@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+.env
+.env.*
+
+# Runtime output
+runs/*
+!runs/.gitkeep
+artifacts/
+observations/
+
+# Manual/security-sensitive work products
+reports/manual/
+poc/
+
+# Local scratch
+tmp/
+*.tmp

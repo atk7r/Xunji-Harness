@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+.env
+.env.*
+
+# Runtime output
+runs/*
+!runs/.gitkeep
+artifacts/
+observations/
+
+# Manual/security-sensitive work products — never publish real target findings
+reports/
+poc/
+
+# Knowledge base: ship only the scaffolding/contract, not the curated entries
+knowledge/*.md
+!knowledge/README.md
+!knowledge/_TEMPLATE.md
+
+# Local scratch
+tmp/
+*.tmp

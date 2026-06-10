@@ -1,0 +1,48 @@
+{
+  "_comment": "Deterministic deny rules for the PreToolUse safety hook. Each rule blocks a Bash command when its regex matches (case-insensitive, searched against the raw command string). Scope/domain is intentionally NOT restricted here - only destructive action categories are blocked. Edit/extend freely; the hook falls back to built-in defaults if this file is missing or invalid.",
+  "rules": [
+    {"category": "destructive", "pattern": "\\brm\\s+-[a-z]*[rf]", "reason": "recursive/forced file deletion (rm -rf)"},
+    {"category": "destructive", "pattern": "\\brmdir\\s+/s", "reason": "recursive directory deletion (rmdir /s)"},
+    {"category": "destructive", "pattern": "\\bdel\\s+/[sq]", "reason": "recursive/quiet file deletion (del /s|/q)"},
+    {"category": "destructive", "pattern": "remove-item\\b[^|;\\n]*-recurse", "reason": "recursive deletion (Remove-Item -Recurse)"},
+    {"category": "destructive", "pattern": "\\bmkfs\\b", "reason": "filesystem format (mkfs)"},
+    {"category": "destructive", "pattern": "\\bformat\\s+[a-z]:", "reason": "drive format"},
+    {"category": "destructive", "pattern": "\\bdd\\s+if=", "reason": "raw disk write (dd if=)"},
+    {"category": "destructive", "pattern": ">\\s*/dev/sd[a-z]", "reason": "raw block-device overwrite"},
+    {"category": "destructive", "pattern": ":\\(\\)\\s*\\{\\s*:\\|:", "reason": "fork bomb"},
+    {"category": "destructive", "pattern": "\\b(shutdown|reboot|halt|poweroff)\\b", "reason": "host shutdown/reboot"},
+
+    {"category": "permission_change", "pattern": "\\bchmod\\s+(-[a-z]*r|777|a\\+)", "reason": "permission modification (chmod recursive/777)"},
+    {"category": "permission_change", "pattern": "\\bchown\\b", "reason": "ownership change (chown)"},
+    {"category": "permission_change", "pattern": "\\b(icacls|takeown)\\b", "reason": "Windows ACL modification"},
+    {"category": "permission_change", "pattern": "(set|grant|update)[-_]?(role|privilege|permission|acl)", "reason": "privilege/permission modification on target"},
+
+    {"category": "delete_resource", "pattern": "(-X|--request)\\s*['\"]?DELETE", "reason": "state-changing HTTP DELETE against target"},
+
+    {"category": "payment_transfer", "pattern": "(-X\\s*(POST|PUT|PATCH)|--data(-raw|-binary)?|--data\\b|\\s-d\\s)[^|;\\n]*\\b(transfer|withdraw|remit|refund|payment|recharge|payout|settle)\\b", "reason": "state-changing request to a money/transfer endpoint"},
+
+    {"category": "bruteforce", "pattern": "\\b(hydra|medusa|patator|ncrack|crackmapexec|\\bcme\\b|brutespray|thc-hydra)\\b", "reason": "online credential brute-force tool"},
+
+    {"category": "dos", "pattern": "\\b(slowloris|t50|mhddos|goldeneye|loic|hoic|hulk)\\b", "reason": "denial-of-service tool"},
+    {"category": "dos", "pattern": "\\bhping3?\\b[^|;\\n]*--flood", "reason": "packet flood (hping --flood)"},
+    {"category": "dos", "pattern": "\\bping\\b[^|;\\n]*\\s-[a-z]*f", "reason": "ping flood (-f)"},
+    {"category": "dos", "pattern": "\\bab\\b[^|;\\n]*-n\\s*[1-9]\\d{4,}", "reason": "apachebench high-volume load (>=10000 requests)"},
+    {"category": "dos", "pattern": "\\bwrk\\b[^|;\\n]*-c\\s*[1-9]\\d{2,}", "reason": "wrk high-concurrency load (>=100 connections)"},
+    {"category": "dos", "pattern": "\\bmasscan\\b", "reason": "high-rate mass scan"},
+
+    {"category": "post_exploitation", "pattern": "/dev/(tcp|udp)/", "reason": "reverse shell via /dev/tcp redirection"},
+    {"category": "post_exploitation", "pattern": "\\b(nc|ncat|netcat)\\b[^|;\\n]*-[a-z]*e\\b", "reason": "netcat reverse shell (-e/--exec)"},
+    {"category": "post_exploitation", "pattern": "\\bmkfifo\\b", "reason": "named-pipe reverse shell (mkfifo backpipe)"},
+    {"category": "post_exploitation", "pattern": "pty\\.spawn", "reason": "interactive shell spawn (python pty.spawn)"},
+    {"category": "post_exploitation", "pattern": "php\\s+-r\\b[^|;\\n]*fsockopen", "reason": "php reverse shell (fsockopen)"},
+    {"category": "post_exploitation", "pattern": "\\bsocat\\b[^|;\\n]*exec", "reason": "socat reverse shell (EXEC)"},
+    {"category": "post_exploitation", "pattern": "net\\.sockets\\.tcpclient", "reason": "powershell reverse shell (Net.Sockets.TCPClient)"},
+    {"category": "post_exploitation", "pattern": "perl\\s+-e\\b[^|;\\n]*socket", "reason": "perl reverse shell (socket)"},
+    {"category": "post_exploitation", "pattern": "ruby\\b[^|;\\n]*tcpsocket", "reason": "ruby reverse shell (TCPSocket)"},
+    {"category": "post_exploitation", "pattern": "\\bmsfvenom\\b", "reason": "payload/backdoor generator (msfvenom)"},
+    {"category": "post_exploitation", "pattern": "\\bweevely\\b", "reason": "webshell generator (weevely)"},
+    {"category": "post_exploitation", "pattern": "(eval|system|assert|passthru|shell_exec|popen|proc_open)\\s*\\(\\s*\\$_(post|get|request|cookie|server)", "reason": "webshell content taking commands from request input (PHP)"},
+    {"category": "post_exploitation", "pattern": "runtime\\.getruntime\\(\\)\\.exec", "reason": "webshell/command-exec content (JSP Runtime.exec)"},
+    {"category": "post_exploitation", "pattern": "(eval|execute)\\s+request\\s*\\(", "reason": "webshell content taking commands from request input (ASP)"}
+  ]
+}
