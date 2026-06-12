@@ -20,6 +20,7 @@ runs/<target_slug>_<YYYYMMDD>/
   review.md
   report.md
   chains.md         # conditional — only when a vulnerability chain exists
+  hints.md          # conditional — only when the operator injects steering
 ```
 
 Use short target slugs. Do not store secrets, private tokens, real personal
@@ -46,8 +47,9 @@ The cycle may be creative, but the written state must stay precise.
 ### Reason pass (high-frequency whole-frontier re-read)
 
 Before choosing the next move, do a cheap, self-only re-read of the **entire**
-`frontier.md` (every open *and* deferred front) plus the evidence added since the
-last pass — not only the front you are on. Ask three questions:
+`frontier.md` (every open *and* deferred front), the evidence added since the last
+pass, and any **pending operator hints in `hints.md`** — not only the front you
+are on. Ask three questions:
 
 1. Did new evidence just **confirm, refute, or unlock** any front (e.g. a Fact
    that satisfies a previously-blocked front's precondition)?
@@ -409,6 +411,31 @@ does not.
 
 Each cycle should add or update a decision entry. If the investigation asks the
 user for input, the decision entry must state why autonomy is blocked.
+
+## hints.md (conditional)
+
+Purpose: make operator steering a first-class, persistent, re-read node instead
+of an ephemeral chat message. The Operator Authority principle says the operator
+is the highest authority; `hints.md` is the *mechanism* that keeps their async
+judgement in the audit trail and in front of the driver every cycle, so a steer
+given ten cycles ago is not lost under momentum.
+
+Create or append it only when the operator injects direction (a run without
+operator steering does not need it). Each hint is `HINT-xxx` with `Time`, `From`,
+`Kind`, the `Hint` text, `Status`, and `Absorbed by`. See
+`docs/templates/run/hints.md` for the template and the absorb-by-`Kind` rules.
+
+Discipline:
+
+- **Re-read `hints.md` every cycle** as part of the Reason pass. A `pending` hint
+  is operator steering not yet acted on — absorb it or record why declined.
+- Absorb by `Kind`: a **directive** (do / skip / prioritize / open / close) is
+  controlling — act on it (it overrides soft constraints, never the hard hook). A
+  **lead / claim** about the target is a `<= 0.5` lead, not a Fact — verify it
+  through the evidence gate (operator suspicion is not evidence). A **constraint**
+  is a soft rule for the run; honour it until lifted.
+- When acted on, set `Status: absorbed` and link the `D-xxx` / front it fed.
+- `tools/check_run.py` warns while any hint is still `pending`.
 
 ## review.md
 

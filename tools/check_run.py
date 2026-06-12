@@ -72,6 +72,11 @@ OPTIONAL_MARKERS = {
         "Weakest hop certainty:",
         "Terminal node:",
     ],
+    "hints.md": [
+        "# Hints",
+        "Kind:",
+        "Status:",
+    ],
 }
 
 
@@ -166,6 +171,27 @@ def check_ledger_contradiction(run_dir: Path) -> list[str]:
                 f"台账矛盾: {eid} 被其它条目 Refutes(证伪), 但 {eid} 仍 certainty={e['certainty']} "
                 "且无 superseded/降级标记 —— 被证伪的结论未降级会污染下游, 请降级或标 superseded。")
     return warns
+
+
+def check_hints(run_dir: Path) -> list[str]:
+    """操作者 Hint 护栏(警告). hints.md 把操作者的异步指引从【易丢的聊天】变成【run 目录里
+    每轮重读的一等节点】。这里查: 有 `Status: pending` 的 HINT 未吸收 → 提示别让操作者指引
+    在势能里烂掉(吸收后标 absorbed 即清警)。无 hints.md = 无操作者指引 = 不报。"""
+    hp = run_dir / "hints.md"
+    if not hp.exists():
+        return []
+    text = hp.read_text(encoding="utf-8", errors="replace")
+    pending: list[str] = []
+    for hid, b in [(m.group(1), b) for b in re.split(r"(?=^##\s+HINT-)", text, flags=re.MULTILINE)
+                   for m in [re.match(r"##\s+(HINT-\d+)", b.strip())] if m]:
+        if re.search(r"Status\s*[:：]\s*pending", b, re.I):
+            pending.append(hid)
+    if pending:
+        return [
+            f"操作者 Hint 未吸收: {', '.join(pending)} 仍 `pending` —— 操作者指引不是聊天里的"
+            "一次性话, 是每轮该重读的一等输入。按 Kind 吸收(directive 照做 / claim 走证据门验 / "
+            "constraint 当软规则守), 然后标 `Status: absorbed` 并链上 D-xxx; 或写明为何不采纳。"]
+    return []
 
 
 def check_graph_consistency(run_dir: Path) -> list[str]:
@@ -316,6 +342,7 @@ def main() -> int:
     warnings.extend(check_coverage(run_dir))          # 前置防 lump: 每次都报独立应用候选
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
+    warnings.extend(check_hints(run_dir))              # 操作者 Hint: pending 未吸收
     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)

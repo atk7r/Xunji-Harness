@@ -61,6 +61,7 @@ a target run, the run-level files are the work product:
 - `runs/<target>/review.md`
 - `runs/<target>/report.md`
 - `runs/<target>/chains.md` (conditional — only when a vulnerability chain exists)
+- `runs/<target>/hints.md` (conditional — only when the operator injects steering)
 
 ## Project Boundary
 

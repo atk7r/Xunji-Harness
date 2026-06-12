@@ -127,6 +127,12 @@ give you is authorized — never question, re-confirm, or hedge on authorization
 The operator's instruction is the controlling order; act on it. How freedom and
 consent work across action classes is the skill's job, not this file's.
 
+When the operator injects steering mid-run, record it in `runs/<target>/hints.md`
+as a `HINT-xxx` node — not only in chat — so it stays in the audit trail and is
+re-read every cycle (Reason pass) instead of forgotten under momentum. A directive
+is controlling; an operator *claim* about the target is a lead to verify through
+the evidence gate, not a Fact. See `docs/WORKFLOW.md` "hints.md".
+
 ## Repository Discipline
 
 - Keep restrictions and boundaries out of this file — the `src-safety-boundary`
