@@ -35,6 +35,10 @@ target selection. Invoke on demand when the task matches; do not auto-load.
   handoff-ready artifact: xday/normal home, hardened binaries, and the
   **scrub-real-targets-before-handoff** discipline. Invoke before handing off,
   committing, or submitting any PoC.
+- `.claude/skills/captcha-solve/SKILL.md` — getting past a captcha barrier
+  (slider / click-select / rotate / text) by driving a real browser and reusing
+  the page's own verification JS, then extracting the validate token. Invoke when
+  a captcha gates the endpoint you need to verify.
 
 ## Run Authority
 
