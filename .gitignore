@@ -20,9 +20,9 @@ observations/
 reports/
 poc/
 
-# Concrete PoC / 0day exploit code & built binaries — never publish; ship only
-# the scaffolding/contract (poc_library/README.md, poc_library/normal/...).
-poc_library/xday/
+# Weaponized 0day exploits ship with the repo (poc_library/xday/) — method is
+# free. Scrub real-target instances first (findings hygiene, not the weapon).
+# tools/poc_ours_upload/ stays out: redundant older build of an xday weapon.
 tools/poc_ours_upload/
 
 # Local scratch
