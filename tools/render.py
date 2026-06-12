@@ -22,17 +22,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from harness.guard import RateLimiter, cap_body, RateBudgetExceeded  # noqa: E402
+from harness.guard import (RateLimiter, cap_body, RateBudgetExceeded,  # noqa: E402
+                           HostHealth, HostBackoff)
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
+    sys.stderr.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
+except Exception:
+    pass
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 STEALTH = False  # set by --stealth: minimal anti-automation hardening (authorized access)
+PROXY = None     # set by --proxy / env: 经中继访问境内资产
 
 
 def render(url: str, out_dir: Path, wait: str, timeout_ms: int) -> dict:
@@ -42,6 +51,8 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int) -> dict:
         return {"error": f"playwright unavailable: {e}. Run with the venv python."}
 
     host = urlparse(url).hostname or "unknown"
+    hh = HostHealth()
+    hh.check(host)            # 自熔断: host 在退避冷却期则抛 HostBackoff
     RateLimiter().gate(host)  # 禁高频: spacing enforced before navigation
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -52,8 +63,10 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int) -> dict:
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"] if STEALTH else [])
-        ctx = browser.new_context(user_agent=UA, ignore_https_errors=True,
-                                  locale="zh-CN")
+        ctx_kwargs = dict(user_agent=UA, ignore_https_errors=True, locale="zh-CN")
+        if PROXY:
+            ctx_kwargs["proxy"] = {"server": PROXY}
+        ctx = browser.new_context(**ctx_kwargs)
         if STEALTH:
             # Minimal anti-automation hardening for authorized access to anti-bot
             # gated pages: stop the engine announcing itself as automated. This
@@ -104,6 +117,12 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int) -> dict:
         finally:
             ctx.close()
             browser.close()
+    # circuit breaker: a navigation that returned a status = healthy connection;
+    # an exception (timeout/reset/refused) = transport failure for this host
+    if result.get("error") and result.get("status") is None:
+        hh.record_error(host)
+    else:
+        hh.record_ok(host)
     return result
 
 
@@ -117,10 +136,14 @@ def main() -> int:
     ap.add_argument("--stealth", action="store_true",
                     help="minimal anti-automation hardening for authorized access to "
                          "anti-bot-gated pages (does not forge challenge tokens)")
+    ap.add_argument("--proxy", default=None,
+                    help="代理(http://h:p / socks5://h:p)；经中继访问境内资产。"
+                         "未给则读 HTTPS_PROXY/ALL_PROXY")
     args = ap.parse_args()
 
-    global STEALTH
+    global STEALTH, PROXY
     STEALTH = args.stealth
+    PROXY = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY")
 
     host = urlparse(args.url).hostname or "page"
     out_dir = Path(args.out) if args.out else Path("tmp") / "render" / host
@@ -128,6 +151,8 @@ def main() -> int:
         res = render(args.url, out_dir, args.wait, args.timeout)
     except RateBudgetExceeded as e:
         res = {"error": f"rate-limited: {e}"}
+    except HostBackoff as e:
+        res = {"error": f"host-backoff: {e}"}
 
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0 if "error" not in res else 1

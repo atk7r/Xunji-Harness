@@ -28,6 +28,9 @@ tools/poc_ours_upload/
 # Local scratch
 tmp/
 *.tmp
+# one-off local docx reformatter (hardcoded personal desktop paths)
+tools/reformat_docx.ps1
+tools/_docx_fmt_config.json
 
 # active-tool runtime state
 tools/harness/.state/

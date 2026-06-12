@@ -270,6 +270,7 @@ Template:
 - Caused by us: yes / no / unknown
 - Alternative explanation:
 - Certainty: 0.3 / 0.5 / 0.8 / 1.0
+- Replicated / Control: (conditional — required when Certainty >= 0.8)
 - Supports:
 - Refutes:
 - Next:
@@ -282,6 +283,15 @@ Evidence confidence:
 - `0.5`: suspicious signal without enough baseline, replay, or impact.
 - `0.3`: clue, one-sided observation, inference, timeout, redirect, block page,
   or environmental noise.
+
+A `Certainty` of `0.8` or `1.0` **requires** a `Replicated:` field (how it was
+re-observed) or a `Control:` field (the comparison/baseline that rules out the
+environmental/alternative explanation). A single observation, or a conclusion
+drawn without testing the alternative, may not be assigned `>= 0.8` — name the
+control or downgrade. `tools/check_run.py` warns on any `>= 0.8` entry missing
+this. (This guards against the failure where a hasty conclusion — e.g. "the whole
+site blocked my IP" — is recorded at `1.0` without testing a control such as
+"is another host on a different IP still reachable?".)
 
 ## false_positive.md
 
@@ -433,3 +443,59 @@ Do not claim the target or surface is exhausted unless:
 
 If these conditions are not met, write the current best finding and the next
 autonomous action instead of saying the work is done.
+
+### Closure Discipline (premature-closure guard)
+
+The most common failure is declaring "no attack surface / 探尽 / 打不动" while
+assets were only header- or recon-classified and never actually examined. Before
+any such claim:
+
+- **No lump.** You may not collapse N hosts into "a shared stack / default pages"
+  without a per-asset, by-content examination. Run `tools/classify_hosts.py`
+  (fingerprints each host by live content, not by Server header) — it writes a
+  structured **`coverage.json`** (per-asset: reachable / examined / stack / flags),
+  the single source of truth for "was this asset actually looked at". A host that
+  returns the same default page is fine to note as such, but only after its content
+  was actually fetched and read. **`tools/check_run.py` reads `coverage.json` on
+  every run** (not just at closure) and lists the **distinct-app candidates**
+  (unrecognized stack / Spring / Vue-SPA / LOGIN·DYN·FRAMEWORK) that must be
+  investigated per-asset — so lumping is surfaced when it happens, not at closure.
+- **"Can't reach" is not "is safe".** Closing a front because a WAF / throttle /
+  timeout / login-gate stopped you is a `deferred` (barrier-class Type A: you
+  couldn't reach the app layer), **not** a `closed` (Type B: the app layer was
+  examined and is safe). A `closed` front needs positive evidence (a `Refutes:`
+  or a proof), not just a barrier.
+- **Closed fronts cite evidence.** Each Closed Front in `frontier.md` references
+  an `E-` evidence id, not prose.
+
+- **Credentials are ask-then-fallback, never a blocker.** When a front would go
+  deeper with a test account (authenticated 越权 / SQLi / business logic), **ask the
+  operator** for one. If they have none, **fall back to the unauth / harmless
+  methods** (`docs/cognition/harmless-verification.md`) and push the unauth surface
+  as far as it goes — do not stall the front waiting for credentials, and never
+  fabricate or brute them. Record "needs account (asked, none available)" and keep
+  the unauth front moving.
+- **Capture grounding knowledge.** If the run fingerprinted a product / stack that
+  has no entry in `knowledge/`, add a `seed` entry before closing (recognition
+  signatures + weak-point anchors, grounding-only). The knowledge base must grow
+  with what you actually meet in the field, not lag behind it.
+- **Independent review before closure (mandatory).** Self-review does not fix
+  self-review bias. Before any closure claim, spawn an independent `general-purpose`
+  reviewer (fresh context, no investment in concluding) per
+  `docs/templates/independent-reviewer.md`; record its findings under an
+  `## Independent Review` heading in `review.md` and address every one. The
+  operator has granted standing authorization to spawn this reviewer at the
+  closure gate — do it without re-asking.
+
+`tools/check_run.py` enforces this at the closure gate (only when `report.md` makes
+a strong closure claim):
+
+- **HARD FAIL** if `review.md` has no `Independent Review` record. Self-review does
+  not fix self-review bias, so the independent reviewer is a hard requirement to
+  close — not a suggestion. (某实战 showed that even after this guard was built, the
+  driver still tried to close prematurely twice; a soft warning does not hold, so
+  the missing-review case fails the check.) Resolve by spawning the reviewer and
+  recording it, or by retracting the closure language.
+- **WARN** (advisory) if the run lacks a `classify.txt`, a Closed Front lacks an
+  evidence id, or a front was closed on a barrier without a Refutes — signals you
+  are about to close too early; look harder or downgrade `closed` to `deferred`.

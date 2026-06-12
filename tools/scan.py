@@ -17,6 +17,7 @@ directly, the safety hook still blocks them.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from harness.guard import RateLimiter  # noqa: E402
+from harness.guard import RateLimiter, HostHealth, HostBackoff  # noqa: E402
 
 # defaults chosen to stay inside proof-only verification + the rate ceiling
 SQLMAP_SAFE = ["--batch", "--level=1", "--risk=1",
@@ -52,13 +53,24 @@ def run(cmd: list[str]) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--proxy", default=None,
+                    help="代理(http://h:p / socks5://h:p)；经中继扫描境内资产。"
+                         "未给则读 HTTPS_PROXY/ALL_PROXY。须置于 tool/target 之前")
     ap.add_argument("tool", choices=["sqlmap", "nuclei"])
     ap.add_argument("target")
     ap.add_argument("extra", nargs=argparse.REMAINDER,
                     help="extra args incl. -flags (vetted against the forbidden list)")
     args = ap.parse_args()
 
+    proxy = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY")
     host = urlparse(args.target).hostname or args.target
+    try:
+        # 自熔断: 拒绝对已在退避冷却(连续失败/被目标限流)的 host 发起扫描器 —— 扫描器
+        # 请求量大, 对正在封锁我的 host launch nuclei/sqlmap 只会加深封锁(本次教训)
+        HostHealth().check(host)
+    except HostBackoff as e:
+        print(f"[scan] refused: {e}", file=sys.stderr)
+        return 4
     RateLimiter().gate(host)  # space the launch itself
 
     if args.tool == "sqlmap":
@@ -72,6 +84,8 @@ def main() -> int:
             return 127
         cmd = ["sqlmap", "-u", args.target, *[a for a in SQLMAP_SAFE if not a.startswith("--technique")],
                SQLMAP_TECH, *args.extra]
+        if proxy:
+            cmd.append(f"--proxy={proxy}")
         return run(cmd)
 
     # nuclei
@@ -84,6 +98,8 @@ def main() -> int:
               "rate-limit + excludes dos/intrusive templates.", file=sys.stderr)
         return 127
     cmd = ["nuclei", "-u", args.target, *NUCLEI_SAFE, *args.extra]
+    if proxy:
+        cmd += ["-proxy", proxy]
     return run(cmd)
 
 

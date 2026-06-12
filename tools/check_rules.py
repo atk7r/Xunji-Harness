@@ -5,8 +5,25 @@ import sys
 from pathlib import Path
 
 
+# ---------------------------------------------------------------------------
+# check_rules.py — repository ARCHITECTURE-DRIFT guard (not a security control).
+#
+# 它守的唯一东西: 仓库有没有漂回那套被废弃的 JSON 编排器 / playbook 架构,
+# 以及核心纲领文件在不在。
+#
+# 它【不】管武器。理由是项目的核心轴 "gate EFFECTS, not METHODS":
+#   - exp / poc / scanner / 利用代码 = 方法, 方法自由。它存在于仓库里、被编写
+#     出来, 本身不造成任何破坏(见 poc_library/, tools/poc_ours_upload/,
+#     runs/<target>/ 等正当产物区)。
+#   - 唯一要管的是【在活靶上自动执行时的不可逆危害】—— 那是【效果】, 按效果、
+#     在运行时由 .claude/hooks/safety_gate.py 守, 不靠静态文件名去拦。
+# 因此这里不做任何 exploit/poc/scanner 文件名或工具名的"方法警察"判定 —— 那既
+# 与 hook 重复, 又违背 gate-effects-not-methods。
+# ---------------------------------------------------------------------------
+
 ROOT = Path(__file__).resolve().parents[1]
 
+# 被废弃的旧架构目录 —— 重新出现即为架构回退
 LEGACY_DIRS = [
     "apps",
     "schemas",
@@ -17,6 +34,7 @@ LEGACY_DIRS = [
     "artifacts",
 ]
 
+# 文本扫描范围(找旧架构引用)
 WATCH_DIRS = [
     ".claude",
     "docs",
@@ -35,33 +53,17 @@ SKIP_DIRS = {
     "deepseek-project",
 }
 
+# 自身定义了旧架构引用字符串, 必须跳过自检
 SKIP_FILES = {
     Path("tools/check_rules.py"),
     Path("tools/check_hook.py"),
     Path(".claude/hooks/safety_gate.py"),
     Path(".claude/hooks/safety_rules.json"),
-    # Sanctioned, guard-routed active-verification tools (Active verification
-    # doctrine, CLAUDE.md). These may name scanners as sensors; weaponization
-    # references elsewhere in the tree are still caught.
-    Path("tools/scan.py"),
-    Path("tools/probe.py"),
-    Path("tools/render.py"),
-    Path("tools/harness/guard.py"),
-    Path("tools/harness/__init__.py"),
 }
 
-FORBIDDEN_FILE_PATTERNS = [
-    re.compile(r"(^|[\\/])poc([\\/]|$)", re.IGNORECASE),
-    re.compile(r"(^|[\\/]).*exploit.*\.py$", re.IGNORECASE),
-    re.compile(r"(^|[\\/]).*attack.*\.py$", re.IGNORECASE),
-    re.compile(r"(^|[\\/]).*scanner.*\.py$", re.IGNORECASE),
-]
-
+# 仅拦【旧架构】引用 —— 这是架构完整性, 不是方法警察。
+# 不再拦 sqlmap/hydra/masscan/metasploit 等工具名: 方法自由, 是否造成危害由 hook 按效果守。
 FORBIDDEN_TEXT_PATTERNS = [
-    re.compile(r"\bsqlmap\b", re.IGNORECASE),
-    re.compile(r"\bhydra\b", re.IGNORECASE),
-    re.compile(r"\bmasscan\b", re.IGNORECASE),
-    re.compile(r"\bmetasploit\b|\bmsfconsole\b", re.IGNORECASE),
     re.compile(r"apps\.orchestrator", re.IGNORECASE),
     re.compile(r"schemas/action\.schema\.json", re.IGNORECASE),
     re.compile(r"prompts/planner\.system\.md", re.IGNORECASE),
@@ -102,39 +104,19 @@ def iter_text_files() -> list[Path]:
 
 def main() -> int:
     errors: list[str] = []
-    warnings: list[str] = []
 
+    # 1. 架构回退: 旧目录重现
     for dirname in LEGACY_DIRS:
         path = ROOT / dirname
         if path.exists():
             errors.append(f"legacy directory exists: {dirname}")
 
+    # 2. 纲领文件存在
     for rel in REQUIRED_FILES:
         if not (ROOT / rel).exists():
             errors.append(f"required file missing: {rel}")
 
-    poc_dir = ROOT / "poc"
-    if poc_dir.exists():
-        children = [p for p in poc_dir.rglob("*") if p.is_file()]
-        if children:
-            errors.append("poc directory contains files")
-        else:
-            warnings.append("empty poc directory still exists")
-
-    for path in ROOT.rglob("*"):
-        rel_parts = path.relative_to(ROOT).parts
-        if any(part in SKIP_DIRS for part in rel_parts):
-            continue
-        if not path.is_file():
-            continue
-        rel = relative(path)
-        rel_text = str(rel).replace("\\", "/")
-        if rel in SKIP_FILES:
-            continue
-        for pattern in FORBIDDEN_FILE_PATTERNS:
-            if pattern.search(rel_text):
-                errors.append(f"forbidden file path: {rel_text}")
-
+    # 3. 旧架构文本引用
     for path in iter_text_files():
         rel = relative(path)
         if rel in SKIP_FILES:
@@ -147,6 +129,7 @@ def main() -> int:
             if pattern.search(text):
                 errors.append(f"forbidden text pattern {pattern.pattern!r} in {rel}")
 
+    # 4. 必含文本(当前为空)
     for rel, required_items in REQUIRED_TEXT.items():
         path = ROOT / rel
         if not path.exists():
@@ -155,11 +138,6 @@ def main() -> int:
         for required in required_items:
             if required not in text:
                 errors.append(f"{rel} missing required text: {required}")
-
-    if warnings:
-        print("warnings")
-        for warning in warnings:
-            print(f"- {warning}")
 
     if errors:
         print("rule check failed")

@@ -69,6 +69,10 @@ Output:
 
 - create or update the run directory
 - define scope and authorization
+- if a recon/OSINT report is supplied, fold it first with
+  `python tools/ingest_recon.py <recon.json>` (asset table + entry points +
+  reachability matrix) and cite the source in `surface.md` — do not re-discover
+  what the report already carries
 - ask the user only for missing authorization, target, account, or boundary data
 
 ### Driver
@@ -153,6 +157,12 @@ Output:
 - reopened or downgraded fronts if needed
 - next autonomous front
 
+**Before any closure / "explored enough" claim, the Reviewer phase MUST include an
+independent reviewer** (a fresh-context `general-purpose` sub-agent, standing-
+authorized) per `docs/templates/independent-reviewer.md` — self-review does not fix
+self-review bias. Its findings go under `## Independent Review` in `review.md` and
+must be resolved before closing. `tools/check_run.py` enforces this at the closure gate.
+
 ### Report
 
 Use only after evidence and false-positive checks are current.
@@ -189,16 +199,43 @@ Project-discipline and run-structure checks live in `tools/`:
 
 - `python tools/check_run.py runs/<dir>` — the run carries all required files
   and markers (run it at Reviewer and before Report).
-- `python tools/check_rules.py` — repository discipline (no legacy dirs, no
-  exploit/scanner/PoC files, required text present).
+- `python tools/check_rules.py` — repository ARCHITECTURE-drift guard (no legacy
+  orchestrator/playbook dirs or refs, required doctrine files present). It does NOT
+  police weapons: exp/poc/scanner code is method and is free to live in the repo
+  (`poc_library/`, `runs/<target>/`, `tools/poc_*`); irreversible harm is gated
+  by effect at runtime by `.claude/hooks/safety_gate.py`, not by filename here.
 - `python tools/check_hook.py` — the safety hook actually denies blocked
   commands and stays silent on allowed ones.
 - `python tools/check_knowledge.py` — the grounding knowledge base keeps its
   structure and stays grounding (no payload/exploit/step fields; every anchor
   carries a reference and source). Run after editing `knowledge/`.
+- `python tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
+  `surface.md`-ready asset table, entry points, and a reachability matrix
+  (recon-view vs your-egress-view). Setup-phase helper; structures intel, makes
+  no front choices.
+- `python tools/classify_hosts.py <recon.json>` — per-host classification by live
+  content (not Server header): stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags.
+  Run before claiming "explored/no surface" so assets are examined, not lumped.
+- `python tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl.
+  webpack chunks) and assert completeness. **Run before claiming endpoint
+  enumeration is complete** — grepping endpoints from a partially-fetched JS set
+  is how the 某实战 run missed an account-takeover endpoint (only 4/13 chunks
+  fetched). "已抓 N/M" must be N==M before "端点已枚举完".
+- `python tools/rerun_deferred.py --run runs/<dir>` — re-probe the assets that were
+  unreachable (egress-deferred) per `coverage.json`, from any egress (after a
+  cooldown, a switched egress, or run in-country by the operator). Reports which
+  became reachable + re-classifies them → the standardized "come back to the
+  deferred list" path instead of hunting through `frontier.md`.
 
 These tools verify structure and discipline only. They never replace the
 evidence gate or autonomous judgement.
+
+Active-verification tools (`probe.py` / `render.py` / `scan.py`, all guard-routed)
+are sensors, not gates. `scan.py` (sqlmap/nuclei) is **opt-in when a front is
+already grounded and you want cheap breadth** — its output is a ≤0.5 lead that
+Hunter discipline still adjudicates, never a verdict, and never the front-selection
+decision. Skipping it for a manual, controlled probe (e.g. under a noisy WAF) is a
+legitimate driver choice, not a gap.
 
 ## Selection Record
 
