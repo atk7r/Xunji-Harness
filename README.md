@@ -287,10 +287,13 @@ guard 的限速 / 计数状态（`tools/harness/.state/`）在首次运行时自
 
 - **自动记忆** 存在仓库之外（`~/.claude/projects/.../memory/`），按机器隔离 —— clone
   不携带它。
-- **具体 PoC / 0day 条目 / 已构建二进制**（`poc_library/xday/`、
-  `tools/poc_ours_upload/`）被 git 忽略、从不发布 —— 需要时带外传输。
-- **接地知识库**（`knowledge/*.md`）**随仓发布**：它是识别签名 + 弱点锚点（接地、
-  非武器，由 `check_knowledge.py` 把关），意在跨机共享、随实战生长。
+- **武器化 0day 利用**（`poc_library/xday/`）：仓库**只保留 `xday/` 文件夹结构**
+  （`.gitkeep`）；具体 exploit 源码 / 二进制**留在本地、不进仓、不 push**（操作者裁量）。
+  方法自由是指允许编写,不等于必须发布——武器内容带外传输。
+- **接地知识库**（`knowledge/*.md`）**随仓发布**、clone 即得：它是识别签名 + 弱点锚点
+  （接地、非武器，由 `check_knowledge.py` 把关），意在跨机共享、随实战生长。
+- **其余仍 git 忽略、clone 不会恢复**：`tools/poc_ours_upload/`（某 xday 武器的冗余旧
+  构建）、`runs/`、`reports/`、`poc/`，以及任何真实目标发现物 —— 需要时带外传输。
 - **运行发现**（`runs/<target>/`）不提交；较旧的运行还引用机器本地的 OSINT 路径，在别处
   不存在。
 - **`.claude/settings.local.json`**（权限白名单）是本地的 —— 在新机器上重新授权一次。

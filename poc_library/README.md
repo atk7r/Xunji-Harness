@@ -37,15 +37,16 @@ poc_library/
 
 ## 外发纪律（尤其 xday）
 
-- Xday 的源码含利用细节（如验证码求解算法）。外发交平台时用**混淆二进制**
-  （`poc_*.exe` / `poc_linux64`，garble -literals，`strings` 零泄露），不外发源码。
+- **仓库只保留 `xday/` 文件夹结构**（`.gitkeep`）：未披露 xday 的**源码 / 二进制 /
+  明细 README 一律留本地、不进仓、不 push**（方法自由是指允许编写,不等于必须发布）。
+- 外发披露平台（CNVD/EDUSRC 等第三方）时纪律更紧:用**混淆二进制**
+  （`poc_*.exe` / `poc_linux64`，garble -literals，`strings` 零泄露），**不外发源码**。
 - 漏洞描述脱敏：交平台的文字描述按需隐藏利用原理（见对应 run 目录的提交稿）。
 
 ## 索引
 
 ### xday/
-- [ours-ehr-unauth-upload](xday/ours-ehr-unauth-upload/) — 致远薪事力(OURS eHR)
-  未授权文件上传 (CWE-434+306)；v4~v8 全版本；11 实例实测确认；厂商=致远互联(688369)
+- 未披露 xday 条目仅存于本地（仓库只保留 `xday/` 文件夹）；具体清单不公开。
 
 ### normal/
 - （空）

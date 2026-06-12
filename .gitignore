@@ -20,9 +20,10 @@ observations/
 reports/
 poc/
 
-# Weaponized 0day exploits ship with the repo (poc_library/xday/) — method is
-# free. Scrub real-target instances first (findings hygiene, not the weapon).
-# tools/poc_ours_upload/ stays out: redundant older build of an xday weapon.
+# Weaponized 0day exploits: ship ONLY the xday/ folder scaffolding; the actual
+# exploit code/binaries stay local (operator's call) and are never pushed.
+poc_library/xday/*
+!poc_library/xday/.gitkeep
 tools/poc_ours_upload/
 
 # Local scratch
