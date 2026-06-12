@@ -202,6 +202,7 @@ Template:
 - Next autonomous move:
 - Stop condition:
 - Linked hypotheses:
+- Unlocked-by: (conditional — the E-id whose confirmation makes this front actionable; a chain / 组合利用 dependency. Most relevant on a deferred front waiting on a prior fact. Omit when there is no such dependency.)
 
 ## Deferred Fronts
 
@@ -227,6 +228,37 @@ Template:
 A high-value front must not disappear from the investigation. It must remain
 open, become confirmed, become rejected, be deferred with a blocker, or be
 closed with Type B reasoning.
+
+## State Graph (derived)
+
+The run files already hold typed nodes (H-/F/E-xxx) and most of their edges:
+evidence `Supports:` / `Refutes:`, front `Linked hypotheses:`. The one edge that
+used to live only in your head is **`Unlocked-by:` / `Unlocks:`** — a confirmed
+Fact (E with `Certainty >= 0.8`) satisfying a front's precondition. That is the
+`chains.md` (组合利用) edge, generalized to the whole frontier.
+
+`python tools/graph.py runs/<dir>` parses these into a **derived** graph
+(`<run>/graph.json`) and prints what is otherwise easy to miss:
+
+- **actionable** — open fronts plus deferred fronts a confirmed Fact has unlocked.
+- **unlocked-but-deferred** — a Fact confirmed, the front it unlocks still sitting
+  in Deferred. The classic miss: you proved the precondition and never went back.
+- **closed-but-unlocked** — a front you closed that a confirmed Fact actually
+  reopens (contradiction).
+- **dangling Facts** — a confirmed Fact that supports / unlocks / refutes nothing:
+  found something and did not follow it.
+- **orphan hypotheses** and **confirmed chains** (組合利用 candidates to record).
+
+Run it at the start of a **Reason pass** so "what just got unlocked / neglected"
+is a query, not a re-derivation. `check_run.py` reuses the same parse to warn on
+the two contradiction classes (unlocked-but-deferred, closed-but-unlocked).
+
+**Guardrail**: the graph is derived and **advisory only — it never drives or
+closes anything**. Choosing the next front stays the driver's judgement; the
+graph just lays the current state out. A graph that becomes the source of truth
+or auto-selects work is the JSON orchestrator this project deleted (and
+`check_rules.py` guards against). Markdown stays the source of truth; the graph is
+a projection, like `coverage.json`.
 
 ## Failure Budget
 
@@ -297,6 +329,7 @@ Template:
 - Replicated / Control: (conditional — required when Certainty >= 0.8)
 - Supports:
 - Refutes:
+- Unlocks: (conditional — the F-id this confirmed fact makes actionable, satisfying that front's precondition. The 组合利用 edge; omit when it unlocks nothing.)
 - Next:
 ```
 

@@ -11,6 +11,12 @@ try:
 except Exception:
     pass
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import graph as _graph   # 派生状态图(同目录); 缺失则跳过图一致性检查
+except Exception:
+    _graph = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_FILES = [
@@ -162,6 +168,34 @@ def check_ledger_contradiction(run_dir: Path) -> list[str]:
     return warns
 
 
+def check_graph_consistency(run_dir: Path) -> list[str]:
+    """派生状态图一致性护栏(警告). 复用 graph.py 解析 H/F/E 节点与 Unlocked-by/Unlocks 边,
+    只报两类【显式边与前沿状态矛盾】的高信号情形(悬挂 Fact / 孤儿假设属软提示, 留给
+    graph.py 视图, 这里不报以免噪声):
+
+    - **unlocked-but-deferred**: 某前沿被已确认 Fact(certainty>=0.8)解锁(Unlocked-by/Unlocks
+      边), 却仍躺在 Deferred —— 前置已证、却没回头打(典型漏挖)。
+    - **closed-but-unlocked**: 某前沿已 Closed, 却被一个已确认 Fact 解锁 —— 关门与解锁互相矛盾,
+      应重开。
+    """
+    if _graph is None:
+        return []
+    try:
+        view = _graph.derive_view(_graph.build_graph(run_dir))
+    except Exception:
+        return []
+    warns: list[str] = []
+    for u in view.get("unlocked_deferred", []):
+        warns.append(
+            f"状态图: 前沿 {u['front']} 已被已确认 Fact {u['by']} 解锁, 却仍在 Deferred —— "
+            "前置已证应回头激活它, 别让它躺着(典型漏挖)。跑 `python tools/graph.py` 看全图。")
+    for u in view.get("closed_but_unlocked", []):
+        warns.append(
+            f"状态图矛盾: 前沿 {u['front']} 已 Closed, 却被已确认 Fact {u['by']} 解锁 —— "
+            "关门与解锁互斥, 应重开该前沿或撤回那条 Unlocks 边。")
+    return warns
+
+
 def check_reason_pass(run_dir: Path) -> list[str]:
     """高频 Reason pass 护栏(警告). Reason pass 是每轮选前沿前【重读整个 frontier】的廉价
     习惯, 专治隧道视野(挖一个前沿到底、更高价值的晾着、新证据解锁了也没看)。纯文档纪律会
@@ -281,6 +315,7 @@ def main() -> int:
     warnings = check_evidence_certainty(run_dir)
     warnings.extend(check_coverage(run_dir))          # 前置防 lump: 每次都报独立应用候选
     warnings.extend(check_ledger_contradiction(run_dir))
+    warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)

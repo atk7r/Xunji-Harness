@@ -103,8 +103,10 @@ Load:
 
 Begin each Driver cycle with a **Reason pass**: re-read the *whole* `frontier.md`
 (all open + deferred fronts) and the newest evidence before choosing — catch
-newly-unlocked fronts and tunnel vision early. It re-prioritizes only; it never
-closes a front. See `docs/WORKFLOW.md` "Reason pass".
+newly-unlocked fronts and tunnel vision early. `python tools/graph.py runs/<dir>`
+makes "what just got unlocked / neglected" a query instead of a re-read. The
+Reason pass re-prioritizes only; it never closes a front. See `docs/WORKFLOW.md`
+"Reason pass" and "State Graph".
 
 Output:
 
@@ -246,6 +248,13 @@ Project-discipline and run-structure checks live in `tools/`:
   cooldown, a switched egress, or run in-country by the operator). Reports which
   became reachable + re-classifies them → the standardized "come back to the
   deferred list" path instead of hunting through `frontier.md`.
+- `python tools/graph.py runs/<dir>` — derive the typed state graph from the run
+  files (H/F/E nodes + `Unlocked-by`/`Supports`/`Refutes` edges) → `graph.json` +
+  a view of actionable / unlocked-but-deferred / closed-but-unlocked / dangling
+  Facts. **Run at the start of a Reason pass** so "what just got unlocked or
+  neglected" is a query, not a re-read. Derived and advisory only — it never
+  selects the next front (that stays the driver). See `docs/WORKFLOW.md` "State
+  Graph".
 
 These tools verify structure and discipline only. They never replace the
 evidence gate or autonomous judgement.
