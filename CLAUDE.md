@@ -1,4 +1,4 @@
-# vulnfinder Claude Code Rules
+# Xunji Claude Code Rules
 
 > Nested project: `deepseek-project/` is a separate, independent DeepSeek copy of
 > this whole project. It has its own baseline and is driven by DeepSeek. If you

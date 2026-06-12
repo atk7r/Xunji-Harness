@@ -72,7 +72,7 @@ def check_file(path: Path, markers: list[str]) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check a vulnfinder run directory.")
+    parser = argparse.ArgumentParser(description="Check a Xunji run directory.")
     parser.add_argument("run_dir", type=Path)
     args = parser.parse_args()
 

@@ -1,6 +1,6 @@
-# vulnfinder
+# Xunji
 
-vulnfinder is an autonomous red-team workspace for Claude Code / Codex, focused
+Xunji is an autonomous red-team workspace for Claude Code / Codex, focused
 on web 打点 (initial access). It supports AI-driven vulnerability discovery and
 exploitation while keeping the process auditable, evidence-bound, and bounded by
 a machine-enforced hard-rule floor.

@@ -1,4 +1,4 @@
-# vulnfinder 项目待办
+# Xunji 项目待办
 
 > 最后更新:2026-06-10。本文件记录跨会话的未决事项,避免被上下文压缩冲掉。
 > 分两个独立项目:**父项目**(Claude/Codex 工作区)与 **deepseek-project/**(DeepSeek 实例)。
