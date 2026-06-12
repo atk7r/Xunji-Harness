@@ -25,11 +25,6 @@ poc/
 poc_library/xday/
 tools/poc_ours_upload/
 
-# Knowledge base: ship only the scaffolding/contract, not the curated entries
-knowledge/*.md
-!knowledge/README.md
-!knowledge/_TEMPLATE.md
-
 # Local scratch
 tmp/
 *.tmp

@@ -334,8 +334,12 @@ this does not affect `probe.py`, `scan.py`, the hook, or the checkers.
 - **Auto-memory** lives outside the repo (`~/.claude/projects/.../memory/`) and
   is per-machine — a clone does not carry it.
 - **Concrete PoCs / 0day entries / built binaries** (`poc_library/xday/`,
-  `tools/poc_ours_upload/`) and **curated knowledge entries** (`knowledge/*.md`)
-  are git-ignored and never published — transfer them out of band if needed.
+  `tools/poc_ours_upload/`) are git-ignored and never published — transfer them
+  out of band if needed.
+- **The grounding knowledge base** (`knowledge/*.md`) **ships with the repo**:
+  recognition signatures + weak-point anchors (grounding, not weapons, enforced
+  by `check_knowledge.py`), meant to be shared across machines and grow with field
+  work.
 - **Run findings** (`runs/<target>/`) are not committed; older runs also
   reference machine-local OSINT paths that will not exist elsewhere.
 - **`.claude/settings.local.json`** (permission allowlist) is local — re-grant
