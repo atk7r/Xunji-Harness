@@ -15,15 +15,25 @@ Always follow:
 The hook boundary in `.claude/hooks/` is always active when Claude Code runs
 Bash through the configured PreToolUse hook.
 
+## On Request Only
+
+Load only when the operator explicitly tells you to use the SRC skill. Do NOT
+auto-load it by guessing a target belongs to a program.
+
+- `.claude/skills/src-rules/SKILL.md` — SRC / bug-bounty program rules (e.g.
+  教育漏洞报告平台 / EDUSRC 无害化原则). Applies on top of `src-safety-boundary`
+  and tightens it for platform submissions (pivot off the table, data changes need
+  platform authorization).
+
 ## Run Authority
 
-This is the Claude Code / Codex workspace, scoped to **web application
-penetration testing only** (see `CLAUDE.md` Project Role). Every run is a
-web-layer SRC run: targets reached over HTTP(S) / a browser, findings are
-individual web vulnerabilities proven by harmless verification. Host / OS
-exploitation, internal-network or lateral movement, binary research, and
-multi-stage red-team campaigns are out of scope; if a target or task implies
-them, stop and tell the user it is outside this workspace.
+This is the Claude Code / Codex workspace, a **red-team toolkit for web 打点
+(initial access)** (see `CLAUDE.md` Project Role). The primary surface is the web
+layer: targets reached over HTTP(S) / a browser, findings are web vulnerabilities
+proven to genuinely exist. Host / OS exploitation, internal-network access,
+lateral movement, binary research, and multi-stage red-team work are **in scope
+as operator-gated soft capabilities** — allowed with the operator's consent, not
+out of scope.
 
 The driver may edit project files when the user asks for project changes. During
 a target run, the run-level files are the work product:

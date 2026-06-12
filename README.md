@@ -1,10 +1,11 @@
 # vulnfinder
 
-vulnfinder is an autonomous SRC workspace for Claude Code / Codex. It is built
-to support AI-driven vulnerability discovery while keeping the process
-auditable, evidence-bound, and safe.
+vulnfinder is an autonomous red-team workspace for Claude Code / Codex, focused
+on web 打点 (initial access). It supports AI-driven vulnerability discovery and
+exploitation while keeping the process auditable, evidence-bound, and bounded by
+a machine-enforced hard-rule floor.
 
-The project is not a scanner, PoC library, exploit framework, or JSON
+The project is not a scanner, PoC library, turnkey exploit kit, or JSON
 orchestrator. It provides operating rules, run-state structure, safety
 boundaries, and local checks.
 
@@ -46,6 +47,12 @@ Always active:
 - [docs/cognition/README.md](docs/cognition/README.md)
 - [.claude/skills/src-safety-boundary/SKILL.md](.claude/skills/src-safety-boundary/SKILL.md)
 
+On request only (load when the operator explicitly says to use the SRC skill — not
+auto-loaded):
+
+- [.claude/skills/src-rules/SKILL.md](.claude/skills/src-rules/SKILL.md) — SRC /
+  bug-bounty program rules (e.g. EDUSRC 无害化原则).
+
 Nested DeepSeek project:
 
 - `deepseek-project/` is an independent DeepSeek copy of this project. It is
@@ -67,6 +74,8 @@ Nested DeepSeek project:
 - `.claude/hooks/safety_gate.py`: deterministic deny boundary.
 - `.claude/hooks/safety_rules.json`: deny-rule configuration.
 - `.claude/skills/src-safety-boundary/SKILL.md`: boundary-only skill.
+- `.claude/skills/src-rules/SKILL.md`: SRC / bug-bounty program rules — loaded
+  only on the operator's explicit request, not always active.
 
 ### Nested DeepSeek Project
 
@@ -110,15 +119,20 @@ memory, model confidence, or single unattributed signals.
 
 ## Safety Model
 
-The hook blocks destructive host/file operations, permission changes, target
-resource deletion, money movement, online brute force, DoS-style behavior, and
-high-rate scanning patterns.
+The hook blocks irreversible destruction (host/file wipes plus data destruction
+— DROP/TRUNCATE/unscoped DELETE/UPDATE), target resource deletion, mass data
+exfiltration / database dump (拖库), money movement, and DoS-style / high-rate
+behavior. Uploading a proof artifact is not blocked
+(driver's call). Getting a shell, going past the web layer, and other heavier
+actions are not machine-blocked either but are operator-gated — the driver gets
+the operator's consent first.
 
 A blocked action is not unlocked by human approval. Choose a safe,
 non-destructive proof instead.
 
-Scope is not encoded in the hook. Only test targets that are authorized for the
-current engagement.
+Scope is not encoded in the hook. The operator is the highest authority and runs
+authorized targets; their instruction overrides the soft constraints and is the
+controlling order everywhere except the hard boundary above.
 
 ## Local Checks
 

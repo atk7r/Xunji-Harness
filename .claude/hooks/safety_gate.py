@@ -3,9 +3,9 @@
 
 Role: this hook is a *boundary*, not a driver. The AI designs and executes its
 own hunting approach freely; this script only deterministically BLOCKS a small
-set of destructive action categories (filesystem/host destruction, permission
-changes, money/transfer/refund state changes, resource deletion, online
-brute-force, and DoS). It does NOT restrict scope/domain, and it never
+set of irreversible / destructive action categories (filesystem & host
+destruction incl. 删库, mass data dump / 拖库, resource deletion, money
+movement, and DoS). It does NOT restrict scope/domain, and it never
 auto-approves anything: on no match it stays silent so Claude Code's normal
 permission flow applies.
 
@@ -15,6 +15,7 @@ hookSpecificOutput JSON on stdout only when it decides to deny. Pure stdlib.
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import sys
@@ -29,10 +30,11 @@ DEFAULT_RULES = [
     {"category": "destructive", "pattern": r"\bmkfs\b", "reason": "filesystem format"},
     {"category": "destructive", "pattern": r"\bdd\s+if=", "reason": "raw disk write (dd if=)"},
     {"category": "destructive", "pattern": r"\b(shutdown|reboot|halt|poweroff)\b", "reason": "host shutdown/reboot"},
-    {"category": "permission_change", "pattern": r"\bchown\b", "reason": "ownership change (chown)"},
+    {"category": "destructive", "pattern": r"\bdrop\s+(database|table|schema)\b", "reason": "database/table destruction (删库)"},
+    {"category": "data_exfil", "pattern": r"\bsqlmap\b[^|;\n]*--dump", "reason": "sqlmap data dump (拖库)"},
     {"category": "delete_resource", "pattern": r"(-X|--request)\s*['\"]?DELETE", "reason": "state-changing HTTP DELETE"},
-    {"category": "bruteforce", "pattern": r"\b(hydra|medusa|patator|ncrack|crackmapexec|brutespray)\b", "reason": "online credential brute-force tool"},
     {"category": "dos", "pattern": r"\b(slowloris|loic|hoic|t50|mhddos|masscan)\b", "reason": "DoS / mass-flood tool"},
+    {"category": "payment_transfer", "pattern": r"(-X\s*(POST|PUT|PATCH)|--data|\s-d\s)[^|;\n]*\b(transfer|withdraw|refund|payout)\b", "reason": "money-movement request"},
 ]
 
 
@@ -61,6 +63,19 @@ def extract_command(event: dict) -> str:
     return " \n ".join(parts)
 
 
+def audit(category: str, reason: str, command: str) -> None:
+    """Append a HARD_STOP hit to the audit log. Best-effort: never let logging
+    break the gate (a failed write must not change the deny decision)."""
+    try:
+        log = Path(__file__).resolve().parents[2] / "tools" / "harness" / ".state" / "audit.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().isoformat(timespec="seconds")
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(f"{ts} | DENY | {category} | {reason} | {command[:120]}\n")
+    except Exception:
+        pass
+
+
 def deny(reason: str) -> None:
     out = {
         "hookSpecificOutput": {
@@ -73,13 +88,64 @@ def deny(reason: str) -> None:
     sys.exit(0)
 
 
+def selftest() -> int:
+    """Fail-closed self-check: prove the gate still denies known-bad commands and
+    stays silent on known-good ones. Returns 0 if healthy, 1 if the gate is broken.
+    Wire this into session start / tools/check_hook.py so a broken gate is caught
+    before any hunting begins."""
+    must_block = [
+        '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"sqlmap -u http://t/ --dump"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"mysql -e \'DROP DATABASE prod\'"}}',
+    ]
+    must_pass = [
+        '{"tool_name":"Bash","tool_input":{"command":"curl -s https://t/api/x"}}',
+    ]
+    rules = load_rules()
+
+    def blocks(ev_text: str) -> bool:
+        cmd = extract_command(json.loads(ev_text))
+        return any(
+            re.search(r["pattern"], cmd, re.IGNORECASE) for r in rules
+            if _safe_pattern(r["pattern"])
+        )
+
+    ok = True
+    for ev in must_block:
+        if not blocks(ev):
+            print(f"[selftest] FAIL: should block -> {ev}", file=sys.stderr)
+            ok = False
+    for ev in must_pass:
+        if blocks(ev):
+            print(f"[selftest] FAIL: should allow -> {ev}", file=sys.stderr)
+            ok = False
+    print("[selftest] safety gate healthy" if ok else "[selftest] safety gate BROKEN",
+          file=sys.stderr)
+    return 0 if ok else 1
+
+
+def _safe_pattern(pattern: str) -> bool:
+    try:
+        re.compile(pattern)
+        return True
+    except re.error:
+        return False
+
+
 def main() -> None:
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
+
     try:
         event = json.loads(sys.stdin.read() or "{}")
     except Exception:
-        # If we cannot parse the event, do not block (fail-open for usability);
-        # the destructive-default rules only matter when a command is present.
-        sys.exit(0)
+        # FAIL-CLOSED: a malformed event means we cannot vet this action, so we
+        # refuse it rather than let it through unchecked.
+        deny(
+            "[safety-boundary] BLOCKED (fail-closed): the safety gate could not parse "
+            "the tool event, so it cannot vet this action against the deny rules. This is a "
+            "fail-closed stop. Retry; if it persists, inspect .claude/hooks/safety_gate.py."
+        )
 
     command = extract_command(event)
     if not command:
@@ -90,6 +156,7 @@ def main() -> None:
             if re.search(rule["pattern"], command, re.IGNORECASE):
                 cat = rule.get("category", "blocked")
                 reason = rule.get("reason", "matched a deny rule")
+                audit(cat, reason, command)
                 deny(
                     f"[safety-boundary] BLOCKED ({cat}): {reason}. "
                     f"This destructive action class is NEVER executed, regardless of target, "

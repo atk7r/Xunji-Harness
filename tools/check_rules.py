@@ -29,6 +29,7 @@ SKIP_DIRS = {
     "__pycache__",
     ".pytest_cache",
     ".ruff_cache",
+    ".state",
     "observations",
     "reports",
     "deepseek-project",
@@ -39,6 +40,14 @@ SKIP_FILES = {
     Path("tools/check_hook.py"),
     Path(".claude/hooks/safety_gate.py"),
     Path(".claude/hooks/safety_rules.json"),
+    # Sanctioned, guard-routed active-verification tools (Active verification
+    # doctrine, CLAUDE.md). These may name scanners as sensors; weaponization
+    # references elsewhere in the tree are still caught.
+    Path("tools/scan.py"),
+    Path("tools/probe.py"),
+    Path("tools/render.py"),
+    Path("tools/harness/guard.py"),
+    Path("tools/harness/__init__.py"),
 }
 
 FORBIDDEN_FILE_PATTERNS = [

@@ -20,6 +20,11 @@ observations/
 reports/
 poc/
 
+# Concrete PoC / 0day exploit code & built binaries — never publish; ship only
+# the scaffolding/contract (poc_library/README.md, poc_library/normal/...).
+poc_library/xday/
+tools/poc_ours_upload/
+
 # Knowledge base: ship only the scaffolding/contract, not the curated entries
 knowledge/*.md
 !knowledge/README.md
@@ -28,3 +33,6 @@ knowledge/*.md
 # Local scratch
 tmp/
 *.tmp
+
+# active-tool runtime state
+tools/harness/.state/

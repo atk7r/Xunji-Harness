@@ -71,12 +71,12 @@ its own discipline:
   be a confirmed evidence item (`certainty >= 0.8`); if any hop is merely
   suspected, the whole chain is suspected, not confirmed.
 - Terminal proof node: a high-impact proven state (RCE proven, admin reached)
-  ENDS the chain. Record it and stop — do not extend into the destructive final
-  action, persistence, a webshell, or data exfiltration. The proof is the impact
-  demonstration; going further only crosses the boundary.
-- Web layer only: an SSRF / RCE hop is proven by reachability to the target
-  state, never by pivoting from it into the host or internal network — that is
-  out of scope and a hard-boundary violation.
+  ENDS the chain for proof purposes. Record it. The destructive final action and
+  data exfiltration / 拖库 are hard rules — never. Going further (persistence, a
+  webshell, pivoting) is operator-gated — only with the operator's consent.
+- Default: prove an SSRF / RCE hop by reachability to the target state. Pivoting
+  from it into the host or internal network is operator-gated (ask the operator
+  first), not a boundary violation.
 - Record edges in `chains.md`; the atoms still report individually. Composite
   severity is usually higher than any single hop alone.
 
@@ -179,7 +179,7 @@ Grounding knowledge is permitted and encouraged; weapons and automation are not.
 These are different things and must not be conflated:
 
 - Allowed (grounding): recognition signatures for a technology, its known
-  weak-point anchors, CVE / CNVD references, and safe-verification notes — the
+  weak-point anchors, CVE / CNVD references, and verification notes — the
   variant-analysis input that frontier work relies on. A reasoning driver
   consults it contextually after it has identified the technology.
 - Forbidden (weapons / automation): exploit playbooks, payload libraries,

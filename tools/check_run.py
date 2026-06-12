@@ -56,7 +56,6 @@ OPTIONAL_MARKERS = {
         "Hops",
         "Weakest hop certainty:",
         "Terminal node:",
-        "Harmless stop:",
     ],
 }
 

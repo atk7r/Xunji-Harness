@@ -11,7 +11,7 @@ maturity: seed               # seed | verified | stale
 <!--
 This file is grounding knowledge, not a weapon. See knowledge/README.md.
 Allowed: recognition signatures, weak-point anchors (class + mechanism +
-reference), safe-verification principles. Forbidden: payloads, exploit chains,
+reference), proof-only verification principles. Forbidden: payloads, exploit chains,
 request bodies, step-by-step PoC, scanner rules, blind checklists.
 Every anchor needs a source. "Found nothing verifiable" beats inventing.
 -->
@@ -36,11 +36,11 @@ check for the live target itself.
   - Reference: <CVE-xxxx-xxxxx / CNVD-xxxx-xxxxx / advisory URL>
   - source: external-cited | run-observation | driver-reasoning
 
-## Safe-Verification Principle (harmless confirmation)
+## Verification Principle (existence proof)
 
 - Existence proof: <what "the weakness exists" looks like here — presence, not
   impact>
-- Hard stops (per the harmless-verification boundary — confidentiality /
+- Hard stops (per the proof boundary — confidentiality /
   availability / integrity): <e.g. confirm endpoint identity only; do NOT pull
   data bytes, extract secrets, RCE, tamper, or dump>
 

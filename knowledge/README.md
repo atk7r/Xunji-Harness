@@ -17,8 +17,8 @@ section, that section wins.
 > same way regardless of target (forbidden)?
 
 - **Allowed (grounding):** recognition signatures, known weak-point anchors
-  (weakness *class* + mechanism + CVE/CNVD reference), and safe-verification
-  principles derived from the harmless-verification boundary.
+  (weakness *class* + mechanism + CVE/CNVD reference), and proof-only
+  verification principles derived from the proof boundary.
 - **Forbidden (weapons / automation):** payloads, exploit chains, request bodies,
   step-by-step PoC, scanner rules, or any fixed checklist meant to be run
   blindly. Citing that "a public PoC exists for CVE-X" is an allowed *fact*;
@@ -60,8 +60,8 @@ Every fact must be traceable. Three source classes, kept distinct via the
 2. **First-hand run observation** — a signature or weakness this workspace
    confirmed on a real target. Cite the run and evidence ID. Runs feed the base;
    the base grounds the next run.
-3. **Driver-authored reasoning** — safe-verification principles and confounders,
-   derived from the safety boundary and Attribution Checks. Marked as reasoning,
+3. **Driver-authored reasoning** — proof-only verification principles and
+   confounders, derived from the safety boundary and Attribution Checks. Marked as reasoning,
    not external fact.
 
 ### Where knowledge must NOT come from

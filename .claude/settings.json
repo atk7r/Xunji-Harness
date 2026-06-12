@@ -1,12 +1,22 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\" --selftest"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": ".venv/Scripts/python.exe .claude/hooks/safety_gate.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\""
           }
         ]
       }

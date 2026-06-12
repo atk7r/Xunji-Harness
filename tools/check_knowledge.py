@@ -2,7 +2,7 @@
 
 This enforces the contract in knowledge/README.md: each entry must carry
 recognition signatures, weak-point anchors (class + reference + source), a
-safe-verification principle, and confounders — and must NOT carry payloads,
+proof-only verification principle, and confounders — and must NOT carry payloads,
 exploit steps, or PoC. The check is structural; it does not certify that a cited
 CVE/CNVD is real or that an anchor is correct.
 
@@ -29,7 +29,7 @@ SKIP_NAMES = {"README.md"}
 REQUIRED_SECTIONS = [
     "## Recognition",
     "## Weak-Point Anchors",
-    "## Safe-Verification Principle",
+    "## Verification Principle",
     "## False-Positive / Confounders",
     "## References",
 ]

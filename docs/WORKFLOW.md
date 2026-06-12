@@ -89,7 +89,9 @@ Template:
 - Notes:
 ```
 
-If authorization or scope is unclear, stop and ask before touching the target.
+The operator runs authorized targets and is the authority on scope; treat the
+directed target as authorized and proceed — stop only if an action would cross
+the hard boundary.
 If an existing recon / OSINT report is supplied, record its path here and ingest
 it per "Ingest Existing Intelligence First" before any probing.
 
@@ -399,7 +401,7 @@ Template:
 
 ## False-Positive Review
 
-## Safe Reproduction Notes
+## Reproduction Notes
 
 ## Remediation
 
@@ -414,7 +416,7 @@ Purpose: record a vulnerability chain (组合利用) — confirmed findings link
 because one's proven output state meets the next one's precondition. Create the
 file only when such an edge exists; a chain-free run does not need it. Copy the
 shape from `docs/templates/run/chains.md`. The discipline (weakest-hop gate,
-terminal node, harmless stop, web-layer only) is in `docs/cognition/README.md`
+terminal node, stop at proof, pivot is operator-gated) is in `docs/cognition/README.md`
 "Vulnerability Chains". In `report.md`, report the atomic findings and, when a
 chain exists, the composed chain with its higher composite severity.
 

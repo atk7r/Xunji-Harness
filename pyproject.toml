@@ -1,7 +1,7 @@
 [project]
 name = "vulnfinder"
 version = "0.1.0"
-description = "Claude Code autonomous SRC workspace with deterministic safety boundaries."
+description = "Claude Code autonomous red-team web initial-access workspace with deterministic safety boundaries."
 requires-python = ">=3.10"
 dependencies = []
 
