@@ -134,6 +134,51 @@ Scope is not encoded in the hook. The operator is the highest authority and runs
 authorized targets; their instruction overrides the soft constraints and is the
 controlling order everywhere except the hard boundary above.
 
+## Setup
+
+A fresh clone needs almost nothing: the core toolchain has **zero third-party
+dependencies** (Python standard library only). The single optional dependency is
+Playwright, used only by the browser tools (`render.py`, the captcha solver).
+
+### Requirement (the only hard one)
+
+- **Python ≥ 3.10 on PATH.** Covers the PreToolUse hook (`safety_gate.py`), the
+  `check_*` checkers, and `probe.py` / `scan.py`. The hook is wired with
+  `$CLAUDE_PROJECT_DIR` (no hard-coded paths), so it is portable across machines
+  with no edits.
+
+### Browser tools (optional — only for `render.py` / captcha solving)
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate   |   Linux/macOS: source .venv/bin/activate
+pip install playwright
+playwright install chromium
+```
+
+`render.py` and the captcha solver run under the venv python
+(`.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere). Skipping
+this does not affect `probe.py`, `scan.py`, the hook, or the checkers.
+
+### Directories & state
+
+`runs/`, `knowledge/`, and `poc_library/` already exist via shipped
+`.gitkeep` / `README` files. The guard's rate-limit / counter state
+(`tools/harness/.state/`) is created automatically on first run; `reports/` and
+`poc/` are created on demand. No manual directory setup is needed.
+
+### Not restored by a clone (by design)
+
+- **Auto-memory** lives outside the repo (`~/.claude/projects/.../memory/`) and
+  is per-machine — a clone does not carry it.
+- **Concrete PoCs / 0day entries / built binaries** (`poc_library/xday/`,
+  `tools/poc_ours_upload/`) and **curated knowledge entries** (`knowledge/*.md`)
+  are git-ignored and never published — transfer them out of band if needed.
+- **Run findings** (`runs/<target>/`) are not committed; older runs also
+  reference machine-local OSINT paths that will not exist elsewhere.
+- **`.claude/settings.local.json`** (permission allowlist) is local — re-grant
+  permissions once on a new machine.
+
 ## Local Checks
 
 ```powershell
