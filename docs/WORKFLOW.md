@@ -353,6 +353,7 @@ Template:
 
 - Time:
 - Loaded rule files this cycle:
+- Reason: (whole-frontier re-read before choosing — N fronts seen; staying on F-00X / pivoting to F-00Y because Z; any front newly unlocked/refuted by recent evidence)
 - Chosen front:
 - Chosen hypothesis:
 - Why this is worth pursuing now:

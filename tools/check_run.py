@@ -162,6 +162,27 @@ def check_ledger_contradiction(run_dir: Path) -> list[str]:
     return warns
 
 
+def check_reason_pass(run_dir: Path) -> list[str]:
+    """高频 Reason pass 护栏(警告). Reason pass 是每轮选前沿前【重读整个 frontier】的廉价
+    习惯, 专治隧道视野(挖一个前沿到底、更高价值的晾着、新证据解锁了也没看)。纯文档纪律会
+    在势能里被跳过 —— 正是最需要它的时候(独立复审从软警升硬门就是这个教训)。这里查:
+    decisions.md 已推进多轮(>=3 条决策)却一条 `Reason:` 全图重读记录都没有 → 提示。
+    存在性检查(可被糊弄, 写一行即过), 故 WARN 不硬卡; 硬门仍是收口的独立复审。"""
+    dec = run_dir / "decisions.md"
+    if not dec.exists():
+        return []
+    text = dec.read_text(encoding="utf-8", errors="replace")
+    n_decisions = len(re.findall(r"^##\s+D-\d+", text, flags=re.MULTILINE))
+    n_reason = len(re.findall(r"^\s*[-*]?\s*Reason\s*[:：]", text, flags=re.MULTILINE))
+    if n_decisions >= 3 and n_reason == 0:
+        return [
+            f"Reason pass(防隧道视野): decisions.md 已 {n_decisions} 条决策却无一条 `Reason:` "
+            "全图重读记录 —— 每轮选前沿前应重读【整个 frontier】(所有 open+deferred 前沿, 非只"
+            "当前那个), 看有无被新证据解锁、或被忽略的高价值前沿。补 `Reason:` 行(见 WORKFLOW.md "
+            "'Reason pass'); 它只重排优先级, 不收口。"]
+    return []
+
+
 # 强收口措辞 —— 出现这些"已穷尽/无可利用/打不动"的断言时, 触发覆盖核验(P0-1)
 CLOSURE_CLAIMS = [
     "无攻击面", "无可利用", "探尽", "测尽", "都无法", "全无", "均无确认",
@@ -260,6 +281,7 @@ def main() -> int:
     warnings = check_evidence_certainty(run_dir)
     warnings.extend(check_coverage(run_dir))          # 前置防 lump: 每次都报独立应用候选
     warnings.extend(check_ledger_contradiction(run_dir))
+    warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
     errors.extend(closure_errors)
