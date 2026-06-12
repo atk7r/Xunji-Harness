@@ -16,6 +16,10 @@ try:
     import graph as _graph   # 派生状态图(同目录); 缺失则跳过图一致性检查
 except Exception:
     _graph = None
+try:
+    import workers as _workers   # 并行 worker 台账(同目录)
+except Exception:
+    _workers = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -171,6 +175,26 @@ def check_ledger_contradiction(run_dir: Path) -> list[str]:
                 f"台账矛盾: {eid} 被其它条目 Refutes(证伪), 但 {eid} 仍 certainty={e['certainty']} "
                 "且无 superseded/降级标记 —— 被证伪的结论未降级会污染下游, 请降级或标 superseded。")
     return warns
+
+
+def check_workers(run_dir: Path) -> list[str]:
+    """并行 fan-out 护栏(警告). 若有 worker 文件标了 `Status: done` 却没被 driver merge
+    (Status 未置 merged), 提示: 并行成果别静默丢, 且【证据门别跳】—— 候选必须过门(>=0.8
+    要 Control/复现)才能并入 canonical evidence.md。这是 Cairn 弱点(并行写未确认 Fact 污染
+    台账)的解药: 整合由单一 driver 把门。无 workers/ = 串行模式 = 不报。"""
+    if _workers is None:
+        return []
+    try:
+        um = _workers.unmerged(run_dir)
+    except Exception:
+        return []
+    if um:
+        names = ", ".join(f"{w['file']}({w['front']})" for w in um)
+        return [
+            f"并行 worker 未整合: {len(um)} 个 worker 已 done 却未 merge —— {names}。driver 须把每条候选"
+            "过【证据门】(proposed>=0.8 必须有 Control/复现, 否则降级)、分配 E-id、去重、更新 frontier, "
+            "再把该 worker 标 `Status: merged`。别让并行成果丢, 也别跳证据门。"]
+    return []
 
 
 def check_hints(run_dir: Path) -> list[str]:
@@ -342,6 +366,7 @@ def main() -> int:
     warnings.extend(check_coverage(run_dir))          # 前置防 lump: 每次都报独立应用候选
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
+    warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)
     warnings.extend(check_hints(run_dir))              # 操作者 Hint: pending 未吸收
     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警

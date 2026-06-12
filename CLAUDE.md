@@ -92,6 +92,13 @@ means a smaller safe step, different context, or missing evidence may move it
 forward. Type B means the front is sufficiently explored and should be closed or
 deferred with a written reason.
 
+When breadth beats depth (>= 3 independent fronts on different assets), you may
+fan them out to parallel fresh-context workers that coordinate only through the
+run directory (stigmergy). You stay the **sole integrator**: workers produce
+candidates, and you merge them through the evidence gate — parallel breadth never
+relaxes confirmation. Workers are proof-level; heavier actions stay with you. See
+`docs/WORKFLOW.md` "Parallel Fan-out" and `docs/templates/worker.md`.
+
 ## Dual Mind
 
 Work with two internal phases:

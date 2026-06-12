@@ -256,6 +256,12 @@ Project-discipline and run-structure checks live in `tools/`:
   neglected" is a query, not a re-read. Derived and advisory only — it never
   selects the next front (that stays the driver). See `docs/WORKFLOW.md` "State
   Graph".
+- `python tools/workers.py runs/<dir>` — parallel fan-out bookkeeping: `--new
+  <F-id>` scaffolds a worker scratch file; the bare form lists worker status and
+  flags any `done`-but-unmerged worker whose candidates the driver still owes the
+  evidence gate. Scaffold + ledger only — it never spawns workers or picks fronts
+  (the driver does, via the Agent tool). See `docs/WORKFLOW.md` "Parallel Fan-out"
+  and `docs/templates/worker.md`.
 
 These tools verify structure and discipline only. They never replace the
 evidence gate or autonomous judgement.

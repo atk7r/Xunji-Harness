@@ -262,6 +262,33 @@ or auto-selects work is the JSON orchestrator this project deleted (and
 `check_rules.py` guards against). Markdown stays the source of truth; the graph is
 a projection, like `coverage.json`.
 
+## Parallel Fan-out
+
+The run directory is a blackboard; the independent reviewer was the first parallel
+worker. When breadth beats depth, the driver may fan **several independent fronts**
+out to fresh-context sub-agent workers at once. Full mechanics and prompts are in
+`docs/templates/worker.md`; the essentials:
+
+- **When**: only with **>= 3 mutually-non-blocking fronts on different
+  assets/barriers** (early multi-asset recon is the case). Not for deep single-front
+  work, and not when fronts share a barrier (unblock it serially first).
+- **Stigmergy**: workers coordinate **only through the run dir** — they never
+  message each other. The driver assigns each a disjoint front (push, not a
+  claim-race); each worker writes only its own `runs/<target>/workers/W-<id>.md`.
+- **Driver = sole integrator.** Workers produce **candidates, not Facts**. At merge
+  the driver runs every candidate through the **evidence gate** (proposed
+  `>= 0.8` without `Control:`/`Replicated:` is downgraded), allocates the canonical
+  `E-id`, dedupes, updates `frontier.md`, then `graph.py` + contradiction checks.
+  This single-writer gated merge is the antidote to the parallel-pollution failure
+  (workers writing unconfirmed "Facts") — breadth never relaxes the evidence gate.
+- **Safety**: every worker's Bash still hits the hook; all workers share ONE global
+  rate limit (the guard state is cross-process locked). Workers are proof-level;
+  heavier / gated / weaponized actions stay with the driver (author-and-handoff).
+- `tools/workers.py` scaffolds worker files and lists merge status; `check_run.py`
+  warns while any worker is `done` but unmerged. It is **not** an orchestrator — it
+  never spawns workers or picks fronts (that is the driver's judgement, via the
+  Agent tool). Same guardrail as the graph: tooling assists, it never drives.
+
 ## Failure Budget
 
 Autonomy requires persistence. Real vulnerabilities often surrender only on a
