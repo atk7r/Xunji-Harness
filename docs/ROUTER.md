@@ -25,6 +25,17 @@ auto-load it by guessing a target belongs to a program.
   and tightens it for platform submissions (pivot off the table, data changes need
   platform authorization).
 
+## Capability Skills (invoke when the task fits)
+
+These are **procedure/tooling** skills, not playbooks: they encode a recurring,
+error-prone *mechanism* (how to operate something), never attack methodology or
+target selection. Invoke on demand when the task matches; do not auto-load.
+
+- `.claude/skills/poc-package/SKILL.md` — packaging an authored PoC into a clean,
+  handoff-ready artifact: xday/normal home, hardened binaries, and the
+  **scrub-real-targets-before-handoff** discipline. Invoke before handing off,
+  committing, or submitting any PoC.
+
 ## Run Authority
 
 This is the Claude Code / Codex workspace, a **red-team toolkit for web 打点
