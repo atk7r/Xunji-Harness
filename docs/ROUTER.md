@@ -101,6 +101,11 @@ Load:
 - latest `decisions.md`
 - recent `evidence.md`
 
+Begin each Driver cycle with a **Reason pass**: re-read the *whole* `frontier.md`
+(all open + deferred fronts) and the newest evidence before choosing — catch
+newly-unlocked fronts and tunnel vision early. It re-prioritizes only; it never
+closes a front. See `docs/WORKFLOW.md` "Reason pass".
+
 Output:
 
 - chosen front

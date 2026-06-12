@@ -61,9 +61,15 @@ Each work cycle must update the written state:
 
 ```text
 observe -> update surface -> update frontier -> update hypotheses
--> choose one safe verification -> record evidence -> check false positives
--> continue / confirm / reject
+-> reason over the whole frontier -> choose one safe verification
+-> record evidence -> check false positives -> continue / confirm / reject
 ```
+
+The "reason over the whole frontier" step is a cheap every-cycle re-read of *all*
+fronts (not just the active one): did new evidence unlock or refute a front, and
+are you tunnel-visioned on one while a higher-value front sits idle? It only
+re-prioritizes — it never closes a front (that stays the Reviewer's job). See
+`docs/WORKFLOW.md` "Reason pass".
 
 Do not keep the investigation only in chat memory. The run directory is the
 audit trail.

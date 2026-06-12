@@ -34,6 +34,7 @@ observe
   -> update surface
   -> update frontier
   -> update hypotheses
+  -> REASON over the whole frontier (re-read ALL fronts, not just the active one)
   -> choose one safe verification
   -> record evidence
   -> run false-positive checks
@@ -41,6 +42,29 @@ observe
 ```
 
 The cycle may be creative, but the written state must stay precise.
+
+### Reason pass (high-frequency whole-frontier re-read)
+
+Before choosing the next move, do a cheap, self-only re-read of the **entire**
+`frontier.md` (every open *and* deferred front) plus the evidence added since the
+last pass — not only the front you are on. Ask three questions:
+
+1. Did new evidence just **confirm, refute, or unlock** any front (e.g. a Fact
+   that satisfies a previously-blocked front's precondition)?
+2. Are you **tunnel-visioned** — grinding the current front while a
+   higher-value or newly-unblocked one sits idle?
+3. Is the active front still the best next move, or should you **pivot**?
+
+Output is one line in `decisions.md`, e.g. `Reason: re-read N fronts; staying on
+F-00X / pivoting to F-00Y because Z`. That is the whole cost.
+
+This is **not** the Reviewer. It is lighter and runs **every cycle**; it only
+re-prioritizes and surfaces neglected/unblocked fronts — it **never closes a
+front** and needs no independent reviewer. Closing/downgrading/reopening stays
+the Reviewer phase's job (heavier, every 3–5 cycles or at a closure gate, with the
+independent-reviewer hard-gate). The Reason pass exists to catch tunnel vision
+*early*, between Reviewer checkpoints — an earlier run dug one front deep while
+higher-value fronts sat idle, exactly what this pass surfaces.
 
 When a finding **confirms**, before moving on ask one more question: does its
 proven output state satisfy the precondition of another finding? If so, that is
