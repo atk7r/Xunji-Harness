@@ -17,12 +17,24 @@ separate tool invocations (each Bash call is a fresh process).
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import time
 from pathlib import Path
 
+try:                       # Windows
+    import msvcrt
+except ImportError:
+    msvcrt = None
+try:                       # POSIX
+    import fcntl
+except ImportError:
+    fcntl = None
+
 STATE_DIR = Path(__file__).resolve().parent / ".state"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
+_LOCK_PATH = STATE_DIR / ".lock"
 
 # --- Hard caps (deliberately conservative; tune in one place only) -----------
 GLOBAL_MAX_RPS = 2.0          # 禁高频: global requests/sec ceiling
@@ -42,7 +54,47 @@ def _now() -> float:
     return time.monotonic()
 
 
+@contextlib.contextmanager
+def _state_lock(max_wait: float = 15.0):
+    """Cross-process exclusive lock serializing every guard state read-modify-write.
+
+    Parallel workers each run the active tools as separate processes sharing this
+    one `.state/` dir. Without a lock their `_load`->modify->`_save` sequences race
+    and lose updates — the global rate ceiling would be violated by N workers at
+    once (打爆目标 / 自己的访问). This lock makes the whole fan-out honour ONE global
+    limit. Coarse and simple on purpose: guard mutations are sub-millisecond except
+    the rate gate's intentional spacing sleep, which SHOULD serialize anyway.
+    """
+    f = open(_LOCK_PATH, "a+")
+    deadline = time.time() + max_wait
+    try:
+        if msvcrt is not None:
+            f.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.time() > deadline:
+                        raise RateBudgetExceeded("guard state lock contention >15s; aborting")
+                    time.sleep(0.03)
+        elif fcntl is not None:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if msvcrt is not None:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            elif fcntl is not None:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        finally:
+            f.close()
+
+
 def _load(name: str) -> dict:
+    # Reads are consistent without the lock: _save replaces atomically (os.replace),
+    # so a reader never sees a torn file — at worst a slightly stale one.
     p = STATE_DIR / name
     try:
         return json.loads(p.read_text(encoding="utf-8"))
@@ -51,7 +103,18 @@ def _load(name: str) -> dict:
 
 
 def _save(name: str, data: dict) -> None:
-    (STATE_DIR / name).write_text(json.dumps(data), encoding="utf-8")
+    p = STATE_DIR / name
+    tmp = p.with_name(f"{p.name}.tmp{os.getpid()}")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, p)        # atomic on the same filesystem -> no torn reads
+
+
+def _update(name: str, mutate) -> None:
+    """Atomic read-modify-write under the cross-process lock."""
+    with _state_lock():
+        data = _load(name)
+        mutate(data)
+        _save(name, data)
 
 
 class RateBudgetExceeded(Exception):
@@ -104,23 +167,25 @@ class HostHealth:
             )
 
     def record_ok(self, host: str) -> None:
-        all_st = _load("hosthealth.json")
-        st = all_st.get(host, {"errs": 0, "total": 0, "until": 0.0})
-        st["errs"] = 0
-        st["total"] = st.get("total", 0) + 1
-        st["until"] = 0.0
-        all_st[host] = st
-        _save("hosthealth.json", all_st)
+        with _state_lock():
+            all_st = _load("hosthealth.json")
+            st = all_st.get(host, {"errs": 0, "total": 0, "until": 0.0})
+            st["errs"] = 0
+            st["total"] = st.get("total", 0) + 1
+            st["until"] = 0.0
+            all_st[host] = st
+            _save("hosthealth.json", all_st)
 
     def record_error(self, host: str) -> None:
-        all_st = _load("hosthealth.json")
-        st = all_st.get(host, {"errs": 0, "total": 0, "until": 0.0})
-        st["errs"] = st.get("errs", 0) + 1
-        st["total"] = st.get("total", 0) + 1
-        if st["errs"] >= self.threshold:
-            st["until"] = time.time() + self.backoff
-        all_st[host] = st
-        _save("hosthealth.json", all_st)
+        with _state_lock():
+            all_st = _load("hosthealth.json")
+            st = all_st.get(host, {"errs": 0, "total": 0, "until": 0.0})
+            st["errs"] = st.get("errs", 0) + 1
+            st["total"] = st.get("total", 0) + 1
+            if st["errs"] >= self.threshold:
+                st["until"] = time.time() + self.backoff
+            all_st[host] = st
+            _save("hosthealth.json", all_st)
 
     def soft_warn(self, host: str) -> str | None:
         """Return a non-blocking warning string once a host crosses the request
@@ -142,13 +207,14 @@ class SessionBudget:
         self.warn_count = warn_count
 
     def record(self) -> str | None:
-        st = _load("sessionbudget.json")
-        now = time.time()
-        reqs = [t for t in st.get("reqs", []) if now - t < self.window]
-        reqs.append(now)
-        st["reqs"] = reqs[-2000:]   # 防无限增长
-        _save("sessionbudget.json", st)
-        n = len(reqs)
+        with _state_lock():
+            st = _load("sessionbudget.json")
+            now = time.time()
+            reqs = [t for t in st.get("reqs", []) if now - t < self.window]
+            reqs.append(now)
+            st["reqs"] = reqs[-2000:]   # 防无限增长
+            _save("sessionbudget.json", st)
+            n = len(reqs)
         if n >= self.warn_count and n % 50 == 0:   # 达阈值后每 50 次提醒一次
             return (f"[guard] 全局会话 {int(self.window // 60)} 分钟内已发 {n} 请求 —— "
                     "整场请求量偏高, 易打爆目标各 IP; 考虑收敛攻击面 / 放缓 / 换出口。")
@@ -165,26 +231,30 @@ class RateLimiter:
         self.min_host = 1.0 / max(host_rps, 0.01)
 
     def gate(self, host: str, max_wait: float = 10.0) -> None:
-        st = _load("ratelimit.json")
-        wall = time.time()
-        last_global = st.get("__global__", 0.0)
-        last_host = st.get(host, 0.0)
-        wait = max(
-            self.min_global - (wall - last_global),
-            self.min_host - (wall - last_host),
-            0.0,
-        )
-        if wait > max_wait:
-            raise RateBudgetExceeded(
-                f"rate ceiling would require waiting {wait:.1f}s for {host}; "
-                "aborting instead of bursting (禁高频/DoS)"
+        # The whole compute+spacing-sleep+write runs under the cross-process lock,
+        # so N parallel workers queue through the gate and honour ONE global RPS
+        # ceiling instead of each spacing independently (which would be N x rate).
+        with _state_lock():
+            st = _load("ratelimit.json")
+            wall = time.time()
+            last_global = st.get("__global__", 0.0)
+            last_host = st.get(host, 0.0)
+            wait = max(
+                self.min_global - (wall - last_global),
+                self.min_host - (wall - last_host),
+                0.0,
             )
-        if wait > 0:
-            time.sleep(wait)
-        wall = time.time()
-        st["__global__"] = wall
-        st[host] = wall
-        _save("ratelimit.json", st)
+            if wait > max_wait:
+                raise RateBudgetExceeded(
+                    f"rate ceiling would require waiting {wait:.1f}s for {host}; "
+                    "aborting instead of bursting (禁高频/DoS)"
+                )
+            if wait > 0:
+                time.sleep(wait)
+            wall = time.time()
+            st["__global__"] = wall
+            st[host] = wall
+            _save("ratelimit.json", st)
 
 
 def cap_body(data: bytes, limit: int = MAX_BODY_BYTES) -> tuple[bytes, bool]:
@@ -213,9 +283,10 @@ class AuthFailCounter:
             )
 
     def record(self, key: str, ok: bool) -> None:
-        st = _load("authfail.json")
-        st[key] = 0 if ok else st.get(key, 0) + 1
-        _save("authfail.json", st)
+        with _state_lock():
+            st = _load("authfail.json")
+            st[key] = 0 if ok else st.get(key, 0) + 1
+            _save("authfail.json", st)
 
 
 class UploadRegistry:
@@ -224,19 +295,21 @@ class UploadRegistry:
     allowed once the artifact is registered here AND a cleanup is recorded."""
 
     def register(self, run: str, target: str, remote_ref: str, note: str = "") -> None:
-        st = _load("uploads.json")
-        st.setdefault(run, []).append(
-            {"target": target, "ref": remote_ref, "note": note,
-             "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "cleaned": False}
-        )
-        _save("uploads.json", st)
+        with _state_lock():
+            st = _load("uploads.json")
+            st.setdefault(run, []).append(
+                {"target": target, "ref": remote_ref, "note": note,
+                 "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "cleaned": False}
+            )
+            _save("uploads.json", st)
 
     def mark_cleaned(self, run: str, remote_ref: str) -> None:
-        st = _load("uploads.json")
-        for item in st.get(run, []):
-            if item["ref"] == remote_ref:
-                item["cleaned"] = True
-        _save("uploads.json", st)
+        with _state_lock():
+            st = _load("uploads.json")
+            for item in st.get(run, []):
+                if item["ref"] == remote_ref:
+                    item["cleaned"] = True
+            _save("uploads.json", st)
 
     def outstanding(self, run: str | None = None) -> list[dict]:
         st = _load("uploads.json")
