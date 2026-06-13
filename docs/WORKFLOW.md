@@ -623,3 +623,36 @@ a strong closure claim):
 - **WARN** (advisory) if the run lacks a `classify.txt`, a Closed Front lacks an
   evidence id, or a front was closed on a barrier without a Refutes — signals you
   are about to close too early; look harder or downgrade `closed` to `deferred`.
+
+## Independent review of safety-critical code (narrow gate)
+
+The same self-review-bias fix applies beyond pentest runs to **safety-critical
+framework code** — the machinery that decides what is allowed or destructive:
+
+- `.claude/hooks/` (safety_gate + rules — the hard block)
+- `tools/harness/guard.py` (rate / volume / auth / body / circuit breakers)
+- `sentinel/` (behavior classification + autonomy decision + circuit breaker)
+
+**Before declaring a behavior change to any of the above "done", spawn an
+independent `general-purpose` reviewer** (fresh context, per
+`review/independent-reviewer.md`, pointed at the changed files + commits) and
+**record its findings + your disposition of each in `review/records/<date>-<topic>.md`.**
+This is evidence-backed, not precautionary: an independent pass on the session
+circuit breaker caught a real bug (retry undercount) and a latent invariant break
+that the author's own self-audit missed — and one of them contradicted the
+author's own commit message (`review/records/2026-06-14-session-circuit-breaker.md`).
+
+**Scope is deliberately narrow** (same discipline as "approval gates only for the
+few highest-power actions" — do not turn it into "every commit needs review"):
+
+- **In scope**: a change that alters *what these layers allow, block, escalate, or
+  measure* (a new rule, a threshold, a decision branch, a guard wiring).
+- **Out of scope**: docs / comments / pure refactor with no behavior change /
+  test-only edits / changes outside the three areas above. Trivial and reversible
+  work does not pay for a review.
+
+Unlike run closure, code has no `report.md` closure artifact, so `check_run.py`
+does **not** mechanically enforce this — it is driver discipline. If it gets
+skipped in practice, add a mechanical aid then (e.g. a pre-commit/CI check that a
+behavior diff under these paths has a matching `review/records/` entry) — measured,
+not pre-built.

@@ -163,3 +163,8 @@ the evidence gate, not a Fact. See `docs/WORKFLOW.md` "hints.md".
 - Any new active capability inherits the guard layer (rate limit, body cap,
   brute-force lock, upload cleanup) and routes through it. The skill and the hook
   define the limits it must respect.
+- Before declaring a **behavior change to safety-critical code** done
+  (`.claude/hooks/`, `tools/harness/guard.py`, `sentinel/`), get an independent
+  fresh-context review and record it under `review/records/` — same self-review-bias
+  fix as run closure, narrow scope. See `docs/WORKFLOW.md` "Independent review of
+  safety-critical code". Self-review does not fix self-review bias.
