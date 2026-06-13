@@ -71,6 +71,23 @@ When unattended: L1/L2 run alone (L2 audited); **L3 is queued** (`pending_approv
 In observe-only the `would→` is recorded but **not enforced**. Findings go to
 `runs/<target>/alerts.md` with a running session risk score.
 
+## Session circuit breaker (Part B)
+
+Per-action detectors can't see **aggregate** runaway — each command looks fine,
+the *pattern* is the problem. The breaker trips on three session-level signals:
+
+- **T1 hijack-streak** — N consecutive effectful actions while target-content
+  taint is hot (the lethal-trifecta guard).
+- **T2 risk-accumulation** — cumulative `risk_score` crosses a ceiling.
+- **T3 escalation-streak** — repeated `high` scope/effect-escalation findings.
+
+On trip it is **escalate-not-kill**: effectful `AUTO` decisions are clamped to
+`GATE` (queued in `pending_approval.md`) and one loud `CIRCUIT-BREAKER TRIPPED`
+alert fires; proof / recon / operator-housekeeping keep flowing. It clears on
+cooldown, on taint cool-down, or on an operator `reset breaker` / `解除熔断`
+`hints.md` directive (highest authority). Thresholds + clamp rules:
+[`TUNING.md`](TUNING.md) §2.
+
 **Axes feeding the decision**: effect category, **reversibility** (`is_reversible` —
 read=reversible→may NOTIFY; write/exec=irreversible→floor GATE), **locus** + **provenance**
 (incl. `hints.md` pure-directive authorization + `TARGET_DERIVED` taint), **scope**,
@@ -84,6 +101,8 @@ read=reversible→may NOTIFY; write/exec=irreversible→floor GATE), **locus** +
 - `state.py` — cross-process session state (`.state/sentinel/`) + run-ledger access
 - `hook.py` — Claude Code hook entry (Pre/Post/UserPromptSubmit/SessionStart), UTF-8 stdin
 - `replay.py` — golden replay regression test (`python sentinel/replay.py`)
+- `verify_layers.py` — L1–L4 FP + effectiveness + breaker over-clamp guard
+- `TUNING.md` — every threshold (detectors + circuit breaker), with re-test steps
 
 Wired in `.claude/settings.json` for SessionStart / PreToolUse / PostToolUse /
 UserPromptSubmit (matcher `Bash`). State + alerts are under gitignored paths.
@@ -91,7 +110,8 @@ UserPromptSubmit (matcher `Bash`). State + alerts are under gitignored paths.
 ## Run the tests
 
 ```
-python sentinel/replay.py      # 22 golden cases: 4-level decision + detectors + hints + injection
+python sentinel/replay.py      # golden cases: 4-level decision + detectors + hints + injection + breaker
+python sentinel/verify_layers.py   # FP guard + effectiveness + breaker over-clamp guard
 ```
 
 ## Roadmap

@@ -36,12 +36,32 @@ def safety_blocks(cmd: str) -> bool:
     return "BLOCKED" in p.stdout.decode("utf-8", "replace")
 
 
-def decide(cmd: str, directives=()) -> tuple[int, str]:
+def decide(cmd: str, directives=(), sess=None) -> tuple[int, str]:
     a = C.normalize_action("Bash", cmd)
     ctx = {"scope_hosts": SCOPE, "directives": list(directives),
            "plan_keywords": list(SCOPE), "taint": False}
-    r = M.assess(a, ctx, {"egress_bytes": 0, "request_count": 0, "auth_fails": 0})
+    base = {"egress_bytes": 0, "request_count": 0, "auth_fails": 0}
+    if sess:
+        base.update(sess)
+    r = M.assess(a, ctx, base)
     return r["level"], r["decision"]
+
+
+def _tripped_sess() -> dict:
+    return {"breaker": {"tripped": True, "reason": "test", "until": 9e18,
+                        "hijack_streak": 0, "escalation_hits": 0}}
+
+
+def breaker_no_overclamp() -> list[str]:
+    """A TRIPPED circuit breaker must escalate, not kill: benign proof/recon must
+    still NOT be hard-blocked and must NEVER be pushed to L4/BLOCK. (Effectful AUTO
+    being clamped to GATE is intended and checked in replay.py test_breaker.)"""
+    bad = []
+    for name, cmd, kind, dirs in BENIGN:
+        lvl, dec = decide(cmd, dirs, sess=_tripped_sess())
+        if dec == "BLOCK":
+            bad.append(f"{name} (clamped to BLOCK under tripped breaker: L{lvl}/{dec})")
+    return bad
 
 
 # kind: benign_proof / benign_recon / benign_cleanup / harm / gated
@@ -120,6 +140,13 @@ def run() -> int:
             if not ok:
                 miss.append(f"{name} (sentinel only L{lvl}/{dec}, expected >=GATE)")
         print(f"  {'ok' if ok else 'MISS':14} {name:22} safety_gate={'BLOCK' if blk else 'allow':5} sentinel=L{lvl}/{dec}")
+
+    print("\n== BREAKER (tripped state must escalate-not-kill: no benign -> BLOCK) ==")
+    oc = breaker_no_overclamp()
+    for name, _, _, _ in BENIGN:
+        flag = "OVER-CLAMP" if any(name in x for x in oc) else "ok"
+        print(f"  {flag:14} {name}")
+    fp.extend(oc)
 
     print("\n=== SUMMARY ===")
     print(f"benign: {len(BENIGN)}   false-positives: {len(fp)} {fp if fp else ''}")

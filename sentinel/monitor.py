@@ -8,6 +8,7 @@ ALWAYS returns None (observe-only — never blocks).
 from __future__ import annotations
 
 import re
+import time
 
 from . import classifier as C
 from . import detectors as D
@@ -60,9 +61,22 @@ def assess(action: dict, ctx: dict, sess: dict) -> dict:
     # cumulative volume is a reversible-but-noteworthy session signal -> NOTIFY (audit)
     if decision == "AUTO" and any(f["detector"] == "exfil_rate" for f in findings):
         level, decision, dreason = max(level, D.NOTIFY), "NOTIFY", "cumulative volume — audited"
+    # session circuit breaker (Part B): aggregate-runaway trip -> clamp effectful AUTO + alert.
+    this_escalation = any(f["detector"] in ("effect_escalation", "scope_drift")
+                          and f["severity"] == "high" for f in findings)
+    breaker, bevent = D.breaker_eval(
+        sess.get("breaker"),
+        taint_hot=bool(ctx.get("taint")),
+        this_effectful=(level >= D.GATE),
+        this_escalation=this_escalation,
+        risk_score=sess.get("risk_score", 0.0) + risk,
+        now=time.time(), ts=S.now(),
+        operator_reset=any(D.BREAKER_RESET_RE.search(d or "") for d in ctx.get("directives", [])))
+    if breaker.get("tripped"):
+        level, decision, dreason = D.apply_breaker(breaker, level, decision, dreason)
     return {"attr": attr, "tier": tier, "lane": lane, "findings": findings, "risk": risk,
             "level": level, "decision": decision, "decision_reason": dreason,
-            "verdict": "observe"}
+            "breaker": breaker, "breaker_event": bevent, "verdict": "observe"}
 
 
 # --- live hook integration (IO) ---------------------------------------------
@@ -119,11 +133,13 @@ def handle_event(event: dict) -> None:
                    "taint": taint}
             _record_artifacts(command or "", sess)   # track agent-created infra for cleanup attribution
             res = assess(action, ctx, sess)
+            sess["breaker"] = res["breaker"]      # persist circuit-breaker state across actions
             sess.setdefault("trace", []).append(
                 {"ts": S.now(), "cmd": (command or "")[:160], "locus": res["attr"]["locus"],
                  "prov": res["attr"]["provenance"], "tier": res["tier"],
                  "level": res["level"], "decision": res["decision"], "risk": res["risk"]})
             sess["trace"] = sess["trace"][-_MAX_TRACE:]
+            res["trace_tail"] = sess["trace"][-5:]   # context for a circuit-breaker alert
             if res["findings"]:
                 sess["risk_score"] = round(sess.get("risk_score", 0.0) + res["risk"], 3)
             # observe-only recording by autonomy decision (NOTHING is blocked here):
@@ -132,6 +148,9 @@ def handle_event(event: dict) -> None:
                 _write_pending(run, command or "", res, sess.get("risk_score", 0.0))
             elif res["decision"] in ("NOTIFY", "BLOCK"):
                 _write_alert(run, command or "", res, sess.get("risk_score", 0.0))
+            # circuit-breaker transitions get their own loud, one-shot alert
+            if res.get("breaker_event") in ("trip", "clear"):
+                _write_breaker_alert(run, command or "", res, sess.get("risk_score", 0.0))
 
         elif name == "PostToolUse":
             _observe_result(event, sess, run)
@@ -197,6 +216,27 @@ def _write_pending(run, command: str, res: dict, risk_total: float) -> None:
               "once inline, this waits for your approve/reject (unattended: queued, agent works "
               "other fronts). Status: [ ] pending")
     S.append_pending(run, block)
+
+
+def _write_breaker_alert(run, command: str, res: dict, risk_total: float) -> None:
+    """One-shot loud alert on a circuit-breaker transition (trip / clear)."""
+    b = res.get("breaker") or {}
+    if res.get("breaker_event") == "trip":
+        recent = [t.get("cmd", "")[:80] for t in (res.get("trace_tail") or [])]
+        lines = [f"## CIRCUIT-BREAKER {S.now()}  TRIPPED  (session risk={risk_total})",
+                 f"- Trip: {b.get('reason', '')}",
+                 f"- Triggering action: `{command[:200]}`",
+                 "- Effect: while tripped, effectful AUTO actions are CLAMPED to L3/GATE "
+                 "(queued in pending_approval.md); proof/recon/operator-housekeeping keep "
+                 "flowing. observe-only — nothing was blocked.",
+                 f"- Clears: auto after {D.BREAKER_COOLDOWN}s with no contributing event, on "
+                 "taint cool-down, or on an operator 'reset breaker' / '解除熔断' hint."]
+        if recent:
+            lines.append(f"- Recent actions: {recent}")
+    else:
+        lines = [f"## CIRCUIT-BREAKER {S.now()}  CLEARED  (session risk={risk_total})",
+                 "- The session circuit breaker has reset; normal autonomy resumes."]
+    S.append_alert(run, "\n".join(lines))
 
 
 def _write_alert(run, command: str, res: dict, risk_total: float) -> None:

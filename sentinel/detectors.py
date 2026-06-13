@@ -252,3 +252,74 @@ def run_detectors(action: dict, attr: dict, sess: dict, scope: set) -> list[dict
           "action has no operator/plan/scope attribution (off-script; possible drift or hijack)", 0.2)
 
     return findings
+
+
+# --- Part B: session circuit breaker (observe-layer aggregate trip) ------------
+# Catches AGGREGATE runaway that no per-command gate can see: a hijacked agent
+# (target-content taint hot + sustained effectful actions) or a risk/escalation
+# snowball. On trip it CLAMPS subsequent effectful AUTO decisions down to GATE
+# (operator review) and fires ONE loud alert — escalate-not-kill: proof / recon /
+# operator housekeeping keep flowing so a real engagement is never killed. Still
+# observe-only in Phase 1 (the clamp just routes to pending instead of trace).
+BREAKER_RISK_TRIP = 3.0        # T2: cumulative session risk_score -> trip
+BREAKER_ESCALATION_TRIP = 3    # T3: cumulative high scope/effect-escalation findings since clear
+BREAKER_HIJACK_STREAK = 2      # T1: consecutive effectful actions while taint hot
+BREAKER_COOLDOWN = 600         # seconds with no contributing event -> auto-clear
+# operator is highest authority: this directive clears the breaker immediately.
+BREAKER_RESET_RE = re.compile(r"reset\s+breaker|clear\s+breaker|解除熔断|重置熔断", re.I)
+
+
+def _fresh_breaker() -> dict:
+    return {"tripped": False, "since": "", "until": 0.0, "reason": "",
+            "hijack_streak": 0, "escalation_hits": 0}
+
+
+def breaker_eval(breaker, *, taint_hot, this_effectful, this_escalation,
+                 risk_score, now, ts, operator_reset=False):
+    """Session circuit-breaker state machine. Pure (no IO): reads the prior breaker
+    dict + this action's signals, returns (new_breaker, event) where event is
+    'trip' (just tripped), 'clear' (just reset), or None."""
+    b = dict(breaker) if breaker else _fresh_breaker()
+
+    if operator_reset and b.get("tripped"):
+        return (_fresh_breaker(), "clear")
+
+    if b.get("tripped"):
+        # a still-active contributing condition refreshes the cooldown window
+        if (taint_hot and this_effectful) or this_escalation:
+            b["until"] = now + BREAKER_COOLDOWN
+        if now >= b.get("until", 0.0):
+            return (_fresh_breaker(), "clear")
+        return (b, None)
+
+    # not tripped: accumulate the trip signals
+    b["hijack_streak"] = (b.get("hijack_streak", 0) + 1) if (taint_hot and this_effectful) else 0
+    if this_escalation:
+        b["escalation_hits"] = b.get("escalation_hits", 0) + 1
+
+    reason = ""
+    if b["hijack_streak"] >= BREAKER_HIJACK_STREAK:
+        reason = (f"T1 hijack-streak: {b['hijack_streak']} consecutive effectful actions while "
+                  "untrusted target-content taint is hot (possible injection takeover)")
+    elif risk_score >= BREAKER_RISK_TRIP:
+        reason = f"T2 risk-accumulation: session risk_score {round(risk_score, 3)} >= {BREAKER_RISK_TRIP}"
+    elif b["escalation_hits"] >= BREAKER_ESCALATION_TRIP:
+        reason = (f"T3 escalation-streak: {b['escalation_hits']} high scope/effect-escalation "
+                  "findings this session")
+    if reason:
+        b.update({"tripped": True, "since": ts, "until": now + BREAKER_COOLDOWN, "reason": reason})
+        return (b, "trip")
+    return (b, None)
+
+
+def apply_breaker(breaker, level, decision, reason):
+    """While tripped, clamp an effectful AUTO decision down to GATE (operator review).
+    proof/recon/housekeeping (level < GATE) and already-escalated NOTIFY/GATE/BLOCK
+    decisions are left unchanged — only silently-auto effectful actions get paused."""
+    if not (breaker and breaker.get("tripped")):
+        return (level, decision, reason)
+    if decision == "AUTO" and level >= GATE:
+        return (GATE, "GATE",
+                f"circuit-breaker tripped ({breaker.get('reason', '')}) — effectful action "
+                "clamped to operator review")
+    return (level, decision, reason)

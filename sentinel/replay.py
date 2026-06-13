@@ -209,6 +209,67 @@ def test_injection() -> int:
     return fails
 
 
+def test_breaker() -> int:
+    """Part B session circuit breaker: aggregate-runaway trip + escalate-not-kill clamp.
+    Drives the state machine directly (multi-action sequences the single-shot CASES
+    table can't express) plus one live assess() wiring check."""
+    fails = 0
+    now = 1_000_000.0
+
+    # T1 hijack streak: 2 consecutive effectful-while-tainted actions -> trip
+    b = D._fresh_breaker()
+    b, e1 = D.breaker_eval(b, taint_hot=True, this_effectful=True, this_escalation=False,
+                           risk_score=0.0, now=now, ts="t")
+    b, e2 = D.breaker_eval(b, taint_hot=True, this_effectful=True, this_escalation=False,
+                           risk_score=0.0, now=now + 1, ts="t")
+    if e1 is not None or e2 != "trip" or not b["tripped"]:
+        print(f"FAIL breaker T1: hijack streak did not trip (e1={e1} e2={e2})"); fails += 1
+
+    # clamp: while tripped, an effectful AUTO decision is forced to GATE...
+    lvl, dec, _ = D.apply_breaker(b, D.GATE, "AUTO", "operator-authorized")
+    if dec != "GATE" or lvl < D.GATE:
+        print(f"FAIL breaker clamp: effectful AUTO not clamped (got L{lvl}/{dec})"); fails += 1
+    # ...but proof/recon (level<GATE) keeps flowing — escalate-not-kill
+    _, dec2, _ = D.apply_breaker(b, D.AUTO, "AUTO", "proof")
+    if dec2 != "AUTO":
+        print(f"FAIL breaker clamp: proof wrongly clamped (got {dec2})"); fails += 1
+
+    # operator reset clears immediately (highest authority)
+    b3, e3 = D.breaker_eval(b, taint_hot=False, this_effectful=False, this_escalation=False,
+                            risk_score=0.0, now=now + 2, ts="t", operator_reset=True)
+    if e3 != "clear" or b3["tripped"]:
+        print(f"FAIL breaker reset: operator reset did not clear (e3={e3})"); fails += 1
+
+    # cooldown auto-clear: tripped, until in the past, no contributing event
+    bc = D._fresh_breaker(); bc.update({"tripped": True, "until": now - 1})
+    bc2, e4 = D.breaker_eval(bc, taint_hot=False, this_effectful=False, this_escalation=False,
+                             risk_score=0.0, now=now, ts="t")
+    if e4 != "clear" or bc2["tripped"]:
+        print(f"FAIL breaker cooldown: did not auto-clear (e4={e4})"); fails += 1
+
+    # T3 escalation streak: 3 high scope/effect-escalation findings -> trip
+    b5 = D._fresh_breaker(); ev = None
+    for i in range(3):
+        b5, ev = D.breaker_eval(b5, taint_hot=False, this_effectful=True, this_escalation=True,
+                                risk_score=0.0, now=now + i, ts="t")
+    if ev != "trip" or not b5["tripped"]:
+        print(f"FAIL breaker T3: escalation streak did not trip (ev={ev})"); fails += 1
+
+    # T2 risk accumulation via the live assess() path (wiring check); proof still flows
+    sess = {"egress_bytes": 0, "request_count": 0, "auth_fails": 0, "risk_score": 3.0}
+    action = C.normalize_action("Bash", "python tools/probe.py GET http://192.168.191.138:8080/x")
+    ctx = {"scope_hosts": set(SCOPE), "directives": [], "plan_keywords": list(SCOPE), "taint": False}
+    res = M.assess(action, ctx, sess)
+    if res.get("breaker_event") != "trip" or not res["breaker"]["tripped"]:
+        print(f"FAIL breaker T2: risk accumulation did not trip via assess (event={res.get('breaker_event')})"); fails += 1
+    if res["decision"] != "AUTO":
+        print(f"FAIL breaker T2: in-scope proof wrongly clamped under trip (got {res['decision']})"); fails += 1
+
+    if not fails:
+        print("ok    breaker: T1/T2/T3 trip; clamp effectful-only; operator+cooldown clear")
+    return fails
+
+
 def run() -> int:
     failures = 0
     for c in CASES:
@@ -238,7 +299,8 @@ def run() -> int:
             print(f"ok    {c['name']:40} [{got_lane}] L{res['level']}/{res['decision']:5} {sorted(got_dets)}")
     failures += test_hints()
     failures += test_injection()
-    total = len(CASES) + 2
+    failures += test_breaker()
+    total = len(CASES) + 3
     print(f"\n{total-failures}/{total} passed")
     return 1 if failures else 0
 
