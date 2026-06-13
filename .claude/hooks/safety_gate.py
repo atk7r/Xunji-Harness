@@ -94,12 +94,22 @@ def selftest() -> int:
     Wire this into session start / tools/check_hook.py so a broken gate is caught
     before any hunting begins."""
     must_block = [
-        '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}',
+        # rm is narrowed to CATASTROPHIC targets only (root / home / system dir /
+        # drive root / bare * . ..); these must still hard-deny.
+        '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"rm -rf ~"}}',
+        # ...but rm SHIPPED TO A TARGET (rm co-located with a URL) hard-denies at
+        # ANY path — destroying target data is never a proof step:
+        '{"tool_name":"Bash","tool_input":{"command":"curl http://t/?c=rm -rf /app/data"}}',
         '{"tool_name":"Bash","tool_input":{"command":"sqlmap -u http://t/ --dump"}}',
         '{"tool_name":"Bash","tool_input":{"command":"mysql -e \'DROP DATABASE prod\'"}}',
     ]
     must_pass = [
         '{"tool_name":"Bash","tool_input":{"command":"curl -s https://t/api/x"}}',
+        # repo-relative cleanup is NOT catastrophic -> must fall through to the
+        # native ask/allow flow, not hard-deny (this is the narrowing guarantee).
+        '{"tool_name":"Bash","tool_input":{"command":"rm -rf tmp/build"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"rm -f runs/old/cookies.txt"}}',
     ]
     rules = load_rules()
 
@@ -137,7 +147,14 @@ def main() -> None:
         sys.exit(selftest())
 
     try:
-        event = json.loads(sys.stdin.read() or "{}")
+        # Read stdin as raw bytes and decode UTF-8 explicitly: the harness sends a
+        # UTF-8 event, but sys.stdin.read() would decode it with the OS locale codec
+        # (GBK/cp936 on a Chinese Windows), so a command containing non-ASCII (中文
+        # echo / heredoc) would fail to decode and trip the fail-closed branch on a
+        # perfectly benign command. Mirrors the UTF-8 reconfigure probe.py/render.py
+        # already do. A genuinely malformed event still raises -> still fail-closed.
+        raw = sys.stdin.buffer.read()
+        event = json.loads(raw.decode("utf-8", "replace") or "{}")
     except Exception:
         # FAIL-CLOSED: a malformed event means we cannot vet this action, so we
         # refuse it rather than let it through unchecked.

