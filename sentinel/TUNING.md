@@ -92,6 +92,25 @@ candidate for a later phase if per-engagement tuning becomes routine.
 - **Tool-layer rate / body / auth-runaway / host-backoff** —
   `tools/harness/guard.py` (`GLOBAL_MAX_RPS`, `PER_HOST_MAX_RPS`,
   `MAX_BODY_BYTES`, `AUTH_FAIL_LOCK`, `HOST_ERR_THRESHOLD`, `SESSION_WARN_COUNT`).
-  These *enforce*; the §1–§2 values only *observe*. A future **Part A** will
-  promote `SessionBudget` from soft-warn to a real tool-layer trip
-  (`SESSION_TRIP_COUNT` / `SESSION_TRIP_BYTES`) — documented here when built.
+  These *enforce* (they can abort a tool); the §1–§2 values only *observe*.
+
+### Part A — whole-session volume breaker (`guard.py`, enforcing)
+
+`SessionBudget` is now a real tool-layer circuit breaker (not just soft-warn):
+`probe.py` calls `check()` before each request and `record(nbytes)` after. When
+the sliding-window request count OR retained-egress bytes cross a hard ceiling it
+arms a cooldown; `check()` then raises `SessionTripped` (subclass of
+`RateBudgetExceeded`) and the tool aborts instead of continuing the flood. This is
+the GLOBAL (cross-host) counterpart to the per-host `HostHealth`/`HostBackoff`.
+
+| Constant | Default | Trips on | Raise it if… |
+|---|---|---|---|
+| `SESSION_WARN_COUNT` | 200 | soft warn only (no abort) | noisy on a legit big sweep |
+| `SESSION_TRIP_COUNT` | 800 | window request count → abort | a legitimately large authorized sweep |
+| `SESSION_TRIP_BYTES` | 16 MB | window retained-egress bytes → abort | a data-heavy but authorized engagement |
+| `SESSION_TRIP_COOLDOWN` | 300 s | armed-cooldown duration | — |
+| `SESSION_WINDOW_SEC` | 600 s | sliding window for both | — |
+
+Per-run override: raise the constant (read live), or construct
+`SessionBudget(trip_count=…, trip_bytes=…)`. Self-test (isolated state, no live
+pollution): `python tools/harness/guard.py`.

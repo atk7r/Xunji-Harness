@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness.guard import (RateLimiter, AuthFailCounter, cap_body,  # noqa: E402
                            RateBudgetExceeded, BruteforceLock,
-                           HostHealth, HostBackoff, SessionBudget)
+                           HostHealth, HostBackoff, SessionBudget, SessionTripped)
 
 # Emit UTF-8 regardless of the OS locale, so this tool's JSON (ensure_ascii=False,
 # 含中文/标题) survives being captured by a parent process on Windows (default
@@ -75,9 +75,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         afc.check(auth_key)            # anti-runaway: stop once locked
     hh = HostHealth()
     hh.check(host)                     # 自熔断: host 在退避冷却期则直接抛 HostBackoff
-    sb_warn = SessionBudget().record()  # 全局会话请求预算(跨 host 总量软告警)
-    if sb_warn:
-        print(sb_warn, file=sys.stderr)
+    sb = SessionBudget()
+    sb.check()                         # 整场量熔断: 冷却期直接 abort(跨 host 总量/外渗)
 
     req = urllib.request.Request(url=url, method=method.upper(),
                                  data=data, headers={"User-Agent": UA, **headers})
@@ -116,6 +115,9 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     warn = hh.soft_warn(host)
     if warn:
         print(warn, file=sys.stderr)
+    sb_warn = sb.record(len(raw))      # 整场请求+外渗量计量; 越硬阈值则布防熔断
+    if sb_warn:
+        print(sb_warn, file=sys.stderr)
 
     body, truncated = cap_body(raw)
     summary.update({
@@ -218,6 +220,8 @@ def main() -> int:
                                            data, args.auth_key, args.timeout,
                                            args.save, args.retry, args.retry_wait,
                                            args.headers)}
+    except SessionTripped as e:
+        out = {"error": f"session-volume-breaker: {e}"}
     except RateBudgetExceeded as e:
         out = {"error": f"rate-limited: {e}"}
     except BruteforceLock as e:
