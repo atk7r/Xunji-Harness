@@ -95,6 +95,54 @@ def check_file(path: Path, markers: list[str]) -> list[str]:
     return errors
 
 
+_ART_TOKEN = re.compile(
+    r"(?:evidence/[\w./-]+|render[_-][\w./-]+|[\w][\w./-]*\.(?:html|json|png|jpe?g|gif|txt|log|bin))",
+    re.I)
+
+
+def _block_has_live_artifact(block: str, run_dir: Path) -> bool:
+    """True iff the evidence block references at least one artifact path that
+    actually exists (non-empty) under run_dir. A referenced directory (e.g.
+    render_sxss/) counts if it holds any non-empty file."""
+    root = run_dir.resolve()
+    for tok in _ART_TOKEN.findall(block):
+        tok = tok.strip().strip("`\"'").rstrip(").,;:，。）")
+        cands = [tok] if tok.startswith("evidence/") else [tok, f"evidence/{tok}"]
+        for rel in cands:
+            try:
+                p = (run_dir / rel).resolve()
+            except Exception:
+                continue
+            if p != root and root not in p.parents:
+                continue  # ignore anything escaping the run dir
+            if p.is_file() and p.stat().st_size > 0:
+                return True
+            if p.is_dir() and any(f.is_file() and f.stat().st_size > 0
+                                  for f in p.rglob("*")):
+                return True
+    return False
+
+
+def evidence_entries_missing_artifact(run_dir: Path) -> list[str]:
+    """P1 收口护栏: Certainty>=0.8 的证据条目必须引用一个 run 目录下【真实存在】的
+    产物文件 —— 把"声称确认但没存盘"挡在收口外。两次实战复审都抓到这类假证据
+    (假 DOM XSS 产物=登录页; 盲注/CSRF 结论根本没存盘), 而结构闸门当时全放行。
+    返回缺产物的条目 head 列表; 由收口硬门升为 error。"""
+    ev = run_dir / "evidence.md"
+    if not ev.exists():
+        return []
+    text = ev.read_text(encoding="utf-8", errors="replace")
+    bad: list[str] = []
+    for b in re.split(r"(?=^##\s)", text, flags=re.MULTILINE):
+        if not b.strip():
+            continue
+        head = b.splitlines()[0].strip()
+        if re.search(r"Certainty\s*[:：]\s*(0\.8|1\.0)\b", b):
+            if not _block_has_live_artifact(b, run_dir):
+                bad.append(head)
+    return bad
+
+
 def check_evidence_certainty(run_dir: Path) -> list[str]:
     """证据门质量护栏(P0-2): certainty >= 0.8 的条目必须带 `Replicated:` 或
     `Control:` —— 复现/对照实验是把"单次观测≠确认"从口号变成可检字段。缺则 WARN
@@ -302,6 +350,14 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
             "收口硬门(P0-1): report 含强收口断言, 但 review.md 无【独立复审 / Independent "
             "Review】记录。自评治不了自评偏见; 收口前【必须】派独立 Reviewer 子代理(常驻授权, "
             "见 docs/templates/independent-reviewer.md)并落 review.md。撤回收口措辞或补复审后再过。")
+
+    # 硬门(P1): 收口时每条 Certainty>=0.8 必须引用 run 目录下真实存在的产物文件。
+    # 结构闸门只查字段在不在, 查不出"声称确认却无产物"; 实战两次复审都抓到这类假证据。
+    for head in evidence_entries_missing_artifact(run_dir):
+        errors.append(
+            f"收口硬门(P1): evidence {head!r} Certainty>=0.8 但未引用任何 run 目录下"
+            "【真实存在】的产物文件 —— 确认级结论必须可复核。把 --save 的产物路径写进该条目"
+            "(html/json/png/jpg/txt 或 render_* 目录), 或把 certainty 降级。")
 
     has_classify = any(run_dir.glob("**/classify*.txt"))
     if not has_classify:

@@ -379,6 +379,18 @@ this. (This guards against the failure where a hasty conclusion — e.g. "the wh
 site blocked my IP" — is recorded at `1.0` without testing a control such as
 "is another host on a different IP still reachable?".)
 
+A `>= 0.8` entry **must also cite a saved artifact** — a path under the run dir
+that actually exists and is non-empty (a `--save`d response `*.html`/`*.json`, a
+`render_*/` dir, a screenshot, a captured header dump). The proof has to be on
+disk and **named in the entry**, so a reviewer can re-open it; describing the
+result in prose while the backing file is unsaved (or absent) is not confirmation.
+`tools/check_run.py` **hard-fails the closure gate** (when `report.md` makes a
+strong-closure claim) on any `>= 0.8` entry that references no existing artifact.
+(This is the hole two independent reviews caught after the structural gate had
+passed: a `1.0` DOM-XSS whose only saved file was a redirect-to-login page, and
+`1.0` blind-SQLi / CSRF conclusions that were never saved at all — claimed, not
+captured.)
+
 ## false_positive.md
 
 Purpose: make the hunter phase explicit.
