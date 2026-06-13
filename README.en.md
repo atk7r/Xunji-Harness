@@ -15,11 +15,11 @@
 
 ---
 
-It supports AI-driven vulnerability discovery and exploitation while keeping the process **auditable, evidence-bound, and bounded by a machine-enforced hard-rule floor**.
+**This is a red-team weapon.** A single-AI-driven workspace for web 打点 (initial access) — vulnerability discovery and **full weaponized exploitation** — that keeps the process **auditable, evidence-bound, and bounded by a machine-enforced hard-rule floor**.
 
-> It is **not** a scanner, a turnkey mass-exploit kit, or a JSON orchestrator. It gives the AI
-> **judgment discipline · grounded recognition knowledge · run-state structure · a hard floor drawn by effect**.
-> Weaponized exploits the driver authors are **allowed (method is free)**; only **irreversible harm auto-executed against the target** is hard-blocked.
+> It gives the AI **judgment discipline · grounded recognition knowledge · run-state structure · a hard floor drawn by effect** — and is **not** a scanner, a turnkey mass-exploit kit, or a JSON orchestrator.
+> Weaponized exploits the driver authors are **free (no method ceiling)**; the only hard-blocked thing is an **irreversible / harm-as-purpose effect auto-executed against the target**.
+> **"Not a turnkey kit" ≠ "not a weapon"**: the project itself is a weapon; what is excluded is only indiscriminate, target-agnostic mass exploitation.
 
 ## 🧭 Architecture
 
@@ -116,8 +116,8 @@ The field showed the deepest failure is not capability — it is an eager model 
 - **Now extended to safety-critical code** — behavior changes to `.claude/hooks/` · `guard.py` · `sentinel/` also require an independent review recorded under `review/records/` before "done" (narrow scope, see `docs/WORKFLOW.md`). Evidence-backed: one such review caught a real bug in the circuit breaker the author's self-audit missed.
 - **Ledger contradiction + certainty control + egress re-run queue** — a conclusion that another entry `Refutes:` but still carries ≥ 0.8 is flagged; ≥ 0.8 must carry `Control:` / `Replicated:`; merely-unreachable assets form a standardized queue that `rerun_deferred.py` re-probes from another egress later.
 
-### 5 ｜ Grounding knowledge, never a weapon
-`knowledge/*.md` carry recognition signatures + weak-point anchors (weakness class + mechanism + CVE/CNVD reference + source), and explicitly **no payloads, steps, or turnkey kits** — `check_knowledge.py` enforces the contract. The base is meant to **grow with what you actually meet in the field**.
+### 5 ｜ `knowledge/` is grounding, not a turnkey kit (about the knowledge base, not the project)
+**The project itself is a weapon and weaponization is free** (see the axis); what is tightened here is only the **repo-shared `knowledge/` corpus**. It carries recognition signatures + weak-point anchors (weakness class + mechanism + CVE/CNVD reference + source) — the variant-analysis input the driver looks up **for a specific target** — and deliberately **no payloads / steps / turnkey mass-exploit kit**, because that would become target-agnostic mass automation (the indiscriminate-harm family the L4 boundary rejects). The test: **knowledge looked up for a specific target = allowed; weapons/steps that run the same regardless of target = forbidden**. Weapons live in `poc_library/` and the driver's authored exploits, not here. `check_knowledge.py` enforces the contract; the corpus grows with field work.
 
 ### 6 ｜ A small, dependency-free, guard-routed pipeline
 `ingest_recon` (recon report → asset table + reachability matrix) → `classify_hosts` (per-content → `coverage.json`) → `fetch_assets` (fetch **all** SPA chunks + completeness assertion) → `probe / render / scan` (active verification sensors, all guard-routed, UTF-8-safe) → `rerun_deferred` (egress queue). Pure standard library; Playwright is the only optional dep.
