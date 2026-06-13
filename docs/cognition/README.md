@@ -175,16 +175,21 @@ false beliefs.
 
 ## Grounding Knowledge Is Not a Weapon
 
-Grounding knowledge is permitted and encouraged; weapons and automation are not.
-These are different things and must not be conflated:
+The project itself is a weapon, and authored, target-specific weaponization is
+free (see "gate effects, not methods"). This section scopes something narrower:
+the **grounding knowledge base and the framework architecture** must stay grounding
++ reasoning — they must not be turned into target-agnostic weapons / automation.
+Those are different things and must not be conflated:
 
 - Allowed (grounding): recognition signatures for a technology, its known
   weak-point anchors, CVE / CNVD references, and verification notes — the
   variant-analysis input that frontier work relies on. A reasoning driver
   consults it contextually after it has identified the technology.
-- Forbidden (weapons / automation): exploit playbooks, payload libraries,
-  scanner wrappers, a JSON orchestrator, and mechanical fixed checklists that
-  run regardless of the target.
+- Forbidden HERE (target-agnostic weapons / automation baked into knowledge or
+  framework): exploit playbooks, payload libraries, scanner wrappers, a JSON
+  orchestrator, and mechanical fixed checklists that run regardless of the
+  target. (Target-SPECIFIC authored exploitation is free — it lives in
+  `poc_library/` and the driver's authored code, not in `knowledge/`.)
 
 The test: does the artifact carry knowledge a reasoning driver looks up for a
 specific identified target (allowed), or does it carry weapons / steps that
