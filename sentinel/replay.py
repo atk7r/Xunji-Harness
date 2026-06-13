@@ -247,6 +247,19 @@ def test_breaker() -> int:
     if e4 != "clear" or bc2["tripped"]:
         print(f"FAIL breaker cooldown: did not auto-clear (e4={e4})"); fails += 1
 
+    # T2 latch regression: after a clear, T2 must re-baseline so lifetime risk_score
+    # (which only grows) does NOT re-trip on the next finding. (bug found in self-audit)
+    bl = D._fresh_breaker()
+    bl, _ = D.breaker_eval(bl, taint_hot=False, this_effectful=False, this_escalation=False,
+                           risk_score=3.0, now=now, ts="t")          # trip
+    bl["until"] = now - 1                                            # force cooldown expiry
+    bl, ec = D.breaker_eval(bl, taint_hot=False, this_effectful=False, this_escalation=False,
+                            risk_score=3.0, now=now + 10, ts="t")    # clear + re-baseline at 3.0
+    bl, er = D.breaker_eval(bl, taint_hot=False, this_effectful=False, this_escalation=False,
+                            risk_score=3.2, now=now + 11, ts="t")    # only +0.2 fresh -> must NOT trip
+    if ec != "clear" or er == "trip" or bl["tripped"]:
+        print(f"FAIL breaker T2-latch: re-tripped on lifetime risk after clear (ec={ec} er={er})"); fails += 1
+
     # T3 escalation streak: 3 high scope/effect-escalation findings -> trip
     b5 = D._fresh_breaker(); ev = None
     for i in range(3):

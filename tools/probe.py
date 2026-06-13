@@ -107,6 +107,7 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                 time.sleep(retry_wait)     # 瞬时超时/RST 重试(如本次 vpn)
     if last_err is not None:
         hh.record_error(host)          # 传输错误: 累计, 达阈值即熔断该 host
+        sb.record(0)                   # 失败请求也计入整场量(防多 host 错误洪水绕过会话熔断)
         out = {**summary, "error": last_err}
         if retry:
             out["attempts"] = retry + 1

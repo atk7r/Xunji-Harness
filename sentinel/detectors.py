@@ -269,9 +269,13 @@ BREAKER_COOLDOWN = 600         # seconds with no contributing event -> auto-clea
 BREAKER_RESET_RE = re.compile(r"reset\s+breaker|clear\s+breaker|解除熔断|重置熔断", re.I)
 
 
-def _fresh_breaker() -> dict:
+def _fresh_breaker(risk_baseline: float = 0.0) -> dict:
+    # risk_baseline: the session risk_score at the moment of the last clear. T2
+    # measures risk ACCRUED SINCE THEN, not lifetime — otherwise, because risk_score
+    # only ever grows, the breaker would re-trip on the next finding after every
+    # cooldown once 3.0 was ever crossed (a permanent clamp). See test_breaker.
     return {"tripped": False, "since": "", "until": 0.0, "reason": "",
-            "hijack_streak": 0, "escalation_hits": 0}
+            "hijack_streak": 0, "escalation_hits": 0, "risk_baseline": round(risk_baseline, 3)}
 
 
 def breaker_eval(breaker, *, taint_hot, this_effectful, this_escalation,
@@ -281,28 +285,32 @@ def breaker_eval(breaker, *, taint_hot, this_effectful, this_escalation,
     'trip' (just tripped), 'clear' (just reset), or None."""
     b = dict(breaker) if breaker else _fresh_breaker()
 
+    # a clear re-baselines T2 to the current risk_score so the next trip needs a
+    # fresh BREAKER_RISK_TRIP of accrued risk, not the already-counted lifetime total.
     if operator_reset and b.get("tripped"):
-        return (_fresh_breaker(), "clear")
+        return (_fresh_breaker(risk_score), "clear")
 
     if b.get("tripped"):
         # a still-active contributing condition refreshes the cooldown window
         if (taint_hot and this_effectful) or this_escalation:
             b["until"] = now + BREAKER_COOLDOWN
         if now >= b.get("until", 0.0):
-            return (_fresh_breaker(), "clear")
+            return (_fresh_breaker(risk_score), "clear")
         return (b, None)
 
     # not tripped: accumulate the trip signals
     b["hijack_streak"] = (b.get("hijack_streak", 0) + 1) if (taint_hot and this_effectful) else 0
     if this_escalation:
         b["escalation_hits"] = b.get("escalation_hits", 0) + 1
+    risk_since_clear = risk_score - b.get("risk_baseline", 0.0)
 
     reason = ""
     if b["hijack_streak"] >= BREAKER_HIJACK_STREAK:
         reason = (f"T1 hijack-streak: {b['hijack_streak']} consecutive effectful actions while "
                   "untrusted target-content taint is hot (possible injection takeover)")
-    elif risk_score >= BREAKER_RISK_TRIP:
-        reason = f"T2 risk-accumulation: session risk_score {round(risk_score, 3)} >= {BREAKER_RISK_TRIP}"
+    elif risk_since_clear >= BREAKER_RISK_TRIP:
+        reason = (f"T2 risk-accumulation: {round(risk_since_clear, 3)} risk accrued since last "
+                  f"clear >= {BREAKER_RISK_TRIP}")
     elif b["escalation_hits"] >= BREAKER_ESCALATION_TRIP:
         reason = (f"T3 escalation-streak: {b['escalation_hits']} high scope/effect-escalation "
                   "findings this session")
