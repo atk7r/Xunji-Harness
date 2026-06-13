@@ -326,7 +326,11 @@ def apply_breaker(breaker, level, decision, reason):
     decisions are left unchanged — only silently-auto effectful actions get paused."""
     if not (breaker and breaker.get("tripped")):
         return (level, decision, reason)
-    if decision == "AUTO" and level >= GATE:
+    # only an effectful AUTO is clamped. Bound BELOW BLOCK too: a (BLOCK,"AUTO")
+    # must never be downgraded to GATE — the breaker only ever escalates. (Today
+    # autonomy_decision never emits BLOCK+AUTO, so this guards a future invariant
+    # break, flagged by independent review.)
+    if decision == "AUTO" and GATE <= level < BLOCK:
         return (GATE, "GATE",
                 f"circuit-breaker tripped ({breaker.get('reason', '')}) — effectful action "
                 "clamped to operator review")

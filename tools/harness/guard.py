@@ -53,7 +53,7 @@ SESSION_WINDOW_SEC = 600      # 滑动窗口(秒)
 SESSION_WARN_COUNT = 200      # 窗口内总请求达此值 -> 软告警(整场量偏高, 考虑收敛/换出口)
 # --- 全局会话硬熔断 (Part A: 软告警之上的真·工具层熔断, 整场失控时 abort) --------
 SESSION_TRIP_COUNT = 800      # 窗口内总请求达此值 -> 硬熔断(布防冷却, check() 抛 SessionTripped)
-SESSION_TRIP_BYTES = 16 * 1024 * 1024   # 窗口内累计保留响应字节达此值 -> 硬熔断(防整场拖量)
+SESSION_TRIP_BYTES = 16 * 1024 * 1024   # 窗口内累计响应字节(截断前线缆量, 非 cap 后保留量)-> 硬熔断(防整场拖量)
 SESSION_TRIP_COOLDOWN = 300   # 熔断冷却时长(秒); 期间对任何 host 的请求直接 abort
 
 
@@ -245,14 +245,16 @@ class SessionBudget:
                 f"{int(self.window // 60)}min). 整场请求/外渗量过大=打爆各 IP 风险; "
                 "收敛攻击面 / 换出口, 或调高 SESSION_TRIP_* 后再跑。")
 
-    def record(self, nbytes: int = 0) -> str | None:
-        """Post-response: count the request + retained bytes; arm the hard breaker
-        on count OR volume; return a soft/arming warning string (or None)."""
+    def record(self, nbytes: int = 0, count: int = 1) -> str | None:
+        """Post-response: count `count` real requests + retained bytes; arm the hard
+        breaker on count OR volume; return a soft/arming warning string (or None).
+        `count` > 1 lets one send() that made N real attempts (retries) record all N
+        — otherwise --retry would undercount the session volume (bug B1)."""
         with _state_lock():
             st = _load(self.name)
             now = time.time()
             reqs = [t for t in st.get("reqs", []) if now - t < self.window]
-            reqs.append(now)
+            reqs.extend([now] * max(int(count), 0))   # 每个真实请求(含重试)各计一次
             st["reqs"] = reqs[-5000:]   # 防无限增长
             bys = [[t, b] for (t, b) in st.get("bytes", []) if now - t < self.window]
             if nbytes:
@@ -400,7 +402,17 @@ def _selftest_session_breaker() -> None:
         # after cooldown expiry, check() passes again
         st = _load(fname); st["until"] = time.time() - 1; _save(fname, st)
         SessionBudget(name=fname).check()      # must not raise
-        print("session-breaker selftest OK (count trip + bytes trip + cooldown clear)")
+        # B1 regression: one record(count=N) must count N real requests (retries),
+        # not 1 — else --retry undercounts the session volume breaker.
+        (STATE_DIR / fname).unlink(missing_ok=True)
+        sbN = SessionBudget(trip_count=3, trip_bytes=10**9, cooldown=300, name=fname)
+        sbN.record(0, count=3)                 # one send() that made 3 real attempts
+        try:
+            sbN.check()
+            raise AssertionError("record(count=3) did not aggregate retries (B1)")
+        except SessionTripped:
+            pass
+        print("session-breaker selftest OK (count trip + bytes trip + cooldown clear + retry-count)")
     finally:
         (STATE_DIR / fname).unlink(missing_ok=True)
 

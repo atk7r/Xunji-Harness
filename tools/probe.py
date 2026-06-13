@@ -86,7 +86,9 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     raw = b""
     status = 0
     resp_headers: dict = {}
+    attempts = 0                           # 真实发出的请求数(含重试), 供整场量精确计数
     for attempt in range(retry + 1):
+        attempts += 1
         RateLimiter().gate(host)           # 禁高频(每次实际请求都计入)
         try:
             with opener.open(req, timeout=timeout) as r:
@@ -107,7 +109,7 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                 time.sleep(retry_wait)     # 瞬时超时/RST 重试(如本次 vpn)
     if last_err is not None:
         hh.record_error(host)          # 传输错误: 累计, 达阈值即熔断该 host
-        sb.record(0)                   # 失败请求也计入整场量(防多 host 错误洪水绕过会话熔断)
+        sb.record(0, count=attempts)   # 失败请求(含每次重试)都计入整场量, 防错误洪水绕过会话熔断
         out = {**summary, "error": last_err}
         if retry:
             out["attempts"] = retry + 1
@@ -116,7 +118,7 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     warn = hh.soft_warn(host)
     if warn:
         print(warn, file=sys.stderr)
-    sb_warn = sb.record(len(raw))      # 整场请求+外渗量计量; 越硬阈值则布防熔断
+    sb_warn = sb.record(len(raw), count=attempts)   # 整场请求(含重试)+外渗量计量; 越硬阈值则布防熔断
     if sb_warn:
         print(sb_warn, file=sys.stderr)
 

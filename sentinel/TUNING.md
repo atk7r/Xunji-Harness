@@ -45,7 +45,7 @@ keep flowing, so a real engagement is never halted. Still observe-only in Phase 
 
 | Constant | Default | Trip condition (T) | Notes |
 |---|---|---|---|
-| `BREAKER_HIJACK_STREAK` | 2 | **T1** N consecutive *effectful* actions while target-content taint is hot | the lethal-trifecta guard; the most important one |
+| `BREAKER_HIJACK_STREAK` | 2 | **T1** N consecutive *effectful* actions while target-content taint is hot (under hot taint a taint-correlated action is forced ≥GATE, so any such action counts as effectful) | the lethal-trifecta guard; the most important one |
 | `BREAKER_RISK_TRIP` | 3.0 | **T2** cumulative `risk_score` ≥ this | a snowball of findings (≈ many `high` detectors) |
 | `BREAKER_ESCALATION_TRIP` | 3 | **T3** cumulative `high` scope/effect-escalation findings since last clear | repeated beyond-proof / out-of-scope attempts |
 | `BREAKER_COOLDOWN` | 600 s | — | idle time with no contributing event → auto-clear |
@@ -107,7 +107,7 @@ the GLOBAL (cross-host) counterpart to the per-host `HostHealth`/`HostBackoff`.
 |---|---|---|---|
 | `SESSION_WARN_COUNT` | 200 | soft warn only (no abort) | noisy on a legit big sweep |
 | `SESSION_TRIP_COUNT` | 800 | window request count → abort | a legitimately large authorized sweep |
-| `SESSION_TRIP_BYTES` | 16 MB | window retained-egress bytes → abort | a data-heavy but authorized engagement |
+| `SESSION_TRIP_BYTES` | 16 MB | window response bytes over the wire (pre-cap, not the 256KB-capped retained body) → abort | a data-heavy but authorized engagement |
 | `SESSION_TRIP_COOLDOWN` | 300 s | armed-cooldown duration | — |
 | `SESSION_WINDOW_SEC` | 600 s | sliding window for both | — |
 
