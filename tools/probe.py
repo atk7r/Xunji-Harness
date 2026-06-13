@@ -6,8 +6,8 @@ exists, then stops. This is the proof-only verification primitive the skill
 explicitly permits (SQLi differential, SSTI eval echo, auth-bypass, IDOR
 existence) -- bounded by the guard layer:
 
-- RateLimiter (禁高频), cap_body (禁拖库: oversized bodies truncated),
-  AuthFailCounter (防失控: probe's auth loop locks after N fails).
+- RateLimiter (禁高频: 速率是爆破的真正危害闸), cap_body (禁拖库: oversized
+  bodies truncated), AuthFailCounter (防死循环: 弱口令随便试, 只兜底无限认证循环).
 - It never dumps: bodies are capped and only summarized (status/len/sha1/snippet).
 
 It is a sender, not an exploiter. Proof, not extraction. Examples:

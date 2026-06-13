@@ -7,8 +7,9 @@ limits from src-safety-boundary become code, not prose:
 
 - RateLimiter      -> 禁 DoS/高频  (global + per-host token bucket)
 - cap_body         -> 禁拖库/取他人数据 (truncate oversized responses)
-- AuthFailCounter  -> 防失控 (stop probe's auth loop after N fails; a real
-                     brute/spray run uses a separate, operator-gated tool)
+- AuthFailCounter  -> 防死循环 (only stops a runaway/infinite auth loop; weak-
+                     credential trials are allowed — the harm is SPEED, not count,
+                     and RateLimiter is the actual brute-force throttle)
 - UploadRegistry   -> 不留后门残留 (every test artifact is tracked for cleanup)
 
 Pure stdlib. State persists under tools/harness/.state/ so limits hold across
@@ -40,7 +41,9 @@ _LOCK_PATH = STATE_DIR / ".lock"
 GLOBAL_MAX_RPS = 2.0          # 禁高频: global requests/sec ceiling
 PER_HOST_MAX_RPS = 1.0        # per-host ceiling
 MAX_BODY_BYTES = 256 * 1024   # 禁拖库: refuse to retain bodies bigger than this
-AUTH_FAIL_LOCK = 5            # anti-runaway: stop probe's auth loop after this many fails (raisable per run)
+AUTH_FAIL_LOCK = 500         # 防死循环天花板(非禁爆破): 弱口令字典随便试, 真正的危害闸是
+                             # RateLimiter 的速率(单 host 1 rps); 此值只在 probe 因 bug 陷入无限
+                             # 认证循环时兜底停下。爆破可逆 -> 不按"试了几次"限, 按"多快"限。
 # --- Self-throttle circuit breaker (防止打爆自己对目标的访问) ------------------
 HOST_ERR_THRESHOLD = 3        # 连续传输错误(超时/RST/拒绝)达此值 -> 熔断该 host
 HOST_BACKOFF_SEC = 120        # 熔断冷却时长(秒); 期间对该 host 的请求直接抛 HostBackoff
@@ -123,10 +126,11 @@ class RateBudgetExceeded(Exception):
 
 
 class BruteforceLock(Exception):
-    """Raised when probe hits too many auth failures on one endpoint -> stop the
-    automated loop. Anti-runaway throttle, NOT a policy ban: probe is a proof
-    tool, not a brute-forcer. Raise/disable AUTH_FAIL_LOCK, or use a dedicated
-    (operator-gated) brute/spray tool, for a real credential run."""
+    """Raised only when probe's auth loop runs away (AUTH_FAIL_LOCK = a high
+    anti-infinite-loop ceiling, not a brute-force ban). Weak-credential trials
+    are allowed; the real harm of brute-force is SPEED, which RateLimiter caps
+    (per-host 1 rps). This counter exists solely so a buggy/unbounded auth loop
+    eventually stops — raise AUTH_FAIL_LOCK per run if a dictionary is longer."""
 
 
 class HostBackoff(Exception):
@@ -268,8 +272,9 @@ def cap_body(data: bytes, limit: int = MAX_BODY_BYTES) -> tuple[bytes, bool]:
 class AuthFailCounter:
     """Per-endpoint authentication-failure counter. Tools call record(key, ok)
     after each auth attempt; check(key) raises BruteforceLock once the endpoint
-    has accumulated AUTH_FAIL_LOCK failures. This makes 'try another password'
-    structurally impossible past the threshold."""
+    has accumulated AUTH_FAIL_LOCK failures. The threshold is a high anti-runaway
+    ceiling, NOT a brute-force ban — weak-credential trials run freely; speed is
+    capped by RateLimiter. This only stops a buggy unbounded auth loop."""
 
     def __init__(self, limit: int = AUTH_FAIL_LOCK):
         self.limit = limit
@@ -279,7 +284,8 @@ class AuthFailCounter:
         if st.get(key, 0) >= self.limit:
             raise BruteforceLock(
                 f"endpoint '{key}' hit {self.limit} auth failures; probe stopped "
-                "(anti-runaway lock; raise AUTH_FAIL_LOCK or use a dedicated brute tool)"
+                "(anti-runaway ceiling — not a brute-force ban; raise AUTH_FAIL_LOCK "
+                "for a longer dictionary. Speed is already capped by RateLimiter)"
             )
 
     def record(self, key: str, ok: bool) -> None:
