@@ -349,7 +349,7 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
         errors.append(
             "收口硬门(P0-1): report 含强收口断言, 但 review.md 无【独立复审 / Independent "
             "Review】记录。自评治不了自评偏见; 收口前【必须】派独立 Reviewer 子代理(常驻授权, "
-            "见 docs/templates/independent-reviewer.md)并落 review.md。撤回收口措辞或补复审后再过。")
+            "见 docs/review/independent-reviewer.md)并落 review.md。撤回收口措辞或补复审后再过。")
 
     # 硬门(P1): 收口时每条 Certainty>=0.8 必须引用 run 目录下真实存在的产物文件。
     # 结构闸门只查字段在不在, 查不出"声称确认却无产物"; 实战两次复审都抓到这类假证据。

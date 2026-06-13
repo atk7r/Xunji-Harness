@@ -182,7 +182,7 @@ Output:
 
 **Before any closure / "explored enough" claim, the Reviewer phase MUST include an
 independent reviewer** (a fresh-context `general-purpose` sub-agent, standing-
-authorized) per `docs/templates/independent-reviewer.md` — self-review does not fix
+authorized) per `docs/review/independent-reviewer.md` — self-review does not fix
 self-review bias. Its findings go under `## Independent Review` in `review.md` and
 must be resolved before closing. `tools/check_run.py` enforces this at the closure gate.
 

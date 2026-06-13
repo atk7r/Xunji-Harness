@@ -130,10 +130,10 @@ conclusion at full confidence. **Self-review cannot fix self-review bias.** So:
   that must be investigated, so lumping is surfaced *when it happens*, not at the end.
 - **Independent Reviewer, as a HARD gate** — before any "explored enough / no
   attack surface" claim, a **fresh-context sub-agent** audits the run with no
-  investment in concluding (`docs/templates/independent-reviewer.md`).
+  investment in concluding (`docs/review/independent-reviewer.md`).
   `check_run.py` **hard-fails** a closure claim with no `Independent Review` record.
   This turns review from self-administered (gameable) into independent (enforced) —
-  the portable design is written up in `docs/review-mechanism.md`.
+  the portable design is written up in `docs/review/review-mechanism.md`.
 - **Ledger contradiction + certainty control** — a conclusion that another entry
   `Refutes:` but that still carries ≥ 0.8 is flagged (no polluting the ledger); any
   ≥ 0.8 entry must carry a `Control:` / `Replicated:` field.
