@@ -14,8 +14,15 @@ Discipline:
   requests the page makes (XHR/fetch) -- which is how it surfaces real backend
   API endpoints for grounding.
 
+For an authenticated page (DOM-XSS modules, post-login SPA), inject the session
+you already hold -- a fresh browser context has no cookies and would be bounced to
+the login page. This is symmetric to the cookie EXPORT render.py already does:
+  --cookie "PHPSESSID=...; security=low"      quick header form (repeatable)
+  --cookies-file runs/<dir>/cookies.json      reuse render.py's own export, or a {name:value} dict
+
 Run with the venv python (Playwright lives there):
   .venv/Scripts/python.exe tools/render.py <url> [--out runs/<dir>/render] [--wait networkidle]
+  .venv/Scripts/python.exe tools/render.py <url> --cookie "PHPSESSID=abc; security=low"
 """
 
 from __future__ import annotations
@@ -44,7 +51,46 @@ STEALTH = False  # set by --stealth: minimal anti-automation hardening (authoriz
 PROXY = None     # set by --proxy / env: 经中继访问境内资产
 
 
-def render(url: str, out_dir: Path, wait: str, timeout_ms: int) -> dict:
+def build_cookies(url: str, headers: list[str], cfile: str | None) -> list[dict]:
+    """Build a Playwright cookie list (name/value/domain/path) for session injection.
+
+    Sources, both bound to the TARGET host so an IP host (e.g. 192.168.x.x) works:
+    - header strings:  --cookie "PHPSESSID=abc; security=low"  (repeatable)
+    - a JSON file:     render.py's own cookies.json (a Playwright cookie list) OR a
+                       simple {name: value} dict.
+    Only name/value/domain/path are carried -- enough to SEND the session; the
+    httpOnly/secure/sameSite flags are export-only metadata and would just risk
+    Playwright validation errors here, so they are dropped.
+    """
+    host = urlparse(url).hostname or ""
+    out: list[dict] = []
+
+    def add(name: str, value: str) -> None:
+        name = (name or "").strip()
+        if name:
+            out.append({"name": name, "value": str(value).strip(),
+                        "domain": host, "path": "/"})
+
+    for h in headers:
+        for part in h.split(";"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                add(k, v)
+
+    if cfile:
+        data = json.loads(Path(cfile).read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            for k, v in data.items():
+                add(k, v)
+        elif isinstance(data, list):
+            for c in data:               # Playwright cookie dicts (render.py export)
+                if isinstance(c, dict) and c.get("name"):
+                    add(c["name"], c.get("value", ""))
+    return out
+
+
+def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
+           cookies: list[dict] | None = None) -> dict:
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:  # pragma: no cover
@@ -67,6 +113,11 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int) -> dict:
         if PROXY:
             ctx_kwargs["proxy"] = {"server": PROXY}
         ctx = browser.new_context(**ctx_kwargs)
+        if cookies:
+            # inject an already-held session so authenticated pages render instead
+            # of 302-ing to login (read-only: we navigate, we do not submit)
+            ctx.add_cookies(cookies)
+            result["injected_cookies"] = [c["name"] for c in cookies]
         if STEALTH:
             # Minimal anti-automation hardening for authorized access to anti-bot
             # gated pages: stop the engine announcing itself as automated. This
@@ -139,6 +190,11 @@ def main() -> int:
     ap.add_argument("--proxy", default=None,
                     help="代理(http://h:p / socks5://h:p)；经中继访问境内资产。"
                          "未给则读 HTTPS_PROXY/ALL_PROXY")
+    ap.add_argument("--cookie", action="append", default=[],
+                    help="注入会话 cookie(认证后页面用),形如 'PHPSESSID=abc; security=low';可重复")
+    ap.add_argument("--cookies-file", default=None,
+                    help="从 JSON 读 cookie:render.py 导出的 cookies.json(playwright 列表)"
+                         "或 {name:value} 字典;与 --cookie 合并")
     args = ap.parse_args()
 
     global STEALTH, PROXY
@@ -147,8 +203,9 @@ def main() -> int:
 
     host = urlparse(args.url).hostname or "page"
     out_dir = Path(args.out) if args.out else Path("tmp") / "render" / host
+    cookies = build_cookies(args.url, args.cookie, args.cookies_file)
     try:
-        res = render(args.url, out_dir, args.wait, args.timeout)
+        res = render(args.url, out_dir, args.wait, args.timeout, cookies)
     except RateBudgetExceeded as e:
         res = {"error": f"rate-limited: {e}"}
     except HostBackoff as e:
