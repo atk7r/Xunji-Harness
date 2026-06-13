@@ -8,7 +8,7 @@
 
 This record exists because the review must leave an audit trail, not live only in chat
 (CLAUDE.md: "the run directory is the audit trail"). For code reviews there is no run
-dir, so the record lives here under `docs/review/records/`.
+dir, so the record lives here under `review/records/`.
 
 ## Findings & disposition
 

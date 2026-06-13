@@ -606,7 +606,7 @@ any such claim:
 - **Independent review before closure (mandatory).** Self-review does not fix
   self-review bias. Before any closure claim, spawn an independent `general-purpose`
   reviewer (fresh context, no investment in concluding) per
-  `docs/review/independent-reviewer.md`; record its findings under an
+  `review/independent-reviewer.md`; record its findings under an
   `## Independent Review` heading in `review.md` and address every one. The
   operator has granted standing authorization to spawn this reviewer at the
   closure gate — do it without re-asking.

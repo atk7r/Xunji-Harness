@@ -110,9 +110,9 @@ PreToolUse hook（`safety_gate.py`）只按效果强制**自动执行的硬上�
   调查的"独立应用"候选 —— 让"一锅端"在**发生当下**就被点出来，而不是拖到最后。
 - **独立 Reviewer，作为硬门** —— 在任何"探索够了 / 没有攻击面"的论断之前，一个
   **全新上下文的子 agent**（无收口利益绑定）审计本次运行
-  （`docs/review/independent-reviewer.md`）。`check_run.py` 对**没有
+  （`review/independent-reviewer.md`）。`check_run.py` 对**没有
   `Independent Review` 记录**的收口论断**硬性失败**。这把复审从"自评（可被糊弄）"变成
-  "独立（被强制）"—— 可移植的设计写在 `docs/review/review-mechanism.md`。
+  "独立（被强制）"—— 可移植的设计写在 `review/review-mechanism.md`。
 - **台账矛盾 + certainty 管控** —— 一个被另一条目 `Refutes:`（否证）却仍带 ≥ 0.8 的
   结论会被标出（别污染台账）；任何 ≥ 0.8 的条目必须带 `Control:` / `Replicated:` 字段。
 - **够不着重跑队列** —— 仅仅是"够不着"（`coverage.json` 里 `reachable=false`）的资产
