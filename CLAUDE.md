@@ -2,7 +2,7 @@
 
 > Nested project: `deepseek-project/` is a separate, independent DeepSeek copy of
 > this whole project. It has its own baseline and is driven by DeepSeek. If you
-> are Claude Code or Codex, this is not your workspace — do not operate inside
+> are Claude Code (the driver), this is not your workspace — do not operate inside
 > `deepseek-project/` or treat its files as yours. The two projects are isolated;
 > the only difference is that the DeepSeek one lives nested under this one.
 

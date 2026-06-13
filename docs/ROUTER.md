@@ -42,8 +42,11 @@ target selection. Invoke on demand when the task matches; do not auto-load.
 
 ## Run Authority
 
-This is the Claude Code / Codex workspace, a **red-team toolkit for web 打点
-(initial access)** (see `CLAUDE.md` Project Role). The primary surface is the web
+This is the Claude Code workspace, a **red-team toolkit for web 打点
+(initial access)** (see `CLAUDE.md` Project Role). It is **Claude Code-specific**:
+the machine-enforced safety floor (`.claude/hooks/` PreToolUse etc.), CLAUDE.md
+auto-load, skills, and memory are Claude Code mechanisms — under a runtime without
+them (e.g. Codex) the hard floor does not run, so the safety guarantees do not hold. The primary surface is the web
 layer: targets reached over HTTP(S) / a browser, findings are web vulnerabilities
 proven to genuinely exist. Host / OS exploitation, internal-network access,
 lateral movement, binary research, and multi-stage red-team work are **in scope

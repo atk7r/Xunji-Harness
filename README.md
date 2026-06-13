@@ -2,11 +2,11 @@
 
 # 寻迹 · Xunji
 
-**面向 Claude Code / Codex 的自主红队工作区 —— 专注 Web 打点（initial access）**
+**面向 Claude Code 的自主红队工作区 —— 专注 Web 打点（initial access）**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![依赖](https://img.shields.io/badge/依赖-标准库-2ea44f)](#-安装)
-[![适配](https://img.shields.io/badge/适配-Claude%20Code%20·%20Codex-8A2BE2)](https://claude.com/claude-code)
+[![适配](https://img.shields.io/badge/适配-Claude%20Code-8A2BE2)](https://claude.com/claude-code)
 [![安全](https://img.shields.io/badge/安全-机器强制硬底线-c0392b)](#%EF%B8%8F-安全模型)
 
 **中文** ｜ [English](README.en.md)
@@ -199,6 +199,7 @@ playwright install chromium
 
 ## 🔐 权限 · 路由 · 嵌套 DeepSeek
 
-- **权限**：这是 Claude Code / Codex 的工作区；驱动者在用户要求时可编辑项目文件，运行期间拥有运行级文件。
+- **权限**：这是 **Claude Code** 的工作区；驱动者在用户要求时可编辑项目文件，运行期间拥有运行级文件。
+- **为什么是 Claude Code 专属**：机器强制的安全底线（`.claude/hooks/` 的 PreToolUse 等）、CLAUDE.md 自动加载、skills、memory 都是 Claude Code 的机制。**Codex 等不提供这套 hook，硬底线不会运行、安全保证不成立** —— 因此本项目按 Claude Code 设计与验证，不声称兼容 Codex。
 - **路由**：用 [`docs/ROUTER.md`](docs/ROUTER.md) 决定哪些指引生效；始终生效的有 `CLAUDE.md` · `docs/WORKFLOW.md` · `docs/cognition/README.md` · `src-safety-boundary` skill。
 - **嵌套 DeepSeek**：`deepseek-project/` 是独立、自包含的 DeepSeek 副本，有自己的基线、由 DeepSeek 驱动 —— **不属本工作区范围，勿跨界操作**。

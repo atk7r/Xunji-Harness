@@ -2,11 +2,11 @@
 
 # Xunji · 寻迹
 
-**An autonomous red-team workspace for Claude Code / Codex — focused on web 打点 (initial access)**
+**An autonomous red-team workspace for Claude Code — focused on web 打点 (initial access)**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![deps](https://img.shields.io/badge/deps-stdlib%20only-2ea44f)](#%EF%B8%8F-setup)
-[![for](https://img.shields.io/badge/for-Claude%20Code%20·%20Codex-8A2BE2)](https://claude.com/claude-code)
+[![for](https://img.shields.io/badge/for-Claude%20Code-8A2BE2)](https://claude.com/claude-code)
 [![safety](https://img.shields.io/badge/safety-machine--enforced-c0392b)](#%EF%B8%8F-safety-model)
 
 **English** ｜ [中文](README.md)
@@ -199,6 +199,7 @@ Skipping this does not affect `probe.py`, `scan.py`, the hook, or the checkers.
 
 ## 🔐 Authority · Routing · Nested DeepSeek
 
-- **Authority**: this is the Claude Code / Codex workspace; the driver may edit project files when the user asks, and owns run-level files during a run.
+- **Authority**: this is the **Claude Code** workspace; the driver may edit project files when the user asks, and owns run-level files during a run.
+- **Why Claude Code-specific**: the machine-enforced safety floor (`.claude/hooks/` PreToolUse etc.), CLAUDE.md auto-load, skills, and memory are all Claude Code mechanisms. **A runtime without that hook system (e.g. Codex) does not run the hard floor, so the safety guarantees do not hold** — the project is designed and verified for Claude Code and does not claim Codex compatibility.
 - **Routing**: use [`docs/ROUTER.md`](docs/ROUTER.md) to decide what guidance applies; always active are `CLAUDE.md` · `docs/WORKFLOW.md` · `docs/cognition/README.md` · the `src-safety-boundary` skill.
 - **Nested DeepSeek**: `deepseek-project/` is a separate, self-contained DeepSeek copy with its own baseline, driven by DeepSeek — **out of scope for this workspace; do not operate across that boundary**.
