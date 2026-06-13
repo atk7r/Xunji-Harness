@@ -23,24 +23,27 @@
 
 ## 🧭 Architecture
 
-```mermaid
-flowchart TD
-    OP([Operator · highest authority]) -->|authorized target| DRV[Single AI Driver]
+```text
+                Operator · highest authority
+                     │  authorized target
+                     ▼
+        ════════  Single AI Driver  ════════
+        reason · pick front · exploit · verify · report
+                     │
+   ╭─────────────────╯
+   │
+   ├─①  written run state  →  runs/<target>/   audit trail (not committed)
+   │
+   ├─②  active verification →  probe · render · scan · fetch_assets
+   │                        →  guard.py (rate · body cap · 3 circuit breakers) →  target
+   │
+   ├─③  every Bash call     →  safety_gate hook   ✋ L4 irreversible harm · hard block
+   │
+   ├─④  observe-only sidecar →  sentinel/   behavior detection · 4-level autonomy · breaker
+   │
+   └─⑤  closure / safety-critical change →  review/   independent review (hard gate) →  runs/
 
-    DRV --> RUN[("runs/&lt;target&gt;/<br/>written run state = audit trail")]
-    DRV -->|active verification| TOOLS["probe · render · scan · fetch_assets"]
-    TOOLS --> GUARD{{"guard.py<br/>rate · body cap · circuit breakers"}}
-    GUARD --> TGT[(Authorized Target)]
-
-    DRV -.->|every Bash call| HOOK{{"safety_gate hook<br/>L4 irreversible harm · hard block"}}
-    DRV -.->|observe-only sidecar| SENT["sentinel/<br/>behavior detection · 4-level autonomy · breaker"]
-    DRV -->|before closure / safety-critical change| REV["review/<br/>independent review (hard gate)"]
-    REV --> RUN
-
-    classDef hard fill:#c0392b,stroke:#7b241c,color:#fff;
-    classDef soft fill:#2e86c1,stroke:#1b4f72,color:#fff;
-    class HOOK,GUARD hard;
-    class SENT,REV soft;
+   Defenses:  ③ safety_gate hard block (enforcer) · ② guard tool-layer breakers · ④ sentinel observe-only
 ```
 
 Three defenses, each with one job: the **`safety_gate` hook** hard-blocks irreversible harm by effect (the enforcer); **`guard.py`** rate-limits, caps, and trips at the tool layer (protecting the target *and* your own reachability); **`sentinel/`** never blocks — it attributes and tiers every action and brakes on aggregate runaway.

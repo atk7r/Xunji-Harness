@@ -23,24 +23,27 @@
 
 ## 🧭 架构总览
 
-```mermaid
-flowchart TD
-    OP([操作者 · 最高权威]) -->|授权目标| DRV[单一 AI 驱动者]
+```text
+                操作者 · 最高权威
+                     │  授权目标
+                     ▼
+        ════════  单一 AI 驱动者  ════════
+        推理 · 选前沿 · 利用 · 验证 · 起草报告
+                     │
+   ╭─────────────────╯
+   │
+   ├─①  书面运行态        →  runs/<target>/   审计轨迹（不入库，结论的唯一依据）
+   │
+   ├─②  主动验证          →  probe · render · scan · fetch_assets
+   │                       →  guard.py（限速 · 体上限 · 三道熔断器）→  授权目标
+   │
+   ├─③  每次 Bash 调用    →  safety_gate hook   ✋ L4 不可逆危害 · 硬拦
+   │
+   ├─④  observe-only 旁路 →  sentinel/   行为检测 · 四级自治 · 会话熔断（永不拦）
+   │
+   └─⑤  收口/安全关键改动  →  review/   独立复审（硬门）→  写回 runs/
 
-    DRV --> RUN[("runs/&lt;target&gt;/<br/>书面运行态 = 审计轨迹")]
-    DRV -->|主动验证| TOOLS["probe · render · scan · fetch_assets"]
-    TOOLS --> GUARD{{"guard.py<br/>限速 · 体上限 · 熔断器"}}
-    GUARD --> TGT[(授权目标)]
-
-    DRV -.->|每次 Bash 调用| HOOK{{"safety_gate hook<br/>L4 不可逆危害 · 硬拦"}}
-    DRV -.->|observe-only 旁路| SENT["sentinel/<br/>行为检测 · 四级自治 · 会话熔断"]
-    DRV -->|收口前 / 安全关键改动| REV["review/<br/>独立复审（硬门）"]
-    REV --> RUN
-
-    classDef hard fill:#c0392b,stroke:#7b241c,color:#fff;
-    classDef soft fill:#2e86c1,stroke:#1b4f72,color:#fff;
-    class HOOK,GUARD hard;
-    class SENT,REV soft;
+   防线：③ safety_gate 硬拦（执法者） · ② guard 工具层熔断 · ④ sentinel 只观察不拦
 ```
 
 三条防线各司其职：**`safety_gate` hook** 按效果硬拦不可逆危害（执法者）；**`guard.py`** 在工具层限速、限量、熔断（保护目标也保护你自己的可达性）；**`sentinel/`** 只观察不拦截，给每个动作归因贴级、聚合失控时刹车。
