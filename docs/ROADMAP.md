@@ -18,8 +18,10 @@ consensus is "measure what matters" (SoK below). So:
    - **not a playbook** — structure/discipline, never a fixed attack checklist;
    - **not an orchestrator** — tooling assists/derives, never auto-drives or
      auto-closes; markdown/the driver stays the source of truth;
-   - **grounding, not a weapon** — knowledge is recognition + anchors, never
-     turnkey payloads (`docs/cognition` "Grounding Knowledge Is Not a Weapon").
+   - **attacker, not a scanner** — payload knowledge is used per-target through the
+     evidence gate, never fired as a blind checklist; public tier = grounding,
+     weapons live in the gitignored `knowledge/weaponized/` tier
+     (`docs/cognition` "Knowledge: Grounding vs Weaponized — never a blind scanner").
 3. Prefer the smallest doc/discipline + a light tool with teeth in `check_run.py`,
    the pattern the rest of the repo already uses.
 

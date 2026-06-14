@@ -1,28 +1,41 @@
-# Grounding Knowledge Base
+# Knowledge Base — Grounding (public) + Weaponized (local)
 
-This directory holds **grounding knowledge**, not weapons. Each file anchors
-hypotheses for one identified technology so the autonomous driver can reason
-about variants instead of guessing in the open. It is variant-analysis input,
-consulted contextually after a target is fingerprinted — never a checklist that
-runs the same way regardless of target.
+The project's goal is to **use vulnerability / payload knowledge to attack** — it is
+a reasoning attacker, **not a payload scanner**. Payload knowledge is therefore a
+first-class, expected input, not something to strip out. The base is split into two
+tiers, and the line between them is **where it publishes**, not whether it is "a
+weapon":
 
-This directory is governed by `docs/cognition/README.md`
-("Grounding Knowledge Is Not a Weapon"). If anything here contradicts that
-section, that section wins.
+- **Grounding tier — `knowledge/*.md` (this dir root · public · shipped to GitHub):**
+  recognition signatures + weak-point anchors (weakness *class* + mechanism +
+  CVE/CNVD reference) + proof-only verification principles. **No raw payloads here**
+  — because this tier ships publicly.
+- **Weaponized tier — `knowledge/weaponized/*.md` (local · gitignored):** working
+  payloads, exploit chains, PoC recipes, keyed to the same recognition. The weapons
+  live here and are never pushed (same discipline as `poc_library/xday/`). See
+  `knowledge/weaponized/README.md`.
 
-## The Contract (the one test that gates every entry)
+This dir is governed by `docs/cognition/README.md` ("Knowledge: Grounding vs
+Weaponized — never a blind scanner"). If anything here contradicts that section,
+that section wins.
 
-> Does this artifact carry knowledge a reasoning driver looks up for a specific
-> identified target (allowed), or does it carry weapons / steps that execute the
-> same way regardless of target (forbidden)?
+## The one line that gates USE (attacker, not scanner)
 
-- **Allowed (grounding):** recognition signatures, known weak-point anchors
-  (weakness *class* + mechanism + CVE/CNVD reference), and proof-only
-  verification principles derived from the proof boundary.
-- **Forbidden (weapons / automation):** payloads, exploit chains, request bodies,
-  step-by-step PoC, scanner rules, or any fixed checklist meant to be run
-  blindly. Citing that "a public PoC exists for CVE-X" is an allowed *fact*;
-  copying the PoC content here is forbidden.
+> Is the knowledge looked up by a reasoning driver **after** it identifies a
+> specific target, then adapted to that target and run through the evidence gate
+> (allowed) — or fired the **same way regardless of target** as a blind checklist
+> (forbidden: that is the scanner / playbook the project rejects)?
+
+This gate is about **use pattern**, not about possessing payloads. You cannot attack
+without payload knowledge; running it blindly is the only thing forbidden. The two
+tiers differ only by **publication** — payloads go in the gitignored weaponized
+tier, not the public root.
+
+- **Grounding tier holds:** recognition signatures, weak-point anchors (class +
+  mechanism + CVE/CNVD reference), proof-only verification principles.
+- **Weaponized tier holds:** payloads, exploit chains, request bodies, PoC recipes
+  — keyed to recognition, gitignored, used per-target through the evidence gate
+  (never pre-loaded and walked as a blind checklist).
 
 ## How To Use (and How Not To)
 
@@ -69,8 +82,9 @@ Every fact must be traceable. Three source classes, kept distinct via the
 - Parametric/model memory treated as authority — the primary hallucination
   source named in `docs/cognition/README.md`. Memory is a lead for *what to look
   up*, never a fact to record. Never write a CVE/CNVD id from memory.
-- Exploit-DB / GitHub PoC repos / PacketStorm **payload content**. The existence
-  of a PoC is a citable fact; its content is a weapon and stays out.
+- Exploit-DB / GitHub PoC repos / PacketStorm **payload content** in the PUBLIC
+  tier. The existence of a PoC is a citable fact; its content is a weapon — it
+  belongs in the gitignored `knowledge/weaponized/` tier, never in the public root.
 - Scanner template catalogs (e.g. Nuclei) **as a mirror**. Mining their `info`
   and detection-only matchers for anchors/recognition is allowed; copying their
   request/payload bodies, or bulk-importing the catalog, is not. Cite the
@@ -93,11 +107,15 @@ inventing them.
 
 ## Files
 
-- `_TEMPLATE.md` — blank schema. Copy it to start a new entry.
+- `_TEMPLATE.md` — blank schema for the public grounding tier. Copy to start an entry.
 - One file per technology / product, named by `id` (kebab-case).
+- `weaponized/` — the local, gitignored weaponized tier (payloads / chains / PoC);
+  see `weaponized/README.md`. Only its `README.md` + `.gitkeep` are tracked.
 
-The structural and anti-weaponization checks live in
-`tools/check_knowledge.py` (added with the first entries).
+`tools/check_knowledge.py` validates the PUBLIC tier only (its glob is
+non-recursive — `knowledge/*.md`), so the weaponized tier is out of scope: it is
+local working material, like `runs/` and `poc/`. A payload that lands in the public
+tier hard-fails the checker (publish-routing error → move it to `weaponized/`).
 
 ## Project Boundary
 

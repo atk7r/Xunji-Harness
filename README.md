@@ -119,8 +119,13 @@
 - **已扩到安全关键代码** —— `.claude/hooks/` · `guard.py` · `sentinel/` 的**行为改动**收口前同样须独立复审、记录到 `review/records/`（窄边界，详见 `docs/WORKFLOW.md`）。这条是实证换来的：一次独立复审在熔断器上抓出了作者自检漏掉的真 bug。
 - **台账矛盾 + certainty 管控 + 够不着重跑队列** —— 被 `Refutes:` 却仍 ≥ 0.8 的结论会被标出；≥ 0.8 须带 `Control:` / `Replicated:`；仅「够不着」的资产进标准化队列，`rerun_deferred.py` 稍后换出口重探。
 
-### 5 ｜ `knowledge/` 是接地知识，不是通杀套件（这是关于知识库，不是关于项目）
-**项目本身是武器、武器化利用自由**（见核心轴）；这里收紧的只是**随仓共享的 `knowledge/` 语料**。它承载识别签名 + 弱点锚点（弱点类别 + 机理 + CVE/CNVD 引用 + 来源），是驱动者**针对具体目标**去查的变体分析输入，**刻意不含 payload / 步骤 / turnkey 通杀套件** —— 塞进去就成了"不分目标机械照跑"的批量通杀（与 L4 拒绝的无差别规模化伤害同族）。判定：**针对具体目标查的知识 = 允许；不分目标都照跑的武器 / 步骤 = 禁止**。武器活在 `poc_library/` 和驱动者亲手写的利用里，不在这。`check_knowledge.py` 强制这份契约，语料意在随实战生长。
+### 5 ｜ 知识库：接地（公开）+ 武器化（本地）—— 攻击者，不是扫描器
+目标是**用漏洞 / payload 知识去打**，所以 payload 知识是一等输入，不是要剔除的东西。知识库分两层，分界是**发不发布**，而非"是不是武器"：
+
+- **接地层 `knowledge/*.md`（公开 · 随仓发）**：识别签名 + 弱点锚点（类别 + 机理 + CVE/CNVD）+ 证明级验证原则，**不含裸 payload**（因为公开）。
+- **武器化层 `knowledge/weaponized/`（本地 · gitignore）**：working payload / 利用链 / PoC，按识别挂钩，**不入库**（同 `poc_library/xday`）。
+
+唯一被禁的是**盲扫描器**：不分目标照跑的清单 —— **有没有 payload 都算**。区分攻击者与扫描器的是**使用方式**(识别后查 · 按目标适配 · 过证据门),不是有没有 payload。`check_knowledge.py` 只管公开层(payload 落公开层 = 发布路由错，硬失败，挪去 `weaponized/`)。
 
 ### 6 ｜ 一条小而无依赖、全程走 guard 的流水线
 `ingest_recon`（recon 报告 → 资产表 + 可达矩阵）→ `classify_hosts`（按内容分类 → `coverage.json`）→ `fetch_assets`（抓**全部** SPA chunk + 完整性断言）→ `probe / render / scan`（主动验证传感器，全程走 guard、UTF-8 安全）→ `rerun_deferred`（出口重跑）。纯标准库；Playwright 是唯一可选依赖。

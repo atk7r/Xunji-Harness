@@ -42,11 +42,14 @@ What is free, what needs the operator's nod, and what is blocked outright is
 declared in the `src-safety-boundary` skill and enforced by the PreToolUse hook.
 Operate to those boundaries; this file states none.
 
-Grounding knowledge is encouraged. Recognition signatures, known-weak-point
-anchors (with CVE / CNVD references), and proof-level verification notes for an
-identified technology are variant-analysis input. See "Grounding Knowledge Is
-Not a Weapon" in `docs/cognition/README.md` for the line between a proof check
-(allowed) and a turnkey mass-exploit kit (forbidden).
+Knowledge is encouraged, and the goal is to **use payload knowledge to attack** —
+a reasoning attacker, not a payload scanner. The base has two tiers: the public
+grounding tier (`knowledge/*.md` — recognition signatures, weak-point anchors with
+CVE/CNVD references, verification notes) and the local gitignored weaponized tier
+(`knowledge/weaponized/` — payloads / chains / PoC). See "Knowledge: Grounding vs
+Weaponized — never a blind scanner" in `docs/cognition/README.md`: the forbidden
+thing is the blind scanner / playbook (knowledge fired the same regardless of
+target) and publishing a turnkey kit — not weaponization itself.
 
 ## Operating Loop
 

@@ -1,15 +1,20 @@
-"""Structural and anti-weaponization check for the grounding knowledge base.
+"""Structural check for the PUBLIC grounding tier of the knowledge base.
 
-This enforces the contract in knowledge/README.md: each entry must carry
-recognition signatures, weak-point anchors (class + reference + source), a
-proof-only verification principle, and confounders — and must NOT carry payloads,
-exploit steps, or PoC. The check is structural; it does not certify that a cited
-CVE/CNVD is real or that an anchor is correct.
+The knowledge base has two tiers (see knowledge/README.md):
+- knowledge/*.md (public, shipped) = GROUNDING: recognition + weak-point anchors,
+  no raw payloads — because it ships to GitHub.
+- knowledge/weaponized/*.md (local, gitignored) = WEAPONIZED: payloads / chains /
+  PoC keyed to recognition. NOT policed here — it is local working material, like
+  runs/ and poc/. (This glob is non-recursive: knowledge/*.md only, so the
+  weaponized/ subdir is automatically out of scope.)
 
-Hard failures: missing/extra structure, missing frontmatter, an anchor without a
-Reference or source tag, a forbidden weaponization heading/field, bad maturity
-or date. Payload-shaped strings only WARN (they may be legitimate recognition
-signatures), flagging drift toward a payload library for human review.
+So this validates the PUBLISHED tier only: each entry carries recognition
+signatures, weak-point anchors (class + reference + source), a proof-only
+verification principle, and confounders. Payloads are NOT "forbidden" in the
+project — the goal is to use payload knowledge to attack — they are routed to the
+gitignored weaponized tier. A payload heading/field in the PUBLIC tier is a
+publish-routing error (it would ship a weapon), so it hard-fails HERE. The check
+is structural; it does not certify that a cited CVE/CNVD is real.
 
 Pure stdlib. Run: python tools/check_knowledge.py
 """
@@ -38,9 +43,10 @@ REQUIRED_FRONTMATTER = ["id", "product", "maturity", "last_reviewed"]
 VALID_MATURITY = {"seed", "verified", "stale"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-# Forbidden as a markdown heading or frontmatter key — these turn an entry into a
-# weapon. Matched against headings/keys only, not prose (citing "a public exploit
-# exists" is allowed; a `## Exploit` / `payload:` block is not).
+# Payload/exploit headings/keys in the PUBLIC tier = a publish-routing error: that
+# content belongs in the gitignored knowledge/weaponized/ tier (allowed there), not
+# in a file that ships to GitHub. Matched against headings/keys only, not prose
+# (citing "a public exploit exists" is a fact and is allowed).
 FORBIDDEN_HEADING_RE = re.compile(
     r"^\s{0,3}#{1,6}\s*(payload|payloads|exploit|exploitation|exploit chain|steps|"
     r"step-by-step|poc|proof of concept|request body|raw request)\b",
@@ -138,7 +144,9 @@ def check_entry(path: Path, errors: list[str], warnings: list[str]) -> None:
     # Forbidden weaponization headings / keys
     for line in text.splitlines():
         if FORBIDDEN_HEADING_RE.match(line) or FORBIDDEN_KEY_RE.match(line):
-            errors.append(f"{rel}: forbidden weaponization heading/field -> {line.strip()!r}")
+            errors.append(f"{rel}: payload/exploit heading/field in the PUBLIC tier -> "
+                          f"{line.strip()!r} — move it to knowledge/weaponized/ (gitignored); "
+                          "the public root ships to GitHub and stays grounding")
 
     # Each anchor needs a Reference and a source tag (skip the template's example).
     weak = section_body(text, "## Weak-Point Anchors")
@@ -157,8 +165,9 @@ def check_entry(path: Path, errors: list[str], warnings: list[str]) -> None:
         m = pattern.search(body)
         if m:
             warnings.append(
-                f"{rel}: payload-shaped string {m.group(0)!r} — confirm it is a "
-                f"recognition signature, not a payload"
+                f"{rel}: payload-shaped string {m.group(0)!r} in the public tier — "
+                f"confirm it is a recognition signature; if it is an actual payload, "
+                f"move it to knowledge/weaponized/ (gitignored)"
             )
 
 

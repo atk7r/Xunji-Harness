@@ -9,11 +9,12 @@ maturity: seed               # seed | verified | stale
 ---
 
 <!--
-This file is grounding knowledge, not a weapon. See knowledge/README.md.
-Allowed: recognition signatures, weak-point anchors (class + mechanism +
-reference), proof-only verification principles. Forbidden: payloads, exploit chains,
-request bodies, step-by-step PoC, scanner rules, blind checklists.
-Every anchor needs a source. "Found nothing verifiable" beats inventing.
+This is the PUBLIC grounding tier (ships to GitHub). See knowledge/README.md.
+Allowed here: recognition signatures, weak-point anchors (class + mechanism +
+reference), proof-only verification principles. Payloads / exploit chains / PoC
+go in the gitignored knowledge/weaponized/ tier, NOT here. Use any knowledge as a
+reasoning attacker (look up after fingerprint, adapt, evidence-gate) — never as a
+blind scanner. Every anchor needs a source. "Found nothing verifiable" beats inventing.
 -->
 
 ## Recognition (identification only)

@@ -173,25 +173,33 @@ What can be absorbed is judgment discipline: discovery/verification separation,
 evidence grading, failure classification, and resistance to environment-induced
 false beliefs.
 
-## Grounding Knowledge Is Not a Weapon
+## Knowledge: Grounding vs Weaponized — never a blind scanner
 
-The project itself is a weapon, and authored, target-specific weaponization is
-free (see "gate effects, not methods"). This section scopes something narrower:
-the **grounding knowledge base and the framework architecture** must stay grounding
-+ reasoning — they must not be turned into target-agnostic weapons / automation.
-Those are different things and must not be conflated:
+The project is a weapon, and the goal is to **use vulnerability / payload knowledge
+to attack** — it is a reasoning attacker, **not a payload scanner**. So the forbidden
+thing is **not "weaponization"**; it is **the blind scanner / playbook** (knowledge
+fired the same way regardless of target) and **publishing weapons** (shipping a
+turnkey kit to the world). Two axes, kept separate:
 
-- Allowed (grounding): recognition signatures for a technology, its known
-  weak-point anchors, CVE / CNVD references, and verification notes — the
-  variant-analysis input that frontier work relies on. A reasoning driver
-  consults it contextually after it has identified the technology.
-- Forbidden HERE (target-agnostic weapons / automation baked into knowledge or
-  framework): exploit playbooks, payload libraries, scanner wrappers, a JSON
-  orchestrator, and mechanical fixed checklists that run regardless of the
-  target. (Target-SPECIFIC authored exploitation is free — it lives in
-  `poc_library/` and the driver's authored code, not in `knowledge/`.)
+**Axis 1 — use pattern (attacker vs scanner).** The line is *how* knowledge is used,
+not whether it contains payloads:
 
-The test: does the artifact carry knowledge a reasoning driver looks up for a
-specific identified target (allowed), or does it carry weapons / steps that
-execute the same way regardless of target (forbidden)? Grounding knowledge makes
-reasoning sharper; it must never become a checklist the driver runs blindly.
+- Allowed: a reasoning driver looks knowledge up **after** it identifies a specific
+  target, **adapts** it to that target, and confirms through the evidence gate.
+- Forbidden: pre-loading knowledge and firing it the **same way regardless of
+  target** — exploit playbooks run blindly, scanner wrappers, a JSON orchestrator,
+  mechanical fixed checklists. That is the scanner/playbook the project rejects, and
+  it is forbidden **whether or not** it contains payloads.
+
+**Axis 2 — publication (what ships).** Weaponization is free to author and possess;
+what is gated is publishing it:
+
+- Public grounding tier (`knowledge/*.md`, shipped): recognition signatures,
+  weak-point anchors (class + mechanism + CVE/CNVD reference), verification notes.
+- Weaponized tier (`knowledge/weaponized/*.md`, gitignored) + `poc_library/` + the
+  driver's authored exploits: payloads, chains, PoC. Free to hold; **not pushed**
+  (publishing a turnkey kit is the indiscriminate-harm family the hard floor rejects).
+
+The mistake to avoid: conflating "has payloads" with "is a scanner". Payload
+knowledge makes the attacker sharper; using *any* knowledge as a blind checklist —
+payload or not — is what's forbidden.
