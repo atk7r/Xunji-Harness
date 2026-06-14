@@ -96,72 +96,159 @@ def check_file(path: Path, markers: list[str]) -> list[str]:
 
 
 _ART_TOKEN = re.compile(
-    r"(?:evidence/[\w./-]+|render[_-][\w./-]+|[\w][\w./-]*\.(?:html|json|png|jpe?g|gif|txt|log|bin))",
+    r"(?:evidence/[\w./-]+|render[_-][\w./-]+|[\w][\w./-]*\.(?:html|json|js|css|xml|png|jpe?g|gif|txt|log|bin))",
     re.I)
 
 
-def _block_has_live_artifact(block: str, run_dir: Path) -> bool:
-    """True iff the evidence block references at least one artifact path that
-    actually exists (non-empty) under run_dir. A referenced directory (e.g.
-    render_sxss/) counts if it holds any non-empty file."""
+def _resolve_artifact(tok: str, run_dir: Path) -> Path | None:
+    """Resolve an artifact token to an existing, non-empty file/dir under run_dir,
+    else None. A directory (e.g. render_sxss/) counts if it holds a non-empty file."""
     root = run_dir.resolve()
-    for tok in _ART_TOKEN.findall(block):
-        tok = tok.strip().strip("`\"'").rstrip(").,;:，。）")
-        cands = [tok] if tok.startswith("evidence/") else [tok, f"evidence/{tok}"]
-        for rel in cands:
-            try:
-                p = (run_dir / rel).resolve()
-            except Exception:
-                continue
-            if p != root and root not in p.parents:
-                continue  # ignore anything escaping the run dir
-            if p.is_file() and p.stat().st_size > 0:
-                return True
-            if p.is_dir() and any(f.is_file() and f.stat().st_size > 0
-                                  for f in p.rglob("*")):
-                return True
-    return False
+    tok = tok.strip().strip("`\"'").rstrip(").,;:，。）")
+    cands = [tok] if tok.startswith("evidence/") else [tok, f"evidence/{tok}"]
+    for rel in cands:
+        try:
+            p = (run_dir / rel).resolve()
+        except Exception:
+            continue
+        if p != root and root not in p.parents:
+            continue  # ignore anything escaping the run dir
+        if p.is_file() and p.stat().st_size > 0:
+            return p
+        if p.is_dir() and any(f.is_file() and f.stat().st_size > 0
+                              for f in p.rglob("*")):
+            return p
+    return None
+
+
+# Artifacts are cited in an explicit `Artifacts:` field (one or more lines until the
+# next `- Field:` bullet / blank / next entry). Scoping citation-checks to this field
+# (not the whole block) keeps prose filename mentions (e.g. "jquery-3.6.0.min.js",
+# "ais.webform.js") from being mis-read as dead evidence citations.
+_ARTIFACT_FIELD_RE = re.compile(
+    r"Artifacts?\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
+    re.S)
+_CERT_LITERAL_RE = re.compile(r"\b(1\.0|0\.8|0\.5|0\.3)\b")
+# inline field labels — used to bound a field's value when several share one line
+# (e.g. "- Supports: H-002. Refutes: —. Next: prove X (E-005)." — the (E-005) belongs
+# to Next:, not Refutes:; cutting at the next label stops that misattribution).
+_INLINE_FIELDS = (r"Supports|Refutes|Next|Certainty|Severity|Cleanup|Note|Replicated|"
+                  r"Control|Alternative|Source|Action|Result|Caused by us")
+_INLINE_CUT_RE = re.compile(r"\b(?:" + _INLINE_FIELDS + r")\s*[:：]")
+
+_EVIDENCE_MEMO: dict = {}
+
+
+def _field_ids(block: str, name: str, idpat: str) -> list[str]:
+    """IDs (E-/H-/F-) in a `Name:` field's value, bounded to the next inline field
+    label so a co-line `Next:`/prose mention is not swept in."""
+    out: list[str] = []
+    for m in re.finditer(name + r"\s*[:：]\s*(.*)", block):
+        seg = m.group(1)
+        cut = _INLINE_CUT_RE.search(seg)
+        if cut:
+            seg = seg[:cut.start()]
+        out += re.findall(idpat, seg)
+    return out
+
+
+def parse_evidence(run_dir: Path) -> list[dict]:
+    """Single canonical parser: evidence.md -> structured records. Replaces the
+    per-check ad-hoc `##`-split + regex (fragile, and the artifact gate used to pass
+    a block if ANY one citation resolved, so a deleted file was silent — E-012).
+    Memoized by (path, mtime)."""
+    ev = run_dir / "evidence.md"
+    if not ev.exists():
+        return []
+    key = (str(ev.resolve()), ev.stat().st_mtime_ns)
+    if _EVIDENCE_MEMO.get("key") == key:
+        return _EVIDENCE_MEMO["records"]
+    text = ev.read_text(encoding="utf-8", errors="replace")
+    records: list[dict] = []
+    for b in re.split(r"(?=^##\s)", text, flags=re.MULTILINE):
+        if not b.lstrip().startswith("##"):
+            continue  # skip the file preamble (the `# Evidence Ledger` header block)
+        head = b.splitlines()[0].strip()
+        idm = re.search(r"\bE-\d+\b", head)
+        eid = idm.group(0) if idm else head.lstrip("# ").strip()[:48]
+        # certainty: from the first 'certainty' keyword to end (covers the split
+        # form "Certainty (SPLIT...):\n - ... 1.0\n - ... 0.5" that a `Certainty:\s*N`
+        # regex misses entirely).
+        ci = b.lower().find("certainty")
+        certs = ([float(x) for x in _CERT_LITERAL_RE.findall(b[ci:])] if ci >= 0 else [])
+        # also read explicit "Certainty: 0.NN" values so an OFF-DOCTRINE certainty
+        # (0.9/0.85/0.7…, off the {1.0,0.8,0.5,0.3} grid) cannot silently slip the
+        # hard artifact gate by failing to match the canonical-literal regex above.
+        certs += [float(x) for x in re.findall(r"certainty\s*[:：]\s*\**\s*(\d\.\d+)", b, re.I)]
+        # artifacts: scoped to the explicit Artifacts: field (fallback: whole block,
+        # for legacy entries with no such field).
+        fm = _ARTIFACT_FIELD_RE.search(b)
+        scope_txt, scoped = (fm.group(1), True) if fm else (b, False)
+        arts: list[str] = []
+        for tok in _ART_TOKEN.findall(scope_txt):
+            t = tok.strip().strip("`\"'").rstrip(").,;:，。）")
+            if t and t not in arts:
+                arts.append(t)
+        present = [a for a in arts if _resolve_artifact(a, run_dir)]
+        missing = [a for a in arts if not _resolve_artifact(a, run_dir)]
+        refutes = _field_ids(b, "Refutes", r"E-\d+")
+        supports = _field_ids(b, "Supports", r"[EHF]-\d+")
+        records.append({
+            "id": eid, "head": head,
+            "certainties": certs, "confirmed": any(c >= 0.8 for c in certs),
+            "has_control": bool(re.search(r"\b(Replicated|Control)\s*[:：]", b)),
+            "artifacts": arts, "artifacts_scoped": scoped,
+            "artifacts_present": present, "artifacts_missing": missing,
+            "supports": sorted(set(supports)), "refutes": sorted(set(refutes)),
+            "superseded": bool(re.search(r"superseded|降级|撤回|改判", b, re.I)),
+        })
+    _EVIDENCE_MEMO.update(key=key, records=records)
+    return records
+
+
+def write_evidence_index(run_dir: Path, records: list[dict]) -> None:
+    """Derived sidecar (like graph.json / coverage.json): structured, queryable view
+    of the evidence ledger so tooling/operator need not regex the markdown."""
+    if not records:
+        return
+    confirmed = [r["id"] for r in records if r["confirmed"]]
+    out = {"total": len(records), "confirmed": confirmed,
+           "dangling_citations": {r["id"]: r["artifacts_missing"]
+                                  for r in records if r["artifacts_missing"]},
+           "entries": records}
+    try:
+        (run_dir / "evidence.json").write_text(
+            json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def evidence_entries_missing_artifact(run_dir: Path) -> list[str]:
     """P1 收口护栏: Certainty>=0.8 的证据条目必须引用一个 run 目录下【真实存在】的
-    产物文件 —— 把"声称确认但没存盘"挡在收口外。两次实战复审都抓到这类假证据
-    (假 DOM XSS 产物=登录页; 盲注/CSRF 结论根本没存盘), 而结构闸门当时全放行。
-    返回缺产物的条目 head 列表; 由收口硬门升为 error。"""
-    ev = run_dir / "evidence.md"
-    if not ev.exists():
-        return []
-    text = ev.read_text(encoding="utf-8", errors="replace")
-    bad: list[str] = []
-    for b in re.split(r"(?=^##\s)", text, flags=re.MULTILINE):
-        if not b.strip():
-            continue
-        head = b.splitlines()[0].strip()
-        if re.search(r"Certainty\s*[:：]\s*(0\.8|1\.0)\b", b):
-            if not _block_has_live_artifact(b, run_dir):
-                bad.append(head)
-    return bad
+    产物文件 —— 把"声称确认但没存盘"挡在收口外。返回缺产物的条目 head 列表(收口硬门→error)。"""
+    return [r["head"] for r in parse_evidence(run_dir)
+            if r["confirmed"] and not r["artifacts_present"]]
+
+
+def check_dangling_citations(run_dir: Path) -> list[str]:
+    """悬空引用护栏(警告): 证据条目 Artifacts: 字段里引用了 run 目录下【不存在】的产物
+    —— 引用必须可复核。旧逻辑只要块内任一产物存在就放行, 删掉某个被引文件不会报(E-012:
+    删 _ci_*.html 后 E-012 引用静默悬空, 靠人工才发现)。现逐条列出死引用。"""
+    warns: list[str] = []
+    for r in parse_evidence(run_dir):
+        if r["artifacts_missing"]:
+            warns.append(
+                f"evidence {r['id']}: 引用了不存在的产物 {r['artifacts_missing']} —— "
+                "死引用无法复核(文件被删/改名/笔误)。修正路径、补存产物、或移除该引用。")
+    return warns
 
 
 def check_evidence_certainty(run_dir: Path) -> list[str]:
     """证据门质量护栏(P0-2): certainty >= 0.8 的条目必须带 `Replicated:` 或
-    `Control:` —— 复现/对照实验是把"单次观测≠确认"从口号变成可检字段。缺则 WARN
-    (提示补对照或降级), 不硬失败 —— 这是质量提示, 非结构闸门。"""
-    ev = run_dir / "evidence.md"
-    if not ev.exists():
-        return []
-    text = ev.read_text(encoding="utf-8", errors="replace")
-    warns: list[str] = []
-    # 按 `## ` 切分条目
-    blocks = re.split(r"(?=^##\s)", text, flags=re.MULTILINE)
-    for b in blocks:
-        head = b.splitlines()[0].strip() if b.strip() else ""
-        if re.search(r"Certainty\s*[:：]\s*(0\.8|1\.0)\b", b):
-            if not re.search(r"\b(Replicated|Control)\s*[:：]", b):
-                warns.append(
-                    f"evidence {head!r}: Certainty>=0.8 但缺 'Replicated:'/'Control:' "
-                    "字段 —— 补复现/对照实验, 否则按证据门定义应降级(单次观测≠确认)")
-    return warns
+    `Control:` —— 复现/对照是把"单次观测≠确认"从口号变成可检字段。缺则 WARN。"""
+    return [f"evidence {r['id']}: Certainty>=0.8 但缺 'Replicated:'/'Control:' 字段 "
+            "—— 补复现/对照实验, 否则按证据门定义应降级(单次观测≠确认)"
+            for r in parse_evidence(run_dir) if r["confirmed"] and not r["has_control"]]
 
 
 def check_coverage(run_dir: Path) -> list[str]:
@@ -196,31 +283,18 @@ def check_ledger_contradiction(run_dir: Path) -> list[str]:
     """台账矛盾护栏(警告): 若某条证据 `Refutes: E-X`, 但 E-X 自己仍 certainty>=0.8 且
     无 superseded/降级/撤回 标记 → 台账里同时挂着"被证伪"和"高置信"两个矛盾态, 会污染
     下游推理(某实战 实战: E-010 整站封锁满分置信度被 E-011 证伪却没降级)。静态可查。"""
-    ev = run_dir / "evidence.md"
-    if not ev.exists():
-        return []
-    text = ev.read_text(encoding="utf-8", errors="replace")
-    blocks = re.split(r"(?=^##\s+E-)", text, flags=re.MULTILINE)
-    entries: dict[str, dict] = {}
+    records = parse_evidence(run_dir)
+    entries = {r["id"]: r for r in records if r["id"].startswith("E-")}
     refuted: set[str] = set()
-    for b in blocks:
-        hm = re.match(r"##\s+(E-\d+)", b.strip())
-        if not hm:
-            continue
-        eid = hm.group(1)
-        cm = re.search(r"Certainty\s*[:：]\s*(\d\.\d)", b)
-        certainty = float(cm.group(1)) if cm else 0.0
-        superseded = bool(re.search(r"superseded|降级|撤回|改判", b, re.I))
-        entries[eid] = {"certainty": certainty, "superseded": superseded}
-        for line in re.findall(r"Refutes\s*[:：]([^\n]*)", b):
-            for rm in re.findall(r"E-\d+", line):
-                refuted.add(rm)
+    for r in records:
+        refuted.update(r["refutes"])
     warns: list[str] = []
     for eid in sorted(refuted):
         e = entries.get(eid)
-        if e and e["certainty"] >= 0.8 and not e["superseded"]:
+        if e and e["confirmed"] and not e["superseded"]:
+            cmax = max(e["certainties"]) if e["certainties"] else 0.8
             warns.append(
-                f"台账矛盾: {eid} 被其它条目 Refutes(证伪), 但 {eid} 仍 certainty={e['certainty']} "
+                f"台账矛盾: {eid} 被其它条目 Refutes(证伪), 但 {eid} 仍 certainty={cmax} "
                 "且无 superseded/降级标记 —— 被证伪的结论未降级会污染下游, 请降级或标 superseded。")
     return warns
 
@@ -322,6 +396,32 @@ CLOSURE_CLAIMS = [
     "exhausted", "nothing exploitable",
 ]
 
+# Negators that FLIP a closure claim into a non-claim, so an honest disclaimer like
+# "非已穷尽" / "未探尽" / "not exhausted" does NOT spuriously trip the over-closure
+# gate (it did on a real run: "非已穷尽" matched the substring "已穷尽").
+_NEG_CJK = "非未没"
+_NEG_EN = ("not ", "no ", "n't ", "never ", "without ", "isn't ", "aren't ", "wasn't ", "yet to ")
+
+
+def _closure_claimed(text: str) -> bool:
+    """True iff text contains a NON-negated closure assertion. Substring match (as
+    before) but skips occurrences immediately preceded by a negator."""
+    t = text.lower()
+    for claim in CLOSURE_CLAIMS:
+        c = claim.lower()
+        start = 0
+        while True:
+            i = t.find(c, start)
+            if i < 0:
+                break
+            prevchar = t[i - 1] if i > 0 else ""
+            window = t[max(0, i - 10):i]
+            if (prevchar and prevchar in _NEG_CJK) or any(window.endswith(n) for n in _NEG_EN):
+                start = i + len(c)
+                continue
+            return True
+    return False
+
 
 def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     """过早收口护栏(P0-1). 仅当 report.md 出现【强收口断言】时触发。返回 (errors, warns):
@@ -336,8 +436,8 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     if not report.exists():
         return [], []
     rtext = report.read_text(encoding="utf-8", errors="replace")
-    if not any(c in rtext for c in CLOSURE_CLAIMS):
-        return [], []  # 未声称收口 -> 不触发, 不增日常负担
+    if not _closure_claimed(rtext):
+        return [], []  # 未声称收口(或为否定式"非已穷尽") -> 不触发, 不增日常负担
 
     errors: list[str] = []
     warns: list[str] = []
@@ -388,10 +488,65 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     return errors, warns
 
 
+def _selftest() -> int:
+    """Regression for the structured evidence parser (parse_evidence + the gates that
+    consume it). Mirrors check_hook's self-testing pattern. No network, no run dir."""
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    (d / "ev_real.html").write_text("x" * 10, encoding="utf-8")
+    (d / "evidence.md").write_text(
+        "# Evidence Ledger\n\n"
+        "## E-001 — confirmed, artifact present, has control\n"
+        "- Replicated: yes\n- Artifacts: `ev_real.html`\n- Certainty: 1.0\n"
+        "- Supports: H-002. Refutes: —. Next: prove later (E-002)\n\n"
+        "## E-002 — split certainty; dangling citation; prose filename elsewhere\n"
+        "- mentions jquery-3.6.0.min.js and ais.webform.js in prose (not citations)\n"
+        "- Control: baseline vs payload\n- Artifacts: `ev_real.html`, `ev_DELETED.html`\n"
+        "- Certainty (SPLIT): sub-A = **1.0**; sub-B = 0.5\n\n"
+        "## E-003 — confirmed, no control, really refutes E-001\n"
+        "- Artifacts: `ev_real.html`\n- Certainty: 0.8\n- Refutes: E-001\n\n"
+        "## E-004 — off-doctrine certainty (0.9) must still count as confirmed\n"
+        "- Replicated: yes\n- Artifacts: `ev_real.html`\n- Certainty: 0.9\n",
+        encoding="utf-8")
+    recs = parse_evidence(d)
+    byid = {r["id"]: r for r in recs}
+    checks = [
+        ("preamble not counted", len(recs) == 4),
+        ("split certainty -> confirmed", byid["E-002"]["confirmed"] is True),
+        ("off-doctrine 0.9 -> confirmed (C1)", byid["E-004"]["confirmed"] is True),
+        ("dangling citation detected", byid["E-002"]["artifacts_missing"] == ["ev_DELETED.html"]),
+        ("prose filenames not cited", not any("jquery" in a or "webform" in a
+                                              for a in byid["E-002"]["artifacts"])),
+        ("inline Next:(E-002) not swept into Refutes", byid["E-001"]["refutes"] == []),
+        ("real refute detected", byid["E-003"]["refutes"] == ["E-001"]),
+        ("dangling warns for E-002 only", [w for w in check_dangling_citations(d)
+                                           if "E-002" in w] and not any(
+            "E-001" in w or "E-003" in w for w in check_dangling_citations(d))),
+        ("no-control entry flagged (E-003)", any("E-003" in w
+                                                 for w in check_evidence_certainty(d))),
+        ("control entries not flagged", not any(("E-001" in w or "E-002" in w)
+                                                for w in check_evidence_certainty(d))),
+        ("contradiction: refuted-but-confirmed E-001", any("E-001" in w
+                                                           for w in check_ledger_contradiction(d))),
+        ("no confirmed-missing-artifact FP", evidence_entries_missing_artifact(d) == []),
+    ]
+    bad = [n for n, ok in checks if not ok]
+    for n, ok in checks:
+        print(("ok   " if ok else "FAIL ") + n)
+    print("check_run selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+    return 0 if not bad else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check a Xunji run directory.")
-    parser.add_argument("run_dir", type=Path)
+    parser.add_argument("run_dir", type=Path, nargs="?")
+    parser.add_argument("--selftest", action="store_true",
+                        help="run the structured-evidence parser regression and exit")
     args = parser.parse_args()
+    if args.selftest:
+        return _selftest()
+    if args.run_dir is None:
+        parser.error("run_dir is required (or use --selftest)")
 
     run_dir = args.run_dir
     if not run_dir.is_absolute():
@@ -417,8 +572,12 @@ def main() -> int:
         if path.exists():
             errors.extend(check_file(path, markers))
 
+    # Derive the structured evidence sidecar once (queryable; also memoizes the parse).
+    write_evidence_index(run_dir, parse_evidence(run_dir))
+
     # Quality warnings (do not fail the structural gate; surface for the driver).
     warnings = check_evidence_certainty(run_dir)
+    warnings.extend(check_dangling_citations(run_dir))  # 死引用(E-012 洞): 逐条报
     warnings.extend(check_coverage(run_dir))          # 前置防 lump: 每次都报独立应用候选
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁

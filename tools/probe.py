@@ -86,6 +86,7 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     raw = b""
     status = 0
     resp_headers: dict = {}
+    cookie_list: list[str] = []            # ALL Set-Cookie values (dict() would drop dups)
     attempts = 0                           # 真实发出的请求数(含重试), 供整场量精确计数
     for attempt in range(retry + 1):
         attempts += 1
@@ -95,12 +96,14 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                 raw = r.read()
                 status = r.status
                 resp_headers = dict(r.headers)
+                cookie_list = r.headers.get_all("Set-Cookie") or []
             last_err = None
             break
         except urllib.error.HTTPError as e:
             raw = e.read()
             status = e.code
             resp_headers = dict(e.headers or {})
+            cookie_list = (e.headers.get_all("Set-Cookie") if e.headers else None) or []
             last_err = None
             break
         except Exception as e:
@@ -133,8 +136,13 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         "snippet": body[:240].decode("utf-8", "replace"),
     })
     if want_headers:
-        # 完整响应头(Location/Set-Cookie 等), 分析跳转/会话/WAF 用
+        # 完整响应头(Location/Set-Cookie 等), 分析跳转/会话/WAF 用。
+        # dict(r.headers) 对重复 Set-Cookie 只留一个 -> 多 cookie(antiforgery+session)会丢;
+        # 用 get_all 把全部 Set-Cookie 合并回 headers, 并单列 set_cookies 列表供会话流程解析。
+        if cookie_list:
+            resp_headers["Set-Cookie"] = "\n".join(cookie_list)
         summary["headers"] = resp_headers
+        summary["set_cookies"] = cookie_list
     if save:
         # write the guard-capped body to a file for full-evidence inspection
         Path(save).parent.mkdir(parents=True, exist_ok=True)
@@ -148,11 +156,62 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     return summary
 
 
+def _selftest() -> int:
+    """Regression for full Set-Cookie capture (dict() used to drop duplicate
+    Set-Cookie -> the ASP.NET Core antiforgery flow broke) + --save. Local-only."""
+    import http.server
+    import re as _re
+    import socketserver
+    import tempfile
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            b = b"ok-body"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            # two distinct Set-Cookie headers, like ASP.NET Core (cleared external + antiforgery)
+            self.send_header("Set-Cookie", "Identity.External=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; httponly")
+            self.send_header("Set-Cookie", ".AspNetCore.Antiforgery.abc=CfDJ8_TOKEN; path=/; samesite=strict; httponly")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+    srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    checks: list[tuple[str, bool]] = []
+    try:
+        tmp = Path(tempfile.mkdtemp()) / "body.html"
+        d = send("GET", f"http://127.0.0.1:{port}/", {}, None, None, 5,
+                 save=str(tmp), want_headers=True)
+        sc = d.get("headers", {}).get("Set-Cookie", "")
+        cl = d.get("set_cookies", [])
+        checks.append(("status 200", d.get("status") == 200))
+        checks.append(("both Set-Cookie captured (set_cookies list)", len(cl) == 2))
+        checks.append(("Identity.External present in headers", "Identity.External" in sc))
+        checks.append(("antiforgery cookie regex-extractable",
+                       bool(_re.search(r"\.AspNetCore\.Antiforgery\.[^=]+=[^;]+", sc))))
+        checks.append(("--save wrote the body", tmp.is_file() and tmp.read_bytes() == b"ok-body"))
+        checks.append(("len/sha1 summarized", d.get("len") == 7 and bool(d.get("sha1"))))
+    finally:
+        srv.shutdown()
+    bad = [n for n, ok in checks if not ok]
+    for n, ok in checks:
+        print(("ok   " if ok else "FAIL ") + n)
+    print("probe selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+    return 0 if not bad else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("method", help="GET/POST/PUT/... or DIFF for a two-URL comparison")
-    ap.add_argument("url")
+    ap.add_argument("method", nargs="?", help="GET/POST/PUT/... or DIFF for a two-URL comparison")
+    ap.add_argument("url", nargs="?")
     ap.add_argument("url2", nargs="?", help="second URL for DIFF mode")
+    ap.add_argument("--selftest", action="store_true", help="run regression and exit")
     ap.add_argument("--data", default=None)
     ap.add_argument("-H", "--header", action="append", default=[], help="k: v")
     ap.add_argument("--auth-key", default=None,
@@ -172,6 +231,11 @@ def main() -> int:
     ap.add_argument("--samples", type=int, default=1,
                     help="DIFF 模式每侧采样次数；>1 时做稳定性判定(去噪)")
     args = ap.parse_args()
+
+    if args.selftest:
+        return _selftest()
+    if not args.method or not args.url:
+        ap.error("method and url are required (or use --selftest)")
 
     global _PROXY
     _PROXY = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY")
