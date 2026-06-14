@@ -98,10 +98,28 @@ def active_run() -> Path | None:
 
 
 _HOST_RE = re.compile(r"https?://([^/\s:]+)|(\b\d{1,3}(?:\.\d{1,3}){3}\b)")
+# Bare domains too: a target.md that says "Target: example.com" (no http://, no IP)
+# used to extract NOTHING -> empty scope -> every in-scope action looked
+# out-of-scope -> false scope_drift + breaker accumulation (a real-run bug).
+# label count bounded {1,16} to avoid catastrophic backtracking on a pathological
+# many-dotted line (an operator-authored target.md line could otherwise stall the
+# state-lock for tens of seconds).
+_DOMAIN_RE = re.compile(
+    r"(?:\*\.)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){1,16}[a-z]{2,})", re.I)
+# suffixes that look like domains but are filenames/markup, so they are not scope.
+_NON_TLD = {"md", "py", "json", "txt", "html", "htm", "css", "js", "aspx", "ashx",
+            "asmx", "php", "jsp", "log", "bin", "png", "jpg", "jpeg", "gif", "svg",
+            "xml", "yml", "yaml", "ini", "cfg", "sh", "ps1", "go", "exe", "zip"}
+# lines that EXCLUDE hosts from scope — never harvest their domains as in-scope, or
+# an `Out-of-scope: partner-bank.com` line would mute scope_drift on that host.
+_EXCL_RE = re.compile(
+    r"out[\s-]?of[\s-]?scope|exclu|black\s?list|deny\s?list|do not|don't|"
+    r"不测|排除|禁止|黑名单|不在范围|白名单之外", re.I)
 
 
 def scope_hosts(run: Path | None) -> set[str]:
-    """Parse In-scope hosts from target.md (the engagement scope)."""
+    """Parse In-scope hosts from target.md (the engagement scope). Extracts URLs,
+    bare IPv4, AND bare domains (so a plain `Target: example.com` defines scope)."""
     if run is None:
         return set()
     tgt = run / "target.md"
@@ -111,9 +129,17 @@ def scope_hosts(run: Path | None) -> set[str]:
     hosts: set[str] = set()
     for line in text.splitlines():
         low = line.lower()
+        if _EXCL_RE.search(low):
+            continue                       # exclusion line: do not harvest as in-scope
         if "in-scope" in low or "target:" in low or "scope" in low:
             for m in _HOST_RE.finditer(line):
-                hosts.add(m.group(1) or m.group(2))
+                h = (m.group(1) or m.group(2) or "").lower()
+                if h:
+                    hosts.add(h)
+            for m in _DOMAIN_RE.finditer(line):
+                dom = m.group(1).lower()
+                if dom.rsplit(".", 1)[-1] not in _NON_TLD:
+                    hosts.add(dom)
     return {h for h in hosts if h}
 
 

@@ -8,8 +8,13 @@
     },
     {
       "category": "destructive",
-      "pattern": "(?=[\\s\\S]*\\brm\\s+-{1,2}[a-z]*[rf])(?=[\\s\\S]*(?:https?://|ftp://))",
-      "reason": "recursive/forced deletion shipped to a TARGET (rm -rf co-located with a URL) -- destroying target data/files is never a proof step; hard-blocked at any path (proof = read/exists, not delete)"
+      "pattern": "\\brm(?:\\s+-{1,2}[a-z-]+)*\\s+-{1,2}[a-z]*[rf][a-z]*(?:\\s+-{1,2}[a-z-]+)*\\s+[\"']?(?:/data\\b|/backups?\\b|/var/(?:lib|www)\\b|/home/[^/\\s\"']+/[^\\s\"'])",
+      "reason": "recursive/forced rm of a DATA directory (/data, /backup(s), /var/lib, /var/www, /home/<user>/<deep>) -- irreversible data loss the catastrophic-path rule above misses (it only matches one level deep on listed system dirs). Closes the F5 gap from the 2026-06-15 hook review."
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\A(?=[\\s\\S]*['\"][^'\"]*\\brm\\s+-{1,2}[a-z]*[rf])(?=[\\s\\S]*(?:https?|ftp)://)",
+      "reason": "destructive rm -rf SHIPPED TO A TARGET as a payload (a quoted rm -rf inside a request, alongside a URL) -- destroying target data is never a proof step. Narrowed from the old any-rm-co-located-with-any-URL form (which false-fired on a STANDALONE local scratch rm that merely shared a line with a probe URL); the rm -rf must now appear INSIDE a quoted string (i.e. injected as data). Catastrophic local rm is still covered by the root/system-path rule above; benign repo-relative rm falls through to ask/allow."
     },
     {
       "category": "destructive",
@@ -58,8 +63,8 @@
     },
     {
       "category": "destructive",
-      "pattern": "\\bshred\\b|\\bsdelete\\b|\\bcipher\\s+/w|\\bwipefs\\b|\\bblkdiscard\\b|\\bscrub\\b",
-      "reason": "secure-wipe / overwrite destruction (shred/sdelete/cipher /w/wipefs/blkdiscard) -- irreversible, never auto"
+      "pattern": "\\bshred\\b|\\bsdelete\\b|\\bcipher\\s+/w|\\bwipefs\\b|\\bblkdiscard\\b|\\bscrub\\s+(?:-{1,2}[a-zA-Z]|/dev/)",
+      "reason": "secure-wipe / overwrite destruction (shred/sdelete/cipher /w/wipefs/blkdiscard, and the scrub disk-wipe tool when invoked on a device/with flags) -- irreversible, never auto. Narrowed scrub from bare \\bscrub\\b (which false-fired on the English word 'scrub' and on read-only zpool/btrfs scrub) to scrub with a flag or /dev/ target"
     },
     {
       "category": "destructive",
@@ -73,8 +78,18 @@
     },
     {
       "category": "destructive",
-      "pattern": "\\b(shutdown|reboot|halt|poweroff)\\b",
-      "reason": "host shutdown/reboot"
+      "pattern": "(?:^|\\n|;|&&|\\|\\||\\bsudo\\s+)\\s*(?:/\\S+/)?(?:systemctl\\s+(?:--\\S+\\s+)*)?(?:shutdown|reboot|halt|poweroff)\\b(?!\\s*\\()",
+      "reason": "host shutdown/reboot/halt/poweroff at COMMAND POSITION (line start, newline, after ;/&&/||, optional sudo), incl. absolute-path (/sbin/shutdown) and systemctl forms (systemctl poweroff/reboot/halt). Narrowed from bare \\b(shutdown|…)\\b which false-fired on the word as DATA: method calls (srv.shutdown(), logging.shutdown()), grep/echo args (grep 'shutdown|reboot', echo shutdown), URL params (?x=1&shutdown=now). Single | and single & are NOT separators (you never pipe-into or URL-param a real shutdown). Accepted gaps (recoverable effect, evasion-shaped): bash -c \"shutdown\", cmd & shutdown."
+    },
+    {
+      "category": "destructive",
+      "pattern": "(?:^|\\n|;|&&|\\|\\||\\bsudo\\s+)\\s*(?:/\\S+/)?(?:tel)?init\\s+[06]\\b",
+      "reason": "runlevel halt/reboot via init/telinit (init 0 = halt, init 6 = reboot) at command position; requires the literal runlevel digit so it does not fire on 'git init' / npm init / __init__"
+    },
+    {
+      "category": "destructive",
+      "pattern": "(?:^|\\n|;|&&|\\|\\|)\\s*(?:Stop|Restart)-Computer\\b",
+      "reason": "Windows host shutdown/restart (Stop-Computer / Restart-Computer) at COMMAND POSITION (line start, newline, after ;/&&/||) -- native PowerShell host power control; recoverable but disruptive, never auto. Command-position-anchored (like the shutdown rule) so the cmdlet name as DATA (echo/grep/docs) does not false-fire. Accepted gaps (recoverable + evasion-shaped, symmetric to the shutdown rule): scriptblock / Invoke-Command (&{Restart-Computer}, Invoke-Command -ScriptBlock {...}), single-pipe (X | Restart-Computer -- note PS does accept pipeline input here), call-operator (& Restart-Computer), single-& background."
     },
     {
       "category": "destructive",

@@ -98,9 +98,12 @@ def selftest() -> int:
         # drive root / bare * . ..); these must still hard-deny.
         '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}',
         '{"tool_name":"Bash","tool_input":{"command":"rm -rf ~"}}',
-        # ...but rm SHIPPED TO A TARGET (rm co-located with a URL) hard-denies at
-        # ANY path — destroying target data is never a proof step:
-        '{"tool_name":"Bash","tool_input":{"command":"curl http://t/?c=rm -rf /app/data"}}',
+        # ...but a destructive rm SHIPPED TO A TARGET as a QUOTED payload (injected
+        # into a request) hard-denies at any path (the unquoted form is shell-
+        # fragmented + inert, so it is intentionally NOT matched after the narrowing):
+        '{"tool_name":"Bash","tool_input":{"command":"curl \'http://t/?c=rm -rf /app/data\'"}}',
+        # data-dir rm the one-level catastrophic rule misses (F5 gap):
+        '{"tool_name":"Bash","tool_input":{"command":"rm -rf /var/lib/mysql"}}',
         '{"tool_name":"Bash","tool_input":{"command":"sqlmap -u http://t/ --dump"}}',
         '{"tool_name":"Bash","tool_input":{"command":"mysql -e \'DROP DATABASE prod\'"}}',
     ]
@@ -170,19 +173,27 @@ def main() -> None:
 
     for rule in load_rules():
         try:
-            if re.search(rule["pattern"], command, re.IGNORECASE):
+            m = re.search(rule["pattern"], command, re.IGNORECASE)
+            if m:
                 cat = rule.get("category", "blocked")
                 reason = rule.get("reason", "matched a deny rule")
-                audit(cat, reason, command)
+                # Surface the exact matched substring + offset so the driver can see
+                # WHAT tripped WHICH rule and reword fast (vs guessing). Most of this
+                # session's stop-and-reword churn was not knowing the matched token.
+                matched = m.group(0).strip()
+                span = f"{m.start()}-{m.end()}"
+                audit(cat, reason, f"[matched {matched!r}@{span}] {command}")
                 deny(
                     f"[safety-boundary] BLOCKED ({cat}): {reason}. "
+                    f"[matched substring {matched!r} at offset {span}] "
                     f"This destructive action class is NEVER executed, regardless of target, "
                     f"and human authorization does NOT unlock it - authorization can only ever "
                     f"approve an equivalent SAFE proof-of-concept. STOP and ASK the user: explain "
                     f"why you think verification needs this, then propose a non-destructive "
                     f"equivalent PoC and wait for confirmation. Do not work around this hook. "
-                    f"Only if this is a genuine false positive (a benign command wrongly matched) "
-                    f"should the user adjust .claude/hooks/safety_rules.json."
+                    f"If this is a FALSE POSITIVE (the matched substring above is benign DATA — e.g. "
+                    f"a payload/grep arg/echo/heredoc/commit message — not an executed command), the "
+                    f"user may narrow the offending rule in .claude/hooks/safety_rules.json."
                 )
         except re.error:
             continue

@@ -70,6 +70,20 @@ def _salient_tokens(command: str) -> list[str]:
     return [t for t in toks if t]
 
 
+def _host_in_scope(hosts: list, scope: set) -> bool:
+    """A host is in scope if it equals an in-scope host OR is a SUBDOMAIN of one
+    (api.example.com is in scope when example.com is). The leading-dot suffix check
+    prevents look-alike confusion (evil-example.com / example.com.evil.com do NOT match
+    '.example.com'). Without this, every subdomain of an apex-only scope was flagged
+    out-of-scope -> false scope_drift (a real-run defect, 2nd layer)."""
+    for h in hosts:
+        h = (h or "").lower()
+        for s in scope:
+            if h == s or h.endswith("." + s):
+                return True
+    return False
+
+
 def classify(action: dict, ctx: dict) -> dict:
     """ctx = {scope_hosts:set, directives:[str], plan_keywords:[str], taint:bool}"""
     scope = {h.lower() for h in ctx.get("scope_hosts", set())}
@@ -91,7 +105,7 @@ def classify(action: dict, ctx: dict) -> dict:
     salient = _salient_tokens(action.get("command", ""))
     directives = " \n ".join(ctx.get("directives", [])).lower()
     plan_kw = set(ctx.get("plan_keywords", []))
-    host_in_scope = any(h in scope for h in action.get("hosts", []))
+    host_in_scope = _host_in_scope(action.get("hosts", []), scope)
 
     if ctx.get("taint"):
         provenance = TARGET_DERIVED
