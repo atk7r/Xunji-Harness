@@ -73,6 +73,7 @@ REQUIRED_FILES = [
     Path("CLAUDE.md"),
     Path("docs/ROUTER.md"),
     Path("docs/WORKFLOW.md"),
+    Path("docs/WORKFLOW-reference.md"),
     Path("docs/cognition/README.md"),
 ]
 

@@ -137,7 +137,7 @@ def parse_hint_directives(text: str) -> list[str]:
     """Pure: from hints.md text, return the Hint texts of HINT nodes that AUTHORIZE
     an action — Kind is a **pure directive** (do/skip/prioritize/open/close).
 
-    Excluded on purpose (WORKFLOW.md hints.md 'Absorb by Kind'):
+    Excluded on purpose (WORKFLOW-reference.md hints.md 'Absorb by Kind'):
     - lead / claim  -> <=0.5 intel to verify, never authorization.
     - constraint    -> a scope/boundary rule (handled by scope_hosts), not action
       authorization; e.g. '只测 host X' must NOT auto-authorize --dump against X.

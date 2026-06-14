@@ -8,7 +8,10 @@ pick a mode by preference or vibe.
 Always follow:
 
 - `CLAUDE.md`
-- `docs/WORKFLOW.md`
+- `docs/WORKFLOW.md` — lean per-cycle core. The file templates, derived state graph,
+  parallel fan-out, and detailed closure / safety-review rules are in
+  `docs/WORKFLOW-reference.md`, loaded **on demand** (writing a run file, a fan-out
+  or closure gate), not every cycle.
 - `docs/cognition/README.md`
 - `.claude/skills/src-safety-boundary/SKILL.md`
 
@@ -82,6 +85,7 @@ Use when starting a new target run.
 Load:
 
 - `docs/WORKFLOW.md`
+- `docs/WORKFLOW-reference.md` (file templates — load when writing the run files)
 - `docs/templates/run/`
 
 Output:
@@ -257,14 +261,14 @@ Project-discipline and run-structure checks live in `tools/`:
   a view of actionable / unlocked-but-deferred / closed-but-unlocked / dangling
   Facts. **Run at the start of a Reason pass** so "what just got unlocked or
   neglected" is a query, not a re-read. Derived and advisory only — it never
-  selects the next front (that stays the driver). See `docs/WORKFLOW.md` "State
-  Graph".
+  selects the next front (that stays the driver). See `docs/WORKFLOW-reference.md`
+  "State Graph".
 - `python tools/workers.py runs/<dir>` — parallel fan-out bookkeeping: `--new
   <F-id>` scaffolds a worker scratch file; the bare form lists worker status and
   flags any `done`-but-unmerged worker whose candidates the driver still owes the
   evidence gate. Scaffold + ledger only — it never spawns workers or picks fronts
-  (the driver does, via the Agent tool). See `docs/WORKFLOW.md` "Parallel Fan-out"
-  and `docs/templates/worker.md`.
+  (the driver does, via the Agent tool). See `docs/WORKFLOW-reference.md` "Parallel
+  Fan-out" and `docs/templates/worker.md`.
 
 These tools verify structure and discipline only. They never replace the
 evidence gate or autonomous judgement.

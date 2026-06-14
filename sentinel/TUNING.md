@@ -64,7 +64,7 @@ or shorten what counts toward it (the §1 detectors).
    `Kind: directive` whose text matches `BREAKER_RESET_RE`
    (`reset breaker` / `clear breaker` / `解除熔断` / `重置熔断`) clears it
    immediately. This is the intended manual escape hatch — see CLAUDE.md
-   "Operator Authority" and `docs/WORKFLOW.md` hints.md.
+   "Operator Authority" and `docs/WORKFLOW.md` "Operator Hints".
 
 ### What the clamp does / does not touch
 - **Clamped**: a decision that *would* be `AUTO` with `level ≥ GATE` (an effectful

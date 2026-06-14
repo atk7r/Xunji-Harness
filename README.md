@@ -116,7 +116,7 @@
 
 - **逐资产检视台账** —— `classify_hosts.py` 按**实时内容**（非 Server 头）给每台主机指纹写入 `coverage.json`；`check_run.py` **每次**运行都读它、列出必须深挖的「独立应用」候选 —— 让一锅端**当下**暴露。
 - **独立 Reviewer = 硬门** —— 任何「探尽 / 无攻击面」论断前，一个**全新上下文子 agent**（无收口利益）审计本次运行；`check_run.py` 对**没有 `Independent Review` 记录**的收口论断**硬性失败**。可移植设计见 [`review/review-mechanism.md`](review/review-mechanism.md)。
-- **已扩到安全关键代码** —— `.claude/hooks/` · `guard.py` · `sentinel/` 的**行为改动**收口前同样须独立复审、记录到 `review/records/`（窄边界，详见 `docs/WORKFLOW.md`）。这条是实证换来的：一次独立复审在熔断器上抓出了作者自检漏掉的真 bug。
+- **已扩到安全关键代码** —— `.claude/hooks/` · `guard.py` · `sentinel/` 的**行为改动**收口前同样须独立复审、记录到 `review/records/`（窄边界，详见 `docs/WORKFLOW-reference.md`）。这条是实证换来的：一次独立复审在熔断器上抓出了作者自检漏掉的真 bug。
 - **台账矛盾 + certainty 管控 + 够不着重跑队列** —— 被 `Refutes:` 却仍 ≥ 0.8 的结论会被标出；≥ 0.8 须带 `Control:` / `Replicated:`；仅「够不着」的资产进标准化队列，`rerun_deferred.py` 稍后换出口重探。
 
 ### 5 ｜ 知识库：接地（公开）+ 武器化（本地）—— 攻击者，不是扫描器

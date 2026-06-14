@@ -100,7 +100,7 @@ fan them out to parallel fresh-context workers that coordinate only through the
 run directory (stigmergy). You stay the **sole integrator**: workers produce
 candidates, and you merge them through the evidence gate — parallel breadth never
 relaxes confirmation. Workers are proof-level; heavier actions stay with you. See
-`docs/WORKFLOW.md` "Parallel Fan-out" and `docs/templates/worker.md`.
+`docs/WORKFLOW-reference.md` "Parallel Fan-out" and `docs/templates/worker.md`.
 
 ## Dual Mind
 
@@ -141,7 +141,7 @@ When the operator injects steering mid-run, record it in `runs/<target>/hints.md
 as a `HINT-xxx` node — not only in chat — so it stays in the audit trail and is
 re-read every cycle (Reason pass) instead of forgotten under momentum. A directive
 is controlling; an operator *claim* about the target is a lead to verify through
-the evidence gate, not a Fact. See `docs/WORKFLOW.md` "hints.md".
+the evidence gate, not a Fact. See `docs/WORKFLOW.md` "Operator Hints".
 
 ## Repository Discipline
 
@@ -169,5 +169,5 @@ the evidence gate, not a Fact. See `docs/WORKFLOW.md` "hints.md".
 - Before declaring a **behavior change to safety-critical code** done
   (`.claude/hooks/`, `tools/harness/guard.py`, `sentinel/`), get an independent
   fresh-context review and record it under `review/records/` — same self-review-bias
-  fix as run closure, narrow scope. See `docs/WORKFLOW.md` "Independent review of
-  safety-critical code". Self-review does not fix self-review bias.
+  fix as run closure, narrow scope. See `docs/WORKFLOW-reference.md` "Independent
+  review of safety-critical code". Self-review does not fix self-review bias.

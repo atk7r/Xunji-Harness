@@ -14,7 +14,7 @@ reviewer at the closure gate (option A) — do it without re-asking; do not skip
 Also mandatory before declaring a **behavior change to safety-critical framework
 code** done — `.claude/hooks/`, `tools/harness/guard.py`, `sentinel/` — with
 findings recorded under `review/records/`. Narrow scope and rationale: see
-`docs/WORKFLOW.md` "Independent review of safety-critical code".
+`docs/WORKFLOW-reference.md` "Independent review of safety-critical code".
 
 ## How
 
