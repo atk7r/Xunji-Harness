@@ -47,6 +47,7 @@ poc_library/
 
 ### xday/
 - 未披露 xday 条目仅存于本地（仓库只保留 `xday/` 文件夹）；具体清单不公开。
+  实有清单见本地 `poc_library/xday/_INDEX.local.md`（随 `xday/*` gitignore，不入库）。
 
 ### normal/
-- （空）
+- （暂无条目）
