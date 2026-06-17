@@ -54,7 +54,16 @@ _CTX.verify_mode = ssl.CERT_NONE
 _PROXY: str | None = None
 
 
-def _opener() -> urllib.request.OpenerDirector:
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """不跟随 3xx 跳转: redirect_request 返回 None 使 302/301/303/307 以 HTTPError 抛出, 由 send 的
+    except 捕获(status=3xx + Location + 该跳的 Set-Cookie)。认证流(登录/注册成功后 302 带
+    .AspNet.ApplicationCookie 等)的会话 cookie 就设在这一跳上, 跟随跳转会丢失它。顺带: 不自动追
+    跳转 -> 不会被 302 带到 scope 外的 host。"""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _opener(no_redirect: bool = False) -> urllib.request.OpenerDirector:
     handlers: list = [urllib.request.HTTPSHandler(context=_CTX)]
     if _PROXY:
         handlers.append(urllib.request.ProxyHandler({"http": _PROXY,
@@ -62,13 +71,15 @@ def _opener() -> urllib.request.OpenerDirector:
     else:
         # 显式置空, 不继承系统代理(避免意外走错出口)
         handlers.append(urllib.request.ProxyHandler({}))
+    if no_redirect:
+        handlers.append(_NoRedirect())          # build_opener 用它替换默认 HTTPRedirectHandler
     return urllib.request.build_opener(*handlers)
 
 
 def send(method: str, url: str, headers: dict, data: bytes | None,
          auth_key: str | None, timeout: int, save: str | None = None,
          retry: int = 0, retry_wait: float = 1.5,
-         want_headers: bool = False) -> dict:
+         want_headers: bool = False, no_redirect: bool = False) -> dict:
     host = urlparse(url).hostname or "unknown"
     afc = AuthFailCounter()
     if auth_key:
@@ -81,7 +92,7 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     req = urllib.request.Request(url=url, method=method.upper(),
                                  data=data, headers={"User-Agent": UA, **headers})
     summary: dict = {"method": method.upper(), "url": url}
-    opener = _opener()
+    opener = _opener(no_redirect)
     last_err: str | None = None
     raw = b""
     status = 0
@@ -193,6 +204,14 @@ def _selftest() -> int:
             pass
 
         def do_GET(self):
+            if self.path.startswith("/redir"):
+                # 模拟登录成功: 302 跳转, 会话 cookie 设在【这一跳】上(跟随跳转会丢失它)
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", ".AspNet.ApplicationCookie=AUTH_TOKEN_XYZ; path=/; httponly")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             b = b"ok-body"
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -238,6 +257,18 @@ def _selftest() -> int:
             checks.append(("请求头完整存(Cookie 原值在, 供重放认证请求)", "sess=secret123" in hreq))
             checks.append(("响应头完整存(Set-Cookie 原值在, 不脱敏)", "Identity.External=" in hresp))
             checks.append(("summary 引用 replay 路径", bool(d.get("replay"))))
+        # 认证流: --no-redirect 不跟随 302, 捕获【跳转那一跳】的 Set-Cookie(会话 cookie)
+        nr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5,
+                  want_headers=True, no_redirect=True)
+        nr_sc = "\n".join(nr.get("set_cookies", []))
+        checks.append(("--no-redirect 拿到 302(不跟随)", nr.get("status") == 302))
+        checks.append(("--no-redirect 捕获跳转上的会话 cookie",
+                       ".AspNet.ApplicationCookie=AUTH_TOKEN_XYZ" in nr_sc))
+        checks.append(("--no-redirect 响应头含 Location", nr.get("headers", {}).get("Location", "") == "/"))
+        # 对照: 默认跟随到 200, 会话 cookie 丢失(证明 --no-redirect 对认证流是必要的)
+        fr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5, want_headers=True)
+        checks.append(("默认跟随 -> 200 且会话 cookie 丢(故认证流需 --no-redirect)",
+                       fr.get("status") == 200 and "ApplicationCookie" not in "\n".join(fr.get("set_cookies", []))))
     finally:
         srv.shutdown()
     bad = [n for n, ok in checks if not ok]
@@ -269,6 +300,9 @@ def main() -> int:
     ap.add_argument("--retry-wait", type=float, default=1.5, help="重试间隔秒")
     ap.add_argument("--headers", action="store_true",
                     help="输出完整响应头(Location/Set-Cookie 等)")
+    ap.add_argument("--no-redirect", action="store_true",
+                    help="不跟随 3xx 跳转 —— 直接拿 302 那一跳(认证流会话 cookie 设在跳转上, 跟随会丢; "
+                         "也防被跳转带到 scope 外)")
     ap.add_argument("--samples", type=int, default=1,
                     help="DIFF 模式每侧采样次数；>1 时做稳定性判定(去噪)")
     args = ap.parse_args()
@@ -327,7 +361,7 @@ def main() -> int:
             out = {"tag": args.tag, **send(args.method, args.url, headers,
                                            data, args.auth_key, args.timeout,
                                            args.save, args.retry, args.retry_wait,
-                                           args.headers)}
+                                           args.headers, args.no_redirect)}
     except SessionTripped as e:
         out = {"error": f"session-volume-breaker: {e}"}
     except RateBudgetExceeded as e:

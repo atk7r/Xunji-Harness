@@ -115,6 +115,38 @@ re-introducing orchestration. Do not adopt chatty inter-worker messaging, and do
 not specialize workers by *technique* (that drifts toward a playbook); scope them
 by *front/asset*, as now.
 
+## 实现状态 & 未完成清单(2026-06-17 本轮)
+
+R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一轮围绕"证据可信度"落地了一批,
+也明确了哪些是改不动的本质墙(A 类)。
+
+### 已落地
+- **异构独立复审 = R-6 的实现** — `tools/peer_review.py`(Codex>DeepSeek/GLM>Claude兜底, 候选非
+  裁决)+ check_run `--auto-peer-review`。R-6「从干净上下文重证发现」由【异构】模型落地; 同模型只
+  减 bias 不减盲区(A2)。6 次实战 dogfood 各逮到真问题(漏报/bypass/同族蒙混/凭据/越界/重放DELETE)。
+- **B1 证据可重放化(缓解 A1)** — probe `--save` 留 `.replay.json` 录像; `tools/replay.py` 走 guard 重放
+  比对(幂等 GET 自动 / DELETE 永不重放 / host 白名单)。造假成本从"P 张图"抬到"伪造自洽请求+响应+sha1"。
+- **漏报一致性硬门** — check_run: certainty>=0.8 正向发现必须进 report(防 hamastar 漏报 E-017 那类)。
+
+### 未完成 / 预留(卡点已标)
+- ⬜ **B2-② 多异构 panel** — 扩展点已留(peer_review.py 注释; 配 ≥2 异构 key + `review_panel()` 即可,
+  不改现有结构)。卡: key + API 成本。
+- ⬜ **B1-③ API 后端核对产物** — codex 版已做(rubric 第7点); API 版卡 key。
+- ⬜ **B3-② 通用利用原语**(撬 A3 能力墙, 当前方向): ① OOB 带外回调监听器(推荐起点, 盲 RCE/SSRF/
+  盲注→铁证) ② 编码/序列化 ③ multipart 上传发送 ④ 盲注提取引擎。**铁律: 工具是枪, payload 靠 AI
+  临场定制, 不做 playbook**(同 R-4 sensor 精神)。
+- ⬜ **replay 接进收口** — 现为独立工具(手动跑); 可加 check_run 可选 `--replay-verify` 收口前自动核实。
+- ⬜ **历史 run 过新漏报门** — 早期 run 当年无此门, 可能也漏报高 certainty 发现, 各跑一遍 check_run。
+- ⬜ **C2 workers 实战压测 / C3 runtime 解耦 / deepseek-project 适配** — 见 P3 与各自 memory。
+- ⬜ **R-1 自评 harness 仍是最高价值缺口** — 上面所有"改进"都还没法 A/B 证明真提升了找洞率(度量先行)。
+
+### 承认的本质墙(不可"完成", 只记录边界)
+- **A1 申报即过 verify-real**: B1 把墙后移到「证据 vs 现实」; 破坏性/一次性/目标下线证据仍停人工。
+- **A2 同模型盲点**: 异构复审已破解, 依赖后端可用 + 可接受数据出境 + 多正交收敛。
+- **A3 护栏≠能力**: 无护栏方案, 只能 B3 真加能力(慢/长期); 最硬的墙。
+
+> 真实目标 run 待办(发现物, 红线不进仓)在各 `runs/<t>/`。
+
 ## Sources
 
 - SoK: Measuring What Matters for Closed-Loop Security Agents — arxiv 2510.01654

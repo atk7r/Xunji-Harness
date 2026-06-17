@@ -77,6 +77,7 @@ REVIEW RUBRIC — for each point, cite a specific file:line or filename as evide
 4. Shallow closure: were any high-value fronts (especially RCE / getshell / file upload / deserialization) closed after only shallow probing? Anything abandoned as "Type B" that deserved deeper work?
 5. Claim integrity: are the report's confirmed findings, claimed depth, and captured fingerprints actually backed by evidence in the run? In particular — is EVERY evidence item with certainty >= 0.8 carried into the report's confirmed findings? Does the report contradict its own evidence ledger (e.g. an asset called "unreachable" that later evidence shows was reached and exploited)?
 6. Missed surface: anything present in surface*.md / evidence that is NOT carried into the report?
+7. Artifact cross-check: for confirmed (certainty>=0.8) findings, OPEN the cited artifact files under the run dir (probe_*.html, *.replay.json) and verify they ACTUALLY contain the markers / response the evidence claims — do not trust evidence.md prose alone. A `.replay.json` recording holds the real request + response + sha1; confirm it matches the claim. Flag any confirmed finding whose artifact is missing, empty, or inconsistent with its written description.
 
 FOCUS: report what YOU, as a different model, see that the author likely MISSED. Do not just echo the report.
 
@@ -375,6 +376,9 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     return result
 
 
+# 扩展点(预留, 暂不实现 —— DeepSeek/GLM API 成本高): 多异构 panel。配 >=2 个异构 key 后加
+# review_panel(scope, backends=[...]) 并行跑多后端、取最严 verdict(任一 BLOCKER 即阻断, 盲区
+# 互补 = 补"补盲的补盲")。后端定义 / _run_openai / select_backend 已就位, 加 panel 不改现有结构。
 def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
     """把复审【追加】进 runs/<t>/review.md 的独立复审区块 —— 满足 check_run 的独立复审硬门
     (re.search 'Independent Review|独立复审')。追加不覆盖(review.md 可能已有别的内容)。
