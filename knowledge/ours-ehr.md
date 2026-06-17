@@ -6,6 +6,7 @@ aliases: [ours, ours-ehr, 薪事力, 致远薪事力, x-dhr, DHR人力云]
 category: framework-management-endpoint
 last_reviewed: 2026-06-12
 maturity: verified
+signatures: ["/res_common/ours/", "ours_user_token", "ours_pc.min.js", "薪事力"]
 ---
 
 <!--

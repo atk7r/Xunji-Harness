@@ -6,6 +6,7 @@ aliases: [Shibboleth IdP, SAML IdP, 统一身份认证, SSO]
 category: framework-management-endpoint
 last_reviewed: 2026-06-12
 maturity: seed
+signatures: ["/idp/shibboleth", "/idp/css/placeholder.css", "shibboleth idp"]
 ---
 
 <!--

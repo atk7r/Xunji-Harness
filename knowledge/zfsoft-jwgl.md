@@ -6,6 +6,7 @@ aliases: [正方教务, jwglxt, 教学管理信息服务平台, 正方新版教�
 category: framework-management-endpoint
 last_reviewed: 2026-06-12
 maturity: seed
+signatures: ["/jwglxt/", "login_slogin.html", "login_getpublickey.html", "教学管理信息服务平台"]
 ---
 
 <!--

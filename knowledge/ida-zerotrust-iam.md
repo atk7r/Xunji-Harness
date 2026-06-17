@@ -6,6 +6,7 @@ aliases: [IDA, 零信任, IAM, SDP, 环境感知, iam/auth, trustAssess, startTu
 category: framework-management-endpoint
 last_reviewed: 2026-06-12
 maturity: seed
+signatures: ["/iam/auth/", "trustassess", "getmachineiduuid", "idastrategyid"]
 ---
 
 <!--

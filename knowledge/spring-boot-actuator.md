@@ -6,6 +6,7 @@ aliases: [actuator, spring actuator, spring boot management endpoints]
 category: framework-management-endpoint
 last_reviewed: 2026-06-10
 maturity: verified
+signatures: ["/actuator/health", "/actuator/env", "/actuator/configprops"]
 ---
 
 <!--

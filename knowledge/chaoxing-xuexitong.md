@@ -6,6 +6,7 @@ aliases: [超星, 学习通, 泛雅, chaoxing, fanya, AI平台]
 category: framework-management-endpoint
 last_reviewed: 2026-06-12
 maturity: seed
+signatures: ["passport2.chaoxing.com", "sentry-stats.chaoxing.com", "captcha.chaoxing.com"]
 ---
 
 <!--

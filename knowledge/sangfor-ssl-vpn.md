@@ -6,6 +6,7 @@ aliases: [深信服SSL VPN, EasyConnect, svpn, 深信服远程接入]
 category: device
 last_reviewed: 2026-06-12
 maturity: seed
+signatures: ["/por/login_auth.csp", "/por/login_psw.csp", "<twfid>", "svpntool"]
 ---
 
 <!--

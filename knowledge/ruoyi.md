@@ -6,6 +6,7 @@ aliases: [ruoyi, ruoyi-vue, ruoyi-cloud, 若依]
 category: framework-management-endpoint
 last_reviewed: 2026-06-11
 maturity: verified
+signatures: ["/prod-api/", "欢迎使用ruoyi后台管理框架", "/captchaimage"]
 ---
 
 <!--

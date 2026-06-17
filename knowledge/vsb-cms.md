@@ -6,6 +6,7 @@ aliases: [VSB, 院系门户, system/resource, dynclicks, vsbscreen, 网站群]
 category: cms
 last_reviewed: 2026-06-12
 maturity: seed
+signatures: ["/system/resource/", "dynclicks", "/__local/", "vsbscreen"]
 ---
 
 <!--

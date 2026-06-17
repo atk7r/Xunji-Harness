@@ -6,6 +6,7 @@ aliases: [金智教育, wisedu, ehall, authserver, 网上办事大厅, 今日校
 category: framework-management-endpoint
 last_reviewed: 2026-06-12
 maturity: seed
+signatures: ["/qljfwapp/", "checkneedcaptcha.htl", "schoolcombinedlogin.js", "/publicapp/"]
 ---
 
 <!--
