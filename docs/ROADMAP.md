@@ -80,7 +80,7 @@ consensus is "measure what matters" (SoK below). So:
 - **Guardrail**: sensors feed the evidence gate; they do not auto-exploit.
 - **Source**: Big Sleep, dual-loop vulnerability reproduction.
 
-### R-5. Knowledge retrieval over `knowledge/` (borderline — gate hard)
+### R-5. Knowledge retrieval over `knowledge/` (borderline — gate hard) ✅ v0 landed
 - **Gap**: grounding knowledge is consulted **manually**; the relevant entry may be
   missed when a stack is fingerprinted.
 - **Steal**: RAG-enhanced pentest knowledge (PentestAgent, xOffense) — auto-surface
@@ -89,6 +89,25 @@ consensus is "measure what matters" (SoK below). So:
   retrieving turnkey payloads = the forbidden weapon kit. **Only build this if it
   passes the grounding-vs-weapon test**; `check_knowledge.py` stays the contract.
 - **Source**: PentestAgent, xOffense.
+- **Status (2026-06-17)**: the flywheel is now end-to-end. Write end = check_run
+  `Fingerprints captured` gate; match end = `classify_hosts` signature matching →
+  `kb:<id>` tag; **retrieval end = `tools/knowledge_match.py`** (`--body` matches a
+  saved response against the grounding `signatures:` and prints the matched entry's
+  Recognition + Weak-Point Anchors; `--id` surfaces a known entry). Passes the gate
+  by construction: reads `knowledge/*.md` non-recursively (never `weaponized/`),
+  surfaces recognition + anchors only (public tier has no payloads — `check_knowledge`
+  enforces). **Remaining = content, not tooling**: only ~4 of ~18 entries have
+  `signatures:` filled, so body-match recognizes only those; fill `signatures:` on
+  the rest (a per-entry chore done as runs re-touch each stack) to widen recall.
+- **xday retrieval end (2026-06-17, mirror of R-5)**: `tools/xday_match.py` — same
+  signature match, but reads the **local gitignored** weaponized/xday tiers
+  (`knowledge/weaponized/` + `poc_library/xday/`) and surfaces the stored exploit
+  path/chain for a matched stack. Rationale (operator): public vulns can be crafted
+  from the internet off the anchor, so they need no local payload; **xday has no
+  public payload — the local copy is the only source**, so local retrieval is where
+  it earns its keep. Match-gated, local-only behavior, stores never ship. Proven
+  end-to-end on `scshr` (AIS page → `soarcloud-ais-hr` → local `poc_library/xday/
+  soarcloud-ais/`). 2 real xday currently retrievable (ours-ehr, soarcloud-ais).
 
 ---
 
@@ -128,6 +147,28 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一�
   比对(幂等 GET 自动 / DELETE 永不重放 / host 白名单)。造假成本从"P 张图"抬到"伪造自洽请求+响应+sha1"。
 - **漏报一致性硬门** — check_run: certainty>=0.8 正向发现必须进 report(防 hamastar 漏报 E-017 那类)。
 
+### 全流程贯通(2026-06-17 本轮: 先把闭环焊齐再实践微调)
+做了一次 setup→recon→classify→侦察→证据→收口→报告→复审 的端到端贯通体检, 焊了真断点:
+- **聚合自测 `tools/selftest_all.py`** — 一条命令跑全部 12 个 selftest 入口(工具/hook/sentinel),
+  一张红绿卡; 改安全关键码、独立复审前的第一道自动回归。是 R-1 度量的地基。
+- **断-2 产物布局统一** — `probe --save NAME --run`、`render --run` 让产物(含 `.replay.json` 录像)
+  自动落 `<run>/evidence/`; check_run 加**收口时**布局漂移 WARN(主动验证期静默, 降噪)。
+  标准布局成文(WORKFLOW-reference「Run directory layout」)。让"正确放法=省事放法"。
+- **断-1 replay 接进收口** — check_run `--replay-verify`(收口前自动重放 `.replay.json`, DIVERGED=
+  证据存疑升警告; 走 guard / target.md 授权 scope / 幂等 GET 才重放)。replay 从孤岛焊进闭环。
+- **断-3 历史 run 过新门体检** — 12 run 全过一遍; **确认无历史漏洞漏报**(被标的全是环境/防御/
+  工具就绪条目), 失败几乎全是后加门+格式漂移; grandfather 不回填。详见
+  `review/records/2026-06-17-historical-run-gate-audit.md`。
+- **半连缝定性(不投机堆工具, 守 measure-before-add)**:
+  - **recon 前门 = 有意外部接缝** — 框架是【给定攻击面】的 web 打点武器, 侦察采集(子域/端口/OSINT)
+    在上游, 操作者/外部扫描器喂 `recon.json`(ingest_recon/setup_run 已收)。自建采集器 = 大幅越界 +
+    漂向"扫描器", 不做。明确记为设计, 非缺口。
+  - **传感器→证据 = 有意人工接缝** — 什么算证据是 driver 的判断, 不自动写 evidence(自动桩有橡皮图章
+    之险)。`.replay.json` 已结构化留底; 转录成本低。保持 driver 亲笔。
+  - **report 脚手架 = 候选, gate 在 R-1 之后** — 从 evidence.json 预填确认发现清单骨架(不下结论)能补
+    报告阶段唯一无工具的环节, 且过反编排测试; 但本会话已加多件未度量工具, 不再投机加码 —— 待 R-1
+    能 A/B 证明它真帮上找洞/防漏报, 再建。
+
 ### 未完成 / 预留(卡点已标)
 - ⬜ **B2-② 多异构 panel** — 扩展点已留(peer_review.py 注释; 配 ≥2 异构 key + `review_panel()` 即可,
   不改现有结构)。卡: key + API 成本。
@@ -135,10 +176,15 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一�
 - ⬜ **B3-② 通用利用原语**(撬 A3 能力墙, 当前方向): ① OOB 带外回调监听器(推荐起点, 盲 RCE/SSRF/
   盲注→铁证) ② 编码/序列化 ③ multipart 上传发送 ④ 盲注提取引擎。**铁律: 工具是枪, payload 靠 AI
   临场定制, 不做 playbook**(同 R-4 sensor 精神)。
-- ⬜ **replay 接进收口** — 现为独立工具(手动跑); 可加 check_run 可选 `--replay-verify` 收口前自动核实。
-- ⬜ **历史 run 过新漏报门** — 早期 run 当年无此门, 可能也漏报高 certainty 发现, 各跑一遍 check_run。
+- ✅ **replay 接进收口** — 已落地: check_run `--replay-verify`(见上「全流程贯通」)。
+- ✅ **历史 run 过新门体检** — 已做: 确认无漏洞漏报(见审计记录)。
+- ⬜ **report 脚手架** — 候选, 待 R-1 度量后再建(见上半连缝定性)。
 - ⬜ **C2 workers 实战压测 / C3 runtime 解耦 / deepseek-project 适配** — 见 P3 与各自 memory。
-- ⬜ **R-1 自评 harness 仍是最高价值缺口** — 上面所有"改进"都还没法 A/B 证明真提升了找洞率(度量先行)。
+- 🟡 **R-1 自评 harness v0 已落地** — `tools/bench.py` + `bench/`(检出率/校准/误报/预算 打分,
+  对照 fixture 真值; `bench/example-dvwa-sqli/` 合成样例 + 随附回归)。这是把尺子。**边界(诚实标)**:
+  ① 它是 scorer, 跑 fixture 的那次 run 仍要 driver(agent)亲自打 —— 不是全自动 A/B; ② fixture 还少,
+  需扩(DVWA 各关 / Juice Shop / 录制 run 真值标注); ③ marker 子串匹配是近似。下一步: 用它把本会话
+  这批改动(断-1/2/3 + selftest_all)真正 A/B —— 在它能证明价值前, 别再凭手感堆工具。
 
 ### 承认的本质墙(不可"完成", 只记录边界)
 - **A1 申报即过 verify-real**: B1 把墙后移到「证据 vs 现实」; 破坏性/一次性/目标下线证据仍停人工。

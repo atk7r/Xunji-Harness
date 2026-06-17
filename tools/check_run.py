@@ -20,6 +20,11 @@ try:
     import workers as _workers   # 并行 worker 台账(同目录)
 except Exception:
     _workers = None
+try:
+    import replay as _replay     # 重放核实(同目录); 缺失则 --replay-verify 跳过
+except Exception:
+    _replay = None
+from evidence_parse import parse_evidence, write_evidence_index  # 唯一权威证据解析器(已抽出到独立模块)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,150 +100,6 @@ def check_file(path: Path, markers: list[str]) -> list[str]:
     return errors
 
 
-_ART_TOKEN = re.compile(
-    r"(?:evidence/[\w./-]+|render[_-][\w./-]+|[\w][\w./-]*\.(?:html|json|js|css|xml|png|jpe?g|gif|txt|log|bin))",
-    re.I)
-
-
-def _resolve_artifact(tok: str, run_dir: Path) -> Path | None:
-    """Resolve an artifact token to an existing, non-empty file/dir under run_dir,
-    else None. A directory (e.g. render_sxss/) counts if it holds a non-empty file."""
-    root = run_dir.resolve()
-    tok = tok.strip().strip("`\"'").rstrip(").,;:，。）")
-    cands = [tok] if tok.startswith("evidence/") else [tok, f"evidence/{tok}"]
-    for rel in cands:
-        try:
-            p = (run_dir / rel).resolve()
-        except Exception:
-            continue
-        if p != root and root not in p.parents:
-            continue  # ignore anything escaping the run dir
-        if p.is_file() and p.stat().st_size > 0:
-            return p
-        if p.is_dir() and any(f.is_file() and f.stat().st_size > 0
-                              for f in p.rglob("*")):
-            return p
-    return None
-
-
-# Artifacts are cited in an explicit `Artifacts:` field (one or more lines until the
-# next `- Field:` bullet / blank / next entry). Scoping citation-checks to this field
-# (not the whole block) keeps prose filename mentions (e.g. "jquery-3.6.0.min.js",
-# "ais.webform.js") from being mis-read as dead evidence citations.
-_ARTIFACT_FIELD_RE = re.compile(
-    r"Artifacts?\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
-    re.S)
-_CERT_LITERAL_RE = re.compile(r"\b(1\.0|0\.8|0\.5|0\.3)\b")
-# Certainty 字段的【值区域】: 从 `Certainty…:` 到下一个 `- Field:` / 空行 / 块尾。
-# 用来把 certainty 取值限定在【字段值内】(而非旧逻辑"从关键词扫到块尾"), 再配合 _PAREN_RE
-# 剥掉括号说明 —— 否则降级时括号里写的解释数字(如"原 0.8 / 升回 1.0")会被误当成 certainty
-# 值, 使降级无效(2026-06-17 实测)。剥括号后仍含【同字段内】的 split-certainty 多值。
-_CERT_FIELD_RE = re.compile(
-    r"Certainty[^\n:：]*[:：](.+?)(?=\n\s*[-*]\s+\w[\w /()（）-]*[:：]|\n\s*\n|\n##|\Z)",
-    re.S | re.I)
-_PAREN_RE = re.compile(r"[\(（][^\)）]*[\)）]")
-# inline field labels — used to bound a field's value when several share one line
-# (e.g. "- Supports: H-002. Refutes: —. Next: prove X (E-005)." — the (E-005) belongs
-# to Next:, not Refutes:; cutting at the next label stops that misattribution).
-_INLINE_FIELDS = (r"Supports|Refutes|Next|Certainty|Severity|Cleanup|Note|Replicated|"
-                  r"Control|Alternative|Source|Action|Result|Caused by us")
-_INLINE_CUT_RE = re.compile(r"\b(?:" + _INLINE_FIELDS + r")\s*[:：]")
-
-_EVIDENCE_MEMO: dict = {}
-
-
-def _field_ids(block: str, name: str, idpat: str) -> list[str]:
-    """IDs (E-/H-/F-) in a `Name:` field's value, bounded to the next inline field
-    label so a co-line `Next:`/prose mention is not swept in."""
-    out: list[str] = []
-    for m in re.finditer(name + r"\s*[:：]\s*(.*)", block):
-        seg = m.group(1)
-        cut = _INLINE_CUT_RE.search(seg)
-        if cut:
-            seg = seg[:cut.start()]
-        out += re.findall(idpat, seg)
-    return out
-
-
-def parse_evidence(run_dir: Path) -> list[dict]:
-    """Single canonical parser: evidence.md -> structured records. Replaces the
-    per-check ad-hoc `##`-split + regex (fragile, and the artifact gate used to pass
-    a block if ANY one citation resolved, so a deleted file was silent — E-012).
-    Memoized by (path, mtime)."""
-    ev = run_dir / "evidence.md"
-    if not ev.exists():
-        return []
-    key = (str(ev.resolve()), ev.stat().st_mtime_ns)
-    if _EVIDENCE_MEMO.get("key") == key:
-        return _EVIDENCE_MEMO["records"]
-    text = ev.read_text(encoding="utf-8", errors="replace")
-    records: list[dict] = []
-    for b in re.split(r"(?=^##\s)", text, flags=re.MULTILINE):
-        if not b.lstrip().startswith("##"):
-            continue  # skip the file preamble (the `# Evidence Ledger` header block)
-        head = b.splitlines()[0].strip()
-        idm = re.search(r"\bE-\d+\b", head)
-        eid = idm.group(0) if idm else head.lstrip("# ").strip()[:48]
-        # certainty: 取 `Certainty:` 字段的【值区域】并【剥掉括号说明】, 而非旧逻辑"从关键词
-        # 扫到块尾"—— 后者会把降级时括号里写的解释数字(如"原 0.8 / 升回 1.0")误当成 certainty
-        # 值, 使降级无效(2026-06-17 实测踩到)。剥括号后仍含同字段内的 split-certainty 多值。
-        cm = _CERT_FIELD_RE.search(b)
-        region = _PAREN_RE.sub("", cm.group(1)) if cm else ""
-        certs = [float(x) for x in _CERT_LITERAL_RE.findall(region)]
-        # also read explicit "Certainty: 0.NN" values so an OFF-DOCTRINE certainty
-        # (0.9/0.85/0.7…, off the {1.0,0.8,0.5,0.3} grid) cannot silently slip the
-        # hard artifact gate by failing to match the canonical-literal regex above.
-        # off-grid 兜底: 抓 `Certainty:` 后紧跟的值(含 0.9 这类非网格)。允许一层可选括号
-        # `[\(（]?`, 这样值本身被写进括号(`Certainty: (0.8)`)也能抓到 —— 否则 _PAREN_RE 会把
-        # 它连括号一起剥掉致漏判(复审 S1)。降级写法 `0.5 (原 0.8…)` 仍只抓紧跟的 0.5(不进括号)。
-        certs += [float(x) for x in re.findall(r"certainty\s*[:：]\s*\**\s*[\(（]?\s*(\d\.\d+)", b, re.I)]
-        # artifacts: scoped to the explicit Artifacts: field (fallback: whole block,
-        # for legacy entries with no such field).
-        fm = _ARTIFACT_FIELD_RE.search(b)
-        scope_txt, scoped = (fm.group(1), True) if fm else (b, False)
-        arts: list[str] = []
-        for tok in _ART_TOKEN.findall(scope_txt):
-            t = tok.strip().strip("`\"'").rstrip(").,;:，。）")
-            if t and t not in arts:
-                arts.append(t)
-        present = [a for a in arts if _resolve_artifact(a, run_dir)]
-        missing = [a for a in arts if not _resolve_artifact(a, run_dir)]
-        refutes = _field_ids(b, "Refutes", r"E-\d+")
-        supports = _field_ids(b, "Supports", r"[EHF]-\d+")
-        records.append({
-            "id": eid, "head": head,
-            "certainties": certs, "confirmed": any(c >= 0.8 for c in certs),
-            "has_control": bool(re.search(r"\b(Replicated|Control)\s*[:：]", b)),
-            "artifacts": arts, "artifacts_scoped": scoped,
-            "artifacts_present": present, "artifacts_missing": missing,
-            "supports": sorted(set(supports)), "refutes": sorted(set(refutes)),
-            # refutes_any: block 是否含 Refutes 字段(不论 refute 的是 E/H/F)。漏报一致性门用它
-            # 区分"排除性/negative 结论"(Refutes hypothesis, 如'未发现漏洞')—— 这类不该强制进
-            # report 确认发现; r["refutes"] 只抓 E-\d+ 会漏掉 Refutes H-xxx 的 negative 结论(FP)。
-            "refutes_any": bool(re.search(r"(?im)^\s*[-*]?\s*Refutes\s*[:：]\s*\S", b)),
-            "superseded": bool(re.search(r"superseded|降级|撤回|改判", b, re.I)),
-        })
-    _EVIDENCE_MEMO.update(key=key, records=records)
-    return records
-
-
-def write_evidence_index(run_dir: Path, records: list[dict]) -> None:
-    """Derived sidecar (like graph.json / coverage.json): structured, queryable view
-    of the evidence ledger so tooling/operator need not regex the markdown."""
-    if not records:
-        return
-    confirmed = [r["id"] for r in records if r["confirmed"]]
-    out = {"total": len(records), "confirmed": confirmed,
-           "dangling_citations": {r["id"]: r["artifacts_missing"]
-                                  for r in records if r["artifacts_missing"]},
-           "entries": records}
-    try:
-        (run_dir / "evidence.json").write_text(
-            json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-
 def evidence_entries_missing_artifact(run_dir: Path) -> list[str]:
     """P1 收口护栏: Certainty>=0.8 的证据条目必须引用一个 run 目录下【真实存在】的
     产物文件 —— 把"声称确认但没存盘"挡在收口外。返回缺产物的条目 head 列表(收口硬门→error)。"""
@@ -266,6 +127,47 @@ def check_replay_evidence(run_dir: Path) -> list[str]:
     return warns
 
 
+def _summarize_replay(results: list[dict]) -> list[str]:
+    """把 replay_run 的结果列表汇总成警告行(纯函数, 可离线单测)。DIVERGED=证据存疑升为显著
+    警告(目标可能已改/已修/当时造假); 其余汇总计数。UNREACHABLE 不算失败(够不着≠假)。"""
+    counts: dict = {}
+    diverged: list[str] = []
+    for r in results:
+        v = r.get("verdict", "?")
+        counts[v] = counts.get(v, 0) + 1
+        if v == "DIVERGED":
+            diverged.append(f"{r.get('method','?')} {r.get('url','')} "
+                            f"({r.get('old_status')}→{r.get('new_status')})")
+    warns: list[str] = []
+    if diverged:
+        warns.append("replay 核实 DIVERGED(证据存疑: 目标可能已改/已修/当时造假, driver 须核对内容是否"
+                     "仍是漏洞响应): " + "; ".join(diverged[:8])
+                     + (" …" if len(diverged) > 8 else ""))
+    if counts:
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+        warns.append(f"replay 核实汇总: {summary} "
+                     "(IDENTICAL/CONSISTENT=现实支持; DIVERGED=存疑; UNREACHABLE=够不着≠假; "
+                     "SKIPPED-*=写/破坏性/越界未自动重放, 留人工)")
+    return warns
+
+
+def run_replay_verify(run_dir: Path) -> list[str]:
+    """--replay-verify: 收口前自动重放核实, 把 replay 从孤岛焊进收口闭环(断-1)。调
+    replay.replay_run(走 guard / target.md 授权 scope / 幂等 GET 才重放 / DELETE 永不 /
+    写操作默认 skip)。慢(走实网)+ 默认关、仅显式 flag —— 同 --auto-peer-review 的取舍。"""
+    if _replay is None:
+        return ["replay 核实跳过: 无法加载 replay 模块(同目录 tools/replay.py 缺失?)"]
+    recs = list(run_dir.glob("**/*.replay.json"))
+    if not recs:
+        return ["replay 核实: 本 run 无 .replay.json 录像可重放 —— 传感器加 "
+                "`probe --save NAME --run runs/<dir>` 留录像, 高 certainty 证据才可重放核实。"]
+    try:
+        results = _replay.replay_run(run_dir)
+    except Exception as e:   # 防御: replay 内部异常不该炸掉整个收口检查
+        return [f"replay 核实异常(已捕获, 不影响其余检查): {e}"]
+    return _summarize_replay(results)
+
+
 def check_dangling_citations(run_dir: Path) -> list[str]:
     """悬空引用护栏(警告): 证据条目 Artifacts: 字段里引用了 run 目录下【不存在】的产物
     —— 引用必须可复核。旧逻辑只要块内任一产物存在就放行, 删掉某个被引文件不会报(E-012:
@@ -287,32 +189,36 @@ def check_evidence_certainty(run_dir: Path) -> list[str]:
             for r in parse_evidence(run_dir) if r["confirmed"] and not r["has_control"]]
 
 
-def check_coverage(run_dir: Path) -> list[str]:
-    """前置防 lump 护栏(警告, 每次 check_run 都报, 不只收口). 读 classify_hosts.py 产出的
-    结构化检视台账 coverage.json, 把【独立应用候选】(未识别栈/Spring/Vue-SPA/带 LOGIN·DYN·
-    FRAMEWORK·SPA 标记 的可达资产)逐个列出 —— 这些是【不能只按服务器头 lump 带过】、必须
-    逐个深挖的。lump 当下就暴露(根源: 检视状态是结构化一等台账, 藏不住), 而非收口才发现。"""
-    covs = list(run_dir.glob("**/coverage.json"))
-    if not covs:
-        return []   # 还没跑 classify_hosts -> 由收口闸门的 'no classify.txt' 警告兜
-    try:
-        data = json.loads(covs[0].read_text(encoding="utf-8", errors="replace"))
-    except Exception:
+# 布局漂移(断-2): evidence/ 放传感器证据, classify/ 放 coverage, scripts/ 放 PoC; run 根目录
+# 只该有核心 .md + 自动派生的 evidence.json/coverage.json/graph.json。证据/草稿散落根目录虽仍能被
+# _resolve_artifact 找到(收口门不坏), 但证据与草稿混作一团、不利审计 —— WARN 提醒归位(不硬失败,
+# 历史 run 不受累)。probe/render 加 --run 后裸名/默认产物自动落 evidence/, 正确放法=省事放法。
+_PROOF_SUFFIXES = {".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".js", ".json"}
+_ROOT_OK_FILES = {"evidence.json", "coverage.json", "graph.json"}
+
+
+def _loose_proof_files(run_dir: Path) -> list[str]:
+    """run 根目录下散落的证据/草稿文件名(排除白名单派生 json 与子目录内文件)。纯函数, 可单测。"""
+    loose = [p.name for p in run_dir.iterdir()
+             if p.is_file() and p.name not in _ROOT_OK_FILES
+             and p.suffix.lower() in _PROOF_SUFFIXES]
+    loose.sort()
+    return loose
+
+
+def check_layout_drift(run_dir: Path) -> list[str]:
+    # 只在【收口时】报: 主动验证中根目录有临时产物(试探截图/中间响应)属正常, 每轮唠叨=噪音;
+    # 产出终版报告后还散落一地, 才是真审计问题(同 check_shallow_close 的收口节奏)。
+    if not _report_is_final(run_dir):
         return []
-    total = data.get("total", 0)
-    examined = data.get("examined", 0)
-    reachable = data.get("reachable", 0)
-    candidates = [a for a in data.get("assets", [])
-                  if a.get("reachable") is True
-                  and (a.get("stack") in ("?", "SpringBoot-api", "Vue-SPA") or a.get("flags"))]
-    warns: list[str] = []
-    if candidates:
-        names = ", ".join(a["host"] for a in candidates[:15])
-        warns.append(
-            f"检视覆盖(防lump): 资产 {total} / 已检视内容 {examined} / 可达 {reachable}; "
-            f"【独立应用候选 {len(candidates)} 个】须逐个深挖(勿按服务器头 lump): {names}"
-            + (" …" if len(candidates) > 15 else ""))
-    return warns
+    loose = _loose_proof_files(run_dir)
+    if not loose:
+        return []
+    shown = ", ".join(loose[:10]) + (" …" if len(loose) > 10 else "")
+    return [f"布局漂移(收口): {len(loose)} 个证据/草稿文件散落 run 根目录({shown}) —— "
+            "传感器证据应落 evidence/(probe/render 加 --run 自动归位), PoC 落 scripts/, "
+            "coverage 落 classify/。根目录只留核心 .md + 自动派生的 evidence/coverage/graph.json。"
+            "散落仍可被收口门解析(门不坏), 但证据与草稿混作一团、不利审计。"]
 
 
 def _recon_cited(run_dir: Path) -> str | None:
@@ -338,42 +244,71 @@ def coverage_present(run_dir: Path) -> bool:
     return bool(list(run_dir.glob("**/coverage.json")))
 
 
-def check_coverage_complete(run_dir: Path) -> list[str]:
-    """台账完整性(警告): coverage.json 资产数 vs recon 资产数。覆盖硬门只查 coverage 在不在,
-    不查数量 —— 跑个子集 classify 就能"存在即过"蒙混。这里比对: cov_total 显著少于 recon assets
-    则 WARN(别用子集台账冒充全量)。仅在 recon 路径是可解析 JSON 时生效(report.md 路径则跳过, 不误报)。"""
+def _load_coverage(run_dir: Path) -> tuple:
+    """覆盖三联检的共享输入, 加载一次: (recon值, recon资产数or None, coverage文件在否, coverage数据or None)。
+    recon_n=None 表示 recon 路径非 JSON(如 report.md)或读不到 —— 据此跳过数量比对, 不误报。"""
     recon = _recon_cited(run_dir)
+    recon_n = None
+    if recon:
+        try:
+            assets = json.loads(Path(recon).read_text(encoding="utf-8", errors="replace")).get("assets", [])
+            recon_n = len(assets) if isinstance(assets, list) else 0
+        except Exception:
+            recon_n = None
     covs = list(run_dir.glob("**/coverage.json"))
-    if not recon or not covs:
-        return []
-    try:
-        assets = json.loads(Path(recon).read_text(encoding="utf-8", errors="replace")).get("assets", [])
-        recon_n = len(assets) if isinstance(assets, list) else 0
-        cov_n = json.loads(covs[0].read_text(encoding="utf-8", errors="replace")).get("total", 0)
-    except Exception:
-        return []   # recon 路径非 JSON(如 report.md) / 读不到 -> 跳过, 不误报
-    if recon_n and cov_n < recon_n * 0.8:
-        return [f"台账完整性(防子集蒙混): coverage.json 只 {cov_n} 个资产, recon 有 {recon_n} 个 —— "
+    cov_present = bool(covs)
+    cov = None
+    if covs:
+        try:
+            cov = json.loads(covs[0].read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            cov = None
+    return recon, recon_n, cov_present, cov
+
+
+def check_coverage_health(run_dir: Path) -> list[str]:
+    """覆盖台账三联检(警告, 每轮都报, 不只收口; 输入一次加载)。三类失败各一条, 互不重叠:
+
+    ① 防 lump: coverage.json 里的【独立应用候选】(未识别栈/Spring/Vue-SPA/带标记 的可达资产)
+       逐个列出 —— 不能只按服务器头 lump, 须逐个深挖。lump 当下就暴露(结构化台账藏不住)。
+    ② 台账缺建: target.md 引用了 recon 却无 coverage.json —— 资产清单疑似手工誊录子集(driver
+       选择偏见=盲区), 让防 lump 失明(读不到从没建过的台账)。hamastar 根因即此。
+    ③ 台账完整性: coverage 资产数 << recon 资产数 —— 子集冒充全量, 蒙混"覆盖门只查在不在"。
+
+    收口硬门(check_closure_discipline)另有 recon&&无coverage 的【硬】失败; 此处只软警、每轮提示。"""
+    recon, recon_n, cov_present, cov = _load_coverage(run_dir)
+    warns: list[str] = []
+    # ① 防 lump 候选(需 coverage 已建且可解析)
+    if cov is not None:
+        total = cov.get("total", 0)
+        examined = cov.get("examined", 0)
+        reachable = cov.get("reachable", 0)
+        candidates = [a for a in cov.get("assets", [])
+                      if a.get("reachable") is True
+                      and (a.get("stack") in ("?", "SpringBoot-api", "Vue-SPA") or a.get("flags"))]
+        if candidates:
+            names = ", ".join(a["host"] for a in candidates[:15])
+            warns.append(
+                f"检视覆盖(防lump): 资产 {total} / 已检视内容 {examined} / 可达 {reachable}; "
+                f"【独立应用候选 {len(candidates)} 个】须逐个深挖(勿按服务器头 lump): {names}"
+                + (" …" if len(candidates) > 15 else ""))
+    # ② 台账缺建(引用 recon 却无 coverage 文件 —— 用文件在否, 不看可解析性)
+    if recon and not cov_present:
+        warns.append(
+            f"覆盖台账缺建: target.md 引用了 recon 情报({recon[:60]}) 却无 coverage.json "
+            "—— 资产清单疑似手工誊录的子集(driver 选择偏见 = run 的盲区)。跑 "
+            "`python tools/ingest_recon.py <recon.json>` 折全量资产 + `python tools/"
+            "classify_hosts.py <recon.json> --out runs/<t>/classify` 建结构化台账; "
+            "防 lump 护栏没有它就失明, 漏挖不会被发现。")
+    # ③ 台账完整性(coverage 是 recon 的子集; 仅 recon 可解析为 JSON 时生效)
+    if recon and cov is not None and recon_n:
+        cov_n = cov.get("total", 0)
+        if cov_n < recon_n * 0.8:
+            warns.append(
+                f"台账完整性(防子集蒙混): coverage.json 只 {cov_n} 个资产, recon 有 {recon_n} 个 —— "
                 "台账疑似子集(只 classify 了一部分), 覆盖门会被【存在即过】蒙混。对全量 recon 跑 "
-                "classify_hosts(别用子集台账冒充全量), 漏挖才不会藏在没 classify 的资产里。"]
-    return []
-
-
-def check_coverage_built(run_dir: Path) -> list[str]:
-    """覆盖台账缺建护栏(警告, 每次都报). 若 target.md 引用了 recon/OSINT 情报却无
-    coverage.json(classify_hosts.py 的产出) —— 说明资产清单很可能是【手工誊录的子集】,
-    而非把 recon 全量折成结构化台账。手工誊录把 driver 的选择偏见当成 run 的事实地面,
-    让防 lump 护栏(check_coverage)失明(它读不到从没建过的台账)。这正是 hamastar run
-    的根因: 引用了 recon.json 却从没跑 ingest_recon / classify_hosts, 30+ 资产从未被
-    台账记录, 收口闸门因此对漏挖完全沉默。"""
-    recon = _recon_cited(run_dir)
-    if recon and not coverage_present(run_dir):
-        return [f"覆盖台账缺建: target.md 引用了 recon 情报({recon[:60]}) 却无 coverage.json "
-                "—— 资产清单疑似手工誊录的子集(driver 选择偏见 = run 的盲区)。跑 "
-                "`python tools/ingest_recon.py <recon.json>` 折全量资产 + `python tools/"
-                "classify_hosts.py <recon.json> --out runs/<t>/classify` 建结构化台账; "
-                "防 lump 护栏没有它就失明, 漏挖不会被发现。"]
-    return []
+                "classify_hosts(别用子集台账冒充全量), 漏挖才不会藏在没 classify 的资产里。")
+    return warns
 
 
 def _report_is_final(run_dir: Path) -> bool:
@@ -778,12 +713,13 @@ def _selftest() -> int:
     (d2 / "target.md").write_text(
         "# Target\n- Existing intel / recon report: /path/recon.json\n", encoding="utf-8")
     (d2 / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
-    cov_warn_before = check_coverage_built(d2)
+    _built = lambda rd: [w for w in check_coverage_health(rd) if "覆盖台账缺建" in w]  # ② 缺建子警
+    cov_warn_before = _built(d2)
     final_before = _report_is_final(d2)
     cerr_before, _ = check_closure_discipline(d2)
     (d2 / "coverage.json").write_text(
         '{"total":1,"examined":1,"reachable":1,"assets":[]}', encoding="utf-8")
-    cov_warn_after = check_coverage_built(d2)
+    cov_warn_after = _built(d2)
     cerr_after, _ = check_closure_discipline(d2)
     # control: no recon cited -> no coverage gate (avoid FP on operator-given targets)
     d3 = Path(tempfile.mkdtemp())
@@ -794,7 +730,7 @@ def _selftest() -> int:
         ("final report + no coverage -> closure HARD error", any("覆盖台账" in e for e in cerr_before)),
         ("coverage built -> coverage warn clears", cov_warn_after == []),
         ("coverage built -> closure coverage error clears", not any("覆盖台账" in e for e in cerr_after)),
-        ("no recon cited -> no coverage gate (no FP)", check_coverage_built(d3) == [] and _recon_cited(d3) is None),
+        ("no recon cited -> no coverage gate (no FP)", _built(d3) == [] and _recon_cited(d3) is None),
     ]
 
     # --- 纵深护栏 (check_shallow_close) + recon 占位排除 (P0-3) ---
@@ -848,20 +784,21 @@ def _selftest() -> int:
         ("Fingerprints only in comment -> hard error (S2)", any("收口硬门(指纹入库)" in e for e in fp_err_s2)),
     ]
 
-    # --- 台账完整性门 (check_coverage_complete, 任务8) ---
+    # --- 台账完整性 (check_coverage_health ③ 子警, 任务8 + 任务#4 合并) ---
+    _complete = lambda rd: [w for w in check_coverage_health(rd) if "台账完整性" in w]  # ③ 子集蒙混
     d7 = Path(tempfile.mkdtemp())
     recon_j = d7 / "recon.json"
     recon_j.write_text(json.dumps({"assets": [{"host": f"h{i}"} for i in range(100)]}), encoding="utf-8")
     (d7 / "target.md").write_text(
         f"# Target\n- Existing intel / recon report: {recon_j}\n", encoding="utf-8")
     (d7 / "coverage.json").write_text(json.dumps({"total": 50, "assets": []}), encoding="utf-8")
-    cc_subset = check_coverage_complete(d7)
+    cc_subset = _complete(d7)
     (d7 / "coverage.json").write_text(json.dumps({"total": 95, "assets": []}), encoding="utf-8")
-    cc_full = check_coverage_complete(d7)
+    cc_full = _complete(d7)
     d8b = Path(tempfile.mkdtemp())
     (d8b / "target.md").write_text("# Target\n- Existing intel / recon report: /x/report.md\n", encoding="utf-8")
     (d8b / "coverage.json").write_text(json.dumps({"total": 1, "assets": []}), encoding="utf-8")
-    cc_nonjson = check_coverage_complete(d8b)
+    cc_nonjson = _complete(d8b)
     checks += [
         ("coverage subset (50/100) -> warn", bool(cc_subset)),
         ("coverage full (95/100) -> no warn", cc_full == []),
@@ -945,6 +882,55 @@ def _selftest() -> int:
         ("录像软警: negative 不提示 E-302", not any("E-302" in w for w in rep_w)),
     ]
 
+    # 布局漂移(断-2): 检测逻辑(纯函数)+ 收口门控(只在终版报告产出后才报)
+    d13 = d / "drift_20260101"
+    (d13 / "evidence").mkdir(parents=True)
+    (d13 / "ev_loose.html").write_text("x", encoding="utf-8")           # 散落证据
+    (d13 / "shot.png").write_text("x", encoding="utf-8")                # 散落截图
+    (d13 / "evidence.json").write_text("{}", encoding="utf-8")          # 派生, 白名单
+    (d13 / "coverage.json").write_text("{}", encoding="utf-8")          # 白名单
+    (d13 / "evidence" / "clean.html").write_text("x", encoding="utf-8")  # 已归位, 不算
+    loose = _loose_proof_files(d13)
+    checks += [
+        ("布局漂移检测: 抓到散落 ev_loose.html/shot.png", "ev_loose.html" in loose and "shot.png" in loose),
+        ("布局漂移检测: 不误报白名单 evidence.json/coverage.json", "evidence.json" not in loose and "coverage.json" not in loose),
+        ("布局漂移检测: evidence/ 子目录内文件不算散落", "clean.html" not in loose),
+        # 收口门控: 无终版报告 -> 静默(主动验证期不唠叨)
+        ("布局漂移: 无终版报告时静默(降噪)", check_layout_drift(d13) == []),
+    ]
+    # 给 d13 补一个引用确认发现的终版报告 -> 此时才该报
+    (d13 / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-900\n- Replicated: yes\n- Artifacts: `evidence/clean.html`\n- Certainty: 1.0\n",
+        encoding="utf-8")
+    (d13 / "report.md").write_text("# Report\nEvidence IDs: E-900\n", encoding="utf-8")
+    drift_w = check_layout_drift(d13)
+    checks.append(("布局漂移: 终版报告产出后散落 -> WARN", bool(drift_w) and "ev_loose.html" in drift_w[0]))
+    # 终版报告但根目录干净(证据都在 evidence/) -> 仍静默
+    d14 = d / "clean_20260101"
+    (d14 / "evidence").mkdir(parents=True)
+    (d14 / "evidence" / "ok.html").write_text("x", encoding="utf-8")
+    (d14 / "graph.json").write_text("{}", encoding="utf-8")
+    (d14 / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-901\n- Replicated: yes\n- Artifacts: `evidence/ok.html`\n- Certainty: 1.0\n",
+        encoding="utf-8")
+    (d14 / "report.md").write_text("# Report\nEvidence IDs: E-901\n", encoding="utf-8")
+    checks.append(("布局漂移: 收口且根目录干净 -> 静默", check_layout_drift(d14) == []))
+
+    # 断-1 replay 接入: _summarize_replay 汇总逻辑(纯函数, 离线; 实网重放走 --replay-verify 不在此测)
+    rv = _summarize_replay([
+        {"verdict": "IDENTICAL", "method": "GET", "url": "http://x/a"},
+        {"verdict": "DIVERGED", "method": "GET", "url": "http://x/b", "old_status": 200, "new_status": 404},
+        {"verdict": "SKIPPED-WRITE", "method": "POST", "url": "http://x/c"},
+    ])
+    rv_text = "\n".join(rv)
+    checks += [
+        ("replay 汇总: DIVERGED 升显著警告", any("DIVERGED" in w and "http://x/b" in w for w in rv)),
+        ("replay 汇总: 含计数汇总行", "IDENTICAL=1" in rv_text and "SKIPPED-WRITE=1" in rv_text),
+        ("replay 汇总: 全 IDENTICAL 无 DIVERGED 警告",
+         not any("证据存疑" in w for w in _summarize_replay([{"verdict": "IDENTICAL", "method": "GET", "url": "http://x/a"}]))),
+        ("replay 汇总: 空结果 -> 空", _summarize_replay([]) == []),
+    ]
+
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -994,6 +980,10 @@ def main() -> int:
                         help="收口时若 review.md 缺独立复审记录, 自动跑 tools/peer_review.py "
                              "(异构后端 Codex>DeepSeek/GLM>Claude, 慢/数据出境)写进 review.md "
                              "满足独立复审硬门。幂等(有记录不重跑)、默认关、selftest 不触发")
+    parser.add_argument("--replay-verify", action="store_true",
+                        help="收口前自动重放核实: 对 .replay.json 录像跑 replay_run(走 guard / "
+                             "target.md 授权 scope / 幂等 GET 才重放 / DELETE 永不 / 写操作默认 skip), "
+                             "DIVERGED=证据存疑升警告。走实网, 默认关、仅显式 flag、selftest 不触发")
     args = parser.parse_args()
     if args.selftest:
         return _selftest()
@@ -1031,9 +1021,8 @@ def main() -> int:
     warnings = check_evidence_certainty(run_dir)
     warnings.extend(check_dangling_citations(run_dir))  # 死引用(E-012 洞): 逐条报
     warnings.extend(check_replay_evidence(run_dir))    # 操作录像: certainty>=0.8 确认建议附 .replay.json(可重放核实)
-    warnings.extend(check_coverage(run_dir))          # 前置防 lump: 每次都报独立应用候选
-    warnings.extend(check_coverage_built(run_dir))    # 覆盖台账缺建: 引用 recon 却无 coverage.json(每轮都报, 不靠收口自首)
-    warnings.extend(check_coverage_complete(run_dir))  # 台账完整性: coverage 数量 vs recon, 防子集冒充全量
+    warnings.extend(check_layout_drift(run_dir))       # 布局漂移: 证据/草稿散落 run 根目录(应归位 evidence/scripts/classify)
+    warnings.extend(check_coverage_health(run_dir))   # 覆盖台账三联检(防 lump / 缺建 / 子集蒙混; 输入一次加载)
     warnings.extend(check_shallow_close(run_dir))     # 纵深: 高价值前沿 depth=shallow 关闭却无 Vectors tried
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
@@ -1044,6 +1033,10 @@ def main() -> int:
     # 满足下面的独立复审硬门。慢(几分钟)+数据出境, 默认关、仅显式 flag; selftest 不走这。
     if args.auto_peer_review:
         _maybe_auto_peer_review(run_dir)
+    # --replay-verify(断-1): 收口前自动重放核实 .replay.json 录像, 把 replay 焊进收口闭环。
+    # 走实网(慢)+ 默认关、仅显式 flag; selftest 不走这(汇总逻辑 _summarize_replay 单独离线测)。
+    if args.replay_verify:
+        warnings.extend(run_replay_verify(run_dir))
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
     errors.extend(closure_errors)

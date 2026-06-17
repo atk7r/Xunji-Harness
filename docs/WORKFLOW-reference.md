@@ -5,6 +5,38 @@ holds the full file templates, the derived state graph, parallel fan-out, the
 detailed evidence/closure mechanics, and the safety-critical-code review gate. Read
 the relevant section when you write that run file or hit that gate — not every cycle.
 
+## Run directory layout (canonical)
+
+One place for each kind of artifact, so a run stays auditable and the closure gate
+never has to guess. `tools/setup_run.py` scaffolds it; the sensors default into it.
+
+```text
+runs/<slug>_<date>/
+  <core .md>        target · surface · frontier · hypotheses · evidence ·
+                    false_positive · decisions · review · report
+  evidence.json     auto-derived index of evidence.md (check_run writes it)
+  graph.json        derived state graph (graph.py writes it)
+  evidence/         sensor proof artifacts: *.html, *.replay.json, render_<host>/, screenshots
+  classify/         classify_hosts output: coverage.json + per-host bodies
+  scripts/          PoC / helper scripts (author-and-handoff)
+  chains.md · hints.md · alerts.md   conditional (created only when they apply)
+```
+
+Keep the run **root** to the core `.md` files plus the auto-derived
+`evidence.json` / `coverage.json` / `graph.json`. Proof artifacts belong under
+`evidence/`, PoC under `scripts/`, coverage under `classify/`. To make the right
+place the easy place: `probe --save NAME --run runs/<dir>` drops the body **and** its
+`.replay.json` into `<run>/evidence/`; `render --run runs/<dir>` defaults its output
+to `<run>/evidence/render_<host>/`. The closure gate still resolves a cited artifact
+wherever it sits (it is layout-tolerant), but `check_run.py` **warns on layout
+drift at closure** — proof/scratch files left loose in the run root once a final
+report exists — because mixing evidence with scratch is what makes a run hard to
+audit (the original break-2 finding: `scshr` dumped 33 `ev_*.html` in the root,
+`cqytxy` 21 scratch files). The warn is **closure-gated** (silent during active
+verification, where mid-flight scratch in the root is normal — same cadence as
+`check_shallow_close`) and never hard-fails, so legacy runs are not punished; it
+just nudges you to tidy before the report is final.
+
 ## File Templates
 
 ### target.md — engagement boundary
@@ -142,6 +174,7 @@ Type B reasoning.
 - Alternative explanation:
 - Certainty: 0.3 / 0.5 / 0.8 / 1.0
 - Replicated / Control: (conditional — required when Certainty >= 0.8)
+- Artifacts: (conditional — required when Certainty >= 0.8; the saved file/dir that proves it, e.g. `evidence/foo.html`. check_run hard-fails a confirmed entry with none. `probe --save NAME --run runs/<dir>`.)
 - Supports:
 - Refutes:
 - Unlocks: (conditional — the F-id this confirmed fact makes actionable, satisfying that front's precondition. The 组合利用 edge; omit when it unlocks nothing.)
@@ -170,6 +203,19 @@ after the structural gate passed: a `1.0` DOM-XSS whose only saved file was a
 redirect-to-login page, and `1.0` blind-SQLi / CSRF conclusions never saved at all.)
 `tools/check_run.py` warns on a missing control and **hard-fails the closure gate**
 on a missing artifact.
+
+**Replay-verify the evidence (close the trust loop).** A saved `*.html` proves a
+response existed; a `.replay.json` (written automatically by `probe --save`) proves
+*what request produced it*, so the claim can be re-checked against the live target
+instead of taken on faith. At closure run `python tools/check_run.py runs/<dir>
+--replay-verify`: it replays each `.replay.json` through the guard (idempotent `GET`
+only — `POST`/`PUT` need `--force`, `DELETE` is never replayed; host must be in
+`target.md` In-scope). A `DIVERGED` verdict (status changed) means the evidence no
+longer matches reality — the target was fixed/changed, or the finding was shaky —
+and the driver must re-adjudicate before reporting it. `UNREACHABLE` is not a failure
+(can't-reach ≠ false). It is opt-in (live traffic, slow) and advisory, never a hard
+gate: a target legitimately changing between probe and closure is not the run's fault.
+Standalone `python tools/replay.py runs/<dir>` does the same outside the gate.
 
 ### false_positive.md — make the hunter phase explicit
 
@@ -379,7 +425,9 @@ framework code** — the machinery that decides what is allowed or destructive:
 - `tools/harness/guard.py` (rate / volume / auth / body / circuit breakers)
 - `sentinel/` (behavior classification + autonomy decision + circuit breaker)
 
-**Before declaring a behavior change to any of the above "done", spawn an
+**Before declaring a behavior change to any of the above "done", first run the
+whole regression battery in one shot — `python tools/selftest_all.py` (every
+tool / hook / sentinel selftest; green is the floor, not the goal) — then spawn an
 independent `general-purpose` reviewer** (fresh context, per
 `review/independent-reviewer.md`, pointed at the changed files + commits) and
 **record its findings + your disposition of each in `review/records/<date>-<topic>.md`.**

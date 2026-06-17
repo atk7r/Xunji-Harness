@@ -271,11 +271,27 @@ def _selftest() -> int:
                        fr.get("status") == 200 and "ApplicationCookie" not in "\n".join(fr.get("set_cookies", []))))
     finally:
         srv.shutdown()
+    # 统一布局 _place_save: 裸文件名 + --run -> <run>/evidence/; 显式路径/无 --run 原样
+    ps_bare = _place_save("ev_x.html", "runs/t_20260101")
+    checks.append(("--run + 裸名 -> <run>/evidence/", Path(ps_bare) == Path("runs/t_20260101/evidence/ev_x.html")))
+    checks.append(("--run + 显式路径 -> 原样尊重", _place_save("sub/ev.html", "runs/t") == "sub/ev.html"))
+    checks.append(("无 --run -> 原样", _place_save("ev.html", None) == "ev.html"))
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
     print("probe selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
     return 0 if not bad else 1
+
+
+def _place_save(save: str | None, run: str | None) -> str | None:
+    """统一布局: --run 给定且 --save 是【裸文件名】(无路径分隔)时, 产物落到 <run>/evidence/
+    —— 录像 .replay.json 写在 save 旁, 自动一并跟随。--save 已带路径分隔则原样尊重
+    (显式路径优先, 向后兼容)。专治证据散落 run 根目录、与草稿混作一团(断-2)。"""
+    if not save or not run:
+        return save
+    if ("/" in save) or ("\\" in save):
+        return save
+    return str(Path(run) / "evidence" / save)
 
 
 def main() -> int:
@@ -292,6 +308,9 @@ def main() -> int:
     ap.add_argument("--tag", default=None, help="label recorded with the result")
     ap.add_argument("--save", default=None,
                     help="write the guard-capped response body to this file")
+    ap.add_argument("--run", default=None,
+                    help="run 目录 runs/<dir>; 给了它且 --save 是裸文件名时, 产物落到 "
+                         "<run>/evidence/(统一布局, 防散落根目录; 录像 .replay.json 一并跟随)")
     ap.add_argument("--proxy", default=None,
                     help="代理(http://h:p / socks5://h:p)；解锁境内资产经中继。"
                          "未给则读环境变量 HTTPS_PROXY/ALL_PROXY")
@@ -311,6 +330,8 @@ def main() -> int:
         return _selftest()
     if not args.method or not args.url:
         ap.error("method and url are required (or use --selftest)")
+
+    args.save = _place_save(args.save, args.run)   # 统一布局: --run 时裸文件名 -> <run>/evidence/
 
     global _PROXY
     _PROXY = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY")

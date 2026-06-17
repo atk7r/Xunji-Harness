@@ -45,11 +45,26 @@ hypothesis in an observed fact, not in speculation.
   the open. A known starting point removes ambiguity and is where current models
   are strongest. (This is knowledge-and-reasoning, not a payload library or a
   fixed checklist — derive the specific check from the specific technology.)
+- The grounding base **is** where those weak-point anchors live — consult it on a
+  fingerprint hit, do not re-derive a known stack from memory. When an observation
+  grounds a product (or `classify_hosts` tags an asset `kb:<id>`), retrieve the
+  entry: `python tools/knowledge_match.py --body <saved-response>` surfaces its
+  Recognition + Weak-Point Anchors (class + mechanism + CVE) to aim the next
+  per-target check, and `python tools/xday_match.py --body …` checks whether a
+  stored **local** exploit exists for that stack (xday has no public payload to
+  research — the local copy is the only source; for a public vuln, take the anchor
+  and craft from internet research instead). Consult **after** a live recognition
+  match and adapt to the target — never pre-load the base and walk it as a checklist
+  (that is the blind scanner the project rejects).
 - Keep reasoning tied to observable behavior. When a step's result is ambiguous,
   get one more grounding observation before believing it, rather than reasoning
   further on an unverified premise.
 
 ## Evidence Confidence
+
+This table is the **canonical** certainty scale for the whole project. Other files
+(`CLAUDE.md`, `docs/WORKFLOW.md`, templates) cite the `>= 0.8` threshold but must
+not restate or redefine the levels — change them here, in one place.
 
 | Certainty | Meaning | Allowed conclusion |
 | --- | --- | --- |

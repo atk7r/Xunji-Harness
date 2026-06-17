@@ -141,6 +141,13 @@ over-digging the Reviewer failure budget exists to catch. A scan or other
 recon tool is sensor input that feeds this gate; it is never the front-selection
 decision itself.
 
+Once an observation **grounds a product fingerprint** (or `classify_hosts` tagged the
+asset `kb:<id>`), retrieve that stack from the grounding base before crafting the next
+check — `tools/knowledge_match.py --body` for its weak-point anchors + CVE leads, and
+`tools/xday_match.py --body` for any stored local exploit (the variant-analysis
+read-side, cognition "Grounding and Variant Analysis"). Consult on the hit and adapt
+per-target; never pre-load the base as a checklist.
+
 ### Hunter
 
 Use when judging a signal or evidence item.
@@ -234,7 +241,9 @@ files carry the required fields. It does not certify the findings.
 Project-discipline and run-structure checks live in `tools/`:
 
 - `python tools/check_run.py runs/<dir>` — the run carries all required files
-  and markers (run it at Reviewer and before Report).
+  and markers (run it at Reviewer and before Report). Add `--replay-verify` at
+  closure to re-check `.replay.json` evidence against the live target (idempotent
+  GET only, guard-routed, In-scope only; `DIVERGED` = re-adjudicate).
 - `python tools/check_rules.py` — repository ARCHITECTURE-drift guard (no legacy
   orchestrator/playbook dirs or refs, required doctrine files present). It does NOT
   police weapons: exp/poc/scanner code is method and is free to live in the repo
@@ -242,9 +251,32 @@ Project-discipline and run-structure checks live in `tools/`:
   by effect at runtime by `.claude/hooks/safety_gate.py`, not by filename here.
 - `python tools/check_hook.py` — the safety hook actually denies blocked
   commands and stays silent on allowed ones.
+- `python tools/selftest_all.py` — aggregate runner: every tool / hook / sentinel
+  selftest in one shot, one green/red scorecard. Run it before declaring a
+  safety-critical change done (the floor before the independent review).
+- `python tools/bench.py score <run> <truth.json>` — R-1 self-eval scorer: grade a
+  finished run against a fixture's ground truth (detection / calibration / false-pos /
+  budget). Measures the driver, never drives. Fixtures live in `bench/` (benign
+  known-vuln targets only, never real engagements). Use it to A/B a framework change.
 - `python tools/check_knowledge.py` — the grounding knowledge base keeps its
   structure and stays grounding (no payload/exploit/step fields; every anchor
   carries a reference and source). Run after editing `knowledge/`.
+- `python tools/knowledge_match.py --body <saved-resp>` (or `--id <id>` from a
+  `kb:<id>` classify tag) — the fingerprint flywheel's **retrieval end**: matches a
+  target's content against the grounding base's `signatures:` and surfaces the
+  matched entry's Recognition + Weak-Point Anchors (class + mechanism + CVE) to
+  drive the next per-target check. Reads the **public grounding tier only** (never
+  `weaponized/`); recognition + anchors, never payloads. Consult on a fingerprint
+  hit — not a blind pre-load.
+- `python tools/xday_match.py --body <saved-resp>` (or `--id <id>`) — the **xday
+  retrieval end** (mirror of `knowledge_match`): same signature match, but reads the
+  **local, gitignored** weaponized/xday tiers (`knowledge/weaponized/` +
+  `poc_library/xday/`) and surfaces the stored exploit path + chain for a matched
+  stack. For **xday there is no public payload to research online** — the local copy
+  is the only source, so this retrieval is where it earns its keep (public vulns:
+  use `knowledge_match` anchors + craft from the internet instead). Match-gated
+  (needs a live `--body` hit or explicit `--id`); `--list` inventories without
+  dumping payloads. Local-only behavior; the stores never ship.
 - `python tools/setup_run.py <slug> [recon.json]` — Setup-phase ONE-SHOT: build the
   run dir from templates (+ `evidence/`/`scripts/` subdirs), fold the recon via
   ingest_recon into `surface_recon.md`, record the recon path in `target.md`;
@@ -286,7 +318,9 @@ These tools verify structure and discipline only. They never replace the
 evidence gate or autonomous judgement.
 
 Active-verification tools (`probe.py` / `render.py` / `scan.py`, all guard-routed)
-are sensors, not gates. `scan.py` (sqlmap/nuclei) is **opt-in when a front is
+are sensors, not gates. Pass `--run runs/<dir>` so saved artifacts land in
+`<run>/evidence/` (canonical layout, reference "Run directory layout"); `check_run`
+warns on proof/scratch left loose in the run root. `scan.py` (sqlmap/nuclei) is **opt-in when a front is
 already grounded and you want cheap breadth** — its output is a ≤0.5 lead that
 Hunter discipline still adjudicates, never a verdict, and never the front-selection
 decision. Skipping it for a manual, controlled probe (e.g. under a noisy WAF) is a

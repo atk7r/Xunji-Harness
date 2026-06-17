@@ -181,6 +181,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("url")
     ap.add_argument("--out", default=None, help="artifact dir (default tmp/render/<host>)")
+    ap.add_argument("--run", default=None,
+                    help="run 目录 runs/<dir>; 未给 --out 时产物默认落 <run>/evidence/render_<host>/"
+                         "(统一布局, 防散落根目录)")
     ap.add_argument("--wait", default="networkidle",
                     choices=["load", "domcontentloaded", "networkidle"])
     ap.add_argument("--timeout", type=int, default=30000)
@@ -202,7 +205,12 @@ def main() -> int:
     PROXY = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY")
 
     host = urlparse(args.url).hostname or "page"
-    out_dir = Path(args.out) if args.out else Path("tmp") / "render" / host
+    if args.out:
+        out_dir = Path(args.out)
+    elif args.run:
+        out_dir = Path(args.run) / "evidence" / f"render_{host}"   # 统一布局
+    else:
+        out_dir = Path("tmp") / "render" / host
     cookies = build_cookies(args.url, args.cookie, args.cookies_file)
     try:
         res = render(args.url, out_dir, args.wait, args.timeout, cookies)

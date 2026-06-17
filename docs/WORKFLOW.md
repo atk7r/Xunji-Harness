@@ -62,6 +62,14 @@ When a finding **confirms**, ask: does its proven output state satisfy another
 finding's precondition? If so that is a chain edge (组合利用) — open a front and
 record it in `chains.md` (conditional; skip when no edge).
 
+When an observation **grounds a product fingerprint** (or `classify_hosts` tags an
+asset `kb:<id>`), consult the grounding base for that stack **before** crafting the
+next probe — do not re-derive a known stack's weak points from memory:
+`tools/knowledge_match.py --body <saved-response>` for its weak-point anchors (+ CVE
+leads), `tools/xday_match.py --body …` for any stored **local** exploit. Consult on
+the hit and adapt per-target — not a pre-loaded checklist (cognition "Grounding and
+Variant Analysis").
+
 ## Ingest Existing Intelligence First
 
 If a recon / OSINT / asset report exists, ingest it before probing: fold its
@@ -98,17 +106,18 @@ collapse back to: stop.
 
 ## Evidence Gate
 
-Certainty: `1.0` direct/reproducible · `0.8` stable controlled difference ·
-`0.5` suspicious without baseline/replay/impact · `0.3` clue / one-sided / inference
-/ timeout / redirect / block page / noise. Only `>= 0.8` may be reported confirmed.
+Only `certainty >= 0.8` may be reported confirmed. The four-level scale + meanings
+is the canonical table in `docs/cognition/README.md` "Evidence Confidence" (always
+loaded) — not restated here, to keep one source of truth.
 
-A `>= 0.8` entry **requires** a `Replicated:` or `Control:` field **and** must cite
-a **saved artifact** that exists and is non-empty under the run dir (a `--save`d
+A `>= 0.8` entry **requires** a `Replicated:` or `Control:` field **and** a cited
+**saved artifact** that exists and is non-empty under the run dir (a `--save`d
 `*.html` / `*.json`, a `render_*/` dir, a screenshot). `tools/check_run.py`
-hard-fails the closure gate on any `>= 0.8` entry missing the control or the
-artifact. (Both holes were caught by real independent reviews — a `1.0` whose only
-saved file was a login redirect; conclusions claimed but never saved.) Rationale +
-the `evidence.md` template: reference.
+**hard-fails** the closure gate on a `>= 0.8` entry missing the artifact, and
+**warns** on one missing the control/replication (which the evidence-gate
+definition then says to downgrade). (Both holes were caught by real independent
+reviews — a `1.0` whose only saved file was a login redirect; conclusions claimed
+but never saved.) Rationale + the `evidence.md` template: reference.
 
 ## Operator Hints (`hints.md`, conditional)
 

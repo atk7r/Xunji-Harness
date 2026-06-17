@@ -115,16 +115,10 @@ Discovery may be creative. Confirmation must be evidence-bound.
 
 ## Evidence Gate
 
-Use `certainty` as the confirmation gate:
-
-- `1.0`: direct, reproducible, boundary-clear evidence.
-- `0.8`: stable controlled difference with enough replay or comparison to rule
-  out normal explanations.
-- `0.5`: suspicious signal without enough baseline, replay, or impact.
-- `0.3`: page clue, one-sided observation, model inference, redirect, block
-  page, timeout, environmental noise, or unverified content.
-
-Only `certainty >= 0.8` may be reported as confirmed.
+`certainty` is the confirmation gate. Only `certainty >= 0.8` may be reported as
+confirmed. The four-level scale and what each level means is the **canonical table
+in `docs/cognition/README.md` "Evidence Confidence"** (always loaded) — do not
+restate or redefine the levels here.
 
 Single observations, environment-provided artifacts, block pages, redirects,
 and model confidence alone are never confirmation. If a signal may have existed
