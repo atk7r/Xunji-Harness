@@ -6,6 +6,7 @@ aliases: [AIS, SoarCloud HR, 飛騰雲端, scshr, eServices]
 category: saas-hr
 last_reviewed: 2026-06-15
 maturity: seed
+signatures: ["ais.webform.js", "__logincompanyid", "伺服端資訊", "eservices.styles.css"]
 ---
 
 <!--

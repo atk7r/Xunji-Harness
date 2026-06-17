@@ -6,6 +6,7 @@
 - Severity candidate:
 - Affected asset:
 - Evidence IDs:
+- Fingerprints captured:   (识别的产品指纹是否入库: '<产品> → knowledge/<id>.md'; 或 "无新指纹")
 
 ## Impact
 

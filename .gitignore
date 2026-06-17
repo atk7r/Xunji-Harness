@@ -43,3 +43,10 @@ tools/_docx_fmt_config.json
 
 # active-tool runtime state
 tools/harness/.state/
+
+# Editor / AI-tool session stores & on-demand OCR resources — local drift, NOT
+# Xunji project structure. .kunsdd = an AI-coding tool's chat/thread store;
+# tessdata = tesseract OCR data the captcha-solve skill loads on demand (large
+# binary, re-downloadable, never belongs in the repo).
+.kunsdd/
+tessdata/

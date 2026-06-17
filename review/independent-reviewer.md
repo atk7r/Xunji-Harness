@@ -25,6 +25,23 @@ finding** — re-examine, reopen, or downgrade — before claiming the work is d
 `check_run.py` **hard-fails** a closure claim that has no `Independent Review`
 record — this is a gate, not a suggestion: you cannot mark the run closed without it.
 
+### 自动化: 异构后端 (tools/peer_review.py)
+
+"另一个模型"这条(独立性最强)已做成可接入模块 `tools/peer_review.py`:
+`review("runs/<target>", out_file="review/records/<date>-<target>.md")`，或 CLI
+`python tools/peer_review.py runs/<target> --out review/records/<...>.md`。后端优先级
+**Codex > DeepSeek/GLM > Claude 自家兜底** —— 异构厂商和 Claude 盲区正交才真补盲(A2),
+Claude 自家只减 bias 不减盲区故仅兜底。产出是**候选非裁决**: driver 仍唯一整合者过证据门
+(不盲从工具/语境误报, 不忽视真盲补)。实测 Codex 逮到 driver + check_run 都漏的满分 CRITICAL
+漏报(见 `review/records/2026-06-17-hamastar-codex-peer-review.md`，并据此补了 check_run 的
+"漏报一致性"硬门)。**数据出境**: API 后端把 run 内容发外部厂商, 仅操作者接受时用。
+
+**收口自动触发**: `python tools/check_run.py runs/<t> --auto-peer-review` —— 收口时若
+review.md 缺独立复审记录, 自动跑 peer_review 写进 review.md 满足本硬门。默认关(慢/数据出境)、
+幂等(有记录不重跑)、selftest 不触发。**只用异构后端满足门**: 落到同族 Claude
+(`heterogeneous=False`)时返回 NEEDS_DRIVER、不写记录、门仍拦 —— 同族自审减 bias 不减盲区(A2),
+不算异构独立复审。
+
 ## Reviewer prompt (copy, fill `<target>`)
 
 ```

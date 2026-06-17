@@ -126,11 +126,13 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         print(sb_warn, file=sys.stderr)
 
     body, truncated = cap_body(raw)
+    _full_sha1 = hashlib.sha1(raw).hexdigest()
     summary.update({
         "status": status,
         "len": len(raw),
         "truncated": truncated,
-        "sha1": hashlib.sha1(raw).hexdigest()[:12],
+        "sha1": _full_sha1[:12],
+        "sha1_full": _full_sha1,            # 全 sha1: replay 比对整完整性(不削成 48-bit)
         "ctype": resp_headers.get("Content-Type", ""),
         "server": resp_headers.get("Server", ""),
         "snippet": body[:240].decode("utf-8", "replace"),
@@ -149,6 +151,27 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         Path(save).write_bytes(body)
         summary["saved"] = save
         summary["saved_bytes"] = len(body)
+        # 操作录像(.replay.json): 完整请求 + 响应摘要, 让 certainty>=0.8 的证据可被【重放核实】而非
+        # 只信描述(B1: 把造假从"P 张图"抬到"伪造自洽的请求+响应+sha1")。响应只存摘要(status/全
+        # sha1/len/headers/snippet) —— 全 body 已在 saved 文件, 不重复 dump(守模块"never dumps"原则)。
+        replay = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "request": {"method": method.upper(), "url": url,
+                        "headers": dict(headers),   # 存完整(含 Cookie/Authorization): 重放认证请求需原值;
+                        "body": data.decode("utf-8", "replace") if data else None},  # 目标非机密(能上云=不机密), 不脱敏
+            "response": {"status": status, "len": len(raw),
+                         "sha1": hashlib.sha1(raw).hexdigest(),
+                         "ctype": resp_headers.get("Content-Type", ""),
+                         "headers": resp_headers,   # 完整响应头(含 Set-Cookie), 供重放/核对
+                         "snippet": body[:240].decode("utf-8", "replace")},
+            "saved_body": save,
+        }
+        # 文件名【追加】.replay.json(不用 with_suffix: 它替换最后扩展名 -> a.html/a.txt 都成
+        # a.replay.json 互相覆盖、x.tar.gz 丢 .gz —— dogfood 第5次 WARN)。追加保证唯一对应。
+        replay_path = save + ".replay.json"
+        Path(replay_path).write_text(json.dumps(replay, ensure_ascii=False, indent=2),
+                                     encoding="utf-8")
+        summary["replay"] = replay_path
     if auth_key:
         # heuristic: 401/403 or a login-ish redirect counts as an auth failure
         ok = status not in (401, 403)
@@ -186,7 +209,7 @@ def _selftest() -> int:
     checks: list[tuple[str, bool]] = []
     try:
         tmp = Path(tempfile.mkdtemp()) / "body.html"
-        d = send("GET", f"http://127.0.0.1:{port}/", {}, None, None, 5,
+        d = send("GET", f"http://127.0.0.1:{port}/", {"Cookie": "sess=secret123"}, None, None, 5,
                  save=str(tmp), want_headers=True)
         sc = d.get("headers", {}).get("Set-Cookie", "")
         cl = d.get("set_cookies", [])
@@ -197,6 +220,24 @@ def _selftest() -> int:
                        bool(_re.search(r"\.AspNetCore\.Antiforgery\.[^=]+=[^;]+", sc))))
         checks.append(("--save wrote the body", tmp.is_file() and tmp.read_bytes() == b"ok-body"))
         checks.append(("len/sha1 summarized", d.get("len") == 7 and bool(d.get("sha1"))))
+        # 操作录像: --save 同时写 <file>.replay.json(追加扩展名, 非 with_suffix)
+        rp = Path(str(tmp) + ".replay.json")
+        checks.append(("--save 写了 <file>.replay.json(追加不替换扩展名)", rp.is_file()))
+        checks.append(("文件名是 body.html.replay.json(非 body.replay.json, 防同 stem 覆盖)",
+                       rp.name == "body.html.replay.json"))
+        if rp.is_file():
+            rj = json.loads(rp.read_text(encoding="utf-8"))
+            hreq = json.dumps(rj["request"]["headers"])
+            hresp = json.dumps(rj["response"]["headers"])
+            checks.append(("replay 含请求 method/url",
+                           rj["request"]["method"] == "GET" and rj["request"]["url"].startswith("http")))
+            checks.append(("replay 含响应 status/全sha1",
+                           rj["response"]["status"] == 200 and len(rj["response"]["sha1"]) >= 40))
+            checks.append(("summary.sha1 == replay.sha1 前缀(截断一致)",
+                           d.get("sha1") == rj["response"]["sha1"][:12]))
+            checks.append(("请求头完整存(Cookie 原值在, 供重放认证请求)", "sess=secret123" in hreq))
+            checks.append(("响应头完整存(Set-Cookie 原值在, 不脱敏)", "Identity.External=" in hresp))
+            checks.append(("summary 引用 replay 路径", bool(d.get("replay"))))
     finally:
         srv.shutdown()
     bad = [n for n, ok in checks if not ok]

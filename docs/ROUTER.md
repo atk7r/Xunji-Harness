@@ -90,12 +90,18 @@ Load:
 
 Output:
 
-- create or update the run directory
+- **create the run directory in ONE shot**: `python tools/setup_run.py <slug>
+  [recon.json]` — builds the template skeleton + `evidence/`/`scripts/` subdirs, and
+  (with a recon arg) folds the FULL asset table via ingest_recon into
+  `surface_recon.md` + records the recon path in `target.md`. **Never hand-curate
+  `surface.md` from the human report** — a curated subset encodes the driver's
+  selection bias as the run's ground truth and blinds the anti-lump guard (hamastar
+  root cause: 30+ assets silently un-examined, 6 operator nudges).
+- **build the coverage ledger before claiming any surface explored**:
+  `python tools/classify_hosts.py <recon.json> --out runs/<dir>/classify` (or
+  `setup_run.py … --classify`) → `coverage.json`. `check_run` hard-fails a final
+  report that cited a recon but never built `coverage.json`.
 - define scope and authorization
-- if a recon/OSINT report is supplied, fold it first with
-  `python tools/ingest_recon.py <recon.json>` (asset table + entry points +
-  reachability matrix) and cite the source in `surface.md` — do not re-discover
-  what the report already carries
 - ask the user only for missing authorization, target, account, or boundary data
 
 ### Driver
@@ -239,6 +245,12 @@ Project-discipline and run-structure checks live in `tools/`:
 - `python tools/check_knowledge.py` — the grounding knowledge base keeps its
   structure and stays grounding (no payload/exploit/step fields; every anchor
   carries a reference and source). Run after editing `knowledge/`.
+- `python tools/setup_run.py <slug> [recon.json]` — Setup-phase ONE-SHOT: build the
+  run dir from templates (+ `evidence/`/`scripts/` subdirs), fold the recon via
+  ingest_recon into `surface_recon.md`, record the recon path in `target.md`;
+  `--classify` also runs classify_hosts → coverage.json. **Start every run with
+  this** — never hand-curate surface.md from the human report (selection bias →
+  blind spots). Builds the workbench; makes no front choices (派生不驱动).
 - `python tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
   `surface.md`-ready asset table, entry points, and a reachability matrix
   (recon-view vs your-egress-view). Setup-phase helper; structures intel, makes

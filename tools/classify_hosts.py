@@ -66,8 +66,40 @@ def detect_redirect(body: str) -> str | None:
     return None
 
 
-def classify_body(body: str) -> tuple[str, list[str]]:
-    """(stack, flags) 仅凭内容判定。"""
+_KB_ID_RE = re.compile(r"^id:\s*(\S+)\s*$", re.M)
+_KB_SIG_RE = re.compile(r"^signatures:\s*(\[.*\])\s*$", re.M)
+
+
+def load_knowledge_signatures(kb_dir: Path) -> "list[tuple[str, list[str]]]":
+    """读 knowledge/*.md frontmatter 的 (id, signatures) —— 让 classify 识别【已入库】的产品。
+    接通指纹飞轮的【读取端】(写入端 = check_run 指纹入库收口门): 上次入库的指纹, 这次遇到同栈
+    直接识别。signatures 是机器可匹配的小写 substring 列表(JSON)。"""
+    out: list[tuple[str, list[str]]] = []
+    if not kb_dir.is_dir():
+        return out
+    for f in sorted(kb_dir.glob("*.md")):
+        if f.name in ("README.md", "_TEMPLATE.md"):
+            continue
+        try:
+            head = f.read_text(encoding="utf-8", errors="replace").split("---", 2)
+        except Exception:
+            continue
+        fm = head[1] if len(head) >= 3 else ""
+        idm, sigm = _KB_ID_RE.search(fm), _KB_SIG_RE.search(fm)
+        if not (idm and sigm):
+            continue
+        try:
+            sigs = [str(s).lower() for s in json.loads(sigm.group(1)) if str(s).strip()]
+        except Exception:
+            continue
+        if sigs:
+            out.append((idm.group(1).strip(), sigs))
+    return out
+
+
+def classify_body(body: str, kb_sigs: "list[tuple[str, list[str]]] | None" = None) -> tuple[str, list[str]]:
+    """(stack, flags) 仅凭内容判定。kb_sigs = 已入库 knowledge 的 (id, signatures); 硬编码没
+    认出时用它识别 —— 接通指纹飞轮读取端。"""
     low = body.lower()
     stack = "?"
     # Soar Cloud AIS HR (this product family) — recognize so it is never "?"/lumped.
@@ -89,6 +121,14 @@ def classify_body(body: str) -> tuple[str, list[str]]:
         stack = "Vue-SPA"
     elif '"status":' in low and '"timestamp":' in low and '"path":' in low:
         stack = "SpringBoot-api"
+
+    # 飞轮读取端: 硬编码没认出 -> 用【已入库】的 knowledge signatures 认(下次同栈直接识别)。
+    # 标 "kb:<id>" 以示来自知识库, driver 据此直接调该条目的弱点锚。
+    if stack == "?" and kb_sigs:
+        for kid, sigs in kb_sigs:
+            if any(s in low for s in sigs):
+                stack = f"kb:{kid}"
+                break
 
     flags = []
     if 'type="password"' in low or "type='password'" in low:
@@ -159,6 +199,13 @@ def _selftest() -> int:
     checks.append(("classify: eServices",
                    classify_body('<link href="/eServices.styles.css"><input name="Input.Email"> Identity.External')[0]
                    == "eServices-Identity"))
+    _kb = [("hamastar-cms", ["css_v4.5/"]), ("foo", ["ais.webform.js"])]
+    checks.append(("classify: knowledge signature match (飞轮读取端)",
+                   classify_body('<link href="/css_v4.5/x.css">', _kb)[0] == "kb:hamastar-cms"))
+    checks.append(("classify: no kb match -> stays ?",
+                   classify_body('<html>plain page</html>', _kb)[0] == "?"))
+    checks.append(("classify: hardcoded wins over kb",
+                   classify_body('<script src="/Scripts/ais.webform.js"></script>', _kb)[0] == "AIS-WebForms"))
 
     STUB = '<html><script>window.location.href= "/app/";</script></html>'
     APP = ('<title>LOGIN</title><input type="password" name="FormLayout$edtPassword">'
@@ -231,6 +278,9 @@ def main() -> int:
         out_dir = Path(args.out) if args.out else Path("tmp") / "classify"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # 飞轮读取端: 加载已入库的 knowledge signatures, 让 classify 识别上次入库的产品。
+    kb_sigs = load_knowledge_signatures(ROOT / "knowledge")
+
     # 结构化检视台账(coverage): 每个资产 reachable/examined/stack —— 让 lump 藏不住。
     coverage: list[dict] = []
     rows = []
@@ -249,7 +299,7 @@ def main() -> int:
                              "stack": "ERR", "flags": [], "note": (meta.get("error", "") or "")[:40]})
             time.sleep(args.delay)
             continue
-        stack, flags = classify_body(body)
+        stack, flags = classify_body(body, kb_sigs)
         m = re.search(r"<title>(.*?)</title>", body, re.I | re.S)
         ti = (m.group(1).strip()[:30] if m else "")
         ln = meta.get("len", len(body))

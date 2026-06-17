@@ -129,6 +129,14 @@ _ARTIFACT_FIELD_RE = re.compile(
     r"Artifacts?\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
     re.S)
 _CERT_LITERAL_RE = re.compile(r"\b(1\.0|0\.8|0\.5|0\.3)\b")
+# Certainty 字段的【值区域】: 从 `Certainty…:` 到下一个 `- Field:` / 空行 / 块尾。
+# 用来把 certainty 取值限定在【字段值内】(而非旧逻辑"从关键词扫到块尾"), 再配合 _PAREN_RE
+# 剥掉括号说明 —— 否则降级时括号里写的解释数字(如"原 0.8 / 升回 1.0")会被误当成 certainty
+# 值, 使降级无效(2026-06-17 实测)。剥括号后仍含【同字段内】的 split-certainty 多值。
+_CERT_FIELD_RE = re.compile(
+    r"Certainty[^\n:：]*[:：](.+?)(?=\n\s*[-*]\s+\w[\w /()（）-]*[:：]|\n\s*\n|\n##|\Z)",
+    re.S | re.I)
+_PAREN_RE = re.compile(r"[\(（][^\)）]*[\)）]")
 # inline field labels — used to bound a field's value when several share one line
 # (e.g. "- Supports: H-002. Refutes: —. Next: prove X (E-005)." — the (E-005) belongs
 # to Next:, not Refutes:; cutting at the next label stops that misattribution).
@@ -171,15 +179,19 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         head = b.splitlines()[0].strip()
         idm = re.search(r"\bE-\d+\b", head)
         eid = idm.group(0) if idm else head.lstrip("# ").strip()[:48]
-        # certainty: from the first 'certainty' keyword to end (covers the split
-        # form "Certainty (SPLIT...):\n - ... 1.0\n - ... 0.5" that a `Certainty:\s*N`
-        # regex misses entirely).
-        ci = b.lower().find("certainty")
-        certs = ([float(x) for x in _CERT_LITERAL_RE.findall(b[ci:])] if ci >= 0 else [])
+        # certainty: 取 `Certainty:` 字段的【值区域】并【剥掉括号说明】, 而非旧逻辑"从关键词
+        # 扫到块尾"—— 后者会把降级时括号里写的解释数字(如"原 0.8 / 升回 1.0")误当成 certainty
+        # 值, 使降级无效(2026-06-17 实测踩到)。剥括号后仍含同字段内的 split-certainty 多值。
+        cm = _CERT_FIELD_RE.search(b)
+        region = _PAREN_RE.sub("", cm.group(1)) if cm else ""
+        certs = [float(x) for x in _CERT_LITERAL_RE.findall(region)]
         # also read explicit "Certainty: 0.NN" values so an OFF-DOCTRINE certainty
         # (0.9/0.85/0.7…, off the {1.0,0.8,0.5,0.3} grid) cannot silently slip the
         # hard artifact gate by failing to match the canonical-literal regex above.
-        certs += [float(x) for x in re.findall(r"certainty\s*[:：]\s*\**\s*(\d\.\d+)", b, re.I)]
+        # off-grid 兜底: 抓 `Certainty:` 后紧跟的值(含 0.9 这类非网格)。允许一层可选括号
+        # `[\(（]?`, 这样值本身被写进括号(`Certainty: (0.8)`)也能抓到 —— 否则 _PAREN_RE 会把
+        # 它连括号一起剥掉致漏判(复审 S1)。降级写法 `0.5 (原 0.8…)` 仍只抓紧跟的 0.5(不进括号)。
+        certs += [float(x) for x in re.findall(r"certainty\s*[:：]\s*\**\s*[\(（]?\s*(\d\.\d+)", b, re.I)]
         # artifacts: scoped to the explicit Artifacts: field (fallback: whole block,
         # for legacy entries with no such field).
         fm = _ARTIFACT_FIELD_RE.search(b)
@@ -200,6 +212,10 @@ def parse_evidence(run_dir: Path) -> list[dict]:
             "artifacts": arts, "artifacts_scoped": scoped,
             "artifacts_present": present, "artifacts_missing": missing,
             "supports": sorted(set(supports)), "refutes": sorted(set(refutes)),
+            # refutes_any: block 是否含 Refutes 字段(不论 refute 的是 E/H/F)。漏报一致性门用它
+            # 区分"排除性/negative 结论"(Refutes hypothesis, 如'未发现漏洞')—— 这类不该强制进
+            # report 确认发现; r["refutes"] 只抓 E-\d+ 会漏掉 Refutes H-xxx 的 negative 结论(FP)。
+            "refutes_any": bool(re.search(r"(?im)^\s*[-*]?\s*Refutes\s*[:：]\s*\S", b)),
             "superseded": bool(re.search(r"superseded|降级|撤回|改判", b, re.I)),
         })
     _EVIDENCE_MEMO.update(key=key, records=records)
@@ -228,6 +244,26 @@ def evidence_entries_missing_artifact(run_dir: Path) -> list[str]:
     产物文件 —— 把"声称确认但没存盘"挡在收口外。返回缺产物的条目 head 列表(收口硬门→error)。"""
     return [r["head"] for r in parse_evidence(run_dir)
             if r["confirmed"] and not r["artifacts_present"]]
+
+
+def check_replay_evidence(run_dir: Path) -> list[str]:
+    """操作录像(软警): certainty>=0.8 的【正向确认】建议附 .replay.json 操作录像(probe --save 自动
+    生成: 完整请求 + 响应 sha1) —— 让证据可被【重放核实】而非只信描述(B1: 把造假从"P 张图"抬到
+    "伪造自洽请求+响应")。软警不硬卡: render/手工/negative 类未必有 probe 录像, 硬门会 FP; 先提示,
+    推动"用 probe 验证就留录像", 稳定后可升硬门(同独立复审门当年软→硬的路径)。
+    只对【已有产物但其中无 .replay.json】的正向确认提示(完全无产物归 P1 硬门管, 不重叠报)。"""
+    warns: list[str] = []
+    for r in parse_evidence(run_dir):
+        if not (r["confirmed"] and r["id"].startswith("E-")):
+            continue
+        if r["refutes_any"] and not r["supports"]:
+            continue  # 纯 negative 结论不需录像
+        arts = r.get("artifacts", [])
+        if arts and not any(a.lower().endswith(".replay.json") for a in arts):
+            warns.append(
+                f"{r['id']}: certainty>=0.8 确认但产物无 .replay.json 操作录像 —— 建议用 "
+                "`probe --save` 留录像(完整请求+响应+sha1)以便重放核实, 而非只信描述。")
+    return warns
 
 
 def check_dangling_citations(run_dir: Path) -> list[str]:
@@ -276,6 +312,129 @@ def check_coverage(run_dir: Path) -> list[str]:
             f"检视覆盖(防lump): 资产 {total} / 已检视内容 {examined} / 可达 {reachable}; "
             f"【独立应用候选 {len(candidates)} 个】须逐个深挖(勿按服务器头 lump): {names}"
             + (" …" if len(candidates) > 15 else ""))
+    return warns
+
+
+def _recon_cited(run_dir: Path) -> str | None:
+    """target.md 的『Existing intel / recon report:』字段若填了真实值(非空/非 N/A),
+    返回该值, 否则 None —— 用于判断本 run 是否声明引用了外部 recon/OSINT 情报。"""
+    t = run_dir / "target.md"
+    if not t.exists():
+        return None
+    m = re.search(r"Existing intel\s*/\s*recon report\s*[:：]\s*(.+)",
+                  t.read_text(encoding="utf-8", errors="replace"))
+    if not m:
+        return None
+    val = m.group(1).strip().strip("`").rstrip()
+    low = val.lower()
+    if not val or low in ("n/a", "none", "无", "無", "—", "-", "(none)"):
+        return None
+    if "path or" in low:   # 未填的模板占位 '(path or "none"; …)' 不算引用了 recon
+        return None
+    return val
+
+
+def coverage_present(run_dir: Path) -> bool:
+    return bool(list(run_dir.glob("**/coverage.json")))
+
+
+def check_coverage_complete(run_dir: Path) -> list[str]:
+    """台账完整性(警告): coverage.json 资产数 vs recon 资产数。覆盖硬门只查 coverage 在不在,
+    不查数量 —— 跑个子集 classify 就能"存在即过"蒙混。这里比对: cov_total 显著少于 recon assets
+    则 WARN(别用子集台账冒充全量)。仅在 recon 路径是可解析 JSON 时生效(report.md 路径则跳过, 不误报)。"""
+    recon = _recon_cited(run_dir)
+    covs = list(run_dir.glob("**/coverage.json"))
+    if not recon or not covs:
+        return []
+    try:
+        assets = json.loads(Path(recon).read_text(encoding="utf-8", errors="replace")).get("assets", [])
+        recon_n = len(assets) if isinstance(assets, list) else 0
+        cov_n = json.loads(covs[0].read_text(encoding="utf-8", errors="replace")).get("total", 0)
+    except Exception:
+        return []   # recon 路径非 JSON(如 report.md) / 读不到 -> 跳过, 不误报
+    if recon_n and cov_n < recon_n * 0.8:
+        return [f"台账完整性(防子集蒙混): coverage.json 只 {cov_n} 个资产, recon 有 {recon_n} 个 —— "
+                "台账疑似子集(只 classify 了一部分), 覆盖门会被【存在即过】蒙混。对全量 recon 跑 "
+                "classify_hosts(别用子集台账冒充全量), 漏挖才不会藏在没 classify 的资产里。"]
+    return []
+
+
+def check_coverage_built(run_dir: Path) -> list[str]:
+    """覆盖台账缺建护栏(警告, 每次都报). 若 target.md 引用了 recon/OSINT 情报却无
+    coverage.json(classify_hosts.py 的产出) —— 说明资产清单很可能是【手工誊录的子集】,
+    而非把 recon 全量折成结构化台账。手工誊录把 driver 的选择偏见当成 run 的事实地面,
+    让防 lump 护栏(check_coverage)失明(它读不到从没建过的台账)。这正是 hamastar run
+    的根因: 引用了 recon.json 却从没跑 ingest_recon / classify_hosts, 30+ 资产从未被
+    台账记录, 收口闸门因此对漏挖完全沉默。"""
+    recon = _recon_cited(run_dir)
+    if recon and not coverage_present(run_dir):
+        return [f"覆盖台账缺建: target.md 引用了 recon 情报({recon[:60]}) 却无 coverage.json "
+                "—— 资产清单疑似手工誊录的子集(driver 选择偏见 = run 的盲区)。跑 "
+                "`python tools/ingest_recon.py <recon.json>` 折全量资产 + `python tools/"
+                "classify_hosts.py <recon.json> --out runs/<t>/classify` 建结构化台账; "
+                "防 lump 护栏没有它就失明, 漏挖不会被发现。"]
+    return []
+
+
+def _report_is_final(run_dir: Path) -> bool:
+    """report.md 是否为【实质终版报告】(而非中途存根): 其 `Evidence IDs:` 行引用了
+    >=1 个 E-id, 且其中至少一个在 evidence.md 里已确认(certainty>=0.8)。
+
+    用作【状态式收口信号】—— 把收口纪律的触发从『report 里写了"已穷尽/exhausted"这类
+    忏悔措辞』改成『写出了引用确认发现的终版报告』, 堵住"在聊天里宣布完工、run 文件里
+    只字不提收口"的【静默收口】漏洞(hamastar run: 行为上收口、report.md 无任何收口措辞
+    → _closure_claimed 返回 False → 整个收口闸门被跳过)。闸门审的是文件不是聊天, 且原先
+    只在自首时才硬审; 现在产出终版报告即触发, 自首与否都拦得住。"""
+    report = run_dir / "report.md"
+    if not report.exists():
+        return False
+    rtext = report.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"Evidence IDs\s*[:：]\s*(.+)", rtext)
+    if not m:
+        return False
+    cited = set(re.findall(r"E-\d+", m.group(1)))
+    if not cited:
+        return False
+    confirmed = {r["id"] for r in parse_evidence(run_dir) if r["confirmed"]}
+    return bool(cited & confirmed)
+
+
+def check_shallow_close(run_dir: Path) -> list[str]:
+    """纵深护栏(警告, 每轮). 单 front 的深度投入是 driver 判断, 但"高价值前沿浅尝即弃"是
+    漏挖根因(hamastar: RCE 的多个向量各试一两下就放弃)。把【关门时的深度】变成可检信号:
+    某 Closed Front 申报 `Current depth: shallow` 却没写 `Vectors tried:`(尝试过的向量类别)
+    → 提示补尝试类别, 并说明为何 shallow 即足以 Type B 关闭(而非 deferred)。
+
+    只在 front 【显式申报了 shallow】时报 → 对未申报深度的旧 run / Deferred 前沿不 FP;
+    写了 Vectors tried 就不再催(深度已有交代)。只读, 不强卡(深度终究是判断)。
+
+    评估过扩展(强制全 front 申报 depth / 高价值前沿无视深度都催 / moderate 也要 Vectors tried):
+    都不做。病根一致 —— 想用更激进的静态规则测"申报深度是否属实", 但 driver 谎报 moderate 逃避
+    时静态检查无法反驳(=申报即过的本质局限, 非护栏覆盖不足)。对旧 run/Deferred/异构模板还会
+    FP 不可控。用 FP 噪音糊一个测不出的东西只会让护栏变钝被无视, 故保持 shallow-only。"""
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return []
+    text = fr.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"##\s*Closed Fronts(.*?)(?=^##\s|\Z)", text, re.S | re.MULTILINE)
+    if not m:
+        return []
+    warns: list[str] = []
+    for block in re.split(r"(?=^###\s)", m.group(1), flags=re.MULTILINE):
+        if not block.lstrip().startswith("###"):
+            continue
+        head = block.strip().splitlines()[0][:48]
+        dm = re.search(r"Current depth\s*[:：]\s*(.+)", block)
+        if not dm:
+            continue   # 没申报深度 → 不强报(避免对旧 run / 无该字段的前沿 FP)
+        val = dm.group(1).strip().lower()
+        first = val.split()[0].rstrip(".,;:") if val.split() else ""
+        if first == "shallow" and "moderate" not in val and "deep" not in val:
+            if not re.search(r"Vectors?\s*tried\s*[:：]\s*\S", block, re.I):
+                warns.append(
+                    f"frontier Closed Front {head!r}: 以 depth=shallow 关闭却无 `Vectors tried:` "
+                    "—— 高价值前沿浅尝即弃是漏挖根因(hamastar 的 RCE 浅尝教训)。补 `Vectors tried:` "
+                    "写清尝试过的【向量类别】, 并说明为何 shallow 即足以 Type B 关闭(而非 deferred)。")
     return warns
 
 
@@ -424,23 +583,90 @@ def _closure_claimed(text: str) -> bool:
 
 
 def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
-    """过早收口护栏(P0-1). 仅当 report.md 出现【强收口断言】时触发。返回 (errors, warns):
+    """过早收口护栏(P0-1). 触发条件 = report.md 出现【强收口断言】(自首式) **或**
+    report.md 已是【实质终版报告】(状态式 _report_is_final: 引用了已确认发现)。后者堵住
+    "聊天里宣布完工、文件里不写收口措辞"的【静默收口】漏洞(hamastar run 实测: 收口闸门
+    因 report 无措辞被整段跳过, 30+ 资产漏挖却"run check passed")。返回 (errors, warns):
 
-    - **硬错(errors → check_run 失败)**: review.md 无【独立复审/Independent Review】记录。
-      self-review 治不了 self-review 偏见; 把"收口必先派独立 Reviewer"从软调用变硬约束
-      (某实战 实战: 建了 ④ 仍两次过早收口, 软警告拦不住 → 改硬门)。
+    - **硬错(errors → check_run 失败)**:
+      ① review.md 无【独立复审/Independent Review】记录(self-review 治不了 self-review 偏见);
+      ② Certainty>=0.8 的证据未引用真实产物(假证据);
+      ③ 引用了 recon 情报却无 coverage.json(覆盖台账缺建 = 漏挖盲区, 不能在没建全量台账时收口)。
     - **软警(warns → 仅提示)**: 无 classify.txt、Closed Front 缺证据、屏障关门无 Refutes。
-      这些是质量提示, 收口是否成立属判断, 不硬卡。
     """
     report = run_dir / "report.md"
     if not report.exists():
         return [], []
     rtext = report.read_text(encoding="utf-8", errors="replace")
-    if not _closure_claimed(rtext):
-        return [], []  # 未声称收口(或为否定式"非已穷尽") -> 不触发, 不增日常负担
+    if not (_closure_claimed(rtext) or _report_is_final(run_dir)):
+        return [], []  # 未声称收口、也非终版报告 -> 不触发, 不增日常负担
 
     errors: list[str] = []
     warns: list[str] = []
+
+    # 硬门(覆盖台账): 引用了 recon 情报却没把它折成 coverage.json, 等于资产清单只是手工
+    # 誊录的子集 —— 不能在没建全量结构化台账的情况下产出终版报告/宣布收口(hamastar 根因)。
+    recon = _recon_cited(run_dir)
+    if recon and not coverage_present(run_dir):
+        errors.append(
+            "收口硬门(覆盖台账): target.md 引用了 recon 情报却无 coverage.json —— 资产清单"
+            "疑似手工誊录的子集, 漏挖无法被发现。先跑 ingest_recon + classify_hosts 把【全量】"
+            "资产折成结构化台账并逐个深挖独立应用候选, 再收口; 不能在台账缺建时出终版报告。")
+
+    # 硬门(漏报一致性): evidence 里【已确认(certainty>=0.8)且非排除性、未降级】的正向发现,
+    # 必须进 report 的确认发现/证据清单 —— 否则是漏报。hamastar 实测: E-017 满分 CRITICAL 越权
+    # 没进 report(还反向称资产"不可达"), check_run 当时放行, 异构复审(Codex)才逮到。纯静态可查,
+    # 不属"申报即过"那类测不出的(只比对 ID 在不在, 不判断申报内容真假)。
+    # report_body: 先剥代码块/注释(防 ```/<!-- --> 里的 E-id 假装"已报"—— 与指纹门 S2 同类
+    # bypass, Codex dogfood 复审逮到, 同一坑我在指纹门修过又在这犯), 再剥头部机械列全部 ID 的行
+    # (Evidence ID/IDs/ID(s) 变体, 不依赖冒号)。残留(contrived, driver 不会自伤): 换行另起一行
+    # 列 ID、正文显式写"E-x 不报"仍算引用; 模板是同行列 IDs。
+    report_body = re.sub(r"```.*?```|<!--.*?-->", "", rtext, flags=re.S)
+    report_body = re.sub(r"(?im)^\s*Evidence\s+IDs?.*$", "", report_body)
+    cited_ids = set(re.findall(r"E-\d+", report_body))
+    missing_hi = [r["id"] for r in parse_evidence(run_dir)
+                  if r["id"].startswith("E-") and r["confirmed"] and not r["superseded"]
+                  # 纯 negative(有 Refutes 且无 Supports)才豁免; mixed(Supports+Refutes)的确认
+                  # 正向发现仍须报(WARN3, Codex 复审)。
+                  and not (r["refutes_any"] and not r["supports"])
+                  and r["id"] not in cited_ids]
+    if missing_hi:
+        errors.append(
+            f"收口硬门(漏报一致性): {', '.join(sorted(missing_hi))} 在 evidence 里已确认"
+            "(certainty>=0.8、非 Refutes、未降级)却没进 report 确认发现/证据清单 —— 漏报"
+            "(hamastar E-017 满分 CRITICAL 越权漏报即此类)。把它们提进 report 确认发现, 或在 "
+            "evidence 里降级 / 标 Refutes / 标 superseded。")
+
+    # 硬门(指纹入库): 终版报告须申报本 run 的指纹入库情况 —— 每次渗透收口都入库喂飞轮
+    # (下次同栈直接识别 + 调已知弱点锚)。缺申报=硬错; 申报"无"却有独立应用候选=软警(疑似漏入库)。
+    # 剥代码块/注释再找申报, 防 ```/<!-- --> 里的字段被当真申报(复审 S2)。
+    fp_scan = re.sub(r"```.*?```|<!--.*?-->", "", rtext, flags=re.S)
+    fp_m = re.search(r"Fingerprints? captured\s*[:：]\s*(.*)", fp_scan, re.I)
+    fp_val = fp_m.group(1).strip() if fp_m else ""
+    # 实质申报的判据 = 含 `knowledge/` 入库路径(比"否定词正则"稳健: 不会把"无法测X; Y→knowledge/y.md"
+    # 这种以"无/none"开头的真实申报误判为空 —— 复审 S1)。无路径 = 真没新指纹 或 识别了却没入库,
+    # 两者在有独立应用候选时都该提示。
+    if not fp_m:
+        errors.append(
+            "收口硬门(指纹入库): report 无 `Fingerprints captured:` 申报 —— 每次渗透收口都须申报"
+            "识别到的产品指纹是否已入 knowledge/ grounding 库(喂飞轮: 下次同栈直接识别+调弱点锚)。"
+            "写明 '<产品> → knowledge/<id>.md', 或诚实声明 '无新指纹'。")
+    elif "knowledge/" not in fp_val.lower():
+        covs = list(run_dir.glob("**/coverage.json"))
+        cand = 0
+        if covs:
+            try:
+                data = json.loads(covs[0].read_text(encoding="utf-8", errors="replace"))
+                cand = sum(1 for a in data.get("assets", [])
+                           if a.get("reachable") is True
+                           and (a.get("stack") in ("?", "SpringBoot-api", "Vue-SPA") or a.get("flags")))
+            except Exception:
+                cand = 0
+        if cand:
+            warns.append(
+                f"指纹入库(软警): Fingerprints captured 未给出 knowledge/ 入库路径, 但 coverage 有 "
+                f"{cand} 个独立应用候选(未识别栈/带攻击面标记) —— 确认这些不是该入 knowledge/ 的"
+                "新产品指纹, 别让飞轮空转。")
 
     # 硬门: 收口前必须有独立 Reviewer 复审记录
     review = run_dir / "review.md"
@@ -506,14 +732,25 @@ def _selftest() -> int:
         "## E-003 — confirmed, no control, really refutes E-001\n"
         "- Artifacts: `ev_real.html`\n- Certainty: 0.8\n- Refutes: E-001\n\n"
         "## E-004 — off-doctrine certainty (0.9) must still count as confirmed\n"
-        "- Replicated: yes\n- Artifacts: `ev_real.html`\n- Certainty: 0.9\n",
+        "- Replicated: yes\n- Artifacts: `ev_real.html`\n- Certainty: 0.9\n\n"
+        "## E-005 — downgraded; parenthetical note mentions grid numbers (must NOT re-confirm)\n"
+        "- Replicated: yes\n- Artifacts: `ev_real.html`\n"
+        "- Certainty: 0.5 (降级: 原 0.8 误用, 补存可升回 1.0)\n\n"
+        "## E-006 — multi-line split certainty (regression lock, N2)\n"
+        "- Replicated: yes\n- Artifacts: `ev_real.html`\n"
+        "- Certainty:\n  - sub-A = 1.0\n  - sub-B = 0.5\n- Supports: H-001\n\n"
+        "## E-007 — value itself in parens (S1 fix: off-grid must still catch)\n"
+        "- Replicated: yes\n- Artifacts: `ev_real.html`\n- Certainty: (0.8)\n",
         encoding="utf-8")
     recs = parse_evidence(d)
     byid = {r["id"]: r for r in recs}
     checks = [
-        ("preamble not counted", len(recs) == 4),
+        ("preamble not counted", len(recs) == 7),
         ("split certainty -> confirmed", byid["E-002"]["confirmed"] is True),
         ("off-doctrine 0.9 -> confirmed (C1)", byid["E-004"]["confirmed"] is True),
+        ("downgrade w/ grid nums in note -> NOT confirmed (the 2026-06-17 fix)", byid["E-005"]["confirmed"] is False),
+        ("multi-line split certainty -> confirmed (N2 regression)", byid["E-006"]["confirmed"] is True),
+        ("certainty value inside parens -> confirmed (S1 fix)", byid["E-007"]["confirmed"] is True),
         ("dangling citation detected", byid["E-002"]["artifacts_missing"] == ["ev_DELETED.html"]),
         ("prose filenames not cited", not any("jquery" in a or "webform" in a
                                               for a in byid["E-002"]["artifacts"])),
@@ -530,6 +767,184 @@ def _selftest() -> int:
                                                            for w in check_ledger_contradiction(d))),
         ("no confirmed-missing-artifact FP", evidence_entries_missing_artifact(d) == []),
     ]
+
+    # --- coverage-built + 状态式收口触发 (hamastar 修复回归) ---
+    d2 = Path(tempfile.mkdtemp())
+    (d2 / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d2 / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001 — confirmed\n"
+        "- Replicated: yes\n- Artifacts: `ev.html`\n- Certainty: 1.0\n",
+        encoding="utf-8")
+    (d2 / "target.md").write_text(
+        "# Target\n- Existing intel / recon report: /path/recon.json\n", encoding="utf-8")
+    (d2 / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+    cov_warn_before = check_coverage_built(d2)
+    final_before = _report_is_final(d2)
+    cerr_before, _ = check_closure_discipline(d2)
+    (d2 / "coverage.json").write_text(
+        '{"total":1,"examined":1,"reachable":1,"assets":[]}', encoding="utf-8")
+    cov_warn_after = check_coverage_built(d2)
+    cerr_after, _ = check_closure_discipline(d2)
+    # control: no recon cited -> no coverage gate (avoid FP on operator-given targets)
+    d3 = Path(tempfile.mkdtemp())
+    (d3 / "target.md").write_text("# Target\n- Existing intel / recon report: N/A\n", encoding="utf-8")
+    checks += [
+        ("recon cited + no coverage -> warn", bool(cov_warn_before)),
+        ("real report (confirmed E-id) -> final (state-trigger)", final_before is True),
+        ("final report + no coverage -> closure HARD error", any("覆盖台账" in e for e in cerr_before)),
+        ("coverage built -> coverage warn clears", cov_warn_after == []),
+        ("coverage built -> closure coverage error clears", not any("覆盖台账" in e for e in cerr_after)),
+        ("no recon cited -> no coverage gate (no FP)", check_coverage_built(d3) == [] and _recon_cited(d3) is None),
+    ]
+
+    # --- 纵深护栏 (check_shallow_close) + recon 占位排除 (P0-3) ---
+    d4 = Path(tempfile.mkdtemp())
+    (d4 / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n## Deferred Fronts\n## Closed Fronts\n\n"
+        "### F-001 shallow no vectors\n- Current depth: shallow\n- Why closed: x\n\n"
+        "### F-002 shallow with vectors\n- Current depth: shallow\n- Vectors tried: SQLi, upload, deser\n\n"
+        "### F-003 deep\n- Current depth: deep\n- Why closed: proven\n",
+        encoding="utf-8")
+    sc = check_shallow_close(d4)
+    d5 = Path(tempfile.mkdtemp())
+    (d5 / "target.md").write_text(
+        '# Target\n- Existing intel / recon report: (path or "none"; ingest first)\n', encoding="utf-8")
+    checks += [
+        ("shallow-close w/o Vectors tried -> warn (F-001)", any("F-001" in w for w in sc)),
+        ("shallow-close WITH Vectors tried -> no warn (F-002)", not any("F-002" in w for w in sc)),
+        ("deep-close -> no warn (F-003)", not any("F-003" in w for w in sc)),
+        ("recon template placeholder -> not cited (no FP)", _recon_cited(d5) is None),
+    ]
+
+    # --- 指纹入库收口门 (任务1) ---
+    d6 = Path(tempfile.mkdtemp())
+    (d6 / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d6 / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
+    (d6 / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d6 / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+    (d6 / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+    fp_err_missing, _ = check_closure_discipline(d6)
+    (d6 / "report.md").write_text(
+        "# Report\nEvidence IDs: E-001\nFingerprints captured: FooCMS → knowledge/foo.md\n", encoding="utf-8")
+    fp_err_ok, _ = check_closure_discipline(d6)
+    (d6 / "report.md").write_text("# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
+    (d6 / "coverage.json").write_text(
+        json.dumps({"total": 1, "examined": 1, "reachable": 1,
+                    "assets": [{"host": "a", "reachable": True, "stack": "?", "flags": ["LOGIN"]}]}), encoding="utf-8")
+    _, fp_warn = check_closure_discipline(d6)
+    (d6 / "report.md").write_text(
+        "# Report\nEvidence IDs: E-001\nFingerprints captured: 无法测产品平台; 主站 WP → knowledge/wp.md\n",
+        encoding="utf-8")
+    _, fp_warn_s1 = check_closure_discipline(d6)
+    (d6 / "report.md").write_text(
+        "# Report\nEvidence IDs: E-001\n<!-- Fingerprints captured: x -->\n", encoding="utf-8")
+    fp_err_s2, _ = check_closure_discipline(d6)
+    checks += [
+        ("missing Fingerprints captured -> hard error", any("指纹入库" in e for e in fp_err_missing)),
+        ("Fingerprints captured filled -> no fp hard error", not any("收口硬门(指纹入库)" in e for e in fp_err_ok)),
+        ("'无新指纹' + candidates -> soft warn", any("指纹入库(软警)" in w for w in fp_warn)),
+        ("'无…' WITH knowledge path -> no soft warn (S1)", not any("指纹入库(软警)" in w for w in fp_warn_s1)),
+        ("Fingerprints only in comment -> hard error (S2)", any("收口硬门(指纹入库)" in e for e in fp_err_s2)),
+    ]
+
+    # --- 台账完整性门 (check_coverage_complete, 任务8) ---
+    d7 = Path(tempfile.mkdtemp())
+    recon_j = d7 / "recon.json"
+    recon_j.write_text(json.dumps({"assets": [{"host": f"h{i}"} for i in range(100)]}), encoding="utf-8")
+    (d7 / "target.md").write_text(
+        f"# Target\n- Existing intel / recon report: {recon_j}\n", encoding="utf-8")
+    (d7 / "coverage.json").write_text(json.dumps({"total": 50, "assets": []}), encoding="utf-8")
+    cc_subset = check_coverage_complete(d7)
+    (d7 / "coverage.json").write_text(json.dumps({"total": 95, "assets": []}), encoding="utf-8")
+    cc_full = check_coverage_complete(d7)
+    d8b = Path(tempfile.mkdtemp())
+    (d8b / "target.md").write_text("# Target\n- Existing intel / recon report: /x/report.md\n", encoding="utf-8")
+    (d8b / "coverage.json").write_text(json.dumps({"total": 1, "assets": []}), encoding="utf-8")
+    cc_nonjson = check_coverage_complete(d8b)
+    checks += [
+        ("coverage subset (50/100) -> warn", bool(cc_subset)),
+        ("coverage full (95/100) -> no warn", cc_full == []),
+        ("recon path non-JSON -> skip (no FP)", cc_nonjson == []),
+    ]
+
+    # --- 漏报一致性门 (report↔evidence 高certainty一致, Codex 暴露的缺口) ---
+    d9 = Path(tempfile.mkdtemp())
+    for n in ("a.html", "b.html", "c.html"):
+        (d9 / n).write_text("x" * 10, encoding="utf-8")
+    (d9 / "evidence.md").write_text(
+        "# Evidence Ledger\n"
+        "## E-200: positive missing from report\n- Certainty: 1.0\n- Supports: H-001\n"
+        "- Saved artifacts: a.html\n\n"
+        "## E-201: refutes-only negative (Refutes hypothesis, no Supports)\n- Certainty: 0.8\n"
+        "- Refutes: H-002\n- Saved artifacts: b.html\n\n"
+        "## E-202: positive but cited in report body\n- Certainty: 1.0\n- Supports: H-003\n"
+        "- Saved artifacts: c.html\n\n"
+        "## E-203: downgraded\n- Certainty: 0.5 (降级 2026 从 1.0)\n- Supports: H-004\n\n"
+        "## E-204: positive cited only in code block (bypass)\n- Certainty: 1.0\n"
+        "- Supports: H-005\n- Saved artifacts: a.html\n\n"
+        "## E-205: positive cited only in HTML comment (bypass)\n- Certainty: 1.0\n"
+        "- Supports: H-006\n- Saved artifacts: a.html\n\n"
+        "## E-206: mixed Supports+Refutes positive\n- Certainty: 1.0\n- Supports: H-007\n"
+        "- Refutes: H-008\n- Saved artifacts: a.html\n",
+        encoding="utf-8")
+    (d9 / "report.md").write_text(
+        "# Report\nEvidence IDs: E-200, E-201, E-202, E-203, E-204, E-205, E-206\n\n"
+        "## 确认发现\n### 1. finding\n- 证据: E-202\n\n"
+        "```\nsample E-204 in a code block\n```\n\n<!-- E-205 in a comment -->\n",
+        encoding="utf-8")
+    mc_err, _ = check_closure_discipline(d9)
+    mc_miss = [e for e in mc_err if "漏报一致性" in e]
+    # header 变体直接测正则(不依赖冒号, 覆盖 'IDs :' 空格 / 'ID(s):')
+    hv = re.sub(r"(?im)^\s*Evidence\s+IDs?.*$", "",
+                "# R\nEvidence IDs : E-300\nEvidence ID(s): E-301\nbody E-302\n")
+    checks += [
+        ("漏报: confirmed positive 缺失 -> 含 E-200", any("E-200" in e for e in mc_miss)),
+        ("漏报: refutes-only(无Supports) 豁免 E-201", not any("E-201" in e for e in mc_miss)),
+        ("漏报: report 正文引用豁免 E-202", not any("E-202" in e for e in mc_miss)),
+        ("漏报: 已降级豁免 E-203", not any("E-203" in e for e in mc_miss)),
+        ("漏报: 代码块引用不算(bypass) E-204", any("E-204" in e for e in mc_miss)),
+        ("漏报: 注释引用不算(bypass) E-205", any("E-205" in e for e in mc_miss)),
+        ("漏报: mixed Supports+Refutes 不豁免 E-206", any("E-206" in e for e in mc_miss)),
+        ("漏报: header 变体(空格/ID(s))被剥, E-302 正文保留",
+         "E-300" not in hv and "E-301" not in hv and "E-302" in hv),
+        ("漏报门触发一次", len(mc_miss) == 1),
+    ]
+
+    # --- auto-peer-review 触发/幂等逻辑(不调真实模型) ---
+    d10 = Path(tempfile.mkdtemp())
+    (d10 / "report.md").write_text(
+        "# Report\nEvidence IDs: E-001\n## 确认发现\n- 证据: E-001\n", encoding="utf-8")
+    (d10 / "review.md").write_text("# Review\n## Independent Review\n- done\n", encoding="utf-8")
+    rv_before = (d10 / "review.md").read_text(encoding="utf-8")
+    _maybe_auto_peer_review(d10)   # 幂等: 已有独立复审记录 -> 直接 return, 不改 review.md/不调模型
+    rv_after = (d10 / "review.md").read_text(encoding="utf-8")
+    d11 = Path(tempfile.mkdtemp())
+    (d11 / "report.md").write_text("# Report\n草稿, 无收口断言无确认引用\n", encoding="utf-8")
+    _maybe_auto_peer_review(d11)   # 未收口 -> return, 不建 review.md
+    checks += [
+        ("auto-review 幂等: 已有独立复审 -> review.md 不变", rv_before == rv_after),
+        ("auto-review: 未收口 -> 不触发(不建 review.md)", not (d11 / "review.md").exists()),
+    ]
+
+    # --- 操作录像软警 (check_replay_evidence) ---
+    d12 = Path(tempfile.mkdtemp())
+    (d12 / "evidence.md").write_text(
+        "# Evidence Ledger\n"
+        "## E-300: confirmed, html only (无录像)\n- Certainty: 1.0\n- Supports: H-1\n"
+        "- Saved artifacts: probe_x.html\n\n"
+        "## E-301: confirmed, has replay\n- Certainty: 1.0\n- Supports: H-2\n"
+        "- Saved artifacts: probe_y.html, probe_y.replay.json\n\n"
+        "## E-302: negative refutes (无 supports)\n- Certainty: 0.8\n- Refutes: H-3\n"
+        "- Saved artifacts: probe_z.html\n",
+        encoding="utf-8")
+    rep_w = check_replay_evidence(d12)
+    checks += [
+        ("录像软警: html-only confirmed -> 提示 E-300", any("E-300" in w for w in rep_w)),
+        ("录像软警: 有 .replay.json 不提示 E-301", not any("E-301" in w for w in rep_w)),
+        ("录像软警: negative 不提示 E-302", not any("E-302" in w for w in rep_w)),
+    ]
+
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -537,11 +952,48 @@ def _selftest() -> int:
     return 0 if not bad else 1
 
 
+def _maybe_auto_peer_review(run_dir: Path) -> None:
+    """--auto-peer-review: 收口时若 review.md 缺独立复审记录, 自动跑 tools/peer_review.py 异构
+    复审写进 review.md(满足独立复审硬门 line 654)。慢+数据出境, 故仅显式 flag。幂等: 已有记录
+    则不重跑(不重复花钱/出境)。复审是候选非裁决, driver 仍逐条过证据门。"""
+    report = run_dir / "report.md"
+    if not report.exists():
+        return
+    rtext = report.read_text(encoding="utf-8", errors="replace")
+    if not (_closure_claimed(rtext) or _report_is_final(run_dir)):
+        return  # 未收口 -> 不触发
+    rv_path = run_dir / "review.md"
+    rv = rv_path.read_text(encoding="utf-8", errors="replace") if rv_path.exists() else ""
+    if re.search(r"Independent Review|独立复审", rv):
+        return  # 幂等: 已有独立复审记录 -> 不重跑
+    try:
+        import peer_review  # 同目录(sys.path 已插入 tools/)
+    except Exception as e:
+        print(f"[auto-peer-review] 无法 import peer_review: {e}")
+        return
+    print("[auto-peer-review] 收口缺独立复审 -> 跑异构复审(peer_review, 慢/数据出境)…")
+    try:
+        r = peer_review.review(run_dir, into_run=True, require_heterogeneous=True)
+    except Exception as e:
+        print(f"[auto-peer-review] peer_review 失败: {e}")
+        return
+    if r.verdict == "NEEDS_DRIVER":
+        print("[auto-peer-review] 落到 Claude 兜底且无 API key —— 无异构后端, 需 driver 自己 spawn "
+              "fresh-context 子代理复审(独立复审门仍会拦, 这是对的)。")
+        return
+    print(f"[auto-peer-review] backend={r.backend_used} verdict={r.verdict}, "
+          f"{len(r.findings)} findings 已写进 review.md。候选非裁决, 逐条过证据门。")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check a Xunji run directory.")
     parser.add_argument("run_dir", type=Path, nargs="?")
     parser.add_argument("--selftest", action="store_true",
                         help="run the structured-evidence parser regression and exit")
+    parser.add_argument("--auto-peer-review", action="store_true",
+                        help="收口时若 review.md 缺独立复审记录, 自动跑 tools/peer_review.py "
+                             "(异构后端 Codex>DeepSeek/GLM>Claude, 慢/数据出境)写进 review.md "
+                             "满足独立复审硬门。幂等(有记录不重跑)、默认关、selftest 不触发")
     args = parser.parse_args()
     if args.selftest:
         return _selftest()
@@ -578,12 +1030,20 @@ def main() -> int:
     # Quality warnings (do not fail the structural gate; surface for the driver).
     warnings = check_evidence_certainty(run_dir)
     warnings.extend(check_dangling_citations(run_dir))  # 死引用(E-012 洞): 逐条报
+    warnings.extend(check_replay_evidence(run_dir))    # 操作录像: certainty>=0.8 确认建议附 .replay.json(可重放核实)
     warnings.extend(check_coverage(run_dir))          # 前置防 lump: 每次都报独立应用候选
+    warnings.extend(check_coverage_built(run_dir))    # 覆盖台账缺建: 引用 recon 却无 coverage.json(每轮都报, 不靠收口自首)
+    warnings.extend(check_coverage_complete(run_dir))  # 台账完整性: coverage 数量 vs recon, 防子集冒充全量
+    warnings.extend(check_shallow_close(run_dir))     # 纵深: 高价值前沿 depth=shallow 关闭却无 Vectors tried
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
     warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)
     warnings.extend(check_hints(run_dir))              # 操作者 Hint: pending 未吸收
     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
+    # 自动异构复审(--auto-peer-review): 收口时若缺独立复审记录, 自动跑 peer_review 写进 review.md
+    # 满足下面的独立复审硬门。慢(几分钟)+数据出境, 默认关、仅显式 flag; selftest 不走这。
+    if args.auto_peer_review:
+        _maybe_auto_peer_review(run_dir)
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
     errors.extend(closure_errors)
