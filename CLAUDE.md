@@ -56,6 +56,17 @@ target) and publishing a turnkey kit — not weaponization itself.
 For every authorized target, maintain a run directory under `runs/` using
 `docs/WORKFLOW.md`.
 
+The recon/OSINT layer is a **separate upstream tool** (Guanlan,
+`github.com/atk7r/Guanlan`): it collects, dedups, folds wildcard DNS, probes
+liveness, and classifies ownership. Xunji **consumes that clean asset inventory and
+attacks it — it does NOT re-do OSINT.** `setup_run <slug> <recon.json>` builds
+`coverage.json` directly from the Guanlan output with **zero re-probe**; do not
+bulk-run `classify_hosts` to rebuild what Guanlan already produced (that is
+re-OSINT — a pure time-sink, and the thing that turned a real run into a slog).
+The framework's job starts where the OSINT output ends: pentest the reachable
+assets and prove the vulnerabilities. `classify_hosts` survives only as an opt-in
+own-egress liveness recheck.
+
 Use `docs/ROUTER.md` to decide which mode-specific guidance applies. The router
 is deterministic: current runtime plus task phase plus run state decide which
 files to load.
