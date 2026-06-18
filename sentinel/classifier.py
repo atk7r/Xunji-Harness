@@ -26,6 +26,9 @@ _REMOTE_TOOL = re.compile(r"\b(curl|wget|nc|ncat|socat)\b|probe\.py|render\.py|s
 # a path-looking token: starts with / ~ ./ ../ or drive, or contains a slash
 _PATH_RE = re.compile(r"(?<!\w)(?:~|\$HOME|/[^\s;,|&'\"]*|\.{1,2}/[^\s;,|&'\"]*|[A-Za-z]:[\\/][^\s;,|&'\"]*|[\w.\-]+/[^\s;,|&'\"]*)")
 _SYS_DIR = re.compile(r"^(?:/(?:bin|sbin|boot|dev|etc|lib|lib64|proc|root|sys|usr|var|home|opt|srv|mnt)\b|/$|~|\$HOME|[A-Za-z]:[\\/]?$|/[a-z]$)", re.I)
+# 重定向汇/源(2>/dev/null 之类): 不是动作的操作对象, 不该参与 locus 判定 —— 否则 `rm runs/x 2>/dev/null`
+# 因 /dev/null 是系统路径被误判 LOCAL_OTHER → 把"清理自己 scratch"当 L4 销毁(mokwon dogfood #11)。
+_REDIR_SINK = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/zero", "/dev/tty"}
 
 
 # verbs that operate on the local working tree (not a remote target) unless a
@@ -40,7 +43,9 @@ def normalize_action(tool: str, command: str) -> dict:
     urls = _URL_RE.findall(command)
     hosts = set(h.lower() for h in urls) | set(_IP_RE.findall(command))
     remote = bool(urls) or (bool(_REMOTE_TOOL.search(command)) and bool(hosts))
-    paths = [p for p in _PATH_RE.findall(command) if not p.lower().startswith(("http", "ftp"))]
+    paths = [p for p in _PATH_RE.findall(command)
+             if not p.lower().startswith(("http", "ftp"))
+             and p.strip("'\"").lower() not in _REDIR_SINK]
     verb = command.split()[0].lower() if command.split() else ""
     return {"tool": tool, "command": command, "urls": urls, "verb": verb,
             "hosts": sorted(hosts), "remote": remote, "paths": paths}

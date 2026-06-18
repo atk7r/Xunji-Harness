@@ -177,9 +177,11 @@ def autonomy_decision(action: dict, attr: dict, own_refs=()) -> tuple[int, str, 
         return (max(eff, GATE), "BLOCK" if eff == BLOCK else "GATE",
                 "derived from untrusted target content (possible injection)")
 
-    # 4) out-of-scope target -> at least GATE (scope is orthogonal to depth).
+    # 4) out-of-scope target -> at least GATE (scope is orthogonal to depth)。空 scope = 未知, 仍保守 GATE
+    #    —— 不靠 scope_known 放行: 空 scope + 残留 plan 误判 PLAN_DERIVED 会欠标 AUTO 漏放(Codex BLOCKER)。
+    #    真实的过期 scope FP 由 #10a(按当前 run 刷 scope)+ setup 自动填 scope 治, 不靠放宽这道门。
     if locus == C.TARGET and hosts and not attr["host_in_scope"]:
-        return (max(eff, GATE), "BLOCK" if eff == BLOCK else "GATE", "out-of-scope target")
+        return (max(eff, GATE), "BLOCK" if eff == BLOCK else "GATE", "out-of-scope / scope-undefined target")
 
     # 5) effect-driven
     if eff == BLOCK:
@@ -219,6 +221,7 @@ def run_detectors(action: dict, attr: dict, sess: dict, scope: set) -> list[dict
                          "tier": tier})
 
     # 1) scope drift — target action against a host not in the engagement scope
+    #    (空 scope 也报: 未定义=保守, 安全优先; 真实过期 scope 由 #10a 刷当前 run scope 治, 不放宽此门)
     if attr["locus"] == C.TARGET and action.get("hosts") and not attr["host_in_scope"]:
         f("scope_drift", "high", "deny",
           f"action targets out-of-scope host(s) {action['hosts']} (scope={sorted(scope)})", 0.6)

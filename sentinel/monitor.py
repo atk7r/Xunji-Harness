@@ -90,11 +90,25 @@ def _load_sess(event: dict) -> dict:
     sess = S.load(_sess_name(event))
     if not sess:
         run = S.active_run()
-        sess = {"scope_hosts": sorted(S.scope_hosts(run)),
+        sess = {"scope_hosts": sorted(S.scope_hosts(run)) if run else [],
                 "plan_keywords": [], "directives": [],
                 "egress_bytes": 0, "request_count": 0, "auth_fails": 0,
                 "risk_score": 0.0, "trace": [], "run": str(run) if run else ""}
     return sess
+
+
+def _refresh_run_ctx(sess: dict, run) -> None:
+    """据【当前】active run 刷新 scope/plan_keywords; run=None(无活跃 run)则【清空】, 绝不保留上一个
+    run 的过期值 —— 否则过期 scope 让 host_in_scope 误判 in-scope、过期 plan 误判 PLAN_DERIVED, 把
+    target 动作欠标成 L1/AUTO 漏放(Codex 两轮逮到的 under-label 路径)。None-safe。"""
+    if run is not None:
+        sess["scope_hosts"] = sorted(S.scope_hosts(run))
+        sess["plan_keywords"] = S.plan_keywords(run)
+        sess["run"] = str(run)
+    else:
+        sess["scope_hosts"] = []
+        sess["plan_keywords"] = []
+        sess["run"] = ""
 
 
 def handle_event(event: dict) -> None:
@@ -104,9 +118,7 @@ def handle_event(event: dict) -> None:
         run = S.active_run()
 
         if name == "SessionStart":
-            sess["scope_hosts"] = sorted(S.scope_hosts(run))
-            sess["plan_keywords"] = S.plan_keywords(run)
-            sess["run"] = str(run) if run else ""
+            _refresh_run_ctx(sess, run)
 
         elif name == "UserPromptSubmit":
             prompt = (event.get("prompt") or "").strip()
@@ -127,6 +139,10 @@ def handle_event(event: dict) -> None:
             taint = _taint_active(sess, action)        # Phase 2: did this derive from injected target content?
             if (sess.get("taint") or {}).get("hot", 0) > 0:
                 sess["taint"]["hot"] -= 1
+            # #10a: 每动作据【当前】active run 实时刷新 scope(防用 session 开始时那个 run 的过期
+            # scope; 也 pick up 中途填进 target.md 的 scope)。mokwon dogfood: 半途开新 run, sentinel
+            # 仍拿上一个 run 的 hamastar scope → 把 mokwon 合法探测满屏误判越界 + 触发熔断。
+            _refresh_run_ctx(sess, run)   # 据当前 run 刷 scope/plan(run=None 则清空, 不留过期 → 防漏放)
             ctx = {"scope_hosts": set(sess.get("scope_hosts", [])),
                    "directives": directives,
                    "plan_keywords": sess.get("plan_keywords", []),
