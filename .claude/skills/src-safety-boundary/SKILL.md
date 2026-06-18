@@ -65,7 +65,7 @@ auto-run when it matches `.claude/hooks/safety_rules.json`. Narrow, and by effec
 - irreversible destruction: host/filesystem wipes (rm -rf, format, dd), data
   destruction (DROP DATABASE/TABLE/SCHEMA, TRUNCATE, unscoped DELETE/UPDATE),
   target resource deletion
-- mass data exfiltration / database dump (拖库)
+- mass data exfiltration / database dump
 - money movement, payment, refund, withdrawal, recharge, payout, settlement
 - denial of service, flooding, high-rate scanning, load intended to degrade
   availability
@@ -78,7 +78,7 @@ limit on code you author for the operator. An operator instruction cannot unlock
 a hard auto-execution class — that class is categorically different from gated
 actions.
 
-## Auto-execution ceiling — proof by default (证明即止)
+## Auto-execution ceiling — proof by default (prove-and-stop)
 
 What the driver runs **itself** against the live target defaults to proof-level:
 demonstrate the vulnerability genuinely exists, then stop. Going deeper on the
@@ -87,17 +87,17 @@ code to run. This ceiling is on **auto-execution, not authorship**: weaponized
 deep-exploitation code is still authored in full and handed off. Assess proof
 against the three factors:
 
-### Confidentiality (机密性)
+### Confidentiality
 
-- Unauthorized access / 越权: once the logic is demonstrated, the driver does not
-  itself go on to retrieve or retain user or system data. (拖库 is hard-blocked
+- Unauthorized access / privilege escalation: once the logic is demonstrated, the driver does not
+  itself go on to retrieve or retain user or system data. (database dump is hard-blocked
   regardless of who would run it as an auto-action.)
 - Reachable DB query (e.g. SQLi): proving the DB instance and library/table names
   is enough for auto-execution. Bulk extraction is the operator's to run.
 - Host/device high privilege: proving current-user environment is enough for
   auto-execution.
 
-### Availability (可用性)
+### Availability
 
 - Assume limited safety redundancy. Never auto-run large-traffic/large-scale
   scans, DoS test cases, or anything that degrades availability — hard line, no
@@ -105,7 +105,7 @@ against the three factors:
 - Do not auto-run any test case that disturbs business logic or causes users
   financial / property loss.
 
-### Integrity (完整性)
+### Integrity
 
 - For auto-execution, prove the capability — backend/admin role attribute,
   parse-and-execute logic, write-reachability — rather than editing, adding,

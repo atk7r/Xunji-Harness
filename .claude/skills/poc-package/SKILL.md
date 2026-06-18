@@ -31,7 +31,7 @@ Per `poc_library/README.md`:
 - `poc_library/normal/<id>/` — already-disclosed N-day (public CVE/CNVD + public PoC
   exists). May ship with the repo.
 
-Entry layout: `<id>/` holds `README.md` (metadata table + 原理 + 用法), the
+Entry layout: `<id>/` holds `README.md` (metadata table + principle + usage), the
 `poc.py`/`poc.go`/binaries, and links to `knowledge/<id>.md` + `runs/<...>/`.
 
 ## The pipeline
@@ -64,7 +64,7 @@ a placeholder. This is what the OURS eHR packaging missed and had to fix:
 | Hardcoded host/IP in code | a baked-in `https://real.host/...` | arg-driven / `<target>` |
 | Run/registry tags | `UploadRegistry().register("acme_20250131", …)` | a generic tag, e.g. `"<id>-upload"` |
 | Reproduction-ledger paths | `runs/acme_20250131/` | `runs/<target>_<date>/` |
-| Instance lists in README | "11 实例：西安…、深圳…" | drop or genericize |
+| Instance lists in README | "11 instances：Xi'an…、Shenzhen…" | drop or genericize |
 
 Keep the weapon fully functional — every scrub is to a placeholder/arg, never a
 removal of capability. The vuln *class* and the grounding `knowledge/<id>.md`
@@ -91,8 +91,8 @@ real domain root / org slug is provably absent.
 
 - **author-and-handoff**: deliver complete, runnable, full-impact code to the
   operator, who runs it. No ceiling on what you author. What the driver
-  *auto-runs* against the live target stays proof-level (证明即止); hard-effect
-  classes (拖库 / DoS / destruction) are never auto-run regardless of handoff.
+  *auto-runs* against the live target stays proof-level (prove-and-stop); hard-effect
+  classes (database dump / DoS / destruction) are never auto-run regardless of handoff.
 - **xday → operator/local only**: hand off out of band; do not commit content
   (repo keeps the folder only). If history already carries it, a `git filter-repo`
   purge + force-push is required (see `repo-publishing-policy`).

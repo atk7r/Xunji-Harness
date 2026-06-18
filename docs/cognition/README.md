@@ -89,7 +89,7 @@ The default confirmation threshold is `certainty >= 0.8`.
 
 ## Vulnerability Chains
 
-Web-layer findings often combine (组合利用): one confirmed finding's proven
+Web-layer findings often combine (chaining): one confirmed finding's proven
 output state satisfies another finding's precondition. Chaining is first-class —
 it is how low-severity atoms compose into a high-impact finding — but it carries
 its own discipline:
@@ -99,7 +99,7 @@ its own discipline:
   suspected, the whole chain is suspected, not confirmed.
 - Terminal proof node: a high-impact proven state (RCE proven, admin reached)
   ENDS the chain for proof purposes. Record it. The destructive final action and
-  data exfiltration / 拖库 are hard rules — never. Going further (persistence, a
+  data exfiltration / database dump are hard rules — never. Going further (persistence, a
   webshell, pivoting) is operator-gated — only with the operator's consent.
 - Default: prove an SSRF / RCE hop by reachability to the target state. Pivoting
   from it into the host or internal network is operator-gated (ask the operator

@@ -24,7 +24,7 @@ Load only when the operator explicitly tells you to use the SRC skill. Do NOT
 auto-load it by guessing a target belongs to a program.
 
 - `.claude/skills/src-rules/SKILL.md` — SRC / bug-bounty program rules (e.g.
-  教育漏洞报告平台 / EDUSRC 无害化原则). Applies on top of `src-safety-boundary`
+  education vuln-report platform / EDUSRC). Applies on top of `src-safety-boundary`
   and tightens it for platform submissions (pivot off the table, data changes need
   platform authorization).
 
@@ -45,7 +45,7 @@ target selection. Invoke on demand when the task matches; do not auto-load.
 
 ## Run Authority
 
-This is the Claude Code workspace, a **red-team toolkit for web 打点
+This is the Claude Code workspace, a **red-team toolkit for web initial access
 (initial access)** (see `CLAUDE.md` Project Role). It is **Claude Code-specific**:
 the machine-enforced safety floor (`.claude/hooks/` PreToolUse etc.), CLAUDE.md
 auto-load, skills, and memory are Claude Code mechanisms — under a runtime without
@@ -167,7 +167,7 @@ Output:
 - report update only if evidence supports it
 - if a confirmed finding's proven output state meets another finding's
   precondition, record the chain edge in `chains.md` and open it as a new front
-  (组合利用); a chain is only as strong as its weakest confirmed hop
+  (chaining); a chain is only as strong as its weakest confirmed hop
 
 ### Reviewer
 
@@ -292,10 +292,10 @@ Project-discipline and run-structure checks live in `tools/`:
   run dir from templates (+ `evidence/`/`scripts/` subdirs), fold the recon via
   ingest_recon into `surface_recon.md`, record the recon path in `target.md`, **and
   derive a default `In-scope`/`Out-of-scope` into `target.md` from recon `ownership`
-  (`tools/scope.py`; `unrelated`→out, review/edit — 派生不驱动)**;
+  (`tools/scope.py`; `unrelated`→out, review/edit — derive-don't-drive)**;
   `--classify` also runs classify_hosts → coverage.json. **Start every run with
   this** — never hand-curate surface.md from the human report (selection bias →
-  blind spots). Builds the workbench; makes no front choices (派生不驱动).
+  blind spots). Builds the workbench; makes no front choices (derive-don't-drive).
 - `python tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
   `surface.md`-ready asset table, entry points, and a reachability matrix
   (recon-view vs your-egress-view). Setup-phase helper; structures intel, makes
@@ -310,8 +310,8 @@ Project-discipline and run-structure checks live in `tools/`:
 - `python tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl.
   webpack chunks) and assert completeness. **Run before claiming endpoint
   enumeration is complete** — grepping endpoints from a partially-fetched JS set
-  is how the 某实战 run missed an account-takeover endpoint (only 4/13 chunks
-  fetched). "已抓 N/M" must be N==M before "端点已枚举完".
+  is how the a real engagement run missed an account-takeover endpoint (only 4/13 chunks
+  fetched). "fetched N/M" must be N==M before "endpoints fully enumerated".
 - `python tools/rerun_deferred.py --run runs/<dir>` — re-probe the assets that were
   unreachable (egress-deferred) per `coverage.json`, from any egress (after a
   cooldown, a switched egress, or run in-country by the operator). Reports which

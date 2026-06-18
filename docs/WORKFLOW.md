@@ -63,7 +63,7 @@ pivoting to F-00Y because Z`). It only re-prioritizes — it **never closes a fr
 independent-reviewer hard gate).
 
 When a finding **confirms**, ask: does its proven output state satisfy another
-finding's precondition? If so that is a chain edge (组合利用) — open a front and
+finding's precondition? If so that is a chain edge (chaining) — open a front and
 record it in `chains.md` (conditional; skip when no edge).
 
 When an observation **grounds a product fingerprint** (or `classify_hosts` tags an
@@ -160,7 +160,7 @@ write the current best finding and the next autonomous action.
 
 ### Closure Discipline (premature-closure guard)
 
-The most common failure is declaring "no attack surface / 探尽 / 打不动" while
+The most common failure is declaring "no attack surface / exhausted / can't crack" while
 assets were only header / recon-classified, never examined. Before any such claim:
 
 - **No lump.** No collapsing N hosts into "a shared stack" without a per-asset,

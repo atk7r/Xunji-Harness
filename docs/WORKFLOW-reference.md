@@ -140,7 +140,7 @@ context.
 - Next autonomous move:
 - Stop condition:
 - Linked hypotheses:
-- Unlocked-by: (conditional — the E-id whose confirmation makes this front actionable; a chain / 组合利用 dependency. Most relevant on a deferred front waiting on a prior fact. Omit when there is no such dependency.)
+- Unlocked-by: (conditional — the E-id whose confirmation makes this front actionable; a chain / chaining dependency. Most relevant on a deferred front waiting on a prior fact. Omit when there is no such dependency.)
 
 ## Deferred Fronts
 
@@ -185,7 +185,7 @@ Type B reasoning.
 - Artifacts: (conditional — required when Certainty >= 0.8; the saved file/dir that proves it, e.g. `evidence/foo.html`. check_run hard-fails a confirmed entry with none. `probe --save NAME --run runs/<dir>`.)
 - Supports:
 - Refutes:
-- Unlocks: (conditional — the F-id this confirmed fact makes actionable, satisfying that front's precondition. The 组合利用 edge; omit when it unlocks nothing.)
+- Unlocks: (conditional — the F-id this confirmed fact makes actionable, satisfying that front's precondition. The chaining edge; omit when it unlocks nothing.)
 - Next:
 ```
 
@@ -348,7 +348,7 @@ rule), set `Status: absorbed` and link the `D-xxx` / front, re-read every cycle 
 part of the Reason pass; `check_run.py` warns while any hint is `pending`. (Core
 "Operator Hints" has the short version.)
 
-### chains.md — vulnerability chain / 组合利用 (conditional)
+### chains.md — vulnerability chain / chaining (conditional)
 
 Confirmed findings linked because one's proven output state meets the next's
 precondition. Create only when such an edge exists; copy the shape from
@@ -363,7 +363,7 @@ The run files already hold typed nodes (H-/F/E-xxx) and most of their edges:
 evidence `Supports:` / `Refutes:`, front `Linked hypotheses:`. The one edge that
 used to live only in your head is **`Unlocked-by:` / `Unlocks:`** — a confirmed Fact
 (E with `Certainty >= 0.8`) satisfying a front's precondition. That is the
-`chains.md` (组合利用) edge, generalized to the whole frontier.
+`chains.md` (chaining) edge, generalized to the whole frontier.
 
 `python tools/graph.py runs/<dir>` parses these into a **derived** graph
 (`<run>/graph.json`) and prints what is otherwise easy to miss:
@@ -374,7 +374,7 @@ used to live only in your head is **`Unlocked-by:` / `Unlocks:`** — a confirme
 - **closed-but-unlocked** — a front you closed that a confirmed Fact actually reopens
   (contradiction).
 - **dangling Facts** — a confirmed Fact that supports / unlocks / refutes nothing.
-- **orphan hypotheses** and **confirmed chains** (組合利用 candidates to record).
+- **orphan hypotheses** and **confirmed chains** (chaining candidates to record).
 
 Run it at the start of a **Reason pass** so "what just got unlocked / neglected" is a
 query, not a re-derivation. `check_run.py` reuses the same parse to warn on the two
@@ -420,7 +420,7 @@ when `report.md` makes a strong closure claim:
 
 - **HARD FAIL** if `review.md` has no `Independent Review` record. Self-review does
   not fix self-review bias, so the independent reviewer is a hard requirement to
-  close — not a suggestion. (某实战 showed that even after this guard was built, the
+  close — not a suggestion. (a real engagement showed that even after this guard was built, the
   driver still tried to close prematurely twice; a soft warning does not hold.)
   Resolve by spawning the reviewer and recording it, or by retracting the closure
   language.

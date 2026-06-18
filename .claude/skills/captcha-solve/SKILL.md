@@ -41,7 +41,7 @@ load page (acquire its JS + cookies)
 - **Slider**: find the gap offset (from a returned coordinate, or by image diff of
   bg vs puzzle), then drag the handle there. The response usually wants a
   **trajectory**, not just an endpoint — see gotchas.
-- **Click-select (点选)**: the challenge names targets (chars/icons) in an order;
+- **Click-select (click-select)**: the challenge names targets (chars/icons) in an order;
   click their on-image coordinates in that order. Coordinates may need scaling
   from natural to rendered image size.
 - **Rotate**: rotate the image to upright; submit the angle (often as a fraction
@@ -81,12 +81,12 @@ load page (acquire its JS + cookies)
 Solving the captcha is free (method). What you do **after** the barrier is graded
 by **effect**, not by this skill:
 
-- Default to **proof-level (证明即止)**: solve once, prove the gated endpoint is
+- Default to **proof-level (prove-and-stop)**: solve once, prove the gated endpoint is
   reachable, stop.
 - Driving a solved captcha to enable **high-rate brute-force, credential
   stuffing, or request flooding** crosses into the effect-gated / hard-blocked
   zone (availability / flooding) — that is not unlocked by being able to solve the
-  captcha. **SMS / 短信 verification-code endpoints especially**: solving the
+  captcha. **SMS / SMS verification-code endpoints especially**: solving the
   captcha does not license triggering a flood of messages.
 - Limits remain `src-safety-boundary` (effect, not method) and the
   `.claude/hooks/` gate.
