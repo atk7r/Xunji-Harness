@@ -161,6 +161,10 @@ Watch for these signs that the agent is not digging deeply enough:
   still open.
 - It expands assets but does not pick a high-value front to pursue.
 - It treats first-pass banner, version, or page observations as sufficient.
+- On a SPA it calls endpoints "enumerated" from a partially-fetched JS set — confirm
+  `tools/fetch_assets.py` reports every referenced chunk fetched (N==M) before
+  believing enumeration is complete; a missed webpack chunk is how a real run walked
+  past an account-takeover endpoint.
 - It stops after WAF, login, CAS, redirect, or missing credentials without Type
   A/B reasoning.
 - It records a suspicious signal but never defines what would confirm or reject

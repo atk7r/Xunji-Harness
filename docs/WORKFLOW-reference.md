@@ -27,7 +27,13 @@ Keep the run **root** to the core `.md` files plus the auto-derived
 `evidence/`, PoC under `scripts/`, coverage under `classify/`. To make the right
 place the easy place: `probe --save NAME --run runs/<dir>` drops the body **and** its
 `.replay.json` into `<run>/evidence/`; `render --run runs/<dir>` defaults its output
-to `<run>/evidence/render_<host>/`. The closure gate still resolves a cited artifact
+to `<run>/evidence/render_<host>/`. A render also drops `network.json` (every request
+the page made, capped at 500 — the app/API calls, `xhr`/`fetch` + `/api`·`/rest`·`.do`,
+are in there; render's stdout also echoes that filtered subset as `api_requests`) and
+`cookies.json` (its session) there — don't let them evaporate: if those requests
+surface app/API endpoints, fold them into `surface.md`/`frontier.md`; if a follow-up
+check needs the authenticated session, reuse `cookies.json` via `render --cookies-file`
+or a `probe -H 'Cookie: …'`. The closure gate still resolves a cited artifact
 wherever it sits (it is layout-tolerant), but `check_run.py` **warns on layout
 drift at closure** — proof/scratch files left loose in the run root once a final
 report exists — because mixing evidence with scratch is what makes a run hard to
@@ -35,7 +41,9 @@ audit (the original break-2 finding: `scshr` dumped 33 `ev_*.html` in the root,
 `cqytxy` 21 scratch files). The warn is **closure-gated** (silent during active
 verification, where mid-flight scratch in the root is normal — same cadence as
 `check_shallow_close`) and never hard-fails, so legacy runs are not punished; it
-just nudges you to tidy before the report is final.
+just nudges you to tidy before the report is final (`tools/cleanup.py --scratch`
+clears `tmp/` / `__pycache__` / `.state` scratch — dry-run by default, `--apply` to
+delete).
 
 ## File Templates
 

@@ -205,6 +205,10 @@ independent reviewer** (a fresh-context `general-purpose` sub-agent, standing-
 authorized) per `review/independent-reviewer.md` — self-review does not fix
 self-review bias. Its findings go under `## Independent Review` in `review.md` and
 must be resolved before closing. `tools/check_run.py` enforces this at the closure gate.
+When the operator accepts data egress and a heterogeneous backend is available, prefer
+`tools/peer_review.py --into-run` (or `check_run.py --auto-peer-review`) as that
+reviewer — an *orthogonal* model catches shared blind spots a same-model sub-agent
+cannot; the sub-agent is the egress-free fallback.
 
 ### Report
 
@@ -289,6 +293,7 @@ Project-discipline and run-structure checks live in `tools/`:
   no front choices.
 - `python tools/classify_hosts.py <recon.json>` — per-host classification by live
   content (not Server header): stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags.
+  `--hosts <file>` takes a plain host list when the operator gave no recon JSON.
   Run before claiming "explored/no surface" so assets are examined, not lumped.
 - `python tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl.
   webpack chunks) and assert completeness. **Run before claiming endpoint

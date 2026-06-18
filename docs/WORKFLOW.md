@@ -43,7 +43,11 @@ record why in `decisions.md`.
 ### Reason pass (every cycle, cheap)
 
 Before the next move, re-read the **open** fronts in `frontier.md`, the evidence
-added since the last pass, and any **pending hints in `hints.md`**. For the
+added since the last pass, and any **pending hints in `hints.md`**. If sentinel has
+written `alerts.md` / `pending_approval.md` in the run dir, scan any unresolved entry
+too — each flags an action of yours that hit the risky / approval-gated class; note
+the disposition in `decisions.md` or hand it to the operator. (Sentinel stays
+observe-only — this is self-awareness and audit, not a gate that stops you.) For the
 deferred dimension run `python tools/graph.py runs/<dir>` — it lists *actionable*
 and *unlocked-but-deferred* fronts, so "what just got unlocked / neglected" is a
 query, not a full re-read of every block. Ask:
@@ -117,7 +121,11 @@ A `>= 0.8` entry **requires** a `Replicated:` or `Control:` field **and** a cite
 **warns** on one missing the control/replication (which the evidence-gate
 definition then says to downgrade). (Both holes were caught by real independent
 reviews — a `1.0` whose only saved file was a login redirect; conclusions claimed
-but never saved.) Rationale + the `evidence.md` template: reference.
+but never saved.) When that control is a baseline-vs-mutant difference (boolean SQLi,
+auth-bypass, IDOR on/off), `tools/probe.py DIFF <urlA> <urlB>` produces it in one call
+— it reports `reliable_differential` only when each side is stable *and* the two differ
+(`--samples N` raises the stability bar): the purpose-built control, not a hand-rolled
+second probe. Rationale + the `evidence.md` template: reference.
 
 ## Operator Hints (`hints.md`, conditional)
 
@@ -154,7 +162,11 @@ assets were only header / recon-classified, never examined. Before any such clai
   every run and lists distinct-app candidates to investigate.
 - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
-  evidence (a `Refutes:` or a proof), not a barrier.
+  evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,
+  switched egress, run in-country) and egress-deferred assets remain, re-probe them
+  with `tools/rerun_deferred.py --run runs/<dir>`; whatever it returns as
+  newly-reachable is **new attack surface** (it lands in `coverage_rerun.json`) —
+  open/update those fronts and record the decision rather than leaving it parked.
 - **Closed fronts cite an `E-` evidence id**, not prose.
 - **Credentials are ask-then-fallback, never a blocker.** Ask the operator; if none,
   fall back to unauth / harmless methods and push the unauth surface as far as it
@@ -165,9 +177,15 @@ assets were only header / recon-classified, never examined. Before any such clai
 - **Independent review before closure (mandatory · HARD gate).** Self-review does
   not fix self-review bias. Spawn an independent fresh-context `general-purpose`
   reviewer (`review/independent-reviewer.md`), record findings under an
-  `## Independent Review` heading in `review.md`, and address every one.
-  `check_run.py` **hard-fails** a closure claim with no `Independent Review` record.
-  Standing authorization granted — do it without re-asking.
+  `## Independent Review` heading in `review.md`, and address every one. **Prefer a
+  heterogeneous reviewer when its cost is paid:** if the operator accepts data egress
+  (the run findings go to an external vendor — Codex→OpenAI) and a backend is up,
+  `tools/peer_review.py --into-run runs/<dir>` (or `check_run.py --auto-peer-review`)
+  satisfies this gate with an *orthogonal* model — a same-model sub-agent only reduces
+  bias, not the shared blind spots a different vendor catches. Absent that consent, the
+  fresh-context `general-purpose` sub-agent is the always-available, egress-free
+  fallback. `check_run.py` **hard-fails** a closure claim with no `Independent Review`
+  record. Standing authorization granted for the sub-agent — do it without re-asking.
 
 `check_run.py` HARD-fails / WARN mechanics for closure, and the same independent
 review applied to **safety-critical code** changes, are in the reference.
