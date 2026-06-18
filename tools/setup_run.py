@@ -96,10 +96,13 @@ def record_scope(run_dir: Path, recon_path: Path) -> str:
     if out_line:
         txt = setfield(txt, "Out-of-scope assets", out_line)
     if sc["notes"]:
-        note = "scope 复核(secondary/第三方托管): " + "; ".join(f"{h}" for h, _ in sc["notes"][:6])
+        prefix = ("⚠ scope 启发式(recon 无 ownership), 归属待裁: " if sc.get("heuristic")
+                  else "scope 复核(secondary/第三方托管): ")
+        note = prefix + "; ".join(f"{h}" for h, _ in sc["notes"][:6])
         txt = setfield(txt, "Notes", note)
     t.write_text(txt, encoding="utf-8")
-    return f"scope 派生 → {len(sc['in'])} in-模式 / {len(sc['out'])} out / {len(sc['notes'])} 复核"
+    tag = " ⚠启发式(无 ownership, 务必复核 target.md In/Out-of-scope)" if sc.get("heuristic") else ""
+    return f"scope 派生 → {len(sc['in'])} in-模式 / {len(sc['out'])} out / {len(sc['notes'])} 复核{tag}"
 
 
 def ingest(recon_path: Path, run_dir: Path) -> str:
@@ -202,7 +205,7 @@ def _selftest() -> int:
         ("frontier template has depth field", "Current depth" in (rd / "frontier.md").read_text(encoding="utf-8")),
         ("no-overwrite guard raises", _raises_exist(rd)),
     ]
-    recon = {"target": "t", "assets": [{"host": "a.example", "category": "c", "reachability": "confirmed"}]}
+    recon = {"target": "t", "assets": [{"host": "a.example", "category": "c", "reachability": "confirmed", "ownership": "core"}]}
     rp = d / "recon.json"
     rp.write_text(json.dumps(recon), encoding="utf-8")
     record_recon(rd, str(rp))

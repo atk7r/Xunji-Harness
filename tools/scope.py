@@ -56,8 +56,14 @@ def _cidr24(ip: str) -> str:
 
 
 def derive_scope(recon: dict) -> dict:
-    """从 recon 派生默认 scope。键: target/in/out/out_detail/notes。in/out 是匹配模式列表。"""
+    """从 recon 派生默认 scope。键: target/in/out/out_detail/notes/heuristic。
+    osint_ai schema 有 `ownership`(unrelated→out, core/secondary→in)。**无 ownership 字段的 recon
+    源走启发式兜底**: 只把【target 域族】判 in-scope, 其余(别的域/裸 IP)进 needs_human 待人工裁定,
+    绝不静默把所有资产判 in-scope(原 bug: 换源后过滤失效)。heuristic=True 时 setup/CLI 会显著告警。"""
     assets = recon.get("assets") or []
+    target = (recon.get("target") or "").strip().lower()
+    target_reg = registrable(target) if target else ""
+    heuristic = not any(isinstance(a, dict) and a.get("ownership") for a in assets)
     in_doms: set[str] = set()
     in_ips: list[str] = []
     out_detail: list[tuple[str, str]] = []
@@ -68,8 +74,16 @@ def derive_scope(recon: dict) -> dict:
         h = (a.get("host") or "").strip().lower()
         if not h:
             continue
-        own = (a.get("ownership") or "core").lower()
         reason = a.get("reason") or ""
+        if heuristic:
+            # 无 ownership: 只 target 域族 in-scope; 别的域/裸 IP 进 needs_human(不自动 in/out,
+            # 因无信号分不清别名 vs 第三方)。不静默全判 in-scope。
+            if not _is_ip(h) and target_reg and registrable(h) == target_reg:
+                in_doms.add(target_reg)
+            else:
+                notes.append((h, reason or "无 ownership: 归属待人工裁定"))
+            continue
+        own = (a.get("ownership") or "core").lower()
         if own == "unrelated":
             out_detail.append((h, reason))
             continue
@@ -89,7 +103,7 @@ def derive_scope(recon: dict) -> dict:
     in_pats = sorted(f"*.{d}" for d in in_doms) + sorted(set(in_cidrs))
     out_pats = sorted(set(h for h, _ in out_detail))
     return {"target": recon.get("target", ""), "in": in_pats, "out": out_pats,
-            "out_detail": out_detail, "notes": notes}
+            "out_detail": out_detail, "notes": notes, "heuristic": heuristic}
 
 
 def _match_one(host: str, pat: str) -> bool:
@@ -135,6 +149,11 @@ def parse_target_scope(md: str) -> tuple[list[str], list[str]]:
 
 def render_scope_lines(sc: dict) -> tuple[str, str]:
     """→ (in_line, out_line) 写进 target.md(带派生来源说明)。"""
+    if sc.get("heuristic"):
+        note = "  (⚠ recon 无 ownership: 仅 target 域族启发式; 其余资产见 Notes 待裁 —— 务必复核/补全)"
+        in_line = (", ".join(sc["in"]) + note) if sc["in"] else \
+                  "⚠ recon 无 ownership 且无 target 域 —— scope 未派生, 手填 In-scope 再 classify"
+        return in_line, ""     # 启发式不自动定 out(无信号分不清别名 vs 第三方)
     in_line = (", ".join(sc["in"]) + "  (recon ownership 派生; 复核/可改)") if sc["in"] else ""
     out_line = (", ".join(sc["out"]) + "  (recon ownership=unrelated, 非目标)") if sc["out"] else ""
     return in_line, out_line
@@ -184,6 +203,19 @@ def _selftest() -> int:
         ("往返后判定一致", in_scope("ucm.mokwon.ac.kr", pin, pout) == "in"
                           and in_scope("lizking215.synology.me", pin, pout) == "out"),
     ]
+    # 启发式兜底: recon 无 ownership 不静默全判 in-scope, 只 target 域族 in, 其余 needs_human
+    rec_no_own = {"target": "ex.com", "assets": [
+        {"host": "a.ex.com"}, {"host": "b.ex.com"}, {"host": "evil.other.org"}, {"host": "9.9.9.9"}]}
+    sc2 = derive_scope(rec_no_own)
+    checks += [
+        ("无 ownership → heuristic=True", sc2.get("heuristic") is True),
+        ("启发式: target 域族 *.ex.com in", "*.ex.com" in sc2["in"]),
+        ("启发式: 别的域不自动 in(防静默全 in)", in_scope("evil.other.org", sc2["in"], sc2["out"]) != "in"),
+        ("启发式: 裸 IP 不自动 in", in_scope("9.9.9.9", sc2["in"], sc2["out"]) != "in"),
+        ("启发式: 别的域/IP 进 notes 待裁",
+         any(h == "evil.other.org" for h, _ in sc2["notes"]) and any(h == "9.9.9.9" for h, _ in sc2["notes"])),
+        ("有 ownership → heuristic=False", derive_scope(recon).get("heuristic") is False),
+    ]
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -202,6 +234,10 @@ def main() -> int:
         ap.error("need recon.json (or --selftest)")
     recon = json.loads(Path(args.recon).read_text(encoding="utf-8"))
     sc = derive_scope(recon)
+    if sc.get("heuristic"):
+        print("[⚠ scope 启发式] recon 无 ownership 字段 → 仅按 target 域族派生 in-scope, "
+              f"{len(sc['notes'])} 个资产归属待人工裁定。复核 target.md In/Out-of-scope 再 classify。",
+              file=sys.stderr)
     in_line, out_line = render_scope_lines(sc)
     print(f"target: {sc['target']}")
     print(f"In-scope:  {in_line}")
