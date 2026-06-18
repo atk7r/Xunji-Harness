@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 KNOWLEDGE = ROOT / "knowledge"
 
 # Files that are not entries.
-SKIP_NAMES = {"README.md"}
+SKIP_NAMES = {"README.md", "_lexicon.md"}   # _lexicon.md = vuln-class anchor vocabulary (reference, not a product entry)
 
 REQUIRED_SECTIONS = [
     "## Recognition",

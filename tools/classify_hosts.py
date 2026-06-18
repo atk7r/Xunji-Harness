@@ -141,6 +141,31 @@ def classify_body(body: str, kb_sigs: "list[tuple[str, list[str]]] | None" = Non
         flags.append("FRAMEWORK")
     if "id=app" in low or 'id="app"' in low:
         flags.append("SPA")
+    # Signal-driven attack-surface subtypes (SURFACE:X): set ONLY when the body shows a concrete
+    # actionable surface (grounding, not "every page is attack surface"). The depth gate keys on
+    # LOGIN or any SURFACE:* so non-login surfaces (API/upload/admin/swagger/...) can't be deferred free.
+    if 'type="file"' in low or "type='file'" in low or "multipart/form-data" in low:
+        flags.append("SURFACE:UPLOAD")
+    # Signals are PATH/PRODUCT-shaped, not bare words (a bare 'graphql'/'oauth'/'/api/' in an SPA
+    # bundle would over-tag a HARD gate — Codex calibration). Only fire on a concrete surface.
+    if "swagger-ui" in low or "swagger.json" in low or "/swagger" in low or "openapi.json" in low or "api-docs" in low:
+        flags.append("SURFACE:SWAGGER")
+    if "/graphql" in low or "graphiql" in low or "__schema" in low:
+        flags.append("SURFACE:GRAPHQL")
+    if "actuator" in low:
+        flags.append("SURFACE:ACTUATOR")
+    if any(k in low for k in ("druid", "nacos", "eureka", "phpinfo", "h2-console", "jenkins")):
+        flags.append("SURFACE:ADMIN")
+    if stack == "SpringBoot-api" or ('"code":' in low and '"data":' in low) or re.search(r"/api/v\d", low):
+        flags.append("SURFACE:API")
+    if any(k in low for k in ("ws://", "wss://", "socket.io", "sockjs", "stomp", "signalr")):
+        flags.append("SURFACE:WEBSOCKET")
+    if any(k in low for k in ("/oauth", "oauth2/", "/saml", "saml2", "/openid", "/sso", "authserver", "/cas")):
+        flags.append("SURFACE:SSO")
+    if re.search(r"[?&](url|redirect_uri|webhook|preview|imageurl|proxy)=", low):
+        flags.append("SURFACE:URL_FETCH")
+    if re.search(r"[?&](file|path|download|export|filename|filepath)=", low):
+        flags.append("SURFACE:FILE_DOWNLOAD")
     return stack, flags
 
 
@@ -207,6 +232,19 @@ def _selftest() -> int:
                    classify_body('<html>plain page</html>', _kb)[0] == "?"))
     checks.append(("classify: hardcoded wins over kb",
                    classify_body('<script src="/Scripts/ais.webform.js"></script>', _kb)[0] == "AIS-WebForms"))
+    # SURFACE:* signal-driven subtypes (Codex calibration: path/product-shaped, not bare words —
+    # so the HARD depth gate over LOGIN|SURFACE:* does not over-tag generic SPA bundles).
+    def _fl(b: str) -> list:
+        return classify_body(b)[1]
+    checks += [
+        ("SURFACE: upload form -> UPLOAD", "SURFACE:UPLOAD" in _fl('<form enctype="multipart/form-data"><input type="file"></form>')),
+        ("SURFACE: swagger-ui -> SWAGGER", "SURFACE:SWAGGER" in _fl('<title>swagger-ui</title>')),
+        ("SURFACE: SpringBoot JSON -> API", "SURFACE:API" in _fl('{"status":500,"timestamp":1,"path":"/api/x"}')),
+        ("SURFACE: /graphql -> GRAPHQL", "SURFACE:GRAPHQL" in _fl('fetch("/graphql")')),
+        ("SURFACE: plain SPA not over-tagged", not any(f.startswith("SURFACE:") for f in _fl('<div id="app">hello</div>'))),
+        ("SURFACE: bare /api/ does NOT tag API (tightened)", "SURFACE:API" not in _fl('<a href="/api/config">x</a>')),
+        ("SURFACE: bare word 'oauth' does NOT tag SSO (tightened)", "SURFACE:SSO" not in _fl('<p>we support oauth login soon</p>')),
+    ]
     # 防回归: 真 recon 跑会调 load_knowledge_signatures(ROOT/...) —— 之前 ROOT 漏定义致 NameError,
     # 而 selftest 从不走那行, 故 16/16 绿却真跑必崩(mokwon dogfood 逮到)。覆盖 ROOT + 那行。
     checks.append(("ROOT 已定义 + load_knowledge_signatures(ROOT) 可跑(防 NameError 回归)",

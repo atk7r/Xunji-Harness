@@ -110,6 +110,10 @@ collapse back to: stop.
   (filled only when it applies) or enforced in `tools/`.
 - A passing `tools/check_run.py` means the structure is present, never that the
   work is good. Filling fields is not advancing a front.
+- **Every line earns its tokens** (PDF "token economics"): a note must do one of —
+  narrow the asset scope, narrow the vuln class, raise/lower a certainty, explain a
+  barrier, or preserve a reproducible evidence pointer. A token that neither anchors a
+  fact nor shrinks the search space is noise — cut it. Same test for prompts and docs.
 
 ## Evidence Gate
 
@@ -185,6 +189,17 @@ assets were only header / recon-classified, never examined. Before any such clai
   / default-creds / WAF-bypass), record the `E-xxx` — its result counts whether it lands,
   is hardened, or is egress-blocked — **then** defer the post-auth (creds-gated) depth. Do
   not stop and ask the operator while attack surface remains unattacked.
+- **Depth covers the applicable vuln classes per surface — not just auth.** A
+  surface's depth = the vuln classes its observed signals justify, anchored on the
+  precise class name (`knowledge/_lexicon.md`), by subtype: login→auth-bypass/SQLi-login/
+  enum/default-creds then [creds] horizontal/vertical privilege-escalation; param-API→injection(SQLi/cmd/
+  SSTI/deser)/IDOR/SSRF/mass-assignment; upload→upload-shell/traversal/XXE; URL-fetch→SSRF/
+  open-redirect; admin/actuator/swagger→unauth/default-creds/debug→RCE; SSO/OAuth→redirect/
+  state/signature; file-download→traversal/arbitrary-download; exposure→source/secret/debug.
+  **Discipline (not a fire-list):** test only the classes the surface's signals justify;
+  name the signal that made each relevant; a negative/deferred record states the barrier
+  or why the class did not apply; no fixed payload list (payloads stay local/operator-chosen);
+  the gate wants evidence of *reasoning/attack attempt*, not exhaustive exploitation.
 - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
   evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,

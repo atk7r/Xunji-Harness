@@ -62,6 +62,12 @@ hypothesis in an observed fact, not in speculation.
   `tools/knowledge_seed.py <id> --product … --from-body <saved>` — so the next run
   recognizes it. A read-only flywheel stops compounding; capture on the miss, fill
   and adapt per-target (still grounding, never a payload dump).
+- **Anchor every hypothesis on the precise vuln-class term**, not a vague description
+  ("SQLi" not "fuzz the param", "IDOR" not "broken access", "path traversal" not "read a
+  file"): the exact class name localizes the model's knowledge and retrieves the right
+  weak-point anchor. `knowledge/_lexicon.md` is the canonical class vocabulary (10 families,
+  not just auth). The class must be **justified by an observed surface signal** — never fire
+  a class the target gives no signal for (that is the blind scanner the project rejects).
 - Keep reasoning tied to observable behavior. When a step's result is ambiguous,
   get one more grounding observation before believing it, rather than reasoning
   further on an unverified premise.
