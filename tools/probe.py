@@ -276,6 +276,11 @@ def _selftest() -> int:
     checks.append(("--run + 裸名 -> <run>/evidence/", Path(ps_bare) == Path("runs/t_20260101/evidence/ev_x.html")))
     checks.append(("--run + 显式路径 -> 原样尊重", _place_save("sub/ev.html", "runs/t") == "sub/ev.html"))
     checks.append(("无 --run -> 原样", _place_save("ev.html", None) == "ev.html"))
+    # #3: 无扩展名裸名补 .html(dogfood: --save tomcat9 存成裸名, driver 以为 .html 报错)
+    checks.append(("--run + 无扩展名裸名 -> 补 .html 落 evidence/",
+                   Path(_place_save("tomcat9", "runs/t")) == Path("runs/t/evidence/tomcat9.html")))
+    checks.append(("无 --run + 无扩展名 -> 补 .html", _place_save("foo", None) == "foo.html"))
+    checks.append(("已带扩展名不重复补", _place_save("a.json", None) == "a.json"))
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -287,9 +292,11 @@ def _place_save(save: str | None, run: str | None) -> str | None:
     """统一布局: --run 给定且 --save 是【裸文件名】(无路径分隔)时, 产物落到 <run>/evidence/
     —— 录像 .replay.json 写在 save 旁, 自动一并跟随。--save 已带路径分隔则原样尊重
     (显式路径优先, 向后兼容)。专治证据散落 run 根目录、与草稿混作一团(断-2)。"""
-    if not save or not run:
+    if not save:
         return save
-    if ("/" in save) or ("\\" in save):
+    if "." not in Path(save).name:        # 无扩展名裸名补 .html(#3 dogfood: --save tomcat9 存成裸名,
+        save = save + ".html"             # driver 以为是 .html 当场报错; 录像 .replay.json 自动跟随)
+    if not run or ("/" in save) or ("\\" in save):
         return save
     return str(Path(run) / "evidence" / save)
 

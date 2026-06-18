@@ -221,9 +221,11 @@ def check_dangling_citations(run_dir: Path) -> list[str]:
     删 _ci_*.html 后 E-012 引用静默悬空, 靠人工才发现)。现逐条列出死引用。"""
     warns: list[str] = []
     for r in parse_evidence(run_dir):
-        if r["artifacts_missing"]:
+        # 只对【显式 Artifacts: 字段】里的引用较真(artifacts_scoped)。否则散文里写的探测路径
+        # (如 Action: "...GET /WEB-INF/web.xml") 会被全块兜底误抓成"死引用"(#14 mokwon dogfood FP)。
+        if r["artifacts_missing"] and r.get("artifacts_scoped"):
             warns.append(
-                f"evidence {r['id']}: 引用了不存在的产物 {r['artifacts_missing']} —— "
+                f"evidence {r['id']}: Artifacts 字段引用了不存在的产物 {r['artifacts_missing']} —— "
                 "死引用无法复核(文件被删/改名/笔误)。修正路径、补存产物、或移除该引用。")
     return warns
 

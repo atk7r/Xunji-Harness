@@ -15,7 +15,7 @@
 - Alternative explanation:
 - Certainty:
 - Replicated / Control: (conditional — required once this entry is confirmed; the replay or baseline that rules out the benign explanation)
-- Artifacts: (conditional — required once this entry is confirmed; the saved file/dir that proves it, e.g. `evidence/foo.html`. Save with `probe --save NAME --run runs/<dir>`.)
+- Artifacts: (conditional — required once this entry is confirmed; the saved file/dir that proves it, e.g. `evidence/<name>.html`. Save with `probe --save NAME --run runs/<dir>`.)
 - Supports:
 - Refutes:
 - Unlocks: (conditional — the F-id this confirmed fact makes actionable, satisfying that front's precondition; the 组合利用 edge. Omit when it unlocks nothing.)

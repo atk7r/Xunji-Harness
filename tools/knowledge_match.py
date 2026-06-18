@@ -167,7 +167,9 @@ def main() -> int:
         hits = match_body(body, kb_dir)
         if not hits:
             print("[无命中] 目标内容未匹配任何【已入库】指纹。")
-            print("         若识别出新产品, 收口时申报 Fingerprints captured 入库, 飞轮下次自动认。")
+            print("         识别出新产品? 顺手写回飞轮(别等收口): "
+                  "python tools/knowledge_seed.py <id> --product <名> --from-body <本响应体>")
+            print("         收口时在 report 申报 Fingerprints captured, 飞轮下次自动认。")
             return 0
         print(f"[命中 {len(hits)} 条] 据目标指纹检索到以下接地条目(按目标定制利用, 勿盲跑):\n")
         for e, matched in hits:

@@ -60,7 +60,16 @@ def extract_signatures(body: str, limit: int = 6) -> list[str]:
             seen.append(cl)
         if len(seen) >= limit:
             break
-    return seen
+    # 剥尾部版本号 → 也给版本无关 signature(#5 dogfood: 'apache tomcat/9.0.58' 只认那一版, 加 'apache tomcat')
+    ver = re.compile(r"[ /v.\-]*\d[\d.]*[a-z]?\s*$", re.I)
+    out: list[str] = []
+    for s in seen:
+        if s not in out:
+            out.append(s)
+        s2 = ver.sub("", s).strip(" /.-")
+        if s2 and s2 != s and len(s2) >= 3 and s2 not in out:
+            out.append(s2)
+    return out[:limit]
 
 
 def build_entry(entry_id: str, product: str, vendor: str, category: str,

@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+ROOT = Path(__file__).resolve().parents[1]   # 仓库根(flywheel 读端 load_knowledge_signatures 用; 之前漏定义 → 真 recon 跑必崩 NameError, selftest 没覆盖到那行)
 import probe  # noqa: E402  (复用 send + 其 guard 接入 + UTF-8 stdout)
 from harness.guard import HostBackoff  # noqa: E402
 
@@ -206,6 +207,10 @@ def _selftest() -> int:
                    classify_body('<html>plain page</html>', _kb)[0] == "?"))
     checks.append(("classify: hardcoded wins over kb",
                    classify_body('<script src="/Scripts/ais.webform.js"></script>', _kb)[0] == "AIS-WebForms"))
+    # 防回归: 真 recon 跑会调 load_knowledge_signatures(ROOT/...) —— 之前 ROOT 漏定义致 NameError,
+    # 而 selftest 从不走那行, 故 16/16 绿却真跑必崩(mokwon dogfood 逮到)。覆盖 ROOT + 那行。
+    checks.append(("ROOT 已定义 + load_knowledge_signatures(ROOT) 可跑(防 NameError 回归)",
+                   isinstance(load_knowledge_signatures(ROOT / "knowledge"), list)))
 
     STUB = '<html><script>window.location.href= "/app/";</script></html>'
     APP = ('<title>LOGIN</title><input type="password" name="FormLayout$edtPassword">'
@@ -234,6 +239,14 @@ def _selftest() -> int:
                        (meta.get("redirected_to", "") or "").endswith("/app/")))
         checks.append(("integration: resolved page classified AIS", stack == "AIS-WebForms"))
         checks.append(("integration: resolved body has app marker", "ais.webform.js" in body))
+        # run_classify 覆盖(#9: main 循环之前没被测 → ROOT/落盘 bug 绿着崩)。2 台 + flush_every=1
+        d2 = Path(tempfile.mkdtemp())
+        cov, rws, intr = run_classify([f"127.0.0.1:{port}", f"127.0.0.1:{port}"], d2, [], 0.0, 5, flush_every=1)
+        cj = d2 / "coverage.json"
+        cjd = json.loads(cj.read_text(encoding="utf-8")) if cj.exists() else {}
+        checks.append(("run_classify 增量写 coverage.json", cj.exists()))
+        checks.append(("coverage 含 2 资产 + partial 字段", cjd.get("total") == 2 and "partial" in cjd))
+        checks.append(("run_classify 返回 coverage 列表", len(cov) == 2))
     finally:
         srv.shutdown()
 
@@ -242,6 +255,74 @@ def _selftest() -> int:
         print(("ok   " if ok else "FAIL ") + n)
     print("classify_hosts selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
     return 0 if not bad else 1
+
+
+def run_classify(hosts: list, out_dir: Path, kb_sigs, delay: float, timeout: int,
+                 flush_every: int = 10):
+    """逐主机分类 + 【增量落盘】coverage.json/classify.txt(每 flush_every 台 + finally)。
+    mokwon dogfood: 131 台跑到 71 静默死, coverage 全丢(只在循环末尾写一次)。现在跑到一半被杀/
+    超时也留部分 coverage;单台任何异常不致命(防整跑崩)。返回 (coverage, rows, interesting)。
+    抽成函数 = 可被 selftest 覆盖(ROOT/落盘那类 main-only 的 bug 不再绿着崩)。"""
+    coverage: list[dict] = []
+    rows: list = []
+    interesting: list = []
+    total = len(hosts)
+
+    def flush() -> None:
+        table = "\n".join(f"{h:30} [{st:14}] {ti:30} {fl}" for h, st, ti, fl in rows)
+        (out_dir / "classify.txt").write_text(table, encoding="utf-8")
+        examined = sum(1 for c in coverage if c["examined"])
+        reachable = sum(1 for c in coverage if c["reachable"] is True)
+        (out_dir / "coverage.json").write_text(json.dumps(
+            {"total": len(coverage), "examined": examined, "reachable": reachable,
+             "planned": total, "partial": len(coverage) < total, "assets": coverage},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+
+    try:
+        for i, h in enumerate(hosts, 1):
+            do_sleep = True
+            try:
+                body, meta = fetch_body(h, out_dir, timeout)
+            except HostBackoff as e:
+                rows.append((h, "BACKOFF", "", str(e)[:30]))
+                coverage.append({"host": h, "reachable": "unknown", "examined": False,
+                                 "stack": "BACKOFF", "flags": [], "note": "self-throttle"})
+                do_sleep = False
+            except Exception as e:                       # 单台异常不致命(网络/解析/未料)
+                rows.append((h, "EXC", "", str(e)[:30]))
+                coverage.append({"host": h, "reachable": "unknown", "examined": False,
+                                 "stack": "EXC", "flags": [], "note": f"exc: {str(e)[:50]}"})
+                do_sleep = False
+            else:
+                if not body and "error" in meta:
+                    rows.append((h, "ERR", "", (meta.get("error", "") or "")[:24]))
+                    coverage.append({"host": h, "reachable": False, "examined": False,
+                                     "stack": "ERR", "flags": [], "note": (meta.get("error", "") or "")[:40]})
+                else:
+                    stack, flags = classify_body(body, kb_sigs)
+                    m = re.search(r"<title>(.*?)</title>", body, re.I | re.S)
+                    ti = (m.group(1).strip()[:30] if m else "")
+                    ln = meta.get("len", len(body))
+                    redir = meta.get("redirected_to")
+                    if redir:
+                        flags = [*flags, "REDIRECT"]
+                        ln = len(body)               # len of the RESOLVED page, not the stub
+                    rows.append((h, stack, ti, " ".join(flags)))
+                    cov = {"host": h, "reachable": True, "examined": True,
+                           "stack": stack, "flags": flags, "title": ti, "len": ln}
+                    if redir:
+                        cov["redirected_to"] = redir
+                    coverage.append(cov)
+                    if stack in ("?", "SpringBoot-api", "Vue-SPA") or flags:   # 有意思=未识别/带攻击面标记
+                        interesting.append((h, stack, ti, " ".join(flags), ln))
+            if i % flush_every == 0 or i == total:       # 增量落盘: 中断也留部分 coverage
+                flush()
+                print(f"[classify] {i}/{total} … coverage 增量落盘", file=sys.stderr)
+            if do_sleep:
+                time.sleep(delay)
+    finally:
+        flush()                                          # 收尾/中断/异常都写最终 coverage
+    return coverage, rows, interesting
 
 
 def main() -> int:
@@ -300,51 +381,11 @@ def main() -> int:
     # 飞轮读取端: 加载已入库的 knowledge signatures, 让 classify 识别上次入库的产品。
     kb_sigs = load_knowledge_signatures(ROOT / "knowledge")
 
-    # 结构化检视台账(coverage): 每个资产 reachable/examined/stack —— 让 lump 藏不住。
-    coverage: list[dict] = []
-    rows = []
-    interesting = []
-    for h in hosts:
-        try:
-            body, meta = fetch_body(h, out_dir, args.timeout)
-        except HostBackoff as e:
-            rows.append((h, "BACKOFF", "", str(e)[:30]))
-            coverage.append({"host": h, "reachable": "unknown", "examined": False,
-                             "stack": "BACKOFF", "flags": [], "note": "self-throttle"})
-            continue
-        if not body and "error" in meta:
-            rows.append((h, "ERR", "", (meta.get("error", "") or "")[:24]))
-            coverage.append({"host": h, "reachable": False, "examined": False,
-                             "stack": "ERR", "flags": [], "note": (meta.get("error", "") or "")[:40]})
-            time.sleep(args.delay)
-            continue
-        stack, flags = classify_body(body, kb_sigs)
-        m = re.search(r"<title>(.*?)</title>", body, re.I | re.S)
-        ti = (m.group(1).strip()[:30] if m else "")
-        ln = meta.get("len", len(body))
-        redir = meta.get("redirected_to")
-        if redir:
-            flags = [*flags, "REDIRECT"]
-            ln = len(body)               # len of the RESOLVED page, not the stub
-        rows.append((h, stack, ti, " ".join(flags)))
-        cov = {"host": h, "reachable": True, "examined": True,
-               "stack": stack, "flags": flags, "title": ti, "len": ln}
-        if redir:
-            cov["redirected_to"] = redir
-        coverage.append(cov)
-        # "有意思"= 未识别栈 或 带攻击面标记(独立应用/登录/动态/框架)
-        if stack in ("?", "SpringBoot-api", "Vue-SPA") or flags:
-            interesting.append((h, stack, ti, " ".join(flags), ln))
-        time.sleep(args.delay)
-
+    # 逐主机分类 + 增量落盘 coverage(抽成 run_classify, 可测 + 中断留部分, 见 #9)
+    coverage, rows, interesting = run_classify(hosts, out_dir, kb_sigs, args.delay, args.timeout)
     table = "\n".join(f"{h:30} [{st:14}] {ti:30} {fl}" for h, st, ti, fl in rows)
-    (out_dir / "classify.txt").write_text(table, encoding="utf-8")
-    # coverage.json: check_run 读它做"已检视 vs 可达未检视"的结构化比对(根源防 lump)
     examined = sum(1 for c in coverage if c["examined"])
     reachable = sum(1 for c in coverage if c["reachable"] is True)
-    (out_dir / "coverage.json").write_text(json.dumps(
-        {"total": len(coverage), "examined": examined, "reachable": reachable,
-         "assets": coverage}, ensure_ascii=False, indent=2), encoding="utf-8")
     print(table)
     print(f"\n[检视覆盖] 资产 {len(coverage)} | 已检视内容 {examined} | "
           f"可达 {reachable} | 写 {out_dir}/coverage.json")

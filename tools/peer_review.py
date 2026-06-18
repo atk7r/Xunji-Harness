@@ -334,6 +334,15 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     if not scope.is_dir():
         return ReviewResult(verdict="ERROR", error=f"scope 目录不存在: {scope}")
 
+    # #12: 复审前据当前 evidence.md 重生 evidence.json(它是 check_run 派生缓存; 若 driver 改了
+    # evidence.md 却没跑 check_run, 旧 sidecar 会与源矛盾 → 误导独立复审。mokwon dogfood: Codex
+    # 逮到 confirmed:[]/foo.html 的过期 evidence.json)。让复审看到真状态。
+    try:
+        import evidence_parse as _ep
+        _ep.write_evidence_index(scope, _ep.parse_evidence(scope))
+    except Exception:
+        pass
+
     cfg = config or load_config()
     rubric = rubric or DEFAULT_RUBRIC
     chosen = select_backend(cfg, backend)
