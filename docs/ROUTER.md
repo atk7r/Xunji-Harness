@@ -93,14 +93,17 @@ Output:
 - **create the run directory in ONE shot**: `python tools/setup_run.py <slug>
   [recon.json]` — builds the template skeleton + `evidence/`/`scripts/` subdirs, and
   (with a recon arg) folds the FULL asset table via ingest_recon into
-  `surface_recon.md` + records the recon path in `target.md`. **Never hand-curate
-  `surface.md` from the human report** — a curated subset encodes the driver's
-  selection bias as the run's ground truth and blinds the anti-lump guard (hamastar
-  root cause: 30+ assets silently un-examined, 6 operator nudges).
-- **build the coverage ledger before claiming any surface explored**:
-  `python tools/classify_hosts.py <recon.json> --out runs/<dir>/classify` (or
-  `setup_run.py … --classify`) → `coverage.json`. `check_run` hard-fails a final
-  report that cited a recon but never built `coverage.json`.
+  `surface_recon.md`, records the recon path in `target.md`, **and builds `coverage.json`
+  directly from the Guanlan recon (zero re-probe)**. **Never hand-curate `surface.md`
+  from the human report** — a curated subset encodes the driver's selection bias as the
+  run's ground truth and blinds the anti-lump guard (hamastar root cause: 30+ assets
+  silently un-examined, 6 operator nudges).
+- **the coverage ledger is built FOR you, zero re-probe**: `setup_run` (above) folds the
+  Guanlan recon (`classification.json` assets + `report.md` liveness) straight into
+  `coverage.json` — Guanlan already did dedup / wildcard-fold / liveness / ownership, so
+  **do NOT bulk-run `classify_hosts` to rebuild it (= re-OSINT, the nuist time-sink)**;
+  that tool is now opt-in for a your-own-egress recheck only. `check_run` hard-fails a
+  final report that cited a recon but never built `coverage.json`.
 - define scope and authorization
 - ask the user only for missing authorization, target, account, or boundary data
 
@@ -292,21 +295,27 @@ Project-discipline and run-structure checks live in `tools/`:
   run dir from templates (+ `evidence/`/`scripts/` subdirs), fold the recon via
   ingest_recon into `surface_recon.md`, record the recon path in `target.md`, **and
   derive a default `In-scope`/`Out-of-scope` into `target.md` from recon `ownership`
-  (`tools/scope.py`; `unrelated`→out, review/edit — derive-don't-drive)**;
-  `--classify` also runs classify_hosts → coverage.json. **Start every run with
-  this** — never hand-curate surface.md from the human report (selection bias →
-  blind spots). Builds the workbench; makes no front choices (derive-don't-drive).
+  (`tools/scope.py`; `unrelated`→out, review/edit — derive-don't-drive)**, **and build
+  `coverage.json` DIRECTLY from the Guanlan recon (`classification.json` assets +
+  `report.md` liveness) with ZERO re-probe** — Guanlan (the upstream OSINT tool) already
+  did dedup / wildcard-DNS folding / liveness / ownership, so **do NOT bulk-run
+  classify_hosts to rebuild that (= re-OSINT, the time-sink that ate the nuist run).**
+  `reachable=True` only for Guanlan-confirmed ∩ in-scope → the gate demands verdicts for
+  the genuinely-reachable subset, not the unreachable majority. `--classify` is **opt-in**:
+  re-probe from your own egress only when you need your-vantage liveness (e.g. after the
+  proxy is up). **Start every run with this** — never hand-curate surface.md from the human
+  report (selection bias → blind spots). Builds the workbench; makes no front choices.
 - `python tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
   `surface.md`-ready asset table, entry points, and a reachability matrix
   (recon-view vs your-egress-view). Setup-phase helper; structures intel, makes
   no front choices.
-- `python tools/classify_hosts.py <recon.json>` — per-host classification by live
-  content (not Server header): stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags.
-  `--hosts <file>` takes a plain host list when the operator gave no recon JSON.
-  Run before claiming "explored/no surface" so assets are examined, not lumped.
-  Skips recon **out-of-scope** assets by default (`ownership=unrelated` — personal/
-  third-party, e.g. a personal NAS); `--all` probes everything. Scope honored via
-  `tools/scope.py` (the run's `target.md` In/Out-of-scope is the source of truth).
+- `python tools/classify_hosts.py <recon.json>` — **OPT-IN** per-host classification by
+  LIVE re-probe (stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags). **Not the default
+  coverage builder anymore** — setup_run's Guanlan adapter already produces `coverage.json`
+  with zero re-probe; running this bulk = re-OSINT (Guanlan did the OSINT). Use it ONLY for
+  a deliberate **your-own-egress liveness/fingerprint recheck** (e.g. proxy now up, want to
+  confirm a host you're about to attack). `--hosts <file>` for a plain host list with no recon.
+  Skips recon out-of-scope by default; `--all` probes everything; scope via `tools/scope.py`.
 - `python tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl.
   webpack chunks) and assert completeness. **Run before claiming endpoint
   enumeration is complete** — grepping endpoints from a partially-fetched JS set

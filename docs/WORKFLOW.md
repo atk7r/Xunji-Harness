@@ -66,9 +66,10 @@ When a finding **confirms**, ask: does its proven output state satisfy another
 finding's precondition? If so that is a chain edge (chaining) — open a front and
 record it in `chains.md` (conditional; skip when no edge).
 
-When an observation **grounds a product fingerprint** (or `classify_hosts` tags an
-asset `kb:<id>`), consult the grounding base for that stack **before** crafting the
-next probe — do not re-derive a known stack's weak points from memory:
+When an observation **grounds a product fingerprint** — i.e. while attacking an asset you
+fetch it and recognize the stack (or an opt-in `classify_hosts` tagged it `kb:<id>`) —
+consult the grounding base for that stack **before** crafting the next probe; do not
+re-derive a known stack's weak points from memory:
 `tools/knowledge_match.py --body <saved-response>` for its weak-point anchors (+ CVE
 leads), `tools/xday_match.py --body …` for any stored **local** exploit. Consult on
 the hit and adapt per-target — not a pre-loaded checklist (cognition "Grounding and
@@ -164,9 +165,12 @@ The most common failure is declaring "no attack surface / exhausted / can't crac
 assets were only header / recon-classified, never examined. Before any such claim:
 
 - **No lump.** No collapsing N hosts into "a shared stack" without a per-asset,
-  by-content examination. Run `tools/classify_hosts.py` → `coverage.json` (the
-  source of truth for "was this asset actually looked at"). `check_run.py` reads it
-  every run and lists distinct-app candidates to investigate.
+  by-content examination. `coverage.json` is the source of truth for "which assets exist
+  + which are reachable" — **built by `setup_run` directly from the Guanlan recon (zero
+  re-probe; Guanlan already did dedup / wildcard-fold / liveness). Do NOT bulk-run
+  classify_hosts to rebuild it (= re-OSINT).** `check_run.py` reads it every run and
+  lists distinct-app candidates to investigate (per-asset content examination happens
+  when you actually attack the asset, not in a bulk pre-scan).
 - **Every reachable asset reaches a verdict — "examined" ≠ "tested".** Prioritising
   high-value is right, but low-value is **not** skipped: after the high-value depth
   pass, **auto-continue to the low-value assets** (cheap breadth via `tools/scan.py`).
@@ -180,8 +184,9 @@ assets were only header / recon-classified, never examined. Before any such clai
 - **Breadth before depth; `deferred` on attack surface is NOT free.** The flow is:
   preliminary-detect **every** asset's surface first (high-value → low-value; do **not**
   tunnel deep on one app while others are unexamined), **then** go to depth. A `deferred`
-  verdict must be *earned*: for any asset `classify` flagged `LOGIN` (a real attack
-  surface), the deferral must be backed by an **evidence (`E-xxx`) attack record** —
+  verdict must be *earned*: for any asset `coverage` flagged `LOGIN` (from the Guanlan
+  category, or a live probe — a real attack surface), the deferral must be backed by an
+  **evidence (`E-xxx`) attack record** —
   symmetric to `confirmed` needing evidence. A bare "deferred (need creds / low value)"
   on a login surface with **no attack attempt** is the *deferred-is-the-new-lump* hole:
   laundering "didn't attack" into "closure". `check_run.py` **hard-fails** a closure with

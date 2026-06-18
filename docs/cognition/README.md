@@ -47,8 +47,9 @@ hypothesis in an observed fact, not in speculation.
   fixed checklist — derive the specific check from the specific technology.)
 - The grounding base **is** where those weak-point anchors live — consult it on a
   fingerprint hit, do not re-derive a known stack from memory. When an observation
-  grounds a product (or `classify_hosts` tags an asset `kb:<id>`), retrieve the
-  entry: `python tools/knowledge_match.py --body <saved-response>` surfaces its
+  grounds a product — you fetched the asset while attacking it and recognized the stack
+  (or an opt-in `classify_hosts` tagged it `kb:<id>`) — retrieve the entry:
+  `python tools/knowledge_match.py --body <saved-response>` surfaces its
   Recognition + Weak-Point Anchors (class + mechanism + CVE) to aim the next
   per-target check, and `python tools/xday_match.py --body …` checks whether a
   stored **local** exploit exists for that stack (xday has no public payload to
