@@ -115,6 +115,21 @@ def ingest(recon_path: Path, run_dir: Path) -> str:
     return f"surface_recon.md ({n} assets)"
 
 
+def adapt_coverage(recon_path: Path, run_dir: Path) -> str:
+    """轴 B 适配器: Guanlan 产物 → coverage.json, 【零重探】。Guanlan 已做去重/通配折叠/存活/归属,
+    框架不再 classify_hosts 全量重探重建(= re-OSINT 冤枉时间)。取 recon 同目录 report.md 的存活分层。"""
+    import ingest_recon
+    recon = json.loads(recon_path.read_text(encoding="utf-8"))
+    rep = recon_path.parent / "report.md"
+    report_md = rep.read_text(encoding="utf-8", errors="replace") if rep.exists() else None
+    cov = ingest_recon.build_coverage(recon, report_md)
+    out = run_dir / "classify"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "coverage.json").write_text(json.dumps(cov, ensure_ascii=False, indent=2), encoding="utf-8")
+    src = "含 report.md 存活分层" if report_md else "无 report.md → 可达性留 unknown(渗透时定)"
+    return f"coverage.json ({cov['total']} 资产 / {cov['reachable']} 已确认可达, {src})"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="初始化授权目标 run 工作台(派生不驱动)")
     ap.add_argument("slug", nargs="?", help="目标短名 → run 目录 runs/<slug>_<date>")
@@ -162,23 +177,28 @@ def main() -> int:
                 print(f"[setup] {sinfo} → target.md(派生不驱动, 复核/可改)")
             except Exception as e:
                 print(f"[!] scope 派生失败(请手填 target.md In/Out-of-scope): {e}", file=sys.stderr)
+            # 轴 B: 默认【零重探】从 Guanlan 产物折 coverage.json(check_run 收口硬门要它)。
+            try:
+                cinfo = adapt_coverage(rp, run_dir)
+                print(f"[setup] Guanlan→coverage(零重探): {cinfo}")
+            except Exception as e:
+                print(f"[!] coverage 适配失败(可手跑 classify_hosts 兜底): {e}", file=sys.stderr)
     else:
         record_recon(run_dir, "none")
         print("[setup] 无 recon: 自行填 target.md 范围。")
 
     if recon_ok and args.classify:
-        print("[setup] 跑 classify_hosts(实时探测建 coverage.json)...")
+        # 可选: 额外用【自己出口视角】实时探测复核存活/指纹(代理通了想核实时才用)。注意会【覆写】
+        # 上面 Guanlan 折好的 coverage(classify 不 merge), 是显式 opt-in 的重探。
+        print("[setup] --classify: 额外跑 classify_hosts 实时探测(覆写 Guanlan coverage; 仅需自出口存活复核时用)...")
         cmd = [sys.executable, str(ROOT / "tools" / "classify_hosts.py"), str(rp),
                "--out", str(run_dir / "classify")]
         r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
         sys.stdout.write(r.stdout or "")
         if r.stderr:
             sys.stderr.write(r.stderr)
-    elif recon_ok:
-        print("[下一步] 主动侦察建覆盖台账(check_run 收口硬门要 coverage.json):")
-        print(f"         python tools/classify_hosts.py {rp} --out {run_dir / 'classify'}")
 
-    print(f"[下一步] 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
+    print(f"[下一步] 直接打可达高价值(coverage 已就位); 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
     return 0
 
 
@@ -221,6 +241,16 @@ def _selftest() -> int:
         ("scope 派生填进 target.md Target", "- Target: t" in tgt),
         ("scope 派生填进 In-scope assets", "*.a.example" in tgt),
         ("record_scope 报派生计数", "in-模式" in sinfo),
+    ]
+    # adapt_coverage: Guanlan 产物 → coverage.json(零重探)
+    adapt_coverage(rp, rd)
+    cov_p = rd / "classify" / "coverage.json"
+    cov_j = json.loads(cov_p.read_text(encoding="utf-8")) if cov_p.exists() else {}
+    checks += [
+        ("adapt_coverage 写 classify/coverage.json", cov_p.exists()),
+        ("coverage 含资产 a.example", any(a.get("host") == "a.example" for a in cov_j.get("assets", []))),
+        ("coverage examined=0(零重探, 没发包)", cov_j.get("examined") == 0),
+        ("coverage source 标 guanlan-adapter", "guanlan" in cov_j.get("source", "")),
     ]
     # no-recon path writes 'none' (avoid template placeholder tripping _recon_cited)
     rd2 = d / "t2_20260101"

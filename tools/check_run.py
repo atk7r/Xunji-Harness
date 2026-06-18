@@ -333,7 +333,7 @@ def check_coverage_health(run_dir: Path) -> list[str]:
         examined = cov.get("examined", 0)
         reachable = cov.get("reachable", 0)
         candidates = [a for a in cov.get("assets", [])
-                      if a.get("reachable") is True
+                      if a.get("reachable") is True and a.get("examined") is True
                       and (a.get("stack") in ("?", "SpringBoot-api", "Vue-SPA") or a.get("flags"))]
         if candidates:
             names = ", ".join(a["host"] for a in candidates[:15])
