@@ -166,6 +166,11 @@ Watch for these signs that the agent is not digging deeply enough:
 - It asks the user what vulnerability class to test next while safe fronts are
   still open.
 - It expands assets but does not pick a high-value front to pursue.
+- It stops after a high-value finding and leaves the remaining (especially
+  low-value) reachable assets only fingerprinted, never driven to a verdict —
+  "examined" lumped as "tested". Prioritise high-value, then auto-continue the
+  low-value ones (cheap breadth via `tools/scan.py`); every reachable asset gets a
+  verdict (deferred-with-reason counts), one is not skipped.
 - It treats first-pass banner, version, or page observations as sufficient.
 - On a SPA it calls endpoints "enumerated" from a partially-fetched JS set — confirm
   `tools/fetch_assets.py` reports every referenced chunk fetched (N==M) before

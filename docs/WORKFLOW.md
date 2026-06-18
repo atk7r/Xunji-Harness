@@ -163,6 +163,16 @@ assets were only header / recon-classified, never examined. Before any such clai
   by-content examination. Run `tools/classify_hosts.py` → `coverage.json` (the
   source of truth for "was this asset actually looked at"). `check_run.py` reads it
   every run and lists distinct-app candidates to investigate.
+- **Every reachable asset reaches a verdict — "examined" ≠ "tested".** Prioritising
+  high-value is right, but low-value is **not** skipped: after the high-value depth
+  pass, **auto-continue to the low-value assets** (cheap breadth via `tools/scan.py`).
+  Each reachable in-scope asset must be driven to a verdict — confirmed / rejected /
+  `deferred` **with a reason** (login-gated · no creds · can't-reach · WAF). Only
+  fingerprinted (classify looked at it) is **not** a verdict and **not** closure.
+  `check_run.py` **hard-fails** a final report with reachable assets never named in a
+  front / evidence (same-stack siblings may share one front that lists them all — do
+  not re-attack each, but every member must be accounted for). This forces a driver
+  *judgement on every asset*, never a blind scan of every host.
 - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
   evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,

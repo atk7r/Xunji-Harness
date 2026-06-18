@@ -566,6 +566,62 @@ def _closure_claimed(text: str) -> bool:
     return False
 
 
+def _norm_host(h) -> str:
+    """规整: 去 scheme/path/port/尾点 + 小写 —— 让 coverage 的 host(可能带 https://h:8443)与 .md 里
+    的写法对齐比对, 防表示不一致的假阴(Codex 复审)。括号 IPv6 [..]:port 取括号内; 仅【单冒号】才当
+    host:port 去 port(多冒号=裸 IPv6, 保留不截断)。已知边界: 单标签 host(如 h1)在 .md 里可能被无关
+    <h1>//h1/ 误命中 —— cooperative 台账的限制, 真实 recon 几乎不出现单标签 host(Codex WARN)。"""
+    s = str(h or "").strip().lower()
+    s = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", s)       # scheme
+    s = s.split("/")[0]                                 # path
+    if s.startswith("[") and "]" in s:                 # [2001:db8::1]:443 → 2001:db8::1
+        return s[1:s.index("]")]
+    if s.count(":") == 1:                               # host:port → 去 port(裸 IPv6 多冒号则保留)
+        s = s.split(":")[0]
+    return s.rstrip(".")
+
+
+def check_untested_assets(run_dir: Path) -> list[str]:
+    """收口硬门(测的层 anti-lump / 不漏测): coverage 里每个【可达】资产都要被驱动到一个 verdict ——
+    在 verdict 台账(frontier=front/Status · evidence=E- · report=确认发现)里被【点到】(测了 / 或
+    deferred 带理由)。只 examined(摸了指纹)不算测过。漏掉的可达资产 = 早停/漏测(操作者纪律: 优先
+    高价值没问题, 但低价值也要测, 高价值测完自动续测低价值, 我给的资产都要测, 不要漏)。deferred
+    (登录门/无凭据/够不着/WAF)是合法 verdict —— 在 front 里点到该资产并写理由即可; 同栈/同源簇可在一个
+    front 里列全部成员一起裁决(别逐个重打, 但每个成员都要被点到)。coverage 由 classify 产出且已滤
+    out-of-scope, 故此处 = 可达 in-scope 资产。这逼的是【对每个资产表态】, 不是机械打穿每台(后者=项目
+    禁的盲扫)。比对用【逐 host 词界精确匹配】(host 前后不得紧邻域名字符 \\w.-): 防 1.2.3.1⊂1.2.3.10 /
+    a.com⊂data.com / a.com⊂sub.a.com 的假阳, 且单标签 h、IDN example.xn--p1ai 等任意形状均按整串匹配
+    (一套机制, 不靠通用 host 正则的形状假设 —— Codex 逮到两机制不一致致单标签恒假阴 BLOCKER)。"""
+    covs = list(run_dir.glob("**/coverage.json"))
+    if not covs:
+        return []
+    try:
+        cov = json.loads(covs[0].read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return []
+    reachable = {_norm_host(a.get("host")) for a in cov.get("assets", [])
+                 if isinstance(a, dict) and a.get("reachable") is True and a.get("host")}
+    reachable.discard("")
+    if not reachable:
+        return []
+    hay = ""
+    for fn in ("frontier.md", "evidence.md", "report.md"):     # verdict 台账(front/E-/确认发现)
+        p = run_dir / fn
+        if p.exists():
+            hay += "\n" + p.read_text(encoding="utf-8", errors="replace").lower()
+    # 逐 host 词界精确匹配: host 前后不得是 [\w.-](域名字符), 故 1.2.3.1 不命中 1.2.3.10、a.com 不命中
+    # data.com / sub.a.com; 单标签/IDN 等任意形状按整串匹配(一套机制, 不靠通用 host 正则的形状假设)。
+    untested = [h for h in sorted(reachable)
+                if not re.search(r"(?<![\w.\-])" + re.escape(h) + r"(?![\w.\-])", hay)]
+    if not untested:
+        return []
+    shown = ", ".join(untested[:15]) + (" …" if len(untested) > 15 else "")
+    return [f"收口硬门(漏测/未到结论): {len(untested)}/{len(reachable)} 个【可达】资产从未在 frontier/"
+            f"evidence/report 被驱动到 verdict —— 只 examined(摸指纹)不算测过: {shown}。每个可达资产都要"
+            "到一个 verdict(confirmed/rejected/deferred带理由); 高价值手工深挖在前、低价值 scan.py/nuclei "
+            "兜底在后, 一个别落(同栈簇可在一个 front 里列全成员一起裁决, 不必逐个重打)。"]
+
+
 def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     """过早收口护栏(P0-1). 触发条件 = report.md 出现【强收口断言】(自首式) **或**
     report.md 已是【实质终版报告】(状态式 _report_is_final: 引用了已确认发现)。后者堵住
@@ -651,6 +707,9 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
                 f"指纹入库(软警): Fingerprints captured 未给出 knowledge/ 入库路径, 但 coverage 有 "
                 f"{cand} 个独立应用候选(未识别栈/带攻击面标记) —— 确认这些不是该入 knowledge/ 的"
                 "新产品指纹, 别让飞轮空转。")
+
+    # 硬门(测的层 anti-lump / 不漏测): coverage 里每个【可达】资产都要被驱动到 verdict, 不能只 examined
+    errors.extend(check_untested_assets(run_dir))
 
     # 硬门: 收口前必须有独立 Reviewer 复审记录
     review = run_dir / "review.md"
@@ -988,6 +1047,44 @@ def _selftest() -> int:
         "# Evidence Ledger\n## E-9\n- Certainty: 1.0\n- Artifacts: `evidence/shot`\n", encoding="utf-8")
     checks.append(("replay 绑定: bare-stem shot ↔ shot.replay.json 也绑上",
                    _replay_unacked_findings(d16, [{"file": "evidence/shot.replay.json", "verdict": "DIVERGED"}]) == ["E-9"]))
+
+    # 漏测门(测的层 anti-lump): coverage 可达资产必须在 frontier/evidence/report 被【逐 host 词界】点到
+    d18 = Path(tempfile.mkdtemp())
+    (d18 / "classify").mkdir()
+    (d18 / "classify" / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "tested.example", "reachable": True},
+        {"host": "missed.example", "reachable": True},
+        {"host": "down.example", "reachable": False},
+        {"host": "1.2.3.1", "reachable": True},                 # 子串陷阱: 只点了 1.2.3.10
+        {"host": "a.com", "reachable": True},                   # 前缀子串陷阱: 只点了 data.com
+        {"host": "ex.com", "reachable": True},                  # 后缀子串陷阱: 只点了 sub.ex.com
+        {"host": "https://h1:8443", "reachable": True},         # 单标签 host(Codex BLOCKER): 规整成 h1
+        {"host": "https://norm.example:8443", "reachable": True}]}), encoding="utf-8")
+    (d18 / "frontier.md").write_text(
+        "# Frontier\n### F-1\n- Front: tested.example 登录门 deferred(无凭据)\n"
+        "- 1.2.3.10 closed; data.com closed; sub.ex.com closed; h1 deferred(WAF); norm.example deferred\n",
+        encoding="utf-8")
+    flat = (check_untested_assets(d18) or [""])[0]
+    checks += [
+        ("漏测门: 未点到的可达资产被报", "missed.example" in flat),
+        ("漏测门: 已点到(测/defer)不报", "tested.example" not in flat),
+        ("漏测门: 不可达资产不计入", "down.example" not in flat),
+        ("漏测门: IP 子串假阳已修(点 1.2.3.10 ≠ 1.2.3.1)", "1.2.3.1" in flat),
+        ("漏测门: 域名前缀子串假阳已修(点 data.com ≠ a.com)", "a.com" in flat),
+        ("漏测门: 域名后缀子串假阳已修(点 sub.ex.com ≠ ex.com)", "ex.com" in flat),
+        ("漏测门: 单标签 host 已修(https://h1:8443→h1, 点 h1 算测过)", "h1" not in flat),
+        ("漏测门: host 规整(去 scheme/port)→ https://norm.example:8443 算点到", "norm.example" not in flat),
+    ]
+    (d18 / "frontier.md").write_text(
+        "# Frontier\n- tested.example\n- missed.example\n- 1.2.3.1\n- a.com\n- ex.com\n- h1\n- norm.example\n",
+        encoding="utf-8")
+    checks.append(("漏测门: 可达资产全点到 → 不报", check_untested_assets(d18) == []))
+    checks.append(("漏测门: 无 coverage → 不报(不强加)", check_untested_assets(Path(tempfile.mkdtemp())) == []))
+    checks += [   # _norm_host: 括号 IPv6 取内 / 单冒号去 port / 裸 IPv6 不截断(Codex WARN 修)
+        ("_norm_host 括号IPv6取内", _norm_host("https://[2001:db8::1]:443/x") == "2001:db8::1"),
+        ("_norm_host 单冒号去port", _norm_host("https://h:8443") == "h"),
+        ("_norm_host 裸IPv6不截断", _norm_host("2001:db8::1") == "2001:db8::1"),
+    ]
     # 不过度匹配(防 false-fail): 录像 sqli.replay.json 对应 bare-stem 产物 sqli, 不该误绑引用 sqli.json
     # 的无关发现(那条的录像应是 sqli.json.replay.json)。Codex 三轮复审逮到的 false-fail。
     d17 = Path(tempfile.mkdtemp())
