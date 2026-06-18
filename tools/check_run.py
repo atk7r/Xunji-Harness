@@ -345,9 +345,9 @@ def check_coverage_health(run_dir: Path) -> list[str]:
     if recon and not cov_present:
         warns.append(
             f"覆盖台账缺建: target.md 引用了 recon 情报({recon[:60]}) 却无 coverage.json "
-            "—— 资产清单疑似手工誊录的子集(driver 选择偏见 = run 的盲区)。跑 "
-            "`python tools/ingest_recon.py <recon.json>` 折全量资产 + `python tools/"
-            "classify_hosts.py <recon.json> --out runs/<t>/classify` 建结构化台账; "
+            "—— 资产清单疑似手工誊录的子集(driver 选择偏见 = run 的盲区)。用 "
+            "`python tools/setup_run.py <slug> <recon.json>` 从 Guanlan 产物【零重探】折 coverage "
+            "(Guanlan 已做去重/通配折叠/存活/归属, 别再 classify_hosts 全量重探 = re-OSINT); "
             "防 lump 护栏没有它就失明, 漏挖不会被发现。")
     # ③ 台账完整性(coverage 是 recon 的子集; 仅 recon 可解析为 JSON 时生效)
     if recon and cov is not None and recon_n:
