@@ -1,6 +1,6 @@
 ---
 id: wisedu-ecampus
-product: 金智教育 数字校园（统一认证 authserver / 网上办事大厅 ehall）
+product: 金智教育 数字校园 (unified auth authserver / online service hall ehall)
 vendor: 江苏金智教育 Wisedu
 aliases: [金智教育, wisedu, ehall, authserver, 网上办事大厅, 今日校园, 统一身份认证]
 category: framework-management-endpoint
@@ -10,53 +10,57 @@ signatures: ["/qljfwapp/", "checkneedcaptcha.htl", "schoolcombinedlogin.js", "/p
 ---
 
 <!--
-Grounding knowledge, not a weapon. 来源: <run> 实测(run-observation) +
-公开披露(external-cited)。无 payload/步骤/PoC。
+Grounding knowledge, not a weapon. Source: <run> run-observation +
+public disclosure (external-cited). No payloads / steps / PoC.
 -->
 
 ## Recognition (identification only)
 
-- Signature: 响应头 `Server: wisedu`（金智应用服务器的强指纹）。
-- Signature: 统一认证在 `/authserver/`：`/authserver/login` 登录页（class `root-main`），
-  静态资源在 `/authserver/<校定制Theme>/static/...?v=<日期版本>`（如 `某实战Themea v=20240524`），
-  含 `encrypt.js`(口令加密) / `login.js` / `fido.js` / `schoolCombinedLogin.js`。
-- Signature: 办事大厅 ehall 的服务应用命名空间 `/qljfwapp/<app>/sys/...`、`/publicapp/...`；
-  `/authserver/checkNeedCaptcha.htl?username=` 返 `{"isNeed":..}`、`/authserver/getCaptcha.htl` 图片码。
-- Distinguishing notes: 与其它 CAS（apereo 原生、其它 IdP）区分点是 `Server: wisedu` +
-  `/authserver/<Theme>/static/` 定制主题 + ehall 的 `qljfwapp`/`publicapp` 服务应用结构。
+- Signature: response header `Server: wisedu` (a strong fingerprint of the Wisedu application server).
+- Signature: unified auth at `/authserver/`: `/authserver/login` login page (class `root-main`), static resources
+  at `/authserver/<school-custom-Theme>/static/...?v=<date version>` (e.g. `<engagement>Theme v=20240524`),
+  containing `encrypt.js` (password encryption) / `login.js` / `fido.js` / `schoolCombinedLogin.js`.
+- Signature: the ehall service-app namespaces `/qljfwapp/<app>/sys/...`, `/publicapp/...`;
+  `/authserver/checkNeedCaptcha.htl?username=` returns `{"isNeed":..}`, `/authserver/getCaptcha.htl` returns an image captcha.
+- Distinguishing notes: what separates it from other CAS (apereo native, other IdPs) is `Server: wisedu` +
+  the `/authserver/<Theme>/static/` custom theme + the ehall `qljfwapp`/`publicapp` service-app structure.
 
 ## Weak-Point Anchors (variant-analysis input — NOT exploit steps)
 
-- Anchor: ehall 服务应用未授权 SQLi / 越权 缺陷类
-  - Affected: 部分 `/qljfwapp/*/sys/*` 服务接口在特定版本未强制鉴权或对象级越权
-  - Mechanism: 服务应用模块多, 鉴权过滤覆盖不全; 历史披露集中在 `/sys/...Controller/...` 类接口
-  - Reference: CNVD 检索“金智教育 / ehall” https://www.cnvd.org.cn/
+- Anchor: ehall service-app unauthenticated SQLi / authz-bypass flaw classes
+  - Affected: some `/qljfwapp/*/sys/*` service interfaces in specific versions lack enforced authz or object-level authz
+  - Mechanism: many service-app modules, incomplete authz-filter coverage; historical disclosures cluster around
+    `/sys/...Controller/...`-type interfaces
+  - Reference: CNVD search "金智教育 / ehall" https://www.cnvd.org.cn/
   - source: external-cited
-- Anchor: authserver(CAS) 认证逻辑 / 任意用户登录 缺陷类
-  - Affected: 较老 authserver 版本
-  - Mechanism: 口令 RSA 加密 + CAS ticket 流; 历史有加密绕过/任意登录类
-  - Reference: CNVD/CNNVD 金智 authserver 条目
+- Anchor: authserver (CAS) authentication-logic / arbitrary-user-login flaw classes
+  - Affected: older authserver versions
+  - Mechanism: password RSA encryption + CAS ticket flow; historically had encryption-bypass / arbitrary-login classes
+  - Reference: CNVD/CNNVD Wisedu authserver entries
   - source: external-cited
-- Anchor: 服务应用枚举依赖授权后的应用清单
-  - Affected: 未登录时 `/qljfwapp/sys/`→CAS 登录, 应用名不可直接列举
-  - Mechanism: 未授权面有限, 多数服务需登录态; 测越权/注入通常需测试账号或精确 app/module 名
-  - Reference: 本仓 run-observation（某实战 ehall）
+- Anchor: service-app enumeration depends on the post-authorization app list
+  - Affected: un-logged-in `/qljfwapp/sys/` → CAS login, app names not directly enumerable
+  - Mechanism: the unauth surface is limited, most services need a login state; testing authz-bypass/injection usually
+    needs a test account or the exact app/module name
+  - Reference: this repo's run-observation (an engagement's ehall)
   - source: run-observation
 
 ## Verification Principle (existence proof)
 
-- Existence proof: `Server: wisedu` + `/authserver/login` + ehall `/qljfwapp/` 即确认产品。
-  版本取 `/authserver/<Theme>/static/...?v=` 时间戳, 用于已知缺陷对位。
-- Hard stops: 未授权面止于指纹/版本; 服务应用越权/注入证明需账号或精确 app 名,
-  proof 级布尔差异不拖库; checkNeedCaptcha 不做账号枚举式高频请求。
+- Existence proof: `Server: wisedu` + `/authserver/login` + ehall `/qljfwapp/` confirms the product.
+  Take the version from the `/authserver/<Theme>/static/...?v=` timestamp, for matching known flaws.
+- Hard stops: the unauth surface stops at fingerprint/version; service-app authz-bypass/injection proof needs an
+  account or exact app name, a proof-level boolean differential, no database dump; do not do account-enumeration-style
+  high-frequency requests against checkNeedCaptcha.
 
 ## False-Positive / Confounders
 
-- `Server: wisedu` 后多主机为 CAS 登录页（jxpg/jsfzzx/kyc 等）——是同一登录入口, 非独立应用,
-  勿当多个面 lump 计数。
-- `checkNeedCaptcha` 对存在/不存在用户可能返回相同 `isNeed`（无用户枚举）, 勿据此判枚举漏洞。
+- Multiple hosts behind `Server: wisedu` are CAS login pages (jxpg/jsfzzx/kyc, etc.) — they are the same login entry,
+  not independent apps; do not lump-count them as multiple surfaces.
+- `checkNeedCaptcha` may return the same `isNeed` for existing/non-existing users (no user enumeration); do not infer
+  an enumeration vuln from it.
 
 ## References
 
-- https://www.cnvd.org.cn/ （检索“金智教育 / ehall / authserver”）
-- 本仓实测: runs/<run>/ 证据 E-002/E-004/E-008（某真实主机 authserver/ehall）
+- https://www.cnvd.org.cn/ (search "金智教育 / ehall / authserver")
+- This repo's run-observation: runs/<run>/ evidence E-002/E-004/E-008 (a real host authserver/ehall)

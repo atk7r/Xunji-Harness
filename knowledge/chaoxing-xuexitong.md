@@ -10,48 +10,48 @@ signatures: ["passport2.chaoxing.com", "sentry-stats.chaoxing.com", "captcha.cha
 ---
 
 <!--
-Grounding knowledge, not a weapon. 来源: <run> 实测(run-observation) +
-公开披露(external-cited)。无 payload/步骤/PoC。
+Grounding knowledge, not a weapon. Source: <run> run-observation +
+public disclosure (external-cited). No payloads / steps / PoC.
 -->
 
 ## Recognition (identification only)
 
-- Signature: 登录跳转到第三方统一认证 `passport2.chaoxing.com`（refer 回业务域）。
-- Signature: 本域后端 REST 接口前缀 `/v1/...`（如 `/v1/user/...`、`/v1/manage/...`），未登录
-  常返回 HTTP 200 但 body `{"msg":"未登录","statusCode":-1}`。
-- Signature: 前端 Vue SPA；遥测打到 `sentry-stats.chaoxing.com`；验证码 `captcha.chaoxing.com`。
-- Distinguishing notes: 业务子域（学校 AI 平台/学习通）是部署点，统一认证 passport 在
-  `chaoxing.com` 厂商域；二者范围归属不同。
+- Signature: login redirects to the third-party unified auth `passport2.chaoxing.com` (referer back to the business domain).
+- Signature: same-domain backend REST prefix `/v1/...` (e.g. `/v1/user/...`, `/v1/manage/...`); when not logged in
+  it usually returns HTTP 200 but with body `{"msg":"未登录","statusCode":-1}`.
+- Signature: front-end Vue SPA; telemetry to `sentry-stats.chaoxing.com`; captcha `captcha.chaoxing.com`.
+- Distinguishing notes: the business subdomain (a school's AI platform / 学习通) is the deployment point, while the
+  unified-auth passport lives on the vendor domain `chaoxing.com`; the two have different scope ownership.
 
 ## Weak-Point Anchors (variant-analysis input — NOT exploit steps)
 
-- Anchor: 组件级已知缺陷类（越权 / SSRF / 信息泄露 历史披露）
-  - Affected: 受影响的超星组件版本
-  - Mechanism: 大型多租户平台历史上有越权取数、服务端请求伪造等公开披露类；属厂商代码面，
-    具体随版本
-  - Reference: CNVD 检索“超星 / 学习通” https://www.cnvd.org.cn/
+- Anchor: component-level known-flaw classes (authz bypass / SSRF / info disclosure — historical disclosures)
+  - Affected: affected Chaoxing component versions
+  - Mechanism: a large multi-tenant platform has historically had publicly-disclosed authz-bypass data reads,
+    server-side request forgery, etc.; these are in the vendor's code surface, specifics vary by version
+  - Reference: CNVD search "超星 / 学习通" https://www.cnvd.org.cn/
   - source: external-cited
-- Anchor: API 鉴权边界（本次实测为应用层强制）
-  - Affected: `/v1/manage/*` 等管理命名空间
-  - Mechanism: 接口返回 HTTP 200 但应用层校验登录态（`{"msg":"未登录"}`）；勿把 200 误判为
-    未授权可访问 —— 须看 body 语义
-  - Reference: 本仓 run-observation
+- Anchor: API authorization boundary (this run found it enforced at the application layer)
+  - Affected: management namespaces such as `/v1/manage/*`
+  - Mechanism: the interface returns HTTP 200 but checks login state at the application layer (`{"msg":"未登录"}`);
+    do NOT mistake 200 for "unauthenticated-accessible" — read the body semantics
+  - Reference: this repo's run-observation
   - source: run-observation
 
 ## Verification Principle (existence proof)
 
-- Existence proof: passport.chaoxing.com 跳转 + `/v1/` API 形态即确认产品。鉴权判定**以 body
-  语义为准**（200 + “未登录” = 已鉴权），不以 HTTP 状态码为准。
-- Hard stops: 越权/信息泄露证明止于“可达本不该可达的对象/数据项存在性”，不批量取数；登录在
-  厂商 passport 域，注意范围边界。
+- Existence proof: a passport.chaoxing.com redirect + the `/v1/` API shape confirms the product. Judge
+  authorization **by body semantics** (200 + "未登录" = authenticated), not by the HTTP status code.
+- Hard stops: authz-bypass / info-disclosure proof stops at "the existence of an object/data item that should not
+  be reachable"; no bulk data pull; login is on the vendor passport domain, mind the scope boundary.
 
 ## False-Positive / Confounders
 
-- **HTTP 200 ≠ 未授权访问**：超星接口惯于 200 包裹业务错误码，未登录请求也回 200。这是本次
-  一个被证伪的方向（见 runs/<run> 证据 E-003）。
-- passport 在 `chaoxing.com` 域，可能超出对单一学校的授权范围。
+- **HTTP 200 ≠ unauthenticated access**: Chaoxing interfaces habitually wrap business error codes in 200, and an
+  un-logged-in request also returns 200. This was a refuted direction this run (see runs/<run> evidence E-003).
+- passport is on the `chaoxing.com` domain, which may exceed the authorization scope of a single school.
 
 ## References
 
-- https://www.cnvd.org.cn/ （检索“超星 / 学习通”）
-- 本仓实测: runs/<run>/ 证据 E-003（某真实主机）
+- https://www.cnvd.org.cn/ (search "超星 / 学习通")
+- This repo's run-observation: runs/<run>/ evidence E-003 (a real host)

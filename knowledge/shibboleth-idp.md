@@ -10,50 +10,53 @@ signatures: ["/idp/shibboleth", "/idp/css/placeholder.css", "shibboleth idp"]
 ---
 
 <!--
-Grounding knowledge, not a weapon. 来源: <run> 实测(run-observation) +
-公开披露(external-cited)。无 payload/步骤/PoC。
+Grounding knowledge, not a weapon. Source: <run> run-observation +
+public disclosure (external-cited). No payloads / steps / PoC.
 -->
 
 ## Recognition (identification only)
 
-- Signature: 路径 `/idp/`，标题/页面 “Shibboleth IdP”；`/idp/css/placeholder.css` 等默认资源。
-- Signature: `/idp/shibboleth` 返回 SAML 元数据（entityID、证书）；部分部署仍是未替换的
-  “example metadata”（页头自带 “This is example metadata only …”）。
-- Signature: `/idp/status` 在加固部署返回 403（已锁），未加固则可读运行状态。
-- Distinguishing notes: 与其它 SAML IdP（SimpleSAMLphp、ADFS）区分点是 `/idp/` 路径族与
-  `shibboleth` 元数据端点。
+- Signature: path `/idp/`, title/page "Shibboleth IdP"; default resources like `/idp/css/placeholder.css`.
+- Signature: `/idp/shibboleth` returns SAML metadata (entityID, certificate); some deployments still ship the
+  un-replaced "example metadata" (page header carries "This is example metadata only …").
+- Signature: `/idp/status` returns 403 on a hardened deployment (locked); an un-hardened one exposes the running status.
+- Distinguishing notes: what separates it from other SAML IdPs (SimpleSAMLphp, ADFS) is the `/idp/` path family and
+  the `shibboleth` metadata endpoint.
 
 ## Weak-Point Anchors (variant-analysis input — NOT exploit steps)
 
-- Anchor: 旧版本认证/请求处理 缺陷类
-  - Affected: 较老的 IdP / OpenSAML / 依赖库版本
-  - Mechanism: 历史披露存在认证处理、XML 解析（XXE）、会话处理等缺陷类；以版本对位为准
-  - Reference: Shibboleth 安全公告 https://shibboleth.net/community/advisories/
+- Anchor: older-version authentication / request-handling flaw classes
+  - Affected: older IdP / OpenSAML / dependency-library versions
+  - Mechanism: historical disclosures include auth-handling, XML-parsing (XXE), and session-handling flaw classes;
+    judged by version matching
+  - Reference: Shibboleth security advisories https://shibboleth.net/community/advisories/
   - source: external-cited
-- Anchor: 默认/示例元数据暴露（配置卫生，非直接漏洞）
-  - Affected: `/idp/shibboleth` 仍为示例 metadata 的部署
-  - Mechanism: 暴露 entityID/证书结构与“未完成生产配置”信号；本身不可直接利用，是运维卫生项
-  - Reference: 本仓 run-observation；Shibboleth 部署文档（metadata 生成指引）
+- Anchor: default / example metadata exposure (config hygiene, not a direct vuln)
+  - Affected: deployments where `/idp/shibboleth` is still example metadata
+  - Mechanism: exposes the entityID/certificate structure and a "production config not finished" signal; not directly
+    exploitable on its own — it is an ops-hygiene item
+  - Reference: this repo's run-observation; Shibboleth deployment docs (metadata generation guide)
   - source: run-observation
-- Anchor: 运行状态端点暴露
-  - Affected: `/idp/status` 未限制访问的部署
-  - Mechanism: 泄露版本/运行信息，利于版本对位与情报收集
-  - Reference: Shibboleth IdP 文档（status 端点访问控制）
+- Anchor: running-status endpoint exposure
+  - Affected: deployments where `/idp/status` access is unrestricted
+  - Mechanism: leaks version/runtime info, useful for version matching and intel gathering
+  - Reference: Shibboleth IdP docs (status endpoint access control)
   - source: driver-reasoning
 
 ## Verification Principle (existence proof)
 
-- Existence proof: `/idp/` + `/idp/shibboleth` 元数据即确认产品；`/idp/status` 403 vs 可读区分
-  加固程度；示例 metadata 的页头文案确认“默认未替换”。
-- Hard stops: 止于指纹/版本/配置卫生识别；不对解析层发破坏性 payload，不触动认证服务可用性。
+- Existence proof: `/idp/` + `/idp/shibboleth` metadata confirms the product; `/idp/status` 403 vs readable
+  distinguishes the hardening level; the example-metadata page-header text confirms "default not replaced".
+- Hard stops: stop at fingerprint/version/config-hygiene identification; do not send destructive payloads at the
+  parsing layer, do not touch the auth service's availability.
 
 ## False-Positive / Confounders
 
-- **示例 metadata 暴露本身不是漏洞**，只是配置卫生信号——勿拔高为高危（本次教训，
-  runs/<run> 证据 E-004 / FP-003）。
-- `/idp/status` 返回 403 是“已加固”的正向信号，不是缺陷。
+- **Example-metadata exposure is not itself a vulnerability**, only a config-hygiene signal — do not inflate it to
+  high severity (lesson this run, runs/<run> evidence E-004 / FP-003).
+- `/idp/status` returning 403 is a positive "already hardened" signal, not a flaw.
 
 ## References
 
-- https://shibboleth.net/community/advisories/ （官方安全公告）
-- 本仓实测: runs/<run>/ 证据 E-004（某真实主机）
+- https://shibboleth.net/community/advisories/ (official security advisories)
+- This repo's run-observation: runs/<run>/ evidence E-004 (a real host)
