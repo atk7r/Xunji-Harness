@@ -252,6 +252,8 @@ def main() -> int:
     ap.add_argument("--delay", type=float, default=1.5, help="每主机间隔秒(配合限速)")
     ap.add_argument("--timeout", type=int, default=8)
     ap.add_argument("--selftest", action="store_true", help="run regression and exit")
+    ap.add_argument("--all", action="store_true",
+                    help="不做 scope 过滤, 探 recon 全量(含 ownership=unrelated 的 out-of-scope)")
     args = ap.parse_args()
 
     if args.selftest:
@@ -266,6 +268,23 @@ def main() -> int:
                  if h.strip() and not h.startswith("#")]
     else:
         hosts = _hosts_from_recon(Path(args.recon))
+
+    # scope 过滤(打谁不打谁): 默认跳过 recon 标的 out-of-scope(ownership=unrelated, 如个人 NAS /
+    # 外部域)—— mokwon dogfood 实测: 不过滤会把 classify 群发到个人 Synology NAS。--all 探全量;
+    # --hosts 模式无 recon 上下文, 不过滤。scope 派生自 recon, 非手挑(派生不驱动)。
+    if args.recon and not args.all:
+        try:
+            import scope as _scope
+            _recon = json.loads(Path(args.recon).read_text(encoding="utf-8"))
+            _sc = _scope.derive_scope(_recon)
+            _skip = [h for h in hosts if _scope.in_scope(h, _sc["in"], _sc["out"]) == "out"]
+            if _skip:
+                hosts = [h for h in hosts if h not in set(_skip)]
+                print(f"[scope] 跳过 {len(_skip)} 个 out-of-scope(recon ownership=unrelated): "
+                      + ", ".join(_skip[:8]) + (" …" if len(_skip) > 8 else "")
+                      + "  (--all 探全量)", file=sys.stderr)
+        except Exception as e:
+            print(f"[scope] 过滤跳过(派生失败, 探全量): {e}", file=sys.stderr)
 
     # --out is a DIRECTORY (stores body + tables). Guard the common footgun of
     # passing a file path like ".../coverage.json" (which used to create a dir

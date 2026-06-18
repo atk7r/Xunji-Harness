@@ -75,6 +75,33 @@ def record_recon(run_dir: Path, value: str) -> None:
     t.write_text(new, encoding="utf-8")
 
 
+def record_scope(run_dir: Path, recon_path: Path) -> str:
+    """从 recon 的 ownership 派生默认 scope, 填进 target.md 的 Target/In-scope/Out-of-scope
+    (现在这些字段 setup 留空 = scope 脊梁缺失, mokwon dogfood 实测的头号问题)。派生不驱动:
+    写的是默认, driver 可改 target.md(scope.py parse_target_scope 是源)。"""
+    import scope as _scope
+    recon = json.loads(recon_path.read_text(encoding="utf-8"))
+    sc = _scope.derive_scope(recon)
+    in_line, out_line = _scope.render_scope_lines(sc)
+    t = run_dir / "target.md"
+    txt = t.read_text(encoding="utf-8", errors="replace")
+
+    def setfield(s: str, name: str, val: str) -> str:           # lambda 替换避免反斜杠组引用 bug
+        return re.sub(rf"(- {re.escape(name)}:).*", lambda m: f"{m.group(1)} {val}", s, count=1)
+
+    if sc["target"]:
+        txt = setfield(txt, "Target", sc["target"])
+    if in_line:
+        txt = setfield(txt, "In-scope assets", in_line)
+    if out_line:
+        txt = setfield(txt, "Out-of-scope assets", out_line)
+    if sc["notes"]:
+        note = "scope 复核(secondary/第三方托管): " + "; ".join(f"{h}" for h, _ in sc["notes"][:6])
+        txt = setfield(txt, "Notes", note)
+    t.write_text(txt, encoding="utf-8")
+    return f"scope 派生 → {len(sc['in'])} in-模式 / {len(sc['out'])} out / {len(sc['notes'])} 复核"
+
+
 def ingest(recon_path: Path, run_dir: Path) -> str:
     """import ingest_recon.render 折全量资产到 surface_recon.md(纯函数, 无网络)。"""
     import ingest_recon
@@ -127,6 +154,11 @@ def main() -> int:
                 print(f"[setup] ingest_recon → {info}; target.md 已记录 recon 路径")
             except Exception as e:
                 print(f"[!] ingest_recon 失败(已记录路径, 请手动 ingest): {e}", file=sys.stderr)
+            try:
+                sinfo = record_scope(run_dir, rp)
+                print(f"[setup] {sinfo} → target.md(派生不驱动, 复核/可改)")
+            except Exception as e:
+                print(f"[!] scope 派生失败(请手填 target.md In/Out-of-scope): {e}", file=sys.stderr)
     else:
         record_recon(run_dir, "none")
         print("[setup] 无 recon: 自行填 target.md 范围。")
@@ -175,6 +207,7 @@ def _selftest() -> int:
     rp.write_text(json.dumps(recon), encoding="utf-8")
     record_recon(rd, str(rp))
     info = ingest(rp, rd)
+    sinfo = record_scope(rd, rp)
     tgt = (rd / "target.md").read_text(encoding="utf-8")
     checks += [
         ("target.md records recon path", str(rp) in tgt),
@@ -182,6 +215,9 @@ def _selftest() -> int:
         ("surface_recon.md written w/ asset", (rd / "surface_recon.md").exists()
             and "a.example" in (rd / "surface_recon.md").read_text(encoding="utf-8")),
         ("ingest reports asset count", "1 assets" in info),
+        ("scope 派生填进 target.md Target", "- Target: t" in tgt),
+        ("scope 派生填进 In-scope assets", "*.a.example" in tgt),
+        ("record_scope 报派生计数", "in-模式" in sinfo),
     ]
     # no-recon path writes 'none' (avoid template placeholder tripping _recon_cited)
     rd2 = d / "t2_20260101"

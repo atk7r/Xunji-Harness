@@ -290,7 +290,9 @@ Project-discipline and run-structure checks live in `tools/`:
   recognition miss, not a blind mass-import.
 - `python tools/setup_run.py <slug> [recon.json]` — Setup-phase ONE-SHOT: build the
   run dir from templates (+ `evidence/`/`scripts/` subdirs), fold the recon via
-  ingest_recon into `surface_recon.md`, record the recon path in `target.md`;
+  ingest_recon into `surface_recon.md`, record the recon path in `target.md`, **and
+  derive a default `In-scope`/`Out-of-scope` into `target.md` from recon `ownership`
+  (`tools/scope.py`; `unrelated`→out, review/edit — 派生不驱动)**;
   `--classify` also runs classify_hosts → coverage.json. **Start every run with
   this** — never hand-curate surface.md from the human report (selection bias →
   blind spots). Builds the workbench; makes no front choices (派生不驱动).
@@ -302,6 +304,9 @@ Project-discipline and run-structure checks live in `tools/`:
   content (not Server header): stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags.
   `--hosts <file>` takes a plain host list when the operator gave no recon JSON.
   Run before claiming "explored/no surface" so assets are examined, not lumped.
+  Skips recon **out-of-scope** assets by default (`ownership=unrelated` — personal/
+  third-party, e.g. a personal NAS); `--all` probes everything. Scope honored via
+  `tools/scope.py` (the run's `target.md` In/Out-of-scope is the source of truth).
 - `python tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl.
   webpack chunks) and assert completeness. **Run before claiming endpoint
   enumeration is complete** — grepping endpoints from a partially-fetched JS set

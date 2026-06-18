@@ -44,6 +44,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     # --- verification tools (--selftest flag) ---
     ("check_run",      ["tools/check_run.py", "--selftest"],      "evidence gate + closure"),
     ("classify_hosts", ["tools/classify_hosts.py", "--selftest"], "recon -> coverage"),
+    ("scope",          ["tools/scope.py", "--selftest"],          "run scope derive/match"),
     ("peer_review",    ["tools/peer_review.py", "--selftest"],    "heterogeneous review"),
     ("probe",          ["tools/probe.py", "--selftest"],          "active HTTP sensor"),
     ("replay",         ["tools/replay.py", "--selftest"],         "evidence replay"),
