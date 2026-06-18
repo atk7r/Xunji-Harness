@@ -1,7 +1,7 @@
 ---
 id: ida-zerotrust-iam
-product: IDA 零信任 / IAM 统一身份接入网关
-vendor: 未定厂商（"IDA" 零信任 / SDP，环境感知准入）
+product: IDA 零信任 / IAM unified identity access gateway
+vendor: unknown vendor ("IDA" zero-trust / SDP, environment-aware admission)
 aliases: [IDA, 零信任, IAM, SDP, 环境感知, iam/auth, trustAssess, startTunnel]
 category: framework-management-endpoint
 last_reviewed: 2026-06-12
@@ -10,62 +10,70 @@ signatures: ["/iam/auth/", "trustassess", "getmachineiduuid", "idastrategyid"]
 ---
 
 <!--
-Grounding knowledge, not a weapon. 来源: <run> 实测(run-observation)。
-厂商未定 → 不臆造 CVE。无 payload/步骤/PoC。
+Grounding knowledge, not a weapon. Source: <run> run-observation.
+Vendor undetermined → do not invent CVEs. No payloads / steps / PoC.
 -->
 
 ## Recognition (identification only)
 
-- Signature: 后端 API 前缀 `/iam/auth/`（`/iam/auth/login/*`、`/iam/auth/index/*`、
-  `/iam/auth/noLogin/*`、`/iam/auth/qrcode/*`、`/iam/auth/dingApi/*`）。
-- Signature: 前端 Vue 门户在 `/app/`（`LoginedShow` chunk）；客户端隧道逻辑
-  `/startTunnel`、`/tunnelConnect`，连本地 agent `http://127.0.0.1:60001/getMachineIdUuid`。
-- Signature: 零信任术语 `trustAssess`(信任评估)、"IDA环境感知"、`idaStrategyId`、`sdpOn`、
-  `agentIdentifyConfig`；统一错误体 `{"code":<int>,"msg":..,"content":..}`(code 5002/5000 等)。
-- Distinguishing notes: 多租户(按 host 解析租户)；认证流 `initial → prepare(instId) → auth →
-  trustAssess(环境感知) → flowSuccess`。
+- Signature: backend API prefix `/iam/auth/` (`/iam/auth/login/*`, `/iam/auth/index/*`, `/iam/auth/noLogin/*`,
+  `/iam/auth/qrcode/*`, `/iam/auth/dingApi/*`).
+- Signature: a front-end Vue portal at `/app/` (`LoginedShow` chunk); client tunnel logic `/startTunnel`,
+  `/tunnelConnect`, connecting a local agent `http://127.0.0.1:60001/getMachineIdUuid`.
+- Signature: zero-trust terms `trustAssess` (trust assessment), "IDA环境感知" (environment awareness),
+  `idaStrategyId`, `sdpOn`, `agentIdentifyConfig`; unified error body `{"code":<int>,"msg":..,"content":..}`
+  (code 5002/5000, etc.).
+- Distinguishing notes: multi-tenant (tenant resolved by host); auth flow `initial → prepare(instId) → auth →
+  trustAssess(environment awareness) → flowSuccess`.
 
 ## Weak-Point Anchors (variant-analysis input — NOT exploit steps)
 
-- Anchor: 登录前 `/iam/auth/*` 接口未授权信息泄露 缺陷类
-  - Affected: `login/initial`(返认证配置+口令策略)、`index/getAgentConfig`(返 agent/SDP/网络策略)
-  - Mechanism: 登录前页面所需配置接口未鉴权且返回过多内部字段(ServiceImpl 类名/CAS 内网地址/
-    口令策略/零信任策略)
-  - Reference: 本仓 run-observation（某实战 E-011）
+- Anchor: pre-login `/iam/auth/*` interface unauthenticated information-disclosure flaw class
+  - Affected: `login/initial` (returns auth config + password policy), `index/getAgentConfig` (returns agent/SDP/network policy)
+  - Mechanism: the config interfaces a pre-login page needs are unauthenticated and return too many internal fields
+    (ServiceImpl class names / CAS internal addresses / password policy / zero-trust policy)
+  - Reference: this repo's run-observation (an engagement, E-011)
   - source: run-observation
-- Anchor: `login/forgetPwd` 未授权密码修改端点 / 账号接管 缺陷类
-  - Affected: `/iam/auth/login/forgetPwd`(字段 account/code/password/passwordTwo/mobile)
-    + `/iam/auth/login/sendValidCode`(notifyCode=forget_code)
-  - Mechanism: 未授权可达的“发码→改密”链; 危害取决于短信码逻辑(可否绕过/爆破/篡改/为他人账号指定手机)。
-    无害测试(假账号)可排除“空码即改密”类平凡绕过, 但码逻辑健全性需真实测试账号判定
-  - Reference: 本仓 run-observation（某实战 E-017/E-018）
+- Anchor: `login/forgetPwd` unauthenticated password-change endpoint / account takeover flaw class
+  - Affected: `/iam/auth/login/forgetPwd` (fields account/code/password/passwordTwo/mobile)
+    + `/iam/auth/login/sendValidCode` (notifyCode=forget_code)
+  - Mechanism: an unauthenticated-reachable "send code → change password" chain; the harm depends on the SMS-code logic
+    (can it be bypassed/brute-forced/tampered, or a phone set for another's account). A harmless test (fake account) can
+    rule out "empty-code-changes-password" trivial bypass, but the code logic's soundness needs a real test account
+  - Reference: this repo's run-observation (an engagement, E-017/E-018)
   - source: run-observation
-- Anchor: noLogin / 第三方 OAuth / QR 登录 面
-  - Affected: `noLogin/getDingUserByCode`、`qrcode/getQrcode`+`qrcode/polling`、`dingApi/*`
-  - Mechanism: 未授权命名空间; QR 登录劫持(qrId 绑定/可预测)、OAuth code 处理需逐接口核; 本部署钉钉多未配
-  - Reference: 本仓 run-observation
+- Anchor: noLogin / third-party OAuth / QR-login surface
+  - Affected: `noLogin/getDingUserByCode`, `qrcode/getQrcode`+`qrcode/polling`, `dingApi/*`
+  - Mechanism: unauthenticated namespaces; QR-login hijack (qrId binding/predictability), OAuth code handling needs
+    per-interface review; this deployment's DingTalk is mostly unconfigured
+  - Reference: this repo's run-observation
   - source: driver-reasoning
-- Anchor: 认证流环境感知(零信任)绕过 缺陷类
-  - Affected: `prepare`(未授权下发 SESSION)、`trustAssess`(需 agent machineId)、`auth`、`flowSuccess`
-  - Mechanism: 逐步门控；本仓实测三路(空会话打 flowSuccess/伪造 machineId/auth 探)均被正确门控(无绕过),
-    但 prepare 预认证 SESSION 复用、instId 全枚举、nasIp/inIframe 语义仍是逻辑探测面
-  - Reference: 本仓 run-observation（某实战 E-016）
+- Anchor: auth-flow environment-awareness (zero-trust) bypass flaw class
+  - Affected: `prepare` (issues SESSION unauthenticated), `trustAssess` (needs agent machineId), `auth`, `flowSuccess`
+  - Mechanism: step-by-step gating; this repo tested three paths (empty session hitting flowSuccess / forged machineId /
+    auth probe) — all correctly gated (no bypass), but `prepare` pre-auth SESSION reuse, full instId enumeration, and the
+    nasIp/inIframe semantics are still a logic-probing surface
+  - Reference: this repo's run-observation (an engagement, E-016)
   - source: run-observation
 
 ## Verification Principle (existence proof)
 
-- Existence proof: `/iam/auth/` + `trustAssess`/"IDA环境感知" 即确认产品。未授权面用良性 GET 枚举
-  (不触发 WAF)；**端点枚举须先 `fetch_assets.py` 抓全 SPA 的全部 chunk**(否则漏端点, 见 某实战 4/13 教训)。
-- Hard stops: 信息泄露止于证明返回敏感字段(不批量取数)；forgetPwd 改密=完整性破坏(operator-gated, 不自动改)；
-  sendValidCode 单发用假号(短信轰炸=flooding 硬禁)；QR 劫持需真人扫码(不自主)。
+- Existence proof: `/iam/auth/` + `trustAssess` / "IDA环境感知" confirms the product. Enumerate the unauth surface with
+  benign GETs (do not trigger the WAF); **endpoint enumeration must first run `fetch_assets.py` to fetch all of the
+  SPA's chunks** (otherwise endpoints are missed — see the 4/13 engagement lesson).
+- Hard stops: info disclosure stops at proving sensitive fields are returned (no bulk data pull); forgetPwd change =
+  integrity damage (operator-gated, not auto-changed); sendValidCode single-shot with a fake number (SMS bombing =
+  flooding, hard-forbidden); QR hijack needs a human to scan (not autonomous).
 
 ## False-Positive / Confounders
 
-- 同 IP 多主机(cw/ots/quest/static/trust/wisdom…)从外部均落同一 `/app/` 默认页, 是同应用别名, 非独立面。
-- `trustAssess` 返 "需开启终端" 是零信任正常拦截(会话≠访问), 不是可绕过信号。
-- 端点清单若基于部分 chunk → "已枚举完"不成立(必 fetch_assets 核完整性)。
+- Multiple hosts on the same IP (cw/ots/quest/static/trust/wisdom…) all land on the same `/app/` default page from
+  outside — they are aliases of the same app, not independent surfaces.
+- `trustAssess` returning "terminal must be enabled" is normal zero-trust interception (a session ≠ access), not a
+  bypassable signal.
+- An endpoint list based on partial chunks → "enumeration complete" does not hold (must verify completeness with fetch_assets).
 
 ## References
 
-- 本仓实测: runs/<run>/ 证据 E-011~E-018；报告 report_iam_unauth_disclosure.md /
+- This repo's run-observation: runs/<run>/ evidence E-011~E-018; reports report_iam_unauth_disclosure.md /
   report_iam_forgetpwd_ato.md

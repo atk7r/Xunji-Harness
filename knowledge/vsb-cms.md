@@ -1,7 +1,7 @@
 ---
 id: vsb-cms
-product: VSB 院系门户内容管理系统
-vendor: VSB（高校院系网站群 CMS）
+product: VSB 院系门户内容管理系统 (department portal CMS)
+vendor: VSB (university department website-group CMS)
 aliases: [VSB, 院系门户, system/resource, dynclicks, vsbscreen, 网站群]
 category: cms
 last_reviewed: 2026-06-12
@@ -10,52 +10,57 @@ signatures: ["/system/resource/", "dynclicks", "/__local/", "vsbscreen"]
 ---
 
 <!--
-Grounding knowledge, not a weapon. 来源: <run> 实测(run-observation) +
-公开披露(external-cited)。无 payload/步骤/PoC。
+Grounding knowledge, not a weapon. Source: <run> run-observation +
+public disclosure (external-cited). No payloads / steps / PoC.
 -->
 
 ## Recognition (identification only)
 
-- Signature: 静态资源前缀 `/system/resource/`（`/system/resource/js/dynclicks.js`、
-  `vsbscreen.min.js`、`/system/resource/code/...`）；上传/媒体路径 `/__local/`。
-- Signature: 文章 URL 重写 `/info/<栏目id>/<文章id>.htm`（静态化页）；首页含点击计数
-  span `dynclicks_u<owner>_<clickid>`；搜索 `/search/modules/resultpc/soso.html`。
-- Signature: 反代常把 `Server` 头掩码（如显示一串 `**********`），与 VSB 内容特征叠加出现。
-- Distinguishing notes: 院系站标题多为“<学校>-<院系/部处>”；与正方/金智等业务系统区分点是
-  `/system/resource/` + `dynclicks` + 静态化 `/info/.../.htm`。
+- Signature: static resource prefix `/system/resource/` (`/system/resource/js/dynclicks.js`,
+  `vsbscreen.min.js`, `/system/resource/code/...`); upload/media path `/__local/`.
+- Signature: article URL rewrite `/info/<column-id>/<article-id>.htm` (static-ized pages); the homepage carries a
+  click-count span `dynclicks_u<owner>_<clickid>`; search at `/search/modules/resultpc/soso.html`.
+- Signature: the reverse proxy often masks the `Server` header (e.g. shows a string of `**********`), appearing
+  together with the VSB content signatures.
+- Distinguishing notes: department-site titles are usually "<school>-<department/office>"; what separates it from
+  business systems like ZFSoft/Wisedu is `/system/resource/` + `dynclicks` + static-ized `/info/.../.htm`.
 
 ## Weak-Point Anchors (variant-analysis input — NOT exploit steps)
 
-- Anchor: 未授权点击计数接口 `dynclicks.jsp` 注入 缺陷类
+- Anchor: unauthenticated click-count endpoint `dynclicks.jsp` injection flaw class
   - Affected: `/system/resource/code/news/click/dynclicks.jsp?clickid&owner&clicktype`
-  - Mechanism: clickid/owner 历史上拼接进 SQL; 但部分部署对其 int 转换/参数化(本仓实测 某实战 即此),
-    且前置 WAF 拦关键字 → 需对位实测, 不可假设可注入
-  - Reference: 公开“VSB dynclicks SQL注入”资料; 本仓 run-observation(证伪记录)
+  - Mechanism: clickid/owner have historically been concatenated into SQL; but some deployments int-cast/parameterize
+    them (this repo's engagement was one such), with a front WAF blocking keywords → needs per-target verification,
+    do not assume it is injectable
+  - Reference: public "VSB dynclicks SQL injection" material; this repo's run-observation (a refutation record)
   - source: external-cited
-- Anchor: 搜索 / 其它 `/system/resource/code/` jsp 的注入/文件面
-  - Affected: 搜索、列表、媒体等动态 jsp
-  - Mechanism: dynclicks 之外 VSB 还有搜索/列表接口, 不应以单接口否定整栈
-  - Reference: 本仓 run-observation
+- Anchor: injection / file surface in search and other `/system/resource/code/` jsp
+  - Affected: dynamic jsp for search, lists, media
+  - Mechanism: beyond dynclicks, VSB also has search/list interfaces; do not negate the whole stack from a single endpoint
+  - Reference: this repo's run-observation
   - source: driver-reasoning
-- Anchor: 内网链接 / 内部系统泄露（低危）
-  - Affected: 院系站常硬编码内网 OPAC/期刊/管理系统直链
-  - Mechanism: 公网页面误暴露内网 IP/路径, 利于内网情报
-  - Reference: 本仓 run-observation（某实战 lib 泄露 192.168.x OPAC）
+- Anchor: internal-network link / internal-system disclosure (low severity)
+  - Affected: department sites often hardcode internal OPAC/journal/management-system direct links
+  - Mechanism: public pages accidentally expose internal IPs/paths, useful for internal-network intel
+  - Reference: this repo's run-observation (an engagement's lib leaked a 192.168.x OPAC)
   - source: run-observation
 
 ## Verification Principle (existence proof)
 
-- Existence proof: `/system/resource/` + `dynclicks` 即确认 VSB。注入须实测：数字等价/算术判上下文,
-  引号→DB 报错 vs WAF 拦截 须区分（拦截页≠报错）。
-- Hard stops: proof 级布尔/差异, 不拖库; dynclicks 计数接口避免高频(易触发 WAF 封 IP 与短信无关但属高频)。
+- Existence proof: `/system/resource/` + `dynclicks` confirms VSB. Injection must be tested live: numeric-equivalence /
+  arithmetic to judge context; a quote → DB error vs WAF block must be distinguished (a block page ≠ a DB error).
+- Hard stops: proof-level boolean/differential, no database dump; avoid high-frequency requests to the dynclicks
+  count endpoint (easily triggers a WAF IP block — unrelated to SMS but it is high-frequency).
 
 ## False-Positive / Confounders
 
-- **WAF 拦截 ≠ 可注入**：引号触发拦截页/连接重置是 WAF, 不是 DB 报错; 反过来“WAF 挡掉了
-  能产生 oracle 的 payload, 再用无 oracle 判不可注入”是**循环论证**, 避免（某实战 教训）。见 [[waf-block-recognition]]。
-- 几十个院系站共享同一 VSB + 掩码反代, 是同栈别名, 勿 lump 成“都安全”——同栈也要逐站确认搜索等其它面。
+- **A WAF block ≠ injectable**: a quote triggering a block page / connection reset is the WAF, not a DB error;
+  conversely "the WAF blocked the oracle-producing payload, so I judge it not-injectable with a no-oracle test" is
+  **circular reasoning** — avoid (engagement lesson). See [[waf-block-recognition]].
+- Dozens of department sites sharing one VSB + a masked reverse proxy are same-stack aliases; do not lump them as
+  "all safe" — same-stack still needs per-site confirmation of search and other surfaces.
 
 ## References
 
-- https://www.cnvd.org.cn/ （检索“VSB / dynclicks”）
-- 本仓实测: runs/<run>/ 证据 E-003/E-007（某实战 院系门户群）; 关联 [[waf-block-recognition]]
+- https://www.cnvd.org.cn/ (search "VSB / dynclicks")
+- This repo's run-observation: runs/<run>/ evidence E-003/E-007 (an engagement's department portal group); related [[waf-block-recognition]]

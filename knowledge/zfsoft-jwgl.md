@@ -10,53 +10,56 @@ signatures: ["/jwglxt/", "login_slogin.html", "login_getpublickey.html", "教学
 ---
 
 <!--
-Grounding knowledge, not a weapon. 来源: <run> 实测(run-observation) +
-公开披露(external-cited)。无 payload/步骤/PoC。
+Grounding knowledge, not a weapon. Source: <run> run-observation +
+public disclosure (external-cited). No payloads / steps / PoC.
 -->
 
 ## Recognition (identification only)
 
-- Signature: 路径 `/jwglxt/`；首页常 meta-refresh 跳 `/jwglxt`，登录页
-  `xtgl/login_slogin.html`，标题“教学管理信息服务平台”。
-- Signature: 登录用 RSA，公钥接口 `xtgl/login_getPublicKey.html` 返回 `{"modulus","exponent"}`。
-- Signature: 静态资源带 `?ver=<build>` 构建号（如 `jw-login.css?ver=29564678`），class 前缀
-  `globalweb` / `jw-`；Cookie 含 `JSESSIONID` + `route`（集群路由）。
-- Distinguishing notes: 与强智教务（路径 `/jsxsd/`）是常见混淆对；正方新版以 `/jwglxt/` +
-  `login_slogin.html` + `login_getPublicKey.html` 区分。
+- Signature: path `/jwglxt/`; the homepage often meta-refreshes to `/jwglxt`, login page
+  `xtgl/login_slogin.html`, title "教学管理信息服务平台".
+- Signature: login uses RSA, the public-key endpoint `xtgl/login_getPublicKey.html` returns `{"modulus","exponent"}`.
+- Signature: static resources carry a `?ver=<build>` build number (e.g. `jw-login.css?ver=29564678`), class prefixes
+  `globalweb` / `jw-`; the cookie has `JSESSIONID` + `route` (cluster routing).
+- Distinguishing notes: it is commonly confused with Qiangzhi jwmis (path `/jsxsd/`); the new ZFSoft is told apart by
+  `/jwglxt/` + `login_slogin.html` + `login_getPublicKey.html`.
 
 ## Weak-Point Anchors (variant-analysis input — NOT exploit steps)
 
-- Anchor: SQL 注入 缺陷类
-  - Affected: 多个历史 build 的特定接口（含部分未授权点，随版本而异）
-  - Mechanism: 历史版本存在参数拼接进 SQL 的注入面；新 build 多有修复，需按 `?ver=` 对位核验
-  - Reference: CNVD 检索“正方 教务” https://www.cnvd.org.cn/ ；具体编号随 build
+- Anchor: SQL injection flaw class
+  - Affected: specific interfaces across many historical builds (including some unauth points, varying by version)
+  - Mechanism: older versions have an injection surface where params are concatenated into SQL; newer builds are mostly
+    fixed — verify by matching the `?ver=` build
+  - Reference: CNVD search "正方 教务" https://www.cnvd.org.cn/ ; specific IDs vary by build
   - source: external-cited
-- Anchor: 未授权访问 / 越权 缺陷类
-  - Affected: 部分接口在特定版本未强制鉴权或越权可读他人数据
-  - Mechanism: 鉴权过滤覆盖不全 / 对象级权限校验缺失
-  - Reference: CNVD/CNNVD 正方教务条目检索
+- Anchor: unauthenticated access / authz-bypass flaw class
+  - Affected: some interfaces in specific versions lack enforced authz or allow reading others' data
+  - Mechanism: incomplete authz-filter coverage / missing object-level permission check
+  - Reference: CNVD/CNNVD ZFSoft jwgl entry search
   - source: external-cited
-- Anchor: 弱口令 / 默认账号面
-  - Affected: 学生/教师账号体系
-  - Mechanism: 常见学号/工号即用户名、弱默认口令模式；属需凭据尝试的面，非未授权直打
-  - Reference: 通用账号安全实践（driver 按授权与平台规则决定是否进行）
+- Anchor: weak-credential / default-account surface
+  - Affected: the student/teacher account system
+  - Mechanism: common pattern of student-id/staff-id as username and weak default passwords; this is a
+    credential-trying surface, not a direct unauth hit
+  - Reference: general account-security practice (the driver decides whether to proceed per authorization and platform rules)
   - source: driver-reasoning
 
 ## Verification Principle (existence proof)
 
-- Existence proof: `/jwglxt/` + `login_slogin.html` + `login_getPublicKey.html` 即确认产品与
-  登录流；`?ver=` 给出 build，用于已知缺陷对位。数据接口未登录是否重定向回登录页，区分
-  鉴权是否生效。
-- Hard stops: 注入证明止于布尔/差异证据（不拖库）；越权证明止于“可达他人对象”而非批量取数；
-  弱口令须遵守授权与平台无害化规则，自动执行不失控（防爆破锁定）。
+- Existence proof: `/jwglxt/` + `login_slogin.html` + `login_getPublicKey.html` confirms the product and login flow;
+  `?ver=` gives the build, for matching known flaws. Whether a data interface redirects un-logged-in back to login
+  distinguishes whether authz is enforced.
+- Hard stops: injection proof stops at boolean/differential evidence (no database dump); authz-bypass proof stops at
+  "another user's object is reachable" rather than bulk data pull; weak-credential testing must follow authorization and
+  the platform's harmless rules, auto-execution stays controlled (avoid brute-force lockout).
 
 ## False-Positive / Confounders
 
-- 前置 WAF（如安恒云）会对引号/关键字返回拦截页，**拦截页 ≠ DB 报错**，勿据此判定注入
-  （见 [[waf-block-recognition]]）。
-- `route`/`JSESSIONID` 双 Cookie 是正常集群会话保持，非漏洞信号。
+- A front WAF (e.g. Anheng cloud) returns a block page for quotes/keywords; **a block page ≠ a DB error**, do not judge
+  injection from it (see [[waf-block-recognition]]).
+- The `route`/`JSESSIONID` dual cookie is normal cluster session affinity, not a vuln signal.
 
 ## References
 
-- https://www.cnvd.org.cn/ （检索“正方 教务 / jwglxt”）
-- 本仓实测: runs/<run>/ 证据 E-001/E-002（某真实主机，build 29564678）
+- https://www.cnvd.org.cn/ (search "正方 教务 / jwglxt")
+- This repo's run-observation: runs/<run>/ evidence E-001/E-002 (a real host, build 29564678)
