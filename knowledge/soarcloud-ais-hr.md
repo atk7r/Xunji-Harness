@@ -70,7 +70,7 @@ No payloads/PoC. Seeded from a real run (see runs/<run>/ in workspace, not here)
 - Open registration: prove with a controlled differential — a second register of the SAME
   throwaway email returns `Username '…' is already taken.`, attributing creation to the prior
   matched-password POST. One throwaway account only; do NOT access tenant data after.
-- Hard stops: confirm identity/capability only. No tenant-data pull, no 拖库, no tampering,
+- Hard stops: confirm identity/capability only. No tenant-data pull, no database dump, no tampering,
   no second-order use of created accounts beyond proving existence. Clean up created artifacts
   (flag the account for operator deletion).
 

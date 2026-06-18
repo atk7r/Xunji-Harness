@@ -23,7 +23,7 @@ Product/framework signatures are public; specific customer instances are NOT nam
   `__VIEWSTATE` / `__VIEWSTATEGENERATOR` / `__EVENTVALIDATION` + ScriptManager;
   login fields `txtAccount` / `txtPW` / `txtVali` with captcha `Common/CheckCode.aspx?t=<hex>`;
   inline `var lang = {…}` multi-language JSON; fancybox + `vue.min.js` + `jquery.min.js`;
-  buttons `btnApplyAccount` (申請帳號) / `btnForgotPasswd` / `btnICLogin` (自然人憑證);
+  buttons `btnApplyAccount` (apply account) / `btnForgotPasswd` / `btnICLogin` (natural-person cert);
   banner `登入錯誤 3 次後…帳號即被鎖定`.
 - **MVC variant:** some management systems are ASP.NET MVC (`X-AspNetMvc-Version` header),
   fronted by a test-period password gate at `/Common/TestLogin` (`測試期通關密碼`).
@@ -77,7 +77,7 @@ Product/framework signatures are public; specific customer instances are NOT nam
   touch admin data.
 - Open redirect: confirm `ReturnUrl` reflected into the form action; do not actually phish.
 - Hard stops (confidentiality / availability / integrity): prove existence only — no data
-  pull, no 拖库, no tamper, no persistence. One probe per finding, proof-level.
+  pull, no database dump, no tamper, no persistence. One probe per finding, proof-level.
 
 ## False-Positive / Confounders
 

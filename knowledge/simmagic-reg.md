@@ -70,7 +70,7 @@ Product signatures are public; specific customer/license data is NOT reproduced 
 - User directory: GET `/User?sn=<license>` and confirm the sensitive columns are present.
   Do NOT export or delete user data.
 - DB schema: an invalid `ORGANIZATION_ID` triggering an FK 500 with schema text is the proof;
-  do NOT pursue extraction / 拖库.
+  do NOT pursue extraction / database dump.
 - Hard stops: prove existence only — never edit/delete licenses or users, never dump, never
   leave the test account active (hand to operator for cleanup).
 
