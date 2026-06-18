@@ -581,6 +581,28 @@ def _norm_host(h) -> str:
     return s.rstrip(".")
 
 
+def _common_dotsuffix(hosts: list) -> str:
+    """可达集的最长公共点分域顶(apex) —— 簇裁决安全界用: glob 必须比它更具体(严格子域)才算
+    合法簇, 防 `*.<目标顶域>` 一句洗白全部。逐【标签】比对(非字符)。无公共顶或纯 IP → ''。"""
+    labs = [h.strip(".").lower().split(".") for h in hosts if h and not _is_ip_like(h)]
+    if not labs:
+        return ""
+    common = labs[0][::-1]
+    for l in labs[1:]:
+        r = l[::-1]
+        k = 0
+        while k < len(common) and k < len(r) and common[k] == r[k]:
+            k += 1
+        common = common[:k]
+        if not common:
+            break
+    return ".".join(common[::-1])
+
+
+def _is_ip_like(h: str) -> bool:
+    return bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", str(h or "")))
+
+
 def check_untested_assets(run_dir: Path) -> list[str]:
     """收口硬门(测的层 anti-lump / 不漏测): coverage 里每个【可达】资产都要被驱动到一个 verdict ——
     在 verdict 台账(frontier=front/Status · evidence=E- · report=确认发现)里被【点到】(测了 / 或
@@ -613,8 +635,35 @@ def check_untested_assets(run_dir: Path) -> list[str]:
             hay += "\n" + p.read_text(encoding="utf-8", errors="replace").lower()
     # 逐 host 词界精确匹配: host 前后不得是 [\w.-](域名字符), 故 1.2.3.1 不命中 1.2.3.10、a.com 不命中
     # data.com / sub.a.com; 单标签/IDN 等任意形状按整串匹配(一套机制, 不靠通用 host 正则的形状假设)。
-    untested = [h for h in sorted(reachable)
-                if not re.search(r"(?<![\w.\-])" + re.escape(h) + r"(?![\w.\-])", hay)]
+    #
+    # ① 廉价收口 / ③ 簇裁决: 一个 `*.子域` glob 顶一【簇】同源/不可达成员, 免逐个具名 —— 直击"域名炸开 +
+    # 执着不可达"逼出的逐资产 whack-a-mole。安全界(防"写一句 *.<目标顶域> 把全部洗成已裁"的偷懒洞):
+    # glob 必须是【严格子域】(比可达集公共域顶 apex 更具体), 故 `*.vpn.x.edu.cn` 接受、`*.x.edu.cn`(=apex
+    # 本身, 太宽)拒。独立复审仍是"真够不着 vs 偷懒"的最终兜底, 这里只免去机械的逐个具名。
+    # 合法簇 glob = 必须是【严格子域】(`*.vpn.x.edu.cn` 可; `*.x.edu.cn`/`*.edu.cn` 不可)。用 registrable
+    # 判(比"可达公共顶 apex"稳: 可达跨多域时 apex 缩到公共后缀, 会让 `*.整个域` 也混进当簇; registrable
+    # 不会 —— registrable(G)==G 即 G 本身就是可注册域/公共后缀, 拒)。registrable 已含 .cn/.tw/.jp 后缀。
+    try:
+        import scope as _scope
+        def _strict_subdomain(g: str) -> bool:
+            r = _scope.registrable(g)
+            return bool(r) and r != g
+    except Exception:
+        apex = _common_dotsuffix(sorted(reachable))          # 兜底: 无 scope 退到 apex 法
+        def _strict_subdomain(g: str) -> bool:
+            return bool(apex) and g != apex and g.endswith("." + apex)
+    # 左边界 (?<![\w.\-]) 防 `x*.vpn.example` 误得 vpn.example; 拒含 `..` 的畸形(Codex WARN#4)。
+    cluster_globs = [g for g in set(re.findall(r"(?<![\w.\-])\*\.([a-z0-9][a-z0-9.\-]*[a-z0-9])", hay))
+                     if ".." not in g and _strict_subdomain(g)]
+
+    def _verdicted(h: str) -> bool:
+        if re.search(r"(?<![\w.\-])" + re.escape(h) + r"(?![\w.\-])", hay):
+            return True                                                   # 具名裁决
+        # 簇 glob 只覆盖【严格子域】(x.G), 【不】覆盖 G 自身 —— 否则 `*.bulletin.x` 会把直连子域应用
+        # bulletin.x 自己也洗成"已裁"(Codex 复审 WARN#1: 旧 h==g 的洞)。簇头/代表必须具名, 不能 glob 掉自己。
+        return any(h.endswith("." + g) for g in cluster_globs)
+
+    untested = [h for h in sorted(reachable) if not _verdicted(h)]
     if not untested:
         return []
     shown = ", ".join(untested[:15]) + (" …" if len(untested) > 15 else "")
@@ -1137,6 +1186,51 @@ def _selftest() -> int:
         encoding="utf-8")
     checks.append(("漏测门: 可达资产全点到 → 不报", check_untested_assets(d18) == []))
     checks.append(("漏测门: 无 coverage → 不报(不强加)", check_untested_assets(Path(tempfile.mkdtemp())) == []))
+    # ① 廉价收口 / ③ 簇裁决: `*.子域` glob 顶一簇, 免逐个具名; 但 `*.<apex顶域>` 太宽不算(防偷懒洞)
+    d18c = Path(tempfile.mkdtemp())
+    (d18c / "classify").mkdir()
+    (d18c / "classify" / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "0.vpn.corp.example", "reachable": True},
+        {"host": "1a2b.vpn.corp.example", "reachable": True},
+        {"host": "app.corp.example", "reachable": True}]}), encoding="utf-8")
+    (d18c / "evidence.md").write_text(
+        "# Evidence\n## E-1\n- VPN 网关簇 *.vpn.corp.example 统一 403 deferred(creds-gated)\n", encoding="utf-8")
+    fc = (check_untested_assets(d18c) or [""])[0]
+    checks += [
+        ("① 簇裁决: *.vpn.corp.example 顶通配成员(0.vpn/1a2b.vpn 不报)",
+         "0.vpn.corp.example" not in fc and "1a2b.vpn.corp.example" not in fc),
+        ("① 簇裁决: 簇外可达 app.corp.example 仍报(没被簇洗白)", "app.corp.example" in fc),
+    ]
+    (d18c / "evidence.md").write_text(            # 偷懒: 写 *.<apex> 想洗全部
+        "# Evidence\n## E-1\n- 一句 *.corp.example 想把全部 deferred 掉\n", encoding="utf-8")
+    fc2 = (check_untested_assets(d18c) or [""])[0]
+    checks.append(("① 安全界: *.<apex顶域> 太宽不算簇 → app.corp.example 仍被报(防偷懒洞)",
+                   "app.corp.example" in fc2))
+    # 安全界硬化(registrable 比 apex 稳): 可达跨两个注册域时, apex 缩到 edu.cn, 旧 apex 法会把
+    # `*.target.edu.cn`(strict subdomain of edu.cn)误当簇洗白; registrable 判 target.edu.cn==自身 → 拒。
+    d18d = Path(tempfile.mkdtemp())
+    (d18d / "classify").mkdir()
+    (d18d / "classify" / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "a.target.edu.cn", "reachable": True},
+        {"host": "x.other.edu.cn", "reachable": True}]}), encoding="utf-8")
+    (d18d / "evidence.md").write_text(
+        "# Evidence\n## E-1\n- 想用一句 *.target.edu.cn 把整个域洗成 deferred(应被拒)\n", encoding="utf-8")
+    fd = (check_untested_assets(d18d) or [""])[0]
+    checks.append(("① 安全界硬化: 跨域时 *.<整注册域> 不算簇(registrable 判) → a.target.edu.cn 仍被报",
+                   "a.target.edu.cn" in fd))
+    # Codex 复审 WARN#1: glob `*.G` 只覆盖严格子域 x.G, 【不】覆盖 G 自身(簇头须具名, 防洗掉直连应用)
+    d18e = Path(tempfile.mkdtemp())
+    (d18e / "classify").mkdir()
+    (d18e / "classify" / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "gw.corp.example", "reachable": True},
+        {"host": "node1.gw.corp.example", "reachable": True}]}), encoding="utf-8")
+    (d18e / "evidence.md").write_text(
+        "# Evidence\n## E-1\n- *.gw.corp.example 网关簇 deferred\n", encoding="utf-8")
+    fe = (check_untested_assets(d18e) or [""])[0]
+    checks += [
+        ("① 簇 glob 覆盖严格子域 node1.gw.corp.example(不报)", "node1.gw.corp.example" not in fe),
+        ("① Codex#1: 簇头 gw.corp.example 自身不被 *.gw.corp.example 洗白(仍报)", "gw.corp.example" in fe),
+    ]
     checks += [   # _norm_host: 括号 IPv6 取内 / 单冒号去 port / 裸 IPv6 不截断(Codex WARN 修)
         ("_norm_host 括号IPv6取内", _norm_host("https://[2001:db8::1]:443/x") == "2001:db8::1"),
         ("_norm_host 单冒号去port", _norm_host("https://h:8443") == "h"),
