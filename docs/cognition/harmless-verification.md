@@ -1,46 +1,62 @@
-# 无害验证配方（证明即止的可操作化）
+# Harmless-verification recipes (prove-and-stop, operationalized)
 
-"证明漏洞确实存在、但不造成破坏" 不是一句口号——它有具体配方。下面是从实战提炼的、
-能在**不伤害任何人**的前提下把"疑似"逼到"确认/否定"的手法。核心思路：**用响应行为暴露
-缺陷的存在，而不触发缺陷的危害效果**。
+"Prove the vulnerability genuinely exists, without causing damage" is not a slogan — it
+has concrete recipes. Below are techniques distilled from real engagements that push a
+"suspected" finding to "confirmed / rejected" **without harming anyone**. Core idea:
+**expose the flaw through response behavior, without triggering the flaw's harmful effect.**
 
-## 五条配方
+## Five recipes
 
-1. **不存在的对象代替真实对象。**
-   测密码找回/改密接口时，用一个**明显不存在的假账号**——后端改不动任何人，但响应（参数
-   校验顺序、是否"成功"、报错码）会暴露它**校不校验**。
-   > 实战：forgetPwd 用假账号 + 空码/错码 → 后端返 4001/500 而非"成功" → 证明无"空码即改密"
-   > 类平凡绕过，且全程没改任何真实用户口令。
+1. **A non-existent object in place of a real one.**
+   When testing password-reset / change-password endpoints, use an **obviously
+   non-existent fake account** — the backend changes nothing for anyone, but the response
+   (parameter-validation order, whether it "succeeds", the error code) reveals **whether it
+   validates**.
+   > Engagement: forgetPwd with a fake account + empty/wrong code → backend returns
+   > 4001/500 rather than "success" → proves there is no "empty-code-changes-password"
+   > trivial bypass, and no real user's password was ever changed.
 
-2. **非生产 / 明显无效值。**
-   要填手机号/邮箱/金额/目标地址时，用**明显假的**（如 `13800000000`、`example.com`、
-   `0.01`、不可达内网）——既能看接口行为，又不会真发短信骚扰、真转账、真触达。
+2. **Non-production / obviously invalid values.**
+   When a field wants a phone / email / amount / target address, use **obviously fake**
+   ones (`13800000000`, `example.com`, `0.01`, an unreachable internal IP) — you still see
+   the endpoint's behavior, without sending a real SMS, making a real transfer, or really
+   reaching anyone.
 
-3. **只读探测，存在性证明，不取数。**
-   未授权访问/越权：证明"本不该可达的对象/数据项**存在**"即止，**不**拉取它的内容、
-   不批量遍历（拖库是硬边界）。一个对象的可达性 = 证明；全量数据 = 危害。
+3. **Read-only probe: prove existence, do not extract data.**
+   Unauthenticated access / privilege escalation: prove that "an object/data item that
+   should not be reachable **exists**" and stop — do **not** pull its content, do not bulk
+   enumerate (database dump is a hard boundary). One object's reachability = proof; the full
+   dataset = harm.
 
-4. **单发，不循环。**
-   验证码/登录/发送类：**单次**看行为即可（码是否回显、账号是否枚举、是否限速）。
-   **绝不循环**——短信轰炸、验证码爆破、登录爆破都是高频 flooding（硬边界）。
-   "码逻辑健不健全"的最终判定若必须多次尝试 → 交 operator 评估速率/锁定后授权执行。
+4. **Single shot, no loop.**
+   Captcha / login / send-type endpoints: a **single** observation of the behavior suffices
+   (is the code reflected, is the account enumerable, is there rate limiting). **Never loop**
+   — SMS bombing, captcha brute-force, login brute-force are all high-frequency flooding
+   (hard boundary). If the final judgment of "is the code logic sound" truly requires many
+   attempts → hand it to the operator to assess rate/lockout, then execute under authorization.
 
-5. **测逻辑分支，不测危害效果。**
-   命令注入/RCE：`id`/`whoami` 单条回显证明能执行即止，不上 shell、不持久化、不跳板。
-   改密/改权限/删除：证明"具备该能力"（可写/可达/角色属性）而非真的改/删。
+5. **Test the logic branch, not the harmful effect.**
+   Command injection / RCE: a single `id`/`whoami` echo proving execution is enough — do not
+   drop a shell, do not persist, do not pivot. Change-password / change-permission / delete:
+   prove "the capability exists" (writable / reachable / role attribute) rather than actually
+   changing/deleting.
 
-## 判定边界（什么时候必须停手交 operator）
+## Decision boundary (when you must stop and hand to the operator)
 
-无害配方能覆盖**绝大多数存在性证明**。但下列**只能由 operator 在授权/自有测试账号上执行**：
-- 真实改密/改权限/删除（完整性破坏，不可逆）；
-- 必须多次尝试才能判定的（爆破/喷洒，触 flooding）；
-- 必须真实用户配合的（如扫码登录劫持需真人扫码）；
-- 跨 web 层的内网利用/横向（operator-gated）。
+The harmless recipes cover the **vast majority of existence proofs**. But the following may
+**only be done by the operator, on authorized / own test accounts**:
+- real change-password / change-permission / delete (integrity damage, irreversible);
+- anything that requires many attempts to judge (brute-force / spraying, hits flooding);
+- anything requiring a real user's cooperation (e.g. QR-login hijack needs a human to scan);
+- internal-network exploitation / lateral movement beyond the web layer (operator-gated).
 
-这些**写进报告的"为何未深入"+ 以 author-and-handoff PoC 交付**（见 `docs/templates/poc-report.md`）。
+These go into the report's "why not pursued deeper" + are delivered as an author-and-handoff
+PoC (see `docs/templates/poc-report.md`).
 
-## 一句话
+## In one line
 
-**无害验证 = 拿假的/无效的/单次的/只读的输入，让接口的响应自己招供缺陷在不在——
-而真实的破坏、批量、循环、跨层，一概交给 operator。** 能无害证明的就证明，
-证明不了的诚实标"未确认 + 待 operator"，绝不为凑结论而越界或夸大。
+**Harmless verification = use fake / invalid / single-shot / read-only inputs and let the
+endpoint's own response confess whether the flaw is there — while real destruction, bulk
+extraction, looping, and cross-layer work all go to the operator.** Prove what can be proven
+harmlessly; for what cannot, honestly mark "unconfirmed + pending operator" — never overstep
+or overstate to manufacture a conclusion.
