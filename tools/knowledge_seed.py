@@ -60,8 +60,9 @@ def extract_signatures(body: str, limit: int = 6) -> list[str]:
             seen.append(cl)
         if len(seen) >= limit:
             break
-    # 剥尾部版本号 → 也给版本无关 signature(#5 dogfood: 'apache tomcat/9.0.58' 只认那一版, 加 'apache tomcat')
-    ver = re.compile(r"[ /v.\-]*\d[\d.]*[a-z]?\s*$", re.I)
+    # 剥尾部版本号 → 也给版本无关 signature(#5: 'apache tomcat/9.0.58' 只认那一版, 加 'apache tomcat')。
+    # 只剥【带点的版本】或【/前缀版本】, 不剥裸尾数(否则 'portal 2024'→'portal' 误剥, Codex 复审逮到)。
+    ver = re.compile(r"(?:[ /]v?\d+\.[\d.]*[a-z]?|/v?\d[\d.]*[a-z]?)\s*$", re.I)
     out: list[str] = []
     for s in seen:
         if s not in out:

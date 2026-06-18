@@ -281,6 +281,7 @@ def _selftest() -> int:
                    Path(_place_save("tomcat9", "runs/t")) == Path("runs/t/evidence/tomcat9.html")))
     checks.append(("无 --run + 无扩展名 -> 补 .html", _place_save("foo", None) == "foo.html"))
     checks.append(("已带扩展名不重复补", _place_save("a.json", None) == "a.json"))
+    checks.append(("显式路径(含分隔符)无扩展名也不补/不改(Codex#7)", _place_save("sub/tomcat9", "runs/t") == "sub/tomcat9"))
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -294,9 +295,11 @@ def _place_save(save: str | None, run: str | None) -> str | None:
     (显式路径优先, 向后兼容)。专治证据散落 run 根目录、与草稿混作一团(断-2)。"""
     if not save:
         return save
-    if "." not in Path(save).name:        # 无扩展名裸名补 .html(#3 dogfood: --save tomcat9 存成裸名,
-        save = save + ".html"             # driver 以为是 .html 当场报错; 录像 .replay.json 自动跟随)
-    if not run or ("/" in save) or ("\\" in save):
+    if ("/" in save) or ("\\" in save):
+        return save                       # 显式路径: 原样尊重(向后兼容), 不补扩展名/不改(Codex#7)
+    if "." not in Path(save).name:        # 裸名无扩展名 → 补 .html(#3: --save tomcat9 存成裸名报错;
+        save = save + ".html"             # 录像 .replay.json 自动跟随)
+    if not run:
         return save
     return str(Path(run) / "evidence" / save)
 

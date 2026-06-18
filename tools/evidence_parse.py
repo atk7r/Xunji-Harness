@@ -47,7 +47,7 @@ def _resolve_artifact(tok: str, run_dir: Path) -> Path | None:
 # (not the whole block) keeps prose filename mentions (e.g. "jquery-3.6.0.min.js",
 # "ais.webform.js") from being mis-read as dead evidence citations.
 _ARTIFACT_FIELD_RE = re.compile(
-    r"Artifacts?\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
+    r"(?:[Ss]aved\s+)?[Aa]rtifacts?\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
     re.S)
 _CERT_LITERAL_RE = re.compile(r"\b(1\.0|0\.8|0\.5|0\.3)\b")
 # Certainty 字段的【值区域】: 从 `Certainty…:` 到下一个 `- Field:` / 空行 / 块尾。

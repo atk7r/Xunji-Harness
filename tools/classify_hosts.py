@@ -273,10 +273,13 @@ def run_classify(hosts: list, out_dir: Path, kb_sigs, delay: float, timeout: int
         (out_dir / "classify.txt").write_text(table, encoding="utf-8")
         examined = sum(1 for c in coverage if c["examined"])
         reachable = sum(1 for c in coverage if c["reachable"] is True)
-        (out_dir / "coverage.json").write_text(json.dumps(
+        # 原子写: 先 .tmp 再 replace(同盘原子改名), 防增量落盘中途被杀留半截损坏 JSON(Codex#2)
+        tmp = out_dir / "coverage.json.tmp"
+        tmp.write_text(json.dumps(
             {"total": len(coverage), "examined": examined, "reachable": reachable,
              "planned": total, "partial": len(coverage) < total, "assets": coverage},
             ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(out_dir / "coverage.json")
 
     try:
         for i, h in enumerate(hosts, 1):
