@@ -599,6 +599,8 @@ def check_untested_assets(run_dir: Path) -> list[str]:
         cov = json.loads(covs[0].read_text(encoding="utf-8", errors="replace"))
     except Exception:
         return []
+    if not isinstance(cov, dict):     # 非 dict coverage 不崩(Codex 健壮性)
+        return []
     reachable = {_norm_host(a.get("host")) for a in cov.get("assets", [])
                  if isinstance(a, dict) and a.get("reachable") is True and a.get("host")}
     reachable.discard("")
@@ -620,6 +622,54 @@ def check_untested_assets(run_dir: Path) -> list[str]:
             f"evidence/report 被驱动到 verdict —— 只 examined(摸指纹)不算测过: {shown}。每个可达资产都要"
             "到一个 verdict(confirmed/rejected/deferred带理由); 高价值手工深挖在前、低价值 scan.py/nuclei "
             "兜底在后, 一个别落(同栈簇可在一个 front 里列全成员一起裁决, 不必逐个重打)。"]
+
+
+def check_unattacked_surface(run_dir: Path) -> list[str]:
+    """收口硬门(深度层 anti-lump —— deferred 不是新 lump): coverage 里【带登录攻击面(LOGIN flag)】的
+    可达资产, 必须在 **evidence.md** 有 E-xxx 攻击/探测记录(host 被点到)。deferred 一个登录面却没留任何
+    攻击尝试 = 把"没打"洗成"收口"(deferred-is-the-new-lump 根问题: confirmed 要证据、deferred 只要一句话,
+    阻力最小路径=费劲的全 defer 掉)。**对称 confirmed 要证据**: 有攻击面的 deferred 也要证据 —— 哪怕是
+    负向记录(打了→加固 / egress 不可达 / WAF 旁路已试)。LOGIN 面无 E-xxx = 硬门拦, 逼先打 unauth 面
+    (注入/枚举/默认口令/旁路)再收口。这逼的是【对攻击面真打过】, 不是机械打穿每台。
+    判据=evidence.md(攻击台账)被点到; frontier 里被 deferred 但 evidence 无记录 = 未打的 lazy defer。"""
+    covs = list(run_dir.glob("**/coverage.json"))
+    if not covs:
+        return []
+    try:
+        cov = json.loads(covs[0].read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return []
+    if not isinstance(cov, dict):     # 非 dict(list/scalar)coverage 不崩(Codex 健壮性)
+        return []
+    login = {_norm_host(a.get("host")) for a in cov.get("assets", [])
+             if isinstance(a, dict) and a.get("reachable") is True and a.get("host")
+             and "LOGIN" in (a.get("flags") or [])}
+    login.discard("")
+    if not login:
+        return []
+    # haystack 只取 `## E-xxx` 攻击记录条目块内的文本: host 必须落在某条 E-xxx 里, 不是文件别处随手一提
+    # (否则把 host 名 dump 进文件任意处即可蒙混; 绑到 E-条目才算"有攻击记录")。与 parse_evidence 同源:
+    # 按【行首】`## ` 分节、取节头含 E-\d+ 的节正文 —— 锚定行首防 `### E-1`/行内 `## E-1`/`##E-1` 等
+    # 非规范头蒙混(Codex round-2 不锚定残留)。
+    ev = ""
+    p = run_dir / "evidence.md"
+    if p.exists():
+        raw = p.read_text(encoding="utf-8", errors="replace")
+        parts = []
+        for sec in re.split(r"(?m)^(?=##\s)", raw):
+            head = sec.splitlines()[0] if sec.strip() else ""
+            if re.search(r"\bE-\d+\b", head):
+                parts.append(sec)
+        ev = "\n".join(parts).lower()
+    unattacked = [h for h in sorted(login)
+                  if not re.search(r"(?<![\w.\-])" + re.escape(h) + r"(?![\w.\-])", ev)]
+    if not unattacked:
+        return []
+    shown = ", ".join(unattacked[:15]) + (" …" if len(unattacked) > 15 else "")
+    return [f"收口硬门(攻击面 deferred 当收口): {len(unattacked)}/{len(login)} 个【带登录攻击面(LOGIN)】"
+            f"可达资产从未在 evidence.md 留攻击/探测记录(E-xxx)—— deferred 一个登录面却没打 = 把'没打'洗成"
+            f"'收口'(deferred-is-the-new-lump; 对称 confirmed 要证据)。先对其 unauth 面【实打】(注入/枚举/"
+            f"默认口令/旁路)记 E-xxx(成功/加固/不可达都算证据), 再收口: {shown}。"]
 
 
 def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
@@ -710,6 +760,8 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
 
     # 硬门(测的层 anti-lump / 不漏测): coverage 里每个【可达】资产都要被驱动到 verdict, 不能只 examined
     errors.extend(check_untested_assets(run_dir))
+    # 硬门(深度层 anti-lump): 带登录攻击面的可达资产必须有 evidence 攻击记录, deferred 不是免费逃生口
+    errors.extend(check_unattacked_surface(run_dir))
 
     # 硬门: 收口前必须有独立 Reviewer 复审记录
     review = run_dir / "review.md"
@@ -1085,6 +1137,38 @@ def _selftest() -> int:
         ("_norm_host 单冒号去port", _norm_host("https://h:8443") == "h"),
         ("_norm_host 裸IPv6不截断", _norm_host("2001:db8::1") == "2001:db8::1"),
     ]
+    # 深度门(攻击面 deferred 当收口): 带 LOGIN flag 的可达资产必须在 evidence 有攻击记录
+    d19 = Path(tempfile.mkdtemp())
+    (d19 / "classify").mkdir()
+    (d19 / "classify" / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "login1.example", "reachable": True, "flags": ["LOGIN", "DYN"]},
+        {"host": "login2.example", "reachable": True, "flags": ["LOGIN"]},      # 未打
+        {"host": "login3.example", "reachable": True, "flags": ["LOGIN"]},      # 只在文件头提, 不在 E 块
+        {"host": "login4.example", "reachable": True, "flags": ["LOGIN"]},      # 在非规范 ### E-9 头, 不算 E 块
+        {"host": "static.example", "reachable": True, "flags": ["DYN"]},        # 非 LOGIN, 不要求
+        {"host": "downlogin.example", "reachable": False, "flags": ["LOGIN"]}]}), encoding="utf-8")
+    (d19 / "evidence.md").write_text(
+        "# Evidence Ledger\nlogin3.example 随手提一句(不在 E 块, 不算攻击记录)\n"
+        "### E-9 login4.example\n"     # 非规范 3-# 头(锚定测试): 不该被当 E 块
+        "## E-001\n- Action: 打 login1.example 登录 SQLi/枚举 → 加固无差分\n", encoding="utf-8")
+    ua2 = (check_unattacked_surface(d19) or [""])[0]
+    checks += [
+        ("深度门: 攻击过(E块内点到)的登录面不报", "login1.example" not in ua2),
+        ("深度门: 未打(evidence 无)的登录面被报", "login2.example" in ua2),
+        ("深度门: 仅文件头提及(非E块)登录面仍被报", "login3.example" in ua2),
+        ("深度门: 非规范 ### E-9 头不算 E 块(锚定)", "login4.example" in ua2),
+        ("深度门: 非 LOGIN 面不要求攻击记录", "static.example" not in ua2),
+        ("深度门: 不可达登录面不计入", "downlogin.example" not in ua2),
+    ]
+    (d19 / "evidence.md").write_text(
+        "# Evidence\n## E-001 login1.example login2.example login3.example login4.example\n", encoding="utf-8")
+    checks.append(("深度门: 登录面都进 E 块 → 不报", check_unattacked_surface(d19) == []))
+    checks.append(("深度门: 无 coverage → 不报(不强加)", check_unattacked_surface(Path(tempfile.mkdtemp())) == []))
+    # 非 dict coverage(list/scalar)不崩(Codex 健壮性, 两门同修)
+    d20 = Path(tempfile.mkdtemp()); (d20 / "classify").mkdir()
+    (d20 / "classify" / "coverage.json").write_text("[1,2,3]", encoding="utf-8")
+    checks.append(("深度门/漏测门: 非dict coverage 不崩",
+                   check_unattacked_surface(d20) == [] and check_untested_assets(d20) == []))
     # 不过度匹配(防 false-fail): 录像 sqli.replay.json 对应 bare-stem 产物 sqli, 不该误绑引用 sqli.json
     # 的无关发现(那条的录像应是 sqli.json.replay.json)。Codex 三轮复审逮到的 false-fail。
     d17 = Path(tempfile.mkdtemp())

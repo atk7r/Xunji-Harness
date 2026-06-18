@@ -171,6 +171,13 @@ Watch for these signs that the agent is not digging deeply enough:
   "examined" lumped as "tested". Prioritise high-value, then auto-continue the
   low-value ones (cheap breadth via `tools/scan.py`); every reachable asset gets a
   verdict (deferred-with-reason counts), one is not skipped.
+- It marks an asset `deferred` ("need creds" / "low value") **without an attack
+  attempt** — treating `deferred` as a free escape hatch (the *deferred-is-the-new-lump*
+  hole). For real attack surface (a login form), attack the unauth layer (SQLi / user
+  enum / default creds / bypass) and record an `E-xxx` first — its result counts whether
+  it lands, is hardened, or is egress-blocked; only the post-auth depth is creds-gated.
+- It tunnels deep on one attractive app before the breadth pass (preliminary
+  surface-detection of *every* asset, high-value then low-value) is complete.
 - It treats first-pass banner, version, or page observations as sufficient.
 - On a SPA it calls endpoints "enumerated" from a partially-fetched JS set — confirm
   `tools/fetch_assets.py` reports every referenced chunk fetched (N==M) before

@@ -173,6 +173,18 @@ assets were only header / recon-classified, never examined. Before any such clai
   front / evidence (same-stack siblings may share one front that lists them all — do
   not re-attack each, but every member must be accounted for). This forces a driver
   *judgement on every asset*, never a blind scan of every host.
+- **Breadth before depth; `deferred` on attack surface is NOT free.** The flow is:
+  preliminary-detect **every** asset's surface first (high-value → low-value; do **not**
+  tunnel deep on one app while others are unexamined), **then** go to depth. A `deferred`
+  verdict must be *earned*: for any asset `classify` flagged `LOGIN` (a real attack
+  surface), the deferral must be backed by an **evidence (`E-xxx`) attack record** —
+  symmetric to `confirmed` needing evidence. A bare "deferred (need creds / low value)"
+  on a login surface with **no attack attempt** is the *deferred-is-the-new-lump* hole:
+  laundering "didn't attack" into "closure". `check_run.py` **hard-fails** a closure with
+  `LOGIN` assets absent from `evidence.md`. Attack the unauth layer first (SQLi / user-enum
+  / default-creds / WAF-bypass), record the `E-xxx` — its result counts whether it lands,
+  is hardened, or is egress-blocked — **then** defer the post-auth (creds-gated) depth. Do
+  not stop and ask the operator while attack surface remains unattacked.
 - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
   evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,
