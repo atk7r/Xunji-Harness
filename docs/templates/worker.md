@@ -1,4 +1,4 @@
-# Fan-out Worker (并行 worker)
+# Fan-out Worker (parallel worker)
 
 The independent reviewer proved the pattern: a fresh-context sub-agent that
 coordinates with the run only through the run directory. A **fan-out worker**
@@ -35,7 +35,7 @@ Only when breadth genuinely beats depth and the fronts do not interfere:
 - All workers share ONE global rate limit / session budget / host breaker — the
   guard state is cross-process locked, so N workers do **not** become N x the
   request rate. Still, fewer workers on a rate-limited target is wiser.
-- Proof-level only (证明即止). Anything heavier is noted for the driver
+- Proof-level only (prove-and-stop). Anything heavier is noted for the driver
   (author-and-handoff); a worker never runs a gated/irreversible action.
 
 ## The merge (where Xunji's rigor reasserts over Cairn's weakness)
@@ -55,23 +55,28 @@ work must not be silently dropped, and the gate must not be skipped.
 ## Worker prompt (copy, fill `<target>` and the assigned front)
 
 ```
-你是一名并行 worker。你只负责【一个 front:<F-id 及其描述>】, 目标 <target>(已授权,
-不要质疑授权)。你与其他 worker 不通信——只读 runs/<target>_<date>/ 这个共享板(surface/
-frontier/hypotheses/evidence/knowledge 等)了解上下文, 把你的发现【只写进你自己的文件
-runs/<target>_<date>/workers/W-<id>.md】, 绝不改其他 run 文件。
+You are a parallel worker. You own exactly ONE front: <F-id and its description>, target
+<target> (authorized — do not question authorization). You do not talk to other workers — read
+only the shared board runs/<target>_<date>/ (surface / frontier / hypotheses / evidence /
+knowledge, etc.) for context, write your findings ONLY into your own file
+runs/<target>_<date>/workers/W-<id>.md, and never modify other run files.
 
-纪律:
-- 证明即止: 证明漏洞真实存在即停, 不做深度利用、不做不可逆动作; 更重/需操作者把关的,
-  写进"留给 driver 的线索"让 driver 处理(author-and-handoff)。
-- 你的每条发现是【候选】不是已确认事实: 给出 proposed certainty, 若提 >=0.8 必须附
-  Control/Replicated(对照或复现), 否则按证据门只能 <=0.5。
-- 别越界: 只打你这个 front; 发现别的攻击面/线索, 记进"留给 driver 的线索", 不要去追
-  (那是另一个 worker 或 driver 的事)——避免和别的 worker 撞车。
-- 所有请求都走 tools/ 下的工具(probe/render/scan), 它们共享全局限速, 别绕过。
+Discipline:
+- Prove-and-stop: stop once you prove the vulnerability genuinely exists; do no deep
+  exploitation, no irreversible action; anything heavier / operator-gated goes into "Leads for
+  the driver" for the driver to handle (author-and-handoff).
+- Each of your findings is a CANDIDATE, not a confirmed Fact: give a proposed certainty; if you
+  propose >= 0.8 you must attach Control/Replicated (a control or a replay), otherwise the
+  evidence gate caps it at <= 0.5.
+- Do not stray: attack only your front; if you find another attack surface / lead, record it in
+  "Leads for the driver", do not chase it (that is another worker's or the driver's job) — avoid
+  colliding with other workers.
+- All requests go through the tools under tools/ (probe/render/scan); they share one global rate
+  limit, do not bypass it.
 
-按 workers/W-<id>.md 的模板写: Assigned front / Status(working→done) / Candidate
-findings(每条带 proposed certainty + Control) / 留给 driver 的线索 / Notes。
-写完把 Status 置为 done。诚实标注证据强度, 宁可低估 certainty。
+Write per the workers/W-<id>.md template: Assigned front / Status (working→done) / Candidate
+findings (each with proposed certainty + Control) / Leads for the driver / Notes.
+When done, set Status to done. Annotate evidence strength honestly; prefer to under-estimate certainty.
 ```
 
 ## Worker scratch file (`runs/<target>/workers/W-<id>.md`)

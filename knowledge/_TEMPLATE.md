@@ -6,7 +6,7 @@ aliases: [alias1, alias2]
 category: short-category     # e.g. cms | framework-management-endpoint | device
 last_reviewed: YYYY-MM-DD
 maturity: seed               # seed | verified | stale
-signatures: ["sig1", "sig2"] # 机器可匹配的小写 substring; classify_hosts 据此识别【已入库】产品(飞轮读取端)
+signatures: ["sig1", "sig2"] # lowercase substring the classifier matches; classify_hosts recognizes a known (indexed) product by these (flywheel read end)
 ---
 
 <!--
