@@ -39,6 +39,8 @@ except Exception:
     pass
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from harness import proxy as proxymod  # noqa: E402  模型调用【绝不】走交战代理(剥代理 env + 空 opener)
 CONFIG_PATH = ROOT / "review" / "peer_review.json"
 
 # ---- 默认配置(可被 review/peer_review.json 覆盖) ----
@@ -257,7 +259,8 @@ def _run_codex(scope_dir: Path, rubric: str, b: dict, timeout: int) -> ReviewRes
     try:
         proc = subprocess.run(cmd, shell=True, input=prompt, capture_output=True,
                               text=True, encoding="utf-8", errors="replace",
-                              cwd=str(ROOT), timeout=timeout)
+                              cwd=str(ROOT), timeout=timeout,
+                              env=proxymod.model_safe_env())   # 模型 CLI【绝不】走交战代理(剥代理 env)
     except subprocess.TimeoutExpired:
         return ReviewResult(verdict="ERROR", backend_used="codex",
                             error=f"codex 超时(>{timeout}s)")
@@ -287,7 +290,7 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int) 
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with proxymod.model_no_proxy_opener().open(req, timeout=timeout) as resp:   # 模型 API 不走交战代理
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
         content = data["choices"][0]["message"]["content"]
     except Exception as e:
@@ -315,7 +318,7 @@ def _run_anthropic(scope_dir: Path, rubric: str, b: dict, timeout: int) -> Revie
         headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                  "Content-Type": "application/json"}, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with proxymod.model_no_proxy_opener().open(req, timeout=timeout) as resp:   # 模型 API 不走交战代理
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
         content = "".join(blk.get("text", "") for blk in data.get("content", []))
     except Exception as e:

@@ -47,6 +47,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("scope",          ["tools/scope.py", "--selftest"],          "run scope derive/match"),
     ("peer_review",    ["tools/peer_review.py", "--selftest"],    "heterogeneous review"),
     ("probe",          ["tools/probe.py", "--selftest"],          "active HTTP sensor"),
+    ("proxy",          ["tools/harness/proxy.py", "--selftest"],  "engagement egress proxy (渗透走/模型不走)"),
     ("replay",         ["tools/replay.py", "--selftest"],         "evidence replay"),
     ("setup_run",      ["tools/setup_run.py", "--selftest"],      "run scaffolding"),
     ("bench",          ["tools/bench.py", "--selftest"],          "R-1 self-eval scorer"),

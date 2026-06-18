@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness.guard import (RateLimiter, AuthFailCounter, cap_body,  # noqa: E402
                            RateBudgetExceeded, BruteforceLock,
                            HostHealth, HostBackoff, SessionBudget, SessionTripped)
+from harness import proxy as proxymod  # noqa: E402  渗透流量走交战代理(模型调用不走)
 
 # Emit UTF-8 regardless of the OS locale, so this tool's JSON (ensure_ascii=False,
 # 含中文/标题) survives being captured by a parent process on Windows (default
@@ -64,13 +65,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _opener(no_redirect: bool = False) -> urllib.request.OpenerDirector:
-    handlers: list = [urllib.request.HTTPSHandler(context=_CTX)]
-    if _PROXY:
-        handlers.append(urllib.request.ProxyHandler({"http": _PROXY,
-                                                     "https": _PROXY}))
-    else:
-        # 显式置空, 不继承系统代理(避免意外走错出口)
-        handlers.append(urllib.request.ProxyHandler({}))
+    # urllib_proxy_handlers 返回【完整连接 handler(含带 _CTX 的 HTTPS handler)】。这里【不要】再自己加
+    # HTTPSHandler —— 否则普通 HTTPSHandler 会和 socks handler 抢 https, socks 连不上时悄悄走直连泄真实 IP
+    # (实测坏代理仍回 200 的坑)。_PROXY 仅是 --proxy 覆盖; 内部 resolve() 让 import probe.send 的工具
+    # (classify_hosts/fetch_assets/replay/rerun_deferred)也走交战代理 + required 时 fail-closed。
+    handlers: list = list(proxymod.urllib_proxy_handlers(_PROXY, ssl_context=_CTX))
     if no_redirect:
         handlers.append(_NoRedirect())          # build_opener 用它替换默认 HTTPRedirectHandler
     return urllib.request.build_opener(*handlers)
@@ -322,8 +321,8 @@ def main() -> int:
                     help="run 目录 runs/<dir>; 给了它且 --save 是裸文件名时, 产物落到 "
                          "<run>/evidence/(统一布局, 防散落根目录; 录像 .replay.json 一并跟随)")
     ap.add_argument("--proxy", default=None,
-                    help="代理(http://h:p / socks5://h:p)；解锁境内资产经中继。"
-                         "未给则读环境变量 HTTPS_PROXY/ALL_PROXY")
+                    help="交战代理(http://h:p / socks5h://h:p)；解锁境内资产经中继。"
+                         "未给则走 harness.proxy 解析(XUNJI_PROXY / proxy.conf, 不读 HTTPS_PROXY=模型那条)")
     ap.add_argument("--retry", type=int, default=0,
                     help="超时/RST 重试次数(瞬时不可达时用)")
     ap.add_argument("--retry-wait", type=float, default=1.5, help="重试间隔秒")
@@ -344,7 +343,7 @@ def main() -> int:
     args.save = _place_save(args.save, args.run)   # 统一布局: --run 时裸文件名 -> <run>/evidence/
 
     global _PROXY
-    _PROXY = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY")
+    _PROXY = args.proxy   # 仅存 --proxy 覆盖; 真正解析在 _opener(urllib_proxy_handlers), 直跑与 import 都走交战代理
 
     headers = {}
     for h in args.header:

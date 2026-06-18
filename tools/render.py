@@ -37,6 +37,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness.guard import (RateLimiter, cap_body, RateBudgetExceeded,  # noqa: E402
                            HostHealth, HostBackoff)
+from harness import proxy as proxymod  # noqa: E402  渗透流量走交战代理(模型调用不走)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
@@ -191,8 +192,8 @@ def main() -> int:
                     help="minimal anti-automation hardening for authorized access to "
                          "anti-bot-gated pages (does not forge challenge tokens)")
     ap.add_argument("--proxy", default=None,
-                    help="代理(http://h:p / socks5://h:p)；经中继访问境内资产。"
-                         "未给则读 HTTPS_PROXY/ALL_PROXY")
+                    help="交战代理(http://h:p / socks5h://h:p)；经中继访问境内资产。"
+                         "未给则走 harness.proxy(XUNJI_PROXY / proxy.conf, 不读 HTTPS_PROXY=模型那条)")
     ap.add_argument("--cookie", action="append", default=[],
                     help="注入会话 cookie(认证后页面用),形如 'PHPSESSID=abc; security=low';可重复")
     ap.add_argument("--cookies-file", default=None,
@@ -202,7 +203,7 @@ def main() -> int:
 
     global STEALTH, PROXY
     STEALTH = args.stealth
-    PROXY = args.proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY")
+    PROXY = proxymod.resolve(args.proxy)   # 交战代理(XUNJI_PROXY/proxy.conf/--proxy); required 时没配 fail-closed
 
     host = urlparse(args.url).hostname or "page"
     if args.out:
