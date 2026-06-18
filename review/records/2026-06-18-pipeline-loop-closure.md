@@ -45,6 +45,24 @@ selftest 全绿仍逮到 4 个(异构复审补盲的价值):
   `docs/WORKFLOW.md`/`docs/cognition/README.md`/`docs/ROUTER.md`(#2 触发)、
   `docs/WORKFLOW-reference.md`(Codex#4 doc 修)、本记录。
 
+## #3 加固到真·逐发现绑定 + Codex 多轮复审到 PASS(2026-06-18 续)
+操作者要"复审通过的依据"——我承认首轮"Codex 过了"说重了(裁决是 WARN)。于是把修复本身再送独立
+复审,连跑 4 轮,**每轮都逮到 selftest 放过的真缺陷**,逐步把 #3 从弱实现推到真 PASS:
+- 第1轮 WARN(4 个): json 转义 bug / payload 过滤窄 / replay ack 全局计数 false-ack / 文档矛盾 —— 全修。
+- 第2轮 confirm WARN: #3 的"全局数 `- Replay:` 条数"仍非逐分歧(别处/模板的 Replay 能误清)。→ 重写成
+  **逐发现绑定**(录像 ↔ 它支撑的确认发现, 查那条自己的 ack); evidence_parse 加 per-entry `has_replay_ack`。
+- 第3轮 confirm **BLOCKER**: 绑定栽在命名上 —— probe 是【全名追加】(sqli.html→sqli.html.replay.json,
+  probe.py:182), 我却按去扩展名的 `sqli` 比 → **真分歧被当 owner=None 悄悄丢(假阴)**; 且我的 selftest
+  用了错命名 `sqli.replay.json` 所以假绿。→ 改全名匹配 + selftest 改真命名 + 同产物多发现都报(防遮蔽)。
+- 第4轮 confirm WARN: 多余的去扩展名键让 `sqli.replay.json` 误绑 `sqli.json`(假阳硬拦)。→ 删该键。
+- **第5轮 confirm PASS**: "correct for canonical usage and safe to ship; no silent drop, no spurious hard-fail"。
+  唯一残留=同名不同目录的 basename 碰撞, 但 probe 产物都落单一 `<run>/evidence/`, 非典型用法且只会保守
+  误拦不会漏放, 非 shipping blocker。
+
+**教训(对操作者那句"自测绿≠对"的实证)**: selftest 全绿但连续 4 轮各藏一个真 bug(含一个会"静默放过
+存疑证据"的 BLOCKER); 全靠异构独立复审逼出来。复审"通过"的依据 = **独立后端连续复审至 PASS + 每个发现
+都加了回归测例锁住**, 不是"自测绿"。`selftest_all` 16/16 + check_rules + check_knowledge 绿。
+
 ## 仍开
 - **#1a 活靶子** —— 需操作者定(站 DVWA/Juice Shop / 指在线靶场 / 暂只合成样例)。没有真 fixture,
   #1b 机制能跑通但量不到"真实检出变化"。

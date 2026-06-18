@@ -151,27 +151,40 @@ def _summarize_replay(results: list[dict]) -> list[str]:
     return warns
 
 
-# replay 分歧的 re-adjudication 标记: 一条 `- Replay:` 字段 = 处理了一条分歧。【逐条计数】而非全局有无
-# —— 否则 ack 一条就放过所有(Codex 复审逮到的 false-ack: E-1 有 Replay、E-2 静默分歧也蒙混过门)。
-_REPLAY_ACK_FIELD_RE = re.compile(r"(?im)^\s*-\s*replay\s*:")
+def _artifact_keys(rec: dict) -> set:
+    """E- 记录引用的产物 → 候选匹配键(小写): 全名 +（直接引 .replay.json 时)去 .replay.json 的名。
+    probe 的录像名是【产物全名追加 .replay.json】(sqli.html → sqli.html.replay.json, probe.py:182),
+    所以【全名 sqli.html】就能绑(bare-stem 产物 shot 的全名就是 shot, 也对得上 shot.replay.json)。
+    【不】再加去扩展名的键 —— 那会让 sqli.replay.json 误绑引用 sqli.json 的无关发现 = 假阴报错
+    (Codex 三轮复审 false-fail); 全名匹配已覆盖 真实 / bare-stem / 直接引 三种命名。"""
+    out = set()
+    for a in rec.get("artifacts", []):
+        base = a.replace("\\", "/").split("/")[-1].lower()
+        if base:
+            out.add(base)                                 # sqli.html / shot
+            out.add(re.sub(r"\.replay\.json$", "", base)) # 直接引 sqli.html.replay.json → sqli.html
+    out.discard("")
+    return out
 
 
-def _count_replay_acks(run_dir: Path) -> int:
-    """数 evidence.md/review.md 里 `- Replay:` 字段条数 = 已 re-adjudication 的分歧条数。约定: 每条
-    DIVERGED 发现都加一条 `- Replay:`(降级, 或说明为何分歧后结论仍成立)。"""
-    n = 0
-    for fn in ("evidence.md", "review.md"):
-        p = run_dir / fn
-        if p.exists():
-            n += len(_REPLAY_ACK_FIELD_RE.findall(p.read_text(encoding="utf-8", errors="replace")))
-    return n
-
-
-def _replay_gate_decision(diverged_count: int, is_final: bool, ack_count: int) -> bool:
-    """纯决策(离线可测): 是否升收口硬门。= 跑了重放有 N>0 条 DIVERGED + report 已终版 + `- Replay:`
-    re-adjudication 少于 N 条(每条分歧都要处理, 漏任一条都拦)。不强制跑 replay(没 DIVERGED 不触发),
-    不自动否定发现(逐条加说明即过) —— 只堵'跑了重放却装没看见某条存疑证据'。保留 replay opt-in 原设计。"""
-    return bool(diverged_count > 0 and is_final and ack_count < diverged_count)
+def _replay_unacked_findings(run_dir: Path, results: list[dict]) -> list[str]:
+    """把每条 DIVERGED 录像【绑到它支撑的已确认 E- 发现】(录像 <artifact>.replay.json ↔ 该 artifact,
+    全名匹配见 _artifact_keys), 列出未 re-adjudication 的 E-id。只对【承重】分歧较真: 无确认 E- 支撑的
+    录像分歧不拦; 该 E- 条目自己有 `- Replay:` = 已处理(逐条目判, 非全局计数, 不会被别处/模板误清)。
+    同一产物被多条确认发现引用时, 每条未自带 ack 的都报(不靠 next 只取第一条 → 防遮蔽)。"""
+    recs = [r for r in parse_evidence(run_dir) if r["confirmed"]]
+    unacked: list[str] = []
+    for r in results:
+        if r.get("verdict") != "DIVERGED":
+            continue
+        key = re.sub(r"\.replay\.json$", "",
+                     str(r.get("file", "")).replace("\\", "/").split("/")[-1], flags=re.I).lower()
+        if not key:
+            continue
+        for rec in recs:                      # 所有引用该产物的确认发现, 各自判 ack(防同名遮蔽)
+            if key in _artifact_keys(rec) and not rec.get("has_replay_ack"):
+                unacked.append(rec["id"])
+    return sorted(set(unacked))
 
 
 def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:
@@ -191,13 +204,14 @@ def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:
         return ([f"replay 核实异常(已捕获, 不影响其余检查): {e}"], [])
     warns = _summarize_replay(results)
     errors: list[str] = []
-    diverged_count = sum(1 for r in results if r.get("verdict") == "DIVERGED")
-    if _replay_gate_decision(diverged_count, _report_is_final(run_dir), _count_replay_acks(run_dir)):
-        errors.append(
-            "收口硬门(replay 分歧未处理): --replay-verify 得到 DIVERGED 且 report 已终版, 但 "
-            "evidence/review 里无 re-adjudication —— 跑了重放却放过存疑证据 = 静默收口。须 re-adjudicate: "
-            "降级该发现(<0.8), 或在对应 E- 条目加 `- Replay:` 说明为何分歧后结论仍成立。"
-            "(replay 仍 opt-in; 此门仅在你已跑且 DIVERGED 时触发, 不强制重放、不自动否定发现)")
+    if _report_is_final(run_dir):
+        unacked = _replay_unacked_findings(run_dir, results)
+        if unacked:
+            errors.append(
+                "收口硬门(replay 分歧未处理): --replay-verify 对 " + ", ".join(unacked) + " 的录像得 "
+                "DIVERGED 且 report 终版, 但这些 E- 条目无 `- Replay:` re-adjudication —— 跑了重放却放过"
+                "存疑证据 = 静默收口。逐条处理: 降级该发现(<0.8), 或在该 E- 条目加 `- Replay:` 说明为何"
+                "分歧后结论仍成立。(replay 仍 opt-in; 不强制重放、不自动否定发现)")
     return (warns, errors)
 
 
@@ -940,21 +954,47 @@ def _selftest() -> int:
     checks.append(("布局漂移: 终版报告产出后散落 -> WARN", bool(drift_w) and "ev_loose.html" in drift_w[0]))
 
     # 断-3 replay 分歧门(#3): 纯决策真值表 + re-adjudication 检测(保留 opt-in, 只堵"跑了又装没看见")
-    checks += [
-        ("replay 门: 1 DIVERGED+终版+0 ack -> 硬门", _replay_gate_decision(1, True, 0) is True),
-        ("replay 门: DIVERGED 但非终版 -> 不升门(还没收口)", _replay_gate_decision(1, False, 0) is False),
-        ("replay 门: 1 DIVERGED+终版+1 ack -> 不升门", _replay_gate_decision(1, True, 1) is False),
-        ("replay 门: 2 DIVERGED 只 1 ack -> 仍硬门(逐条 ack, 防 false-ack)", _replay_gate_decision(2, True, 1) is True),
-        ("replay 门: 无 DIVERGED -> 不升门(opt-in/目标变更不罚)", _replay_gate_decision(0, True, 0) is False),
-    ]
+    # 断-3 replay 分歧门(#3, 真·逐发现绑定 + 真实录像命名 <artifact>.replay.json —— Codex 两轮复审)
     d14 = Path(tempfile.mkdtemp())
+    (d14 / "evidence").mkdir()
+    (d14 / "evidence" / "sqli.html").write_text("x", encoding="utf-8")
+    (d14 / "evidence" / "xss.html").write_text("x", encoding="utf-8")
     (d14 / "evidence.md").write_text(
-        "# Evidence Ledger\n## E-1\n- Certainty: 1.0\n- Replay: 目标改版, 已核对响应仍是注入差异, 结论保留\n",
+        "# Evidence Ledger\n"
+        "## E-1\n- Certainty: 1.0\n- Artifacts: `evidence/sqli.html`\n"
+        "- Replay: 目标改版, 已核对仍是注入差异, 结论保留\n\n"
+        "## E-2\n- Certainty: 1.0\n- Artifacts: `evidence/xss.html`\n",
         encoding="utf-8")
-    checks.append(("replay ack 计数: 一条 `- Replay:` -> 1", _count_replay_acks(d14) == 1))
-    d15 = Path(tempfile.mkdtemp())
-    (d15 / "evidence.md").write_text("# Evidence Ledger\n## E-1\n- Certainty: 1.0\n- Supports: H-1\n", encoding="utf-8")
-    checks.append(("replay ack 计数: 无 Replay 字段 -> 0", _count_replay_acks(d15) == 0))
+    (d14 / "review.md").write_text("# Review\n## R-1\n- Replay: (模板示例字段) 略\n", encoding="utf-8")
+    # 真实命名(probe.py:182 追加): 产物 sqli.html 的录像是 sqli.html.replay.json
+    res = [{"file": "evidence/sqli.html.replay.json", "verdict": "DIVERGED"},
+           {"file": "evidence/xss.html.replay.json", "verdict": "DIVERGED"}]
+    unacked = _replay_unacked_findings(d14, res)
+    checks += [
+        ("replay 绑定(真实命名 .html.replay.json 能绑上, 非 owner=None 漏掉): 只报 E-2", unacked == ["E-2"]),
+        ("replay 绑定: E-1 自身 `- Replay:` -> 不报(别处/模板 Replay 不误清, 非全局计数)", "E-1" not in unacked),
+        ("replay 绑定: 无 E- 支撑的分歧不拦(非承重)",
+         _replay_unacked_findings(d14, [{"file": "evidence/orphan.html.replay.json", "verdict": "DIVERGED"}]) == []),
+        ("replay 绑定: 无 DIVERGED -> 空(opt-in/目标变更不罚)",
+         _replay_unacked_findings(d14, [{"file": "evidence/sqli.html.replay.json", "verdict": "IDENTICAL"}]) == []),
+    ]
+    # bare-stem 命名也兼容(产物 shot ↔ shot.replay.json)
+    d16 = Path(tempfile.mkdtemp())
+    (d16 / "evidence").mkdir()
+    (d16 / "evidence" / "shot").write_text("x", encoding="utf-8")
+    (d16 / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-9\n- Certainty: 1.0\n- Artifacts: `evidence/shot`\n", encoding="utf-8")
+    checks.append(("replay 绑定: bare-stem shot ↔ shot.replay.json 也绑上",
+                   _replay_unacked_findings(d16, [{"file": "evidence/shot.replay.json", "verdict": "DIVERGED"}]) == ["E-9"]))
+    # 不过度匹配(防 false-fail): 录像 sqli.replay.json 对应 bare-stem 产物 sqli, 不该误绑引用 sqli.json
+    # 的无关发现(那条的录像应是 sqli.json.replay.json)。Codex 三轮复审逮到的 false-fail。
+    d17 = Path(tempfile.mkdtemp())
+    (d17 / "evidence").mkdir()
+    (d17 / "evidence" / "sqli.json").write_text("x", encoding="utf-8")
+    (d17 / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-7\n- Certainty: 1.0\n- Artifacts: `evidence/sqli.json`\n", encoding="utf-8")
+    checks.append(("replay 绑定: sqli.replay.json 不误绑 sqli.json 发现(防 false-fail)",
+                   _replay_unacked_findings(d17, [{"file": "evidence/sqli.replay.json", "verdict": "DIVERGED"}]) == []))
     # 终版报告但根目录干净(证据都在 evidence/) -> 仍静默
     d14 = d / "clean_20260101"
     (d14 / "evidence").mkdir(parents=True)
@@ -1033,7 +1073,8 @@ def main() -> int:
     parser.add_argument("--replay-verify", action="store_true",
                         help="收口前自动重放核实: 对 .replay.json 录像跑 replay_run(走 guard / "
                              "target.md 授权 scope / 幂等 GET 才重放 / DELETE 永不 / 写操作默认 skip), "
-                             "DIVERGED=证据存疑升警告。走实网, 默认关、仅显式 flag、selftest 不触发")
+                             "DIVERGED=证据存疑(终版报告里未 `- Replay:` 处理的承重发现→硬拦; 否则警告)。"
+                             "走实网, 默认关、仅显式 flag、selftest 不触发")
     args = parser.parse_args()
     if args.selftest:
         return _selftest()

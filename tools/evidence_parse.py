@@ -130,6 +130,9 @@ def parse_evidence(run_dir: Path) -> list[dict]:
             "id": eid, "head": head,
             "certainties": certs, "confirmed": any(c >= 0.8 for c in certs),
             "has_control": bool(re.search(r"\b(Replicated|Control)\s*[:：]", b)),
+            # 该条目自己有 `- Replay:` 字段 = 对 replay 分歧做过 re-adjudication(check_run 断-3 绑定用,
+            # 逐条目判而非全局计数, 避免别处/模板的 Replay 误清这条)。
+            "has_replay_ack": bool(re.search(r"(?im)^\s*[-*]\s*Replay\s*[:：]", b)),
             "artifacts": arts, "artifacts_scoped": scoped,
             "artifacts_present": present, "artifacts_missing": missing,
             "supports": sorted(set(supports)), "refutes": sorted(set(refutes)),
