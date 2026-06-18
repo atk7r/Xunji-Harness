@@ -16,6 +16,12 @@ ROADMAP R-1(最高价值缺口): 一把尺子, 让框架改动可被 A/B —— 
 - calibration: 命中的发现 certainty 是否达 fixture 要求的下限(防欠证/过证)。
 - false-pos  : must_not_flag 陷阱(非漏洞项)被误确认的数量。
 - budget     : 录像 .replay.json 计数作"已记录请求"下界(尽力, 非精确)。
+- process    : expected_process 断言 —— driver 有没有在对的时刻【调用某能力】(指纹检索 /
+               fetch_assets / 独立复审 …)。detection/calibration 量"结果", 这维量"行为":
+               接线类改动(本身不直接改检出)只有这维量得到。纯读产物, 不发包。
+               schema: expected_process:[{id, signals:[子串], in?:[文件名], must?:true}]。
+               signal 是子串匹配 —— 选【稳健的能力踪迹】(工具名 tools/knowledge_match / 产物标记),
+               别选易变措辞: 否则会 false-fail(真触发却没留该串)或 false-confidence(巧合命中)。
 
 用法:
   python tools/bench.py score <run_dir> <truth.json>
@@ -72,6 +78,28 @@ def _match(markers: list, blocks: dict) -> "str | None":
     return None
 
 
+_PROC_DEFAULT_FILES = ["decisions.md", "evidence.md", "review.md", "frontier.md", "report.md"]
+
+
+def _process_check(run_dir: Path, asserts: list) -> list:
+    """过程断言: 量"driver 有没有在对的时刻【调用某能力】"。bench 原本只量结果(检出/校准),
+    接线类改动(把死功能接进触发)不直接改检出, 只能这维量得到 —— 否则"接线有没有真生效"不可见。
+    每条断言 = 在指定 run 文件(默认核心 .md)里找全部 signals(子串, 大小写不敏感); 全中 = 该能力
+    留下了踪迹。must=True(默认)未命中 → 计入回归门(_is_clean)。只读产物, 绝不发包。"""
+    out = []
+    for a in asserts:
+        files = a.get("in") or _PROC_DEFAULT_FILES
+        hay = ""
+        for fn in files:
+            p = run_dir / fn
+            if p.exists():
+                hay += "\n" + p.read_text(encoding="utf-8", errors="replace").lower()
+        sigs = [str(s).lower() for s in a.get("signals", []) if str(s).strip()]
+        out.append({"id": a.get("id"), "fired": bool(sigs) and all(s in hay for s in sigs),
+                    "must": bool(a.get("must", True)), "signals": a.get("signals", [])})
+    return out
+
+
 def score(run_dir: Path, truth: dict) -> dict:
     blocks, cert, positive = _confirmed_blocks(run_dir)
     findings = []
@@ -95,6 +123,7 @@ def score(run_dir: Path, truth: dict) -> dict:
     n_det = sum(1 for f in findings if f["detected"])
     n_cal = sum(1 for f in findings if f["calibrated"])
     budget = len(list(run_dir.glob("**/*.replay.json")))
+    proc = _process_check(run_dir, truth.get("expected_process", []))
     return {
         "fixture": truth.get("name", run_dir.name),
         "expected": n_exp, "detected": n_det,
@@ -104,6 +133,7 @@ def score(run_dir: Path, truth: dict) -> dict:
         "recorded_requests": budget,
         "budget_max": truth.get("budget", {}).get("max_requests"),
         "findings": findings, "fp_detail": fps,
+        "process": proc,
     }
 
 
@@ -126,12 +156,23 @@ def _print_card(s: dict) -> None:
         print(f"    {mark} {f['id']}{eid}{cal}")
     for fp in s["fp_detail"]:
         print(f"    ✗ FALSE-POSITIVE: trap '{fp['trap']}' 被确认条目 {fp['flagged_eid']} 命中")
+    proc = s.get("process", [])
+    if proc:
+        n_fired = sum(1 for p in proc if p["fired"])
+        print(f"  process   : {n_fired}/{len(proc)} 能力在对的时刻触发了")
+        for p in proc:
+            mark = "✓" if p["fired"] else ("✗" if p["must"] else "○")
+            opt = "" if p["must"] else " (optional)"
+            miss = "" if p["fired"] else f"  signals={p['signals']} 未见踪迹"
+            print(f"    {mark} {p['id']}{opt}{miss}")
 
 
 def _is_clean(s: dict) -> bool:
-    """完美 = 全检出 + 全校准 + 零误报。用作退出码(回归/门)。"""
+    """完美 = 全检出 + 全校准 + 零误报 + 所有 must 过程断言都触发。用作退出码(回归/门)。"""
+    proc_ok = all(p["fired"] for p in s.get("process", []) if p["must"])
     return (s["expected"] > 0 and s["detected"] == s["expected"]
-            and s["calibrated"] == s["expected"] and s["false_positives"] == 0)
+            and s["calibrated"] == s["expected"] and s["false_positives"] == 0
+            and proc_ok)
 
 
 def _load_truth(p: Path) -> dict:
@@ -230,6 +271,26 @@ def _selftest() -> int:
         {"id": "xss", "markers": ["reflected xss"], "min_certainty": 1.0}]})
     checks.append(("欠证: xss 0.9<1.0 -> detected 但非 calibrated",
                    s3["findings"][1]["detected"] and not s3["findings"][1]["calibrated"]))
+
+    # 过程断言: run3 的 decisions.md 留下 knowledge_match 踪迹, 但没 fetch_assets
+    run3 = d / "proc_20260101"
+    run3.mkdir()
+    (run3 / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001: SQL injection union-based\n- Certainty: 1.0\n- Replicated: yes\n"
+        "- Artifacts: `evidence/a.html`\n", encoding="utf-8")
+    (run3 / "decisions.md").write_text(
+        "# Decisions\n## D-001\n- Reason: 指纹命中, 跑了 tools/knowledge_match.py --body 取锚点\n",
+        encoding="utf-8")
+    tp = {"name": "proc", "expected_findings": [{"id": "sqli", "markers": ["sql injection"], "min_certainty": 0.8}],
+          "expected_process": [{"id": "consulted-knowledge", "signals": ["knowledge_match"], "must": True},
+                               {"id": "ran-fetch-assets", "signals": ["fetch_assets"], "must": True}]}
+    sp = score(run3, tp)
+    checks.append(("过程: knowledge_match 留痕 -> fired", sp["process"][0]["fired"]))
+    checks.append(("过程: fetch_assets 无痕 -> not fired", not sp["process"][1]["fired"]))
+    checks.append(("过程门: must 断言未全触发 -> 非 clean(尽管全检出)", not _is_clean(sp)))
+    tp2 = {"name": "proc-opt", "expected_findings": [{"id": "sqli", "markers": ["sql injection"], "min_certainty": 0.8}],
+           "expected_process": [{"id": "ran-fetch-assets", "signals": ["fetch_assets"], "must": False}]}
+    checks.append(("过程门: optional 未触发不破 clean", _is_clean(score(run3, tp2))))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

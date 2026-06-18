@@ -281,6 +281,13 @@ Project-discipline and run-structure checks live in `tools/`:
   use `knowledge_match` anchors + craft from the internet instead). Match-gated
   (needs a live `--body` hit or explicit `--id`); `--list` inventories without
   dumping payloads. Local-only behavior; the stores never ship.
+- `python tools/knowledge_seed.py <id> --product … [--from-body <saved>]` — the
+  flywheel's **write-back end** (mirror of `knowledge_match`): scaffolds a compliant
+  `knowledge/<id>.md` grounding **seed** (recognition + anchor TODOs) when recognition
+  **missed** a clearly-fingerprinted product, so the next run recognizes it. `--from-body`
+  suggests candidate `signatures:` from the saved response (you confirm); fill the TODOs,
+  `check_knowledge` validates. Public grounding tier only — never payloads. Seed on a
+  recognition miss, not a blind mass-import.
 - `python tools/setup_run.py <slug> [recon.json]` — Setup-phase ONE-SHOT: build the
   run dir from templates (+ `evidence/`/`scripts/` subdirs), fold the recon via
   ingest_recon into `surface_recon.md`, record the recon path in `target.md`;

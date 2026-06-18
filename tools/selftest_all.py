@@ -51,6 +51,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("bench",          ["tools/bench.py", "--selftest"],          "R-1 self-eval scorer"),
     ("knowledge_match", ["tools/knowledge_match.py", "--selftest"], "fingerprint→knowledge retrieval"),
     ("xday_match",      ["tools/xday_match.py", "--selftest"],      "fingerprint→local xday retrieval"),
+    ("knowledge_seed",  ["tools/knowledge_seed.py", "--selftest"],  "fingerprint→knowledge write-back"),
     # --- PreToolUse / Stop hooks (--selftest flag) ---
     ("safety_gate",    [".claude/hooks/safety_gate.py", "--selftest"], "hard-boundary gate"),
     ("run_gate",       [".claude/hooks/run_gate.py", "--selftest"],    "coverage/depth Stop gate"),

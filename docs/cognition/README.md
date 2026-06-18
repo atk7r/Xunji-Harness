@@ -56,6 +56,12 @@ hypothesis in an observed fact, not in speculation.
   and craft from internet research instead). Consult **after** a live recognition
   match and adapt to the target — never pre-load the base and walk it as a checklist
   (that is the blind scanner the project rejects).
+- The flywheel has a **write-back end**, not just a read end: when recognition
+  **misses** on a clearly-fingerprinted product (`knowledge_match --body` returns
+  nothing), that gap is the base's blind spot. Seed a grounding entry —
+  `tools/knowledge_seed.py <id> --product … --from-body <saved>` — so the next run
+  recognizes it. A read-only flywheel stops compounding; capture on the miss, fill
+  and adapt per-target (still grounding, never a payload dump).
 - Keep reasoning tied to observable behavior. When a step's result is ambiguous,
   get one more grounding observation before believing it, rather than reasoning
   further on an unverified premise.

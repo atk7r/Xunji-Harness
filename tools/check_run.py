@@ -151,21 +151,54 @@ def _summarize_replay(results: list[dict]) -> list[str]:
     return warns
 
 
-def run_replay_verify(run_dir: Path) -> list[str]:
-    """--replay-verify: 收口前自动重放核实, 把 replay 从孤岛焊进收口闭环(断-1)。调
-    replay.replay_run(走 guard / target.md 授权 scope / 幂等 GET 才重放 / DELETE 永不 /
-    写操作默认 skip)。慢(走实网)+ 默认关、仅显式 flag —— 同 --auto-peer-review 的取舍。"""
+# replay 分歧的 re-adjudication 标记: 一条 `- Replay:` 字段 = 处理了一条分歧。【逐条计数】而非全局有无
+# —— 否则 ack 一条就放过所有(Codex 复审逮到的 false-ack: E-1 有 Replay、E-2 静默分歧也蒙混过门)。
+_REPLAY_ACK_FIELD_RE = re.compile(r"(?im)^\s*-\s*replay\s*:")
+
+
+def _count_replay_acks(run_dir: Path) -> int:
+    """数 evidence.md/review.md 里 `- Replay:` 字段条数 = 已 re-adjudication 的分歧条数。约定: 每条
+    DIVERGED 发现都加一条 `- Replay:`(降级, 或说明为何分歧后结论仍成立)。"""
+    n = 0
+    for fn in ("evidence.md", "review.md"):
+        p = run_dir / fn
+        if p.exists():
+            n += len(_REPLAY_ACK_FIELD_RE.findall(p.read_text(encoding="utf-8", errors="replace")))
+    return n
+
+
+def _replay_gate_decision(diverged_count: int, is_final: bool, ack_count: int) -> bool:
+    """纯决策(离线可测): 是否升收口硬门。= 跑了重放有 N>0 条 DIVERGED + report 已终版 + `- Replay:`
+    re-adjudication 少于 N 条(每条分歧都要处理, 漏任一条都拦)。不强制跑 replay(没 DIVERGED 不触发),
+    不自动否定发现(逐条加说明即过) —— 只堵'跑了重放却装没看见某条存疑证据'。保留 replay opt-in 原设计。"""
+    return bool(diverged_count > 0 and is_final and ack_count < diverged_count)
+
+
+def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:
+    """--replay-verify(断-1): 收口前自动重放核实, 把 replay 从孤岛焊进收口闭环。调 replay.replay_run
+    (走 guard / target.md 授权 scope / 幂等 GET 才重放 / DELETE 永不 / 写默认 skip)。慢+默认关。
+    返回 (warns, errors): DIVERGED 默认软警; 但【已终版报告 + DIVERGED + 未 re-adjudication】升硬门
+    (errors), 堵'跑了重放却放过存疑证据'。仍 opt-in —— 没传 --replay-verify / 没 DIVERGED 都不触发。"""
     if _replay is None:
-        return ["replay 核实跳过: 无法加载 replay 模块(同目录 tools/replay.py 缺失?)"]
+        return (["replay 核实跳过: 无法加载 replay 模块(同目录 tools/replay.py 缺失?)"], [])
     recs = list(run_dir.glob("**/*.replay.json"))
     if not recs:
-        return ["replay 核实: 本 run 无 .replay.json 录像可重放 —— 传感器加 "
-                "`probe --save NAME --run runs/<dir>` 留录像, 高 certainty 证据才可重放核实。"]
+        return (["replay 核实: 本 run 无 .replay.json 录像可重放 —— 传感器加 "
+                 "`probe --save NAME --run runs/<dir>` 留录像, 高 certainty 证据才可重放核实。"], [])
     try:
         results = _replay.replay_run(run_dir)
     except Exception as e:   # 防御: replay 内部异常不该炸掉整个收口检查
-        return [f"replay 核实异常(已捕获, 不影响其余检查): {e}"]
-    return _summarize_replay(results)
+        return ([f"replay 核实异常(已捕获, 不影响其余检查): {e}"], [])
+    warns = _summarize_replay(results)
+    errors: list[str] = []
+    diverged_count = sum(1 for r in results if r.get("verdict") == "DIVERGED")
+    if _replay_gate_decision(diverged_count, _report_is_final(run_dir), _count_replay_acks(run_dir)):
+        errors.append(
+            "收口硬门(replay 分歧未处理): --replay-verify 得到 DIVERGED 且 report 已终版, 但 "
+            "evidence/review 里无 re-adjudication —— 跑了重放却放过存疑证据 = 静默收口。须 re-adjudicate: "
+            "降级该发现(<0.8), 或在对应 E- 条目加 `- Replay:` 说明为何分歧后结论仍成立。"
+            "(replay 仍 opt-in; 此门仅在你已跑且 DIVERGED 时触发, 不强制重放、不自动否定发现)")
+    return (warns, errors)
 
 
 def check_dangling_citations(run_dir: Path) -> list[str]:
@@ -905,6 +938,23 @@ def _selftest() -> int:
     (d13 / "report.md").write_text("# Report\nEvidence IDs: E-900\n", encoding="utf-8")
     drift_w = check_layout_drift(d13)
     checks.append(("布局漂移: 终版报告产出后散落 -> WARN", bool(drift_w) and "ev_loose.html" in drift_w[0]))
+
+    # 断-3 replay 分歧门(#3): 纯决策真值表 + re-adjudication 检测(保留 opt-in, 只堵"跑了又装没看见")
+    checks += [
+        ("replay 门: 1 DIVERGED+终版+0 ack -> 硬门", _replay_gate_decision(1, True, 0) is True),
+        ("replay 门: DIVERGED 但非终版 -> 不升门(还没收口)", _replay_gate_decision(1, False, 0) is False),
+        ("replay 门: 1 DIVERGED+终版+1 ack -> 不升门", _replay_gate_decision(1, True, 1) is False),
+        ("replay 门: 2 DIVERGED 只 1 ack -> 仍硬门(逐条 ack, 防 false-ack)", _replay_gate_decision(2, True, 1) is True),
+        ("replay 门: 无 DIVERGED -> 不升门(opt-in/目标变更不罚)", _replay_gate_decision(0, True, 0) is False),
+    ]
+    d14 = Path(tempfile.mkdtemp())
+    (d14 / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-1\n- Certainty: 1.0\n- Replay: 目标改版, 已核对响应仍是注入差异, 结论保留\n",
+        encoding="utf-8")
+    checks.append(("replay ack 计数: 一条 `- Replay:` -> 1", _count_replay_acks(d14) == 1))
+    d15 = Path(tempfile.mkdtemp())
+    (d15 / "evidence.md").write_text("# Evidence Ledger\n## E-1\n- Certainty: 1.0\n- Supports: H-1\n", encoding="utf-8")
+    checks.append(("replay ack 计数: 无 Replay 字段 -> 0", _count_replay_acks(d15) == 0))
     # 终版报告但根目录干净(证据都在 evidence/) -> 仍静默
     d14 = d / "clean_20260101"
     (d14 / "evidence").mkdir(parents=True)
@@ -1036,7 +1086,9 @@ def main() -> int:
     # --replay-verify(断-1): 收口前自动重放核实 .replay.json 录像, 把 replay 焊进收口闭环。
     # 走实网(慢)+ 默认关、仅显式 flag; selftest 不走这(汇总逻辑 _summarize_replay 单独离线测)。
     if args.replay_verify:
-        warnings.extend(run_replay_verify(run_dir))
+        rv_warns, rv_errors = run_replay_verify(run_dir)
+        warnings.extend(rv_warns)
+        errors.extend(rv_errors)
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
     errors.extend(closure_errors)

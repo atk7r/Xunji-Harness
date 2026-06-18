@@ -72,7 +72,10 @@ next probe — do not re-derive a known stack's weak points from memory:
 `tools/knowledge_match.py --body <saved-response>` for its weak-point anchors (+ CVE
 leads), `tools/xday_match.py --body …` for any stored **local** exploit. Consult on
 the hit and adapt per-target — not a pre-loaded checklist (cognition "Grounding and
-Variant Analysis").
+Variant Analysis"). If that lookup **misses** on a clearly-fingerprinted product, seed
+the base back (`tools/knowledge_seed.py <id> --product … --from-body <saved>`) so the
+next run recognizes it — the flywheel's write-back end; fill the TODOs, `check_knowledge`
+validates.
 
 ## Ingest Existing Intelligence First
 
@@ -173,7 +176,9 @@ assets were only header / recon-classified, never examined. Before any such clai
   goes (`docs/cognition/harmless-verification.md`). Record "needs account (asked,
   none available)" and keep moving — never fabricate or brute.
 - **Capture grounding knowledge.** If the run fingerprinted a product with no
-  `knowledge/` entry, add a `seed` grounding entry before closing.
+  `knowledge/` entry, add a `seed` grounding entry before closing
+  (`tools/knowledge_seed.py <id> --product … --from-body <saved>` scaffolds a
+  `check_knowledge`-compliant skeleton — fill the TODOs).
 - **Independent review before closure (mandatory · HARD gate).** Self-review does
   not fix self-review bias. Spawn an independent fresh-context `general-purpose`
   reviewer (`review/independent-reviewer.md`), record findings under an

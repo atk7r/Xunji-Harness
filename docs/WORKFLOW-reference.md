@@ -221,9 +221,15 @@ only — `POST`/`PUT` need `--force`, `DELETE` is never replayed; host must be i
 `target.md` In-scope). A `DIVERGED` verdict (status changed) means the evidence no
 longer matches reality — the target was fixed/changed, or the finding was shaky —
 and the driver must re-adjudicate before reporting it. `UNREACHABLE` is not a failure
-(can't-reach ≠ false). It is opt-in (live traffic, slow) and advisory, never a hard
-gate: a target legitimately changing between probe and closure is not the run's fault.
-Standalone `python tools/replay.py runs/<dir>` does the same outside the gate.
+(can't-reach ≠ false). Replay stays **opt-in** (live traffic, slow) — *not* running
+`--replay-verify` never fails a run, and the gate never forces you to run it. But once
+you **do** run it at a **final** report, a `DIVERGED` you leave **unaddressed** hard-fails
+the closure gate: re-adjudicate each one — downgrade the finding, or add a `- Replay:`
+field to that `E-` entry saying why it still stands (a target legitimately changing is
+fine to keep *with* that note; one `- Replay:` per diverged finding). The gate never
+auto-rejects a finding and never forces a replay — it only stops you from running
+replay and then ignoring a divergence. Standalone `python tools/replay.py runs/<dir>`
+replays outside the gate (no closure hard-fail).
 
 ### false_positive.md — make the hunter phase explicit
 
