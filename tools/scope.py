@@ -31,8 +31,14 @@ except Exception:
     pass
 
 _IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
-# 韩国/常见二级 cc 后缀: registrable = 末3标签; 其余末2标签。无 PSL 的稳健近似。
-_SLD = ("ac.kr", "co.kr", "or.kr", "go.kr", "ne.kr", "re.kr", "pe.kr", "hs.kr", "ms.kr", "es.kr")
+# 东亚常见二级 cc 后缀: registrable = 末3标签; 其余末2标签。无 PSL 的稳健近似。
+# 缺 .cn 段曾让 registrable("x.nuist.edu.cn")=edu.cn → *.edu.cn 把全中国高校纳入 scope(危险过宽)。
+_SLD = (
+    "ac.kr", "co.kr", "or.kr", "go.kr", "ne.kr", "re.kr", "pe.kr", "hs.kr", "ms.kr", "es.kr",
+    "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn", "ac.cn", "mil.cn",           # 中国
+    "com.tw", "edu.tw", "gov.tw", "org.tw", "net.tw",                              # 台湾
+    "co.jp", "ne.jp", "or.jp", "ac.jp", "go.jp", "ed.jp",                          # 日本
+)
 
 
 def _is_ip(h: str) -> bool:
@@ -55,6 +61,34 @@ def _cidr24(ip: str) -> str:
     return f"{o[0]}.{o[1]}.{o[2]}.0/24"
 
 
+def _asset_host(a: dict) -> str:
+    """从 recon 资产记录取主机名。兼容 osint_ai 两种 schema: `host`(旧 recon.json) 与
+    `asset`(classification.json), 也认 `url`; 剥 scheme/path/query/:port, 返回裸 host 或 IP。
+    (原只读 host → classification.json 的 asset 字段全取空 → 0 归类的 bug。)"""
+    raw = (a.get("host") or a.get("asset") or a.get("url") or "").strip().lower()
+    if not raw:
+        return ""
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    raw = raw.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0].strip()   # 剥 path/query/fragment
+    # 剥 :port —— IPv6 安全: [v6]:port 先拆方括号; 裸 host 仅当【单个】冒号才当 host:port,
+    # 裸 IPv6(多个冒号, 如 2001:db8::1)不动(否则 rpartition 会把末段当端口截掉)。
+    if raw.startswith("["):
+        raw = raw[1:].split("]", 1)[0]
+    elif raw.count(":") == 1:
+        head, _, tail = raw.rpartition(":")
+        if head and tail.isdigit():
+            raw = head
+    return raw
+
+
+def _is_public_suffix(d: str) -> bool:
+    """d 本身是否就是公共后缀(裸 TLD 如 cn / 已知二级 cc 后缀如 edu.cn)。这种【不能】*.通配——
+    否则把整个后缀(全中国 .edu.cn / 全 .cn)圈进 scope(Codex 复审: 裸后缀资产 → *.edu.cn 的洞)。"""
+    d = (d or "").strip().lower()
+    return (not d) or ("." not in d) or d in _SLD
+
+
 def derive_scope(recon: dict) -> dict:
     """从 recon 派生默认 scope。键: target/in/out/out_detail/notes/heuristic。
     osint_ai schema 有 `ownership`(unrelated→out, core/secondary→in)。**无 ownership 字段的 recon
@@ -71,7 +105,7 @@ def derive_scope(recon: dict) -> dict:
     for a in assets:
         if not isinstance(a, dict):
             continue
-        h = (a.get("host") or "").strip().lower()
+        h = _asset_host(a)
         if not h:
             continue
         reason = a.get("reason") or ""
@@ -87,11 +121,24 @@ def derive_scope(recon: dict) -> dict:
         if own == "unrelated":
             out_detail.append((h, reason))
             continue
+        if own == "third_party":
+            # 第三方/旁站(CDN 节点/外部域/共享 IP 旁站): 归属【未确认/非目标】→ 默认 out。
+            # 必须进 out_detail(=out_pats 精确 host)而非仅 notes: out 在 in_scope 里【优先于】 in-pattern,
+            # 否则 third_party 的 cdn.nuist.edu.cn 仍会被核心 *.nuist.edu.cn 通配命中='in'、third_party 的
+            # IP 仍会被核心 /24 命中='in'(Codex 复审逮到的洞)。操作者若确认某旁站确属本校, 手动从
+            # target.md 挪回 in(派生不驱动)。
+            out_detail.append((h, reason or "third_party: 归属未确认, 默认排除"))
+            continue
         # core / secondary → in
         if _is_ip(h):
             in_ips.append(h)
         else:
-            in_doms.add(registrable(h))
+            reg = registrable(h)
+            if _is_public_suffix(reg):
+                # 资产本身就是裸公共后缀(如 "edu.cn") → 不 *.通配(会圈进整个后缀), 进 review 待裁
+                notes.append((h, "疑似裸公共后缀, 不自动 *.通配 in-scope, 待人工裁"))
+                continue
+            in_doms.add(reg)
         if own == "secondary":
             notes.append((h, reason))      # 第三方托管/待裁: in-scope 但低值, 提示复核
     by24: dict[str, list[str]] = {}
@@ -184,6 +231,40 @@ def _selftest() -> int:
         ("unrelated 外部域 进 out", "eli.edutrack.co.kr" in op),
         ("secondary 进 notes(in-scope 但提示)", any(h == "cal.mokwon.ac.kr" for h, _ in sc["notes"])),
         ("secondary cal 仍 in(域匹配)", in_scope("cal.mokwon.ac.kr", ip, op) == "in"),
+    ]
+    # osint_ai classification.json schema: 字段名是 `asset`(非 host), 含 http:// 与裸 IP
+    recon2 = {"target": "nuist.edu.cn", "assets": [
+        {"asset": "jwxt.nuist.edu.cn", "ownership": "core"},
+        {"asset": "http://eseal.nuist.edu.cn", "ownership": "core"},
+        {"asset": "202.195.228.228", "ownership": "core"},
+        {"asset": "202.195.228.250", "ownership": "core"},
+        {"asset": "volvolady.com", "ownership": "unrelated", "reason": "境外无关域"},
+        {"asset": "mdx-2020.aai.einfra.hu", "ownership": "third_party", "reason": "匈牙利学术基础设施"},
+        {"asset": "104.21.89.2", "ownership": "third_party", "reason": "Cloudflare CDN"},
+        {"asset": "cdn.nuist.edu.cn", "ownership": "third_party", "reason": "本校域下的 CDN 子域(Codex 洞用例)"},
+    ]}
+    sc2 = derive_scope(recon2)
+    checks += [
+        ("asset 字段 schema: 域族 *.nuist.edu.cn in", "*.nuist.edu.cn" in sc2["in"]),
+        ("asset 带 http:// 正常解析(eseal 不漏)", in_scope("eseal.nuist.edu.cn", sc2["in"], sc2["out"]) == "in"),
+        ("asset 同段 IP 压 /24", "202.195.228.0/24" in sc2["in"]),
+        ("asset unrelated 进 out", "volvolady.com" in sc2["out"]),
+        ("asset schema 有 ownership 非 heuristic", sc2["heuristic"] is False),
+        ("third_party 外部域 → out(einfra.hu)", in_scope("mdx-2020.aai.einfra.hu", sc2["in"], sc2["out"]) == "out"),
+        ("third_party CDN IP → out", in_scope("104.21.89.2", sc2["in"], sc2["out"]) == "out"),
+        # Codex 复审逮到的洞: third_party 的本校子域必须被 out 覆盖, 不能被 *.nuist.edu.cn 通配命中='in'
+        ("third_party 本校子域 cdn.nuist.edu.cn 仍 → out(out 优先于 in-wildcard)",
+         in_scope("cdn.nuist.edu.cn", sc2["in"], sc2["out"]) == "out"),
+        ("但正常 core 子域不受影响仍 in", in_scope("jwxt.nuist.edu.cn", sc2["in"], sc2["out"]) == "in"),
+    ]
+    # Codex WARN: _asset_host fragment/IPv6; registrable 裸公共后缀
+    checks += [
+        ("_asset_host 剥 #fragment", _asset_host({"asset": "https://nuist.edu.cn#x"}) == "nuist.edu.cn"),
+        ("_asset_host [IPv6]:port 拆方括号", _asset_host({"asset": "[2001:db8::1]:8443"}) == "2001:db8::1"),
+        ("_asset_host 裸 IPv6 不被误截", _asset_host({"asset": "2001:db8::1"}) == "2001:db8::1"),
+        ("_asset_host host:port 仍正常剥", _asset_host({"asset": "jwxt.nuist.edu.cn:8443"}) == "jwxt.nuist.edu.cn"),
+        ("裸公共后缀 core 资产 edu.cn 不产出 *.edu.cn",
+         "*.edu.cn" not in derive_scope({"target": "edu.cn", "assets": [{"asset": "edu.cn", "ownership": "core"}]})["in"]),
     ]
     # in_scope 判定
     checks += [
