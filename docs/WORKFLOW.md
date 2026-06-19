@@ -234,6 +234,16 @@ assets were only header / recon-classified, never examined. Before any such clai
   fallback. `check_run.py` **hard-fails** a closure claim with no `Independent Review`
   record. Standing authorization granted for the sub-agent — do it without re-asking.
 
+- **Mandatory retrospective before closure (HARD gate).** Every pentest closes with an
+  honest `retrospective.md` (scaffolded from `docs/templates/run/retrospective.md`):
+  what *I* (the driver) got wrong/slow/missed this run — wrong calls, tunnel vision,
+  premature closure, evidence-gate slips — and where the *framework/tooling* (tools/,
+  hooks, guard, knowledge base, docs) held the run back. Not a disclaimer — the basis
+  for the next run being stronger. `check_run.py` **hard-fails** closure if
+  `retrospective.md` is missing or its **Self problems** / **Framework problems**
+  sections are empty placeholders. Quality stays the driver's job; the gate only blocks
+  empty stubs (same line as the independent-review gate).
+
 `check_run.py` HARD-fails / WARN mechanics for closure, and the same independent
 review applied to **safety-critical code** changes, are in the reference.
 

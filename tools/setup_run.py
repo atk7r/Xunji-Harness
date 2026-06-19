@@ -37,7 +37,10 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 TPL = ROOT / "docs" / "templates" / "run"
 REQUIRED = ["target.md", "surface.md", "frontier.md", "hypotheses.md", "evidence.md",
-            "false_positive.md", "decisions.md", "review.md", "report.md"]
+            "false_positive.md", "decisions.md", "review.md", "report.md",
+            # 强制复盘: 收口硬门(check_run.check_retrospective)要求收口时填好两节真实内容。
+            # 这里只铺模板占位(有 H1), 占位本身不算填 —— 收口前 driver 必须把两节写实。
+            "retrospective.md"]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -219,7 +222,7 @@ def _selftest() -> int:
     rd = d / "t_20260101"
     made = scaffold(rd)
     checks = [
-        ("9 required files copied", all((rd / n).exists() for n in REQUIRED)),
+        ("all required files copied", all((rd / n).exists() for n in REQUIRED)),
         ("evidence/ subdir", (rd / "evidence").is_dir() and (rd / "evidence" / ".gitkeep").exists()),
         ("scripts/ subdir", (rd / "scripts").is_dir()),
         ("frontier template has depth field", "Current depth" in (rd / "frontier.md").read_text(encoding="utf-8")),

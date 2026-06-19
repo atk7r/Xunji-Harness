@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -726,6 +727,65 @@ def check_unattacked_surface(run_dir: Path) -> list[str]:
             f"(成功/加固/不可达都算证据), 再收口: {shown}。"]
 
 
+# --- 强制复盘(retrospective)收口门 ---------------------------------------------
+# 每次渗透收口都要落一份 retrospective.md, 诚实分析【自身问题】(这一 run 我自己做错/漏看/
+# 做慢/过早收口处) 与【框架/工具问题】(tools/hooks/guard/知识库/文档拖后腿处)。不是免责声明,
+# 是下次更强的依据。低内容下限只挡空壳, 不评质量(深浅仍是 driver 的活, 同独立复审门的判分边界)。
+RETRO_FILE = "retrospective.md"
+MIN_RETRO_CHARS = 24   # anti-empty-stub 下限(占位/空节挡在收口外), 非质量评判
+# 节标题识别(中英双语, 与 docs/templates/run/retrospective.md 对齐)
+_RETRO_SELF_RE = r"(?im)^#{1,6}\s+.*(自身问题|self[\s/().a-z-]*problem|driver[\s/().a-z-]*problem)"
+_RETRO_FW_RE = r"(?im)^#{1,6}\s+.*(框架|framework|tooling|工具)"
+
+
+def _md_section_body(text: str, header_re: str) -> str | None:
+    """返回首个匹配 header 的 markdown 小节正文(到下一个标题行止)。无匹配 → None。"""
+    m = re.search(header_re, text)
+    if not m:
+        return None
+    start = m.end()
+    nxt = re.search(r"(?im)^#{1,6}\s", text[start:])
+    return text[start: start + nxt.start()] if nxt else text[start:]
+
+
+def _retro_section_filled(body: str | None) -> bool:
+    """小节去掉 html 注释、模板占位(<...>, 含跨行)、空行、空 bullet 后, 真实字符 >= MIN_RETRO_CHARS。
+    占位必须整体去除(不能按行判 <…>): 模板占位常跨多行, 只查单行会把占位首行误当真实内容。"""
+    if body is None:
+        return False
+    b = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+    b = re.sub(r"<[^>]*>", "", b)               # 模板占位 <...>（跨行: [^>] 含换行）
+    kept: list[str] = []
+    for line in b.splitlines():
+        s = line.strip().lstrip("-*+ ").strip()  # 剥 bullet 记号后仍有内容才算填了
+        if s:
+            kept.append(s)
+    return len("".join(kept)) >= MIN_RETRO_CHARS
+
+
+def check_retrospective(run_dir: Path) -> list[str]:
+    """收口硬门(强制复盘): 收口时必须有 retrospective.md, 且【自身问题】与【框架/工具问题】
+    两节都有真实内容(非空占位)。缺文件 / 缺节 / 仅占位 = 硬错。仅在收口触发(由
+    check_closure_discipline 调用, 那里已用 _closure_claimed/_report_is_final 把门)。"""
+    errors: list[str] = []
+    f = run_dir / RETRO_FILE
+    if not f.exists():
+        return ["收口硬门(强制复盘): 缺 retrospective.md —— 每次渗透收口都必须落一份复盘, 诚实分析"
+                "本 run【自身问题】(我自己做错/漏看/做慢/过早收口处) 与【框架/工具问题】(tools/hooks/"
+                "guard/知识库/文档拖后腿处)。照 docs/templates/run/retrospective.md 建并填好两节再收口。"]
+    text = f.read_text(encoding="utf-8", errors="replace")
+    if not _retro_section_filled(_md_section_body(text, _RETRO_SELF_RE)):
+        errors.append(
+            "收口硬门(强制复盘): retrospective.md 的【自身问题 / Self problems】节缺失或仍是空占位 —— "
+            "写清这一 run 我自己哪里做错/漏看/做慢/过早收口/证据门松动, 具体到本次, 别写通用套话。")
+    if not _retro_section_filled(_md_section_body(text, _RETRO_FW_RE)):
+        errors.append(
+            "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】节缺失或仍是"
+            "空占位 —— 写清 tools/hooks/guard/知识库/文档 哪里拖了本 run 后腿(缺能力/误报闸门/消息误导/"
+            "知识陈旧), 或诚实写明确无。")
+    return errors
+
+
 def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     """过早收口护栏(P0-1). 触发条件 = report.md 出现【强收口断言】(自首式) **或**
     report.md 已是【实质终版报告】(状态式 _report_is_final: 引用了已确认发现)。后者堵住
@@ -816,6 +876,8 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     errors.extend(check_untested_assets(run_dir))
     # 硬门(深度层 anti-lump): 带登录攻击面的可达资产必须有 evidence 攻击记录, deferred 不是免费逃生口
     errors.extend(check_unattacked_surface(run_dir))
+    # 硬门(强制复盘): 每次渗透收口都要落 retrospective.md, 诚实写【自身问题】+【框架/工具问题】
+    errors.extend(check_retrospective(run_dir))
 
     # 硬门: 收口前必须有独立 Reviewer 复审记录
     review = run_dir / "review.md"
@@ -996,6 +1058,47 @@ def _selftest() -> int:
         ("'无新指纹' + candidates -> soft warn", any("指纹入库(软警)" in w for w in fp_warn)),
         ("'无…' WITH knowledge path -> no soft warn (S1)", not any("指纹入库(软警)" in w for w in fp_warn_s1)),
         ("Fingerprints only in comment -> hard error (S2)", any("收口硬门(指纹入库)" in e for e in fp_err_s2)),
+    ]
+
+    # --- 强制复盘收口门 (retrospective) ---
+    d_retro = Path(tempfile.mkdtemp())
+    retro_missing = check_retrospective(d_retro)
+    # 真模板拷贝(占位跨多行 <...>): 回归锁 —— 早期单行 <…> 判定会把跨行占位首行误当真实内容放行
+    tpl = ROOT / "docs" / "templates" / "run" / "retrospective.md"
+    if tpl.exists():
+        shutil.copyfile(tpl, d_retro / "retrospective.md")
+    else:   # 模板缺失时退化为内联跨行占位, 仍锁住同一坑
+        (d_retro / "retrospective.md").write_text(
+            "# Retrospective\n\n## 自身问题 / Self problems\n<这一 run 我哪里做错,\n跨行占位。>\n\n"
+            "## 框架与工具问题 / Framework problems\n<tools/ 哪里拖后腿,\n跨行占位。>\n", encoding="utf-8")
+    retro_stub = check_retrospective(d_retro)
+    (d_retro / "retrospective.md").write_text(  # 自身节填了, 框架节仍占位
+        "# Retrospective\n\n## 自身问题 / Self problems\n- 过早把 SSRF 前沿当不可达关闭, 应再换一个内网回连载体试。\n\n"
+        "## 框架与工具问题 / Framework problems\n<fill in>\n", encoding="utf-8")
+    retro_half = check_retrospective(d_retro)
+    (d_retro / "retrospective.md").write_text(  # 两节都填了真实内容
+        "# Retrospective\n\n## 自身问题 / Self problems\n- 过早把 SSRF 前沿当不可达关闭, 漏看一个回连载体。\n\n"
+        "## 框架与工具问题 / Framework problems\n- probe.py 对 302 链跟随不透明, 误把跳转当原响应, 浪费两轮。\n",
+        encoding="utf-8")
+    retro_ok = check_retrospective(d_retro)
+    # 整合: 终版报告(触发收口) + 无 retrospective → check_closure_discipline 带出复盘硬错
+    d_retro2 = Path(tempfile.mkdtemp())
+    (d_retro2 / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d_retro2 / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
+    (d_retro2 / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_retro2 / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+    (d_retro2 / "report.md").write_text(
+        "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
+    retro_closure_err, _ = check_closure_discipline(d_retro2)
+    checks += [
+        ("retrospective missing -> hard error", any("强制复盘" in e for e in retro_missing)),
+        ("retrospective placeholder-only -> both sections error", len(retro_stub) == 2),
+        ("retrospective half-filled -> framework section error only", len(retro_half) == 1
+            and any("Framework" in e for e in retro_half)),
+        ("retrospective both filled -> no error", retro_ok == []),
+        ("closure trigger + no retrospective -> closure carries 复盘 error",
+            any("强制复盘" in e for e in retro_closure_err)),
     ]
 
     # --- 台账完整性 (check_coverage_health ③ 子警, 任务8 + 任务#4 合并) ---
