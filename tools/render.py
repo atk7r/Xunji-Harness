@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""render.py - controlled, read-only browser fetch (P1).
+r"""render.py - controlled, read-only browser fetch (P1).
 
 Why it exists: curl cannot pass JS anti-bot challenges or render SPAs, leaving a
 large slice of an authorized target's surface untestable. A real browser engine
