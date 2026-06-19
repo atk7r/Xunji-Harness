@@ -101,6 +101,13 @@ blocked. Close or defer a front only with one of:
 - missing credentials or access
 - Type B reasoning that further work is unlikely to add value
 
+Session length, token budget, and an obstacle you have **already solved** are NOT
+on that list — never stop to ask under them. Report progress and keep driving; do
+not request permission to continue. Reachability/DNS is the upstream recon tool's
+(Guanlan's) domain: attack what's reachable, skip what isn't, and report a
+reachability defect upstream — do not build re-probe / egress / relay machinery
+into this repo (that is re-OSINT).
+
 When a direction is blocked, first decide whether it is Type A or Type B. Type A
 means a smaller safe step, different context, or missing evidence may move it
 forward. Type B means the front is sufficiently explored and should be closed or

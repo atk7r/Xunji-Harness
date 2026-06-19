@@ -7,8 +7,13 @@ large slice of an authorized target's surface untestable. A real browser engine
 any user's browser does -- this is access, not a forged bypass.
 
 Discipline:
-- READ-ONLY: navigates and observes. Does not submit forms, click destructive
-  controls, or run site-changing actions.
+- READ-ONLY by default: plain fetch navigates and observes; does not submit forms,
+  click destructive controls, or run site-changing actions.
+- EXCEPTION — `--eval`: author JS runs in the loaded page and MAY issue fetch/XHR
+  (reusing the page's own crypto/token). That traffic is rate-paced and recorded in
+  network.json, but is NOT body/scope-capped like probe.py — so it follows the
+  proof-level / author-and-handoff boundary: auto-run proof-level only; state-changing
+  flows are handed to the operator (src-safety-boundary).
 - Routed through guard.RateLimiter (禁高频) and guard.cap_body (禁拖库).
 - Captures the post-challenge HTML, page title, a screenshot, and the network
   requests the page makes (XHR/fetch) -- which is how it surfaces real backend
@@ -92,7 +97,8 @@ def build_cookies(url: str, headers: list[str], cfile: str | None) -> list[dict]
 
 
 def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
-           cookies: list[dict] | None = None) -> dict:
+           cookies: list[dict] | None = None, eval_js: str | None = None,
+           eval_wait_ms: int = 0) -> dict:
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:  # pragma: no cover
@@ -150,7 +156,27 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
             result["html_bytes"] = len(html)
             result["html_truncated"] = truncated
             page.screenshot(path=str(out_dir / "page.png"), full_page=False)
-            # keep only app/api-ish requests (drop static asset noise) for grounding
+            # --eval: run author-supplied JS in the LOADED page so it can reuse the page's OWN
+            # functions (SM4/encrypt, anti-CSRF token fetch, captcha verify) to build/replay a
+            # request -- the browser-replay primitive (generalizes the captcha-solve pattern).
+            # Reuses the page's crypto; it does NOT forge any server-validated value. NOTE: eval JS
+            # CAN issue fetch/XHR (incl. state-changing) -- that traffic is NOT probe.py/guard
+            # body/scope-controlled, so it inherits the proof-level / author-and-handoff boundary:
+            # the driver auto-runs proof-level only; state-changing flows go to the operator. Ran
+            # BEFORE the network/cookie capture so eval-issued requests are recorded in network.json.
+            if eval_js:
+                if eval_wait_ms > 0:
+                    page.wait_for_timeout(eval_wait_ms)  # let token/crypto JS settle
+                RateLimiter().gate(host)  # pace the eval like a navigation (its JS may issue requests)
+                try:
+                    result["eval"] = page.evaluate(eval_js)
+                    (out_dir / "eval.json").write_text(
+                        json.dumps(result["eval"], ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception as e:
+                    result["eval_error"] = str(e)
+                page.wait_for_timeout(700)  # let eval-issued requestfinished events flush into `requests`
+            # keep only app/api-ish requests (drop static asset noise) for grounding. Captured AFTER
+            # --eval so eval-issued (browser-replay) requests appear in the audit trail.
             api = [r for r in requests
                    if r["type"] in ("xhr", "fetch")
                    or any(k in r["url"] for k in ("/api", "/rest", ".do", ".json", "/v1", "/v2"))]
@@ -179,9 +205,36 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
     return result
 
 
+def _selftest() -> int:
+    """Offline regression: pure helpers + --eval plumbing (no browser/network)."""
+    import inspect
+    checks: list[tuple[str, bool]] = []
+    # build_cookies: header form + dict merge
+    cks = build_cookies("https://x.example/", ["a=1; b=2"], None)
+    names = {c["name"]: c["value"] for c in cks}
+    checks.append(("build_cookies parses header form", names.get("a") == "1" and names.get("b") == "2"))
+    checks.append(("build_cookies sets domain from url", all(c.get("domain") for c in cks)))
+    # --eval plumbing: render() accepts eval_js/eval_wait_ms
+    sig = inspect.signature(render).parameters
+    checks.append(("render accepts eval_js", "eval_js" in sig))
+    checks.append(("render accepts eval_wait_ms", "eval_wait_ms" in sig))
+    bad = [n for n, ok in checks if not ok]
+    for n, ok in checks:
+        print(("ok   " if ok else "FAIL ") + n, file=sys.stderr)
+    print("render selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"), file=sys.stderr)
+    return 0 if not bad else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("url")
+    ap.add_argument("url", nargs="?")
+    ap.add_argument("--selftest", action="store_true", help="offline regression; exit 0/1")
+    ap.add_argument("--eval", default=None, dest="eval_file",
+                    help="JS file run in the LOADED page (page.evaluate) — reuse the page's OWN "
+                         "crypto/token/captcha functions to build/replay a request (browser-replay). "
+                         "Result → eval.json. State-changing flows = author-and-handoff.")
+    ap.add_argument("--eval-wait", type=int, default=0,
+                    help="ms to wait after load before --eval (let token/crypto JS settle)")
     ap.add_argument("--out", default=None, help="artifact dir (default tmp/render/<host>)")
     ap.add_argument("--run", default=None,
                     help="run 目录 runs/<dir>; 未给 --out 时产物默认落 <run>/evidence/render_<host>/"
@@ -201,11 +254,16 @@ def main() -> int:
                     help="从 JSON 读 cookie:render.py 导出的 cookies.json(playwright 列表)"
                          "或 {name:value} 字典;与 --cookie 合并")
     args = ap.parse_args()
+    if args.selftest:
+        return _selftest()
+    if not args.url:
+        ap.error("url is required (or use --selftest)")
 
     global STEALTH, PROXY
     STEALTH = args.stealth
     PROXY = proxymod.resolve(args.proxy)   # 交战代理(XUNJI_PROXY/proxy.conf/--proxy); required 时没配 fail-closed
 
+    eval_js = Path(args.eval_file).read_text(encoding="utf-8") if args.eval_file else None
     host = urlparse(args.url).hostname or "page"
     if args.out:
         out_dir = Path(args.out)
@@ -215,7 +273,8 @@ def main() -> int:
         out_dir = Path("tmp") / "render" / host
     cookies = build_cookies(args.url, args.cookie, args.cookies_file)
     try:
-        res = render(args.url, out_dir, args.wait, args.timeout, cookies)
+        res = render(args.url, out_dir, args.wait, args.timeout, cookies,
+                     eval_js=eval_js, eval_wait_ms=args.eval_wait)
     except RateBudgetExceeded as e:
         res = {"error": f"rate-limited: {e}"}
     except HostBackoff as e:

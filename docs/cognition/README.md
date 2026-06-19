@@ -88,6 +88,19 @@ not restate or redefine the levels — change them here, in one place.
 
 The default confirmation threshold is `certainty >= 0.8`.
 
+Two discipline rules that apply to ALL entries (learned the hard way — ujs_20260619):
+
+- **Verify before scoring ≥ 0.8.** A product/version read off metadata, a default/example
+  template, or a single boilerplate signal is a `≤ 0.5` lead until cross-checked against the
+  live UI + version-specific paths. (FP-001: "EOL Shibboleth v2.x" asserted at 0.8 from the
+  shipped *example* metadata — a false positive that verification refuted.)
+- **Negatives and environment claims meet the SAME artifact bar as positive confirmations.** A
+  refutation / "blocked" / "campus-only" claim at ≥ 0.8 must cite a SAVED artifact that actually
+  substantiates it (e.g. the differential response bodies, not an unrelated homepage). If you only
+  have prose, it is ≤ 0.5. (codex caught E-010/E-013/E-021/E-022 marked 0.8 with prose-only or
+  non-substantiating artifacts.) Run the independent/heterogeneous reviewer (`peer_review --into-run`)
+  **periodically during the hunt** — after any ≥ 0.8 assignment or false positive — not only at closure.
+
 ## Vulnerability Chains
 
 Web-layer findings often combine (chaining): one confirmed finding's proven
