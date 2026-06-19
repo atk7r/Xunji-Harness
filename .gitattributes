@@ -1,0 +1,4 @@
+# Normalize line endings to LF in the repo. Set during the Windows -> macOS
+# port: the checkout pulled in CRLF across many files, which showed as huge
+# whitespace-only diffs. Git will store LF and convert on checkout as needed.
+* text=auto eol=lf
