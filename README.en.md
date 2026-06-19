@@ -166,13 +166,15 @@ The hook blocks: irreversible destruction (host/file wipes, `DROP`/`TRUNCATE`/un
 
 ## ✅ Local Checks
 
-```powershell
-.\.venv\Scripts\python.exe tools\check_rules.py            # architecture-drift guard
-.\.venv\Scripts\python.exe tools\check_hook.py             # hook block/allow regression
-.\.venv\Scripts\python.exe tools\check_run.py runs\<t>     # run-state gate + anti-premature-closure
-python sentinel\replay.py                                  # behavior-detection golden replay
-python sentinel\verify_layers.py                           # L1-L4 false-positive / effectiveness
-python tools\harness\guard.py                              # guard + circuit-breaker selftest
+```bash
+# Activate the venv first (see "Setup" below); forward-slash paths work on all
+# platforms, including Windows Python.
+python tools/check_rules.py          # architecture-drift guard
+python tools/check_hook.py           # hook block/allow regression
+python tools/check_run.py runs/<t>   # run-state gate + anti-premature-closure
+python sentinel/replay.py            # behavior-detection golden replay
+python sentinel/verify_layers.py     # L1-L4 false-positive / effectiveness
+python tools/harness/guard.py        # guard + circuit-breaker selftest
 ```
 
 These inspect local files and hook behavior only — **they do not contact targets**.

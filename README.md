@@ -166,13 +166,14 @@ hook 拦截：不可逆销毁（主机/文件抹除、`DROP`/`TRUNCATE`/无范�
 
 ## ✅ 本地检查
 
-```powershell
-.\.venv\Scripts\python.exe tools\check_rules.py            # 架构漂移守卫
-.\.venv\Scripts\python.exe tools\check_hook.py             # hook 拦/放回归
-.\.venv\Scripts\python.exe tools\check_run.py runs\<t>     # 运行态门 + 反过早收口
-python sentinel\replay.py                                  # 行为检测黄金回放
-python sentinel\verify_layers.py                           # L1-L4 误报 / 有效性
-python tools\harness\guard.py                              # guard + 熔断器自测
+```bash
+# 先激活 venv（见下方「安装」）；正斜杠路径三平台通用，Windows 的 Python 也接受。
+python tools/check_rules.py          # 架构漂移守卫
+python tools/check_hook.py           # hook 拦/放回归
+python tools/check_run.py runs/<t>   # 运行态门 + 反过早收口
+python sentinel/replay.py            # 行为检测黄金回放
+python sentinel/verify_layers.py     # L1-L4 误报 / 有效性
+python tools/harness/guard.py        # guard + 熔断器自测
 ```
 
 这些只检视本地文件与 hook 行为，**不接触目标**。

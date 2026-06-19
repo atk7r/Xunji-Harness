@@ -20,9 +20,10 @@ the login page. This is symmetric to the cookie EXPORT render.py already does:
   --cookie "PHPSESSID=...; security=low"      quick header form (repeatable)
   --cookies-file runs/<dir>/cookies.json      reuse render.py's own export, or a {name:value} dict
 
-Run with the venv python (Playwright lives there):
-  .venv/Scripts/python.exe tools/render.py <url> [--out runs/<dir>/render] [--wait networkidle]
-  .venv/Scripts/python.exe tools/render.py <url> --cookie "PHPSESSID=abc; security=low"
+Run with the venv python (Playwright lives there); activate the venv first
+(.venv/bin/activate on Linux/macOS, .venv\Scripts\activate on Windows):
+  python tools/render.py <url> [--out runs/<dir>/render] [--wait networkidle]
+  python tools/render.py <url> --cookie "PHPSESSID=abc; security=low"
 """
 
 from __future__ import annotations
