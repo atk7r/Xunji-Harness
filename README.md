@@ -184,6 +184,13 @@ python tools/harness/guard.py        # guard + 熔断器自测
 
 **唯一硬性要求**：PATH 上有 **Python ≥ 3.10**（覆盖 hook、`check_*`、`probe`/`scan`）。hook 用 `$CLAUDE_PROJECT_DIR` 接线，无硬编码路径，跨机可移植。
 
+**跨平台约定**（Windows / macOS / Linux 通用，写命令与代码时遵守）：
+
+- **先激活 venv，再用 `python tools/...`**，不要写死解释器路径（`.venv/bin/python` 是 Unix 专用，`.venv\Scripts\python.exe` 是 Windows 专用）。
+- **路径一律用正斜杠** `/`：Windows 的 Python 也接受，三平台同一行命令通用。
+- **venv 与外部二进制不可移植**：`.venv/` 不入库，换机/换平台要重新 `python -m venv` + `pip install`；`nuclei`/`sqlmap`/`tesseract` 用各平台包管理器（brew / apt / choco）各装一次。
+- **换行符已由 `.gitattributes`（`eol=lf`）统一**：跨平台 clone/提交不会再产生 CRLF 假改动。
+
 <details>
 <summary><b>浏览器工具（可选 —— 仅供 <code>render.py</code> / 验证码）</b></summary>
 

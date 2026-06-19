@@ -185,6 +185,13 @@ A fresh clone needs almost nothing: the core toolchain has **zero third-party de
 
 **The only hard requirement**: **Python ≥ 3.10 on PATH** (covers the hook, `check_*`, `probe`/`scan`). The hook is wired with `$CLAUDE_PROJECT_DIR` (no hard-coded paths), portable across machines.
 
+**Cross-platform conventions** (Windows / macOS / Linux — follow these when writing commands or code):
+
+- **Activate the venv, then run `python tools/...`** — never hard-code the interpreter path (`.venv/bin/python` is Unix-only, `.venv\Scripts\python.exe` is Windows-only).
+- **Always use forward-slash paths** `/`: Windows Python accepts them too, so one command line works on all three platforms.
+- **venv and external binaries are not portable**: `.venv/` is not committed — re-run `python -m venv` + `pip install` per machine/OS; install `nuclei`/`sqlmap`/`tesseract` once per platform via its package manager (brew / apt / choco).
+- **Line endings are pinned to LF by `.gitattributes` (`eol=lf`)**: cross-platform clone/commit no longer produces phantom CRLF diffs.
+
 <details>
 <summary><b>Browser tools (optional — only for <code>render.py</code> / captcha)</b></summary>
 
