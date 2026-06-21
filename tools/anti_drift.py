@@ -38,10 +38,20 @@ ACTIVE_WINDOW_SEC = 6 * 3600   # a run that saw any file change in the last 6h =
 BINDING_RULES = [
     "中文回答",
     "自主驱动: safe 前沿还在就别停下问(会话长/已解决障碍/选下一类 都不是停止理由)",
+    "回合协议: 结尾只允许「下一行动: <具体action>」或「BLOCKED: <外部依赖>」; 禁止 ? / 是否 / 继续还是",
     "消费 Guanlan、跳过不可达; 不重做 OSINT / 不建 egress·relay·重探",
-    "证据门: 负面/环境结论也要存盘产物; 先验证再给 ≥0.8; 单一来源/样例模板=≤0.5",
+    "证据门: 负面/环境结论也要存盘产物; 先验证再给 ≥0.8; 单一来源/样例模板=≤0.5 · scripts≠证据(replay才有效)",
     "不过度工程(画蛇添足); 能进代码闸门的别写 prose",
-    "检查点跑 codex(≥0.8 判定 / 收口 / 安全关键改动); 复审是候选非裁决, 我过证据门",
+    "阶段检查点: Driver/Hunter/Reviewer 每批产出后自动触发 peer_review --into-run, codex BLOCKER 先修再继续",
+    "任何代码/文档修改必须经过 codex 复审; codex 必须走专用代理(CODEX_PROXY)",
+]
+
+# Output drift patterns — driver response containing any of these = protocol violation.
+# Codex review checks for these in review.md; the closure gate hard-blocks unresolved violations.
+DRIFT_PATTERNS = [
+    "是否继续", "要不要继续", "还是等其他条件", "请指示下一步",
+    "需要我继续", "等待用户", "你决定", "需要继续吗",
+    "I can continue if", "Should I continue", "wait for",
 ]
 
 
@@ -63,6 +73,67 @@ def find_active_run(runs_root: Path, within_sec: int = ACTIVE_WINDOW_SEC) -> Pat
         return best
     return None
 
+
+def _detect_stage(run_dir: Path) -> str:
+    """Derive current stage from run file state. Uses check_run._report_is_final()
+    for closure detection — file existence alone is not enough (setup_run creates templates)."""
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import check_run as cr
+    except Exception:
+        # Fallback: simple heuristic
+        frontier = run_dir / "frontier.md"
+        if frontier.exists():
+            fr = frontier.read_text(encoding="utf-8", errors="replace")
+            if "Status: probing" in fr or "Status: open" in fr:
+                return "Driver"
+        return "Setup"
+
+    review = run_dir / "review.md"
+    evidence = run_dir / "evidence.md"
+    frontier = run_dir / "frontier.md"
+
+    # Closure: check_run's canonical final-report predicate
+    try:
+        if cr._report_is_final(run_dir):
+            rv = review.read_text(encoding="utf-8", errors="replace") if review.exists() else ""
+            if "Independent Review" in rv:
+                return "Closure"
+            return "Closure-Missing-Review"
+    except Exception:
+        pass
+    # Reviewer: review.md has independent review content (not just the template header)
+    if review.exists() and review.stat().st_size > 500:
+        rv = review.read_text(encoding="utf-8", errors="replace")
+        if "Independent Review" in rv:
+            return "Reviewer"
+    # Hunter: evidence has confirmed entries (use evidence_parse for accuracy)
+    if evidence.exists():
+        try:
+            recs = cr.parse_evidence(run_dir)
+            n_conf = len([r for r in recs if r.get("confirmed")])
+            if n_conf > 0:
+                return "Hunter"
+        except Exception:
+            pass
+    # Driver: frontier has open/probing fronts
+    if frontier.exists():
+        fr = frontier.read_text(encoding="utf-8", errors="replace")
+        if "Status: probing" in fr or "Status: open" in fr:
+            return "Driver"
+    return "Setup"
+
+def _check_drift_alert(run_dir: Path) -> list[str]:
+    """Check drift_alerts.md for unresolved violations. Returns alert items."""
+    alerts = run_dir / "drift_alerts.md"
+    if not alerts.exists():
+        return []
+    try:
+        lines = alerts.read_text(encoding="utf-8", errors="replace").splitlines()
+        unresolved = [l for l in lines if l.startswith("- [ ]") or l.startswith("PENDING")]
+        return unresolved[:5]
+    except Exception:
+        return []
 
 def _overdue_steps(run_dir: Path) -> list[str]:
     """Derive process/evidence flags from the run files via check_run (no re-parsing). Advisory."""
@@ -132,9 +203,16 @@ def build_anchor() -> str:
             age = int((time.time() - mt) / 60)
         except Exception:
             age = -1
-        lines.append(f"当前 run: {run.name} (最后改动 {age}m 前)")
+        stage = _detect_stage(run)
+        lines.append(f"当前 run: {run.name} (最后改动 {age}m 前) | 阶段: {stage}")
         for f in _overdue_steps(run):
             lines.append("  · " + f)
+        # Drift alerts — unresolved violations from prior turns
+        drift_items = _check_drift_alert(run)
+        if drift_items:
+            lines.append("  ⚠ 漂移告警(未解决):")
+            for d in drift_items:
+                lines.append(f"    {d[:120]}")
     return "\n".join(lines)
 
 
@@ -144,9 +222,12 @@ def _selftest() -> int:
     a = build_anchor()
     checks.append(("anchor non-empty", bool(a.strip())))
     checks.append(("anchor carries binding rules", "绑定规则" in a))
-    checks.append(("anchor is compact (<2KB)", len(a) < 2048))
+    checks.append(("anchor is compact (<3KB)", len(a) < 3072))
+    # drift patterns list
+    checks.append(("drift patterns non-empty", len(DRIFT_PATTERNS) >= 5))
     # find_active_run: picks the most-recent run within window, ignores stale
     d = Path(tempfile.mkdtemp())
+    checks.append(("stage Detection exists", _detect_stage(d) == "Setup"))
     runs = d / "runs"
     (runs / "a_x").mkdir(parents=True)
     (runs / "a_x" / "report.md").write_text("# r", encoding="utf-8")
