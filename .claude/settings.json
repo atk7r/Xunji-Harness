@@ -5,15 +5,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\" --selftest"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\" --selftest"
           },
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\" --selftest"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\" --selftest"
           },
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\" --selftest"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
           }
         ]
       }
@@ -24,11 +28,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\""
           },
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
           }
         ]
       }
@@ -39,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
           }
         ]
       }
@@ -49,11 +53,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
           },
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/tools/anti_drift.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/anti_drift.py\""
           }
         ]
       }
@@ -63,7 +67,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\""
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\""
           }
         ]
       }
