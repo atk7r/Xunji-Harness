@@ -49,7 +49,6 @@ def _resolve_artifact(tok: str, run_dir: Path) -> Path | None:
 _ARTIFACT_FIELD_RE = re.compile(
     r"(?:[Ss]aved\s+)?[Aa]rtifacts?\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
     re.S)
-_CERT_LITERAL_RE = re.compile(r"\b(1\.0|0\.8|0\.5|0\.3)\b")
 # Certainty 字段的【值区域】: 从 `Certainty…:` 到下一个 `- Field:` / 空行 / 块尾。
 # 用来把 certainty 取值限定在【字段值内】(而非旧逻辑"从关键词扫到块尾"), 再配合 _PAREN_RE
 # 剥掉括号说明 —— 否则降级时括号里写的解释数字(如"原 0.8 / 升回 1.0")会被误当成 certainty
@@ -58,6 +57,7 @@ _CERT_FIELD_RE = re.compile(
     r"Certainty[^\n:：]*[:：](.+?)(?=\n\s*[-*]\s+\w[\w /()（）-]*[:：]|\n\s*\n|\n##|\Z)",
     re.S | re.I)
 _PAREN_RE = re.compile(r"[\(（][^\)）]*[\)）]")
+_CERT_NUMBER_RE = re.compile(r"\b[01]\.\d+\b")
 # inline field labels — used to bound a field's value when several share one line
 # (e.g. "- Supports: H-002. Refutes: —. Next: prove X (E-005)." — the (E-005) belongs
 # to Next:, not Refutes:; cutting at the next label stops that misattribution).
@@ -66,6 +66,15 @@ _INLINE_FIELDS = (r"Supports|Refutes|Next|Certainty|Severity|Cleanup|Note|Replic
 _INLINE_CUT_RE = re.compile(r"\b(?:" + _INLINE_FIELDS + r")\s*[:：]")
 
 _EVIDENCE_MEMO: dict = {}
+
+
+def _strip_certainty_notes(text: str) -> str:
+    """Drop explanatory parentheticals from a Certainty field while preserving
+    a value that is itself parenthesized, e.g. `Certainty: (0.8)`."""
+    def repl(m: re.Match) -> str:
+        inner = m.group(0)[1:-1].strip()
+        return inner if re.fullmatch(r"[01]\.\d+", inner) else ""
+    return _PAREN_RE.sub(repl, text)
 
 
 def _field_ids(block: str, name: str, idpat: str) -> list[str]:
@@ -104,8 +113,8 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         # 扫到块尾"—— 后者会把降级时括号里写的解释数字(如"原 0.8 / 升回 1.0")误当成 certainty
         # 值, 使降级无效(2026-06-17 实测踩到)。剥括号后仍含同字段内的 split-certainty 多值。
         cm = _CERT_FIELD_RE.search(b)
-        region = _PAREN_RE.sub("", cm.group(1)) if cm else ""
-        certs = [float(x) for x in _CERT_LITERAL_RE.findall(region)]
+        region = _strip_certainty_notes(cm.group(1)) if cm else ""
+        certs = [float(x) for x in _CERT_NUMBER_RE.findall(region)]
         # also read explicit "Certainty: 0.NN" values so an OFF-DOCTRINE certainty
         # (0.9/0.85/0.7…, off the {1.0,0.8,0.5,0.3} grid) cannot silently slip the
         # hard artifact gate by failing to match the canonical-literal regex above.
@@ -113,6 +122,10 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         # `[\(（]?`, 这样值本身被写进括号(`Certainty: (0.8)`)也能抓到 —— 否则 _PAREN_RE 会把
         # 它连括号一起剥掉致漏判(复审 S1)。降级写法 `0.5 (原 0.8…)` 仍只抓紧跟的 0.5(不进括号)。
         certs += [float(x) for x in re.findall(r"certainty\s*[:：]\s*\**\s*[\(（]?\s*(\d\.\d+)", b, re.I)]
+        # Stable de-duplication: split fields and the explicit fallback can both
+        # see the first value. Keep ordering so diagnostics remain predictable.
+        seen_certs = set()
+        certs = [c for c in certs if not (c in seen_certs or seen_certs.add(c))]
         # artifacts: scoped to the explicit Artifacts: field (fallback: whole block,
         # for legacy entries with no such field).
         fm = _ARTIFACT_FIELD_RE.search(b)

@@ -42,6 +42,30 @@ review.md 缺独立复审记录, 自动跑 peer_review 写进 review.md 满足�
 (`heterogeneous=False`)时返回 NEEDS_DRIVER、不写记录、门仍拦 —— 同族自审减 bias 不减盲区(A2),
 不算异构独立复审。
 
+### Codex 代理（必须）
+
+Codex CLI 调用 OpenAI API，**必须通过专用代理通道**（`tools/harness/codex_proxy.py`）——
+三条通道各走各的、互不串味：
+
+| 通道 | 代理 | 配置 |
+|---|---|---|
+| 交战流量 | `XUNJI_PROXY` | env / `proxy.conf` |
+| 模型 API (DeepSeek/GLM/Claude) | 剥代理直连 | `model_safe_env()` |
+| **Codex CLI** | **`CODEX_PROXY`** | env / `codex_proxy.conf` |
+
+Codex 不经过 XUNJI_PROXY（交战代理会在目标侧中继 codex 流量 = 串味+泄露），也不走模型
+API 的直连（可能不可达）。`peer_review.py` 的 `_run_codex()` 已硬编码走 `codex_env()`，
+不读交战/系统代理。
+
+配置方式：
+- `export CODEX_PROXY=http://127.0.0.1:7892`（或 socks5h://）
+- 或写入 `tools/harness/codex_proxy.conf`（一行一个 URL，已 gitignore）
+
+自检：`python tools/harness/codex_proxy.py --status`  /  `--selftest`
+
+**注意**：Codex 是 `peer_review.py` 优先级最高的后端，但无 codex_proxy 时它不可达 →
+自动降到 DeepSeek/GLM 或兜底。正确的代理是 codex 可用的前提。
+
 ## Reviewer prompt (copy, fill `<target>`)
 
 ```

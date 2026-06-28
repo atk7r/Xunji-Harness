@@ -40,7 +40,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from harness import proxy as proxymod  # noqa: E402  模型调用【绝不】走交战代理(剥代理 env + 空 opener)
+from harness import proxy as proxymod          # noqa: E402  模型调用【绝不】走交战代理(剥代理 env + 空 opener)
+from harness import codex_proxy                # noqa: E402  Codex CLI 专用代理通道
 CONFIG_PATH = ROOT / "review" / "peer_review.json"
 
 # ---- 默认配置(可被 review/peer_review.json 覆盖) ----
@@ -48,8 +49,8 @@ DEFAULT_CONFIG: dict = {
     "priority": ["codex", "deepseek", "glm", "claude"],
     "backends": {
         # cli-agent: 自己能读文件, prompt 只给路径 + rubric
-        "codex": {"kind": "cli-agent", "cmd": "codex", "sandbox": "read-only", "model": None,
-                  "heterogeneous": True},
+        "codex": {"kind": "cli-agent", "cmd": "codex", "sandbox": "read-only",
+                  "model": "gpt-5.5", "effort": "high", "heterogeneous": True},
         # openai 兼容: 纯 API, 模块替它打包 run 内容进 prompt
         "deepseek": {"kind": "openai", "base_url": "https://api.deepseek.com/v1",
                      "model": "deepseek-reasoner", "api_key_env": "DEEPSEEK_API_KEY",
@@ -162,7 +163,12 @@ def backend_available(name: str, cfg: dict) -> bool:
         return False
     kind = b.get("kind")
     if kind == "cli-agent":
-        return shutil.which(b.get("cmd", name)) is not None
+        if shutil.which(b.get("cmd", name)) is None:
+            return False
+        # codex: CODEX_PROXY_REQUIRED=1 且无代理 → 标记不可用(落到下一后端)
+        if name == "codex" and codex_proxy.codex_required() and not codex_proxy.codex_proxy_url():
+            return False
+        return True
     if kind == "openai":
         return bool(os.environ.get(b.get("api_key_env", "")))
     if kind == "anthropic-or-driver":
@@ -253,14 +259,16 @@ def _run_codex(scope_dir: Path, rubric: str, b: dict, timeout: int) -> ReviewRes
     rel = scope_dir.relative_to(ROOT).as_posix() if scope_dir.is_relative_to(ROOT) else str(scope_dir)
     prompt = (f"Review the CLOSED red-team run at {rel}. You may read any file under that "
               f"directory (read-only). Do not read or modify anything outside it.\n\n{rubric}")
-    cmd = f'{b.get("cmd", "codex")} exec -s {b.get("sandbox", "read-only")}'
+    argv = [b.get("cmd", "codex"), "exec", "-s", b.get("sandbox", "read-only")]
     if b.get("model"):
-        cmd += f' -m {b["model"]}'
+        argv.extend(["-m", b["model"]])
+    if b.get("effort"):
+        argv.extend(["-c", f'model_reasoning_effort={b["effort"]}'])
     try:
-        proc = subprocess.run(cmd, shell=True, input=prompt, capture_output=True,
+        proc = subprocess.run(argv, input=prompt, capture_output=True,
                               text=True, encoding="utf-8", errors="replace",
                               cwd=str(ROOT), timeout=timeout,
-                              env=proxymod.model_safe_env())   # 模型 CLI【绝不】走交战代理(剥代理 env)
+                              env=codex_proxy.codex_env())   # Codex CLI 走专用代理通道(与交战/模型API 隔离)
     except subprocess.TimeoutExpired:
         return ReviewResult(verdict="ERROR", backend_used="codex",
                             error=f"codex 超时(>{timeout}s)")

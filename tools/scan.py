@@ -8,6 +8,7 @@ the PreToolUse hook is the second line that blocks dump/os-shell/intrusive flags
 
   python tools/scan.py sqlmap "https://t/x?id=1"      # injection PROOF only (no dump)
   python tools/scan.py nuclei "https://t/"             # detection templates only
+  python tools/scan.py --run runs/<dir> sqlmap "https://t/x?id=1"  # saves evidence
 
 This wrapper never adds --dump/--os-shell (sqlmap) or dos/intrusive tags
 (nuclei). If you hand it those, it refuses; if you bypass it and call the tool
@@ -17,10 +18,13 @@ directly, the safety hook still blocks them.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -43,14 +47,47 @@ FORBIDDEN_SQLMAP = ("--dump", "--os-shell", "--os-pwn", "--os-cmd", "--file-writ
 FORBIDDEN_NUCLEI_TAGS = ("dos", "intrusive", "fuzz")
 
 
-def run(cmd: list[str]) -> int:
+def run(cmd: list[str], run_dir: str | None = None, name: str | None = None,
+        host: str = "", tool: str = "") -> int:
     print("[scan] " + " ".join(cmd), file=sys.stderr)
+    start = time.time()
     try:
-        # 剥 ambient 代理 env: sqlmap/nuclei 只走显式 --proxy(=交战代理), 不偷读 HTTPS_PROXY 走错出口
-        return subprocess.call(cmd, env=proxymod.scrub_proxy_env())
+        result = subprocess.run(cmd, env=proxymod.scrub_proxy_env(),
+                                capture_output=run_dir is not None, text=True)
+        elapsed = time.time() - start
+        if run_dir:
+            _save_evidence(run_dir, name or f"{tool}_{host}", tool, host, cmd,
+                           result.returncode, result.stdout, result.stderr, elapsed)
+        return result.returncode
     except FileNotFoundError:
         print(f"[scan] '{cmd[0]}' not installed on this host.", file=sys.stderr)
         return 127
+
+
+def _save_evidence(run_dir: str, name: str, tool: str, host: str,
+                   cmd: list[str], rc: int, stdout: str, stderr: str,
+                   elapsed: float) -> None:
+    evdir = Path(run_dir) / "evidence"
+    evdir.mkdir(parents=True, exist_ok=True)
+    safe_name = name.replace("/", "_").replace(" ", "_")
+    replay = {
+        "tool": tool,
+        "command": " ".join(cmd),
+        "target": host,
+        "exit_code": rc,
+        "elapsed_seconds": round(elapsed, 2),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "stdout_sha256": hashlib.sha256(stdout.encode("utf-8", errors="replace")).hexdigest(),
+        "stdout_length": len(stdout),
+    }
+    rp_path = evdir / f"{safe_name}.scan.json"
+    rp_path.write_text(json.dumps(replay, indent=2, ensure_ascii=False), encoding="utf-8")
+    out_path = evdir / f"{safe_name}.scan.txt"
+    out_path.write_text(stdout, encoding="utf-8", errors="replace")
+    if stderr:
+        err_path = evdir / f"{safe_name}.scan.err.txt"
+        err_path.write_text(stderr, encoding="utf-8", errors="replace")
+    print(f"[scan] evidence saved: {rp_path} + {out_path}", file=sys.stderr)
 
 
 def main() -> int:
@@ -58,6 +95,10 @@ def main() -> int:
     ap.add_argument("--proxy", default=None,
                     help="交战代理(http://h:p / socks5h://h:p)；经中继扫描境内资产。未给则走 harness.proxy"
                          "(XUNJI_PROXY / proxy.conf, 不读 HTTPS_PROXY=模型那条)。须置于 tool/target 之前")
+    ap.add_argument("--run", default=None, dest="run_dir",
+                    help="run 目录如 runs/<target>; 给则将扫描输出落 evidence/<name>.scan.json + .scan.txt")
+    ap.add_argument("--name", default=None,
+                    help="证据名称(如 E-xxx_scan); 需 --run。默认用 <tool>_<host>")
     ap.add_argument("tool", choices=["sqlmap", "nuclei"])
     ap.add_argument("target")
     ap.add_argument("extra", nargs=argparse.REMAINDER,
@@ -88,7 +129,7 @@ def main() -> int:
                SQLMAP_TECH, *args.extra]
         if proxy:
             cmd.append(f"--proxy={proxy}")
-        return run(cmd)
+        return run(cmd, run_dir=args.run_dir, name=args.name, host=host, tool="sqlmap")
 
     # nuclei
     if any(t in " ".join(args.extra) for t in FORBIDDEN_NUCLEI_TAGS):
@@ -102,7 +143,7 @@ def main() -> int:
     cmd = ["nuclei", "-u", args.target, *NUCLEI_SAFE, *args.extra]
     if proxy:
         cmd += ["-proxy", proxy]
-    return run(cmd)
+    return run(cmd, run_dir=args.run_dir, name=args.name, host=host, tool="nuclei")
 
 
 if __name__ == "__main__":

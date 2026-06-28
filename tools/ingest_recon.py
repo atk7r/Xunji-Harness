@@ -158,7 +158,31 @@ _CATEGORY_FLAGS = {                       # Guanlan category → 深度门最小
     "auth": ["LOGIN", "SURFACE:SSO"],
     "vpn": ["LOGIN"],
     "oa": ["SURFACE:ADMIN"],
+    "admin": ["SURFACE:ADMIN"],
+    "management": ["SURFACE:ADMIN"],
+    "practice": ["SURFACE:ADMIN"],
 }
+
+
+def _asset_flags(a: dict) -> list[str]:
+    """Carry recon's high-value/review/admin hints into coverage so closure gates
+    can force a real E-entry instead of letting those assets disappear."""
+    flags = list(_CATEGORY_FLAGS.get(str(a.get("category_id") or "").lower(), []))
+    text = " ".join(str(a.get(k) or "") for k in (
+        "asset", "host", "category", "category_id", "reason", "title", "note", "tags"))
+    if a.get("is_high_value"):
+        flags.append("HIGH_VALUE")
+    if re.search(r"\[review\]", text, re.I):
+        flags.append("REVIEW")
+    if re.search(r"管理|后台|admin|仪器共享|实践教学", text, re.I):
+        flags.append("SURFACE:ADMIN")
+    if re.search(r"登录|login|auth|sso|idp", text, re.I):
+        flags.append("LOGIN")
+    out: list[str] = []
+    for f in flags:
+        if f and f not in out:
+            out.append(f)
+    return out
 
 
 def build_coverage(recon: dict, report_md: str | None = None) -> dict:
@@ -189,7 +213,7 @@ def build_coverage(recon: dict, report_md: str | None = None) -> dict:
             reach = "unknown"
         assets.append({
             "host": h, "reachable": reach, "examined": False, "stack": "",
-            "flags": list(_CATEGORY_FLAGS.get(str(a.get("category_id") or "").lower(), [])),
+            "flags": _asset_flags(a),
             "ownership": a.get("ownership"), "high_value": bool(a.get("is_high_value")),
             "category": a.get("category_id"), "reason": (a.get("reason") or "")[:120],
             "source": "guanlan",
@@ -206,10 +230,13 @@ def _selftest() -> int:
         {"asset": "auth.ex.edu.cn", "ownership": "core", "category_id": "auth", "is_high_value": True},
         {"asset": "www.ex.edu.cn", "ownership": "core", "category_id": "portal"},
         {"asset": "dead.ex.edu.cn", "ownership": "core", "category_id": "portal"},
+        {"asset": "ies.ex.edu.cn", "ownership": "core", "category_id": "portal",
+         "reason": "[review] 大型仪器共享管理平台", "is_high_value": True},
         {"asset": "spam.unrelated.com", "ownership": "unrelated"},
         {"asset": "0.vpn.ex.edu.cn", "ownership": "core", "category_id": "vpn"},
     ]}
     report = ("# R\n## 3. 已确认可达资产\n| auth.ex.edu.cn | 200 | t |\n| www.ex.edu.cn | 200 | t |\n"
+              "| ies.ex.edu.cn | 200 | t |\n"
               "## 5. 低质量\n| dead.ex.edu.cn | 404 | |\n")
     cov = build_coverage(recon, report)
     h = {a["host"]: a for a in cov["assets"]}
@@ -220,11 +247,13 @@ def _selftest() -> int:
         ("待验证(不在 report)→ unknown(轴B: 不纠缠)", h["0.vpn.ex.edu.cn"]["reachable"] == "unknown"),
         ("auth category → LOGIN flag(供深度门)", "LOGIN" in h["auth.ex.edu.cn"]["flags"]),
         ("vpn category → LOGIN flag", "LOGIN" in h["0.vpn.ex.edu.cn"]["flags"]),
+        ("[review]/高价值管理面 → REVIEW/HIGH_VALUE/SURFACE:ADMIN flags",
+         all(f in h["ies.ex.edu.cn"]["flags"] for f in ("REVIEW", "HIGH_VALUE", "SURFACE:ADMIN"))),
         ("portal 无 flag", h["www.ex.edu.cn"]["flags"] == []),
         ("examined=0 全 False(零重探, 渗透时才检视)", cov["examined"] == 0 and all(a["examined"] is False for a in cov["assets"])),
         ("high_value 透传", h["auth.ex.edu.cn"]["high_value"] is True),
         ("source 标 guanlan-adapter", "guanlan" in cov["source"]),
-        ("reachable 计数 = 已确认可达数(2)", cov["reachable"] == 2),
+        ("reachable 计数 = 已确认可达数(3)", cov["reachable"] == 3),
         ("无 report → 全 unknown(降级不崩)", all(a["reachable"] == "unknown" for a in build_coverage(recon, None)["assets"])),
     ]
     # Codex 复审 WARN#1: 无 ownership 的 recon, unknown-scope 无关 host 即便列在『已确认可达』也不标 reachable True

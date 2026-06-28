@@ -239,6 +239,24 @@ def check_evidence_certainty(run_dir: Path) -> list[str]:
             for r in parse_evidence(run_dir) if r["confirmed"] and not r["has_control"]]
 
 
+_ALLOWED_CERTAINTY = {1.0, 0.8, 0.5, 0.3}
+
+
+def check_certainty_scale(run_dir: Path) -> list[str]:
+    """证据硬门: certainty 只能使用 canonical 四级刻度。否则 0.7/0.75/0.85
+    这种"看起来精细"的分数会绕开证据门含义, 让单次观测被包装成准确认。"""
+    errors: list[str] = []
+    for r in parse_evidence(run_dir):
+        off = sorted({c for c in r["certainties"] if c not in _ALLOWED_CERTAINTY})
+        if off:
+            vals = ", ".join(f"{c:g}" for c in off)
+            errors.append(
+                f"证据硬门(certainty 刻度): evidence {r['id']} 使用非标准 certainty {vals} —— "
+                "只允许 1.0 / 0.8 / 0.5 / 0.3。单次观测、timeout、redirect、block page、"
+                "无对照指纹通常应降到 0.5 或 0.3。")
+    return errors
+
+
 # 布局漂移(断-2): evidence/ 放传感器证据, classify/ 放 coverage, scripts/ 放 PoC; run 根目录
 # 只该有核心 .md + 自动派生的 evidence.json/coverage.json/graph.json。证据/草稿散落根目录虽仍能被
 # _resolve_artifact 找到(收口门不坏), 但证据与草稿混作一团、不利审计 —— WARN 提醒归位(不硬失败,
@@ -533,6 +551,205 @@ def check_reason_pass(run_dir: Path) -> list[str]:
     return []
 
 
+_HIGH_THREAT_ROLES = {"admin-mgmt", "data-pii", "identity-auth"}
+
+
+def check_threat_triage(run_dir: Path) -> list[str]:
+    """威胁分级护栏(警告). 高威胁角色(admin-mgmt/data-pii/identity-auth) + public-unauth
+    暴露面的前沿若仅被 deferred 却无 E-entry 攻击记录, 提示: 这些是最高价值的未打前沿,
+    deferred 不能当免费逃生口。只 WARN 不硬卡(威胁分级是优先级信号, 非闸门)。"""
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return []
+    text = fr.read_text(encoding="utf-8", errors="replace")
+    # 收集 evidence.md 里出现过的 F-id(被 E-entry 引用)
+    ev = run_dir / "evidence.md"
+    ev_text = ev.read_text(encoding="utf-8", errors="replace").lower() if ev.exists() else ""
+    warns: list[str] = []
+    # 扫描整个 frontier.md 所有 ### F-XXX 块，找出含 [DEFERRED] 标记的前沿
+    for block in re.split(r"(?=^###\s+F-\d+)", text, flags=re.MULTILINE):
+        if not re.match(r"^###\s+F-\d+", block.lstrip()):
+            continue
+        head = block.strip().splitlines()[0][:48]
+        # 只处理 deferred 前沿（标题中含 [DEFERRED] 或位于 ## Deferred Fronts 区段之后
+        # 的下一个 ## 之前且该区段内的块本身就是 deferred）
+        lines = block.strip().splitlines()
+        heading = lines[0] if lines else ""
+        is_deferred = "[DEFERRED]" in heading.upper()
+        if not is_deferred:
+            # 兼容旧格式：块位于 ## Deferred Fronts 区段内（标题无显式 [DEFERRED] 标记）
+            # 通过回溯定位该块所属的 ## 区段来判断
+            fid_match = re.match(r"(###\s+F-\d+)", heading)
+            if fid_match:
+                block_start = text.find(fid_match.group(1))
+            else:
+                block_start = text.find(heading)
+            if block_start < 0:
+                continue
+            prefix = text[:block_start]
+            # 找到该块之前最近的一个 ## 标题
+            last_h2 = re.findall(r"^##\s+(.*?)$", prefix, re.MULTILINE)
+            if not last_h2 or not last_h2[-1].strip().lower().startswith("deferred"):
+                continue
+        # 提取 Threat role
+        tr_m = re.search(r"Threat role\s*[:：]\s*(.+)", block, re.I)
+        te_m = re.search(r"Threat exposure\s*[:：]\s*(.+)", block, re.I)
+        if not tr_m or not te_m:
+            continue
+        role = tr_m.group(1).strip().lower()
+        exposure = te_m.group(1).strip().lower()
+        if role not in _HIGH_THREAT_ROLES:
+            continue
+        if exposure != "public-unauth":
+            continue
+        # 检查是否有 E-entry 引用
+        fid = re.match(r"###\s+(F-\d+)", block.lstrip())
+        fid_str = fid.group(1).lower() if fid else ""
+        has_evidence = bool(fid_str and fid_str in ev_text)
+        if not has_evidence:
+            warns.append(
+                f"威胁分级: {head!r} threat={role} exposure={exposure} (HIGH+) 仅 deferred "
+                f"却无 evidence 记录(E-entry) —— 高价值未打前沿, deferred 不能当免费逃生口。"
+                "先对其 unauth 面实打(据 knowledge/_lexicon.md 取适配类)记 E-xxx, 再 defer。")
+    return warns
+
+
+def check_surface_populated(run_dir: Path) -> list[str]:
+    """surface.md 填充护栏(警告). surface.md 模板存在但 Entry Points 或 Assets 部分
+    空内容(只有模板占位符或空行) —— 提示 driver 填充 surface.md。模板已建, 只是使用
+    纪律缺失。只 WARN 不 HARD FAIL —— surface.md 的填充是质量信号不是结构要求。"""
+    sf = run_dir / "surface.md"
+    if not sf.exists():
+        return []
+    text = sf.read_text(encoding="utf-8", errors="replace")
+    warns: list[str] = []
+
+    def _section_empty(sec_name: str) -> bool:
+        """提取 ## sec_name 到下一个同级/上级标题之间的正文, 剥掉空行/空bullet后判空。"""
+        m = re.search(rf"^##\s+{re.escape(sec_name)}\s*$(.*?)(?=^##\s|\Z)", text, re.MULTILINE | re.DOTALL)
+        if not m:
+            return True  # 节标题都不存在
+        body = m.group(1).strip()
+        # 剥 HTML 注释、模板占位
+        body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+        body = re.sub(r"<[^>]*>", "", body)
+        kept: list[str] = []
+        for line in body.splitlines():
+            s = line.strip().lstrip("-*+ ").strip()
+            if s:
+                kept.append(s)
+        return len("".join(kept)) == 0
+
+    missing: list[str] = []
+    if _section_empty("Entry Points"):
+        missing.append("Entry Points")
+    if _section_empty("Assets"):
+        missing.append("Assets")
+    if missing:
+        warns.append(
+            f"surface.md 未填充: {'/'.join(missing)} 部分仍为空(模板存在但未被 driver 填充) —— "
+            "surface.md 模板已建, 将攻击过程中发现的 distinct app、入口点路径写入对应部分。"
+            "攻击面记录 = 攻击过程的自然产物, 不是独立文档工作。")
+    return warns
+
+
+def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warns: list[str] = []
+
+    confirmed_n = sum(1 for r in parse_evidence(run_dir) if r["confirmed"])
+
+    decisions_path = run_dir / "decisions.md"
+    decisions_text = decisions_path.read_text(encoding="utf-8", errors="replace") if decisions_path.exists() else ""
+    decisions_n = len(re.findall(r"^## D-\d+", decisions_text, flags=re.MULTILINE))
+
+    review_path = run_dir / "review.md"
+    review_text = review_path.read_text(encoding="utf-8", errors="replace") if review_path.exists() else ""
+    independent_reviews = list(re.finditer(r"(?im)^##\s+(?:Independent Review|独立复审)\b", review_text))
+    last_independent_review = independent_reviews[-1] if independent_reviews else None
+    has_independent_review = last_independent_review is not None
+    evidence_path = run_dir / "evidence.md"
+    review_stale = False
+    if has_independent_review and evidence_path.exists() and review_path.exists():
+        try:
+            review_stale = evidence_path.stat().st_mtime > review_path.stat().st_mtime
+        except OSError:
+            review_stale = False
+    has_fresh_independent_review = has_independent_review and not review_stale
+    review_gap = ("without fresh independent review (evidence.md newer than review.md)"
+                  if review_stale else "without independent review")
+
+    if confirmed_n and decisions_n >= 4 and not has_fresh_independent_review:
+        errors.append(
+            f"peer_review overdue: {confirmed_n} confirmed entries {review_gap} for >3 cycles "
+            "— run tools/peer_review.py --into-run")
+
+    if decisions_n >= 5 and not has_fresh_independent_review:
+        errors.append(f"Reviewer cycle overdue: {decisions_n} decisions {review_gap}")
+
+    frontier_path = run_dir / "frontier.md"
+    if frontier_path.exists():
+        frontier_text = frontier_path.read_text(encoding="utf-8", errors="replace")
+        for block in re.split(r"(?=^###\s+F-\d+)", frontier_text, flags=re.MULTILINE):
+            fm = re.match(r"^###\s+(F-\d+)", block.lstrip())
+            if not fm:
+                continue
+            sm = re.search(r"(?im)^\s*-?\s*Status\s*[:：]\s*(.+)$", block)
+            status = sm.group(1).strip().lower() if sm else ""
+            if "open" not in status and "probing" not in status:
+                continue
+            for bm in re.finditer(r"Same barrier failures:\s*(\d+)", block):
+                n = int(bm.group(1))
+                if n >= 3:
+                    warns.append(
+                        f"Front {fm.group(1)}: {n} same-barrier failures — "
+                        "explicit continue/pivot decision required")
+
+    coverage_path = run_dir / "classify" / "coverage.json"
+    if coverage_path.exists():
+        try:
+            coverage = json.loads(coverage_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            coverage = None
+        if isinstance(coverage, dict):
+            assets = coverage.get("assets", [])
+            if isinstance(assets, list):
+                reachable = {_norm_host(a.get("host")) for a in assets
+                             if isinstance(a, dict) and a.get("reachable") is True and a.get("host")}
+                reachable.discard("")
+                touched_hay = _evidence_blocks_text(run_dir)
+                if frontier_path.exists():
+                    frontier_text = frontier_path.read_text(encoding="utf-8", errors="replace")
+                    fronts = []
+                    for block in re.split(r"(?=^###\s+F-\d+)", frontier_text, flags=re.MULTILINE):
+                        if re.match(r"^###\s+F-\d+", block.lstrip()):
+                            fronts.append(block)
+                    touched_hay += "\n" + "\n".join(fronts).lower()
+
+                def _touched(h: str) -> bool:
+                    if re.search(r"(?<![\w.\-])" + re.escape(h) + r"(?![\w.\-])", touched_hay):
+                        return True
+                    label = h.split(".")[0]
+                    return bool(label and re.search(r"(?<![\w.\-])" + re.escape(label) + r"(?![\w.\-])",
+                                                     touched_hay))
+
+                unexamined = [h for h in sorted(reachable) if not _touched(h)]
+                unexamined_n = len(unexamined)
+                reachable_n = len(reachable)
+                if reachable_n:
+                    ratio = unexamined_n / reachable_n
+                    if ratio > 0.7:
+                        warns.append(
+                            f"Coverage gap: {unexamined_n}/{reachable_n} reachable assets unexamined "
+                            "— breadth before depth")
+                    if ratio > 0.9 and decisions_n >= 5 and "depth-first-override" not in decisions_text:
+                        errors.append(
+                            f"Coverage gap hard fail: {unexamined_n}/{reachable_n} reachable assets unexamined "
+                            "— breadth before depth")
+
+    return errors, warns
+
+
 # 强收口措辞 —— 出现这些"已穷尽/无可利用/打不动"的断言时, 触发覆盖核验(P0-1)
 CLOSURE_CLAIMS = [
     "无攻击面", "无可利用", "探尽", "测尽", "都无法", "全无", "均无确认",
@@ -674,6 +891,64 @@ def check_untested_assets(run_dir: Path) -> list[str]:
             "兜底在后, 一个别落(同栈簇可在一个 front 里列全成员一起裁决, 不必逐个重打)。"]
 
 
+def _evidence_blocks_text(run_dir: Path) -> str:
+    """Only text inside normative `## E-xxx` blocks counts as an evidence entry."""
+    p = run_dir / "evidence.md"
+    if not p.exists():
+        return ""
+    raw = p.read_text(encoding="utf-8", errors="replace")
+    parts = []
+    for sec in re.split(r"(?m)^(?=##\s)", raw):
+        head = sec.splitlines()[0] if sec.strip() else ""
+        if re.search(r"\bE-\d+\b", head):
+            parts.append(sec)
+    return "\n".join(parts).lower()
+
+
+def _review_marked_asset(a: dict) -> bool:
+    flags = [str(f).upper() for f in (a.get("flags") or [])]
+    text = " ".join(str(a.get(k) or "") for k in (
+        "host", "category", "category_id", "reason", "note", "title", "verdict", "source"))
+    return (
+        bool(a.get("high_value"))
+        or "REVIEW" in flags
+        or "HIGH_VALUE" in flags
+        or any(f.startswith("SURFACE:ADMIN") for f in flags)
+        or bool(re.search(r"\[review\]|管理|后台|admin|仪器共享|实践教学", text, re.I))
+    )
+
+
+def check_review_assets_have_evidence(run_dir: Path) -> list[str]:
+    """收口硬门(高价值/review 资产落账): recon 标成 [review]/高价值/管理面的可达资产,
+    不能只在 frontier 里一句话带过, 必须有 E-entry 记录实际探测结果。成功、加固、登录门控、
+    WAF/超时都可以, 但都要有可复核条目, 防 recon 的高价值目标从证据账本里蒸发。"""
+    covs = list(run_dir.glob("**/coverage.json"))
+    if not covs:
+        return []
+    try:
+        cov = json.loads(covs[0].read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return []
+    if not isinstance(cov, dict):
+        return []
+    targets = {_norm_host(a.get("host")) for a in cov.get("assets", [])
+               if isinstance(a, dict) and a.get("reachable") is True and a.get("host")
+               and _review_marked_asset(a)}
+    targets.discard("")
+    if not targets:
+        return []
+    ev = _evidence_blocks_text(run_dir)
+    missing = [h for h in sorted(targets)
+               if not re.search(r"(?<![\w.\-])" + re.escape(h) + r"(?![\w.\-])", ev)]
+    if not missing:
+        return []
+    shown = ", ".join(missing[:15]) + (" …" if len(missing) > 15 else "")
+    return [f"收口硬门(recon review 资产未落 E-entry): {len(missing)}/{len(targets)} 个"
+            f"【[review]/高价值/管理面】可达资产没有 evidence.md 的 E-xxx 探测记录: {shown}。"
+            "这些目标可以 deferred, 但 deferred 也要引用 E-entry(登录门控/WAF/当前出口不可达/加固无差分等), "
+            "不能只留在 recon 或 frontier prose 里。"]
+
+
 def check_unattacked_surface(run_dir: Path) -> list[str]:
     """收口硬门(深度层 anti-lump —— deferred 不是新 lump): coverage 里【带攻击面(LOGIN flag, 或信号驱动的
     SURFACE:* 子类型: API/UPLOAD/ADMIN/SWAGGER/GRAPHQL/SSO/URL_FETCH/...)】的可达资产, 必须在 **evidence.md**
@@ -705,16 +980,7 @@ def check_unattacked_surface(run_dir: Path) -> list[str]:
     # (否则把 host 名 dump 进文件任意处即可蒙混; 绑到 E-条目才算"有攻击记录")。与 parse_evidence 同源:
     # 按【行首】`## ` 分节、取节头含 E-\d+ 的节正文 —— 锚定行首防 `### E-1`/行内 `## E-1`/`##E-1` 等
     # 非规范头蒙混(Codex round-2 不锚定残留)。
-    ev = ""
-    p = run_dir / "evidence.md"
-    if p.exists():
-        raw = p.read_text(encoding="utf-8", errors="replace")
-        parts = []
-        for sec in re.split(r"(?m)^(?=##\s)", raw):
-            head = sec.splitlines()[0] if sec.strip() else ""
-            if re.search(r"\bE-\d+\b", head):
-                parts.append(sec)
-        ev = "\n".join(parts).lower()
+    ev = _evidence_blocks_text(run_dir)
     unattacked = [h for h in sorted(surf)
                   if not re.search(r"(?<![\w.\-])" + re.escape(h) + r"(?![\w.\-])", ev)]
     if not unattacked:
@@ -874,6 +1140,8 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
 
     # 硬门(测的层 anti-lump / 不漏测): coverage 里每个【可达】资产都要被驱动到 verdict, 不能只 examined
     errors.extend(check_untested_assets(run_dir))
+    # 硬门(recon review 资产落账): 高价值/管理面可达资产必须有 E-entry, frontier prose 不够
+    errors.extend(check_review_assets_have_evidence(run_dir))
     # 硬门(深度层 anti-lump): 带登录攻击面的可达资产必须有 evidence 攻击记录, deferred 不是免费逃生口
     errors.extend(check_unattacked_surface(run_dir))
     # 硬门(强制复盘): 每次渗透收口都要落 retrospective.md, 诚实写【自身问题】+【框架/工具问题】
@@ -887,6 +1155,16 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
             "收口硬门(P0-1): report 含强收口断言, 但 review.md 无【独立复审 / Independent "
             "Review】记录。自评治不了自评偏见; 收口前【必须】派独立 Reviewer 子代理(常驻授权, "
             "见 review/independent-reviewer.md)并落 review.md。撤回收口措辞或补复审后再过。")
+
+    # 硬门(P1): 收口时检查 UploadRegistry —— 未清理的上传测试残留不得留后门
+    from harness.guard import UploadRegistry
+    outstanding = UploadRegistry().outstanding(run_dir.name)
+    if outstanding:
+        refs = ", ".join(it["ref"] for it in outstanding[:5])
+        errors.append(
+            f"收口硬门(P1): UploadRegistry 有 {len(outstanding)} 个未清理的上传残留 "
+            f"({refs}{'…' if len(outstanding) > 5 else ''})。"
+            "收口前必须 mark_cleaned 所有上传测试产物, 不留后门残留。")
 
     # 硬门(P1): 收口时每条 Certainty>=0.8 必须引用 run 目录下真实存在的产物文件。
     # 结构闸门只查字段在不在, 查不出"声称确认却无产物"; 实战两次复审都抓到这类假证据。
@@ -928,6 +1206,7 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
 def _selftest() -> int:
     """Regression for the structured evidence parser (parse_evidence + the gates that
     consume it). Mirrors check_hook's self-testing pattern. No network, no run dir."""
+    import os
     import tempfile
     d = Path(tempfile.mkdtemp())
     (d / "ev_real.html").write_text("x" * 10, encoding="utf-8")
@@ -974,6 +1253,8 @@ def _selftest() -> int:
                                                  for w in check_evidence_certainty(d))),
         ("control entries not flagged", not any(("E-001" in w or "E-002" in w)
                                                 for w in check_evidence_certainty(d))),
+        ("非标准 certainty -> hard error (E-004=0.9)", any("E-004" in e and "0.9" in e
+                                                        for e in check_certainty_scale(d))),
         ("contradiction: refuted-but-confirmed E-001", any("E-001" in w
                                                            for w in check_ledger_contradiction(d))),
         ("no confirmed-missing-artifact FP", evidence_entries_missing_artifact(d) == []),
@@ -1181,6 +1462,65 @@ def _selftest() -> int:
         ("auto-review: 未收口 -> 不触发(不建 review.md)", not (d11 / "review.md").exists()),
     ]
 
+    # --- intermediate gates: fresh review, live coverage, same-barrier status filtering ---
+    _five_decisions = "# Decisions\n" + "\n".join(
+        f"## D-{i:03d}\n- Chosen front: F-001\n" for i in range(1, 6))
+
+    d_mid_cov = Path(tempfile.mkdtemp())
+    (d_mid_cov / "classify").mkdir()
+    (d_mid_cov / "classify" / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "alpha.example", "reachable": True, "examined": False},
+        {"host": "https://bravo.example:8443", "reachable": True, "examined": False},
+        {"host": "charlie.example", "reachable": True, "examined": False}]}), encoding="utf-8")
+    (d_mid_cov / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- touched alpha/bravo during probing\n", encoding="utf-8")
+    (d_mid_cov / "frontier.md").write_text(
+        "# Frontier\n### F-001\n- Status: open\n- charlie login gate\n", encoding="utf-8")
+    (d_mid_cov / "decisions.md").write_text(_five_decisions, encoding="utf-8")
+    (d_mid_cov / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    mid_cov_e, mid_cov_w = check_intermediate_gates(d_mid_cov)
+
+    d_mid_fresh = Path(tempfile.mkdtemp())
+    evp = d_mid_fresh / "evidence.md"
+    rvp = d_mid_fresh / "review.md"
+    evp.write_text("# Evidence Ledger\n## E-001\n- Certainty: 1.0\n", encoding="utf-8")
+    rvp.write_text("# Review\n## 独立复审\n- ok\n", encoding="utf-8")
+    (d_mid_fresh / "decisions.md").write_text(_five_decisions, encoding="utf-8")
+    os.utime(evp, (1000, 1000))
+    os.utime(rvp, (1010, 1010))
+    fresh_review_e, _ = check_intermediate_gates(d_mid_fresh)
+
+    d_mid_stale = Path(tempfile.mkdtemp())
+    evp2 = d_mid_stale / "evidence.md"
+    rvp2 = d_mid_stale / "review.md"
+    evp2.write_text("# Evidence Ledger\n## E-001\n- Certainty: 1.0\n", encoding="utf-8")
+    rvp2.write_text("# Review\n## Independent Review\n- old\n", encoding="utf-8")
+    (d_mid_stale / "decisions.md").write_text(_five_decisions, encoding="utf-8")
+    os.utime(rvp2, (1000, 1000))
+    os.utime(evp2, (1010, 1010))
+    stale_review_e, _ = check_intermediate_gates(d_mid_stale)
+
+    d_mid_barrier = Path(tempfile.mkdtemp())
+    (d_mid_barrier / "frontier.md").write_text(
+        "# Frontier\n"
+        "### F-001\n- Status: closed\n- Same barrier failures: 5\n\n"
+        "### F-002\n- Status: deferred\n- Same barrier failures: 5\n\n"
+        "### F-003\n- Status: open\n- Same barrier failures: 3\n\n"
+        "### F-004\n- Status: probing\n- Same barrier failures: 4\n", encoding="utf-8")
+    _, barrier_w = check_intermediate_gates(d_mid_barrier)
+    checks += [
+        ("intermediate coverage: stale examined=false ignored when E/front touched hosts",
+         not any("Coverage gap" in x for x in (mid_cov_e + mid_cov_w))),
+        ("intermediate review: 独立复审 header counts when review is fresh",
+         not any("peer_review overdue" in e or "Reviewer cycle overdue" in e for e in fresh_review_e)),
+        ("intermediate review: evidence newer than review makes review stale",
+         any("peer_review overdue" in e for e in stale_review_e)
+         and any("Reviewer cycle overdue" in e for e in stale_review_e)),
+        ("intermediate same-barrier: closed/deferred fronts skipped, open/probing still warn",
+         "F-001" not in "\n".join(barrier_w) and "F-002" not in "\n".join(barrier_w)
+         and "F-003" in "\n".join(barrier_w) and "F-004" in "\n".join(barrier_w)),
+    ]
+
     # --- 操作录像软警 (check_replay_evidence) ---
     d12 = Path(tempfile.mkdtemp())
     (d12 / "evidence.md").write_text(
@@ -1344,7 +1684,7 @@ def _selftest() -> int:
     (d19 / "classify").mkdir()
     (d19 / "classify" / "coverage.json").write_text(json.dumps({"assets": [
         {"host": "login1.example", "reachable": True, "flags": ["LOGIN", "DYN"]},
-        {"host": "login2.example", "reachable": True, "flags": ["LOGIN"]},      # 未打
+        {"host": "login2.example", "reachable": True, "flags": ["LOGIN"], "high_value": True},      # 未打
         {"host": "login3.example", "reachable": True, "flags": ["LOGIN"]},      # 只在文件头提, 不在 E 块
         {"host": "login4.example", "reachable": True, "flags": ["LOGIN"]},      # 在非规范 ### E-9 头, 不算 E 块
         {"host": "static.example", "reachable": True, "flags": ["DYN"]},        # 非攻击面(DYN-only), 不要求
@@ -1355,6 +1695,7 @@ def _selftest() -> int:
         "### E-9 login4.example\n"     # 非规范 3-# 头(锚定测试): 不该被当 E 块
         "## E-001\n- Action: 打 login1.example 登录 SQLi/枚举 → 加固无差分\n", encoding="utf-8")
     ua2 = (check_unattacked_surface(d19) or [""])[0]
+    review_missing = (check_review_assets_have_evidence(d19) or [""])[0]
     checks += [
         ("深度门: 攻击过(E块内点到)的登录面不报", "login1.example" not in ua2),
         ("深度门: 未打(evidence 无)的登录面被报", "login2.example" in ua2),
@@ -1363,10 +1704,13 @@ def _selftest() -> int:
         ("深度门: DYN-only(无攻击面)不要求攻击记录", "static.example" not in ua2),
         ("深度门: 非登录攻击面 SURFACE:API 未打也被报(不只LOGIN, Codex#4)", "api1.example" in ua2),
         ("深度门: 不可达登录面不计入", "downlogin.example" not in ua2),
+        ("review资产门: 高价值/管理面可达资产无 E-entry -> 报 login2.example", "login2.example" in review_missing),
+        ("review资产门: 普通低价值资产不报", "static.example" not in review_missing),
     ]
     (d19 / "evidence.md").write_text(
         "# Evidence\n## E-001 login1.example login2.example login3.example login4.example api1.example\n", encoding="utf-8")
     checks.append(("深度门: 登录面都进 E 块 → 不报", check_unattacked_surface(d19) == []))
+    checks.append(("review资产门: 高价值/管理面都进 E 块 → 不报", check_review_assets_have_evidence(d19) == []))
     checks.append(("深度门: 无 coverage → 不报(不强加)", check_unattacked_surface(Path(tempfile.mkdtemp())) == []))
     # 非 dict coverage(list/scalar)不崩(Codex 健壮性, 两门同修)
     d20 = Path(tempfile.mkdtemp()); (d20 / "classify").mkdir()
@@ -1495,6 +1839,9 @@ def main() -> int:
     # Derive the structured evidence sidecar once (queryable; also memoizes the parse).
     write_evidence_index(run_dir, parse_evidence(run_dir))
 
+    # Evidence hard gate: certainty must use the canonical 1.0 / 0.8 / 0.5 / 0.3 scale.
+    errors.extend(check_certainty_scale(run_dir))
+
     # Quality warnings (do not fail the structural gate; surface for the driver).
     warnings = check_evidence_certainty(run_dir)
     warnings.extend(check_dangling_citations(run_dir))  # 死引用(E-012 洞): 逐条报
@@ -1507,6 +1854,8 @@ def main() -> int:
     warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)
     warnings.extend(check_hints(run_dir))              # 操作者 Hint: pending 未吸收
     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
+    warnings.extend(check_threat_triage(run_dir))     # 威胁分级: HIGH+ deferred 无 E-entry → WARN
+    warnings.extend(check_surface_populated(run_dir))  # surface.md 填充: Entry Points/Assets 空 → WARN
     # 自动异构复审(--auto-peer-review): 收口时若缺独立复审记录, 自动跑 peer_review 写进 review.md
     # 满足下面的独立复审硬门。慢(几分钟)+数据出境, 默认关、仅显式 flag; selftest 不走这。
     if args.auto_peer_review:
@@ -1517,6 +1866,9 @@ def main() -> int:
         rv_warns, rv_errors = run_replay_verify(run_dir)
         warnings.extend(rv_warns)
         errors.extend(rv_errors)
+    intermediate_errors, intermediate_warns = check_intermediate_gates(run_dir)
+    errors.extend(intermediate_errors)
+    warnings.extend(intermediate_warns)
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
     errors.extend(closure_errors)

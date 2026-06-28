@@ -35,8 +35,9 @@ knowledge/weaponized/*
 !knowledge/weaponized/.gitkeep
 !knowledge/weaponized/README.md
 
-# Engagement egress proxy config (operator's relay endpoint — local, never pushed)
+# Egress proxy configs (operator's relay endpoints — local, never pushed)
 tools/harness/proxy.conf
+tools/harness/codex_proxy.conf
 
 # Local scratch
 tmp/

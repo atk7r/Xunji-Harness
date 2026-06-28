@@ -46,17 +46,15 @@ hypothesis in an observed fact, not in speculation.
   are strongest. (This is knowledge-and-reasoning, not a payload library or a
   fixed checklist — derive the specific check from the specific technology.)
 - The grounding base **is** where those weak-point anchors live — consult it on a
-  fingerprint hit, do not re-derive a known stack from memory. When an observation
-  grounds a product — you fetched the asset while attacking it and recognized the stack
-  (or an opt-in `classify_hosts` tagged it `kb:<id>`) — retrieve the entry:
-  `python tools/knowledge_match.py --body <saved-response>` surfaces its
-  Recognition + Weak-Point Anchors (class + mechanism + CVE) to aim the next
-  per-target check, and `python tools/xday_match.py --body …` checks whether a
-  stored **local** exploit exists for that stack (xday has no public payload to
-  research — the local copy is the only source; for a public vuln, take the anchor
-  and craft from internet research instead). Consult **after** a live recognition
-  match and adapt to the target — never pre-load the base and walk it as a checklist
-  (that is the blind scanner the project rejects).
+  fingerprint hit, don't re-derive a known stack from memory. After an observation
+  grounds a product (you recognized the stack while attacking it, or `classify_hosts`
+  tagged it `kb:<id>`), retrieve the entry via `knowledge_match --body` (Recognition +
+  Weak-Point Anchors — class + mechanism + CVE — to aim the next per-target check) and
+  `xday_match --body` (any stored **local** exploit; xday has no public payload to
+  research, so the local copy is the only source — for a public vuln, take the anchor and
+  craft from internet research). Command mechanics: ROUTER "Verification Tools". Consult
+  **after** a live recognition match and adapt to the target — never pre-load the base and
+  walk it as a checklist (the blind scanner the project rejects).
 - The flywheel has a **write-back end**, not just a read end: when recognition
   **misses** on a clearly-fingerprinted product (`knowledge_match --body` returns
   nothing), that gap is the base's blind spot. Seed a grounding entry —
@@ -100,6 +98,8 @@ Two discipline rules that apply to ALL entries (learned the hard way — ujs_202
   have prose, it is ≤ 0.5. (codex caught E-010/E-013/E-021/E-022 marked 0.8 with prose-only or
   non-substantiating artifacts.) Run the independent/heterogeneous reviewer (`peer_review --into-run`)
   **periodically during the hunt** — after any ≥ 0.8 assignment or false positive — not only at closure.
+  Codex backend requires its own dedicated proxy (`CODEX_PROXY` env or `tools/harness/codex_proxy.conf`);
+  see `review/independent-reviewer.md` "Codex 代理（必须）".
 
 ## Vulnerability Chains
 
@@ -123,21 +123,11 @@ its own discipline:
 
 ## Attribution Checks
 
-Before treating a signal as proof, answer:
-
-- Was this caused by the current verification action?
-- Did the page or environment already contain this signal?
-- Is there a normal explanation such as encoding, reflection, dynamic content,
-  caching, access control, gateway behavior, or test data?
-- Could the vulnerable-looking response be deceptive — a honeypot, instrumented
-  decoy, or gateway stub that presents a convincing weakness it does not
-  actually have? A single convincing observation cannot rule this out; require
-  controlled replay or a second independent signal before confirming.
-- Is the asset definitely in scope and owned by the target program?
-- Is the weakness merely present, or is impact actually demonstrated?
-
-If the answer is unclear, keep the finding as suspected and record the missing
-evidence in the run ledger.
+Before treating a signal as proof, run the attribution checklist in
+`docs/cognition/reference.md` (load in Hunter phase): rule out self-caused /
+pre-existing / benign (encoding, caching, access control, gateway) / deceptive-decoy
+explanations, confirm the asset is in scope + owned, and present-vs-impact-demonstrated.
+Unclear → keep the finding suspected, record the missing evidence in the run ledger.
 
 ## Stop / Continue
 
@@ -186,11 +176,18 @@ Watch for these signs that the agent is not digging deeply enough:
 - It asks the user what vulnerability class to test next while safe fronts are
   still open.
 - It expands assets but does not pick a high-value front to pursue.
+- It lumps assets by hostname/IP proximity without checking whether they serve
+  different business roles. Threat role mismatch between same-IP or same-hostname-pattern
+  assets is a no-lump signal — they MUST be separate fronts.
 - It stops after a high-value finding and leaves the remaining (especially
   low-value) reachable assets only fingerprinted, never driven to a verdict —
   "examined" lumped as "tested". Prioritise high-value, then auto-continue the
   low-value ones (cheap breadth via `tools/scan.py`); every reachable asset gets a
   verdict (deferred-with-reason counts), one is not skipped.
+- It lets recon `[review]` / high-value / management assets disappear into prose.
+  Those assets need an `E-xxx` entry even when the result is negative, blocked, or
+  current-egress unreachable; otherwise the evidence ledger cannot prove they were
+  actually touched.
 - It marks an asset `deferred` ("need creds" / "low value") **without an attack
   attempt** — treating `deferred` as a free escape hatch (the *deferred-is-the-new-lump*
   hole). For real attack surface (a login form), attack the unauth layer (SQLi / user
@@ -232,31 +229,10 @@ false beliefs.
 
 ## Knowledge: Grounding vs Weaponized — never a blind scanner
 
-The project is a weapon, and the goal is to **use vulnerability / payload knowledge
-to attack** — it is a reasoning attacker, **not a payload scanner**. So the forbidden
-thing is **not "weaponization"**; it is **the blind scanner / playbook** (knowledge
-fired the same way regardless of target) and **publishing weapons** (shipping a
-turnkey kit to the world). Two axes, kept separate:
-
-**Axis 1 — use pattern (attacker vs scanner).** The line is *how* knowledge is used,
-not whether it contains payloads:
-
-- Allowed: a reasoning driver looks knowledge up **after** it identifies a specific
-  target, **adapts** it to that target, and confirms through the evidence gate.
-- Forbidden: pre-loading knowledge and firing it the **same way regardless of
-  target** — exploit playbooks run blindly, scanner wrappers, a JSON orchestrator,
-  mechanical fixed checklists. That is the scanner/playbook the project rejects, and
-  it is forbidden **whether or not** it contains payloads.
-
-**Axis 2 — publication (what ships).** Weaponization is free to author and possess;
-what is gated is publishing it:
-
-- Public grounding tier (`knowledge/*.md`, shipped): recognition signatures,
-  weak-point anchors (class + mechanism + CVE/CNVD reference), verification notes.
-- Weaponized tier (`knowledge/weaponized/*.md`, gitignored) + `poc_library/` + the
-  driver's authored exploits: payloads, chains, PoC. Free to hold; **not pushed**
-  (publishing a turnkey kit is the indiscriminate-harm family the hard floor rejects).
-
-The mistake to avoid: conflating "has payloads" with "is a scanner". Payload
-knowledge makes the attacker sharper; using *any* knowledge as a blind checklist —
-payload or not — is what's forbidden.
+**Use payload knowledge to attack** — a reasoning attacker, **not a payload scanner**.
+The forbidden thing is **not weaponization**; it is the **blind scanner / playbook**
+(knowledge fired the same way regardless of target) + **publishing a turnkey kit**. Look
+knowledge up **after** identifying a target, **adapt** it, confirm through the evidence
+gate; never pre-load and fire it blind (payload or not). The two-axis detail (use-pattern
+vs publication; grounding tier ships, weaponized tier is held-not-pushed) is in
+`docs/cognition/reference.md` — load it when handling the knowledge base.

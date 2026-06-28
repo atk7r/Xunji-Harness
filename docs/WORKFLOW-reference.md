@@ -80,10 +80,16 @@ and ingest it (core "Ingest Existing Intelligence First") before any probing.
 
 ## Entry Points
 
+<!-- NOT OPTIONAL: 攻击过程中将发现的 distinct app 及其入口点路径(URI、参数、方法、auth 要求)
+写入此处。攻击面记录 = 攻击过程的自然产物, 不是独立文档工作 —— 每发现一个独立应用就补一条,
+不要等"写完文档再攻击"。 -->
 - 
 
 ## Trust Boundaries
 
+<!-- NOT OPTIONAL: 记录 auth 边界关系(SSO 域、登录门、内外网隔离、角色域)。这些关系决定
+攻击面之间的 trust 传递(一个入口的凭据能访问哪些其它面), 是组合利用/横向移动的前提信息。
+同样随攻击过程填充, 不作为独立文档任务。 -->
 - 
 
 ## Interesting Signals
@@ -129,6 +135,21 @@ context.
 
 - Front:
 - Why it matters:
+- Threat role: <admin-mgmt|identity-auth|data-pii|transaction|content-cms|proxy-relay|infra>
+- Threat exposure: <public-unauth|login-gated|hardened>
+> **Threat weight matrix (driver-derived priority):**
+>
+> | Threat Role   | public-unauth | login-gated | hardened |
+> |---------------|---------------|-------------|----------|
+> | admin-mgmt    | CRITICAL      | HIGH        | MEDIUM   |
+> | identity-auth | CRITICAL      | HIGH        | MEDIUM   |
+> | data-pii      | HIGH          | MEDIUM      | LOW      |
+> | transaction   | HIGH          | MEDIUM      | LOW      |
+> | content-cms   | MEDIUM        | LOW         | LOW      |
+> | proxy-relay   | MEDIUM        | MEDIUM      | LOW      |
+> | infra         | Depends on specific exposure surface  |           |
+>
+> **Anti-lump rule:** merged assets MUST share the same threat role, else split into separate fronts.
 - Current depth: shallow / moderate / deep
 - Status: open / probing / blocked_type_a / blocked_type_b / deferred / closed
 - Barrier class: none / app-layer / auth-layer / WAF-layer / routing-layer / network-layer / scope-credential-layer
@@ -147,6 +168,8 @@ context.
 ### F-002
 
 - Front:
+- Threat role: <admin-mgmt|identity-auth|data-pii|transaction|content-cms|proxy-relay|infra>
+- Threat exposure: <public-unauth|login-gated|hardened>
 - Why deferred:
 - What would make it worth revisiting:
 - Safety / authorization issue:
@@ -178,6 +201,11 @@ Type B reasoning.
 - Action:
 - Source:
 - Result:
+  - Observed: <仅事实 — HTTP状态码/响应长度/SHA1/URL/页面标题, 禁止推测词>
+  - DataObtained: <none | N条-TYPE — 如 'none' 或 '128条-姓名电话邮箱'>
+  - Mechanism: <利用机制 | none — 如 'POST布尔盲注' 'GET无鉴权返回模板' 'none'>
+  - SeverityBasis: <从 Observed / DataObtained 直接推导, 禁止引用 DataObtained:none>
+  - CodexReview: <条件字段 — Severity >= HIGH 时必填。codex agent 输出: 推荐的 severity + 一句话理由。Driver 只能采纳或降级, 不能升级。>
 - Caused by us: yes / no / unknown
 - Alternative explanation:
 - Certainty: 0.3 / 0.5 / 0.8 / 1.0
@@ -429,6 +457,35 @@ when `report.md` makes a strong closure claim:
 - **WARN** (advisory) if the run lacks a `classify.txt`, a Closed Front lacks an
   evidence id, or a front was closed on a barrier without a Refutes — signals you are
   about to close too early; look harder or downgrade `closed` to `deferred`.
+
+### Run-closure detail (core "Closure Discipline" points that load here)
+
+**Independent review before closure — procedure.** Self-review doesn't fix self-review bias.
+Spawn an independent fresh-context `general-purpose` reviewer
+(`review/independent-reviewer.md`), record findings under `## Independent Review` in
+`review.md`, address every one. **Prefer a heterogeneous reviewer when its cost is paid:**
+if the operator accepts data egress (run findings go to an external vendor — Codex→OpenAI)
+and a backend is up, `tools/peer_review.py --into-run runs/<dir>` (or
+`check_run.py --auto-peer-review`) satisfies the gate with an *orthogonal* model — a
+same-model sub-agent only reduces bias, not the shared blind spots a different vendor
+catches. Absent that consent, the fresh-context sub-agent is the always-available,
+egress-free fallback. Standing authorization granted for the sub-agent — do it without
+re-asking. `check_run.py` HARD-fails a closure claim with no `Independent Review` record.
+
+**Codex proxy is mandatory for the codex backend.** Codex CLI calls OpenAI API through its
+own dedicated proxy channel (`tools/harness/codex_proxy.py`, configured via `CODEX_PROXY`
+env or `tools/harness/codex_proxy.conf`), isolated from the engagement proxy
+(`XUNJI_PROXY`) and the model-API direct channel. Without it, codex is unreachable and
+peer_review falls through to the next backend. See `review/independent-reviewer.md` "Codex
+代理（必须）".
+
+**Mandatory retrospective before closure — procedure.** Every pentest closes with an honest
+`retrospective.md` (scaffolded from `docs/templates/run/retrospective.md`): what *I* (the
+driver) got wrong/slow/missed (wrong calls, tunnel vision, premature closure, evidence-gate
+slips) and where the *framework/tooling* (tools/, hooks, guard, knowledge base, docs) held
+the run back — the basis for the next run being stronger, not a disclaimer. `check_run.py`
+HARD-fails closure if `retrospective.md` is missing or its **Self problems** / **Framework
+problems** sections are empty placeholders.
 
 ## Independent review of safety-critical code (narrow gate)
 

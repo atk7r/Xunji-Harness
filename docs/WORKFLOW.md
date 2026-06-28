@@ -56,6 +56,9 @@ query, not a full re-read of every block. Ask:
 2. Are you **tunnel-visioned** — grinding one front while a higher-value /
    newly-unblocked one sits idle?
 3. Is the active front still the best move, or should you **pivot**?
+4. Are there open HIGH/CRITICAL threat-weight fronts that remain un-attacked or only
+   shallow-examined? (Threat triage — business-role exposure, not just technical
+   exploitability.)
 
 Output: one line in `decisions.md` (`Reason: re-read N fronts; staying on F-00X /
 pivoting to F-00Y because Z`). It only re-prioritizes — it **never closes a front**
@@ -86,6 +89,22 @@ facts (hosts, IPs, titles, banners) as given, and probe only to (1) fill a gap,
 (2) verify a signal a hypothesis needs, or (3) refresh a fact you believe changed —
 saying which in `decisions.md`. Re-collecting existing data wastes the request
 budget, the scarce resource against a rate-limited / WAF target.
+
+## Threat Triage (at Setup)
+
+After `setup_run` builds `coverage.json`, the driver assigns a **threat role** and
+**threat exposure** to every distinct-app cluster and records them in `frontier.md`:
+
+- **Threat role**: `admin-mgmt` / `identity-auth` / `data-pii` / `transaction` /
+  `content-cms` / `proxy-relay` / `infra` — the business function the asset serves.
+- **Threat exposure**: `public-unauth` / `login-gated` / `hardened` — who can reach it.
+
+Clusters that share the same threat role may share a single front. Clusters with
+different threat roles **MUST be split into independent fronts** (anti-lump: same
+hostname/IP pattern does not justify merging assets that serve different business
+roles). The threat weight matrix (reference) derives CRITICAL / HIGH / MEDIUM / LOW
+priority from the role x exposure combination — the driver consults it when choosing
+the next front, but it is a priority signal, never a verdict or a block.
 
 ## Failure Budget
 
@@ -181,6 +200,12 @@ assets were only header / recon-classified, never examined. Before any such clai
   front / evidence (same-stack siblings may share one front that lists them all — do
   not re-attack each, but every member must be accounted for). This forces a driver
   *judgement on every asset*, never a blind scan of every host.
+- **Recon `[review]` / high-value management surfaces must become E-entries.** If
+  upstream recon marks a reachable asset as `[review]`, high-value, admin/management,
+  or otherwise security-sensitive, it cannot remain only in `surface.md` or
+  `frontier.md` prose. Record an `E-xxx` for the actual probe result: reachable login,
+  hardened/blocked, WAF/RASP page, current-egress timeout, or auth boundary. A
+  `deferred` verdict is allowed, but it must cite that E-entry.
 - **Breadth before depth; `deferred` on attack surface is NOT free.** The flow is:
   preliminary-detect **every** asset's surface first (high-value → low-value; do **not**
   tunnel deep on one app while others are unexamined), **then** go to depth. A `deferred`
@@ -190,7 +215,7 @@ assets were only header / recon-classified, never examined. Before any such clai
   symmetric to `confirmed` needing evidence. A bare "deferred (need creds / low value)"
   on a login surface with **no attack attempt** is the *deferred-is-the-new-lump* hole:
   laundering "didn't attack" into "closure". `check_run.py` **hard-fails** a closure with
-  `LOGIN` assets absent from `evidence.md`. Attack the unauth layer first (SQLi / user-enum
+  `LOGIN` / `SURFACE:*` / `[review]` assets absent from `evidence.md`. Attack the unauth layer first (SQLi / user-enum
   / default-creds / WAF-bypass), record the `E-xxx` — its result counts whether it lands,
   is hardened, or is egress-blocked — **then** defer the post-auth (creds-gated) depth. Do
   not stop and ask the operator while attack surface remains unattacked.
@@ -213,36 +238,36 @@ assets were only header / recon-classified, never examined. Before any such clai
   newly-reachable is **new attack surface** (it lands in `coverage_rerun.json`) —
   open/update those fronts and record the decision rather than leaving it parked.
 - **Closed fronts cite an `E-` evidence id**, not prose.
-- **Credentials are ask-then-fallback, never a blocker.** Ask the operator; if none,
-  fall back to unauth / harmless methods and push the unauth surface as far as it
-  goes (`docs/cognition/harmless-verification.md`). Record "needs account (asked,
-  none available)" and keep moving — never fabricate or brute.
+- **Credentials are never a blocker.** Ghost mode: try in order — (1) default/common
+  credentials for the detected stack, (2) weak-password attempts against known
+  usernames (rate-limit aware), (3) self-registration if available, (4) user
+  enumeration + password spray. Record all in evidence ledger; defer only when
+  all four are exhausted AND recorded (backed by E-xxx entries).
+
+  Normal mode: ask the operator first; if none provided, fall back to unauth
+  methods — never fabricate or brute credentials.
 - **Capture grounding knowledge.** If the run fingerprinted a product with no
   `knowledge/` entry, add a `seed` grounding entry before closing
   (`tools/knowledge_seed.py <id> --product … --from-body <saved>` scaffolds a
   `check_knowledge`-compliant skeleton — fill the TODOs).
-- **Independent review before closure (mandatory · HARD gate).** Self-review does
-  not fix self-review bias. Spawn an independent fresh-context `general-purpose`
-  reviewer (`review/independent-reviewer.md`), record findings under an
-  `## Independent Review` heading in `review.md`, and address every one. **Prefer a
-  heterogeneous reviewer when its cost is paid:** if the operator accepts data egress
-  (the run findings go to an external vendor — Codex→OpenAI) and a backend is up,
-  `tools/peer_review.py --into-run runs/<dir>` (or `check_run.py --auto-peer-review`)
-  satisfies this gate with an *orthogonal* model — a same-model sub-agent only reduces
-  bias, not the shared blind spots a different vendor catches. Absent that consent, the
-  fresh-context `general-purpose` sub-agent is the always-available, egress-free
-  fallback. `check_run.py` **hard-fails** a closure claim with no `Independent Review`
-  record. Standing authorization granted for the sub-agent — do it without re-asking.
+- **Independent review before closure (mandatory · HARD gate).** Self-review doesn't fix
+  self-review bias — spawn an independent fresh-context `general-purpose` reviewer
+  (`review/independent-reviewer.md`), record under `## Independent Review` in `review.md`,
+  resolve every finding. Standing-authorized (no re-asking); prefer a heterogeneous reviewer
+  (`tools/peer_review.py --into-run`) when egress is consented. `check_run.py` **hard-fails** a
+  closure with no `Independent Review` record. Procedure: reference "Run-closure detail".
 
-- **Mandatory retrospective before closure (HARD gate).** Every pentest closes with an
-  honest `retrospective.md` (scaffolded from `docs/templates/run/retrospective.md`):
-  what *I* (the driver) got wrong/slow/missed this run — wrong calls, tunnel vision,
-  premature closure, evidence-gate slips — and where the *framework/tooling* (tools/,
-  hooks, guard, knowledge base, docs) held the run back. Not a disclaimer — the basis
-  for the next run being stronger. `check_run.py` **hard-fails** closure if
-  `retrospective.md` is missing or its **Self problems** / **Framework problems**
-  sections are empty placeholders. Quality stays the driver's job; the gate only blocks
-  empty stubs (same line as the independent-review gate).
+- **Mandatory retrospective before closure (HARD gate).** Close every pentest with an
+  honest `retrospective.md` — what *I* got wrong/slow/missed (wrong calls, tunnel vision,
+  premature closure, evidence slips) + where the framework/tooling held the run back; the
+  basis for a stronger next run, not a disclaimer. `check_run.py` **hard-fails** closure if
+  it's missing or its **Self problems** / **Framework problems** are empty stubs. Procedure:
+  reference "Run-closure detail".
+
+- **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
+  independent review resolved, retrospective written), write `GHOST_COMPLETE` at
+  the end of `decisions.md`. The loop driver detects this and stops. No operator
+  review required.
 
 `check_run.py` HARD-fails / WARN mechanics for closure, and the same independent
 review applied to **safety-critical code** changes, are in the reference.

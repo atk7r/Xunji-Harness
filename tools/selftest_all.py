@@ -56,8 +56,13 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("knowledge_match", ["tools/knowledge_match.py", "--selftest"], "fingerprint→knowledge retrieval"),
     ("xday_match",      ["tools/xday_match.py", "--selftest"],      "fingerprint→local xday retrieval"),
     ("knowledge_seed",  ["tools/knowledge_seed.py", "--selftest"],  "fingerprint→knowledge write-back"),
+    # --- loop pipeline ---
+    ("loop_bootstrap",   ["tools/loop_bootstrap.py", "--selftest"],   "autonomous loop launcher"),
+    ("session_handoff",  ["tools/session_handoff.py", "--selftest"],  "session handoff tool"),
+    ("deferred_queue",   ["tools/deferred_queue.py", "--selftest"],   "deferred asset retry manager"),
     # --- PreToolUse / Stop hooks (--selftest flag) ---
     ("safety_gate",    [".claude/hooks/safety_gate.py", "--selftest"], "hard-boundary gate"),
+    ("output_gate",    [".claude/hooks/output_gate.py", "--selftest"], "output drift Stop gate"),
     ("run_gate",       [".claude/hooks/run_gate.py", "--selftest"],    "coverage/depth Stop gate"),
     # --- live-fire safety test (drives safety_gate with real commands) ---
     ("check_hook",     ["tools/check_hook.py"],                   "safety_gate live-fire"),
