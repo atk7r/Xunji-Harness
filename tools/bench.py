@@ -26,6 +26,7 @@ ROADMAP R-1(最高价值缺口): 一把尺子, 让框架改动可被 A/B —— 
 用法:
   python tools/bench.py score <run_dir> <truth.json>
   python tools/bench.py score-all bench/        # 跑 bench/ 下每个 <fixture>/truth.json(各指 run)
+  python tools/bench.py compare baseline.json change.json
   python tools/bench.py --selftest
 """
 from __future__ import annotations
@@ -100,6 +101,67 @@ def _process_check(run_dir: Path, asserts: list) -> list:
     return out
 
 
+def _timeline_metrics(run_dir: Path) -> dict:
+    """Optional recorded timeline metrics.
+
+    If a fixture includes events.jsonl, each line may be:
+      {"ts": 1.0, "type": "request"|"action"|"evidence", ...}
+    This stays artifact-only: no wall clock probing, no target traffic.
+    """
+    p = run_dir / "events.jsonl"
+    out = {"event_requests": 0, "time_to_first_evidence_sec": None}
+    if not p.exists():
+        return out
+    first_activity = None
+    first_evidence = None
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            ev = json.loads(line)
+            ts = float(ev.get("ts"))
+        except Exception:
+            continue
+        typ = str(ev.get("type", "")).lower()
+        if typ == "request":
+            out["event_requests"] += 1
+        if typ in {"request", "action"} and first_activity is None:
+            first_activity = ts
+        if typ == "evidence" and first_evidence is None:
+            first_evidence = ts
+    if first_activity is not None and first_evidence is not None and first_evidence >= first_activity:
+        out["time_to_first_evidence_sec"] = round(first_evidence - first_activity, 3)
+    return out
+
+
+def _closure_check(run_dir: Path, truth: dict) -> dict | None:
+    """Check a recorded closure fixture without treating 'no finding' as failure."""
+    spec = truth.get("expected_closure")
+    if not spec:
+        return None
+    hay = ""
+    for fn in spec.get("in") or ["decisions.md", "review.md", "report.md"]:
+        p = run_dir / fn
+        if p.exists():
+            hay += "\n" + p.read_text(encoding="utf-8", errors="replace").lower()
+    markers = [str(m).lower() for m in spec.get("markers", []) if str(m).strip()]
+    markers_ok = all(m in hay for m in markers)
+    review_ok = True
+    if spec.get("requires_independent_review", False):
+        rp = run_dir / "review.md"
+        review_ok = rp.exists() and "independent review" in rp.read_text(
+            encoding="utf-8", errors="replace").lower()
+    no_positive = True
+    if spec.get("requires_no_positive_findings", True):
+        blocks, _cert, positive = _confirmed_blocks(run_dir)
+        no_positive = not any(eid in positive for eid in blocks)
+    return {
+        "expected": True,
+        "correct": bool(markers_ok and review_ok and no_positive),
+        "markers_ok": markers_ok,
+        "review_ok": review_ok,
+        "no_positive_findings": no_positive,
+    }
+
+
 def score(run_dir: Path, truth: dict) -> dict:
     blocks, cert, positive = _confirmed_blocks(run_dir)
     findings = []
@@ -122,16 +184,27 @@ def score(run_dir: Path, truth: dict) -> dict:
     n_exp = len(findings)
     n_det = sum(1 for f in findings if f["detected"])
     n_cal = sum(1 for f in findings if f["calibrated"])
-    budget = len(list(run_dir.glob("**/*.replay.json")))
+    timeline = _timeline_metrics(run_dir)
+    replay_budget = len(list(run_dir.glob("**/*.replay.json")))
+    budget = max(replay_budget, timeline["event_requests"])
     proc = _process_check(run_dir, truth.get("expected_process", []))
+    budget_max = truth.get("budget", {}).get("max_requests")
+    closure = _closure_check(run_dir, truth)
     return {
         "fixture": truth.get("name", run_dir.name),
         "expected": n_exp, "detected": n_det,
         "detection_rate": round(n_det / n_exp, 3) if n_exp else None,
-        "calibrated": n_cal, "false_positives": len(fps),
+        "calibrated": n_cal,
+        "calibration_rate": round(n_cal / n_det, 3) if n_det else (1.0 if n_exp == 0 else 0.0),
+        "false_positives": len(fps),
+        "false_positive_rate": round(len(fps) / len(truth.get("must_not_flag", [])), 3)
+        if truth.get("must_not_flag") else 0.0,
         "confirmed_total": len(blocks),
         "recorded_requests": budget,
-        "budget_max": truth.get("budget", {}).get("max_requests"),
+        "budget_max": budget_max,
+        "over_budget": bool(budget_max is not None and budget > int(budget_max)),
+        "time_to_first_evidence_sec": timeline["time_to_first_evidence_sec"],
+        "closure": closure,
         "findings": findings, "fp_detail": fps,
         "process": proc,
     }
@@ -146,7 +219,16 @@ def _print_card(s: dict) -> None:
     print(f"  false-pos : {s['false_positives']}   (confirmed entries total: {s['confirmed_total']})")
     bm = s["budget_max"]
     print(f"  budget    : {s['recorded_requests']} recorded requests"
-          + (f" / {bm} max" if bm else "") + "  (lower bound: only --save'd)")
+          + (f" / {bm} max" if bm else "")
+          + ("  OVER" if s.get("over_budget") else "")
+          + "  (lower bound: saved replay or recorded events)")
+    if s.get("time_to_first_evidence_sec") is not None:
+        print(f"  first-evidence: {s['time_to_first_evidence_sec']}s")
+    if s.get("closure"):
+        c = s["closure"]
+        mark = "✓" if c["correct"] else "✗"
+        print(f"  closure   : {mark} markers={c['markers_ok']} review={c['review_ok']} "
+              f"no_positive={c['no_positive_findings']}")
     for f in s["findings"]:
         mark = "✓" if f["detected"] else "✗"
         cal = "" if not f["detected"] else (
@@ -168,15 +250,106 @@ def _print_card(s: dict) -> None:
 
 
 def _is_clean(s: dict) -> bool:
-    """完美 = 全检出 + 全校准 + 零误报 + 所有 must 过程断言都触发。用作退出码(回归/门)。"""
+    """完美 = 全检出 + 全校准 + 零误报 + 预算内 + must 过程断言触发。"""
     proc_ok = all(p["fired"] for p in s.get("process", []) if p["must"])
-    return (s["expected"] > 0 and s["detected"] == s["expected"]
-            and s["calibrated"] == s["expected"] and s["false_positives"] == 0
-            and proc_ok)
+    closure = s.get("closure")
+    closure_ok = closure is None or closure["correct"]
+    detection_ok = (
+        (s["expected"] > 0 and s["detected"] == s["expected"]
+         and s["calibrated"] == s["expected"])
+        or (s["expected"] == 0 and closure is not None)
+    )
+    return (detection_ok and s["false_positives"] == 0 and not s.get("over_budget", False)
+            and proc_ok and closure_ok)
 
 
 def _load_truth(p: Path) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _aggregate(scores: list[dict]) -> dict:
+    total_expected = sum(s["expected"] for s in scores)
+    total_detected = sum(s["detected"] for s in scores)
+    total_calibrated = sum(s["calibrated"] for s in scores)
+    ttfe = [s["time_to_first_evidence_sec"] for s in scores
+            if s.get("time_to_first_evidence_sec") is not None]
+    clean = sum(1 for s in scores if _is_clean(s))
+    closures = [s for s in scores if s.get("closure")]
+    return {
+        "fixtures": len(scores),
+        "clean": clean,
+        "detection_rate": round(total_detected / total_expected, 3) if total_expected else None,
+        "calibration_rate": round(total_calibrated / total_detected, 3) if total_detected else 1.0,
+        "false_positives": sum(s["false_positives"] for s in scores),
+        "false_positive_rate_mean": round(
+            sum(s["false_positive_rate"] for s in scores) / len(scores), 3) if scores else None,
+        "request_budget_over": sum(1 for s in scores if s.get("over_budget")),
+        "request_budget_total": sum(s["recorded_requests"] for s in scores),
+        "time_to_first_evidence_avg_sec": round(sum(ttfe) / len(ttfe), 3) if ttfe else None,
+        "closure_correct": sum(1 for s in closures if s["closure"]["correct"]),
+        "closure_expected": len(closures),
+        "total_expected_findings": total_expected,
+        "total_detected_findings": total_detected,
+        "total_calibrated_findings": total_calibrated,
+    }
+
+
+def _summary(scores: list[dict]) -> dict:
+    return {"summary": _aggregate(scores), "scores": scores}
+
+
+def _print_summary(summary: dict) -> None:
+    a = summary["summary"]
+    print("== bench summary ==")
+    print(f"  fixtures  : {a['clean']}/{a['fixtures']} clean")
+    if a["detection_rate"] is not None:
+        print(f"  detection : {a['total_detected_findings']}/{a['total_expected_findings']} "
+              f"({a['detection_rate']:.0%})")
+    print(f"  calibration: {a['total_calibrated_findings']}/{a['total_detected_findings']} "
+          f"({a['calibration_rate']:.0%})")
+    print(f"  false-pos : {a['false_positives']} "
+          f"(mean trap rate {a['false_positive_rate_mean']:.0%})")
+    print(f"  budget    : {a['request_budget_total']} recorded; "
+          f"{a['request_budget_over']} fixture(s) over max")
+    if a["time_to_first_evidence_avg_sec"] is not None:
+        print(f"  first-evidence avg: {a['time_to_first_evidence_avg_sec']}s")
+    if a["closure_expected"]:
+        print(f"  closure   : {a['closure_correct']}/{a['closure_expected']} correct")
+
+
+def _write_json(path: Path | None, obj: dict) -> None:
+    if not path:
+        return
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _load_score_or_summary(path: Path) -> dict:
+    obj = json.loads(path.read_text(encoding="utf-8"))
+    if "summary" in obj:
+        return obj["summary"]
+    if "scores" in obj:
+        return _aggregate(obj["scores"])
+    return _aggregate([obj])
+
+
+def _compare(baseline: Path, change: Path) -> int:
+    b = _load_score_or_summary(baseline)
+    c = _load_score_or_summary(change)
+    keys = [
+        "detection_rate", "calibration_rate", "false_positives", "request_budget_total",
+        "request_budget_over", "time_to_first_evidence_avg_sec", "closure_correct",
+    ]
+    print("== bench compare ==")
+    print(f"  baseline: {baseline}")
+    print(f"  change  : {change}")
+    for k in keys:
+        bv, cv = b.get(k), c.get(k)
+        if bv is None and cv is None:
+            continue
+        delta = None if bv is None or cv is None else round(cv - bv, 3)
+        sign = "" if delta is None or delta < 0 else "+"
+        print(f"  {k}: {bv} -> {cv}" + ("" if delta is None else f" ({sign}{delta})"))
+    return 0
 
 
 def main() -> int:
@@ -185,8 +358,15 @@ def main() -> int:
     sp = sub.add_parser("score", help="给单个 run 对照 truth.json 打分")
     sp.add_argument("run_dir", type=Path)
     sp.add_argument("truth", type=Path)
+    sp.add_argument("--json", action="store_true", help="print JSON instead of a text card")
+    sp.add_argument("--json-out", type=Path, help="write score JSON to this path")
     sa = sub.add_parser("score-all", help="跑 bench/ 下每个 <fixture>/truth.json(truth 内 run 字段指 run)")
     sa.add_argument("bench_dir", type=Path, nargs="?", default=ROOT / "bench")
+    sa.add_argument("--json", action="store_true", help="print summary JSON instead of cards")
+    sa.add_argument("--json-out", type=Path, help="write summary JSON to this path")
+    cp = sub.add_parser("compare", help="compare two score/summary JSON files")
+    cp.add_argument("baseline", type=Path)
+    cp.add_argument("change", type=Path)
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
@@ -195,7 +375,11 @@ def main() -> int:
     if args.cmd == "score":
         rd = args.run_dir if args.run_dir.is_absolute() else Path.cwd() / args.run_dir
         s = score(rd, _load_truth(args.truth))
-        _print_card(s)
+        _write_json(args.json_out, s)
+        if args.json:
+            print(json.dumps(s, ensure_ascii=False, indent=2))
+        else:
+            _print_card(s)
         return 0 if _is_clean(s) else 1
     if args.cmd == "score-all":
         bdir = args.bench_dir
@@ -204,6 +388,7 @@ def main() -> int:
             print(f"(无 fixture: {bdir}/*/truth.json)")
             return 0
         worst = 0
+        scores = []
         for tp in truths:
             truth = _load_truth(tp)
             run_rel = truth.get("run")
@@ -212,9 +397,19 @@ def main() -> int:
                 continue
             rd = (tp.parent / run_rel).resolve()
             s = score(rd, truth)
-            _print_card(s)
+            scores.append(s)
+            if not args.json:
+                _print_card(s)
             worst = max(worst, 0 if _is_clean(s) else 1)
+        summary = _summary(scores)
+        _write_json(args.json_out, summary)
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+        else:
+            _print_summary(summary)
         return worst
+    if args.cmd == "compare":
+        return _compare(args.baseline, args.change)
     ap.print_help()
     return 2
 
@@ -291,6 +486,31 @@ def _selftest() -> int:
     tp2 = {"name": "proc-opt", "expected_findings": [{"id": "sqli", "markers": ["sql injection"], "min_certainty": 0.8}],
            "expected_process": [{"id": "ran-fetch-assets", "signals": ["fetch_assets"], "must": False}]}
     checks.append(("过程门: optional 未触发不破 clean", _is_clean(score(run3, tp2))))
+
+    # timeline + recorded closure fixture
+    run4 = d / "closure_20260101"
+    run4.mkdir()
+    (run4 / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001: Static-only fixture\n- Certainty: 0.8\n"
+        "- Replicated: yes\n- Refutes: H-001\n", encoding="utf-8")
+    (run4 / "review.md").write_text(
+        "# Review\n\n## Independent Review\n\nclosure supported; no confirmed findings.\n",
+        encoding="utf-8")
+    (run4 / "report.md").write_text(
+        "# Report\n\n## Closure\n\nstatic-only fixture; no confirmed findings.\n",
+        encoding="utf-8")
+    (run4 / "events.jsonl").write_text(
+        '{"ts": 2.0, "type": "request"}\n{"ts": 5.5, "type": "evidence"}\n',
+        encoding="utf-8")
+    sc = score(run4, {"name": "closure", "expected_findings": [],
+                      "expected_closure": {"markers": ["closure", "static-only fixture"],
+                                           "requires_independent_review": True},
+                      "budget": {"max_requests": 3}})
+    checks.append(("时间线: time-to-first-evidence 从 events.jsonl 计算", sc["time_to_first_evidence_sec"] == 3.5))
+    checks.append(("收口: 无正向发现 + Independent Review + markers -> clean", _is_clean(sc)))
+    summ = _summary([s2, sc])["summary"]
+    checks.append(("汇总: 2 fixture clean 且 closure 计数正确",
+                   summ["clean"] == 2 and summ["closure_correct"] == 1))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

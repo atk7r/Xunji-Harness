@@ -1,0 +1,12 @@
+{
+  "name": "auth-idor-profile",
+  "run": "sample_run",
+  "note": "Synthetic auth/IDOR fixture. No real target data.",
+  "expected_findings": [
+    {"id": "profile-idor", "markers": ["idor", "profile", "user_id"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "login-required", "markers": ["expected access control behavior"]}
+  ],
+  "budget": {"max_requests": 8}
+}

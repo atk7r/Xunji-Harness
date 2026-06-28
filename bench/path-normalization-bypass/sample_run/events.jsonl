@@ -1,0 +1,4 @@
+{"ts": 0.0, "type": "request", "path": "/file?name=public"}
+{"ts": 0.8, "type": "request", "path": "/file?name=direct"}
+{"ts": 1.6, "type": "request", "path": "/file?name=normalized"}
+{"ts": 2.0, "type": "evidence", "id": "E-001"}

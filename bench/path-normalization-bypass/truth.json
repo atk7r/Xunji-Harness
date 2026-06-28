@@ -1,0 +1,12 @@
+{
+  "name": "path-normalization-bypass",
+  "run": "sample_run",
+  "note": "Synthetic path normalization fixture.",
+  "expected_findings": [
+    {"id": "path-normalization-bypass", "markers": ["path normalization", "bypass", "control"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "blocked-direct", "markers": ["simplest traversal form"]}
+  ],
+  "budget": {"max_requests": 10}
+}

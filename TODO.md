@@ -28,11 +28,11 @@
 
 ### Phase 2 — Bench 先行,让 measure-before-add 变成真门
 
-- [ ] 扩 `bench/` fixture:至少 10 个样例,覆盖 auth/IDOR、injection、upload/path、recorded closure。
-- [ ] 扩 `tools/bench.py` 指标:detection rate、false positive rate、certainty calibration、request budget、time-to-first-evidence、closure correctness。
-- [ ] 增加 baseline-vs-change 输出格式,便于对 Metacog / worker / sensor 改动做 A/B。
-- [ ] 每次新增机制必须产生一条 `review/records/<date>-bench-*.md` 记录:测了什么、指标变化、是否采用。
-- [ ] 提交: `test: expand bench decision gate`
+- [x] 扩 `bench/` fixture:至少 10 个样例,覆盖 auth/IDOR、injection、upload/path、recorded closure。
+- [x] 扩 `tools/bench.py` 指标:detection rate、false positive rate、certainty calibration、request budget、time-to-first-evidence、closure correctness。
+- [x] 增加 baseline-vs-change 输出格式,便于对 Metacog / worker / sensor 改动做 A/B。
+- [x] 每次新增机制必须产生一条 `review/records/<date>-bench-*.md` 记录:测了什么、指标变化、是否采用。
+- [x] 提交: `test: expand bench decision gate`
 
 ### Phase 3 — 显式 Metacog pass(第二系统,先软门)
 

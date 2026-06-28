@@ -39,19 +39,38 @@ bench/
   "must_not_flag": [                    // 陷阱: 这些【不是漏洞】, 被【正向确认】命中即记误报
     {"id": "login-page", "markers": ["login page present"]}
   ],
+  "expected_closure": {                  // 可选: recorded closure fixture, 期望没有正向 finding
+    "markers": ["closure", "no confirmed findings"],
+    "requires_independent_review": true,
+    "requires_no_positive_findings": true
+  },
+  "expected_process": [                  // 可选: 过程断言, 只读 run 产物中的能力踪迹
+    {"id": "consulted-knowledge", "signals": ["knowledge_match"], "must": true}
+  ],
   "budget": {"max_requests": 200}       // 可选: 请求预算上限(对照录像 .replay.json 计数, 下界)
 }
 ```
 
 打分维度: **detection**(期望发现的检出率)· **calibration**(命中条目 certainty 达不达下限,
 防欠证/过证)· **false-positives**(陷阱被正向确认命中数; 纯负向 Refutes 条目不算)·
-**budget**(录像计数作已记录请求下界)。
+**budget**(录像/事件计数作已记录请求下界)· **time-to-first-evidence**(`events.jsonl` 中首个
+request/action 到首个 evidence 的秒数)· **closure correctness**(recorded closure 是否有独立复审、
+无正向 finding、命中 closure markers)。
+
+可选 `events.jsonl` 每行一个事件:
+
+```json
+{"ts": 0.0, "type": "request", "path": "/demo"}
+{"ts": 2.0, "type": "evidence", "id": "E-001"}
+```
 
 ## 用法
 
 ```bash
 python tools/bench.py score runs/<dir> bench/<fixture>/truth.json   # 单个 run 打分
 python tools/bench.py score-all bench/                              # 跑所有随附样例 run
+python tools/bench.py score-all bench --json-out tmp/baseline.json   # 保存汇总 JSON
+python tools/bench.py compare tmp/baseline.json tmp/change.json       # A/B 指标对比
 python tools/bench.py --selftest                                    # 离线回归(已并入 selftest_all)
 ```
 
@@ -60,12 +79,15 @@ python tools/bench.py --selftest                                    # 离线回�
 ## 怎么用它 A/B 一个框架改动
 
 1. 选一个 fixture(如本地 DVWA 某关)。
-2. 改框架**前**: driver 打一次, 落 `runs/<a>/` → `bench.py score runs/<a> <truth>` 记分。
-3. 改框架**后**: 同 fixture 再打一次, 落 `runs/<b>/` → 记分。
-4. 比 detection / calibration / false-pos / budget。**分数没变好 = 改动没证明价值**(ROADMAP
+2. 改框架**前**: driver 打一次, 落 `runs/<a>/` → `bench.py score runs/<a> <truth> --json-out tmp/baseline.json`。
+3. 改框架**后**: 同 fixture 再打一次, 落 `runs/<b>/` → `--json-out tmp/change.json`。
+4. 跑 `bench.py compare tmp/baseline.json tmp/change.json`。
+5. 比 detection / calibration / false-pos / request budget / time-to-first-evidence / closure。**分数没变好 = 改动没证明价值**(ROADMAP
    gating principle: 度量先行, 别凭手感堆)。
 
 ## 现有 fixture
 
 - `example-dvwa-sqli/` —— 合成的 DVWA 风格样例(SQLi + reflected XSS + 一个"登录页非漏洞"
   陷阱), 演示 schema 与打分, 也是 `bench.py` 的随附回归样本。**非真实目标**。
+- 另有 9 个合成 fixture, 覆盖 auth/IDOR、injection、upload/path、path traversal 和 recorded
+  closure。它们只用于离线评估, 不含真实交战发现物。
