@@ -45,12 +45,12 @@
 
 ### Phase 4 — Worker 计划自动化,不做事实自动化
 
-- [ ] 增强 `tools/workers.py suggest`:读取 `frontier.md` / `coverage.json`,列出适合 fan-out 的候选 front。
-- [ ] 增强 `tools/workers.py plan`:生成 worker 分配草案,由 driver 确认/复制给子 agent。
-- [ ] 增强 `tools/workers.py merge-check`:列出 candidate 缺 Control/Replicated、重复、冲突、done-but-unmerged。
-- [ ] 调整文档:允许计划级自动化,仍禁止 worker 自动写 canonical evidence / confirmed finding。
-- [ ] 重新考虑 `>=3 independent fronts` 的硬阈值:改为建议条件,结合 front 数、共享 barrier、限速、历史 worker 命中率。
-- [ ] 提交: `feat: add worker planning helpers`
+- [x] 增强 `tools/workers.py suggest`:读取 `frontier.md` / `coverage.json`,列出适合 fan-out 的候选 front。
+- [x] 增强 `tools/workers.py plan`:生成 worker 分配草案,由 driver 确认/复制给子 agent。
+- [x] 增强 `tools/workers.py merge-check`:列出 candidate 缺 Control/Replicated、重复、冲突、done-but-unmerged。
+- [x] 调整文档:允许计划级自动化,仍禁止 worker 自动写 canonical evidence / confirmed finding。
+- [x] 重新考虑 `>=3 independent fronts` 的硬阈值:改为建议条件,结合 front 数、共享 barrier、限速、历史 worker 命中率。
+- [x] 提交: `feat: add worker planning helpers`
 
 ### Phase 5 — Sensor 能力层:先补最缺的枪
 

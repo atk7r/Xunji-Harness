@@ -11,13 +11,20 @@ the single integrator that merges their output back through the evidence gate.
 
 ## When the driver fans out
 
-Only when breadth genuinely beats depth and the fronts do not interfere:
+Only when breadth genuinely beats depth and the fronts do not interfere. The old
+">= 3 independent fronts" rule is now a recommendation, not a hard threshold:
+the driver should consider front count, distinct assets, shared barriers,
+rate-limit pressure, and past worker hit rate.
 
-- **>= 3 independent fronts** that are mutually non-blocking and hit **different
-  assets / barriers** (so two workers cannot duplicate or trip each other). Early
-  multi-asset recon across many hosts is the canonical case.
+- **Recommended:** 3 or more independent fronts that are mutually non-blocking and
+  hit **different assets / barriers** (so two workers cannot duplicate or trip
+  each other). Early multi-asset recon across many hosts is the canonical case.
+- **Optional:** 2 strong fronts on different assets when the target is stable,
+  rate limits are loose, and the lanes are clearly disjoint.
 - **Not** for deep work on one front (that is serial, single-driver), and not when
   fronts share a barrier (one worker's finding should unblock the others first).
+  Run `python tools/workers.py suggest runs/<dir>` for an advisory ranking and
+  `python tools/workers.py plan runs/<dir>` for a copyable assignment draft.
 
 ## Roles
 
@@ -51,6 +58,9 @@ pollute the ledger. At merge the driver, for each candidate:
 
 `tools/check_run.py` warns while any worker file is `done` but unmerged — parallel
 work must not be silently dropped, and the gate must not be skipped.
+`python tools/workers.py merge-check runs/<dir>` lists missing controls,
+duplicates, conflicts, and done-but-unmerged workers before the driver allocates
+canonical `E-` ids.
 
 ## Worker prompt (copy, fill `<target>` and the assigned front)
 

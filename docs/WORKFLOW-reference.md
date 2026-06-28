@@ -421,9 +421,11 @@ worker. When breadth beats depth, the driver may fan **several independent front
 out to fresh-context sub-agent workers at once. Full mechanics and prompts are in
 `docs/templates/worker.md`; the essentials:
 
-- **When**: only with **>= 3 mutually-non-blocking fronts on different
-  assets/barriers** (early multi-asset recon is the case). Not for deep single-front
-  work, and not when fronts share a barrier (unblock it serially first).
+- **When**: use fan-out when several mutually-non-blocking fronts hit different
+  assets/barriers (early multi-asset recon is the case). Three strong independent
+  fronts is the default recommendation, not a hard threshold; two may be enough
+  when lanes are clean and rate limits are loose, while five shared-barrier fronts
+  should stay serial.
 - **Stigmergy**: workers coordinate **only through the run dir** — they never message
   each other. The driver assigns each a disjoint front (push, not a claim-race); each
   worker writes only its own `runs/<target>/workers/W-<id>.md`.
@@ -436,10 +438,11 @@ out to fresh-context sub-agent workers at once. Full mechanics and prompts are i
 - **Safety**: every worker's Bash still hits the hook; all workers share ONE global
   rate limit (the guard state is cross-process locked). Workers are proof-level;
   heavier / gated / weaponized actions stay with the driver (author-and-handoff).
-- `tools/workers.py` scaffolds worker files and lists merge status; `check_run.py`
-  warns while any worker is `done` but unmerged. It is **not** an orchestrator — it
-  never spawns workers or picks fronts (that is the driver's judgement, via the Agent
-  tool). Same guardrail as the graph: tooling assists, it never drives.
+- `tools/workers.py` scaffolds worker files, suggests fan-out candidates, prints
+  assignment drafts, and checks worker merge readiness; `check_run.py` warns while
+  any worker is `done` but unmerged. It is **not** an orchestrator — it never spawns
+  workers and never writes canonical facts (that is the driver's judgement and
+  merge duty). Same guardrail as the graph: tooling assists, it never drives.
 
 ## Closure gate — `check_run.py` mechanics
 

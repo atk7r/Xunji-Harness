@@ -60,6 +60,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("loop_bootstrap",   ["tools/loop_bootstrap.py", "--selftest"],   "autonomous loop launcher"),
     ("session_handoff",  ["tools/session_handoff.py", "--selftest"],  "session handoff tool"),
     ("deferred_queue",   ["tools/deferred_queue.py", "--selftest"],   "deferred asset retry manager"),
+    ("workers",          ["tools/workers.py", "--selftest"],          "fan-out worker planning helpers"),
     # --- PreToolUse / Stop hooks (--selftest flag) ---
     ("safety_gate",    [".claude/hooks/safety_gate.py", "--selftest"], "hard-boundary gate"),
     ("output_gate",    [".claude/hooks/output_gate.py", "--selftest"], "output drift Stop gate"),

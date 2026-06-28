@@ -281,8 +281,10 @@ Project-discipline and run-structure checks in `tools/`:
 - `python tools/workers.py runs/<dir>` — parallel fan-out bookkeeping: `--new <F-id>`
   scaffolds a worker scratch file; the bare form lists worker status and flags any
   `done`-but-unmerged worker whose candidates the driver still owes the evidence gate.
-  Scaffold + ledger only — never spawns workers or picks fronts (the driver does, via the
-  Agent tool). See `docs/WORKFLOW-reference.md` "Parallel Fan-out" + `docs/templates/worker.md`.
+  `suggest` ranks possible fan-out fronts, `plan` prints a copyable assignment draft,
+  and `merge-check` lists candidate gate problems. Advisory + ledger only — never
+  spawns workers and never writes canonical findings. See `docs/WORKFLOW-reference.md`
+  "Parallel Fan-out" + `docs/templates/worker.md`.
 
 These tools verify structure and discipline only — never a replacement for the evidence
 gate or autonomous judgement.
