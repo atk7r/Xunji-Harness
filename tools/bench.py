@@ -108,7 +108,9 @@ def _timeline_metrics(run_dir: Path) -> dict:
       {"ts": 1.0, "type": "request"|"action"|"evidence", ...}
     This stays artifact-only: no wall clock probing, no target traffic.
     """
-    p = run_dir / "events.jsonl"
+    p = run_dir / "state" / "events.jsonl"
+    if not p.exists():
+        p = run_dir / "events.jsonl"
     out = {"event_requests": 0, "time_to_first_evidence_sec": None}
     if not p.exists():
         return out
@@ -526,6 +528,15 @@ def _selftest() -> int:
                                            "requires_independent_review": True},
                       "budget": {"max_requests": 3}})
     checks.append(("时间线: time-to-first-evidence 从 events.jsonl 计算", sc["time_to_first_evidence_sec"] == 3.5))
+    run4_state = d / "closure_state_20260101"
+    run4_state.mkdir()
+    (run4_state / "state").mkdir()
+    (run4_state / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (run4_state / "state" / "events.jsonl").write_text(
+        '{"ts": 1.0, "type": "request"}\n{"ts": 4.0, "type": "evidence"}\n',
+        encoding="utf-8")
+    checks.append(("时间线: state/events.jsonl 优先",
+                   _timeline_metrics(run4_state)["time_to_first_evidence_sec"] == 3.0))
     checks.append(("收口: 无正向发现 + Independent Review + markers -> clean", _is_clean(sc)))
     summ = _summary([s2, sc])["summary"]
     checks.append(("汇总: 2 fixture clean 且 closure 计数正确",

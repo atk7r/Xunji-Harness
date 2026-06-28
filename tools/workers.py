@@ -41,6 +41,11 @@ ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {"list", "new", "suggest", "plan", "merge-check"}
 HWS = r"[^\S\n]"
 
+try:
+    import state_project as _state_project
+except Exception:
+    _state_project = None
+
 SCAFFOLD = """# Worker {wid}
 
 - Assigned front: {front}
@@ -194,8 +199,18 @@ def _front_assets(front: dict, assets: list[dict]) -> list[dict]:
 
 def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:
     """Return advisory fan-out candidates. This ranks fronts; it never assigns work."""
-    fronts = parse_frontiers(run_dir)
-    assets = _load_coverage(run_dir)
+    if _state_project is not None:
+        try:
+            proj = _state_project.load_or_create(run_dir)
+            fronts = proj.get("fronts") or parse_frontiers(run_dir)
+            cov = proj.get("coverage") if isinstance(proj.get("coverage"), dict) else {}
+            assets = cov.get("assets") or _load_coverage(run_dir)
+        except Exception:
+            fronts = parse_frontiers(run_dir)
+            assets = _load_coverage(run_dir)
+    else:
+        fronts = parse_frontiers(run_dir)
+        assets = _load_coverage(run_dir)
     rows: list[dict] = []
     for f in fronts:
         if re.search(r"\b(closed|merged)\b", f["status"]):

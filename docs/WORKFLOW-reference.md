@@ -414,6 +414,12 @@ the current state out. A graph that becomes the source of truth or auto-selects 
 is the JSON orchestrator this project deleted (and `check_rules.py` guards against).
 Markdown stays the source of truth; the graph is a projection, like `coverage.json`.
 
+`tools/state_project.py` provides the broader machine projection:
+`<run>/state/projection.json` and `<run>/state/events.jsonl`. The event stream uses
+`type=front|status|action|evidence` records derived from Markdown. It is cache/index
+data for tools such as `workers`, `bench`, and `check_run`; it must never be edited
+as the narrative source of truth or used to overwrite Markdown.
+
 ## Parallel Fan-out
 
 The run directory is a blackboard; the independent reviewer was the first parallel

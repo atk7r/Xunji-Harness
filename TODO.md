@@ -80,11 +80,11 @@
 
 ### Phase 8 — 机器状态投影,不替代 Markdown
 
-- [ ] 新增 `runs/<target>/state/events.jsonl` 约定:action/evidence/front/status 事件流。
-- [ ] 新增 `tools/state_project.py`:从 markdown run dir 生成 JSON projection。
-- [ ] worker suggest、bench、check_run 优先读 projection;projection 缺失时从 markdown 生成。
-- [ ] 文档声明 markdown 仍是 canonical narrative;JSON 是索引/缓存,不得反向覆盖人工记录。
-- [ ] 提交: `feat: add run state projection`
+- [x] 新增 `runs/<target>/state/events.jsonl` 约定:action/evidence/front/status 事件流。
+- [x] 新增 `tools/state_project.py`:从 markdown run dir 生成 JSON projection。
+- [x] worker suggest、bench、check_run 优先读 projection;projection 缺失时从 markdown 生成。
+- [x] 文档声明 markdown 仍是 canonical narrative;JSON 是索引/缓存,不得反向覆盖人工记录。
+- [x] 提交: `feat: add run state projection`
 
 ### Phase 9 — Client / Code graybox 扩展(排在 Web 主线之后)
 
@@ -98,7 +98,7 @@
 - [ ] `config.ini` 以 dev 模式入库不合理;运行模式影响 hook 行为,应本地化。
 - [ ] `measure before add` 已写入 roadmap,但 bench 还不足以真正阻止坏机制进入 core。
 - [ ] 反 orchestrator 边界过粗;应允许计划/建议/投影自动化,只禁止自动污染事实源。
-- [ ] Markdown-only 对机器协同不友好;需要 JSON projection,但不能替代审计叙事。
+- [x] Markdown-only 对机器协同不友好;需要 JSON projection,但不能替代审计叙事。
 - [ ] evidence gate 偏文档产物;应补 OOB / diff / sanitizer / reproduction oracle。
 - [ ] `>=3 independent fronts` worker 阈值僵硬;应改为可解释建议条件。
 - [x] 对目标内容中的 prompt injection / hostile instruction 缺独立纪律层。

@@ -60,6 +60,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("sensor_mutate",   ["tools/sensors/mutate_payload.py", "--selftest"], "payload mutation artifact sensor"),
     ("sensor_blind_diff", ["tools/sensors/blind_diff.py", "--selftest"], "blind differential artifact sensor"),
     ("sensor_upload",   ["tools/sensors/upload_probe.py", "--selftest"], "harmless upload proof sensor"),
+    ("state_project",   ["tools/state_project.py", "--selftest"], "markdown-derived run state projection"),
     # --- loop pipeline ---
     ("loop_bootstrap",   ["tools/loop_bootstrap.py", "--selftest"],   "autonomous loop launcher"),
     ("session_handoff",  ["tools/session_handoff.py", "--selftest"],  "session handoff tool"),

@@ -285,6 +285,9 @@ Project-discipline and run-structure checks in `tools/`:
   and `merge-check` lists candidate gate problems. Advisory + ledger only — never
   spawns workers and never writes canonical findings. See `docs/WORKFLOW-reference.md`
   "Parallel Fan-out" + `docs/templates/worker.md`.
+- `python tools/state_project.py runs/<dir>` — derives `state/projection.json` and
+  `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
+  canonical and projection must not be hand-edited back into facts.
 
 These tools verify structure and discipline only — never a replacement for the evidence
 gate or autonomous judgement.

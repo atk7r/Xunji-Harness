@@ -25,6 +25,10 @@ try:
     import replay as _replay     # 重放核实(同目录); 缺失则 --replay-verify 跳过
 except Exception:
     _replay = None
+try:
+    import state_project as _state_project   # Markdown-derived machine projection
+except Exception:
+    _state_project = None
 from evidence_parse import parse_evidence, write_evidence_index  # 唯一权威证据解析器(已抽出到独立模块)
 
 
@@ -2124,6 +2128,11 @@ def main() -> int:
 
     # Derive the structured evidence sidecar once (queryable; also memoizes the parse).
     write_evidence_index(run_dir, parse_evidence(run_dir))
+    if _state_project is not None:
+        try:
+            _state_project.write_projection(run_dir)
+        except Exception as e:
+            print(f"[state_project] projection skipped: {e}")
 
     # Evidence hard gate: certainty must use the canonical 1.0 / 0.8 / 0.5 / 0.3 scale.
     errors.extend(check_certainty_scale(run_dir))
