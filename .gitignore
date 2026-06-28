@@ -30,6 +30,11 @@ poc_library/xday/*
 !poc_library/xday/.gitkeep
 tools/poc_ours_upload/
 
+# Undisclosed normal PoC entries — product-specific findings not yet publicly
+# disclosed (no CVE/CNVD, vendor unpatched). Gitignored until disclosure.
+# Add individual entries here when normal/ contains undisclosed material.
+poc_library/normal/soarcloud-ais/
+
 # Weaponized knowledge tier: payload/exploit-level entries keyed to recognition.
 # Ship ONLY the scaffolding (README + .gitkeep); the actual weaponized entries stay
 # local (operator's call) and are never pushed. The public knowledge/ root is the

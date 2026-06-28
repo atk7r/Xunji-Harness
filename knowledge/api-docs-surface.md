@@ -29,8 +29,8 @@ scshr run-observation (SDK docs), multiple EDU runs.
   `/druid/websession.html`, `/druid/spring.html` — Alibaba Druid connection
   pool monitor; unauthenticated access leaks SQL stats, URIs, session data.
 - Signature (GraphQL): `/graphql` (common), `/api/graphql`, `/gql` — GraphQL
-  endpoint; GET returns "query not found" or a GraphiQL IDE; POST with
-  `{"query":"{__schema{types{name}}}"}` confirms introspection enabled.
+  endpoint; GET returns "query not found" or a GraphiQL IDE; POST with a
+  `__schema` introspection query confirms if schema introspection is enabled.
 - Signature (generic API docs): `/api/help`, `/api/docs`, `/docs/api`,
   `/api/swagger.json`, `/openapi.json` — vendor-neutral paths.
 - Distinguishing notes: a Swagger UI page is the UI shell; the actual data is
@@ -90,8 +90,9 @@ scshr run-observation (SDK docs), multiple EDU runs.
 
 ## References
 
-- OWASP: API documentation in production
-- Spring Boot: production-ready features / security
+- OWASP: https://owasp.org/www-project-api-security/ (API security project)
+- Spring Boot Actuator: https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html
+- Alibaba Druid: https://github.com/alibaba/druid/wiki (configuration and security)
 - This repo's run-observation: cqytxy E-012 (RuoYi Swagger v3.8.8), E-016
   (RuoYi-Cloud gateway Swagger aggregation); scshr E-002 (SDK docs)
 - Related: [[spring-boot-actuator]] [[waf-block-recognition]]

@@ -6,7 +6,7 @@ aliases: [stack fingerprint, server header, 技术栈识别, IIS, Apache, Nginx,
 category: weakness-recognition
 last_reviewed: 2026-06-28
 maturity: seed
-signatures: ["Server:", "X-Powered-By:", "X-AspNet-Version:", "Set-Cookie: JSESSIONID", "Set-Cookie: PHPSESSID", "Set-Cookie: ASP.NET_SessionId", "__VIEWSTATE"]
+signatures: ["__viewstate", "jsessionid=", "phpsessid=", "asp.net_sessionid=", "microsoft-iis", "x-aspnet-version", "dhn ws/"]
 ---
 
 <!--
@@ -68,11 +68,11 @@ Chinese universities, Taiwanese SaaS, Korean universities, and lab targets.
     nginx reverse proxy → try Host-header bypass to reach backend directly.
   - Reference: this is the driver's reasoning input, not an exploit
   - source: driver-reasoning
-- Anchor: masked/erased Server header indicates WAF or security-conscious ops
+- Anchor: masked/erased Server header indicates WAF or reverse proxy presence
   - Affected: sites behind a WAF or reverse proxy that strips Headers.
-  - Mechanism: a masked header tells you there IS a gateway WAF; probe for
-    the WAF product (see [[waf-block-recognition]]) and try bypass methods
-    (POST for GET-only WAF, encoding mismatches, origin IP).
+  - Mechanism: a masked header signals a gateway layer that may inspect or
+    filter traffic; its presence and coverage (GET vs POST, encoding handling)
+    is the variant-analysis input (see [[waf-block-recognition]]).
   - Reference: this repo's run-observation
   - source: run-observation
 

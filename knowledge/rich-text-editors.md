@@ -6,7 +6,7 @@ aliases: [CKEditor, Kindeditor, TinyMCE, UEditor, FCKeditor, 富文本编辑器,
 category: weakness-recognition
 last_reviewed: 2026-06-28
 maturity: seed
-signatures: ["/ckeditor/", "/kindeditor/", "/tinymce/", "/ueditor/", "/fckeditor/", "/editor/"]
+signatures: ["/ckeditor/", "/kindeditor/", "/tinymce/", "/ueditor/", "/fckeditor/", "ckeditor.js", "kindeditor.js", "ueditor.config.js"]
 ---
 
 <!--

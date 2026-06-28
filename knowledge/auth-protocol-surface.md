@@ -69,8 +69,9 @@ runs (sxtbu×2, ujs, nuist), CAS in multiple EDU runs, OAuth2 in sxtbu cx AI.
 - Anchor: OAuth2 redirect_uri validation bypass
   - Affected: OAuth2 authorization servers with loose redirect_uri matching.
   - Mechanism: open redirect in the OAuth flow allows authorization code
-    theft; pattern-based matching (`startswith`, `contains`) is weaker than
-    exact matching. Test with `redirect_uri=https://target.com.evil.com/cb`.
+    theft; pattern-based matching (prefix/suffix/contains) is weaker than
+    exact matching. The authorization server must validate the redirect_uri
+    against a registered whitelist.
   - Reference: CWE-601; OAuth 2.0 Security Best Current Practice (RFC 6819)
   - source: external-cited
 - Anchor: CAS ticket reuse / proxy ticket abuse
@@ -88,10 +89,11 @@ runs (sxtbu×2, ujs, nuist), CAS in multiple EDU runs, OAuth2 in sxtbu cx AI.
   - source: external-cited
 - Anchor: LDAP injection in login form
   - Affected: login forms that construct LDAP filters from user input without
-    escaping `*()\&|`.
-  - Mechanism: `*` wildcard + boolean logic in username field → authentication
-    bypass; `)(|(uid=*))` style injection. The tell is LDAP-specific error
-    messages or timing.
+    escaping special characters.
+  - Mechanism: LDAP filter metacharacters in the username field can alter the
+    filter logic (wildcard expansion, boolean injection) leading to
+    authentication bypass. The tell is LDAP-specific error messages or
+    javax.naming exceptions.
   - Reference: CWE-90; OWASP LDAP Injection
   - source: external-cited
 

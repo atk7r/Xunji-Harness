@@ -6,7 +6,7 @@ aliases: [phpmyadmin, adminer, pgadmin, mongoexpress, rediscommander, 数据库�
 category: weakness-recognition
 last_reviewed: 2026-06-28
 maturity: seed
-signatures: ["/phpmyadmin/", "/adminer", "/pgadmin", "/phpPgAdmin", "/rockmongo", "/mongo-express"]
+signatures: ["/phpmyadmin/", "/adminer.php", "/phppgadmin/", "/pgadmin4/", "/rockmongo/", "/mongo-express/", "/redis-commander/"]
 ---
 
 <!--
@@ -57,10 +57,11 @@ accessible after credential discovery), tongda_oa run (MySQL 3336 open).
 - Anchor: Redis/MongoDB without authentication on public interface
   - Affected: NoSQL databases bound to 0.0.0.0 without `requirepass` (Redis)
     or `--auth` (MongoDB).
-  - Mechanism: Redis without auth → `CONFIG SET dir /var/www/html` + `CONFIG
-    SET dbfilename shell.php` → webshell via Redis protocol. MongoDB without
-    auth → full database dump via `mongoexport` equivalent.
-  - Reference: CWE-306; public Redis/MongoDB exposure incidents
+  - Mechanism: Redis without auth allows arbitrary config modification via the
+    Redis protocol; combined with web-writable directories this enables code
+    execution. MongoDB without auth allows full database access via the wire
+    protocol.
+  - Reference: CWE-306; public incident reports of exposed NoSQL databases
   - source: external-cited
 
 ## Verification Principle
@@ -88,8 +89,8 @@ accessible after credential discovery), tongda_oa run (MySQL 3336 open).
 
 ## References
 
-- CWE-306: Missing Authentication for Critical Function
-- OWASP: administrative interface exposure
+- CWE-306: Missing Authentication for Critical Function (https://cwe.mitre.org/data/definitions/306.html)
+- OWASP Admin Interface: https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/05-Authorization_Testing/03-Testing_for_Privilege_Escalation
 - This repo's run-observation: mokwon (phpMyAdmin in webroot);
   tongda_oa (MySQL port 3336 remote root access)
 - Related: [[backup-config-discovery]] [[error-disclosure-signatures]]
