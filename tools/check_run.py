@@ -562,6 +562,14 @@ _METACOG_FIELDS = [
 ]
 
 
+def _decision_closing(run_dir: Path) -> bool:
+    dec = run_dir / "decisions.md"
+    if not dec.exists():
+        return False
+    text = dec.read_text(encoding="utf-8", errors="replace")
+    return bool(re.search(r"(?im)^\s*[-*]?\s*Status\s*[:：]\s*(CLOSING|FINAL|收口)\b", text))
+
+
 def check_metacog_pass(run_dir: Path) -> list[str]:
     """Soft gate for the explicit Metacog pass before closure.
 
@@ -569,10 +577,11 @@ def check_metacog_pass(run_dir: Path) -> list[str]:
     one verifiable next action. It is not a confirmation path and never closes fronts.
     """
     report = run_dir / "report.md"
-    if not report.exists():
+    closing_by_decision = _decision_closing(run_dir)
+    if not report.exists() and not closing_by_decision:
         return []
-    rtext = report.read_text(encoding="utf-8", errors="replace")
-    if not (_closure_claimed(rtext) or _report_is_final(run_dir)):
+    rtext = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
+    if not (_closure_claimed(rtext) or _report_is_final(run_dir) or closing_by_decision):
         return []
     dec = run_dir / "decisions.md"
     if not dec.exists():
@@ -1509,6 +1518,14 @@ def _selftest() -> int:
     (d_meta_draft / "report.md").write_text("# Report\n草稿, 无收口断言无确认引用\n", encoding="utf-8")
     meta_draft_w = check_metacog_pass(d_meta_draft)
 
+    d_meta_claim = Path(tempfile.mkdtemp())
+    (d_meta_claim / "report.md").write_text("# Report\n已穷尽所有攻击面\n", encoding="utf-8")
+    meta_claim_w = check_metacog_pass(d_meta_claim)
+
+    d_meta_status = Path(tempfile.mkdtemp())
+    (d_meta_status / "decisions.md").write_text("# Decisions\n## D-001\n- Status: CLOSING\n", encoding="utf-8")
+    meta_status_w = check_metacog_pass(d_meta_status)
+
     d_meta = Path(tempfile.mkdtemp())
     (d_meta / "evidence.md").write_text(
         "# Evidence Ledger\n## E-001\n- Certainty: 0.8\n", encoding="utf-8")
@@ -1532,6 +1549,8 @@ def _selftest() -> int:
     meta_ok_w = check_metacog_pass(d_meta)
     checks += [
         ("Metacog: draft report -> no warn", meta_draft_w == []),
+        ("Metacog: _closure_claimed path triggers", any("Metacog" in w for w in meta_claim_w)),
+        ("Metacog: decisions Status CLOSING path triggers", any("Metacog" in w for w in meta_status_w)),
         ("Metacog: final report missing pass -> warn", any("Metacog" in w for w in meta_missing_w)),
         ("Metacog: partial pass -> missing fields warn", any("字段不完整" in w for w in meta_partial_w)),
         ("Metacog: full contract -> no warn", meta_ok_w == []),

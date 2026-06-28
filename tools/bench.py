@@ -257,7 +257,7 @@ def _is_clean(s: dict) -> bool:
     detection_ok = (
         (s["expected"] > 0 and s["detected"] == s["expected"]
          and s["calibrated"] == s["expected"])
-        or (s["expected"] == 0 and closure is not None)
+        or s["expected"] == 0
     )
     return (detection_ok and s["false_positives"] == 0 and not s.get("over_budget", False)
             and proc_ok and closure_ok)
@@ -336,9 +336,16 @@ def _compare(baseline: Path, change: Path) -> int:
     b = _load_score_or_summary(baseline)
     c = _load_score_or_summary(change)
     keys = [
-        "detection_rate", "calibration_rate", "false_positives", "request_budget_total",
-        "request_budget_over", "time_to_first_evidence_avg_sec", "closure_correct",
+        "detection_rate", "calibration_rate", "false_positives", "false_positive_rate_mean",
+        "request_budget_total", "request_budget_over", "time_to_first_evidence_avg_sec",
+        "closure_correct",
     ]
+    higher_is_better = {"detection_rate", "calibration_rate", "closure_correct"}
+    lower_is_better = {
+        "false_positives", "false_positive_rate_mean", "request_budget_total",
+        "request_budget_over", "time_to_first_evidence_avg_sec",
+    }
+    regressed = False
     print("== bench compare ==")
     print(f"  baseline: {baseline}")
     print(f"  change  : {change}")
@@ -347,9 +354,14 @@ def _compare(baseline: Path, change: Path) -> int:
         if bv is None and cv is None:
             continue
         delta = None if bv is None or cv is None else round(cv - bv, 3)
-        sign = "" if delta is None or delta < 0 else "+"
+        sign = "+" if delta is not None and delta > 0 else ""
+        if delta is not None:
+            if k in higher_is_better and delta < 0:
+                regressed = True
+            if k in lower_is_better and delta > 0:
+                regressed = True
         print(f"  {k}: {bv} -> {cv}" + ("" if delta is None else f" ({sign}{delta})"))
-    return 0
+    return 1 if regressed else 0
 
 
 def main() -> int:
@@ -415,6 +427,8 @@ def main() -> int:
 
 
 def _selftest() -> int:
+    import contextlib
+    import io
     import tempfile
     d = Path(tempfile.mkdtemp())
     run = d / "fix_20260101"
@@ -487,6 +501,11 @@ def _selftest() -> int:
            "expected_process": [{"id": "ran-fetch-assets", "signals": ["fetch_assets"], "must": False}]}
     checks.append(("过程门: optional 未触发不破 clean", _is_clean(score(run3, tp2))))
 
+    # pure-negative fixture: no expected findings, just traps that must not be positive-confirmed.
+    spn = score(run3, {"name": "pure-negative", "expected_findings": [],
+                       "must_not_flag": [{"id": "not-sqli", "markers": ["not present"]}]})
+    checks.append(("纯负向 fixture: 无 expected_findings 且零误报 -> clean", _is_clean(spn)))
+
     # timeline + recorded closure fixture
     run4 = d / "closure_20260101"
     run4.mkdir()
@@ -511,6 +530,31 @@ def _selftest() -> int:
     summ = _summary([s2, sc])["summary"]
     checks.append(("汇总: 2 fixture clean 且 closure 计数正确",
                    summ["clean"] == 2 and summ["closure_correct"] == 1))
+
+    # compare is a real regression gate, not just display.
+    base = d / "base.json"
+    change_ok = d / "change-ok.json"
+    change_bad = d / "change-bad.json"
+    base.write_text(json.dumps({"summary": {"detection_rate": 1.0, "calibration_rate": 1.0,
+                                            "false_positives": 0, "false_positive_rate_mean": 0.0,
+                                            "request_budget_total": 10, "request_budget_over": 0,
+                                            "time_to_first_evidence_avg_sec": 2.0,
+                                            "closure_correct": 1}}, ensure_ascii=False), encoding="utf-8")
+    change_ok.write_text(json.dumps({"summary": {"detection_rate": 1.0, "calibration_rate": 1.0,
+                                                 "false_positives": 0, "false_positive_rate_mean": 0.0,
+                                                 "request_budget_total": 10, "request_budget_over": 0,
+                                                 "time_to_first_evidence_avg_sec": 2.0,
+                                                 "closure_correct": 1}}, ensure_ascii=False), encoding="utf-8")
+    change_bad.write_text(json.dumps({"summary": {"detection_rate": 0.5, "calibration_rate": 1.0,
+                                                  "false_positives": 1, "false_positive_rate_mean": 0.5,
+                                                  "request_budget_total": 12, "request_budget_over": 1,
+                                                  "time_to_first_evidence_avg_sec": 3.0,
+                                                  "closure_correct": 1}}, ensure_ascii=False), encoding="utf-8")
+    with contextlib.redirect_stdout(io.StringIO()):
+        cmp_ok = _compare(base, change_ok)
+        cmp_bad = _compare(base, change_bad)
+    checks.append(("compare: unchanged metrics exit 0", cmp_ok == 0))
+    checks.append(("compare: worse metrics exit 1", cmp_bad == 1))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

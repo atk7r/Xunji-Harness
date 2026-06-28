@@ -185,6 +185,10 @@ A fresh clone needs almost nothing: the core toolchain has **zero third-party de
 
 **The only hard requirement**: **Python ≥ 3.10 on PATH** (covers the hook, `check_*`, `probe`/`scan`). The hook is wired with `$CLAUDE_PROJECT_DIR` (no hard-coded paths), portable across machines.
 
+Runtime mode defaults to tracked `config.example.ini` (`mode = normal`). For local
+development mode, copy it to `config.ini` and set `mode = dev`; real `config.ini` is
+git-ignored and should stay local.
+
 **Cross-platform conventions** (Windows / macOS / Linux — follow these when writing commands or code):
 
 - **Activate the venv, then run `python tools/...`** — never hard-code the interpreter path (`.venv/bin/python` is Unix-only, `.venv\Scripts\python.exe` is Windows-only).

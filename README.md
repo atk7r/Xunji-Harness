@@ -184,6 +184,9 @@ python tools/harness/guard.py        # guard + 熔断器自测
 
 **唯一硬性要求**：PATH 上有 **Python ≥ 3.10**（覆盖 hook、`check_*`、`probe`/`scan`）。hook 用 `$CLAUDE_PROJECT_DIR` 接线，无硬编码路径，跨机可移植。
 
+运行模式默认来自随仓的 `config.example.ini`，即 `mode = normal`。需要本地开发模式时复制一份
+`config.ini` 并改为 `mode = dev`；真实 `config.ini` 已被 git 忽略，不再入库。
+
 **跨平台约定**（Windows / macOS / Linux 通用，写命令与代码时遵守）：
 
 - **先激活 venv，再用 `python tools/...`**，不要写死解释器路径（`.venv/bin/python` 是 Unix 专用，`.venv\Scripts\python.exe` 是 Windows 专用）。

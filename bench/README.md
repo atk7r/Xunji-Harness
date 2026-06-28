@@ -74,7 +74,9 @@ python tools/bench.py compare tmp/baseline.json tmp/change.json       # A/B 指�
 python tools/bench.py --selftest                                    # 离线回归(已并入 selftest_all)
 ```
 
-退出码: 全检出 + 全校准 + 零误报 = 0(可当回归门), 否则 1。
+退出码: `score` / `score-all` 全检出 + 全校准 + 零误报 + 预算内 + 必需过程断言满足 = 0,
+否则 1。`compare` 在 detection / calibration / closure 下降, 或 false-pos / budget /
+time-to-first-evidence 上升时返回 1, 可当 A/B 回归门。
 
 ## 怎么用它 A/B 一个框架改动
 
