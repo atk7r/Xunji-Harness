@@ -1,10 +1,108 @@
 # Xunji 项目待办
 
-> 最后更新:2026-06-10。本文件记录跨会话的未决事项,避免被上下文压缩冲掉。
+> 最后更新:2026-06-28。本文件记录跨会话的未决事项,避免被上下文压缩冲掉。
 > 分两个独立项目:**父项目**(Claude/Codex 工作区)与 **deepseek-project/**(DeepSeek 实例)。
 >
 > **核心思想(勿忘)**:让 AI 自主、像人类猎手一样推理;框架只给判断纪律+接地知识+硬边界,
 > 绝不做清单/playbook。扩展前过 grounding-vs-weapon 测试。详见持久记忆 `core-philosophy-ai-autonomy`。
+
+## 0. 2026-06-28 优化落地计划(按阶段提交)
+
+背景:对比 TianTi 与 2026 年 autonomous security agent / vuln-research agent 研究后,确认 Xunji 的优势仍是证据门、审计、硬边界、反过早收口;短板是评估闭环弱、能力 sensor 薄、Metacog 不显式、worker 摩擦大、hostile-content 风险没有独立建模。
+
+原则:
+
+- 不把 Xunji 改成 TianTi;吸收其显式元认知、actionable 契约、覆盖补盲思想。
+- 不把反 orchestrator 理解成反自动化;禁止的是自动污染事实源,不是禁止计划/建议/投影。
+- Markdown 继续做人类事实源;JSON/state 只能做机器投影与索引。
+- 新能力一律是 sensor:不选目标、不自动确认、不绕过 evidence gate。
+- 每个阶段完成后提交;除配置卫生外,尽量先 warning/soft gate,再用 bench 证明是否升级 hard gate。
+
+### Phase 1 — 配置卫生与本地状态边界
+
+- [ ] 将已入库的 `config.ini` 改为 `config.example.ini`,默认 `mode = normal`。
+- [ ] 将真实 `config.ini` 加入 `.gitignore`;本地可保留 dev 配置,但不再入库。
+- [ ] 加入 `.DS_Store` ignore,避免 macOS 垃圾文件反复污染状态。
+- [ ] 检查 hook / tools 读取配置的路径,确保缺少 `config.ini` 时回落 normal 或示例默认。
+- [ ] 提交: `chore: move runtime config to example`
+
+### Phase 2 — Bench 先行,让 measure-before-add 变成真门
+
+- [ ] 扩 `bench/` fixture:至少 10 个样例,覆盖 auth/IDOR、injection、upload/path、recorded closure。
+- [ ] 扩 `tools/bench.py` 指标:detection rate、false positive rate、certainty calibration、request budget、time-to-first-evidence、closure correctness。
+- [ ] 增加 baseline-vs-change 输出格式,便于对 Metacog / worker / sensor 改动做 A/B。
+- [ ] 每次新增机制必须产生一条 `review/records/<date>-bench-*.md` 记录:测了什么、指标变化、是否采用。
+- [ ] 提交: `test: expand bench decision gate`
+
+### Phase 3 — 显式 Metacog pass(第二系统,先软门)
+
+- [ ] 在 `docs/WORKFLOW.md` 增加 Metacog pass:用于反事件发散,不是确认/收口。
+- [ ] 触发条件:连续 3 轮无新证据;同 barrier 重复失败;Reason 连续 staying;closure 前;operator hint 含 metacog;高价值 front 长期未实际 attack。
+- [ ] 输出契约写入 `decisions.md`:Trigger / Blind spot hypothesis / Proposed action / Target object / Expected signal / Safety class / Why main driver likely missed it。
+- [ ] `check_run.py` 增 closure 前缺 Metacog pass 的 WARN,不要 hard fail。
+- [ ] `docs/templates/loop_prompt.md` 加最短提示,避免长上下文忘记第二系统。
+- [ ] 提交: `docs: add explicit metacog pass`
+
+### Phase 4 — Worker 计划自动化,不做事实自动化
+
+- [ ] 增强 `tools/workers.py suggest`:读取 `frontier.md` / `coverage.json`,列出适合 fan-out 的候选 front。
+- [ ] 增强 `tools/workers.py plan`:生成 worker 分配草案,由 driver 确认/复制给子 agent。
+- [ ] 增强 `tools/workers.py merge-check`:列出 candidate 缺 Control/Replicated、重复、冲突、done-but-unmerged。
+- [ ] 调整文档:允许计划级自动化,仍禁止 worker 自动写 canonical evidence / confirmed finding。
+- [ ] 重新考虑 `>=3 independent fronts` 的硬阈值:改为建议条件,结合 front 数、共享 barrier、限速、历史 worker 命中率。
+- [ ] 提交: `feat: add worker planning helpers`
+
+### Phase 5 — Sensor 能力层:先补最缺的枪
+
+- [ ] 新建 `tools/sensors/` 命名空间,文档声明 sensor 只产出 candidate/evidence artifact。
+- [ ] `oob_listener.py` v0:支持盲 RCE / SSRF / XXE / SSTI 的 callback 证据;默认本地/授权 endpoint,记录 nonce。
+- [ ] `mutate_payload.py` v0:编码、大小写、路径归一化、JSON/XML/form/multipart 变体;不内置漏洞清单。
+- [ ] `blind_diff.py` v0:稳定采样状态码/长度/时间差,输出可复核差分。
+- [ ] `upload_probe.py` v0:无害上传证明、路径控制、清理记录、guard 限制。
+- [ ] 将 sensor 输出格式接到 evidence gate:artifact path + control/replicated 字段。
+- [ ] 提交: `feat: add proof-oriented sensors`
+
+### Phase 6 — Phenomenon / Candidate / Finding 分层
+
+- [ ] 文档定义三层:phenomenon=观察/静态线索;candidate=主动验证但证据未满;finding=过 evidence gate。
+- [ ] worker 输出默认 candidate;client/source/static sensor 输出默认 phenomenon。
+- [ ] `check_run.py` 对 report 中 phenomenon/candidate 伪装 finding 给 WARN/FAIL。
+- [ ] `evidence_parse.py` 支持解析层级字段,但保持向后兼容。
+- [ ] 提交: `feat: classify evidence maturity`
+
+### Phase 7 — Hostile content / prompt injection 防线
+
+- [ ] 新增 `docs/UNTRUSTED-CONTENT.md` 或并入 `docs/cognition/reference.md`。
+- [ ] 明确目标网页、JS、PDF、README、报错、工具输出、MCP/tool 描述中的自然语言默认 untrusted data,不是 operator 指令。
+- [ ] `render.py` / `evidence_parse.py` / 相关工具输出加 provenance: `source=target-content`, `trust=untrusted`。
+- [ ] review/closure 检查是否把 target content 当作指令吸收。
+- [ ] 提交: `docs: model hostile target content`
+
+### Phase 8 — 机器状态投影,不替代 Markdown
+
+- [ ] 新增 `runs/<target>/state/events.jsonl` 约定:action/evidence/front/status 事件流。
+- [ ] 新增 `tools/state_project.py`:从 markdown run dir 生成 JSON projection。
+- [ ] worker suggest、bench、check_run 优先读 projection;projection 缺失时从 markdown 生成。
+- [ ] 文档声明 markdown 仍是 canonical narrative;JSON 是索引/缓存,不得反向覆盖人工记录。
+- [ ] 提交: `feat: add run state projection`
+
+### Phase 9 — Client / Code graybox 扩展(排在 Web 主线之后)
+
+- [ ] 只做 sensor,不改 Xunji 主定位:Electron asar/config 检查、strings/grep 线索、本地监听端口 ingest、IPC/custom protocol 入口记录。
+- [ ] 输出默认 phenomenon,必须经主动 proof 才能升 candidate/finding。
+- [ ] 不把 TianTi 十维模型塞进 Web 主循环;作为 `client-graybox` 可选 profile。
+- [ ] 提交: `feat: add client graybox sensor skeleton`
+
+### 当前已知不合理点(改动时逐个消化)
+
+- [ ] `config.ini` 以 dev 模式入库不合理;运行模式影响 hook 行为,应本地化。
+- [ ] `measure before add` 已写入 roadmap,但 bench 还不足以真正阻止坏机制进入 core。
+- [ ] 反 orchestrator 边界过粗;应允许计划/建议/投影自动化,只禁止自动污染事实源。
+- [ ] Markdown-only 对机器协同不友好;需要 JSON projection,但不能替代审计叙事。
+- [ ] evidence gate 偏文档产物;应补 OOB / diff / sanitizer / reproduction oracle。
+- [ ] `>=3 independent fronts` worker 阈值僵硬;应改为可解释建议条件。
+- [ ] 对目标内容中的 prompt injection / hostile instruction 缺独立纪律层。
+- [ ] 能力 sensor 薄于安全/审计/收口纪律;要补 proof-oriented sensors。
 
 ## 1. 状态栏(statusline.ps1)
 
