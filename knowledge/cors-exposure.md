@@ -61,10 +61,10 @@ CSP allowing localhost), multiple EDU runs.
 
 ## Verification Principle
 
-- Existence proof: send a CORS preflight (OPTIONS with `Origin: https://evil.com`
-  and `Access-Control-Request-Method: GET`) → check if the response allows the
-  origin. Then send a real GET with the same `Origin` → check if `ACAO` reflects
-  it. The endpoint URL + response headers are the artifact.
+- Existence proof: send an OPTIONS preflight with a non-whitelisted Origin and
+  observe whether `Access-Control-Allow-Origin` in the response reflects that
+  origin. Then send a real GET with the same Origin to confirm the reflection.
+  The endpoint URL + response headers are the artifact.
 - Hard stops: confirm the CORS misconfiguration exists. Do NOT host a malicious
   page to prove data exfiltration — the header combination alone is the finding.
   Do not extract real user data via CORS.
@@ -82,7 +82,7 @@ CSP allowing localhost), multiple EDU runs.
 
 ## References
 
-- CWE-942: Permissive Cross-domain Policy with Untrusted Domains
+- CWE-942: https://cwe.mitre.org/data/definitions/942.html (Permissive Cross-domain Policy)
 - OWASP: https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/11-Client-side_Testing/07-Testing_Cross_Origin_Resource_Sharing
 - Fetch Standard: CORS protocol (https://fetch.spec.whatwg.org/#http-cors-protocol)
 - This repo's run-observation: jou (CORS * with credential cookies)

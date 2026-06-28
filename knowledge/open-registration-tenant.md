@@ -6,7 +6,7 @@ aliases: [open registration, self-registration, tenant bypass, tenant isolation,
 category: weakness-recognition
 last_reviewed: 2026-06-28
 maturity: seed
-signatures: ["/register", "/signup", "/account/register", "customerid", "tenantid", "companyid", "create account"]
+signatures: ["/identity/account/register", "customerid", "tenantid", "input.customerid", "input.tenantid", "companyid"]
 ---
 
 <!--
@@ -67,14 +67,14 @@ multi-tenant isolation weaknesses — cross-product. Source: scshr run-observati
 
 ## Verification Principle
 
-- Existence proof: a GET on the registration path returns the form. A POST
-  with throwaway data creates an account (or returns a validation error that
-  reveals what IS validated). If the tenant field accepts arbitrary values,
-  that is the existence proof of missing validation.
-- Hard stops: create ONE throwaway account to prove registration persists, then
-  stop. Do NOT create multiple accounts. Do NOT use the created account to
-  access real tenant data — record the potential IDOR surface for operator
-  decision. Operator must delete the test account.
+- Existence proof: a GET on the registration path returns the form. The form
+  fields (presence of tenant-isolation field, required/pattern attributes,
+  dropdown vs free-text input) reveal whether tenant validation is client-side
+  only. The endpoint URL + form structure are the artifact.
+- Hard stops: observe the registration form and its field validation attributes.
+  Do NOT create accounts autonomously (account creation is a state-changing
+  action, operator-gated). Record the registration surface and tenant-field
+  structure for operator decision on proof-level testing.
 
 ## False-Positive / Confounders
 
@@ -90,9 +90,9 @@ multi-tenant isolation weaknesses — cross-product. Source: scshr run-observati
 
 ## References
 
-- CWE-639: Authorization Bypass Through User-Controlled Key
-- CWE-287: Improper Authentication
-- OWASP: Multi-Tenant Application Security
+- CWE-639: https://cwe.mitre.org/data/definitions/639.html (Authorization Bypass Through User-Controlled Key)
+- CWE-287: https://cwe.mitre.org/data/definitions/287.html (Improper Authentication)
+- OWASP: https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html
 - This repo's run-observation: scshr E-005 (open registration + unvalidated
   CustomerID), E-012 (CustomerID optional free text); hamastar SimMAGIC IDOR
 - Related: [[auth-protocol-surface]] [[security-header-weaknesses]]

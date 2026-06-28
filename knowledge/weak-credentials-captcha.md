@@ -6,7 +6,7 @@ aliases: [weak password, default password, captcha bypass, rate limit, brute for
 category: weakness-recognition
 last_reviewed: 2026-06-28
 maturity: seed
-signatures: ["password policy", "captcha", "rate limit", "lockout", "retry-after", "too many attempts"]
+signatures: ["retry-after", "too many login attempts", "password must be at least", "account locked", "429 too many requests", "captcha challenge"]
 ---
 
 <!--
@@ -21,14 +21,13 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs
 
 - Signature (password policy weakness): password accepted with length < 8,
   no complexity requirements (no uppercase/number/special enforced), common
-  passwords allowed (Password123, admin123). The tell is the error message:
-  "Password must be at least 6 characters" = weak policy; "Password must
-  contain uppercase, lowercase, digit, and special character, minimum 12
-  characters" = strong policy.
-- Signature (default credentials): admin/admin, admin/admin123, admin/password,
-  root/root, guest/guest, and vendor-specific defaults (e.g., ownCloud
-  admin/admin, phpMyAdmin root/(empty)). The service docs or default config
-  reveal these.
+  passwords accepted. The tell is the error message: "must be at least 6
+  characters" = weak policy; "must contain uppercase, lowercase, digit, and
+  special character, minimum 12 characters" = strong policy.
+- Signature (default credentials): the service documentation or default
+  configuration references built-in accounts with well-known passwords;
+  vendor install guides often list these. The tell is a login page that
+  accepts common username/password pairs from the product manual.
 - Signature (rate-limit absent): no `Retry-After` header or `X-RateLimit-*`
   headers on authentication endpoints; no 429 Too Many Requests after rapid
   attempts; server processes every login attempt with consistent response time.
@@ -107,9 +106,9 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs
 
 ## References
 
-- CWE-307: Improper Restriction of Excessive Authentication Attempts
-- CWE-204: Observable Response Discrepancy (User Enumeration)
-- CWE-602: Client-Side Enforcement of Server-Side Security
+- CWE-307: https://cwe.mitre.org/data/definitions/307.html (Improper Restriction of Excessive Authentication Attempts)
+- CWE-204: https://cwe.mitre.org/data/definitions/204.html (Observable Response Discrepancy)
+- CWE-602: https://cwe.mitre.org/data/definitions/602.html (Client-Side Enforcement of Server-Side Security)
 - OWASP Authentication Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
 - This repo's run-observation: hamastar (captcha cookie cleartext, no account
   lockout); mokwon (student:12345678 weak password); cqytxy (arithmetic

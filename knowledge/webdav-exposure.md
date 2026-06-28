@@ -60,14 +60,14 @@ on upload paths).
 
 ## Verification Principle
 
-- Existence proof: send OPTIONS to the target path → parse the Allow/DAV header
-  for extended methods. For WebDAV: send PROPFIND with `Depth: 0` (or 1 for
-  directory listing) → confirm 207 Multi-Status with XML body. The methods
-  present + the XML response are the artifact.
-- Hard stops: confirm which extended methods are available and whether they
-  require authentication. Do NOT upload files via PUT or create directories
-  via MKCOL in autonomous mode (file creation = guard-managed). Do not
-  download files from WebDAV listings (data exfiltration).
+- Existence proof: an OPTIONS response listing WebDAV methods (PROPFIND, MKCOL,
+  etc.) in the Allow or DAV header confirms WebDAV is enabled. A subsequent
+  GET on the same path returning normal content (not 401/403) suggests the
+  methods may be available without authentication.
+- Hard stops: observe which extended methods are advertised and whether the path
+  requires authentication. Do NOT upload files, create directories, or download
+  files via WebDAV in autonomous mode (file creation and data access are
+  guard-managed).
 
 ## False-Positive / Confounders
 

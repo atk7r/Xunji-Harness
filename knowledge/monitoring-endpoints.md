@@ -6,7 +6,7 @@ aliases: [monitoring, prometheus, nacos, eureka, jolokia, stub_status, metrics, 
 category: weakness-recognition
 last_reviewed: 2026-06-28
 maturity: seed
-signatures: ["/nacos/", "/eureka/", "/jolokia/", "stub_status", "/metrics", "/prometheus", "netdata"]
+signatures: ["/nacos/v1/", "/eureka/apps", "/jolokia/list", "stub_status", "actuator/prometheus", "/prometheus/metrics", "netdata dashboard"]
 ---
 
 <!--
@@ -98,7 +98,7 @@ Prometheus, Nginx stub_status, Netdata, and generic /metrics endpoints.
 ## References
 
 - Nacos: https://nacos.io/en/docs/security/auth/ (authentication configuration)
-- Eureka: https://cloud.spring.io/spring-cloud-netflix/ (security section)
+- Eureka: https://docs.spring.io/spring-cloud-netflix/docs/current/reference/html/#securing-eureka-server (Spring Cloud Netflix Eureka security)
 - Jolokia: https://jolokia.org/reference/html/security.html
 - Prometheus: https://prometheus.io/docs/operating/security/
 - This repo's run-observation: various EDU runs (Nacos/Eureka on campus

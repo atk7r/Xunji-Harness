@@ -6,7 +6,7 @@ aliases: [missing headers, XFO, CSP, HSTS, HttpOnly, Secure cookie, 安全头缺
 category: weakness-recognition
 last_reviewed: 2026-06-28
 maturity: seed
-signatures: ["x-frame-options", "content-security-policy", "strict-transport-security", "httponly", "secure cookie", "samesite"]
+signatures: ["x-frame-options: deny", "content-security-policy: default-src", "strict-transport-security: max-age", "set-cookie: .*httponly", "set-cookie: .*secure"]
 ---
 
 <!--
@@ -85,8 +85,8 @@ HSTS, cookie no HttpOnly/Secure), mokwon run (session_regenerate_id not enforced
 ## References
 
 - OWASP Secure Headers Project: https://owasp.org/www-project-secure-headers/
-- CWE-1004: Sensitive Cookie Without 'HttpOnly' Flag
-- CWE-1275: Sensitive Cookie with Improper SameSite Attribute
+- CWE-1004: https://cwe.mitre.org/data/definitions/1004.html (Sensitive Cookie Without 'HttpOnly' Flag)
+- CWE-1275: https://cwe.mitre.org/data/definitions/1275.html (Sensitive Cookie with Improper SameSite Attribute)
 - This repo's run-observation: DVWA (missing XFO/CSP/HSTS, cookie flags);
   mokwon (session not regenerated after login)
 - Related: [[error-disclosure-signatures]] [[tech-stack-fingerprint]]
