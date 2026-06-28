@@ -95,9 +95,9 @@
 
 ### 当前已知不合理点(改动时逐个消化)
 
-- [ ] `config.ini` 以 dev 模式入库不合理;运行模式影响 hook 行为,应本地化。
-- [ ] `measure before add` 已写入 roadmap,但 bench 还不足以真正阻止坏机制进入 core。
-- [ ] 反 orchestrator 边界过粗;应允许计划/建议/投影自动化,只禁止自动污染事实源。
+- [x] `config.ini` 以 dev 模式入库不合理;运行模式影响 hook 行为,应本地化。
+- [x] `measure before add` 已写入 roadmap,但 bench 还不足以真正阻止坏机制进入 core。
+- [x] 反 orchestrator 边界过粗;应允许计划/建议/投影自动化,只禁止自动污染事实源。
 - [x] Markdown-only 对机器协同不友好;需要 JSON projection,但不能替代审计叙事。
 - [x] evidence gate 偏文档产物;应补 OOB / diff / sanitizer / reproduction oracle。
 - [x] `>=3 independent fronts` worker 阈值僵硬;应改为可解释建议条件。
