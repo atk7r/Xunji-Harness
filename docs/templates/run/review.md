@@ -9,6 +9,7 @@
 - Fronts waiting for user direction:
 - Evidence gaps:
 - False-positive risks:
+- Untrusted content handling:
 - Repeated-barrier loops:
 - Failure-budget triggers:
 - Conclusions to downgrade:

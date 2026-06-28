@@ -72,11 +72,11 @@
 
 ### Phase 7 — Hostile content / prompt injection 防线
 
-- [ ] 新增 `docs/UNTRUSTED-CONTENT.md` 或并入 `docs/cognition/reference.md`。
-- [ ] 明确目标网页、JS、PDF、README、报错、工具输出、MCP/tool 描述中的自然语言默认 untrusted data,不是 operator 指令。
-- [ ] `render.py` / `evidence_parse.py` / 相关工具输出加 provenance: `source=target-content`, `trust=untrusted`。
-- [ ] review/closure 检查是否把 target content 当作指令吸收。
-- [ ] 提交: `docs: model hostile target content`
+- [x] 新增 `docs/UNTRUSTED-CONTENT.md` 或并入 `docs/cognition/reference.md`。
+- [x] 明确目标网页、JS、PDF、README、报错、工具输出、MCP/tool 描述中的自然语言默认 untrusted data,不是 operator 指令。
+- [x] `render.py` / `evidence_parse.py` / 相关工具输出加 provenance: `source=target-content`, `trust=untrusted`。
+- [x] review/closure 检查是否把 target content 当作指令吸收。
+- [x] 提交: `docs: model hostile target content`
 
 ### Phase 8 — 机器状态投影,不替代 Markdown
 
@@ -101,7 +101,7 @@
 - [ ] Markdown-only 对机器协同不友好;需要 JSON projection,但不能替代审计叙事。
 - [ ] evidence gate 偏文档产物;应补 OOB / diff / sanitizer / reproduction oracle。
 - [ ] `>=3 independent fronts` worker 阈值僵硬;应改为可解释建议条件。
-- [ ] 对目标内容中的 prompt injection / hostile instruction 缺独立纪律层。
+- [x] 对目标内容中的 prompt injection / hostile instruction 缺独立纪律层。
 - [ ] 能力 sensor 薄于安全/审计/收口纪律;要补 proof-oriented sensors。
 
 ## 1. 状态栏(statusline.ps1)

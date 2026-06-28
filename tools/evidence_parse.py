@@ -66,6 +66,9 @@ _INLINE_FIELDS = (r"Supports|Refutes|Next|Certainty|Maturity|Severity|Cleanup|No
 _INLINE_CUT_RE = re.compile(r"\b(?:" + _INLINE_FIELDS + r")\s*[:：]")
 _MATURITY_FIELD_RE = re.compile(
     r"(?im)^\s*[-*]?\s*Maturity\s*[:：]\s*([A-Za-z_-]+|现象|候选|发现|确认)")
+_FIELD_RE = re.compile(
+    r"(?im)^\s*[-*]?\s*(Source|Trust)\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
+    re.S)
 
 _EVIDENCE_MEMO: dict = {}
 
@@ -104,6 +107,20 @@ def _maturity(block: str, confirmed: bool) -> tuple[str, bool, str | None]:
     if val in {"finding", "confirmed", "confirmed-finding", "发现", "确认"}:
         return "finding", True, None
     return "candidate", True, val
+
+
+def _provenance(block: str) -> dict:
+    fields: dict[str, str] = {}
+    for m in _FIELD_RE.finditer(block):
+        fields[m.group(1).lower()] = m.group(2).strip().splitlines()[0].strip()
+    src = fields.get("source", "evidence-ledger")
+    trust = fields.get("trust")
+    src_l = src.lower()
+    if trust is None:
+        trust = "untrusted" if any(x in src_l for x in (
+            "target-content", "target", "render", "client", "source", "static", "sensor"
+        )) else "operator-reviewed"
+    return {"source": src, "trust": trust}
 
 
 def parse_evidence(run_dir: Path) -> list[dict]:
@@ -157,11 +174,13 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         supports = _field_ids(b, "Supports", r"[EHF]-\d+")
         confirmed = any(c >= 0.8 for c in certs)
         maturity, maturity_explicit, maturity_raw = _maturity(b, confirmed)
+        prov = _provenance(b)
         records.append({
             "id": eid, "head": head,
             "certainties": certs, "confirmed": confirmed,
             "maturity": maturity, "maturity_explicit": maturity_explicit,
             "maturity_raw": maturity_raw, "maturity_unknown": maturity_raw is not None,
+            "source": prov["source"], "trust": prov["trust"], "provenance": prov,
             "has_control": bool(re.search(r"\b(Replicated|Control)\s*[:：]", b)),
             # 该条目自己有 `- Replay:` 字段 = 对 replay 分歧做过 re-adjudication(check_run 断-3 绑定用,
             # 逐条目判而非全局计数, 避免别处/模板的 Replay 误清这条)。
