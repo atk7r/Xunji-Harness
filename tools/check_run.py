@@ -551,6 +551,48 @@ def check_reason_pass(run_dir: Path) -> list[str]:
     return []
 
 
+_METACOG_FIELDS = [
+    "Trigger",
+    "Blind spot hypothesis",
+    "Proposed action",
+    "Target object",
+    "Expected signal",
+    "Safety class",
+    "Why main driver likely missed it",
+]
+
+
+def check_metacog_pass(run_dir: Path) -> list[str]:
+    """Soft gate for the explicit Metacog pass before closure.
+
+    Metacog is a second-system divergence pass: it proposes one blind-spot hypothesis and
+    one verifiable next action. It is not a confirmation path and never closes fronts.
+    """
+    report = run_dir / "report.md"
+    if not report.exists():
+        return []
+    rtext = report.read_text(encoding="utf-8", errors="replace")
+    if not (_closure_claimed(rtext) or _report_is_final(run_dir)):
+        return []
+    dec = run_dir / "decisions.md"
+    if not dec.exists():
+        return [
+            "Metacog pass(软门): 收口/终版报告前缺 decisions.md, 因而看不到 Metacog pass。"
+            "收口前应记录一次第二系统发散: Trigger / Blind spot hypothesis / Proposed action / "
+            "Target object / Expected signal / Safety class / Why main driver likely missed it。"]
+    text = dec.read_text(encoding="utf-8", errors="replace")
+    if not re.search(r"Metacog|Metacognitive|元认知|第二系统", text, re.I):
+        return [
+            "Metacog pass(软门): report 已触发收口/终版报告, 但 decisions.md 未记录 Metacog pass。"
+            "收口前应做一次第二系统发散, 找盲区并提出可验证动作; 它只打开/重排前沿, 不确认、不关门。"]
+    missing = [f for f in _METACOG_FIELDS if not re.search(rf"{re.escape(f)}\s*[:：]", text, re.I)]
+    if missing:
+        return [
+            "Metacog pass(软门): decisions.md 有 Metacog 记录但字段不完整, 缺 "
+            f"{', '.join(missing)}。按 WORKFLOW.md 契约补齐, 让建议可执行、可验收。"]
+    return []
+
+
 _HIGH_THREAT_ROLES = {"admin-mgmt", "data-pii", "identity-auth"}
 
 
@@ -1462,6 +1504,39 @@ def _selftest() -> int:
         ("auto-review: 未收口 -> 不触发(不建 review.md)", not (d11 / "review.md").exists()),
     ]
 
+    # --- Metacog soft gate (closure-before-second-system) ---
+    d_meta_draft = Path(tempfile.mkdtemp())
+    (d_meta_draft / "report.md").write_text("# Report\n草稿, 无收口断言无确认引用\n", encoding="utf-8")
+    meta_draft_w = check_metacog_pass(d_meta_draft)
+
+    d_meta = Path(tempfile.mkdtemp())
+    (d_meta / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Certainty: 0.8\n", encoding="utf-8")
+    (d_meta / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+    meta_missing_w = check_metacog_pass(d_meta)
+    (d_meta / "decisions.md").write_text(
+        "# Decisions\n## D-001\n- Metacog: second system before closure\n"
+        "- Trigger: closure before report\n",
+        encoding="utf-8")
+    meta_partial_w = check_metacog_pass(d_meta)
+    (d_meta / "decisions.md").write_text(
+        "# Decisions\n## D-001\n- Metacog: second system before closure\n"
+        "- Trigger: closure before report\n"
+        "- Blind spot hypothesis: ignored alternate auth boundary\n"
+        "- Proposed action: probe one alternate role transition\n"
+        "- Target object: F-001 auth surface\n"
+        "- Expected signal: 403 vs 200 differential\n"
+        "- Safety class: proof-only\n"
+        "- Why main driver likely missed it: tunneled on confirmed finding\n",
+        encoding="utf-8")
+    meta_ok_w = check_metacog_pass(d_meta)
+    checks += [
+        ("Metacog: draft report -> no warn", meta_draft_w == []),
+        ("Metacog: final report missing pass -> warn", any("Metacog" in w for w in meta_missing_w)),
+        ("Metacog: partial pass -> missing fields warn", any("字段不完整" in w for w in meta_partial_w)),
+        ("Metacog: full contract -> no warn", meta_ok_w == []),
+    ]
+
     # --- intermediate gates: fresh review, live coverage, same-barrier status filtering ---
     _five_decisions = "# Decisions\n" + "\n".join(
         f"## D-{i:03d}\n- Chosen front: F-001\n" for i in range(1, 6))
@@ -1854,6 +1929,7 @@ def main() -> int:
     warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)
     warnings.extend(check_hints(run_dir))              # 操作者 Hint: pending 未吸收
     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
+    warnings.extend(check_metacog_pass(run_dir))       # 收口前第二系统发散: 防主驱动盲区
     warnings.extend(check_threat_triage(run_dir))     # 威胁分级: HIGH+ deferred 无 E-entry → WARN
     warnings.extend(check_surface_populated(run_dir))  # surface.md 填充: Entry Points/Assets 空 → WARN
     # 自动异构复审(--auto-peer-review): 收口时若缺独立复审记录, 自动跑 peer_review 写进 review.md

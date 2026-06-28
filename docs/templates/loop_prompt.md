@@ -17,6 +17,8 @@ python tools/graph.py "{{RUN_DIR}}"
 
 Append one `Reason:` line to decisions.md: open/deferred counts, stay/pivot choice, target F-XXX.
 
+If closure is near, the same barrier keeps failing, 3 cycles produced no new evidence, or a hint asks for metacog, append one compact `Metacog:` block: Trigger / Blind spot hypothesis / Proposed action / Target object / Expected signal / Safety class / Why main driver likely missed it.
+
 ### 3. Act
 Guard-routed tools only.
 

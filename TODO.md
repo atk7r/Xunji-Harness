@@ -36,12 +36,12 @@
 
 ### Phase 3 — 显式 Metacog pass(第二系统,先软门)
 
-- [ ] 在 `docs/WORKFLOW.md` 增加 Metacog pass:用于反事件发散,不是确认/收口。
-- [ ] 触发条件:连续 3 轮无新证据;同 barrier 重复失败;Reason 连续 staying;closure 前;operator hint 含 metacog;高价值 front 长期未实际 attack。
-- [ ] 输出契约写入 `decisions.md`:Trigger / Blind spot hypothesis / Proposed action / Target object / Expected signal / Safety class / Why main driver likely missed it。
-- [ ] `check_run.py` 增 closure 前缺 Metacog pass 的 WARN,不要 hard fail。
-- [ ] `docs/templates/loop_prompt.md` 加最短提示,避免长上下文忘记第二系统。
-- [ ] 提交: `docs: add explicit metacog pass`
+- [x] 在 `docs/WORKFLOW.md` 增加 Metacog pass:用于反事件发散,不是确认/收口。
+- [x] 触发条件:连续 3 轮无新证据;同 barrier 重复失败;Reason 连续 staying;closure 前;operator hint 含 metacog;高价值 front 长期未实际 attack。
+- [x] 输出契约写入 `decisions.md`:Trigger / Blind spot hypothesis / Proposed action / Target object / Expected signal / Safety class / Why main driver likely missed it。
+- [x] `check_run.py` 增 closure 前缺 Metacog pass 的 WARN,不要 hard fail。
+- [x] `docs/templates/loop_prompt.md` 加最短提示,避免长上下文忘记第二系统。
+- [x] 提交: `docs: add explicit metacog pass`
 
 ### Phase 4 — Worker 计划自动化,不做事实自动化
 

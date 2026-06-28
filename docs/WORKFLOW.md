@@ -69,6 +69,38 @@ When a finding **confirms**, ask: does its proven output state satisfy another
 finding's precondition? If so that is a chain edge (chaining) — open a front and
 record it in `chains.md` (conditional; skip when no edge).
 
+### Metacog pass (conditional, second system)
+
+Metacog is a deliberate divergence pass used to expose blind spots in the main
+driver's current trajectory. It proposes a next action; it never confirms a finding,
+never closes a front, and never bypasses the evidence gate.
+
+Trigger it when any of these are true:
+
+- Three consecutive cycles produced no new evidence.
+- The same barrier class failed repeatedly.
+- `Reason:` keeps choosing "staying" on the same front.
+- Before closure / final report.
+- The operator hint asks for metacog / second-system review.
+- A high-value front has stayed open or deferred without a real attack attempt.
+
+Write one compact block in `decisions.md`:
+
+```text
+- Metacog: second system before <trigger>
+- Trigger: <why now>
+- Blind spot hypothesis: <what the main driver may be missing>
+- Proposed action: <one concrete verification or pivot>
+- Target object: <front / asset / evidence id>
+- Expected signal: <what would change if the hypothesis is useful>
+- Safety class: <proof-only / operator-gated / other>
+- Why main driver likely missed it: <tunnel, assumption, barrier, stale evidence>
+```
+
+Then either perform the proposed action or record why it is not worth doing. If the
+pass opens a new line of inquiry, add/update a front rather than smuggling the idea
+into a conclusion.
+
 When an observation **grounds a product fingerprint** — i.e. while attacking an asset you
 fetch it and recognize the stack (or an opt-in `classify_hosts` tagged it `kb:<id>`) —
 consult the grounding base for that stack **before** crafting the next probe; do not
