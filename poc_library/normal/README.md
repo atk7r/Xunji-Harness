@@ -14,4 +14,5 @@
 
 ## 本地条目（未披露，gitignored）
 
-- **soarcloud-ais** — 飛騰雲端 AIS HR: 开放自助注册 + CustomerID 未校验 + ViewState RCE（条件性：需 machineKey）；关联 `runs/scshr_20260614/`
+- 未披露产品特定条目只允许保留在本地 gitignored 目录；公开索引不得列厂商名、
+  漏洞类别、利用条件或 run 关联。待公开披露后再补入“公开索引”。

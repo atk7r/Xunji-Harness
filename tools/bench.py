@@ -114,6 +114,9 @@ def _timeline_metrics(run_dir: Path) -> dict:
     out = {"event_requests": 0, "time_to_first_evidence_sec": None}
     if not p.exists():
         return out
+    out["timeline_source"] = str(p.relative_to(run_dir))
+    if p.name == "events.jsonl" and p.parent == run_dir:
+        out["timeline_warning"] = "legacy root events.jsonl fallback; prefer state/events.jsonl"
     first_activity = None
     first_evidence = None
     for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -537,6 +540,8 @@ def _selftest() -> int:
         encoding="utf-8")
     checks.append(("时间线: state/events.jsonl 优先",
                    _timeline_metrics(run4_state)["time_to_first_evidence_sec"] == 3.0))
+    checks.append(("时间线: legacy events.jsonl 标记 fallback",
+                   _timeline_metrics(run4).get("timeline_warning") is not None))
     checks.append(("收口: 无正向发现 + Independent Review + markers -> clean", _is_clean(sc)))
     summ = _summary([s2, sc])["summary"]
     checks.append(("汇总: 2 fixture clean 且 closure 计数正确",

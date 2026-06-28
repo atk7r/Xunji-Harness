@@ -336,7 +336,7 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:
 
 
 def _has_target_content_artifacts(run_dir: Path) -> bool:
-    if any(run_dir.glob("evidence/**/provenance.json")):
+    if any(run_dir.glob("**/provenance.json")):
         return True
     for r in parse_evidence(run_dir):
         if r.get("trust") == "untrusted" or str(r.get("source", "")).lower().startswith("target"):
@@ -359,7 +359,8 @@ def check_untrusted_content(run_dir: Path) -> list[str]:
 
     suspect_re = re.compile(
         r"(ignore previous|disregard (?:all )?(?:prior|previous)|follow(?:ed)? (?:the )?(?:page|target).*instruction|"
-        r"页面要求我|目标要求我|按(?:照)?(?:页面|目标).*指令|忽略.*(?:规则|system|previous))",
+        r"as instructed by the page|根据(?:网站|页面).*操作|执行(?:页面|网站).*命令|"
+        r"页面要求我|目标要求我|按(?:照)?(?:页面|目标|网站).*指令|忽略.*(?:规则|system|previous))",
         re.I)
     hay = "\n".join(
         p.read_text(encoding="utf-8", errors="replace")
@@ -1396,12 +1397,14 @@ def _selftest() -> int:
         "- Certainty:\n  - sub-A = 1.0\n  - sub-B = 0.5\n- Supports: H-001\n\n"
         "## E-007 — value itself in parens (S1 fix: off-grid must still catch)\n"
         "- Replicated: yes\n- Artifacts: `ev_real.html`\n- Certainty: (0.8)\n"
-        "- Maturity: finding\n- Source: target-content\n- Trust: untrusted\n",
+        "- Maturity: finding\n- Source: target-content\n- Trust: untrusted\n\n"
+        "## E-008 — source-code-review should stay operator-reviewed\n"
+        "- Maturity: phenomenon\n- Source: source-code-review\n- Certainty: 0.3\n",
         encoding="utf-8")
     recs = parse_evidence(d)
     byid = {r["id"]: r for r in recs}
     checks = [
-        ("preamble not counted", len(recs) == 7),
+        ("preamble not counted", len(recs) == 8),
         ("split certainty -> confirmed", byid["E-002"]["confirmed"] is True),
         ("off-doctrine 0.9 -> confirmed (C1)", byid["E-004"]["confirmed"] is True),
         ("downgrade w/ grid nums in note -> NOT confirmed (the 2026-06-17 fix)", byid["E-005"]["confirmed"] is False),
@@ -1413,6 +1416,7 @@ def _selftest() -> int:
          and byid["E-001"]["maturity_explicit"] is False),
         ("provenance parsed from Source/Trust", byid["E-007"]["source"] == "target-content"
          and byid["E-007"]["trust"] == "untrusted"),
+        ("provenance inference is not overbroad", byid["E-008"]["trust"] == "operator-reviewed"),
         ("dangling citation detected", byid["E-002"]["artifacts_missing"] == ["ev_DELETED.html"]),
         ("prose filenames not cited", not any("jquery" in a or "webform" in a
                                               for a in byid["E-002"]["artifacts"])),

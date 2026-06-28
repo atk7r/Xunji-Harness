@@ -81,7 +81,7 @@ def build(paths: list[Path], ports_file: Path | None = None, limit: int = 500) -
     if ports_file and ports_file.exists():
         leads.extend(ingest_ports(ports_file.read_text(encoding="utf-8", errors="replace")))
     return {
-        "candidate": True,
+        "candidate": False,
         "maturity": "phenomenon",
         "source": "client-graybox",
         "trust": "untrusted",
@@ -107,7 +107,7 @@ def _selftest() -> int:
     data = build([d], ports)
     kinds = {x["kind"] for x in data["leads"]}
     checks = [
-        ("defaults to phenomenon", data["maturity"] == "phenomenon"),
+        ("defaults to phenomenon, not candidate", data["maturity"] == "phenomenon" and data["candidate"] is False),
         ("records electron artifact", "client_artifact" in kinds),
         ("records ipc lead", "ipc" in kinds),
         ("records custom protocol lead", "custom_protocol" in kinds),
@@ -129,6 +129,7 @@ def main() -> int:
     ap.add_argument("--run")
     ap.add_argument("--tag", default="client_graybox")
     ap.add_argument("--out", type=Path)
+    ap.add_argument("--show-snippets", action="store_true", help="print code snippets to stdout; artifacts always keep full JSON")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
@@ -143,7 +144,11 @@ def main() -> int:
     elif args.run:
         path = write_artifact(args.run, "client_graybox", args.tag, data)
         data["artifact"] = str(path)
-    print_json({"sensor": "client_graybox", **data})
+    stdout_data = {"sensor": "client_graybox", **data}
+    if not args.show_snippets:
+        stdout_data["leads"] = [{k: v for k, v in lead.items() if k != "snippet"} for lead in data["leads"]]
+        stdout_data["snippets_redacted"] = True
+    print_json(stdout_data)
     return 0
 
 

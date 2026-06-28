@@ -117,9 +117,11 @@ def _provenance(block: str) -> dict:
     trust = fields.get("trust")
     src_l = src.lower()
     if trust is None:
-        trust = "untrusted" if any(x in src_l for x in (
-            "target-content", "target", "render", "client", "source", "static", "sensor"
-        )) else "operator-reviewed"
+        target_sources = {
+            "target", "target-content", "target-network-observation", "target-session-artifact",
+            "target-error", "target-page", "target-js", "target-pdf", "target-readme",
+        }
+        trust = "untrusted" if src_l in target_sources or src_l.startswith("target-") else "operator-reviewed"
     return {"source": src, "trust": trust}
 
 

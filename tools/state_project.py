@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -26,9 +27,10 @@ def _read(path: Path) -> str:
 
 
 def _field(block: str, name: str) -> str:
-    pat = rf"(?im)^[ \t]*[-*]?[ \t]*{re.escape(name)}[ \t]*[:：][ \t]*(.*)$"
+    pat = (rf"(?ims)^[ \t]*[-*]?[ \t]*{re.escape(name)}[ \t]*[:：][ \t]*(.+?)"
+           rf"(?=\n[ \t]*[-*]?[ \t]*[A-Z][\w /()（）-]*[ \t]*[:：]|\n\s*\n|^##|\Z)")
     m = re.search(pat, block)
-    return m.group(1).strip() if m else ""
+    return " ".join(m.group(1).strip().split()) if m else ""
 
 
 def parse_fronts(run_dir: Path) -> list[dict]:
@@ -117,12 +119,27 @@ def write_projection(run_dir: Path) -> dict:
     proj = derive(run_dir)
     state = run_dir / "state"
     state.mkdir(parents=True, exist_ok=True)
-    (state / "projection.json").write_text(json.dumps(proj, ensure_ascii=False, indent=2) + "\n",
-                                           encoding="utf-8")
-    with (state / "events.jsonl").open("w", encoding="utf-8") as f:
-        for ev in _events(proj):
-            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    _atomic_write(state / "projection.json", json.dumps(proj, ensure_ascii=False, indent=2) + "\n")
+    _atomic_write(state / "events.jsonl", "".join(json.dumps(ev, ensure_ascii=False) + "\n" for ev in _events(proj)))
     return proj
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _source_mtime(run_dir: Path) -> int:
+    paths = [run_dir / n for n in ("frontier.md", "evidence.md", "decisions.md", "coverage.json")]
+    paths += sorted(run_dir.glob("**/coverage.json"))
+    mt = 0
+    for p in paths:
+        try:
+            mt = max(mt, p.stat().st_mtime_ns)
+        except OSError:
+            pass
+    return mt
 
 
 def load_or_create(run_dir: Path) -> dict:
@@ -130,7 +147,8 @@ def load_or_create(run_dir: Path) -> dict:
     if p.exists():
         try:
             data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
-            if isinstance(data, dict) and data.get("schema") == SCHEMA:
+            if (isinstance(data, dict) and data.get("schema") == SCHEMA
+                    and p.stat().st_mtime_ns >= _source_mtime(run_dir)):
                 return data
         except Exception:
             pass
@@ -158,6 +176,13 @@ def _selftest() -> int:
         ("events written", any('"type": "evidence"' in line for line in events)),
         ("load_or_create reads existing projection", load_or_create(d)["schema"] == SCHEMA),
     ]
+    old_mtime = (d / "state" / "projection.json").stat().st_mtime_ns
+    time.sleep(0.001)
+    (d / "frontier.md").write_text(
+        "# Frontier\n\n### F-002 API\n- Status: open\n- Barrier class: none\n", encoding="utf-8")
+    refreshed = load_or_create(d)
+    checks.append(("load_or_create refreshes stale projection", refreshed["fronts"][0]["id"] == "F-002"
+                   and (d / "state" / "projection.json").stat().st_mtime_ns >= old_mtime))
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
