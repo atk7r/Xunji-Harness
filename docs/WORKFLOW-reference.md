@@ -444,6 +444,15 @@ out to fresh-context sub-agent workers at once. Full mechanics and prompts are i
   workers and never writes canonical facts (that is the driver's judgement and
   merge duty). Same guardrail as the graph: tooling assists, it never drives.
 
+## Proof-oriented sensors
+
+`tools/sensors/` contains small proof helpers for cases where a single response is
+not enough: OOB callbacks, encoding/container mutation, stable blind differentials,
+and harmless upload proof objects. They write JSON artifacts under
+`<run>/evidence/sensors/` when `--run` is supplied. A sensor artifact is still a
+candidate input: the driver must copy only supported facts into `evidence.md`, attach
+Control/Replicated, and apply the certainty scale.
+
 ## Closure gate — `check_run.py` mechanics
 
 `tools/check_run.py` enforces closure discipline (core "Closure Discipline") only

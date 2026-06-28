@@ -54,13 +54,13 @@
 
 ### Phase 5 — Sensor 能力层:先补最缺的枪
 
-- [ ] 新建 `tools/sensors/` 命名空间,文档声明 sensor 只产出 candidate/evidence artifact。
-- [ ] `oob_listener.py` v0:支持盲 RCE / SSRF / XXE / SSTI 的 callback 证据;默认本地/授权 endpoint,记录 nonce。
-- [ ] `mutate_payload.py` v0:编码、大小写、路径归一化、JSON/XML/form/multipart 变体;不内置漏洞清单。
-- [ ] `blind_diff.py` v0:稳定采样状态码/长度/时间差,输出可复核差分。
-- [ ] `upload_probe.py` v0:无害上传证明、路径控制、清理记录、guard 限制。
-- [ ] 将 sensor 输出格式接到 evidence gate:artifact path + control/replicated 字段。
-- [ ] 提交: `feat: add proof-oriented sensors`
+- [x] 新建 `tools/sensors/` 命名空间,文档声明 sensor 只产出 candidate/evidence artifact。
+- [x] `oob_listener.py` v0:支持盲 RCE / SSRF / XXE / SSTI 的 callback 证据;默认本地/授权 endpoint,记录 nonce。
+- [x] `mutate_payload.py` v0:编码、大小写、路径归一化、JSON/XML/form/multipart 变体;不内置漏洞清单。
+- [x] `blind_diff.py` v0:稳定采样状态码/长度/时间差,输出可复核差分。
+- [x] `upload_probe.py` v0:无害上传证明、路径控制、清理记录、guard 限制。
+- [x] 将 sensor 输出格式接到 evidence gate:artifact path + control/replicated 字段。
+- [x] 提交: `feat: add proof-oriented sensors`
 
 ### Phase 6 — Phenomenon / Candidate / Finding 分层
 

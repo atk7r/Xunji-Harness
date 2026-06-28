@@ -296,6 +296,10 @@ run root. `scan.py` (sqlmap/nuclei) is **opt-in when a front is already grounded
 want cheap breadth** — its output is a ≤0.5 lead Hunter discipline still adjudicates, never
 a verdict, never the front-selection decision. Skipping it for a manual, controlled probe
 (e.g. under a noisy WAF) is a legitimate driver choice, not a gap.
+Proof-oriented helpers under `tools/sensors/` follow the same rule: they emit artifacts
+and candidate/control text only. They never choose targets, confirm findings, or write
+canonical `evidence.md`. Use them when proof needs OOB callbacks, encoding variants,
+stable blind differentials, or harmless upload evidence.
 
 ## Selection Record
 

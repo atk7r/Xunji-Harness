@@ -56,6 +56,10 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("knowledge_match", ["tools/knowledge_match.py", "--selftest"], "fingerprint→knowledge retrieval"),
     ("xday_match",      ["tools/xday_match.py", "--selftest"],      "fingerprint→local xday retrieval"),
     ("knowledge_seed",  ["tools/knowledge_seed.py", "--selftest"],  "fingerprint→knowledge write-back"),
+    ("sensor_oob",      ["tools/sensors/oob_listener.py", "--selftest"], "OOB callback artifact sensor"),
+    ("sensor_mutate",   ["tools/sensors/mutate_payload.py", "--selftest"], "payload mutation artifact sensor"),
+    ("sensor_blind_diff", ["tools/sensors/blind_diff.py", "--selftest"], "blind differential artifact sensor"),
+    ("sensor_upload",   ["tools/sensors/upload_probe.py", "--selftest"], "harmless upload proof sensor"),
     # --- loop pipeline ---
     ("loop_bootstrap",   ["tools/loop_bootstrap.py", "--selftest"],   "autonomous loop launcher"),
     ("session_handoff",  ["tools/session_handoff.py", "--selftest"],  "session handoff tool"),
