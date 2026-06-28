@@ -88,10 +88,10 @@
 
 ### Phase 9 — Client / Code graybox 扩展(排在 Web 主线之后)
 
-- [ ] 只做 sensor,不改 Xunji 主定位:Electron asar/config 检查、strings/grep 线索、本地监听端口 ingest、IPC/custom protocol 入口记录。
-- [ ] 输出默认 phenomenon,必须经主动 proof 才能升 candidate/finding。
-- [ ] 不把 TianTi 十维模型塞进 Web 主循环;作为 `client-graybox` 可选 profile。
-- [ ] 提交: `feat: add client graybox sensor skeleton`
+- [x] 只做 sensor,不改 Xunji 主定位:Electron asar/config 检查、strings/grep 线索、本地监听端口 ingest、IPC/custom protocol 入口记录。
+- [x] 输出默认 phenomenon,必须经主动 proof 才能升 candidate/finding。
+- [x] 不把 TianTi 十维模型塞进 Web 主循环;作为 `client-graybox` 可选 profile。
+- [x] 提交: `feat: add client graybox sensor skeleton`
 
 ### 当前已知不合理点(改动时逐个消化)
 
@@ -99,10 +99,10 @@
 - [ ] `measure before add` 已写入 roadmap,但 bench 还不足以真正阻止坏机制进入 core。
 - [ ] 反 orchestrator 边界过粗;应允许计划/建议/投影自动化,只禁止自动污染事实源。
 - [x] Markdown-only 对机器协同不友好;需要 JSON projection,但不能替代审计叙事。
-- [ ] evidence gate 偏文档产物;应补 OOB / diff / sanitizer / reproduction oracle。
-- [ ] `>=3 independent fronts` worker 阈值僵硬;应改为可解释建议条件。
+- [x] evidence gate 偏文档产物;应补 OOB / diff / sanitizer / reproduction oracle。
+- [x] `>=3 independent fronts` worker 阈值僵硬;应改为可解释建议条件。
 - [x] 对目标内容中的 prompt injection / hostile instruction 缺独立纪律层。
-- [ ] 能力 sensor 薄于安全/审计/收口纪律;要补 proof-oriented sensors。
+- [x] 能力 sensor 薄于安全/审计/收口纪律;要补 proof-oriented sensors。
 
 ## 1. 状态栏(statusline.ps1)
 

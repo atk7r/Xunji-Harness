@@ -476,6 +476,10 @@ and harmless upload proof objects. They write JSON artifacts under
 candidate input: the driver must copy only supported facts into `evidence.md`, set
 the correct `Maturity:`, attach Control/Replicated, and apply the certainty scale.
 
+`client_graybox.py` is separate from the web-first main loop. Use it only when the
+engagement includes client/code artifacts; its ASAR/config/IPC/custom-protocol/local
+port observations default to `Maturity: phenomenon` until active proof upgrades them.
+
 ## Closure gate — `check_run.py` mechanics
 
 `tools/check_run.py` enforces closure discipline (core "Closure Discipline") only
