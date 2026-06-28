@@ -64,11 +64,11 @@
 
 ### Phase 6 — Phenomenon / Candidate / Finding 分层
 
-- [ ] 文档定义三层:phenomenon=观察/静态线索;candidate=主动验证但证据未满;finding=过 evidence gate。
-- [ ] worker 输出默认 candidate;client/source/static sensor 输出默认 phenomenon。
-- [ ] `check_run.py` 对 report 中 phenomenon/candidate 伪装 finding 给 WARN/FAIL。
-- [ ] `evidence_parse.py` 支持解析层级字段,但保持向后兼容。
-- [ ] 提交: `feat: classify evidence maturity`
+- [x] 文档定义三层:phenomenon=观察/静态线索;candidate=主动验证但证据未满;finding=过 evidence gate。
+- [x] worker 输出默认 candidate;client/source/static sensor 输出默认 phenomenon。
+- [x] `check_run.py` 对 report 中 phenomenon/candidate 伪装 finding 给 WARN/FAIL。
+- [x] `evidence_parse.py` 支持解析层级字段,但保持向后兼容。
+- [x] 提交: `feat: classify evidence maturity`
 
 ### Phase 7 — Hostile content / prompt injection 防线
 

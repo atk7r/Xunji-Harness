@@ -257,6 +257,80 @@ def check_certainty_scale(run_dir: Path) -> list[str]:
     return errors
 
 
+def _report_evidence_ids(rtext: str) -> set[str]:
+    ids: set[str] = set()
+    for m in re.finditer(r"(?im)^\s*Evidence\s+IDs?\s*[:：]\s*(.*)$", rtext):
+        ids.update(re.findall(r"E-\d+", m.group(1)))
+    return ids
+
+
+def check_evidence_maturity(run_dir: Path) -> list[str]:
+    """Soft consistency hints for the Phenomenon/Candidate/Finding split.
+
+    Backward-compatible entries without `Maturity:` are inferred, but explicit
+    contradictions are surfaced so a phenomenon/candidate is not silently treated
+    as a reportable finding.
+    """
+    warns: list[str] = []
+    for r in parse_evidence(run_dir):
+        mat = r.get("maturity")
+        if r.get("maturity_unknown"):
+            warns.append(
+                f"evidence {r['id']}: unknown Maturity value {r.get('maturity_raw')!r} —— "
+                "按 candidate 处理; 请改为 phenomenon / candidate / finding。")
+        if mat == "finding" and not r["confirmed"]:
+            warns.append(
+                f"evidence {r['id']}: Maturity=finding 但 Certainty<0.8 —— finding 必须过 evidence gate; "
+                "降为 candidate/phenomenon 或补足 Control/Replicated/Artifacts 后再升。")
+        if mat in {"phenomenon", "candidate"} and r["confirmed"]:
+            warns.append(
+                f"evidence {r['id']}: Maturity={mat} 但 Certainty>=0.8 —— 成熟度和 certainty 冲突; "
+                "若已过 evidence gate 改为 finding, 否则降 certainty。")
+    return warns
+
+
+def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:
+    """Prevent lower-maturity entries from masquerading as reportable findings.
+
+    `Evidence IDs:` is the report's confirmed evidence list, so phenomenon or
+    candidate IDs there are hard errors. Other body citations are warnings: they
+    may be legitimate context, but should be explicitly framed as non-findings.
+    """
+    report = run_dir / "report.md"
+    if not report.exists():
+        return [], []
+    rtext = report.read_text(encoding="utf-8", errors="replace")
+    records = {r["id"]: r for r in parse_evidence(run_dir)}
+    ids_line = _report_evidence_ids(rtext)
+    immature_line = sorted(
+        eid for eid in ids_line
+        if eid in records and records[eid].get("maturity") in {"phenomenon", "candidate"}
+    )
+    errors = []
+    if immature_line:
+        details = ", ".join(f"{eid}={records[eid]['maturity']}" for eid in immature_line)
+        errors.append(
+            "成熟度硬门(report): `Evidence IDs:` 只能列 finding(已过 evidence gate)。"
+            f" 下列条目仍是 phenomenon/candidate: {details}。把它们移出确认证据清单, "
+            "或补主动验证/Control/Replicated/Artifacts 后在 evidence.md 标为 Maturity: finding。")
+
+    body = re.sub(r"```.*?```|<!--.*?-->", "", rtext, flags=re.S)
+    body = re.sub(r"`[^`\n]*`", "", body)
+    body = re.sub(r"(?im)^\s*Evidence\s+IDs?.*$", "", body)
+    body_ids = set(re.findall(r"E-\d+", body))
+    immature_body = sorted(
+        eid for eid in body_ids
+        if eid in records and records[eid].get("maturity") in {"phenomenon", "candidate"}
+    )
+    warnings = []
+    if immature_body:
+        details = ", ".join(f"{eid}={records[eid]['maturity']}" for eid in immature_body)
+        warnings.append(
+            "成熟度软警(report): report 正文引用了未达 finding 的证据条目 "
+            f"({details})。若只是背景/开放问题, 请显式写明非确认发现; 若作为确认发现, 先过 evidence gate。")
+    return errors, warnings
+
+
 # 布局漂移(断-2): evidence/ 放传感器证据, classify/ 放 coverage, scripts/ 放 PoC; run 根目录
 # 只该有核心 .md + 自动派生的 evidence.json/coverage.json/graph.json。证据/草稿散落根目录虽仍能被
 # _resolve_artifact 找到(收口门不坏), 但证据与草稿混作一团、不利审计 —— WARN 提醒归位(不硬失败,
@@ -392,10 +466,7 @@ def _report_is_final(run_dir: Path) -> bool:
     if not report.exists():
         return False
     rtext = report.read_text(encoding="utf-8", errors="replace")
-    m = re.search(r"Evidence IDs\s*[:：]\s*(.+)", rtext)
-    if not m:
-        return False
-    cited = set(re.findall(r"E-\d+", m.group(1)))
+    cited = _report_evidence_ids(rtext)
     if not cited:
         return False
     confirmed = {r["id"] for r in parse_evidence(run_dir) if r["confirmed"]}
@@ -1281,7 +1352,8 @@ def _selftest() -> int:
         "- Replicated: yes\n- Artifacts: `ev_real.html`\n"
         "- Certainty:\n  - sub-A = 1.0\n  - sub-B = 0.5\n- Supports: H-001\n\n"
         "## E-007 — value itself in parens (S1 fix: off-grid must still catch)\n"
-        "- Replicated: yes\n- Artifacts: `ev_real.html`\n- Certainty: (0.8)\n",
+        "- Replicated: yes\n- Artifacts: `ev_real.html`\n- Certainty: (0.8)\n"
+        "- Maturity: finding\n",
         encoding="utf-8")
     recs = parse_evidence(d)
     byid = {r["id"]: r for r in recs}
@@ -1292,6 +1364,10 @@ def _selftest() -> int:
         ("downgrade w/ grid nums in note -> NOT confirmed (the 2026-06-17 fix)", byid["E-005"]["confirmed"] is False),
         ("multi-line split certainty -> confirmed (N2 regression)", byid["E-006"]["confirmed"] is True),
         ("certainty value inside parens -> confirmed (S1 fix)", byid["E-007"]["confirmed"] is True),
+        ("explicit maturity parsed", byid["E-007"]["maturity"] == "finding"
+         and byid["E-007"]["maturity_explicit"] is True),
+        ("legacy confirmed entry infers finding", byid["E-001"]["maturity"] == "finding"
+         and byid["E-001"]["maturity_explicit"] is False),
         ("dangling citation detected", byid["E-002"]["artifacts_missing"] == ["ev_DELETED.html"]),
         ("prose filenames not cited", not any("jquery" in a or "webform" in a
                                               for a in byid["E-002"]["artifacts"])),
@@ -1309,6 +1385,56 @@ def _selftest() -> int:
         ("contradiction: refuted-but-confirmed E-001", any("E-001" in w
                                                            for w in check_ledger_contradiction(d))),
         ("no confirmed-missing-artifact FP", evidence_entries_missing_artifact(d) == []),
+    ]
+
+    d_mat = Path(tempfile.mkdtemp())
+    (d_mat / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d_mat / "evidence.md").write_text(
+        "# Evidence Ledger\n\n"
+        "## E-010 — source observation\n"
+        "- Maturity: phenomenon\n- Certainty: 0.3\n\n"
+        "## E-011 — worker candidate\n"
+        "- Maturity: candidate\n- Certainty: 0.5\n\n"
+        "## E-012 — confirmed finding\n"
+        "- Maturity: finding\n- Replicated: yes\n- Artifacts: `ev.html`\n- Certainty: 0.8\n\n"
+        "## E-013 — typo maturity defaults to candidate\n"
+        "- Maturity: findig\n- Certainty: 0.3\n\n"
+        "## E-014 — finding label without gate\n"
+        "- Maturity: finding\n- Certainty: 0.5\n\n"
+        "## E-015 — candidate label with high certainty\n"
+        "- Maturity: candidate\n- Certainty: 0.8\n",
+        encoding="utf-8")
+    (d_mat / "report.md").write_text(
+        "# Report\nEvidence IDs: E-012, E-011, E-015\n\n"
+        "## Evidence\nCandidate context: E-010 and inline code `E-013`\n",
+        encoding="utf-8")
+    mat_errors, mat_warns = check_report_maturity(d_mat)
+    mat_consistency = check_evidence_maturity(d_mat)
+    mat_recs = {r["id"]: r for r in parse_evidence(d_mat)}
+    write_evidence_index(d_mat, parse_evidence(d_mat))
+    mat_index = json.loads((d_mat / "evidence.json").read_text(encoding="utf-8"))
+    checks += [
+        ("maturity parser: phenomenon", mat_recs["E-010"]["maturity"] == "phenomenon"),
+        ("maturity parser: candidate", mat_recs["E-011"]["maturity"] == "candidate"),
+        ("maturity parser: unknown defaults to candidate and records raw",
+         mat_recs["E-013"]["maturity"] == "candidate" and mat_recs["E-013"]["maturity_unknown"] is True),
+        ("report maturity gate: candidate in Evidence IDs hard error",
+         any("E-011=candidate" in e for e in mat_errors)),
+        ("report maturity gate: high-cert candidate still triggers final report",
+         _report_is_final(d_mat) is True and any("E-015=candidate" in e for e in mat_errors)),
+        ("report maturity gate: phenomenon in body soft warn",
+         any("E-010=phenomenon" in w for w in mat_warns)),
+        ("report maturity gate: inline code E-id ignored",
+         not any("E-013" in w for w in mat_warns)),
+        ("maturity consistency: unknown warns",
+         any("E-013" in w and "unknown Maturity" in w for w in mat_consistency)),
+        ("maturity consistency: finding below gate warns",
+         any("E-014" in w and "Maturity=finding" in w for w in mat_consistency)),
+        ("maturity consistency: candidate above gate warns",
+         any("E-015" in w and "Maturity=candidate" in w for w in mat_consistency)),
+        ("evidence index keeps legacy confirmed and adds confirmed_findings",
+         "E-015" in mat_index["confirmed"] and "E-015" not in mat_index["confirmed_findings"]
+         and "E-012" in mat_index["confirmed_findings"]),
     ]
 
     # --- coverage-built + 状态式收口触发 (hamastar 修复回归) ---
@@ -1938,6 +2064,7 @@ def main() -> int:
 
     # Quality warnings (do not fail the structural gate; surface for the driver).
     warnings = check_evidence_certainty(run_dir)
+    warnings.extend(check_evidence_maturity(run_dir))  # 成熟度分层: phenomenon/candidate/finding 一致性
     warnings.extend(check_dangling_citations(run_dir))  # 死引用(E-012 洞): 逐条报
     warnings.extend(check_replay_evidence(run_dir))    # 操作录像: certainty>=0.8 确认建议附 .replay.json(可重放核实)
     warnings.extend(check_layout_drift(run_dir))       # 布局漂移: 证据/草稿散落 run 根目录(应归位 evidence/scripts/classify)
@@ -1964,6 +2091,9 @@ def main() -> int:
     intermediate_errors, intermediate_warns = check_intermediate_gates(run_dir)
     errors.extend(intermediate_errors)
     warnings.extend(intermediate_warns)
+    maturity_errors, maturity_warns = check_report_maturity(run_dir)
+    errors.extend(maturity_errors)
+    warnings.extend(maturity_warns)
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
     errors.extend(closure_errors)

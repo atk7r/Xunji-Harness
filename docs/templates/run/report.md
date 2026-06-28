@@ -5,7 +5,7 @@
 - Status:
 - Severity candidate:
 - Affected asset:
-- Evidence IDs:
+- Evidence IDs:   (finding maturity only; do not list phenomenon/candidate here)
 - Fingerprints captured:   (识别的产品指纹是否入库: '<产品> → knowledge/<id>.md'; 或 "无新指纹")
 
 ## Impact

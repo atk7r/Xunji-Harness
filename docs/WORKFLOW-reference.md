@@ -444,14 +444,31 @@ out to fresh-context sub-agent workers at once. Full mechanics and prompts are i
   workers and never writes canonical facts (that is the driver's judgement and
   merge duty). Same guardrail as the graph: tooling assists, it never drives.
 
+## Evidence maturity
+
+Every evidence entry has one maturity layer:
+
+- `phenomenon`: an observation or static/source/client-side lead. It can steer
+  attention, but it is not active proof.
+- `candidate`: an active probe or worker result that is plausible but has not yet
+  passed the evidence gate.
+- `finding`: a confirmed entry that has passed the evidence gate (`Certainty >= 0.8`
+  with Control/Replicated and a real artifact when closing).
+
+Workers default to `candidate`. Source/client/static sensors and passive observations
+default to `phenomenon`. `report.md` may cite phenomenon/candidate context in prose,
+but its `Evidence IDs:` confirmed-evidence list must contain only `finding` entries.
+New evidence entries should set `Maturity:` explicitly; parser inference exists only
+for legacy entries without the field.
+
 ## Proof-oriented sensors
 
 `tools/sensors/` contains small proof helpers for cases where a single response is
 not enough: OOB callbacks, encoding/container mutation, stable blind differentials,
 and harmless upload proof objects. They write JSON artifacts under
 `<run>/evidence/sensors/` when `--run` is supplied. A sensor artifact is still a
-candidate input: the driver must copy only supported facts into `evidence.md`, attach
-Control/Replicated, and apply the certainty scale.
+candidate input: the driver must copy only supported facts into `evidence.md`, set
+the correct `Maturity:`, attach Control/Replicated, and apply the certainty scale.
 
 ## Closure gate — `check_run.py` mechanics
 

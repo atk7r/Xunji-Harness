@@ -61,9 +61,11 @@ _CERT_NUMBER_RE = re.compile(r"\b[01]\.\d+\b")
 # inline field labels — used to bound a field's value when several share one line
 # (e.g. "- Supports: H-002. Refutes: —. Next: prove X (E-005)." — the (E-005) belongs
 # to Next:, not Refutes:; cutting at the next label stops that misattribution).
-_INLINE_FIELDS = (r"Supports|Refutes|Next|Certainty|Severity|Cleanup|Note|Replicated|"
+_INLINE_FIELDS = (r"Supports|Refutes|Next|Certainty|Maturity|Severity|Cleanup|Note|Replicated|"
                   r"Control|Alternative|Source|Action|Result|Caused by us")
 _INLINE_CUT_RE = re.compile(r"\b(?:" + _INLINE_FIELDS + r")\s*[:：]")
+_MATURITY_FIELD_RE = re.compile(
+    r"(?im)^\s*[-*]?\s*Maturity\s*[:：]\s*([A-Za-z_-]+|现象|候选|发现|确认)")
 
 _EVIDENCE_MEMO: dict = {}
 
@@ -88,6 +90,20 @@ def _field_ids(block: str, name: str, idpat: str) -> list[str]:
             seg = seg[:cut.start()]
         out += re.findall(idpat, seg)
     return out
+
+
+def _maturity(block: str, confirmed: bool) -> tuple[str, bool, str | None]:
+    m = _MATURITY_FIELD_RE.search(block)
+    if not m:
+        return ("finding" if confirmed else "candidate"), False, None
+    val = m.group(1).strip().lower().replace("_", "-")
+    if val in {"phenomenon", "observed", "observation", "static", "source", "client", "recon", "现象"}:
+        return "phenomenon", True, None
+    if val in {"candidate", "proposed", "unconfirmed", "候选"}:
+        return "candidate", True, None
+    if val in {"finding", "confirmed", "confirmed-finding", "发现", "确认"}:
+        return "finding", True, None
+    return "candidate", True, val
 
 
 def parse_evidence(run_dir: Path) -> list[dict]:
@@ -139,9 +155,13 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         missing = [a for a in arts if not _resolve_artifact(a, run_dir)]
         refutes = _field_ids(b, "Refutes", r"E-\d+")
         supports = _field_ids(b, "Supports", r"[EHF]-\d+")
+        confirmed = any(c >= 0.8 for c in certs)
+        maturity, maturity_explicit, maturity_raw = _maturity(b, confirmed)
         records.append({
             "id": eid, "head": head,
-            "certainties": certs, "confirmed": any(c >= 0.8 for c in certs),
+            "certainties": certs, "confirmed": confirmed,
+            "maturity": maturity, "maturity_explicit": maturity_explicit,
+            "maturity_raw": maturity_raw, "maturity_unknown": maturity_raw is not None,
             "has_control": bool(re.search(r"\b(Replicated|Control)\s*[:：]", b)),
             # 该条目自己有 `- Replay:` 字段 = 对 replay 分歧做过 re-adjudication(check_run 断-3 绑定用,
             # 逐条目判而非全局计数, 避免别处/模板的 Replay 误清这条)。
@@ -165,7 +185,9 @@ def write_evidence_index(run_dir: Path, records: list[dict]) -> None:
     if not records:
         return
     confirmed = [r["id"] for r in records if r["confirmed"]]
+    confirmed_findings = [r["id"] for r in records if r["confirmed"] and r.get("maturity") == "finding"]
     out = {"total": len(records), "confirmed": confirmed,
+           "confirmed_findings": confirmed_findings,
            "dangling_citations": {r["id"]: r["artifacts_missing"]
                                   for r in records if r["artifacts_missing"]},
            "entries": records}

@@ -7,6 +7,7 @@
 
 ## E-001
 
+- Maturity: phenomenon / candidate / finding
 - Time:
 - Action:
 - Source:

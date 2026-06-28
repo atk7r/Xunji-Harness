@@ -169,6 +169,17 @@ collapse back to: stop.
 
 ## Evidence Gate
 
+Each evidence item carries a maturity layer:
+
+- `phenomenon`: observation/static/source/client lead only.
+- `candidate`: active proof or worker result that has not passed the gate.
+- `finding`: passed evidence gate and may be listed in report `Evidence IDs:`.
+
+Workers default to `candidate`; passive/source/client/static sensor output defaults
+to `phenomenon`. Do not let lower-maturity entries masquerade as confirmed findings.
+New entries should set `Maturity:` explicitly; parser inference exists only for
+legacy entries without the field.
+
 Only `certainty >= 0.8` may be reported confirmed. The four-level scale + meanings
 is the canonical table in `docs/cognition/README.md` "Evidence Confidence" (always
 loaded) — not restated here, to keep one source of truth.

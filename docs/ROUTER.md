@@ -300,6 +300,10 @@ Proof-oriented helpers under `tools/sensors/` follow the same rule: they emit ar
 and candidate/control text only. They never choose targets, confirm findings, or write
 canonical `evidence.md`. Use them when proof needs OOB callbacks, encoding variants,
 stable blind differentials, or harmless upload evidence.
+Evidence maturity is explicit in `evidence.md`: passive/source/client/static observations
+start as `phenomenon`, worker output and active-but-incomplete proof start as `candidate`,
+and only evidence-gated entries become `finding`. `report.md`'s `Evidence IDs:` list is
+reserved for finding-maturity entries.
 
 ## Selection Record
 

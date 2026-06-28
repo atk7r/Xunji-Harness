@@ -50,6 +50,7 @@ SCAFFOLD = """# Worker {wid}
 ## Candidate findings
 
 ### CAND-1
+- Maturity: candidate
 - Claim:
 - Action / probe:
 - Result:
