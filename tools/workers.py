@@ -24,6 +24,8 @@ driver 是唯一整合者: 把候选过【证据门】后并入 evidence.md。�
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import re
 import sys
@@ -37,6 +39,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {"list", "new", "suggest", "plan", "merge-check"}
+HWS = r"[^\S\n]"
 
 SCAFFOLD = """# Worker {wid}
 
@@ -74,13 +77,20 @@ def resolve_run_dir(path: Path) -> Path:
     return run_dir.resolve()
 
 
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def scan(run_dir: Path) -> list[dict]:
     wd = workers_dir(run_dir)
     out: list[dict] = []
     for f in sorted(wd.glob("W-*.md")) if wd.exists() else []:
         text = f.read_text(encoding="utf-8", errors="replace")
-        st = re.search(r"^-?\s*Status\s*[:：]\s*([A-Za-z]+)", text, re.M)
-        front = re.search(r"^-?\s*Assigned front\s*[:：]\s*([^\n]+)", text, re.M)
+        st = re.search(rf"(?im)^{HWS}*-?{HWS}*Status{HWS}*[:：]{HWS}*([A-Za-z]+)", text)
+        front = re.search(rf"(?im)^{HWS}*-?{HWS}*Assigned front{HWS}*[:：]{HWS}*([^\n]+)", text)
         cands = len(re.findall(r"^###\s+CAND-", text, re.M))
         out.append({
             "file": f.name,
@@ -92,7 +102,7 @@ def scan(run_dir: Path) -> list[dict]:
 
 
 def _field(text: str, name: str) -> str:
-    m = re.search(rf"(?im)^\s*[-*]?\s*{re.escape(name)}\s*[:：]\s*(.+)$", text)
+    m = re.search(rf"(?im)^{HWS}*[-*]?{HWS}*{re.escape(name)}{HWS}*[:：]{HWS}*([^\n]*)$", text)
     return m.group(1).strip() if m else ""
 
 
@@ -107,7 +117,7 @@ def _front_sections(text: str) -> list[tuple[str, str]]:
     current = "unknown"
     buf: list[str] = []
     for line in text.splitlines():
-        mh = re.match(r"^##\s+(.+?)\s*$", line)
+        mh = re.match(r"^##[ \t]+(.+?)[ \t]*$", line)
         if mh:
             if buf:
                 sections.append((current, "\n".join(buf)))
@@ -127,7 +137,7 @@ def parse_frontiers(run_dir: Path) -> list[dict]:
     text = path.read_text(encoding="utf-8", errors="replace")
     fronts: list[dict] = []
     for section, body in _front_sections(text):
-        for m in re.finditer(r"(?ms)^###\s+(F-\d+).*?(?=^###\s+F-\d+|\Z)", body):
+        for m in re.finditer(r"(?ms)^###[ \t]+(F-\d+).*?(?=^###[ \t]+|\Z)", body):
             block = m.group(0)
             fid = m.group(1)
             status = (_field(block, "Status") or section).lower()
@@ -258,7 +268,7 @@ def _fanout_verdict(rows: list[dict]) -> tuple[str, list[str]]:
 
 def _candidate_blocks(text: str) -> list[dict]:
     blocks: list[dict] = []
-    for m in re.finditer(r"(?ms)^###\s+(CAND-\d+).*?(?=^###\s+CAND-\d+|\Z)", text):
+    for m in re.finditer(r"(?ms)^###[ \t]+(CAND-\d+).*?(?=^###[ \t]+|\Z)", text):
         block = m.group(0)
         raw_cert = _field(block, "Proposed certainty")
         cm = re.search(r"[01]\.\d+", raw_cert)
@@ -289,7 +299,7 @@ def merge_check(run_dir: Path) -> list[dict]:
             if not claim or claim in {"-", "TODO"}:
                 issues.append({"severity": "warn", "worker": w["file"], "kind": "missing-claim",
                                "detail": f"{label} has no Claim."})
-            norm = re.sub(r"\W+", " ", claim.lower()).strip()
+            norm = re.sub(r"\W+", " ", claim.lower()).strip() or claim.lower().strip()
             if norm:
                 other = seen_claims.get(norm)
                 if other:
@@ -356,6 +366,7 @@ def print_suggest(run_dir: Path, limit: int | None = None) -> int:
     verdict, notes = _fanout_verdict(rows)
     print(f"[workers suggest] {verdict} ({'; '.join(notes)})")
     print("  note: advisory only; driver chooses. Workers produce candidates, never canonical Facts.")
+    print("  driver still weighs live rate limits, shared auth/WAF barriers, and prior worker hit rate.")
     for r in rows:
         rs = "; ".join(r["reasons"][:3]) or "no positive signal"
         cs = (" | cautions: " + "; ".join(r["cautions"][:3])) if r["cautions"] else ""
@@ -371,11 +382,14 @@ def print_plan(run_dir: Path, limit: int) -> int:
         print("[workers plan] 无 strong candidate。先串行推进或补 coverage/frontier 资产映射。")
         return 1
     selected = rows[:limit]
-    verdict, notes = _fanout_verdict(selected)
+    verdict, notes = _fanout_verdict(rows)
     print(f"[workers plan] draft only: {verdict} ({'; '.join(notes)})")
+    if len(selected) < len(rows):
+        print(f"Selected {len(selected)} of {len(rows)} strong candidate(s) due to --limit={limit}.")
     print("Driver must confirm before spawning; this tool does not create facts or run agents.\n")
-    for idx, r in enumerate(selected, 1):
-        wid = f"W-{idx:02d}"
+    start = int(next_id(run_dir).split("-", 1)[1])
+    for offset, r in enumerate(selected):
+        wid = f"W-{start + offset:02d}"
         print(f"## {wid} -> {r['front']}")
         print(f"- Front: {r['title']}")
         print(f"- Assets: {', '.join(r['assets']) if r['assets'] else 'not mapped; driver verify disjoint lane'}")
@@ -406,6 +420,8 @@ def _selftest() -> int:
     d = Path(tempfile.mkdtemp())
     run = d / "run"
     run.mkdir()
+    empty_run = d / "empty"
+    empty_run.mkdir()
     (run / "coverage.json").write_text(json.dumps({"assets": [
         {"host": "a.example", "reachable": True, "flags": ["LOGIN"]},
         {"host": "b.example", "reachable": True, "flags": ["SURFACE:API"]},
@@ -435,15 +451,48 @@ def _selftest() -> int:
         encoding="utf-8")
     rows = suggest(run)
     issues = merge_check(run)
+    clean_run = d / "clean"
+    clean_run.mkdir()
+    no_strong = d / "no_strong"
+    no_strong.mkdir()
+    (no_strong / "frontier.md").write_text(
+        "# Frontier\n## Deferred Fronts\n### F-001\n- Front: unmapped\n- Status: deferred\n"
+        "- Barrier class: WAF-layer\n- Same barrier failures: 4\n", encoding="utf-8")
+    created = create_worker(clean_run, "F-123")
+    clean_rows = scan(clean_run)
+    with_missing = d / "with_missing"
+    with_missing.mkdir()
+    (with_missing / "workers").mkdir()
+    (with_missing / "workers" / "W-01.md").write_text(
+        "# Worker W-01\n- Assigned front: F-001\n- Status: done\n\n## Candidate findings\n\n"
+        "### CAND-1\n- Claim:\n- Proposed certainty: 0.8\n- Control / Replicated:\n",
+        encoding="utf-8")
+    missing_issues = merge_check(with_missing)
+    plan_limited_rows = [r for r in suggest(run) if r["score"] >= 3]
+    with contextlib.redirect_stdout(io.StringIO()):
+        no_strong_exit = print_plan(no_strong, 3)
+        clean_exit = print_merge_check(empty_run)
+        legacy_list_exit = main([str(run)])
+        legacy_new_exit = main([str(run), "--new", "F-777"])
     checks = [
         ("suggest returns open/probing before bad deferred", rows[0]["front"] in {"F-001", "F-002", "F-003"}),
         ("suggest excludes closed", all(r["front"] != "F-099" for r in rows)),
         ("fanout verdict recommends with 3 mapped fronts", _fanout_verdict(rows[:3])[0] == "fan-out recommended"),
         ("scan sees two done workers", len(unmerged(run)) == 2),
+        ("empty run suggest returns []", suggest(empty_run) == []),
+        ("plan with no strong candidate exits 1", no_strong_exit == 1),
+        ("merge-check clean path exits 0", clean_exit == 0),
+        ("created worker scans assigned front", clean_rows and clean_rows[0]["front"] == "F-123"),
+        ("field parser does not cross newline on empty value", _field("- Barrier class:\n- Same barrier failures: 1", "Barrier class") == ""),
+        ("empty Claim does not swallow next line", any(i["kind"] == "missing-claim" for i in missing_issues)),
+        ("empty Control does not swallow following text", any(i["kind"] == "missing-control" for i in missing_issues)),
+        ("plan --limit uses full pool verdict source", _fanout_verdict(plan_limited_rows)[0] == "fan-out recommended"),
         ("merge-check catches missing control", any(i["kind"] == "missing-control" for i in issues)),
         ("merge-check catches duplicate candidate", any(i["kind"] == "duplicate-candidate" for i in issues)),
         ("merge-check catches conflicting candidate certainty", any(i["kind"] == "conflicting-candidate" for i in issues)),
         ("merge-check catches done-but-unmerged", any(i["kind"] == "done-but-unmerged" for i in issues)),
+        ("legacy main list exits 0", legacy_list_exit == 0),
+        ("legacy main --new exits 0", legacy_new_exit == 0),
     ]
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
@@ -476,7 +525,7 @@ def main(argv: list[str] | None = None) -> int:
             return print_list(run_dir)
         if cmd == "new":
             path = create_worker(run_dir, args.front)
-            print(f"[workers] 新建 {path.relative_to(ROOT)} → 指派 front {args.front}")
+            print(f"[workers] 新建 {display_path(path)} → 指派 front {args.front}")
             return 0
         if cmd == "suggest":
             return print_suggest(run_dir, args.limit)
@@ -485,7 +534,11 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "merge-check":
             return print_merge_check(run_dir)
 
-    ap = argparse.ArgumentParser(description="并行 worker 脚手架 + 合并台账(不编排)")
+    ap = argparse.ArgumentParser(
+        description="并行 worker 脚手架 + 合并台账(不编排)",
+        epilog="new commands: list, new, suggest, plan, merge-check. "
+               "Legacy forms remain: workers.py RUN_DIR and workers.py RUN_DIR --new F-005.",
+    )
     ap.add_argument("run_dir", type=Path)
     ap.add_argument("--new", metavar="F-ID", help="开一个新 worker 脚手架, 指派给该 front")
     args = ap.parse_args(argv)
@@ -496,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.new:
         path = create_worker(run_dir, args.new)
-        print(f"[workers] 新建 {path.relative_to(ROOT)} → 指派 front {args.new}")
+        print(f"[workers] 新建 {display_path(path)} → 指派 front {args.new}")
         print("  driver: 用 Agent 工具 spawn 一个 general-purpose 子 agent, 喂 docs/templates/worker.md "
               "的 prompt(填 target + 该 front), 让它把候选写进这个文件。")
         return 0
