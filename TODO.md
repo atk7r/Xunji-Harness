@@ -20,11 +20,11 @@
 
 ### Phase 1 — 配置卫生与本地状态边界
 
-- [ ] 将已入库的 `config.ini` 改为 `config.example.ini`,默认 `mode = normal`。
-- [ ] 将真实 `config.ini` 加入 `.gitignore`;本地可保留 dev 配置,但不再入库。
-- [ ] 加入 `.DS_Store` ignore,避免 macOS 垃圾文件反复污染状态。
-- [ ] 检查 hook / tools 读取配置的路径,确保缺少 `config.ini` 时回落 normal 或示例默认。
-- [ ] 提交: `chore: move runtime config to example`
+- [x] 将已入库的 `config.ini` 改为 `config.example.ini`,默认 `mode = normal`。
+- [x] 将真实 `config.ini` 加入 `.gitignore`;本地可保留 dev 配置,但不再入库。
+- [x] 加入 `.DS_Store` ignore,避免 macOS 垃圾文件反复污染状态。
+- [x] 检查 hook / tools 读取配置的路径,确保缺少 `config.ini` 时回落 normal 或示例默认。
+- [x] 提交: `chore: move runtime config to example`
 
 ### Phase 2 — Bench 先行,让 measure-before-add 变成真门
 

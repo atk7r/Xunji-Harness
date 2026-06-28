@@ -33,6 +33,7 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
 CONFIG_INI = ROOT / "config.ini"
+CONFIG_EXAMPLE_INI = ROOT / "config.example.ini"
 ACTIVE_WINDOW_SEC = 6 * 3600   # a run that saw any file change in the last 6h = the one in flight
 SESSION_STATE_STALE_SEC = 50 * 60  # session_state.json stale threshold for normal/dev mode
 SESSION_STATE_STALE_GHOST_SEC = 120 * 60  # ghost mode: longer threshold
@@ -46,7 +47,7 @@ _mode_cache: tuple[float, str] = (0.0, "normal")
 
 
 def get_mode() -> str:
-    """Read config.ini [mode] once per 5s. Returns 'normal' | 'dev' | 'ghost'."""
+    """Read local/example config [mode] once per 5s. Returns 'normal' | 'dev' | 'ghost'."""
     global _mode_cache
     now = time.time()
     if now - _mode_cache[0] < 5.0:
@@ -54,7 +55,7 @@ def get_mode() -> str:
     try:
         import configparser
         cp = configparser.ConfigParser()
-        cp.read(str(CONFIG_INI), encoding="utf-8")
+        cp.read([str(CONFIG_EXAMPLE_INI), str(CONFIG_INI)], encoding="utf-8")
         mode = cp.get("mode", "mode", fallback="normal").strip().lower()
         if mode not in ("normal", "dev", "ghost"):
             mode = "normal"

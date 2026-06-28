@@ -17,6 +17,9 @@ runs/*
 artifacts/
 observations/
 
+# Local runtime config
+config.ini
+
 # Manual/security-sensitive work products — never publish real target findings
 reports/
 poc/
@@ -42,6 +45,7 @@ tools/harness/codex_proxy.conf
 # Local scratch
 tmp/
 *.tmp
+.DS_Store
 # one-off local docx reformatter (hardcoded personal desktop paths)
 tools/reformat_docx.ps1
 tools/_docx_fmt_config.json
