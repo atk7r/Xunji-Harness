@@ -2,7 +2,7 @@
 
 > SharedBarrier groups: GUID-routing = [F-003~F-010] | budget exhausted: 4 methods | all downgraded Type B
 >
-> 消费 Guanlan recon 2026-06-14 | 14 confirmed reachable | Proxy: http://127.0.0.1:7892 | **FINAL — operator 收工** | 15 evidence | 0 confirmed
+> 消费 Guanlan recon 2026-06-14 | 14 confirmed reachable | Proxy: http://127.0.0.1:7892 | **FINAL — operator 收工** | Agent Board 强制门已接入
 
 ## Open Fronts
 

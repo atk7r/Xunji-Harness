@@ -37,8 +37,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
 ACTIVE_WINDOW_SEC = 900   # 只对最近 15 分钟内改动过的 run 介入(= 当前正在做的那个)
-SESSION_TIMEOUT_SEC = 50 * 60   # Phase 2: normal/dev 超过 50 分钟未更新 + 有漂移信号 → 阻断
-SESSION_TIMEOUT_GHOST_SEC = 120 * 60  # ghost mode: 120 min timeout
+SESSION_TIMEOUT_SEC = 50 * 60   # Phase 2: 超过 50 分钟未更新 + 有漂移信号 → 阻断
 
 sys.path.insert(0, str(ROOT / "tools"))
 try:
@@ -50,7 +49,6 @@ try:
     from anti_drift import (
         find_active_run as _shared_find_active_run,
         is_dev_mode as _is_dev_mode,
-        is_ghost_mode as _is_ghost_mode,
         is_normal_mode as _is_normal_mode,
         _valid_ts,
         SessionStateManager,
@@ -59,9 +57,6 @@ except Exception:
     _shared_find_active_run = None
 
     def _is_dev_mode() -> bool:
-        return False
-
-    def _is_ghost_mode() -> bool:
         return False
 
     def _is_normal_mode() -> bool:
@@ -152,8 +147,7 @@ def _check_session_timeout(
 ) -> tuple[str | None, str]:
     """Phase 2 fail-safe: check ONLY the active run's session_state.json for timeout + drift signals.
     Fixes cross-run contamination — stale session no longer blocks other runs.
-    Uses max(JSON updated_at, file mtime) — both must be stale for timeout to trigger.
-    Ghost mode: 120 min timeout (Decision B-2)."""
+    Uses max(JSON updated_at, file mtime) — both must be stale for timeout to trigger."""
     active_run = active_run or find_active_run(runs_root)
     if active_run is None:
         return None, ""
@@ -169,7 +163,7 @@ def _check_session_timeout(
             return None, ""
         updated_at = _valid_ts(state.get("updated_at"), now)
         last_touch = max(updated_at, sf_mtime)
-        timeout_sec = SESSION_TIMEOUT_GHOST_SEC if _is_ghost_mode() else SESSION_TIMEOUT_SEC
+        timeout_sec = SESSION_TIMEOUT_SEC
         timeout_min = timeout_sec // 60
         if now - last_touch <= timeout_sec:
             return None, ""
@@ -200,7 +194,7 @@ def _check_drift_session(
     # Only notify if session is fresh (updated within timeout window)
     now = time.time()
     updated_at = _valid_ts(state.get("updated_at"), now)
-    timeout_sec = SESSION_TIMEOUT_GHOST_SEC if _is_ghost_mode() else SESSION_TIMEOUT_SEC
+    timeout_sec = SESSION_TIMEOUT_SEC
     if updated_at and now - updated_at > timeout_sec:
         return None, ""  # stale = Phase 2 handles it
     drift_count = state.get("drift_block_count", 1)
@@ -371,6 +365,50 @@ def _check_evidence_severity(run_dir: Path) -> tuple[str | None, str]:
     return mode, msg
 
 
+def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
+    """Phase 5: Agent Board 强制门 — open fronts >= 4 且 barrier 多样时必须使用 Agent Board。
+
+    如果 frontier.md 中 open fronts >= 4 且 barrier classes 不共享(无 SharedBarrier group),
+    则检查 state/assignments.json 或 agents/ 目录是否存在且有内容。
+    未检测到 agent 使用 → block; 存在 shared barrier 或 open < 4 → 静默放行。
+
+    FAIL-OPEN: 解析失败静默放行。
+    """
+    try:
+        from anti_drift import _check_agent_board_needed as _ab_needed
+    except Exception:
+        return None, ""
+
+    try:
+        should_remind, open_count, _bg = _ab_needed(run_dir)
+    except Exception:
+        return None, ""
+
+    if not should_remind:
+        return None, ""
+
+    # Check if Agent Board has been used
+    agents_dir_path = run_dir / "agents"
+    assignments_path = run_dir / "state" / "assignments.json"
+
+    has_agents = agents_dir_path.is_dir() and any(agents_dir_path.glob("A-*.md"))
+    has_assignments = False
+    if assignments_path.exists():
+        try:
+            data = json.loads(assignments_path.read_text(encoding="utf-8", errors="replace"))
+            has_assignments = isinstance(data.get("assignments"), list) and len(data["assignments"]) > 0
+        except Exception:
+            pass
+
+    if has_agents or has_assignments:
+        return None, ""  # Agent Board used, pass
+
+    return "block", (
+        f"open fronts >= 4 且独立(无共享 barrier)，但未使用 Agent Board。"
+        f"请用 workers.py assign 分配 >= 2 个 subagent。"
+    )
+
+
 def _extract_field(section: str, field_name: str) -> str:
     """提取 - FieldName: value 行。"""
     for line in section.split("\n"):
@@ -523,31 +561,43 @@ def main() -> None:
                 print(json.dumps({"systemMessage": timeout_msg}, ensure_ascii=False))
                 # fall through — don't exit; allow existing gate checks to also run
 
+        # ---- Phase 5 (NEW): Agent Board 强制门 — open fronts >= 4 且 barrier 多样时禁止全串行 ----
+        if active_run is not None:
+            ab_mode, ab_msg = _check_agent_board(active_run)
+            if ab_mode is not None:
+                if ab_mode == "block" and stop_active:
+                    ab_mode = "notify"  # anti-loop: already resumed once
+                if ab_mode == "block":
+                    print(json.dumps({"decision": "block", "reason": ab_msg}, ensure_ascii=False))
+                    sys.exit(0)
+                else:
+                    print(json.dumps({"systemMessage": ab_msg}, ensure_ascii=False))
+                    # fall through
+
         # ---- Existing closure gate ----
         run_dir = active_run
         if run_dir is None or not report_is_final(run_dir):
             sys.exit(0)
-        # Ghost mode: report 已终版但缺独立复审 → 注入提醒
-        if _is_ghost_mode() and not gate_skipped(run_dir):
+        # NORMAL mode closure: 独立复审 + CodexCompletionReview
+        if _is_normal_mode() and not gate_skipped(run_dir):
             try:
                 import re as _re
                 rv = (run_dir / "review.md").read_text(encoding="utf-8", errors="replace") \
                     if (run_dir / "review.md").exists() else ""
-                if not _re.search(r"Independent Review|独立复审", rv):
-                    ghost_closure_msg = (
-                        "[Ghost 收口] report 已终版但缺独立复审。"
-                        "Ghost 模式自动收口: 请 spawn codex reviewer 完成独立复审 → "
-                        "写 retrospective.md → 在 decisions.md 末尾写入 GHOST_COMPLETE。"
-                    )
-                    print(json.dumps({"systemMessage": ghost_closure_msg}, ensure_ascii=False))
-                    sys.exit(0)
-            except Exception:
-                pass
-        # NORMAL mode: report 已终版但 decisions.md 缺 CodexCompletionReview → BLOCK
-        if _is_normal_mode() and not gate_skipped(run_dir):
-            try:
                 dc = run_dir / "decisions.md"
                 dc_text = dc.read_text(encoding="utf-8", errors="replace") if dc.exists() else ""
+
+                # Check 1: independent review
+                if not _re.search(r"Independent Review|独立复审", rv):
+                    closure_msg = (
+                        "[Normal 收口] report 已终版但缺独立复审。"
+                        "请 spawn codex reviewer 完成独立复审 → "
+                        "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
+                    )
+                    print(json.dumps({"systemMessage": closure_msg}, ensure_ascii=False))
+                    sys.exit(0)
+
+                # Check 2: CodexCompletionReview
                 if "CodexCompletionReview" not in dc_text:
                     cc_msg = (
                         "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
@@ -561,7 +611,7 @@ def main() -> None:
                         print(json.dumps({"decision": "block", "reason": cc_msg}, ensure_ascii=False))
                         sys.exit(0)
             except Exception:
-                pass  # FAIL-OPEN: decisions.md 读失败放行
+                pass  # FAIL-OPEN: decisions.md / review.md 读失败放行
         if gate_skipped(run_dir):
             sys.exit(0)   # 操作者已认可此 run 不收尾(教学样本/中止) → 不主动提醒
         rc, out = run_check(run_dir)
@@ -887,6 +937,87 @@ def _selftest() -> int:
                        "CodexCompletionReview" in dc_text2))
     finally:
         globals().pop("_is_normal_mode", None)
+
+    # Phase 5: Agent Board 强制门 selftest
+    import tempfile as _tm_ab
+    ab_test = Path(_tm_ab.mkdtemp())
+
+    # Case 1: no frontier.md -> pass (silent)
+    ab_run1 = ab_test / "no_frontier"
+    ab_run1.mkdir()
+    mode1, _ = _check_agent_board(ab_run1)
+    checks.append(("agent board gate: no frontier.md -> pass", mode1 is None))
+
+    # Case 2: < 4 open fronts -> pass
+    ab_run2 = ab_test / "few_fronts"
+    ab_run2.mkdir()
+    (ab_run2 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: none\n\n"
+        "### F-002\n- Status: open\n- Barrier class: none\n\n"
+        "### F-003\n- Status: probing\n- Barrier class: WAF\n",
+        encoding="utf-8")
+    mode2, _ = _check_agent_board(ab_run2)
+    checks.append(("agent board gate: <4 open fronts -> pass", mode2 is None))
+
+    # Case 3: >= 4 open fronts with shared barrier -> pass
+    ab_run3 = ab_test / "shared_barrier"
+    ab_run3.mkdir()
+    (ab_run3 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-002\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-003\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-004\n- Status: probing\n- Barrier class: WAF-rate-limit\n",
+        encoding="utf-8")
+    mode3, _ = _check_agent_board(ab_run3)
+    checks.append(("agent board gate: shared barrier -> pass", mode3 is None))
+
+    # Case 4: >= 4 open fronts diverse, no agents -> block
+    ab_run4 = ab_test / "diverse_no_agents"
+    ab_run4.mkdir()
+    (ab_run4 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
+        "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
+        "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
+        "### F-004\n- Status: probing\n- Barrier class: file-upload\n",
+        encoding="utf-8")
+    mode4, msg4 = _check_agent_board(ab_run4)
+    checks.append(("agent board gate: diverse no agents -> block", mode4 == "block"))
+    checks.append(("agent board gate: block message readable", "Agent Board" in (msg4 or "")))
+
+    # Case 5: >= 4 open fronts diverse, has agents/ dir -> pass
+    ab_run5 = ab_test / "diverse_with_agents"
+    ab_run5.mkdir()
+    (ab_run5 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
+        "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
+        "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
+        "### F-004\n- Status: probing\n- Barrier class: file-upload\n",
+        encoding="utf-8")
+    (ab_run5 / "agents").mkdir()
+    (ab_run5 / "agents" / "A-web-hunter-001.md").write_text("# Agent\n", encoding="utf-8")
+    mode5, _ = _check_agent_board(ab_run5)
+    checks.append(("agent board gate: diverse with agents -> pass", mode5 is None))
+
+    # Case 6: >= 4 open fronts diverse, has assignments.json -> pass
+    ab_run6 = ab_test / "diverse_with_assignments"
+    ab_run6.mkdir()
+    (ab_run6 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
+        "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
+        "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
+        "### F-004\n- Status: probing\n- Barrier class: file-upload\n",
+        encoding="utf-8")
+    (ab_run6 / "state").mkdir(parents=True)
+    (ab_run6 / "state" / "assignments.json").write_text(
+        json.dumps({"schema": 1, "assignments": [{"agent": "A-web-hunter-001", "status": "assigned"}]}),
+        encoding="utf-8")
+    mode6, _ = _check_agent_board(ab_run6)
+    checks.append(("agent board gate: diverse with assignments.json -> pass", mode6 is None))
 
     bad = [n for n, ok in checks if not ok]
     # 输出到 stderr(与 safety_gate 一致): SessionStart 接线时不刷 context, 手动跑仍可见。

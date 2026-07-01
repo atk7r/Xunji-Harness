@@ -106,10 +106,13 @@ observe -> update state graph -> decompose fronts
 - Default collaboration model: assign fresh-context Agents through the run dir when
   breadth or independent expertise helps. Agents produce candidates/refutations, never
   canonical findings. The Single Synthesizer merges through the evidence gate; parallel
-  breadth never relaxes confirmation. Stay serial for a single low-value front, a tight
-  request budget, or a shared barrier. Parallelize for independent fronts, high-value
-  breadth, code+blackbox split, xday/0day hypothesis variance, and unresolved conflicts
-  before closure. See reference "Agent Board" + `docs/templates/agents/`.
+  breadth never relaxes confirmation.
+- **Agent Board is mandatory when open fronts >= 4 and barrier classes are diverse**
+  (no SharedBarrier group). The Root MUST spawn >= 2 subagents via workers.py
+  assign — never do all fronts serially when breadth would help.
+- Stay serial only for: a single low-value front, a tight request budget under
+  50k tokens, or fronts that share a barrier class (SharedBarrier group).
+  See reference "Agent Board" + `docs/templates/agents/`.
 
 ## Dual Mind
 

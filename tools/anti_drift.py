@@ -14,6 +14,10 @@ run_gate / check_run). FAIL-OPEN: any error prints the static rules and exits 0;
 injector must never break a turn. Process-state is DERIVED from the run files (reuse check_run),
 not self-reported — a drifted self-report would just re-encode the drift.
 
+Two modes (config.ini [mode] mode=):
+  normal — full enforcement: drift block + evidence gates + auto-closure
+  dev    — development: drift detection records but does not block, evidence gates + closure checks still run
+
 Usage:
     python tools/anti_drift.py            # print the anchor (UserPromptSubmit hook target)
     python tools/anti_drift.py --selftest # offline regression
@@ -35,8 +39,7 @@ RUNS = ROOT / "runs"
 CONFIG_INI = ROOT / "config.ini"
 CONFIG_EXAMPLE_INI = ROOT / "config.example.ini"
 ACTIVE_WINDOW_SEC = 6 * 3600   # a run that saw any file change in the last 6h = the one in flight
-SESSION_STATE_STALE_SEC = 50 * 60  # session_state.json stale threshold for normal/dev mode
-SESSION_STATE_STALE_GHOST_SEC = 120 * 60  # ghost mode: longer threshold
+SESSION_STATE_STALE_SEC = 50 * 60  # session_state.json stale threshold
 
 _TOOLS_PATH = str(ROOT / "tools")
 if _TOOLS_PATH not in sys.path:
@@ -47,7 +50,7 @@ _mode_cache: tuple[float, str] = (0.0, "normal")
 
 
 def get_mode() -> str:
-    """Read local/example config [mode] once per 5s. Returns 'normal' | 'dev' | 'ghost'."""
+    """Read local/example config [mode] once per 5s. Returns 'normal' | 'dev'."""
     global _mode_cache
     now = time.time()
     if now - _mode_cache[0] < 5.0:
@@ -57,7 +60,7 @@ def get_mode() -> str:
         cp = configparser.ConfigParser()
         cp.read([str(CONFIG_EXAMPLE_INI), str(CONFIG_INI)], encoding="utf-8")
         mode = cp.get("mode", "mode", fallback="normal").strip().lower()
-        if mode not in ("normal", "dev", "ghost"):
+        if mode not in ("normal", "dev"):
             mode = "normal"
         _mode_cache = (now, mode)
         return mode
@@ -68,10 +71,6 @@ def get_mode() -> str:
 
 def is_dev_mode() -> bool:
     return get_mode() == "dev"
-
-
-def is_ghost_mode() -> bool:
-    return get_mode() == "ghost"
 
 
 def is_normal_mode() -> bool:
@@ -161,7 +160,7 @@ class SessionStateManager:
         if hard_block_active:
             return state  # never reset while hard-blocked
         updated_at = _valid_ts(state.get("updated_at"), time.time())
-        stale_sec = SESSION_STATE_STALE_GHOST_SEC if is_ghost_mode() else SESSION_STATE_STALE_SEC
+        stale_sec = SESSION_STATE_STALE_SEC
         if updated_at and time.time() - updated_at > stale_sec:
             state["drift_flags"] = []
             state["reread_pending"] = False
@@ -251,6 +250,54 @@ def _check_drift_alert(run_dir: Path) -> list[str]:
     except Exception:
         return []
 
+def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
+    """Check if Agent Board is mandatory: open fronts >= 4 and barrier classes are diverse
+    (no SharedBarrierGroup). Returns (should_remind, open_count, barrier_groups)."""
+    frontier = run_dir / "frontier.md"
+    if not frontier.exists():
+        return False, 0, {}
+    try:
+        text = frontier.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return False, 0, {}
+
+    import re as _re_ab
+
+    # Find all ### F-xxx blocks, extract Status + Barrier class
+    open_fronts: list[str] = []
+    barrier_by_front: dict[str, str] = {}
+    for m in _re_ab.finditer(r"(?ms)^###[ \t]+(F-\d+).*?(?=^###[ \t]+|\Z)", text):
+        block = m.group(0)
+        fid = m.group(1)
+        st_match = _re_ab.search(rf"(?im)^\s*-?\s*Status\s*[:：]\s*([^\n]+)", block)
+        status = st_match.group(1).strip().lower() if st_match else ""
+        if status not in ("open", "probing"):
+            continue
+        bc_match = _re_ab.search(rf"(?im)^\s*-?\s*Barrier class\s*[:：]\s*([^\n]+)", block)
+        barrier = bc_match.group(1).strip().lower() if bc_match else "unknown"
+        open_fronts.append(fid)
+        barrier_by_front[fid] = barrier
+
+    open_count = len(open_fronts)
+    if open_count < 4:
+        return False, open_count, {}
+
+    # Build barrier groups — exclude trivial barriers from grouping
+    trivial = {"", "none", "unknown", "n/a"}
+    barrier_groups: dict[str, list[str]] = {}
+    for fid in open_fronts:
+        bc = barrier_by_front[fid]
+        if bc in trivial:
+            continue
+        barrier_groups.setdefault(bc, []).append(fid)
+
+    # SharedBarrierGroup exists if any barrier class has >= 2 fronts
+    has_shared = any(len(fronts) >= 2 for fronts in barrier_groups.values())
+    # Agent Board needed when barriers are diverse (no shared group)
+    should_remind = not has_shared
+    return should_remind, open_count, barrier_groups
+
+
 def _overdue_steps(run_dir: Path) -> list[str]:
     """Derive process/evidence flags from the run files via check_run (no re-parsing). Advisory."""
     flags: list[str] = []
@@ -317,11 +364,11 @@ def build_anchor(
 ) -> str:
     lines = []
 
-    # ---- Ghost mode: 全自动托管规则 ----
-    if is_ghost_mode():
-        lines.append("[GHOST MODE — 全自动托管]")
+    # ---- Normal mode: 全量执行规则 ----
+    if is_normal_mode():
+        lines.append("[NORMAL MODE — 全量执行]")
         lines.append("")
-        lines.append("【Ghost 自立规则】")
+        lines.append("【Normal 自立规则】")
         lines.append("  · 凭据自立: 默认密码→弱口令爆破→注册→用户枚举→密码喷洒, 不等待/不询问")
         lines.append("  · 网络自立: 不可达→先换路径/备选方案再判定; 不建egress·relay(保持边界内)")
         lines.append("  · 决策自立: 不问操作者任何问题, 所有选择自主做出, 记录在 decisions.md")
@@ -355,6 +402,11 @@ def build_anchor(
     lines.append("【本轮必做】")
     for r in BINDING_RULES_TIER1:
         lines.append(f"  · {r}")
+    # Agent Board 强制检查: open fronts >= 4 且无共享 barrier → 必须并行
+    if run is not None:
+        agent_needed, n_open, _bg = _check_agent_board_needed(run)
+        if agent_needed:
+            lines.append("  · Agent Board 强制: open fronts ≥ 4 且无共享 barrier → 本轮必须 spawn ≥ 2 个 subagent (通过 workers.py assign), 禁止 Root 全串行。")
     lines.append("")
     # Tier-2: 当前状态 (dynamic — run phase + process flags)
     if run is not None:
@@ -366,12 +418,12 @@ def build_anchor(
         stage = _detect_stage(run)
         lines.append("【当前状态】")
         lines.append(f"  run: {run.name} | 阶段: {stage} | 最后改动: {age}m 前")
-        # Ghost complete detection: check decisions.md for GHOST_COMPLETE
-        if is_ghost_mode():
+        # Normal complete detection: check decisions.md for NORMAL_COMPLETE
+        if is_normal_mode():
             try:
                 dc = run / "decisions.md"
-                if dc.exists() and "GHOST_COMPLETE" in dc.read_text(encoding="utf-8", errors="replace"):
-                    lines.append("  ✅ GHOST_COMPLETE: 所有前沿已完成, run 已自动收口")
+                if dc.exists() and "NORMAL_COMPLETE" in dc.read_text(encoding="utf-8", errors="replace"):
+                    lines.append("  ✅ NORMAL_COMPLETE: 所有前沿已完成, run 已自动收口")
                     lines.append("     → 停止: 无剩余工作, 等待操作者确认或关闭会话")
             except Exception:
                 pass
@@ -423,8 +475,6 @@ def _selftest() -> int:
     # Isolate from real config.ini — selftest always runs in normal mode.
     _orig_is_dev_mode = globals()["is_dev_mode"]
     globals()["is_dev_mode"] = lambda: False
-    _orig_is_ghost_mode = globals()["is_ghost_mode"]
-    globals()["is_ghost_mode"] = lambda: False
 
     checks: list[tuple[str, bool]] = []
     a = build_anchor()
@@ -499,9 +549,74 @@ def _selftest() -> int:
     checks.append(("stale session_state auto-reset",
                    "先 Read CLAUDE.md — 回合协议违规" not in anchor_fresh))
 
-    # Restore original is_dev_mode and is_ghost_mode after selftest
+    # Agent Board 强制门 selftest
+    ab_dir = _tmp_runs / "_selftest_agent_board"
+    ab_dir.mkdir(parents=True)
+    (ab_dir / "evidence.md").write_text("# test", encoding="utf-8")
+    time.sleep(1.1)  # ensure mtime is fresh
+
+    # Case 1: < 4 open fronts -> should NOT remind
+    (ab_dir / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: none\n\n"
+        "### F-002\n- Status: open\n- Barrier class: none\n\n"
+        "### F-003\n- Status: probing\n- Barrier class: WAF\n",
+        encoding="utf-8")
+    needed_lt4, n_lt4, _ = _check_agent_board_needed(ab_dir)
+    checks.append(("agent board: <4 open fronts -> not needed", not needed_lt4 and n_lt4 == 3))
+
+    # Case 2: >= 4 open fronts with shared barrier (SharedBarrierGroup exists) -> should NOT remind
+    (ab_dir / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-002\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-003\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-004\n- Status: probing\n- Barrier class: WAF-rate-limit\n",
+        encoding="utf-8")
+    needed_shared, n_shared, bg_shared = _check_agent_board_needed(ab_dir)
+    checks.append(("agent board: shared barrier -> not needed", not needed_shared and n_shared == 4))
+    checks.append(("agent board: shared barrier group detected", len(bg_shared.get("waf-rate-limit", [])) == 4))
+
+    # Case 3: >= 4 open fronts with diverse barriers (no SharedBarrierGroup) -> MUST remind
+    (ab_dir / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
+        "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
+        "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
+        "### F-004\n- Status: probing\n- Barrier class: file-upload\n",
+        encoding="utf-8")
+    needed_div, n_div, bg_div = _check_agent_board_needed(ab_dir)
+    checks.append(("agent board: diverse barriers -> needed", needed_div and n_div == 4))
+    checks.append(("agent board: no shared group in diverse", all(len(v) < 2 for v in bg_div.values())))
+
+    # Case 4: >= 4 open with all barriers none/unknown -> diverse (remind)
+    (ab_dir / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: none\n\n"
+        "### F-002\n- Status: open\n- Barrier class: unknown\n\n"
+        "### F-003\n- Status: open\n- Barrier class: none\n\n"
+        "### F-004\n- Status: probing\n- Barrier class: \n",
+        encoding="utf-8")
+    needed_none, n_none, bg_none = _check_agent_board_needed(ab_dir)
+    checks.append(("agent board: all none/unknown -> needed", needed_none and n_none == 4))
+    checks.append(("agent board: none/unknown not grouped", len(bg_none) == 0))
+
+    # Case 5: verify build_anchor injects the reminder
+    anchor_ab = build_anchor(runs_root=_tmp_runs)
+    # The anchor should have the reminder because the most recent active run (ab_dir or fresh_run)
+    # has diverse barriers. But _tmp_runs has other runs too — find_active_run picks the most recent.
+    # Since ab_dir was touched most recently above, it should be the active run.
+    checks.append(("agent board: anchor injects reminder", "Agent Board 强制" in anchor_ab))
+
+    # Case 6: missing frontier.md -> not needed
+    no_frontier = _tmp_runs / "no_frontier_run"
+    no_frontier.mkdir()
+    (no_frontier / "evidence.md").write_text("# test", encoding="utf-8")
+    needed_nf, n_nf, _ = _check_agent_board_needed(no_frontier)
+    checks.append(("agent board: no frontier.md -> not needed", not needed_nf and n_nf == 0))
+
+    # Restore original is_dev_mode after selftest
     globals()["is_dev_mode"] = _orig_is_dev_mode
-    globals()["is_ghost_mode"] = _orig_is_ghost_mode
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

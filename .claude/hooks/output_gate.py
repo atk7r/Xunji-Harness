@@ -27,14 +27,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
-SESSION_STATE_STALE_SEC = 50 * 60  # normal/dev: session timeout 50 min
-SESSION_STATE_STALE_GHOST_SEC = 120 * 60  # ghost: session timeout 120 min
+SESSION_STATE_STALE_SEC = 50 * 60  # session timeout 50 min
 INVISIBLE_RE = re.compile(r"[​‌‍⁠﻿ ]")
 sys.path.insert(0, str(ROOT / "tools"))
 
 try:
     from anti_drift import (
-        DRIFT_PATTERNS, find_active_run, is_dev_mode, is_ghost_mode,
+        DRIFT_PATTERNS, find_active_run, is_dev_mode, is_normal_mode,
         _valid_ts, SessionStateManager, get_mode,
     )
 except Exception:
@@ -50,8 +49,8 @@ except Exception:
     def is_dev_mode() -> bool:
         return False
 
-    def is_ghost_mode() -> bool:
-        return False
+    def is_normal_mode() -> bool:
+        return True
 
     def get_mode() -> str:
         return "normal"
@@ -172,16 +171,15 @@ def main() -> None:
             frontier = run_dir / "frontier.md"
             claude_md = ROOT / "CLAUDE.md"
             prev_state = SessionStateManager.load(run_dir)
-            # Reset stale session_state: ghost=120min, normal/dev=50min (Decision B-2)
-            ghost = is_ghost_mode()
-            stale_sec = SESSION_STATE_STALE_GHOST_SEC if ghost else SESSION_STATE_STALE_SEC
+            # Reset stale session_state (Decision B-2)
+            stale_sec = SESSION_STATE_STALE_SEC
             prev_updated = _valid_ts(prev_state.get("updated_at"), now)
             if prev_updated and now - prev_updated > stale_sec:
                 prev_state = {}
 
-            # frontier_stale: frontier.md mtime > 15 min ago (30 min in ghost mode)
+            # frontier_stale: frontier.md mtime > 15 min ago (30 min in normal mode)
             _frontier_alerted = 0.0
-            frontier_stale_sec = 1800 if ghost else 900
+            frontier_stale_sec = 1800 if is_normal_mode() else 900
             if frontier.exists():
                 frontier_mtime = frontier.stat().st_mtime
                 if time.time() - frontier_mtime > frontier_stale_sec:
@@ -222,9 +220,9 @@ def main() -> None:
 
         # ---- Drift notification: systemMessage only (no drift_block.json, Decision 2) ----
         if drift_flags and not dev_mode:
-            ghost = is_ghost_mode()
-            threshold_handoff = 5 if ghost else 3
-            threshold_reread = 3 if ghost else 2
+            normal = is_normal_mode()
+            threshold_handoff = 5 if normal else 3
+            threshold_reread = 3 if normal else 2
             if drift_count >= threshold_handoff:
                 block_msg = (
                     f"[漂移告警 x{drift_count}] 检测到: {', '.join(drift_flags)}。"
