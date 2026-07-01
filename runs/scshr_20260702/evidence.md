@@ -9,6 +9,7 @@
 
 - Maturity: candidate
 - Reportable: yes
+- Severity: LOW (信息泄露 — 用户列表, 非直接可利用漏洞)
 - Superseded:
 - Time: 2026-07-02T01:28Z
 - Action: GET /wp-json/wp/v2/users + /wp-json/wp/v2/users?per_page=100
@@ -28,6 +29,7 @@
 
 - Maturity: candidate
 - Reportable: yes
+- Severity: LOW (信息泄露 — 内网 IP, 非直接可利用)
 - Superseded:
 - Time: 2026-07-02T01:30Z
 - Action: GET /wp-json/wp/v2/users/1
@@ -239,6 +241,7 @@
 
 - Maturity: candidate
 - Reportable: yes (信息泄露)
+- Severity: LOW (信息泄露 — 版本/配置字符串, 非直接可利用)
 - Superseded:
 - Time: 2026-07-02T02:40Z
 - Action: 读取保存的 evidence/*.html 文件 (此前 probe stdout body 为空被遗漏, codex review 发现)

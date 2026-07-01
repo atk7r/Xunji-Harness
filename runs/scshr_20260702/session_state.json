@@ -1,9 +1,11 @@
 {
   "frontier_mtime": 1782936033.9913018,
   "claude_mtime": 1782935863.8081248,
-  "drift_flags": [],
-  "updated_at": 1782936064.118979,
+  "drift_flags": [
+    "protocol_violation"
+  ],
+  "updated_at": 1782936187.8854778,
   "reread_pending": false,
-  "drift_block_count": 0,
+  "drift_block_count": 1,
   "frontier_alerted_at": 1782932797.05716
 }
