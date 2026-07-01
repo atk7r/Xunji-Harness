@@ -86,6 +86,20 @@ not restate or redefine the levels — change them here, in one place.
 
 The default confirmation threshold is `certainty >= 0.8`.
 
+### Certainty Anchor Examples
+
+These concrete anchors calibrate the four-level scale for the most common Xunji scenarios:
+
+| Scenario | Certainty | Why |
+|----------|-----------|-----|
+| Single observation / redirect / block page / timeout / environment artifact | ≤ 0.3 | Never confirmation on their own |
+| Version matches CVE but exploit path NOT verified (no PoC run, no target test) | 0.4 | Theoretical possibility only; AC:H CVEs default here |
+| Version matches CVE but exploit PRECONDITIONS confirmed NOT met on target | 0.2 | CVE exists but environment rules it out |
+| Version matches + exploit path determined (code analysis complete) but NOT run | 0.6 | Ready to test, not tested |
+| Version matches + PoC validated locally (off-target) | 0.7 | Works somewhere, not confirmed here |
+| Exploit executed on target + expected behavior observed + control verified | ≥ 0.8 | Confirmation gate — reportable |
+| Two independent methods confirm + control verified + artifact cross-check passed | 1.0 | Maximum certainty |
+
 Two discipline rules that apply to ALL entries (learned the hard way — ujs_20260619):
 
 - **Verify before scoring ≥ 0.8.** A product/version read off metadata, a default/example
@@ -236,3 +250,17 @@ knowledge up **after** identifying a target, **adapt** it, confirm through the e
 gate; never pre-load and fire it blind (payload or not). The two-axis detail (use-pattern
 vs publication; grounding tier ships, weaponized tier is held-not-pushed) is in
 `docs/cognition/reference.md` — load it when handling the knowledge base.
+
+## Exploit Preconditions
+
+When a CVE is identified and the target's version matches, record the exploit
+preconditions as a separate field (not folded into certainty):
+
+- `ExploitPreconditions: met | not-met | unknown`
+- `met` = all conditions for the exploit are confirmed present on target
+- `not-met` = at least one required condition is confirmed absent (e.g. "2FA not enabled", "REST route not registered")
+- `unknown` = version matches but preconditions have not been checked
+
+This prevents the "version matches CVE = confirmed vulnerability" error and
+gives the certainty rating a concrete basis. When preconditions are `not-met`,
+certainty MUST be ≤ 0.2 regardless of CVSS score.

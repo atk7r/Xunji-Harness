@@ -1,0 +1,30 @@
+{
+  "ts": "2026-07-01T19:43:43Z",
+  "request": {
+    "method": "GET",
+    "url": "https://plugins.svn.wordpress.org/really-simple-ssl/tags/9.5.10.1/readme.txt",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 31647,
+    "sha1": "9360033aef31c696ae175a69a49327bce5fa0ad1",
+    "ctype": "text/plain",
+    "headers": {
+      "Server": "nginx",
+      "Date": "Wed, 01 Jul 2026 19:43:43 GMT",
+      "Content-Type": "text/plain",
+      "Content-Length": "31647",
+      "Connection": "close",
+      "Vary": "Accept-Encoding",
+      "Last-Modified": "Tue, 28 Apr 2026 09:31:10 GMT",
+      "ETag": "\"3517169//really-simple-ssl/tags/9.5.10.1/readme.txt\"",
+      "Cache-Control": "max-age=604800",
+      "Accept-Ranges": "bytes",
+      "Alt-Svc": "clear"
+    },
+    "snippet": "=== Really Simple Security - Simple and Performant Security (formerly Really Simple SSL)===\nContributors: RogierLankhorst, markwolters, hesseldejong, vicocotea, marcelsanting, janwoostendorp, wimbraam\nDonate link: https://www.paypal.me/real"
+  },
+  "saved_body": "scshr_20260702/evidence/rsssl-9.5.10.1-readme.txt"
+}

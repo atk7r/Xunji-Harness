@@ -1,0 +1,32 @@
+{
+  "ts": "2026-07-01T19:10:35Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/wp-content/plugins/code-snippets/readme.txt",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 18406,
+    "sha1": "a885f8959a452fa2234e85f886865639c9b29cf4",
+    "ctype": "text/plain; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 19:10:35 GMT",
+      "Content-Type": "text/plain; charset=UTF-8",
+      "Content-Length": "18406",
+      "Connection": "close",
+      "Last-Modified": "Fri, 13 Feb 2026 03:58:13 GMT",
+      "ETag": "\"47e6-64aac9d46b56e\"",
+      "Accept-Ranges": "bytes",
+      "Vary": "Accept-Encoding",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "=== Code Snippets ===\nContributors: bungeshea, ver3, lightbulbman, 0aksmith, johnpixle, louiswol94, carolinaop\nDonate link: https://codesnippets.pro\nTags: code, snippets, multisite, php, css\nLicense: GPL-2.0-or-later\nLicense URI: license.tx"
+  },
+  "saved_body": "scshr_20260702/evidence/code-snippets-readme.txt"
+}

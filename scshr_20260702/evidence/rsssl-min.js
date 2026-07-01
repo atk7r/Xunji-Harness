@@ -1,0 +1,1816 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+	<meta charset="UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<link rel="pingback" href="https://www.scshr.com/xmlrpc.php" />
+
+	<script type="text/javascript" src="data:text/javascript;base64,ZG9jdW1lbnQuZG9jdW1lbnRFbGVtZW50LmNsYXNzTmFtZT0nanMn" defer></script>
+
+		<meta name="google-site-verification" content="e6gajSax2sd73HTdobPvEqcsEHd_aHcMopqtlguaNpE" />
+	
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /><meta name='robots' content='noindex, follow' />
+	<style>img:is([sizes="auto" i], [sizes^="auto," i]) { contain-intrinsic-size: 3000px 1500px }</style>
+	
+	<!-- This site is optimized with the Yoast SEO plugin v27.9 - https://yoast.com/product/yoast-seo-wordpress/ -->
+	<title>找不到符合條件的頁面 - 飛騰雲端</title>
+	<meta property="og:locale" content="zh_TW" />
+	<meta property="og:title" content="找不到符合條件的頁面 - 飛騰雲端" />
+	<meta property="og:site_name" content="飛騰雲端" />
+	<script type="application/ld+json" class="yoast-schema-graph">{"@context":"https:\/\/schema.org","@graph":[{"@type":"WebSite","@id":"https:\/\/www.scshr.com\/#website","url":"https:\/\/www.scshr.com\/","name":"飛騰雲端 - 專為台灣中小企業設計的人資系統","description":"一站滿足HR的現在需要跟未來想要","publisher":{"@id":"https:\/\/www.scshr.com\/#organization"},"alternateName":"飛騰雲端SCSHR","potentialAction":[{"@type":"SearchAction","target":{"@type":"EntryPoint","urlTemplate":"https:\/\/www.scshr.com\/?s={search_term_string}"},"query-input":{"@type":"PropertyValueSpecification","valueRequired":true,"valueName":"search_term_string"}}],"inLanguage":"zh-TW"},{"@type":"Organization","@id":"https:\/\/www.scshr.com\/#organization","name":"飛騰雲端系統股份有限公司","alternateName":"飛騰雲端","url":"https:\/\/www.scshr.com\/","logo":{"@type":"ImageObject","inLanguage":"zh-TW","@id":"https:\/\/www.scshr.com\/#\/schema\/logo\/image\/","url":"https:\/\/www.scshr.com\/wp-content\/uploads\/2022\/03\/飛騰雲端公司LOGO-FB.jpg","contentUrl":"https:\/\/www.scshr.com\/wp-content\/uploads\/2022\/03\/飛騰雲端公司LOGO-FB.jpg","width":200,"height":200,"caption":"飛騰雲端系統股份有限公司"},"image":{"@id":"https:\/\/www.scshr.com\/#\/schema\/logo\/image\/"},"sameAs":["https:\/\/www.facebook.com\/SoarCloud","https:\/\/www.youtube.com\/@scshr","https:\/\/www.instagram.com\/soarcloudmkt\/","https:\/\/www.linkedin.com\/company\/soarcloud-hr\/"]}]}</script>
+	<!-- / Yoast SEO plugin. -->
+
+
+<script type='application/javascript'  id='pys-version-script'>console.log('PixelYourSite Free version 10.1.0');</script>
+<link rel='dns-prefetch' href='//static.addtoany.com' />
+<link rel='dns-prefetch' href='//js.hs-scripts.com' />
+<link rel='dns-prefetch' href='//www.google.com' />
+<link rel="alternate" type="application/rss+xml" title="訂閱《飛騰雲端》&raquo; 資訊提供" href="https://www.scshr.com/feed/" />
+<link rel="alternate" type="application/rss+xml" title="訂閱《飛騰雲端》&raquo; 留言的資訊提供" href="https://www.scshr.com/comments/feed/" />
+<meta content="Divi Child Theme v.1.0.0" name="generator"/>
+<link data-optimized="1" rel='stylesheet' id='wp-block-library-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/69059b654f8c84ea8da5863a8521aa55.css?ver=fea2d' type='text/css' media='all' />
+<style id='wp-block-library-theme-inline-css' type='text/css'>
+.wp-block-audio :where(figcaption){color:#555;font-size:13px;text-align:center}.is-dark-theme .wp-block-audio :where(figcaption){color:#ffffffa6}.wp-block-audio{margin:0 0 1em}.wp-block-code{border:1px solid #ccc;border-radius:4px;font-family:Menlo,Consolas,monaco,monospace;padding:.8em 1em}.wp-block-embed :where(figcaption){color:#555;font-size:13px;text-align:center}.is-dark-theme .wp-block-embed :where(figcaption){color:#ffffffa6}.wp-block-embed{margin:0 0 1em}.blocks-gallery-caption{color:#555;font-size:13px;text-align:center}.is-dark-theme .blocks-gallery-caption{color:#ffffffa6}:root :where(.wp-block-image figcaption){color:#555;font-size:13px;text-align:center}.is-dark-theme :root :where(.wp-block-image figcaption){color:#ffffffa6}.wp-block-image{margin:0 0 1em}.wp-block-pullquote{border-bottom:4px solid;border-top:4px solid;color:currentColor;margin-bottom:1.75em}.wp-block-pullquote cite,.wp-block-pullquote footer,.wp-block-pullquote__citation{color:currentColor;font-size:.8125em;font-style:normal;text-transform:uppercase}.wp-block-quote{border-left:.25em solid;margin:0 0 1.75em;padding-left:1em}.wp-block-quote cite,.wp-block-quote footer{color:currentColor;font-size:.8125em;font-style:normal;position:relative}.wp-block-quote:where(.has-text-align-right){border-left:none;border-right:.25em solid;padding-left:0;padding-right:1em}.wp-block-quote:where(.has-text-align-center){border:none;padding-left:0}.wp-block-quote.is-large,.wp-block-quote.is-style-large,.wp-block-quote:where(.is-style-plain){border:none}.wp-block-search .wp-block-search__label{font-weight:700}.wp-block-search__button{border:1px solid #ccc;padding:.375em .625em}:where(.wp-block-group.has-background){padding:1.25em 2.375em}.wp-block-separator.has-css-opacity{opacity:.4}.wp-block-separator{border:none;border-bottom:2px solid;margin-left:auto;margin-right:auto}.wp-block-separator.has-alpha-channel-opacity{opacity:1}.wp-block-separator:not(.is-style-wide):not(.is-style-dots){width:100px}.wp-block-separator.has-background:not(.is-style-dots){border-bottom:none;height:1px}.wp-block-separator.has-background:not(.is-style-wide):not(.is-style-dots){height:2px}.wp-block-table{margin:0 0 1em}.wp-block-table td,.wp-block-table th{word-break:normal}.wp-block-table :where(figcaption){color:#555;font-size:13px;text-align:center}.is-dark-theme .wp-block-table :where(figcaption){color:#ffffffa6}.wp-block-video :where(figcaption){color:#555;font-size:13px;text-align:center}.is-dark-theme .wp-block-video :where(figcaption){color:#ffffffa6}.wp-block-video{margin:0 0 1em}:root :where(.wp-block-template-part.has-background){margin-bottom:0;margin-top:0;padding:1.25em 2.375em}
+</style>
+<style id='global-styles-inline-css' type='text/css'>
+:root{--wp--preset--aspect-ratio--square: 1;--wp--preset--aspect-ratio--4-3: 4/3;--wp--preset--aspect-ratio--3-4: 3/4;--wp--preset--aspect-ratio--3-2: 3/2;--wp--preset--aspect-ratio--2-3: 2/3;--wp--preset--aspect-ratio--16-9: 16/9;--wp--preset--aspect-ratio--9-16: 9/16;--wp--preset--color--black: #000000;--wp--preset--color--cyan-bluish-gray: #abb8c3;--wp--preset--color--white: #ffffff;--wp--preset--color--pale-pink: #f78da7;--wp--preset--color--vivid-red: #cf2e2e;--wp--preset--color--luminous-vivid-orange: #ff6900;--wp--preset--color--luminous-vivid-amber: #fcb900;--wp--preset--color--light-green-cyan: #7bdcb5;--wp--preset--color--vivid-green-cyan: #00d084;--wp--preset--color--pale-cyan-blue: #8ed1fc;--wp--preset--color--vivid-cyan-blue: #0693e3;--wp--preset--color--vivid-purple: #9b51e0;--wp--preset--gradient--vivid-cyan-blue-to-vivid-purple: linear-gradient(135deg,rgba(6,147,227,1) 0%,rgb(155,81,224) 100%);--wp--preset--gradient--light-green-cyan-to-vivid-green-cyan: linear-gradient(135deg,rgb(122,220,180) 0%,rgb(0,208,130) 100%);--wp--preset--gradient--luminous-vivid-amber-to-luminous-vivid-orange: linear-gradient(135deg,rgba(252,185,0,1) 0%,rgba(255,105,0,1) 100%);--wp--preset--gradient--luminous-vivid-orange-to-vivid-red: linear-gradient(135deg,rgba(255,105,0,1) 0%,rgb(207,46,46) 100%);--wp--preset--gradient--very-light-gray-to-cyan-bluish-gray: linear-gradient(135deg,rgb(238,238,238) 0%,rgb(169,184,195) 100%);--wp--preset--gradient--cool-to-warm-spectrum: linear-gradient(135deg,rgb(74,234,220) 0%,rgb(151,120,209) 20%,rgb(207,42,186) 40%,rgb(238,44,130) 60%,rgb(251,105,98) 80%,rgb(254,248,76) 100%);--wp--preset--gradient--blush-light-purple: linear-gradient(135deg,rgb(255,206,236) 0%,rgb(152,150,240) 100%);--wp--preset--gradient--blush-bordeaux: linear-gradient(135deg,rgb(254,205,165) 0%,rgb(254,45,45) 50%,rgb(107,0,62) 100%);--wp--preset--gradient--luminous-dusk: linear-gradient(135deg,rgb(255,203,112) 0%,rgb(199,81,192) 50%,rgb(65,88,208) 100%);--wp--preset--gradient--pale-ocean: linear-gradient(135deg,rgb(255,245,203) 0%,rgb(182,227,212) 50%,rgb(51,167,181) 100%);--wp--preset--gradient--electric-grass: linear-gradient(135deg,rgb(202,248,128) 0%,rgb(113,206,126) 100%);--wp--preset--gradient--midnight: linear-gradient(135deg,rgb(2,3,129) 0%,rgb(40,116,252) 100%);--wp--preset--font-size--small: 13px;--wp--preset--font-size--medium: 20px;--wp--preset--font-size--large: 36px;--wp--preset--font-size--x-large: 42px;--wp--preset--spacing--20: 0.44rem;--wp--preset--spacing--30: 0.67rem;--wp--preset--spacing--40: 1rem;--wp--preset--spacing--50: 1.5rem;--wp--preset--spacing--60: 2.25rem;--wp--preset--spacing--70: 3.38rem;--wp--preset--spacing--80: 5.06rem;--wp--preset--shadow--natural: 6px 6px 9px rgba(0, 0, 0, 0.2);--wp--preset--shadow--deep: 12px 12px 50px rgba(0, 0, 0, 0.4);--wp--preset--shadow--sharp: 6px 6px 0px rgba(0, 0, 0, 0.2);--wp--preset--shadow--outlined: 6px 6px 0px -3px rgba(255, 255, 255, 1), 6px 6px rgba(0, 0, 0, 1);--wp--preset--shadow--crisp: 6px 6px 0px rgba(0, 0, 0, 1);}:root { --wp--style--global--content-size: 823px;--wp--style--global--wide-size: 1080px; }:where(body) { margin: 0; }.wp-site-blocks > .alignleft { float: left; margin-right: 2em; }.wp-site-blocks > .alignright { float: right; margin-left: 2em; }.wp-site-blocks > .aligncenter { justify-content: center; margin-left: auto; margin-right: auto; }:where(.is-layout-flex){gap: 0.5em;}:where(.is-layout-grid){gap: 0.5em;}.is-layout-flow > .alignleft{float: left;margin-inline-start: 0;margin-inline-end: 2em;}.is-layout-flow > .alignright{float: right;margin-inline-start: 2em;margin-inline-end: 0;}.is-layout-flow > .aligncenter{margin-left: auto !important;margin-right: auto !important;}.is-layout-constrained > .alignleft{float: left;margin-inline-start: 0;margin-inline-end: 2em;}.is-layout-constrained > .alignright{float: right;margin-inline-start: 2em;margin-inline-end: 0;}.is-layout-constrained > .aligncenter{margin-left: auto !important;margin-right: auto !important;}.is-layout-constrained > :where(:not(.alignleft):not(.alignright):not(.alignfull)){max-width: var(--wp--style--global--content-size);margin-left: auto !important;margin-right: auto !important;}.is-layout-constrained > .alignwide{max-width: var(--wp--style--global--wide-size);}body .is-layout-flex{display: flex;}.is-layout-flex{flex-wrap: wrap;align-items: center;}.is-layout-flex > :is(*, div){margin: 0;}body .is-layout-grid{display: grid;}.is-layout-grid > :is(*, div){margin: 0;}body{padding-top: 0px;padding-right: 0px;padding-bottom: 0px;padding-left: 0px;}:root :where(.wp-element-button, .wp-block-button__link){background-color: #32373c;border-width: 0;color: #fff;font-family: inherit;font-size: inherit;line-height: inherit;padding: calc(0.667em + 2px) calc(1.333em + 2px);text-decoration: none;}.has-black-color{color: var(--wp--preset--color--black) !important;}.has-cyan-bluish-gray-color{color: var(--wp--preset--color--cyan-bluish-gray) !important;}.has-white-color{color: var(--wp--preset--color--white) !important;}.has-pale-pink-color{color: var(--wp--preset--color--pale-pink) !important;}.has-vivid-red-color{color: var(--wp--preset--color--vivid-red) !important;}.has-luminous-vivid-orange-color{color: var(--wp--preset--color--luminous-vivid-orange) !important;}.has-luminous-vivid-amber-color{color: var(--wp--preset--color--luminous-vivid-amber) !important;}.has-light-green-cyan-color{color: var(--wp--preset--color--light-green-cyan) !important;}.has-vivid-green-cyan-color{color: var(--wp--preset--color--vivid-green-cyan) !important;}.has-pale-cyan-blue-color{color: var(--wp--preset--color--pale-cyan-blue) !important;}.has-vivid-cyan-blue-color{color: var(--wp--preset--color--vivid-cyan-blue) !important;}.has-vivid-purple-color{color: var(--wp--preset--color--vivid-purple) !important;}.has-black-background-color{background-color: var(--wp--preset--color--black) !important;}.has-cyan-bluish-gray-background-color{background-color: var(--wp--preset--color--cyan-bluish-gray) !important;}.has-white-background-color{background-color: var(--wp--preset--color--white) !important;}.has-pale-pink-background-color{background-color: var(--wp--preset--color--pale-pink) !important;}.has-vivid-red-background-color{background-color: var(--wp--preset--color--vivid-red) !important;}.has-luminous-vivid-orange-background-color{background-color: var(--wp--preset--color--luminous-vivid-orange) !important;}.has-luminous-vivid-amber-background-color{background-color: var(--wp--preset--color--luminous-vivid-amber) !important;}.has-light-green-cyan-background-color{background-color: var(--wp--preset--color--light-green-cyan) !important;}.has-vivid-green-cyan-background-color{background-color: var(--wp--preset--color--vivid-green-cyan) !important;}.has-pale-cyan-blue-background-color{background-color: var(--wp--preset--color--pale-cyan-blue) !important;}.has-vivid-cyan-blue-background-color{background-color: var(--wp--preset--color--vivid-cyan-blue) !important;}.has-vivid-purple-background-color{background-color: var(--wp--preset--color--vivid-purple) !important;}.has-black-border-color{border-color: var(--wp--preset--color--black) !important;}.has-cyan-bluish-gray-border-color{border-color: var(--wp--preset--color--cyan-bluish-gray) !important;}.has-white-border-color{border-color: var(--wp--preset--color--white) !important;}.has-pale-pink-border-color{border-color: var(--wp--preset--color--pale-pink) !important;}.has-vivid-red-border-color{border-color: var(--wp--preset--color--vivid-red) !important;}.has-luminous-vivid-orange-border-color{border-color: var(--wp--preset--color--luminous-vivid-orange) !important;}.has-luminous-vivid-amber-border-color{border-color: var(--wp--preset--color--luminous-vivid-amber) !important;}.has-light-green-cyan-border-color{border-color: var(--wp--preset--color--light-green-cyan) !important;}.has-vivid-green-cyan-border-color{border-color: var(--wp--preset--color--vivid-green-cyan) !important;}.has-pale-cyan-blue-border-color{border-color: var(--wp--preset--color--pale-cyan-blue) !important;}.has-vivid-cyan-blue-border-color{border-color: var(--wp--preset--color--vivid-cyan-blue) !important;}.has-vivid-purple-border-color{border-color: var(--wp--preset--color--vivid-purple) !important;}.has-vivid-cyan-blue-to-vivid-purple-gradient-background{background: var(--wp--preset--gradient--vivid-cyan-blue-to-vivid-purple) !important;}.has-light-green-cyan-to-vivid-green-cyan-gradient-background{background: var(--wp--preset--gradient--light-green-cyan-to-vivid-green-cyan) !important;}.has-luminous-vivid-amber-to-luminous-vivid-orange-gradient-background{background: var(--wp--preset--gradient--luminous-vivid-amber-to-luminous-vivid-orange) !important;}.has-luminous-vivid-orange-to-vivid-red-gradient-background{background: var(--wp--preset--gradient--luminous-vivid-orange-to-vivid-red) !important;}.has-very-light-gray-to-cyan-bluish-gray-gradient-background{background: var(--wp--preset--gradient--very-light-gray-to-cyan-bluish-gray) !important;}.has-cool-to-warm-spectrum-gradient-background{background: var(--wp--preset--gradient--cool-to-warm-spectrum) !important;}.has-blush-light-purple-gradient-background{background: var(--wp--preset--gradient--blush-light-purple) !important;}.has-blush-bordeaux-gradient-background{background: var(--wp--preset--gradient--blush-bordeaux) !important;}.has-luminous-dusk-gradient-background{background: var(--wp--preset--gradient--luminous-dusk) !important;}.has-pale-ocean-gradient-background{background: var(--wp--preset--gradient--pale-ocean) !important;}.has-electric-grass-gradient-background{background: var(--wp--preset--gradient--electric-grass) !important;}.has-midnight-gradient-background{background: var(--wp--preset--gradient--midnight) !important;}.has-small-font-size{font-size: var(--wp--preset--font-size--small) !important;}.has-medium-font-size{font-size: var(--wp--preset--font-size--medium) !important;}.has-large-font-size{font-size: var(--wp--preset--font-size--large) !important;}.has-x-large-font-size{font-size: var(--wp--preset--font-size--x-large) !important;}
+:where(.wp-block-post-template.is-layout-flex){gap: 1.25em;}:where(.wp-block-post-template.is-layout-grid){gap: 1.25em;}
+:where(.wp-block-columns.is-layout-flex){gap: 2em;}:where(.wp-block-columns.is-layout-grid){gap: 2em;}
+:root :where(.wp-block-pullquote){font-size: 1.5em;line-height: 1.6;}
+</style>
+<link data-optimized="1" rel='stylesheet' id='contact-form-7-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/b318656223f153500265ebd7a685c982.css?ver=1eddf' type='text/css' media='all' />
+<link data-optimized="1" rel='stylesheet' id='wp-pagenavi-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/e5402957a4fe93995d5a09137b9bab0d.css?ver=50174' type='text/css' media='all' />
+<link data-optimized="1" rel='stylesheet' id='lwp-image-carousel-styles-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/8fb333699da90c37ef0bdb2386262d8c.css?ver=b76c8' type='text/css' media='all' />
+<link data-optimized="1" rel='stylesheet' id='popup-maker-site-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/e5d5e4cdec5118fb1c47558fabf3c80e.css?ver=0d157' type='text/css' media='all' />
+<link data-optimized="1" rel='stylesheet' id='addtoany-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/ed1fcdb554494dfb44861748f90a6295.css?ver=4eaf8' type='text/css' media='all' />
+<link data-optimized="1" rel='stylesheet' id='cf7cf-style-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/a08183a9f4c1ba4c614588908d10a1e6.css?ver=11d8f' type='text/css' media='all' />
+<link data-optimized="1" rel='stylesheet' id='divi-style-parent-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/eee9e213e53a88b698a03bb32bde913a.css?ver=da8a6' type='text/css' media='all' />
+<link data-optimized="1" rel='stylesheet' id='child-style-css' href='https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/ea1cdcff5b28992ad3908a5fd464e45e.css?ver=d07be' type='text/css' media='all' />
+<script type="text/javascript" id="addtoany-core-js-before" src="data:text/javascript;base64,d2luZG93LmEyYV9jb25maWc9d2luZG93LmEyYV9jb25maWd8fHt9O2EyYV9jb25maWcuY2FsbGJhY2tzPVtdO2EyYV9jb25maWcub3ZlcmxheXM9W107YTJhX2NvbmZpZy50ZW1wbGF0ZXM9e307YTJhX2xvY2FsaXplPXtTaGFyZToi5YiG5LqrIixTYXZlOiLlhLLlrZgiLFN1YnNjcmliZToi6KiC6ZaxIixFbWFpbDoi6Zu75a2Q6YO15Lu2IixCb29rbWFyazoi5pu457GkIixTaG93QWxsOiLpoa/npLrlhajpg6giLFNob3dMZXNzOiLpoa/npLrovIPlsJEiLEZpbmRTZXJ2aWNlczoi5bCL5om+5pyN5YuZIixGaW5kQW55U2VydmljZVRvQWRkVG86Iueri+WNs+Wwi+aJvuaDs+imgeaWsOWinueahOacjeWLmSIsUG93ZXJlZEJ5OiLplovnmbzlnJjpmoo6IixTaGFyZVZpYUVtYWlsOiLpgI/pgY7pm7vlrZDpg7Xku7bliIbkuqsiLFN1YnNjcmliZVZpYUVtYWlsOiLpgI/pgY7pm7vlrZDpg7Xku7boqILplrEiLEJvb2ttYXJrSW5Zb3VyQnJvd3Nlcjoi5Zyo54CP6Ka95Zmo5Lit5Yqg5YWl5pu457GkIixCb29rbWFya0luc3RydWN0aW9uczoi5oyJ5LiLIEN0cmwrRCDmiJYgXHUyMzE4K0Qg5bCH6YCZ5YCL6aCB6Z2i5Yqg5YWl5pu457GkIixBZGRUb1lvdXJGYXZvcml0ZXM6IuaWsOWinuiHsyBb5oiR55qE5pyA5oSbXSIsU2VuZEZyb21XZWJPclByb2dyYW06IumAj+mBjuS7u+S9lembu+WtkOmDteS7tuWcsOWdgOaIlumbu+WtkOmDteS7tueoi+W8j+WCs+mAgSIsRW1haWxQcm9ncmFtOiLpm7vlrZDpg7Xku7bnqIvlvI8iLE1vcmU6IumAsuS4gOatpeS6huinoy4uLiIsVGhhbmtzRm9yU2hhcmluZzoi5oSf6Kyd5YiG5Lqr77yBIixUaGFua3NGb3JGb2xsb3dpbmc6IuaEn+isnei/vei5pO+8gSJ9" defer></script>
+<script type="text/javascript" defer src="https://static.addtoany.com/menu/page.js" id="addtoany-core-js"></script>
+<script type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-includes/js/jquery/jquery.min.js?ver=3.7.1" id="jquery-core-js"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/59b8a8b136a2a92615298dd8b7147da8.js?ver=f4c53" id="jquery-migrate-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" defer src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/31a2fde3f3f12c5636b57bcb09e0fb4a.js?ver=6c567" id="addtoany-jquery-js"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/9cb37da822e04a33b53c1c470efc541e.js?ver=1e327" id="wp-hooks-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="say-what-js-js-extra" src="data:text/javascript;base64,dmFyIHNheV93aGF0X2RhdGE9eyJyZXBsYWNlbWVudHMiOnsiZXRfYnVpbGRlcnxyZWFkIG1vcmV8IjoiXHU5NWIxXHU4YjgwXHU2NmY0XHU1OTFhIn19" defer></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/99e2ebea363a165b9ada8b1c4208eabe.js?ver=cbcdf" id="say-what-js-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/352ffe0b8c1aa64960b011468ef8ea29.js?ver=2a59b" id="jquery-bind-first-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/c84bfb14f9bb146f18c92ac5c09d655f.js?ver=4eade" id="js-cookie-pys-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/b178a5832bf402d7aa4fabe3097e2792.js?ver=b52c0" id="js-tld-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="pys-js-extra" src="data:text/javascript;base64,dmFyIHB5c09wdGlvbnM9eyJzdGF0aWNFdmVudHMiOltdLCJkeW5hbWljRXZlbnRzIjpbXSwidHJpZ2dlckV2ZW50cyI6W10sInRyaWdnZXJFdmVudFR5cGVzIjpbXSwiZmFjZWJvb2siOnsicGl4ZWxJZHMiOlsiMTAxNzgzNzgyNTg3Nzg2MiJdLCJhZHZhbmNlZE1hdGNoaW5nIjp7ImV4dGVybmFsX2lkIjoiYmNlZWVmYWZiZWNhYWVhZWRhZGRlIn0sImFkdmFuY2VkTWF0Y2hpbmdFbmFibGVkIjohMCwicmVtb3ZlTWV0YWRhdGEiOiExLCJjb250ZW50UGFyYW1zIjpbXSwiY29tbWVudEV2ZW50RW5hYmxlZCI6ITAsIndvb1ZhcmlhYmxlQXNTaW1wbGUiOiExLCJkb3dubG9hZEVuYWJsZWQiOiEwLCJmb3JtRXZlbnRFbmFibGVkIjohMCwic2VydmVyQXBpRW5hYmxlZCI6ITAsIndvb0NSU2VuZEZyb21TZXJ2ZXIiOiExLCJzZW5kX2V4dGVybmFsX2lkIjpudWxsLCJlbmFibGVkX21lZGljYWwiOiExLCJkb19ub3RfdHJhY2tfbWVkaWNhbF9wYXJhbSI6WyJldmVudF91cmwiLCJwb3N0X3RpdGxlIiwicGFnZV90aXRsZSIsImxhbmRpbmdfcGFnZSIsImNvbnRlbnRfbmFtZSIsImNhdGVnb3JpZXMiLCJ0YWdzIl0sIm1ldGFfbGR1IjohMX0sImRlYnVnIjoiIiwic2l0ZVVybCI6Imh0dHBzOlwvXC93d3cuc2NzaHIuY29tIiwiYWpheFVybCI6Imh0dHBzOlwvXC93d3cuc2NzaHIuY29tXC93cC1hZG1pblwvYWRtaW4tYWpheC5waHAiLCJhamF4X2V2ZW50IjoiODlkOTVjOTcxZSIsImVuYWJsZV9yZW1vdmVfZG93bmxvYWRfdXJsX3BhcmFtIjoiMSIsImNvb2tpZV9kdXJhdGlvbiI6IjciLCJsYXN0X3Zpc2l0X2R1cmF0aW9uIjoiNjAiLCJlbmFibGVfc3VjY2Vzc19zZW5kX2Zvcm0iOiIiLCJhamF4Rm9yU2VydmVyRXZlbnQiOiIxIiwiYWpheEZvclNlcnZlclN0YXRpY0V2ZW50IjoiMSIsInNlbmRfZXh0ZXJuYWxfaWQiOiIxIiwiZXh0ZXJuYWxfaWRfZXhwaXJlIjoiMTgwIiwidHJhY2tfY29va2llX2Zvcl9zdWJkb21haW5zIjoiMSIsImdvb2dsZV9jb25zZW50X21vZGUiOiIxIiwiZ2RwciI6eyJhamF4X2VuYWJsZWQiOiExLCJhbGxfZGlzYWJsZWRfYnlfYXBpIjohMSwiZmFjZWJvb2tfZGlzYWJsZWRfYnlfYXBpIjohMSwiYW5hbHl0aWNzX2Rpc2FibGVkX2J5X2FwaSI6ITEsImdvb2dsZV9hZHNfZGlzYWJsZWRfYnlfYXBpIjohMSwicGludGVyZXN0X2Rpc2FibGVkX2J5X2FwaSI6ITEsImJpbmdfZGlzYWJsZWRfYnlfYXBpIjohMSwiZXh0ZXJuYWxJRF9kaXNhYmxlZF9ieV9hcGkiOiExLCJmYWNlYm9va19wcmlvcl9jb25zZW50X2VuYWJsZWQiOiEwLCJhbmFseXRpY3NfcHJpb3JfY29uc2VudF9lbmFibGVkIjohMCwiZ29vZ2xlX2Fkc19wcmlvcl9jb25zZW50X2VuYWJsZWQiOm51bGwsInBpbnRlcmVzdF9wcmlvcl9jb25zZW50X2VuYWJsZWQiOiEwLCJiaW5nX3ByaW9yX2NvbnNlbnRfZW5hYmxlZCI6ITAsImNvb2tpZWJvdF9pbnRlZ3JhdGlvbl9lbmFibGVkIjohMSwiY29va2llYm90X2ZhY2Vib29rX2NvbnNlbnRfY2F0ZWdvcnkiOiJtYXJrZXRpbmciLCJjb29raWVib3RfYW5hbHl0aWNzX2NvbnNlbnRfY2F0ZWdvcnkiOiJzdGF0aXN0aWNzIiwiY29va2llYm90X3Rpa3Rva19jb25zZW50X2NhdGVnb3J5IjoibWFya2V0aW5nIiwiY29va2llYm90X2dvb2dsZV9hZHNfY29uc2VudF9jYXRlZ29yeSI6bnVsbCwiY29va2llYm90X3BpbnRlcmVzdF9jb25zZW50X2NhdGVnb3J5IjoibWFya2V0aW5nIiwiY29va2llYm90X2JpbmdfY29uc2VudF9jYXRlZ29yeSI6Im1hcmtldGluZyIsImNvbnNlbnRfbWFnaWNfaW50ZWdyYXRpb25fZW5hYmxlZCI6ITEsInJlYWxfY29va2llX2Jhbm5lcl9pbnRlZ3JhdGlvbl9lbmFibGVkIjohMSwiY29va2llX25vdGljZV9pbnRlZ3JhdGlvbl9lbmFibGVkIjohMSwiY29va2llX2xhd19pbmZvX2ludGVncmF0aW9uX2VuYWJsZWQiOiExLCJhbmFseXRpY3Nfc3RvcmFnZSI6eyJlbmFibGVkIjohMCwidmFsdWUiOiJncmFudGVkIiwiZmlsdGVyIjohMX0sImFkX3N0b3JhZ2UiOnsiZW5hYmxlZCI6ITAsInZhbHVlIjoiZ3JhbnRlZCIsImZpbHRlciI6ITF9LCJhZF91c2VyX2RhdGEiOnsiZW5hYmxlZCI6ITAsInZhbHVlIjoiZ3JhbnRlZCIsImZpbHRlciI6ITF9LCJhZF9wZXJzb25hbGl6YXRpb24iOnsiZW5hYmxlZCI6ITAsInZhbHVlIjoiZ3JhbnRlZCIsImZpbHRlciI6ITF9fSwiY29va2llIjp7ImRpc2FibGVkX2FsbF9jb29raWUiOiExLCJkaXNhYmxlZF9zdGFydF9zZXNzaW9uX2Nvb2tpZSI6ITEsImRpc2FibGVkX2FkdmFuY2VkX2Zvcm1fZGF0YV9jb29raWUiOiExLCJkaXNhYmxlZF9sYW5kaW5nX3BhZ2VfY29va2llIjohMSwiZGlzYWJsZWRfZmlyc3RfdmlzaXRfY29va2llIjohMSwiZGlzYWJsZWRfdHJhZmZpY3NvdXJjZV9jb29raWUiOiExLCJkaXNhYmxlZF91dG1UZXJtc19jb29raWUiOiExLCJkaXNhYmxlZF91dG1JZF9jb29raWUiOiExfSwidHJhY2tpbmdfYW5hbHl0aWNzIjp7IlRyYWZmaWNTb3VyY2UiOiJkaXJlY3QiLCJUcmFmZmljTGFuZGluZyI6InVuZGVmaW5lZCIsIlRyYWZmaWNVdG1zIjpbXSwiVHJhZmZpY1V0bXNJZCI6W119LCJHQVRhZ3MiOnsiZ2FfZGF0YWxheWVyX3R5cGUiOiJkZWZhdWx0IiwiZ2FfZGF0YWxheWVyX25hbWUiOiJkYXRhTGF5ZXJQWVMifSwid29vIjp7ImVuYWJsZWQiOiExfSwiZWRkIjp7ImVuYWJsZWQiOiExfSwiY2FjaGVfYnlwYXNzIjoiMTc4MjkzMjMyMSJ9" defer></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/aae09710f64b365a4e3a3b0ad9ebb0a1.js?ver=d2f88" id="pys-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/4c3eaba6d5c97c4a2118fa29582e5674.js?ver=035bc" id="scshr-blockui-js" defer data-deferred="1"></script>
+			<!-- DO NOT COPY THIS SNIPPET! Start of Page Analytics Tracking for HubSpot WordPress plugin v11.3.51-->
+			<script class="hsq-set-content-id" data-content-id="standard-page" src="data:text/javascript;base64,dmFyIF9oc3E9X2hzcXx8W107X2hzcS5wdXNoKFsic2V0Q29udGVudFR5cGUiLCJzdGFuZGFyZC1wYWdlIl0p" defer></script>
+			<!-- DO NOT COPY THIS SNIPPET! End of Page Analytics Tracking for HubSpot WordPress plugin -->
+			<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+<!-- Meta Pixel Code -->
+<script type='text/javascript' src="data:text/javascript;base64,IWZ1bmN0aW9uKGYsYixlLHYsbix0LHMpe2lmKGYuZmJxKXJldHVybjtuPWYuZmJxPWZ1bmN0aW9uKCl7bi5jYWxsTWV0aG9kP24uY2FsbE1ldGhvZC5hcHBseShuLGFyZ3VtZW50cyk6bi5xdWV1ZS5wdXNoKGFyZ3VtZW50cyl9O2lmKCFmLl9mYnEpZi5fZmJxPW47bi5wdXNoPW47bi5sb2FkZWQ9ITA7bi52ZXJzaW9uPScyLjAnO24ucXVldWU9W107dD1iLmNyZWF0ZUVsZW1lbnQoZSk7dC5hc3luYz0hMDt0LnNyYz12O3M9Yi5nZXRFbGVtZW50c0J5VGFnTmFtZShlKVswXTtzLnBhcmVudE5vZGUuaW5zZXJ0QmVmb3JlKHQscyl9KHdpbmRvdyxkb2N1bWVudCwnc2NyaXB0JywnaHR0cHM6Ly9jb25uZWN0LmZhY2Vib29rLm5ldC9lbl9VUy9mYmV2ZW50cy5qcz92PW5leHQnKQ==" defer></script>
+<!-- End Meta Pixel Code -->
+
+      <script type='text/javascript' src="data:text/javascript;base64,dmFyIHVybD13aW5kb3cubG9jYXRpb24ub3JpZ2luKyc/b2I9b3Blbi1icmlkZ2UnO2ZicSgnc2V0Jywnb3BlbmJyaWRnZScsJzEwMTc4Mzc4MjU4Nzc4NjInLHVybCk=" defer></script>
+    <script type='text/javascript' src="data:text/javascript;base64,ZmJxKCdpbml0JywnMTAxNzgzNzgyNTg3Nzg2Micse30seyJhZ2VudCI6IndvcmRwcmVzcy02LjguNS00LjAuMCJ9KQ==" defer></script><script type='text/javascript' src="data:text/javascript;base64,ZmJxKCd0cmFjaycsJ1BhZ2VWaWV3JyxbXSk=" defer></script>
+<!-- Meta Pixel Code -->
+<noscript>
+<img height="1" width="1" style="display:none" alt="fbpx"
+src="https://www.facebook.com/tr?id=1017837825877862&ev=PageView&noscript=1" />
+</noscript>
+<!-- End Meta Pixel Code -->
+<meta name="redi-version" content="1.3.0" /><link rel="canonical" href="https://www.scshr.com/">
+<!-- Preloading font to fix menu icon flashing 3 -->
+<link rel="preload" href="wp-content/themes/Divi/core/admin/fonts/modules.ttf" as="font" type="font/ttf" crossorigin="anonymous">
+<!-- Preloading font to fix menu icon flashing - end -->
+
+<!--語系-->
+<link rel="alternate" hreflang="zh-TW" href="https://www.scshr.com/">
+<link rel="alternate" hreflang="x-default" href="https://www.scshr.com/">
+
+
+<script type="application/ld+json"> {   "@context": "https://schema.org",   "@type": "Person",   "name": "飛騰雲端內容團隊",   "worksFor": { "@type": "Organization", "name": "飛騰雲端" } } </script>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-MHCQ6MZX');</script>
+<!-- End Google Tag Manager -->
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-KDWJMKF');</script>
+<!-- End Google Tag Manager -->
+<meta name="google-site-verification" content="l1c7uW6mYyjm7mYA4cRGYfNwfZVIidLr_tX3t1BxYzc">
+<meta name="facebook-domain-verification" content="izy812t34tuee1dhlek22w5hj1ikk5">
+<meta name="google-site-verification" content="zx4ljYiGrUx2jVASWj-qNKm_48jLk3eU45ayVGtzy7Y"><!--ann-->
+<!-- Meta Pixel Code -->
+<script src="data:text/javascript;base64,IWZ1bmN0aW9uKGYsYixlLHYsbix0LHMpe2lmKGYuZmJxKXJldHVybjtuPWYuZmJxPWZ1bmN0aW9uKCl7bi5jYWxsTWV0aG9kP24uY2FsbE1ldGhvZC5hcHBseShuLGFyZ3VtZW50cyk6bi5xdWV1ZS5wdXNoKGFyZ3VtZW50cyl9O2lmKCFmLl9mYnEpZi5fZmJxPW47bi5wdXNoPW47bi5sb2FkZWQ9ITA7bi52ZXJzaW9uPScyLjAnO24ucXVldWU9W107dD1iLmNyZWF0ZUVsZW1lbnQoZSk7dC5hc3luYz0hMDt0LnNyYz12O3M9Yi5nZXRFbGVtZW50c0J5VGFnTmFtZShlKVswXTtzLnBhcmVudE5vZGUuaW5zZXJ0QmVmb3JlKHQscyl9KHdpbmRvdyxkb2N1bWVudCwnc2NyaXB0JywnaHR0cHM6Ly9jb25uZWN0LmZhY2Vib29rLm5ldC9lbl9VUy9mYmV2ZW50cy5qcycpO2ZicSgnaW5pdCcsJzEwMTc4Mzc4MjU4Nzc4NjInKTtmYnEoJ3RyYWNrJywnUGFnZVZpZXcnKQ==" defer></script>
+<noscript><img height="1" width="1px" style="display:none" src="https://www.facebook.com/tr?id=1017837825877862&amp;ev=PageView&amp;noscript=1"></noscript>
+<!-- End Meta Pixel Code -->
+<!-- Meta Pixel Code -->
+<script src="data:text/javascript;base64,IWZ1bmN0aW9uKGYsYixlLHYsbix0LHMpe2lmKGYuZmJxKXJldHVybjtuPWYuZmJxPWZ1bmN0aW9uKCl7bi5jYWxsTWV0aG9kP24uY2FsbE1ldGhvZC5hcHBseShuLGFyZ3VtZW50cyk6bi5xdWV1ZS5wdXNoKGFyZ3VtZW50cyl9O2lmKCFmLl9mYnEpZi5fZmJxPW47bi5wdXNoPW47bi5sb2FkZWQ9ITA7bi52ZXJzaW9uPScyLjAnO24ucXVldWU9W107dD1iLmNyZWF0ZUVsZW1lbnQoZSk7dC5hc3luYz0hMDt0LnNyYz12O3M9Yi5nZXRFbGVtZW50c0J5VGFnTmFtZShlKVswXTtzLnBhcmVudE5vZGUuaW5zZXJ0QmVmb3JlKHQscyl9KHdpbmRvdyxkb2N1bWVudCwnc2NyaXB0JywnaHR0cHM6Ly9jb25uZWN0LmZhY2Vib29rLm5ldC9lbl9VUy9mYmV2ZW50cy5qcycpO2ZicSgnaW5pdCcsJzgyNjgzNjUyNTc3MzI2OScpO2ZicSgndHJhY2snLCdQYWdlVmlldycp" defer></script>
+<noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=826836525773269&amp;ev=PageView&amp;noscript=1"></noscript>
+<!-- End Meta Pixel Code -->
+<!-- Google tag (gtag.js) gads 開始試用 -->
+<script src="https://www.googletagmanager.com/gtag/js?id=AW-11037805980" defer data-deferred="1"></script>
+<script src="data:text/javascript;base64,d2luZG93LmRhdGFMYXllcj13aW5kb3cuZGF0YUxheWVyfHxbXTtmdW5jdGlvbiBndGFnKCl7ZGF0YUxheWVyLnB1c2goYXJndW1lbnRzKX0KZ3RhZygnanMnLG5ldyBEYXRlKCkpO2d0YWcoJ2NvbmZpZycsJ0FXLTExMDM3ODA1OTgwJyk=" defer></script>
+
+
+<script src="data:text/javascript;base64,ZG9jdW1lbnQuYWRkRXZlbnRMaXN0ZW5lcigiRE9NQ29udGVudExvYWRlZCIsZnVuY3Rpb24oKXtkb2N1bWVudC5xdWVyeVNlbGVjdG9yQWxsKCIuZXRfcGJfaW1hZ2UgaW1nW3RpdGxlXSIpLmZvckVhY2goZnVuY3Rpb24oaW1nKXtpbWcucmVtb3ZlQXR0cmlidXRlKCJ0aXRsZSIpfSl9KQ==" defer></script>
+
+
+<link rel="icon" href="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2021/03/cropped-favicon-150x150.png" sizes="32x32" />
+<link rel="icon" href="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2021/03/cropped-favicon-300x300.png" sizes="192x192" />
+<link rel="apple-touch-icon" href="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2021/03/cropped-favicon-300x300.png" />
+<meta name="msapplication-TileImage" content="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2021/03/cropped-favicon-300x300.png" />
+<link data-optimized="1" rel="stylesheet" id="et-divi-customizer-global-cached-inline-styles" href="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/css/1cc9f9a570ba4d0946fa21181dd1972f.css?ver=3f8b6" /><noscript><style id="rocket-lazyload-nojs-css">.rll-youtube-player, [data-lazy-src]{display:none !important;}</style></noscript></head>
+<body class="error404 wp-theme-Divi wp-child-theme-divichild et-tb-has-template et-tb-has-header et-tb-has-body et-tb-has-footer et_pb_button_helper_class et_cover_background et_pb_gutter windows et_pb_gutters3 et_divi_theme et-db">
+	<div id="page-container">
+<div id="et-boc" class="et-boc">
+			
+		<header class="et-l et-l--header">
+			<div class="et_builder_inner_content et_pb_gutters3">
+		<div class="et_pb_section et_pb_section_0_tb_header slide-in-menu-container et_section_regular et_pb_section--fixed et_pb_section--with-menu" >
+				
+				
+				
+				
+				
+				
+				<div class="et_pb_row et_pb_row_0_tb_header">
+				<div class="et_pb_column et_pb_column_1_5 et_pb_column_0_tb_header  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_0_tb_header et_clickable">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><!--<iframe src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/websource/logo.html"
+        width="200px" height="50px" style="border:0;margin-top:15px;" scrolling="no"></iframe>-->
+<image src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2023/12/logo_home.png" style="margin-top:15px;"></image></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_3_5 et_pb_column_1_tb_header  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_1_tb_header  et_pb_text_align_right">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><div class="social_icons">
+  <a href="https://www.facebook.com/SoarCloud" target="_blank" class="social_icon" rel="noopener">
+    <img decoding="async" class="social_icon" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2021/04/social_fb_solid.png" width="28" height="28"/>
+  </a>
+  <a href="https://www.instagram.com/soarcloudmkt/" target="_blank" class="social_icon" rel="noopener">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2023/08/IG-icon.png" width="28" height="28"/>
+  </a>  
+
+  <a href="https://lin.ee/vhFphVd" target="_blank" class="social_icon" rel="noopener">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2023/08/line-icon.png" width="28" height="28"/>
+  </a>
+</div>
+
+<style>
+    .social_icons {
+      display: inline-flex;
+      gap:1vh;
+      margin: 12px 0px 0px 0px;
+    }
+
+    .social_icon {
+      flex: 0 0 40%;
+      align-items: center;
+      justify-content: center;
+    }
+</style></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_5 et_pb_column_2_tb_header  et_pb_css_mix_blend_mode_passthrough et-last-child">
+				
+				
+				
+				
+				<div id="slide-in-open" class="et_pb_module et_pb_text et_pb_text_0_tb_header  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p><span class="line line-1"></span><br /><span class="line line-2"></span><br /><span class="line line-3"></span></p></div>
+			</div><div class="et_pb_module et_pb_code et_pb_code_2_tb_header">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><style> 
+  
+.slide-in-menu-container #mobile_menu1 {
+  height: 86vh;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+  -webkit-transform: translate3d(0, 0, 0);
+}
+
+.et_mobile_menu {
+	box-shadow: none;    
+}
+span.mobile_menu_bar {
+	display: none;
+}
+.et_mobile_menu {
+	display: block;    
+  border-top: none;
+}
+
+#slide-in-open{
+	cursor: pointer;
+}
+ 
+.line{
+  display: block;
+  position: absolute;
+  height: 4px;
+  width: 100%;
+  background: #00499A;
+  border-radius: 9px;
+  opacity: 1;
+  -webkit-transition: .1s ease-in-out;
+  -moz-transition: .1s ease-in-out;
+  -o-transition: .1s ease-in-out;
+  transition: .1s ease-in-out;
+}
+ 
+.line-2 {
+	top: 10px;
+}
+ 
+.line-3 {
+  top: 20px;
+}
+ 
+#slide-in-open.open .line-1 {
+  top: 10px;
+  -webkit-transform: rotate(135deg);
+  -moz-transform: rotate(135deg);
+  -o-transform: rotate(135deg);
+  transform: rotate(135deg);
+}
+ 
+#slide-in-open.open .line-2 {
+  display: none;
+}
+ 
+#slide-in-open.open .line-3 {
+  top: 10px;
+  -webkit-transform: rotate(-135deg);
+  -moz-transform: rotate(-135deg);
+  -o-transform: rotate(-135deg);
+  transform: rotate(-135deg);
+}
+ 
+.slide-in-menu {
+  right: 0 !important;
+  opacity: 1 !important;
+}
+ 
+.slide-in-menu-container {
+  -webkit-transition: all 0.5s ease !important;
+  -moz-transition: all 0.5s ease !important;
+  -o-transition: all 0.5s ease !important;
+  -ms-transition: all 0.5s ease !important;
+  transition: all 0.5s ease !important;
+}
+  
+</style>
+
+<script src="data:text/javascript;base64,alF1ZXJ5KGZ1bmN0aW9uKCQpeyQoJyNzbGlkZS1pbi1vcGVuJykuY2xpY2soZnVuY3Rpb24oKXskKHRoaXMpLnRvZ2dsZUNsYXNzKCdvcGVuJyk7JCgnLnNsaWRlLWluLW1lbnUtY29udGFpbmVyJykudG9nZ2xlQ2xhc3MoJ3NsaWRlLWluLW1lbnUnKX0pfSk=" defer></script></div>
+			</div>
+			</div>
+				
+				
+				
+				
+			</div><div class="et_pb_with_border et_pb_row et_pb_row_1_tb_header slide-in-menu-container et_pb_gutters1 et_pb_row--with-menu">
+				<div class="et_pb_column et_pb_column_4_4 et_pb_column_3_tb_header  et_pb_css_mix_blend_mode_passthrough et-last-child et_pb_column--with-menu">
+				
+				
+				
+				
+				<div id="slide-in-open" class="et_pb_module et_pb_menu et_pb_menu_0_tb_header et_pb_bg_layout_light  et_pb_text_align_left et_dropdown_animation_fade et_pb_menu--without-logo et_pb_menu--style-left_aligned">
+					
+					
+					
+					
+					<div class="et_pb_menu_inner_container clearfix">
+						
+						<div class="et_pb_menu__wrap">
+							<div class="et_pb_menu__menu">
+								<nav class="et-menu-nav"><ul id="menu-2025_nav" class="et-menu nav"><li id="menu-item-39929" class="et_pb_menu_page_id-37677 menu-item menu-item-type-post_type menu-item-object-page menu-item-39929"><a href="https://www.scshr.com/ipo-hr/">IPO-HR</a></li>
+<li id="menu-item-27309" class="et_pb_menu_page_id-27309 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27309"><a>產品服務</a>
+<ul class="sub-menu">
+	<li id="menu-item-27284" class="et_pb_menu_page_id-27284 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27284"><a href="https://www.scshr.com/product/">人資系統</a>
+	<ul class="sub-menu">
+		<li id="menu-item-35059" class="menucatetitle et_pb_menu_page_id-35059 menu-item menu-item-type-custom menu-item-object-custom menu-item-35059"><a>買斷/地端</a></li>
+		<li id="menu-item-27295" class="submenu-hr et_pb_menu_page_id-7119 menu-item menu-item-type-post_type menu-item-object-page menu-item-27295"><a href="https://www.scshr.com/projecta/">客製化|企業集團</a></li>
+		<li id="menu-item-35062" class="et_pb_menu_page_id-35062 menu-item menu-item-type-custom menu-item-object-custom menu-item-35062"><a href="https://www.scshr.com/product/">&#8212;&#8212;</a></li>
+		<li id="menu-item-35060" class="menucatetitle et_pb_menu_page_id-35060 menu-item menu-item-type-custom menu-item-object-custom menu-item-35060"><a>雲端租賃</a></li>
+		<li id="menu-item-27296" class="submenu-hr et_pb_menu_page_id-7233 menu-item menu-item-type-post_type menu-item-object-page menu-item-27296"><a href="https://www.scshr.com/projectb/">標準版|企業集團>200人</a></li>
+		<li id="menu-item-27298" class="submenu-hr et_pb_menu_page_id-6829 menu-item menu-item-type-post_type menu-item-object-page menu-item-27298"><a href="https://www.scshr.com/cloudboss/">雲老闆|中小企業30-200人</a></li>
+		<li id="menu-item-27297" class="submenu-hr et_pb_menu_page_id-20297 menu-item menu-item-type-post_type menu-item-object-page menu-item-27297"><a href="https://www.scshr.com/cloudassistant/">雲助理|微型企業<30人</a></li>
+	</ul>
+</li>
+	<li id="menu-item-27294" class="et_pb_menu_page_id-27294 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27294"><a>HR解決方案</a>
+	<ul class="sub-menu">
+		<li id="menu-item-27285" class="submenu-sol et_pb_menu_page_id-4419 menu-item menu-item-type-post_type menu-item-object-page menu-item-27285"><a href="https://www.scshr.com/hrsolutions/solutions-hrm/">系統 | 人事薪資</a></li>
+		<li id="menu-item-27289" class="submenu-sol et_pb_menu_page_id-4467 menu-item menu-item-type-post_type menu-item-object-page menu-item-27289"><a href="https://www.scshr.com/hrsolutions/solutions-sol5/">系統 | 勞動事件法</a></li>
+		<li id="menu-item-27291" class="submenu-sol et_pb_menu_page_id-4475 menu-item menu-item-type-post_type menu-item-object-page menu-item-27291"><a href="https://www.scshr.com/hrsolutions/solutions-sol8/">系統 | 兼職人員(PT)</a></li>
+		<li id="menu-item-27290" class="submenu-sol et_pb_menu_page_id-4471 menu-item menu-item-type-post_type menu-item-object-page menu-item-27290"><a href="https://www.scshr.com/hrsolutions/solutions-sol7/">系統 | 多元打卡</a></li>
+		<li id="menu-item-27288" class="submenu-sol et_pb_menu_page_id-4464 menu-item menu-item-type-post_type menu-item-object-page menu-item-27288"><a href="https://www.scshr.com/hrsolutions/solutions-sol4/">系統 | 人才招募</a></li>
+		<li id="menu-item-27286" class="submenu-sol et_pb_menu_page_id-4455 menu-item menu-item-type-post_type menu-item-object-page menu-item-27286"><a href="https://www.scshr.com/hrsolutions/solutions-hrd/">系統 | 訓練發展</a></li>
+		<li id="menu-item-37553" class="submenu-sol et_pb_menu_page_id-37187 menu-item menu-item-type-post_type menu-item-object-page menu-item-37553"><a href="https://www.scshr.com/hrsolutions/restaurant-scheduling-and-payroll/">解方 | 餐飲業</a></li>
+	</ul>
+</li>
+	<li id="menu-item-28716" class="et_pb_menu_page_id-28716 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-28716"><a>BPM解決方案</a>
+	<ul class="sub-menu">
+		<li id="menu-item-27287" class="submenu-bpm et_pb_menu_page_id-4459 menu-item menu-item-type-post_type menu-item-object-page menu-item-27287"><a href="https://www.scshr.com/hrsolutions/solutions-bpm/">企業流程管理系統</a></li>
+		<li id="menu-item-27299" class="submenu-bpm et_pb_menu_page_id-17895 menu-item menu-item-type-post_type menu-item-object-page menu-item-27299"><a href="https://www.scshr.com/cloudbpm/">雲表單</a></li>
+	</ul>
+</li>
+	<li id="menu-item-28736" class="et_pb_menu_page_id-28736 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-28736"><a>AI服務</a>
+	<ul class="sub-menu">
+		<li id="menu-item-28739" class="submenu-ailabor et_pb_menu_page_id-24539 menu-item menu-item-type-post_type menu-item-object-page menu-item-28739"><a href="https://www.scshr.com/ailaborlaw/">AI勞資顧問機器人</a></li>
+	</ul>
+</li>
+	<li id="menu-item-28737" class="et_pb_menu_page_id-28737 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-28737"><a>ESG功能包</a>
+	<ul class="sub-menu">
+		<li id="menu-item-28738" class="submenu-esg et_pb_menu_page_id-27697 menu-item menu-item-type-post_type menu-item-object-page menu-item-28738"><a href="https://www.scshr.com/esg-travel-carbon-management/">ESG差旅碳排管理</a></li>
+	</ul>
+</li>
+	<li id="menu-item-39911" class="et_pb_menu_page_id-39359 menu-item menu-item-type-post_type menu-item-object-page menu-item-39911"><a href="https://www.scshr.com/employee-relations/">WGS 職場治理平台系統</a></li>
+	<li id="menu-item-36513" class="et_pb_menu_page_id-36187 menu-item menu-item-type-post_type menu-item-object-page menu-item-36513"><a href="https://www.scshr.com/scsapi/">API串接</a></li>
+</ul>
+</li>
+<li id="menu-item-28641" class="et_pb_menu_page_id-28641 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-28641"><a>代表客戶</a>
+<ul class="sub-menu">
+	<li id="menu-item-27308" class="et_pb_menu_page_id-27308 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27308"><a href="https://www.scshr.com/scsclients/">客戶行業別</a>
+	<ul class="sub-menu">
+		<li id="menu-item-27306" class="et_pb_menu_page_id-5548 menu-item menu-item-type-post_type menu-item-object-page menu-item-27306"><a href="https://www.scshr.com/scsclients/chain/">連鎖餐飲業</a></li>
+		<li id="menu-item-27302" class="et_pb_menu_page_id-5592 menu-item menu-item-type-post_type menu-item-object-page menu-item-27302"><a href="https://www.scshr.com/scsclients/wholesale/">批發零售業</a></li>
+		<li id="menu-item-27303" class="et_pb_menu_page_id-17909 menu-item menu-item-type-post_type menu-item-object-page menu-item-27303"><a href="https://www.scshr.com/scsclients/service/">服務業</a></li>
+		<li id="menu-item-27304" class="et_pb_menu_page_id-17913 menu-item menu-item-type-post_type menu-item-object-page menu-item-27304"><a href="https://www.scshr.com/scsclients/manufacture/">製造業</a></li>
+		<li id="menu-item-27305" class="et_pb_menu_page_id-5595 menu-item menu-item-type-post_type menu-item-object-page menu-item-27305"><a href="https://www.scshr.com/scsclients/electronics/">資訊電子業</a></li>
+		<li id="menu-item-27301" class="et_pb_menu_page_id-5582 menu-item menu-item-type-post_type menu-item-object-page menu-item-27301"><a href="https://www.scshr.com/scsclients/semiconductor/">半導體產業</a></li>
+		<li id="menu-item-29790" class="et_pb_menu_page_id-29723 menu-item menu-item-type-post_type menu-item-object-page menu-item-29790"><a href="https://www.scshr.com/scsclients/construction/">營建工程業</a></li>
+	</ul>
+</li>
+	<li id="menu-item-27307" class="et_pb_menu_page_id-4538 menu-item menu-item-type-post_type menu-item-object-page menu-item-27307"><a href="https://www.scshr.com/scsclients/scscase/">成功案例專訪</a></li>
+</ul>
+</li>
+<li id="menu-item-27319" class="et_pb_menu_page_id-27319 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27319"><a>資訊中心</a>
+<ul class="sub-menu">
+	<li id="menu-item-30612" class="et_pb_menu_page_id-30612 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-30612"><a>功能新知</a>
+	<ul class="sub-menu">
+		<li id="menu-item-30614" class="et_pb_menu_page_id-30601 menu-item menu-item-type-post_type menu-item-object-page menu-item-30614"><a href="https://www.scshr.com/news/scschangelog/scsnewfunctions/">飛騰新功能解密</a></li>
+		<li id="menu-item-34102" class="et_pb_menu_page_id-34096 menu-item menu-item-type-post_type menu-item-object-page menu-item-34102"><a href="https://www.scshr.com/news/scschangelog/soarcloud-system-benefits/">飛騰系統功能優勢</a></li>
+		<li id="menu-item-27321" class="et_pb_menu_page_id-17881 menu-item menu-item-type-post_type menu-item-object-page menu-item-27321"><a href="https://www.scshr.com/news/scschangelog/">系統功能演進</a></li>
+		<li id="menu-item-31460" class="et_pb_menu_page_id-31455 menu-item menu-item-type-post_type menu-item-object-page menu-item-31460"><a href="https://www.scshr.com/news/scschangelog/cloudassistantguide/">雲助理功能說明</a></li>
+	</ul>
+</li>
+	<li id="menu-item-27320" class="et_pb_menu_page_id-4510 menu-item menu-item-type-post_type menu-item-object-page menu-item-27320"><a href="https://www.scshr.com/news/">最新訊息</a></li>
+	<li id="menu-item-29449" class="et_pb_menu_page_id-29446 menu-item menu-item-type-post_type menu-item-object-page menu-item-29449"><a href="https://www.scshr.com/news/scsevent/">最新活動</a></li>
+	<li id="menu-item-27322" class="et_pb_menu_page_id-4544 menu-item menu-item-type-post_type menu-item-object-page menu-item-27322"><a href="https://www.scshr.com/news/scscourse/">課程訊息</a></li>
+	<li id="menu-item-27323" class="et_pb_menu_page_id-14656 menu-item menu-item-type-post_type menu-item-object-page menu-item-27323"><a href="https://www.scshr.com/news/newsletter/">飛騰雙週報</a></li>
+	<li id="menu-item-27324" class="et_pb_menu_page_id-4616 menu-item menu-item-type-post_type menu-item-object-page menu-item-27324"><a href="https://www.scshr.com/scsfocus/scsdownloads/">下載專區</a></li>
+	<li id="menu-item-29071" class="et_pb_menu_page_id-28194 menu-item menu-item-type-post_type menu-item-object-page menu-item-29071"><a href="https://www.scshr.com/news/faq/">常見問題</a></li>
+	<li id="menu-item-37269" class="et_pb_menu_page_id-37046 menu-item menu-item-type-post_type menu-item-object-page menu-item-37269"><a href="https://www.scshr.com/news/hr-system-guide/">操作指南</a></li>
+</ul>
+</li>
+<li id="menu-item-27310" class="et_pb_menu_page_id-27310 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27310"><a href="https://www.scshr.com/scsfocus/">專欄文章</a>
+<ul class="sub-menu">
+	<li id="menu-item-27312" class="et_pb_menu_page_id-4603 menu-item menu-item-type-post_type menu-item-object-page menu-item-27312"><a href="https://www.scshr.com/scsfocus/scsflow/">企業大小事</a></li>
+	<li id="menu-item-27313" class="et_pb_menu_page_id-4596 menu-item menu-item-type-post_type menu-item-object-page menu-item-27313"><a href="https://www.scshr.com/scsfocus/scssalary/">人事管理</a></li>
+	<li id="menu-item-27314" class="et_pb_menu_page_id-4610 menu-item menu-item-type-post_type menu-item-object-page menu-item-27314"><a href="https://www.scshr.com/scsfocus/scslaws/">法令規章</a></li>
+	<li id="menu-item-27315" class="et_pb_menu_page_id-15924 menu-item menu-item-type-post_type menu-item-object-page menu-item-27315"><a href="https://www.scshr.com/scsfocus/famous-topics/">名家專欄</a></li>
+	<li id="menu-item-27316" class="et_pb_menu_page_id-22253 menu-item menu-item-type-post_type menu-item-object-page menu-item-27316"><a href="https://www.scshr.com/scsfocus/hr-compare/">人資系統比較</a></li>
+	<li id="menu-item-27317" class="et_pb_menu_page_id-15928 menu-item menu-item-type-post_type menu-item-object-page menu-item-27317"><a href="https://www.scshr.com/scsfocus/cloud-assistant/">雲助理專區</a></li>
+	<li id="menu-item-27318" class="et_pb_menu_page_id-4626 menu-item menu-item-type-post_type menu-item-object-page menu-item-27318"><a href="https://www.scshr.com/scsfocus/scschinahrm/">中國HRM</a></li>
+	<li id="menu-item-28521" class="et_pb_menu_page_id-28514 menu-item menu-item-type-post_type menu-item-object-page menu-item-28521"><a href="https://www.scshr.com/scsfocus/esg/">ESG</a></li>
+	<li id="menu-item-34189" class="et_pb_menu_page_id-34183 menu-item menu-item-type-post_type menu-item-object-page menu-item-34189"><a href="https://www.scshr.com/scsfocus/aihrtech/">AI × 人資科技</a></li>
+	<li id="menu-item-38882" class="et_pb_menu_page_id-38876 menu-item menu-item-type-post_type menu-item-object-page menu-item-38882"><a href="https://www.scshr.com/scsfocus/ai-smart-scheduling/">AI × 智能排班</a></li>
+</ul>
+</li>
+<li id="menu-item-27334" class="et_pb_menu_page_id-27334 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27334"><a>關於我們</a>
+<ul class="sub-menu">
+	<li id="menu-item-31354" class="et_pb_menu_page_id-30534 menu-item menu-item-type-post_type menu-item-object-page menu-item-31354"><a href="https://www.scshr.com/aboutus/">關於我們</a></li>
+	<li id="menu-item-28404" class="et_pb_menu_page_id-28400 menu-item menu-item-type-post_type menu-item-object-page menu-item-28404"><a href="https://www.scshr.com/scsmedia/">媒體報導</a></li>
+	<li id="menu-item-36922" class="et_pb_menu_page_id-36888 menu-item menu-item-type-post_type menu-item-object-page menu-item-36922"><a href="https://www.scshr.com/scssecurity/">資訊安全</a></li>
+	<li id="menu-item-27326" class="et_pb_menu_page_id-25731 menu-item menu-item-type-post_type menu-item-object-page menu-item-27326"><a href="https://www.scshr.com/securitypolicy/">資訊安全政策</a></li>
+	<li id="menu-item-35100" class="et_pb_menu_page_id-3 menu-item menu-item-type-post_type menu-item-object-page menu-item-privacy-policy menu-item-35100"><a rel="privacy-policy" href="https://www.scshr.com/privacy-policy/">隱私權政策</a></li>
+</ul>
+</li>
+<li id="menu-item-27325" class="et_pb_menu_page_id-27325 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27325"><a>聯絡我們</a>
+<ul class="sub-menu">
+	<li id="menu-item-27328" class="et_pb_menu_page_id-4484 menu-item menu-item-type-post_type menu-item-object-page menu-item-has-children menu-item-27328"><a href="https://www.scshr.com/contactus/">聯絡我們</a>
+	<ul class="sub-menu">
+		<li id="menu-item-27329" class="et_pb_menu_page_id-13653 menu-item menu-item-type-post_type menu-item-object-page menu-item-27329"><a href="https://www.scshr.com/business-consulting/">HR系統諮詢申請表</a></li>
+		<li id="menu-item-27331" class="et_pb_menu_page_id-25684 menu-item menu-item-type-post_type menu-item-object-page menu-item-27331"><a href="https://www.scshr.com/cloudassistant-trial/">雲助理試用申請</a></li>
+		<li id="menu-item-27332" class="et_pb_menu_page_id-17166 menu-item menu-item-type-post_type menu-item-object-page menu-item-27332"><a href="https://www.scshr.com/cloud-bpm-trial/">雲表單試用申請</a></li>
+		<li id="menu-item-27333" class="et_pb_menu_page_id-18698 menu-item menu-item-type-post_type menu-item-object-page menu-item-27333"><a href="https://www.scshr.com/newsletter-subscription/">飛騰雙週報訂閱申請</a></li>
+	</ul>
+</li>
+	<li id="menu-item-35082" class="et_pb_menu_page_id-35082 menu-item menu-item-type-custom menu-item-object-custom menu-item-35082"><a href="https://www.scshr.com/contactus/">&#8212;&#8212;</a></li>
+	<li id="menu-item-35083" class="et_pb_menu_page_id-35083 menu-item menu-item-type-custom menu-item-object-custom menu-item-35083"><a>合作夥伴</a></li>
+	<li id="menu-item-27335" class="otherlinkfont et_pb_menu_page_id-27335 menu-item menu-item-type-custom menu-item-object-custom menu-item-27335"><a href="https://www.huntbyte.com/page/scshr/">HuntByte：以獵頭為主的人力銀行</a></li>
+</ul>
+</li>
+</ul></nav>
+							</div>
+							
+							
+							<div class="et_mobile_nav_menu">
+				<div class="mobile_nav closed">
+					<span class="mobile_menu_bar"></span>
+				</div>
+			</div>
+						</div>
+						
+					</div>
+				</div>
+			</div>
+				
+				
+				
+				
+			</div>
+				
+				
+			</div><div class="et_pb_with_border et_pb_section et_pb_section_1_tb_header et_pb_with_background et_section_regular et_pb_section--fixed et_pb_section--with-menu" >
+				
+				
+				
+				
+				
+				
+				<div id="allheader" class="et_pb_row et_pb_row_2_tb_header et_pb_gutters1 et_pb_row--with-menu">
+				<div class="et_pb_column et_pb_column_1_4 et_pb_column_4_tb_header  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_3_tb_header et_clickable">
+				
+				
+				
+				
+				<div class="et_pb_code_inner" data-et-multi-view="{&quot;schema&quot;:{&quot;content&quot;:{&quot;desktop&quot;:&quot;&lt;style&gt;\n @media (min-width: 981px) {\n    .et_pb_gutters1 .et_pb_column_1_4, .et_pb_gutters1.et_pb_row .et_pb_column_1_4 {\n        width: auto;\n    }\n}\n&lt;\/style&gt;\n\n&lt;!--&lt;iframe src=\&quot;https:\/\/www.scshr.com\/wp-content\/uploads\/websource\/logo.html\&quot;\n        width=\&quot;190px\&quot; height=\&quot;50px\&quot; style=\&quot;border:0;margin-top:2px;\&quot; scrolling=\&quot;no\&quot;&gt;&lt;\/iframe&gt;--&gt;\n&lt;img src=\&quot;https:\/\/www.scshr.com\/wp-content\/uploads\/2023\/12\/logo_home.png\&quot; style=\&quot;width:190px; margin-top:2px;\&quot; alt=\&quot;\u98db\u9a30\u96f2\u7aef\u4eba\u8cc7\u7cfb\u7d71(SCSHR)\&quot;&gt;&quot;,&quot;tablet&quot;:&quot;&quot;}},&quot;slug&quot;:&quot;et_pb_code&quot;}" data-et-multi-view-load-tablet-hidden="true"><style>
+ @media (min-width: 981px) {
+    .et_pb_gutters1 .et_pb_column_1_4, .et_pb_gutters1.et_pb_row .et_pb_column_1_4 {
+        width: auto;
+    }
+}
+</style>
+
+<!--<iframe src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/websource/logo.html"
+        width="190px" height="50px" style="border:0;margin-top:2px;" scrolling="no"></iframe>-->
+<img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2023/12/logo_home.png" style="width:190px; margin-top:2px;" alt="飛騰雲端人資系統(SCSHR)"></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_3_4 et_pb_column_5_tb_header  et_pb_css_mix_blend_mode_passthrough et-last-child et_pb_column--with-menu">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_menu et_pb_menu_1_tb_header header_desktop et_pb_bg_layout_light  et_pb_text_align_left et_dropdown_animation_fade et_pb_menu--without-logo et_pb_menu--style-centered">
+					
+					
+					
+					
+					<div class="et_pb_menu_inner_container clearfix">
+						
+						<div class="et_pb_menu__wrap">
+							<div class="et_pb_menu__menu">
+								<nav class="et-menu-nav"><ul id="menu-2025_nav-1" class="et-menu nav downwards"><li class="et_pb_menu_page_id-37677 menu-item menu-item-type-post_type menu-item-object-page menu-item-39929"><a href="https://www.scshr.com/ipo-hr/">IPO-HR</a></li>
+<li class="et_pb_menu_page_id-27309 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27309"><a>產品服務</a>
+<ul class="sub-menu">
+	<li class="et_pb_menu_page_id-27284 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27284"><a href="https://www.scshr.com/product/">人資系統</a>
+	<ul class="sub-menu">
+		<li class="menucatetitle et_pb_menu_page_id-35059 menu-item menu-item-type-custom menu-item-object-custom menu-item-35059"><a>買斷/地端</a></li>
+		<li class="submenu-hr et_pb_menu_page_id-7119 menu-item menu-item-type-post_type menu-item-object-page menu-item-27295"><a href="https://www.scshr.com/projecta/">客製化|企業集團</a></li>
+		<li class="et_pb_menu_page_id-35062 menu-item menu-item-type-custom menu-item-object-custom menu-item-35062"><a href="https://www.scshr.com/product/">&#8212;&#8212;</a></li>
+		<li class="menucatetitle et_pb_menu_page_id-35060 menu-item menu-item-type-custom menu-item-object-custom menu-item-35060"><a>雲端租賃</a></li>
+		<li class="submenu-hr et_pb_menu_page_id-7233 menu-item menu-item-type-post_type menu-item-object-page menu-item-27296"><a href="https://www.scshr.com/projectb/">標準版|企業集團>200人</a></li>
+		<li class="submenu-hr et_pb_menu_page_id-6829 menu-item menu-item-type-post_type menu-item-object-page menu-item-27298"><a href="https://www.scshr.com/cloudboss/">雲老闆|中小企業30-200人</a></li>
+		<li class="submenu-hr et_pb_menu_page_id-20297 menu-item menu-item-type-post_type menu-item-object-page menu-item-27297"><a href="https://www.scshr.com/cloudassistant/">雲助理|微型企業<30人</a></li>
+	</ul>
+</li>
+	<li class="et_pb_menu_page_id-27294 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27294"><a>HR解決方案</a>
+	<ul class="sub-menu">
+		<li class="submenu-sol et_pb_menu_page_id-4419 menu-item menu-item-type-post_type menu-item-object-page menu-item-27285"><a href="https://www.scshr.com/hrsolutions/solutions-hrm/">系統 | 人事薪資</a></li>
+		<li class="submenu-sol et_pb_menu_page_id-4467 menu-item menu-item-type-post_type menu-item-object-page menu-item-27289"><a href="https://www.scshr.com/hrsolutions/solutions-sol5/">系統 | 勞動事件法</a></li>
+		<li class="submenu-sol et_pb_menu_page_id-4475 menu-item menu-item-type-post_type menu-item-object-page menu-item-27291"><a href="https://www.scshr.com/hrsolutions/solutions-sol8/">系統 | 兼職人員(PT)</a></li>
+		<li class="submenu-sol et_pb_menu_page_id-4471 menu-item menu-item-type-post_type menu-item-object-page menu-item-27290"><a href="https://www.scshr.com/hrsolutions/solutions-sol7/">系統 | 多元打卡</a></li>
+		<li class="submenu-sol et_pb_menu_page_id-4464 menu-item menu-item-type-post_type menu-item-object-page menu-item-27288"><a href="https://www.scshr.com/hrsolutions/solutions-sol4/">系統 | 人才招募</a></li>
+		<li class="submenu-sol et_pb_menu_page_id-4455 menu-item menu-item-type-post_type menu-item-object-page menu-item-27286"><a href="https://www.scshr.com/hrsolutions/solutions-hrd/">系統 | 訓練發展</a></li>
+		<li class="submenu-sol et_pb_menu_page_id-37187 menu-item menu-item-type-post_type menu-item-object-page menu-item-37553"><a href="https://www.scshr.com/hrsolutions/restaurant-scheduling-and-payroll/">解方 | 餐飲業</a></li>
+	</ul>
+</li>
+	<li class="et_pb_menu_page_id-28716 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-28716"><a>BPM解決方案</a>
+	<ul class="sub-menu">
+		<li class="submenu-bpm et_pb_menu_page_id-4459 menu-item menu-item-type-post_type menu-item-object-page menu-item-27287"><a href="https://www.scshr.com/hrsolutions/solutions-bpm/">企業流程管理系統</a></li>
+		<li class="submenu-bpm et_pb_menu_page_id-17895 menu-item menu-item-type-post_type menu-item-object-page menu-item-27299"><a href="https://www.scshr.com/cloudbpm/">雲表單</a></li>
+	</ul>
+</li>
+	<li class="et_pb_menu_page_id-28736 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-28736"><a>AI服務</a>
+	<ul class="sub-menu">
+		<li class="submenu-ailabor et_pb_menu_page_id-24539 menu-item menu-item-type-post_type menu-item-object-page menu-item-28739"><a href="https://www.scshr.com/ailaborlaw/">AI勞資顧問機器人</a></li>
+	</ul>
+</li>
+	<li class="et_pb_menu_page_id-28737 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-28737"><a>ESG功能包</a>
+	<ul class="sub-menu">
+		<li class="submenu-esg et_pb_menu_page_id-27697 menu-item menu-item-type-post_type menu-item-object-page menu-item-28738"><a href="https://www.scshr.com/esg-travel-carbon-management/">ESG差旅碳排管理</a></li>
+	</ul>
+</li>
+	<li class="et_pb_menu_page_id-39359 menu-item menu-item-type-post_type menu-item-object-page menu-item-39911"><a href="https://www.scshr.com/employee-relations/">WGS 職場治理平台系統</a></li>
+	<li class="et_pb_menu_page_id-36187 menu-item menu-item-type-post_type menu-item-object-page menu-item-36513"><a href="https://www.scshr.com/scsapi/">API串接</a></li>
+</ul>
+</li>
+<li class="et_pb_menu_page_id-28641 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-28641"><a>代表客戶</a>
+<ul class="sub-menu">
+	<li class="et_pb_menu_page_id-27308 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27308"><a href="https://www.scshr.com/scsclients/">客戶行業別</a>
+	<ul class="sub-menu">
+		<li class="et_pb_menu_page_id-5548 menu-item menu-item-type-post_type menu-item-object-page menu-item-27306"><a href="https://www.scshr.com/scsclients/chain/">連鎖餐飲業</a></li>
+		<li class="et_pb_menu_page_id-5592 menu-item menu-item-type-post_type menu-item-object-page menu-item-27302"><a href="https://www.scshr.com/scsclients/wholesale/">批發零售業</a></li>
+		<li class="et_pb_menu_page_id-17909 menu-item menu-item-type-post_type menu-item-object-page menu-item-27303"><a href="https://www.scshr.com/scsclients/service/">服務業</a></li>
+		<li class="et_pb_menu_page_id-17913 menu-item menu-item-type-post_type menu-item-object-page menu-item-27304"><a href="https://www.scshr.com/scsclients/manufacture/">製造業</a></li>
+		<li class="et_pb_menu_page_id-5595 menu-item menu-item-type-post_type menu-item-object-page menu-item-27305"><a href="https://www.scshr.com/scsclients/electronics/">資訊電子業</a></li>
+		<li class="et_pb_menu_page_id-5582 menu-item menu-item-type-post_type menu-item-object-page menu-item-27301"><a href="https://www.scshr.com/scsclients/semiconductor/">半導體產業</a></li>
+		<li class="et_pb_menu_page_id-29723 menu-item menu-item-type-post_type menu-item-object-page menu-item-29790"><a href="https://www.scshr.com/scsclients/construction/">營建工程業</a></li>
+	</ul>
+</li>
+	<li class="et_pb_menu_page_id-4538 menu-item menu-item-type-post_type menu-item-object-page menu-item-27307"><a href="https://www.scshr.com/scsclients/scscase/">成功案例專訪</a></li>
+</ul>
+</li>
+<li class="et_pb_menu_page_id-27319 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27319"><a>資訊中心</a>
+<ul class="sub-menu">
+	<li class="et_pb_menu_page_id-30612 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-30612"><a>功能新知</a>
+	<ul class="sub-menu">
+		<li class="et_pb_menu_page_id-30601 menu-item menu-item-type-post_type menu-item-object-page menu-item-30614"><a href="https://www.scshr.com/news/scschangelog/scsnewfunctions/">飛騰新功能解密</a></li>
+		<li class="et_pb_menu_page_id-34096 menu-item menu-item-type-post_type menu-item-object-page menu-item-34102"><a href="https://www.scshr.com/news/scschangelog/soarcloud-system-benefits/">飛騰系統功能優勢</a></li>
+		<li class="et_pb_menu_page_id-17881 menu-item menu-item-type-post_type menu-item-object-page menu-item-27321"><a href="https://www.scshr.com/news/scschangelog/">系統功能演進</a></li>
+		<li class="et_pb_menu_page_id-31455 menu-item menu-item-type-post_type menu-item-object-page menu-item-31460"><a href="https://www.scshr.com/news/scschangelog/cloudassistantguide/">雲助理功能說明</a></li>
+	</ul>
+</li>
+	<li class="et_pb_menu_page_id-4510 menu-item menu-item-type-post_type menu-item-object-page menu-item-27320"><a href="https://www.scshr.com/news/">最新訊息</a></li>
+	<li class="et_pb_menu_page_id-29446 menu-item menu-item-type-post_type menu-item-object-page menu-item-29449"><a href="https://www.scshr.com/news/scsevent/">最新活動</a></li>
+	<li class="et_pb_menu_page_id-4544 menu-item menu-item-type-post_type menu-item-object-page menu-item-27322"><a href="https://www.scshr.com/news/scscourse/">課程訊息</a></li>
+	<li class="et_pb_menu_page_id-14656 menu-item menu-item-type-post_type menu-item-object-page menu-item-27323"><a href="https://www.scshr.com/news/newsletter/">飛騰雙週報</a></li>
+	<li class="et_pb_menu_page_id-4616 menu-item menu-item-type-post_type menu-item-object-page menu-item-27324"><a href="https://www.scshr.com/scsfocus/scsdownloads/">下載專區</a></li>
+	<li class="et_pb_menu_page_id-28194 menu-item menu-item-type-post_type menu-item-object-page menu-item-29071"><a href="https://www.scshr.com/news/faq/">常見問題</a></li>
+	<li class="et_pb_menu_page_id-37046 menu-item menu-item-type-post_type menu-item-object-page menu-item-37269"><a href="https://www.scshr.com/news/hr-system-guide/">操作指南</a></li>
+</ul>
+</li>
+<li class="et_pb_menu_page_id-27310 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27310"><a href="https://www.scshr.com/scsfocus/">專欄文章</a>
+<ul class="sub-menu">
+	<li class="et_pb_menu_page_id-4603 menu-item menu-item-type-post_type menu-item-object-page menu-item-27312"><a href="https://www.scshr.com/scsfocus/scsflow/">企業大小事</a></li>
+	<li class="et_pb_menu_page_id-4596 menu-item menu-item-type-post_type menu-item-object-page menu-item-27313"><a href="https://www.scshr.com/scsfocus/scssalary/">人事管理</a></li>
+	<li class="et_pb_menu_page_id-4610 menu-item menu-item-type-post_type menu-item-object-page menu-item-27314"><a href="https://www.scshr.com/scsfocus/scslaws/">法令規章</a></li>
+	<li class="et_pb_menu_page_id-15924 menu-item menu-item-type-post_type menu-item-object-page menu-item-27315"><a href="https://www.scshr.com/scsfocus/famous-topics/">名家專欄</a></li>
+	<li class="et_pb_menu_page_id-22253 menu-item menu-item-type-post_type menu-item-object-page menu-item-27316"><a href="https://www.scshr.com/scsfocus/hr-compare/">人資系統比較</a></li>
+	<li class="et_pb_menu_page_id-15928 menu-item menu-item-type-post_type menu-item-object-page menu-item-27317"><a href="https://www.scshr.com/scsfocus/cloud-assistant/">雲助理專區</a></li>
+	<li class="et_pb_menu_page_id-4626 menu-item menu-item-type-post_type menu-item-object-page menu-item-27318"><a href="https://www.scshr.com/scsfocus/scschinahrm/">中國HRM</a></li>
+	<li class="et_pb_menu_page_id-28514 menu-item menu-item-type-post_type menu-item-object-page menu-item-28521"><a href="https://www.scshr.com/scsfocus/esg/">ESG</a></li>
+	<li class="et_pb_menu_page_id-34183 menu-item menu-item-type-post_type menu-item-object-page menu-item-34189"><a href="https://www.scshr.com/scsfocus/aihrtech/">AI × 人資科技</a></li>
+	<li class="et_pb_menu_page_id-38876 menu-item menu-item-type-post_type menu-item-object-page menu-item-38882"><a href="https://www.scshr.com/scsfocus/ai-smart-scheduling/">AI × 智能排班</a></li>
+</ul>
+</li>
+<li class="et_pb_menu_page_id-27334 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27334"><a>關於我們</a>
+<ul class="sub-menu">
+	<li class="et_pb_menu_page_id-30534 menu-item menu-item-type-post_type menu-item-object-page menu-item-31354"><a href="https://www.scshr.com/aboutus/">關於我們</a></li>
+	<li class="et_pb_menu_page_id-28400 menu-item menu-item-type-post_type menu-item-object-page menu-item-28404"><a href="https://www.scshr.com/scsmedia/">媒體報導</a></li>
+	<li class="et_pb_menu_page_id-36888 menu-item menu-item-type-post_type menu-item-object-page menu-item-36922"><a href="https://www.scshr.com/scssecurity/">資訊安全</a></li>
+	<li class="et_pb_menu_page_id-25731 menu-item menu-item-type-post_type menu-item-object-page menu-item-27326"><a href="https://www.scshr.com/securitypolicy/">資訊安全政策</a></li>
+	<li class="et_pb_menu_page_id-3 menu-item menu-item-type-post_type menu-item-object-page menu-item-privacy-policy menu-item-35100"><a rel="privacy-policy" href="https://www.scshr.com/privacy-policy/">隱私權政策</a></li>
+</ul>
+</li>
+<li class="et_pb_menu_page_id-27325 menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-27325"><a>聯絡我們</a>
+<ul class="sub-menu">
+	<li class="et_pb_menu_page_id-4484 menu-item menu-item-type-post_type menu-item-object-page menu-item-has-children menu-item-27328"><a href="https://www.scshr.com/contactus/">聯絡我們</a>
+	<ul class="sub-menu">
+		<li class="et_pb_menu_page_id-13653 menu-item menu-item-type-post_type menu-item-object-page menu-item-27329"><a href="https://www.scshr.com/business-consulting/">HR系統諮詢申請表</a></li>
+		<li class="et_pb_menu_page_id-25684 menu-item menu-item-type-post_type menu-item-object-page menu-item-27331"><a href="https://www.scshr.com/cloudassistant-trial/">雲助理試用申請</a></li>
+		<li class="et_pb_menu_page_id-17166 menu-item menu-item-type-post_type menu-item-object-page menu-item-27332"><a href="https://www.scshr.com/cloud-bpm-trial/">雲表單試用申請</a></li>
+		<li class="et_pb_menu_page_id-18698 menu-item menu-item-type-post_type menu-item-object-page menu-item-27333"><a href="https://www.scshr.com/newsletter-subscription/">飛騰雙週報訂閱申請</a></li>
+	</ul>
+</li>
+	<li class="et_pb_menu_page_id-35082 menu-item menu-item-type-custom menu-item-object-custom menu-item-35082"><a href="https://www.scshr.com/contactus/">&#8212;&#8212;</a></li>
+	<li class="et_pb_menu_page_id-35083 menu-item menu-item-type-custom menu-item-object-custom menu-item-35083"><a>合作夥伴</a></li>
+	<li class="otherlinkfont et_pb_menu_page_id-27335 menu-item menu-item-type-custom menu-item-object-custom menu-item-27335"><a href="https://www.huntbyte.com/page/scshr/">HuntByte：以獵頭為主的人力銀行</a></li>
+</ul>
+</li>
+</ul></nav>
+							</div>
+							
+							<button type="button" class="et_pb_menu__icon et_pb_menu__search-button"></button>
+							<div class="et_mobile_nav_menu">
+				<div class="mobile_nav closed">
+					<span class="mobile_menu_bar"></span>
+				</div>
+			</div>
+						</div>
+						<div class="et_pb_menu__search-container et_pb_menu__search-container--disabled">
+				<div class="et_pb_menu__search">
+					<form role="search" method="get" class="et_pb_menu__search-form" action="https://www.scshr.com/">
+						<input type="search" class="et_pb_menu__search-input" placeholder="Search &hellip;" name="s" title="Search for:" />
+					</form>
+					<button type="button" class="et_pb_menu__icon et_pb_menu__close-search-button"></button>
+				</div>
+			</div>
+					</div>
+				</div><div class="et_pb_module et_pb_code et_pb_code_4_tb_header">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><div class="social_icons">
+  <a href="https://www.facebook.com/SoarCloud" target="_blank" class="social_icon" rel="noopener">
+    <img decoding="async" class="social_icon" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2021/04/social_fb_solid.png" width="28" height="28" alt="飛騰雲端 Facebook"/>
+  </a>
+  <a href="https://www.instagram.com/soarcloudmkt/" target="_blank" class="social_icon" rel="noopener">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2023/08/IG-icon.png" alt="飛騰雲端 IG" width="28" height="28"/>
+  </a>  
+   
+  <a href="https://lin.ee/vhFphVd" target="_blank" class="social_icon" rel="noopener" >
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2023/08/line-icon.png" alt="飛騰雲端 Line" width="28" height="28"/>
+  </a> 
+</div>
+
+
+<style>
+.menu-item-35059 > a  , .menu-item-35060 > a , .menu-item-35083 > a   {
+    font-weight: 500!important;
+    color: #666 !important;
+}
+  
+.menu-item-35059 > a:hover , .menu-item-35060 > a:hover , .menu-item-35083 > a:hover  {
+    font-weight: 500!important;
+    color: #666 !important;
+}
+  
+  
+  .menu-item-39929 > a  {
+    font-weight: 600!important;
+  }
+  
+  .menu-item-39929 > a:hover  {
+    font-weight: 600!important;
+  }
+  
+  
+  
+.menu-item-35062 > a {
+    padding: 15px 0px!important;
+    display: none!important;
+}
+  
+.menu-item-35082 > a {
+    color: #eee!important;
+    padding: 10px 0px!important;
+    /*display: none!important;*/
+}
+  
+.header_desktop a:active {
+    color: #064d9c!important;
+}
+  
+  @media (min-width: 1024px) {
+    .et_pb_fullwidth_menu .et_pb_menu__close-search-button:after, .et_pb_menu .et_pb_menu__close-search-button:after {
+      content: url(https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2021/08/cancel.png);
+      padding-bottom: 1rem;
+      margin:0 0;
+    }
+    .search_submit:hover {
+      cursor: pointer;
+    }
+    .search_submit {
+      border: none; 
+      width: 40px;
+      margin-bottom: 10px;
+      background: transparent;
+    }
+    
+    .header_desktop form.et_pb_menu__search-form {
+      margin-top: 0;
+      display: flex;
+    }
+    .header_desktop {
+    	height: fit-content;
+      margin:auto 0;
+    }
+    
+    .social_icons {
+      display: inline-flex;
+      gap:0.4vh;
+      margin: 5px 0px 0px 0px;
+    }
+
+    .social_icon {
+      flex: 0 0 37%;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .header_desktop .et_pb_menu__search-button {
+      flex: 0 0 8% !important;
+      justify-content: flex-end!important;
+      margin-left:0.5rem;
+    }
+    
+    .header_desktop .et_pb_menu__menu ul{
+      border-top: none !important;
+      box-shadow: none !important;
+    }
+    .et-menu li li.menu-item-has-children>a:first-child:after{
+      top:3px;
+    }
+    .header_desktop .et_pb_menu__menu ul li a:hover {
+      background-color: rgba(252, 182, 33, .07) !important;
+      color: #fcb621 !important;
+      font-weight:400!important;
+    }
+    
+    .et_pb_menu__search form {
+      padding-top: 0 !important;
+    }
+  }
+  #wpcf7-weekpost-o1 input[type="submit"] {
+    color:#767676;
+    background-color:#fff;
+    height:30px;
+    border:#bbbbbb;
+    border-style:solid;
+    border-width:2px;
+    border-radius:3px;
+    padding:1px 10px 1px 10px;
+    margin-top: 30px;
+    display: block;
+    margin-bottom: 0px;
+  }
+  #wpcf7-weekpost-o1 input[type="radio"] {
+   margin-top: 20px;
+   margin-bottom: 0px;
+  }
+
+    .et_pb_menu_1_tb_header.et_pb_menu .et-menu-nav li ul.sub-menu .menu-item-18454 a {
+    color: #8500EA!important;
+    font-weight: bold;
+    width: 20rem;
+	}
+  .et_pb_menu_0_tb_header.et_pb_menu ul li .menu-item-18454 a {
+    color: #0C71C3!important;
+    font-weight: bold;
+  }
+  .nav li ul {
+    width:auto;
+  }
+  
+  @keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.et_pb_button_2_tb_header {
+  background: linear-gradient(341deg, #0cb8ef, #6ae5d1, #0cb8ef);
+  background-size: 300% 300%;
+  animation: gradientShift 10s ease infinite;
+}
+
+  
+  
+  
+/*第一層*/
+.nav li.et-touch-hover>ul, .nav li:hover>ul {
+opacity: 1;
+visibility: visible;
+}
+
+/*滑過第一層選單時，展開第二層選單*/
+.et_pb_menu li.menu-item-has-children:hover ul.sub-menu {
+  display: block;
+  opacity: 1 ;
+  visibility: visible;
+} 
+
+.et_pb_menu .sub-menu li.menu-item-has-children > a::after {
+  content: "›";
+  transition: transform 0.3s ease;
+  float: right;
+  margin-left: 8px;
+  font-size: 20px;
+  color: #999;
+}
+.et_pb_menu .sub-menu li.menu-item-has-children:hover > a::after {
+  color: #fcb621;
+}
+
+/* 移除子選單（第三層）所有點點 */
+.et_pb_menu .sub-menu li {
+  list-style: none !important;
+}
+
+ /* 滑入對應左側主項時，顯示右側子選單 */
+.menu-item-27284:hover .submenu-hr {
+  display: block;
+}
+.menu-item-27294:hover .submenu-sol {
+  display: block;
+}
+.menu-item-28716:hover .submenu-bpm {
+  display: block;
+}
+.menu-item-28736:hover .submenu-ailabor {
+  display: block;
+}
+.menu-item-28737:hover .submenu-esg {
+  display: block;
+}
+  
+.menu-item-27294 .submenu-sol {
+  display: none;
+}
+.menu-item-27294 > ul.sub-menu {
+  margin-top: -25px!important;
+}
+.menu-item-28716 .submenu-bpm {
+  display: none;
+}
+.menu-item-28716 > ul.sub-menu {
+  margin-top: -25px!important;
+}
+.menu-item-28736 .submenu-ailabor {
+  display: none;
+}
+.menu-item-28736 > ul.sub-menu {
+  margin-top: -25px!important;
+}
+.menu-item-28737 .submenu-esg {
+  display: none;
+}
+.menu-item-28737 > ul.sub-menu {
+  margin-top: -25px!important;
+}
+
+/* 移除點點、內距統一 */
+.submenu-hr li,
+.submenu-sol li,
+.submenu-bpm li,
+.submenu-ailabor li,
+.submenu-esg li{
+  list-style: none !important;
+  padding: 10px 15px;
+  white-space: nowrap;
+}
+
+  
+  
+
+/*menu高度統一*/
+.et_pb_menu_1_tb_header.et_pb_menu .nav li ul, .et_pb_menu_1_tb_header.et_pb_menu .et_mobile_menu, .et_pb_menu_1_tb_header.et_pb_menu .et_mobile_menu ul {
+    background-color: #ffffff !important;
+    height: 300px!important;
+    border-bottom: 2px solid #eee;
+}
+
+.et_pb_menu .et_pb_menu__search-input {
+    width: 70%!important;
+    margin-top: 0px!important;
+    margin-left: 35px!important;
+}
+
+.et_pb_menu .et_pb_menu__close-search-button {
+ 	margin-top: 12px !important;
+}
+
+.et_pb_menu_1_tb_header.et_pb_menu .nav li ul {
+    background-color: #ffffff!important;
+    border-top: 3.5px solid #fcd001!important;
+    margin-top: 0px!important;
+}
+
+.header_desktop .et_pb_menu__menu ul li a:hover {
+    background-color: #fff!important;
+    color: rgba(255,193,7,1) !important;
+}
+
+  .menu-item-28737 .et_pb_menu_1_tb_header.et_pb_menu .nav li ul {
+     border-top: 3.5px solid transparent!important;
+  }
+  
+
+@media (max-width: 982px) {
+  /* 滑入對應左側主項時，顯示右側子選單 */
+.menu-item-27284:hover .submenu-hr {
+  display: block;
+}
+.menu-item-27294:hover .submenu-sol {
+  display: block;
+}
+.menu-item-28716:hover .submenu-bpm {
+  display: block;
+}
+  .menu-item-28736:hover .submenu-ailabor {
+  display: block;
+}
+  .menu-item-28737:hover .submenu-esg {
+  display: block;
+}
+.menu-item-27294 .submenu-sol {
+  display: block!important;;
+}
+.menu-item-28716 .submenu-bpm {
+  display: block!important;;
+}
+.menu-item-28736 .submenu-ailabor {
+  display: block!important;;
+}
+.menu-item-28737 .submenu-esg {
+  display: block!important;;
+}
+.menu-item-27294 > ul.sub-menu {
+  padding: 28px 0 0 0!important;
+}
+.menu-item-28716 > ul.sub-menu {
+  padding: 56px 0 0 0!important;
+}
+.menu-item-28736 > ul.sub-menu {
+  padding: 84px 0 0 0!important;
+}
+.menu-item-28737 > ul.sub-menu {
+  padding: 112px 0 0 0!important;
+}
+}
+
+
+@media screen and (min-width: 982px) and (max-width: 1135px) {
+  .social_icons {
+    display: none!important;
+}
+body #page-container .et_pb_section .et_pb_button_1_tb_header, body .pum-container .et_pb_section .et_pb_button_1_tb_header {
+    display: none!important;
+}
+}
+</style>
+
+
+
+<script src="data:text/javascript;base64,ZG9jdW1lbnQuYWRkRXZlbnRMaXN0ZW5lcignRE9NQ29udGVudExvYWRlZCcsZnVuY3Rpb24oKXtjb25zdCBtZW51SFI9ZG9jdW1lbnQucXVlcnlTZWxlY3RvcignLm1lbnUtaXRlbS0yNzI4NCcpO2NvbnN0IG1lbnVTb2w9ZG9jdW1lbnQucXVlcnlTZWxlY3RvcignLm1lbnUtaXRlbS0yNzI5NCcpO2NvbnN0IG1lbnVCcG09ZG9jdW1lbnQucXVlcnlTZWxlY3RvcignLm1lbnUtaXRlbS0yODcxNicpO2NvbnN0IG1lbnVBaT1kb2N1bWVudC5xdWVyeVNlbGVjdG9yKCcubWVudS1pdGVtLTI4NzM2Jyk7Y29uc3QgbWVudUVzZz1kb2N1bWVudC5xdWVyeVNlbGVjdG9yKCcubWVudS1pdGVtLTI4NzM3Jyk7Y29uc3QgbWVudU1haW49ZG9jdW1lbnQucXVlcnlTZWxlY3RvcignLm1lbnUtaXRlbS0yNzMwOScpO2NvbnN0IHN1YkhSSXRlbXM9ZG9jdW1lbnQucXVlcnlTZWxlY3RvckFsbCgnLm1lbnUtaXRlbS0yNzI4NCAuc3ViLW1lbnUnKTtjb25zdCBzdWJTb2xJdGVtcz1kb2N1bWVudC5xdWVyeVNlbGVjdG9yQWxsKCcubWVudS1pdGVtLTI3Mjk0IC5zdWItbWVudScpO2NvbnN0IHN1YkJwbUl0ZW1zPWRvY3VtZW50LnF1ZXJ5U2VsZWN0b3JBbGwoJy5tZW51LWl0ZW0tMjg3MTYgLnN1Yi1tZW51Jyk7Y29uc3Qgc3ViQWlJdGVtcz1kb2N1bWVudC5xdWVyeVNlbGVjdG9yQWxsKCcubWVudS1pdGVtLTI4NzM2IC5zdWItbWVudScpO2NvbnN0IHN1YkVzZ0l0ZW1zPWRvY3VtZW50LnF1ZXJ5U2VsZWN0b3JBbGwoJy5tZW51LWl0ZW0tMjg3MzcgLnN1Yi1tZW51Jyk7ZnVuY3Rpb24gc2hvd0hSKCl7c3ViSFJJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nYmxvY2snKTtzdWJTb2xJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nbm9uZScpO3N1YkJwbUl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdub25lJyk7c3ViQWlJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nbm9uZScpO3N1YkVzZ0l0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdub25lJyl9CmZ1bmN0aW9uIHNob3dTb2woKXtzdWJTb2xJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nYmxvY2snKTtzdWJIUkl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdub25lJyk7c3ViQnBtSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKTtzdWJBaUl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdub25lJyk7c3ViRXNnSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKX0KZnVuY3Rpb24gc2hvd0JwbSgpe3N1YkJwbUl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdibG9jaycpO3N1YkhSSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKTtzdWJTb2xJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nbm9uZScpO3N1YkFpSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKTtzdWJFc2dJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nbm9uZScpfQpmdW5jdGlvbiBzaG93QWkoKXtzdWJBaUl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdibG9jaycpO3N1YkhSSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKTtzdWJTb2xJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nbm9uZScpO3N1YkJwbUl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdub25lJyk7c3ViRXNnSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKX0KZnVuY3Rpb24gc2hvd0VzZygpe3N1YkVzZ0l0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdibG9jaycpO3N1YkhSSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKTtzdWJTb2xJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nbm9uZScpO3N1YkJwbUl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdub25lJyk7c3ViQWlJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nbm9uZScpfQpmdW5jdGlvbiBoaWRlQWxsKCl7c3ViSFJJdGVtcy5mb3JFYWNoKGl0ZW09Pml0ZW0uc3R5bGUuZGlzcGxheT0nbm9uZScpO3N1YlNvbEl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdub25lJyk7c3ViQnBtSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKTtzdWJBaUl0ZW1zLmZvckVhY2goaXRlbT0+aXRlbS5zdHlsZS5kaXNwbGF5PSdub25lJyk7c3ViRXNnSXRlbXMuZm9yRWFjaChpdGVtPT5pdGVtLnN0eWxlLmRpc3BsYXk9J25vbmUnKX0KbWVudUhSLmFkZEV2ZW50TGlzdGVuZXIoJ21vdXNlZW50ZXInLHNob3dIUik7bWVudVNvbC5hZGRFdmVudExpc3RlbmVyKCdtb3VzZWVudGVyJyxzaG93U29sKTttZW51QnBtLmFkZEV2ZW50TGlzdGVuZXIoJ21vdXNlZW50ZXInLHNob3dCcG0pO21lbnVBaS5hZGRFdmVudExpc3RlbmVyKCdtb3VzZWVudGVyJyxzaG93QWkpO21lbnVFc2cuYWRkRXZlbnRMaXN0ZW5lcignbW91c2VlbnRlcicsc2hvd0VzZyk7bWVudU1haW4uYWRkRXZlbnRMaXN0ZW5lcignbW91c2VlbnRlcicsc2hvd0hSKTtjb25zdCBtYWluTWVudT1kb2N1bWVudC5xdWVyeVNlbGVjdG9yKCcuZXRfcGJfbWVudScpO21haW5NZW51LmFkZEV2ZW50TGlzdGVuZXIoJ21vdXNlbGVhdmUnLGhpZGVBbGwpfSk7ZG9jdW1lbnQucXVlcnlTZWxlY3RvckFsbCgnLm1lbnUtaXRlbS0yNzI5NCA+IHVsLnN1Yi1tZW51JykuZm9yRWFjaChlbD0+ZWwuc3R5bGUuc2V0UHJvcGVydHkoJ21hcmdpbi10b3AnLCctMjZweCcsJ2ltcG9ydGFudCcpKTtkb2N1bWVudC5xdWVyeVNlbGVjdG9yQWxsKCcubWVudS1pdGVtLTI4NzE2ID4gdWwuc3ViLW1lbnUnKS5mb3JFYWNoKGVsPT57ZWwuc3R5bGUuc2V0UHJvcGVydHkoJ21hcmdpbi10b3AnLCctNTJweCcsJ2ltcG9ydGFudCcpfSk7ZG9jdW1lbnQucXVlcnlTZWxlY3RvckFsbCgnLm1lbnUtaXRlbS0yODczNiA+IHVsLnN1Yi1tZW51JykuZm9yRWFjaChlbD0+ZWwuc3R5bGUuc2V0UHJvcGVydHkoJ21hcmdpbi10b3AnLCctNzhweCcsJ2ltcG9ydGFudCcpKTtkb2N1bWVudC5xdWVyeVNlbGVjdG9yQWxsKCcubWVudS1pdGVtLTI4NzM3ID4gdWwuc3ViLW1lbnUnKS5mb3JFYWNoKGVsPT5lbC5zdHlsZS5zZXRQcm9wZXJ0eSgnbWFyZ2luLXRvcCcsJy0xMDRweCcsJ2ltcG9ydGFudCcpKQ==" defer></script>
+
+
+
+
+<script src="data:text/javascript;base64,KGZ1bmN0aW9uKCQpe2Z1bmN0aW9uIGluamVjdFNlYXJjaEJ0bigpe3ZhciAkaW5wdXRzPSQoIi5oZWFkZXJfZGVza3RvcCBpbnB1dC5ldF9wYl9tZW51X19zZWFyY2gtaW5wdXQiKTskaW5wdXRzLmVhY2goZnVuY3Rpb24oKXt2YXIgJGlucHV0PSQodGhpcyk7aWYoJGlucHV0Lm5leHQoIi5zZWFyY2hfc3VibWl0IikubGVuZ3RoKXJldHVybjskaW5wdXQuYWZ0ZXIoJzxidXR0b24gdHlwZT0ic3VibWl0IiBjbGFzcz0ic2VhcmNoX3N1Ym1pdCIgYXJpYS1sYWJlbD0iU2VhcmNoIj48L2J1dHRvbj4nKX0pfQokKGRvY3VtZW50KS5vbigncmVhZHkgYWpheENvbXBsZXRlJyxpbmplY3RTZWFyY2hCdG4pfSkoalF1ZXJ5KQ==" defer></script>
+
+
+
+
+
+<script src="data:text/javascript;base64,ZG9jdW1lbnQuYWRkRXZlbnRMaXN0ZW5lcignc3VibWl0JyxmdW5jdGlvbihlKXt2YXIgZm9ybT1lLnRhcmdldDtpZighZm9ybXx8Zm9ybS50YWdOYW1lIT09J0ZPUk0nKXJldHVybjtpZighZm9ybS5jbGFzc0xpc3QuY29udGFpbnMoJ2V0X3BiX21lbnVfX3NlYXJjaC1mb3JtJykpcmV0dXJuO2lmKCFmb3JtLmNsb3Nlc3QoJy5oZWFkZXJfZGVza3RvcCcpKXJldHVybjtpZighZm9ybS5xdWVyeVNlbGVjdG9yKCdpbnB1dFtuYW1lPSJzIl0nKSlyZXR1cm47aWYoZm9ybS5xdWVyeVNlbGVjdG9yKCdpbnB1dFtuYW1lPSJzaXRlIl0nKSlyZXR1cm47dmFyIGhpZGRlbj1kb2N1bWVudC5jcmVhdGVFbGVtZW50KCdpbnB1dCcpO2hpZGRlbi50eXBlPSdoaWRkZW4nO2hpZGRlbi5uYW1lPSdzaXRlJztoaWRkZW4udmFsdWU9J3NvYXJjbG91ZCc7Zm9ybS5hcHBlbmRDaGlsZChoaWRkZW4pfSwhMCk=" defer></script></div>
+			</div><div class="et_pb_button_module_wrapper et_pb_button_1_tb_header_wrapper et_pb_button_alignment_center et_pb_module ">
+				<a class="et_pb_button et_pb_button_1_tb_header weekpost_button et_pb_bg_layout_dark" href="">訂閱週報</a>
+			</div><div class="et_pb_button_module_wrapper et_pb_button_2_tb_header_wrapper et_pb_button_alignment_center et_pb_module ">
+				<a class="et_pb_button et_pb_button_2_tb_header et_pb_bg_layout_dark" href="https://www.scshr.com/cloudassistant-trial/">免費試用</a>
+			</div>
+			</div>
+				
+				
+				
+				
+			</div>
+				
+				
+			</div>		</div>
+	</header>
+	<div id="et-main-area">
+	
+    <div id="main-content">
+    <div class="et-l et-l--body">
+			<div class="et_builder_inner_content et_pb_gutters3"><div class="et_pb_section et_pb_section_0_tb_body et_section_regular" >
+				
+				
+				
+				<span class="et_pb_background_pattern"></span>
+				
+				
+				<div class="et_pb_row et_pb_row_0_tb_body">
+				<div class="et_pb_column et_pb_column_4_4 et_pb_column_0_tb_body  et_pb_css_mix_blend_mode_passthrough et-last-child">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_0_tb_body  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><h1>404</h1></div>
+			</div><div class="et_pb_module et_pb_divider et_pb_divider_0_tb_body et_pb_divider_position_center et_pb_space"><div class="et_pb_divider_internal"></div></div><div class="et_pb_module et_pb_text et_pb_text_1_tb_body  et_pb_text_align_center et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner">系統維護中，請稍晚再回來！</div>
+			</div><div class="et_pb_button_module_wrapper et_pb_button_0_tb_body_wrapper et_pb_button_alignment_center et_pb_module ">
+				<a class="et_pb_button et_pb_button_0_tb_body et_pb_bg_layout_light" href="https://www.scshr.com/?page_id=8712">回首頁</a>
+			</div>
+			</div>
+				
+				
+				
+				
+			</div>
+				
+				
+			</div>		</div>
+	</div>
+	    </div>
+    
+	<footer class="et-l et-l--footer">
+			<div class="et_builder_inner_content et_pb_gutters3">
+		<div class="et_pb_section et_pb_section_0_tb_footer et_pb_with_background et_section_regular et_pb_section--with-menu" >
+				
+				
+				
+				
+				
+				
+				<div class="et_pb_row et_pb_row_0_tb_footer">
+				<div class="et_pb_column et_pb_column_1_5 et_pb_column_0_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_image et_pb_image_0_tb_footer et_pb_image_sticky">
+				
+				
+				
+				
+				<span class="et_pb_image_wrap "><img loading="lazy" decoding="async" width="226" height="54" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Group-2441.png" alt="飛騰雲端HR人資系統" title="Group 2441" class="wp-image-27103" /></span>
+			</div>
+			</div><div class="et_pb_column et_pb_column_3_5 et_pb_column_1_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_with_border et_pb_module et_pb_text et_pb_text_0_tb_footer  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><h4><span style="color: #00499a;">台北總公司  02-77305225#103      台中  04-37064167       高雄  07-3358333</span></h4></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_5 et_pb_column_2_tb_footer  et_pb_css_mix_blend_mode_passthrough et-last-child">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_0_tb_footer">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><div class="footer_social_icons">
+  <div class="footer_social_icon">
+   <a href="https://www.facebook.com/SoarCloud" target="_blank" rel="noopener">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2021/04/social_fb_solid.png" width="35" alt="飛騰雲端 LINE"/>
+  </a>
+  </div>
+  <div class="footer_social_icon">
+     <a href="https://www.instagram.com/soarcloudmkt/" target="_blank" rel="noopener">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2023/08/IG-icon.png" width="35" alt="飛騰雲端 Instagram"/>
+  </a> 
+  </div>
+    <div class="footer_social_icon">
+       <a href="https://lin.ee/vhFphVd" target="_blank" rel="noopener">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2023/08/line-icon.png" width="35" alt="飛騰雲端 Line"/>
+  </a> 
+  </div>
+  <div class="footer_social_icon">
+       <a href="https://www.linkedin.com/company/soarcloud-hr/" target="_blank" rel="noopener">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/12/linkedin.png" width="35" alt="linkedin"/>
+  </a> 
+  </div>
+</div>
+
+<style>
+  .footer_social_icons {
+    padding:0px 0px;
+    display: flex;
+    gap:0.5vh;
+  }
+  
+  .footer_desktop li{
+    flex: 0 0 100%;
+  }
+  
+  .footer_sitemap nav ul {
+    flex-direction: column;
+		flex-wrap: wrap;
+  }
+  .et_pb_bg_layout_dark.et_pb_fullwidth_menu ul li a:hover, .et_pb_bg_layout_dark.et_pb_menu ul li a:hover {
+    color: #000!important;
+    opacity: 1;	
+  }
+</style></div>
+			</div>
+			</div>
+				
+				
+				
+				
+			</div><div class="et_pb_row et_pb_row_1_tb_footer">
+				<div class="et_pb_column et_pb_column_1_6 et_pb_column_3_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_1_tb_footer  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>人資系統</p></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_4_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_2_tb_footer  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>HR解決方案</p></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_5_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_3_tb_footer  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>智慧治理方案</p></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_6_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_4_tb_footer  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>資訊中心</p></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_7_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_5_tb_footer  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>專欄文章</p></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_8_tb_footer  et_pb_css_mix_blend_mode_passthrough et-last-child">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_6_tb_footer  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>其他連結</p></div>
+			</div>
+			</div>
+				
+				
+				
+				
+			</div><div class="et_pb_with_border et_pb_row et_pb_row_2_tb_footer footer_sitemap et_pb_equal_columns et_pb_row--with-menu">
+				<div class="et_pb_column et_pb_column_1_6 et_pb_column_9_tb_footer  et_pb_css_mix_blend_mode_passthrough et_pb_column--with-menu">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_menu et_pb_menu_0_tb_footer et_pb_bg_layout_dark  et_pb_text_align_left et_dropdown_animation_fade et_pb_menu--without-logo et_pb_menu--style-left_aligned">
+					
+					
+					
+					
+					<div class="et_pb_menu_inner_container clearfix">
+						
+						<div class="et_pb_menu__wrap">
+							<div class="et_pb_menu__menu">
+								<nav class="et-menu-nav"><ul id="menu-2025_footer_prod" class="et-menu nav"><li id="menu-item-27417" class="et_pb_menu_page_id-7119 menu-item menu-item-type-post_type menu-item-object-page menu-item-27417"><a href="https://www.scshr.com/projecta/">客製化 (買斷/地端)</a></li>
+<li id="menu-item-27418" class="et_pb_menu_page_id-7233 menu-item menu-item-type-post_type menu-item-object-page menu-item-27418"><a href="https://www.scshr.com/projectb/">標準版 (>200人)</a></li>
+<li id="menu-item-27420" class="et_pb_menu_page_id-6829 menu-item menu-item-type-post_type menu-item-object-page menu-item-27420"><a href="https://www.scshr.com/cloudboss/">雲老闆 (30-200人)</a></li>
+<li id="menu-item-27419" class="et_pb_menu_page_id-20297 menu-item menu-item-type-post_type menu-item-object-page menu-item-27419"><a href="https://www.scshr.com/cloudassistant/">雲助理 (<30人)</a></li>
+</ul></nav>
+							</div>
+							
+							
+							<div class="et_mobile_nav_menu">
+				<div class="mobile_nav closed">
+					<span class="mobile_menu_bar"></span>
+				</div>
+			</div>
+						</div>
+						
+					</div>
+				</div><div class="et_pb_module et_pb_code et_pb_code_1_tb_footer">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><div style="position:absolute; top:-10px;width:70px;">
+  <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/07/Group-284-ISO.png" alt="ISO 27001 資安認證標章">
+</div>
+</div>
+			</div>
+			</div><div class="et_pb_with_border et_pb_column_1_6 et_pb_column et_pb_column_10_tb_footer  et_pb_css_mix_blend_mode_passthrough et_pb_column--with-menu">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_menu et_pb_menu_1_tb_footer et_pb_bg_layout_dark  et_pb_text_align_left et_dropdown_animation_fade et_pb_menu--without-logo et_pb_menu--style-left_aligned">
+					
+					
+					
+					
+					<div class="et_pb_menu_inner_container clearfix">
+						
+						<div class="et_pb_menu__wrap">
+							<div class="et_pb_menu__menu">
+								<nav class="et-menu-nav"><ul id="menu-2025_footer_hr_1" class="et-menu nav"><li id="menu-item-37559" class="et_pb_menu_page_id-37187 menu-item menu-item-type-post_type menu-item-object-page menu-item-37559"><a href="https://www.scshr.com/hrsolutions/restaurant-scheduling-and-payroll/">餐飲業解方</a></li>
+<li id="menu-item-28764" class="et_pb_menu_page_id-4419 menu-item menu-item-type-post_type menu-item-object-page menu-item-28764"><a href="https://www.scshr.com/hrsolutions/solutions-hrm/">人事薪資系統</a></li>
+<li id="menu-item-28765" class="et_pb_menu_page_id-4467 menu-item menu-item-type-post_type menu-item-object-page menu-item-28765"><a href="https://www.scshr.com/hrsolutions/solutions-sol5/">勞動事件法系統</a></li>
+<li id="menu-item-28763" class="et_pb_menu_page_id-4475 menu-item menu-item-type-post_type menu-item-object-page menu-item-28763"><a href="https://www.scshr.com/hrsolutions/solutions-sol8/">兼職人員(PT)系統</a></li>
+<li id="menu-item-28762" class="et_pb_menu_page_id-4471 menu-item menu-item-type-post_type menu-item-object-page menu-item-28762"><a href="https://www.scshr.com/hrsolutions/solutions-sol7/">多元打卡解決方案</a></li>
+<li id="menu-item-28767" class="et_pb_menu_page_id-4464 menu-item menu-item-type-post_type menu-item-object-page menu-item-28767"><a href="https://www.scshr.com/hrsolutions/solutions-sol4/">人才招募系統</a></li>
+<li id="menu-item-28766" class="et_pb_menu_page_id-4455 menu-item menu-item-type-post_type menu-item-object-page menu-item-28766"><a href="https://www.scshr.com/hrsolutions/solutions-hrd/">訓練發展系統</a></li>
+</ul></nav>
+							</div>
+							
+							
+							<div class="et_mobile_nav_menu">
+				<div class="mobile_nav closed">
+					<span class="mobile_menu_bar"></span>
+				</div>
+			</div>
+						</div>
+						
+					</div>
+				</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_11_tb_footer  et_pb_css_mix_blend_mode_passthrough et_pb_column--with-menu">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_menu et_pb_menu_2_tb_footer et_pb_bg_layout_dark  et_pb_text_align_left et_dropdown_animation_fade et_pb_menu--without-logo et_pb_menu--style-left_aligned">
+					
+					
+					
+					
+					<div class="et_pb_menu_inner_container clearfix">
+						
+						<div class="et_pb_menu__wrap">
+							<div class="et_pb_menu__menu">
+								<nav class="et-menu-nav"><ul id="menu-2025_footer_bpm" class="et-menu nav"><li id="menu-item-39930" class="et_pb_menu_page_id-37677 menu-item menu-item-type-post_type menu-item-object-page menu-item-39930"><a href="https://www.scshr.com/ipo-hr/">IPO-HR</a></li>
+<li id="menu-item-28769" class="et_pb_menu_page_id-4459 menu-item menu-item-type-post_type menu-item-object-page menu-item-28769"><a href="https://www.scshr.com/hrsolutions/solutions-bpm/">企業流程管理系統</a></li>
+<li id="menu-item-28770" class="et_pb_menu_page_id-17895 menu-item menu-item-type-post_type menu-item-object-page menu-item-28770"><a href="https://www.scshr.com/cloudbpm/">雲端雲表單</a></li>
+<li id="menu-item-28774" class="et_pb_menu_page_id-24539 menu-item menu-item-type-post_type menu-item-object-page menu-item-28774"><a href="https://www.scshr.com/ailaborlaw/">AI勞資顧問機器人</a></li>
+<li id="menu-item-28775" class="et_pb_menu_page_id-27697 menu-item menu-item-type-post_type menu-item-object-page menu-item-28775"><a href="https://www.scshr.com/esg-travel-carbon-management/">ESG差旅碳排管理</a></li>
+<li id="menu-item-39923" class="et_pb_menu_page_id-39359 menu-item menu-item-type-post_type menu-item-object-page menu-item-39923"><a href="https://www.scshr.com/employee-relations/">WGS 職場治理平台系統</a></li>
+<li id="menu-item-36510" class="et_pb_menu_page_id-36187 menu-item menu-item-type-post_type menu-item-object-page menu-item-36510"><a href="https://www.scshr.com/scsapi/">API串接</a></li>
+</ul></nav>
+							</div>
+							
+							
+							<div class="et_mobile_nav_menu">
+				<div class="mobile_nav closed">
+					<span class="mobile_menu_bar"></span>
+				</div>
+			</div>
+						</div>
+						
+					</div>
+				</div>
+			</div><div class="et_pb_with_border et_pb_column_1_6 et_pb_column et_pb_column_12_tb_footer  et_pb_css_mix_blend_mode_passthrough et_pb_column--with-menu">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_menu et_pb_menu_3_tb_footer et_pb_bg_layout_dark  et_pb_text_align_left et_dropdown_animation_fade et_pb_menu--without-logo et_pb_menu--style-left_aligned">
+					
+					
+					
+					
+					<div class="et_pb_menu_inner_container clearfix">
+						
+						<div class="et_pb_menu__wrap">
+							<div class="et_pb_menu__menu">
+								<nav class="et-menu-nav"><ul id="menu-news-nav" class="et-menu nav"><li id="menu-item-17796" class="et_pb_menu_page_id-4510 menu-item menu-item-type-post_type menu-item-object-page menu-item-17796"><a href="https://www.scshr.com/news/">最新訊息</a></li>
+<li id="menu-item-29450" class="et_pb_menu_page_id-29446 menu-item menu-item-type-post_type menu-item-object-page menu-item-29450"><a href="https://www.scshr.com/news/scsevent/">最新活動</a></li>
+<li id="menu-item-17797" class="et_pb_menu_page_id-4544 menu-item menu-item-type-post_type menu-item-object-page menu-item-17797"><a href="https://www.scshr.com/news/scscourse/">課程訊息</a></li>
+<li id="menu-item-17892" class="et_pb_menu_page_id-17881 menu-item menu-item-type-post_type menu-item-object-page menu-item-17892"><a href="https://www.scshr.com/news/scschangelog/">功能新知</a></li>
+<li id="menu-item-17805" class="et_pb_menu_page_id-14656 menu-item menu-item-type-post_type menu-item-object-page menu-item-17805"><a href="https://www.scshr.com/news/newsletter/">飛騰雙週報</a></li>
+<li id="menu-item-17814" class="et_pb_menu_page_id-4616 menu-item menu-item-type-post_type menu-item-object-page menu-item-17814"><a href="https://www.scshr.com/scsfocus/scsdownloads/">下載專區</a></li>
+<li id="menu-item-28990" class="et_pb_menu_page_id-28194 menu-item menu-item-type-post_type menu-item-object-page menu-item-28990"><a href="https://www.scshr.com/news/faq/">常見問題</a></li>
+<li id="menu-item-37315" class="et_pb_menu_page_id-37046 menu-item menu-item-type-post_type menu-item-object-page menu-item-37315"><a href="https://www.scshr.com/news/hr-system-guide/">操作指南</a></li>
+</ul></nav>
+							</div>
+							
+							
+							<div class="et_mobile_nav_menu">
+				<div class="mobile_nav closed">
+					<span class="mobile_menu_bar"></span>
+				</div>
+			</div>
+						</div>
+						
+					</div>
+				</div>
+			</div><div class="et_pb_with_border et_pb_column_1_6 et_pb_column et_pb_column_13_tb_footer  et_pb_css_mix_blend_mode_passthrough et_pb_column--with-menu">
+				
+				
+				
+				
+				<div class="et_pb_with_border et_pb_module et_pb_menu et_pb_menu_4_tb_footer et_pb_bg_layout_light  et_pb_text_align_left et_dropdown_animation_fade et_pb_menu--without-logo et_pb_menu--style-left_aligned">
+					
+					
+					
+					
+					<div class="et_pb_menu_inner_container clearfix">
+						
+						<div class="et_pb_menu__wrap">
+							<div class="et_pb_menu__menu">
+								<nav class="et-menu-nav"><ul id="menu-hr-nav" class="et-menu nav"><li id="menu-item-22259" class="et_pb_menu_page_id-4603 menu-item menu-item-type-post_type menu-item-object-page menu-item-22259"><a href="https://www.scshr.com/scsfocus/scsflow/">企業大小事</a></li>
+<li id="menu-item-22260" class="et_pb_menu_page_id-4596 menu-item menu-item-type-post_type menu-item-object-page menu-item-22260"><a href="https://www.scshr.com/scsfocus/scssalary/">人事管理</a></li>
+<li id="menu-item-22261" class="et_pb_menu_page_id-4610 menu-item menu-item-type-post_type menu-item-object-page menu-item-22261"><a href="https://www.scshr.com/scsfocus/scslaws/">法令規章</a></li>
+<li id="menu-item-22262" class="et_pb_menu_page_id-15924 menu-item menu-item-type-post_type menu-item-object-page menu-item-22262"><a href="https://www.scshr.com/scsfocus/famous-topics/">名家專欄</a></li>
+<li id="menu-item-22264" class="et_pb_menu_page_id-15928 menu-item menu-item-type-post_type menu-item-object-page menu-item-22264"><a href="https://www.scshr.com/scsfocus/cloud-assistant/">雲助理專區</a></li>
+<li id="menu-item-22263" class="et_pb_menu_page_id-22253 menu-item menu-item-type-post_type menu-item-object-page menu-item-22263"><a href="https://www.scshr.com/scsfocus/hr-compare/">人資系統比較</a></li>
+<li id="menu-item-22265" class="et_pb_menu_page_id-4626 menu-item menu-item-type-post_type menu-item-object-page menu-item-22265"><a href="https://www.scshr.com/scsfocus/scschinahrm/">中國HRM</a></li>
+<li id="menu-item-28522" class="et_pb_menu_page_id-28514 menu-item menu-item-type-post_type menu-item-object-page menu-item-28522"><a href="https://www.scshr.com/scsfocus/esg/">ESG</a></li>
+<li id="menu-item-34188" class="et_pb_menu_page_id-34183 menu-item menu-item-type-post_type menu-item-object-page menu-item-34188"><a href="https://www.scshr.com/scsfocus/aihrtech/">AI × 人資科技</a></li>
+<li id="menu-item-38881" class="et_pb_menu_page_id-38876 menu-item menu-item-type-post_type menu-item-object-page menu-item-38881"><a href="https://www.scshr.com/scsfocus/ai-smart-scheduling/">AI × 智能排班</a></li>
+</ul></nav>
+							</div>
+							
+							
+							<div class="et_mobile_nav_menu">
+				<div class="mobile_nav closed">
+					<span class="mobile_menu_bar"></span>
+				</div>
+			</div>
+						</div>
+						
+					</div>
+				</div>
+			</div><div class="et_pb_with_border et_pb_column_1_6 et_pb_column et_pb_column_14_tb_footer  et_pb_css_mix_blend_mode_passthrough et-last-child et_pb_column--with-menu">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_menu et_pb_menu_5_tb_footer et_pb_bg_layout_dark  et_pb_text_align_left et_dropdown_animation_fade et_pb_menu--without-logo et_pb_menu--style-left_aligned">
+					
+					
+					
+					
+					<div class="et_pb_menu_inner_container clearfix">
+						
+						<div class="et_pb_menu__wrap">
+							<div class="et_pb_menu__menu">
+								<nav class="et-menu-nav"><ul id="menu-2025_footer_other" class="et-menu nav"><li id="menu-item-27430" class="et_pb_menu_page_id-4480 menu-item menu-item-type-post_type menu-item-object-page menu-item-27430"><a href="https://www.scshr.com/scsclients/">代表客戶</a></li>
+<li id="menu-item-27431" class="et_pb_menu_page_id-4538 menu-item menu-item-type-post_type menu-item-object-page menu-item-27431"><a href="https://www.scshr.com/scsclients/scscase/">成功案例</a></li>
+<li id="menu-item-31355" class="et_pb_menu_page_id-30534 menu-item menu-item-type-post_type menu-item-object-page menu-item-31355"><a href="https://www.scshr.com/aboutus/">關於我們</a></li>
+<li id="menu-item-27432" class="et_pb_menu_page_id-4484 menu-item menu-item-type-post_type menu-item-object-page menu-item-27432"><a href="https://www.scshr.com/contactus/">聯絡我們</a></li>
+<li id="menu-item-37560" class="et_pb_menu_page_id-36888 menu-item menu-item-type-post_type menu-item-object-page menu-item-37560"><a href="https://www.scshr.com/scssecurity/">資訊安全</a></li>
+<li id="menu-item-27433" class="et_pb_menu_page_id-25731 menu-item menu-item-type-post_type menu-item-object-page menu-item-27433"><a href="https://www.scshr.com/securitypolicy/">資安政策</a></li>
+</ul></nav>
+							</div>
+							
+							
+							<div class="et_mobile_nav_menu">
+				<div class="mobile_nav closed">
+					<span class="mobile_menu_bar"></span>
+				</div>
+			</div>
+						</div>
+						
+					</div>
+				</div>
+			</div>
+				
+				
+				
+				
+			</div><div class="et_pb_with_border et_pb_row et_pb_row_3_tb_footer">
+				<div class="et_pb_column et_pb_column_3_4 et_pb_column_15_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_7_tb_footer  et_pb_text_align_left et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner">Copyright © 飛騰雲端系統股份有限公司(Soar Cloud System CO., LTD.), 統編:54163894  |  本站採用 reCAPTCHA 保護機制 <a href="https://www.scshr.com/privacy-policy/" target="_blank" rel="noopener" title="飛騰雲端隱私權條款">隱私權 &amp; 條款 </a> </div>
+			</div><div class="et_pb_module et_pb_code et_pb_code_2_tb_footer">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><div id="floatingSideMenu">
+  <a href="https://www.scshr.com/contactus/" class="side-item">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-13-–-1.png" alt="留言諮詢"><div class="listiconfont">留言諮詢</div>
+  </a>
+  <a href="https://lin.ee/vhFphVd" class="side-item line-item" target="_blank">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-14-–-1.png" alt="加LINE諮詢"><div class="listiconfont">LINE諮詢</div>
+     <div class="qrcode-popup">
+    	 <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/螢幕擷取畫面-2025-06-20-100416.png" alt="LINE QR Code">
+  	</div>
+  </a>
+  <a href="https://www.scshr.com/news/faq/" target="_top" class="side-item">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-15-–-1.png" alt="常見問題"><div class="listiconfont">常見問題</div>
+  </a>
+  <a href="#" class="side-item weekpost_button" >
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-16-–-1.png" alt="訂閱雙週報"><div class="listiconfont">訂閱週報</div>
+  </a>
+  <a href="javascript:void(0);" class="side-item" onclick="topFunction()">
+    <img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-17-–-1.png" alt="回頂部"><div class="listiconfont">回頂部</div>
+  </a>
+</div>
+
+<style>
+.listiconfont {
+ 	text-align:center;  
+  font-size:11px;
+  line-height:12px;
+  color:#555;
+  }
+#floatingSideMenu {
+  position: fixed;
+  right: 15px;
+  bottom: 10%;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  background: white;
+  box-shadow: 0 0 6px rgba(0,0,0,0.15);
+  border-radius: 10px;
+  z-index: 1000;
+  overflow: hidden;
+  padding: 6px 0px;
+  pointer-events: none; /* 滑鼠事件不啟用 */
+}
+  #floatingSideMenu.show {
+  opacity: 1;
+  pointer-events: auto; /* 滑鼠事件啟用 */
+}
+  
+.side-item {
+  display: block;
+  align-items: center;
+  gap: 5px;
+  padding: 12px 6px 12px 6px;
+  text-decoration: none;
+  color: #333;
+  text-align:center;
+  border-bottom: 1px solid #eee;
+}
+.side-item img {
+  width: 24px;
+  height: 24px;  
+}
+.side-item:hover {
+  background: #f0f0f0;
+}
+.side-item span {
+  white-space: nowrap;
+}
+  
+  .line-item {
+  position: relative;
+}
+
+.qrcode-popup {
+  position: absolute;
+    left: 0px;
+    width: 100%;
+    top: 50%;
+    height: 68px;
+    transform: translateY(-50%);
+    background: white;
+    /* border: 1px solid #ccc; */
+    /* border-radius: 8px; */
+    padding: 2px;
+    opacity: 1;
+    visibility: hidden;
+    transition: opacity 0.3s ease;
+    /* box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); */
+    z-index: 98888899;
+}
+  
+  .qrcode-popup img{
+        width: 55px;
+    height: 55px;
+    margin-top: 4px;
+  }
+  
+.line-item:hover .qrcode-popup {
+  opacity: 1;
+  visibility: visible;
+}
+  
+  
+</style>
+
+<script src="data:text/javascript;base64,ZnVuY3Rpb24gdG9wRnVuY3Rpb24oKXt3aW5kb3cuc2Nyb2xsVG8oe3RvcDowLGJlaGF2aW9yOidzbW9vdGgnfSl9CndpbmRvdy5hZGRFdmVudExpc3RlbmVyKCdzY3JvbGwnLGZ1bmN0aW9uKCl7Y29uc3QgbWVudT1kb2N1bWVudC5nZXRFbGVtZW50QnlJZCgnZmxvYXRpbmdTaWRlTWVudScpO2lmKHdpbmRvdy5zY3JvbGxZPjUwKXttZW51LmNsYXNzTGlzdC5hZGQoJ3Nob3cnKX1lbHNle21lbnUuY2xhc3NMaXN0LnJlbW92ZSgnc2hvdycpfX0p" defer></script></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_4 et_pb_column_16_tb_footer  et_pb_css_mix_blend_mode_passthrough et-last-child">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_8_tb_footer  et_pb_text_align_right et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>部分圖片素材來源 / Freepik</p></div>
+			</div>
+			</div>
+				
+				
+				
+				
+			</div>
+				
+				
+			</div><div class="et_pb_section et_pb_section_1_tb_footer et_pb_with_background et_section_regular" >
+				
+				
+				
+				
+				
+				
+				<div class="et_pb_with_border et_pb_row et_pb_row_4_tb_footer">
+				<div class="et_pb_column et_pb_column_4_4 et_pb_column_17_tb_footer  et_pb_css_mix_blend_mode_passthrough et-last-child">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_text et_pb_text_9_tb_footer  et_pb_text_align_center et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>本站採用 reCAPTCHA 保護機制 <a href="https://www.scshr.com/privacy-policy/" target="_blank" rel="noopener" title="飛騰雲端隱私權條款">隱私權 &amp; 條款 </a></p></div>
+			</div><div class="et_pb_module et_pb_text et_pb_text_10_tb_footer  et_pb_text_align_right et_pb_bg_layout_light">
+				
+				
+				
+				
+				<div class="et_pb_text_inner"><p>Designed by Freepik</p></div>
+			</div>
+			</div>
+				
+				
+				
+				
+			</div>
+				
+				
+			</div><div class="et_pb_with_border et_pb_section et_pb_section_2_tb_footer et_pb_with_background et_section_regular et_pb_section--fixed" >
+				
+				
+				
+				
+				
+				
+				<div class="et_pb_row et_pb_row_5_tb_footer et_pb_gutters1">
+				<div class="et_pb_column et_pb_column_1_6 et_pb_column_18_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_3_tb_footer  et_pb_text_align_center">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><a href="https://www.scshr.com/" class="iconstyle"><img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/home-2.png" width="25px" alt="返回首頁"><div class="iconfont">返回首頁</div></a>
+</div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_19_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_4_tb_footer  et_pb_text_align_center">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><a href="https://www.scshr.com/contactus/" target="_blank" rel="noopener" class="iconstyle"><img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-13-–-1.png" width="25px" alt="留言諮詢"><div class="iconfont">留言諮詢</div></a></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_20_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_5_tb_footer  et_pb_text_align_center">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><a class="iconstyle" href="https://lin.ee/vhFphVd"  target="_blank" rel="noopener"><img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-14-–-1.png" width="25px" alt="LINE諮詢"><div class="iconfont">LINE諮詢</div></a></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_21_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_6_tb_footer  et_pb_text_align_center">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><a class="iconstyle" href="https://www.scshr.com/news/faq/" target="" rel="noopener">
+<img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-15-–-1.png" width="26px" alt="常見問題"><div class="iconfont">常見問題</div></a>
+</div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_22_tb_footer  et_pb_css_mix_blend_mode_passthrough">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_7_tb_footer  et_pb_text_align_center">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><a class="iconstyle weekpost_button" href="#"  rel="noopener">
+<img decoding="async" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/uploads/2025/06/Component-16-–-1.png" width="25px" alt="訂閱雙週報"><div class="iconfont">訂閱雙週報</div></a></div>
+			</div>
+			</div><div class="et_pb_column et_pb_column_1_6 et_pb_column_23_tb_footer  et_pb_css_mix_blend_mode_passthrough et-last-child">
+				
+				
+				
+				
+				<div class="et_pb_module et_pb_code et_pb_code_8_tb_footer  et_pb_text_align_center">
+				
+				
+				
+				
+				<div class="et_pb_code_inner"><a href="https://www.scshr.com/cloudassistant-trial/" target="_blank" rel="noopener" style="color:#fff;line-height: 20px;
+    padding-top: 11px;
+    font-size: 15px;
+    display: block;">
+  免費<div>
+  試用
+  </div>
+</a></div>
+			</div>
+			</div>
+				
+				
+				
+				
+			</div>
+				
+				
+			</div>		</div>
+	</footer>
+		</div>
+
+			
+		</div>
+		</div>
+
+			<script type="speculationrules">
+{"prefetch":[{"source":"document","where":{"and":[{"href_matches":"\/*"},{"not":{"href_matches":["\/wp-*.php","\/wp-admin\/*","\/wp-content\/uploads\/*","\/wp-content\/*","\/wp-content\/plugins\/*","\/wp-content\/themes\/divichild\/*","\/wp-content\/themes\/Divi\/*","\/*\\?(.+)"]}},{"not":{"selector_matches":"a[rel~=\"nofollow\"]"}},{"not":{"selector_matches":".no-prefetch, .no-prefetch a"}}]},"eagerness":"conservative"}]}
+</script>
+    <script src="data:text/javascript;base64,KGZ1bmN0aW9uKCl7ZnVuY3Rpb24gZ2V0UGFyYW0obmFtZSl7dmFyIHVybD1uZXcgVVJMKHdpbmRvdy5sb2NhdGlvbi5ocmVmKTtyZXR1cm4gdXJsLnNlYXJjaFBhcmFtcy5nZXQobmFtZSl8fCcnfQpmdW5jdGlvbiBnZXRSZWZlcnJlcigpe3JldHVybiBkb2N1bWVudC5yZWZlcnJlcnx8Jyd9CmZ1bmN0aW9uIGNsYXNzaWZ5U291cmNlKGRhdGEpe3ZhciB1dG1Tb3VyY2U9KGRhdGEudXRtX3NvdXJjZXx8JycpLnRvTG93ZXJDYXNlKCk7dmFyIHV0bU1lZGl1bT0oZGF0YS51dG1fbWVkaXVtfHwnJykudG9Mb3dlckNhc2UoKTt2YXIgcmVmZXJyZXI9KGRhdGEucmVmZXJyZXJ8fCcnKS50b0xvd2VyQ2FzZSgpO3ZhciBoYXNGYmNsaWQ9ISFkYXRhLmZiY2xpZDt2YXIgaGFzR2NsaWQ9ISFkYXRhLmdjbGlkO2lmKFsnbWV0YScsJ2ZhY2Vib29rJywnaW5zdGFncmFtJywnZmInLCdpZyddLmluY2x1ZGVzKHV0bVNvdXJjZSl8fChbJ2NwYycsJ3BhaWQnLCdhZHMnLCdwYWlkX3NvY2lhbCddLmluY2x1ZGVzKHV0bU1lZGl1bSkmJlsnbWV0YScsJ2ZhY2Vib29rJywnaW5zdGFncmFtJywnZmInLCdpZyddLmluY2x1ZGVzKHV0bVNvdXJjZSkpfHxoYXNGYmNsaWQpe3JldHVybidtZXRhX3BhaWQnfQppZigodXRtU291cmNlPT09J2dvb2dsZScmJlsnY3BjJywncHBjJywncGFpZCddLmluY2x1ZGVzKHV0bU1lZGl1bSkpfHxoYXNHY2xpZCl7cmV0dXJuJ2dvb2dsZV9hZHMnfQppZihyZWZlcnJlci5pbmRleE9mKCdnb29nbGUuJyk+LTEpe3JldHVybidnb29nbGVfb3JnYW5pYyd9CmlmKHJlZmVycmVyLmluZGV4T2YoJ2NoYXRncHQuY29tJyk+LTF8fHJlZmVycmVyLmluZGV4T2YoJ2dlbWluaS5nb29nbGUuY29tJyk+LTF8fHJlZmVycmVyLmluZGV4T2YoJ3BlcnBsZXhpdHkuYWknKT4tMXx8cmVmZXJyZXIuaW5kZXhPZignY29waWxvdC5taWNyb3NvZnQuY29tJyk+LTEpe3JldHVybidhaV9yZWZlcnJhbCd9CmlmKHJlZmVycmVyKXtyZXR1cm4ncmVmZXJyYWxfb3RoZXInfQpyZXR1cm4nZGlyZWN0J30KdmFyIGV4aXN0aW5nPXt9O3RyeXtleGlzdGluZz1KU09OLnBhcnNlKGxvY2FsU3RvcmFnZS5nZXRJdGVtKCdsZWFkX2F0dHJpYnV0aW9uJyl8fCd7fScpfWNhdGNoKGUpe2V4aXN0aW5nPXt9fQp2YXIgY3VycmVudERhdGE9e3V0bV9zb3VyY2U6Z2V0UGFyYW0oJ3V0bV9zb3VyY2UnKSx1dG1fbWVkaXVtOmdldFBhcmFtKCd1dG1fbWVkaXVtJyksdXRtX2NhbXBhaWduOmdldFBhcmFtKCd1dG1fY2FtcGFpZ24nKSx1dG1fY29udGVudDpnZXRQYXJhbSgndXRtX2NvbnRlbnQnKSx1dG1fdGVybTpnZXRQYXJhbSgndXRtX3Rlcm0nKSxmYmNsaWQ6Z2V0UGFyYW0oJ2ZiY2xpZCcpLGdjbGlkOmdldFBhcmFtKCdnY2xpZCcpLHJlZmVycmVyOmdldFJlZmVycmVyKCksbGFuZGluZ19wYWdlOndpbmRvdy5sb2NhdGlvbi5ocmVmLGZpcnN0X3Zpc2l0X3RpbWU6bmV3IERhdGUoKS50b0lTT1N0cmluZygpfTt2YXIgc2hvdWxkT3ZlcndyaXRlPWN1cnJlbnREYXRhLnV0bV9zb3VyY2V8fGN1cnJlbnREYXRhLnV0bV9tZWRpdW18fGN1cnJlbnREYXRhLnV0bV9jYW1wYWlnbnx8Y3VycmVudERhdGEuZmJjbGlkfHxjdXJyZW50RGF0YS5nY2xpZDt2YXIgZmluYWxEYXRhPWV4aXN0aW5nJiZPYmplY3Qua2V5cyhleGlzdGluZykubGVuZ3RoP2V4aXN0aW5nOmN1cnJlbnREYXRhO2lmKHNob3VsZE92ZXJ3cml0ZXx8IWV4aXN0aW5nfHwhT2JqZWN0LmtleXMoZXhpc3RpbmcpLmxlbmd0aCl7Y3VycmVudERhdGEuc291cmNlX3R5cGU9Y2xhc3NpZnlTb3VyY2UoY3VycmVudERhdGEpO2ZpbmFsRGF0YT1jdXJyZW50RGF0YTtsb2NhbFN0b3JhZ2Uuc2V0SXRlbSgnbGVhZF9hdHRyaWJ1dGlvbicsSlNPTi5zdHJpbmdpZnkoZmluYWxEYXRhKSl9ZWxzZXtmaW5hbERhdGEuc291cmNlX3R5cGU9Y2xhc3NpZnlTb3VyY2UoZmluYWxEYXRhKTtsb2NhbFN0b3JhZ2Uuc2V0SXRlbSgnbGVhZF9hdHRyaWJ1dGlvbicsSlNPTi5zdHJpbmdpZnkoZmluYWxEYXRhKSl9CmZ1bmN0aW9uIHNldFZhbHVlKHNlbGVjdG9yLHZhbHVlKXt2YXIgZWw9ZG9jdW1lbnQucXVlcnlTZWxlY3RvcihzZWxlY3Rvcik7aWYoZWwpZWwudmFsdWU9dmFsdWV8fCcnfQpmdW5jdGlvbiBmaWxsQ2Y3SGlkZGVuRmllbGRzKCl7dmFyIGRhdGE9e307dHJ5e2RhdGE9SlNPTi5wYXJzZShsb2NhbFN0b3JhZ2UuZ2V0SXRlbSgnbGVhZF9hdHRyaWJ1dGlvbicpfHwne30nKX1jYXRjaChlKXtkYXRhPXt9fQpzZXRWYWx1ZSgnI2xlYWRfc291cmNlJyxkYXRhLnV0bV9zb3VyY2UpO3NldFZhbHVlKCcjbGVhZF9tZWRpdW0nLGRhdGEudXRtX21lZGl1bSk7c2V0VmFsdWUoJyNsZWFkX2NhbXBhaWduJyxkYXRhLnV0bV9jYW1wYWlnbik7c2V0VmFsdWUoJyNsZWFkX2NvbnRlbnQnLGRhdGEudXRtX2NvbnRlbnQpO3NldFZhbHVlKCcjbGVhZF90ZXJtJyxkYXRhLnV0bV90ZXJtKTtzZXRWYWx1ZSgnI2xlYWRfcmVmZXJyZXInLGRhdGEucmVmZXJyZXIpO3NldFZhbHVlKCcjbGFuZGluZ191cmwnLGRhdGEubGFuZGluZ19wYWdlKTtzZXRWYWx1ZSgnI2ZpcnN0X3Zpc2l0X3RpbWUnLGRhdGEuZmlyc3RfdmlzaXRfdGltZSk7c2V0VmFsdWUoJyNzb3VyY2VfdHlwZScsZGF0YS5zb3VyY2VfdHlwZSl9CmRvY3VtZW50LmFkZEV2ZW50TGlzdGVuZXIoJ0RPTUNvbnRlbnRMb2FkZWQnLGZ1bmN0aW9uKCl7ZmlsbENmN0hpZGRlbkZpZWxkcygpO3NldFRpbWVvdXQoZmlsbENmN0hpZGRlbkZpZWxkcyw1MDApO3NldFRpbWVvdXQoZmlsbENmN0hpZGRlbkZpZWxkcywxNTAwKX0pO2RvY3VtZW50LmFkZEV2ZW50TGlzdGVuZXIoJ2NsaWNrJyxmdW5jdGlvbigpe3NldFRpbWVvdXQoZmlsbENmN0hpZGRlbkZpZWxkcywzMDApfSk7ZG9jdW1lbnQuYWRkRXZlbnRMaXN0ZW5lcignd3BjZjdzdWJtaXQnLGZpbGxDZjdIaWRkZW5GaWVsZHMpfSkoKQ==" defer></script>
+    <div id="pum-14024" role="dialog" aria-modal="false" aria-labelledby=&quot;pum_popup_title_14024&quot; class="pum pum-overlay pum-theme-13588 pum-theme-lightbox-2 popmake-overlay click_open" data-popmake="{&quot;id&quot;:14024,&quot;slug&quot;:&quot;weekpost_order&quot;,&quot;theme_id&quot;:13588,&quot;cookies&quot;:[],&quot;triggers&quot;:[{&quot;type&quot;:&quot;click_open&quot;,&quot;settings&quot;:{&quot;cookie_name&quot;:&quot;&quot;,&quot;extra_selectors&quot;:&quot;.weekpost_button&quot;}}],&quot;mobile_disabled&quot;:null,&quot;tablet_disabled&quot;:null,&quot;meta&quot;:{&quot;display&quot;:{&quot;stackable&quot;:false,&quot;overlay_disabled&quot;:false,&quot;scrollable_content&quot;:false,&quot;disable_reposition&quot;:false,&quot;size&quot;:&quot;small&quot;,&quot;responsive_min_width&quot;:&quot;0%&quot;,&quot;responsive_min_width_unit&quot;:false,&quot;responsive_max_width&quot;:&quot;100%&quot;,&quot;responsive_max_width_unit&quot;:false,&quot;custom_width&quot;:&quot;640px&quot;,&quot;custom_width_unit&quot;:false,&quot;custom_height&quot;:&quot;380px&quot;,&quot;custom_height_unit&quot;:false,&quot;custom_height_auto&quot;:false,&quot;location&quot;:&quot;center&quot;,&quot;position_from_trigger&quot;:false,&quot;position_top&quot;:&quot;100&quot;,&quot;position_left&quot;:&quot;0&quot;,&quot;position_bottom&quot;:&quot;0&quot;,&quot;position_right&quot;:&quot;0&quot;,&quot;position_fixed&quot;:false,&quot;animation_type&quot;:&quot;fade&quot;,&quot;animation_speed&quot;:&quot;350&quot;,&quot;animation_origin&quot;:&quot;center top&quot;,&quot;overlay_zindex&quot;:false,&quot;zindex&quot;:&quot;1999999999&quot;},&quot;close&quot;:{&quot;text&quot;:&quot;&quot;,&quot;button_delay&quot;:&quot;0&quot;,&quot;overlay_click&quot;:false,&quot;esc_press&quot;:&quot;1&quot;,&quot;f4_press&quot;:false},&quot;click_open&quot;:[]}}">
+
+	<div id="popmake-14024" class="pum-container popmake theme-13588 pum-responsive pum-responsive-small responsive size-small">
+
+				
+							<div id="pum_popup_title_14024" class="pum-title popmake-title">
+				飛騰週報訂閱			</div>
+		
+		
+				<div class="pum-content popmake-content" tabindex="0">
+			<p><span style="vertical-align: inherit;"><span style="vertical-align: inherit;">
+<div class="wpcf7 no-js" id="wpcf7-f14000-o1" lang="zh-TW" dir="ltr">
+<div class="screen-reader-response"><p role="status" aria-live="polite" aria-atomic="true"></p> <ul></ul></div>
+<form action="/wp-content/plugins/really-simple-ssl/js/rsssl.min.js#wpcf7-f14000-o1" method="post" class="wpcf7-form init" aria-label="聯絡表單" novalidate="novalidate" data-status="init">
+<div style="display: none;">
+<input type="hidden" name="_wpcf7" value="14000" />
+<input type="hidden" name="_wpcf7_version" value="5.9.8" />
+<input type="hidden" name="_wpcf7_locale" value="zh_TW" />
+<input type="hidden" name="_wpcf7_unit_tag" value="wpcf7-f14000-o1" />
+<input type="hidden" name="_wpcf7_container_post" value="0" />
+<input type="hidden" name="_wpcf7_posted_data_hash" value="" />
+<input type="hidden" name="_wpcf7cf_hidden_group_fields" value="[]" />
+<input type="hidden" name="_wpcf7cf_hidden_groups" value="[]" />
+<input type="hidden" name="_wpcf7cf_visible_groups" value="[]" />
+<input type="hidden" name="_wpcf7cf_repeaters" value="[]" />
+<input type="hidden" name="_wpcf7cf_steps" value="{}" />
+<input type="hidden" name="_wpcf7cf_options" value="{&quot;form_id&quot;:14000,&quot;conditions&quot;:[],&quot;settings&quot;:{&quot;animation&quot;:&quot;yes&quot;,&quot;animation_intime&quot;:200,&quot;animation_outtime&quot;:200,&quot;conditions_ui&quot;:&quot;normal&quot;,&quot;notice_dismissed&quot;:false,&quot;notice_dismissed_update-cf7-5.9.6&quot;:true}}" />
+<input type="hidden" name="_wpcf7_recaptcha_response" value="" />
+</div>
+<div align="center" role="form" id="wpcf7-weekpost-o1">
+	<p><label>請填上您的E-mail <span class="wpcf7-form-control-wrap" data-name="email-747"><input size="40" maxlength="400" class="wpcf7-form-control wpcf7-email wpcf7-validates-as-required wpcf7-text wpcf7-validates-as-email" aria-required="true" aria-invalid="false" placeholder="your e-mail" value="" type="email" name="email-747" /></span></label><br />
+<span class="wpcf7-form-control-wrap" data-name="radio-316"><span class="wpcf7-form-control wpcf7-radio"><span class="wpcf7-list-item first"><span class="wpcf7-list-item-label">訂閱</span><input type="radio" name="radio-316" value="訂閱" checked="checked" /></span><span class="wpcf7-list-item last"><span class="wpcf7-list-item-label">取消</span><input type="radio" name="radio-316" value="取消" /></span></span></span><br />
+<input class="wpcf7-form-control wpcf7-submit has-spinner" type="submit" value="傳送" />
+	</p>
+</div><input type='hidden' class='wpcf7-pum' value='{"closepopup":false,"closedelay":0,"openpopup":false,"openpopup_id":0}' /><div class="wpcf7-response-output" aria-hidden="true"></div>
+</form>
+</div>
+<script src="data:text/javascript;base64,alF1ZXJ5KGRvY3VtZW50KS5yZWFkeShmdW5jdGlvbigpe2pRdWVyeSgnLndwY2Y3LXN1Ym1pdCcpLm9uKCdjbGljaycsZnVuY3Rpb24oZXZlbnQpe2pRdWVyeSgnLndwY2Y3LWZvcm0nKS5ibG9jayh7J21lc3NhZ2UnOifos4fmlpnpgIHlh7rkuK0g6KuL56iN5b6MLi4uJywnY3NzJzp7cGFkZGluZzonMWVtJywnZm9udC1zaXplJzonMS4ycmVtJyx3aWR0aDonNjAlJ319KX0pO2pRdWVyeSgnLndwY2Y3Jykub24oJ3dwY2Y3aW52YWxpZCB3cGNmN3NwYW0gd3BjZjdtYWlsc2VudCB3cGNmN21haWxmYWlsZWQnLGZ1bmN0aW9uKGV2ZW50KXtpZihldmVudC5kZXRhaWwuc3RhdHVzPT09J21haWxfc2VudCcpd2luZG93LmxvY2F0aW9uLmhyZWY9J2h0dHBzOi8vd3d3LnNjc2hyLmNvbS9hcHBsaWVkJztlbHNlIGpRdWVyeSgnLndwY2Y3LWZvcm0nKS51bmJsb2NrKCl9KX0p" defer></script></span></span></p>
+		</div>
+
+				
+							<button type="button" class="pum-close popmake-close" aria-label="Close">
+			×			</button>
+		
+	</div>
+
+</div>
+    <!-- Meta Pixel Event Code -->
+    <script type='text/javascript' src="data:text/javascript;base64,ZG9jdW1lbnQuYWRkRXZlbnRMaXN0ZW5lcignd3BjZjdtYWlsc2VudCcsZnVuY3Rpb24oZXZlbnQpe2lmKCJmYl9weGxfY29kZSIgaW4gZXZlbnQuZGV0YWlsLmFwaVJlc3BvbnNlKXtldmFsKGV2ZW50LmRldGFpbC5hcGlSZXNwb25zZS5mYl9weGxfY29kZSl9fSwhMSk=" defer></script>
+    <!-- End Meta Pixel Event Code -->
+    <div id='fb-pxl-ajax-code'></div>	<script type="text/javascript" src="data:text/javascript;base64,dmFyIGV0X2xpbmtfb3B0aW9uc19kYXRhPVt7ImNsYXNzIjoiZXRfcGJfY29kZV8wX3RiX2hlYWRlciIsInVybCI6Imh0dHBzOlwvXC93d3cuc2NzaHIuY29tXC8iLCJ0YXJnZXQiOiJfc2VsZiJ9LHsiY2xhc3MiOiJldF9wYl9jb2RlXzNfdGJfaGVhZGVyIiwidXJsIjoiaHR0cHM6XC9cL3d3dy5zY3Noci5jb21cLyIsInRhcmdldCI6Il9zZWxmIn1d" defer></script>
+	<style id="et-builder-googlefonts-inline">/* Original: https://fonts.googleapis.com/css?family=Noto+Sans+TC:100,300,regular,500,700,900|Noto+Sans:100,100italic,200,200italic,300,300italic,regular,italic,500,500italic,600,600italic,700,700italic,800,800italic,900,900italic&#038;subset=chinese-traditional,latin,cyrillic,cyrillic-ext,devanagari,greek,greek-ext,latin-ext,vietnamese&#038;display=swap *//* User Agent: Mozilla/5.0 (Unknown; Linux x86_64) AppleWebKit/538.1 (KHTML, like Gecko) Safari/538.1 Daum/4.1 */@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 100;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QDcf6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 200;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QLce6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 300;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QGke6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 400;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QDce6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 500;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QAUe6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 600;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QOkZ6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 700;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QNAZ6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 800;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QLcZ6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 900;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QJ4Z6Vc.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 100;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyD9At9d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 200;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyB9A99d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 300;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyCjA99d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 400;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyD9A99d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 500;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyDPA99d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 600;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyAjBN9d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 700;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyAaBN9d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 800;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyB9BN9d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 900;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyBUBN9d.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 100;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz76Cz_Co.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 300;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz7_6y_Co.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 400;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz76Cy_Co.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 500;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz75Ky_Co.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 700;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz70e1_Co.ttf) format('truetype'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 900;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz7wm1_Co.ttf) format('truetype'); }/* User Agent: Mozilla/5.0 (Windows NT 6.1; WOW64; rv:27.0) Gecko/20100101 Firefox/27.0 */@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 100;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QDcf6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 200;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QLce6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 300;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QGke6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 400;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QDce6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 500;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QAUe6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 600;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QOkZ6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 700;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QNAZ6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 800;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QLcZ6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 900;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QJ4Z6VQ.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 100;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyD9At9e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 200;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyB9A99e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 300;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyCjA99e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 400;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyD9A99e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 500;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyDPA99e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 600;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyAjBN9e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 700;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyAaBN9e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 800;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyB9BN9e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 900;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyBUBN9e.woff) format('woff'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 100;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz76Cz_Ck.woff) format('woff'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 300;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz7_6y_Ck.woff) format('woff'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 400;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz76Cy_Ck.woff) format('woff'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 500;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz75Ky_Ck.woff) format('woff'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 700;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz70e1_Ck.woff) format('woff'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 900;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz7wm1_Ck.woff) format('woff'); }/* User Agent: Mozilla/5.0 (Windows NT 6.3; rv:39.0) Gecko/20100101 Firefox/39.0 */@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 100;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QDcf6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 200;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QLce6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 300;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QGke6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 400;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QDce6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 500;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QAUe6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 600;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QOkZ6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 700;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QNAZ6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 800;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QLcZ6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: italic;font-weight: 900;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0kIpQlx3QUlC5A4PNr4C5OaxRsfNNlKbCePevHtVtX57DGjDU1QJ4Z6VI.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 100;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyD9At9Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 200;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyB9A99Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 300;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyCjA99Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 400;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyD9A99Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 500;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyDPA99Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 600;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyAjBN9Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 700;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyAaBN9Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 800;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyB9BN9Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans';font-style: normal;font-weight: 900;font-stretch: normal;font-display: swap;src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyBUBN9Y.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 100;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz76Cz_C8.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 300;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz7_6y_C8.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 400;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz76Cy_C8.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 500;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz75Ky_C8.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 700;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz70e1_C8.woff2) format('woff2'); }@font-face{ font-family: 'Noto Sans TC';font-style: normal;font-weight: 900;font-display: swap;src: url(https://fonts.gstatic.com/s/notosanstc/v39/-nFuOG829Oofr2wohFbTp9ifNAn722rq0MXz7wm1_C8.woff2) format('woff2'); }</style><!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-KDWJMKF" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+
+<!-- Start of HubSpot Embed Code -->
+<script type="text/javascript" id="hs-script-loader" async defer src="//js-na1.hs-scripts.com/44116659.js"></script>
+<!-- End of HubSpot Embed Code -->
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-MHCQ6MZX" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) --><script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/c4fdde99b37380ac9c46f4fcfbd777b0.js?ver=22343" id="wp-i18n-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="wp-i18n-js-after" src="data:text/javascript;base64,d3AuaTE4bi5zZXRMb2NhbGVEYXRhKHsndGV4dCBkaXJlY3Rpb25cdTAwMDRsdHInOlsnbHRyJ119KQ==" defer></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/898c83e66bc453ccb0df2242ac78f72c.js?ver=98a4d" id="swv-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="contact-form-7-js-extra" src="data:text/javascript;base64,dmFyIHdwY2Y3PXsiYXBpIjp7InJvb3QiOiJodHRwczpcL1wvd3d3LnNjc2hyLmNvbVwvd3AtanNvblwvIiwibmFtZXNwYWNlIjoiY29udGFjdC1mb3JtLTdcL3YxIn0sImNhY2hlZCI6IjEifTt2YXIgd3BjZjc9eyJhcGkiOnsicm9vdCI6Imh0dHBzOlwvXC93d3cuc2NzaHIuY29tXC93cC1qc29uXC8iLCJuYW1lc3BhY2UiOiJjb250YWN0LWZvcm0tN1wvdjEifSwiY2FjaGVkIjoiMSJ9" defer></script>
+<script type="text/javascript" id="contact-form-7-js-translations" src="data:text/javascript;base64,KGZ1bmN0aW9uKGRvbWFpbix0cmFuc2xhdGlvbnMpe3ZhciBsb2NhbGVEYXRhPXRyYW5zbGF0aW9ucy5sb2NhbGVfZGF0YVtkb21haW5dfHx0cmFuc2xhdGlvbnMubG9jYWxlX2RhdGEubWVzc2FnZXM7bG9jYWxlRGF0YVsiIl0uZG9tYWluPWRvbWFpbjt3cC5pMThuLnNldExvY2FsZURhdGEobG9jYWxlRGF0YSxkb21haW4pfSkoImNvbnRhY3QtZm9ybS03Iix7InRyYW5zbGF0aW9uLXJldmlzaW9uLWRhdGUiOiIyMDI0LTA3LTIyIDA5OjU0OjIzKzAwMDAiLCJnZW5lcmF0b3IiOiJHbG90UHJlc3NcLzQuMC4xIiwiZG9tYWluIjoibWVzc2FnZXMiLCJsb2NhbGVfZGF0YSI6eyJtZXNzYWdlcyI6eyIiOnsiZG9tYWluIjoibWVzc2FnZXMiLCJwbHVyYWwtZm9ybXMiOiJucGx1cmFscz0xOyBwbHVyYWw9MDsiLCJsYW5nIjoiemhfVFcifSwiVGhpcyBjb250YWN0IGZvcm0gaXMgcGxhY2VkIGluIHRoZSB3cm9uZyBwbGFjZS4iOlsiXHU5MDE5XHU0ZWZkXHU4MDZmXHU3ZDYxXHU4ODY4XHU1NWFlXHU2NTNlXHU1NzI4XHU5MzJmXHU4YWE0XHU3Njg0XHU0ZjRkXHU3ZjZlXHUzMDAyIl0sIkVycm9yOiI6WyJcdTkzMmZcdThhYTQ6Il19fSwiY29tbWVudCI6eyJyZWZlcmVuY2UiOiJpbmNsdWRlc1wvanNcL2luZGV4LmpzIn19KQ==" defer></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/2cd2ac854abc5e6bdae1580fb3e6d4ea.js?ver=95446" id="contact-form-7-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="leadin-script-loader-js-js-extra" src="data:text/javascript;base64,dmFyIGxlYWRpbl93b3JkcHJlc3M9eyJ1c2VyUm9sZSI6InZpc2l0b3IiLCJwYWdlVHlwZSI6Im90aGVyIiwibGVhZGluUGx1Z2luVmVyc2lvbiI6IjExLjMuNTEifQ==" defer></script>
+<script type="text/javascript" src="https://js.hs-scripts.com/44116659.js?integration=WordPress&amp;ver=11.3.51" id="leadin-script-loader-js-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="google-invisible-recaptcha-js-before" src="data:text/javascript;base64,dmFyIHJlbmRlckludmlzaWJsZVJlQ2FwdGNoYT1mdW5jdGlvbigpe2Zvcih2YXIgaT0wO2k8ZG9jdW1lbnQuZm9ybXMubGVuZ3RoOysraSl7dmFyIGZvcm09ZG9jdW1lbnQuZm9ybXNbaV07dmFyIGhvbGRlcj1mb3JtLnF1ZXJ5U2VsZWN0b3IoJy5pbnYtcmVjYXB0Y2hhLWhvbGRlcicpO2lmKG51bGw9PT1ob2xkZXIpY29udGludWU7aG9sZGVyLmlubmVySFRNTD0nJzsoZnVuY3Rpb24oZnJtKXt2YXIgY2Y3U3VibWl0RWxtPWZybS5xdWVyeVNlbGVjdG9yKCcud3BjZjctc3VibWl0Jyk7dmFyIGhvbGRlcklkPWdyZWNhcHRjaGEucmVuZGVyKGhvbGRlcix7J3NpdGVrZXknOic2TGVhdmtrcEFBQUFBTVh3RUFVZGxwaU1MYnluOW5zWThrM2NYN09DJywnc2l6ZSc6J2ludmlzaWJsZScsJ2JhZGdlJzonYm90dG9tbGVmdCcsJ2NhbGxiYWNrJzpmdW5jdGlvbihyZWNhcHRjaGFUb2tlbil7aWYoKG51bGwhPT1jZjdTdWJtaXRFbG0pJiYodHlwZW9mIGpRdWVyeSE9J3VuZGVmaW5lZCcpKXtqUXVlcnkoZnJtKS5zdWJtaXQoKTtncmVjYXB0Y2hhLnJlc2V0KGhvbGRlcklkKTtyZXR1cm59CkhUTUxGb3JtRWxlbWVudC5wcm90b3R5cGUuc3VibWl0LmNhbGwoZnJtKX0sJ2V4cGlyZWQtY2FsbGJhY2snOmZ1bmN0aW9uKCl7Z3JlY2FwdGNoYS5yZXNldChob2xkZXJJZCl9fSk7aWYobnVsbCE9PWNmN1N1Ym1pdEVsbSYmKHR5cGVvZiBqUXVlcnkhPSd1bmRlZmluZWQnKSl7alF1ZXJ5KGNmN1N1Ym1pdEVsbSkub2ZmKCdjbGljaycpLm9uKCdjbGljaycsZnVuY3Rpb24oY2xpY2tFdnQpe2NsaWNrRXZ0LnByZXZlbnREZWZhdWx0KCk7Z3JlY2FwdGNoYS5leGVjdXRlKGhvbGRlcklkKX0pfWVsc2V7ZnJtLm9uc3VibWl0PWZ1bmN0aW9uKGV2dCl7ZXZ0LnByZXZlbnREZWZhdWx0KCk7Z3JlY2FwdGNoYS5leGVjdXRlKGhvbGRlcklkKX19fSkoZm9ybSl9fQ==" defer></script>
+<script type="text/javascript" async defer src="https://www.google.com/recaptcha/api.js?onload=renderInvisibleReCaptcha&amp;render=explicit&amp;hl=zh-TW" id="google-invisible-recaptcha-js"></script>
+<script type="text/javascript" id="divi-custom-script-js-extra" src="data:text/javascript;base64,dmFyIERJVkk9eyJpdGVtX2NvdW50IjoiJWQgSXRlbSIsIml0ZW1zX2NvdW50IjoiJWQgSXRlbXMifTt2YXIgZXRfYnVpbGRlcl91dGlsc19wYXJhbXM9eyJjb25kaXRpb24iOnsiZGl2aVRoZW1lIjohMCwiZXh0cmFUaGVtZSI6ITF9LCJzY3JvbGxMb2NhdGlvbnMiOlsiYXBwIiwidG9wIl0sImJ1aWxkZXJTY3JvbGxMb2NhdGlvbnMiOnsiZGVza3RvcCI6ImFwcCIsInRhYmxldCI6ImFwcCIsInBob25lIjoiYXBwIn0sIm9ubG9hZFNjcm9sbExvY2F0aW9uIjoiYXBwIiwiYnVpbGRlclR5cGUiOiJmZSJ9O3ZhciBldF9mcm9udGVuZF9zY3JpcHRzPXsiYnVpbGRlckNzc0NvbnRhaW5lclByZWZpeCI6IiNldC1ib2MiLCJidWlsZGVyQ3NzTGF5b3V0UHJlZml4IjoiI2V0LWJvYyAuZXQtbCJ9O3ZhciBldF9wYl9jdXN0b209eyJhamF4dXJsIjoiaHR0cHM6XC9cL3d3dy5zY3Noci5jb21cL3dwLWFkbWluXC9hZG1pbi1hamF4LnBocCIsImltYWdlc191cmkiOiJodHRwczpcL1wvd3d3LnNjc2hyLmNvbVwvd3AtY29udGVudFwvdGhlbWVzXC9EaXZpXC9pbWFnZXMiLCJidWlsZGVyX2ltYWdlc191cmkiOiJodHRwczpcL1wvd3d3LnNjc2hyLmNvbVwvd3AtY29udGVudFwvdGhlbWVzXC9EaXZpXC9pbmNsdWRlc1wvYnVpbGRlclwvaW1hZ2VzIiwiZXRfZnJvbnRlbmRfbm9uY2UiOiJlNDJjZTkxM2IwIiwic3Vic2NyaXB0aW9uX2ZhaWxlZCI6IlBsZWFzZSwgY2hlY2sgdGhlIGZpZWxkcyBiZWxvdyB0byBtYWtlIHN1cmUgeW91IGVudGVyZWQgdGhlIGNvcnJlY3QgaW5mb3JtYXRpb24uIiwiZXRfYWJfbG9nX25vbmNlIjoiNDBiMDBkZmFiNyIsImZpbGxfbWVzc2FnZSI6IlBsZWFzZSwgZmlsbCBpbiB0aGUgZm9sbG93aW5nIGZpZWxkczoiLCJjb250YWN0X2Vycm9yX21lc3NhZ2UiOiJQbGVhc2UsIGZpeCB0aGUgZm9sbG93aW5nIGVycm9yczoiLCJpbnZhbGlkIjoiSW52YWxpZCBlbWFpbCIsImNhcHRjaGEiOiJDYXB0Y2hhIiwicHJldiI6IlByZXYiLCJwcmV2aW91cyI6IlByZXZpb3VzIiwibmV4dCI6Ik5leHQiLCJ3cm9uZ19jYXB0Y2hhIjoiWW91IGVudGVyZWQgdGhlIHdyb25nIG51bWJlciBpbiBjYXB0Y2hhLiIsIndyb25nX2NoZWNrYm94IjoiQ2hlY2tib3giLCJpZ25vcmVfd2F5cG9pbnRzIjoibm8iLCJpc19kaXZpX3RoZW1lX3VzZWQiOiIxIiwid2lkZ2V0X3NlYXJjaF9zZWxlY3RvciI6Ii53aWRnZXRfc2VhcmNoIiwiYWJfdGVzdHMiOltdLCJpc19hYl90ZXN0aW5nX2FjdGl2ZSI6IiIsInBhZ2VfaWQiOiIiLCJ1bmlxdWVfdGVzdF9pZCI6IiIsImFiX2JvdW5jZV9yYXRlIjoiIiwiaXNfY2FjaGVfcGx1Z2luX2FjdGl2ZSI6InllcyIsImlzX3Nob3J0Y29kZV90cmFja2luZyI6IiIsInRpbnltY2VfdXJpIjoiaHR0cHM6XC9cL3d3dy5zY3Noci5jb21cL3dwLWNvbnRlbnRcL3RoZW1lc1wvRGl2aVwvaW5jbHVkZXNcL2J1aWxkZXJcL2Zyb250ZW5kLWJ1aWxkZXJcL2Fzc2V0c1wvdmVuZG9ycyIsImFjY2VudF9jb2xvciI6IiM3RUJFQzUiLCJ3YXlwb2ludHNfb3B0aW9ucyI6eyJjb250ZXh0IjpbIi5wdW0tb3ZlcmxheSJdfX07dmFyIGV0X3BiX2JveF9zaGFkb3dfZWxlbWVudHM9W10=" defer></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/b4013080612bc42d33b555f326c1305e.js?ver=adef6" id="divi-custom-script-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/a96fdf9caf7e608dee6aa76ecfb3e4ab.js?ver=2a8a3" id="fitvids-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/dd23aeecc27a55ed4e4a277add655d43.js?ver=2f486" id="lwp-image-carousel-frontend-bundle-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/225119cd8f116320a0d84fcd03e5a5de.js?ver=5ad53" id="jquery-ui-core-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="popup-maker-site-js-extra" src="data:text/javascript;base64,dmFyIHB1bV92YXJzPXsidmVyc2lvbiI6IjEuMjAuMiIsInBtX2Rpcl91cmwiOiJodHRwczpcL1wvd3d3LnNjc2hyLmNvbVwvd3AtY29udGVudFwvcGx1Z2luc1wvcG9wdXAtbWFrZXJcLyIsImFqYXh1cmwiOiJodHRwczpcL1wvd3d3LnNjc2hyLmNvbVwvd3AtYWRtaW5cL2FkbWluLWFqYXgucGhwIiwicmVzdGFwaSI6Imh0dHBzOlwvXC93d3cuc2NzaHIuY29tXC93cC1qc29uXC9wdW1cL3YxIiwicmVzdF9ub25jZSI6bnVsbCwiZGVmYXVsdF90aGVtZSI6IjciLCJkZWJ1Z19tb2RlIjoiIiwiZGlzYWJsZV90cmFja2luZyI6IiIsImhvbWVfdXJsIjoiXC8iLCJtZXNzYWdlX3Bvc2l0aW9uIjoidG9wIiwiY29yZV9zdWJfZm9ybXNfZW5hYmxlZCI6IjEiLCJwb3B1cHMiOltdLCJjb29raWVfZG9tYWluIjoiIiwiYW5hbHl0aWNzX3JvdXRlIjoiYW5hbHl0aWNzIiwiYW5hbHl0aWNzX2FwaSI6Imh0dHBzOlwvXC93d3cuc2NzaHIuY29tXC93cC1qc29uXC9wdW1cL3YxIn07dmFyIHB1bV9zdWJfdmFycz17ImFqYXh1cmwiOiJodHRwczpcL1wvd3d3LnNjc2hyLmNvbVwvd3AtYWRtaW5cL2FkbWluLWFqYXgucGhwIiwibWVzc2FnZV9wb3NpdGlvbiI6InRvcCJ9O3ZhciBwdW1fcG9wdXBzPXsicHVtLTE0MDI0Ijp7InRyaWdnZXJzIjpbeyJ0eXBlIjoiY2xpY2tfb3BlbiIsInNldHRpbmdzIjp7ImNvb2tpZV9uYW1lIjoiIiwiZXh0cmFfc2VsZWN0b3JzIjoiLndlZWtwb3N0X2J1dHRvbiJ9fV0sImNvb2tpZXMiOltdLCJkaXNhYmxlX29uX21vYmlsZSI6ITEsImRpc2FibGVfb25fdGFibGV0IjohMSwiYXRjX3Byb21vdGlvbiI6bnVsbCwiZXhwbGFpbiI6bnVsbCwidHlwZV9zZWN0aW9uIjpudWxsLCJ0aGVtZV9pZCI6IjEzNTg4Iiwic2l6ZSI6InNtYWxsIiwicmVzcG9uc2l2ZV9taW5fd2lkdGgiOiIwJSIsInJlc3BvbnNpdmVfbWF4X3dpZHRoIjoiMTAwJSIsImN1c3RvbV93aWR0aCI6IjY0MHB4IiwiY3VzdG9tX2hlaWdodF9hdXRvIjohMSwiY3VzdG9tX2hlaWdodCI6IjM4MHB4Iiwic2Nyb2xsYWJsZV9jb250ZW50IjohMSwiYW5pbWF0aW9uX3R5cGUiOiJmYWRlIiwiYW5pbWF0aW9uX3NwZWVkIjoiMzUwIiwiYW5pbWF0aW9uX29yaWdpbiI6ImNlbnRlciB0b3AiLCJvcGVuX3NvdW5kIjoibm9uZSIsImN1c3RvbV9zb3VuZCI6IiIsImxvY2F0aW9uIjoiY2VudGVyIiwicG9zaXRpb25fdG9wIjoiMTAwIiwicG9zaXRpb25fYm90dG9tIjoiMCIsInBvc2l0aW9uX2xlZnQiOiIwIiwicG9zaXRpb25fcmlnaHQiOiIwIiwicG9zaXRpb25fZnJvbV90cmlnZ2VyIjohMSwicG9zaXRpb25fZml4ZWQiOiExLCJvdmVybGF5X2Rpc2FibGVkIjohMSwic3RhY2thYmxlIjohMSwiZGlzYWJsZV9yZXBvc2l0aW9uIjohMSwiemluZGV4IjoiMTk5OTk5OTk5OSIsImNsb3NlX2J1dHRvbl9kZWxheSI6IjAiLCJmaV9wcm9tb3Rpb24iOm51bGwsImNsb3NlX29uX2Zvcm1fc3VibWlzc2lvbiI6ITAsImNsb3NlX29uX2Zvcm1fc3VibWlzc2lvbl9kZWxheSI6IjAiLCJjbG9zZV9vbl9vdmVybGF5X2NsaWNrIjohMSwiY2xvc2Vfb25fZXNjX3ByZXNzIjohMCwiY2xvc2Vfb25fZjRfcHJlc3MiOiExLCJkaXNhYmxlX2Zvcm1fcmVvcGVuIjohMSwiZGlzYWJsZV9hY2Nlc3NpYmlsaXR5IjohMSwidGhlbWVfc2x1ZyI6ImxpZ2h0Ym94LTIiLCJpZCI6MTQwMjQsInNsdWciOiJ3ZWVrcG9zdF9vcmRlciJ9fQ==" defer></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/2b4e359d6d92e88e4cbb7ff5e8f9247b.js?ver=75adc" id="popup-maker-site-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/64c973abe58fa223772b80d7085e2b22.js?ver=1cfcd" id="et-core-common-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="wpcf7cf-scripts-js-extra" src="data:text/javascript;base64,dmFyIHdwY2Y3Y2ZfZ2xvYmFsX3NldHRpbmdzPXsiYWpheHVybCI6Imh0dHBzOlwvXC93d3cuc2NzaHIuY29tXC93cC1hZG1pblwvYWRtaW4tYWpheC5waHAifQ==" defer></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/9a198acf5b37c088c687ac6c8f1c1eaa.js?ver=48933" id="wpcf7cf-scripts-js" defer data-deferred="1"></script>
+<script type="text/javascript" src="https://www.google.com/recaptcha/api.js?render=6LeavkkpAAAAAMXwEAUdlpiMLbyn9nsY8k3cX7OC&amp;ver=3.0" id="google-recaptcha-js" defer data-deferred="1"></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/36f330299d50abc5331adc0ab0f5fc0d.js?ver=213a3" id="wp-polyfill-js" defer data-deferred="1"></script>
+<script type="text/javascript" id="wpcf7-recaptcha-js-extra" src="data:text/javascript;base64,dmFyIHdwY2Y3X3JlY2FwdGNoYT17InNpdGVrZXkiOiI2TGVhdmtrcEFBQUFBTVh3RUFVZGxwaU1MYnluOW5zWThrM2NYN09DIiwiYWN0aW9ucyI6eyJob21lcGFnZSI6ImhvbWVwYWdlIiwiY29udGFjdGZvcm0iOiJjb250YWN0Zm9ybSJ9fQ==" defer></script>
+<script data-optimized="1" type="text/javascript" src="https://scshome-cwehbtfkenbchqdc.z01.azurefd.net/wp-content/litespeed/js/20dc5e351b2d14a535656371d4767276.js?ver=67276" id="wpcf7-recaptcha-js" defer data-deferred="1"></script>
+<style id="et-builder-module-design-17855-cached-inline-styles">@media (min-width:981px){#allheader.et_pb_gutters3 .et_pb_column_3_4,#allheader.et_pb_gutters3.et_pb_row .et_pb_column_3_4{width:100%!important}}.et-db #et-boc .et-l .et_pb_column{margin-bottom:0px}#et-main-area{margin-top:60px}.et_pb_button_1_tb_header{width:70px!important}@media (max-width:980px){#et-main-area{margin-top:8em}}@media (max-width:479px){#et-main-area{margin-top:5em}}.et_pb_menu--without-logo .et_pb_menu__menu>nav>ul>li{margin-top:20px}.et_pb_menu .et_pb_menu__search-input{width:85%;margin-top:15px}.et_pb_menu .et_pb_menu__close-search-button{margin-top:12px!important}.et_pb_menu_1_tb_header.et_pb_menu .nav li ul{background-color:#ffffff!important;border-top:3px solid #fcd001!important;margin-top:0px!important}.header_desktop .et_pb_menu__menu ul li a:hover{background-color:#fff!important;color:rgba(255,193,7,1)!important}.et_pb_menu_1_tb_header .et_pb_menu__icon.et_pb_menu__search-button,.et_pb_menu_1_tb_header .et_pb_menu__icon{font-size:25px!important;color:#b9b9b9!important;margin-top:0px}@media (min-width:980px){.header_desktop .et_pb_menu__search-button{flex:0 0 8%!important;justify-content:flex-end;margin-top:20px;padding:17px 0px;height:fit-content}}@media (max-width:767px){.et_pb_row_0_tb_header{display:flex;align-items:center;z-index:2600!important}}@media (min-width:981px) and (max-width:1288px){body #page-container .et_pb_section .et_pb_button_2_tb_header,body .pum-container .et_pb_section .et_pb_button_2_tb_header{display:none}}.et-l--header ul{line-height:normal}.et-db #et-boc .et-l .et_pb_section_0_tb_header.et_pb_section,.et-db .pum .et-l .et_pb_section_0_tb_header.et_pb_section{padding-top:9px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_section_0_tb_header,.et-db .pum .et-l .et_pb_section_0_tb_header{z-index:2000;position:fixed!important;top:0px;bottom:auto;left:0px;right:auto;-webkit-transform:translateZ(0px);-webkit-transform:translate3d(0,0,0);-webkit-perspective:1000}body.logged-in.admin-bar.et-db #et-boc .et-l .et_pb_section_0_tb_header,body.logged-in.admin-bar.et-db .pum .et-l .et_pb_section_0_tb_header,body.logged-in.admin-bar.et-db #et-boc .et-l .et_pb_code_2_tb_header,body.logged-in.admin-bar.et-db .pum .et-l .et_pb_code_2_tb_header,body.logged-in.admin-bar.et-db #et-boc .et-l .et_pb_section_1_tb_header,body.logged-in.admin-bar.et-db .pum .et-l .et_pb_section_1_tb_header{top:calc(0px + 32px)}.et-db #et-boc .et-l .et_pb_row_0_tb_header,.et-db .pum .et-l .et_pb_row_0_tb_header{background-color:#FFFFFF;min-height:80px;box-shadow:0px 1px 11px -4px rgba(44,136,215,0.3);z-index:500!important;position:relative;display:flex;align-items:center}.et-db #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_0_tb_header.et_pb_row{padding-top:5px!important;padding-bottom:5px!important;padding-left:13px!important;margin-top:0px!important;margin-bottom:0px!important;padding-top:5px;padding-bottom:5px;padding-left:13px}.et-db #et-boc .et-l .et_pb_row_0_tb_header,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,.et-db #et-boc .et-l .et_pb_row_0_tb_header,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_0_tb_header,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_0_tb_header,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_header.et_pb_row{width:100%;max-width:100%}.et-db #et-boc .et-l .et_pb_text_0_tb_header,.et-db .pum .et-l .et_pb_text_0_tb_header{line-height:0em;font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;line-height:0em;background-color:RGBA(0,0,0,0);padding-top:0px!important;padding-right:32px!important;padding-bottom:0px!important;padding-left:53px!important;margin-top:10px!important;width:115px;z-index:80;position:relative}.et-db #et-boc .et-l .et_pb_text_0_tb_header h1,.et-db .pum .et-l .et_pb_text_0_tb_header h1{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:700;font-size:40px;color:#FFFFFF!important;letter-spacing:5px;line-height:1.3em;text-shadow:0em 0.1em 0.1em rgba(0,0,0,0.4)}.et-db #et-boc .et-l .et_pb_text_0_tb_header h2,.et-db .pum .et-l .et_pb_text_0_tb_header h2{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:700;font-size:32px;color:#00499a!important;letter-spacing:5px;line-height:1.2em}.et-db #et-boc .et-l .et_pb_text_0_tb_header h3,.et-db .pum .et-l .et_pb_text_0_tb_header h3{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:700;color:#111111!important;letter-spacing:1px;line-height:1.2em}.et-db #et-boc .et-l .et_pb_text_0_tb_header h4,.et-db .pum .et-l .et_pb_text_0_tb_header h4{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:700;color:#00499a!important;letter-spacing:1px;line-height:1.2em}.et-db #et-boc .et-l .et_pb_text_0_tb_header h5,.et-db .pum .et-l .et_pb_text_0_tb_header h5{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif}body.iphone.et-db #et-boc .et-l .et_pb_text_0_tb_header h1,body.iphone.et-db .pum .et-l .et_pb_text_0_tb_header h1{font-variant-ligatures:no-common-ligatures}.et-db #et-boc .et-l .et_pb_code_2_tb_header,.et-db .pum .et-l .et_pb_code_2_tb_header{padding-top:0px;padding-bottom:0px;margin-top:0px!important;margin-bottom:0px!important;position:fixed!important;top:0px;bottom:auto;right:0px;left:auto}.et-db #et-boc .et-l .et_pb_row_1_tb_header,.et-db .pum .et-l .et_pb_row_1_tb_header{background-color:#eef7ff;border-left-width:10px;border-left-style:none;border-left-color:#2e80c3;height:100vh;z-index:499!important;position:absolute!important;top:0px;bottom:auto;right:0px;left:auto;opacity:0;right:-1000px}.et-db #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header.et_pb_row{padding-top:10vw!important;padding-top:10vw}.et-db #et-boc .et-l .et_pb_menu_0_tb_header.et_pb_menu ul li a,.et-db .pum .et-l .et_pb_menu_0_tb_header.et_pb_menu ul li a{font-weight:700;color:#2c88d7!important}.et-db #et-boc .et-l .et_pb_menu_0_tb_header.et_pb_menu,.et-db .pum .et-l .et_pb_menu_0_tb_header.et_pb_menu{background-color:RGBA(0,0,0,0)}.et-db #et-boc .et-l .et_pb_menu_0_tb_header,.et-db .pum .et-l .et_pb_menu_0_tb_header{z-index:500;position:relative;top:0px;bottom:auto;left:0px;right:auto}.et-db #et-boc .et-l .et_pb_menu_0_tb_header.et_pb_menu ul li.current-menu-item a,.et-db .pum .et-l .et_pb_menu_0_tb_header.et_pb_menu ul li.current-menu-item a{color:#00499a!important}.et-db #et-boc .et-l .et_pb_menu_0_tb_header.et_pb_menu .nav li ul,.et-db .pum .et-l .et_pb_menu_0_tb_header.et_pb_menu .nav li ul,.et-db #et-boc .et-l .et_pb_menu_0_tb_header.et_pb_menu .et_mobile_menu,.et-db #et-boc .et-l .et_pb_menu_0_tb_header.et_pb_menu .et_mobile_menu ul,.et-db .pum .et-l .et_pb_menu_0_tb_header.et_pb_menu .et_mobile_menu,.et-db .pum .et-l .et_pb_menu_0_tb_header.et_pb_menu .et_mobile_menu ul{background-color:RGBA(0,0,0,0)!important}.et-db #et-boc .et-l .et_pb_menu_0_tb_header .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db #et-boc .et-l .et_pb_menu_0_tb_header .et_pb_menu__logo-slot,.et-db .pum .et-l .et_pb_menu_0_tb_header .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db .pum .et-l .et_pb_menu_0_tb_header .et_pb_menu__logo-slot{width:auto;max-width:100%}.et-db #et-boc .et-l .et_pb_menu_0_tb_header .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db #et-boc .et-l .et_pb_menu_0_tb_header .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db .pum .et-l .et_pb_menu_0_tb_header .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db .pum .et-l .et_pb_menu_0_tb_header .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img{height:auto;max-height:none}.et-db #et-boc .et-l .et_pb_menu_0_tb_header .mobile_nav .mobile_menu_bar:before,.et-db .pum .et-l .et_pb_menu_0_tb_header .mobile_nav .mobile_menu_bar:before,.et-db #et-boc .et-l .et_pb_menu_0_tb_header .et_pb_menu__icon.et_pb_menu__search-button,.et-db #et-boc .et-l .et_pb_menu_0_tb_header .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db .pum .et-l .et_pb_menu_0_tb_header .et_pb_menu__icon.et_pb_menu__search-button,.et-db .pum .et-l .et_pb_menu_0_tb_header .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db #et-boc .et-l .et_pb_menu_0_tb_header .et_pb_menu__icon.et_pb_menu__cart-button,.et-db .pum .et-l .et_pb_menu_0_tb_header .et_pb_menu__icon.et_pb_menu__cart-button,.et-db #et-boc .et-l .et_pb_menu_1_tb_header .et_pb_menu__icon.et_pb_menu__cart-button,.et-db .pum .et-l .et_pb_menu_1_tb_header .et_pb_menu__icon.et_pb_menu__cart-button{color:#7EBEC5}.et-db #et-boc .et-l .et_pb_section_1_tb_header,.et-db .pum .et-l .et_pb_section_1_tb_header{border-bottom-color:#dddddd;overflow-x:visible;overflow-y:visible;z-index:10;box-shadow:0px 6px 6px -6px rgba(0,0,0,0.18);z-index:3000;position:fixed!important;top:0px;bottom:auto;left:50%;right:auto;transform:translateX(-50%)}.et-db #et-boc .et-l .et_pb_section_1_tb_header.et_pb_section,.et-db .pum .et-l .et_pb_section_1_tb_header.et_pb_section{padding-top:0px;padding-right:0px;padding-bottom:0px;padding-left:0px;background-color:#ffffff!important}.et-db #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_2_tb_header.et_pb_row{padding-top:0px!important;padding-right:0px!important;padding-bottom:0px!important;padding-left:0px!important;margin-top:0px!important;margin-bottom:0px!important;padding-top:0px;padding-right:0px;padding-bottom:0px;padding-left:0px}.et-db #et-boc .et-l .et_pb_row_2_tb_header,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,.et-db #et-boc .et-l .et_pb_row_2_tb_header,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_2_tb_header,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_2_tb_header,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_header.et_pb_row{width:100%;max-width:1260px}.et-db #et-boc .et-l .et_pb_row_2_tb_header,.et-db .pum .et-l .et_pb_row_2_tb_header{position:static!important;top:0px;right:auto;bottom:auto;left:0px;display:flex;align-content:center}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu ul li a,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu ul li a{font-size:1rem;color:#5a5a5a!important;letter-spacing:1px;line-height:1rem}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu{background-color:#ffffff;width:100%}.et-db #et-boc .et-l .et_pb_menu_1_tb_header,.et-db .pum .et-l .et_pb_menu_1_tb_header{margin-top:auto!important;margin-bottom:auto!important}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu .nav li ul a,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu .nav li ul a{transition:color 300ms ease 0ms}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu .et-menu-nav li.current-menu-item a,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu .et-menu-nav li.current-menu-item a{color:#064d9c!important;font-weight:500!important}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu .et-menu-nav li ul.sub-menu a,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu .et-menu-nav li ul.sub-menu a{font-weight:300;font-size:16px!important;padding:5px 0px!important;color:#333!important}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu ul li.current-menu-item a,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu ul li.current-menu-item a,.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu .nav li ul.sub-menu li.current-menu-item a,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu .nav li ul.sub-menu li.current-menu-item a{color:#064d9c!important}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu .nav li ul,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu .nav li ul,.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu .et_mobile_menu,.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu .et_mobile_menu ul,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu .et_mobile_menu,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu .et_mobile_menu ul{background-color:#ffffff!important}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu .nav li ul.sub-menu a:hover,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu .nav li ul.sub-menu a:hover{color:#fcb621!important}.et-db #et-boc .et-l .et_pb_menu_1_tb_header.et_pb_menu nav>ul>li li a:hover,.et-db .pum .et-l .et_pb_menu_1_tb_header.et_pb_menu nav>ul>li li a:hover{opacity:1}.et-db #et-boc .et-l .et_pb_menu_1_tb_header .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db #et-boc .et-l .et_pb_menu_1_tb_header .et_pb_menu__logo-slot,.et-db .pum .et-l .et_pb_menu_1_tb_header .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db .pum .et-l .et_pb_menu_1_tb_header .et_pb_menu__logo-slot{width:0%;max-width:0%}.et-db #et-boc .et-l .et_pb_menu_1_tb_header .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db #et-boc .et-l .et_pb_menu_1_tb_header .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db .pum .et-l .et_pb_menu_1_tb_header .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db .pum .et-l .et_pb_menu_1_tb_header .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img{height:0px;max-height:none}.et-db #et-boc .et-l .et_pb_menu_1_tb_header .mobile_nav .mobile_menu_bar:before,.et-db .pum .et-l .et_pb_menu_1_tb_header .mobile_nav .mobile_menu_bar:before{color:#004993}.et-db #et-boc .et-l .et_pb_menu_1_tb_header .et_pb_menu__icon.et_pb_menu__search-button,.et-db #et-boc .et-l .et_pb_menu_1_tb_header .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db .pum .et-l .et_pb_menu_1_tb_header .et_pb_menu__icon.et_pb_menu__search-button,.et-db .pum .et-l .et_pb_menu_1_tb_header .et_pb_menu__icon.et_pb_menu__close-search-button{font-size:25px;color:#004993}.et-db #et-boc .et-l .et_pb_code_4_tb_header,.et-db .pum .et-l .et_pb_code_4_tb_header{margin-top:auto!important;margin-right:15px!important;margin-bottom:auto!important;margin:auto 0}.et-db #et-boc .et-l .et_pb_button_1_tb_header_wrapper .et_pb_button_1_tb_header,.et-db #et-boc .et-l .et_pb_button_1_tb_header_wrapper .et_pb_button_1_tb_header:hover,.et-db .pum .et-l .et_pb_button_1_tb_header_wrapper .et_pb_button_1_tb_header,.et-db .pum .et-l .et_pb_button_1_tb_header_wrapper .et_pb_button_1_tb_header:hover,.et-db #et-boc .et-l .et_pb_button_2_tb_header_wrapper .et_pb_button_2_tb_header,.et-db #et-boc .et-l .et_pb_button_2_tb_header_wrapper .et_pb_button_2_tb_header:hover,.et-db .pum .et-l .et_pb_button_2_tb_header_wrapper .et_pb_button_2_tb_header,.et-db .pum .et-l .et_pb_button_2_tb_header_wrapper .et_pb_button_2_tb_header:hover{padding-top:6px!important;padding-right:6px!important;padding-bottom:6px!important;padding-left:6px!important}.et-db #et-boc .et-l .et_pb_button_1_tb_header_wrapper,.et-db .pum .et-l .et_pb_button_1_tb_header_wrapper{margin-top:13px!important;margin-right:0px!important;margin-bottom:0px!important;margin-left:6px!important}body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_1_tb_header,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_1_tb_header{border-width:0px!important;border-radius:66px;letter-spacing:1px;font-size:12px;font-weight:600!important;background-color:rgba(7,10,0,0.89)}body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_1_tb_header:before,body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_1_tb_header:after,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_1_tb_header:before,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_1_tb_header:after,body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_2_tb_header:before,body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_2_tb_header:after,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_2_tb_header:before,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_2_tb_header:after{display:none!important}.et-db #et-boc .et-l .et_pb_button_1_tb_header,.et-db .pum .et-l .et_pb_button_1_tb_header{width:90px;height:32px}.et-db #et-boc .et-l .et_pb_button_1_tb_header,.et-db #et-boc .et-l .et_pb_button_1_tb_header:after,.et-db .pum .et-l .et_pb_button_1_tb_header,.et-db .pum .et-l .et_pb_button_1_tb_header:after,.et-db #et-boc .et-l .et_pb_button_2_tb_header,.et-db #et-boc .et-l .et_pb_button_2_tb_header:after,.et-db .pum .et-l .et_pb_button_2_tb_header,.et-db .pum .et-l .et_pb_button_2_tb_header:after{transition:all 300ms ease 0ms}.et-db #et-boc .et-l .et_pb_button_2_tb_header_wrapper,.et-db .pum .et-l .et_pb_button_2_tb_header_wrapper{margin-top:13px!important;margin-right:0px!important;margin-bottom:0px!important;margin-left:5px!important}body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_2_tb_header,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_2_tb_header{border-width:0px!important;border-radius:66px;letter-spacing:1px;font-size:12px;font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif!important;font-weight:600!important;background-image:linear-gradient(341deg,#0c8ef2 16%,#5ae3cc 100%)}body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_2_tb_header:hover,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_2_tb_header:hover{background-image:initial;background-color:#0C71C3}.et-db #et-boc .et-l .et_pb_button_2_tb_header,.et-db .pum .et-l .et_pb_button_2_tb_header{transition:background-color 300ms ease 0ms;width:65px;height:32px}.et-db #et-boc .et-l .et_pb_column_0_tb_header,.et-db .pum .et-l .et_pb_column_0_tb_header{padding-top:0px;padding-bottom:0px;z-index:2600!important}.et-db #et-boc .et-l .et_pb_column_2_tb_header,.et-db .pum .et-l .et_pb_column_2_tb_header{padding-top:0px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_column_4_tb_header,.et-db .pum .et-l .et_pb_column_4_tb_header{padding-right:0px;padding-left:0px}.et-db #et-boc .et-l .et_pb_column_5_tb_header,.et-db .pum .et-l .et_pb_column_5_tb_header{padding-right:0px;padding-left:0px;width:100%!important;display:inline-flex}.et-db #et-boc .et-l .et_pb_text_0_tb_header.et_pb_module,.et-db .pum .et-l .et_pb_text_0_tb_header.et_pb_module{margin-left:auto!important;margin-right:0px!important}@media only screen and (min-width:981px){.et-db #et-boc .et-l .et_pb_section_0_tb_header,.et-db .pum .et-l .et_pb_section_0_tb_header,.et-db #et-boc .et-l .et_pb_code_0_tb_header,.et-db .pum .et-l .et_pb_code_0_tb_header,.et-db #et-boc .et-l .et_pb_code_1_tb_header,.et-db .pum .et-l .et_pb_code_1_tb_header{display:none!important}.et-db #et-boc .et-l .et_pb_row_1_tb_header,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db #et-boc .et-l .et_pb_row_1_tb_header,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row{width:20%}}@media only screen and (max-width:980px){.et-db #et-boc .et-l .et_pb_section_0_tb_header.et_pb_section,.et-db .pum .et-l .et_pb_section_0_tb_header.et_pb_section{padding-top:13px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_row_0_tb_header,.et-db .pum .et-l .et_pb_row_0_tb_header{display:flex;align-items:center}.et-db #et-boc .et-l .et_pb_text_0_tb_header,.et-db .pum .et-l .et_pb_text_0_tb_header{font-size:14px}.et-db #et-boc .et-l .et_pb_row_1_tb_header,.et-db .pum .et-l .et_pb_row_1_tb_header{border-left-width:10px;border-left-style:none;border-left-color:#2e80c3}.et-db #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header.et_pb_row{padding-top:15vh!important;padding-top:15vh!important}.et-db #et-boc .et-l .et_pb_row_1_tb_header,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db #et-boc .et-l .et_pb_row_1_tb_header,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row{width:60%}.et-db #et-boc .et-l .et_pb_section_1_tb_header,.et-db .pum .et-l .et_pb_section_1_tb_header{border-bottom-color:#dddddd}.et-db #et-boc .et-l .et_pb_button_2_tb_header_wrapper,.et-db .pum .et-l .et_pb_button_2_tb_header_wrapper{margin-top:15px!important;margin-right:0px!important;margin-left:10px!important}}@media only screen and (min-width:768px) and (max-width:980px){.et-db #et-boc .et-l .et_pb_section_1_tb_header,.et-db .pum .et-l .et_pb_section_1_tb_header{display:none!important}}@media only screen and (max-width:767px){.et-db #et-boc .et-l .et_pb_section_0_tb_header.et_pb_section,.et-db .pum .et-l .et_pb_section_0_tb_header.et_pb_section{padding-top:0px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_row_0_tb_header,.et-db .pum .et-l .et_pb_row_0_tb_header{display:flex;align-items:center}.et-db #et-boc .et-l .et_pb_text_0_tb_header,.et-db .pum .et-l .et_pb_text_0_tb_header{font-size:12px}.et-db #et-boc .et-l .et_pb_text_0_tb_header h1,.et-db .pum .et-l .et_pb_text_0_tb_header h1{font-size:32px;line-height:1.2em;letter-spacing:2px}.et-db #et-boc .et-l .et_pb_row_1_tb_header,.et-db .pum .et-l .et_pb_row_1_tb_header{border-left-width:10px;border-left-style:none;border-left-color:#2e80c3}.et-db #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header.et_pb_row{padding-top:10vh!important;padding-top:10vh!important}.et-db #et-boc .et-l .et_pb_row_1_tb_header,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db #et-boc .et-l .et_pb_row_1_tb_header,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_header,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_header.et_pb_row{width:100%}.et-db #et-boc .et-l .et_pb_section_1_tb_header,.et-db .pum .et-l .et_pb_section_1_tb_header{border-bottom-color:#dddddd;display:none!important}.et-db #et-boc .et-l .et_pb_button_2_tb_header_wrapper,.et-db .pum .et-l .et_pb_button_2_tb_header_wrapper{margin-top:15px!important;margin-right:0px!important;margin-left:10px!important}}.header_desktop.et_pb_menu .et_pb_menu__wrap{justify-content:flex-end!important}.header_desktop.et_pb_menu .et_pb_menu__wrap{justify-content:flex-end!important}</style><style id="et-builder-module-design-18217-cached-inline-styles">.et-db #et-boc .et-l div.et_pb_section.et_pb_section_0_tb_body>.et_pb_background_pattern,.et-db .pum .et-l div.et_pb_section.et_pb_section_0_tb_body>.et_pb_background_pattern{background-image:url(data:image/svg+xml;base64,PHN2ZyAgZmlsbD0icmdiYSgwLDAsMCwwLjIpIiBoZWlnaHQ9IjEyOHB4IiB3aWR0aD0iMTI4cHgiIHZpZXdCb3g9IjAgMCAxMjggMTI4IiBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxwYXRoIGQ9Ik05Ljg1LDU0LjE1YTEsMSwwLDAsMS0uNzEsMS43MSwxLDEsMCwwLDEtLjctLjMsMSwxLDAsMCwxLDEuNDEtMS40MVpNMTcuNTgsNDVhMSwxLDAsMCwwLDAsMS40MSwxLDEsMCwwLDAsMS40MSwwQTEsMSwwLDAsMCwxNy41OCw0NVptOS44NS03LjQ0YTEsMSwwLDAsMCwuNzEtLjI5LDEsMSwwLDAsMCwwLTEuNDIsMSwxLDAsMCwwLTEuNDIsMS40MkExLDEsMCwwLDAsMjcuNDMsMzcuNTdabTguNDMtMTAuODVhMSwxLDAsMCwwLDAsMS40MiwxLDEsMCwwLDAsMS40MiwwLDEsMSwwLDAsMC0xLjQyLTEuNDJaTTQ1LDE3LjU4QTEsMSwwLDAsMCw0NSwxOWExLDEsMCwwLDAsMS40MSwwQTEsMSwwLDEsMCw0NSwxNy41OFptOS4xNC05LjE0YTEsMSwwLDAsMCwwLDEuNDEsMSwxLDAsMCwwLDEuNDEsMCwxLDEsMCwxLDAtMS40MS0xLjQxWm0wLDEwOS43MWExLDEsMCwwLDAsMCwxLjQxLDEsMSwwLDAsMCwxLjQxLDAsMSwxLDAsMSwwLTEuNDEtMS40MVpNNDUsMTA5YTEsMSwwLDAsMCwwLDEuNDEsMSwxLDAsMCwwLDEuNDEsMEExLDEsMCwxLDAsNDUsMTA5Wm0tOS4xNS05LjE1YTEsMSwwLDAsMCwwLDEuNDIsMSwxLDAsMCwwLDEuNDIsMCwxLDEsMCwxLDAtMS40Mi0xLjQyWm0tOS4xNC05LjE0YTEsMSwwLDAsMCwwLDEuNDIsMSwxLDAsMCwwLC43MS4yOSwxLDEsMCwwLDAsLjcxLS4yOSwxLDEsMCwwLDAtMS40Mi0xLjQyWm0tOS4xNC05LjE0YTEsMSwwLDAsMCwwLDEuNDFBMSwxLDAsMCwwLDE5LDgzYTEsMSwwLDAsMC0xLjQxLTEuNDFaTTguNDQsNzIuNDRhMSwxLDAsMCwwLDAsMS40MSwxLDEsMCwwLDAsLjcuMjksMSwxLDAsMCwwLC43MS0uMjksMSwxLDAsMCwwLTEuNDEtMS40MVptNjQsNDUuNzFhMSwxLDAsMCwwLDAsMS40MSwxLDEsMCwwLDAsMS40MSwwLDEsMSwwLDAsMC0xLjQxLTEuNDFaTTgxLjU4LDEwOWExLDEsMCwwLDAsMCwxLjQxLDEsMSwwLDAsMCwxLjQxLDBBMSwxLDAsMCwwLDgxLjU4LDEwOVptOS4xNC05LjE1YTEsMSwwLDAsMCwwLDEuNDIsMSwxLDAsMCwwLDEuNDIsMCwxLDEsMCwxLDAtMS40Mi0xLjQyWm05LjE0LTkuMTRhMSwxLDAsMCwwLDAsMS40MiwxLDEsMCwwLDAsMS40MiwwLDEsMSwwLDAsMC0xLjQyLTEuNDJaTTEwOSw4MS41OEExLDEsMCwwLDAsMTA5LDgzYTEsMSwwLDAsMCwxLjQxLDBBMSwxLDAsMCwwLDEwOSw4MS41OFptOS4xNC05LjE1YTEsMSwwLDAsMCwwLDEuNDIsMSwxLDAsMCwwLDEuNDEsMCwxLDEsMCwwLDAtMS40MS0xLjQyWm0wLTE4LjI4YTEsMSwwLDAsMCwwLDEuNDEsMSwxLDAsMSwwLDEuNDEtMS40MUExLDEsMCwwLDAsMTE4LjE1LDU0LjE1Wk0xMDksNDVhMSwxLDAsMCwwLDAsMS40MSwxLDEsMCwwLDAsMS40MSwwQTEsMSwwLDAsMCwxMDksNDVabS05LjE1LTkuMTVhMSwxLDAsMCwwLDAsMS40MiwxLDEsMCwwLDAsMS40MiwwLDEsMSwwLDAsMC0xLjQyLTEuNDJabS04LjQzLTcuNDNhMSwxLDAsMCwwLC43LS4zLDEsMSwwLDEsMC0uNy4zWk04MS41OCwxNy41OGExLDEsMCwwLDAsMCwxLjQxQTEsMSwwLDAsMCw4MywxOWExLDEsMCwxLDAtMS40MS0xLjQxWk03Mi40NCw4LjQ0YTEsMSwwLDAsMCwuNywxLjcsMSwxLDAsMCwwLC43MS0uMjksMSwxLDAsMCwwLDAtMS40MUExLDEsMCwwLDAsNzIuNDQsOC40NFpNNjQsM2EzLjE1LDMuMTUsMCwwLDAsMi4xMy0uODdBMy4xMywzLjEzLDAsMCwwLDY3LDBINjFhMy4xMywzLjEzLDAsMCwwLC44NywyLjEyQTMuMTUsMy4xNSwwLDAsMCw2NCwzWk0zLDY0YTMuMTUsMy4xNSwwLDAsMC0uODctMi4xM0EzLjA3LDMuMDcsMCwwLDAsMCw2MXY2YTMuMTUsMy4xNSwwLDAsMCwyLjEzLS44N0EzLjE1LDMuMTUsMCwwLDAsMyw2NFptNjMuMTMsNjEuODdBMywzLDAsMCwwLDYxLDEyOGg2QTMuMTUsMy4xNSwwLDAsMCw2Ni4xMywxMjUuODZabTU5LjExLTYzQTMsMywwLDAsMCwxMjUsNjRhMywzLDAsMCwwLDMsM1Y2MWEyLjg2LDIuODYsMCwwLDAtMi43NiwxLjg1WiIvPjwvc3ZnPg==)}.et-db #et-boc .et-l .et_pb_section_0_tb_body.et_pb_section,.et-db .pum .et-l .et_pb_section_0_tb_body.et_pb_section{padding-top:0px;padding-bottom:0px;margin-top:0px}.et-db #et-boc .et-l .et_pb_row_0_tb_body.et_pb_row,.et-db .pum .et-l .et_pb_row_0_tb_body.et_pb_row{padding-top:0px!important;padding-bottom:0px!important;margin-top:0px!important;margin-bottom:0px!important;padding-top:0px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_text_0_tb_body h1,.et-db .pum .et-l .et_pb_text_0_tb_body h1{font-weight:800;font-size:10rem;color:#8e8e8e!important;letter-spacing:12px;line-height:10rem;text-align:center}.et-db #et-boc .et-l .et_pb_text_0_tb_body,.et-db .pum .et-l .et_pb_text_0_tb_body{margin-top:4rem!important;margin-bottom:4rem!important}.et-db #et-boc .et-l .et_pb_divider_0_tb_body,.et-db .pum .et-l .et_pb_divider_0_tb_body{width:50%}.et-db #et-boc .et-l .et_pb_divider_0_tb_body:before,.et-db .pum .et-l .et_pb_divider_0_tb_body:before{border-top-color:#8e8e8e}.et-db #et-boc .et-l .et_pb_text_1_tb_body.et_pb_text,.et-db .pum .et-l .et_pb_text_1_tb_body.et_pb_text{color:#8e8e8e!important}.et-db #et-boc .et-l .et_pb_text_1_tb_body,.et-db .pum .et-l .et_pb_text_1_tb_body{line-height:0.5rem;font-size:1.5rem;letter-spacing:2px;line-height:0.5rem}.et-db #et-boc .et-l .et_pb_button_0_tb_body_wrapper .et_pb_button_0_tb_body,.et-db #et-boc .et-l .et_pb_button_0_tb_body_wrapper .et_pb_button_0_tb_body:hover,.et-db .pum .et-l .et_pb_button_0_tb_body_wrapper .et_pb_button_0_tb_body,.et-db .pum .et-l .et_pb_button_0_tb_body_wrapper .et_pb_button_0_tb_body:hover{padding-top:0.3rem!important;padding-right:2rem!important;padding-bottom:0.3rem!important;padding-left:2rem!important}.et-db #et-boc .et-l .et_pb_button_0_tb_body_wrapper,.et-db .pum .et-l .et_pb_button_0_tb_body_wrapper{margin-top:4em!important;margin-bottom:4em!important}body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body{color:#FFFFFF!important;border-width:0px!important;border-radius:2rem;background-image:linear-gradient(1deg,#2eb9e8 0%,#0c71c3 100%);background-color:#0C71C3}body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:hover,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:hover{background-image:linear-gradient(1deg,#935800 0%,#ce9400 100%);background-color:#0C71C3}.et-db #et-boc .et-l .et_pb_button_0_tb_body,.et-db .pum .et-l .et_pb_button_0_tb_body{transition:background-color 300ms ease 0ms}.et-db #et-boc .et-l .et_pb_button_0_tb_body,.et-db #et-boc .et-l .et_pb_button_0_tb_body:after,.et-db .pum .et-l .et_pb_button_0_tb_body,.et-db .pum .et-l .et_pb_button_0_tb_body:after{transition:all 300ms ease 0ms}.et-db #et-boc .et-l .et_pb_divider_0_tb_body.et_pb_module,.et-db .pum .et-l .et_pb_divider_0_tb_body.et_pb_module{margin-left:auto!important;margin-right:auto!important}@media only screen and (max-width:980px){body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:after,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:after{display:inline-block;opacity:0}body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:hover:after,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:hover:after{opacity:1}}@media only screen and (max-width:767px){body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:after,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:after{display:inline-block;opacity:0}body.et-db #page-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:hover:after,body.et-db .pum-container #et-boc .et-l .et_pb_section .et_pb_button_0_tb_body:hover:after{opacity:1}}</style><style id="et-builder-module-design-17856-cached-inline-styles">body.et_pb_recaptcha_enabled .grecaptcha-badge{visibility:hidden!important}.iconstyle{flex:1 1 20%;margin:0 auto;align-items:center}.iconstyle img{opacity:0.7}.iconstylea{flex:1 1 20%;margin:0 auto;align-items:center}.iconstylea img{opacity:1;margin-top:8px}.et_pb_text_inner a{color:#b9b9b9!important}.iconfont{color:#333;font-size:11px;font-weight:300;line-height:11px;margin-bottom:0px}.et-l--footer .et_pb_menu__menu>nav>ul>li{padding:0!important;margin:6px!important}.et-db #et-boc .et-l .et_pb_section_0_tb_footer,.et-db .pum .et-l .et_pb_section_0_tb_footer{min-height:373.9px}.et-db #et-boc .et-l .et_pb_section_0_tb_footer.et_pb_section,.et-db .pum .et-l .et_pb_section_0_tb_footer.et_pb_section{padding-top:24px;padding-bottom:32px;background-color:#efefef!important}.et-db #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_0_tb_footer.et_pb_row{padding-bottom:7px!important;margin-right:auto!important;margin-bottom:21px!important;margin-left:auto!important;padding-bottom:7px}.et-db #et-boc .et-l .et_pb_row_0_tb_footer,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,.et-db #et-boc .et-l .et_pb_row_0_tb_footer,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_0_tb_footer,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_0_tb_footer,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_0_tb_footer.et_pb_row,.et-db #et-boc .et-l .et_pb_row_1_tb_footer,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,.et-db #et-boc .et-l .et_pb_row_1_tb_footer,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_footer,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_footer,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,.et-db #et-boc .et-l .et_pb_row_2_tb_footer,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,.et-db #et-boc .et-l .et_pb_row_2_tb_footer,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_2_tb_footer,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_2_tb_footer,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,.et-db #et-boc .et-l .et_pb_row_3_tb_footer,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,.et-db #et-boc .et-l .et_pb_row_3_tb_footer,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_3_tb_footer,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_3_tb_footer,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row{max-width:1200px}.et-db #et-boc .et-l .et_pb_image_0_tb_footer,.et-db .pum .et-l .et_pb_image_0_tb_footer{padding-right:52px;margin-left:-5px!important;width:220px;text-align:left;margin-left:0}.et-db #et-boc .et-l .et_pb_text_0_tb_footer,.et-db .pum .et-l .et_pb_text_0_tb_footer{line-height:1.6em;font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;line-height:1.6em;background-image:linear-gradient(108deg,#ffffff 0%,#ffffff 100%);background-color:RGBA(255,255,255,0);border-radius:50px 50px 50px 50px;overflow:hidden;border-color:RGBA(255,255,255,0);padding-top:8px!important;padding-right:5px!important;padding-bottom:0px!important;padding-left:5px!important;margin-right:-193px!important;margin-left:18px!important;width:100%;background-color:#353535;padding:3px;color:#ebebeb;text-align:center;white-space:nowrap}.et-db #et-boc .et-l .et_pb_text_0_tb_footer h1,.et-db .pum .et-l .et_pb_text_0_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_1_tb_footer h1,.et-db .pum .et-l .et_pb_text_1_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_2_tb_footer h1,.et-db .pum .et-l .et_pb_text_2_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_3_tb_footer h1,.et-db .pum .et-l .et_pb_text_3_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_4_tb_footer h1,.et-db .pum .et-l .et_pb_text_4_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_5_tb_footer h1,.et-db .pum .et-l .et_pb_text_5_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_6_tb_footer h1,.et-db .pum .et-l .et_pb_text_6_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_7_tb_footer h1,.et-db .pum .et-l .et_pb_text_7_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_8_tb_footer h1,.et-db .pum .et-l .et_pb_text_8_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_9_tb_footer h1,.et-db .pum .et-l .et_pb_text_9_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_10_tb_footer h1,.et-db .pum .et-l .et_pb_text_10_tb_footer h1{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:700;font-size:40px;color:#FFFFFF!important;letter-spacing:5px;line-height:1.3em;text-shadow:0em 0.1em 0.1em rgba(0,0,0,0.4)}.et-db #et-boc .et-l .et_pb_text_0_tb_footer h2,.et-db .pum .et-l .et_pb_text_0_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_1_tb_footer h2,.et-db .pum .et-l .et_pb_text_1_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_2_tb_footer h2,.et-db .pum .et-l .et_pb_text_2_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_3_tb_footer h2,.et-db .pum .et-l .et_pb_text_3_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_4_tb_footer h2,.et-db .pum .et-l .et_pb_text_4_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_5_tb_footer h2,.et-db .pum .et-l .et_pb_text_5_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_6_tb_footer h2,.et-db .pum .et-l .et_pb_text_6_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_7_tb_footer h2,.et-db .pum .et-l .et_pb_text_7_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_8_tb_footer h2,.et-db .pum .et-l .et_pb_text_8_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_9_tb_footer h2,.et-db .pum .et-l .et_pb_text_9_tb_footer h2,.et-db #et-boc .et-l .et_pb_text_10_tb_footer h2,.et-db .pum .et-l .et_pb_text_10_tb_footer h2{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:700;font-size:32px;color:#00499a!important;letter-spacing:5px;line-height:1.2em}.et-db #et-boc .et-l .et_pb_text_0_tb_footer h3,.et-db .pum .et-l .et_pb_text_0_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_1_tb_footer h3,.et-db .pum .et-l .et_pb_text_1_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_2_tb_footer h3,.et-db .pum .et-l .et_pb_text_2_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_3_tb_footer h3,.et-db .pum .et-l .et_pb_text_3_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_4_tb_footer h3,.et-db .pum .et-l .et_pb_text_4_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_5_tb_footer h3,.et-db .pum .et-l .et_pb_text_5_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_6_tb_footer h3,.et-db .pum .et-l .et_pb_text_6_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_7_tb_footer h3,.et-db .pum .et-l .et_pb_text_7_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_8_tb_footer h3,.et-db .pum .et-l .et_pb_text_8_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_9_tb_footer h3,.et-db .pum .et-l .et_pb_text_9_tb_footer h3,.et-db #et-boc .et-l .et_pb_text_10_tb_footer h3,.et-db .pum .et-l .et_pb_text_10_tb_footer h3{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:700;color:#111111!important;letter-spacing:1px;line-height:1.2em}.et-db #et-boc .et-l .et_pb_text_0_tb_footer h4,.et-db .pum .et-l .et_pb_text_0_tb_footer h4{font-family:'Noto Sans',Helvetica,Arial,Lucida,sans-serif;font-size:15px;color:#00499a!important;letter-spacing:1px;line-height:1.4em;text-align:center}.et-db #et-boc .et-l .et_pb_text_0_tb_footer h5,.et-db .pum .et-l .et_pb_text_0_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_1_tb_footer h5,.et-db .pum .et-l .et_pb_text_1_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_2_tb_footer h5,.et-db .pum .et-l .et_pb_text_2_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_3_tb_footer h5,.et-db .pum .et-l .et_pb_text_3_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_4_tb_footer h5,.et-db .pum .et-l .et_pb_text_4_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_5_tb_footer h5,.et-db .pum .et-l .et_pb_text_5_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_6_tb_footer h5,.et-db .pum .et-l .et_pb_text_6_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_7_tb_footer h5,.et-db .pum .et-l .et_pb_text_7_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_8_tb_footer h5,.et-db .pum .et-l .et_pb_text_8_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_9_tb_footer h5,.et-db .pum .et-l .et_pb_text_9_tb_footer h5,.et-db #et-boc .et-l .et_pb_text_10_tb_footer h5,.et-db .pum .et-l .et_pb_text_10_tb_footer h5{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif}body.iphone.et-db #et-boc .et-l .et_pb_text_0_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_0_tb_footer h1,body.safari.et-db #et-boc .et-l .et_pb_text_1_tb_footer,body.safari.et-db .pum .et-l .et_pb_text_1_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_1_tb_footer,body.iphone.et-db .pum .et-l .et_pb_text_1_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_1_tb_footer,body.uiwebview.et-db .pum .et-l .et_pb_text_1_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_1_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_1_tb_footer h1,body.safari.et-db #et-boc .et-l .et_pb_text_2_tb_footer,body.safari.et-db .pum .et-l .et_pb_text_2_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_2_tb_footer,body.iphone.et-db .pum .et-l .et_pb_text_2_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_2_tb_footer,body.uiwebview.et-db .pum .et-l .et_pb_text_2_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_2_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_2_tb_footer h1,body.safari.et-db #et-boc .et-l .et_pb_text_3_tb_footer,body.safari.et-db .pum .et-l .et_pb_text_3_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_3_tb_footer,body.iphone.et-db .pum .et-l .et_pb_text_3_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_3_tb_footer,body.uiwebview.et-db .pum .et-l .et_pb_text_3_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_3_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_3_tb_footer h1,body.safari.et-db #et-boc .et-l .et_pb_text_4_tb_footer,body.safari.et-db .pum .et-l .et_pb_text_4_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_4_tb_footer,body.iphone.et-db .pum .et-l .et_pb_text_4_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_4_tb_footer,body.uiwebview.et-db .pum .et-l .et_pb_text_4_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_4_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_4_tb_footer h1,body.safari.et-db #et-boc .et-l .et_pb_text_5_tb_footer,body.safari.et-db .pum .et-l .et_pb_text_5_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_5_tb_footer,body.iphone.et-db .pum .et-l .et_pb_text_5_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_5_tb_footer,body.uiwebview.et-db .pum .et-l .et_pb_text_5_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_5_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_5_tb_footer h1,body.safari.et-db #et-boc .et-l .et_pb_text_6_tb_footer,body.safari.et-db .pum .et-l .et_pb_text_6_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_6_tb_footer,body.iphone.et-db .pum .et-l .et_pb_text_6_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_6_tb_footer,body.uiwebview.et-db .pum .et-l .et_pb_text_6_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_6_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_6_tb_footer h1,body.safari.et-db #et-boc .et-l .et_pb_text_7_tb_footer,body.safari.et-db .pum .et-l .et_pb_text_7_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_7_tb_footer,body.iphone.et-db .pum .et-l .et_pb_text_7_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_7_tb_footer,body.uiwebview.et-db .pum .et-l .et_pb_text_7_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_7_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_7_tb_footer h1,body.safari.et-db #et-boc .et-l .et_pb_text_8_tb_footer,body.safari.et-db .pum .et-l .et_pb_text_8_tb_footer,body.iphone.et-db #et-boc .et-l .et_pb_text_8_tb_footer,body.iphone.et-db .pum .et-l .et_pb_text_8_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_8_tb_footer,body.uiwebview.et-db .pum .et-l .et_pb_text_8_tb_footer,body.uiwebview.et-db #et-boc .et-l .et_pb_text_8_tb_footer h1,body.uiwebview.et-db .pum .et-l .et_pb_text_8_tb_footer h1,body.iphone.et-db #et-boc .et-l .et_pb_text_8_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_8_tb_footer h1,body.iphone.et-db #et-boc .et-l .et_pb_text_9_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_9_tb_footer h1,body.iphone.et-db #et-boc .et-l .et_pb_text_10_tb_footer h1,body.iphone.et-db .pum .et-l .et_pb_text_10_tb_footer h1{font-variant-ligatures:no-common-ligatures}.et-db #et-boc .et-l .et_pb_code_0_tb_footer,.et-db .pum .et-l .et_pb_code_0_tb_footer{margin-top:8px!important;width:63%}.et-db #et-boc .et-l .et_pb_row_1_tb_footer,.et-db .pum .et-l .et_pb_row_1_tb_footer{min-height:53px}.et-db #et-boc .et-l .et_pb_row_1_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_1_tb_footer.et_pb_row{padding-top:15px!important;padding-bottom:0px!important;margin-top:0px!important;margin-bottom:0px!important;padding-top:15px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_text_1_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_1_tb_footer.et_pb_text,.et-db #et-boc .et-l .et_pb_text_2_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_2_tb_footer.et_pb_text,.et-db #et-boc .et-l .et_pb_text_3_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_3_tb_footer.et_pb_text,.et-db #et-boc .et-l .et_pb_text_4_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_4_tb_footer.et_pb_text,.et-db #et-boc .et-l .et_pb_text_5_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_5_tb_footer.et_pb_text,.et-db #et-boc .et-l .et_pb_text_6_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_6_tb_footer.et_pb_text{color:#333333!important}.et-db #et-boc .et-l .et_pb_text_1_tb_footer,.et-db .pum .et-l .et_pb_text_1_tb_footer{letter-spacing:1px;margin-bottom:12px!important;white-space:nowrap}.et-db #et-boc .et-l .et_pb_text_1_tb_footer h4,.et-db .pum .et-l .et_pb_text_1_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_2_tb_footer h4,.et-db .pum .et-l .et_pb_text_2_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_3_tb_footer h4,.et-db .pum .et-l .et_pb_text_3_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_4_tb_footer h4,.et-db .pum .et-l .et_pb_text_4_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_5_tb_footer h4,.et-db .pum .et-l .et_pb_text_5_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_6_tb_footer h4,.et-db .pum .et-l .et_pb_text_6_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_7_tb_footer h4,.et-db .pum .et-l .et_pb_text_7_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_8_tb_footer h4,.et-db .pum .et-l .et_pb_text_8_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_9_tb_footer h4,.et-db .pum .et-l .et_pb_text_9_tb_footer h4,.et-db #et-boc .et-l .et_pb_text_10_tb_footer h4,.et-db .pum .et-l .et_pb_text_10_tb_footer h4{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:700;color:#00499a!important;letter-spacing:1px;line-height:1.2em}.et-db #et-boc .et-l .et_pb_text_2_tb_footer,.et-db .pum .et-l .et_pb_text_2_tb_footer{letter-spacing:1px;margin-bottom:12px!important;margin-left:10px!important;white-space:nowrap}.et-db #et-boc .et-l .et_pb_text_3_tb_footer,.et-db .pum .et-l .et_pb_text_3_tb_footer{letter-spacing:1px;margin-left:20px!important;white-space:nowrap}.et-db #et-boc .et-l .et_pb_text_4_tb_footer,.et-db .pum .et-l .et_pb_text_4_tb_footer,.et-db #et-boc .et-l .et_pb_text_5_tb_footer,.et-db .pum .et-l .et_pb_text_5_tb_footer,.et-db #et-boc .et-l .et_pb_text_6_tb_footer,.et-db .pum .et-l .et_pb_text_6_tb_footer{letter-spacing:1px;margin-left:50px!important;white-space:nowrap}.et-db #et-boc .et-l .et_pb_row_2_tb_footer,.et-db .pum .et-l .et_pb_row_2_tb_footer{border-bottom-color:#3a3a3a;min-height:150px}.et-db #et-boc .et-l .et_pb_row_2_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_2_tb_footer.et_pb_row{padding-top:0px!important;padding-bottom:0px!important;margin-top:0px!important;padding-top:0px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_menu_0_tb_footer.et_pb_menu ul li a,.et-db .pum .et-l .et_pb_menu_0_tb_footer.et_pb_menu ul li a,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer.et_pb_menu ul li a,.et-db .pum .et-l .et_pb_menu_1_tb_footer.et_pb_menu ul li a,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer.et_pb_menu ul li a,.et-db .pum .et-l .et_pb_menu_2_tb_footer.et_pb_menu ul li a,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer.et_pb_menu ul li a,.et-db .pum .et-l .et_pb_menu_3_tb_footer.et_pb_menu ul li a{font-weight:300;color:#222222!important;letter-spacing:1px;line-height:0.8em}.et-db #et-boc .et-l .et_pb_menu_0_tb_footer.et_pb_menu .et-menu-nav li a,.et-db .pum .et-l .et_pb_menu_0_tb_footer.et_pb_menu .et-menu-nav li a,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer.et_pb_menu .et-menu-nav li a,.et-db .pum .et-l .et_pb_menu_1_tb_footer.et_pb_menu .et-menu-nav li a,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer.et_pb_menu .et-menu-nav li a,.et-db .pum .et-l .et_pb_menu_2_tb_footer.et_pb_menu .et-menu-nav li a,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer.et_pb_menu .et-menu-nav li a,.et-db .pum .et-l .et_pb_menu_3_tb_footer.et_pb_menu .et-menu-nav li a,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer.et_pb_menu .et-menu-nav li a,.et-db .pum .et-l .et_pb_menu_5_tb_footer.et_pb_menu .et-menu-nav li a{padding-bottom:2px;white-space:nowrap}.et-db #et-boc .et-l .et_pb_menu_0_tb_footer.et_pb_menu .nav li ul,.et-db .pum .et-l .et_pb_menu_0_tb_footer.et_pb_menu .nav li ul,.et-db #et-boc .et-l .et_pb_menu_0_tb_footer.et_pb_menu .et_mobile_menu,.et-db #et-boc .et-l .et_pb_menu_0_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db .pum .et-l .et_pb_menu_0_tb_footer.et_pb_menu .et_mobile_menu,.et-db .pum .et-l .et_pb_menu_0_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer.et_pb_menu .nav li ul,.et-db .pum .et-l .et_pb_menu_1_tb_footer.et_pb_menu .nav li ul,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer.et_pb_menu .et_mobile_menu,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db .pum .et-l .et_pb_menu_1_tb_footer.et_pb_menu .et_mobile_menu,.et-db .pum .et-l .et_pb_menu_1_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer.et_pb_menu .nav li ul,.et-db .pum .et-l .et_pb_menu_2_tb_footer.et_pb_menu .nav li ul,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer.et_pb_menu .et_mobile_menu,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db .pum .et-l .et_pb_menu_2_tb_footer.et_pb_menu .et_mobile_menu,.et-db .pum .et-l .et_pb_menu_2_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer.et_pb_menu .nav li ul,.et-db .pum .et-l .et_pb_menu_3_tb_footer.et_pb_menu .nav li ul,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer.et_pb_menu .et_mobile_menu,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db .pum .et-l .et_pb_menu_3_tb_footer.et_pb_menu .et_mobile_menu,.et-db .pum .et-l .et_pb_menu_3_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer.et_pb_menu .nav li ul,.et-db .pum .et-l .et_pb_menu_4_tb_footer.et_pb_menu .nav li ul,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer.et_pb_menu .et_mobile_menu,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db .pum .et-l .et_pb_menu_4_tb_footer.et_pb_menu .et_mobile_menu,.et-db .pum .et-l .et_pb_menu_4_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer.et_pb_menu .nav li ul,.et-db .pum .et-l .et_pb_menu_5_tb_footer.et_pb_menu .nav li ul,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer.et_pb_menu .et_mobile_menu,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer.et_pb_menu .et_mobile_menu ul,.et-db .pum .et-l .et_pb_menu_5_tb_footer.et_pb_menu .et_mobile_menu,.et-db .pum .et-l .et_pb_menu_5_tb_footer.et_pb_menu .et_mobile_menu ul{background-color:#ffffff!important}.et-db #et-boc .et-l .et_pb_menu_0_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db #et-boc .et-l .et_pb_menu_0_tb_footer .et_pb_menu__logo-slot,.et-db .pum .et-l .et_pb_menu_0_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db .pum .et-l .et_pb_menu_0_tb_footer .et_pb_menu__logo-slot,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer .et_pb_menu__logo-slot,.et-db .pum .et-l .et_pb_menu_1_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db .pum .et-l .et_pb_menu_1_tb_footer .et_pb_menu__logo-slot,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer .et_pb_menu__logo-slot,.et-db .pum .et-l .et_pb_menu_2_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db .pum .et-l .et_pb_menu_2_tb_footer .et_pb_menu__logo-slot,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer .et_pb_menu__logo-slot,.et-db .pum .et-l .et_pb_menu_3_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db .pum .et-l .et_pb_menu_3_tb_footer .et_pb_menu__logo-slot,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer .et_pb_menu__logo-slot,.et-db .pum .et-l .et_pb_menu_4_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db .pum .et-l .et_pb_menu_4_tb_footer .et_pb_menu__logo-slot,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer .et_pb_menu__logo-slot,.et-db .pum .et-l .et_pb_menu_5_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap,.et-db .pum .et-l .et_pb_menu_5_tb_footer .et_pb_menu__logo-slot{width:auto;max-width:100%}.et-db #et-boc .et-l .et_pb_menu_0_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db #et-boc .et-l .et_pb_menu_0_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db .pum .et-l .et_pb_menu_0_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db .pum .et-l .et_pb_menu_0_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db .pum .et-l .et_pb_menu_1_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db .pum .et-l .et_pb_menu_1_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db .pum .et-l .et_pb_menu_2_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db .pum .et-l .et_pb_menu_2_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db .pum .et-l .et_pb_menu_3_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db .pum .et-l .et_pb_menu_3_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db .pum .et-l .et_pb_menu_4_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db .pum .et-l .et_pb_menu_4_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img,.et-db .pum .et-l .et_pb_menu_5_tb_footer .et_pb_menu_inner_container>.et_pb_menu__logo-wrap .et_pb_menu__logo img,.et-db .pum .et-l .et_pb_menu_5_tb_footer .et_pb_menu__logo-slot .et_pb_menu__logo-wrap img{height:auto;max-height:none}.et-db #et-boc .et-l .et_pb_menu_0_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db .pum .et-l .et_pb_menu_0_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db #et-boc .et-l .et_pb_menu_0_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db #et-boc .et-l .et_pb_menu_0_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db .pum .et-l .et_pb_menu_0_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db .pum .et-l .et_pb_menu_0_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db #et-boc .et-l .et_pb_menu_0_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db .pum .et-l .et_pb_menu_0_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db .pum .et-l .et_pb_menu_1_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db .pum .et-l .et_pb_menu_1_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db .pum .et-l .et_pb_menu_1_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db #et-boc .et-l .et_pb_menu_1_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db .pum .et-l .et_pb_menu_1_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db .pum .et-l .et_pb_menu_2_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db .pum .et-l .et_pb_menu_2_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db .pum .et-l .et_pb_menu_2_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db #et-boc .et-l .et_pb_menu_2_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db .pum .et-l .et_pb_menu_2_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db .pum .et-l .et_pb_menu_3_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db .pum .et-l .et_pb_menu_3_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db .pum .et-l .et_pb_menu_3_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db #et-boc .et-l .et_pb_menu_3_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db .pum .et-l .et_pb_menu_3_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db .pum .et-l .et_pb_menu_4_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db .pum .et-l .et_pb_menu_4_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db .pum .et-l .et_pb_menu_4_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db #et-boc .et-l .et_pb_menu_4_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db .pum .et-l .et_pb_menu_4_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db .pum .et-l .et_pb_menu_5_tb_footer .mobile_nav .mobile_menu_bar:before,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db .pum .et-l .et_pb_menu_5_tb_footer .et_pb_menu__icon.et_pb_menu__search-button,.et-db .pum .et-l .et_pb_menu_5_tb_footer .et_pb_menu__icon.et_pb_menu__close-search-button,.et-db #et-boc .et-l .et_pb_menu_5_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button,.et-db .pum .et-l .et_pb_menu_5_tb_footer .et_pb_menu__icon.et_pb_menu__cart-button{color:#7EBEC5}.et-db #et-boc .et-l .et_pb_menu_1_tb_footer,.et-db .pum .et-l .et_pb_menu_1_tb_footer{padding-bottom:38px;margin-left:10px!important}.et-db #et-boc .et-l .et_pb_menu_2_tb_footer,.et-db .pum .et-l .et_pb_menu_2_tb_footer{margin-bottom:28px!important;margin-left:20px!important}.et-db #et-boc .et-l .et_pb_menu_3_tb_footer,.et-db .pum .et-l .et_pb_menu_3_tb_footer{margin-right:0px!important;margin-left:50px!important}.et-db #et-boc .et-l .et_pb_menu_4_tb_footer.et_pb_menu ul li a,.et-db .pum .et-l .et_pb_menu_4_tb_footer.et_pb_menu ul li a{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:300;color:#333333!important;letter-spacing:1px;line-height:0.5em}.et-db #et-boc .et-l .et_pb_menu_4_tb_footer.et_pb_menu,.et-db .pum .et-l .et_pb_menu_4_tb_footer.et_pb_menu{border-left-color:#d6d6d6}.et-db #et-boc .et-l .et_pb_menu_4_tb_footer,.et-db .pum .et-l .et_pb_menu_4_tb_footer{padding-left:0px;margin-top:2px!important;margin-right:0px!important;margin-left:50px!important}.et-db #et-boc .et-l .et_pb_menu_5_tb_footer.et_pb_menu ul li a,.et-db .pum .et-l .et_pb_menu_5_tb_footer.et_pb_menu ul li a{font-weight:300;font-size:15px;color:#222222!important;letter-spacing:1px;line-height:0.9em}.et-db #et-boc .et-l .et_pb_menu_5_tb_footer,.et-db .pum .et-l .et_pb_menu_5_tb_footer{padding-bottom:15px;margin-right:0px!important;margin-left:50px!important}.et-db #et-boc .et-l .et_pb_row_3_tb_footer,.et-db .pum .et-l .et_pb_row_3_tb_footer{border-top-width:1px;border-top-color:#bebebe}.et-db #et-boc .et-l .et_pb_row_3_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_3_tb_footer.et_pb_row{padding-top:0px!important;padding-bottom:0px!important;margin-top:10px!important;padding-top:0px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_text_7_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_7_tb_footer.et_pb_text{color:#666666!important}.et-db #et-boc .et-l .et_pb_text_7_tb_footer,.et-db .pum .et-l .et_pb_text_7_tb_footer{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:300;font-size:13px;padding-top:8px!important;padding-left:5px!important;margin-bottom:2px!important}.et-db #et-boc .et-l .et_pb_code_2_tb_footer,.et-db .pum .et-l .et_pb_code_2_tb_footer{height:&#8221;0px&#8221;;min-height:&#8221;0px&#8221;;max-height:&#8221;0px&#8221;;padding-top:0&#8221;px;padding-bottom:0px;margin-top:0&#8221;px!important;margin-bottom:0px!important;&#8221;padding-bottom:}.et-db #et-boc .et-l .et_pb_text_8_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_8_tb_footer.et_pb_text{color:#919191!important}.et-db #et-boc .et-l .et_pb_text_8_tb_footer,.et-db .pum .et-l .et_pb_text_8_tb_footer{font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:300;font-size:10px;padding-top:8px!important;padding-left:5px!important;margin-bottom:2px!important}.et-db #et-boc .et-l .et_pb_section_1_tb_footer.et_pb_section,.et-db .pum .et-l .et_pb_section_1_tb_footer.et_pb_section{padding-top:0px;padding-bottom:12px;margin-bottom:60px;background-color:#f9f9f9!important}.et-db #et-boc .et-l .et_pb_row_4_tb_footer,.et-db .pum .et-l .et_pb_row_4_tb_footer{border-top-width:0px;border-top-color:#FFFFFF}.et-db #et-boc .et-l .et_pb_row_4_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_4_tb_footer.et_pb_row{padding-top:12px!important;padding-bottom:0px!important;padding-top:12px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_text_9_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_9_tb_footer.et_pb_text{color:#7f7f7f!important}.et-db #et-boc .et-l .et_pb_text_9_tb_footer,.et-db .pum .et-l .et_pb_text_9_tb_footer{line-height:1.5em;font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:300;font-size:13px;letter-spacing:1px;line-height:1.5em;background-color:RGBA(0,0,0,0);margin-bottom:9px!important}.et-db #et-boc .et-l .et_pb_text_10_tb_footer.et_pb_text,.et-db .pum .et-l .et_pb_text_10_tb_footer.et_pb_text{color:#d8d8d8!important}.et-db #et-boc .et-l .et_pb_text_10_tb_footer,.et-db .pum .et-l .et_pb_text_10_tb_footer{line-height:8px;font-family:'Noto Sans TC',Helvetica,Arial,Lucida,sans-serif;font-weight:300;font-size:13px;letter-spacing:1px;line-height:8px;background-color:RGBA(0,0,0,0);padding-top:0px!important;padding-bottom:0px!important;margin-top:0px!important;margin-bottom:0px!important}.et-db #et-boc .et-l .et_pb_section_2_tb_footer,.et-db .pum .et-l .et_pb_section_2_tb_footer{border-top-width:1px;border-top-color:#e0e0e0;min-height:50px;position:fixed!important;bottom:0px;top:auto;left:50%;right:auto;transform:translateX(-50%);z-index:9999!important}.et-db #et-boc .et-l .et_pb_section_2_tb_footer.et_pb_section,.et-db .pum .et-l .et_pb_section_2_tb_footer.et_pb_section{padding-top:0px;padding-bottom:0px;margin-top:0px;margin-bottom:0px;background-color:rgba(255,255,255,0.95)!important}body.logged-in.admin-bar.et-db #et-boc .et-l .et_pb_section_2_tb_footer,body.logged-in.admin-bar.et-db .pum .et-l .et_pb_section_2_tb_footer{top:auto}.et-db #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_5_tb_footer.et_pb_row{padding-top:0px!important;padding-bottom:0px!important;margin-top:0px!important;margin-bottom:0px!important;padding-top:0px;padding-bottom:0px}.et-db #et-boc .et-l .et_pb_row_5_tb_footer,body.et-db #page-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,.et-db #et-boc .et-l .et_pb_row_5_tb_footer,body.et-db .pum-container .et-db #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_5_tb_footer,body.et-db #page-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,.et-db .pum .et-l .et_pb_row_5_tb_footer,body.et-db .pum-container .et-db .pum .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row,body.et_pb_pagebuilder_layout.single.et_full_width_page.et-db #page-container #et-boc .et-l #et-boc .et-l .et_pb_row_5_tb_footer.et_pb_row{width:100%;max-width:1200px}.et-db #et-boc .et-l .et_pb_row_5_tb_footer,.et-db .pum .et-l .et_pb_row_5_tb_footer{display:flex;flex-wrap:nowrap;flex-direction:row;align-items:center;justify-content:center}.et-db #et-boc .et-l .et_pb_code_8_tb_footer,.et-db .pum .et-l .et_pb_code_8_tb_footer{background-image:linear-gradient(302deg,#0080ff 0%,#00e7ff 100%);height:65px}.et-db #et-boc .et-l .et_pb_column_10_tb_footer,.et-db .pum .et-l .et_pb_column_10_tb_footer{border-right-color:#dcdcdc}.et-db #et-boc .et-l .et_pb_column_12_tb_footer,.et-db .pum .et-l .et_pb_column_12_tb_footer,.et-db #et-boc .et-l .et_pb_column_13_tb_footer,.et-db .pum .et-l .et_pb_column_13_tb_footer,.et-db #et-boc .et-l .et_pb_column_14_tb_footer,.et-db .pum .et-l .et_pb_column_14_tb_footer{border-left-width:1px;border-left-color:#dcdcdc}.et-db #et-boc .et-l .et_pb_column_15_tb_footer,.et-db .pum .et-l .et_pb_column_15_tb_footer{padding-bottom:0px}.et-db #et-boc .et-l .et_pb_code_0_tb_footer.et_pb_module,.et-db .pum .et-l .et_pb_code_0_tb_footer.et_pb_module{margin-left:auto!important;margin-right:0px!important}@media only screen and (min-width:981px){.et-db #et-boc .et-l .et_pb_section_1_tb_footer,.et-db .pum .et-l .et_pb_section_1_tb_footer,.et-db #et-boc .et-l .et_pb_section_2_tb_footer,.et-db .pum .et-l .et_pb_section_2_tb_footer{display:none!important}}@media only screen and (max-width:980px){.et-db #et-boc .et-l .et_pb_section_0_tb_footer.et_pb_section,.et-db .pum .et-l .et_pb_section_0_tb_footer.et_pb_section{padding-top:0px;padding-bottom:0px}body.logged-in.admin-bar.et-db #et-boc .et-l .et_pb_section_0_tb_footer,body.logged-in.admin-bar.et-db .pum .et-l .et_pb_section_0_tb_footer{top:0px}.et-db #et-boc .et-l .et_pb_section_0_tb_footer,.et-db .pum .et-l .et_pb_section_0_tb_footer{top:0px;bottom:auto;left:0px;right:auto}.et-db #et-boc .et-l .et_pb_image_0_tb_footer .et_pb_image_wrap img,.et-db .pum .et-l .et_pb_image_0_tb_footer .et_pb_image_wrap img{width:auto}.et-db #et-boc .et-l .et_pb_text_0_tb_footer,.et-db .pum .et-l .et_pb_text_0_tb_footer,.et-db #et-boc .et-l .et_pb_text_1_tb_footer,.et-db .pum .et-l .et_pb_text_1_tb_footer,.et-db #et-boc .et-l .et_pb_text_2_tb_footer,.et-db .pum .et-l .et_pb_text_2_tb_footer,.et-db #et-boc .et-l .et_pb_text_3_tb_footer,.et-db .pum .et-l .et_pb_text_3_tb_footer,.et-db #et-boc .et-l .et_pb_text_4_tb_footer,.et-db .pum .et-l .et_pb_text_4_tb_footer,.et-db #et-boc .et-l .et_pb_text_5_tb_footer,.et-db .pum .et-l .et_pb_text_5_tb_footer,.et-db #et-boc .et-l .et_pb_text_6_tb_footer,.et-db .pum .et-l .et_pb_text_6_tb_footer,.et-db #et-boc .et-l .et_pb_text_7_tb_footer,.et-db .pum .et-l .et_pb_text_7_tb_footer,.et-db #et-boc .et-l .et_pb_text_8_tb_footer,.et-db .pum .et-l .et_pb_text_8_tb_footer,.et-db #et-boc .et-l .et_pb_text_9_tb_footer,.et-db .pum .et-l .et_pb_text_9_tb_footer{font-size:14px}.et-db #et-boc .et-l .et_pb_row_2_tb_footer,.et-db .pum .et-l .et_pb_row_2_tb_footer{border-bottom-color:#3a3a3a}.et-db #et-boc .et-l .et_pb_menu_4_tb_footer.et_pb_menu,.et-db .pum .et-l .et_pb_menu_4_tb_footer.et_pb_menu{border-left-color:#d6d6d6}.et-db #et-boc .et-l .et_pb_row_3_tb_footer,.et-db .pum .et-l .et_pb_row_3_tb_footer{border-top-width:1px;border-top-color:#bebebe}.et-db #et-boc .et-l .et_pb_text_8_tb_footer h1,.et-db .pum .et-l .et_pb_text_8_tb_footer h1{font-size:40px;line-height:1.3em;letter-spacing:5px}.et-db #et-boc .et-l .et_pb_row_4_tb_footer,.et-db .pum .et-l .et_pb_row_4_tb_footer{border-top-width:0px;border-top-color:#FFFFFF}.et-db #et-boc .et-l .et_pb_text_10_tb_footer,.et-db .pum .et-l .et_pb_text_10_tb_footer{font-size:8px}.et-db #et-boc .et-l .et_pb_section_2_tb_footer,.et-db .pum .et-l .et_pb_section_2_tb_footer{border-top-width:1px;border-top-color:#e0e0e0}.et-db #et-boc .et-l .et_pb_column_10_tb_footer,.et-db .pum .et-l .et_pb_column_10_tb_footer{border-right-color:#dcdcdc}.et-db #et-boc .et-l .et_pb_column_12_tb_footer,.et-db .pum .et-l .et_pb_column_12_tb_footer,.et-db #et-boc .et-l .et_pb_column_13_tb_footer,.et-db .pum .et-l .et_pb_column_13_tb_footer,.et-db #et-boc .et-l .et_pb_column_14_tb_footer,.et-db .pum .et-l .et_pb_column_14_tb_footer{border-left-width:1px;border-left-color:#dcdcdc}}@media only screen and (min-width:768px) and (max-width:980px){.et-db #et-boc .et-l .et_pb_section_0_tb_footer,.et-db .pum .et-l .et_pb_section_0_tb_footer,.et-db #et-boc .et-l .et_pb_section_1_tb_footer,.et-db .pum .et-l .et_pb_section_1_tb_footer{display:none!important}}@media only screen and (max-width:767px){.et-db #et-boc .et-l .et_pb_section_0_tb_footer.et_pb_section,.et-db .pum .et-l .et_pb_section_0_tb_footer.et_pb_section{padding-top:0px;padding-bottom:0px}body.logged-in.admin-bar.et-db #et-boc .et-l .et_pb_section_0_tb_footer,body.logged-in.admin-bar.et-db .pum .et-l .et_pb_section_0_tb_footer{top:0px}.et-db #et-boc .et-l .et_pb_section_0_tb_footer,.et-db .pum .et-l .et_pb_section_0_tb_footer{top:0px;bottom:auto;left:0px;right:auto;display:none!important}.et-db #et-boc .et-l .et_pb_image_0_tb_footer .et_pb_image_wrap img,.et-db .pum .et-l .et_pb_image_0_tb_footer .et_pb_image_wrap img{width:auto}.et-db #et-boc .et-l .et_pb_text_0_tb_footer,.et-db .pum .et-l .et_pb_text_0_tb_footer,.et-db #et-boc .et-l .et_pb_text_1_tb_footer,.et-db .pum .et-l .et_pb_text_1_tb_footer,.et-db #et-boc .et-l .et_pb_text_2_tb_footer,.et-db .pum .et-l .et_pb_text_2_tb_footer,.et-db #et-boc .et-l .et_pb_text_3_tb_footer,.et-db .pum .et-l .et_pb_text_3_tb_footer,.et-db #et-boc .et-l .et_pb_text_4_tb_footer,.et-db .pum .et-l .et_pb_text_4_tb_footer,.et-db #et-boc .et-l .et_pb_text_5_tb_footer,.et-db .pum .et-l .et_pb_text_5_tb_footer,.et-db #et-boc .et-l .et_pb_text_6_tb_footer,.et-db .pum .et-l .et_pb_text_6_tb_footer,.et-db #et-boc .et-l .et_pb_text_7_tb_footer,.et-db .pum .et-l .et_pb_text_7_tb_footer,.et-db #et-boc .et-l .et_pb_text_8_tb_footer,.et-db .pum .et-l .et_pb_text_8_tb_footer,.et-db #et-boc .et-l .et_pb_text_9_tb_footer,.et-db .pum .et-l .et_pb_text_9_tb_footer{font-size:12px}.et-db #et-boc .et-l .et_pb_text_0_tb_footer h1,.et-db .pum .et-l .et_pb_text_0_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_1_tb_footer h1,.et-db .pum .et-l .et_pb_text_1_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_2_tb_footer h1,.et-db .pum .et-l .et_pb_text_2_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_3_tb_footer h1,.et-db .pum .et-l .et_pb_text_3_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_4_tb_footer h1,.et-db .pum .et-l .et_pb_text_4_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_5_tb_footer h1,.et-db .pum .et-l .et_pb_text_5_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_6_tb_footer h1,.et-db .pum .et-l .et_pb_text_6_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_7_tb_footer h1,.et-db .pum .et-l .et_pb_text_7_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_8_tb_footer h1,.et-db .pum .et-l .et_pb_text_8_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_9_tb_footer h1,.et-db .pum .et-l .et_pb_text_9_tb_footer h1,.et-db #et-boc .et-l .et_pb_text_10_tb_footer h1,.et-db .pum .et-l .et_pb_text_10_tb_footer h1{font-size:32px;line-height:1.2em;letter-spacing:2px}.et-db #et-boc .et-l .et_pb_row_2_tb_footer,.et-db .pum .et-l .et_pb_row_2_tb_footer{border-bottom-color:#3a3a3a}.et-db #et-boc .et-l .et_pb_menu_4_tb_footer.et_pb_menu,.et-db .pum .et-l .et_pb_menu_4_tb_footer.et_pb_menu{border-left-color:#d6d6d6}.et-db #et-boc .et-l .et_pb_row_3_tb_footer,.et-db .pum .et-l .et_pb_row_3_tb_footer{border-top-width:1px;border-top-color:#bebebe}.et-db #et-boc .et-l .et_pb_row_4_tb_footer,.et-db .pum .et-l .et_pb_row_4_tb_footer{border-top-width:0px;border-top-color:#FFFFFF}.et-db #et-boc .et-l .et_pb_text_10_tb_footer,.et-db .pum .et-l .et_pb_text_10_tb_footer{font-size:8px}.et-db #et-boc .et-l .et_pb_section_2_tb_footer,.et-db .pum .et-l .et_pb_section_2_tb_footer{border-top-width:1px;border-top-color:#e0e0e0}.et-db #et-boc .et-l .et_pb_column_10_tb_footer,.et-db .pum .et-l .et_pb_column_10_tb_footer{border-right-color:#dcdcdc}.et-db #et-boc .et-l .et_pb_column_12_tb_footer,.et-db .pum .et-l .et_pb_column_12_tb_footer,.et-db #et-boc .et-l .et_pb_column_13_tb_footer,.et-db .pum .et-l .et_pb_column_13_tb_footer,.et-db #et-boc .et-l .et_pb_column_14_tb_footer,.et-db .pum .et-l .et_pb_column_14_tb_footer{border-left-width:1px;border-left-color:#dcdcdc}}.et_pb_text_inner a{color:#333!important}.et_pb_text_inner a{color:#333!important}</style>	
+	</body>
+</html>
+
+
+<!-- Page supported by LiteSpeed Cache 7.8 on 2026-07-02 02:58:41 -->

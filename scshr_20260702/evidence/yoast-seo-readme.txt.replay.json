@@ -1,0 +1,32 @@
+{
+  "ts": "2026-07-01T19:04:48Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/wp-content/plugins/wordpress-seo/readme.txt",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 19115,
+    "sha1": "65e2b766a384bce0997db398cc6a10d7d09c4ae4",
+    "ctype": "text/plain; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 19:04:47 GMT",
+      "Content-Type": "text/plain; charset=UTF-8",
+      "Content-Length": "19115",
+      "Connection": "close",
+      "Last-Modified": "Tue, 23 Jun 2026 17:56:36 GMT",
+      "ETag": "\"4aab-654ef7af013d2\"",
+      "Accept-Ranges": "bytes",
+      "Vary": "Accept-Encoding",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "=== Yoast SEO - Advanced SEO with real-time guidance and built-in AI ===\nContributors: yoast, joostdevalk, tdevalk\nDonate link: https://yoa.st/1up\nLicense: GPLv3\nLicense URI: http://www.gnu.org/licenses/gpl.html\nTags: SEO, XML sitemap, Cont"
+  },
+  "saved_body": "scshr_20260702/evidence/yoast-seo-readme.txt"
+}

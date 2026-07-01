@@ -1,0 +1,32 @@
+{
+  "ts": "2026-07-01T19:10:34Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/wp-content/plugins/leadin/readme.txt",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 18713,
+    "sha1": "b470a25d1476bd62284079d1ea0fa60411820ffd",
+    "ctype": "text/plain; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 19:10:34 GMT",
+      "Content-Type": "text/plain; charset=UTF-8",
+      "Content-Length": "18713",
+      "Connection": "close",
+      "Last-Modified": "Tue, 23 Jun 2026 17:56:26 GMT",
+      "ETag": "\"4919-654ef7a56d946\"",
+      "Accept-Ranges": "bytes",
+      "Vary": "Accept-Encoding",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "=== HubSpot All-In-One Marketing - Forms, Popups, Live Chat ===\nContributors: HubSpotDev, leadin\nLicense: GPLv3\nLicense URI: http://www.gnu.org/licenses/gpl.html\nTags: CRM, Marketing, Live Chat, Forms, Analytics\nRequires at least: 5.8\nTeste"
+  },
+  "saved_body": "scshr_20260702/evidence/leadin-readme.txt"
+}

@@ -1,0 +1,30 @@
+{
+  "ts": "2026-07-01T19:49:04Z",
+  "request": {
+    "method": "GET",
+    "url": "https://yk50lan.scshr.com:12443/remote/hostcheck_validate",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 569,
+    "sha1": "3ab268b7b23b20483576edf09830c5b6fe9c3d16",
+    "ctype": "text/html; charset=utf-8",
+    "headers": {
+      "Date": "Wed, 01 Jul 2026 19:49:04 GMT",
+      "Server": "xxxxxxxx-xxxxx",
+      "Set-Cookie": "SVPNCOOKIE=; path=/; expires=Sun, 11 Mar 1984 12:00:00 GMT; secure; httponly; SameSite=Strict;",
+      "Content-Length": "569",
+      "Connection": "close",
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Frame-Options": "SAMEORIGIN",
+      "Content-Security-Policy": "frame-ancestors 'self'; object-src 'self'; script-src 'self' https   'unsafe-eval' 'unsafe-inline' blob:;",
+      "X-XSS-Protection": "1; mode=block",
+      "X-Content-Type-Options": "nosniff",
+      "Strict-Transport-Security": "max-age=31536000"
+    },
+    "snippet": "<!DOCTYPE html>\n<html><head><script>function fgt_sslvpn_logout(sid) {var cookies = document.cookie.split(';');for (var c = 0; c < cookies.length; ++c) {var one_c = cookies[0];var cookie_key = one_c.split('=')[0];cookie_key.trim();if (cookie"
+  },
+  "saved_body": "scshr_20260702/evidence/yk50lan-hostcheck.html"
+}
