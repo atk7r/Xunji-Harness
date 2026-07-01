@@ -8,6 +8,8 @@
 ## E-001
 
 - Maturity: phenomenon / candidate / finding
+- Reportable: yes / no (confirmed vuln→report; coverage/verdict→summary)
+- Superseded: (set when replaced by newer evidence)
 - Time:
 - Action:
 - Source:

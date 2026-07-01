@@ -217,6 +217,10 @@ def build_coverage(recon: dict, report_md: str | None = None) -> dict:
             "ownership": a.get("ownership"), "high_value": bool(a.get("is_high_value")),
             "category": a.get("category_id"), "reason": (a.get("reason") or "")[:120],
             "source": "guanlan",
+            # P0: Guanlan baseline + egress_recheck overlay
+            "source_reachability": reach,
+            "current_egress_reachability": None,
+            "verdict": None,
         })
     reachable_n = sum(1 for c in assets if c["reachable"] is True)
     return {"total": len(assets), "examined": 0, "reachable": reachable_n,

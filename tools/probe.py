@@ -20,17 +20,21 @@ It is a sender, not an exploiter. Proof, not extraction. Examples:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
+import shutil
 import ssl
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from harness import guard as guardmod  # noqa: E402
 from harness.guard import (RateLimiter, AuthFailCounter, cap_body,  # noqa: E402
                            RateBudgetExceeded, BruteforceLock,
                            HostHealth, HostBackoff, SessionBudget, SessionTripped)
@@ -74,6 +78,66 @@ def _opener(no_redirect: bool = False) -> urllib.request.OpenerDirector:
         handlers.append(_NoRedirect())          # build_opener 用它替换默认 HTTPRedirectHandler
     return urllib.request.build_opener(*handlers)
 
+
+@contextlib.contextmanager
+def selftest_isolation():
+    """Run local HTTP selftests with isolated guard state and no engagement proxy.
+
+    Real active tools must honor the persistent guard state and `proxy.conf`.
+    Local loopback regressions, however, need deterministic fixtures: a stale
+    localhost HostHealth/SessionBudget entry or a developer's gitignored
+    `proxy.conf` must not make the suite red.
+    """
+    tmp_root = Path(tempfile.mkdtemp())
+    old = (
+        _PROXY,
+        proxymod._CONF,
+        guardmod.STATE_DIR,
+        guardmod._LOCK_PATH,
+        os.environ.get("XUNJI_PROXY"),
+        os.environ.get("XUNJI_PROXY_REQUIRED"),
+    )
+    try:
+        os.environ.pop("XUNJI_PROXY", None)
+        os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+        globals()["_PROXY"] = None
+        proxymod._CONF = Path("__xunji_no_proxy_conf__")
+        guardmod.STATE_DIR = tmp_root / "guard_state"
+        guardmod.STATE_DIR.mkdir(parents=True, exist_ok=True)
+        guardmod._LOCK_PATH = guardmod.STATE_DIR / ".lock"
+        yield
+    finally:
+        (old_proxy, old_conf, old_state_dir, old_lock_path,
+         old_proxy_env, old_required_env) = old
+        globals()["_PROXY"] = old_proxy
+        proxymod._CONF = old_conf
+        guardmod.STATE_DIR = old_state_dir
+        guardmod._LOCK_PATH = old_lock_path
+        if old_proxy_env is None:
+            os.environ.pop("XUNJI_PROXY", None)
+        else:
+            os.environ["XUNJI_PROXY"] = old_proxy_env
+        if old_required_env is None:
+            os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+        else:
+            os.environ["XUNJI_PROXY_REQUIRED"] = old_required_env
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def _is_waf_block(headers: dict, body: bytes) -> bool:
+    """P1: 判断 403 是否为 WAF/策略拦截(非认证失败)。"""
+    body_str = body.decode("utf-8", "replace").lower()
+    waf_indicators = [
+        "waf", "blocked", "access denied", "request rejected",
+        "cloudfront", "akamai", "cloudflare", "imperva", "f5",
+        "rate limit", "too many requests", "challenge",
+    ]
+    server = headers.get("Server", "").lower()
+    if any(w in server for w in ["cloudfront", "cloudflare", "akamai"]):
+        return True
+    if any(w in body_str[:500] for w in waf_indicators):
+        return True
+    return False
 
 def send(method: str, url: str, headers: dict, data: bytes | None,
          auth_key: str | None, timeout: int, save: str | None = None,
@@ -121,9 +185,17 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
             if attempt < retry:
                 time.sleep(retry_wait)     # 瞬时超时/RST 重试(如本次 vpn)
     if last_err is not None:
-        hh.record_error(host)          # 传输错误: 累计, 达阈值即熔断该 host
+        hh.record_error(host)
+        # P1: classify transport error
+        err_lower = last_err.lower()
+        if 'ssl' in err_lower or 'tls' in err_lower or 'handshake' in err_lower:
+            transport_type = "cdn_tls_reject" if 'eof' in err_lower else "transport_error"
+        elif 'timeout' in err_lower or 'reset' in err_lower or 'refused' in err_lower or 'unreachable' in err_lower:
+            transport_type = "transport_error"
+        else:
+            transport_type = "transport_error"          # 传输错误: 累计, 达阈值即熔断该 host
         sb.record(0, count=attempts)   # 失败请求(含每次重试)都计入整场量, 防错误洪水绕过会话熔断
-        out = {**summary, "error": last_err}
+        out = {**summary, "error": last_err, "transport_error": True, "error_type": transport_type}
         if retry:
             out["attempts"] = retry + 1
         return out
@@ -146,7 +218,25 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         "ctype": resp_headers.get("Content-Type", ""),
         "server": resp_headers.get("Server", ""),
         "snippet": body[:240].decode("utf-8", "replace"),
+        # P1: 错误分类
+        "transport_error": False,
+        "application_error": False,
+        "auth_failure": False,
+        "blocked_by_policy": False,
+        "cdn_tls_reject": False,
     })
+    # P1: 分类 HTTP 响应
+    if status in (401,):
+        summary["auth_failure"] = True
+    if status in (403,):
+        if _is_waf_block(resp_headers, body):
+            summary["blocked_by_policy"] = True
+        else:
+            summary["auth_failure"] = True
+    if status in (429, 503):
+        summary["blocked_by_policy"] = True
+    if status >= 400 and not summary["auth_failure"] and not summary["blocked_by_policy"]:
+        summary["application_error"] = True
     if want_headers:
         # 完整响应头(Location/Set-Cookie 等), 分析跳转/会话/WAF 用。
         # dict(r.headers) 对重复 Set-Cookie 只留一个 -> 多 cookie(antiforgery+session)会丢;
@@ -198,78 +288,79 @@ def _selftest() -> int:
     import tempfile
     import threading
 
-    class H(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            if self.path.startswith("/redir"):
-                # 模拟登录成功: 302 跳转, 会话 cookie 设在【这一跳】上(跟随跳转会丢失它)
-                self.send_response(302)
-                self.send_header("Location", "/")
-                self.send_header("Set-Cookie", ".AspNet.ApplicationCookie=AUTH_TOKEN_XYZ; path=/; httponly")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            b = b"ok-body"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            # two distinct Set-Cookie headers, like ASP.NET Core (cleared external + antiforgery)
-            self.send_header("Set-Cookie", "Identity.External=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; httponly")
-            self.send_header("Set-Cookie", ".AspNetCore.Antiforgery.abc=CfDJ8_TOKEN; path=/; samesite=strict; httponly")
-            self.send_header("Content-Length", str(len(b)))
-            self.end_headers()
-            self.wfile.write(b)
-
-    srv = socketserver.TCPServer(("127.0.0.1", 0), H)
-    port = srv.server_address[1]
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
     checks: list[tuple[str, bool]] = []
-    try:
-        tmp = Path(tempfile.mkdtemp()) / "body.html"
-        d = send("GET", f"http://127.0.0.1:{port}/", {"Cookie": "sess=secret123"}, None, None, 5,
-                 save=str(tmp), want_headers=True)
-        sc = d.get("headers", {}).get("Set-Cookie", "")
-        cl = d.get("set_cookies", [])
-        checks.append(("status 200", d.get("status") == 200))
-        checks.append(("both Set-Cookie captured (set_cookies list)", len(cl) == 2))
-        checks.append(("Identity.External present in headers", "Identity.External" in sc))
-        checks.append(("antiforgery cookie regex-extractable",
-                       bool(_re.search(r"\.AspNetCore\.Antiforgery\.[^=]+=[^;]+", sc))))
-        checks.append(("--save wrote the body", tmp.is_file() and tmp.read_bytes() == b"ok-body"))
-        checks.append(("len/sha1 summarized", d.get("len") == 7 and bool(d.get("sha1"))))
-        # 操作录像: --save 同时写 <file>.replay.json(追加扩展名, 非 with_suffix)
-        rp = Path(str(tmp) + ".replay.json")
-        checks.append(("--save 写了 <file>.replay.json(追加不替换扩展名)", rp.is_file()))
-        checks.append(("文件名是 body.html.replay.json(非 body.replay.json, 防同 stem 覆盖)",
-                       rp.name == "body.html.replay.json"))
-        if rp.is_file():
-            rj = json.loads(rp.read_text(encoding="utf-8"))
-            hreq = json.dumps(rj["request"]["headers"])
-            hresp = json.dumps(rj["response"]["headers"])
-            checks.append(("replay 含请求 method/url",
-                           rj["request"]["method"] == "GET" and rj["request"]["url"].startswith("http")))
-            checks.append(("replay 含响应 status/全sha1",
-                           rj["response"]["status"] == 200 and len(rj["response"]["sha1"]) >= 40))
-            checks.append(("summary.sha1 == replay.sha1 前缀(截断一致)",
-                           d.get("sha1") == rj["response"]["sha1"][:12]))
-            checks.append(("请求头完整存(Cookie 原值在, 供重放认证请求)", "sess=secret123" in hreq))
-            checks.append(("响应头完整存(Set-Cookie 原值在, 不脱敏)", "Identity.External=" in hresp))
-            checks.append(("summary 引用 replay 路径", bool(d.get("replay"))))
-        # 认证流: --no-redirect 不跟随 302, 捕获【跳转那一跳】的 Set-Cookie(会话 cookie)
-        nr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5,
-                  want_headers=True, no_redirect=True)
-        nr_sc = "\n".join(nr.get("set_cookies", []))
-        checks.append(("--no-redirect 拿到 302(不跟随)", nr.get("status") == 302))
-        checks.append(("--no-redirect 捕获跳转上的会话 cookie",
-                       ".AspNet.ApplicationCookie=AUTH_TOKEN_XYZ" in nr_sc))
-        checks.append(("--no-redirect 响应头含 Location", nr.get("headers", {}).get("Location", "") == "/"))
-        # 对照: 默认跟随到 200, 会话 cookie 丢失(证明 --no-redirect 对认证流是必要的)
-        fr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5, want_headers=True)
-        checks.append(("默认跟随 -> 200 且会话 cookie 丢(故认证流需 --no-redirect)",
-                       fr.get("status") == 200 and "ApplicationCookie" not in "\n".join(fr.get("set_cookies", []))))
-    finally:
-        srv.shutdown()
+    with selftest_isolation():
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                if self.path.startswith("/redir"):
+                    # 模拟登录成功: 302 跳转, 会话 cookie 设在【这一跳】上(跟随跳转会丢失它)
+                    self.send_response(302)
+                    self.send_header("Location", "/")
+                    self.send_header("Set-Cookie", ".AspNet.ApplicationCookie=AUTH_TOKEN_XYZ; path=/; httponly")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                b = b"ok-body"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                # two distinct Set-Cookie headers, like ASP.NET Core (cleared external + antiforgery)
+                self.send_header("Set-Cookie", "Identity.External=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; httponly")
+                self.send_header("Set-Cookie", ".AspNetCore.Antiforgery.abc=CfDJ8_TOKEN; path=/; samesite=strict; httponly")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+
+        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            tmp = Path(tempfile.mkdtemp()) / "body.html"
+            d = send("GET", f"http://127.0.0.1:{port}/", {"Cookie": "sess=secret123"}, None, None, 5,
+                     save=str(tmp), want_headers=True)
+            sc = d.get("headers", {}).get("Set-Cookie", "")
+            cl = d.get("set_cookies", [])
+            checks.append(("status 200", d.get("status") == 200))
+            checks.append(("both Set-Cookie captured (set_cookies list)", len(cl) == 2))
+            checks.append(("Identity.External present in headers", "Identity.External" in sc))
+            checks.append(("antiforgery cookie regex-extractable",
+                           bool(_re.search(r"\.AspNetCore\.Antiforgery\.[^=]+=[^;]+", sc))))
+            checks.append(("--save wrote the body", tmp.is_file() and tmp.read_bytes() == b"ok-body"))
+            checks.append(("len/sha1 summarized", d.get("len") == 7 and bool(d.get("sha1"))))
+            # 操作录像: --save 同时写 <file>.replay.json(追加扩展名, 非 with_suffix)
+            rp = Path(str(tmp) + ".replay.json")
+            checks.append(("--save 写了 <file>.replay.json(追加不替换扩展名)", rp.is_file()))
+            checks.append(("文件名是 body.html.replay.json(非 body.replay.json, 防同 stem 覆盖)",
+                           rp.name == "body.html.replay.json"))
+            if rp.is_file():
+                rj = json.loads(rp.read_text(encoding="utf-8"))
+                hreq = json.dumps(rj["request"]["headers"])
+                hresp = json.dumps(rj["response"]["headers"])
+                checks.append(("replay 含请求 method/url",
+                               rj["request"]["method"] == "GET" and rj["request"]["url"].startswith("http")))
+                checks.append(("replay 含响应 status/全sha1",
+                               rj["response"]["status"] == 200 and len(rj["response"]["sha1"]) >= 40))
+                checks.append(("summary.sha1 == replay.sha1 前缀(截断一致)",
+                               d.get("sha1") == rj["response"]["sha1"][:12]))
+                checks.append(("请求头完整存(Cookie 原值在, 供重放认证请求)", "sess=secret123" in hreq))
+                checks.append(("响应头完整存(Set-Cookie 原值在, 不脱敏)", "Identity.External=" in hresp))
+                checks.append(("summary 引用 replay 路径", bool(d.get("replay"))))
+            # 认证流: --no-redirect 不跟随 302, 捕获【跳转那一跳】的 Set-Cookie(会话 cookie)
+            nr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5,
+                      want_headers=True, no_redirect=True)
+            nr_sc = "\n".join(nr.get("set_cookies", []))
+            checks.append(("--no-redirect 拿到 302(不跟随)", nr.get("status") == 302))
+            checks.append(("--no-redirect 捕获跳转上的会话 cookie",
+                           ".AspNet.ApplicationCookie=AUTH_TOKEN_XYZ" in nr_sc))
+            checks.append(("--no-redirect 响应头含 Location", nr.get("headers", {}).get("Location", "") == "/"))
+            # 对照: 默认跟随到 200, 会话 cookie 丢失(证明 --no-redirect 对认证流是必要的)
+            fr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5, want_headers=True)
+            checks.append(("默认跟随 -> 200 且会话 cookie 丢(故认证流需 --no-redirect)",
+                           fr.get("status") == 200 and "ApplicationCookie" not in "\n".join(fr.get("set_cookies", []))))
+        finally:
+            srv.shutdown()
     # 统一布局 _place_save: 裸文件名 + --run -> <run>/evidence/; 显式路径/无 --run 原样
     ps_bare = _place_save("ev_x.html", "runs/t_20260101")
     checks.append(("--run + 裸名 -> <run>/evidence/", Path(ps_bare) == Path("runs/t_20260101/evidence/ev_x.html")))

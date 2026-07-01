@@ -133,6 +133,26 @@ def adapt_coverage(recon_path: Path, run_dir: Path) -> str:
     return f"coverage.json ({cov['total']} 资产 / {cov['reachable']} 已确认可达, {src})"
 
 
+def _merge_egress_recheck(run_dir):
+    """P0: 合并 Guanlan baseline coverage + classify_hosts egress recheck overlay."""
+    import json as _json
+    cov_path = run_dir / "classify" / "coverage.json"
+    egress_path = run_dir / "classify" / "egress_coverage.json"
+    if not cov_path.exists() or not egress_path.exists():
+        return
+    cov = _json.loads(cov_path.read_text(encoding="utf-8"))
+    egress = _json.loads(egress_path.read_text(encoding="utf-8"))
+    egress_map = {a["host"]: a for a in egress.get("assets", [])}
+    for a in cov["assets"]:
+        h = a["host"]
+        if h in egress_map:
+            a["current_egress_reachability"] = egress_map[h].get("reachable")
+            if a["current_egress_reachability"] is True:
+                a["reachable"] = True
+    cov["source"] = "guanlan-baseline + egress-recheck-overlay"
+    cov_path.write_text(_json.dumps(cov, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="初始化授权目标 run 工作台(派生不驱动)")
     ap.add_argument("slug", nargs="?", help="目标短名 → run 目录 runs/<slug>_<date>")
@@ -191,15 +211,15 @@ def main() -> int:
         print("[setup] 无 recon: 自行填 target.md 范围。")
 
     if recon_ok and args.classify:
-        # 可选: 额外用【自己出口视角】实时探测复核存活/指纹(代理通了想核实时才用)。注意会【覆写】
-        # 上面 Guanlan 折好的 coverage(classify 不 merge), 是显式 opt-in 的重探。
-        print("[setup] --classify: 额外跑 classify_hosts 实时探测(覆写 Guanlan coverage; 仅需自出口存活复核时用)...")
+        # P0: classify_hosts 作为 egress_recheck 增量层, 不覆写 Guanlan baseline
+        print("[setup] --classify: 跑 classify_hosts 作 egress_recheck 增量...")
         cmd = [sys.executable, str(ROOT / "tools" / "classify_hosts.py"), str(rp),
-               "--out", str(run_dir / "classify")]
+               "--out", str(run_dir / "classify"), "--egress-recheck"]
         r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
         sys.stdout.write(r.stdout or "")
         if r.stderr:
             sys.stderr.write(r.stderr)
+        _merge_egress_recheck(run_dir)
 
     print(f"[下一步] 直接打可达高价值(coverage 已就位); 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
     return 0

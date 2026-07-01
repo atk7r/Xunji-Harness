@@ -1,5 +1,14 @@
 # Review
 
+## Independent Review
+
+> 独立复审记录。check_run 识别此标记 + 时间戳作为有效复审。peer_review.py 成功后自动写入。
+> 当 codex API 不可达时，driver 可手工填写此节。
+
+- Reviewer: (codex / deepseek / glm / manual-driver)
+- Time: (ISO timestamp)
+- Verdict: (PASS / WARN / BLOCKER)
+
 ## R-001
 
 - Time:
