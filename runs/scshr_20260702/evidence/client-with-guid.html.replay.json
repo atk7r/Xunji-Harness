@@ -1,0 +1,34 @@
+{
+  "ts": "2026-07-01T18:10:34Z",
+  "request": {
+    "method": "GET",
+    "url": "https://client.scshr.com/default.aspx?ParentUniqueGUID=def88fa4-65b0-43be-a884-2d177ef38835",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 4292,
+    "sha1": "f83d74bdf407d34e137ac779c7e28bd2faca1ece",
+    "ctype": "text/html; charset=utf-8",
+    "headers": {
+      "Content-Length": "4292",
+      "Connection": "close",
+      "Content-Type": "text/html; charset=utf-8",
+      "Date": "Wed, 01 Jul 2026 18:10:34 GMT",
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      "Expires": "0",
+      "Pragma": "no-cache",
+      "Set-Cookie": "ASP.NET_SessionId=8c46a1b5-0a07-45c6-8555-d0e647467fbc; path=/; HttpOnly; SameSite=Lax",
+      "Strict-Transport-Security": "max-age=31536000",
+      "X-Frame-Options": "SAMEORIGIN",
+      "X-XSS-Protection": "1; mode=block",
+      "X-Content-Type-Options": "nosniff",
+      "Permissions-Policy": "geolocation=(self), microphone=()",
+      "Referrer-Policy": "origin",
+      "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-ancestors 'self'; form-action 'self'"
+    },
+    "snippet": "\r\n\r\n<!DOCTYPE html>\r\n\r\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\r\n<head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" /><title>\r\n\t伺服端資訊\r\n</title><link href=\"/favicon.ico\" rel=\"shortcut icon\" type=\"image/x-ic"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/client-with-guid.html"
+}

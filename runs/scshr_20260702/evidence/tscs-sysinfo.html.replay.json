@@ -1,0 +1,30 @@
+{
+  "ts": "2026-07-01T18:10:55Z",
+  "request": {
+    "method": "GET",
+    "url": "https://tscs.scshr.com/",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 71,
+    "sha1": "1cf974b5cd014551fb7528aa9ddb0f1f0ca0ad2c",
+    "ctype": "text/html",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 18:10:55 GMT",
+      "Content-Type": "text/html",
+      "Content-Length": "71",
+      "Connection": "close",
+      "Last-Modified": "Tue, 10 Sep 2024 03:34:07 GMT",
+      "Accept-Ranges": "bytes",
+      "ETag": "\"1fdd814a323db1:0\"",
+      "X-Robots-Tag": "noindex, nofllow",
+      "X-Frame-Options": "SAMEORIGIN",
+      "Strict-Transport-Security": "max-age=31536000"
+    },
+    "snippet": "<html>\r\n<script>\r\nwindow.location.href= \"/SCSRwd/\";\r\n</script>\r\n</html>"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/tscs-sysinfo.html"
+}

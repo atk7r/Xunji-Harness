@@ -1,0 +1,107 @@
+
+
+<!DOCTYPE html>
+
+<html lang="zh-TW" xml:lang="zh-TW" xmlns="http://www.w3.org/1999/xhtml">
+<head><link rel="stylesheet" href="/DXR.axd?r=1_66,1_67,1_207,0_4834,0_4970,0_4973-Y9TPw&p=73782ba1" /><meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><meta name="viewport" content="width=device-width, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0" /><title>
+	錯誤訊息
+</title><link href="/favicon.ico" rel="shortcut icon" type="image/x-icon" /><link id="Controls.css" href="/Content/Controls.css?v=7.3.2026.0612" rel="stylesheet" type="text/css" /><link id="Customize.css" href="/Content/Customize.css?v=7.3.2026.0612" rel="stylesheet" type="text/css" /></head>
+<body>
+    <form method="post" action="./Error.aspx?ParentUniqueGUID=898ed3b0-d462-4d2e-99d5-34680d469ebf" id="form1">
+<div class="aspNetHidden">
+<input type="hidden" name="__RequestVerificationToken" id="__RequestVerificationToken" value="7d8d297c-2ab2-459c-a32a-246ffbac5d43" />
+<input type="hidden" name="__EVENTTARGET" id="__EVENTTARGET" value="" />
+<input type="hidden" name="__EVENTARGUMENT" id="__EVENTARGUMENT" value="" />
+<input type="hidden" name="__UNIQUEGUID" id="__UNIQUEGUID" value="574e1190-d16b-4e5b-bfc7-914e096a16cd" />
+<input type="hidden" name="__ROOTPATH" id="__ROOTPATH" value="/" />
+<input type="hidden" name="__LOGINCOMPANYID" id="__LOGINCOMPANYID" value="" />
+<input type="hidden" name="__VALUECHANGEID" id="__VALUECHANGEID" value="" />
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="" />
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+var theForm = document.forms['form1'];
+if (!theForm) {
+    theForm = document.form1;
+}
+function __doPostBack(eventTarget, eventArgument) {
+    if (!theForm.onsubmit || (theForm.onsubmit() != false)) {
+        theForm.__EVENTTARGET.value = eventTarget;
+        theForm.__EVENTARGUMENT.value = eventArgument;
+        theForm.submit();
+    }
+}
+//]]>
+</script>
+
+
+<script src="/WebResource.axd?d=pynGkmcFUV13He1Qd6_TZBv7gq7z7uponlQgMuf02bH8-Q-D_yoWs3kf43E_53o5A1q6ldmJPlEUz-KVtgbnLQ2&amp;t=638901526312636832" type="text/javascript"></script>
+
+
+<script src="/Scripts/jquery-3.6.0.min.js?v=7.3.2026.0612" type="text/javascript"></script>
+<script src="/Scripts/ais.webform.js?v=7.3.2026.0612" type="text/javascript"></script>
+<div class="aspNetHidden">
+
+	<input type="hidden" name="__SCROLLPOSITIONX" id="__SCROLLPOSITIONX" value="0" />
+	<input type="hidden" name="__SCROLLPOSITIONY" id="__SCROLLPOSITIONY" value="0" />
+	<input type="hidden" name="__EVENTVALIDATION" id="__EVENTVALIDATION" value="VW/fbKuAKPfXkoPeyu4IhKQjSqFl2Y5h8sUW205ZgL9/oNSGcyfm6yHx1szRH+/YagQ6tuwPd46LsR7eXhPYerbGaqJbAERHBUisYFm4sAtJZvoLghxxA2TBbuVQIgzC" />
+</div>
+        <div style="text-align: center">
+            <br />
+            <br />
+            <br />
+            <img alt="" src="Content/Images/Error.png" /><br />
+            <script id="dxis_322941483" src="/DXR.axd?r=1_9,1_10,1_253,1_21,1_62,1_11,1_12,1_13,1_15,1_39-X9TPw"></script><span class="dxeBase_Office365" id="lblMessage" style="color:Red;font-size:12pt;">網站發生錯誤，請聯絡系統管理員!</span>
+            <br />
+            <br />
+            
+            <br />
+            
+        </div>
+    <div id="popupHelper_PW-1" class="dxpcLite_Office365 dxpclW" style="height:325px;width:400px;z-index:10000;display:none;visibility:hidden;">
+	<div class="dxpc-mainDiv popupModal dxpc-shadow">
+		<div class="dxpc-header drag dxpc-withBtn" style="-webkit-user-select:none;">
+			<div class="dxpc-closeBtn">
+				<img class="dxWeb_pcCloseButton_Office365" src="/DXR.axd?r=1_87-X9TPw" alt="Close" />
+			</div><div class="dxpc-headerContent">
+				<span class="dxpc-headerText dx-vam"></span>
+			</div><b class="dx-clear"></b>
+		</div><div class="dxpc-contentWrapper">
+			<div class="dxpc-content" style="padding-left:0px;padding-right:0px;padding-top:0px;padding-bottom:0px;">
+				&nbsp;&nbsp;
+			</div>
+		</div>
+	</div>
+</div><div id="popupHelper_DXPWMB-1" class="dxpcModalBackLite_Office365" style="z-index:9999;">
+
+</div><table id="popupHelper_LP" class="dxpcLoadingPanel_Office365 dxlpLoadingPanel_Office365" style="left:0px;top:0px;z-index:30000;display:none;">
+	<tr>
+		<td class="dx" style="padding-right:0px;"><img class="dxlp-loadingImage dxlp-imgPosLeft" src="/DXR.axd?r=1_87-X9TPw" alt="" style="vertical-align:middle;" /></td><td class="dx" style="padding-left:0px;"><span id="popupHelper_TL">Loading&hellip;</span></td>
+	</tr>
+</table><div id="popupHelper_LD" class="dxpcLoadingDiv_Office365 dxlpLoadingDiv_Office365 dx-ft" style="left:0px;top:0px;z-index:29999;display:none;position:absolute;">
+
+</div><script id="dxss_795799583">
+<!--
+ASPx.AddHoverItems('popupHelper',[[['dxpc-closeBtnHover'],[''],['HCB-1']]]);
+ASPx.FillDocumentElementDXThemeCssClassName("Office365");
+ASPx.createControl(ASPxClientPopupControl,'popupHelper','',{'callBack':function(arg) { WebForm_DoCallback('popupHelper',arg,ASPx.Callback,'popupHelper',ASPx.CallbackError,true); },'popupAnimationType':'fade','allowResize':true,'closeAction':'CloseButton','closeOnEscape':true,'popupHorizontalAlign':'WindowCenter','popupVerticalAlign':'WindowCenter','isPopupPositionCorrectionOn':false,'allowDragging':true,'modal':true,'width':400,'widthFromServer':true,'height':325,'minHeight':280,'minWidth':310},{'Shown':$onPopupShown});
+
+//-->
+</script>
+
+<script type="text/javascript">
+//<![CDATA[
+
+var callBackFrameUrl='/WebResource.axd?d=beToSAE3vdsL1QUQUxjWdXbexAnvoRRVTh4GlHHR3XUKx-lpF7Rm1BoYB7LVAIL9DpG5gNil7HfLERi6RAfjFg2&t=638901526312636832';
+WebForm_InitCallback();
+theForm.oldSubmit = theForm.submit;
+theForm.submit = WebForm_SaveScrollPositionSubmit;
+
+theForm.oldOnSubmit = theForm.onsubmit;
+theForm.onsubmit = WebForm_SaveScrollPositionOnSubmit;
+//]]>
+</script>
+</form>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "ts": "2026-07-01T17:52:18Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/wp-json/wp/v2/media?per_page=5",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 24994,
+    "sha1": "aa11f5ef273095a949ef5314416514e49417ead2",
+    "ctype": "application/json; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 17:52:18 GMT",
+      "Content-Type": "application/json; charset=UTF-8",
+      "Transfer-Encoding": "chunked",
+      "Connection": "close",
+      "X-Powered-By": "PHP/8.2.26",
+      "Vary": "Accept-Encoding,Cookie,Origin",
+      "X-Robots-Tag": "noindex",
+      "Link": "<https://www.scshr.com/wp-json/wp/v2/media?per_page=5&page=2>; rel=\"next\"",
+      "X-Content-Type-Options": "nosniff",
+      "Access-Control-Expose-Headers": "X-WP-Total, X-WP-TotalPages, Link",
+      "Access-Control-Allow-Headers": "Authorization, X-WP-Nonce, Content-Disposition, Content-MD5, Content-Type",
+      "X-WP-Total": "3079",
+      "X-WP-TotalPages": "616",
+      "Allow": "GET",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "[{\"id\":39941,\"date\":\"2026-07-01T02:54:58\",\"date_gmt\":\"2026-06-30T18:54:58\",\"guid\":{\"rendered\":\"https:\\/\\/www.scshr.com\\/wp-content\\/uploads\\/2026\\/07\\/scshr-banner_202607.webp\"},\"modified\":\"2026-07-01T02:54:58\",\"modified_gmt\":\"2026-06-30T18"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/wp-media.html"
+}

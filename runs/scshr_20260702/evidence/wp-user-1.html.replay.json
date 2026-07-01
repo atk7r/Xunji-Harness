@@ -1,0 +1,35 @@
+{
+  "ts": "2026-07-01T17:34:29Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/wp-json/wp/v2/users/1",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 768,
+    "sha1": "803afc0df21683f0a4d4acff2820fb4de5dbc004",
+    "ctype": "application/json; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 17:34:29 GMT",
+      "Content-Type": "application/json; charset=UTF-8",
+      "Content-Length": "768",
+      "Connection": "close",
+      "X-Powered-By": "PHP/8.2.26",
+      "Vary": "Accept-Encoding,Cookie,Origin",
+      "X-Robots-Tag": "noindex",
+      "Link": "<https://www.scshr.com/wp-json/>; rel=\"https://api.w.org/\"",
+      "X-Content-Type-Options": "nosniff",
+      "Access-Control-Expose-Headers": "X-WP-Total, X-WP-TotalPages, Link",
+      "Access-Control-Allow-Headers": "Authorization, X-WP-Nonce, Content-Disposition, Content-MD5, Content-Type",
+      "Allow": "GET",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "{\"id\":1,\"name\":\"nick\",\"url\":\"http:\\/\\/192.168.8.221:8087\",\"description\":\"\",\"link\":\"https:\\/\\/www.scshr.com\\/author\\/nick\\/\",\"slug\":\"nick\",\"avatar_urls\":{\"24\":\"https:\\/\\/secure.gravatar.com\\/avatar\\/f6089ff86dd47affc9d8eed325767e8a195bd8a873"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/wp-user-1.html"
+}

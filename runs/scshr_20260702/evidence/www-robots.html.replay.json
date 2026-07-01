@@ -1,0 +1,32 @@
+{
+  "ts": "2026-07-01T17:52:35Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/robots.txt",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 789,
+    "sha1": "08f793e675be8d033ad78c1c165fd8cdf4050ea1",
+    "ctype": "text/plain; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 17:52:35 GMT",
+      "Content-Type": "text/plain; charset=UTF-8",
+      "Content-Length": "789",
+      "Connection": "close",
+      "Last-Modified": "Mon, 09 Mar 2026 06:01:52 GMT",
+      "ETag": "\"315-64c9123a1341b\"",
+      "Accept-Ranges": "bytes",
+      "Vary": "Accept-Encoding",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "# Soar Cloud HR (SCSHR)\r\n# HR SaaS platform in Taiwan\r\n# https://www.scshr.com\r\n# robots.txt for scshr.com\r\n# Optimized for SEO + AI Crawlers\r\n\r\nUser-agent: *\r\nAllow: /\r\n\r\n# WordPress admin\r\nDisallow: /wp-admin/\r\nAllow: /wp-admin/admin-ajax"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/www-robots.html"
+}

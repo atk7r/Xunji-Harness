@@ -1,0 +1,35 @@
+{
+  "ts": "2026-07-01T18:01:20Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/wp-json/code-snippets/v1/",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 9154,
+    "sha1": "e34b481cf19fd4743538ebdd64f984a0269d1c54",
+    "ctype": "application/json; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 18:01:20 GMT",
+      "Content-Type": "application/json; charset=UTF-8",
+      "Transfer-Encoding": "chunked",
+      "Connection": "close",
+      "X-Powered-By": "PHP/8.2.26",
+      "Vary": "Accept-Encoding,Cookie,Origin",
+      "X-Robots-Tag": "noindex",
+      "Link": "<https://www.scshr.com/wp-json/>; rel=\"https://api.w.org/\"",
+      "X-Content-Type-Options": "nosniff",
+      "Access-Control-Expose-Headers": "X-WP-Total, X-WP-TotalPages, Link",
+      "Access-Control-Allow-Headers": "Authorization, X-WP-Nonce, Content-Disposition, Content-MD5, Content-Type",
+      "Allow": "GET",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "{\"namespace\":\"code-snippets\\/v1\",\"routes\":{\"\\/code-snippets\\/v1\":{\"namespace\":\"code-snippets\\/v1\",\"methods\":[\"GET\"],\"endpoints\":[{\"methods\":[\"GET\"],\"args\":{\"namespace\":{\"default\":\"code-snippets\\/v1\",\"required\":false},\"context\":{\"default\":\"v"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/wp-codesnippets.html"
+}

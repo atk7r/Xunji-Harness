@@ -1,0 +1,530 @@
+{
+  "total": 15,
+  "confirmed": [],
+  "confirmed_findings": [],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001: WordPress REST API 用户枚举",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy http://127.0.0.1:7892",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy http://127.0.0.1:7892",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/wp-users.html",
+        "evidence/wp-user-1.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/wp-users.html",
+        "evidence/wp-user-1.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002: WordPress 内部 IP 泄露",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy http://127.0.0.1:7892",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy http://127.0.0.1:7892",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/wp-user-1.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/wp-user-1.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003: HR SaaS 统一 JSON-RPC API 端点暴露",
+      "certainties": [
+        0.3
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/schedule-api.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/schedule-api.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-002",
+        "F-005",
+        "F-006"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004: DevExpress ASP.NET 多租户架构 (GUID 路由)",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [],
+      "artifacts_scoped": true,
+      "artifacts_present": [],
+      "artifacts_missing": [],
+      "supports": [
+        "F-003",
+        "F-004"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005: IIS 裸机 — 无应用部署",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [],
+      "artifacts_scoped": true,
+      "artifacts_present": [],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-006",
+      "head": "## E-006: WordPress 插件枚举",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/wp-file-manager-readme.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/wp-file-manager-readme.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-007",
+      "head": "## E-007: FortiGate SSL VPN — Azure AD SAML SSO",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/yk50lan-saml.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/yk50lan-saml.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-103"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-008",
+      "head": "## E-008: .NET 类库文档公开暴露",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/api-help-namespace.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/api-help-namespace.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-002"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-009",
+      "head": "## E-009: WordPress REST API 完全开放",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/wp-json-root.html",
+        "evidence/wp-media.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/wp-json-root.html",
+        "evidence/wp-media.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-010",
+      "head": "## E-010: llms.txt AI 知识源泄露内部结构",
+      "certainties": [
+        0.3
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/www-llms.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/www-llms.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-011",
+      "head": "## E-011: WordPress 扩展插件 REST API 结构泄露",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/wp-codesnippets.html",
+        "evidence/wp-leadin.html",
+        "evidence/wp-litespeed.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/wp-codesnippets.html",
+        "evidence/wp-leadin.html",
+        "evidence/wp-litespeed.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-012",
+      "head": "## E-012: WordPress 用户枚举 (lostpassword 响应大小差异)",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [],
+      "artifacts_scoped": true,
+      "artifacts_present": [],
+      "artifacts_missing": [],
+      "supports": [
+        "E-001",
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-013",
+      "head": "## E-013: AIS 框架系统信息泄露 (schedule/cloud/client)",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/schedule-root.html",
+        "evidence/client-sysinfo.html",
+        "evidence/cloud-sysinfo.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/schedule-root.html",
+        "evidence/client-sysinfo.html",
+        "evidence/cloud-sysinfo.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-004",
+        "F-005",
+        "F-006"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    },
+    {
+      "id": "E-014",
+      "head": "## E-014: HR SaaS DevExpress 页面分析修正 (GUID + 隐藏字段)",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy + saved artifacts",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy + saved artifacts",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/client-default.html",
+        "evidence/ai-follow.html",
+        "evidence/schedule-root.html"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/client-default.html",
+        "evidence/ai-follow.html",
+        "evidence/schedule-root.html"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-004",
+        "F-006",
+        "F-008"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": false
+    },
+    {
+      "id": "E-015",
+      "head": "## E-015: Really Simple SSL v9.5.8 — CVE-2026-48970 未认证认证绕过",
+      "certainties": [
+        0.3
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "source": "probe.py via proxy + WordPress SVN 源码分析",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "probe.py via proxy + WordPress SVN 源码分析",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/rsssl-readme.txt",
+        "evidence/rsssl-9.5.8-settings.php",
+        "evidence/rsssl-9.5.10.1-settings.php"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/rsssl-readme.txt",
+        "evidence/rsssl-9.5.8-settings.php",
+        "evidence/rsssl-9.5.10.1-settings.php"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": true
+    }
+  ]
+}

@@ -92,12 +92,12 @@ These concrete anchors calibrate the four-level scale for the most common Xunji 
 
 | Scenario | Certainty | Why |
 |----------|-----------|-----|
-| Single observation / redirect / block page / timeout / environment artifact | ≤ 0.3 | Never confirmation on their own |
-| Version matches CVE but exploit path NOT verified (no PoC run, no target test) | 0.4 | Theoretical possibility only; AC:H CVEs default here |
-| Version matches CVE but exploit PRECONDITIONS confirmed NOT met on target | 0.2 | CVE exists but environment rules it out |
-| Version matches + exploit path determined (code analysis complete) but NOT run | 0.6 | Ready to test, not tested |
-| Version matches + PoC validated locally (off-target) | 0.7 | Works somewhere, not confirmed here |
-| Exploit executed on target + expected behavior observed + control verified | ≥ 0.8 | Confirmation gate — reportable |
+| Single observation / redirect / block page / timeout / environment artifact | 0.3 | Never confirmation on their own |
+| Version matches CVE but exploit path NOT verified (no PoC run, no target test) | 0.3 | Phenomenon only — theoretical possibility; AC:H CVEs default here |
+| Version matches CVE + exploit PRECONDITIONS confirmed NOT met on target | 0.3 | CVE exists but environment rules it out; report as phenomenon |
+| Version matches + exploit path determined (code analysis complete) but NOT run | 0.5 | Candidate — stronger signal, ready to test |
+| Version matches + PoC validated locally (off-target) | 0.5 | Candidate — works somewhere, not confirmed here |
+| Exploit executed on target + expected behavior observed + control verified | 0.8 | Confirmed — reportable |
 | Two independent methods confirm + control verified + artifact cross-check passed | 1.0 | Maximum certainty |
 
 Two discipline rules that apply to ALL entries (learned the hard way — ujs_20260619):
@@ -263,4 +263,4 @@ preconditions as a separate field (not folded into certainty):
 
 This prevents the "version matches CVE = confirmed vulnerability" error and
 gives the certainty rating a concrete basis. When preconditions are `not-met`,
-certainty MUST be ≤ 0.2 regardless of CVSS score.
+certainty MUST be ≤ 0.3 regardless of CVSS score.

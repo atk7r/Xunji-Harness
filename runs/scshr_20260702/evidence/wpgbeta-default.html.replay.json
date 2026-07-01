@@ -1,0 +1,27 @@
+{
+  "ts": "2026-07-01T17:59:45Z",
+  "request": {
+    "method": "GET",
+    "url": "https://wpgbeta.scshr.com/default.aspx",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "len": 1862,
+    "sha1": "4fcc0651f0348daf8b82d899be4124f81bec7b51",
+    "ctype": "text/html; charset=utf-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 17:59:45 GMT",
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Length": "1862",
+      "Connection": "close",
+      "Cache-Control": "private",
+      "X-AspNet-Version": "4.0.30319",
+      "X-Powered-By": "ASP.NET"
+    },
+    "snippet": "<!DOCTYPE html>\r\n<html>\r\n    <head>\r\n        <title>找不到資源。</title>\r\n        <meta name=\"viewport\" content=\"width=device-width\" />\r\n        <style>\r\n         body {font-family:\"Verdana\";font-weight:normal;font-size: .7em;color:bl"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/wpgbeta-default.html"
+}

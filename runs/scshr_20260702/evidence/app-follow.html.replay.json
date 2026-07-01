@@ -1,0 +1,36 @@
+{
+  "ts": "2026-07-01T17:33:25Z",
+  "request": {
+    "method": "GET",
+    "url": "https://app.scshr.com/",
+    "headers": {
+      "Accept": "text/html"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 5890,
+    "sha1": "8e2ad54e1168f72595d5b403bc18e2ca322ceedf",
+    "ctype": "text/html; charset=utf-8",
+    "headers": {
+      "Content-Length": "5890",
+      "Connection": "close",
+      "Content-Type": "text/html; charset=utf-8",
+      "Date": "Wed, 01 Jul 2026 17:33:25 GMT",
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      "Expires": "0",
+      "Pragma": "no-cache",
+      "Set-Cookie": "ASP.NET_SessionId=55313145-5a03-4a35-abaa-44a44814b856; path=/; HttpOnly; SameSite=Lax",
+      "Strict-Transport-Security": "max-age=31536000",
+      "X-Frame-Options": "SAMEORIGIN",
+      "X-XSS-Protection": "1; mode=block",
+      "X-Content-Type-Options": "nosniff",
+      "Permissions-Policy": "geolocation=(self), microphone=()",
+      "Referrer-Policy": "origin",
+      "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-ancestors 'self'; form-action 'self'"
+    },
+    "snippet": "\r\n\r\n<!DOCTYPE html>\r\n\r\n<html lang=\"zh-TW\" xml:lang=\"zh-TW\" xmlns=\"http://www.w3.org/1999/xhtml\">\r\n<head><link rel=\"stylesheet\" href=\"/DXR.axd?r=1_66,1_67,1_207,0_4834,0_4970,0_4973-Y9TPw&p=73782ba1\" /><meta http-equiv=\"Content-Type\" content"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/app-follow.html"
+}

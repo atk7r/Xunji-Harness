@@ -1,0 +1,28 @@
+{
+  "ts": "2026-07-01T17:27:35Z",
+  "request": {
+    "method": "GET",
+    "url": "https://wpgbeta.scshr.com",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 71,
+    "sha1": "de81d231292c964a9f5388bd0f69eb6ce3db4a1f",
+    "ctype": "text/html",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 17:27:35 GMT",
+      "Content-Type": "text/html",
+      "Content-Length": "71",
+      "Connection": "close",
+      "Last-Modified": "Mon, 23 Oct 2023 03:06:22 GMT",
+      "Accept-Ranges": "bytes",
+      "ETag": "\"0b9de65d5da1:0\"",
+      "X-Powered-By": "ASP.NET"
+    },
+    "snippet": "<html>\r\n<script>\r\nwindow.location.href= \"/scsrwd/\";\r\n</script>\r\n</html>"
+  },
+  "saved_body": "/Users/ccj/Documents/AI/Xunji/runs/scshr_20260702/evidence/wpgbeta.scshr.com_baseline.json"
+}

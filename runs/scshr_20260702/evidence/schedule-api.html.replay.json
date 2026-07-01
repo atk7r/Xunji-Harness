@@ -1,0 +1,33 @@
+{
+  "ts": "2026-07-01T17:37:35Z",
+  "request": {
+    "method": "GET",
+    "url": "https://schedule.scshr.com/api/",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 234,
+    "sha1": "d1b49aaf4ebf5559766d060048171bf369834a5b",
+    "ctype": "application/json; charset=utf-8",
+    "headers": {
+      "Content-Length": "234",
+      "Connection": "close",
+      "Content-Type": "application/json; charset=utf-8",
+      "Date": "Wed, 01 Jul 2026 17:37:34 GMT",
+      "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Origin": "*",
+      "Strict-Transport-Security": "max-age=31536000",
+      "X-Frame-Options": "SAMEORIGIN",
+      "X-XSS-Protection": "1; mode=block",
+      "X-Content-Type-Options": "nosniff",
+      "Permissions-Policy": "geolocation=(self), microphone=()",
+      "Referrer-Policy": "origin",
+      "Content-Security-Policy": "default-src 'self' data: 'unsafe-inline' 'unsafe-hashes' 'unsafe-eval'; frame-ancestors 'self'; form-action 'self'"
+    },
+    "snippet": "{\r\n  \"ObjectType\": \"\",\r\n  \"ProgID\": \"\",\r\n  \"Action\": \"\",\r\n  \"Format\": \"\",\r\n  \"Value\": \"\",\r\n  \"Exception\": {\r\n    \"Message\": \"Object reference not set to an instance of an object.\",\r\n    \"StackTrace\": \"\",\r\n    \"IsHandle\": false\r\n  }\r\n}"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/schedule-api.html"
+}

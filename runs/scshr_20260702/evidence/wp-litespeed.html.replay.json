@@ -1,0 +1,35 @@
+{
+  "ts": "2026-07-01T18:01:23Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/wp-json/litespeed/v1/",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 2143,
+    "sha1": "20e12bca8e4bc8305feb807e71de2494823659f0",
+    "ctype": "application/json; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 18:01:23 GMT",
+      "Content-Type": "application/json; charset=UTF-8",
+      "Content-Length": "2143",
+      "Connection": "close",
+      "X-Powered-By": "PHP/8.2.26",
+      "Vary": "Accept-Encoding,Cookie,Origin",
+      "X-Robots-Tag": "noindex",
+      "Link": "<https://www.scshr.com/wp-json/>; rel=\"https://api.w.org/\"",
+      "X-Content-Type-Options": "nosniff",
+      "Access-Control-Expose-Headers": "X-WP-Total, X-WP-TotalPages, Link",
+      "Access-Control-Allow-Headers": "Authorization, X-WP-Nonce, Content-Disposition, Content-MD5, Content-Type",
+      "Allow": "GET",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "{\"namespace\":\"litespeed\\/v1\",\"routes\":{\"\\/litespeed\\/v1\":{\"namespace\":\"litespeed\\/v1\",\"methods\":[\"GET\"],\"endpoints\":[{\"methods\":[\"GET\"],\"args\":{\"namespace\":{\"default\":\"litespeed\\/v1\",\"required\":false},\"context\":{\"default\":\"view\",\"required\":"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/wp-litespeed.html"
+}

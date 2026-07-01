@@ -1,0 +1,32 @@
+{
+  "ts": "2026-07-01T17:52:57Z",
+  "request": {
+    "method": "GET",
+    "url": "https://www.scshr.com/llms.txt",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 3243,
+    "sha1": "c2c7306684bc654576fac093aa39f6c2734c7b6a",
+    "ctype": "text/plain; charset=UTF-8",
+    "headers": {
+      "Server": "nginx/1.14.1",
+      "Date": "Wed, 01 Jul 2026 17:52:57 GMT",
+      "Content-Type": "text/plain; charset=UTF-8",
+      "Content-Length": "3243",
+      "Connection": "close",
+      "Last-Modified": "Fri, 20 Mar 2026 01:56:41 GMT",
+      "ETag": "\"cab-64d6aff0fefab\"",
+      "Accept-Ranges": "bytes",
+      "Vary": "Accept-Encoding",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)"
+    },
+    "snippet": "# SoarCloud (SCSHR) 飛騰雲端 - Taiwan's Leading Cloud HR & AI Compliance Platform\r\n\r\n> SoarCloud (飛騰雲端系統) is a premier HR SaaS provider in Taiwan. We offer scalable cloud HR systems for 30 to 1,000+ employees, covering payro"
+  },
+  "saved_body": "runs/scshr_20260702/evidence/www-llms.html"
+}
