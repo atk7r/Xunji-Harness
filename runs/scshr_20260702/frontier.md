@@ -1,8 +1,8 @@
 # Frontier
 
-> SharedBarrier groups: GUID-routing = [F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010] | barrier class = routing-layer | budget exhausted: 4 methods (enum/cross-host/external-leak/param-test)
+> SharedBarrier groups: GUID-routing = [F-003~F-010] | budget exhausted: 4 methods | all downgraded Type B
 >
-> 消费 Guanlan recon 2026-06-14 | 14 confirmed reachable | Proxy: http://127.0.0.1:7892 | D-011 框架修复 | 15 evidence | 0 confirmed
+> 消费 Guanlan recon 2026-06-14 | 14 confirmed reachable | Proxy: http://127.0.0.1:7892 | **FINAL — operator 收工** | 15 evidence | 0 confirmed
 
 ## Open Fronts
 
