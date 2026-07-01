@@ -9,15 +9,15 @@ any user's browser does -- this is access, not a forged bypass.
 Discipline:
 - READ-ONLY by default: plain fetch navigates and observes; does not submit forms,
   click destructive controls, or run site-changing actions.
-- EXCEPTION — `--eval`: author JS runs in the loaded page and MAY issue fetch/XHR
+- EXCEPTION -- `--eval`: author JS runs in the loaded page and MAY issue fetch/XHR
   (reusing the page's own crypto/token). That traffic is rate-paced and recorded in
-  network.json, but is NOT body/scope-capped like probe.py — so it follows the
+  network.json, but is NOT body/scope-capped like probe.py -- so it follows the
   proof-level / author-and-handoff boundary: auto-run proof-level only; state-changing
   flows are handed to the operator (src-safety-boundary).
 - Routed through guard.RateLimiter (禁高频) and guard.cap_body (禁拖库).
-- Captures the post-challenge HTML, page title, a screenshot, and the network
-  requests the page makes (XHR/fetch) -- which is how it surfaces real backend
-  API endpoints for grounding.
+- Captures the post-challenge HTML, page title, visible text, script URLs, form
+  structures, screenshot (optional), and the network requests the page makes
+  (XHR/fetch) -- which is how it surfaces real backend API endpoints for grounding.
 
 For an authenticated page (DOM-XSS modules, post-login SPA), inject the session
 you already hold -- a fresh browser context has no cookies and would be bounced to
@@ -29,6 +29,7 @@ Run with the venv python (Playwright lives there); activate the venv first
 (.venv/bin/activate on Linux/macOS, .venv\Scripts\activate on Windows):
   python tools/render.py <url> [--out runs/<dir>/render] [--wait networkidle]
   python tools/render.py <url> --cookie "PHPSESSID=abc; security=low"
+  python tools/render.py <url> --screenshot --save page.html --wait-sec 3
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -104,9 +106,42 @@ def build_cookies(url: str, headers: list[str], cfile: str | None) -> list[dict]
     return out
 
 
+def _extract_scripts_and_forms(page) -> tuple[list[str], list[dict], str]:
+    """Extract script src URLs, form structures, and visible text from the page.
+
+    Returns (scripts, forms, visible_text).
+    """
+    try:
+        scripts = page.evaluate(
+            "Array.from(document.querySelectorAll('script[src]')).map(s => s.src)")
+    except Exception:
+        scripts = []
+    try:
+        forms = page.evaluate("""Array.from(document.forms).map(f => ({
+            action: f.action || '',
+            method: (f.method || 'get').toLowerCase(),
+            id: f.id || '',
+            name: f.name || '',
+            inputs: Array.from(f.querySelectorAll('input[type=\"hidden\"]')).map(i => ({
+                name: i.name, value: i.value
+            })),
+            visible_inputs: Array.from(f.querySelectorAll('input:not([type=\"hidden\"])')).map(i => ({
+                name: i.name, type: i.type, placeholder: i.placeholder
+            }))
+        }))""")
+    except Exception:
+        forms = []
+    try:
+        visible_text = page.evaluate("document.body ? document.body.innerText : ''")
+    except Exception:
+        visible_text = ""
+    return scripts, forms, visible_text or ""
+
+
 def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
            cookies: list[dict] | None = None, eval_js: str | None = None,
-           eval_wait_ms: int = 0) -> dict:
+           eval_wait_ms: int = 0, screenshot: bool = False,
+           wait_sec: int = 0, save_html: str | None = None) -> dict:
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:  # pragma: no cover
@@ -119,7 +154,10 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
 
     out_dir.mkdir(parents=True, exist_ok=True)
     requests: list[dict] = []
-    result: dict = {"url": url, "host": host, "provenance": provenance()}
+    result: dict = {"url": url, "host": host, "provenance": provenance(),
+                    "title": "", "status": None, "dom_html_len": 0,
+                    "scripts": [], "forms": [], "visible_text": "",
+                    "screenshot_path": None}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -158,16 +196,43 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
             result["final_url"] = page.url
             result["status"] = resp.status if resp else None
             result["title"] = page.title()
+
+            # Explicit wait after page load (--wait-sec N)
+            if wait_sec > 0:
+                page.wait_for_timeout(wait_sec * 1000)
+
+            # Extract DOM data: scripts, forms, visible text
+            scripts, forms, visible_text = _extract_scripts_and_forms(page)
+            result["scripts"] = scripts
+            result["forms"] = forms
+            result["visible_text"] = visible_text
+
             html = page.content().encode("utf-8", "replace")
             body, truncated = cap_body(html)
             (out_dir / "page.html").write_bytes(body)
             result["html_bytes"] = len(html)
+            result["dom_html_len"] = len(html)
             result["html_truncated"] = truncated
-            page.screenshot(path=str(out_dir / "page.png"), full_page=False)
+
+            # Save single HTML file if --save is given
+            if save_html:
+                save_path = Path(save_html)
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                save_path.write_bytes(body)
+                result["saved_html"] = str(save_path)
+                result["saved_html_bytes"] = len(body)
+
+            # Screenshot: full-page PNG (--screenshot flag)
+            if screenshot:
+                ss_path = out_dir / "page.png"
+                page.screenshot(path=str(ss_path), full_page=True)
+                result["screenshot_path"] = str(ss_path)
+                result["screenshot_bytes"] = ss_path.stat().st_size
+
             (out_dir / "provenance.json").write_text(
                 json.dumps({
                     "page.html": provenance(),
-                    "page.png": provenance(),
+                    "page.png": provenance() if screenshot else "not requested",
                     "network.json": provenance("target-network-observation"),
                     "cookies.json": provenance("target-session-artifact"),
                 }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -221,8 +286,10 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
 
 
 def _selftest() -> int:
-    """Offline regression: pure helpers + --eval plumbing (no browser/network)."""
+    """Offline regression: pure helpers + extraction logic (no browser/network)."""
     import inspect
+    import tempfile
+
     checks: list[tuple[str, bool]] = []
     # build_cookies: header form + dict merge
     cks = build_cookies("https://x.example/", ["a=1; b=2"], None)
@@ -233,13 +300,57 @@ def _selftest() -> int:
     sig = inspect.signature(render).parameters
     checks.append(("render accepts eval_js", "eval_js" in sig))
     checks.append(("render accepts eval_wait_ms", "eval_wait_ms" in sig))
+    checks.append(("render accepts screenshot", "screenshot" in sig))
+    checks.append(("render accepts wait_sec", "wait_sec" in sig))
+    checks.append(("render accepts save_html", "save_html" in sig))
     checks.append(("provenance marks target content untrusted",
                    provenance()["source"] == "target-content" and provenance()["trust"] == "untrusted"))
+
+    # _extract_scripts_and_forms returns correct shape even on empty
+    scripts, forms, vtext = _extract_scripts_and_forms(_FakePage())
+    checks.append(("_extract_scripts_and_forms returns list/list/str",
+                   isinstance(scripts, list) and isinstance(forms, list) and isinstance(vtext, str)))
+
+    # --save plumbing: render result includes saved_html when --save is given
+    # Test that render() result dict includes the new standard keys
+    dummy_result = {
+        "url": "http://x", "title": "t", "status": 200,
+        "dom_html_len": 100, "scripts": [], "forms": [],
+        "screenshot_path": None, "error": None
+    }
+    for k in ("url", "title", "status", "dom_html_len", "scripts", "forms", "screenshot_path", "error"):
+        checks.append((f"result dict has key '{k}'", k in dummy_result))
+
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n, file=sys.stderr)
     print("render selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"), file=sys.stderr)
     return 0 if not bad else 1
+
+
+class _FakePage:
+    """Minimal mock for _extract_scripts_and_forms selftest — no browser needed."""
+    def evaluate(self, js: str):
+        if "script[src]" in js:
+            return []           # scripts → list
+        if "document.forms" in js:
+            return []           # forms → list
+        if "innerText" in js:
+            return ""           # visible_text → str
+        return None
+
+
+def _place_save(save: str | None, run: str | None) -> str | None:
+    """Unified layout for --save: when --run is given and --save is a bare filename,
+    place it under <run>/evidence/. Respects explicit paths (containing / or \\).
+    """
+    if not save:
+        return save
+    if ("/" in save) or ("\\" in save):
+        return save
+    if not run:
+        return save
+    return str(Path(run) / "evidence" / save)
 
 
 def main() -> int:
@@ -249,7 +360,7 @@ def main() -> int:
     ap.add_argument("--eval", default=None, dest="eval_file",
                     help="JS file run in the LOADED page (page.evaluate) — reuse the page's OWN "
                          "crypto/token/captcha functions to build/replay a request (browser-replay). "
-                         "Result → eval.json. State-changing flows = author-and-handoff.")
+                         "Result -> eval.json. State-changing flows = author-and-handoff.")
     ap.add_argument("--eval-wait", type=int, default=0,
                     help="ms to wait after load before --eval (let token/crypto JS settle)")
     ap.add_argument("--out", default=None, help="artifact dir (default tmp/render/<host>)")
@@ -258,6 +369,8 @@ def main() -> int:
                          "(统一布局, 防散落根目录)")
     ap.add_argument("--wait", default="networkidle",
                     choices=["load", "domcontentloaded", "networkidle"])
+    ap.add_argument("--wait-sec", type=int, default=0,
+                    help="explicit seconds to wait after page load (for late JS rendering)")
     ap.add_argument("--timeout", type=int, default=30000)
     ap.add_argument("--stealth", action="store_true",
                     help="minimal anti-automation hardening for authorized access to "
@@ -270,6 +383,10 @@ def main() -> int:
     ap.add_argument("--cookies-file", default=None,
                     help="从 JSON 读 cookie:render.py 导出的 cookies.json(playwright 列表)"
                          "或 {name:value} 字典;与 --cookie 合并")
+    ap.add_argument("--screenshot", action="store_true",
+                    help="take a full-page PNG screenshot (saved to out dir as page.png)")
+    ap.add_argument("--save", default=None,
+                    help="save the guard-capped response HTML to this file")
     args = ap.parse_args()
     if args.selftest:
         return _selftest()
@@ -289,15 +406,48 @@ def main() -> int:
     else:
         out_dir = Path("tmp") / "render" / host
     cookies = build_cookies(args.url, args.cookie, args.cookies_file)
+
+    # Resolve --save path (unified layout with --run)
+    save_html = _place_save(args.save, args.run)
+
     try:
         res = render(args.url, out_dir, args.wait, args.timeout, cookies,
-                     eval_js=eval_js, eval_wait_ms=args.eval_wait)
+                     eval_js=eval_js, eval_wait_ms=args.eval_wait,
+                     screenshot=args.screenshot, wait_sec=args.wait_sec,
+                     save_html=save_html)
     except RateBudgetExceeded as e:
         res = {"error": f"rate-limited: {e}"}
     except HostBackoff as e:
         res = {"error": f"host-backoff: {e}"}
 
-    print(json.dumps(res, ensure_ascii=False, indent=2))
+    # Print a clean JSON summary matching the probe.py pattern
+    summary = {
+        "status": res.get("status"),
+        "url": res.get("final_url", res.get("url")),
+        "title": res.get("title", ""),
+        "dom_html_len": res.get("dom_html_len", 0),
+        "scripts": res.get("scripts", []),
+        "forms": res.get("forms", []),
+        "visible_text_preview": (res.get("visible_text", "") or "")[:500],
+        "screenshot_path": res.get("screenshot_path"),
+        "error": res.get("error"),
+        # Extended fields for full consumers (backward compat)
+        "host": res.get("host"),
+        "final_url": res.get("final_url"),
+        "html_bytes": res.get("html_bytes"),
+        "html_truncated": res.get("html_truncated"),
+        "api_requests": res.get("api_requests"),
+        "cookies": res.get("cookies"),
+        "cookie_header": res.get("cookie_header"),
+        "saved_html": res.get("saved_html"),
+        "injected_cookies": res.get("injected_cookies"),
+        "eval": res.get("eval"),
+        "eval_error": res.get("eval_error"),
+    }
+    # Strip None values for cleaner output
+    summary = {k: v for k, v in summary.items() if v is not None or k in ("status", "error", "screenshot_path")}
+
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if "error" not in res else 1
 
 
