@@ -27,6 +27,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -111,11 +112,18 @@ def match_body(body_text: str, kb_dir: Path = KB) -> list:
     return hits
 
 
-def _print_entry(e: Entry, matched: "list | None" = None) -> None:
+def _ts_header() -> str:
+    """检索时刻时间戳 — 每次匹配输出前锚定当前时间。"""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _print_entry(e: Entry, matched: "list | None" = None, ts: str = "") -> None:
     print("=" * 72)
     print(f"  {e.product}  (id: {e.id} · maturity: {e.maturity})")
     if matched is not None:
         print(f"  命中签名 {len(matched)}/{len(e.sigs)}: {', '.join(matched)}")
+    if ts:
+        print(f"  检索时间: {ts}")
     print("=" * 72)
     print(grounding_body(e.path))
     print()
@@ -150,7 +158,8 @@ def main() -> int:
         if not e:
             print(f"[未命中] knowledge 无 id '{args.id}'。`--list` 看现有条目。", file=sys.stderr)
             return 1
-        _print_entry(e)
+        ts = _ts_header()
+        _print_entry(e, ts=ts)
         return 0
 
     if args.body:
@@ -164,16 +173,17 @@ def main() -> int:
                 print(f"[错误] body 文件不存在: {bp}", file=sys.stderr)
                 return 1
             body = bp.read_text(encoding="utf-8", errors="replace")
+        ts = _ts_header()
         hits = match_body(body, kb_dir)
         if not hits:
-            print("[无命中] 目标内容未匹配任何【已入库】指纹。")
+            print(f"[{ts}] 无命中 — 目标内容未匹配任何【已入库】指纹。")
             print("         识别出新产品? 顺手写回飞轮(别等收口): "
                   "python tools/knowledge_seed.py <id> --product <名> --from-body <本响应体>")
             print("         收口时在 report 申报 Fingerprints captured, 飞轮下次自动认。")
             return 0
-        print(f"[命中 {len(hits)} 条] 据目标指纹检索到以下接地条目(按目标定制利用, 勿盲跑):\n")
+        print(f"[{ts}] 命中 {len(hits)} 条 — 据目标指纹检索到以下接地条目(按目标定制利用, 勿盲跑):\n")
         for e, matched in hits:
-            _print_entry(e, matched)
+            _print_entry(e, matched, ts=ts)
         return 0
 
     ap.print_help()

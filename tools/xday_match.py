@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -86,12 +87,19 @@ def match(body_text: str, kb_dir: Path = KB, xday_dir: Path = XDAY,
     return out
 
 
-def _print_stores(kid: str, stores: list, matched_sigs: "list | None" = None) -> None:
+def _ts_header() -> str:
+    """检索时刻时间戳 — 每次匹配输出前锚定当前时间。"""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _print_stores(kid: str, stores: list, matched_sigs: "list | None" = None, ts: str = "") -> None:
     print("=" * 72)
     head = f"  本地 xday: knowledge id `{kid}`"
     if matched_sigs is not None:
         head += f"  (命中签名 {len(matched_sigs)}: {', '.join(matched_sigs)})"
     print(head)
+    if ts:
+        print(f"  检索时间: {ts}")
     print("=" * 72)
     for s in stores:
         if s["kind"] == "poc":
@@ -138,7 +146,7 @@ def main() -> int:
         if kid not in stores:
             print(f"[无本地 xday] knowledge id '{kid}' 没有本地存货。`--list` 看现有。", file=sys.stderr)
             return 1
-        _print_stores(kid, stores[kid])
+        _print_stores(kid, stores[kid], ts=_ts_header())
         return 0
 
     if args.body:
@@ -151,14 +159,15 @@ def main() -> int:
                 print(f"[错误] body 文件不存在: {bp}", file=sys.stderr)
                 return 1
             body = bp.read_text(encoding="utf-8", errors="replace")
+        ts = _ts_header()
         hits = match(body)
         if not hits:
-            print("[无本地 xday 命中] 目标指纹未匹配到【有本地存货】的栈。")
+            print(f"[{ts}] 无本地 xday 命中 — 目标指纹未匹配到【有本地存货】的栈。")
             print("  (栈是公开漏洞 → 用 knowledge_match 取锚点 + 上网造; 是新 xday → 打穿后存进 poc_library/xday/ 喂飞轮)")
             return 0
-        print(f"[命中 {len(hits)} 个有本地 xday 的栈]:\n")
+        print(f"[{ts}] 命中 {len(hits)} 个有本地 xday 的栈:\n")
         for kid, sigs, stores in hits:
-            _print_stores(kid, stores, sigs)
+            _print_stores(kid, stores, sigs, ts=ts)
         return 0
 
     ap.print_help()

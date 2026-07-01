@@ -87,6 +87,7 @@ BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
     "自主驱动: safe 前沿还在就别停下问(会话长/已解决障碍/选下一类 都不是停止理由)",
     "Reason pass: 每轮先重读整个 frontier.md(所有 open+deferred 前沿)再选 — 防隧道视野",
     "回合协议: 结尾只允许「下一行动: <具体action>」或「BLOCKED: <外部依赖>」; 禁止 ? / 是否 / 继续还是",
+    "漏洞检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 查 CVE/CNVD/漏洞前, 必须先 python tools/timestamp_gate.py 获取当前时间, query/URL 必须包含当前年份约束, 严禁凭模型记忆编造未验证年份的 CVE 编号",
 ]
 BINDING_RULES_TIER3 = [   # BOTTOM: 约束速查 — placed at recency position
     "消费 Guanlan、跳过不可达; 不重做 OSINT / 不建 egress·relay·重探",
@@ -95,6 +96,7 @@ BINDING_RULES_TIER3 = [   # BOTTOM: 约束速查 — placed at recency position
     "阶段检查点: Driver/Hunter/Reviewer 每批产出后自动触发 peer_review --into-run, codex BLOCKER 先修再继续",
     "任何代码/文档修改必须经过 codex 复审; codex 必须走专用代理(CODEX_PROXY)",
     "不过度工程(画蛇添足); 能进代码闸门的别写 prose · 中文回答",
+    "引用 CVE 编号前验证其发布年份 ≤ 当前年份; 检索时 query 必须带年份(如 2026); 拿到的 CVE 用 WebFetch 验证 NVD 页面确认发布时间",
 ]
 
 # Output drift patterns — driver response containing any of these = protocol violation.
