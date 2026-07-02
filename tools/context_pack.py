@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -215,13 +216,47 @@ def _load_front_constraints(run_dir: Path, front_id: str) -> list[dict]:
             continue
         constraints.append({
             "id": cid,
-            "front": c_front,
             "mechanism_class": _field(block, "Mechanism class"),
             "input_shape": _field(block, "Input shape"),
             "why_blocked": _field(block, "Why blocked"),
             "ruled_out": _field(block, "Ruled out"),
         })
     return constraints
+
+
+def _load_cross_run_context(run_dir: Path, front_id: str) -> list[str]:
+    """提取该 front 的 barrier class 在历史 run 中的表现, 返回 context 行列表。"""
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return []
+    fr_text = fr.read_text(encoding="utf-8", errors="replace")
+
+    # 找到该 front 的 barrier class
+    barrier_class = ""
+    fm = re.search(rf"(?ms)^###[ \t]+{re.escape(front_id)}\b.*?(?=^###[ \t]+F-\d+|\Z)", fr_text)
+    if fm:
+        barrier_class = _field(fm.group(0), "Barrier class")
+    if not barrier_class or barrier_class == "none":
+        return []
+
+    # 归一化后调用 cross_run.py --barrier
+    import subprocess
+    cross_run_script = str(ROOT / "tools" / "cross_run.py")
+    try:
+        result = subprocess.run(
+            [sys.executable, cross_run_script, "--barrier", barrier_class],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return []
+        output = result.stdout.strip()
+        if not output or "未找到 barrier class" in output:
+            return []
+        # 截取前 30 行, 避免 context 膨胀
+        lines_out = output.splitlines()[:30]
+        return lines_out
+    except Exception:
+        return []
 
 
 def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
@@ -273,6 +308,13 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
                    "Do NOT retry these unless you have a materially different approach:"]
         for c in constraints:
             lines.append(f"- [{c['id']}] {c['mechanism_class']} on {c['input_shape']}: {c['ruled_out']}")
+
+    # 跨运行经验: 该 front 的 barrier class 在历史 run 中的表现
+    cross_run_context = _load_cross_run_context(run_dir, front)
+    if cross_run_context:
+        lines += ["", "## Cross-Run Experience (Historical Barrier Data)"]
+        lines.append("This barrier class has been encountered in previous runs. Learn from history:")
+        lines.extend(cross_run_context)
 
     lines += ["", "## Relevant Evidence"]
     lines.extend(evidence_matches or ["- (no E-block explicitly mentions this front id)"])
