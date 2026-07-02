@@ -1,0 +1,13 @@
+{
+  "name": "example-dvwa-sqli",
+  "run": "sample_run",
+  "note": "合成的 DVWA 风格样例(非真实目标), 演示 schema + bench 随附回归样本。",
+  "expected_findings": [
+    {"id": "sqli-union", "markers": ["sql injection", "union"], "min_certainty": 0.8},
+    {"id": "xss-reflected", "markers": ["reflected xss"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "login-page-present", "markers": ["login page present"]}
+  ],
+  "budget": {"max_requests": 100}
+}

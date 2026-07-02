@@ -1,0 +1,12 @@
+{
+  "name": "injection-nosql-filter",
+  "run": "sample_run",
+  "note": "Synthetic injection fixture using differential response markers.",
+  "expected_findings": [
+    {"id": "nosql-filter-injection", "markers": ["nosql injection", "filter", "differential"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "normal-search", "markers": ["behavior only"]}
+  ],
+  "budget": {"max_requests": 8}
+}

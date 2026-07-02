@@ -1,0 +1,12 @@
+{
+  "name": "upload-path-control",
+  "run": "sample_run",
+  "note": "Synthetic upload/path fixture.",
+  "expected_findings": [
+    {"id": "upload-path-control", "markers": ["upload", "path control", "cleanup"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "randomized-name", "markers": ["safe endpoint"]}
+  ],
+  "budget": {"max_requests": 12}
+}

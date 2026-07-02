@@ -1,0 +1,12 @@
+{
+  "name": "path-traversal-download",
+  "run": "sample_run",
+  "note": "Synthetic path traversal fixture using fixture-owned files.",
+  "expected_findings": [
+    {"id": "download-path-traversal", "markers": ["path traversal", "download", "fixture-owned"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "public-download", "markers": ["expected static file"]}
+  ],
+  "budget": {"max_requests": 8}
+}

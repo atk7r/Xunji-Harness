@@ -1,0 +1,267 @@
+{
+  "_comment": "Deterministic deny rules for the PreToolUse safety hook. This gates ONLY what the driver AUTO-EXECUTES via Bash; it never limits exploitation code the driver authors for the operator to run (author-and-handoff). Gate is on EFFECTS, not methods: scope/domain and technique/payload are intentionally NOT restricted - only never-justified, irreversible / harm-as-purpose effect categories are blocked (destruction, 拖库/dump, DoS, money, harm-as-goal payloads). Each rule blocks a Bash command when its regex matches (case-insensitive, against the raw command string). Edit/extend freely; the hook falls back to built-in defaults if this file is missing or invalid.",
+  "rules": [
+    {
+      "category": "destructive",
+      "pattern": "\\brm(?:\\s+-{1,2}[a-z-]+)*\\s+-{1,2}[a-z]*[rf][a-z]*(?:\\s+-{1,2}[a-z-]+)*\\s+[\\\"']?(?:/(?:(?:[\\s;&|)'\\\"]|$)|\\*)|~(?:/[^\\s;&|)'\\\"]*)?(?:[\\s;&|)'\\\"]|$)|\\$HOME\\b|/(?:bin|sbin|boot|dev|etc|lib|lib64|proc|root|sys|usr|var|home|opt|srv|mnt)(?:/[^/\\s;&|)'\\\"]+)?(?:(?:[\\s;&|)'\\\"]|$)|/?\\*)|/[a-z](?:(?:[\\s;&|)'\\\"]|$)|/\\*)|[a-z]:(?:/|(?:[\\s;&|)'\\\"]|$))|(?:\\.\\.?|\\*|\\./\\*)(?:[\\s;&|)'\\\"]|$))",
+      "reason": "recursive/forced deletion of a CATASTROPHIC target (root / home / system dir / drive root / bare * . ..); repo-relative deletes fall through to the ask/allow flow"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\brm(?:\\s+-{1,2}[a-z-]+)*\\s+-{1,2}[a-z]*[rf][a-z]*(?:\\s+-{1,2}[a-z-]+)*\\s+[\"']?(?:/data\\b|/backups?\\b|/var/(?:lib|www)\\b|/home/[^/\\s\"']+/[^\\s\"'])",
+      "reason": "recursive/forced rm of a DATA directory (/data, /backup(s), /var/lib, /var/www, /home/<user>/<deep>) -- irreversible data loss the catastrophic-path rule above misses (it only matches one level deep on listed system dirs). Closes the F5 gap from the 2026-06-15 hook review."
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\A(?=[\\s\\S]*['\"][^'\"]*\\brm\\s+-{1,2}[a-z]*[rf])(?=[\\s\\S]*(?:https?|ftp)://)",
+      "reason": "destructive rm -rf SHIPPED TO A TARGET as a payload (a quoted rm -rf inside a request, alongside a URL) -- destroying target data is never a proof step. Narrowed from the old any-rm-co-located-with-any-URL form (which false-fired on a STANDALONE local scratch rm that merely shared a line with a probe URL); the rm -rf must now appear INSIDE a quoted string (i.e. injected as data). Catastrophic local rm is still covered by the root/system-path rule above; benign repo-relative rm falls through to ask/allow."
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\brmdir\\s+/s",
+      "reason": "recursive directory deletion (rmdir /s)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bdel\\s+/[sq]",
+      "reason": "recursive/quiet file deletion (del /s|/q)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "remove-item\\b[^|;\\n]*-recurse",
+      "reason": "recursive deletion (Remove-Item -Recurse)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bmkfs\\b",
+      "reason": "filesystem format (mkfs)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bformat\\s+[a-z]:",
+      "reason": "drive format"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bdd\\s+if=",
+      "reason": "raw disk write (dd if=)"
+    },
+    {
+      "category": "destructive",
+      "pattern": ">\\s*/dev/sd[a-z]",
+      "reason": "raw block-device overwrite"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bdd\\b[^|;\\n]*\\bof=\\s*/dev/(?:sd|nvme|vd|hd|mapper|disk)",
+      "reason": "raw write to a disk device (dd of=/dev/...)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\b(?:vssadmin|wbadmin)\\b[^|;\\n]*\\bdelete\\b|\\bwmic\\b[^|;\\n]*shadowcopy[^|;\\n]*\\bdelete\\b",
+      "reason": "ransomware-style backup/shadow-copy destruction (vssadmin/wbadmin/wmic delete shadows) -- harm-as-purpose, never auto"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bshred\\b|\\bsdelete\\b|\\bcipher\\s+/w|\\bwipefs\\b|\\bblkdiscard\\b|\\bscrub\\s+(?:-{1,2}[a-zA-Z]|/dev/)",
+      "reason": "secure-wipe / overwrite destruction (shred/sdelete/cipher /w/wipefs/blkdiscard, and the scrub disk-wipe tool when invoked on a device/with flags) -- irreversible, never auto. Narrowed scrub from bare \\bscrub\\b (which false-fired on the English word 'scrub' and on read-only zpool/btrfs scrub) to scrub with a flag or /dev/ target"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\baz\\b[^|;\\n]*\\bdelete\\b",
+      "reason": "Azure resource deletion (az ... delete)"
+    },
+    {
+      "category": "destructive",
+      "pattern": ":\\(\\)\\s*\\{\\s*:\\|:",
+      "reason": "fork bomb"
+    },
+    {
+      "category": "destructive",
+      "pattern": "(?:^|\\n|;|&&|\\|\\||\\bsudo\\s+)\\s*(?:/\\S+/)?(?:systemctl\\s+(?:--\\S+\\s+)*)?(?:shutdown|reboot|halt|poweroff)\\b(?!\\s*\\()",
+      "reason": "host shutdown/reboot/halt/poweroff at COMMAND POSITION (line start, newline, after ;/&&/||, optional sudo), incl. absolute-path (/sbin/shutdown) and systemctl forms (systemctl poweroff/reboot/halt). Narrowed from bare \\b(shutdown|…)\\b which false-fired on the word as DATA: method calls (srv.shutdown(), logging.shutdown()), grep/echo args (grep 'shutdown|reboot', echo shutdown), URL params (?x=1&shutdown=now). Single | and single & are NOT separators (you never pipe-into or URL-param a real shutdown). Accepted gaps (recoverable effect, evasion-shaped): bash -c \"shutdown\", cmd & shutdown."
+    },
+    {
+      "category": "destructive",
+      "pattern": "(?:^|\\n|;|&&|\\|\\||\\bsudo\\s+)\\s*(?:/\\S+/)?(?:tel)?init\\s+[06]\\b",
+      "reason": "runlevel halt/reboot via init/telinit (init 0 = halt, init 6 = reboot) at command position; requires the literal runlevel digit so it does not fire on 'git init' / npm init / __init__"
+    },
+    {
+      "category": "destructive",
+      "pattern": "(?:^|\\n|;|&&|\\|\\|)\\s*(?:Stop|Restart)-Computer\\b",
+      "reason": "Windows host shutdown/restart (Stop-Computer / Restart-Computer) at COMMAND POSITION (line start, newline, after ;/&&/||) -- native PowerShell host power control; recoverable but disruptive, never auto. Command-position-anchored (like the shutdown rule) so the cmdlet name as DATA (echo/grep/docs) does not false-fire. Accepted gaps (recoverable + evasion-shaped, symmetric to the shutdown rule): scriptblock / Invoke-Command (&{Restart-Computer}, Invoke-Command -ScriptBlock {...}), single-pipe (X | Restart-Computer -- note PS does accept pipeline input here), call-operator (& Restart-Computer), single-& background."
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bdrop\\s+(database|table|schema|user|role|index|view|trigger)\\b",
+      "reason": "schema/data destruction (DROP DATABASE/TABLE/SCHEMA/USER/ROLE/INDEX/VIEW)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\btruncate\\s+(table\\s+)?\\w",
+      "reason": "table data wipe (TRUNCATE)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bdelete\\s+from\\b(?!.*\\bwhere\\b)",
+      "reason": "unscoped row deletion (DELETE FROM without WHERE)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bupdate\\s+\\w+\\s+set\\b(?!.*\\bwhere\\b)",
+      "reason": "unscoped row update (UPDATE without WHERE)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\balter\\s+table\\b[^|;\\n]*\\bdrop\\b",
+      "reason": "column/constraint destruction (ALTER TABLE ... DROP)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\b(flushall|flushdb)\\b",
+      "reason": "Redis full wipe (FLUSHALL/FLUSHDB)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\b(dropdatabase|dropcollection)\\s*\\(",
+      "reason": "NoSQL database/collection drop"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\.drop\\s*\\(\\s*\\)",
+      "reason": "NoSQL collection drop (.drop())"
+    },
+    {
+      "category": "destructive",
+      "pattern": "deletemany\\s*\\(\\s*\\{\\s*\\}",
+      "reason": "NoSQL delete-all (deleteMany({}))"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bfind\\b[^|;\\n]*\\s-delete\\b",
+      "reason": "mass file deletion (find -delete)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bfind\\b[^|;\\n]*-exec\\s+rm\\b",
+      "reason": "mass file deletion (find -exec rm)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bterraform\\s+destroy\\b",
+      "reason": "infrastructure teardown (terraform destroy)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bkubectl\\s+delete\\b",
+      "reason": "Kubernetes resource deletion (kubectl delete)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bhelm\\s+(delete|uninstall)\\b",
+      "reason": "Helm release deletion"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bdocker\\s+(rm|rmi)\\b[^|;\\n]*-f",
+      "reason": "forced container/image removal (docker rm -f)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bdocker\\s+(volume\\s+rm|system\\s+prune)\\b",
+      "reason": "docker volume/system destruction"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\baws\\s+s3\\s+rb\\b",
+      "reason": "S3 bucket removal (aws s3 rb)"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\baws\\s+s3\\s+rm\\b[^|;\\n]*--recursive",
+      "reason": "recursive S3 object deletion"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\baws\\b[^|;\\n]*\\b(delete-bucket|terminate-instances|delete-db-instance|delete-stack|delete-table)\\b",
+      "reason": "AWS resource destruction"
+    },
+    {
+      "category": "destructive",
+      "pattern": "\\bgcloud\\b[^|;\\n]*\\bdelete\\b",
+      "reason": "GCP resource deletion (gcloud ... delete)"
+    },
+    {
+      "_comment_permission_soft": "Permission/ownership/role/ACL/privilege changes (chmod/chown/setfacl/set-role/cloud IAM/k8s RBAC) are SOFT rules now — operator-gated in src-safety-boundary, NOT machine-blocked. They are reversible (non-destructive), so they are not denied here.",
+      "category": "delete_resource",
+      "pattern": "(-X|--request)\\s*['\"]?DELETE",
+      "reason": "state-changing HTTP DELETE against target"
+    },
+    {
+      "category": "payment_transfer",
+      "pattern": "(-X\\s*(POST|PUT|PATCH)|--data(-raw|-binary)?|--data\\b|\\s-d\\s)[^|;\\n]*\\b(transfer|withdraw|remit|refund|payment|recharge|payout|settle)\\b",
+      "reason": "state-changing request to a money/transfer endpoint"
+    },
+    {
+      "category": "dos",
+      "pattern": "\\b(slowloris|t50|mhddos|goldeneye|loic|hoic|hulk)\\b",
+      "reason": "denial-of-service tool"
+    },
+    {
+      "category": "dos",
+      "pattern": "\\bhping3?\\b[^|;\\n]*--flood",
+      "reason": "packet flood (hping --flood)"
+    },
+    {
+      "category": "dos",
+      "pattern": "\\bping\\b[^|;\\n]*\\s-[a-z]*f",
+      "reason": "ping flood (-f)"
+    },
+    {
+      "category": "dos",
+      "pattern": "\\bab\\b[^|;\\n]*-n\\s*[1-9]\\d{4,}",
+      "reason": "apachebench high-volume load (>=10000 requests)"
+    },
+    {
+      "category": "dos",
+      "pattern": "\\bwrk\\b[^|;\\n]*-c\\s*[1-9]\\d{2,}",
+      "reason": "wrk high-concurrency load (>=100 connections)"
+    },
+    {
+      "category": "dos",
+      "pattern": "\\bmasscan\\b",
+      "reason": "high-rate mass scan"
+    },
+    {
+      "category": "dos",
+      "pattern": "\\bnmap\\b[^|;\\n]*--min-rate\\s*[1-9]\\d{3,}",
+      "reason": "nmap high packet rate (>=1000 pps)"
+    },
+    {
+      "_comment_proof_line": "Active proof tools (sqlmap/nuclei/payloads) are ALLOWED for proof-only verification; these rules block ONLY the switches that cross the proof line into dumping data, writing files, or spawning shells.",
+      "category": "data_exfil_or_shell",
+      "pattern": "\\bsqlmap\\b[^|;\\n]*--(dump|dump-all|dumpall|os-shell|os-pwn|os-cmd|os-bof|file-write|file-dest|sql-shell|priv-esc|reg-add|reg-write)",
+      "reason": "sqlmap data-dump / file-write / OS-shell switch crosses the proof line (proof of injection is allowed; extracting business data or shells is not)"
+    },
+    {
+      "category": "data_exfil_or_shell",
+      "pattern": "\\bnuclei\\b[^|;\\n]*-(it|include-tags|tags)\\s+\\S*(dos|fuzz|intrusive)",
+      "reason": "nuclei dos/intrusive/fuzz templates exceed proof-only verification"
+    },
+    {
+      "category": "data_exfil_or_shell",
+      "pattern": "\\bsqlmap\\b[^|;\\n]*--(level|risk)\\s*([4-9]|1[0-9])",
+      "reason": "sqlmap high risk/level expands payloads beyond proof-only verification"
+    },
+    {
+      "category": "data_exfil_or_shell",
+      "pattern": "(?:^|[\\s|;&(])(mysqldump|pg_dump(all)?|mongodump)\\b",
+      "reason": "full database dump tool (拖库)"
+    },
+    {
+      "category": "data_exfil_or_shell",
+      "pattern": "\\binto\\s+(outfile|dumpfile)\\b",
+      "reason": "SQL file-write / exfil (INTO OUTFILE/DUMPFILE)"
+    }
+  ]
+}

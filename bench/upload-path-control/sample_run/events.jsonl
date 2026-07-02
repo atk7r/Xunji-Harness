@@ -1,0 +1,3 @@
+{"ts": 0.0, "type": "request", "path": "/upload/safe"}
+{"ts": 1.0, "type": "request", "path": "/upload/path"}
+{"ts": 2.5, "type": "evidence", "id": "E-001"}

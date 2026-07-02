@@ -1,0 +1,15 @@
+{
+  "name": "recorded-closure-static-site",
+  "run": "sample_run",
+  "note": "Synthetic recorded closure fixture: no finding expected, closure discipline expected.",
+  "expected_findings": [],
+  "expected_closure": {
+    "markers": ["closure", "no confirmed findings", "static-only fixture"],
+    "requires_independent_review": true,
+    "requires_no_positive_findings": true
+  },
+  "must_not_flag": [
+    {"id": "directory-listing", "markers": ["directory listing"]}
+  ],
+  "budget": {"max_requests": 6}
+}

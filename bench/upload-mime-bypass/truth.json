@@ -1,0 +1,12 @@
+{
+  "name": "upload-mime-bypass",
+  "run": "sample_run",
+  "note": "Synthetic upload fixture with harmless proof file.",
+  "expected_findings": [
+    {"id": "upload-mime-bypass", "markers": ["upload", "mime", "harmless proof"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "image-upload-ok", "markers": ["valid demo image"]}
+  ],
+  "budget": {"max_requests": 12}
+}

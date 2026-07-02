@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+.env
+.env.*
+
+# Runtime output
+runs/*
+!runs/.gitkeep
+artifacts/
+observations/
+
+# Local runtime config
+config.ini
+
+# Manual/security-sensitive work products — never publish real target findings
+reports/
+poc/
+
+# Weaponized 0day exploits: ship ONLY the xday/ folder scaffolding; the actual
+# exploit code/binaries stay local (operator's call) and are never pushed.
+poc_library/xday/*
+!poc_library/xday/.gitkeep
+tools/poc_ours_upload/
+
+# Normal PoC entries are product-specific by default. Keep all entry directories
+# local unless/until disclosure makes a specific entry safe to unignore publicly.
+poc_library/normal/*
+!poc_library/normal/README.md
+
+# Weaponized knowledge tier: payload/exploit-level entries keyed to recognition.
+# Ship ONLY the scaffolding (README + .gitkeep); the actual weaponized entries stay
+# local (operator's call) and are never pushed. The public knowledge/ root is the
+# grounding tier; weapons live here.
+knowledge/weaponized/*
+!knowledge/weaponized/.gitkeep
+!knowledge/weaponized/README.md
+
+# Egress proxy configs (operator's relay endpoints — local, never pushed)
+tools/harness/proxy.conf
+tools/harness/codex_proxy.conf
+
+# Local scratch
+tmp/
+*.tmp
+.DS_Store
+# one-off local docx reformatter (hardcoded personal desktop paths)
+tools/reformat_docx.ps1
+tools/_docx_fmt_config.json
+
+# active-tool runtime state
+tools/harness/.state/
+
+# Editor / AI-tool session stores & on-demand OCR resources — local drift, NOT
+# Xunji project structure. .kunsdd = an AI-coding tool's chat/thread store;
+# tessdata = tesseract OCR data the captcha-solve skill loads on demand (large
+# binary, re-downloadable, never belongs in the repo).
+.kunsdd/
+tessdata/
+
+# personal review records
+review/records/

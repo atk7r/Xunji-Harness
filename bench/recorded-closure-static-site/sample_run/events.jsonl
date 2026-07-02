@@ -1,0 +1,3 @@
+{"ts": 0.0, "type": "request", "path": "/"}
+{"ts": 1.0, "type": "request", "path": "/assets/app.js"}
+{"ts": 2.0, "type": "evidence", "id": "E-001"}

@@ -1,0 +1,4 @@
+{"ts": 0.0, "type": "request", "path": "/api/records?record_id=A-1"}
+{"ts": 0.6, "type": "request", "path": "/api/records?record_id=B-1"}
+{"ts": 1.2, "type": "request", "path": "/api/records?record_id=missing"}
+{"ts": 1.8, "type": "evidence", "id": "E-001"}
