@@ -55,6 +55,31 @@ _CTX = ssl.create_default_context()
 _CTX.check_hostname = False
 _CTX.verify_mode = ssl.CERT_NONE
 
+# Content-types safe for plaintext snippets in JSON output.
+# Binary types (images, audio, video, octet-stream, etc.) get base64-encoded.
+_TEXT_CTYPES = frozenset({
+    "text/", "application/json", "application/xml", "application/xhtml+xml",
+    "application/javascript", "application/ld+json", "application/rss+xml",
+    "application/atom+xml", "application/x-www-form-urlencoded",
+})
+
+
+def _safe_snippet(raw: bytes, ctype: str, max_len: int = 240) -> tuple[str, str | None]:
+    """Return (snippet_value, encoding_or_None).
+    Text types: UTF-8 decoded snippet.
+    Binary types: base64-encoded snippet with encoding="base64"."""
+    ctype_lower = ctype.lower().split(";")[0].strip()
+    is_text = any(ctype_lower.startswith(t) for t in _TEXT_CTYPES)
+    if is_text:
+        return raw[:max_len].decode("utf-8", "replace"), None
+    import base64 as _b64
+    return _b64.b64encode(raw[:max_len]).decode("ascii"), "base64"
+
+
+def _snippet_kwargs(encoding: str | None) -> dict:
+    """Return {"snippet_encoding": encoding} if encoding is set, else {}."""
+    return {"snippet_encoding": encoding} if encoding else {}
+
 # 代理: 通过 --proxy 或环境变量设置。境内资产需经中继时用。
 _PROXY: str | None = None
 
@@ -209,6 +234,7 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
 
     body, truncated = cap_body(raw)
     _full_sha1 = hashlib.sha1(raw).hexdigest()
+    _snippet_val, _snippet_enc = _safe_snippet(body, resp_headers.get("Content-Type", ""))
     summary.update({
         "status": status,
         "len": len(raw),
@@ -217,7 +243,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         "sha1_full": _full_sha1,            # 全 sha1: replay 比对整完整性(不削成 48-bit)
         "ctype": resp_headers.get("Content-Type", ""),
         "server": resp_headers.get("Server", ""),
-        "snippet": body[:240].decode("utf-8", "replace"),
+        "snippet": _snippet_val,
+        **_snippet_kwargs(_snippet_enc),
         # P1: 错误分类
         "transport_error": False,
         "application_error": False,
@@ -251,6 +278,14 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         Path(save).write_bytes(body)
         summary["saved"] = save
         summary["saved_bytes"] = len(body)
+        # snippet 覆盖率: 当 body 远超 240-char snippet 时, driver 可能仅依赖 snippet
+        # 而遗漏关键内容(codex review 实战教训: 3 次因 body 空/snippet 短导致错误分析)。
+        # 此字段告诉 driver "snippet 只涵盖了 X% 的响应, 需要读 saved 文件"。
+        snippet_len = min(240, len(body))
+        summary["snippet_pct"] = round(snippet_len / max(len(body), 1) * 100, 1)
+        if len(body) > 500:
+            print(f"[probe] saved {len(body)} bytes → {save}  (snippet covers {summary['snippet_pct']}% only — read the saved file for full content)",
+                  file=sys.stderr)
         # 操作录像(.replay.json): 完整请求 + 响应摘要, 让 certainty>=0.8 的证据可被【重放核实】而非
         # 只信描述(B1: 把造假从"P 张图"抬到"伪造自洽的请求+响应+sha1")。响应只存摘要(status/全
         # sha1/len/headers/snippet) —— 全 body 已在 saved 文件, 不重复 dump(守模块"never dumps"原则)。
@@ -263,7 +298,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                          "sha1": hashlib.sha1(raw).hexdigest(),
                          "ctype": resp_headers.get("Content-Type", ""),
                          "headers": resp_headers,   # 完整响应头(含 Set-Cookie), 供重放/核对
-                         "snippet": body[:240].decode("utf-8", "replace")},
+                         "snippet": _snippet_val,
+                         **_snippet_kwargs(_snippet_enc)},
             "saved_body": save,
         }
         # 文件名【追加】.replay.json(不用 with_suffix: 它替换最后扩展名 -> a.html/a.txt 都成

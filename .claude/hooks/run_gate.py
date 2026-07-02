@@ -577,6 +577,28 @@ def decide(is_final: bool, check_rc: int, stop_hook_active: bool):
     return "block"
 
 
+def _count_open_fronts(run_dir: Path) -> int:
+    """Count fronts in frontier.md with Status: open (not probing/blocked_type_b/deferred/closed).
+    Returns 0 if frontier.md is missing or unparseable."""
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return 0
+    try:
+        text = fr.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return 0
+    import re as _re_of
+    count = 0
+    for block in _re_of.split(r"(?=^###\s+F-\d+)", text, flags=_re_of.MULTILINE):
+        if not _re_of.match(r"^###\s+F-\d+", block.lstrip()):
+            continue
+        sm = _re_of.search(r"(?im)^\s*-?\s*Status\s*[:：]\s*(.+)$", block)
+        status = sm.group(1).strip().lower() if sm else ""
+        if status == "open":
+            count += 1
+    return count
+
+
 def build_message(run_dir: Path, check_out: str) -> str:
     tail = check_out.strip()
     if len(tail) > 1600:
@@ -690,10 +712,22 @@ def main() -> None:
         if gate_skipped(run_dir):
             sys.exit(0)   # 操作者已认可此 run 不收尾(教学样本/中止) → 不主动提醒
         rc, out = run_check(run_dir)
-        mode = decide(True, rc, stop_active)
-        if mode is None:
-            sys.exit(0)
-        msg = build_message(run_dir, out)
+        # P5: When 0 open fronts remain (all Type B/Closed/Deferred), the driver has
+        # genuinely exhausted all attack vectors. Downgrade structural check_run failures
+        # (e.g. "coverage empty" without Guanlan recon) from BLOCK to WARN — do not
+        # indefinitely block closure when nothing more can be done.
+        open_fronts = _count_open_fronts(run_dir)
+        if open_fronts == 0 and rc != 0:
+            mode = "notify"
+            msg = (
+                f"[收口闸门 · 无开放前沿] 全部前沿已裁决 (Type B/Closed/Deferred), "
+                f"但 check_run 仍有提示。确认已穷尽攻击面后即可收口:\n\n"
+            ) + (out.strip()[-1200:] if len(out.strip()) > 1200 else out.strip())
+        else:
+            mode = decide(True, rc, stop_active)
+            if mode is None:
+                sys.exit(0)
+            msg = build_message(run_dir, out)
         if mode == "block":
             print(json.dumps({"decision": "block", "reason": msg}, ensure_ascii=False))
         else:
@@ -1118,7 +1152,7 @@ def _selftest() -> int:
     mode1, _ = _check_agent_board(ab_run1)
     checks.append(("agent board gate: no frontier.md -> pass", mode1 is None))
 
-    # Case 2: < 4 open fronts -> pass
+    # Case 2: < 4 open fronts (probing not counted) -> pass
     ab_run2 = ab_test / "few_fronts"
     ab_run2.mkdir()
     (ab_run2 / "frontier.md").write_text(
@@ -1128,7 +1162,7 @@ def _selftest() -> int:
         "### F-003\n- Status: probing\n- Barrier class: WAF\n",
         encoding="utf-8")
     mode2, _ = _check_agent_board(ab_run2)
-    checks.append(("agent board gate: <4 open fronts -> pass", mode2 is None))
+    checks.append(("agent board gate: <4 open fronts (probing excluded) -> pass", mode2 is None))
 
     # Case 3: >= 4 open fronts with shared barrier -> pass
     ab_run3 = ab_test / "shared_barrier"
@@ -1151,7 +1185,7 @@ def _selftest() -> int:
         "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
         "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
         "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
-        "### F-004\n- Status: probing\n- Barrier class: file-upload\n",
+        "### F-004\n- Status: open\n- Barrier class: file-upload\n",
         encoding="utf-8")
     mode4, msg4 = _check_agent_board(ab_run4)
     checks.append(("agent board gate: diverse no agents -> block", mode4 == "block"))
@@ -1165,7 +1199,7 @@ def _selftest() -> int:
         "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
         "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
         "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
-        "### F-004\n- Status: probing\n- Barrier class: file-upload\n",
+        "### F-004\n- Status: open\n- Barrier class: file-upload\n",
         encoding="utf-8")
     (ab_run5 / "agents").mkdir()
     (ab_run5 / "agents" / "A-web-hunter-001.md").write_text("# Agent\n", encoding="utf-8")
@@ -1180,7 +1214,7 @@ def _selftest() -> int:
         "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
         "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
         "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
-        "### F-004\n- Status: probing\n- Barrier class: file-upload\n",
+        "### F-004\n- Status: open\n- Barrier class: file-upload\n",
         encoding="utf-8")
     (ab_run6 / "state").mkdir(parents=True)
     (ab_run6 / "state" / "assignments.json").write_text(

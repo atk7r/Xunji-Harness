@@ -53,10 +53,11 @@ HOST_BACKOFF_SEC = 120        # 熔断冷却时长(秒); 期间对该 host 的�
 HOST_REQ_WARN = 30           # 单 host 累计请求软告警阈值(只提示, 不阻断)
 # --- 全局会话请求预算 (跨 host; ① 是单 host, 这个管整场总量) -------------------
 SESSION_WINDOW_SEC = 600      # 滑动窗口(秒)
-SESSION_WARN_COUNT = 200      # 窗口内总请求达此值 -> 软告警(整场量偏高, 考虑收敛/换出口)
+SESSION_WARN_COUNT = 300      # 窗口内总请求达此值 -> 软告警(整场量偏高, 考虑收敛/换出口)
 # --- 全局会话硬熔断 (Part A: 软告警之上的真·工具层熔断, 整场失控时 abort) --------
-SESSION_TRIP_COUNT = 800      # 窗口内总请求达此值 -> 硬熔断(布防冷却, check() 抛 SessionTripped)
-SESSION_TRIP_BYTES = 16 * 1024 * 1024   # 窗口内累计响应字节(截断前线缆量, 非 cap 后保留量)-> 硬熔断(防整场拖量)
+SESSION_TRIP_COUNT = 1200     # 窗口内总请求达此值 -> 硬熔断(布防冷却, check() 抛 SessionTripped)
+                               # (retrospective puffts: 800 对多服务+JS-heavy 目标偏低, 单 chunk 可达 262KB)
+SESSION_TRIP_BYTES = 32 * 1024 * 1024   # 窗口内累计响应字节(截断前线缆量, 非 cap 后保留量)-> 硬熔断(防整场拖量)
 SESSION_TRIP_COOLDOWN = 300   # 熔断冷却时长(秒); 期间对任何 host 的请求直接 abort
 
 

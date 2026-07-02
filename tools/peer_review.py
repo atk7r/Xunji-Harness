@@ -67,6 +67,14 @@ DEFAULT_CONFIG: dict = {
 }
 
 # ---- 默认复审契约(英文: 避开中文 stdin 的 GBK 坑; run 内中文文件后端自己读/已附) ----
+NO_RECON_ADDENDUM = """
+
+IMPORTANT — NO-RECON MODE: This run had NO Guanlan recon input. coverage.json and classify/ will NOT exist.
+The attack surface was manually scoped without automated OSINT. For rubric item 2 (Coverage ledger):
+- Do NOT flag "coverage empty" / "coverage.json missing" / "no classify" as BLOCKER. These are expected.
+- You may still flag them as WARN if the report makes claims that depend on coverage data it doesn't have.
+- For any other rubric items, apply the normal severity standards — no-recon only relaxes coverage checks."""
+
 DEFAULT_RUBRIC = """You are an INDEPENDENT, HETEROGENEOUS reviewer — a DIFFERENT model from the author (the author is Claude). Your entire value is catching blind spots Claude shares with itself, so prioritize what the work likely MISSED over restating it.
 
 CONTEXT: This is a CLOSED, authorized red-team web-pentest run. The run directory is the audit trail. Many files are in Chinese — read them as needed. Evidence discipline: certainty is graded 0.3 / 0.5 / 0.8 / 1.0, and ONLY certainty >= 0.8 may be reported as confirmed. Single observations, redirects, block pages, timeouts, and environment-provided artifacts are NEVER confirmation on their own.
@@ -337,8 +345,10 @@ def _run_anthropic(scope_dir: Path, rubric: str, b: dict, timeout: int) -> Revie
 # ===================== 主入口 =====================
 def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
            out_file=None, into_run: bool = False, require_heterogeneous: bool = False,
-           config: dict | None = None, timeout: int = 900) -> ReviewResult:
-    """对一个 run 目录做异构复审。返回 ReviewResult(候选, 非裁决 —— driver 须过证据门整合)。"""
+           config: dict | None = None, timeout: int = 900,
+           no_recon: bool = False) -> ReviewResult:
+    """对一个 run 目录做异构复审。返回 ReviewResult(候选, 非裁决 —— driver 须过证据门整合)。
+    --no-recon: 该 run 无 Guanlan recon 输入, coverage.json 不存在属正常, 复审时覆盖检查降为 WARN。"""
     scope = Path(scope_dir)
     if not scope.is_absolute():
         scope = (ROOT / scope).resolve()
@@ -355,7 +365,9 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
         pass
 
     cfg = config or load_config()
-    rubric = rubric or DEFAULT_RUBRIC
+    rubric = (rubric or DEFAULT_RUBRIC)
+    if no_recon:
+        rubric += NO_RECON_ADDENDUM
     chosen = select_backend(cfg, backend)
     if not chosen:
         return ReviewResult(verdict="ERROR",
@@ -527,6 +539,8 @@ def main() -> int:
     ap.add_argument("--out", help="把复审写到该文件(如 review/records/<x>.md)")
     ap.add_argument("--into-run", action="store_true",
                     help="把复审追加进 runs/<t>/review.md 独立复审区块(满足 check_run 独立复审门)")
+    ap.add_argument("--no-recon", action="store_true",
+                    help="无 Guanlan recon 输入: 覆盖检查降为 WARN, 不因 coverage.json 缺失报 BLOCKER")
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--list-backends", action="store_true", help="列后端可用性后退出")
     ap.add_argument("--selftest", action="store_true")
@@ -547,7 +561,7 @@ def main() -> int:
     if not args.scope:
         ap.error("需要 scope 目录(或用 --list-backends / --selftest)")
     r = review(args.scope, backend=args.backend, out_file=args.out, into_run=args.into_run,
-               config=cfg, timeout=args.timeout)
+               config=cfg, timeout=args.timeout, no_recon=args.no_recon)
     print(r.as_markdown())
     if r.verdict == "NEEDS_DRIVER":
         print("\n[!] 落到 Claude 兜底且无 API key —— 请 driver spawn fresh-context 子代理, "

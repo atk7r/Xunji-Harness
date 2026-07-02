@@ -275,7 +275,10 @@ def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
         fid = m.group(1)
         st_match = _re_ab.search(rf"(?im)^\s*-?\s*Status\s*[:：]\s*([^\n]+)", block)
         status = st_match.group(1).strip().lower() if st_match else ""
-        if status not in ("open", "probing"):
+        # Only count genuinely open fronts — exclude probing, blocked_type_b, deferred,
+        # and closed. Type B candidates and low-value fronts (e.g. user enumeration) should
+        # not force unnecessary agent spawning. (retrospective puffts P4)
+        if status != "open":
             continue
         bc_match = _re_ab.search(rf"(?im)^\s*-?\s*Barrier class\s*[:：]\s*([^\n]+)", block)
         barrier = bc_match.group(1).strip().lower() if bc_match else "unknown"
@@ -581,7 +584,7 @@ def _selftest() -> int:
         "### F-003\n- Status: probing\n- Barrier class: WAF\n",
         encoding="utf-8")
     needed_lt4, n_lt4, _ = _check_agent_board_needed(ab_dir)
-    checks.append(("agent board: <4 open fronts -> not needed", not needed_lt4 and n_lt4 == 3))
+    checks.append(("agent board: <4 open fronts -> not needed", not needed_lt4 and n_lt4 == 2))
 
     # Case 2: >= 4 open fronts with shared barrier (SharedBarrierGroup exists) -> should NOT remind
     (ab_dir / "frontier.md").write_text(
@@ -589,7 +592,7 @@ def _selftest() -> int:
         "### F-001\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
         "### F-002\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
         "### F-003\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
-        "### F-004\n- Status: probing\n- Barrier class: WAF-rate-limit\n",
+        "### F-004\n- Status: open\n- Barrier class: WAF-rate-limit\n",
         encoding="utf-8")
     needed_shared, n_shared, bg_shared = _check_agent_board_needed(ab_dir)
     checks.append(("agent board: shared barrier -> not needed", not needed_shared and n_shared == 4))
@@ -601,7 +604,7 @@ def _selftest() -> int:
         "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
         "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
         "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
-        "### F-004\n- Status: probing\n- Barrier class: file-upload\n",
+        "### F-004\n- Status: open\n- Barrier class: file-upload\n",
         encoding="utf-8")
     needed_div, n_div, bg_div = _check_agent_board_needed(ab_dir)
     checks.append(("agent board: diverse barriers -> needed", needed_div and n_div == 4))
@@ -613,7 +616,7 @@ def _selftest() -> int:
         "### F-001\n- Status: open\n- Barrier class: none\n\n"
         "### F-002\n- Status: open\n- Barrier class: unknown\n\n"
         "### F-003\n- Status: open\n- Barrier class: none\n\n"
-        "### F-004\n- Status: probing\n- Barrier class: \n",
+        "### F-004\n- Status: open\n- Barrier class: \n",
         encoding="utf-8")
     needed_none, n_none, bg_none = _check_agent_board_needed(ab_dir)
     checks.append(("agent board: all none/unknown -> needed", needed_none and n_none == 4))
