@@ -31,6 +31,11 @@ except Exception:
     _state_project = None
 from evidence_parse import parse_evidence, write_evidence_index  # 唯一权威证据解析器(已抽出到独立模块)
 
+try:
+    from saturation import check as check_saturation
+except Exception:
+    check_saturation = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_FILES = [
@@ -1310,6 +1315,144 @@ def check_conflict_gate(run_dir: Path) -> tuple[list[str], list[str]]:
     return [], [msg]
 
 
+def check_constraints_ledger(run_dir: Path) -> tuple[list[str], list[str]]:
+    """约束账本验证: 每条 C-xxx 的 Evidence 必须指向存在的 E-xxx(硬错),
+    Mechanism class 必须在已知 canonical 列表中(软警)。"""
+    path = run_dir / "constraints.md"
+    if not path.exists():
+        return [], []
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    # 收集所有已知 E-id
+    evidence_ids = {r["id"] for r in parse_evidence(run_dir) if r["id"].startswith("E-")}
+
+    # 加载 canonical map(从 saturation 模块, 或空字典兜底)
+    try:
+        from saturation import _CANONICAL_MAP as _SAT_MAP
+    except Exception:
+        _SAT_MAP = {}
+
+    errors: list[str] = []
+    warns: list[str] = []
+
+    for m in re.finditer(r"(?ms)^##[ \t]+(C-\d+).*?(?=^##[ \t]+C-\d+|\Z)", text):
+        block = m.group(0)
+        cid = m.group(1)
+
+        # 提取字段
+        ev_field = ""
+        mc_field = ""
+        for line in block.splitlines():
+            stripped = line.strip()
+            if re.match(r"-\s*Evidence\s*[:：]", stripped, re.I):
+                ev_field = re.sub(r"-\s*Evidence\s*[:：]\s*", "", stripped, flags=re.I).strip()
+            if re.match(r"-\s*Mechanism class\s*[:：]", stripped, re.I):
+                mc_field = re.sub(r"-\s*Mechanism class\s*[:：]\s*", "", stripped, flags=re.I).strip()
+
+        # 硬门: Evidence 字段必须指向存在的 E-xxx
+        ev_ids = re.findall(r"E-\d+[a-z]*", ev_field)
+        if ev_ids:
+            for eid in ev_ids:
+                if eid not in evidence_ids:
+                    errors.append(
+                        f"constraints.md {cid}: Evidence 引用 {eid} 在 evidence.md 中不存在 —— "
+                        "约束的 Evidence 必须指向存在的 E-xxx 条目。修正引用或补建 E-xxx。")
+        elif ev_field:
+            # Evidence 字段非空但不含 E-xxx 格式
+            warns.append(
+                f"constraints.md {cid}: Evidence 字段 '{ev_field}' 不含 E-xxx 引用 —— "
+                "应引用 evidence.md 中的 E-xxx 条目。")
+
+        # 软门: Mechanism class 是否在已知 canonical 列表中
+        if mc_field:
+            key = mc_field.strip().lower().rstrip(".,;: ")
+            if key and key not in _SAT_MAP:
+                # 也检查是否直接等于某个 canonical value
+                known_values = {v.lower() for v in _SAT_MAP.values()}
+                if key not in known_values:
+                    warns.append(
+                        f"constraints.md {cid}: Mechanism class '{mc_field}' 不在 "
+                        "knowledge/_lexicon.md 的已知 canonical 名称中 —— "
+                        "请使用 _lexicon.md 中的规范类别名。")
+
+    return warns, errors
+
+
+def check_agent_constraint_freshness(run_dir: Path) -> list[str]:
+    """Agent 约束新鲜度检查: 对每个 status=done 的 agent, 检查其 mtime 与 constraints.md
+    mtime 的关系。如果 agent 的 mtime < constraints.md 的 mtime（agent 完成后有新约束产生）,
+    且该 agent 负责的 front 在 constraints.md 中有新约束 → WARN: agent 可能在过期约束下工作。"""
+    constraints_path = run_dir / "constraints.md"
+    agents_dir = run_dir / "agents"
+    if not constraints_path.exists() or not agents_dir.exists():
+        return []
+
+    try:
+        constraints_mtime = constraints_path.stat().st_mtime
+    except OSError:
+        return []
+
+    # 解析 constraints.md, 构建 {front_id: [C-xxx, ...]} 映射
+    constraints_text = constraints_path.read_text(encoding="utf-8", errors="replace")
+    front_constraints: dict[str, list[str]] = {}
+    for m in re.finditer(r"(?ms)^##[ \t]+(C-\d+).*?(?=^##[ \t]+C-\d+|\Z)", constraints_text):
+        block = m.group(0)
+        cid = m.group(1)
+        c_front = ""
+        for line in block.splitlines():
+            fm = re.match(r"-\s*Front\s*[:：]\s*(.+)", line.strip(), re.I)
+            if fm:
+                c_front = fm.group(1).strip()
+                break
+        if c_front:
+            front_constraints.setdefault(c_front, []).append(cid)
+
+    if not front_constraints:
+        return []
+
+    warns: list[str] = []
+    for f in sorted(agents_dir.glob("A-*.md")):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        status = ""
+        for line in text.splitlines():
+            sm = re.match(r"-\s*Status\s*[:：]\s*(.+)", line.strip(), re.I)
+            if sm:
+                status = sm.group(1).strip().lower()
+                break
+
+        if status not in {"done", "merged"}:
+            continue
+
+        try:
+            agent_mtime = f.stat().st_mtime
+        except OSError:
+            continue
+
+        if agent_mtime >= constraints_mtime:
+            continue  # agent 在约束更新之后完成, 状态新鲜
+
+        # 获取 agent 的 Assigned front
+        agent_front = ""
+        for line in text.splitlines():
+            fm = re.match(r"-\s*Assigned front\s*[:：]\s*(.+)", line.strip(), re.I)
+            if fm:
+                agent_front = fm.group(1).strip()
+                break
+
+        # 检查该 front 在 constraints.md 中是否有约束
+        new_constraints_for_front = front_constraints.get(agent_front, [])
+        if not new_constraints_for_front:
+            continue  # agent 的 front 无新约束, 不报
+
+        warns.append(
+            f"Agent 约束过期: {f.stem} (front={agent_front}) 完成于 constraints.md 最后修改之前, "
+            f"该 front 在 constraints.md 中有约束 {', '.join(new_constraints_for_front[:5])}"
+            f"{' …' if len(new_constraints_for_front) > 5 else ''} —— "
+            "该 agent 可能在过期约束下工作。检查 agent 结论是否仍有效, 或重新评估。")
+
+    return warns
+
+
 def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     """过早收口护栏(P0-1). 触发条件 = report.md 出现【强收口断言】(自首式) **或**
     report.md 已是【实质终版报告】(状态式 _report_is_final: 引用了已确认发现)。后者堵住
@@ -1407,6 +1550,49 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     conflict_errors, conflict_warns = check_conflict_gate(run_dir)
     errors.extend(conflict_errors)
     warns.extend(conflict_warns)
+
+    # 饱和度检查(闭环优化 P0): 衡量各 front 的 vuln-class 覆盖度
+    if check_saturation is not None:
+        sat_warns, sat_errors = check_saturation(run_dir)
+        warns.extend(sat_warns)
+        errors.extend(sat_errors)
+
+        # P2-3 收口硬门: 高饱和 front 必须有 Type B 降级
+        try:
+            from saturation import compute as _sat_compute, _parse_front_blocks as _sat_front_blocks, _parse_constraints as _sat_parse_constraints
+            fr = run_dir / "frontier.md"
+            if fr.exists():
+                ftext = fr.read_text(encoding="utf-8", errors="replace")
+                sat_blocks = _sat_front_blocks(ftext)
+                sat_constraints = _sat_parse_constraints(run_dir)
+                for b in sat_blocks:
+                    result = _sat_compute(b["text"], sat_constraints)
+                    if result["ratio"] is None:
+                        continue
+                    fid = result["front"]
+                    sat = result["ratio"]
+                    status = b.get("status", "").lower()
+
+                    # 只检查 open/probing 状态的前沿
+                    if status not in {"open", "probing"}:
+                        continue
+
+                    if sat >= 0.85:
+                        errors.append(
+                            f"收口硬门(高饱和未降级): {fid} sat={sat:.0%} 但 Status 仍为 {status} —— "
+                            "几乎饱和的 front 不降级就是'打够了但不承认'。必须降级 Type B (blocked_type_b) "
+                            "或给出明确的继续理由(剩余 untried class + 为何值得继续)。")
+                    elif sat >= 0.75:
+                        warns.append(
+                            f"收口硬门(高饱和): {fid} sat={sat:.0%} 但 Status 仍为 {status} —— "
+                            "高饱和 front 不能保持 open 状态收口。建议降级 Type B 或给出明确的继续理由。")
+        except Exception:
+            pass  # 导入或解析失败时优雅降级
+
+    # 约束账本验证(闭环优化 P0): C-xxx 的 Evidence 必须指向存在的 E-xxx
+    c_warns, c_errors = check_constraints_ledger(run_dir)
+    warns.extend(c_warns)
+    errors.extend(c_errors)
 
     # 硬门: 收口前必须有独立 Reviewer 复审记录
     review = run_dir / "review.md"
@@ -2308,6 +2494,7 @@ def main() -> int:
     warnings.extend(check_metacog_pass(run_dir))       # 收口前第二系统发散: 防主驱动盲区
     warnings.extend(check_threat_triage(run_dir))     # 威胁分级: HIGH+ deferred 无 E-entry → WARN
     warnings.extend(check_surface_populated(run_dir))  # surface.md 填充: Entry Points/Assets 空 → WARN
+    warnings.extend(check_agent_constraint_freshness(run_dir))  # Agent 约束新鲜度: done agent 可能错过新约束
     # 自动异构复审(--auto-peer-review): 收口时若缺独立复审记录, 自动跑 peer_review 写进 review.md
     # 满足下面的独立复审硬门。慢(几分钟)+数据出境, 默认关、仅显式 flag; selftest 不走这。
     if args.auto_peer_review:
