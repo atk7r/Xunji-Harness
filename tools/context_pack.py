@@ -239,8 +239,7 @@ def _load_cross_run_context(run_dir: Path, front_id: str) -> list[str]:
     if not barrier_class or barrier_class == "none":
         return []
 
-    # 归一化后调用 cross_run.py --barrier
-    import subprocess
+    # 调用 cross_run.py --barrier 查询该 barrier class 的历史
     cross_run_script = str(ROOT / "tools" / "cross_run.py")
     try:
         result = subprocess.run(

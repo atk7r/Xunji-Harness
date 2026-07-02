@@ -171,13 +171,18 @@ def _normalize_barrier(barrier: str) -> str:
     """归一化 barrier class —— 去掉括号内的细节注解, 统一为 canonical 前缀。"""
     if not barrier or barrier == "none":
         return "none"
+    # 去掉 markdown 加粗/斜体标记 (*, **, ***)
+    b = re.sub(r"\*+", "", barrier)
     # 去掉括号及其内容
-    b = re.sub(r"\s*[(（][^)）]*[)）]", "", barrier).strip()
+    b = re.sub(r"\s*[(（][^)）]*[)）]", "", b).strip()
     # 去掉尾部的细节描述 (如 " + WAF-layer" 拆成两个)
     # 只取第一个 -layer 前缀作为主类
     m = re.match(r"([a-zA-Z]+-layer)", b)
     if m:
         return m.group(1).lower()
+    # 中文 "未知" → none
+    if b.strip() == "未知":
+        return "none"
     # 常见变体映射
     aliases = {
         "auth": "auth-layer", "auth layer": "auth-layer",
@@ -194,6 +199,9 @@ def _normalize_barrier(barrier: str) -> str:
     for alias, canonical in aliases.items():
         if key.startswith(alias):
             return canonical
+    # 宽泛匹配：包含 "-layer" 则直接返回小写
+    if "-layer" in key:
+        return key
     return key
 
 
@@ -355,17 +363,21 @@ def build_barrier_index(runs: list[dict]) -> dict[str, list[dict]]:
 
 
 def build_product_index(runs: list[dict]) -> dict[str, list[dict]]:
-    """按产品指纹聚合。"""
-    idx: dict[str, list[dict]] = {}
+    """按产品指纹聚合（key 归一化为小写，保留最长精确形式作为显示名）。"""
+    # _display: 收集每个小写 key 的所有原始形式，取最长的作为显示名
+    _display: dict[str, str] = {}
+    _entries: dict[str, list[dict]] = {}
     for r in runs:
         for prod in r["products"]:
-            idx.setdefault(prod, []).append({
+            key = prod.lower()
+            _display[key] = prod if key not in _display or len(prod) > len(_display[key]) else _display[key]
+            _entries.setdefault(key, []).append({
                 "run": r["slug"],
                 "phase": r["phase"],
                 "confirmed_count": r["confirmed_count"],
                 "barrier_classes": r["barrier_classes"],
             })
-    return idx
+    return {_display[k]: v for k, v in _entries.items()}
 
 
 def build_mechanism_index(runs: list[dict]) -> dict[str, list[dict]]:
@@ -485,10 +497,11 @@ def print_barrier_query(runs: list[dict], barrier_class: str) -> int:
     """查询特定 barrier class 的跨运行历史。"""
     barrier_idx = build_barrier_index(runs)
 
-    # 模糊匹配
+    # 归一化查询参数后再做模糊匹配（索引 key 已归一化）
+    query_norm = _normalize_barrier(barrier_class).lower()
     matched = {}
     for bc, entries in barrier_idx.items():
-        if barrier_class.lower() in bc.lower():
+        if query_norm in bc.lower() or barrier_class.lower() in bc.lower():
             matched[bc] = entries
 
     if not matched:
