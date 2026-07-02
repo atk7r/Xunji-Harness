@@ -38,7 +38,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
 ACTIVE_WINDOW_SEC = 900   # 只对最近 15 分钟内改动过的 run 介入(= 当前正在做的那个)
-SESSION_TIMEOUT_SEC = 50 * 60   # Phase 2: 超过 50 分钟未更新 + 有漂移信号 → 阻断
+DRIFT_TIMEOUT_WINDOW_SEC = 6 * 60 * 60   # Phase 2 单独长窗口, 用于抓住超过 30 分钟的未解漂移
+SESSION_TIMEOUT_SEC = 30 * 60   # Phase 2: 超过 30 分钟未更新 + 有漂移信号 → 阻断
 
 sys.path.insert(0, str(ROOT / "tools"))
 try:
@@ -148,8 +149,9 @@ def _check_session_timeout(
 ) -> tuple[str | None, str]:
     """Phase 2 fail-safe: check ONLY the active run's session_state.json for timeout + drift signals.
     Fixes cross-run contamination — stale session no longer blocks other runs.
-    Uses max(JSON updated_at, file mtime) — both must be stale for timeout to trigger."""
-    active_run = active_run or find_active_run(runs_root)
+    Uses drift_started_at when available so output_gate can refresh state before run_gate
+    without erasing the age of an unresolved drift streak."""
+    active_run = active_run or find_active_run(runs_root, within_sec=DRIFT_TIMEOUT_WINDOW_SEC)
     if active_run is None:
         return None, ""
     sf = active_run / "session_state.json"
@@ -162,8 +164,9 @@ def _check_session_timeout(
         drift_flags = state.get("drift_flags", [])
         if not isinstance(drift_flags, list) or not drift_flags:
             return None, ""
+        drift_started_at = _valid_ts(state.get("drift_started_at"), now)
         updated_at = _valid_ts(state.get("updated_at"), now)
-        last_touch = max(updated_at, sf_mtime)
+        last_touch = drift_started_at or max(updated_at, sf_mtime)
         timeout_sec = SESSION_TIMEOUT_SEC
         timeout_min = timeout_sec // 60
         if now - last_touch <= timeout_sec:
@@ -171,7 +174,7 @@ def _check_session_timeout(
         flags_str = ", ".join(str(f) for f in drift_flags)
         return "block", (
             f"[会话超时] 当前 active run runs/{active_run.name} 的 session_state.json "
-            f"超过{timeout_min}分钟未更新且仍有漂移信号({flags_str})。"
+            f"漂移信号({flags_str})已持续超过{timeout_min}分钟。"
             f"请写 session_handoff.md 后重启新会话。"
         )
     except Exception:
@@ -179,11 +182,19 @@ def _check_session_timeout(
     return None, ""
 
 
+DRIFT_HARD_FLAGS = {"protocol_violation", "option_list"}
+DRIFT_BLOCK_THRESHOLD = 2
+DRIFT_HANDOFF_THRESHOLD = 4
+
+
 def _check_drift_session(
     active_run: Path | None = None,
 ) -> tuple[str | None, str]:
-    """Phase 3 (Decision 1: downgraded to NOTIFY): check session_state.drift_flags
-    for unresolved drift signals. Outputs systemMessage reminder, never blocks."""
+    """Phase 3: check fresh session drift state.
+
+    Low-count drift remains advisory. Repeated protocol/autonomy drift becomes
+    a hard gate before the older 30-minute timeout backstop.
+    """
     if active_run is None:
         return None, ""
     drift_flags = SessionStateManager.get_drift_flags(active_run)
@@ -198,8 +209,22 @@ def _check_drift_session(
     timeout_sec = SESSION_TIMEOUT_SEC
     if updated_at and now - updated_at > timeout_sec:
         return None, ""  # stale = Phase 2 handles it
-    drift_count = state.get("drift_block_count", 1)
+    try:
+        drift_count = int(state.get("drift_block_count", 1) or 1)
+    except Exception:
+        drift_count = 1
     flags_str = ", ".join(str(f) for f in drift_flags)
+    hard_flags = [f for f in drift_flags if f in DRIFT_HARD_FLAGS]
+    if hard_flags and drift_count >= DRIFT_HANDOFF_THRESHOLD:
+        return "block", (
+            f"[漂移硬拦 Phase 3] 检测到连续 {drift_count} 次协议/自主性漂移({flags_str})。"
+            f"请写 session_handoff.md 后重启新会话。"
+        )
+    if hard_flags and drift_count >= DRIFT_BLOCK_THRESHOLD:
+        return "block", (
+            f"[漂移硬拦 Phase 3] 检测到连续 {drift_count} 次协议/自主性漂移({flags_str})。"
+            f"请 Read CLAUDE.md / WORKFLOW.md / frontier.md, 修正输出为「下一行动:」或「BLOCKED:」后继续。"
+        )
     msg = (
         f"[漂移提醒 Phase 3] 检测到漂移信号({flags_str}, x{drift_count})。"
         f"请 Read CLAUDE.md / WORKFLOW.md / frontier.md 完成自检后继续。"
@@ -573,13 +598,15 @@ def main() -> None:
         sys.exit(0)
     stop_active = bool(event.get("stop_hook_active"))
     try:
-        # ---- Phase 3: drift session check (Decision 1: NOTIFY, not block) ----
+        # ---- Phase 3: drift session check (soft first, hard on repeated protocol drift) ----
         active_run = find_active_run(RUNS)
         # Dev mode: skip Phase 3 notification (drift detection still runs in output_gate)
         if not _is_dev_mode():
             drift_mode, drift_msg = _check_drift_session(active_run)
             if drift_mode is not None:
-                # Phase 3 always notifies (systemMessage), never blocks
+                if drift_mode == "block":
+                    print(json.dumps({"decision": "block", "reason": drift_msg}, ensure_ascii=False))
+                    sys.exit(0)
                 print(json.dumps({"systemMessage": drift_msg}, ensure_ascii=False))
                 # Fall through — allow other checks to run
 
@@ -762,8 +789,23 @@ def _selftest() -> int:
     os.utime(str(sdir / "session_state.json"), (old_time, old_time))
     mode_badtype, _ = _check_session_timeout(runs)
     checks.append(("session timeout: drift_flags not list -> pass", mode_badtype is None))
+    # Phase 2 uses a longer candidate window than ordinary active-run gates.
+    timeout_runs = d / "timeout_runs"
+    timeout_runs.mkdir()
+    timeout_candidate = timeout_runs / "timeout_candidate"
+    timeout_candidate.mkdir()
+    old_timeout_touch = time.time() - SESSION_TIMEOUT_SEC - 60
+    (timeout_candidate / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
+    (timeout_candidate / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"],
+                    "drift_started_at": old_timeout_touch,
+                    "updated_at": old_timeout_touch}), encoding="utf-8")
+    os.utime(str(timeout_candidate / "frontier.md"), (old_timeout_touch, old_timeout_touch))
+    os.utime(str(timeout_candidate / "session_state.json"), (old_timeout_touch, old_timeout_touch))
+    mode_long_window, _ = _check_session_timeout(timeout_runs)
+    checks.append(("session timeout: >15m drift candidate still blocks", mode_long_window == "block"))
 
-    # Phase 3: drift session check (notify, not block — Decision 1)
+    # Phase 3: drift session check (notify first, then hard block repeated protocol drift)
     import tempfile as _tempfile_mod
     test_ds_dir = Path(_tempfile_mod.mkdtemp())
     # No active_run → pass
@@ -776,11 +818,29 @@ def _selftest() -> int:
     checks.append(("drift session: no session_state -> pass", d3_mode_nostate is None))
     # Fresh session_state with drift_flags → notify
     (ds_run / "session_state.json").write_text(
-        json.dumps({"drift_flags": ["protocol_violation"], "drift_block_count": 2,
+        json.dumps({"drift_flags": ["protocol_violation"], "drift_block_count": 1,
                      "updated_at": time.time()}), encoding="utf-8")
     d3_mode_notify, d3_msg = _check_drift_session(active_run=ds_run)
     checks.append(("drift session: drift flags -> notify", d3_mode_notify == "notify"))
     checks.append(("drift session: message mentions drift", "漂移提醒" in (d3_msg or "")))
+    # Repeated protocol/autonomy drift -> hard block
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"], "drift_block_count": 2,
+                    "updated_at": time.time()}), encoding="utf-8")
+    d3_mode_block, d3_msg_block = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: protocol count 2 -> block", d3_mode_block == "block"))
+    checks.append(("drift session: block asks reread", "Read CLAUDE.md" in (d3_msg_block or "")))
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["option_list"], "drift_block_count": 4,
+                    "updated_at": time.time()}), encoding="utf-8")
+    d3_mode_handoff, d3_msg_handoff = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: option count 4 -> block", d3_mode_handoff == "block"))
+    checks.append(("drift session: handoff message", "session_handoff.md" in (d3_msg_handoff or "")))
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["frontier_stale"], "drift_block_count": 4,
+                    "updated_at": time.time()}), encoding="utf-8")
+    d3_mode_frontier, _ = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: frontier-only count 4 stays notify", d3_mode_frontier == "notify"))
     # Stale session_state with drift_flags → pass (Phase 2 handles stale)
     old_drift = time.time() - SESSION_TIMEOUT_SEC - 120
     (ds_run / "session_state.json").write_text(
@@ -828,6 +888,17 @@ def _selftest() -> int:
     os.utime(str(sf2), (old2, old2))
     mode_both, _ = _check_session_timeout(sdir2, active_run=both_stale)
     checks.append(("session timeout: both stale -> block", mode_both == "block"))
+    # Fresh file writes from output_gate must not erase an old unresolved drift streak.
+    old_started = time.time() - SESSION_TIMEOUT_SEC - 120
+    fresh_file_old_drift = sdir2 / "fresh_file_old_drift"
+    fresh_file_old_drift.mkdir()
+    (fresh_file_old_drift / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"],
+                    "drift_started_at": old_started,
+                    "updated_at": time.time()}), encoding="utf-8")
+    mode_old_drift, msg_old_drift = _check_session_timeout(sdir2, active_run=fresh_file_old_drift)
+    checks.append(("session timeout: old drift_started_at despite fresh file -> block", mode_old_drift == "block"))
+    checks.append(("session timeout: old drift message mentions 持续", "持续" in (msg_old_drift or "")))
 
     # SPECULATION_IN_OBSERVED precision tests (Decision 4)
     import tempfile as _tm_spec

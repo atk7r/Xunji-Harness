@@ -67,11 +67,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\""
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\""
           }
         ]
       }

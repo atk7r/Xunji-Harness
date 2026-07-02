@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 try:
     from anti_drift import (
-        DRIFT_PATTERNS, find_active_run, is_dev_mode, is_normal_mode,
+        DRIFT_PATTERNS, find_active_run, is_normal_mode,
         _valid_ts, SessionStateManager, get_mode,
     )
 except Exception:
@@ -45,9 +45,6 @@ except Exception:
 
     def find_active_run(*args, **kwargs):
         return None
-
-    def is_dev_mode() -> bool:
-        return False
 
     def is_normal_mode() -> bool:
         return True
@@ -120,6 +117,29 @@ def detect_option_list(msg: str) -> bool:
     return len(option_lines) >= 2
 
 
+def _next_drift_count(prev_state: dict, drift_flags: list[str]) -> int:
+    """Consecutive drift counter: any drift increments; clean output resets to zero."""
+    if not drift_flags:
+        return 0
+    try:
+        prev_count = int(prev_state.get("drift_block_count", 0) or 0)
+    except Exception:
+        prev_count = 0
+    return prev_count + 1
+
+
+def _next_drift_started_at(prev_state: dict, drift_flags: list[str], now: float) -> float:
+    """Timestamp when the current consecutive drift streak began; zero when clean."""
+    if not drift_flags:
+        return 0.0
+    prev_flags = prev_state.get("drift_flags", [])
+    if isinstance(prev_flags, list) and prev_flags:
+        started = _valid_ts(prev_state.get("drift_started_at"), now)
+        if started:
+            return started
+    return now
+
+
 def main() -> None:
     if "--selftest" in sys.argv:
         sys.exit(_selftest())
@@ -130,9 +150,6 @@ def main() -> None:
         event = json.loads(raw.decode("utf-8", "replace") or "{}")
     except Exception:
         sys.exit(0)
-
-    # DEV MODE: 保留漂移检测并写入 session_state, 但不产生阻断(Decision 5)
-    dev_mode = is_dev_mode()
 
     try:
         msg = event.get("last_assistant_message") or ""
@@ -191,35 +208,24 @@ def main() -> None:
             else:
                 frontier_mtime = 0.0
 
-            # ---- Escalation tracking: reread_pending + drift_block_count ----
-            reread_pending = prev_state.get("reread_pending", False)
-            drift_count = int(prev_state.get("drift_block_count", 0) or 0) if prev_state else 1
-
-            if drift_flags:
-                # REREAD was offered but driver re-violated → escalate
-                if reread_pending:
-                    drift_count += 1
-                else:
-                    drift_count += 1
-            else:
-                # Compliant output → recovery, clear pending + count
-                drift_count = 0
-            # Always clear reread_pending after processing (consumed this cycle)
-            reread_pending = False
+            # ---- Escalation tracking: consecutive drift count ----
+            drift_count = _next_drift_count(prev_state, drift_flags)
+            drift_started_at = _next_drift_started_at(prev_state, drift_flags, now)
 
             state = {
                 "frontier_mtime": frontier_mtime,
                 "claude_mtime": claude_md.stat().st_mtime if claude_md.exists() else 0.0,
                 "drift_flags": drift_flags,
+                "drift_started_at": drift_started_at,
                 "updated_at": now,
-                "reread_pending": reread_pending,
+                "reread_pending": False,
                 "drift_block_count": drift_count,
                 "frontier_alerted_at": _frontier_alerted if _frontier_alerted > 0 else prev_state.get("frontier_alerted_at", 0),
             }
             SessionStateManager.save(run_dir, state)
 
         # ---- Drift notification: systemMessage only (no drift_block.json, Decision 2) ----
-        if drift_flags and not dev_mode:
+        if drift_flags:
             normal = is_normal_mode()
             threshold_handoff = 5 if normal else 3
             threshold_reread = 3 if normal else 2
@@ -308,6 +314,27 @@ def _selftest() -> int:
     checks.append(("session_state missing -> {}", SessionStateManager.load(d / "nope") == {}))
     # _valid_ts (imported from anti_drift)
     now_ts = time.time()
+    # consecutive count helper semantics
+    checks.append(("drift count first hit -> 1", _next_drift_count({}, ["protocol_violation"]) == 1))
+    checks.append(("drift count increments on drift",
+                   _next_drift_count({"drift_block_count": 2}, ["option_list"]) == 3))
+    checks.append(("drift count resets on clean",
+                   _next_drift_count({"drift_block_count": 3}, []) == 0))
+    checks.append(("drift count bad prior -> 1",
+                   _next_drift_count({"drift_block_count": "bad"}, ["frontier_stale"]) == 1))
+    checks.append(("drift started first hit -> now",
+                   _next_drift_started_at({}, ["protocol_violation"], now_ts) == now_ts))
+    checks.append(("drift started preserves streak",
+                   _next_drift_started_at({"drift_flags": ["protocol_violation"],
+                                           "drift_started_at": now_ts - 10},
+                                          ["option_list"], now_ts) == now_ts - 10))
+    checks.append(("drift started resets on clean",
+                   _next_drift_started_at({"drift_flags": ["protocol_violation"],
+                                           "drift_started_at": now_ts - 10}, [], now_ts) == 0.0))
+    checks.append(("drift started bad prior -> now",
+                   _next_drift_started_at({"drift_flags": ["protocol_violation"],
+                                           "drift_started_at": "bad"},
+                                          ["frontier_stale"], now_ts) == now_ts))
     checks.append(("valid_ts valid", _valid_ts(now_ts, now_ts) == now_ts))
     checks.append(("valid_ts negative -> 0", _valid_ts(-1, now_ts) == 0.0))
     checks.append(("valid_ts future -> 0", _valid_ts(now_ts + 999, now_ts) == 0.0))
