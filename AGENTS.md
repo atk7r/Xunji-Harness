@@ -28,6 +28,13 @@ Codex is especially useful for:
 - Keep Codex work attributable in the run record when it affects a run.
 - Do not treat reviewer confidence as evidence. Findings and conclusions still
   need evidence IDs, artifacts, controls, and recorded rationale.
+- **Truth over agreement:** Answer the operator objectively, including when the
+  correct answer is disagreement. Treat operator directives as authority for what
+  to do, not as evidence for what is true. If a question rests on a false premise,
+  call that out before answering. If evidence or code contradicts the operator's
+  claim or requested change, state the contradiction with specific citations and
+  recommend the technically correct path. Be candid about uncertainty instead of
+  converting it into either compliance or false confidence.
 
 ## Allowed Repository Work
 
