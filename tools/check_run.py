@@ -264,7 +264,7 @@ def check_certainty_scale(run_dir: Path) -> list[str]:
 def _report_evidence_ids(rtext: str) -> set[str]:
     ids: set[str] = set()
     for m in re.finditer(r"(?im)^\s*Evidence\s+IDs?\s*[:：]\s*(.*)$", rtext):
-        ids.update(re.findall(r"E-\d+", m.group(1)))
+        ids.update(re.findall(r"E-\d+[a-z]*", m.group(1)))
     return ids
 
 
@@ -321,7 +321,7 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:
     body = re.sub(r"```.*?```|<!--.*?-->", "", rtext, flags=re.S)
     body = re.sub(r"`[^`\n]*`", "", body)
     body = re.sub(r"(?im)^\s*Evidence\s+IDs?.*$", "", body)
-    body_ids = set(re.findall(r"E-\d+", body))
+    body_ids = set(re.findall(r"E-\d+[a-z]*", body))
     immature_body = sorted(
         eid for eid in body_ids
         if eid in records and records[eid].get("maturity") in {"phenomenon", "candidate"}
@@ -553,6 +553,33 @@ def check_shallow_close(run_dir: Path) -> list[str]:
                     f"frontier Closed Front {head!r}: 以 depth=shallow 关闭却无 `Vectors tried:` "
                     "—— 高价值前沿浅尝即弃是漏挖根因(hamastar 的 RCE 浅尝教训)。补 `Vectors tried:` "
                     "写清尝试过的【向量类别】, 并说明为何 shallow 即足以 Type B 关闭(而非 deferred)。")
+    return warns
+
+
+def check_closed_artifacts(run_dir: Path) -> list[str]:
+    """证据交叉验证护栏(警告). codex review 实战: driver 3 次因依赖 probe stdout JSON
+    的空 body/snippet 而错误关闭前沿(client "无表单" 实际含10隐藏字段, schedule "正常页面"
+    实际含完整系统信息, ai "无GUID" 实际含3个GUID)。根因: 下结论时未交叉验证保存的 evidence
+    文件。此护栏要求 Closed Front 声明 `Artifacts verified:` 字段 —— 列出用于做出关闭结论的
+    具体 evidence 文件及关键发现。只读、不硬卡。"""
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return []
+    text = fr.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"##\s*Closed Fronts(.*?)(?=^##\s|\Z)", text, re.S | re.MULTILINE)
+    if not m:
+        return []
+    warns: list[str] = []
+    for block in re.split(r"(?=^###\s)", m.group(1), flags=re.MULTILINE):
+        if not block.lstrip().startswith("###"):
+            continue
+        head = block.strip().splitlines()[0][:48]
+        if not re.search(r"Artifacts?\s*verified\s*[:：]\s*\S", block, re.I):
+            warns.append(
+                f"frontier Closed Front {head!r}: 无 `Artifacts verified:` 字段 —— "
+                "codex review 实战教训: driver 曾因依赖空 stdout body 而 3 次错误关闭前沿。"
+                "补 `Artifacts verified: evidence/xxx.html (key findings)` "
+                "列出用于做出关闭结论的具体文件, 防基于空 snippet 的错误关闭。")
     return warns
 
 
@@ -1066,7 +1093,7 @@ def _evidence_blocks_text(run_dir: Path) -> str:
     parts = []
     for sec in re.split(r"(?m)^(?=##\s)", raw):
         head = sec.splitlines()[0] if sec.strip() else ""
-        if re.search(r"\bE-\d+\b", head):
+        if re.search(r"\bE-\d+[a-z]*\b", head):
             parts.append(sec)
     return "\n".join(parts).lower()
 
@@ -1218,6 +1245,71 @@ def check_retrospective(run_dir: Path) -> list[str]:
     return errors
 
 
+def _conflict_state(run_dir: Path) -> tuple[list[dict], str | None]:
+    path = run_dir / "state" / "conflicts.json"
+    if not path.exists():
+        return [], None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception as e:
+        return [], f"{path}: {e}"
+    conflicts = data.get("conflicts", []) if isinstance(data, dict) else []
+    unresolved = [c for c in conflicts if isinstance(c, dict)
+                  and str(c.get("status", "")).lower() in {"", "unresolved", "open"}]
+    return unresolved, None
+
+
+def _unresolved_conflicts(run_dir: Path) -> list[dict]:
+    conflicts, _ = _conflict_state(run_dir)
+    return conflicts
+
+
+def _evidence_block(text: str, eid: str) -> str:
+    m = re.search(rf"(?ms)^##\s+{re.escape(eid)}\b.*?(?=^##\s+E-\d+[a-z]*\b|\Z)", text)
+    return m.group(0) if m else ""
+
+
+def _confirmed_high_severity_ids(run_dir: Path) -> list[str]:
+    text = (run_dir / "evidence.md").read_text(encoding="utf-8", errors="replace") \
+        if (run_dir / "evidence.md").exists() else ""
+    out: list[str] = []
+    for rec in parse_evidence(run_dir):
+        if not (rec.get("confirmed") and rec.get("maturity") == "finding"):
+            continue
+        block = _evidence_block(text, rec["id"])
+        sm = re.search(r"(?im)^\s*[-*]?\s*Severity\s*[:：]\s*(HIGH|CRITICAL)\b", block)
+        if sm:
+            out.append(rec["id"])
+    return out
+
+
+def check_conflict_gate(run_dir: Path) -> tuple[list[str], list[str]]:
+    """Agent-board conflict gate for closure.
+
+    `state/conflicts.json` is a projection, not canonical evidence, but unresolved
+    conflicts are exactly the signal that Root Synthesizer still owes
+    verification/falsification before closure. Medium/low runs get a warning; a
+    confirmed HIGH/CRITICAL finding with unresolved conflicts is a hard stop.
+    """
+    conflicts, read_error = _conflict_state(run_dir)
+    if read_error:
+        return [], [f"冲突门: 无法解析 state/conflicts.json ({read_error}) —— "
+                    "该文件只是投影缓存, 不覆盖 canonical Markdown; 请重新运行 "
+                    "`python tools/workers.py conflicts runs/<dir>` 生成干净投影。"]
+    if not conflicts:
+        return [], []
+    fronts = sorted({str(c.get("front") or "?") for c in conflicts})
+    kinds = sorted({str(c.get("type") or "?") for c in conflicts})
+    msg = (f"冲突门: state/conflicts.json 仍有 {len(conflicts)} 个 unresolved conflict "
+           f"(fronts={', '.join(fronts[:6])}; types={', '.join(kinds[:6])}) —— "
+           "收口前应派 verification-agent 做 control/replay/replication, 或由 Root Synthesizer "
+           "写明降级/去重/已解决。")
+    high = _confirmed_high_severity_ids(run_dir)
+    if high:
+        return [msg + f" 当前存在 HIGH/CRITICAL confirmed finding: {', '.join(high)}。"], []
+    return [], [msg]
+
+
 def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     """过早收口护栏(P0-1). 触发条件 = report.md 出现【强收口断言】(自首式) **或**
     report.md 已是【实质终版报告】(状态式 _report_is_final: 引用了已确认发现)。后者堵住
@@ -1259,7 +1351,7 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     # 列 ID、正文显式写"E-x 不报"仍算引用; 模板是同行列 IDs。
     report_body = re.sub(r"```.*?```|<!--.*?-->", "", rtext, flags=re.S)
     report_body = re.sub(r"(?im)^\s*Evidence\s+IDs?.*$", "", report_body)
-    cited_ids = set(re.findall(r"E-\d+", report_body))
+    cited_ids = set(re.findall(r"E-\d+[a-z]*", report_body))
     missing_hi = [r["id"] for r in parse_evidence(run_dir)
                   if r["id"].startswith("E-") and r["confirmed"] and not r["superseded"]
                   # 纯 negative(有 Refutes 且无 Supports)才豁免; mixed(Supports+Refutes)的确认
@@ -1312,6 +1404,9 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     errors.extend(check_unattacked_surface(run_dir))
     # 硬门(强制复盘): 每次渗透收口都要落 retrospective.md, 诚实写【自身问题】+【框架/工具问题】
     errors.extend(check_retrospective(run_dir))
+    conflict_errors, conflict_warns = check_conflict_gate(run_dir)
+    errors.extend(conflict_errors)
+    warns.extend(conflict_warns)
 
     # 硬门: 收口前必须有独立 Reviewer 复审记录
     review = run_dir / "review.md"
@@ -1756,6 +1851,60 @@ def _selftest() -> int:
         ("Metacog: full contract -> no warn", meta_ok_w == []),
     ]
 
+    # --- Ultra-native agent-board conflict gate ---
+    d_conf = Path(tempfile.mkdtemp())
+    (d_conf / "state").mkdir()
+    (d_conf / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d_conf / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_conf / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+    (d_conf / "retrospective.md").write_text(
+        "# Retrospective\n\n## 自身问题 / Self problems\n- conflict gate selftest filled.\n\n"
+        "## 框架与工具问题 / Framework problems\n- conflict gate selftest filled.\n",
+        encoding="utf-8")
+    (d_conf / "report.md").write_text(
+        "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
+    (d_conf / "state" / "conflicts.json").write_text(json.dumps({
+        "schema": 1,
+        "conflicts": [{"type": "direct contradiction", "front": "F-001", "status": "unresolved"}],
+    }), encoding="utf-8")
+    (d_conf / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Maturity: finding\n- Severity: MEDIUM\n"
+        "- Replicated: yes\n- Artifacts: `ev.html`\n- Certainty: 0.8\n",
+        encoding="utf-8")
+    conf_med_err, conf_med_warn = check_closure_discipline(d_conf)
+    (d_conf / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Maturity: finding\n- Severity: HIGH\n"
+        "- Replicated: yes\n- Artifacts: `ev.html`\n- Certainty: 0.8\n",
+        encoding="utf-8")
+    conf_hi_err, conf_hi_warn = check_closure_discipline(d_conf)
+    (d_conf / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Maturity: finding\n- Severity: CRITICAL\n"
+        "- Replicated: yes\n- Artifacts: `ev.html`\n- Certainty: 0.8\n",
+        encoding="utf-8")
+    conf_crit_err, _ = check_closure_discipline(d_conf)
+    (d_conf / "state" / "conflicts.json").write_text(json.dumps({
+        "schema": 1,
+        "conflicts": [{"type": "direct contradiction", "front": "F-001", "status": "resolved"}],
+    }), encoding="utf-8")
+    conf_none_err, conf_none_warn = check_conflict_gate(d_conf)
+    (d_conf / "state" / "conflicts.json").write_text("{not json", encoding="utf-8")
+    conf_bad_err, conf_bad_warn = check_conflict_gate(d_conf)
+    checks += [
+        ("conflict gate: unresolved conflict before closure -> warning",
+         any("冲突门" in w for w in conf_med_warn)),
+        ("conflict gate: medium finding unresolved conflict is not hard fail",
+         not any("冲突门" in e for e in conf_med_err)),
+        ("conflict gate: HIGH finding unresolved conflict -> hard fail",
+         any("冲突门" in e and "HIGH/CRITICAL" in e for e in conf_hi_err)),
+        ("conflict gate: HIGH hard fail does not also warn", not any("冲突门" in w for w in conf_hi_warn)),
+        ("conflict gate: CRITICAL finding unresolved conflict -> hard fail",
+         any("冲突门" in e and "HIGH/CRITICAL" in e for e in conf_crit_err)),
+        ("conflict gate: resolved conflicts -> silent",
+         conf_none_err == [] and conf_none_warn == []),
+        ("conflict gate: bad conflicts.json -> projection warning, not hard fail",
+         conf_bad_err == [] and any("无法解析 state/conflicts.json" in w for w in conf_bad_warn)),
+    ]
+
     # --- intermediate gates: fresh review, live coverage, same-barrier status filtering ---
     _five_decisions = "# Decisions\n" + "\n".join(
         f"## D-{i:03d}\n- Chosen front: F-001\n" for i in range(1, 6))
@@ -2149,6 +2298,7 @@ def main() -> int:
     warnings.extend(check_layout_drift(run_dir))       # 布局漂移: 证据/草稿散落 run 根目录(应归位 evidence/scripts/classify)
     warnings.extend(check_coverage_health(run_dir))   # 覆盖台账三联检(防 lump / 缺建 / 子集蒙混; 输入一次加载)
     warnings.extend(check_shallow_close(run_dir))     # 纵深: 高价值前沿 depth=shallow 关闭却无 Vectors tried
+    warnings.extend(check_closed_artifacts(run_dir))  # 交叉验证: Closed Front 需声明 Artifacts verified (防空 stdout body 错误关闭)
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
     warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)

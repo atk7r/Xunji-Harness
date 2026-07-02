@@ -41,6 +41,11 @@
   `knowledge/weaponized/` (payloads / chains / PoC). The forbidden thing is the **blind
   scanner / playbook** (knowledge fired the same regardless of target) + publishing a
   turnkey kit — **not weaponization itself**. See cognition "Grounding vs Weaponized".
+- **Knowledge-first rule:** When a product signature is recognized (fingerprint match
+  from recon/classify), grep `knowledge/` for matching entries **before** any WebSearch.
+  The signature→knowledge load is a hard step, not optional: consuming the wrong
+  vendor's CVE (e.g. Soar Cloud for 致远薪事力) from WebSearch while the correct
+  `knowledge/*.md` sits unread is a protocol error. See retrospective #3/#15.
 
 ## Operating Loop
 
@@ -51,6 +56,12 @@
   re-probe; do NOT bulk-run `classify_hosts` to rebuild what Guanlan already produced
   (= re-OSINT · pure time-sink · the thing that turned a real run into a slog).
   `classify_hosts` survives only as an opt-in own-egress liveness recheck.
+  When used, produce an egress overlay (`egress_coverage.json`) — do NOT overwrite
+  the Guanlan baseline `coverage.json`. setup_run's `_merge_egress_recheck` merges
+  them with `source: guanlan-baseline + egress-recheck-overlay`. check_run targets
+  Guanlan-baseline assets for hard enforcement; egress-only additions are advisory.
+  (retrospective #13: classify --all turned 19→114 reachable, creating an unsolvable
+  contradiction between "don't re-OSINT" and "every asset needs a verdict.")
 - `docs/ROUTER.md` decides which mode guidance to load; deterministic (runtime +
   phase + run state → files).
 - Every cycle, update the written state:
@@ -103,6 +114,11 @@ observe -> update state graph -> decompose fronts
   re-probe/egress/relay in this repo.
 - Blocked → first judge Type A vs B: A = a smaller safe step · different context ·
   missing evidence may move it; B = explored enough, close/defer with a written reason.
+- **Brute-force budget:** same-endpoint credential guessing that passes 25 consecutive
+  failures with zero success is Type B by default — further guessing won't add value.
+  Pivot to logic flaws, config errors, unauth APIs, IDOR, path traversal. The guard
+  layer prints a pivot warning at 25 failures; ignore it at your own risk
+  (retrospective #4: 500+ guesses, 0 success).
 - Default collaboration model: assign fresh-context Agents through the run dir when
   breadth or independent expertise helps. Agents produce candidates/refutations, never
   canonical findings. The Single Synthesizer merges through the evidence gate; parallel
@@ -141,15 +157,36 @@ observe -> update state graph -> decompose fronts
 - A single observation · an environment-provided artifact · a block page · a redirect ·
   model confidence alone = never confirmation. If a signal may have existed before your
   action, treat it as unconfirmed until proven otherwise.
+- **Control-experiment rule:** A claim that a security mechanism is absent/disabled
+  (e.g. "MAC disabled", "no CSRF check", "no auth required") requires a positive
+  control — first demonstrate the mechanism activates under normal conditions, then
+  show its absence under the test condition. A single anomalous response (e.g. 200
+  from wrong Content-Type that the server ignored) ≠ proof. Rule out alternative
+  explanations (Content-Type mismatch, unparsed parameters, caching) before declaring
+  a mechanism absent. (retrospective #5: ViewState MAC misjudgment)
+
+## Closure Pre-condition (硬门)
+
+- Declaring a run FINAL / 收工 / 结束 requires BOTH:
+  1. `check_run` passes (no hard gates)
+  2. `frontier.md` Open Fronts count = 0
+- If either fails, the next action MUST be an attack, not a closure declaration.
+- The Stop hook enforces this; treat its block as a real signal, not paper compliance.
 
 ## Operator Authority
 
 - The operator (repo owner) = the highest authority; every target they give is
   authorized — never question / re-confirm / hedge. Their instruction = the controlling
   order; act on it. How freedom and consent work across action classes = the skill's job.
-- Mid-run steering → record it in `runs/<target>/hints.md` as a `HINT-xxx` node (not
-  just in chat), re-read every cycle (Root graph pass), so momentum doesn't bury it. **A
-  directive is controlling; an operator *claim* about the target is a lead to verify
+- Mid-run steering → record it in `runs/<target>/hints.md` as a `HINT-xxx` node **before
+  the next Reason pass** — not after, not "when convenient." A directive spoken in chat
+  that is not persisted to hints.md before the next cycle is a protocol violation.
+- **Constraint scope rule:** A `Kind: constraint` from the operator applies to the
+  **entire run** across all fronts and assets, not just the current attack context.
+  "Don't brute force" means don't brute force anything, anywhere, by any method —
+  not "don't brute force this specific endpoint." The constraint stays active until
+  the operator explicitly lifts it. Record the scope in the hint text.
+- **A directive is controlling; an operator *claim* about the target is a lead to verify
   through the evidence gate, not a Fact.** See WORKFLOW "Operator Hints".
 
 ### Normal Mode Pause Gates

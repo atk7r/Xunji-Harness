@@ -22,6 +22,10 @@ ROADMAP R-1(最高价值缺口): 一把尺子, 让框架改动可被 A/B —— 
                schema: expected_process:[{id, signals:[子串], in?:[文件名], must?:true}]。
                signal 是子串匹配 —— 选【稳健的能力踪迹】(工具名 tools/knowledge_match / 产物标记),
                别选易变措辞: 否则会 false-fail(真触发却没留该串)或 false-confidence(巧合命中)。
+- collaboration: expected_collaboration 断言 Ultra-native Agent Board 是否按预期协作
+               (高价值 front 覆盖、冲突解决、每 Agent 请求预算、首证时间、误报压制)。
+               一旦 fixture 声明 expected_collaboration, 这些 checks 会进入 clean 门；
+               缺少必要观测数据(如 state/events.jsonl)会显式 skipped=false-ok, 不静默通过。
 
 用法:
   python tools/bench.py score <run_dir> <truth.json>
@@ -46,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # tools/  (evidence_parse)
 import evidence_parse   # 复用唯一权威证据解析器(独立模块, 不必拉整个收口门 check_run)
 
-_E_BLOCK = re.compile(r"(?ms)^##\s+(E-\d+).*?(?=^##\s+E-|\Z)")
+_E_BLOCK = re.compile(r"(?ms)^##\s+(E-\d+[a-z]*).*?(?=^##\s+E-|\Z)")
 
 
 def _confirmed_blocks(run_dir: Path) -> tuple[dict, dict, set]:
@@ -137,6 +141,167 @@ def _timeline_metrics(run_dir: Path) -> dict:
     return out
 
 
+def _load_json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _field(text: str, name: str) -> str:
+    m = re.search(rf"(?im)^\s*[-*]?\s*{re.escape(name)}\s*[:：]\s*([^\n]*)$", text)
+    return m.group(1).strip() if m else ""
+
+
+def _front_blocks(run_dir: Path) -> list[dict]:
+    text = (run_dir / "frontier.md").read_text(encoding="utf-8", errors="replace") \
+        if (run_dir / "frontier.md").exists() else ""
+    out = []
+    for m in re.finditer(r"(?ms)^###\s+(F-\d+).*?(?=^###\s+F-\d+|\Z)", text):
+        block = m.group(0)
+        threat_role = _field(block, "Threat role")
+        severity = _field(block, "Severity")
+        out.append({
+            "id": m.group(1),
+            "text": block,
+            "status": _field(block, "Status").lower(),
+            "threat_role": threat_role,
+            "threat_exposure": _field(block, "Threat exposure"),
+            "severity": severity,
+            "high_value": severity.upper() in {"HIGH", "CRITICAL"}
+            or threat_role.lower() in {"admin-mgmt", "identity-auth"},
+        })
+    return out
+
+
+def _agent_blocks(run_dir: Path) -> list[dict]:
+    out = []
+    ad = run_dir / "agents"
+    for p in sorted(ad.glob("A-*.md")) if ad.exists() else []:
+        text = p.read_text(encoding="utf-8", errors="replace")
+        out.append({
+            "agent": p.stem,
+            "role": _field(text, "Role"),
+            "front": _field(text, "Assigned front"),
+            "status": _field(text, "Status").lower(),
+            "maturity": _field(text, "Maturity").lower(),
+            "supports": _field(text, "Supports"),
+            "refutes": _field(text, "Refutes"),
+            "confidence": _field(text, "Confidence"),
+        })
+    return out
+
+
+def _collaboration_metrics(run_dir: Path, truth: dict) -> dict:
+    """Artifact-only Ultra-native coordination metrics.
+
+    This does not judge exploitability. It checks whether the agent board behaved
+    like a coordinated search: high-value fronts assigned, candidates gated,
+    conflicts resolved, and request budget not multiplied by agent count.
+    """
+    assignments = _load_json(run_dir / "state" / "assignments.json").get("assignments", [])
+    assignments = [a for a in assignments if isinstance(a, dict)]
+    agents = _agent_blocks(run_dir)
+    fronts = _front_blocks(run_dir)
+    conflicts = _load_json(run_dir / "state" / "conflicts.json").get("conflicts", [])
+    conflicts = [c for c in conflicts if isinstance(c, dict)]
+    unresolved = [c for c in conflicts if str(c.get("status", "")).lower() in {"", "open", "unresolved"}]
+    assigned_fronts = {str(a.get("front")) for a in assignments if a.get("front")}
+    high_fronts = {f["id"] for f in fronts if f["high_value"]}
+    missed_high = sorted(high_fronts - assigned_fronts)
+    agent_roles = {a["agent"]: a.get("role", "") for a in agents}
+    assignment_roles: dict[str, set[str]] = {}
+    for a in assignments:
+        front = str(a.get("front") or "").strip()
+        if not front:
+            continue
+        role = str(a.get("role") or agent_roles.get(str(a.get("agent") or ""), "")).strip().lower()
+        assignment_roles.setdefault(front, set())
+        if role:
+            assignment_roles[front].add(role)
+
+    candidate_agents = [
+        a for a in agents
+        if a.get("maturity") == "candidate" or a.get("supports") or a.get("refutes")
+    ]
+    finding_ids = [r["id"] for r in evidence_parse.parse_evidence(run_dir)
+                   if r["confirmed"] and r.get("maturity") == "finding"]
+    conversion = (round(len(finding_ids) / len(candidate_agents), 3) if candidate_agents else None)
+
+    # Events may optionally include agent and type=request/evidence. Without such
+    # data, report empty maps rather than guessing.
+    event_path = run_dir / "state" / "events.jsonl"
+    req_by_agent: dict[str, int] = {}
+    first_by_mode: dict[str, float] = {}
+    start_by_mode: dict[str, float] = {}
+    if event_path.exists():
+        for line in event_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                ev = json.loads(line)
+                ts = float(ev.get("ts"))
+            except Exception:
+                continue
+            agent = str(ev.get("agent") or ev.get("mode") or "").strip()
+            typ = str(ev.get("type", "")).lower()
+            if agent and typ == "request":
+                req_by_agent[agent] = req_by_agent.get(agent, 0) + 1
+                start_by_mode.setdefault(agent, ts)
+            if agent and typ == "evidence":
+                first_by_mode.setdefault(agent, ts)
+    ttfe_by_mode = {m: round(first_by_mode[m] - start_by_mode[m], 3)
+                    for m in first_by_mode if m in start_by_mode and first_by_mode[m] >= start_by_mode[m]}
+
+    fp_suppressed = sum(1 for r in evidence_parse.parse_evidence(run_dir)
+                        if r.get("refutes_any") and not r.get("supports") and r.get("confirmed"))
+    spec = truth.get("expected_collaboration", {})
+    checks = []
+    role_misses = []
+    if spec:
+        front_roles = spec.get("front_roles", {})
+        if isinstance(front_roles, dict):
+            for front, roles in front_roles.items():
+                wanted = {str(r).strip().lower() for r in roles if str(r).strip()}
+                got = assignment_roles.get(str(front), set())
+                if wanted and not (wanted & got):
+                    role_misses.append({"front": front, "expected_roles": sorted(wanted), "got_roles": sorted(got)})
+        if "min_agent_coverage" in spec:
+            denom = max(len(high_fronts), 1)
+            covered = len(high_fronts) - len(missed_high) - len(
+                [m for m in role_misses if str(m.get("front")) in high_fronts])
+            checks.append({"id": "agent-coverage", "ok": covered / denom
+                           >= float(spec["min_agent_coverage"])})
+        if spec.get("require_conflicts_resolved"):
+            checks.append({"id": "conflicts-resolved", "ok": not unresolved})
+        if "max_requests_per_agent" in spec and req_by_agent:
+            cap = int(spec["max_requests_per_agent"])
+            checks.append({"id": "request-budget-by-agent", "ok": all(v <= cap for v in req_by_agent.values())})
+        elif "max_requests_per_agent" in spec:
+            reason = "state/events.jsonl missing" if not event_path.exists() else "no agent request events"
+            checks.append({"id": "request-budget-by-agent", "ok": False, "skipped": True,
+                           "reason": reason})
+        if spec.get("require_no_missed_high_value"):
+            checks.append({"id": "missed-high-value-front", "ok": not missed_high})
+    return {
+        "assignments": len(assignments),
+        "agents": len(agents),
+        "high_value_fronts": len(high_fronts),
+        "assigned_high_value_fronts": len(high_fronts) - len(missed_high),
+        "missed_high_value_fronts": missed_high,
+        "role_mismatched_fronts": role_misses,
+        "candidate_agents": len(candidate_agents),
+        "confirmed_findings": len(finding_ids),
+        "candidate_to_finding_conversion": conversion,
+        "conflicts_total": len(conflicts),
+        "conflicts_unresolved": len(unresolved),
+        "conflict_resolution_correct": not unresolved if conflicts else None,
+        "request_budget_by_agent": req_by_agent,
+        "time_to_first_evidence_by_mode_sec": ttfe_by_mode,
+        "false_positive_suppression_events": fp_suppressed,
+        "checks": checks,
+    }
+
+
 def _closure_check(run_dir: Path, truth: dict) -> dict | None:
     """Check a recorded closure fixture without treating 'no finding' as failure."""
     spec = truth.get("expected_closure")
@@ -195,6 +360,7 @@ def score(run_dir: Path, truth: dict) -> dict:
     proc = _process_check(run_dir, truth.get("expected_process", []))
     budget_max = truth.get("budget", {}).get("max_requests")
     closure = _closure_check(run_dir, truth)
+    collaboration = _collaboration_metrics(run_dir, truth)
     return {
         "fixture": truth.get("name", run_dir.name),
         "expected": n_exp, "detected": n_det,
@@ -212,6 +378,7 @@ def score(run_dir: Path, truth: dict) -> dict:
         "closure": closure,
         "findings": findings, "fp_detail": fps,
         "process": proc,
+        "collaboration": collaboration,
     }
 
 
@@ -252,6 +419,27 @@ def _print_card(s: dict) -> None:
             opt = "" if p["must"] else " (optional)"
             miss = "" if p["fired"] else f"  signals={p['signals']} 未见踪迹"
             print(f"    {mark} {p['id']}{opt}{miss}")
+    collab = s.get("collaboration", {})
+    if collab and (collab.get("assignments") or collab.get("agents") or collab.get("checks")):
+        failed = [c for c in collab.get("checks", []) if not c.get("ok")]
+        print(f"  agents    : {collab.get('agents', 0)} agents / {collab.get('assignments', 0)} assignments; "
+              f"high fronts {collab.get('assigned_high_value_fronts', 0)}/"
+              f"{collab.get('high_value_fronts', 0)} assigned")
+        conv = collab.get("candidate_to_finding_conversion")
+        if conv is not None:
+            print(f"  conversion: {collab.get('confirmed_findings', 0)}/"
+                  f"{collab.get('candidate_agents', 0)} candidate/refutation agents -> findings ({conv:.0%})")
+        if collab.get("conflicts_total"):
+            print(f"  conflicts : {collab.get('conflicts_total', 0)} total; "
+                  f"{collab.get('conflicts_unresolved', 0)} unresolved")
+        if collab.get("request_budget_by_agent"):
+            print(f"  agent budget: {collab['request_budget_by_agent']}")
+        if collab.get("time_to_first_evidence_by_mode_sec"):
+            print(f"  agent first-evidence: {collab['time_to_first_evidence_by_mode_sec']}")
+        if failed:
+            print("  collaboration checks failed: " + ", ".join(
+                str(c.get("id")) + (f" ({c.get('reason')})" if c.get("skipped") else "")
+                for c in failed))
 
 
 def _is_clean(s: dict) -> bool:
@@ -259,13 +447,15 @@ def _is_clean(s: dict) -> bool:
     proc_ok = all(p["fired"] for p in s.get("process", []) if p["must"])
     closure = s.get("closure")
     closure_ok = closure is None or closure["correct"]
+    collab = s.get("collaboration") or {}
+    collab_ok = all(c.get("ok") for c in collab.get("checks", []))
     detection_ok = (
         (s["expected"] > 0 and s["detected"] == s["expected"]
          and s["calibrated"] == s["expected"])
         or s["expected"] == 0
     )
     return (detection_ok and s["false_positives"] == 0 and not s.get("over_budget", False)
-            and proc_ok and closure_ok)
+            and proc_ok and closure_ok and collab_ok)
 
 
 def _load_truth(p: Path) -> dict:
@@ -280,6 +470,9 @@ def _aggregate(scores: list[dict]) -> dict:
             if s.get("time_to_first_evidence_sec") is not None]
     clean = sum(1 for s in scores if _is_clean(s))
     closures = [s for s in scores if s.get("closure")]
+    collaborations = [s.get("collaboration") or {} for s in scores]
+    collab_checks = [c for co in collaborations for c in co.get("checks", [])]
+    collab_ttfe = [v for co in collaborations for v in co.get("time_to_first_evidence_by_mode_sec", {}).values()]
     return {
         "fixtures": len(scores),
         "clean": clean,
@@ -293,6 +486,15 @@ def _aggregate(scores: list[dict]) -> dict:
         "time_to_first_evidence_avg_sec": round(sum(ttfe) / len(ttfe), 3) if ttfe else None,
         "closure_correct": sum(1 for s in closures if s["closure"]["correct"]),
         "closure_expected": len(closures),
+        "agent_assignments": sum(int(co.get("assignments", 0)) for co in collaborations),
+        "agent_count": sum(int(co.get("agents", 0)) for co in collaborations),
+        "missed_high_value_fronts": sum(len(co.get("missed_high_value_fronts", [])) for co in collaborations),
+        "role_mismatched_fronts": sum(len(co.get("role_mismatched_fronts", [])) for co in collaborations),
+        "conflicts_unresolved": sum(int(co.get("conflicts_unresolved", 0)) for co in collaborations),
+        "collaboration_checks_failed": sum(1 for c in collab_checks if not c.get("ok")),
+        "false_positive_suppression_events": sum(
+            int(co.get("false_positive_suppression_events", 0)) for co in collaborations),
+        "agent_first_evidence_avg_sec": round(sum(collab_ttfe) / len(collab_ttfe), 3) if collab_ttfe else None,
         "total_expected_findings": total_expected,
         "total_detected_findings": total_detected,
         "total_calibrated_findings": total_calibrated,
@@ -320,6 +522,14 @@ def _print_summary(summary: dict) -> None:
         print(f"  first-evidence avg: {a['time_to_first_evidence_avg_sec']}s")
     if a["closure_expected"]:
         print(f"  closure   : {a['closure_correct']}/{a['closure_expected']} correct")
+    if a["agent_count"] or a["agent_assignments"] or a["collaboration_checks_failed"]:
+        print(f"  agents    : {a['agent_count']} agents / {a['agent_assignments']} assignments; "
+              f"missed-high={a['missed_high_value_fronts']} role-mismatch={a['role_mismatched_fronts']}")
+        print(f"  conflicts : {a['conflicts_unresolved']} unresolved; "
+              f"collab-check-fail={a['collaboration_checks_failed']}")
+        print(f"  fp-suppression: {a['false_positive_suppression_events']} negative confirmed events")
+        if a["agent_first_evidence_avg_sec"] is not None:
+            print(f"  agent first-evidence avg: {a['agent_first_evidence_avg_sec']}s")
 
 
 def _write_json(path: Path | None, obj: dict) -> None:
@@ -343,12 +553,19 @@ def _compare(baseline: Path, change: Path) -> int:
     keys = [
         "detection_rate", "calibration_rate", "false_positives", "false_positive_rate_mean",
         "request_budget_total", "request_budget_over", "time_to_first_evidence_avg_sec",
-        "closure_correct",
+        "closure_correct", "missed_high_value_fronts", "role_mismatched_fronts",
+        "conflicts_unresolved", "collaboration_checks_failed", "agent_first_evidence_avg_sec",
+        "false_positive_suppression_events",
     ]
-    higher_is_better = {"detection_rate", "calibration_rate", "closure_correct"}
+    higher_is_better = {
+        "detection_rate", "calibration_rate", "closure_correct",
+        "false_positive_suppression_events",
+    }
     lower_is_better = {
         "false_positives", "false_positive_rate_mean", "request_budget_total",
-        "request_budget_over", "time_to_first_evidence_avg_sec",
+        "request_budget_over", "time_to_first_evidence_avg_sec", "missed_high_value_fronts",
+        "role_mismatched_fronts", "conflicts_unresolved", "collaboration_checks_failed",
+        "agent_first_evidence_avg_sec",
     }
     regressed = False
     print("== bench compare ==")
@@ -547,6 +764,140 @@ def _selftest() -> int:
     checks.append(("汇总: 2 fixture clean 且 closure 计数正确",
                    summ["clean"] == 2 and summ["closure_correct"] == 1))
 
+    # Ultra-native collaboration metrics: assignments, roles, conflicts, agent budgets,
+    # time-to-first-evidence, and false-positive suppression are all artifact-only.
+    run5 = d / "collab_20260101"
+    (run5 / "state").mkdir(parents=True)
+    (run5 / "agents").mkdir()
+    (run5 / "frontier.md").write_text(
+        "# Frontier\n\n"
+        "### F-001 identity-auth profile idor\n"
+        "- Status: active\n- Threat role: identity-auth\n- Severity: HIGH\n\n"
+        "### F-002 marketing page\n"
+        "- Status: active\n- Threat role: static-content\n- Severity: LOW\n",
+        encoding="utf-8")
+    (run5 / "state" / "assignments.json").write_text(json.dumps({
+        "schema": 1,
+        "assignments": [
+            {"agent": "A-web-auth-001", "role": "web-auth", "front": "F-001"},
+            {"agent": "A-verify-001", "role": "verify", "front": "F-001"},
+        ],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    (run5 / "agents" / "A-web-auth-001.md").write_text(
+        "# Agent A-web-auth-001\n"
+        "- Role: web-auth\n- Assigned front: F-001\n- Status: done\n"
+        "- Maturity: candidate\n- Supports: H-001\n- Confidence: 0.8\n",
+        encoding="utf-8")
+    (run5 / "agents" / "A-verify-001.md").write_text(
+        "# Agent A-verify-001\n"
+        "- Role: verify\n- Assigned front: F-001\n- Status: done\n"
+        "- Maturity: phenomenon\n- Refutes: H-009\n- Confidence: 0.8\n",
+        encoding="utf-8")
+    (run5 / "state" / "conflicts.json").write_text(json.dumps({
+        "schema": 1,
+        "conflicts": [
+            {"id": "C-001", "type": "confidence mismatch", "status": "resolved",
+             "resolution": "verification replay supports E-001"},
+        ],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    (run5 / "state" / "events.jsonl").write_text(
+        '{"ts": 1.0, "type": "request", "agent": "A-web-auth-001"}\n'
+        '{"ts": 2.0, "type": "request", "agent": "A-web-auth-001"}\n'
+        '{"ts": 3.5, "type": "evidence", "agent": "A-web-auth-001"}\n'
+        '{"ts": 4.0, "type": "request", "agent": "A-verify-001"}\n'
+        '{"ts": 5.0, "type": "evidence", "agent": "A-verify-001"}\n',
+        encoding="utf-8")
+    (run5 / "evidence.md").write_text(
+        "# Evidence Ledger\n\n"
+        "## E-001: Profile IDOR confirms identity-auth exposure\n"
+        "- Certainty: 0.8\n- Maturity: finding\n- Supports: F-001\n"
+        "- Replicated: yes\n\n"
+        "## E-002: Admin takeover claim refuted by replay\n"
+        "- Certainty: 0.8\n- Maturity: candidate\n- Refutes: H-009\n"
+        "- Replicated: yes\n",
+        encoding="utf-8")
+    collab_truth = {
+        "name": "collab",
+        "expected_findings": [
+            {"id": "idor", "markers": ["profile idor", "identity-auth"], "min_certainty": 0.8},
+        ],
+        "expected_collaboration": {
+            "min_agent_coverage": 1.0,
+            "front_roles": {"F-001": ["web-auth", "verify"]},
+            "require_conflicts_resolved": True,
+            "max_requests_per_agent": 2,
+            "require_no_missed_high_value": True,
+        },
+    }
+    sco = score(run5, collab_truth)
+    checks.append(("协作: high-value front 被合适 role 覆盖", sco["collaboration"]["checks"][0]["ok"]))
+    checks.append(("协作: candidate/refutation-to-finding conversion 记录",
+                   sco["collaboration"]["candidate_to_finding_conversion"] == 0.5))
+    checks.append(("协作: resolved conflict 不破门",
+                   sco["collaboration"]["conflicts_total"] == 1
+                   and sco["collaboration"]["conflicts_unresolved"] == 0))
+    checks.append(("协作: request budget by agent 记录且未超 cap",
+                   sco["collaboration"]["request_budget_by_agent"].get("A-web-auth-001") == 2
+                   and all(c["ok"] for c in sco["collaboration"]["checks"])))
+    checks.append(("协作: time-to-first-evidence by mode 记录",
+                   sco["collaboration"]["time_to_first_evidence_by_mode_sec"].get("A-web-auth-001") == 2.5))
+    checks.append(("协作: false-positive suppression 记录 pure negative confirmed event",
+                   sco["collaboration"]["false_positive_suppression_events"] == 1))
+    checks.append(("协作门: checks 全绿 -> clean", _is_clean(sco)))
+
+    run6 = d / "collab_bad_20260101"
+    (run6 / "state").mkdir(parents=True)
+    (run6 / "agents").mkdir()
+    (run6 / "frontier.md").write_text((run5 / "frontier.md").read_text(encoding="utf-8"), encoding="utf-8")
+    (run6 / "state" / "assignments.json").write_text(json.dumps({
+        "schema": 1,
+        "assignments": [{"agent": "A-surface-001", "role": "surface", "front": "F-002"}],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    (run6 / "agents" / "A-surface-001.md").write_text(
+        "# Agent A-surface-001\n- Role: surface\n- Assigned front: F-002\n- Status: done\n"
+        "- Maturity: phenomenon\n- Confidence: 0.5\n",
+        encoding="utf-8")
+    (run6 / "state" / "conflicts.json").write_text(json.dumps({
+        "schema": 1,
+        "conflicts": [{"id": "C-001", "type": "direct contradiction", "status": "open"}],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    (run6 / "state" / "events.jsonl").write_text(
+        '{"ts": 1.0, "type": "request", "agent": "A-surface-001"}\n'
+        '{"ts": 2.0, "type": "request", "agent": "A-surface-001"}\n'
+        '{"ts": 3.0, "type": "request", "agent": "A-surface-001"}\n',
+        encoding="utf-8")
+    (run6 / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001: Profile IDOR confirms identity-auth exposure\n"
+        "- Certainty: 0.8\n- Maturity: finding\n- Supports: F-001\n- Replicated: yes\n",
+        encoding="utf-8")
+    sbad = score(run6, collab_truth)
+    checks.append(("协作门: high-value miss / unresolved conflict / over cap -> 非 clean",
+                   not _is_clean(sbad)
+                   and sbad["collaboration"]["missed_high_value_fronts"] == ["F-001"]
+                   and sbad["collaboration"]["conflicts_unresolved"] == 1
+                   and sbad["collaboration"]["request_budget_by_agent"].get("A-surface-001") == 3))
+    run7 = d / "collab_no_events_20260101"
+    (run7 / "state").mkdir(parents=True)
+    (run7 / "agents").mkdir()
+    (run7 / "frontier.md").write_text((run5 / "frontier.md").read_text(encoding="utf-8"), encoding="utf-8")
+    (run7 / "state" / "assignments.json").write_text((run5 / "state" / "assignments.json").read_text(
+        encoding="utf-8"), encoding="utf-8")
+    (run7 / "state" / "conflicts.json").write_text((run5 / "state" / "conflicts.json").read_text(
+        encoding="utf-8"), encoding="utf-8")
+    (run7 / "agents" / "A-web-auth-001.md").write_text((run5 / "agents" / "A-web-auth-001.md").read_text(
+        encoding="utf-8"), encoding="utf-8")
+    (run7 / "evidence.md").write_text((run5 / "evidence.md").read_text(encoding="utf-8"), encoding="utf-8")
+    snoevents = score(run7, collab_truth)
+    budget_check = [c for c in snoevents["collaboration"]["checks"] if c["id"] == "request-budget-by-agent"][0]
+    checks.append(("协作门: 要求 per-agent budget 但缺 events -> skipped 且非 clean",
+                   not _is_clean(snoevents) and budget_check.get("skipped")
+                   and budget_check.get("reason") == "state/events.jsonl missing"))
+    summ2 = _summary([sco, sbad])["summary"]
+    checks.append(("协作汇总: failed checks / missed high / unresolved conflict 可见",
+                   summ2["collaboration_checks_failed"] >= 3
+                   and summ2["missed_high_value_fronts"] == 1
+                   and summ2["conflicts_unresolved"] == 1))
+
     # compare is a real regression gate, not just display.
     base = d / "base.json"
     change_ok = d / "change-ok.json"
@@ -555,22 +906,49 @@ def _selftest() -> int:
                                             "false_positives": 0, "false_positive_rate_mean": 0.0,
                                             "request_budget_total": 10, "request_budget_over": 0,
                                             "time_to_first_evidence_avg_sec": 2.0,
-                                            "closure_correct": 1}}, ensure_ascii=False), encoding="utf-8")
+                                            "closure_correct": 1,
+                                            "missed_high_value_fronts": 0,
+                                            "role_mismatched_fronts": 0,
+                                            "conflicts_unresolved": 0,
+                                            "collaboration_checks_failed": 0,
+                                            "agent_first_evidence_avg_sec": 2.0,
+                                            "false_positive_suppression_events": 1}}, ensure_ascii=False), encoding="utf-8")
     change_ok.write_text(json.dumps({"summary": {"detection_rate": 1.0, "calibration_rate": 1.0,
                                                  "false_positives": 0, "false_positive_rate_mean": 0.0,
                                                  "request_budget_total": 10, "request_budget_over": 0,
                                                  "time_to_first_evidence_avg_sec": 2.0,
-                                                 "closure_correct": 1}}, ensure_ascii=False), encoding="utf-8")
+                                                 "closure_correct": 1,
+                                                 "missed_high_value_fronts": 0,
+                                                 "role_mismatched_fronts": 0,
+                                                 "conflicts_unresolved": 0,
+                                                 "collaboration_checks_failed": 0,
+                                                 "agent_first_evidence_avg_sec": 2.0,
+                                                 "false_positive_suppression_events": 1}}, ensure_ascii=False), encoding="utf-8")
     change_bad.write_text(json.dumps({"summary": {"detection_rate": 0.5, "calibration_rate": 1.0,
                                                   "false_positives": 1, "false_positive_rate_mean": 0.5,
                                                   "request_budget_total": 12, "request_budget_over": 1,
                                                   "time_to_first_evidence_avg_sec": 3.0,
-                                                  "closure_correct": 1}}, ensure_ascii=False), encoding="utf-8")
+                                                  "closure_correct": 1,
+                                                  "missed_high_value_fronts": 1,
+                                                  "role_mismatched_fronts": 1,
+                                                  "conflicts_unresolved": 1,
+                                                  "collaboration_checks_failed": 2,
+                                                  "agent_first_evidence_avg_sec": 4.0,
+                                                  "false_positive_suppression_events": 0}}, ensure_ascii=False), encoding="utf-8")
     with contextlib.redirect_stdout(io.StringIO()):
         cmp_ok = _compare(base, change_ok)
         cmp_bad = _compare(base, change_bad)
     checks.append(("compare: unchanged metrics exit 0", cmp_ok == 0))
     checks.append(("compare: worse metrics exit 1", cmp_bad == 1))
+
+    # Keep the checked-in Ultra-native collaboration fixture from drifting.
+    fixture_truth = ROOT / "bench" / "ultra-agent-collab" / "truth.json"
+    if fixture_truth.exists():
+        fixture_run = fixture_truth.parent / "sample_run"
+        sfix = score(fixture_run, _load_truth(fixture_truth))
+        checks.append(("checked-in ultra-agent-collab fixture stays clean",
+                       _is_clean(sfix) and sfix["collaboration"]["checks"]
+                       and sfix["collaboration"]["conflicts_unresolved"] == 0))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

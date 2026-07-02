@@ -1,11 +1,11 @@
 # Autonomous Workflow (core)
 
-The lean, every-cycle operating memory for autonomous vulnerability discovery. It
-defines what must be recorded so work continues, audits, and resists false
-confirmation — not attack techniques.
+The lean, every-cycle operating memory for Root-orchestrated autonomous
+vulnerability discovery. It defines what must be recorded so work continues,
+audits, and resists false confirmation — not attack techniques.
 
 **Load-on-demand reference:** per-file templates/fields, the derived state graph,
-parallel fan-out, and the detailed evidence/closure/safety-review rules live in
+the Agent Board, and the detailed evidence/closure/safety-review rules live in
 [`docs/WORKFLOW-reference.md`](WORKFLOW-reference.md). Read it when writing a
 specific run file or at a closure / fan-out gate — not every cycle.
 
@@ -28,78 +28,121 @@ sensitive content in the run directory. Field templates for each file: reference
 
 ```text
 observe
-  -> update surface / frontier / hypotheses
-  -> REASON over the whole frontier (re-read all live fronts, not just the active one)
-  -> choose one safe verification
-  -> record evidence
-  -> run false-positive checks
-  -> continue / confirm / reject
+  -> update state graph
+  -> decompose fronts
+  -> plan / assign agents
+  -> agents produce candidates
+  -> merge-check / conflict-check
+  -> verify / falsify
+  -> synthesize findings
+  -> review / report / closure
 ```
 
 Creative in discovery; precise in the written state. **Do not ask the user what to
-test next while safe open fronts remain** — choose the next front autonomously and
-record why in `decisions.md`.
+test next while safe open fronts remain** — choose the next front autonomously,
+assign the right Agent lane when useful, and record why in `decisions.md`.
 
-### Reason pass (every cycle, cheap)
+### Root-level state graph pass (every cycle, cheap)
 
-Before the next move, re-read the **open** fronts in `frontier.md`, the evidence
-added since the last pass, and any **pending hints in `hints.md`**. If sentinel has
-written `alerts.md` / `pending_approval.md` in the run dir, scan any unresolved entry
-too — each flags an action of yours that hit the risky / approval-gated class; note
-the disposition in `decisions.md` or hand it to the operator. (Sentinel stays
-observe-only — this is self-awareness and audit, not a gate that stops you.) For the
-deferred dimension run `python tools/graph.py runs/<dir>` — it lists *actionable*
-and *unlocked-but-deferred* fronts, so "what just got unlocked / neglected" is a
-query, not a full re-read of every block. Ask:
+Before the next move, re-read the projected state graph, the **open/deferred**
+fronts in `frontier.md`, evidence added since the last pass, current
+`state/assignments.json`, unresolved `state/conflicts.json`, and **`hints.md`**
+(read it every cycle — unconditionally. If the operator gave a directive/constraint
+this turn and `hints.md` doesn't yet reflect it, create or update it **before**
+selecting the next front. A `constraint` hint is a run-wide rule, not a front-specific
+note — check it before forming the attack plan, not after). If sentinel has written `alerts.md` / `pending_approval.md` in the
+run dir, scan any unresolved entry too — each flags an action of yours that hit the
+risky / approval-gated class; note the disposition in `decisions.md` or hand it to
+the operator. (Sentinel stays observe-only — this is self-awareness and audit, not a
+gate that stops you.) Run:
+
+```bash
+python tools/graph.py runs/<dir>
+python tools/workers.py status runs/<dir>
+python tools/workers.py conflicts runs/<dir>
+```
+
+The point is to make "what just got unlocked / neglected / contradicted / unassigned"
+a query, not a full re-read of every block. Ask:
 
 1. Did new evidence **confirm, refute, or unlock** any front?
-2. Are you **tunnel-visioned** — grinding one front while a higher-value /
-   newly-unblocked one sits idle?
-3. Is the active front still the best move, or should you **pivot**?
+2. Is a higher-value / newly-unblocked front idle or assigned to the wrong role?
+3. Are Agents duplicating work, disagreeing, or leaving conflicts unresolved?
 4. Are there open HIGH/CRITICAL threat-weight fronts that remain un-attacked or only
    shallow-examined? (Threat triage — business-role exposure, not just technical
    exploitability.)
 
-Output: one line in `decisions.md` (`Reason: re-read N fronts; staying on F-00X /
-pivoting to F-00Y because Z`). It only re-prioritizes — it **never closes a front**
-(that is the Reviewer's job: heavier, every 3–5 cycles / at a closure gate, with the
-independent-reviewer hard gate).
+Output: one line in `decisions.md` (`Root graph pass: reviewed N fronts / M agents /
+K conflicts; assigning A-xxx to F-00Y because Z`). It only re-prioritizes and assigns
+— it **never closes a front** (that is the Reviewer's job: heavier, every 3–5 cycles /
+at a closure gate, with the independent-reviewer hard gate).
 
 When a finding **confirms**, ask: does its proven output state satisfy another
 finding's precondition? If so that is a chain edge (chaining) — open a front and
 record it in `chains.md` (conditional; skip when no edge).
 
-### Metacog pass (conditional, second system)
+### Divergence / verification trigger (conditional)
 
-Metacog is a deliberate divergence pass used to expose blind spots in the main
-driver's current trajectory. It proposes a next action; it never confirms a finding,
-never closes a front, and never bypasses the evidence gate.
+The old Metacog pass is now a Root-dispatched divergence Agent or verification
+trigger. Use it to expose blind spots in the current trajectory, create an
+independent falsification path, or test whether a candidate survives a different
+role's view. It proposes action or refutation; it never confirms a finding, never
+closes a front, and never bypasses the evidence gate.
 
 Trigger it when any of these are true:
 
 - Three consecutive cycles produced no new evidence.
 - The same barrier class failed repeatedly.
-- `Reason:` keeps choosing "staying" on the same front.
+- The Root graph pass keeps assigning the same front without new evidence.
 - Before closure / final report.
 - The operator hint asks for metacog / second-system review.
 - A high-value front has stayed open or deferred without a real attack attempt.
 
-Write one compact block in `decisions.md`:
+Write one compact block in `decisions.md` and, when useful, create an Agent assignment:
 
 ```text
-- Metacog: second system before <trigger>
+- Divergence trigger: <why now>
 - Trigger: <why now>
-- Blind spot hypothesis: <what the main driver may be missing>
-- Proposed action: <one concrete verification or pivot>
+- Blind spot hypothesis: <what the Root / current Agents may be missing>
+- Assigned role: <verify / review / surface / web-hunter / code-audit / exploit>
+- Proposed action: <one concrete verification, refutation, or pivot>
 - Target object: <front / asset / evidence id>
 - Expected signal: <what would change if the hypothesis is useful>
 - Safety class: <proof-only / operator-gated / other>
-- Why main driver likely missed it: <tunnel, assumption, barrier, stale evidence>
+- Why current trajectory likely missed it: <tunnel, assumption, barrier, stale evidence>
 ```
 
 Then either perform the proposed action or record why it is not worth doing. If the
 pass opens a new line of inquiry, add/update a front rather than smuggling the idea
 into a conclusion.
+
+## Serial vs Parallel
+
+The Agent Board is the default collaboration model, but "default" does not mean
+"always spawn more agents." Root chooses the smallest shape that preserves evidence
+quality and request discipline.
+
+Stay **serial** when:
+
+- There is one front, one asset, or one shared barrier, so another Agent would mostly
+  duplicate traffic or context.
+- The front is low value and a single guarded proof step can settle it.
+- Request budget, WAF pressure, auth fragility, or host health is tight.
+- A finding on one lane would materially change the next step for the others.
+
+Go **parallel** when:
+
+- Several independent fronts hit different assets, roles, or barriers.
+- A HIGH/CRITICAL or business-critical front needs breadth without losing depth.
+- A code-audit lane and blackbox lane can test the same claim from different evidence
+  sources.
+- 0day/xday work benefits from hypothesis variance and independent falsification.
+- Closure is near and unresolved conflicts, missed high-value fronts, or shallow
+  review risk remain.
+
+All Agents share the global guard state, request budget, host breakers, and run dir.
+Agent output is untrusted candidate material until the Single Synthesizer merges it
+through the evidence gate.
 
 When an observation **grounds a product fingerprint** — i.e. while attacking an asset you
 fetch it and recognize the stack (or an opt-in `classify_hosts` tagged it `kb:<id>`) —
@@ -124,7 +167,7 @@ budget, the scarce resource against a rate-limited / WAF target.
 
 ## Threat Triage (at Setup)
 
-After `setup_run` builds `coverage.json`, the driver assigns a **threat role** and
+After `setup_run` builds `coverage.json`, the Root assigns a **threat role** and
 **threat exposure** to every distinct-app cluster and records them in `frontier.md`:
 
 - **Threat role**: `admin-mgmt` / `identity-auth` / `data-pii` / `transaction` /
@@ -135,7 +178,7 @@ Clusters that share the same threat role may share a single front. Clusters with
 different threat roles **MUST be split into independent fronts** (anti-lump: same
 hostname/IP pattern does not justify merging assets that serve different business
 roles). The threat weight matrix (reference) derives CRITICAL / HIGH / MEDIUM / LOW
-priority from the role x exposure combination — the driver consults it when choosing
+priority from the role x exposure combination — the Root consults it when choosing
 the next front, but it is a priority signal, never a verdict or a block.
 
 ## Failure Budget
@@ -172,10 +215,10 @@ collapse back to: stop.
 Each evidence item carries a maturity layer:
 
 - `phenomenon`: observation/static/source/client lead only.
-- `candidate`: active proof or worker result that has not passed the gate.
+- `candidate`: active proof or Agent result that has not passed the gate.
 - `finding`: passed evidence gate and may be listed in report `Evidence IDs:`.
 
-Workers default to `candidate`; passive/source/client/static sensor output defaults
+Agents default to `candidate`; passive/source/client/static sensor output defaults
 to `phenomenon`. Do not let lower-maturity entries masquerade as confirmed findings.
 New entries should set `Maturity:` explicitly; parser inference exists only for
 legacy entries without the field.
@@ -246,7 +289,7 @@ assets were only header / recon-classified, never examined. Before any such clai
   fingerprinted (classify looked at it) is **not** a verdict and **not** closure.
   `check_run.py` **hard-fails** a final report with reachable assets never named in a
   front / evidence (same-stack siblings may share one front that lists them all — do
-  not re-attack each, but every member must be accounted for). This forces a driver
+  not re-attack each, but every member must be accounted for). This forces a Root
   *judgement on every asset*, never a blind scan of every host.
 - **Recon `[review]` / high-value management surfaces must become E-entries.** If
   upstream recon marks a reachable asset as `[review]`, high-value, admin/management,
@@ -314,7 +357,7 @@ assets were only header / recon-classified, never examined. Before any such clai
 
 - **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
   independent review resolved, retrospective written), write `GHOST_COMPLETE` at
-  the end of `decisions.md`. The loop driver detects this and stops. No operator
+  the end of `decisions.md`. The loop detects this and stops. No operator
   review required.
 
 `check_run.py` HARD-fails / WARN mechanics for closure, and the same independent
@@ -322,6 +365,6 @@ review applied to **safety-critical code** changes, are in the reference.
 
 ## Reference
 
-Per-file templates & fields · derived state graph (`graph.py`) · parallel fan-out ·
+Per-file templates & fields · derived state graph (`graph.py`) · Agent Board ·
 detailed evidence/closure mechanics · independent review of **safety-critical code**
 → [`docs/WORKFLOW-reference.md`](WORKFLOW-reference.md).

@@ -44,6 +44,9 @@ MAX_BODY_BYTES = 256 * 1024   # 禁拖库: refuse to retain bodies bigger than t
 AUTH_FAIL_LOCK = 500         # 防死循环天花板(非禁爆破): 弱口令字典随便试, 真正的危害闸是
                              # RateLimiter 的速率(单 host 1 rps); 此值只在 probe 因 bug 陷入无限
                              # 认证循环时兜底停下。爆破可逆 -> 不按"试了几次"限, 按"多快"限。
+AUTH_FAIL_PIVOT = 25          # 爆破转向阈值: 同一端点连续失败达此值 -> stderr 警告 "猜测攻击
+                             # 不会产生新价值 → 转向逻辑漏洞/配置错误/未授权API"。
+                             # (retrospective #4: 500+ 次猜测 0 成功, 应在 20-30 次后切方向)
 # --- Self-throttle circuit breaker (防止打爆自己对目标的访问) ------------------
 HOST_ERR_THRESHOLD = 3        # 连续传输错误(超时/RST/拒绝)达此值 -> 熔断该 host
 HOST_BACKOFF_SEC = 120        # 熔断冷却时长(秒); 期间对该 host 的请求直接抛 HostBackoff
@@ -325,14 +328,25 @@ class AuthFailCounter:
     after each auth attempt; check(key) raises BruteforceLock once the endpoint
     has accumulated AUTH_FAIL_LOCK failures. The threshold is a high anti-runaway
     ceiling, NOT a brute-force ban — weak-credential trials run freely; speed is
-    capped by RateLimiter. This only stops a buggy unbounded auth loop."""
+    capped by RateLimiter. This only stops a buggy unbounded auth loop.
 
-    def __init__(self, limit: int = AUTH_FAIL_LOCK):
+    At AUTH_FAIL_PIVOT (25) consecutive failures, prints a stderr warning
+    advising the driver to pivot to logic-based attacks (retrospective #4)."""
+
+    def __init__(self, limit: int = AUTH_FAIL_LOCK, pivot: int = AUTH_FAIL_PIVOT):
         self.limit = limit
+        self.pivot = pivot
 
     def check(self, key: str) -> None:
         st = _load("authfail.json")
-        if st.get(key, 0) >= self.limit:
+        cnt = st.get(key, 0)
+        if cnt == self.pivot:
+            import sys as _sys
+            print(f"\n[guard] BRUTE-FORCE PIVOT: endpoint '{key}' 连续 {cnt} 次认证失败 —— "
+                  "猜测攻击不会产生新价值。建议: 转向逻辑漏洞/配置错误/未授权API/IDOR/路径穿越, "
+                  "不要继续尝试更多密码(retrospective #4: 500+ 次猜测 0 成功)\n",
+                  file=_sys.stderr)
+        if cnt >= self.limit:
             raise BruteforceLock(
                 f"endpoint '{key}' hit {self.limit} auth failures; probe stopped "
                 "(anti-runaway ceiling — not a brute-force ban; raise AUTH_FAIL_LOCK "
@@ -417,6 +431,77 @@ def _selftest_session_breaker() -> None:
         (STATE_DIR / fname).unlink(missing_ok=True)
 
 
+class RequestRecorder:
+    """统一 HTTP 请求录制器 — 所有攻击请求（probe.py / render.py / 裸 Python script）
+    都应通过此层记录，自动生成 .replay.json 证据产物。解决 retrospective #11:
+    driver 的 script 攻击和 probe.py 证据采集是两条分离路径，导致 codex 复审时
+    无法复核关键攻击行为。
+
+    使用方式（driver 侧）:
+        rec = RequestRecorder(run_dir)
+        rec.record(
+            method="POST", url="https://target/login", request_body="user=admin",
+            response_status=200, response_body="登录失败", response_headers={"Content-Type": "text/html"},
+            artifact_name="login_attempt_1"
+        )
+
+    probe.py 内部已通过 --save 自动生成 .replay.json; 此层是给裸 script 的桥接。
+    record() 对每个 artifact_name 递增编号，避免覆盖。"""
+
+    def __init__(self, run_dir: str | Path):
+        self.run_dir = Path(run_dir)
+        self.evidence_dir = self.run_dir / "evidence"
+        self.evidence_dir.mkdir(parents=True, exist_ok=True)
+        self._counter: dict[str, int] = {}
+
+    def record(
+        self,
+        method: str,
+        url: str,
+        request_body: str = "",
+        request_headers: dict | None = None,
+        response_status: int = 0,
+        response_body: str = "",
+        response_headers: dict | None = None,
+        artifact_name: str = "script_request",
+        note: str = "",
+    ) -> Path:
+        """记录一次 HTTP 请求-响应对，写入 .replay.json 到 evidence/ 目录。
+        文件名: <artifact_name>.replay.json (首次); 若文件已存在, 自动递增为 _2, _3 …。
+        跨调用安全: 每次调用扫描 evidence/ 目录已有文件, 避免覆盖之前的录像(W5)。
+        不做名称 strip —— 原样保留 artifact_name 中的数字(如 port_8080)(W3)。"""
+        import hashlib
+        base = artifact_name.replace(".replay.json", "")
+        # W5: scan filesystem for existing files to avoid cross-invocation overwrites
+        # Match: <base>.replay.json, <base>_2.replay.json, <base>_3.replay.json ...
+        existing = [p for p in self.evidence_dir.glob(f"{base}*.replay.json")
+                    if p.name.replace(".replay.json", "") == base
+                    or p.name.replace(".replay.json", "").startswith(f"{base}_")]
+        idx = len(existing) + 1
+        # Also consider in-memory counter for dedup within this instance
+        in_mem = self._counter.get(base, 0)
+        idx = max(idx, in_mem + 1)
+        self._counter[base] = idx
+        filename = f"{base}.replay.json" if idx == 1 else f"{base}_{idx}.replay.json"
+
+        body_hash = hashlib.sha256(response_body.encode("utf-8", errors="replace")).hexdigest()[:16]
+        record = {
+            "method": method,
+            "url": url,
+            "request_body": request_body,
+            "request_headers": request_headers or {},
+            "response_status": response_status,
+            "response_body_sha256": body_hash,
+            "response_body_preview": response_body[:500] if response_body else "",
+            "response_headers": response_headers or {},
+            "note": note,
+            "recorded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        out = self.evidence_dir / filename
+        out.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        return out
+
+
 if __name__ == "__main__":
     # quick smoke test
     rl = RateLimiter()
@@ -425,3 +510,12 @@ if __name__ == "__main__":
     print(f"guard OK; cap truncated={trunc} len={len(body)}; "
           f"outstanding uploads={len(UploadRegistry().outstanding())}")
     _selftest_session_breaker()
+    # smoke-test RequestRecorder
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    rr = RequestRecorder(d)
+    p = rr.record(method="POST", url="https://x/login", response_status=200,
+                  response_body="fail", artifact_name="test_login")
+    assert p.exists(), "recorder output missing"
+    assert "test_login.replay.json" in str(p)
+    print("RequestRecorder smoke-test OK")

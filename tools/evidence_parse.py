@@ -142,7 +142,7 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         if not b.lstrip().startswith("##"):
             continue  # skip the file preamble (the `# Evidence Ledger` header block)
         head = b.splitlines()[0].strip()
-        idm = re.search(r"\bE-\d+\b", head)
+        idm = re.search(r"\bE-\d+[a-z]*\b", head)
         eid = idm.group(0) if idm else head.lstrip("# ").strip()[:48]
         # certainty: 取 `Certainty:` 字段的【值区域】并【剥掉括号说明】, 而非旧逻辑"从关键词
         # 扫到块尾"—— 后者会把降级时括号里写的解释数字(如"原 0.8 / 升回 1.0")误当成 certainty
@@ -172,7 +172,7 @@ def parse_evidence(run_dir: Path) -> list[dict]:
                 arts.append(t)
         present = [a for a in arts if _resolve_artifact(a, run_dir)]
         missing = [a for a in arts if not _resolve_artifact(a, run_dir)]
-        refutes = _field_ids(b, "Refutes", r"E-\d+")
+        refutes = _field_ids(b, "Refutes", r"E-\d+[a-z]*")
         supports = _field_ids(b, "Supports", r"[EHF]-\d+")
         confirmed = any(c >= 0.8 for c in certs)
         maturity, maturity_explicit, maturity_raw = _maturity(b, confirmed)

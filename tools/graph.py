@@ -51,7 +51,7 @@ def _blocks(text: str, head_re: str) -> list[tuple[str, str]]:
 def _ids(block: str, field: str, kind: str) -> list[str]:
     """抽某字段那一行里的 <kind>-<num> id 列表。"""
     line = re.search(rf"{field}\s*[:：]([^\n]*)", block)
-    return re.findall(rf"{kind}-\d+", line.group(1)) if line else []
+    return re.findall(rf"{kind}-\d+[a-z]*", line.group(1)) if line else []
 
 
 def build_graph(run_dir: Path) -> dict:
@@ -66,7 +66,7 @@ def build_graph(run_dir: Path) -> dict:
 
     ev = run_dir / "evidence.md"
     if ev.exists():
-        for eid, b in _blocks(ev.read_text(encoding="utf-8", errors="replace"), r"##\s+(E-\d+)"):
+        for eid, b in _blocks(ev.read_text(encoding="utf-8", errors="replace"), r"##\s+(E-\d+[a-z]*)"):
             cm = re.search(r"Certainty\s*[:：]\s*(\d\.\d)", b)
             nodes[eid] = {
                 "type": "evidence",

@@ -87,6 +87,8 @@ BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
     "Reason pass: 每轮先重读整个 frontier.md(所有 open+deferred 前沿)再选 — 防隧道视野",
     "回合协议: 结尾只允许「下一行动: <具体action>」或「BLOCKED: <外部依赖>」; 禁止 ? / 是否 / 继续还是",
     "漏洞检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 查 CVE/CNVD/漏洞前, 必须先 python tools/timestamp_gate.py 获取当前时间, query/URL 必须包含当前年份约束, 严禁凭模型记忆编造未验证年份的 CVE 编号",
+    "操作者约束持久化: 收到 directive/constraint 后先更新 hints.md(HINT-xxx, Kind=directive/constraint, Status=pending) 再继续; 每轮 Reason pass 无条件 Read hints.md —— constraint 是全 run 级原则非当前前沿上下文, 跨轮有效直到操作者显式解除",
+    "Knowledge-first: 识别到产品签名后, 先 grep knowledge/ 匹配条目(Read 对应的 knowledge/*.md) 再 WebSearch —— 签名→knowledge 是硬步骤非可选; 消费了错误厂商的 CVE 而 correct knowledge 未读 = 协议错误",
 ]
 BINDING_RULES_TIER3 = [   # BOTTOM: 约束速查 — placed at recency position
     "消费 Guanlan、跳过不可达; 不重做 OSINT / 不建 egress·relay·重探",
@@ -96,6 +98,8 @@ BINDING_RULES_TIER3 = [   # BOTTOM: 约束速查 — placed at recency position
     "任何代码/文档修改必须经过 codex 复审; codex 必须走专用代理(CODEX_PROXY)",
     "不过度工程(画蛇添足); 能进代码闸门的别写 prose · 中文回答",
     "引用 CVE 编号前验证其发布年份 ≤ 当前年份; 检索时 query 必须带年份(如 2026); 拿到的 CVE 用 WebFetch 验证 NVD 页面确认发布时间",
+    "爆破预算: 同一端点连续爆破 25+ 次无果 → 强制断言 Type B, 转向逻辑漏洞/未授权API(IDOR/路径穿越/配置错误), 不要继续试更多密码(retrospective #4: 500+ 次猜测 0 成功)",
+    "攻击录证: certainty≥0.8 的关键攻击行为必须用 probe.py --save 留 .replay.json 录像; 裸 Python script 攻击后必须补跑 `from harness.guard import RequestRecorder; RequestRecorder(run_dir).record(...)` 录证 —— codex 复审只看 .replay.json, 不认散文描述(retrospective #11)",
 ]
 
 # Output drift patterns — driver response containing any of these = protocol violation.
@@ -407,6 +411,20 @@ def build_anchor(
         agent_needed, n_open, _bg = _check_agent_board_needed(run)
         if agent_needed:
             lines.append("  · Agent Board 强制: open fronts ≥ 4 且无共享 barrier → 本轮必须 spawn ≥ 2 个 subagent (通过 workers.py assign), 禁止 Root 全串行。")
+        # 操作者约束持久化检查: hints.md 有 pending constraint → 提示吸收
+        hp = run / "hints.md"
+        if hp.exists():
+            try:
+                import re as _re_hints
+                htext = hp.read_text(encoding="utf-8", errors="replace")
+                pending = [m.group(1) for m in _re_hints.finditer(
+                    r"##\s+(HINT-\d+)\n(?:(?!##\s).)*?Kind\s*[:：]\s*constraint"
+                    r"(?:(?!##\s).)*?Status\s*[:：]\s*pending",
+                    htext, _re_hints.I | _re_hints.S)]
+                if pending:
+                    lines.append(f"  ⚠ 操作者约束待吸收: {', '.join(pending)} — 先 Read hints.md 并按 Kind 吸收再动作(constraint 是全 run 级原则)")
+            except Exception:
+                pass
     lines.append("")
     # Tier-2: 当前状态 (dynamic — run phase + process flags)
     if run is not None:
