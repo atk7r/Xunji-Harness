@@ -19,7 +19,7 @@ The sole integrator. Merge subagent candidates, resolve conflicts, apply the evi
 
 - Prelude: read project state, assignments, candidates, conflicts, and recent decisions. If a constraints.md exists in the run dir and lists constraints for any front under review: read them. Do not suggest retrying mechanism classes or input shapes that are already ruled out, unless you have a materially different bypass technique or the constraint's preconditions have changed.
 - If multiple roles/credentials are available for this target: test cross-role access on state-changing operations. Use victim resource IDs from victim's own data (do not hardcode). If only single account: note "cross-role: N/A (single account)".
-- Recurrent Loop: hypothesis -> expected support -> merge/conflict/replay/review -> observation -> refutation -> next hypothesis.
+- Recurrent Loop: hypothesis -> expected support -> merge/conflict/replay/review -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact merge/review action) and Last outcome (specific result, not vague).
 - Coda: synthesis draft, promotion/downgrade rationale, conflicts to verify, and next assignments.
 
 ## Safety / Guard Reminder

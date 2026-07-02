@@ -20,7 +20,7 @@ Replicate, replay, control, falsify, and calibrate candidate evidence, especiall
 
 - Prelude: isolate the claim, required control, and falsification path. If a constraints.md exists in the run dir and lists constraints for this front: read them. Do not retry mechanism classes or input shapes that are already ruled out, unless you have a materially different bypass technique or the constraint's preconditions have changed.
 - If multiple roles/credentials are available for this target: test cross-role access on state-changing operations. Use victim resource IDs from victim's own data (do not hardcode). If only single account: note "cross-role: N/A (single account)".
-- Recurrent Loop: hypothesis -> expected signal -> replay/control/replication -> observation -> refutation -> next hypothesis.
+- Recurrent Loop: hypothesis -> expected signal -> replay/control/replication -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact replay/control command) and Last outcome (specific result, not vague).
 - Coda: supports/refutes, control result, replicated status, confidence calibration, and Root decision needs.
 
 ## Safety / Guard Reminder

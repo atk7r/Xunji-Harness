@@ -20,7 +20,7 @@ Draft report skeletons and consistency checks from already gated evidence. Do no
 
 - Prelude: list gated findings and required report fields. If a constraints.md exists in the run dir: note any constrained fronts in the report appendix, so the reader understands which mechanism classes were ruled out and why.
 - If multiple roles/credentials are available for this target: test cross-role access on state-changing operations. Use victim resource IDs from victim's own data (do not hardcode). If only single account: note "cross-role: N/A (single account)".
-- Recurrent Loop: hypothesis -> expected citation -> inspect evidence/report -> observation -> refutation -> next hypothesis.
+- Recurrent Loop: hypothesis -> expected citation -> inspect evidence/report -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact citation/section checked) and Last outcome (specific result, not vague).
 - Coda: draft sections, missing citations, consistency issues, and Root follow-up.
 
 ## Safety / Guard Reminder

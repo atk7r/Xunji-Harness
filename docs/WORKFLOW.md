@@ -60,7 +60,9 @@ gate that stops you.) Run:
 python tools/graph.py runs/<dir>
 python tools/workers.py status runs/<dir>
 python tools/workers.py conflicts runs/<dir>
+python tools/saturation.py runs/<dir>
 ```
+`graph.py` 运行后自动写入 `state/workflow_checkpoint.json`（轻量阶段快照：phase / open/deferred/blocked/closed fronts / confirmed evidence），用于跨会话恢复和阶段追踪。
 
 The point is to make "what just got unlocked / neglected / contradicted / unassigned"
 a query, not a full re-read of every block. Ask:

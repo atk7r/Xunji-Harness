@@ -20,7 +20,7 @@ Audit source, diffs, dependencies, configuration, routes, and authorization boun
 
 - Prelude: identify sources, sinks, trust boundaries, and missing runtime facts. If a constraints.md exists in the run dir and lists constraints for this front: read them. Do not retry mechanism classes or input shapes that are already ruled out, unless you have a materially different bypass technique or the constraint's preconditions have changed.
 - If multiple roles/credentials are available for this target: test cross-role access on state-changing operations. Use victim resource IDs from victim's own data (do not hardcode). If only single account: note "cross-role: N/A (single account)".
-- Recurrent Loop: hypothesis -> expected source signal -> code analysis -> observation -> refutation -> next hypothesis.
+- Recurrent Loop: hypothesis -> expected source signal -> code analysis -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact file/function analyzed) and Last outcome (specific finding, not vague).
 - Coda: source-level phenomenon/candidate, exact file pointers, needed verification, and barriers.
 
 ## Safety / Guard Reminder

@@ -244,7 +244,56 @@ def main() -> int:
         for s in view["agent_suggestions"][:5]:
             print(f"     {s['host']} → {s['agent']} ({s['reason']})")
     print("[graph] 仅为派生视图与建议; 下一步选哪个前沿仍由 driver 判断。")
+
+    # 写入轻量 workflow checkpoint —— 会话恢复和阶段追踪
+    _write_checkpoint(run_dir, g)
     return 0
+
+
+def _write_checkpoint(run_dir: Path, g: dict) -> None:
+    """写入 state/workflow_checkpoint.json —— 轻量运行状态快照。
+    不依赖外部框架, 约 15 行 JSON。Root graph pass 每次调用自动更新。"""
+    import time as _time
+    state_dir = run_dir / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    # 收集当前状态 —— 节点 type: front/evidence/hypothesis
+    nodes = g.get("nodes", {})
+    open_fronts = [nid for nid, nd in nodes.items()
+                   if nd.get("type") == "front" and nd.get("status") in ("open", "probing")]
+    deferred_fronts = [nid for nid, nd in nodes.items()
+                       if nd.get("type") == "front" and nd.get("status") == "deferred"]
+    blocked_fronts = [nid for nid, nd in nodes.items()
+                      if nd.get("type") == "front" and "blocked_type" in str(nd.get("status", ""))]
+    closed_fronts = [nid for nid, nd in nodes.items()
+                     if nd.get("type") == "front" and nd.get("status") == "closed"]
+    confirmed = [nid for nid, nd in nodes.items()
+                 if nd.get("type") == "evidence" and (nd.get("certainty") or 0) >= 0.8]
+    total_fronts = sum(1 for nd in nodes.values() if nd.get("type") == "front")
+
+    # 推断当前阶段
+    phase = "Driver"
+    if not open_fronts and deferred_fronts:
+        phase = "Reviewer"
+    elif blocked_fronts and not open_fronts:
+        phase = "Reviewer"
+    elif confirmed and not open_fronts:
+        phase = "Reviewer"
+
+    checkpoint = {
+        "updated_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        "phase": phase,
+        "open_fronts": open_fronts,
+        "deferred_fronts": deferred_fronts,
+        "blocked_fronts": blocked_fronts,
+        "closed_fronts": closed_fronts,
+        "confirmed_evidence": confirmed,
+        "total_fronts": total_fronts,
+        "last_graph_pass": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+    }
+
+    path = state_dir / "workflow_checkpoint.json"
+    path.write_text(json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

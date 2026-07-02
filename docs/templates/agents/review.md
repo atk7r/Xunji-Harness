@@ -20,7 +20,7 @@ Clean-context review of evidence, closure, or safety-critical code changes. Find
 
 - Prelude: read only the provided snapshot and criteria. If a constraints.md exists in the run dir: cross-check that closed/deferred fronts have their ruled-out mechanism classes recorded as constraints. Flag any unrecorded blocked attempts as missing constraints.
 - If multiple roles/credentials are available for this target: test cross-role access on state-changing operations. Use victim resource IDs from victim's own data (do not hardcode). If only single account: note "cross-role: N/A (single account)".
-- Recurrent Loop: hypothesis -> expected support -> inspect evidence/artifacts -> observation -> refutation -> next hypothesis.
+- Recurrent Loop: hypothesis -> expected support -> inspect evidence/artifacts -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact evidence/artifact inspected) and Last outcome (specific finding, not vague).
 - Coda: verdict, findings/gaps, required fixes, residual risk.
 
 ## Safety / Guard Reminder
