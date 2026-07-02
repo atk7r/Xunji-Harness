@@ -7,7 +7,7 @@
 全部静默放行。根因: 闸门被动, 只在 driver 主动调用且 report 写了收口措辞时才硬审。
 
 本 hook 在 Claude 每次停止响应时触发: 若存在【刚刚改动过的、且已写成实质终版报告的】run,
-就替 driver 跑一遍 check_run; 没过就【拦一次】(decision=block), 把硬门结果怼回 driver 面前,
+就替 driver 跑一遍 check_run; 没过就持续 decision=block, 把硬门结果怼回 driver 面前,
 逼它去建覆盖台账/补真产物/派独立复审, 而不是就此收工。
 
 Phase 架构:
@@ -19,8 +19,9 @@ Phase 架构:
   - safety_gate 拦【不可逆危害】, 必须 FAIL-CLOSED(读不到事件就拒绝)。
   - run_gate 是【流程提醒】, 不防危害、只防遗漏, 必须 FAIL-OPEN: 自身任何异常(读不到事件 /
     找不到 run / check_run 报错 / 超时)都【静默放行 exit 0】, 绝不因为一个提醒器而卡死会话。
-防循环: Claude 因本 hook 续跑后, 下次 Stop 事件带 stop_hook_active=true → 此时只【提示】不再
-block(最多拦一次), 避免 block→续→再 block 的死循环。这是 Claude Code 官方推荐的 Stop hook 写法。
+防循环: 仅纯提醒类路径使用 systemMessage; 客观硬门(check_run / severity / replay / timeout /
+Agent Board / completion review)不因 stop_hook_active 降级。cqytxy_20260702 证明“最多拦一次”
+会把硬门退化成提醒, driver 会继续收口。
 
 Protocol: 读 stdin 的 Stop 事件; 仅在需要时往 stdout 写 {"decision":"block","reason":...}
 (拦) 或 {"systemMessage":...}(提示)。其余 exit 0 静默。纯 stdlib。
@@ -365,6 +366,50 @@ def _check_evidence_severity(run_dir: Path) -> tuple[str | None, str]:
     return mode, msg
 
 
+def _check_replay_quality(run_dir: Path) -> tuple[str | None, str]:
+    """Phase 6: 证据回放质量门 — certainty >= 0.8 的条目必须引用真实存在的 .replay.json。
+
+    codex 复审反复发现: driver 用 Python script 确认了行为, 但 probe.py --save 没录 replay。
+    导致声称 certainty 0.8 的 confirmed finding 在 codex 审计时无法复核。
+
+    规则: 对每条 certainty >= 0.8 的条目, 检查 Artifacts 字段是否引用了 run 目录下真实存在
+    的 .replay.json 文件。缺失的条目 → 持续 block, 要求补 artifact 或降级。
+
+    FAIL-OPEN: 解析失败/evidence.md 不存在静默放行。
+    """
+    try:
+        from evidence_parse import parse_evidence
+    except Exception:
+        return None, ""
+
+    try:
+        recs = parse_evidence(run_dir)
+    except Exception:
+        return None, ""
+
+    missing = []
+    for rec in recs:
+        if not (rec.get("confirmed") and str(rec.get("id", "")).startswith("E-")):
+            continue
+        present_replay = [
+            a for a in rec.get("artifacts_present", [])
+            if str(a).lower().endswith(".replay.json")
+        ]
+        if not present_replay:
+            missing.append(str(rec.get("id", "E-?")))
+
+    if not missing:
+        return None, ""
+
+    msg = (
+        "[证据回放质量门] 以下 confirmed 条目缺少 .replay.json 产物:\n\n"
+        + "\n".join(f"  • {e}" for e in missing)
+        + "\n\n用 probe.py --save 补录 replay, 或在 evidence.md 中将 Certainty 降级到 0.5 "
+          "并标注原因(codex BLOCKER: artifact 采集有时序问题)。"
+    )
+    return "block", msg
+
+
 def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
     """Phase 5: Agent Board 强制门 — open fronts >= 4 且 barrier 多样时必须使用 Agent Board。
 
@@ -497,12 +542,14 @@ def decide(is_final: bool, check_rc: int, stop_hook_active: bool):
     """纯决策(便于自测): 返回 'block' / 'notify' / None(放行)。
     - 非终版报告 → 放行(还没收尾, 别打扰)。
     - check_run 通过 → 放行。
-    - check_run 未过: 首次 → block(拦一次); 已因本 hook 续过(stop_hook_active) → notify(防循环)。"""
+    - check_run 未过 → 始终 block(强制修复, 不降级)。提醒是无效的——本 run 实测:
+      driver 在 stop_hook_active 降级为 notify 后宣布 FINAL, 而 check_run 仍有 4 硬门。
+      去掉降级: 修复前永不收口。"""
     if not is_final:
         return None
     if check_rc == 0:
         return None
-    return "notify" if stop_hook_active else "block"
+    return "block"
 
 
 def build_message(run_dir: Path, check_out: str) -> str:
@@ -540,8 +587,6 @@ def main() -> None:
         if active_run is not None:
             sev_mode, sev_msg = _check_evidence_severity(active_run)
             if sev_mode is not None:
-                if sev_mode == "block" and stop_active:
-                    sev_mode = "notify"  # anti-loop: already resumed once
                 if sev_mode == "block":
                     print(json.dumps({"decision": "block", "reason": sev_msg}, ensure_ascii=False))
                     sys.exit(0)
@@ -552,8 +597,6 @@ def main() -> None:
         # ---- Phase 2: session timeout check ----
         timeout_mode, timeout_msg = _check_session_timeout(RUNS, active_run)
         if timeout_mode is not None:
-            if timeout_mode == "block" and stop_active:
-                timeout_mode = "notify"  # anti-loop: already resumed once, downgrade to notify
             if timeout_mode == "block":
                 print(json.dumps({"decision": "block", "reason": timeout_msg}, ensure_ascii=False))
                 sys.exit(0)
@@ -561,12 +604,20 @@ def main() -> None:
                 print(json.dumps({"systemMessage": timeout_msg}, ensure_ascii=False))
                 # fall through — don't exit; allow existing gate checks to also run
 
+        # ---- Phase 6 (NEW): 证据回放质量门 — certainty>=0.8 必须引用 .replay.json 产物 ----
+        if active_run is not None:
+            rq_mode, rq_msg = _check_replay_quality(active_run)
+            if rq_mode is not None:
+                if rq_mode == "block":
+                    print(json.dumps({"decision": "block", "reason": rq_msg}, ensure_ascii=False))
+                    sys.exit(0)
+                else:
+                    print(json.dumps({"systemMessage": rq_msg}, ensure_ascii=False))
+
         # ---- Phase 5 (NEW): Agent Board 强制门 — open fronts >= 4 且 barrier 多样时禁止全串行 ----
         if active_run is not None:
             ab_mode, ab_msg = _check_agent_board(active_run)
             if ab_mode is not None:
-                if ab_mode == "block" and stop_active:
-                    ab_mode = "notify"  # anti-loop: already resumed once
                 if ab_mode == "block":
                     print(json.dumps({"decision": "block", "reason": ab_msg}, ensure_ascii=False))
                     sys.exit(0)
@@ -605,11 +656,8 @@ def main() -> None:
                         "请 spawn fresh-context codex agent 审查完整 run, "
                         "将其裁决写入 decisions.md 的 CodexCompletionReview 字段。"
                     )
-                    if stop_active:
-                        print(json.dumps({"systemMessage": cc_msg}, ensure_ascii=False))
-                    else:
-                        print(json.dumps({"decision": "block", "reason": cc_msg}, ensure_ascii=False))
-                        sys.exit(0)
+                    print(json.dumps({"decision": "block", "reason": cc_msg}, ensure_ascii=False))
+                    sys.exit(0)
             except Exception:
                 pass  # FAIL-OPEN: decisions.md / review.md 读失败放行
         if gate_skipped(run_dir):
@@ -636,7 +684,7 @@ def _selftest() -> int:
     checks.append(("not final -> pass", decide(False, 1, False) is None))
     checks.append(("final + check pass -> pass", decide(True, 0, False) is None))
     checks.append(("final + check fail -> block", decide(True, 1, False) == "block"))
-    checks.append(("final + fail + stop_active -> notify (anti-loop)", decide(True, 1, True) == "notify"))
+    checks.append(("final + fail + stop_active -> block (强制, 不降级)", decide(True, 1, True) == "block"))
 
     d = Path(tempfile.mkdtemp())
     runs = d / "runs"
@@ -829,6 +877,57 @@ def _selftest() -> int:
 """, encoding="utf-8")
     sev_spec3, _ = _check_evidence_severity(spec_dir3)
     checks.append(("spec word: 若 alone NOT blocked", sev_spec3 is None))
+
+    # Phase 6: replay quality gate requires a real replay artifact in Artifacts:
+    import tempfile as _tm_replay
+    replay_missing = Path(_tm_replay.mkdtemp())
+    (replay_missing / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Artifacts: proof.html
+""", encoding="utf-8")
+    rq_missing, rq_missing_msg = _check_replay_quality(replay_missing)
+    checks.append(("replay quality: confirmed without replay -> block", rq_missing == "block"))
+    checks.append(("replay quality: message names E-001", "E-001" in (rq_missing_msg or "")))
+
+    replay_ok = Path(_tm_replay.mkdtemp())
+    (replay_ok / "proof.html.replay.json").write_text("{}", encoding="utf-8")
+    (replay_ok / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Artifacts: proof.html.replay.json
+""", encoding="utf-8")
+    rq_ok, _ = _check_replay_quality(replay_ok)
+    checks.append(("replay quality: existing replay artifact -> pass", rq_ok is None))
+
+    replay_prose = Path(_tm_replay.mkdtemp())
+    (replay_prose / "proof.html").write_text("x", encoding="utf-8")
+    (replay_prose / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Artifacts: proof.html
+- Note: should add proof.html.replay.json later
+""", encoding="utf-8")
+    rq_prose, _ = _check_replay_quality(replay_prose)
+    checks.append(("replay quality: prose mention is not enough", rq_prose == "block"))
+
+    replay_missing_file = Path(_tm_replay.mkdtemp())
+    (replay_missing_file / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Artifacts: proof.html.replay.json
+""", encoding="utf-8")
+    rq_missing_file, _ = _check_replay_quality(replay_missing_file)
+    checks.append(("replay quality: missing replay file -> block", rq_missing_file == "block"))
+
+    replay_low_cert = Path(_tm_replay.mkdtemp())
+    (replay_low_cert / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.5
+- Artifacts: proof.html
+""", encoding="utf-8")
+    rq_low_cert, _ = _check_replay_quality(replay_low_cert)
+    checks.append(("replay quality: low certainty without replay -> pass", rq_low_cert is None))
 
     # Phase 4: CodexCriticalReview — NORMAL 模式 CRITICAL 定级必须经暂停前复审
     _orig_normal_mode = globals().get("_is_normal_mode")
