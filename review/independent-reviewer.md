@@ -36,6 +36,10 @@ Claude 自家只减 bias 不减盲区故仅兜底。产出是**候选非裁决**
 漏报(见 `review/records/2026-06-17-hamastar-codex-peer-review.md`，并据此补了 check_run 的
 "漏报一致性"硬门)。**数据出境**: API 后端把 run 内容发外部厂商, 仅操作者接受时用。
 
+这里按"Claude Code 为主，Codex 为辅"理解：Codex 常作为异构复审后端，也可给交战建议
+或被委派协作。它不另立运行时或安全边界；所有影响 run 的内容仍以同一运行态台账、
+证据门、guard/hook 边界与复审要求为准。
+
 **收口自动触发**: `python tools/check_run.py runs/<t> --auto-peer-review` —— 收口时若
 review.md 缺独立复审记录, 自动跑 peer_review 写进 review.md 满足本硬门。默认关(慢/数据出境)、
 幂等(有记录不重跑)、selftest 不触发。**只用异构后端满足门**: 落到同族 Claude

@@ -116,9 +116,3 @@ inventing them.
 non-recursive — `knowledge/*.md`), so the weaponized tier is out of scope: it is
 local working material, like `runs/` and `poc/`. A payload that lands in the public
 tier hard-fails the checker (publish-routing error → move it to `weaponized/`).
-
-## Project Boundary
-
-This base belongs to the parent workspace only. `deepseek-project/` maintains its
-own independent `knowledge/`, driven by DeepSeek inside its own root. Do not
-share, symlink, or read across the boundary.

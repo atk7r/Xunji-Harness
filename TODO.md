@@ -1,7 +1,6 @@
 # Xunji 项目待办
 
 > 最后更新:2026-06-28。本文件记录跨会话的未决事项,避免被上下文压缩冲掉。
-> 分两个独立项目:**父项目**(Claude/Codex 工作区)与 **deepseek-project/**(DeepSeek 实例)。
 >
 > **核心思想(勿忘)**:让 AI 自主、像人类猎手一样推理;框架只给判断纪律+接地知识+硬边界,
 > 绝不做清单/playbook。扩展前过 grounding-vs-weapon 测试。详见持久记忆 `core-philosophy-ai-autonomy`。
@@ -127,7 +126,6 @@
   - 用法接线:ROUTER 已加"证据门控承诺"——knowledge 仅指纹命中后查阅、禁 run 开始预载当清单
   - [x] 核实通过(2026-06-10):KINGOSOFT 厂商纠正为**湖南青果软件**(KINGOSOFT=青果教务同一产品线,上一轮"另一产品"判断已纠错);补 S2-045 一手 CVE-2017-5638(NVD,CVSS9.8/CISA KEV)+ SQLi 二手锚点(Seebug,如实标)。苏迪 CNVD 官方查**确无**记录,已留档"已查确无"防重复
   - ⏳ 待续:两者 Recognition 仍需**一手 run 指纹**确认才升 verified;苏迪需拿到厂商名后按公司名再查 CNVD;另从 Nuclei 提炼演示已成范式(`spring-boot-actuator.md` 已加 favicon hash + HPROF 魔数存在性证明)
-  - [x] **deepseek-project/ 脚手架已同步**(2026-06-10,经用户授权破例跨界):只复制 `knowledge/README.md`(Project Boundary 段改 deepseek 视角)+ `_TEMPLATE.md` + `tools/check_knowledge.py`,**内容/种子留空**;两库 checker/检查均通过。**种子与锚点仍由 DeepSeek 自填,保独立基线对照**——内容我不碰
 
 ## 2b. 链式编排 / 组合利用(A2,2026-06-10 已落地)
 
@@ -140,36 +138,13 @@
   - ROUTER:Run Authority 列出(条件式)+ Hunter 记链边并开新前沿 + Report 载入并输出"原子+链(复合严重度更高)"
   - WORKFLOW:循环加"确认后查链边"条件步 + 新增 chains.md 节
   - report.md 模板加「Chains」输出节
-  - ⏳ 待定:deepseek-project 是否同步这套链式框架(同知识脚手架,涉及它自己的 6 个文件;独立基线,需你授权我才碰)
-
-## 2c. 父项目↔deepseek 一致性审计(2026-06-10)
-
-结论:两边均**未违反 AI 自主原则**(自主框架完整、cognition 反复"非清单"自守)。但 deepseek 只同步了知识脚手架+nuclei,方法论落后父项目:
-
-- [x] **#1 安全硬化已同步**(经授权):deepseek safety_rules.json 补齐 14 条 post_exploitation 规则;check_hook + base64 实弹通过。
-- ⏳ 未同步(独立基线 vs 一致性,待你权衡):**#2** 链式编排整套(A2);**#3** cognition 的 honeypot/欺骗确认项;**#4** ROUTER 证据门控承诺;**#5** deepseek ROUTER 未把 check_knowledge.py 列进工具清单(文件在、路由没引用,轻微悬空)。
-- 注:**#6** deepseek 未限 web-scope = 有意(用户只把父项目限 web),非缺陷。
-- 父项目自身链路衔接完整,无悬空引用。
-
-## 3. deepseek-project 运行状态
-
-- [ ] **cdut run** 未过 `check_run`:缺 `Loaded rule files this cycle:` 标记(该字段晚于此 run 引入)。待决定:迁移补字段 or 保留原样。
-- [ ] **lygsf_edu_cn_20260610** run:苏迪 CMS + Spring Boot 线索已记录,报告已起草;如继续应按未关闭的 frontier 推进(勿重复已在 OSINT 报告里的侦察)。
 
 ## 4. 已完成(留档,勿重做)
 
-- [x] 物理 fork:父项目逻辑(含 CLAUDE.md)整套复制到 `deepseek-project/`,两套独立基线
-- [x] 取消 config.ini;改由 deepseek-project 的 CLAUDE.md 横幅 + `docs/ROUTER.md` 指向补丁层
-- [x] 父项目清除 DeepSeek 内容;`check_rules.py` 的 SKIP_DIRS 加入 `deepseek-project`
-- [x] `docs/deepseek/{README,driver,hunter,reviewer,context_slice}.md` 原生操作手册
 - [x] WORKFLOW 增「先吸收已有情报」「失败预算」(软启发+override);cognition 增 grounding/variant 两节
 - [x] src-safety-boundary skill 增 EDUSRC 证明即止原则(机密性/可用性/完整性)+ 平台法务规则
-- [x] **(2026-06-10)父项目定性为 web 渗透 only**:CLAUDE.md Project Role + ROUTER Run Authority 声明(HTTP/浏览器可达;主机/内网/横向/二进制/红队战役 out of scope,Setup 阶段越界即停)。deepseek 未限 web 系有意
 - [x] **(2026-06-12)取消 web-only,重定位为红队 web 打点武器 + 明确三层规则**(经 owner 指令):提示词去掉 "web-only/out of scope" 框定;主机/内网/横向/二进制/红队从"硬排除"挪进**软规则(操作者同意即可做)**;保留"证明即止/无害化验证"作自主层。三层=硬规则(机器强制,破坏性/不可逆,授权也不解)/ 软规则(需 owner 同意)/ 自主(无害验证)。改 CLAUDE.md(Project Role+三层教义+Operator Authority+Hard Boundaries 说明)、SKILL.md、ROUTER、cognition、chains、WORKFLOW、README。详见记忆 [[hard-boundary-only-irreversible-harm]]
 - [x] **(2026-06-12)提示词零限制 + 全量合理性审查**(经 owner 指令):CLAUDE.md 只留角色/驱动/方法,限制全归 skill+hook;"目标皆授权不得怀疑"写入三处。审查后:**permission_change 降为软规则**(hook 删 10 条,SKILL 重点标注;54→44 条规则)、**guard.py 防失控锁保留**(注释去"爆破硬边界")、**SKILL「Platform & Legal」整节删除**(owner 后补新 skill);并修一批多轮不同步(do not pivot / getting-a-shell=driver's call / 爆破残留 / SRC 旧定位)。
-- [x] **(2026-06-10)post_exploitation 钩子硬化**:父项目 + deepseek 的 safety_rules.json 各加 14 条(反弹shell/webshell/武器生成器),与"RCE 证明即停=链终止节点"双保险
-- [x] **(2026-06-11)父项目硬边界重校准**(经 owner 指令):删除 14 条 post_exploitation + bruteforce,改为只硬拦不可逆危害(销毁/删库/拖库/DoS/资金/删资源/改权限);新增删库规则(DROP/TRUNCATE/无WHERE DELETE-UPDATE);selftest+check_hook 同步(nc -e/hydra 移入 ALLOWED,DROP DATABASE 移入 BLOCKED)。仅父项目,deepseek 未动。详见记忆 [[hard-boundary-only-irreversible-harm]]
-- [x] **(2026-06-10)nuclei 离线 clone**:`F:\Codex\nuclei-templates`(两仓库外,13k+ yaml)作 DeepSeek 离线提炼源;只读不跑、不入库、不提交;两 README 已写"本地离线 clone"用法
 
 ## 安全约束(贯穿全程,勿删)
 

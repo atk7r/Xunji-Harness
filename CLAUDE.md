@@ -1,9 +1,5 @@
 # Xunji Claude Code Rules
 
-> Nested `deepseek-project/`: a separate, self-contained DeepSeek copy with its
-> own baseline, driven by DeepSeek. You (Claude, the Xunji Root) — don't enter it,
-> don't treat its files as yours. The two are isolated; it just lives nested here.
-
 ## Project Role
 
 - This repo = a Claude Code autonomous **red-team toolkit for web initial access**.

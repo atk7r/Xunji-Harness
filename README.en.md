@@ -15,10 +15,10 @@
 
 ---
 
-**This is a red-team weapon.** A single-AI-driven workspace for web 打点 (initial access) — vulnerability discovery and **full weaponized exploitation** — that keeps the process **auditable, evidence-bound, and bounded by a machine-enforced hard-rule floor**.
+**This is a red-team weapon.** A Root-Orchestrator-led workspace for web 打点 (initial access): specialized Subagents produce candidates in parallel, and a Single Synthesizer makes the only final evidence-gated judgement for vulnerability discovery and **full weaponized exploitation**. The process stays **auditable, evidence-bound, and bounded by a machine-enforced hard-rule floor**.
 
 > It gives the AI **judgment discipline · grounded recognition knowledge · run-state structure · a hard floor drawn by effect** — and is **not** a scanner, a turnkey mass-exploit kit, or a JSON orchestrator.
-> Weaponized exploits the driver authors are **free (no method ceiling)**; the only hard-blocked thing is an **irreversible / harm-as-purpose effect auto-executed against the target**.
+> Weaponized exploits authored by Root/Agents are **free (no method ceiling)**; the only hard-blocked thing is an **irreversible / harm-as-purpose effect auto-executed against the target**.
 > **"Not a turnkey kit" ≠ "not a weapon"**: the project itself is a weapon; what is excluded is only indiscriminate, target-agnostic mass exploitation.
 
 ## 🧭 Architecture
@@ -27,10 +27,18 @@
                 Operator · highest authority
                      │  authorized target
                      ▼
-        ════════  Single AI Driver  ════════
-        reason · pick front · exploit · verify · report
+        ════════  Root Orchestrator  ════════
+        state graph · front decomposition · agent assignment · conflict routing
                      │
-   ╭─────────────────╯
+   ╭───────────────┬───────────────╯
+   │               │
+   │        Subagents: surface · web-hunter · code-audit
+   │        exploit · verify · review · report
+   │               │
+   │        candidates / refutations / conflicts
+   │               ▼
+   │        Single Synthesizer
+   │        evidence gate · dedupe · conflict judgement · final findings
    │
    ├─①  written run state  →  runs/<target>/   audit trail (not committed)
    │
@@ -51,15 +59,15 @@ Three defenses, each with one job: the **`safety_gate` hook** hard-blocks irreve
 ## 🔁 Operating Loop
 
 ```text
-single AI driver
-  → maintain written run state
-  → choose the next exploration front autonomously
-  → verify with evidence
-  → review for shallow work and false positives
-  → report only what evidence supports
+Root Orchestrator
+  → update the state graph
+  → decompose fronts and assign Subagents
+  → merge candidates and check conflicts
+  → trigger verification / falsification
+  → Single Synthesizer reports only what evidence supports
 ```
 
-The AI should **not** wait for the user to name the next vulnerability class while safe open fronts remain. It selects a front, records why, and continues until the front is **confirmed / rejected / deferred (blocker) / closed (Type B reasoning)**.
+The Root should **not** wait for the user to name the next vulnerability class while safe open fronts remain. It selects fronts, records why, assigns suitable agents, and continues until each front is **confirmed / rejected / deferred (blocker) / closed (Type B reasoning)**. Subagents can only produce `phenomenon` / `candidate` / `refutes`; only the Single Synthesizer can promote a candidate into a reportable finding after the evidence gate.
 
 ## 🧠 Design Philosophy
 
@@ -69,7 +77,7 @@ The whole project rests on **one decision** and **three pillars**.
 
 What is ever restricted is the **irreversible effect an action has on the live target, and who presses execute** — never the technique. Crafting and writing weaponized exploitation (RCE chains, auth bypass, deserialization gadgets, upload-to-shell, privesc, C2 / reverse-shell / webshell) is **method, and method is free**; 0day discovery lives there. The only hard line is an **irreversible / harm-as-purpose effect auto-executed against the target** (destruction, 拖库, DoS, money movement) — drawn by **effect**, in **code**, at **runtime**, never by a filename or a banned keyword.
 
-> A soft constraint that makes the AI timid ("don't write that exploit", "don't name that tool") is **backwards** — it cripples the very capability the operator needs while doing nothing for safety. **Safety is the hook's job, by effect; capability is the driver's, without a method ceiling.**
+> A soft constraint that makes the AI timid ("don't write that exploit", "don't name that tool") is **backwards** — it cripples the very capability the operator needs while doing nothing for safety. **Safety is the hook's job, by effect; capability is Root/Agents', without a method ceiling.**
 
 ### Three pillars, deliberately NOT a playbook
 
@@ -81,10 +89,11 @@ What is ever restricted is the **irreversible effect an action has on the live t
 
 It **refuses to be a fourth thing**: a checklist / playbook / scanner-runner / JSON orchestrator. An earlier orchestrator architecture was **deliberately removed**; `tools/check_rules.py` exists to stop it creeping back. The thesis: **a capable model + discipline + grounded recognition + a hard floor out-performs any fixed playbook — and a playbook would only cap the model.**
 
-### One driver · author-and-handoff
+### Root orchestration · Single Synthesizer · author-and-handoff
 
 - **Author** — write complete, runnable exploitation code up to full impact and hand it to the operator. **No ceiling**; under-delivering exploitation code for an authorized target is a failure, symmetric to under-proving.
-- **Auto-execute** — what the driver itself fires at the live target. Defaults to **proof-level (证明即止)**: demonstrate the vuln genuinely exists, then stop. Going deeper is operator-gated, normally delivered as code the operator runs under supervision.
+- **Auto-execute** — what Root/Agents fire at the live target. Defaults to **proof-level (证明即止)**: demonstrate the vuln genuinely exists, then stop. Going deeper is operator-gated, normally delivered as code the operator runs under supervision.
+- **Synthesize** — agent parallelism widens observation, not conclusion authority. The Single Synthesizer owns dedupe, conflict judgement, certainty calibration, and report entry; parallel breadth never relaxes the evidence gate.
 
 ### Evidence over confidence
 
@@ -93,7 +102,7 @@ A signal is not a conclusion; model confidence is not evidence; a single observa
 ## ✨ Design Highlights
 
 ### 1 ｜ Effect × executor safety, enforced in code
-A three-tier model (autonomous / operator-gated / hard) graded by **what gets touched** and **who executes**, not by technique. The PreToolUse hook (`safety_gate.py`) enforces only the auto-execution hard ceiling by effect; it never touches code the driver authors for the operator.
+A three-tier model (autonomous / operator-gated / hard) graded by **what gets touched** and **who executes**, not by technique. The PreToolUse hook (`safety_gate.py`) enforces only the auto-execution hard ceiling by effect; it never touches code Root/Agents author for the operator.
 
 ### 2 ｜ A guard layer that protects *your own* access too + circuit breakers
 All active tools route through `tools/harness/guard.py`: rate limiter (禁高频 — also the real brute-force throttle, **by rate not attempt count**), body cap (禁拖库), auth-fail backstop (anti-runaway only). Three circuit breakers close the field-exposed "DoS yourself / DoS the target" failure:
@@ -143,7 +152,7 @@ Repository discipline checks that the abandoned orchestrator/playbook surfaces h
 | `tools/harness/guard.py` | rate / body cap / three circuit breakers | ✅ tool abort |
 | `sentinel/` | behavior attribution + 4-level tiering + session breaker | ⬜ observe-only |
 
-The hook blocks: irreversible destruction (host/file wipes, `DROP`/`TRUNCATE`/unscoped `DELETE`/`UPDATE`), target resource deletion, mass exfil / database dump (拖库), money movement, DoS / high-rate. **Uploading a proof artifact is not blocked** (driver's call); getting a shell, going past the web layer, and other heavier actions are **not machine-blocked** but are **operator-gated**.
+The hook blocks: irreversible destruction (host/file wipes, `DROP`/`TRUNCATE`/unscoped `DELETE`/`UPDATE`), target resource deletion, mass exfil / database dump (拖库), money movement, DoS / high-rate. **Uploading a proof artifact is not blocked** (Root call); getting a shell, going past the web layer, and other heavier actions are **not machine-blocked** but are **operator-gated**.
 
 > A blocked action is **not** unlocked by human approval — choose a safe, non-destructive proof instead.
 > Scope is not encoded in the hook. The operator is the highest authority; their instruction overrides soft constraints and is the controlling order everywhere except the hard boundary above.
@@ -158,6 +167,7 @@ The hook blocks: irreversible destruction (host/file wipes, `DROP`/`TRUNCATE`/un
 | `tools/harness/guard.py` | rate / body cap / circuit breakers / session budget / upload registry |
 | **`sentinel/`** | runtime behavior detection: attribution · 4-level autonomy · session breaker (observe-only) · thresholds in `TUNING.md` |
 | **`review/`** | independent-review module: portable spec · reviewer template · `records/` review instances |
+| `docs/templates/agents/` · `tools/workers.py` | agent board: assignments, context packs, candidate merge checks, conflict checks, synthesis drafts |
 | `knowledge/` | grounded recognition signatures + weak-point anchors (not weapons, gated by `check_knowledge.py`) |
 | `tools/` | recon ingest · per-host classify · fetch-all assets · active verification · egress re-run · local checkers |
 | `runs/<target>_<date>/` | per-target run state = audit trail (not committed) |
@@ -218,9 +228,9 @@ Skipping this does not affect `probe.py`, `scan.py`, the hook, or the checkers.
 - **`.claude/settings.local.json`** (permission allowlist) is local — re-grant once on a new machine.
 </details>
 
-## 🔐 Authority · Routing · Nested DeepSeek
+## 🔐 Authority · Routing
 
-- **Authority**: this is the **Claude Code** workspace; the driver may edit project files when the user asks, and owns run-level files during a run.
+- **Authority**: this is the **Claude Code** workspace; Root may edit project files when the user asks, and owns run-level files plus the Agent Board during a run.
 - **Why Claude Code-specific**: the machine-enforced safety floor (`.claude/hooks/` PreToolUse etc.), CLAUDE.md auto-load, skills, and memory are all Claude Code mechanisms. **A runtime without that hook system (e.g. Codex) does not run the hard floor, so the safety guarantees do not hold** — the project is designed and verified for Claude Code and does not claim Codex compatibility.
+- **Codex's place**: Claude Code is primary; Codex is auxiliary. Use Codex for heterogeneous review, engagement advice, disagreement, or delegated collaboration when helpful. It does not create a separate runtime or safety boundary; the same run ledger, evidence gate, guard/hook boundary, and review requirements apply.
 - **Routing**: use [`docs/ROUTER.md`](docs/ROUTER.md) to decide what guidance applies; always active are `CLAUDE.md` · `docs/WORKFLOW.md` · `docs/cognition/README.md` · the `src-safety-boundary` skill.
-- **Nested DeepSeek**: `deepseek-project/` is a separate, self-contained DeepSeek copy with its own baseline, driven by DeepSeek — **out of scope for this workspace; do not operate across that boundary**.

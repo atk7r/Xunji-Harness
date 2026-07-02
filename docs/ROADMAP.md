@@ -179,7 +179,7 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一�
 - ✅ **replay 接进收口** — 已落地: check_run `--replay-verify`(见上「全流程贯通」)。
 - ✅ **历史 run 过新门体检** — 已做: 确认无漏洞漏报(见审计记录)。
 - ⬜ **report 脚手架** — 候选, 待 R-1 度量后再建(见上半连缝定性)。
-- ⬜ **C2 workers 实战压测 / C3 runtime 解耦 / deepseek-project 适配** — 见 P3 与各自 memory。
+- ⬜ **C2 workers 实战压测 / C3 runtime 解耦** — 见 P3 与各自 memory。
 - 🟡 **R-1 自评 harness v0 已落地** — `tools/bench.py` + `bench/`(检出率/校准/误报/预算 打分,
   对照 fixture 真值; `bench/example-dvwa-sqli/` 合成样例 + 随附回归)。这是把尺子。**边界(诚实标)**:
   ① 它是 scorer, 跑 fixture 的那次 run 仍要 driver(agent)亲自打 —— 不是全自动 A/B; ② fixture 还少,
