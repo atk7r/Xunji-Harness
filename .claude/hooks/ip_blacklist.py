@@ -3,13 +3,16 @@
 
 Blocks Bash/WebSearch/WebFetch input when it matches a blacklist regex.
 
-Local config:
+No built-in defaults — all rules come from the config file.  If the config
+file is missing or empty, the hook is a no-op (nothing is blocked).
+
+Config path:
   tools/harness/ip_blacklist.conf
 
 Format:
   - one Python regex per line
   - blank lines and lines starting with # are ignored
-  - local config adds to built-in defaults; it does not replace them
+  - see tools/harness/ip_blacklist.conf.example
 """
 
 from __future__ import annotations
@@ -21,24 +24,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CONF_PATH = ROOT / "tools" / "harness" / "ip_blacklist.conf"
-
-DEFAULT_PATTERNS = [r"gov\.cn"]
 INPUT_FIELDS = ("command", "query", "url")
 
 
 def load_patterns() -> list[str]:
-    patterns = list(DEFAULT_PATTERNS)
-
     try:
         lines = CONF_PATH.read_text(encoding="utf-8").splitlines()
     except (FileNotFoundError, OSError):
-        return patterns
+        return []
 
+    patterns: list[str] = []
     for raw in lines:
         line = raw.strip()
         if line and not line.startswith("#") and line not in patterns:
             patterns.append(line)
-
     return patterns
 
 
@@ -81,6 +80,10 @@ def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
 
+    patterns = load_patterns()
+    if not patterns:
+        return 0  # 无黑名单规则 → 放行
+
     try:
         event = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:
@@ -90,7 +93,7 @@ def main() -> int:
     if not text:
         return 0
 
-    match = first_match(text, load_patterns())
+    match = first_match(text, patterns)
     if match:
         deny(match)
 
@@ -106,14 +109,18 @@ def selftest() -> int:
         except re.error as exc:
             invalid.append(f"{pattern}: {exc}")
 
-    patterns = list(DEFAULT_PATTERNS)
+    # selftest uses its own test patterns, independent of the conf file
+    test_patterns = [r"gov\.cn", r"192\.0\.2\.\d+", r"malware\.example\.com"]
+
     checks = [
         ("config patterns compile", not invalid),
-        ("load includes built-in gov.cn", DEFAULT_PATTERNS[0] in loaded),
-        ("block gov.cn URL", first_match("curl https://www.example.gov.cn/api", patterns) is not None),
-        ("block gov.cn search", first_match("site:gov.cn 漏洞公告", patterns) is not None),
-        ("pass normal URL", first_match("curl https://example.com/api", patterns) is None),
-        ("pass usa.gov", first_match("curl https://www.usa.gov/data", patterns) is None),
+        ("no built-in defaults (conf-driven)", True),  # DEFAULT_PATTERNS no longer exists
+        ("block gov.cn URL", first_match("curl https://www.example.gov.cn/api", test_patterns) == r"gov\.cn"),
+        ("block gov.cn search", first_match("site:gov.cn 漏洞公告", test_patterns) == r"gov\.cn"),
+        ("block IP range", first_match("curl https://192.0.2.10/admin", test_patterns) == r"192\.0\.2\.\d+"),
+        ("block malware domain", first_match("wget https://malware.example.com/payload", test_patterns) == r"malware\.example\.com"),
+        ("pass normal URL", first_match("curl https://example.com/api", test_patterns) is None),
+        ("pass usa.gov", first_match("curl https://www.usa.gov/data", test_patterns) is None),
         (
             "extract command/query/url",
             event_text({"tool_input": {"command": "curl https://test.gov.cn"}})
@@ -123,6 +130,7 @@ def selftest() -> int:
             and event_text({"tool_input": {"url": "https://test.gov.cn/page"}})
             == "https://test.gov.cn/page",
         ),
+        ("empty patterns = no match", first_match("curl https://gov.cn", []) is None),
         ("invalid regex ignored at match time", first_match("test", [r"***invalid[re"]) is None),
     ]
 
