@@ -54,20 +54,48 @@ def format_cn(dt: datetime | None = None) -> str:
     return dt.strftime("%Y年%m月%d日 %H:%M UTC")
 
 
-def build_search_hint(dt: datetime | None = None) -> str:
-    """生成 WebSearch 应附加的时间约束字符串。"""
+def build_search_hint(dt: datetime | None = None, kind: str = "vuln") -> str:
+    """生成 WebSearch 应附加的时间约束字符串。
+
+    kind='vuln' (默认, 向后兼容): 通用时间锚 + CVE 专用验证规则
+    kind='generic': 仅通用时间锚 (产品版本 / 公告 / 配置 / 技术搜索)
+    """
     dt = dt or now_utc()
     year = dt.year
-    return (
-        f"当前时间: {format_cn(dt)}。"
-        f"漏洞检索必须以 {year} 年为基准: "
-        f"优先搜索 {year} 年及近 3 年的 CVE/CNVD/安全公告; "
-        f"引用 CVE 时必须验证其发布时间不晚于 {format_date(dt)}; "
-        f"严禁凭模型记忆引用未验证年份的 CVE 编号。"
+    date = format_date(dt)
+    cn = format_cn(dt)
+
+    # Layer 1: 通用时间锚 — 所有联网搜索都必须受此约束
+    general = (
+        f"当前时间: {cn}。"
+        f"所有联网搜索必须以 {year} 年为时间基准: "
+        f"WebSearch query 必须包含 {year} 或不晚于 {date} 的明确时间约束; "
+        f"WebFetch 须核验页面发布时间/更新日期不晚于 {date}; "
+        f"引用任何版本号 / 安全公告 / 配置变更 / 绕过技术时, "
+        f"必须确认信息发布时间不晚于 {date}; "
+        f"优先搜索 {year} 年及近 3 年的资料, 旧信息须标注「可能已过期」; "
+        f"严禁凭模型记忆引用未验证年份的信息。"
     )
 
+    if kind not in ("generic", "vuln"):
+        raise ValueError(
+            f"unsupported kind: '{kind}' (expected 'generic' or 'vuln')"
+        )
 
-def build_output(dt: datetime | None = None) -> dict:
+    if kind == "generic":
+        return general
+
+    # Layer 2: CVE/CNVD 专用 — 在通用基础上叠加编号验证规则
+    vuln_extra = (
+        f"漏洞检索附加: 优先搜索 {year} 年及近 3 年的 CVE/CNVD/安全公告; "
+        f"引用 CVE 编号前必须验证其发布年份 ≤ {year} 且发布时间不晚于 {date}; "
+        f"拿到的 CVE 须用 WebFetch 验证 NVD 页面确认发布时间; "
+        f"严禁凭模型记忆编造未验证年份的 CVE 编号。"
+    )
+    return f"{general} {vuln_extra}"
+
+
+def build_output(dt: datetime | None = None, kind: str = "vuln") -> dict:
     dt = dt or now_utc()
     return {
         "iso": format_iso(dt),
@@ -76,7 +104,8 @@ def build_output(dt: datetime | None = None) -> dict:
         "year": dt.year,
         "month": dt.month,
         "cn": format_cn(dt),
-        "search_hint": build_search_hint(dt),
+        "search_hint": build_search_hint(dt, kind=kind),
+        "kind": kind,
     }
 
 
@@ -89,6 +118,8 @@ def main() -> int:
     ap.add_argument("--epoch", action="store_true", help="仅 Unix epoch")
     ap.add_argument("--year", action="store_true", help="仅当前年份")
     ap.add_argument("--search-hint", action="store_true", help="输出 WebSearch 时间约束提示")
+    ap.add_argument("--kind", choices=["generic", "vuln"], default="vuln",
+                    help="时间约束范围: generic(通用) / vuln(通用+CVE, 默认)")
     ap.add_argument("--selftest", action="store_true", help="回归测试")
     args = ap.parse_args()
 
@@ -97,8 +128,10 @@ def main() -> int:
 
     dt = now_utc()
 
+    kind = args.kind
+
     if args.json:
-        print(json.dumps(build_output(dt), ensure_ascii=False, indent=2))
+        print(json.dumps(build_output(dt, kind=kind), ensure_ascii=False, indent=2))
         return 0
     if args.iso:
         print(format_iso(dt))
@@ -110,12 +143,13 @@ def main() -> int:
         print(str(dt.year))
         return 0
     if args.search_hint:
-        print(build_search_hint(dt))
+        print(build_search_hint(dt, kind=kind))
         return 0
 
     # Default: human-readable multi-format output
-    out = build_output(dt)
-    print("=== 时间戳闸门 ===")
+    out = build_output(dt, kind=kind)
+    mode_label = "[通用+CVE]" if kind == "vuln" else "[仅通用]"
+    print(f"=== 时间戳闸门 {mode_label} ===")
     print(f"  ISO 8601:  {out['iso']}")
     print(f"  日期:      {out['date']}")
     print(f"  年份:      {out['year']}")
@@ -129,7 +163,8 @@ def main() -> int:
 def _selftest() -> int:
     """Regression tests — uses real clock (deterministic-enough for format checks)."""
     dt = now_utc()
-    out = build_output(dt)
+    out = build_output(dt, kind="vuln")
+    out_generic = build_output(dt, kind="generic")
     checks: list[tuple[str, bool]] = []
 
     # ISO format: YYYY-MM-DDTHH:MM:SSZ
@@ -146,16 +181,37 @@ def _selftest() -> int:
     checks.append(("year is current", out["year"] == dt.year))
     checks.append(("month in 1..12", 1 <= out["month"] <= 12))
 
-    # Search hint contains year
-    checks.append(("search_hint has year", str(dt.year) in out["search_hint"]))
-    checks.append(("search_hint has CVE mention", "CVE" in out["search_hint"]))
-    checks.append(("search_hint has CNVD mention", "CNVD" in out["search_hint"]))
+    # Search hint (vuln kind): contains both general and CVE parts
+    checks.append(("vuln hint has year", str(dt.year) in out["search_hint"]))
+    checks.append(("vuln hint has 'WebSearch query'", "WebSearch query 必须包含" in out["search_hint"]))
+    checks.append(("vuln hint has 'WebFetch 须核验'", "WebFetch 须核验" in out["search_hint"]))
+    checks.append(("vuln hint has CVE mention", "CVE" in out["search_hint"]))
+    checks.append(("vuln hint has CNVD mention", "CNVD" in out["search_hint"]))
+    checks.append(("vuln hint has generic time anchor", "所有联网搜索" in out["search_hint"]))
+    checks.append(("vuln hint has '可能已过期'", "可能已过期" in out["search_hint"]))
+    checks.append(("vuln hint has NVD WebFetch", "WebFetch 验证 NVD" in out["search_hint"]))
+
+    # Search hint (generic kind): has time anchor but NO CVE/CNVD
+    checks.append(("generic hint has year", str(dt.year) in out_generic["search_hint"]))
+    checks.append(("generic hint has 'WebSearch query'", "WebSearch query 必须包含" in out_generic["search_hint"]))
+    checks.append(("generic hint has generic time anchor", "所有联网搜索" in out_generic["search_hint"]))
+    checks.append(("generic hint has '可能已过期'", "可能已过期" in out_generic["search_hint"]))
+    checks.append(("generic hint NO CVE mention", "CVE" not in out_generic["search_hint"]))
+    checks.append(("generic hint NO CNVD mention", "CNVD" not in out_generic["search_hint"]))
+
+    # kind validation: invalid kind raises ValueError
+    try:
+        build_search_hint(dt, kind="invalid")
+        checks.append(("invalid kind raises ValueError", False))
+    except ValueError:
+        checks.append(("invalid kind raises ValueError", True))
 
     # JSON roundtrip
     raw = json.dumps(out, ensure_ascii=False)
     loaded = json.loads(raw)
     checks.append(("JSON roundtrip iso", loaded["iso"] == out["iso"]))
     checks.append(("JSON roundtrip year", loaded["year"] == out["year"]))
+    checks.append(("JSON roundtrip kind", loaded["kind"] == "vuln"))
 
     # CLI flag outputs (capture via main with monkey-patched argv)
     import io
@@ -196,6 +252,19 @@ def _selftest() -> int:
         sys.stdout = old_stdout
         json_out = buf.getvalue().strip()
         checks.append(("--json flag valid JSON", json_out.startswith("{")))
+
+        # --search-hint --kind generic
+        buf = io.StringIO()
+        sys.stdout = buf
+        sys.argv = ["timestamp_gate.py", "--search-hint", "--kind", "generic"]
+        try:
+            main()
+        except SystemExit:
+            pass
+        sys.stdout = old_stdout
+        generic_hint_out = buf.getvalue().strip()
+        checks.append(("--search-hint --kind generic has no CVE", "CVE" not in generic_hint_out))
+        checks.append(("--search-hint --kind generic has time anchor", "所有联网搜索" in generic_hint_out))
     finally:
         sys.stdout = old_stdout
 

@@ -86,7 +86,7 @@ BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
     "自主驱动: safe 前沿还在就别停下问(会话长/已解决障碍/选下一类 都不是停止理由)",
     "Reason pass: 每轮先重读整个 frontier.md(所有 open+deferred 前沿)再选 — 防隧道视野",
     "回合协议: 结尾只允许「下一行动: <具体action>」或「BLOCKED: <外部依赖>」; 禁止 ? / 是否 / 继续还是",
-    "漏洞检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 查 CVE/CNVD/漏洞前, 必须先 python tools/timestamp_gate.py 获取当前时间, query/URL 必须包含当前年份约束, 严禁凭模型记忆编造未验证年份的 CVE 编号",
+    "联网检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 前必须先 python tools/timestamp_gate.py --search-hint --kind vuln 获取当前时间并逐条执行其输出的约束; 非 CVE/CNVD 检索用 --kind generic",
     "操作者约束持久化: 收到 directive/constraint 后先更新 hints.md(HINT-xxx, Kind=directive/constraint, Status=pending) 再继续; 每轮 Reason pass 无条件 Read hints.md —— constraint 是全 run 级原则非当前前沿上下文, 跨轮有效直到操作者显式解除",
     "Knowledge-first: 识别到产品签名后, 先 grep knowledge/ 匹配条目(Read 对应的 knowledge/*.md) 再 WebSearch —— 签名→knowledge 是硬步骤非可选; 消费了错误厂商的 CVE 而 correct knowledge 未读 = 协议错误",
 ]
@@ -97,7 +97,7 @@ BINDING_RULES_TIER3 = [   # BOTTOM: 约束速查 — placed at recency position
     "阶段检查点: Driver/Hunter/Reviewer 每批产出后自动触发 peer_review --into-run, codex BLOCKER 先修再继续",
     "任何代码/文档修改必须经过 codex 复审; codex 必须走专用代理(CODEX_PROXY)",
     "不过度工程(画蛇添足); 能进代码闸门的别写 prose · 中文回答",
-    "引用 CVE 编号前验证其发布年份 ≤ 当前年份; 检索时 query 必须带年份(如 2026); 拿到的 CVE 用 WebFetch 验证 NVD 页面确认发布时间",
+    "联网搜索 tripwire: WebSearch/WebFetch/CVE 引用输出前必须已跑 timestamp_gate 并逐条执行其 search_hint 约束; 未跑 = 不得引用, 跳过 = 协议错误",
     "爆破预算: 同一端点连续爆破 25+ 次无果 → 强制断言 Type B, 转向逻辑漏洞/未授权API(IDOR/路径穿越/配置错误), 不要继续试更多密码(retrospective #4: 500+ 次猜测 0 成功)",
     "攻击录证: certainty≥0.8 的关键攻击行为必须用 probe.py --save 留 .replay.json 录像; 裸 Python script 攻击后必须补跑 `from harness.guard import RequestRecorder; RequestRecorder(run_dir).record(...)` 录证 —— codex 复审只看 .replay.json, 不认散文描述(retrospective #11)",
 ]
