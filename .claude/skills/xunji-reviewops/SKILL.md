@@ -142,6 +142,27 @@ guard, hook, or sentinel layers allow, block, escalate, or measure.
 If a change outside the listed paths is load-bearing for those layers, such as a
 shared utility they import or a configuration they consume, treat it as in scope.
 
+## Claude-Driven Codex Code Changes
+
+This applies when Claude Code remains the driver but delegates repository code or
+documentation edits to Codex. It is not a live engagement runtime change: target-
+facing work still runs under Claude Code's guard/hook boundary.
+
+For Codex-authored diffs under Claude Code:
+
+- Keep authorship attributable: Codex wrote the candidate diff; Claude Code owns
+  integration, tests, and final acceptance.
+- Do not count Codex as an independent reviewer of its own diff.
+- For high-risk code, report, or closure-impacting changes, review the Codex
+  diff with Claude Code plus the arkcli panel when available. The synthesis
+  brain remains Claude Code.
+- If arkcli is unavailable, Claude Code reviews the Codex diff with tests and
+  recorded rationale. For safety-critical paths, explicitly record the missing
+  external reviewer limitation rather than treating Codex self-review as a vote.
+- The narrow safety-critical gate above still applies to `.claude/hooks/`,
+  `tools/harness/guard.py`, and `sentinel/`: run the required tests and write the
+  independent review record before declaring the change done.
+
 ## What Not To Add
 
 - Do not add generic exploit-technique lists such as IDOR, SQLi, XSS, Swagger,
