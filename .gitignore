@@ -47,6 +47,9 @@ knowledge/weaponized/*
 tools/harness/proxy.conf
 tools/harness/codex_proxy.conf
 
+# IP blacklist config (operator's local blocklist — gitignored so it stays local)
+tools/harness/ip_blacklist.conf
+
 # Local scratch
 tmp/
 *.tmp
