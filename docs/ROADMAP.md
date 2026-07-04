@@ -140,9 +140,12 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一�
 也明确了哪些是改不动的本质墙(A 类)。
 
 ### 已落地
-- **异构独立复审 = R-6 的实现** — `tools/peer_review.py`(Codex>DeepSeek/GLM>Claude兜底, 候选非
-  裁决)+ check_run `--auto-peer-review`。R-6「从干净上下文重证发现」由【异构】模型落地; 同模型只
-  减 bias 不减盲区(A2)。6 次实战 dogfood 各逮到真问题(漏报/bypass/同族蒙混/凭据/越界/重放DELETE)。
+- **异构独立复审 = R-6 的实现** — `tools/peer_review.py` 默认按 Claude Code 主驾驶运行
+  Codex gpt-5.5 high + arkcli 三模型 panel(Kimi-K2.7-Code/MiniMax-M3/GLM-5.2), 单点高危和
+  代码/报告/收口复审都走这套; 缺一边则用剩余异构后端, 都缺才 Claude 同族兜底。
+  候选非裁决, 接 `check_run --auto-peer-review`。
+  R-6「从干净上下文重证发现」由【异构】模型落地; 同模型只减 bias 不减盲区(A2)。
+  6 次实战 dogfood 各逮到真问题(漏报/bypass/同族蒙混/凭据/越界/重放DELETE)。
 - **B1 证据可重放化(缓解 A1)** — probe `--save` 留 `.replay.json` 录像; `tools/replay.py` 走 guard 重放
   比对(幂等 GET 自动 / DELETE 永不重放 / host 白名单)。造假成本从"P 张图"抬到"伪造自洽请求+响应+sha1"。
 - **漏报一致性硬门** — check_run: certainty>=0.8 正向发现必须进 report(防 hamastar 漏报 E-017 那类)。
@@ -170,8 +173,10 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一�
     能 A/B 证明它真帮上找洞/防漏报, 再建。
 
 ### 未完成 / 预留(卡点已标)
-- ⬜ **B2-② 多异构 panel** — 扩展点已留(peer_review.py 注释; 配 ≥2 异构 key + `review_panel()` 即可,
-  不改现有结构)。卡: key + API 成本。
+- ✅ **B2-② 多异构 panel** — 默认链路已接 arkcli 三模型 panel(GLM5.2/Kimi2.7/MiniMax-M3);
+  Claude Code 主驾驶时满配默认跑 Codex+arkcli panel, 大脑为 Codex; 无 Codex 时大脑为 arkcli
+  panel; 无 arkcli 时大脑为 Codex。旧 DeepSeek/GLM OpenAI-compatible 后端保留为
+  `--backend`/私有配置扩展, 不再是默认链路。
 - ⬜ **B1-③ API 后端核对产物** — codex 版已做(rubric 第7点); API 版卡 key。
 - ⬜ **B3-② 通用利用原语**(撬 A3 能力墙, 当前方向): ① OOB 带外回调监听器(推荐起点, 盲 RCE/SSRF/
   盲注→铁证) ② 编码/序列化 ③ multipart 上传发送 ④ 盲注提取引擎。**铁律: 工具是枪, payload 靠 AI

@@ -505,13 +505,19 @@ when `report.md` makes a strong closure claim:
 Spawn an independent fresh-context `general-purpose` reviewer
 (`review/independent-reviewer.md`), record findings under `## Independent Review` in
 `review.md`, address every one. **Prefer a heterogeneous reviewer when its cost is paid:**
-if the operator accepts data egress (run findings go to an external vendor — Codex -> OpenAI)
+if the operator accepts data egress (run findings go to an external vendor — Codex -> OpenAI,
+arkcli panel -> ARK data-plane models)
 and a backend is up, `tools/peer_review.py --into-run runs/<dir>` (or
 `check_run.py --auto-peer-review`) satisfies the gate with an *orthogonal* model — a
 same-model sub-agent only reduces bias, not the shared blind spots a different vendor
-catches. Absent that consent, the fresh-context sub-agent is the always-available,
-egress-free fallback. Standing authorization granted for the sub-agent — do it without
-re-asking. `check_run.py` HARD-fails a closure claim with no `Independent Review` record.
+catches. The default matrix assumes Claude Code is the driver and applies to both
+single high-risk review and code/report/closure review: use Codex plus the arkcli
+panel when both are available (brain: Codex), arkcli when Codex is missing (brain:
+arkcli panel), Codex when arkcli is missing (brain: Codex), and Claude Code
+same-family only when neither external reviewer is available. Absent egress consent,
+the fresh-context sub-agent is the always-available, egress-free fallback. Standing
+authorization granted for the sub-agent — do it without re-asking. `check_run.py`
+HARD-fails a closure claim with no `Independent Review` record.
 
 Claude Code is primary and Codex is auxiliary: Codex commonly appears here as a
 heterogeneous review backend, but it can also provide advice or delegated help when
@@ -522,8 +528,8 @@ gate, guard/hook boundary, and review requirements still apply.
 own dedicated proxy channel (`tools/harness/codex_proxy.py`, configured via `CODEX_PROXY`
 env or `tools/harness/codex_proxy.conf`), isolated from the engagement proxy
 (`XUNJI_PROXY`) and the model-API direct channel. Without it, codex is unreachable and
-peer_review falls through to the next backend. See `review/independent-reviewer.md` "Codex
-代理（必须）".
+peer_review falls through to the arkcli panel, then the Claude fallback. See
+`review/independent-reviewer.md` "Codex 代理（必须）".
 
 **Mandatory retrospective before closure — procedure.** Every pentest closes with an honest
 `retrospective.md` (scaffolded from `docs/templates/run/retrospective.md`): what *I* (the

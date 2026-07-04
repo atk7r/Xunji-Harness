@@ -29,12 +29,16 @@ record — this is a gate, not a suggestion: you cannot mark the run closed with
 
 "另一个模型"这条(独立性最强)已做成可接入模块 `tools/peer_review.py`:
 `review("runs/<target>", out_file="review/records/<date>-<target>.md")`，或 CLI
-`python tools/peer_review.py runs/<target> --out review/records/<...>.md`。后端优先级
-**Codex > DeepSeek/GLM > Claude 自家兜底** —— 异构厂商和 Claude 盲区正交才真补盲(A2),
-Claude 自家只减 bias 不减盲区故仅兜底。产出是**候选非裁决**: driver 仍唯一整合者过证据门
+`python tools/peer_review.py runs/<target> --out review/records/<...>.md`。Claude Code
+正常主驾驶时, 单点高危复审、代码/报告/收口复审都按同一矩阵跑: 满配用
+**Codex(gpt-5.5 high) + arkcli 三模型 panel(Kimi-K2.7-Code / MiniMax-M3 / GLM-5.2)**,
+大脑为 Codex; 无 Codex 时只跑 arkcli panel, 大脑为 arkcli panel; 无 arkcli 时只跑 Codex,
+大脑为 Codex; 两者都无时才退到 Claude Code fresh-context 同族模型。Codex 是首席复审官;
+arkcli panel 是外部异构补盲团; Claude 自家只减 bias 不减盲区故仅兜底。
+产出是**候选非裁决**: driver/Codex 裁决仍必须过证据门
 (不盲从工具/语境误报, 不忽视真盲补)。实测 Codex 逮到 driver + check_run 都漏的满分 CRITICAL
 漏报(见 `review/records/2026-06-17-hamastar-codex-peer-review.md`，并据此补了 check_run 的
-"漏报一致性"硬门)。**数据出境**: API 后端把 run 内容发外部厂商, 仅操作者接受时用。
+"漏报一致性"硬门)。**数据出境**: Codex/arkcli/API 后端会把 run 内容发外部厂商, 仅操作者接受时用。
 
 这里按"Claude Code 为主，Codex 为辅"理解：Codex 常作为异构复审后端，也可给交战建议
 或被委派协作。它不另立运行时或安全边界；所有影响 run 的内容仍以同一运行态台账、
@@ -54,7 +58,7 @@ Codex CLI 调用 OpenAI API，**必须通过专用代理通道**（`tools/harnes
 | 通道 | 代理 | 配置 |
 |---|---|---|
 | 交战流量 | `XUNJI_PROXY` | env / `proxy.conf` |
-| 模型 API (DeepSeek/GLM/Claude) | 剥代理直连 | `model_safe_env()` |
+| 模型 API / arkcli panel | 剥代理直连 | `model_safe_env()` |
 | **Codex CLI** | **`CODEX_PROXY`** | env / `codex_proxy.conf` |
 
 Codex 不经过 XUNJI_PROXY（交战代理会在目标侧中继 codex 流量 = 串味+泄露），也不走模型
@@ -68,7 +72,7 @@ API 的直连（可能不可达）。`peer_review.py` 的 `_run_codex()` 已硬�
 自检：`python tools/harness/codex_proxy.py --status`  /  `--selftest`
 
 **注意**：Codex 是 `peer_review.py` 优先级最高的后端，但无 codex_proxy 时它不可达 →
-自动降到 DeepSeek/GLM 或兜底。正确的代理是 codex 可用的前提。
+自动降到 arkcli 三模型 panel 或兜底。正确的代理是 codex 可用的前提。
 
 ## Reviewer prompt (copy, fill `<target>`)
 

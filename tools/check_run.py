@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -97,6 +98,63 @@ OPTIONAL_MARKERS = {
         "Status:",
     ],
 }
+
+
+def _sha1_bytes(data: bytes) -> str:
+    return hashlib.sha1(data).hexdigest()
+
+
+def _sha1_file(path: Path) -> str:
+    h = hashlib.sha1()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _evidence_artifact_hash(run_dir: Path, token: str) -> dict:
+    root = run_dir.resolve()
+    tok = token.strip().strip("`\"'").rstrip(").,;:，。）")
+    cands = [tok] if tok.startswith("evidence/") else [tok, f"evidence/{tok}"]
+    for rel in cands:
+        try:
+            p = (run_dir / rel).resolve()
+        except Exception:
+            continue
+        if p != root and root not in p.parents:
+            continue
+        if p.is_file() and p.stat().st_size > 0:
+            item = {"token": token, "path": p.relative_to(run_dir.resolve()).as_posix(),
+                    "exists": True, "size": p.stat().st_size, "sha1": _sha1_file(p)}
+            if p.suffix.lower() in {".html", ".json", ".txt", ".log", ".xml"}:
+                item["excerpt"] = p.read_text(encoding="utf-8", errors="replace")[:1200]
+            return item
+    return {"token": token, "exists": False}
+
+
+def current_evidence_index_hash(run_dir: Path) -> str:
+    entries = []
+    for rec in parse_evidence(run_dir):
+        entries.append({
+            "id": rec.get("id"),
+            "head": rec.get("head"),
+            "maturity": rec.get("maturity"),
+            "certainties": rec.get("certainties", []),
+            "confirmed": rec.get("confirmed", False),
+            "has_control": rec.get("has_control", False),
+            "supports": rec.get("supports", []),
+            "refutes": rec.get("refutes", []),
+            "refutes_any": rec.get("refutes_any", False),
+            "artifacts": sorted(
+                (_evidence_artifact_hash(run_dir, a) for a in rec.get("artifacts", [])),
+                key=lambda x: (str(x.get("path", "")), str(x.get("token", ""))),
+            ),
+            "artifacts_missing": rec.get("artifacts_missing", []),
+        })
+    entries.sort(key=lambda x: str(x.get("id", "")))
+    payload = {"schema": "xunji.evidence_index.v1", "entries": entries}
+    payload["sha1"] = _sha1_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    return payload["sha1"]
 
 
 def check_file(path: Path, markers: list[str]) -> list[str]:
@@ -948,6 +1006,61 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
     return errors, warns
 
 
+def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:
+    """ReviewOps v2: peer_review 写入的 PR-xxx ledger 必须被处理。
+    只约束新格式 `## Review Finding Ledger`; 旧独立复审记录不带 ledger, 不 retroactive 误杀。"""
+    review = run_dir / "review.md"
+    if not review.exists():
+        return [], []
+    text = review.read_text(encoding="utf-8", errors="replace")
+    if "Review Finding Ledger" not in text:
+        return [], []
+    errors: list[str] = []
+    warns: list[str] = []
+
+    current_hash = current_evidence_index_hash(run_dir)
+    for hm in re.finditer(r"(?im)^\s*-\s*EvidenceIndexHash\s*[:：]\s*([0-9a-f]{40}|\(missing\))", text):
+        seen = hm.group(1)
+        if seen != "(missing)" and seen != current_hash:
+            errors.append(
+                "复审硬门(evidence_index 已变): review.md 的 EvidenceIndexHash "
+                f"{seen} 与当前 {current_hash} 不一致 —— 证据/产物变更后旧 Codex/peer_review "
+                "裁决失效, 需重新跑 `python tools/peer_review.py --into-run runs/<dir>` 或写新的证据化裁决。")
+
+    for m in re.finditer(r"(?ms)^###\s+(PR-\d+)\s+—\s+(BLOCKER|WARN)\b(.*?)(?=^###\s+PR-\d+\s+—|^##\s|\Z)", text):
+        prid, sev, block = m.group(1), m.group(2), m.group(3)
+        sm = re.search(r"(?im)^\s*-\s*Status\s*[:：]\s*([^\n]+)", block)
+        rm = re.search(r"(?im)^\s*-\s*DriverResolution\s*[:：]\s*([^\n]+)", block)
+        status = (sm.group(1).strip().lower() if sm else "pending")
+        resolution = (rm.group(1).strip().lower() if rm else "pending")
+        unresolved = status in {"", "pending", "open", "unresolved"} or resolution in {"", "pending", "open", "unresolved"}
+        allowed_status = {"accepted", "dismissed", "superseded", "escalated"}
+        has_audit_anchor = bool(re.search(
+            r"(?i)\b(Evidence|Reason|Decision|Control|Artifact|Front)\s*[:：]|"
+            r"\b[ECF]-\d+\b|evidence/|review/records/|decisions\.md|frontier\.md",
+            resolution))
+        if not unresolved and status not in allowed_status:
+            errors.append(
+                f"复审硬门(非法处理状态): {prid} Status={status!r} —— 只能用 "
+                "accepted/dismissed/superseded/escalated。")
+        if not unresolved and not has_audit_anchor:
+            msg = (
+                f"复审处理缺证据锚点: {prid} DriverResolution 必须包含 Evidence:/Reason:/Decision:/"
+                "Control:/Artifact:/Front:、E/C/F-id、artifact 路径或 review/records 记录。")
+            if sev == "BLOCKER":
+                errors.append("复审硬门(" + msg + ")")
+            else:
+                warns.append(msg)
+        if sev == "BLOCKER" and unresolved:
+            errors.append(
+                f"复审硬门(未处理 BLOCKER): {prid} 仍为 pending/unresolved —— peer_review/Codex "
+                "提出的 BLOCKER 必须 accepted/dismissed/superseded/escalated 并写证据化 DriverResolution 后才能收口。")
+        elif sev == "WARN" and unresolved:
+            warns.append(
+                f"复审待处理 WARN: {prid} 仍为 pending/unresolved —— 建议在收口前 accepted/dismissed/superseded。")
+    return errors, warns
+
+
 # 强收口措辞 —— 出现这些"已穷尽/无可利用/打不动"的断言时, 触发覆盖核验(P0-1)
 CLOSURE_CLAIMS = [
     "无攻击面", "无可利用", "探尽", "测尽", "都无法", "全无", "均无确认",
@@ -1602,6 +1715,9 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
             "收口硬门(P0-1): report 含强收口断言, 但 review.md 无【独立复审 / Independent "
             "Review】记录。自评治不了自评偏见; 收口前【必须】派独立 Reviewer 子代理(常驻授权, "
             "见 review/independent-reviewer.md)并落 review.md。撤回收口措辞或补复审后再过。")
+    ledger_errors, ledger_warns = check_peer_review_ledger(run_dir)
+    errors.extend(ledger_errors)
+    warns.extend(ledger_warns)
 
     # 硬门(P1): 收口时检查 UploadRegistry —— 未清理的上传测试残留不得留后门
     from harness.guard import UploadRegistry
@@ -2037,6 +2153,56 @@ def _selftest() -> int:
         ("Metacog: full contract -> no warn", meta_ok_w == []),
     ]
 
+    # --- ReviewOps v2 peer_review ledger gate ---
+    d_pr = Path(tempfile.mkdtemp())
+    (d_pr / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d_pr / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001 — confirmed\n"
+        "- Maturity: finding\n- Control: yes\n- Artifacts: `ev.html`\n- Certainty: 0.8\n",
+        encoding="utf-8")
+    pr_hash = current_evidence_index_hash(d_pr)
+    (d_pr / "review.md").write_text(
+        "# Review\n\n## Independent Review (heterogeneous peer_review · codex · now)\n"
+        "## Review Finding Ledger\n"
+        f"- EvidenceIndexHash: {pr_hash}\n"
+        "### PR-001 — BLOCKER — weak_evidence\n"
+        "- Status: pending\n- DriverResolution: pending\n",
+        encoding="utf-8")
+    pr_pending_e, pr_pending_w = check_peer_review_ledger(d_pr)
+    (d_pr / "review.md").write_text(
+        "# Review\n\n## Independent Review (heterogeneous peer_review · codex · now)\n"
+        "## Review Finding Ledger\n"
+        f"- EvidenceIndexHash: {pr_hash}\n"
+        "### PR-001 — BLOCKER — weak_evidence\n"
+        "- Status: dismissed\n- DriverResolution: dismissed with Evidence: E-001 artifact ev.html\n",
+        encoding="utf-8")
+    pr_resolved_e, pr_resolved_w = check_peer_review_ledger(d_pr)
+    (d_pr / "review.md").write_text(
+        "# Review\n\n## Independent Review (heterogeneous peer_review · codex · now)\n"
+        "## Review Finding Ledger\n"
+        f"- EvidenceIndexHash: {pr_hash}\n"
+        "### PR-001 — BLOCKER — weak_evidence\n"
+        "- Status: done\n- DriverResolution: done\n",
+        encoding="utf-8")
+    pr_bad_resolution_e, pr_bad_resolution_w = check_peer_review_ledger(d_pr)
+    (d_pr / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001 — changed\n"
+        "- Maturity: finding\n- Control: yes\n- Artifacts: `ev.html`\n- Certainty: 1.0\n",
+        encoding="utf-8")
+    pr_stale_e, pr_stale_w = check_peer_review_ledger(d_pr)
+    checks += [
+        ("peer_review ledger: pending BLOCKER hard fails",
+         any("未处理 BLOCKER" in e and "PR-001" in e for e in pr_pending_e)),
+        ("peer_review ledger: resolved BLOCKER clears pending gate",
+         not any("未处理 BLOCKER" in e for e in pr_resolved_e)),
+        ("peer_review ledger: invalid status hard fails",
+         any("非法处理状态" in e for e in pr_bad_resolution_e)),
+        ("peer_review ledger: resolution needs audit anchor",
+         any("缺证据锚点" in e for e in pr_bad_resolution_e)),
+        ("peer_review ledger: evidence hash drift hard fails",
+         any("evidence_index 已变" in e for e in pr_stale_e)),
+    ]
+
     # --- Ultra-native agent-board conflict gate ---
     d_conf = Path(tempfile.mkdtemp())
     (d_conf / "state").mkdir()
@@ -2388,10 +2554,12 @@ def _selftest() -> int:
     return 0 if not bad else 1
 
 
-def _maybe_auto_peer_review(run_dir: Path) -> None:
-    """--auto-peer-review: 收口时若 review.md 缺独立复审记录, 自动跑 tools/peer_review.py 异构
-    复审写进 review.md(满足独立复审硬门 line 654)。慢+数据出境, 故仅显式 flag。幂等: 已有记录
-    则不重跑(不重复花钱/出境)。复审是候选非裁决, driver 仍逐条过证据门。"""
+def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
+    """--auto-peer-review: 收口时若 review.md 缺独立复审记录, 自动按复审矩阵跑 panel:
+    codex+arkcli 满配; 缺 codex 用 arkcli; 缺 arkcli 用 codex; 都缺则 Claude 同族兜底/driver。
+    若 driver=codex(仅代码维护/仓库改动), Codex 不算独立票, 矩阵切到 arkcli+Claude Code/API,
+    但综合大脑仍为 Codex。
+    慢+数据出境, 故仅显式 flag。幂等: 已有记录则不重跑。复审是候选非裁决。"""
     report = run_dir / "report.md"
     if not report.exists():
         return
@@ -2407,15 +2575,19 @@ def _maybe_auto_peer_review(run_dir: Path) -> None:
     except Exception as e:
         print(f"[auto-peer-review] 无法 import peer_review: {e}")
         return
-    print("[auto-peer-review] 收口缺独立复审 -> 跑异构复审(peer_review, 慢/数据出境)…")
+    print("[auto-peer-review] 收口缺独立复审 -> 按矩阵跑 peer_review panel(慢/数据出境)…")
     try:
-        r = peer_review.review(run_dir, into_run=True, require_heterogeneous=True)
+        r = peer_review.review_panel(run_dir, into_run=True, driver=driver)
     except Exception as e:
         print(f"[auto-peer-review] peer_review 失败: {e}")
         return
     if r.verdict == "NEEDS_DRIVER":
-        print("[auto-peer-review] 落到 Claude 兜底且无 API key —— 无异构后端, 需 driver 自己 spawn "
-              "fresh-context 子代理复审(独立复审门仍会拦, 这是对的)。")
+        if (driver or "").strip().lower() == "codex":
+            print("[auto-peer-review] arkcli/Claude API 未完成 —— 需在 Claude Code fresh-context "
+                  "会话/子代理按 peer_review prompt 复审。")
+        else:
+            print("[auto-peer-review] 无 codex/arkcli 或 Claude API 不可直接调用 —— 需 driver 在 "
+                  "Claude Code 派 fresh-context 同族子代理复审。")
         return
     print(f"[auto-peer-review] backend={r.backend_used} verdict={r.verdict}, "
           f"{len(r.findings)} findings 已写进 review.md。候选非裁决, 逐条过证据门。")
@@ -2428,8 +2600,10 @@ def main() -> int:
                         help="run the structured-evidence parser regression and exit")
     parser.add_argument("--auto-peer-review", action="store_true",
                         help="收口时若 review.md 缺独立复审记录, 自动跑 tools/peer_review.py "
-                             "(异构后端 Codex>DeepSeek/GLM>Claude, 慢/数据出境)写进 review.md "
+                             "(默认 Claude driver: Codex+arkcli panel; Codex driver: arkcli+Claude, 慢/数据出境)写进 review.md "
                              "满足独立复审硬门。幂等(有记录不重跑)、默认关、selftest 不触发")
+    parser.add_argument("--review-driver", choices=["claude", "codex"], default=None,
+                        help="配合 --auto-peer-review: 当前主操作面/作者模型。codex 仅用于代码维护, 避免 Codex 自审票, 用 arkcli+Claude 给意见, Codex 综合。")
     parser.add_argument("--replay-verify", action="store_true",
                         help="收口前自动重放核实: 对 .replay.json 录像跑 replay_run(走 guard / "
                              "target.md 授权 scope / 幂等 GET 才重放 / DELETE 永不 / 写操作默认 skip), "
@@ -2498,7 +2672,7 @@ def main() -> int:
     # 自动异构复审(--auto-peer-review): 收口时若缺独立复审记录, 自动跑 peer_review 写进 review.md
     # 满足下面的独立复审硬门。慢(几分钟)+数据出境, 默认关、仅显式 flag; selftest 不走这。
     if args.auto_peer_review:
-        _maybe_auto_peer_review(run_dir)
+        _maybe_auto_peer_review(run_dir, driver=args.review_driver)
     # --replay-verify(断-1): 收口前自动重放核实 .replay.json 录像, 把 replay 焊进收口闭环。
     # 走实网(慢)+ 默认关、仅显式 flag; selftest 不走这(汇总逻辑 _summarize_replay 单独离线测)。
     if args.replay_verify:
