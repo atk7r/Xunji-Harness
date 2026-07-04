@@ -1,0 +1,9 @@
+# IP Blacklist — one Python regex per line.
+# Blank lines and lines starting with # are ignored.
+# Copy this file to tools/harness/ip_blacklist.conf to add local rules.
+# Local rules are appended to built-in defaults (gov\.cn always active).
+#
+# Examples:
+# gov\.cn
+# (^|\.)example\.com$
+# 192\.0\.2\.10
