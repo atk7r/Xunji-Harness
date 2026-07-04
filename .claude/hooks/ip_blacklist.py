@@ -114,7 +114,6 @@ def selftest() -> int:
 
     checks = [
         ("config patterns compile", not invalid),
-        ("no built-in defaults (conf-driven)", True),  # DEFAULT_PATTERNS no longer exists
         ("block gov.cn URL", first_match("curl https://www.example.gov.cn/api", test_patterns) == r"gov\.cn"),
         ("block gov.cn search", first_match("site:gov.cn 漏洞公告", test_patterns) == r"gov\.cn"),
         ("block IP range", first_match("curl https://192.0.2.10/admin", test_patterns) == r"192\.0\.2\.\d+"),
