@@ -577,6 +577,20 @@ def decide(is_final: bool, check_rc: int, stop_hook_active: bool):
     return "block"
 
 
+def decide_closure(is_final: bool, check_rc: int, open_fronts: int, stop_hook_active: bool):
+    """FINAL closure decision matrix.
+
+    Open fronts are a closure hard stop even if a broken or stale check_run would
+    otherwise return rc=0. Non-FINAL sessions stay quiet; FINAL sessions never
+    downgrade a failed structural check to notify.
+    """
+    if not is_final:
+        return None
+    if open_fronts > 0:
+        return "block"
+    return decide(is_final, check_rc, stop_hook_active)
+
+
 def _count_open_fronts(run_dir: Path) -> int:
     """Count fronts in frontier.md with Status: open (not probing/blocked_type_b/deferred/closed).
     Returns 0 if frontier.md is missing or unparseable."""
@@ -607,6 +621,19 @@ def build_message(run_dir: Path, check_out: str) -> str:
             "收口不是在聊天里宣布'测完了', 而是 run 文件过闸门。先处理下面的硬门再收尾"
             "(覆盖台账缺建→跑 ingest_recon+classify_hosts; 假证据→补真产物或降级; "
             "缺独立复审→派 fresh-context reviewer):\n\n" + tail)
+
+
+def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -> str:
+    msg = (
+        f"[收口闸门] 你似乎在收尾 runs/{run_dir.name}, "
+        f"但 frontier.md 仍有 {open_fronts} 个 open front。"
+        "FINAL 必须同时满足 open fronts=0 且 check_run 通过; "
+        "请继续推进、降级或写入证据化 deferred/closed 理由。"
+    )
+    if check_out.strip():
+        tail = check_out.strip()
+        msg += "\n\ncheck_run:\n" + (tail[-1200:] if len(tail) > 1200 else tail)
+    return msg
 
 
 def main() -> None:
@@ -711,22 +738,14 @@ def main() -> None:
                 pass  # FAIL-OPEN: decisions.md / review.md 读失败放行
         if gate_skipped(run_dir):
             sys.exit(0)   # 操作者已认可此 run 不收尾(教学样本/中止) → 不主动提醒
-        rc, out = run_check(run_dir)
-        # P5: When 0 open fronts remain (all Type B/Closed/Deferred), the driver has
-        # genuinely exhausted all attack vectors. Downgrade structural check_run failures
-        # (e.g. "coverage empty" without Guanlan recon) from BLOCK to WARN — do not
-        # indefinitely block closure when nothing more can be done.
         open_fronts = _count_open_fronts(run_dir)
-        if open_fronts == 0 and rc != 0:
-            mode = "notify"
-            msg = (
-                f"[收口闸门 · 无开放前沿] 全部前沿已裁决 (Type B/Closed/Deferred), "
-                f"但 check_run 仍有提示。确认已穷尽攻击面后即可收口:\n\n"
-            ) + (out.strip()[-1200:] if len(out.strip()) > 1200 else out.strip())
+        rc, out = run_check(run_dir)
+        mode = decide_closure(True, rc, open_fronts, stop_active)
+        if mode is None:
+            sys.exit(0)
+        if open_fronts > 0:
+            msg = build_open_fronts_message(run_dir, open_fronts, out)
         else:
-            mode = decide(True, rc, stop_active)
-            if mode is None:
-                sys.exit(0)
             msg = build_message(run_dir, out)
         if mode == "block":
             print(json.dumps({"decision": "block", "reason": msg}, ensure_ascii=False))
@@ -746,6 +765,28 @@ def _selftest() -> int:
     checks.append(("final + check pass -> pass", decide(True, 0, False) is None))
     checks.append(("final + check fail -> block", decide(True, 1, False) == "block"))
     checks.append(("final + fail + stop_active -> block (强制, 不降级)", decide(True, 1, True) == "block"))
+    checks.append(("closure matrix: non-final + check fail -> pass",
+                   decide_closure(False, 1, 0, False) is None))
+    checks.append(("closure matrix: final + open fronts + check pass -> block",
+                   decide_closure(True, 0, 1, False) == "block"))
+    checks.append(("closure matrix: final + open fronts + check fail -> block",
+                   decide_closure(True, 1, 2, False) == "block"))
+    checks.append(("closure matrix: final + no open fronts + check fail -> block",
+                   decide_closure(True, 1, 0, False) == "block"))
+    checks.append(("closure matrix: final + no open fronts + check pass -> pass",
+                   decide_closure(True, 0, 0, False) is None))
+    rd_open = Path(tempfile.mkdtemp()) / "open_run"
+    rd_open.mkdir()
+    (rd_open / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n"
+        "### F-001\n- Status: open\n\n"
+        "### F-002\n- Status: open\n\n"
+        "## Deferred Fronts\n### F-003\n- Status: deferred\n",
+        encoding="utf-8")
+    open_msg = build_open_fronts_message(rd_open, _count_open_fronts(rd_open), "check failed")
+    checks.append(("closure path: open-front counter sees only open", _count_open_fronts(rd_open) == 2))
+    checks.append(("closure path: open-front message is blocking-readable",
+                   "2 个 open front" in open_msg and "check failed" in open_msg))
 
     d = Path(tempfile.mkdtemp())
     runs = d / "runs"

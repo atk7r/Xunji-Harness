@@ -18,6 +18,7 @@ import argparse
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -630,6 +631,82 @@ def _print_merge(run_dir: Path) -> int:
     return 0
 
 
+def _selftest() -> int:
+    d = Path(tempfile.mkdtemp())
+    empty = d / "empty"
+    empty.mkdir()
+    run = d / "run"
+    run.mkdir()
+    (run / "frontier.md").write_text(
+        "# Frontier\n"
+        "## Open Fronts\n"
+        "### F-001\n"
+        "- Front: login boundary\n"
+        "- Status: open\n"
+        "- Surface subtype: login\n"
+        "- Vectors tried: auth bypass\n"
+        "- Untried classes: SQLi-login, enum, default-creds\n\n"
+        "### F-002\n"
+        "- Front: api params\n"
+        "- Status: open\n"
+        "- Surface subtype: param-api\n"
+        "- Vectors tried: SQLi, IDOR\n"
+        "- Untried classes: SSRF\n\n"
+        "## Closed Fronts\n"
+        "### F-099\n"
+        "- Front: closed login\n"
+        "- Status: closed\n"
+        "- Surface subtype: login\n"
+        "- Vectors tried: auth bypass\n"
+        "- Untried classes: enum\n",
+        encoding="utf-8",
+    )
+    (run / "constraints.md").write_text(
+        "## C-001\n"
+        "- Front: F-002\n"
+        "- Mechanism class: SSRF\n"
+        "- Input shape: api-param\n"
+        "- Why blocked: auth-gate\n"
+        "- Evidence: local fixture\n"
+        "- Ruled out: yes\n",
+        encoding="utf-8",
+    )
+
+    blocks = _parse_front_blocks((run / "frontier.md").read_text(encoding="utf-8"))
+    constraints = _parse_constraints(run)
+    f1 = compute(blocks[0]["text"], constraints)
+    f2 = compute(blocks[1]["text"], constraints)
+
+    import io
+    import contextlib
+    with contextlib.redirect_stdout(io.StringIO()) as suggest_buf:
+        suggest_exit = _print_suggest(run)
+    suggest_items = json.loads(suggest_buf.getvalue())
+    with contextlib.redirect_stdout(io.StringIO()):
+        empty_exit = _print_full_report(empty)
+        full_exit = _print_full_report(run)
+        detail_exit = _print_front_detail(run, "F-001")
+    warns, errors = check(run)
+
+    checks = [
+        ("empty run without frontier returns 1", empty_exit == 1),
+        ("closed fronts are excluded", all(b["id"] != "F-099" for b in blocks)),
+        ("open front low saturation is computed", f1["front"] == "F-001" and round(f1["ratio"], 2) == 0.25),
+        ("constraints count as tried", f2["front"] == "F-002" and f2["untried_count"] == 0),
+        ("check emits low-saturation warning", any("F-001" in w for w in warns) and not errors),
+        ("full report exits 0", full_exit == 0),
+        ("front detail exits 0", detail_exit == 0),
+        ("suggest exits 0", suggest_exit == 0),
+        ("suggest output is stable json shape",
+         suggest_items and {"front", "saturation", "penalty"} <= set(suggest_items[0])),
+    ]
+    bad = [name for name, ok in checks if not ok]
+    for name, ok in checks:
+        print(("ok   " if ok else "FAIL ") + name)
+    print("saturation selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+    return 0 if not bad else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -638,7 +715,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--front", metavar="F-ID", help="单 front 详细报告")
     ap.add_argument("--suggest", action="store_true", help="JSON 输出, 供 workers.py 消费")
     ap.add_argument("--merge", action="store_true", help="扫描 agents/*.md New Constraints 块")
+    ap.add_argument("--selftest", action="store_true", help="run local regression tests")
     args = ap.parse_args(argv)
+
+    if args.selftest:
+        return _selftest()
 
     if args.run_dir is None:
         ap.error("run_dir is required")

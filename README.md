@@ -177,13 +177,13 @@ hook 拦截：不可逆销毁（主机/文件抹除、`DROP`/`TRUNCATE`/无范�
 ## ✅ 本地检查
 
 ```bash
-# 先激活 venv（见下方「安装」）；正斜杠路径三平台通用，Windows 的 Python 也接受。
-python tools/check_rules.py          # 架构漂移守卫
-python tools/check_hook.py           # hook 拦/放回归
-python tools/check_run.py runs/<t>   # 运行态门 + 反过早收口
-python sentinel/replay.py            # 行为检测黄金回放
-python sentinel/verify_layers.py     # L1-L4 误报 / 有效性
-python tools/harness/guard.py        # guard + 熔断器自测
+# 先激活 venv（见下方「安装」）；未激活 venv 时 macOS/Linux 通常用 python3。
+python3 tools/check_rules.py          # 架构漂移守卫
+python3 tools/check_hook.py           # hook 拦/放回归
+python3 tools/check_run.py runs/<t>   # 运行态门 + 反过早收口
+python3 sentinel/replay.py            # 行为检测黄金回放
+python3 sentinel/verify_layers.py     # L1-L4 误报 / 有效性
+python3 tools/harness/guard.py        # guard + 熔断器自测
 ```
 
 这些只检视本地文件与 hook 行为，**不接触目标**。
@@ -199,7 +199,7 @@ python tools/harness/guard.py        # guard + 熔断器自测
 
 **跨平台约定**（Windows / macOS / Linux 通用，写命令与代码时遵守）：
 
-- **先激活 venv，再用 `python tools/...`**，不要写死解释器路径（`.venv/bin/python` 是 Unix 专用，`.venv\Scripts\python.exe` 是 Windows 专用）。
+- **先激活 venv，再用 `python tools/...`；未激活 venv 时用 `python3 tools/...`**。不要写死解释器路径（`.venv/bin/python` 是 Unix 专用，`.venv\Scripts\python.exe` 是 Windows 专用）。
 - **路径一律用正斜杠** `/`：Windows 的 Python 也接受，三平台同一行命令通用。
 - **venv 与外部二进制不可移植**：`.venv/` 不入库，换机/换平台要重新 `python -m venv` + `pip install`；`nuclei`/`sqlmap`/`tesseract` 用各平台包管理器（brew / apt / choco）各装一次。
 - **换行符已由 `.gitattributes`（`eol=lf`）统一**：跨平台 clone/提交不会再产生 CRLF 假改动。
@@ -229,6 +229,6 @@ playwright install chromium
 ## 🔐 权限 · 路由
 
 - **权限**：这是 **Claude Code** 的工作区；Root 在用户要求时可编辑项目文件，运行期间拥有运行级文件与 Agent Board。
-- **为什么是 Claude Code 专属**：机器强制的安全底线（`.claude/hooks/` 的 PreToolUse 等）、CLAUDE.md 自动加载、skills、memory 都是 Claude Code 的机制。**Codex 等不提供这套 hook，硬底线不会运行、安全保证不成立** —— 因此本项目按 Claude Code 设计与验证，不声称兼容 Codex。
+- **为什么是 Claude Code 专属**：机器强制的安全底线（`.claude/hooks/` 的 PreToolUse 等）、CLAUDE.md 自动加载、skills、memory 都是 Claude Code 的机制。**Codex 等不提供这套 hook，硬底线不会运行、安全保证不成立** —— 因此本项目按 Claude Code 设计与验证，不维护 `.codex/hooks` 镜像，也不声称兼容 Codex 运行时。
 - **Codex 的位置**：Claude Code 为主，Codex 为辅。Codex 可用于异构复审、交战建议、分歧补盲或被委派协作；不另立运行时或安全边界，仍以同一运行态台账、证据门、guard/hook 边界与复审要求为准。
 - **路由**：用 [`docs/ROUTER.md`](docs/ROUTER.md) 决定哪些指引生效；始终生效的有 `CLAUDE.md` · `docs/WORKFLOW.md` · `docs/cognition/README.md` · `src-safety-boundary` skill。

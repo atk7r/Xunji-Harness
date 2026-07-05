@@ -348,11 +348,29 @@ signal needing more evidence) · `rejected` (disproven or too weak).
 - Status:
 - Severity candidate:
 - Affected asset:
-- Evidence IDs:
+- Evidence IDs:   (finding maturity only; do not list phenomenon/candidate here)
+- Fingerprints captured:   (识别的产品指纹是否入库: '<产品> → knowledge/<id>.md'; 或 "无新指纹")
 
 ## Impact
 
-## Evidence
+## Chains (组合利用 — only if a chain exists)
+
+- Chain: <C-id from chains.md>
+- Composed path: <Hop 1 -> Hop 2 -> terminal state>
+- Composite severity: <usually higher than any single hop>
+
+## Confirmed Findings
+
+Only finding-maturity evidence belongs here and in `Evidence IDs:`.
+
+## Candidate / Phenomena
+
+Use this section for leads, background behavior, or lower-maturity observations.
+Do not phrase these as confirmed impact.
+
+## Background Evidence
+
+Context that explains scope, fingerprints, controls, or exclusions.
 
 ## False-Positive Review
 
@@ -408,10 +426,11 @@ Run it at the start of a **Root-level state graph pass** so "what just got unloc
 neglected" is a query, not a re-derivation. `check_run.py` reuses the same parse to warn on the two
 contradiction classes (unlocked-but-deferred, closed-but-unlocked).
 
-**Guardrail**: the graph is derived and **advisory only — it never drives or closes
-anything**. Choosing the next front stays the Root's judgement; the graph just lays
-the current state out. A graph that becomes the source of truth or auto-selects work
-is the JSON orchestrator this project deleted (and `check_rules.py` guards against).
+**Guardrail**: the graph is derived and facts-only — it never drives, closes, or
+assigns work. Choosing the next front stays the Root's judgement. Worker/agent
+suggestions belong in `tools/workers.py suggest`; the graph just lays the current
+state out. A graph that becomes the source of truth or auto-selects work is the
+JSON orchestrator this project deleted (and `check_rules.py` guards against).
 Markdown stays the source of truth; the graph is a projection, like `coverage.json`.
 
 `tools/state_project.py` provides the broader machine projection:

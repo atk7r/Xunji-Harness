@@ -142,10 +142,9 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:
 
     confirmed_chains = [{"from": s, "to": d} for s, d in unlocks if _confirmed(nodes, s)]
 
-    # P0: 从 coverage.json 提取高价值空闲资产和未裁决资产
+    # 从 coverage.json 提取事实层资产状态。调度/agent 角色建议属于 workers.py。
     high_value_idle: list[str] = []
     reachable_no_verdict: list[str] = []
-    agent_suggestions: list[dict] = []
     if run_dir:
         cov_path = run_dir / "classify" / "coverage.json"
         if cov_path.exists():
@@ -156,11 +155,6 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:
                     h = a.get("host", "")
                     if a.get("high_value") and not a.get("examined"):
                         high_value_idle.append(h)
-                        # 根据 category 建议 agent 类型
-                        cat = (a.get("category") or "").lower()
-                        flags = a.get("flags", [])
-                        agent_type = _suggest_agent(cat, flags)
-                        agent_suggestions.append({"host": h, "agent": agent_type, "reason": f"high_value+unexamined, category={cat}"})
                     if a.get("reachable") and a.get("verdict") is None and not a.get("examined"):
                         reachable_no_verdict.append(h)
             except Exception:
@@ -173,31 +167,9 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:
         "dangling_facts": dangling_facts,
         "orphan_hypotheses": orphan_hypotheses,
         "confirmed_chains": confirmed_chains,
-        # P0 新增: 调度建议
         "high_value_idle": high_value_idle,
         "reachable_no_verdict": reachable_no_verdict,
-        "agent_suggestions": agent_suggestions,
     }
-
-
-def _suggest_agent(category: str, flags: list[str]) -> str:
-    """P0: 根据资产分类建议 agent 类型。"""
-    cat_lower = category.lower()
-    if "vpn" in cat_lower or "ssl" in cat_lower or "forti" in cat_lower:
-        return "vpn-agent"
-    if "login" in flags or "auth" in cat_lower or "sso" in cat_lower:
-        return "auth-bypass-agent"
-    if "api" in cat_lower or "rest" in cat_lower or "json" in cat_lower:
-        return "api-agent"
-    if "cdn" in cat_lower or "waf" in cat_lower:
-        return "cdn-origin-agent"
-    if "admin" in cat_lower or "manage" in cat_lower:
-        return "web-admin-agent"
-    if "upload" in cat_lower or "file" in cat_lower:
-        return "file-upload-agent"
-    if "wordpress" in cat_lower or "wp" in cat_lower or "plugin" in cat_lower:
-        return "wordpress-agent"
-    return "general-web-agent"
 
 
 def main() -> int:
@@ -234,16 +206,11 @@ def main() -> int:
     if view["confirmed_chains"]:
         s = ", ".join(f"{c['from']}→{c['to']}" for c in view["confirmed_chains"])
         print(f"  • 确认链(组合利用候选, 记进 chains.md): {s}")
-    # P0: 调度建议 — high-value idle + reachable-no-verdict + agent assignments
     if view.get("high_value_idle"):
         print(f"  🔴 高价值资产未检视: {', '.join(view['high_value_idle'][:8])}")
     if view.get("reachable_no_verdict"):
         print(f"  🟡 可达但无裁决资产: {', '.join(view['reachable_no_verdict'][:8])}")
-    if view.get("agent_suggestions"):
-        print(f"  🤖 Agent 分配建议({len(view['agent_suggestions'])}):")
-        for s in view["agent_suggestions"][:5]:
-            print(f"     {s['host']} → {s['agent']} ({s['reason']})")
-    print("[graph] 仅为派生视图与建议; 下一步选哪个前沿仍由 driver 判断。")
+    print("[graph] 仅为派生事实视图; 调度建议由 workers.py suggest 生成, driver 仍负责判断。")
 
     # 写入轻量 workflow checkpoint —— 会话恢复和阶段追踪
     _write_checkpoint(run_dir, g)

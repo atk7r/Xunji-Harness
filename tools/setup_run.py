@@ -10,8 +10,8 @@ ingest_recon 折【全量】资产到 surface_recon.md, 并在 target.md 记录 
 选择偏见当成 run 的事实地面), 跳过了 ingest_recon/classify_hosts → 30+ 资产漏挖。
 一键起手就杜绝"手工挑子集"的诱惑。
 
-coverage.json 由 classify_hosts 产出, 而 classify 是【实时探测 = 主动侦察】, 不该在
-setup 阶段静默自动发包 —— 默认只打印下一步命令; 加 --classify 才在授权 OK 时顺带跑。
+coverage.json 默认从 Guanlan recon 产物折成零重探 baseline, 满足 check_run 的资产
+台账硬门但不主动发包。加 --classify 才在授权 OK 时跑 egress_recheck 增量探测。
 
 它只【备好工作台】, 不选 front / 不做攻击判断 —— 派生不驱动, 绝非编排器。
 

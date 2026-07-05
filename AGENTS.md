@@ -25,6 +25,8 @@ Codex is especially useful for:
 - Do not bypass, replace, or reinterpret the Claude Code hook/guard boundary.
 - Do not use `.codex/` or `.Codex/` as evidence that the live engagement is safe
   to run under Codex.
+- Do not maintain or recreate `.codex/hooks` as a parallel safety runtime; Codex
+  review is advisory/heterogeneous review, not a hook boundary.
 - Keep Codex work attributable in the run record when it affects a run.
 - Do not treat reviewer confidence as evidence. Findings and conclusions still
   need evidence IDs, artifacts, controls, and recorded rationale.

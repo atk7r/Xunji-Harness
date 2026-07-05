@@ -338,6 +338,43 @@ def _front_assets(front: dict, assets: list[dict]) -> list[dict]:
     return out
 
 
+def _asset_agent_role(asset: dict) -> str:
+    cat = str(asset.get("category") or "").lower()
+    flags = {str(f).lower() for f in (asset.get("flags") or [])}
+    combined = " ".join([cat, *sorted(flags)])
+    if any(k in combined for k in ("login", "auth", "sso", "oauth")):
+        return "web-auth"
+    if any(k in combined for k in ("api", "rest", "json")):
+        return "web-hunter"
+    if any(k in combined for k in ("upload", "file")):
+        return "exploit"
+    if any(k in combined for k in ("admin", "manage", "vpn", "ssl")):
+        return "web-hunter"
+    return "surface"
+
+
+def asset_suggestions(run_dir: Path) -> list[dict]:
+    """Return advisory asset-level suggestions from coverage facts."""
+    items: list[dict] = []
+    for asset in _load_coverage(run_dir):
+        host = _asset_name(asset)
+        if not host or asset.get("examined"):
+            continue
+        reasons: list[str] = []
+        if asset.get("high_value"):
+            reasons.append("high_value")
+        if asset.get("reachable") and asset.get("verdict") is None:
+            reasons.append("reachable_no_verdict")
+        if not reasons:
+            continue
+        items.append({
+            "asset": host,
+            "role": _asset_agent_role(asset),
+            "reasons": reasons,
+        })
+    return items
+
+
 def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:
     """Return advisory fan-out candidates. This ranks fronts; it never assigns work."""
     if _state_project is not None:
@@ -894,6 +931,11 @@ def print_suggest(run_dir: Path, limit: int | None = None) -> int:
         assets = ", ".join(r["assets"][:3]) or "?"
         print(f"  {r['front']:6} score={r['score']:>2} assets={assets:24} status={r['status']:12} "
               f"barrier={r['barrier']:18} {rs}{cs}")
+    asset_rows = asset_suggestions(run_dir)
+    if asset_rows:
+        print("  asset suggestions (advisory; create/front-map before assignment):")
+        for item in asset_rows[:8]:
+            print(f"    {item['asset']} -> role={item['role']} ({', '.join(item['reasons'])})")
     return 0
 
 
@@ -1159,6 +1201,8 @@ def _selftest() -> int:
         {"host": "b.example", "reachable": True, "flags": ["SURFACE:API"]},
         {"host": "c.example", "reachable": True, "flags": ["SURFACE:UPLOAD"]},
         {"host": "d.example", "reachable": False, "flags": []},
+        {"host": "e.example", "reachable": True, "high_value": True, "examined": False,
+         "verdict": None, "category": "sso", "flags": []},
     ]}), encoding="utf-8")
     (run / "frontier.md").write_text(
         "# Frontier\n## Open Fronts\n"
@@ -1182,6 +1226,7 @@ def _selftest() -> int:
         "### CAND-1\n- Claim: IDOR in profile\n- Proposed certainty: 0.5\n- Control / Replicated: baseline differs\n",
         encoding="utf-8")
     rows = suggest(run)
+    asset_rows = asset_suggestions(run)
     issues = merge_check(run)
     clean_run = d / "clean"
     clean_run.mkdir()
@@ -1255,6 +1300,8 @@ def _selftest() -> int:
         ("fanout verdict recommends with 3 mapped fronts", _fanout_verdict(rows[:3])[0] == "fan-out recommended"),
         ("scan sees two done workers", len(unmerged(run)) == 2),
         ("empty run suggest returns []", suggest(empty_run) == []),
+        ("asset suggestions live in workers not graph",
+         any(r["asset"] == "e.example" and r["role"] == "web-auth" for r in asset_rows)),
         ("plan with no strong candidate exits 1", no_strong_exit == 1),
         ("merge-check clean path exits 0", clean_exit == 0),
         ("created worker scans assigned front", clean_rows and clean_rows[0]["front"] == "F-123"),

@@ -53,6 +53,10 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("replay",         ["tools/replay.py", "--selftest"],         "evidence replay"),
     ("setup_run",      ["tools/setup_run.py", "--selftest"],      "run scaffolding"),
     ("bench",          ["tools/bench.py", "--selftest"],          "R-1 self-eval scorer"),
+    ("check_knowledge", ["tools/check_knowledge.py"],             "public knowledge grounding structure"),
+    ("local_hygiene",  ["tools/check_local_hygiene.py"],              "local secret-sink guard"),
+    ("runtime_boundary", ["tools/check_runtime_boundary.py"],         "Codex hooks absence guard"),
+    ("check_templates", ["tools/check_templates.py"],             "template/reference drift guard"),
     ("knowledge_match", ["tools/knowledge_match.py", "--selftest"], "fingerprint→knowledge retrieval"),
     ("xday_match",      ["tools/xday_match.py", "--selftest"],      "fingerprint→local xday retrieval"),
     ("knowledge_seed",  ["tools/knowledge_seed.py", "--selftest"],  "fingerprint→knowledge write-back"),
@@ -68,6 +72,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("session_handoff",  ["tools/session_handoff.py", "--selftest"],  "session handoff tool"),
     ("deferred_queue",   ["tools/deferred_queue.py", "--selftest"],   "deferred asset retry manager"),
     ("workers",          ["tools/workers.py", "--selftest"],          "fan-out worker planning helpers"),
+    ("saturation",       ["tools/saturation.py", "--selftest"],       "front saturation scoring"),
     # --- PreToolUse / Stop hooks (--selftest flag) ---
     ("safety_gate",    [".claude/hooks/safety_gate.py", "--selftest"], "hard-boundary gate"),
     ("output_gate",    [".claude/hooks/output_gate.py", "--selftest"], "output drift Stop gate"),
