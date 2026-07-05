@@ -260,9 +260,39 @@ Only two pauses; each requires a codex gate before the pause:
   · `tools/harness/guard.py` · `sentinel/`): get an independent fresh-context review,
   record it under `review/records/`; self-review doesn't fix self-review bias. See
   reference "Independent review of safety-critical code".
-- **All code / doc / skill / template changes (not just safety-critical) require
-  heterogeneous independent review.** Priority: codex > arkcli panel (kimi + minimax
-  + glm) > Opus subagent. A single-model review is the fallback of last resort, not the
-  default — the puffts retrospective proved Opus-only review missed 2 bugs that the
-  arkcli 3-model panel caught. `peer_review.py` with `--backend arkcli` is the
-  standard path when codex is unavailable.
+## Review Architecture（审查架构）
+
+日常推进始终由 Claude Code 驱动。复审按可用性自动降级，4 级：
+
+### Tier 1 — 配置齐全（codex + arkcli 均可用）
+
+| 场景 | 审查者 |
+|------|--------|
+| 日常推进 | Claude Code |
+| 单点高危复审 | Codex + arkcli panel |
+| 代码/报告/收口 复审 | Codex + arkcli panel |
+| arkcli panel | kimi-k2.7-code + minimax-m3 + glm-5.2 |
+| 大脑 | codex |
+
+### Tier 2 — 无 codex（或 codex 不可用）
+
+| 场景 | 审查者 |
+|------|--------|
+| 日常推进 | Claude Code |
+| 单点高危复审 | arkcli panel |
+| 代码/报告/收口 复审 | arkcli panel |
+| arkcli panel | kimi-k2.7-code + minimax-m3 + glm-5.2 |
+| 大脑 | arkcli panel |
+
+### Tier 3 — 无 arkcli（或 arkcli 不可用）
+
+| 场景 | 审查者 |
+|------|--------|
+| 日常推进 | Claude Code |
+| 单点高危复审 | Codex |
+| 代码/报告/收口 复审 | Codex |
+| 大脑 | Codex |
+
+### Tier 4 — 全部不可用
+
+所有复审由 Claude Code 派出同族子代理执行。单模型审查是最后手段，非默认。
