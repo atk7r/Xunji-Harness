@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""pre-commit hook: 框架代码修改必须经过异构复审才能提交。
+
+检测 staged 文件中是否有框架代码（tools/ .claude/ docs/ sentinel/），
+若有，要求 review/records/ 下存在匹配当前 diff 的复审记录。
+无记录 → 拒绝提交，提示 driver 跑异构复审后再提交。
+
+Tier 4（全部不可用）时：driver 手动写 review/records/manual-fallback-<date>.md
+记录复审过程，hook 接受 manual-fallback 记录。
+
+哲学：和 safety_gate 不同——这是流程闸门，FAIL-OPEN（自身异常时放行不卡提交）。
+"""
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO_ROOT = Path(subprocess.run(
+    ["git", "rev-parse", "--show-toplevel"],
+    capture_output=True, text=True
+).stdout.strip())
+
+REVIEW_DIR = REPO_ROOT / "review" / "records"
+FRAMEWORK_DIRS = ["tools/", ".claude/", "docs/", "sentinel/"]
+
+
+def staged_framework_files() -> list[str]:
+    """返回 staged 中的框架文件列表（相对路径）。"""
+    r = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        capture_output=True, text=True
+    )
+    files = r.stdout.strip().split("\n") if r.stdout.strip() else []
+    return [f for f in files if any(f.startswith(d) for d in FRAMEWORK_DIRS)]
+
+
+def diff_fingerprint() -> str:
+    """返回当前 staged diff 的指纹（框架文件部分）。"""
+    r = subprocess.run(
+        ["git", "diff", "--cached", "--"] + FRAMEWORK_DIRS,
+        capture_output=True, text=True
+    )
+    return hashlib.sha256(r.stdout.encode()).hexdigest()[:16]
+
+
+def find_review_record(fp: str) -> Path | None:
+    """在 review/records/ 中搜索匹配 diff 指纹的复审记录。"""
+    if not REVIEW_DIR.exists():
+        return None
+    for f in sorted(REVIEW_DIR.glob("*.md"), reverse=True):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        # 匹配 diff_fingerprint: <hex> 或 reviewed_diff: <hex>
+        if fp in text:
+            return f
+        # manual-fallback 记录在 Tier 4 时接受
+        if f.name.startswith("manual-fallback-") and _is_recent(f):
+            return f
+    return None
+
+
+def _is_recent(f: Path, hours: int = 24) -> bool:
+    """文件修改时间在 hours 小时内。"""
+    mtime = f.stat().st_mtime
+    age = datetime.now().timestamp() - mtime
+    return age < hours * 3600
+
+
+def main() -> int:
+    framework_files = staged_framework_files()
+    if not framework_files:
+        return 0  # 无框架文件改动，放行
+
+    fp = diff_fingerprint()
+    record = find_review_record(fp)
+
+    if record:
+        print(f"[pre-commit] 复审记录: {record.name} (diff {fp}) — 放行")
+        return 0
+
+    # 无复审记录 — 拒绝
+    print(f"[pre-commit] BLOCKED: {len(framework_files)} 个框架文件已 staged 但无复审记录", file=sys.stderr)
+    print(f"[pre-commit]   diff fingerprint: {fp}", file=sys.stderr)
+    print(f"[pre-commit]   staged: {', '.join(framework_files[:5])}{'…' if len(framework_files) > 5 else ''}", file=sys.stderr)
+    print(f"[pre-commit]", file=sys.stderr)
+    print(f"[pre-commit]   提交前必须完成异构复审（Tier 1-3）并记录到 review/records/。", file=sys.stderr)
+    print(f"[pre-commit]   Tier 4 时手动写 review/records/manual-fallback-<date>.md 记录复审过程。", file=sys.stderr)
+    print(f"[pre-commit]   复审完成后重新 git commit 即可。", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as e:
+        # FAIL-OPEN: hook 自身异常时放行，不卡提交
+        print(f"[pre-commit] hook error (fail-open, allowing commit): {e}", file=sys.stderr)
+        sys.exit(0)
