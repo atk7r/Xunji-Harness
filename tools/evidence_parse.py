@@ -66,6 +66,8 @@ _INLINE_FIELDS = (r"Supports|Refutes|Next|Certainty|Maturity|Severity|Cleanup|No
 _INLINE_CUT_RE = re.compile(r"\b(?:" + _INLINE_FIELDS + r")\s*[:：]")
 _MATURITY_FIELD_RE = re.compile(
     r"(?im)^\s*[-*]?\s*Maturity\s*[:：]\s*([A-Za-z_-]+|现象|候选|发现|确认)")
+_ROLE_FIELD_RE = re.compile(
+    r"(?im)^\s*[-*]?\s*Role\s*[:：]\s*(coverage[a-z_-]*)")
 _FIELD_RE = re.compile(
     r"(?im)^\s*[-*]?\s*(Source|Trust)\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
     re.S)
@@ -176,12 +178,15 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         supports = _field_ids(b, "Supports", r"[EHF]-\d+")
         confirmed = any(c >= 0.8 for c in certs)
         maturity, maturity_explicit, maturity_raw = _maturity(b, confirmed)
+        role_m = _ROLE_FIELD_RE.search(b)
+        role = role_m.group(1) if role_m else ""
         prov = _provenance(b)
         records.append({
             "id": eid, "head": head,
             "certainties": certs, "confirmed": confirmed,
             "maturity": maturity, "maturity_explicit": maturity_explicit,
             "maturity_raw": maturity_raw, "maturity_unknown": maturity_raw is not None,
+            "role": role,
             "source": prov["source"], "trust": prov["trust"], "provenance": prov,
             "has_control": bool(re.search(r"\b(Replicated|Control)\s*[:：]", b)),
             # 该条目自己有 `- Replay:` 字段 = 对 replay 分歧做过 re-adjudication(check_run 断-3 绑定用,

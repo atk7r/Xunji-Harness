@@ -37,7 +37,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import guard as guardmod  # noqa: E402
 from harness.guard import (RateLimiter, AuthFailCounter, cap_body,  # noqa: E402
                            RateBudgetExceeded, BruteforceLock,
-                           HostHealth, HostBackoff, SessionBudget, SessionTripped)
+                           HostHealth, HostBackoff, SessionBudget, SessionTripped,
+                           MIN_STATIC_ASSET_BYTES)
 from harness import proxy as proxymod  # noqa: E402  渗透流量走交战代理(模型调用不走)
 
 # Emit UTF-8 regardless of the OS locale, so this tool's JSON (ensure_ascii=False,
@@ -228,7 +229,13 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     warn = hh.soft_warn(host)
     if warn:
         print(warn, file=sys.stderr)
-    sb_warn = sb.record(len(raw), count=attempts)   # 整场请求(含重试)+外渗量计量; 越硬阈值则布防熔断
+    # JS/CSS 静态资源 >MIN_STATIC_ASSET_BYTES 不计入 bytes budget(防 JS-heavy SPA 的 chunk 下载触发假熔断);
+    # 仍计入 count budget。小于阈值的仍正常计(防大量小文件绕过)。
+    content_type = (resp_headers.get("Content-Type") or "").lower()
+    record_bytes = len(raw)
+    if len(raw) >= MIN_STATIC_ASSET_BYTES and any(t in content_type for t in ("javascript", "css")):
+        record_bytes = 0
+    sb_warn = sb.record(record_bytes, count=attempts)   # 整场请求(含重试)+外渗量计量; 越硬阈值则布防熔断
     if sb_warn:
         print(sb_warn, file=sys.stderr)
 
@@ -312,6 +319,12 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         # heuristic: 401/403 or a login-ish redirect counts as an auth failure
         ok = status not in (401, 403)
         afc.record(auth_key, ok)
+        if afc.would_pivot(auth_key):
+            summary["pivot_required"] = True
+            summary["pivot_reason"] = (
+                f"同一端点 {afc.pivot}+ 次认证失败 — 猜测攻击不会产生新价值。"
+                "转向逻辑漏洞/配置错误/未授权API/IDOR/路径穿越。"
+            )
     return summary
 
 

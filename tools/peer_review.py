@@ -1021,6 +1021,7 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
 
     results: list[tuple[str, ReviewResult]] = []
     errors: list[str] = []
+    context_limits: list[str] = []
     for i, name in enumerate(selected):
         role = roles[i % len(roles)] if roles else None
         rr = review(scope, backend=name, into_run=False, require_heterogeneous=True,
@@ -1028,13 +1029,17 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
                     driver=driver)
         if rr.verdict in {"ERROR", "NEEDS_DRIVER"}:
             errors.append(f"{name}: {rr.verdict} {rr.error or rr.raw[-300:]}")
+            # codex quota/rate-limit exhausted → auto-lower heterogeneous bar
+            err_low = (rr.error or "").lower()
+            if name == "codex" and any(kw in err_low for kw in ("quota", "usage limit")):
+                min_heterogeneous = max(1, min_heterogeneous - 1)
+                context_limits.append("codex quota/rate-limit exhausted; heterogeneous bar lowered to arkcli-only; manual-driver supplement required")
             continue
         results.append((name, rr))
 
     hetero_count = len(results)
     findings: list[Finding] = []
     blind_spots: list[str] = []
-    context_limits: list[str] = []
     verdict = "PASS"
     for name, rr in results:
         if rr.verdict == "BLOCKER":

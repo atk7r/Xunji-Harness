@@ -55,9 +55,11 @@ HOST_REQ_WARN = 30           # 单 host 累计请求软告警阈值(只提示, �
 SESSION_WINDOW_SEC = 600      # 滑动窗口(秒)
 SESSION_WARN_COUNT = 300      # 窗口内总请求达此值 -> 软告警(整场量偏高, 考虑收敛/换出口)
 # --- 全局会话硬熔断 (Part A: 软告警之上的真·工具层熔断, 整场失控时 abort) --------
-SESSION_TRIP_COUNT = 1200     # 窗口内总请求达此值 -> 硬熔断(布防冷却, check() 抛 SessionTripped)
-                               # (retrospective puffts: 800 对多服务+JS-heavy 目标偏低, 单 chunk 可达 262KB)
-SESSION_TRIP_BYTES = 32 * 1024 * 1024   # 窗口内累计响应字节(截断前线缆量, 非 cap 后保留量)-> 硬熔断(防整场拖量)
+SESSION_TRIP_COUNT = 2000     # 窗口内总请求达此值 -> 硬熔断(布防冷却, check() 抛 SessionTripped)
+                               # (retrospective puffts: 1200 对多服务+JS-heavy 目标偏低 → 调至 2000)
+SESSION_TRIP_BYTES = 48 * 1024 * 1024   # 窗口内累计响应字节(截断前线缆量, 非 cap 后保留量)-> 硬熔断(防整场拖量)
+                               # (retrospective puffts: 单 chunk 可达 262KB, 62 chunk+响应 需 32MB+)
+MIN_STATIC_ASSET_BYTES = 64 * 1024  # JS/CSS 排除下限: 小于此值的静态资源仍计入 bytes budget(防大量小文件绕过)
 SESSION_TRIP_COOLDOWN = 300   # 熔断冷却时长(秒); 期间对任何 host 的请求直接 abort
 
 
@@ -359,6 +361,11 @@ class AuthFailCounter:
             st = _load("authfail.json")
             st[key] = 0 if ok else st.get(key, 0) + 1
             _save("authfail.json", st)
+
+    def would_pivot(self, key: str) -> bool:
+        """Probe 调用方在 record 后查: 该 endpoint 是否已达 pivot 阈值。
+        返回 True 时调用方应在输出 JSON 中设 pivot_required, 提示 driver 转向。"""
+        return _load("authfail.json").get(key, 0) >= self.pivot
 
 
 class UploadRegistry:

@@ -17,6 +17,13 @@ evidence grounded in saved target responses and safe replays, not prose.
 - A confirmed entry needs `Artifacts:` plus `Replicated / Control:`.
 - Script output is not proof by itself. If a script performed the proof, preserve
   the request/response with recorder or re-run the proof with `probe --save`.
+- **Agent-originated entries MUST carry `Maturity: candidate`.** An agent's
+  certainty claim without a `.replay.json` artifact is NOT canonical evidence
+  certainty — the Synthesizer must run `replay.py` verification (IDENTICAL or
+  CONSISTENT verdict) before promoting to `Maturity: finding` with final certainty.
+  When the driver writes an evidence entry based on agent output that has not been
+  re-verified via `probe.py --save`, the entry stays at `Maturity: candidate`,
+  `Certainty: <= 0.5`.
 
 ## Save Proof
 

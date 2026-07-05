@@ -278,6 +278,39 @@ def _merge_egress_recheck(run_dir):
     cov_path.write_text(_json.dumps(cov, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _derive_coverage_from_target(run_dir: Path) -> str:
+    """无 Guanlan recon 时, 从 target.md 的 Target 字段提取 host, 生成最小骨架
+    coverage.json。资产标记为 reachable: unknown, source: target-derived。"""
+    target_md = run_dir / "target.md"
+    host, scheme, port = None, "https", 443
+    if target_md.exists():
+        for line in target_md.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"- Target:\s*(https?://)?([^/\s#]+)", line)
+            if m:
+                host = m.group(2)
+                if m.group(1):
+                    scheme = m.group(1).rstrip("://")
+                    port = 443 if scheme == "https" else 80
+                # Extract explicit port from host if present
+                pm = re.match(r"(.+):(\d+)$", host)
+                if pm:
+                    host, port = pm.group(1), int(pm.group(2))
+                break
+    if not host:
+        return "target.md 无 Target 字段, 跳过 coverage 推导"
+    cov = {
+        "source": "target-derived",
+        "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "note": "骨架 coverage — 无 Guanlan recon, 从 target.md Target 字段推导。reachable 待渗透时判定。",
+        "assets": [{"host": host, "port": port, "scheme": scheme, "reachable": "unknown"}],
+        "total": 1, "reachable": 0, "unreachable": 0, "unknown": 1,
+    }
+    out = run_dir / "classify"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "coverage.json").write_text(json.dumps(cov, ensure_ascii=False, indent=2), encoding="utf-8")
+    return f"coverage.json (骨架: {host}, reachable 待判定)"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="初始化授权目标 run 工作台(派生不驱动)")
     ap.add_argument("slug", nargs="?", help="目标短名 → run 目录 runs/<slug>_<date>")
@@ -338,7 +371,12 @@ def main() -> int:
                 print(f"[!] knowledge 匹配失败(可手查): {e}", file=sys.stderr)
     else:
         record_recon(run_dir, "none")
-        print("[setup] 无 recon: 自行填 target.md 范围。")
+        print("[setup] 无 recon: 从 target.md 推导最小 coverage.json …")
+        try:
+            cinfo = _derive_coverage_from_target(run_dir)
+            print(f"[setup] target→coverage(最小骨架): {cinfo}")
+        except Exception as e:
+            print(f"[!] coverage 自动推导失败(可手建): {e}", file=sys.stderr)
 
     if recon_ok and args.classify:
         # P0: classify_hosts 作为 egress_recheck 增量层, 不覆写 Guanlan baseline

@@ -381,13 +381,17 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:
             f" 下列条目仍是 phenomenon/candidate: {details}。把它们移出确认证据清单, "
             "或补主动验证/Control/Replicated/Artifacts 后在 evidence.md 标为 Maturity: finding。")
 
+    # Strip code blocks, inline code, Evidence IDs table, AND Coverage Artifacts sections
     body = re.sub(r"```.*?```|<!--.*?-->", "", rtext, flags=re.S)
     body = re.sub(r"`[^`\n]*`", "", body)
-    body = re.sub(r"(?im)^\s*Evidence\s+IDs?.*$", "", body)
+    body = re.sub(r"(?im)^\s*(Evidence|Confirmed Findings)\s+IDs?.*$", "", body)
+    # Remove Coverage Artifacts / non-finding sections (text + their tables)
+    body = re.sub(r"(?s)^#+\s*(Coverage Artifacts?|非确认发现|not confirmed).*?(?=^#+\s|\Z)", "", body, flags=re.M)
     body_ids = set(re.findall(r"E-\d+[a-z]*", body))
     immature_body = sorted(
         eid for eid in body_ids
         if eid in records and records[eid].get("maturity") in {"phenomenon", "candidate"}
+        and not records[eid].get("role", "").startswith("coverage")
     )
     warnings = []
     if immature_body:
@@ -643,6 +647,28 @@ def check_closed_artifacts(run_dir: Path) -> list[str]:
                 "codex review 实战教训: driver 曾因依赖空 stdout body 而 3 次错误关闭前沿。"
                 "补 `Artifacts verified: evidence/xxx.html (key findings)` "
                 "列出用于做出关闭结论的具体文件, 防基于空 snippet 的错误关闭。")
+    return warns
+
+
+def check_type_b_evidence(run_dir: Path) -> list[str]:
+    """Type B 闭合证据护栏(警告). 每条标记 blocked_type_b 的前沿必须引用至少一个 E-xxx
+    证据条目 —— prose 描述不算证据。WORKFLOW.md line 332 已规定"闭合前沿引用 E-xxx 而非
+    prose", 此护栏在 check_run 层强制执行。"""
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return []
+    text = fr.read_text(encoding="utf-8", errors="replace")
+    warns: list[str] = []
+    for block in re.split(r"(?=^###\s+F-\d+)", text, flags=re.MULTILINE):
+        if "blocked_type_b" not in block:
+            continue
+        head = block.strip().splitlines()[0][:60] if block.strip() else "???"
+        e_refs = re.findall(r"\bE-\d+[a-z]*\b", block)
+        if not e_refs:
+            warns.append(
+                f"frontier Type B {head!r}: 闭合为 blocked_type_b 但未引用任何 E-xxx 证据条目 —— "
+                "WORKFLOW.md 要求闭合前沿引用 E-xxx 而非 prose。补一条 E-xxx 证据(含 probe --save 产物)"
+                "记录至少一个有代表性的失败尝试。")
     return warns
 
 
@@ -2659,6 +2685,7 @@ def main() -> int:
     warnings.extend(check_coverage_health(run_dir))   # 覆盖台账三联检(防 lump / 缺建 / 子集蒙混; 输入一次加载)
     warnings.extend(check_shallow_close(run_dir))     # 纵深: 高价值前沿 depth=shallow 关闭却无 Vectors tried
     warnings.extend(check_closed_artifacts(run_dir))  # 交叉验证: Closed Front 需声明 Artifacts verified (防空 stdout body 错误关闭)
+    warnings.extend(check_type_b_evidence(run_dir))   # Type B 闭合必须引用 E-xxx 证据条目 (防 prose-only 关闭)
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
     warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)

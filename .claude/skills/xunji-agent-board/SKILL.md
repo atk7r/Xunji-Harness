@@ -87,6 +87,11 @@ For each done Agent:
 
 - Verify the output has a role, front, loop, safety reminder, and artifact or
   command pointers.
+- **Agents set `Maturity: candidate` ONLY.** NEVER accept `Maturity: finding` from
+  an agent — downgrade to `candidate`. Only the Single Synthesizer promotes through
+  the replay evidence gate (`replay.py` IDENTICAL or CONSISTENT verdict +
+  `Artifacts:` + `Control:`/`Replicated:` fields present in the canonical evidence
+  entry).
 - Downgrade any high-certainty candidate missing control, replication, or saved
   artifact.
 - Resolve duplicate or contradictory candidates through verification, not

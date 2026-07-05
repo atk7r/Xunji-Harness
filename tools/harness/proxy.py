@@ -27,6 +27,7 @@ import urllib.request
 from pathlib import Path
 
 _CONF = Path(__file__).resolve().parent / "proxy.conf"   # gitignored: 一行一个 url
+_SOCKS_INIT_PATCHED = False  # 防 urllib_proxy_handlers 每次调用都重新 patch SocksiPyConnectionS
 # 所有需要从【模型子进程 env】里剥掉的代理变量(大小写都剥)
 _PROXY_VARS = ("XUNJI_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY",
                "http_proxy", "https_proxy", "all_proxy", "ftp_proxy")
@@ -82,7 +83,19 @@ def urllib_proxy_handlers(override: str | None = None, ssl_context=None) -> list
     if low.startswith(("socks5://", "socks5h://", "socks4://", "socks4a://")):
         try:
             import socks
-            from sockshandler import SocksiPyHandler
+            from sockshandler import SocksiPyHandler, SocksiPyConnectionS
+            # Monkey-patch: Python 3.10+ httplib.HTTPSConnection 不再默认设 _check_hostname,
+            # 但 SocksiPyConnectionS.connect() 仍访问它 → AttributeError。补上默认值 False。
+            # 用模块级 flag 防每次 urllib_proxy_handlers() 调用都重新 wrap __init__。
+            global _SOCKS_INIT_PATCHED
+            if not _SOCKS_INIT_PATCHED:
+                _orig_init = SocksiPyConnectionS.__init__
+                def _patched_init(self, *a, **kw):
+                    _orig_init(self, *a, **kw)
+                    if not hasattr(self, '_check_hostname'):
+                        self._check_hostname = False
+                SocksiPyConnectionS.__init__ = _patched_init
+                _SOCKS_INIT_PATCHED = True
         except ImportError:
             raise SystemExit("[proxy] socks 代理需要 PySocks: `pip install PySocks`(或改用 http:// 代理)。"
                              " 不静默直连(防真实 IP 泄露)。")
@@ -134,52 +147,73 @@ def status() -> dict:
 
 def _selftest() -> int:
     checks = []
-    os.environ["XUNJI_PROXY"] = "socks5h://env:1080"
-    checks.append(("override 胜过 env", engagement_proxy("http://arg:8080") == "http://arg:8080"))
-    checks.append(("env XUNJI_PROXY 次之", engagement_proxy() == "socks5h://env:1080"))
-    os.environ.pop("XUNJI_PROXY", None)
-    os.environ["HTTPS_PROXY"] = "http://model-proxy:3128"   # 故意设, 验证交战侧不读它
-    checks.append(("交战代理【不读】HTTPS_PROXY(与模型隔离)", engagement_proxy() is None))
-    # urllib handlers: 没配交战代理→空 handler(不回退 HTTPS_PROXY); http→ProxyHandler; socks→SocksiPyHandler
-    h0 = urllib_proxy_handlers(None)
-    pn = [x for x in h0 if type(x).__name__ == "ProxyHandler"]
-    checks.append(("无交战代理→空 ProxyHandler(不回退 env, 防串味)", bool(pn) and pn[0].proxies == {}))
-    h1 = urllib_proxy_handlers("http://p:8080")
-    p1 = [x for x in h1 if type(x).__name__ == "ProxyHandler"]
-    checks.append(("http 交战代理→ProxyHandler 带代理", bool(p1) and p1[0].proxies.get("https") == "http://p:8080"))
-    h2 = urllib_proxy_handlers("socks5h://relay:1080")
-    names2 = [type(x).__name__ for x in h2]
-    pn2 = [x for x in h2 if type(x).__name__ == "ProxyHandler"]
-    checks.append(("socks→SocksiPyHandler + 空ProxyHandler, 无竞争 HTTPSHandler(防直连旁路 + 防 ambient 串味)",
-                   "SocksiPyHandler" in names2 and "HTTPSHandler" not in names2
-                   and bool(pn2) and pn2[0].proxies == {}))
-    # model 隔离
-    env = model_safe_env({"HTTPS_PROXY": "x", "XUNJI_PROXY": "y", "http_proxy": "z", "PATH": "/bin"})
-    checks += [
-        ("model_safe_env 剥 HTTPS_PROXY", "HTTPS_PROXY" not in env),
-        ("model_safe_env 剥 XUNJI_PROXY", "XUNJI_PROXY" not in env),
-        ("model_safe_env 剥小写 http_proxy", "http_proxy" not in env),
-        ("model_safe_env NO_PROXY=*", env.get("NO_PROXY") == "*" and env.get("no_proxy") == "*"),
-        ("model_safe_env 保留无关变量", env.get("PATH") == "/bin"),
-        ("model opener 空代理", model_no_proxy_opener() is not None),
-    ]
-    senv = scrub_proxy_env({"HTTPS_PROXY": "x", "XUNJI_PROXY": "y", "PATH": "/bin"})
-    checks += [
-        ("scrub_proxy_env 剥代理变量", "HTTPS_PROXY" not in senv and "XUNJI_PROXY" not in senv),
-        ("scrub_proxy_env 不设 NO_PROXY(不压显式 --proxy)", "NO_PROXY" not in senv),
-        ("scrub_proxy_env 保留无关变量", senv.get("PATH") == "/bin"),
-    ]
-    # fail-closed
-    os.environ.pop("HTTPS_PROXY", None)
-    os.environ["XUNJI_PROXY_REQUIRED"] = "1"
+    old_env = {k: os.environ.get(k) for k in _PROXY_VARS + ("XUNJI_PROXY_REQUIRED",)}
+    old_conf = globals()["_CONF"]
     try:
-        resolve(None)
-        fc = False
-    except SystemExit:
-        fc = True
-    checks.append(("required 但没配 → fail-closed 抛错(不直连)", fc))
-    checks.append(("required 配了 override → 不抛、返回代理", resolve("http://relay:9") == "http://relay:9"))
-    os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+        # Ignore the developer's gitignored proxy.conf; these checks need a clean
+        # "no engagement proxy configured" baseline.
+        globals()["_CONF"] = Path("__xunji_no_proxy_conf__")
+        for k in _PROXY_VARS:
+            os.environ.pop(k, None)
+        os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+
+        os.environ["XUNJI_PROXY"] = "socks5h://env:1080"
+        checks.append(("override 胜过 env", engagement_proxy("http://arg:8080") == "http://arg:8080"))
+        checks.append(("env XUNJI_PROXY 次之", engagement_proxy() == "socks5h://env:1080"))
+        os.environ.pop("XUNJI_PROXY", None)
+        os.environ["HTTPS_PROXY"] = "http://model-proxy:3128"   # 故意设, 验证交战侧不读它
+        checks.append(("交战代理【不读】HTTPS_PROXY(与模型隔离)", engagement_proxy() is None))
+        # urllib handlers: 没配交战代理→空 handler(不回退 HTTPS_PROXY); http→ProxyHandler; socks→SocksiPyHandler
+        h0 = urllib_proxy_handlers(None)
+        pn = [x for x in h0 if type(x).__name__ == "ProxyHandler"]
+        checks.append(("无交战代理→空 ProxyHandler(不回退 env, 防串味)", bool(pn) and pn[0].proxies == {}))
+        h1 = urllib_proxy_handlers("http://p:8080")
+        p1 = [x for x in h1 if type(x).__name__ == "ProxyHandler"]
+        checks.append(("http 交战代理→ProxyHandler 带代理", bool(p1) and p1[0].proxies.get("https") == "http://p:8080"))
+        try:
+            h2 = urllib_proxy_handlers("socks5h://relay:1080")
+        except SystemExit as e:
+            checks.append(("socks 可选依赖缺失 -> selftest 说明性跳过, 运行时仍 fail-closed",
+                           "PySocks" in str(e)))
+        else:
+            names2 = [type(x).__name__ for x in h2]
+            pn2 = [x for x in h2 if type(x).__name__ == "ProxyHandler"]
+            checks.append(("socks→SocksiPyHandler + 空ProxyHandler, 无竞争 HTTPSHandler(防直连旁路 + 防 ambient 串味)",
+                           "SocksiPyHandler" in names2 and "HTTPSHandler" not in names2
+                           and bool(pn2) and pn2[0].proxies == {}))
+        # model 隔离
+        env = model_safe_env({"HTTPS_PROXY": "x", "XUNJI_PROXY": "y", "http_proxy": "z", "PATH": "/bin"})
+        checks += [
+            ("model_safe_env 剥 HTTPS_PROXY", "HTTPS_PROXY" not in env),
+            ("model_safe_env 剥 XUNJI_PROXY", "XUNJI_PROXY" not in env),
+            ("model_safe_env 剥小写 http_proxy", "http_proxy" not in env),
+            ("model_safe_env NO_PROXY=*", env.get("NO_PROXY") == "*" and env.get("no_proxy") == "*"),
+            ("model_safe_env 保留无关变量", env.get("PATH") == "/bin"),
+            ("model opener 空代理", model_no_proxy_opener() is not None),
+        ]
+        senv = scrub_proxy_env({"HTTPS_PROXY": "x", "XUNJI_PROXY": "y", "PATH": "/bin"})
+        checks += [
+            ("scrub_proxy_env 剥代理变量", "HTTPS_PROXY" not in senv and "XUNJI_PROXY" not in senv),
+            ("scrub_proxy_env 不设 NO_PROXY(不压显式 --proxy)", "NO_PROXY" not in senv),
+            ("scrub_proxy_env 保留无关变量", senv.get("PATH") == "/bin"),
+        ]
+        # fail-closed
+        os.environ.pop("HTTPS_PROXY", None)
+        os.environ["XUNJI_PROXY_REQUIRED"] = "1"
+        try:
+            resolve(None)
+            fc = False
+        except SystemExit:
+            fc = True
+        checks.append(("required 但没配 → fail-closed 抛错(不直连)", fc))
+        checks.append(("required 配了 override → 不抛、返回代理", resolve("http://relay:9") == "http://relay:9"))
+    finally:
+        globals()["_CONF"] = old_conf
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)

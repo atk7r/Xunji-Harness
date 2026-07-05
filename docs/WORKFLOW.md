@@ -258,6 +258,13 @@ injects direction. Absorb by `Kind`:
 - **lead / claim** about the target — a `<= 0.5` lead; verify through the evidence
   gate (operator suspicion is not a Fact).
 - **constraint** — a soft rule for the run; honour until lifted.
+- **operator-action-required** — a blocked dependency only the operator can resolve
+  (e.g. SMS registration, VPN access, credential injection). The driver MUST pause
+  ONLY when ALL other open fronts are Type B/Closed/Deferred AND this hint is
+  `pending`. This does NOT violate autonomous-drive: the driver has exhausted every
+  autonomous path. Include a `Blocked-by:` field specifying exactly what the operator
+  needs to do (e.g. "发送短信验证码到目标号码完成注册") and `Affected fronts:` listing
+  which fronts will unlock. Operator sets `Status: completed` when done; driver resumes.
 
 Set `Status: absorbed` and link the `D-xxx` / front when acted on. `check_run.py`
 warns while any hint is `pending`. Template + full absorb rules: reference.
