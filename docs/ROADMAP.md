@@ -143,6 +143,7 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一�
 - **异构独立复审 = R-6 的实现** — `tools/peer_review.py` 默认按 Claude Code 主驾驶运行
   Codex gpt-5.5 high + arkcli 三模型 panel(Kimi-K2.7-Code/MiniMax-M3/GLM-5.2), 单点高危和
   代码/报告/收口复审都走这套; 缺一边则用剩余异构后端, 都缺才 Claude 同族兜底。
+  arkcli panel 默认允许各模型自己的 thinking/推理策略, 不写 `--thinking disabled`。
   候选非裁决, 接 `check_run --auto-peer-review`。
   R-6「从干净上下文重证发现」由【异构】模型落地; 同模型只减 bias 不减盲区(A2)。
   6 次实战 dogfood 各逮到真问题(漏报/bypass/同族蒙混/凭据/越界/重放DELETE)。

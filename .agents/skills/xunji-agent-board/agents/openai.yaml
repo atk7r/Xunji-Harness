@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Agent Board"
+  short_description: "Coordinate Xunji agent board work"
+  default_prompt: "Use $xunji-agent-board to plan or audit Xunji Agent Board work."

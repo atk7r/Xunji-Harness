@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Setup Ingest"
+  short_description: "Maintain Xunji setup ingestion flow"
+  default_prompt: "Use $xunji-setup-ingest to maintain or audit Xunji setup and recon ingestion."

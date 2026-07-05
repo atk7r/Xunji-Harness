@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Peer Review Panel"
+  short_description: "Codex-side Xunji review panel"
+  default_prompt: "Use $xunji-peer-review-panel to run or audit a Codex-side Xunji peer_review panel."

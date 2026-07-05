@@ -35,6 +35,7 @@ record — this is a gate, not a suggestion: you cannot mark the run closed with
 大脑为 Codex; 无 Codex 时只跑 arkcli panel, 大脑为 arkcli panel; 无 arkcli 时只跑 Codex,
 大脑为 Codex; 两者都无时才退到 Claude Code fresh-context 同族模型。Codex 是首席复审官;
 arkcli panel 是外部异构补盲团; Claude 自家只减 bias 不减盲区故仅兜底。
+arkcli panel 默认不禁用 thinking/推理策略; 只有私有配置显式写 `thinking` 字段时才覆盖模型默认行为。
 产出是**候选非裁决**: driver/Codex 裁决仍必须过证据门
 (不盲从工具/语境误报, 不忽视真盲补)。实测 Codex 逮到 driver + check_run 都漏的满分 CRITICAL
 漏报(见 `review/records/2026-06-17-hamastar-codex-peer-review.md`，并据此补了 check_run 的

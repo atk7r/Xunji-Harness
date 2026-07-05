@@ -74,8 +74,8 @@ DEFAULT_CONFIG: dict = {
                    "per_model_timeout": 300, "max_context_chars": 120_000,
                    "models": [
                        {"id": "kimi-k2.7-code"},
-                       {"id": "minimax-m3", "thinking": "disabled"},
-                       {"id": "glm-5.2", "thinking": "disabled"},
+                       {"id": "minimax-m3"},
+                       {"id": "glm-5.2"},
                    ]},
         # 旧 OpenAI 兼容后端: 保留给 --backend 强制/私有配置, 不在默认链路。
         "deepseek": {"kind": "openai", "base_url": "https://api.deepseek.com/v1",
@@ -1206,6 +1206,9 @@ def _selftest() -> int:
     checks.append(("默认 arkcli panel 模型顺序",
                    [_arkcli_model_id(x) for x in cfg["backends"]["arkcli"]["models"]]
                    == ["kimi-k2.7-code", "minimax-m3", "glm-5.2"]))
+    checks.append(("默认 arkcli panel 不禁用 thinking",
+                   all(not (isinstance(x, dict) and x.get("thinking") == "disabled")
+                       for x in cfg["backends"]["arkcli"]["models"])))
     checks += [
         ("panel auto min: codex+arkcli -> 2",
          _effective_panel_min(["codex", "arkcli"], None, "auto") == 2),

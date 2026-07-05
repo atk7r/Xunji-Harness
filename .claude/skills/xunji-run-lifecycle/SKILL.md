@@ -1,0 +1,156 @@
+---
+name: xunji-run-lifecycle
+description: Claude-driver guide for Xunji run lifecycle work. Use when starting, resuming, handing off, structurally checking, reviewing, or closing a Xunji run, including `setup_run.py`, run templates, `check_run.py`, `session_handoff.py`, `anti_drift.py`, `retrospective.md`, `hints.md`, coverage, closure gates, and independent review through `peer_review.py`, Codex, arkcli, or a heterogeneous reviewer panel when applicable.
+---
+
+# Xunji Run Lifecycle
+
+Use this skill for the mechanical lifecycle of a live Xunji run: create the
+workbench, keep state recoverable, absorb operator steering, check gates, hand off
+between sessions, and close only when the run files support it.
+
+## Driver Boundary
+
+- Act as the live Root driver for the run. Use delegated help when useful, but
+  keep decisions attributable in the run.
+- Codex, arkcli, `peer_review.py`, heterogeneous review panels, and sub-agents
+  are tools/reviewers used under this driver. They do not become the Root, bypass
+  `.claude/hooks/`, or turn reviewer confidence into evidence.
+- The source of truth is `runs/<target>/`, not chat. Markdown run files carry
+  decisions and evidence; derived JSON only helps query that state.
+- The `.claude/hooks/` and guard boundary remains authoritative. Do not weaken it
+  with a skill shortcut.
+- Reviewer confidence is not evidence. Evidence IDs, saved artifacts, controls,
+  and rationale decide what can close.
+
+## Overlap Routing
+
+- Use this skill for setup, resume, handoff, structural checks, hints, and
+  closure readiness.
+- Use `xunji-reviewops` for reviewer findings, PR ledgers, false-positive
+  adjudication, report closure, and evidence-quality decisions.
+- Use `xunji-agent-board` for sub-agent fan-out, assignments, context packs,
+  merge-check, conflicts, and synthesis.
+- Use `xunji-knowledge-flywheel` after a live fingerprint grounds a product hit
+  or misses and needs writeback.
+- When a cycle touches several areas, keep lifecycle state here and let the
+  narrower skill govern the specialized judgment.
+
+## Setup
+
+Create a new run in one shot:
+
+```bash
+python tools/setup_run.py <slug> [recon.json]
+```
+
+Use `--classify` only for an authorized current egress recheck:
+
+```bash
+python tools/setup_run.py <slug> <recon.json> --classify
+```
+
+Setup rules:
+
+- Do not hand-curate `surface.md` from a human report. Ingest the full recon asset
+  table so coverage and anti-lump checks can see the real surface.
+- Treat `coverage.json` from Guanlan as the zero-reprobe baseline. Bulk
+  `classify_hosts` is opt-in, not default setup.
+- After setup, assign threat role and threat exposure for distinct-app clusters in
+  `frontier.md`; same IP or hostname pattern is not enough to lump business roles.
+- Ask the operator only for missing authorization, target, account, or boundary
+  data.
+
+## Resume
+
+If a handoff exists, begin there:
+
+```bash
+python tools/session_handoff.py pickup runs/<dir>
+```
+
+Otherwise rebuild context from files:
+
+```text
+session_handoff.md -> target.md -> frontier.md -> decisions.md -> evidence.md -> review.md
+```
+
+Run a Root graph pass before selecting work:
+
+```bash
+python tools/graph.py runs/<dir>
+python tools/workers.py status runs/<dir>
+python tools/workers.py conflicts runs/<dir>
+python tools/saturation.py runs/<dir>
+```
+
+Read `hints.md` every cycle when it exists. If the operator gives a directive,
+constraint, or lead in chat, write or update `hints.md` before choosing the next
+front. Leads are not facts; verify them through the evidence gate.
+
+## Active Run Checks
+
+Run structural checks at reviewer checkpoints and before report work:
+
+```bash
+python tools/check_run.py runs/<dir>
+```
+
+Interpretation:
+
+- Passing means the required structure is present, not that the work is correct.
+- Warnings should either be fixed or explicitly resolved in run files.
+- Blockers must be fixed before closure.
+- `state/workflow_checkpoint.json`, `evidence.json`, and `graph.json` are derived
+  projections. Never edit them as primary truth.
+
+Keep artifacts in their lanes: proof under `evidence/`, PoC/helper scripts under
+`scripts/`, coverage under `classify/`, and only core Markdown plus derived indexes
+in the run root.
+
+## Closure
+
+Before final report, explored-enough, or `GHOST_COMPLETE`:
+
+```bash
+python tools/check_run.py runs/<dir>
+python tools/check_run.py runs/<dir> --replay-verify
+```
+
+Record or obtain the required independent review according to `xunji-reviewops`
+and the run's data-egress boundary. When egress is accepted, use the normal
+Claude-driver review paths:
+
+```bash
+python tools/peer_review.py runs/<dir> --into-run
+python tools/check_run.py runs/<dir> --auto-peer-review --review-driver claude
+```
+
+Closure gates:
+
+- `review.md` must contain an `Independent Review` record; self-review does not
+  cure self-review bias.
+- Resolve `PR-xxx` review ledger blockers before closure.
+- `retrospective.md` must honestly fill the Self problems and Framework/tooling
+  problems sections.
+- `report.md` may list only finding-maturity evidence in `Evidence IDs:`.
+- Confirmed entries need the canonical certainty scale, saved artifacts, and
+  Replicated or Control rationale.
+- If `target.md` cites recon, `coverage.json` must exist, reachable assets must be
+  named, and high-value/login surfaces cannot be silently lumped away.
+- `GHOST_COMPLETE` is written only after check_run hard gates pass, independent
+  review is resolved, retrospective is filled, and the report is final.
+
+## Tool Selftests
+
+After editing lifecycle tools or templates, run:
+
+```bash
+python tools/setup_run.py --selftest
+python tools/check_run.py --selftest
+python tools/session_handoff.py --selftest
+python tools/anti_drift.py --selftest
+```
+
+For shared gate or safety-adjacent changes, also run the relevant aggregate checks
+and obtain the independent review required by `docs/WORKFLOW-reference.md`.

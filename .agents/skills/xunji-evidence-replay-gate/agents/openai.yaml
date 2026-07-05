@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Evidence Replay Gate"
+  short_description: "Maintain Xunji evidence replay gates"
+  default_prompt: "Use $xunji-evidence-replay-gate to maintain or audit Xunji evidence replay behavior."

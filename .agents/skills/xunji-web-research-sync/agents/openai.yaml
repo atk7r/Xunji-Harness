@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Web Research Sync"
+  short_description: "Maintain Xunji web research protocol"
+  default_prompt: "Use $xunji-web-research-sync to maintain or audit Xunji web research behavior."
