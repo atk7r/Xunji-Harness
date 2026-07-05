@@ -260,3 +260,9 @@ Only two pauses; each requires a codex gate before the pause:
   · `tools/harness/guard.py` · `sentinel/`): get an independent fresh-context review,
   record it under `review/records/`; self-review doesn't fix self-review bias. See
   reference "Independent review of safety-critical code".
+- **All code / doc / skill / template changes (not just safety-critical) require
+  heterogeneous independent review.** Priority: codex > arkcli panel (kimi + minimax
+  + glm) > Opus subagent. A single-model review is the fallback of last resort, not the
+  default — the puffts retrospective proved Opus-only review missed 2 bugs that the
+  arkcli 3-model panel caught. `peer_review.py` with `--backend arkcli` is the
+  standard path when codex is unavailable.
