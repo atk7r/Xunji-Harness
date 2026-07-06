@@ -16,15 +16,24 @@ network operation fails, this skill provides the fix patterns. It does NOT decid
 - Any outbound HTTPS request fails when the proxy is known to be working
 - Large-repo operations through SOCKS proxy
 
-## Combat Proxy (交战代理)
+## Local Outbound Proxy
 
-The local SOCKS5 proxy for outbound access:
+The local SOCKS5 proxy often used for developer outbound access:
 
 | Setting | Value |
 |---------|-------|
 | Protocol | SOCKS5h (DNS resolved through proxy) |
 | Address | `127.0.0.1:7892` |
 | Service | Clash / V2Ray (local) |
+
+Do not confuse this with Xunji's active engagement proxy discipline:
+
+- Active Xunji target-facing tools (`probe.py`, `render.py`, `scan.py`, sensors)
+  use `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf` through
+  `tools/harness/proxy.py`.
+- Codex review traffic uses the dedicated `CODEX_PROXY` /
+  `tools/harness/codex_proxy.conf` path.
+- Model/API calls must not be routed through the engagement proxy.
 
 ## Git through SOCKS proxy
 
@@ -54,12 +63,21 @@ git config --global http.postBuffer 524288000
 
 ## Shell environment proxy
 
-When CLI tools (curl, pip, etc.) need proxy access:
+When ordinary CLI tools (curl, pip, etc.) need proxy access, prefer per-command
+environment variables so the setting does not leak into later model/API or
+engagement commands:
 
 ```bash
-export ALL_PROXY=socks5h://127.0.0.1:7892
-export HTTP_PROXY=http://127.0.0.1:7890      # if HTTP proxy is also available
-export HTTPS_PROXY=http://127.0.0.1:7890
+ALL_PROXY=socks5h://127.0.0.1:7892 curl -I https://example.com
+```
+
+Use persistent `export ALL_PROXY=...` only inside a short-lived shell where you
+will not run Xunji active tools or model/API clients afterwards.
+
+For Xunji active tools, do this instead:
+
+```bash
+XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
 ```
 
 ## WebFetch / WebSearch failures
@@ -71,7 +89,8 @@ this is often a proxy/egress issue, not a content policy rejection. Options:
    credential chain and may succeed when direct fetch fails.
 2. **Clone and read locally** — `git clone --depth 1 <url> /tmp/name` and read
    from disk.
-3. **Try with explicit proxy env** — set `ALL_PROXY` before launching the tool.
+3. **Try with explicit proxy env for the specific CLI** — do not leave proxy
+   variables exported for later model/API or active engagement commands.
 
 ## Tooling boundary
 

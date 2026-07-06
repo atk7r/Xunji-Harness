@@ -1,0 +1,406 @@
+diff --git a/.agents/skills/network-proxy/SKILL.md b/.agents/skills/network-proxy/SKILL.md
+index b813d5a..e3ed9e7 100644
+--- a/.agents/skills/network-proxy/SKILL.md
++++ b/.agents/skills/network-proxy/SKILL.md
+@@ -16,9 +16,9 @@ network operation fails, this skill provides the fix patterns. It does NOT decid
+ - Any outbound HTTPS request fails when the proxy is known to be working
+ - Large-repo operations through SOCKS proxy
+
+-## Combat Proxy (交战代理)
++## Local Outbound Proxy
+
+-The local SOCKS5 proxy for outbound access:
++The local SOCKS5 proxy often used for developer outbound access:
+
+ | Setting | Value |
+ |---------|-------|
+@@ -26,6 +26,15 @@ The local SOCKS5 proxy for outbound access:
+ | Address | `127.0.0.1:7892` |
+ | Service | Clash / V2Ray (local) |
+
++Do not confuse this with Xunji's active engagement proxy discipline:
++
++- Active Xunji target-facing tools (`probe.py`, `render.py`, `scan.py`, sensors)
++  use `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf` through
++  `tools/harness/proxy.py`.
++- Codex review traffic uses the dedicated `CODEX_PROXY` /
++  `tools/harness/codex_proxy.conf` path.
++- Model/API calls must not be routed through the engagement proxy.
++
+ ## Git through SOCKS proxy
+
+ ### Quick one-shot push
+@@ -54,12 +63,21 @@ git config --global http.postBuffer 524288000
+
+ ## Shell environment proxy
+
+-When CLI tools (curl, pip, etc.) need proxy access:
++When ordinary CLI tools (curl, pip, etc.) need proxy access, prefer per-command
++environment variables so the setting does not leak into later model/API or
++engagement commands:
++
++```bash
++ALL_PROXY=socks5h://127.0.0.1:7892 curl -I https://example.com
++```
++
++Use persistent `export ALL_PROXY=...` only inside a short-lived shell where you
++will not run Xunji active tools or model/API clients afterwards.
++
++For Xunji active tools, do this instead:
+
+ ```bash
+-export ALL_PROXY=socks5h://127.0.0.1:7892
+-export HTTP_PROXY=http://127.0.0.1:7890      # if HTTP proxy is also available
+-export HTTPS_PROXY=http://127.0.0.1:7890
++XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
+ ```
+
+ ## WebFetch / WebSearch failures
+@@ -71,7 +89,8 @@ this is often a proxy/egress issue, not a content policy rejection. Options:
+    credential chain and may succeed when direct fetch fails.
+ 2. **Clone and read locally** — `git clone --depth 1 <url> /tmp/name` and read
+    from disk.
+-3. **Try with explicit proxy env** — set `ALL_PROXY` before launching the tool.
++3. **Try with explicit proxy env for the specific CLI** — do not leave proxy
++   variables exported for later model/API or active engagement commands.
+
+ ## Tooling boundary
+
+diff --git a/.agents/skills/xunji-closure-audit/SKILL.md b/.agents/skills/xunji-closure-audit/SKILL.md
+new file mode 100644
+index 0000000..92bd4a6
+--- /dev/null
++++ b/.agents/skills/xunji-closure-audit/SKILL.md
+@@ -0,0 +1,112 @@
++---
++name: xunji-closure-audit
++description: Codex-side Xunji closure-audit guide. Use when Codex is asked to check whether `.claude/skills`, docs, tools, templates, run lifecycle flows, evidence recording, or selftest registration are disconnected, stale, unimplemented, or not closed-loop; when auditing Claude primary-driver skill/tool wiring without acting as Root; or when turning a one-off framework audit into reusable checks.
++---
++
++# Xunji Closure Audit
++
++Use this skill for Codex-side maintenance audits of Xunji's process wiring.
++Claude Code remains the primary driver for live runs; this skill audits the repo
++and may propose or implement maintenance fixes when the operator asks.
++
++## Boundary
++
++- Default target for Root/skill/run lifecycle behavior is `.claude/skills/` and
++  shared framework files, not `.agents/skills/`.
++- This skill itself is Codex-side guidance under `.agents/skills/`.
++- Do not create a Codex hook/runtime boundary.
++- Treat review confidence as a lead. Accepted conclusions still need concrete
++  file refs, command output, or review records.
++
++## Read First
++
++- `AGENTS.md` for the Claude-primary / Codex-auxiliary boundary.
++- `.agents/skills/xunji-local-maintenance/SKILL.md` for worktree discipline.
++- `.agents/skills/xunji-peer-review-panel/SKILL.md` if you author a maintenance
++  diff that needs independent review.
++- The specific skill(s), docs, tools, or templates under audit.
++
++## Fast Audit
++
++Run the bundled deterministic scan from the repo root:
++
++```bash
++python3 .agents/skills/xunji-closure-audit/scripts/closure_audit.py
++```
++
++Hard failures from this script mean real wiring gaps until disproven:
++
++- a documented `python tools/*.py` / `.claude/hooks/*.py` command references a
++  missing file;
++- a Python entry point containing `--selftest` is not registered in
++  `tools/selftest_all.py`.
++
++Then run the relevant project gates:
++
++```bash
++python3 tools/check_rules.py
++python3 tools/check_templates.py
++python3 tools/check_runtime_boundary.py
++python3 tools/selftest_all.py --list
++```
++
++Use targeted selftests while iterating. Before claiming broad closure, prefer a
++full `python3 tools/selftest_all.py` unless the change is docs-only or the
++operator asked for a lightweight audit.
++
++## Manual Audit Passes
++
++Search for stale prose and classify it:
++
++```bash
++rg -n "TODO|FIXME|not implemented|unimplemented|stub|placeholder|fallback|not available|manual|手动|未实现|占位|兜底" \
++  .claude/skills docs tools AGENTS.md CLAUDE.md
++```
++
++Most hits are legitimate doctrine, templates, or fallback policy. Treat a hit as
++a gap only when prose promises a mechanical action, tool, template, review, or
++evidence step that the repo cannot execute.
++
++For path-like references, expect false positives from natural language such as
++`tools/reviewers` or `docs/tools/skills edits`. Verify before fixing. Real
++examples worth fixing:
++
++- a file command in a skill does not exist;
++- docs say a template is scaffolded but `setup_run.py` does not copy it;
++- a tool has `--selftest` but is absent from `selftest_all.py`;
++- a skill completion condition depends on a missing recorder/checker;
++- a recovery path produces non-canonical `evidence.md` blocks.
++
++## Fix Pattern
++
++1. Preserve the Claude-primary boundary: update `.claude/skills/` for Root
++   behavior; update `.agents/skills/` only for Codex-side audit guidance.
++2. Prefer adding or wiring the missing local tool over documenting around it.
++3. Keep evidence discipline conservative: source/research leads stay
++   `phenomenon` or `candidate` until active proof passes the evidence gate.
++4. Add or update `--selftest` coverage for new tools, then register it in
++   `tools/selftest_all.py`.
++5. Re-run the bundled scan and relevant gates.
++
++## Review And Commit Discipline
++
++For Codex-authored maintenance diffs that touch framework skills/tools/tests,
++follow the repository review matrix:
++
++```bash
++python3 .claude/hooks/pre-commit --fingerprint
++python3 tools/peer_review.py <review-scope> --driver codex --out review/records/<date>-<topic>.md
++```
++
++Record `diff_fingerprint` and `reviewed_diff` in the disposition before commit.
++If backends are partial, record the limitation and supplement with the best
++available independent review. Never count Codex self-review as independent.
++
++## Report Back
++
++Include:
++
++- hard gaps found and fixed;
++- scans/tests run, with pass/fail counts;
++- review status and limitations;
++- residual risks that are content/backlog rather than wiring bugs.
+diff --git a/.agents/skills/xunji-closure-audit/agents/openai.yaml b/.agents/skills/xunji-closure-audit/agents/openai.yaml
+new file mode 100644
+index 0000000..5eeba7c
+--- /dev/null
++++ b/.agents/skills/xunji-closure-audit/agents/openai.yaml
+@@ -0,0 +1,4 @@
++interface:
++  display_name: "Xunji Closure Audit"
++  short_description: "Audit Xunji skill/tool closure"
++  default_prompt: "Use $xunji-closure-audit to audit Xunji Claude skills, tools, templates, and selftests for disconnected workflows."
+diff --git a/.agents/skills/xunji-closure-audit/scripts/closure_audit.py b/.agents/skills/xunji-closure-audit/scripts/closure_audit.py
+new file mode 100644
+index 0000000..5a90bb0
+--- /dev/null
++++ b/.agents/skills/xunji-closure-audit/scripts/closure_audit.py
+@@ -0,0 +1,137 @@
++#!/usr/bin/env python3
++"""Static wiring checks for Xunji closure audits.
++
++Run from the repository root:
++    python3 .agents/skills/xunji-closure-audit/scripts/closure_audit.py
++"""
++from __future__ import annotations
++
++import argparse
++import ast
++import re
++from pathlib import Path
++
++
++DOC_ROOTS = [
++    ".claude/skills",
++    ".agents/skills",
++    "docs",
++]
++DOC_FILES = ["CLAUDE.md", "AGENTS.md"]
++SELFTEST_ROOTS = ["tools", ".claude/hooks", "sentinel"]
++
++
++def _repo_root(raw: str | None) -> Path:
++    root = Path(raw or ".").resolve()
++    if not (root / "AGENTS.md").is_file() or not (root / "tools").is_dir():
++        raise SystemExit(f"not a Xunji repo root: {root}")
++    return root
++
++
++def _markdown_files(root: Path) -> list[Path]:
++    files: list[Path] = []
++    for rel in DOC_ROOTS:
++        p = root / rel
++        if p.is_dir():
++            files.extend(sorted(p.rglob("*.md")))
++    for rel in DOC_FILES:
++        p = root / rel
++        if p.is_file():
++            files.append(p)
++    return files
++
++
++def check_python_command_refs(root: Path) -> list[str]:
++    missing: list[str] = []
++    pattern = re.compile(r"\bpython3?\s+([./A-Za-z0-9_-]+\.py)\b")
++    total = 0
++    for path in _markdown_files(root):
++        text = path.read_text(encoding="utf-8", errors="replace")
++        for match in pattern.finditer(text):
++            rel = match.group(1)
++            target = Path(rel[2:] if rel.startswith("./") else rel)
++            total += 1
++            if not (root / target).exists():
++                missing.append(f"{target} <- {path.relative_to(root)}")
++    print(f"python_command_refs total={total} missing={len(missing)}")
++    return missing
++
++
++def _registered_selftests(root: Path) -> set[str]:
++    text = (root / "tools/selftest_all.py").read_text(encoding="utf-8", errors="replace")
++    tree = ast.parse(text)
++    for node in tree.body:
++        target = None
++        value = None
++        if isinstance(node, ast.AnnAssign):
++            target = node.target
++            value = node.value
++        elif isinstance(node, ast.Assign) and node.targets:
++            target = node.targets[0]
++            value = node.value
++        if isinstance(target, ast.Name) and target.id == "SUITES" and value is not None:
++            try:
++                suites = ast.literal_eval(value)
++            except (ValueError, SyntaxError) as exc:
++                raise SystemExit(f"could not evaluate SUITES in tools/selftest_all.py: {exc}") from exc
++            registered: set[str] = set()
++            for entry in suites:
++                if not (
++                    isinstance(entry, tuple)
++                    and len(entry) >= 2
++                    and isinstance(entry[1], list)
++                    and entry[1]
++                    and isinstance(entry[1][0], str)
++                ):
++                    raise SystemExit(f"unexpected SUITES entry shape: {entry!r}")
++                registered.add(entry[1][0])
++            return registered
++    raise SystemExit("could not parse SUITES from tools/selftest_all.py")
++
++
++def check_selftest_registry(root: Path) -> list[str]:
++    registered = _registered_selftests(root)
++    not_registered: list[str] = []
++    total = 0
++    for rel in SELFTEST_ROOTS:
++        base = root / rel
++        if not base.exists():
++            continue
++        for path in sorted(base.rglob("*.py")):
++            repo_rel = path.relative_to(root).as_posix()
++            if repo_rel == "tools/selftest_all.py":
++                continue
++            text = path.read_text(encoding="utf-8", errors="replace")
++            if "--selftest" not in text:
++                continue
++            total += 1
++            if repo_rel not in registered:
++                not_registered.append(repo_rel)
++    print(f"selftest_entrypoints total={total} not_registered={len(not_registered)}")
++    return not_registered
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(description="Run Xunji static closure-audit checks.")
++    parser.add_argument("--root", help="repository root; defaults to current directory")
++    args = parser.parse_args(argv)
++
++    root = _repo_root(args.root)
++    failures: list[str] = []
++
++    for item in check_python_command_refs(root):
++        failures.append(f"MISSING_COMMAND {item}")
++    for item in check_selftest_registry(root):
++        failures.append(f"SELFTEST_NOT_REGISTERED {item}")
++
++    if failures:
++        for item in failures:
++            print(item)
++        print(f"closure_audit FAILED ({len(failures)} hard gap(s))")
++        return 1
++    print("closure_audit passed")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/.claude/skills/network-proxy/SKILL.md b/.claude/skills/network-proxy/SKILL.md
+index 1d81d18..25aac1e 100644
+--- a/.claude/skills/network-proxy/SKILL.md
++++ b/.claude/skills/network-proxy/SKILL.md
+@@ -16,9 +16,9 @@ network operation fails, this skill provides the fix patterns. It does NOT decid
+ - Any outbound HTTPS request fails when the proxy is known to be working
+ - Large-repo operations through SOCKS proxy
+
+-## Combat Proxy (交战代理)
++## Local Outbound Proxy
+
+-The local SOCKS5 proxy for outbound access:
++The local SOCKS5 proxy often used for developer outbound access:
+
+ | Setting | Value |
+ |---------|-------|
+@@ -26,6 +26,15 @@ The local SOCKS5 proxy for outbound access:
+ | Address | `127.0.0.1:7892` |
+ | Service | Clash / V2Ray (local) |
+
++Do not confuse this with Xunji's active engagement proxy discipline:
++
++- Active Xunji target-facing tools (`probe.py`, `render.py`, `scan.py`, sensors)
++  use `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf` through
++  `tools/harness/proxy.py`.
++- Codex review traffic uses the dedicated `CODEX_PROXY` /
++  `tools/harness/codex_proxy.conf` path.
++- Model/API calls must not be routed through the engagement proxy.
++
+ ## Git through SOCKS proxy
+
+ ### Quick one-shot push
+@@ -54,12 +63,21 @@ git config --global http.postBuffer 524288000
+
+ ## Shell environment proxy
+
+-When CLI tools (curl, pip, etc.) need proxy access:
++When ordinary CLI tools (curl, pip, etc.) need proxy access, prefer per-command
++environment variables so the setting does not leak into later model/API or
++engagement commands:
++
++```bash
++ALL_PROXY=socks5h://127.0.0.1:7892 curl -I https://example.com
++```
++
++Use persistent `export ALL_PROXY=...` only inside a short-lived shell where you
++will not run Xunji active tools or model/API clients afterwards.
++
++For Xunji active tools, do this instead:
+
+ ```bash
+-export ALL_PROXY=socks5h://127.0.0.1:7892
+-export HTTP_PROXY=http://127.0.0.1:7890      # if HTTP proxy is also available
+-export HTTPS_PROXY=http://127.0.0.1:7890
++XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
+ ```
+
+ ## WebFetch / WebSearch failures
+@@ -71,7 +89,8 @@ this is often a proxy/egress issue, not a content policy rejection. Options:
+    credential chain and may succeed when direct fetch fails.
+ 2. **Clone and read locally** — `git clone --depth 1 <url> /tmp/name` and read
+    from disk.
+-3. **Try with explicit proxy env** — set `ALL_PROXY` before launching the tool.
++3. **Try with explicit proxy env for the specific CLI** — do not leave proxy
++   variables exported for later model/API or active engagement commands.
+
+ ## Tooling boundary
