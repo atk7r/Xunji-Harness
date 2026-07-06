@@ -77,11 +77,56 @@ GROUP_CLASS_MAP: dict[str, set[str]] = {
 }
 
 
+EVIDENCE_GROUP_PATTERNS: dict[str, list[re.Pattern]] = {
+    "Auth": [
+        re.compile(p, re.I) for p in (
+            r"\bauth(?:entication)?[- ]?(?:gate|bypass|slip)\b", r"\bSSO\b", r"\bOAuth\b",
+            r"signature bypass", r"signed-API|sign(?:ature)? verification|hardcoded .*secret",
+            r"OPPO_REDIRECT_URL|Redirect-Uri", r"Basic Auth", r"token[- ]?(?:gated|issuance)",
+        )
+    ],
+    "Injection": [
+        re.compile(p, re.I) for p in (
+            r"\bSQLi\b|NoSQLi|injection", r"SSTI", r"deseriali[sz]ation",
+            r"CVE-2018-15133",
+        )
+    ],
+    "IDOR": [
+        re.compile(p, re.I) for p in (
+            r"\bIDOR\b", r"priv[- ]?esc|cross[- ]?org",
+            r"(?:org[-_ ]?ID|organizationId).{0,40}\b(?:swap|switch|tamper|control|mismatch|enumerat)",
+        )
+    ],
+    "Misconfig": [
+        re.compile(p, re.I) for p in (
+            r"config(?:uration)?[- ]?leak|env\.js|micro_app\.json|app_config\.json",
+            r"CORS|WAF|swagger|actuator|\.env",
+        )
+    ],
+    "InfoLeak": [
+        re.compile(p, re.I) for p in (
+            r"leak|disclos", r"internal host|internal .*domain|backend API",
+            r"bucket|Sentry DSN|version disclosure|APP_KEY|org[- ]?ID",
+        )
+    ],
+    "SSRF": [re.compile(p, re.I) for p in (r"\bSSRF\b", r"url[- ]?fetch|URL fetch|metadata SSRF")],
+    "PathTraversal": [re.compile(p, re.I) for p in (r"path traversal|arbitrary file|file read|file download")],
+    "XXE": [re.compile(r"\bXXE\b", re.I)],
+    "Upload": [re.compile(p, re.I) for p in (r"\bupload\b|file upload",)],
+    "Logic": [re.compile(p, re.I) for p in (r"\breplay\b|nonce|freshness|flow bypass|method[- ]?specific|GET-slip",)],
+}
+
+
+EVIDENCE_TEST_FIELD_RE = re.compile(
+    r"(?im)^\s*-\s*(Action|Result|Control|Replicated|Artifacts?|Status|Verdict)\s*[:：]"
+)
+
+
 SURFACE_GROUPS: dict[str, set[str]] = {
     "login": {"Auth", "Injection"},
     "sso": {"Auth"},
     "oauth": {"Auth"},
-    "param-api": {"Injection", "IDOR", "SSRF", "Logic"},
+    "param-api": {"Injection", "IDOR", "Logic"},
     "graphql": {"Injection", "IDOR", "Logic"},
     "websocket": {"Injection", "IDOR", "Logic"},
     "upload": {"Upload", "PathTraversal", "XXE"},
@@ -268,6 +313,64 @@ def _parse_front_blocks(run_dir: Path) -> list[dict]:
     return blocks
 
 
+def _parse_evidence_blocks(run_dir: Path) -> dict[str, dict]:
+    ev = run_dir / "evidence.md"
+    if not ev.exists():
+        return {}
+    text = ev.read_text(encoding="utf-8", errors="replace")
+    out: dict[str, dict] = {}
+    for b in re.split(r"(?=^##\s)", text, flags=re.MULTILINE):
+        if not b.lstrip().startswith("##"):
+            continue
+        head = b.splitlines()[0].strip()
+        m = re.search(r"\b(E-\d+[a-z]*)\b", head)
+        if not m:
+            continue
+        eid = m.group(1)
+        out[eid] = {
+            "id": eid,
+            "text": b,
+            "front_refs": sorted(set(re.findall(r"\bF-\d+\b", b))),
+            "groups": _evidence_groups(b),
+        }
+    return out
+
+
+def _evidence_groups(text: str) -> set[str]:
+    if not EVIDENCE_TEST_FIELD_RE.search(text):
+        return set()
+    if _evidence_certainty(text) < 0.5:
+        return set()
+    signal = _evidence_signal_text(text)
+    groups: set[str] = set()
+    for group, pats in EVIDENCE_GROUP_PATTERNS.items():
+        if any(p.search(signal) for p in pats):
+            groups.add(group)
+    return groups
+
+
+def _evidence_signal_text(text: str) -> str:
+    """Keep coverage inference on tested/proven fields, not caveats or next leads."""
+    keep = []
+    for line in text.splitlines():
+        if re.match(
+            r"(?i)^\s*-\s*(Action|Result|Control|Replicated|Status|Verdict)\s*[:：]",
+            line,
+        ):
+            keep.append(line)
+    return "\n".join(keep)
+
+
+def _evidence_certainty(text: str) -> float:
+    vals = []
+    for m in re.finditer(r"(?im)^\s*-\s*Certainty[^\n:：]*[:：]\s*[\(（]?\s*(\d(?:\.\d+)?)", text):
+        try:
+            vals.append(float(m.group(1)))
+        except ValueError:
+            pass
+    return max(vals) if vals else 0.0
+
+
 def _front_tried_classes(front: dict, constraints: list[dict]) -> set[str]:
     tried = {_canonical(x) for x in _parse_list_field(front["text"], "Vectors tried") if _canonical(x)}
     fid = front["id"]
@@ -277,6 +380,13 @@ def _front_tried_classes(front: dict, constraints: list[dict]) -> set[str]:
             if mc:
                 tried.add(mc)
     return tried
+
+
+def _front_evidence_groups(front: dict, evidence: dict[str, dict]) -> set[str]:
+    groups: set[str] = set()
+    for eid in sorted(set(re.findall(r"\bE-\d+[a-z]*\b", front["text"]))):
+        groups.update(evidence.get(eid, {}).get("groups", set()))
+    return groups
 
 
 def _class_groups(classes: set[str]) -> set[str]:
@@ -308,8 +418,9 @@ def derive(run_dir: Path) -> dict:
         })
 
     constraints = _parse_constraints(run_dir)
+    evidence = _parse_evidence_blocks(run_dir)
     for front in _parse_front_blocks(run_dir):
-        tried_groups = _class_groups(_front_tried_classes(front, constraints))
+        tried_groups = _class_groups(_front_tried_classes(front, constraints)) | _front_evidence_groups(front, evidence)
         if not tried_groups:
             continue
         declared_tokens = _front_declared_asset_tokens(front["text"])
@@ -318,6 +429,16 @@ def derive(run_dir: Path) -> dict:
             if (declared_tokens & row_tokens) or _mentions_any_host(front["text"], row_tokens):
                 row["fronts"].append(front["id"])
                 row["tested"] = sorted(set(row["tested"]) | tried_groups)
+
+    for eid, ev in evidence.items():
+        ev_groups = set(ev.get("groups", set()))
+        if not ev_groups:
+            continue
+        for row in rows:
+            row_tokens = set(row["tokens"])
+            if _mentions_any_host(ev["text"], row_tokens):
+                row["fronts"] = sorted(set(row["fronts"]) | set(ev.get("front_refs", [])))
+                row["tested"] = sorted(set(row["tested"]) | ev_groups)
 
     group_names = [g for g, _ in GROUPS]
     matrix = []
@@ -447,6 +568,10 @@ def _selftest() -> int:
         {"host": "portal.example", "reachable": True, "title": "Admin API docs"},
         {"host": "asset-field.example", "reachable": True, "flags": ["LOGIN"]},
         {"host": "url-field.example", "port": 8443, "reachable": True, "flags": ["LOGIN"]},
+        {"host": "evidence-only.example", "reachable": True, "flags": ["LOGIN"]},
+        {"host": "status-only.example", "reachable": True, "flags": ["LOGIN"]},
+        {"host": "low-cert.example", "reachable": True, "flags": ["LOGIN"]},
+        {"host": "confounder.example", "reachable": True, "flags": ["SURFACE:API"]},
         {"host": "d.example", "reachable": False, "flags": ["SURFACE:UPLOAD"]},
     ]}), encoding="utf-8")
     (run / "frontier.md").write_text(
@@ -477,6 +602,27 @@ def _selftest() -> int:
         "- Vectors tried: auth-bypass\n",
         encoding="utf-8",
     )
+    (run / "evidence.md").write_text(
+        "# Evidence Ledger\n\n"
+        "## E-001\n"
+        "- Action: checked evidence-only.example login boundary\n"
+        "- Result: SSO auth-gate observed; 401 on unauth API\n"
+        "- Certainty: 0.5\n"
+        "- Supports: F-006\n\n"
+        "## E-002\n"
+        "- Action: checked status-only.example public page\n"
+        "- Result: returned HTTP 401 text without boundary mechanism evidence\n"
+        "- Certainty: 0.3\n\n"
+        "## E-003\n"
+        "- Action: checked low-cert.example login boundary\n"
+        "- Result: SSO auth-gate clue from one redirect only\n"
+        "- Certainty: 0.3\n\n"
+        "## E-004\n"
+        "- Action: checked confounder.example parameter handling\n"
+        "- Result: normal validation response, no parameter anomaly\n"
+        "- Note: false-positive confounder mentioned SQLi as an alternate hypothesis only\n"
+        "- Certainty: 0.5\n",
+        encoding="utf-8")
     data = derive(run)
     warns, errors = check(run)
     write_outputs(run)
@@ -509,6 +655,14 @@ def _selftest() -> int:
         ("explicit Targets field accepts URL host:port",
          by_asset["url-field.example:8443"]["cells"]["Auth"] == "tested"
          and "F-005" in by_asset["url-field.example:8443"]["fronts"]),
+        ("evidence-derived auth test fills matrix without Vectors tried",
+         by_asset["evidence-only.example"]["cells"]["Auth"] == "tested"),
+        ("bare HTTP status text does not fill Auth coverage",
+         by_asset["status-only.example"]["cells"]["Auth"] == "untested"),
+        ("low-certainty evidence does not fill Auth coverage",
+         by_asset["low-cert.example"]["cells"]["Auth"] == "untested"),
+        ("confounder note does not fill Injection coverage",
+         by_asset["confounder.example"]["cells"]["Injection"] == "untested"),
         ("corrupt primary coverage warns while using nested coverage",
          "nested.example" in bad_by_asset and bad_cov_warns and not bad_cov_errors),
         ("check reports warnings only", warns and not errors),

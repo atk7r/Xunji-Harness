@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,7 +118,10 @@ def section_body(text: str, heading: str) -> str:
 
 
 def check_entry(path: Path, errors: list[str], warnings: list[str]) -> None:
-    rel = path.relative_to(ROOT)
+    try:
+        rel = path.relative_to(ROOT)
+    except ValueError:
+        rel = path.name
     # `_`-prefixed files (e.g. _TEMPLATE.md) carry intentional placeholders:
     # validate structure and forbidden fields, but skip placeholder-value checks.
     is_template = path.stem.startswith("_")
@@ -197,7 +201,88 @@ def check_entry(path: Path, errors: list[str], warnings: list[str]) -> None:
             )
 
 
+def _entry_text(signatures: str, extra: str = "") -> str:
+    return f"""---
+id: sample
+product: Sample Product
+vendor: Example
+aliases: []
+category: web-framework
+last_reviewed: 2026-07-07
+maturity: seed
+signatures: {signatures}
+---
+
+## Recognition
+
+- Signature: sample marker
+
+## Weak-Point Anchors
+
+- Anchor: version disclosure — infoleak
+  - Reference: vendor docs
+  - source: primary-reference
+
+## Verification Principle
+
+- Existence proof: observe the sample marker only.
+
+## False-Positive / Confounders
+
+- Static text can imitate the marker.
+
+## References
+
+- https://example.com/docs
+{extra}
+"""
+
+
+def _selftest() -> int:
+    checks: list[tuple[str, bool]] = []
+    d = Path(tempfile.mkdtemp())
+
+    def run_case(name: str, text: str) -> tuple[list[str], list[str]]:
+        p = d / f"{name}.md"
+        p.write_text(text.replace("id: sample", f"id: {name}"), encoding="utf-8")
+        errors: list[str] = []
+        warnings: list[str] = []
+        check_entry(p, errors, warnings)
+        return errors, warnings
+
+    ok_errors, _ = run_case("inline_ok", _entry_text('["sample marker"]'))
+    yaml_errors, _ = run_case("yaml_bad", _entry_text(""))
+    (d / "yaml_bad.md").write_text(
+        _entry_text("").replace("id: sample", "id: yaml_bad").replace(
+            "signatures: \n---", "signatures:\n  - sample marker\n---"),
+        encoding="utf-8")
+    yaml_errors = []
+    yaml_warnings: list[str] = []
+    check_entry(d / "yaml_bad.md", yaml_errors, yaml_warnings)
+    bad_json_errors, _ = run_case("json_bad", _entry_text("[sample marker]"))
+    dead_prefix_errors, _ = run_case("dead_prefix", _entry_text('["body contains sample marker"]'))
+    payload_errors, _ = run_case("payload_bad", _entry_text('["sample marker"]', "\n## Payload\n\n- none\n"))
+
+    checks.extend([
+        ("inline JSON signatures pass", ok_errors == []),
+        ("multi-line YAML signatures fail matcher-compat check",
+         any("inline JSON" in e or "signatures list is empty" in e for e in yaml_errors)),
+        ("invalid JSON signatures fail", any("inline JSON list" in e for e in bad_json_errors)),
+        ("operator-prefixed signature fails", any("operator prefix" in e for e in dead_prefix_errors)),
+        ("public payload heading fails", any("payload/exploit heading" in e for e in payload_errors)),
+    ])
+
+    bad = [name for name, ok in checks if not ok]
+    for name, ok in checks:
+        print(("ok   " if ok else "FAIL ") + name)
+    print("check_knowledge selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+    return 0 if not bad else 1
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return _selftest()
+
     errors: list[str] = []
     warnings: list[str] = []
 

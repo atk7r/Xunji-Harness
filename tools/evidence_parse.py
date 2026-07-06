@@ -21,6 +21,32 @@ _ART_TOKEN = re.compile(
     re.I)
 
 
+def _artifact_tokens(text: str) -> list[str]:
+    """Extract concrete artifact tokens from an Artifacts field.
+
+    The ledger sometimes uses shorthand such as `(+.replay.json)` or
+    `evidence/foo_*.html` to describe adjacent replay files or large families.
+    Those are useful prose, but they are not auditable file references. Keep the
+    gate strict for concrete tokens while ignoring shorthand that would otherwise
+    become noisy dead references.
+    """
+    out: list[str] = []
+    for m in _ART_TOKEN.finditer(text):
+        tok = m.group(0).strip().strip("`\"'").rstrip(").,;:，。）")
+        prev = text[max(0, m.start() - 2):m.start()]
+        next_ch = text[m.end():m.end() + 1]
+        next_two = text[m.end():m.end() + 2]
+        if prev == "+.":
+            continue
+        if tok.lower() == "replay.json" and prev.endswith("."):
+            continue
+        if next_two == "*.":
+            continue
+        if tok and tok not in out:
+            out.append(tok)
+    return out
+
+
 def _resolve_artifact(tok: str, run_dir: Path) -> Path | None:
     """Resolve an artifact token to an existing, non-empty file/dir under run_dir,
     else None. A directory (e.g. render_sxss/) counts if it holds a non-empty file."""
@@ -47,7 +73,7 @@ def _resolve_artifact(tok: str, run_dir: Path) -> Path | None:
 # (not the whole block) keeps prose filename mentions (e.g. "jquery-3.6.0.min.js",
 # "ais.webform.js") from being mis-read as dead evidence citations.
 _ARTIFACT_FIELD_RE = re.compile(
-    r"(?:[Ss]aved\s+)?[Aa]rtifacts?\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
+    r"(?:[Ss]aved\s+)?[Aa]rtifacts?(?:\s*\([^)\n]*\))?\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
     re.S)
 # Certainty 字段的【值区域】: 从 `Certainty…:` 到下一个 `- Field:` / 空行 / 块尾。
 # 用来把 certainty 取值限定在【字段值内】(而非旧逻辑"从关键词扫到块尾"), 再配合 _PAREN_RE
@@ -168,10 +194,7 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         fm = _ARTIFACT_FIELD_RE.search(b)
         scope_txt, scoped = (fm.group(1), True) if fm else (b, False)
         arts: list[str] = []
-        for tok in _ART_TOKEN.findall(scope_txt):
-            t = tok.strip().strip("`\"'").rstrip(").,;:，。）")
-            if t and t not in arts:
-                arts.append(t)
+        arts = _artifact_tokens(scope_txt)
         present = [a for a in arts if _resolve_artifact(a, run_dir)]
         missing = [a for a in arts if not _resolve_artifact(a, run_dir)]
         refutes = _field_ids(b, "Refutes", r"E-\d+[a-z]*")

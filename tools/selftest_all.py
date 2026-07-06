@@ -55,7 +55,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("setup_run",      ["tools/setup_run.py", "--selftest"],      "run scaffolding"),
     ("ingest_recon",    ["tools/ingest_recon.py", "--selftest"],   "Guanlan recon adapter"),
     ("bench",          ["tools/bench.py", "--selftest"],          "R-1 self-eval scorer"),
-    ("check_knowledge", ["tools/check_knowledge.py"],             "public knowledge grounding structure"),
+    ("check_knowledge", ["tools/check_knowledge.py", "--selftest"], "public knowledge grounding structure"),
     ("local_hygiene",  ["tools/check_local_hygiene.py"],          "local/publication hygiene guard"),
     ("runtime_boundary", ["tools/check_runtime_boundary.py"],         "Codex hooks absence guard"),
     ("check_templates", ["tools/check_templates.py"],             "template/reference drift guard"),

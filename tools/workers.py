@@ -640,24 +640,72 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
 
 def _agent_status_from_file(path: Path) -> str:
     text = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
-    return (_field(text, "Status") or "?").lower()
+    status = (_field(text, "Status") or "?").lower()
+    if _normalized_agent_status(status) in {"assigned", "working", "?"} and _has_completion_findings(text):
+        return "done (findings appended)"
+    return status
+
+
+def _has_completion_findings(text: str) -> bool:
+    m = re.search(r"(?ims)^##\s+Findings\b.*?(?=^##\s+|\Z)", text)
+    if not m:
+        return False
+    body = re.sub(r"(?m)^##\s+Findings\b.*$", "", m.group(0)).strip()
+    if not body:
+        return False
+    if re.search(r"(?i)\b(still investigating|pending|tbc|tbd|todo|placeholder|draft only)\b", body):
+        return False
+    structured = re.search(
+        r"(?im)^\s*[-*]\s*(Candidate|Phenomenon|Refutes|Evidence|Control|Artifact|Result|Verdict)\s*[:：]",
+        body,
+    )
+    plain_completion = re.search(
+        r"(?i)\b(no exploitable|no findings|not exploitable|refuted|auth[- ]?gated|blocked|complete|done)\b",
+        body,
+    )
+    return bool(structured or plain_completion)
+
+
+def _normalized_agent_status(status: str) -> str:
+    status_l = (status or "").strip().lower()
+    if status_l.startswith(("done", "complete", "completed")):
+        return "done"
+    if status_l.startswith("merged"):
+        return "merged"
+    if status_l.startswith("block"):
+        return "blocked"
+    if status_l.startswith("work"):
+        return "working"
+    if status_l.startswith("assign"):
+        return "assigned"
+    return status_l or "?"
 
 
 def agent_status_rows(run_dir: Path) -> list[dict]:
     data = load_assignments(run_dir)
     rows = []
+    changed = False
     for rec in data.get("assignments", []):
         if not isinstance(rec, dict):
             continue
         ap = ROOT / rec["agent_file"] if not Path(rec.get("agent_file", "")).is_absolute() else Path(rec["agent_file"])
         row = dict(rec)
         row["file_status"] = _agent_status_from_file(ap)
+        file_status_norm = _normalized_agent_status(row["file_status"])
+        rec_status_norm = _normalized_agent_status(str(rec.get("status") or ""))
+        if file_status_norm == "done" and rec_status_norm in {"assigned", "working", "?"}:
+            rec["status"] = "done"
+            rec["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            row["status"] = "done"
+            changed = True
         if ap.exists():
             text = ap.read_text(encoding="utf-8", errors="replace")
             row["parse_error"] = not (_field(text, "Role") and _field(text, "Assigned front"))
         else:
             row["parse_error"] = True
         rows.append(row)
+    if changed:
+        _atomic_write(_assignments_path(run_dir), json.dumps(data, ensure_ascii=False, indent=2) + "\n")
     return rows
 
 
@@ -1258,6 +1306,44 @@ def _selftest() -> int:
     agent_clean.mkdir()
     create_agent_assignment(agent_clean, role="web-hunter", front="F-001")
     agent_clean_issues = agent_discipline_issues(agent_clean)
+    status_sync = d / "status_sync"
+    status_sync.mkdir()
+    sync_rec = create_agent_assignment(status_sync, role="web-hunter", front="F-001")
+    sync_file = ROOT / sync_rec["agent_file"] if not Path(sync_rec["agent_file"]).is_absolute() else Path(sync_rec["agent_file"])
+    sync_file.write_text(sync_file.read_text(encoding="utf-8").replace(
+        "- Status: assigned", "- Status: complete (candidate produced)"), encoding="utf-8")
+    sync_rows = agent_status_rows(status_sync)
+    sync_state = load_assignments(status_sync)
+    status_findings = d / "status_findings"
+    status_findings.mkdir()
+    findings_rec = create_agent_assignment(status_findings, role="web-hunter", front="F-002")
+    findings_file = ROOT / findings_rec["agent_file"] if not Path(findings_rec["agent_file"]).is_absolute() else Path(findings_rec["agent_file"])
+    findings_file.write_text(findings_file.read_text(encoding="utf-8") + "\n## Findings\n\n- Candidate: done\n", encoding="utf-8")
+    findings_rows = agent_status_rows(status_findings)
+    findings_state = load_assignments(status_findings)
+    status_blank_findings = d / "status_blank_findings"
+    status_blank_findings.mkdir()
+    blank_rec = create_agent_assignment(status_blank_findings, role="web-hunter", front="F-003")
+    blank_file = ROOT / blank_rec["agent_file"] if not Path(blank_rec["agent_file"]).is_absolute() else Path(blank_rec["agent_file"])
+    blank_file.write_text(blank_file.read_text(encoding="utf-8") + "\n## Findings\n\n", encoding="utf-8")
+    blank_rows = agent_status_rows(status_blank_findings)
+    blank_state = load_assignments(status_blank_findings)
+    status_negative_findings = d / "status_negative_findings"
+    status_negative_findings.mkdir()
+    neg_rec = create_agent_assignment(status_negative_findings, role="web-hunter", front="F-004")
+    neg_file = ROOT / neg_rec["agent_file"] if not Path(neg_rec["agent_file"]).is_absolute() else Path(neg_rec["agent_file"])
+    neg_file.write_text(neg_file.read_text(encoding="utf-8") + "\n## Findings\n\nNo exploitable issues found.\n", encoding="utf-8")
+    neg_rows = agent_status_rows(status_negative_findings)
+    neg_state = load_assignments(status_negative_findings)
+    status_placeholder_findings = d / "status_placeholder_findings"
+    status_placeholder_findings.mkdir()
+    placeholder_rec = create_agent_assignment(status_placeholder_findings, role="web-hunter", front="F-005")
+    placeholder_file = ROOT / placeholder_rec["agent_file"] if not Path(placeholder_rec["agent_file"]).is_absolute() else Path(placeholder_rec["agent_file"])
+    placeholder_file.write_text(
+        placeholder_file.read_text(encoding="utf-8") + "\n## Findings\n\n- Candidate: still investigating\n",
+        encoding="utf-8")
+    placeholder_rows = agent_status_rows(status_placeholder_findings)
+    placeholder_state = load_assignments(status_placeholder_findings)
     a_web = create_agent_assignment(run, role="web", front="F-002")
     a1 = create_agent_assignment(run, role="web-auth", front="F-001")
     a2 = create_agent_assignment(run, role="verify", front="F-001")
@@ -1319,6 +1405,21 @@ def _selftest() -> int:
         ("status command exits 0", status_cli_exit == 0),
         ("agent-check empty run exits 0", agent_check_empty_exit == 0),
         ("agent-check clean scaffold has no issues", agent_clean_issues == []),
+        ("status sync: complete file flips assignment to done",
+         sync_rows and sync_rows[0].get("status") == "done"
+         and sync_state["assignments"][0].get("status") == "done"),
+        ("status sync: Findings section flips assignment to done",
+         findings_rows and findings_rows[0].get("status") == "done"
+         and findings_state["assignments"][0].get("status") == "done"),
+        ("status sync: empty Findings section stays assigned",
+         blank_rows and blank_rows[0].get("status") == "assigned"
+         and blank_state["assignments"][0].get("status") == "assigned"),
+        ("status sync: negative Findings summary flips assignment to done",
+         neg_rows and neg_rows[0].get("status") == "done"
+         and neg_state["assignments"][0].get("status") == "done"),
+        ("status sync: investigatory placeholder stays assigned",
+         placeholder_rows and placeholder_rows[0].get("status") == "assigned"
+         and placeholder_state["assignments"][0].get("status") == "assigned"),
         ("role alias web uses web-hunter template", "Missing role template" not in web_context.read_text(encoding="utf-8")),
         ("agent assignment writes context pack", context_exists),
         ("assignments.json records agent", any(a.get("agent") == a1["agent"] for a in load_assignments(run)["assignments"])),

@@ -1,0 +1,53 @@
+{
+  "total": 1,
+  "confirmed": [
+    "E-001"
+  ],
+  "confirmed_findings": [
+    "E-001"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 — local verification artifacts for Codex maintenance diff",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/selftest_all.txt",
+        "evidence/check_run.txt",
+        "evidence/check_knowledge.txt",
+        "evidence/check_templates.txt",
+        "evidence/git_diff_stat.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/selftest_all.txt",
+        "evidence/check_run.txt",
+        "evidence/check_knowledge.txt",
+        "evidence/check_templates.txt",
+        "evidence/git_diff_stat.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

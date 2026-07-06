@@ -165,10 +165,24 @@ def _is_waf_block(headers: dict, body: bytes) -> bool:
         return True
     return False
 
+def _range_header_value(byte_range: str) -> str:
+    br = byte_range.strip()
+    return br if br.lower().startswith("bytes=") else f"bytes={br}"
+
+
+def _header_value(headers: dict, name: str) -> str | None:
+    name_l = name.lower()
+    for k, v in headers.items():
+        if k.lower() == name_l:
+            return v
+    return None
+
+
 def send(method: str, url: str, headers: dict, data: bytes | None,
          auth_key: str | None, timeout: int, save: str | None = None,
          retry: int = 0, retry_wait: float = 1.5,
-         want_headers: bool = False, no_redirect: bool = False) -> dict:
+         want_headers: bool = False, no_redirect: bool = False,
+         byte_range: str | None = None) -> dict:
     host = urlparse(url).hostname or "unknown"
     afc = AuthFailCounter()
     if auth_key:
@@ -178,9 +192,14 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     sb = SessionBudget()
     sb.check()                         # 整场量熔断: 冷却期直接 abort(跨 host 总量/外渗)
 
+    req_headers = {"User-Agent": UA, **headers}
+    if byte_range and not any(k.lower() == "range" for k in req_headers):
+        req_headers["Range"] = _range_header_value(byte_range)
     req = urllib.request.Request(url=url, method=method.upper(),
-                                 data=data, headers={"User-Agent": UA, **headers})
+                                 data=data, headers=req_headers)
     summary: dict = {"method": method.upper(), "url": url}
+    if byte_range:
+        summary["range"] = _header_value(req_headers, "Range")
     opener = _opener(no_redirect)
     last_err: str | None = None
     raw = b""
@@ -344,6 +363,23 @@ def _selftest() -> int:
                 pass
 
             def do_GET(self):
+                if self.path.startswith("/range"):
+                    b = b"0123456789"
+                    if self.headers.get("Range") == "bytes=2-5":
+                        part = b[2:6]
+                        self.send_response(206)
+                        self.send_header("Content-Type", "text/plain")
+                        self.send_header("Content-Range", "bytes 2-5/10")
+                        self.send_header("Content-Length", str(len(part)))
+                        self.end_headers()
+                        self.wfile.write(part)
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                    return
                 if self.path.startswith("/redir"):
                     # 模拟登录成功: 302 跳转, 会话 cookie 设在【这一跳】上(跟随跳转会丢失它)
                     self.send_response(302)
@@ -408,6 +444,17 @@ def _selftest() -> int:
             fr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5, want_headers=True)
             checks.append(("默认跟随 -> 200 且会话 cookie 丢(故认证流需 --no-redirect)",
                            fr.get("status") == 200 and "ApplicationCookie" not in "\n".join(fr.get("set_cookies", []))))
+            rr = send("GET", f"http://127.0.0.1:{port}/range", {}, None, None, 5,
+                      want_headers=True, byte_range="2-5")
+            checks.append(("--range sends Range header and receives partial body",
+                           rr.get("status") == 206 and rr.get("snippet") == "2345"
+                           and rr.get("headers", {}).get("Content-Range") == "bytes 2-5/10"
+                           and rr.get("range") == "bytes=2-5"))
+            rr2 = send("GET", f"http://127.0.0.1:{port}/range", {"range": "bytes=2-5"},
+                       None, None, 5, want_headers=True, byte_range="0-1")
+            checks.append(("--range respects caller-supplied Range header casing",
+                           rr2.get("status") == 206 and rr2.get("snippet") == "2345"
+                           and rr2.get("range") == "bytes=2-5"))
         finally:
             srv.shutdown()
     # 统一布局 _place_save: 裸文件名 + --run -> <run>/evidence/; 显式路径/无 --run 原样
@@ -471,6 +518,9 @@ def main() -> int:
     ap.add_argument("--no-redirect", action="store_true",
                     help="不跟随 3xx 跳转 —— 直接拿 302 那一跳(认证流会话 cookie 设在跳转上, 跟随会丢; "
                          "也防被跳转带到 scope 外)")
+    ap.add_argument("--range", dest="byte_range", default=None,
+                    help="HTTP byte range helper, e.g. 0-262143 or bytes=0-262143. "
+                         "Adds a Range header unless one was supplied explicitly.")
     ap.add_argument("--samples", type=int, default=1,
                     help="DIFF 模式每侧采样次数；>1 时做稳定性判定(去噪)")
     args = ap.parse_args()
@@ -504,7 +554,7 @@ def main() -> int:
             def sample(url: str) -> tuple[dict, bool, list]:
                 runs = [send("GET", url, headers, None, args.auth_key,
                              args.timeout, None, args.retry, args.retry_wait,
-                             args.headers) for _ in range(n)]
+                             args.headers, byte_range=args.byte_range) for _ in range(n)]
                 hs = sorted({r.get("sha1") for r in runs})
                 return runs[0], len(hs) == 1, hs
 
@@ -531,7 +581,8 @@ def main() -> int:
             out = {"tag": args.tag, **send(args.method, args.url, headers,
                                            data, args.auth_key, args.timeout,
                                            args.save, args.retry, args.retry_wait,
-                                           args.headers, args.no_redirect)}
+                                           args.headers, args.no_redirect,
+                                           args.byte_range)}
     except SessionTripped as e:
         out = {"error": f"session-volume-breaker: {e}"}
     except RateBudgetExceeded as e:

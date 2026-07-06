@@ -1,9 +1,11 @@
 # Evidence Ledger
 
-> Certainty: only `>= 0.8` may be reported confirmed, and a confirmed entry MUST
-> carry a `Replicated / Control` field AND a saved `Artifacts` path under the run
-> dir (check_run hard-fails a confirmed entry with no artifact, warns with no
-> control). Full scale + meanings: `docs/cognition/README.md` "Evidence Confidence".
+> Certainty: use only the canonical scale: `1.0` direct/reproducible,
+> `0.8` controlled/replayed confirmed, `0.5` suspected candidate, `0.3` clue/noise.
+> Only `>= 0.8` may be reported confirmed, and a confirmed entry MUST carry a
+> `Replicated / Control` field AND a saved `Artifacts` path under the run dir
+> (check_run hard-fails a confirmed entry with no artifact, warns with no control).
+> Full meanings: `docs/cognition/README.md` "Evidence Confidence".
 
 ## E-001
 
