@@ -16,23 +16,30 @@ import argparse
 import json
 import re
 import socket
-import ssl
 import subprocess
 import sys
-import urllib.request
+import tempfile
 from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from harness import proxy as proxymod
+import probe as probemod
+from probe import send
 
 
-def _opener():
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    handlers = proxymod.urllib_proxy_handlers(ssl_context=ctx)
-    return urllib.request.build_opener(*handlers)
+def _guarded_get(url: str, headers: dict[str, str] | None = None,
+                 timeout: int = 10) -> dict:
+    return send("GET", url, headers or {}, None, None, timeout,
+                want_headers=True, no_redirect=True)
+
+
+def _guarded_body(url: str, headers: dict[str, str] | None = None,
+                  timeout: int = 15) -> tuple[dict, str]:
+    with tempfile.TemporaryDirectory() as td:
+        saved = str(Path(td) / "body.txt")
+        result = send("GET", url, headers or {}, None, None, timeout, save=saved)
+        body = Path(saved).read_text(encoding="utf-8", errors="replace") if Path(saved).exists() else ""
+    return result, body
 
 
 def dns_a(host: str) -> list[str]:
@@ -60,9 +67,10 @@ def ct_log(host: str) -> list[str]:
     # 通过 crt.sh 查询
     try:
         url = f"https://crt.sh/?q=%25.{host}&output=json"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        resp = urllib.request.urlopen(req, timeout=15)
-        entries = json.loads(resp.read())
+        result, body = _guarded_body(url, timeout=15)
+        if result.get("transport_error"):
+            return []
+        entries = json.loads(body)
         names = set()
         for e in entries[:200]:
             name = e.get("name_value", "")
@@ -94,102 +102,81 @@ def origin_ip_host_header(host: str, ips: list[str],
     if test_hosts is None:
         test_hosts = [host, f"www.{host}", f"origin.{host}"]
     results = []
-    opener = _opener()
     for ip in ips[:5]:
         for h in test_hosts[:5]:
-            try:
-                req = urllib.request.Request(f"https://{ip}/",
-                                             headers={"Host": h}, method="GET")
-                resp = opener.open(req, timeout=10)
-                body = resp.read().decode(errors="replace")
+            result = _guarded_get(f"https://{ip}/", {"Host": h}, timeout=10)
+            if result.get("status") and result["status"] not in (404, 403):
+                snippet = result.get("snippet", "")
                 results.append({
-                    "ip": ip, "host_header": h, "status": resp.status,
-                    "len": len(body),
-                    "server": resp.headers.get("Server", ""),
-                    "title": (re.findall(r"<title>([^<]*)</title>", body) or [""])[0][:80],
+                    "ip": ip, "host_header": h, "status": result.get("status"),
+                    "len": result.get("len", 0),
+                    "server": result.get("server", ""),
+                    "title": (re.findall(r"<title>([^<]*)</title>", snippet) or [""])[0][:80],
+                    "sha1": result.get("sha1"),
                 })
-            except urllib.request.HTTPError as e:
-                body = e.read().decode(errors="replace")
-                if e.code not in (404, 403):
-                    results.append({
-                        "ip": ip, "host_header": h, "status": e.code,
-                        "len": len(body), "error": "http_error",
-                    })
-            except Exception:
-                pass
+            elif result.get("transport_error"):
+                results.append({
+                    "ip": ip, "host_header": h,
+                    "error": result.get("error", "")[:120],
+                    "transport_error": True,
+                })
     return results
 
 
 def alternate_ports(host: str, ips: list[str],
                     ports: Optional[list[int]] = None) -> list[dict]:
-    """6. 非标准端口 — CDN 可能只代理 443，其他端口直连源站"""
+    """6. 非标准端口候选 — 不自动连接。
+
+    Raw socket port probing bypasses `probe.send` and the session budget. Keep
+    this as passive planning output; the operator can explicitly verify a chosen
+    port with `probe.py GET https://ip:port/ -H 'Host: ...'`.
+    """
     if ports is None:
         ports = [80, 443, 8080, 8443, 10443, 12443, 4443]
-    results = []
-    for ip in ips[:3]:
-        for port in ports:
-            try:
-                sock = socket.create_connection((ip, port), timeout=5)
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                try:
-                    with ctx.wrap_socket(sock, server_hostname=host) as ssock:
-                        ssock.send(f"GET / HTTP/1.1\r\nHost: {host}\r\n\r\n".encode())
-                        resp = ssock.recv(4096).decode(errors="replace")
-                        status = resp.split("\r\n")[0] if resp else ""
-                        results.append({
-                            "ip": ip, "port": port, "status_line": status[:100],
-                            "len": len(resp),
-                        })
-                except Exception:
-                    pass
-                finally:
-                    try:
-                        sock.close()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-    return results
+    return [
+        {
+            "ip": ip,
+            "candidate_ports": ports,
+            "tested": False,
+            "note": "candidate only; verify one port at a time through tools/probe.py",
+        }
+        for ip in ips[:3]
+    ]
 
 
-def proxy_egress_compare(host: str, path: str = "/") -> dict:
-    """9. 代理出口对比 — 直连 vs 代理的响应差异"""
+def proxy_egress_compare(host: str, path: str = "/", proxy: str | None = None) -> dict:
+    """9. 出口对比 — 默认 guarded egress vs explicit guarded proxy.
+
+    The old implementation made a naked direct request. This version always goes
+    through `probe.send`; without `--proxy`, it reports only the configured
+    default guarded egress.
+    """
     results = {}
-    # Direct
+    old_proxy = probemod._PROXY
     try:
-        req = urllib.request.Request(f"https://{host}{path}", method="GET")
-        resp = urllib.request.urlopen(req, timeout=15)
-        body = resp.read().decode(errors="replace")
-        results["direct"] = {
-            "status": resp.status, "len": len(body),
-            "server": resp.headers.get("Server", ""),
-            "sha1": _sha1(body),
-        }
-    except Exception as e:
-        results["direct"] = {"error": str(e)[:80]}
-
-    # Through proxy
-    try:
-        opener = _opener()
-        req = urllib.request.Request(f"https://{host}{path}", method="GET")
-        resp = opener.open(req, timeout=15)
-        body = resp.read().decode(errors="replace")
-        results["proxy"] = {
-            "status": resp.status, "len": len(body),
-            "server": resp.headers.get("Server", ""),
-            "sha1": _sha1(body),
-        }
-    except Exception as e:
-        results["proxy"] = {"error": str(e)[:80]}
-
+        probemod._PROXY = None
+        default = _guarded_get(f"https://{host}{path}", timeout=15)
+        results["default_guarded"] = _summary_for_compare(default)
+        if proxy:
+            probemod._PROXY = proxy
+            proxied = _guarded_get(f"https://{host}{path}", timeout=15)
+            results["explicit_proxy"] = _summary_for_compare(proxied)
+        else:
+            results["explicit_proxy"] = {"skipped": "pass --proxy to compare another egress"}
+    finally:
+        probemod._PROXY = old_proxy
     return results
 
 
-def _sha1(data: str) -> str:
-    import hashlib
-    return hashlib.sha1(data.encode()).hexdigest()[:16]
+def _summary_for_compare(result: dict) -> dict:
+    return {
+        "status": result.get("status"),
+        "len": result.get("len"),
+        "server": result.get("server", ""),
+        "sha1": result.get("sha1"),
+        "error": result.get("error"),
+        "transport_error": result.get("transport_error", False),
+    }
 
 
 def final_type_a_verdict(results: dict) -> str:
@@ -212,19 +199,25 @@ def final_type_a_verdict(results: dict) -> str:
     alt = results.get("alternate_ports", [])
     if not alt:
         reasons.append("无非标准端口开放")
+    elif all(not r.get("tested") for r in alt):
+        reasons.append("非标准端口未自动探测 — 需经 probe.py 单端口验证")
     # Check proxy egress
     eg = results.get("proxy_egress_compare", {})
-    if eg.get("direct", {}).get("sha1") == eg.get("proxy", {}).get("sha1"):
-        reasons.append("代理出口 vs 直连响应相同 — CDN 无差异")
+    default_sha = eg.get("default_guarded", {}).get("sha1")
+    proxy_sha = eg.get("explicit_proxy", {}).get("sha1")
+    if default_sha and proxy_sha and default_sha == proxy_sha:
+        reasons.append("默认 guarded 出口 vs 显式代理响应相同 — CDN 无差异")
+    elif proxy_sha:
+        reasons.append("默认 guarded 出口与显式代理有差异 — 可能是 CDN 地域路由")
     else:
-        reasons.append("代理出口与直连有差异 — 可能是 CDN 地域路由")
+        reasons.append("未提供显式代理出口对比")
 
     if not reasons:
         return "Type A: CDN 可能可绕过，需进一步验证"
     return "Type B: CDN 不可绕过 — " + "; ".join(reasons[:3])
 
 
-def run(host: str) -> dict:
+def run(host: str, proxy: str | None = None) -> dict:
     """执行全部 10 种 CDN 绕过检测"""
     results = {"host": host}
     results["dns_a"] = dns_a(host)
@@ -235,7 +228,7 @@ def run(host: str) -> dict:
         host, results["dns_a"])
     results["alternate_ports"] = alternate_ports(
         host, results["dns_a"])
-    results["proxy_egress_compare"] = proxy_egress_compare(host)
+    results["proxy_egress_compare"] = proxy_egress_compare(host, proxy=proxy)
     results["type_a_verdict"] = final_type_a_verdict(results)
     return results
 
@@ -244,6 +237,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="CDN/WAF 绕过标准检测")
     ap.add_argument("host", help="目标主机名")
     ap.add_argument("--json", action="store_true", help="JSON 输出")
+    ap.add_argument("--proxy", default=None,
+                    help="显式交战代理(http://h:p / socks5h://h:p)，用于 guarded 出口对比")
     args = ap.parse_args()
 
     host = args.host
@@ -251,7 +246,7 @@ def main() -> int:
         from urllib.parse import urlparse
         host = urlparse(host).hostname
 
-    results = run(host)
+    results = run(host, proxy=args.proxy)
 
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))
@@ -264,11 +259,12 @@ def main() -> int:
         print(f"Origin IP Host header tests: {len(results['origin_ip_host_header'])} probes")
         for r in results["origin_ip_host_header"][:5]:
             print(f"  {r['ip']} Host:{r['host_header']} → {r.get('status','?')} {r.get('len','?')}B [{r.get('title','')}]")
-        print(f"Alternate ports: {len(results['alternate_ports'])} open")
+        print(f"Alternate ports: {len(results['alternate_ports'])} candidate IP set(s)")
         for r in results["alternate_ports"][:5]:
-            print(f"  {r['ip']}:{r['port']} → {r.get('status_line','')[:60]}")
+            print(f"  {r['ip']} → candidates {r.get('candidate_ports', [])}")
         eg = results["proxy_egress_compare"]
-        print(f"Direct: {eg.get('direct',{}).get('sha1','?')} Proxy: {eg.get('proxy',{}).get('sha1','?')}")
+        print(f"Default guarded: {eg.get('default_guarded',{}).get('sha1','?')} "
+              f"Explicit proxy: {eg.get('explicit_proxy',{}).get('sha1','?')}")
         print(f"\nVERDICT: {results['type_a_verdict']}")
     return 0
 

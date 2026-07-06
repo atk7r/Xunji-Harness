@@ -22,6 +22,7 @@ Pure stdlib. Run: python tools/check_knowledge.py
 from __future__ import annotations
 
 import re
+import json
 import sys
 from pathlib import Path
 
@@ -42,6 +43,7 @@ REQUIRED_SECTIONS = [
 REQUIRED_FRONTMATTER = ["id", "product", "maturity", "last_reviewed"]
 VALID_MATURITY = {"seed", "verified", "stale"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DEAD_SIGNATURE_PREFIX_RE = re.compile(r"^(body|header|title)\s+contains\b", re.IGNORECASE)
 
 # Payload/exploit headings/keys in the PUBLIC tier = a publish-routing error: that
 # content belongs in the gitignored knowledge/weaponized/ tier (allowed there), not
@@ -135,6 +137,30 @@ def check_entry(path: Path, errors: list[str], warnings: list[str]) -> None:
             errors.append(f"{rel}: invalid maturity '{fm['maturity']}'")
         if fm.get("last_reviewed") and not DATE_RE.match(fm["last_reviewed"]):
             errors.append(f"{rel}: last_reviewed not YYYY-MM-DD")
+        raw_sigs = fm.get("signatures")
+        if not raw_sigs:
+            errors.append(f"{rel}: frontmatter missing machine-readable inline JSON 'signatures'")
+        else:
+            try:
+                parsed_sigs = json.loads(raw_sigs)
+            except json.JSONDecodeError as e:
+                errors.append(
+                    f"{rel}: signatures must be inline JSON list for matchers "
+                    f"(example: signatures: [\"product marker\"]): {e.msg}"
+                )
+                parsed_sigs = []
+            if not isinstance(parsed_sigs, list):
+                errors.append(f"{rel}: signatures must be a JSON list")
+                parsed_sigs = []
+            clean_sigs = [str(s).strip() for s in parsed_sigs if str(s).strip()]
+            if not clean_sigs:
+                errors.append(f"{rel}: signatures list is empty")
+            for sig in clean_sigs:
+                if DEAD_SIGNATURE_PREFIX_RE.search(sig):
+                    errors.append(
+                        f"{rel}: signature {sig!r} includes an operator prefix; "
+                        "knowledge_match/classify_hosts use raw substring matching"
+                    )
 
     # Required sections
     for heading in REQUIRED_SECTIONS:

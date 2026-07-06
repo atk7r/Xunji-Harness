@@ -14,8 +14,13 @@ venv/
 # Runtime output
 runs/*
 !runs/.gitkeep
+# Historical/manual run workbenches sometimes appear at repo root during
+# handoff or migration. Keep real target evidence local there too.
+/*_20[0-9][0-9][0-9][0-9][0-9][0-9]/
+/*_20[0-9][0-9][0-9][0-9][0-9][0-9]_20[0-9][0-9][0-9][0-9][0-9][0-9]/
 artifacts/
 observations/
+review/review_bundle.json
 
 # Local runtime config
 config.ini

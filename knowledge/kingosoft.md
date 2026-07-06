@@ -6,6 +6,7 @@ aliases: [kingosoft, 青果教务, 青果教务网络管理系统, 高校教务�
 category: edu-academic-administration
 last_reviewed: 2026-06-10
 maturity: seed
+signatures: ["KINGOSOFT", "青果教务", "/xsweb/"]
 ---
 
 <!--

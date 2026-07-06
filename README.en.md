@@ -137,7 +137,7 @@ The goal is to **use vulnerability / payload knowledge to attack**, so payload k
 The only forbidden thing is the **blind scanner**: knowledge fired the same regardless of target — **payloads or not**. What separates an attacker from a scanner is the **use pattern** (look up after fingerprint · adapt to the target · evidence-gate), not whether payloads are present. `check_knowledge.py` polices the public tier only (a payload there = publish-routing error → move to `weaponized/`).
 
 ### 6 ｜ A small, dependency-free, guard-routed pipeline
-`ingest_recon` (recon report → asset table + reachability matrix) → `classify_hosts` (per-content → `coverage.json`) → `fetch_assets` (fetch **all** SPA chunks + completeness assertion) → `probe / render / scan` (active verification sensors, all guard-routed, UTF-8-safe) → `rerun_deferred` (egress queue). Pure standard library; Playwright is the only optional dep.
+`ingest_recon` (recon report → asset table + reachability matrix) → `classify_hosts` (per-content → `coverage.json`) → `fetch_assets` (fetch **all** SPA chunks + completeness assertion) → `probe / render / scan` (active verification sensors, all guard-routed, UTF-8-safe) → `rerun_deferred` (egress queue). The core path is standard-library only; browser, SOCKS proxy, and lint support live in optional extras.
 
 ### 7 ｜ `check_rules` guards the architecture, not the weapons
 Repository discipline checks that the abandoned orchestrator/playbook surfaces have not crept back and the doctrine files exist — it deliberately does **not** police exp/poc/scanner files (those are method, free; harm is gated by effect at runtime). The framework can't regress into a playbook while weaponization stays unconstrained.
@@ -191,7 +191,7 @@ These inspect local files and hook behavior only — **they do not contact targe
 
 ## ⚙️ Setup
 
-A fresh clone needs almost nothing: the core toolchain has **zero third-party dependencies** (Python standard library only). The single optional dependency is Playwright, used only by the browser tools.
+A fresh clone needs almost nothing: the core toolchain has **zero third-party dependencies** (Python standard library only). Optional dependencies are split by use: Playwright only for browser tools, PySocks only for `socks5h://` engagement proxies, and Ruff only for development linting.
 
 **The only hard requirement**: **Python ≥ 3.10 on PATH** (covers the hook, `check_*`, `probe`/`scan`). The hook is wired with `$CLAUDE_PROJECT_DIR` (no hard-coded paths), portable across machines.
 
@@ -212,10 +212,28 @@ git-ignored and should stay local.
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate   |   Linux/macOS: source .venv/bin/activate
-pip install playwright
+pip install -e '.[browser]'
 playwright install chromium
 ```
 Skipping this does not affect `probe.py`, `scan.py`, the hook, or the checkers.
+</details>
+
+<details>
+<summary><b>SOCKS engagement proxy (optional — only for <code>socks5h://</code> / <code>socks4a://</code>)</b></summary>
+
+```bash
+pip install -e '.[socks]'
+```
+Without it, SOCKS proxy use fails closed instead of silently connecting directly. HTTP proxies do not need this extra.
+</details>
+
+<details>
+<summary><b>Developer checks (optional — Ruff)</b></summary>
+
+```bash
+pip install -e '.[dev]'
+ruff check .
+```
 </details>
 
 <details>

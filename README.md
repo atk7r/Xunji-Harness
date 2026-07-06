@@ -137,7 +137,7 @@ Root Orchestrator
 唯一被禁的是**盲扫描器**：不分目标照跑的清单 —— **有没有 payload 都算**。区分攻击者与扫描器的是**使用方式**(识别后查 · 按目标适配 · 过证据门),不是有没有 payload。`check_knowledge.py` 只管公开层(payload 落公开层 = 发布路由错，硬失败，挪去 `weaponized/`)。
 
 ### 6 ｜ 一条小而无依赖、全程走 guard 的流水线
-`ingest_recon`（recon 报告 → 资产表 + 可达矩阵）→ `classify_hosts`（按内容分类 → `coverage.json`）→ `fetch_assets`（抓**全部** SPA chunk + 完整性断言）→ `probe / render / scan`（主动验证传感器，全程走 guard、UTF-8 安全）→ `rerun_deferred`（出口重跑）。纯标准库；Playwright 是唯一可选依赖。
+`ingest_recon`（recon 报告 → 资产表 + 可达矩阵）→ `classify_hosts`（按内容分类 → `coverage.json`）→ `fetch_assets`（抓**全部** SPA chunk + 完整性断言）→ `probe / render / scan`（主动验证传感器，全程走 guard、UTF-8 安全）→ `rerun_deferred`（出口重跑）。核心路径纯标准库；浏览器、SOCKS 代理、开发 lint 分别用可选 extras。
 
 ### 7 ｜ `check_rules` 守的是架构，不是武器
 仓库纪律检查「已废弃的编排器 / playbook 面」没回潮、教义文件存在 —— **刻意不**管 exp/poc/scanner 文件（那些是方法、自由；危害在运行时按效果管）。框架不退化回 playbook，武器化部分完全不设限。
@@ -190,7 +190,7 @@ python3 tools/harness/guard.py        # guard + 熔断器自测
 
 ## ⚙️ 安装
 
-全新 clone 几乎零成本：核心工具链**零第三方依赖**（仅 Python 标准库）。唯一可选依赖是 Playwright，只被浏览器工具用到。
+全新 clone 几乎零成本：核心工具链**零第三方依赖**（仅 Python 标准库）。可选依赖按用途拆分：Playwright 只供浏览器工具，PySocks 只供 `socks5h://` 交战代理，Ruff 只供开发 lint。
 
 **唯一硬性要求**：PATH 上有 **Python ≥ 3.10**（覆盖 hook、`check_*`、`probe`/`scan`）。hook 用 `$CLAUDE_PROJECT_DIR` 接线，无硬编码路径，跨机可移植。
 
@@ -210,10 +210,28 @@ python3 tools/harness/guard.py        # guard + 熔断器自测
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate   |   Linux/macOS: source .venv/bin/activate
-pip install playwright
+pip install -e '.[browser]'
 playwright install chromium
 ```
 跳过它不影响 `probe.py`、`scan.py`、hook 或检查器。
+</details>
+
+<details>
+<summary><b>SOCKS 交战代理（可选 —— 仅供 <code>socks5h://</code> / <code>socks4a://</code>）</b></summary>
+
+```bash
+pip install -e '.[socks]'
+```
+未安装时使用 `socks5h://` 会 fail-closed，不会静默直连泄露真实 IP；HTTP 代理不需要该 extra。
+</details>
+
+<details>
+<summary><b>开发检查（可选 —— Ruff）</b></summary>
+
+```bash
+pip install -e '.[dev]'
+ruff check .
+```
 </details>
 
 <details>

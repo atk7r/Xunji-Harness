@@ -6,6 +6,7 @@ aliases: [苏迪cms, sudy cms, 苏迪建站]
 category: cms
 last_reviewed: 2026-06-10
 maturity: seed
+signatures: ["sudy cms", "苏迪CMS", "苏迪建站"]
 ---
 
 <!--

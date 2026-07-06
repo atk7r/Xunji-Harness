@@ -6,6 +6,7 @@ aliases: [WAF, 安恒云WAF, 网站防火墙, 拦截页识别, false-positive]
 category: confounder
 last_reviewed: 2026-06-12
 maturity: seed
+signatures: ["**********", "网站防火墙", "blocked payload"]
 ---
 
 <!--

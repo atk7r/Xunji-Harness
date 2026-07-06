@@ -23,11 +23,12 @@ fail-closed: XUNJI_PROXY_REQUIRED=1 时, active 工具没配代理就【拒绝�
 from __future__ import annotations
 
 import os
+import http.client
+import ssl
 import urllib.request
 from pathlib import Path
 
 _CONF = Path(__file__).resolve().parent / "proxy.conf"   # gitignored: 一行一个 url
-_SOCKS_INIT_PATCHED = False  # 防 urllib_proxy_handlers 每次调用都重新 patch SocksiPyConnectionS
 # 所有需要从【模型子进程 env】里剥掉的代理变量(大小写都剥)
 _PROXY_VARS = ("XUNJI_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY",
                "http_proxy", "https_proxy", "all_proxy", "ftp_proxy")
@@ -64,14 +65,95 @@ def resolve(override: str | None = None) -> str | None:
     return p
 
 
+class _SocksConnectionMixin:
+    """HTTPConnection mixin that opens the TCP leg through PySocks."""
+
+    _proxy_type: int
+    _proxy_host: str
+    _proxy_port: int
+    _proxy_rdns: bool
+    _proxy_username: str | None
+    _proxy_password: str | None
+
+    def _open_socks_socket(self):
+        import socks
+
+        sock = socks.socksocket()
+        sock.set_proxy(
+            self._proxy_type,
+            self._proxy_host,
+            self._proxy_port,
+            rdns=self._proxy_rdns,
+            username=self._proxy_username,
+            password=self._proxy_password,
+        )
+        if self.timeout is not None:
+            sock.settimeout(self.timeout)
+        sock.connect((self.host, self.port))
+        return sock
+
+
+class _SocksHTTPConnection(_SocksConnectionMixin, http.client.HTTPConnection):
+    def __init__(self, host, *args, proxy_args: dict, **kwargs):
+        super().__init__(host, *args, **kwargs)
+        self.__dict__.update(proxy_args)
+
+    def connect(self) -> None:
+        self.sock = self._open_socks_socket()
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _SocksHTTPSConnection(_SocksConnectionMixin, http.client.HTTPSConnection):
+    def __init__(self, host, *args, proxy_args: dict, **kwargs):
+        super().__init__(host, *args, **kwargs)
+        self.__dict__.update(proxy_args)
+
+    def connect(self) -> None:
+        self.sock = self._open_socks_socket()
+        if self._tunnel_host:
+            self._tunnel()
+        server_hostname = self._tunnel_host or self.host
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=server_hostname)
+
+
+class _SocksHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, proxy_args: dict):
+        super().__init__()
+        self.proxy_args = proxy_args
+
+    def http_open(self, req):
+        return self.do_open(
+            lambda host, timeout=0: _SocksHTTPConnection(
+                host, timeout=timeout, proxy_args=self.proxy_args
+            ),
+            req,
+        )
+
+
+class _SocksHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, proxy_args: dict, context=None):
+        self.proxy_args = proxy_args
+        self.context = context or ssl.create_default_context()
+        super().__init__(context=self.context)
+
+    def https_open(self, req):
+        return self.do_open(
+            lambda host, timeout=0: _SocksHTTPSConnection(
+                host, timeout=timeout, context=self.context, proxy_args=self.proxy_args
+            ),
+            req,
+        )
+
+
 def urllib_proxy_handlers(override: str | None = None, ssl_context=None) -> list:
-    """urllib active 工具(probe + 【所有 import probe.send 的工具】: classify_hosts/fetch_assets/replay/
-    rerun_deferred)用: 据【解析后的交战代理】返回【完整连接 handler 列表(含 HTTPS handler)】。
-    **调用方不要再自己 append HTTPSHandler** —— 否则普通 HTTPSHandler 会和 SocksiPyHandler 抢 https_open,
+    """urllib active 工具(probe + 【所有 import probe.send 的工具】: classify_hosts/fetch_assets/
+    replay/rerun_deferred/exploit/cdn_bypass)用: 据【解析后的交战代理】返回【完整连接 handler 列表(含 HTTPS handler)】。
+    **调用方不要再自己 append HTTPSHandler** —— 否则普通 HTTPSHandler 会和 SOCKS handler 抢 https_open,
     socks 连不上时悄悄走【直连】泄露真实 IP(实测坏代理仍回 200 的坑)。
     - None → [HTTPSHandler, 空 ProxyHandler](关掉 env 代理回退, 不偷用 HTTPS_PROXY=模型那条)。
     - http(s):// → [HTTPSHandler, ProxyHandler]。
-    - socks5(h):// / socks4(a):// → [SocksiPyHandler] **仅此一个**(它自身即 HTTP+HTTPS handler 经 socks,
+    - socks5(h):// / socks4(a):// → SOCKS HTTP/HTTPS handlers(它们自身经 socks,
       build_opener 不会再补默认 HTTPS → 无直连旁路; ...5h/...4a = 代理侧解析 DNS 防 DNS 泄露)。
       需 PySocks; 没装 → SystemExit(绝不静默直连泄真实 IP)。
     内部 resolve() —— import probe.send 的工具不传 override 也拿到交战代理, required 时 fail-closed。"""
@@ -83,19 +165,6 @@ def urllib_proxy_handlers(override: str | None = None, ssl_context=None) -> list
     if low.startswith(("socks5://", "socks5h://", "socks4://", "socks4a://")):
         try:
             import socks
-            from sockshandler import SocksiPyHandler, SocksiPyConnectionS
-            # Monkey-patch: Python 3.10+ httplib.HTTPSConnection 不再默认设 _check_hostname,
-            # 但 SocksiPyConnectionS.connect() 仍访问它 → AttributeError。补上默认值 False。
-            # 用模块级 flag 防每次 urllib_proxy_handlers() 调用都重新 wrap __init__。
-            global _SOCKS_INIT_PATCHED
-            if not _SOCKS_INIT_PATCHED:
-                _orig_init = SocksiPyConnectionS.__init__
-                def _patched_init(self, *a, **kw):
-                    _orig_init(self, *a, **kw)
-                    if not hasattr(self, '_check_hostname'):
-                        self._check_hostname = False
-                SocksiPyConnectionS.__init__ = _patched_init
-                _SOCKS_INIT_PATCHED = True
         except ImportError:
             raise SystemExit("[proxy] socks 代理需要 PySocks: `pip install PySocks`(或改用 http:// 代理)。"
                              " 不静默直连(防真实 IP 泄露)。")
@@ -103,12 +172,20 @@ def urllib_proxy_handlers(override: str | None = None, ssl_context=None) -> list
         u = urlparse(p)
         stype = socks.SOCKS5 if low.startswith(("socks5://", "socks5h://")) else socks.SOCKS4
         rdns = low.startswith(("socks5h://", "socks4a://"))   # h/a = 远端解析 DNS
-        # SocksiPyHandler 自身覆盖 http+https(经 socks), 传 ssl_context 给底层 HTTPSConnection。
+        proxy_args = {
+            "_proxy_type": stype,
+            "_proxy_host": u.hostname,
+            "_proxy_port": u.port or 1080,
+            "_proxy_rdns": rdns,
+            "_proxy_username": u.username,
+            "_proxy_password": u.password,
+        }
+        # 自带 handlers 覆盖 http+https(经 socks), 传 ssl_context 给底层 HTTPSConnection。
         # 【不】另加普通 HTTPSHandler —— 否则它会抢 https 走直连, socks 失败=静默直连旁路(已实测的坑)。
         # 另【显式】加空 ProxyHandler({}): 否则 build_opener 会补一个【读 env】的默认 ProxyHandler,
         # 让 socks 模式的 https 先经 ambient HTTPS_PROXY(=模型那条)= 串味(Codex round-3 WARN#4)。
-        return [SocksiPyHandler(stype, u.hostname, u.port or 1080, rdns, u.username, u.password,
-                                context=ssl_context),
+        return [_SocksHTTPHandler(proxy_args),
+                _SocksHTTPSHandler(proxy_args, context=ssl_context),
                 urllib.request.ProxyHandler({})]
     return [https, urllib.request.ProxyHandler({"http": p, "https": p})]
 
@@ -163,7 +240,7 @@ def _selftest() -> int:
         os.environ.pop("XUNJI_PROXY", None)
         os.environ["HTTPS_PROXY"] = "http://model-proxy:3128"   # 故意设, 验证交战侧不读它
         checks.append(("交战代理【不读】HTTPS_PROXY(与模型隔离)", engagement_proxy() is None))
-        # urllib handlers: 没配交战代理→空 handler(不回退 HTTPS_PROXY); http→ProxyHandler; socks→SocksiPyHandler
+        # urllib handlers: 没配交战代理→空 handler(不回退 HTTPS_PROXY); http→ProxyHandler; socks→custom handlers
         h0 = urllib_proxy_handlers(None)
         pn = [x for x in h0 if type(x).__name__ == "ProxyHandler"]
         checks.append(("无交战代理→空 ProxyHandler(不回退 env, 防串味)", bool(pn) and pn[0].proxies == {}))
@@ -178,8 +255,9 @@ def _selftest() -> int:
         else:
             names2 = [type(x).__name__ for x in h2]
             pn2 = [x for x in h2 if type(x).__name__ == "ProxyHandler"]
-            checks.append(("socks→SocksiPyHandler + 空ProxyHandler, 无竞争 HTTPSHandler(防直连旁路 + 防 ambient 串味)",
-                           "SocksiPyHandler" in names2 and "HTTPSHandler" not in names2
+            checks.append(("socks→custom handlers + 空ProxyHandler, 无竞争 HTTPSHandler(防直连旁路 + 防 ambient 串味)",
+                           "_SocksHTTPHandler" in names2 and "_SocksHTTPSHandler" in names2
+                           and "HTTPSHandler" not in names2
                            and bool(pn2) and pn2[0].proxies == {}))
         # model 隔离
         env = model_safe_env({"HTTPS_PROXY": "x", "XUNJI_PROXY": "y", "http_proxy": "z", "PATH": "/bin"})

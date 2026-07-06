@@ -1,13 +1,24 @@
 # Xunji 项目待办
 
-> 最后更新: 2026-06-29。
+> 最后更新: 2026-07-07。
 > 本文件只保留未完成事项和下一阶段方向。已完成的历史流水账不再保留。
 
 ## 0. 当前最高优先级
 
-### 0.1 修复本地自检红灯
+### 0.1 保持本地自检和发布卫生为绿
 
-`python3 tools/selftest_all.py` 当前结果: 32 passed, 0 failed。
+不要在 TODO 里写死 `selftest_all` 通过数量；实际状态以命令输出为准：
+
+```bash
+python3 tools/selftest_all.py
+python3 tools/bench.py score-all bench --json-out /tmp/xunji-bench-current.json
+```
+
+当前维护重点：
+
+- [ ] `selftest_all` 必须覆盖每个已有 `--selftest` 入口。
+- [ ] `check_local_hygiene.py` 必须拒绝 tracked real-run evidence、tracked ignored files、本地 `config.ini`、以及 `.codex/hooks` 平行 runtime。
+- [ ] 真实 `runs/` / 顶层日期 run workbench / `config.ini` 不再进入 Git 索引。
 
 - [x] `classify_hosts`: 修复 same-host redirect integration 用例。
   - 失败点: followed same-host redirect。
@@ -31,13 +42,12 @@
 
 ### 0.2 保持 bench 基线可用
 
-`python3 tools/bench.py score-all bench --json-out /tmp/xunji-bench-current.json` 当前基线:
+`python3 tools/bench.py score-all bench --json-out /tmp/xunji-bench-current.json` 当前基线由命令生成，不在 TODO 里手写数量。
 
-- [x] 10/10 fixtures clean。
-- [x] detection 10/10。
-- [x] calibration 10/10。
-- [x] false positives 0。
-- [x] closure 1/1 correct。
+- [ ] fixtures clean。
+- [ ] detection / calibration 不回退。
+- [ ] false positives 保持 0。
+- [ ] closure fixture correct。
 - [x] 后续每个架构改动都必须追加一条 `review/records/<date>-bench-*.md`。
 
 ## 1. 核心优化方向: Ultra-native Xunji
