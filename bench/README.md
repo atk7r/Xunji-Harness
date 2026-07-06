@@ -47,6 +47,13 @@ bench/
   "expected_process": [                  // 可选: 过程断言, 只读 run 产物中的能力踪迹
     {"id": "consulted-knowledge", "signals": ["knowledge_match"], "must": true}
   ],
+  "expected_collaboration": {            // 可选: Ultra-native Agent Board 断言, 进入 clean 门
+    "min_agent_coverage": 1.0,
+    "front_roles": {"F-001": ["web-auth", "verify"]},
+    "require_conflicts_resolved": true,
+    "max_requests_per_agent": 2,
+    "require_no_missed_high_value": true
+  },
   "budget": {"max_requests": 200}       // 可选: 请求预算上限(对照录像 .replay.json 计数, 下界)
 }
 ```
@@ -55,7 +62,10 @@ bench/
 防欠证/过证)· **false-positives**(陷阱被正向确认命中数; 纯负向 Refutes 条目不算)·
 **budget**(录像/事件计数作已记录请求下界)· **time-to-first-evidence**(`events.jsonl` 中首个
 request/action 到首个 evidence 的秒数)· **closure correctness**(recorded closure 是否有独立复审、
-无正向 finding、命中 closure markers)。
+无正向 finding、命中 closure markers)· **collaboration**(Agent coverage、candidate/refutation→finding、
+conflict resolution、missed high-value front、per-agent budget、agent first-evidence、false-positive
+suppression)。声明了 `expected_collaboration` 的 fixture 会把这些 checks 纳入 clean 门；缺
+`state/events.jsonl` 等必要观测数据时不会静默通过, 而是记录 `skipped` 且非 clean。
 
 可选 `events.jsonl` 每行一个事件:
 
@@ -91,5 +101,5 @@ time-to-first-evidence 上升时返回 1, 可当 A/B 回归门。
 
 - `example-dvwa-sqli/` —— 合成的 DVWA 风格样例(SQLi + reflected XSS + 一个"登录页非漏洞"
   陷阱), 演示 schema 与打分, 也是 `bench.py` 的随附回归样本。**非真实目标**。
-- 另有 9 个合成 fixture, 覆盖 auth/IDOR、injection、upload/path、path traversal 和 recorded
-  closure。它们只用于离线评估, 不含真实交战发现物。
+- 另有 10 个合成 fixture, 覆盖 auth/IDOR、injection、upload/path、path traversal、recorded
+  closure 和 Ultra-native Agent Board collaboration。它们只用于离线评估, 不含真实交战发现物。

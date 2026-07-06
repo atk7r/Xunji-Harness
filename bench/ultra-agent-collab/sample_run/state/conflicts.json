@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "conflicts": [
+    {
+      "id": "C-001",
+      "type": "confidence mismatch",
+      "front": "F-001",
+      "status": "resolved",
+      "resolution": "verification replay supports E-001 and refutes H-009"
+    }
+  ]
+}

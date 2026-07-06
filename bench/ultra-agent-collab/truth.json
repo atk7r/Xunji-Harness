@@ -1,0 +1,23 @@
+{
+  "name": "ultra-agent-collab",
+  "run": "sample_run",
+  "expected_findings": [
+    {
+      "id": "profile-idor",
+      "markers": ["profile idor", "identity-auth"],
+      "min_certainty": 0.8
+    }
+  ],
+  "expected_collaboration": {
+    "min_agent_coverage": 1.0,
+    "front_roles": {
+      "F-001": ["web-auth", "verify"]
+    },
+    "require_conflicts_resolved": true,
+    "max_requests_per_agent": 2,
+    "require_no_missed_high_value": true
+  },
+  "budget": {
+    "max_requests": 6
+  }
+}

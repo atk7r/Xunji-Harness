@@ -15,6 +15,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy http://127.0.0.1:7892",
       "trust": "operator-reviewed",
       "provenance": {
@@ -51,6 +52,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy http://127.0.0.1:7892",
       "trust": "operator-reviewed",
       "provenance": {
@@ -85,6 +87,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -121,6 +124,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -152,6 +156,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -180,6 +185,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -214,6 +220,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -248,6 +255,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -282,6 +290,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -318,6 +327,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -350,6 +360,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -388,6 +399,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -419,6 +431,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy",
       "trust": "operator-reviewed",
       "provenance": {
@@ -459,6 +472,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy + saved artifacts",
       "trust": "operator-reviewed",
       "provenance": {
@@ -499,6 +513,7 @@
       "maturity_explicit": true,
       "maturity_raw": null,
       "maturity_unknown": false,
+      "role": "",
       "source": "probe.py via proxy + WordPress SVN 源码分析",
       "trust": "operator-reviewed",
       "provenance": {

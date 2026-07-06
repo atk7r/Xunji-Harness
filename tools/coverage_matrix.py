@@ -148,6 +148,27 @@ def _host_tokens(asset_name: str) -> set[str]:
     return {t for t in toks if t}
 
 
+def _asset_tokens_from_value(value: str) -> set[str]:
+    tokens: set[str] = set()
+    for raw in re.split(r"[,;，、]+", value):
+        part = raw.strip().strip("`'\"(){}<>").rstrip(".,")
+        if not part or part in {"-", "n/a", "N/A"}:
+            continue
+        display = _asset_display({"host": part})
+        if display:
+            tokens.update(_host_tokens(display))
+    return tokens
+
+
+def _front_declared_asset_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for name in ("Asset", "Assets", "Target", "Targets"):
+        raw = _field(text, name)
+        if raw:
+            tokens.update(_asset_tokens_from_value(raw))
+    return tokens
+
+
 def _mentions_any_host(text: str, tokens: set[str]) -> bool:
     hay = text.lower()
     for tok in tokens:
@@ -291,8 +312,10 @@ def derive(run_dir: Path) -> dict:
         tried_groups = _class_groups(_front_tried_classes(front, constraints))
         if not tried_groups:
             continue
+        declared_tokens = _front_declared_asset_tokens(front["text"])
         for row in rows:
-            if _mentions_any_host(front["text"], set(row["tokens"])):
+            row_tokens = set(row["tokens"])
+            if (declared_tokens & row_tokens) or _mentions_any_host(front["text"], row_tokens):
                 row["fronts"].append(front["id"])
                 row["tested"] = sorted(set(row["tested"]) | tried_groups)
 
@@ -422,6 +445,8 @@ def _selftest() -> int:
         {"host": "c.example", "reachable": True, "flags": ["SURFACE:URL_FETCH"]},
         {"host": "profile.example", "reachable": True, "title": "User profile"},
         {"host": "portal.example", "reachable": True, "title": "Admin API docs"},
+        {"host": "asset-field.example", "reachable": True, "flags": ["LOGIN"]},
+        {"host": "url-field.example", "port": 8443, "reachable": True, "flags": ["LOGIN"]},
         {"host": "d.example", "reachable": False, "flags": ["SURFACE:UPLOAD"]},
     ]}), encoding="utf-8")
     (run / "frontier.md").write_text(
@@ -439,7 +464,17 @@ def _selftest() -> int:
         "### F-003\n"
         "- Front: c.example URL fetch\n"
         "- Status: deferred\n"
-        "- Vectors tried:\n",
+        "- Vectors tried:\n\n"
+        "### F-004\n"
+        "- Front: SSO flow without host token\n"
+        "- Assets: asset-field.example\n"
+        "- Status: probing\n"
+        "- Vectors tried: auth-bypass\n\n"
+        "### F-005\n"
+        "- Front: URL-form target without host token\n"
+        "- Targets: https://url-field.example:8443/login\n"
+        "- Status: probing\n"
+        "- Vectors tried: auth-bypass\n",
         encoding="utf-8",
     )
     data = derive(run)
@@ -468,6 +503,12 @@ def _selftest() -> int:
          for v in by_asset["profile.example"]["cells"].values())),
         ("free-text title does not create applicability", all(v == "not_applicable"
          for v in by_asset["portal.example"]["cells"].values())),
+        ("explicit Assets field attributes front to asset",
+         by_asset["asset-field.example"]["cells"]["Auth"] == "tested"
+         and "F-004" in by_asset["asset-field.example"]["fronts"]),
+        ("explicit Targets field accepts URL host:port",
+         by_asset["url-field.example:8443"]["cells"]["Auth"] == "tested"
+         and "F-005" in by_asset["url-field.example:8443"]["fronts"]),
         ("corrupt primary coverage warns while using nested coverage",
          "nested.example" in bad_by_asset and bad_cov_warns and not bad_cov_errors),
         ("check reports warnings only", warns and not errors),

@@ -224,89 +224,90 @@ def _selftest() -> int:
             self.end_headers()
             self.wfile.write(body)
 
-    srv = socketserver.TCPServer(("127.0.0.1", 0), H)
-    port = srv.server_address[1]
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{port}/"
-    LH = {"127.0.0.1"}                       # selftest 都打本地 -> 授权 scope
-    d = Path(tempfile.mkdtemp())
-
-    def mkrec(name, method, u, status, sha1, bodyval=None):
-        p = d / name
-        p.write_text(json.dumps({
-            "request": {"method": method, "url": u, "headers": {}, "body": bodyval},
-            "response": {"status": status, "sha1": sha1, "len": 0}}), encoding="utf-8")
-        return p
-
     checks: list = []
-    try:
-        # fail-closed: 无 scope -> SKIPPED-NO-SCOPE(不 fail-open) —— dogfood 第7次 BLOCKER
-        checks.append(("无 scope -> SKIPPED-NO-SCOPE(fail-closed)",
-                       replay_one(mkrec("ns.replay.json", "GET", url, 200, sha))["verdict"] == "SKIPPED-NO-SCOPE"))
-        # 正确录像 -> IDENTICAL
-        checks.append(("正确录像 -> IDENTICAL",
-                       replay_one(mkrec("a.html.replay.json", "GET", url, 200, sha), allowed_hosts=LH)["verdict"] == "IDENTICAL"))
-        # status 同 sha 异(内容动态变) -> CONSISTENT
-        checks.append(("status同 sha异 -> CONSISTENT",
-                       replay_one(mkrec("b.html.replay.json", "GET", url, 200, "0" * 40), allowed_hosts=LH)["verdict"] == "CONSISTENT"))
-        # status 异(当时声称404实际200) -> DIVERGED
-        checks.append(("status异 -> DIVERGED(证据存疑)",
-                       replay_one(mkrec("c.html.replay.json", "GET", url, 404, sha), allowed_hosts=LH)["verdict"] == "DIVERGED"))
-        # 写操作 -> SKIPPED-WRITE; --force 才重放
-        post = mkrec("d.replay.json", "POST", url, 200, sha, bodyval="x")
-        checks.append(("写操作默认 SKIPPED-WRITE", replay_one(post, allowed_hosts=LH)["verdict"] == "SKIPPED-WRITE"))
-        checks.append(("--force 重放写操作(不再skip)", replay_one(post, force=True, allowed_hosts=LH)["verdict"] != "SKIPPED-WRITE"))
-        # 不可达 -> UNREACHABLE
-        checks.append(("目标不可达 -> UNREACHABLE",
-                       replay_one(mkrec("e.replay.json", "GET", "http://127.0.0.1:1/", 200, sha),
-                                  timeout=2, allowed_hosts=LH)["verdict"] == "UNREACHABLE"))
-        # 坏记录 -> BAD-RECORD(在 scope 检查前)
-        bad = d / "bad.replay.json"
-        bad.write_text("{not json", encoding="utf-8")
-        checks.append(("坏 JSON -> BAD-RECORD", replay_one(bad, allowed_hosts=LH)["verdict"] == "BAD-RECORD"))
-        # 破坏性 DELETE -> SKIPPED-DESTRUCTIVE(--force 也不解锁)
-        dele = mkrec("del.replay.json", "DELETE", url, 200, sha)
-        checks.append(("DELETE -> SKIPPED-DESTRUCTIVE", replay_one(dele, allowed_hosts=LH)["verdict"] == "SKIPPED-DESTRUCTIVE"))
-        checks.append(("DELETE --force 仍 SKIPPED-DESTRUCTIVE",
-                       replay_one(dele, force=True, allowed_hosts=LH)["verdict"] == "SKIPPED-DESTRUCTIVE"))
-        # scope 门(防打 scope 外); 授权 scope 用后缀匹配
-        checks.append(("scope 外 host -> SKIPPED-OUT-OF-SCOPE",
-                       replay_one(mkrec("sc.html.replay.json", "GET", url, 200, sha),
-                                  allowed_hosts={"other.example"})["verdict"] == "SKIPPED-OUT-OF-SCOPE"))
-        checks.append(("scope 内 host -> 正常重放",
-                       replay_one(mkrec("sc2.html.replay.json", "GET", url, 200, sha),
-                                  allowed_hosts={"127.0.0.1"})["verdict"] == "IDENTICAL"))
-        # 授权 scope 匹配(纯函数, 不打网络) —— 13.159.140.34 教训
-        checks.append(("授权scope: 子域后缀匹配 in-scope",
-                       _host_in_scope("2019x-mgr.hamastar.com.tw", {"hamastar.com.tw"})))
-        checks.append(("授权scope: 噪音IP越界(13.159.140.34)",
-                       not _host_in_scope("13.159.140.34", {"hamastar.com.tw"})))
-        checks.append(("授权scope: 防伪子域不匹配(evilhamastar.com.tw)",
-                       not _host_in_scope("evilhamastar.com.tw", {"hamastar.com.tw"})))
-        # _authorized_scope 读 target.md In-scope, 【不】读 coverage(含噪音 IP)
-        scoped = Path(tempfile.mkdtemp())
-        (scoped / "target.md").write_text("# Target\n- In-scope assets: hamastar.com.tw\n", encoding="utf-8")
-        (scoped / "classify").mkdir()
-        (scoped / "classify" / "coverage.json").write_text(
-            json.dumps({"assets": [{"host": "13.159.140.34"}, {"host": "www.hamastar.com.tw"}]}),
-            encoding="utf-8")
-        asc = _authorized_scope(scoped)
-        checks.append(("_authorized_scope 取 target.md In-scope", "hamastar.com.tw" in asc))
-        checks.append(("_authorized_scope 不含 coverage 噪音 IP 13.159.140.34", "13.159.140.34" not in asc))
-        # guard 熔断异常 -> GUARD-BLOCKED(不崩)
-        _orig = probe.send
-        probe.send = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HostBackoff"))
+    with probe.selftest_isolation():
+        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{port}/"
+        LH = {"127.0.0.1"}                       # selftest 都打本地 -> 授权 scope
+        d = Path(tempfile.mkdtemp())
+
+        def mkrec(name, method, u, status, sha1, bodyval=None):
+            p = d / name
+            p.write_text(json.dumps({
+                "request": {"method": method, "url": u, "headers": {}, "body": bodyval},
+                "response": {"status": status, "sha1": sha1, "len": 0}}), encoding="utf-8")
+            return p
+
         try:
-            checks.append(("guard 异常 -> GUARD-BLOCKED(不崩)",
-                           replay_one(mkrec("g.html.replay.json", "GET", url, 200, sha), allowed_hosts=LH)["verdict"] == "GUARD-BLOCKED"))
+            # fail-closed: 无 scope -> SKIPPED-NO-SCOPE(不 fail-open) —— dogfood 第7次 BLOCKER
+            checks.append(("无 scope -> SKIPPED-NO-SCOPE(fail-closed)",
+                           replay_one(mkrec("ns.replay.json", "GET", url, 200, sha))["verdict"] == "SKIPPED-NO-SCOPE"))
+            # 正确录像 -> IDENTICAL
+            checks.append(("正确录像 -> IDENTICAL",
+                           replay_one(mkrec("a.html.replay.json", "GET", url, 200, sha), allowed_hosts=LH)["verdict"] == "IDENTICAL"))
+            # status 同 sha 异(内容动态变) -> CONSISTENT
+            checks.append(("status同 sha异 -> CONSISTENT",
+                           replay_one(mkrec("b.html.replay.json", "GET", url, 200, "0" * 40), allowed_hosts=LH)["verdict"] == "CONSISTENT"))
+            # status 异(当时声称404实际200) -> DIVERGED
+            checks.append(("status异 -> DIVERGED(证据存疑)",
+                           replay_one(mkrec("c.html.replay.json", "GET", url, 404, sha), allowed_hosts=LH)["verdict"] == "DIVERGED"))
+            # 写操作 -> SKIPPED-WRITE; --force 才重放
+            post = mkrec("d.replay.json", "POST", url, 200, sha, bodyval="x")
+            checks.append(("写操作默认 SKIPPED-WRITE", replay_one(post, allowed_hosts=LH)["verdict"] == "SKIPPED-WRITE"))
+            checks.append(("--force 重放写操作(不再skip)", replay_one(post, force=True, allowed_hosts=LH)["verdict"] != "SKIPPED-WRITE"))
+            # 不可达 -> UNREACHABLE
+            checks.append(("目标不可达 -> UNREACHABLE",
+                           replay_one(mkrec("e.replay.json", "GET", "http://127.0.0.1:1/", 200, sha),
+                                      timeout=2, allowed_hosts=LH)["verdict"] == "UNREACHABLE"))
+            # 坏记录 -> BAD-RECORD(在 scope 检查前)
+            bad = d / "bad.replay.json"
+            bad.write_text("{not json", encoding="utf-8")
+            checks.append(("坏 JSON -> BAD-RECORD", replay_one(bad, allowed_hosts=LH)["verdict"] == "BAD-RECORD"))
+            # 破坏性 DELETE -> SKIPPED-DESTRUCTIVE(--force 也不解锁)
+            dele = mkrec("del.replay.json", "DELETE", url, 200, sha)
+            checks.append(("DELETE -> SKIPPED-DESTRUCTIVE", replay_one(dele, allowed_hosts=LH)["verdict"] == "SKIPPED-DESTRUCTIVE"))
+            checks.append(("DELETE --force 仍 SKIPPED-DESTRUCTIVE",
+                           replay_one(dele, force=True, allowed_hosts=LH)["verdict"] == "SKIPPED-DESTRUCTIVE"))
+            # scope 门(防打 scope 外); 授权 scope 用后缀匹配
+            checks.append(("scope 外 host -> SKIPPED-OUT-OF-SCOPE",
+                           replay_one(mkrec("sc.html.replay.json", "GET", url, 200, sha),
+                                      allowed_hosts={"other.example"})["verdict"] == "SKIPPED-OUT-OF-SCOPE"))
+            checks.append(("scope 内 host -> 正常重放",
+                           replay_one(mkrec("sc2.html.replay.json", "GET", url, 200, sha),
+                                      allowed_hosts={"127.0.0.1"})["verdict"] == "IDENTICAL"))
+            # 授权 scope 匹配(纯函数, 不打网络) —— 13.159.140.34 教训
+            checks.append(("授权scope: 子域后缀匹配 in-scope",
+                           _host_in_scope("2019x-mgr.hamastar.com.tw", {"hamastar.com.tw"})))
+            checks.append(("授权scope: 噪音IP越界(13.159.140.34)",
+                           not _host_in_scope("13.159.140.34", {"hamastar.com.tw"})))
+            checks.append(("授权scope: 防伪子域不匹配(evilhamastar.com.tw)",
+                           not _host_in_scope("evilhamastar.com.tw", {"hamastar.com.tw"})))
+            # _authorized_scope 读 target.md In-scope, 【不】读 coverage(含噪音 IP)
+            scoped = Path(tempfile.mkdtemp())
+            (scoped / "target.md").write_text("# Target\n- In-scope assets: hamastar.com.tw\n", encoding="utf-8")
+            (scoped / "classify").mkdir()
+            (scoped / "classify" / "coverage.json").write_text(
+                json.dumps({"assets": [{"host": "13.159.140.34"}, {"host": "www.hamastar.com.tw"}]}),
+                encoding="utf-8")
+            asc = _authorized_scope(scoped)
+            checks.append(("_authorized_scope 取 target.md In-scope", "hamastar.com.tw" in asc))
+            checks.append(("_authorized_scope 不含 coverage 噪音 IP 13.159.140.34", "13.159.140.34" not in asc))
+            # guard 熔断异常 -> GUARD-BLOCKED(不崩)
+            _orig = probe.send
+            probe.send = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HostBackoff"))
+            try:
+                checks.append(("guard 异常 -> GUARD-BLOCKED(不崩)",
+                               replay_one(mkrec("g.html.replay.json", "GET", url, 200, sha), allowed_hosts=LH)["verdict"] == "GUARD-BLOCKED"))
+            finally:
+                probe.send = _orig
+            # 批量(显式 scope)
+            res = replay_run(d, allowed_hosts={"127.0.0.1"})
+            checks.append(("批量重放 run 目录(scope 内, 含 IDENTICAL)",
+                           len(res) >= 5 and any(r["verdict"] == "IDENTICAL" for r in res)))
         finally:
-            probe.send = _orig
-        # 批量(显式 scope)
-        res = replay_run(d, allowed_hosts={"127.0.0.1"})
-        checks.append(("批量重放 run 目录(scope 内, 含 IDENTICAL)",
-                       len(res) >= 5 and any(r["verdict"] == "IDENTICAL" for r in res)))
-    finally:
-        srv.shutdown()
+            srv.shutdown()
     failed = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)

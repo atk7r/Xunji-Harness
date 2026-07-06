@@ -266,27 +266,28 @@ def _selftest() -> int:
             self.end_headers()
             self.wfile.write(b)
 
-    srv = socketserver.TCPServer(("127.0.0.1", 0), H)
-    port = srv.server_address[1]
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        d = Path(tempfile.mkdtemp())
-        body, meta = fetch_body(f"127.0.0.1:{port}", d, 5)
-        stack, _ = classify_body(body)
-        checks.append(("integration: followed same-host redirect",
-                       (meta.get("redirected_to", "") or "").endswith("/app/")))
-        checks.append(("integration: resolved page classified AIS", stack == "AIS-WebForms"))
-        checks.append(("integration: resolved body has app marker", "ais.webform.js" in body))
-        # run_classify 覆盖(#9: main 循环之前没被测 → ROOT/落盘 bug 绿着崩)。2 台 + flush_every=1
-        d2 = Path(tempfile.mkdtemp())
-        cov, rws, intr = run_classify([f"127.0.0.1:{port}", f"127.0.0.1:{port}"], d2, [], 0.0, 5, flush_every=1)
-        cj = d2 / "coverage.json"
-        cjd = json.loads(cj.read_text(encoding="utf-8")) if cj.exists() else {}
-        checks.append(("run_classify 增量写 coverage.json", cj.exists()))
-        checks.append(("coverage 含 2 资产 + partial 字段", cjd.get("total") == 2 and "partial" in cjd))
-        checks.append(("run_classify 返回 coverage 列表", len(cov) == 2))
-    finally:
-        srv.shutdown()
+    with probe.selftest_isolation():
+        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            d = Path(tempfile.mkdtemp())
+            body, meta = fetch_body(f"127.0.0.1:{port}", d, 5)
+            stack, _ = classify_body(body)
+            checks.append(("integration: followed same-host redirect",
+                           (meta.get("redirected_to", "") or "").endswith("/app/")))
+            checks.append(("integration: resolved page classified AIS", stack == "AIS-WebForms"))
+            checks.append(("integration: resolved body has app marker", "ais.webform.js" in body))
+            # run_classify 覆盖(#9: main 循环之前没被测 → ROOT/落盘 bug 绿着崩)。2 台 + flush_every=1
+            d2 = Path(tempfile.mkdtemp())
+            cov, rws, intr = run_classify([f"127.0.0.1:{port}", f"127.0.0.1:{port}"], d2, [], 0.0, 5, flush_every=1)
+            cj = d2 / "coverage.json"
+            cjd = json.loads(cj.read_text(encoding="utf-8")) if cj.exists() else {}
+            checks.append(("run_classify 增量写 coverage.json", cj.exists()))
+            checks.append(("coverage 含 2 资产 + partial 字段", cjd.get("total") == 2 and "partial" in cjd))
+            checks.append(("run_classify 返回 coverage 列表", len(cov) == 2))
+        finally:
+            srv.shutdown()
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

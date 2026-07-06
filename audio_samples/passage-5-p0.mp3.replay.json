@@ -1,0 +1,25 @@
+{
+  "ts": "2026-07-02T20:06:04Z",
+  "request": {
+    "method": "GET",
+    "url": "https://puffts.top/wordBackstageManagement/noAuthApi/readPassage/getDocPartVoice?passageId=5&partIndex=0",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 97580,
+    "sha1": "102decddee11c1b1dd3ced52a6ccc297ddf7f38b",
+    "ctype": "audio/mpeg",
+    "headers": {
+      "Server": "nginx/1.24.0 (Ubuntu)",
+      "Date": "Thu, 02 Jul 2026 20:06:04 GMT",
+      "Content-Type": "audio/mpeg",
+      "Content-Length": "97580",
+      "Connection": "close",
+      "Vary": "Origin"
+    },
+    "snippet": "ID3\u0004\u0000\u0000\u0000\u0000\u0000\"TSSE\u0000\u0000\u0000\u000e\u0000\u0000\u0003Lavf62.3.100\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000����\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000Info\u0000\u0000\u0000\u000f\u0000\u0000\u0000�\u0000\u0001}\u0000\u0000\u0004\u0007\t\f\u000e\u0011\u0013\u0016\u0018\u001b\u001d \"%'*-/2479<>ACFHKMPRUXZ]_bdgilnqsvx{}��������������������������������������������������\u0000\u0000\u0000\u0000Lavc62.11\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000$\u0003c\u0000\u0000\u0000\u0000\u0000\u0001}\u0000���\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+  },
+  "saved_body": "audio_samples/passage-5-p0.mp3"
+}

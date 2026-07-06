@@ -65,6 +65,7 @@ DEFAULT_CONFIG: dict = {
     "egress": {
         "redact_secrets": True,
         "include_artifacts": "snippets",
+        "artifact_excerpt_chars": 24_000,
         "max_bundle_chars": 180_000,
     },
     "backends": {
@@ -169,6 +170,27 @@ CONTEXT_FILES = [
 ]
 CONTEXT_GLOBS = ["classify/*.txt", "classify/*.json"]
 PER_FILE_CAP = 24_000   # 每文件最多塞这么多字符给 API 后端
+ARTIFACT_EXCERPT_CAP = 24_000
+BUNDLE_CHAR_CAP = 180_000
+
+
+def _artifact_excerpt_cap(value=None) -> int:
+    try:
+        return max(0, int(ARTIFACT_EXCERPT_CAP if value is None else value))
+    except (TypeError, ValueError):
+        return ARTIFACT_EXCERPT_CAP
+
+
+def _bundle_char_cap(value=None) -> int:
+    try:
+        return max(0, int(BUNDLE_CHAR_CAP if value is None else value))
+    except (TypeError, ValueError):
+        return BUNDLE_CHAR_CAP
+
+
+def _context_cap(default_cap: int, max_bundle_chars: int = BUNDLE_CHAR_CAP) -> int:
+    bundle_cap = _bundle_char_cap(max_bundle_chars)
+    return min(default_cap, bundle_cap) if bundle_cap else default_cap
 
 
 # ===================== 数据结构 =====================
@@ -307,7 +329,8 @@ def _artifact_path(run_dir: Path, token: str) -> Path | None:
 
 
 def _artifact_record(run_dir: Path, token: str, *, redact: bool = False,
-                     include_excerpt: bool = True) -> dict:
+                     include_excerpt: bool = True,
+                     excerpt_chars: int = ARTIFACT_EXCERPT_CAP) -> dict:
     p = _artifact_path(run_dir, token)
     if not p:
         return {"token": token, "exists": False}
@@ -323,19 +346,24 @@ def _artifact_record(run_dir: Path, token: str, *, redact: bool = False,
         txt = p.read_text(encoding="utf-8", errors="replace")
         if redact:
             txt = _redact_text(txt)
-        item["excerpt"] = txt[:1200]
+        cap = _artifact_excerpt_cap(excerpt_chars)
+        item["excerpt"] = txt[:cap]
+        if len(txt) > cap:
+            item["excerpt_truncated_chars"] = len(txt) - cap
     return item
 
 
 def build_evidence_index(run_dir: Path, *, redact: bool = False,
-                         include_artifacts: str = "snippets") -> dict:
+                         include_artifacts: str = "snippets",
+                         artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP) -> dict:
     """Content-addressed fact view for reviewers. Narrative files may contain claims;
     this index is the narrow fact source Codex arbitration must cite."""
     entries = []
     for rec in parse_evidence(run_dir):
         include_excerpt = include_artifacts == "snippets"
         artifacts = sorted(
-            (_artifact_record(run_dir, a, redact=redact, include_excerpt=include_excerpt)
+            (_artifact_record(run_dir, a, redact=redact, include_excerpt=include_excerpt,
+                              excerpt_chars=artifact_excerpt_chars)
              for a in rec.get("artifacts", [])),
             key=lambda x: (str(x.get("path", "")), str(x.get("token", ""))),
         )
@@ -405,7 +433,9 @@ def _mark_invalid_finding_refs(result: ReviewResult, bundle: dict) -> None:
 
 def build_review_bundle(run_dir: Path, *, write: bool = False,
                         redact_egress: bool = False,
-                        include_artifacts: str = "snippets") -> dict:
+                        include_artifacts: str = "snippets",
+                        artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
+                        max_bundle_chars: int = BUNDLE_CHAR_CAP) -> dict:
     """Freeze the review input. Keep fact material separate from narrative claims so
     model-written review/report text cannot become evidence on the next pass."""
     files = {}
@@ -413,29 +443,68 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,
         p = run_dir / rel
         if p.is_file():
             files[rel] = {"sha1": _sha1_file(p), "size": p.stat().st_size}
-    evidence_index = build_evidence_index(
-        run_dir,
-        redact=redact_egress,
-        include_artifacts=include_artifacts,
-    )
     claims = {rel: (run_dir / rel).read_text(encoding="utf-8", errors="replace")[:PER_FILE_CAP]
               for rel in ("report.md", "frontier.md", "decisions.md", "review.md")
               if (run_dir / rel).is_file()}
     if redact_egress:
         claims = {k: _redact_text(v) for k, v in claims.items()}
-    bundle = {
-        "schema": "xunji.review_bundle.v1",
-        "run": run_dir.name,
-        "files": files,
-        "evidence_index": evidence_index,
-        "machine_findings": _machine_findings(evidence_index),
-        "claims": claims,
-        "egress_redaction": {
+    max_chars = _bundle_char_cap(max_bundle_chars)
+    requested_excerpt_chars = _artifact_excerpt_cap(artifact_excerpt_chars)
+    effective_excerpt_chars = requested_excerpt_chars
+    warnings: list[str] = []
+
+    def _compose(evidence_index: dict) -> dict:
+        redaction = {
             "enabled": bool(redact_egress),
             "include_artifacts": include_artifacts,
-        },
-        "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
-    }
+            "artifact_excerpt_chars": effective_excerpt_chars,
+            "max_bundle_chars": max_chars,
+        }
+        if effective_excerpt_chars != requested_excerpt_chars:
+            redaction["requested_artifact_excerpt_chars"] = requested_excerpt_chars
+        return {
+            "schema": "xunji.review_bundle.v1",
+            "run": run_dir.name,
+            "files": files,
+            "evidence_index": evidence_index,
+            "machine_findings": _machine_findings(evidence_index),
+            "claims": claims,
+            "egress_redaction": redaction,
+            "warnings": list(warnings),
+            "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+        }
+
+    bundle = {}
+    for _ in range(6):
+        evidence_index = build_evidence_index(
+            run_dir,
+            redact=redact_egress,
+            include_artifacts=include_artifacts,
+            artifact_excerpt_chars=effective_excerpt_chars,
+        )
+        bundle = _compose(evidence_index)
+        size_probe = json.dumps(bundle, ensure_ascii=False, sort_keys=True)
+        if not max_chars or len(size_probe) <= max_chars:
+            break
+        if include_artifacts != "snippets" or effective_excerpt_chars <= 0:
+            break
+        next_cap = max(0, int(effective_excerpt_chars * max_chars / len(size_probe) * 0.85))
+        if next_cap >= effective_excerpt_chars:
+            next_cap = effective_excerpt_chars - 1
+        warnings.append(
+            f"artifact_excerpt_chars reduced from {effective_excerpt_chars} to {next_cap} "
+            f"to fit max_bundle_chars={max_chars}")
+        effective_excerpt_chars = next_cap
+
+    size_probe = json.dumps(bundle, ensure_ascii=False, sort_keys=True)
+    if max_chars and len(size_probe) > max_chars:
+        if effective_excerpt_chars == 0:
+            bundle["warnings"].append(
+                "review_bundle still exceeds max_bundle_chars after artifact excerpts reached 0; "
+                "claims or evidence metadata dominate bundle size")
+        bundle["warnings"].append(
+            f"review_bundle serialized chars {len(size_probe)} exceed max_bundle_chars={max_chars}; "
+            "downstream reviewer context may still be truncated")
     bundle["sha1"] = _sha1_bytes(json.dumps(bundle, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     if write:
         out_dir = run_dir / "review"
@@ -681,7 +750,11 @@ def parse_review_output(text: str, backend: str = "") -> ReviewResult:
 
 # ===================== 后端实现 =====================
 def _run_codex(scope_dir: Path, rubric: str, b: dict, timeout: int,
-               bundle: dict | None = None) -> ReviewResult:
+               bundle: dict | None = None,
+               artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
+               max_bundle_chars: int = BUNDLE_CHAR_CAP) -> ReviewResult:
+    # Codex reads the frozen review_bundle.json on disk; it does not rebuild or
+    # inline the bundle, so excerpt sizing is controlled by review()/review_panel().
     rel = scope_dir.relative_to(ROOT).as_posix() if scope_dir.is_relative_to(ROOT) else str(scope_dir)
     prompt = (f"Review the CLOSED red-team run at {rel}. You may read any file under that "
               f"directory (read-only). Prefer {rel}/review/review_bundle.json as the frozen input. "
@@ -708,15 +781,22 @@ def _run_codex(scope_dir: Path, rubric: str, b: dict, timeout: int,
 
 
 def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,
-                bundle: dict | None = None) -> ReviewResult:
+                bundle: dict | None = None,
+                artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
+                max_bundle_chars: int = BUNDLE_CHAR_CAP) -> ReviewResult:
     key = os.environ.get(b.get("api_key_env", ""), "")
     if not key:
         return ReviewResult(verdict="ERROR", backend_used=name,
                             error=f"缺 {b.get('api_key_env')} 环境变量")
-    context = json.dumps(bundle or build_review_bundle(scope_dir, redact_egress=True),
+    context = json.dumps(bundle or build_review_bundle(
+        scope_dir,
+        redact_egress=True,
+        artifact_excerpt_chars=artifact_excerpt_chars,
+        max_bundle_chars=max_bundle_chars),
                          ensure_ascii=False, indent=2)
-    if len(context) > PER_FILE_CAP * 8:
-        context = context[:PER_FILE_CAP * 8] + "\n…[review_bundle truncated]"
+    cap = _context_cap(PER_FILE_CAP * 8, max_bundle_chars)
+    if len(context) > cap:
+        context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars]"
     payload = {
         "model": b["model"], "temperature": 0,
         "messages": [
@@ -807,18 +887,24 @@ def _aggregate_arkcli_panel(results: list[tuple[str, ReviewResult]],
 
 
 def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
-                      bundle: dict | None = None) -> ReviewResult:
+                      bundle: dict | None = None,
+                      artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
+                      max_bundle_chars: int = BUNDLE_CHAR_CAP) -> ReviewResult:
     cmd = b.get("cmd", "arkcli")
     if shutil.which(cmd) is None:
         return ReviewResult(verdict="ERROR", backend_used="arkcli", error=f"arkcli not found: {cmd}")
     models = b.get("models") or []
     model_ids = [_arkcli_model_id(m) for m in models if _arkcli_model_id(m)]
     backend_used = "arkcli:" + "+".join(model_ids)
-    context = json.dumps(bundle or build_review_bundle(scope_dir, redact_egress=True),
+    context = json.dumps(bundle or build_review_bundle(
+        scope_dir,
+        redact_egress=True,
+        artifact_excerpt_chars=artifact_excerpt_chars,
+        max_bundle_chars=max_bundle_chars),
                          ensure_ascii=False, indent=2)
-    cap = int(b.get("max_context_chars") or (PER_FILE_CAP * 5))
+    cap = _context_cap(int(b.get("max_context_chars") or (PER_FILE_CAP * 5)), max_bundle_chars)
     if len(context) > cap:
-        context = context[:cap] + "\n…[review_bundle truncated for arkcli panel]"
+        context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars for arkcli panel]"
     panel_prompt = (
         "You are one independent reviewer in the Xunji external heterogeneous panel. "
         "Return ONLY a JSON object matching schema xunji.peer_review.v1. Do not use markdown. "
@@ -870,7 +956,9 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
 
 
 def _run_anthropic(scope_dir: Path, rubric: str, b: dict, timeout: int,
-                   bundle: dict | None = None, driver: str | None = None) -> ReviewResult:
+                   bundle: dict | None = None, driver: str | None = None,
+                   artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
+                   max_bundle_chars: int = BUNDLE_CHAR_CAP) -> ReviewResult:
     key = os.environ.get(b.get("api_key_env", ""), "")
     if not key:
         # 兜底: 委托操作者在 Claude Code 里启动 fresh-context 复审。
@@ -887,10 +975,15 @@ def _run_anthropic(scope_dir: Path, rubric: str, b: dict, timeout: int,
             backend_used = "claude:driver-subagent"
         return ReviewResult(verdict="NEEDS_DRIVER", backend_used=backend_used,
                             raw=prompt)
-    context = json.dumps(bundle or build_review_bundle(scope_dir, redact_egress=True),
+    context = json.dumps(bundle or build_review_bundle(
+        scope_dir,
+        redact_egress=True,
+        artifact_excerpt_chars=artifact_excerpt_chars,
+        max_bundle_chars=max_bundle_chars),
                          ensure_ascii=False, indent=2)
-    if len(context) > PER_FILE_CAP * 8:
-        context = context[:PER_FILE_CAP * 8] + "\n…[review_bundle truncated]"
+    cap = _context_cap(PER_FILE_CAP * 8, max_bundle_chars)
+    if len(context) > cap:
+        context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars]"
     payload = {"model": b["model"], "max_tokens": 4096, "system": rubric,
                "messages": [{"role": "user",
                              "content": f"Run audit trail (read-only) for {scope_dir.name}:\n\n{context}"}]}
@@ -930,6 +1023,8 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     egress_cfg = cfg.get("egress", {})
     redact_egress = bool(egress_cfg.get("redact_secrets", True))
     include_artifacts = str(egress_cfg.get("include_artifacts", "snippets"))
+    artifact_excerpt_chars = _artifact_excerpt_cap(egress_cfg.get("artifact_excerpt_chars"))
+    max_bundle_chars = _bundle_char_cap(egress_cfg.get("max_bundle_chars"))
 
     try:
         import evidence_parse as _ep
@@ -937,7 +1032,9 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     except Exception:
         pass
     bundle = build_review_bundle(scope, write=True, redact_egress=redact_egress,
-                                 include_artifacts=include_artifacts)
+                                 include_artifacts=include_artifacts,
+                                 artifact_excerpt_chars=artifact_excerpt_chars,
+                                 max_bundle_chars=max_bundle_chars)
 
     try:
         rubric = build_rubric(rubric, role=role, no_recon=no_recon)
@@ -962,13 +1059,21 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     b = cfg["backends"][chosen]
     kind = b.get("kind")
     if kind == "cli-agent":
-        result = _run_codex(scope, rubric, b, timeout, bundle)
+        result = _run_codex(scope, rubric, b, timeout, bundle,
+                            artifact_excerpt_chars=artifact_excerpt_chars,
+                            max_bundle_chars=max_bundle_chars)
     elif kind == "arkcli-panel":
-        result = _run_arkcli_panel(scope, rubric, b, timeout, bundle)
+        result = _run_arkcli_panel(scope, rubric, b, timeout, bundle,
+                                   artifact_excerpt_chars=artifact_excerpt_chars,
+                                   max_bundle_chars=max_bundle_chars)
     elif kind == "openai":
-        result = _run_openai(scope, rubric, b, chosen, timeout, bundle)
+        result = _run_openai(scope, rubric, b, chosen, timeout, bundle,
+                             artifact_excerpt_chars=artifact_excerpt_chars,
+                             max_bundle_chars=max_bundle_chars)
     elif kind == "anthropic-or-driver":
-        result = _run_anthropic(scope, rubric, b, timeout, bundle, driver=driver)
+        result = _run_anthropic(scope, rubric, b, timeout, bundle, driver=driver,
+                                artifact_excerpt_chars=artifact_excerpt_chars,
+                                max_bundle_chars=max_bundle_chars)
     else:
         result = ReviewResult(verdict="ERROR", error=f"未知后端 kind: {kind}")
     result.bundle_hash = bundle.get("sha1", "")
@@ -1099,7 +1204,11 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
 
     bundle = build_review_bundle(scope, write=True,
                                  redact_egress=bool(cfg.get("egress", {}).get("redact_secrets", True)),
-                                 include_artifacts=str(cfg.get("egress", {}).get("include_artifacts", "snippets")))
+                                 include_artifacts=str(cfg.get("egress", {}).get("include_artifacts", "snippets")),
+                                 artifact_excerpt_chars=_artifact_excerpt_cap(
+                                     cfg.get("egress", {}).get("artifact_excerpt_chars")),
+                                 max_bundle_chars=_bundle_char_cap(
+                                     cfg.get("egress", {}).get("max_bundle_chars")))
     result = ReviewResult(
         verdict=verdict,
         findings=findings,
@@ -1232,6 +1341,10 @@ def _selftest() -> int:
     checks.append(("默认 arkcli panel 不禁用 thinking",
                    all(not (isinstance(x, dict) and x.get("thinking") == "disabled")
                        for x in cfg["backends"]["arkcli"]["models"])))
+    checks.append(("默认 artifact excerpt cap 覆盖旧 1200 字截断",
+                   cfg["egress"].get("artifact_excerpt_chars") == ARTIFACT_EXCERPT_CAP))
+    checks.append(("默认 max_bundle_chars 有效",
+                   cfg["egress"].get("max_bundle_chars") == BUNDLE_CHAR_CAP))
     checks += [
         ("driver matrix order: claude -> codex,arkcli",
          _driver_matrix_order("claude") == ["codex", "arkcli"]),
@@ -1391,6 +1504,16 @@ def _selftest() -> int:
     b_unredacted = build_review_bundle(d_run, redact_egress=False)
     redacted_blob = json.dumps(b_redacted, ensure_ascii=False)
     unredacted_blob = json.dumps(b_unredacted, ensure_ascii=False)
+    (d_run / "long.txt").write_text("A" * 1300 + "KEEP_TAIL", encoding="utf-8")
+    (d_run / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001 — x\n- Certainty: 0.8\n- Control: yes\n"
+        "- Artifacts: `long.txt`\n",
+        encoding="utf-8")
+    b_long = build_review_bundle(d_run)
+    b_long_small = build_review_bundle(d_run, artifact_excerpt_chars=100)
+    b_tiny_bundle_cap = build_review_bundle(d_run, max_bundle_chars=100)
+    long_art = b_long["evidence_index"]["entries"][0]["artifacts"][0]
+    long_small_art = b_long_small["evidence_index"]["entries"][0]["artifacts"][0]
     (d_run / "evidence.md").write_text(
         "# Evidence Ledger\n\n## E-001 — x\n- Certainty: 0.8\n- Control: yes\n- Artifacts: `a.html`\n",
         encoding="utf-8")
@@ -1415,6 +1538,16 @@ def _selftest() -> int:
         ("bundle 写入 review/review_bundle.json", (d_run / "review" / "review_bundle.json").exists()),
         ("bundle redacts obvious bearer token",
          "abcdefghijk123456" not in redacted_blob and "abcdefghijk123456" in unredacted_blob),
+        ("bundle artifact excerpt keeps evidence after old 1200 char cap",
+         "KEEP_TAIL" in long_art.get("excerpt", "")),
+        ("bundle artifact excerpt cap remains configurable",
+         long_small_art.get("excerpt_truncated_chars", 0) > 0
+         and "KEEP_TAIL" not in long_small_art.get("excerpt", "")),
+        ("bundle max_bundle_chars emits warning when exceeded",
+         b_tiny_bundle_cap.get("warnings")
+         and any("exceed max_bundle_chars=100" in w for w in b_tiny_bundle_cap["warnings"])
+         and any("artifact excerpts reached 0" in w for w in b_tiny_bundle_cap["warnings"])
+         and b_tiny_bundle_cap["egress_redaction"]["artifact_excerpt_chars"] < ARTIFACT_EXCERPT_CAP),
         ("into_run 二次追加不覆盖(两区块)", rv2.count("Independent Review") == 2),
     ]
     d_machine = Path(tempfile.mkdtemp())
@@ -1547,6 +1680,8 @@ def main() -> int:
             write=True,
             redact_egress=bool(egress_cfg.get("redact_secrets", True)),
             include_artifacts=str(egress_cfg.get("include_artifacts", "snippets")),
+            artifact_excerpt_chars=_artifact_excerpt_cap(egress_cfg.get("artifact_excerpt_chars")),
+            max_bundle_chars=_bundle_char_cap(egress_cfg.get("max_bundle_chars")),
         )
         print(json.dumps({"bundle_hash": bundle["sha1"],
                           "evidence_index_hash": bundle["evidence_index"]["sha1"],

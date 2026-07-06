@@ -1,6 +1,6 @@
 ---
 name: xunji-local-maintenance
-description: Codex-side Xunji repository maintenance guide. Use when Codex is writing or fixing project code, docs, templates, tools, tests, skills, local hygiene, or review notes; choosing selftests; handling dirty worktrees; checking architecture drift; or preparing Codex-authored maintenance changes for independent review without acting as the live project-running driver.
+description: Codex-side Xunji repository maintenance guide. Use when Codex is writing or fixing project code, docs, templates, tools, tests, skills, local hygiene, or review notes; choosing selftests; handling dirty worktrees; checking architecture drift; when the operator asks for "复审" / review of a plan, diff, or maintenance change; or preparing Codex-authored maintenance changes for independent review without acting as the live project-running driver.
 ---
 
 # Xunji Local Maintenance
@@ -24,6 +24,18 @@ the Root driver.
   `tools/harness/guard.py`, or `sentinel/` behavior changes.
 - Use `xunji-peer-review-panel` when Codex-authored maintenance needs external
   review. Codex does not count as independent reviewer of its own diff.
+- When the operator asks to "复审" / review a plan, diff, or maintenance change,
+  use `xunji-peer-review-panel`; the author cannot satisfy review by rereading
+  their own work. For Claude Code-authored targets, write the target paths, diff
+  or plan, tests, and review questions to
+  `review/records/<date>-<topic>-context.md`, then run Codex read-only through
+  `tools/harness/codex_proxy.py` (which maps `CODEX_PROXY` / `codex_proxy.conf`
+  into Codex CLI proxy env), for example
+  `python tools/harness/codex_proxy.py codex exec -s read-only < review/records/<date>-<topic>-context.md`.
+  Save the Codex findings to `review/records/<date>-<topic>-codex-review.md`
+  and record driver disposition under `review/records/`. For Codex-authored
+  changes, Codex self-review still does not count; use the Codex-authored
+  maintenance matrix in `xunji-peer-review-panel`.
 - Use the more specific Xunji skill when working on setup, replay, benchmark,
   knowledge, Agent Board, or web research behavior.
 

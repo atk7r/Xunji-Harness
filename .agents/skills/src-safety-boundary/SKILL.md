@@ -1,6 +1,6 @@
 ---
 name: src-safety-boundary
-description: "Boundary-only skill for authorized red-team / vulnerability-research sessions. Load at the start of security testing work. This skill contains limits only: no methodology, no attack ideas, no payload guidance, and no playbooks."
+description: Boundary-only skill for authorized red-team / vulnerability-research sessions. Load at the start of security testing work. This skill contains limits only: no methodology, no attack ideas, no payload guidance, and no playbooks.
 ---
 
 # Safety Boundary
@@ -29,7 +29,7 @@ Two distinct things the driver does:
   what the tiers below grade, by effect.
 
 The operator supervises and executes the weaponized steps (author-and-handoff).
-The hook (`.claude/hooks/safety_gate.py`) enforces the **auto-execution** ceiling
+The Claude Code engagement hook (`.claude/hooks/safety_gate.py`) enforces the **auto-execution** ceiling
 only — it never touches code you write for the operator.
 
 ## Three tiers — by effect × executor
