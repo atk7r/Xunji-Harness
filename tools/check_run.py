@@ -36,6 +36,10 @@ try:
     from saturation import check as check_saturation
 except Exception:
     check_saturation = None
+try:
+    from coverage_matrix import check as check_coverage_matrix
+except Exception:
+    check_coverage_matrix = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -2700,6 +2704,10 @@ def main() -> int:
     warnings.extend(check_replay_evidence(run_dir))    # 操作录像: certainty>=0.8 确认建议附 .replay.json(可重放核实)
     warnings.extend(check_layout_drift(run_dir))       # 布局漂移: 证据/草稿散落 run 根目录(应归位 evidence/scripts/classify)
     warnings.extend(check_coverage_health(run_dir))   # 覆盖台账三联检(防 lump / 缺建 / 子集蒙混; 输入一次加载)
+    if check_coverage_matrix is not None:
+        matrix_warns, matrix_errors = check_coverage_matrix(run_dir)
+        warnings.extend(matrix_warns)                 # 资产×漏洞类别矩阵: 整列空/行稀疏(覆盖方向跑偏)
+        errors.extend(matrix_errors)
     warnings.extend(check_shallow_close(run_dir))     # 纵深: 高价值前沿 depth=shallow 关闭却无 Vectors tried
     warnings.extend(check_closed_artifacts(run_dir))  # 交叉验证: Closed Front 需声明 Artifacts verified (防空 stdout body 错误关闭)
     warnings.extend(check_ledger_contradiction(run_dir))

@@ -330,6 +330,11 @@ assets were only header / recon-classified, never examined. Before any such clai
   name the signal that made each relevant; a negative/deferred record states the barrier
   or why the class did not apply; no fixed payload list (payloads stay local/operator-chosen);
   the gate wants evidence of *reasoning/attack attempt*, not exhaustive exploitation.
+  Run `python tools/coverage_matrix.py runs/<dir> --write` before closure or Coda
+  convergence checks to see the derived asset×vuln-family view. `□` means the
+  category is signal-justified for that asset but no test record is visible; `·`
+  means no current surface signal. Whole empty columns and sparse rows are review
+  signals, not permission to blind-scan.
 - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
   evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,

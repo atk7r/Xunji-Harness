@@ -73,6 +73,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("deferred_queue",   ["tools/deferred_queue.py", "--selftest"],   "deferred asset retry manager"),
     ("workers",          ["tools/workers.py", "--selftest"],          "fan-out worker planning helpers"),
     ("saturation",       ["tools/saturation.py", "--selftest"],       "front saturation scoring"),
+    ("coverage_matrix",  ["tools/coverage_matrix.py", "--selftest"],  "asset x vuln-family coverage matrix"),
     # --- PreToolUse / Stop hooks (--selftest flag) ---
     ("safety_gate",    [".claude/hooks/safety_gate.py", "--selftest"], "hard-boundary gate"),
     ("output_gate",    [".claude/hooks/output_gate.py", "--selftest"], "output drift Stop gate"),
