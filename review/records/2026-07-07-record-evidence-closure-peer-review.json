@@ -1,0 +1,59 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "NEEDS_DRIVER",
+  "backend_used": "panel:arkcli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "480872302f5e2187ddcb6e8d197239e6b6c0e588",
+  "evidence_index_hash": "09866dfafe393b0e9d920ca9c410195dc70e044a",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "kimi-k2.7-code: timeout >300s; minimax-m3: parse error; output tail: FTER state is shown) and the category (this is maintenance, not a security finding).\n\nI'll go with WARN verdict.\n\nNow let me also think about what the author (Claude) might have missed:\n- They might not have shown the BEFORE state to confirm the recorder was actually missing\n- They might not have shown that the new tool actually captures the things it's supposed to\n- They might not have tested the tool with real evidence entries (only syntax check)\n- The review.md attribution issue\n\nLet me write",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "review panel had backend errors; aggregation is partial",
+      "evidence": "claude: NEEDS_DRIVER e_index entries and artifacts prove facts.\n\nROLE FOCUS — closure_skeptic:\nSpend most of your review budget on frontier closure quality: open/deferred fronts, shallow Type B\nbarriers, high-value surfaces, stale review coverage, and whether closure language is stronger than\nthe recorded work supports.",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "At least one requested heterogeneous reviewer failed or was unavailable.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [glm-5.2] <things the author likely overlooked>"
+  ],
+  "context_limits": [
+    "[arkcli] [glm-5.2] <where you are unsure or might be wrong due to Chinese-language or local (CNVD / Taiwan) context you do not fully grasp>",
+    "[arkcli] [glm-5.2] `report.md`: \"Maintenance Report... The Claude-side web research protocol now has a real local recorder for canonical evidence ledger entries. The tool replaces the stock E-001 template on first write...\"",
+    "[arkcli] [glm-5.2] `evidence.md` / `evidence_index`: E-001 is about \"Claude-side web-research skills referenced a missing evidence recorder\". Artifacts include `evidence/check_rules.txt`, `evidence/closure_scan.txt`, `evidence/diff.patch`, etc. These are code commits/diffs for a tool called `tools/record_evidence.py`.",
+    "[arkcli] [glm-5.2] `decisions.md`: \"Chosen front: F-001 web-research evidence recorder... implement the recorder, update Claude-side skills, add aggregate selftest coverage, and record an independent maintenance review.\"",
+    "[arkcli] [glm-5.2] `evidence/check_rules.txt`: \"rule check passed\"",
+    "[arkcli] [glm-5.2] `evidence/closure_scan.txt`: \"all_doc_python_commands 160 missing 0\\nall_selftests 42 not_registered 0\"",
+    "[arkcli] [glm-5.2] `evidence/diff.patch`: 22kb diff",
+    "[arkcli] [glm-5.2] `evidence/git_diff_check.txt`: \"git diff --check passed\"",
+    "[arkcli] [glm-5.2] `evidence/py_compile.txt`: \"py_compile tools/record_evidence.py passed\"",
+    "[arkcli] [glm-5.2] `evidence/selftest_all.txt`: \"4 passed, 0 failed\"",
+    "[arkcli] [glm-5.2] `evidence/check_rules.txt` (size 18): \"rule check passed\\n\"",
+    "[arkcli] [glm-5.2] `evidence/closure_scan.txt` (size 72): \"all_doc_python_commands 160 missing 0\\nall_selftests 42 not_registered 0\\n\"",
+    "[arkcli] [glm-5.2] `evidence/diff.patch` (size 22724): no excerpt provided.",
+    "[arkcli] [glm-5.2] `evidence/git_diff_check.txt` (size 24): \"git diff --check passed\\n\"",
+    "[arkcli] [glm-5.2] `evidence/py_compile.txt` (size 43): \"py_compile tools/record_evidence.py passed\\n\"",
+    "[arkcli] [glm-5.2] `evidence/selftest_all.txt` (size 352): \"running 4 selftest suite(s)... PASS record_evidence 0.0s web research -> evidence ledger\\n4 passed, 0 failed\"",
+    "[arkcli] kimi-k2.7-code: timeout >300s",
+    "[arkcli] minimax-m3: parse error; output tail: FTER state is shown) and the category (this is maintenance, not a security finding).\n\nI'll go with WARN verdict.\n\nNow let me also think about what the author (Claude) might have missed:\n- They might not have shown the BEFORE state to confirm the recorder was actually missing\n- They might not have shown that the new tool actually captures the things it's supposed to\n- They might not have tested the tool with real evidence entries (only syntax check)\n- The review.md attribution issue\n\nLet me write",
+    "claude: NEEDS_DRIVER e_index entries and artifacts prove facts.\n\nROLE FOCUS — closure_skeptic:\nSpend most of your review budget on frontier closure quality: open/deferred fronts, shallow Type B\nbarriers, high-value surfaces, stale review coverage, and whether closure language is stronger than\nthe recorded work supports.",
+    "panel completed 1/2 required heterogeneous backends"
+  ],
+  "error": "claude: NEEDS_DRIVER e_index entries and artifacts prove facts.\n\nROLE FOCUS — closure_skeptic:\nSpend most of your review budget on frontier closure quality: open/deferred fronts, shallow Type B\nbarriers, high-value surfaces, stale review coverage, and whether closure language is stronger than\nthe recorded work supports."
+}

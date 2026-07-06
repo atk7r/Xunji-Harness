@@ -1,0 +1,719 @@
+diff --git a/tools/record_evidence.py b/tools/record_evidence.py
+new file mode 100644
+index 0000000..a82b658
+--- /dev/null
++++ b/tools/record_evidence.py
+@@ -0,0 +1,381 @@
++#!/usr/bin/env python3
++"""Append a normalized evidence entry to a Xunji run ledger.
++
++The tool is intentionally conservative: web research and other external/source
++leads are recorded as low-maturity evidence unless the caller supplies active
++proof fields. It writes only local files and never performs network activity.
++"""
++from __future__ import annotations
++
++import argparse
++import contextlib
++import io
++import json
++import re
++import sys
++import tempfile
++import uuid
++from dataclasses import dataclass
++from datetime import datetime, timezone
++from pathlib import Path
++
++try:
++    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
++    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
++except Exception:
++    pass
++
++ROOT = Path(__file__).resolve().parents[1]
++CANONICAL_CERTAINTY = {"0.3", "0.5", "0.8", "1.0"}
++MATURITY = {"phenomenon", "candidate", "finding"}
++CAUSED_BY_US = {"yes", "no", "unknown"}
++REPORTABLE = {"yes", "no"}
++
++
++@dataclass(frozen=True)
++class AppendResult:
++    entry_id: str
++    path: Path
++    replaced_template: bool
++
++
++def _now_iso() -> str:
++    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
++
++
++def _one_line(value: str | None, default: str = "-") -> str:
++    if value is None:
++        return default
++    clean = re.sub(r"\s+", " ", value.strip())
++    return clean if clean else default
++
++
++def _resolve_run_dir(raw: str) -> Path:
++    run_dir = Path(raw)
++    if not run_dir.is_absolute():
++        run_dir = (Path.cwd() / run_dir).resolve()
++    else:
++        run_dir = run_dir.resolve()
++    if not run_dir.is_dir():
++        raise ValueError(f"run directory does not exist: {run_dir}")
++    ev = run_dir / "evidence.md"
++    if not ev.is_file():
++        raise ValueError(f"missing evidence.md in run directory: {run_dir}")
++    return run_dir
++
++
++def _next_id(text: str) -> str:
++    nums = [int(m.group(1)) for m in re.finditer(r"(?m)^##\s+E-(\d+)\b", text)]
++    if not nums:
++        return "E-001"
++    return f"E-{max(nums) + 1:03d}"
++
++
++def _template_placeholder_span(text: str) -> tuple[int, int, str] | None:
++    """Return the only stock template block span, if evidence.md is still empty."""
++    blocks = list(re.finditer(r"(?ms)^##\s+(E-\d+)\b.*?(?=^##\s+E-\d+\b|\Z)", text))
++    if len(blocks) != 1:
++        return None
++    block = blocks[0].group(0)
++    required = [
++        "- Maturity: phenomenon / candidate / finding",
++        "- Reportable: yes / no",
++        "- Time:",
++        "- Action:",
++        "- Source:",
++        "- Result:",
++        "- Certainty:",
++        "- Next:",
++    ]
++    if all(marker in block for marker in required):
++        return blocks[0].start(), blocks[0].end(), blocks[0].group(1)
++    return None
++
++
++def _validate_args(args: argparse.Namespace) -> None:
++    certainty = str(args.certainty)
++    if certainty not in CANONICAL_CERTAINTY:
++        raise ValueError(
++            "certainty must use the canonical scale: 0.3, 0.5, 0.8, or 1.0"
++        )
++    maturity = args.maturity
++    if maturity not in MATURITY:
++        raise ValueError("maturity must be phenomenon, candidate, or finding")
++    if args.caused_by_us not in CAUSED_BY_US:
++        raise ValueError("caused-by-us must be yes, no, or unknown")
++    if args.reportable not in REPORTABLE:
++        raise ValueError("reportable must be yes or no")
++    if args.date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}Z)?", args.date):
++        raise ValueError("date must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ")
++
++    confirmed = float(certainty) >= 0.8
++    if confirmed and maturity != "finding":
++        raise ValueError("certainty >= 0.8 requires maturity=finding")
++    if maturity == "finding" and not confirmed:
++        raise ValueError("maturity=finding requires certainty >= 0.8")
++    if confirmed and (not args.artifacts or not args.replicated_control):
++        raise ValueError(
++            "confirmed evidence requires --artifacts and --replicated-control"
++        )
++    if args.source == "web-research" and (confirmed or maturity == "finding"):
++        raise ValueError(
++            "web-research entries are source leads; verify with saved target "
++            "artifacts before promoting to finding"
++        )
++    if not args.finding:
++        raise ValueError("--finding is required")
++    if not (args.query or args.action):
++        raise ValueError("--query or --action is required")
++    if not args.provenance:
++        raise ValueError("--provenance is required")
++
++
++def _default_action(args: argparse.Namespace) -> str:
++    if args.action:
++        return args.action
++    if args.query:
++        return f"Web research query: {args.query}"
++    return "Record evidence lead"
++
++
++def _default_next(args: argparse.Namespace) -> str:
++    if args.next:
++        return args.next
++    if args.source == "web-research":
++        return "Verify against target artifacts before promotion."
++    return "Use as lead unless upgraded with control and artifacts."
++
++
++def _default_trust(args: argparse.Namespace) -> str:
++    if args.trust:
++        return args.trust
++    source = args.source.lower()
++    if source == "web-research" or source.startswith("target-"):
++        return "untrusted"
++    return "operator-reviewed"
++
++
++def _default_alternative_explanation(args: argparse.Namespace) -> str:
++    if args.alternative_explanation:
++        return args.alternative_explanation
++    source = args.source.lower()
++    if source == "web-research":
++        return "External source may be stale, wrong, or not applicable until verified against current target artifacts."
++    if source.startswith("target-"):
++        return "Single target observation may have benign confounders unless control or replication rules them out."
++    return "Recorded source may be incomplete, mis-scoped, or contradicted by later evidence."
++
++
++def _format_block(entry_id: str, args: argparse.Namespace) -> str:
++    title = _one_line(args.title, _one_line(args.finding)[:72]).rstrip()
++    fields: list[tuple[str, str]] = [
++        ("Maturity", args.maturity),
++        ("Reportable", args.reportable),
++        ("Time", args.date or _now_iso()),
++        ("Action", _default_action(args)),
++        ("Source", args.source),
++        ("Trust", _default_trust(args)),
++    ]
++    if args.query:
++        fields.append(("Query", args.query))
++    fields += [
++        ("Result", args.finding),
++        ("Provenance", args.provenance),
++        ("Caused by us", args.caused_by_us),
++        ("Alternative explanation", _default_alternative_explanation(args)),
++        ("Certainty", args.certainty),
++    ]
++    if args.replicated_control:
++        fields.append(("Replicated / Control", args.replicated_control))
++    fields.append(("Artifacts", args.artifacts or "none"))
++    fields += [
++        ("Supports", args.supports),
++        ("Refutes", args.refutes),
++    ]
++    if args.unlocks:
++        fields.append(("Unlocks", args.unlocks))
++    fields.append(("Next", _default_next(args)))
++
++    lines = [f"## {entry_id} - {title}", ""]
++    lines.extend(f"- {name}: {_one_line(value)}" for name, value in fields)
++    return "\n".join(lines) + "\n"
++
++
++def append_entry(run_dir: Path, args: argparse.Namespace) -> AppendResult:
++    ev = run_dir / "evidence.md"
++    text = ev.read_text(encoding="utf-8", errors="replace")
++    placeholder = _template_placeholder_span(text)
++    if placeholder:
++        start, end, entry_id = placeholder
++        new_text = text[:start].rstrip() + "\n\n" + _format_block(entry_id, args) + text[end:].lstrip("\n")
++        replaced = True
++    else:
++        entry_id = _next_id(text)
++        prefix = text.rstrip() + "\n\n" if text.strip() else ""
++        new_text = prefix + _format_block(entry_id, args)
++        replaced = False
++
++    tmp = ev.with_name(f".{ev.name}.{uuid.uuid4().hex}.tmp")
++    tmp.write_text(new_text, encoding="utf-8")
++    tmp.replace(ev)
++    return AppendResult(entry_id=entry_id, path=ev, replaced_template=replaced)
++
++
++def _parser() -> argparse.ArgumentParser:
++    ap = argparse.ArgumentParser(description="Record a normalized Xunji evidence entry.")
++    ap.add_argument("--run", required=False, help="run directory containing evidence.md")
++    ap.add_argument("--source", default="web-research", help="evidence source label")
++    ap.add_argument("--trust", help="provenance trust label; defaults from --source")
++    ap.add_argument("--query", help="research query or searched phrase")
++    ap.add_argument("--date", help="entry timestamp, preferably tools/timestamp_gate.py --iso")
++    ap.add_argument("--finding", help="what was found")
++    ap.add_argument("--provenance", help="URL, source name, or local source pointer")
++    ap.add_argument("--title", help="optional heading title")
++    ap.add_argument("--maturity", default="phenomenon", choices=sorted(MATURITY))
++    ap.add_argument("--certainty", default="0.3", choices=sorted(CANONICAL_CERTAINTY))
++    ap.add_argument("--reportable", default="no", choices=sorted(REPORTABLE))
++    ap.add_argument("--action", help="explicit action field; defaults from --query")
++    ap.add_argument("--caused-by-us", default="no", choices=sorted(CAUSED_BY_US))
++    ap.add_argument(
++        "--alternative-explanation",
++        help="benign/confounding explanation to preserve in the evidence entry",
++    )
++    ap.add_argument("--replicated-control", help="required for confirmed evidence")
++    ap.add_argument("--artifacts", help="saved artifact path(s), required for confirmed evidence")
++    ap.add_argument("--supports", default="-", help="IDs this entry supports")
++    ap.add_argument("--refutes", default="-", help="IDs this entry refutes")
++    ap.add_argument("--unlocks", help="optional F-id unlocked by this confirmed fact")
++    ap.add_argument("--next", help="next action")
++    ap.add_argument("--dry-run", action="store_true", help="print the block without writing")
++    ap.add_argument("--json", action="store_true", help="print machine-readable result")
++    ap.add_argument("--selftest", action="store_true", help="run local regression tests")
++    return ap
++
++
++def main(argv: list[str] | None = None) -> int:
++    ap = _parser()
++    args = ap.parse_args(argv)
++    if args.selftest:
++        return _selftest()
++    if not args.run:
++        ap.error("--run is required unless --selftest is used")
++    try:
++        _validate_args(args)
++        run_dir = _resolve_run_dir(args.run)
++        if args.dry_run:
++            text = (run_dir / "evidence.md").read_text(encoding="utf-8", errors="replace")
++            placeholder = _template_placeholder_span(text)
++            entry_id = placeholder[2] if placeholder else _next_id(text)
++            print(_format_block(entry_id, args), end="")
++            return 0
++        result = append_entry(run_dir, args)
++    except ValueError as exc:
++        print(f"record_evidence: {exc}", file=sys.stderr)
++        return 2
++
++    if args.json:
++        print(json.dumps({
++            "id": result.entry_id,
++            "path": str(result.path),
++            "replaced_template": result.replaced_template,
++        }, ensure_ascii=False))
++    else:
++        print(f"{result.entry_id} {result.path}")
++    return 0
++
++
++def _template_text() -> str:
++    return """# Evidence Ledger
++
++## E-001
++
++- Maturity: phenomenon / candidate / finding
++- Reportable: yes / no (confirmed vuln->report; coverage/verdict->summary)
++- Time:
++- Action:
++- Source:
++- Result:
++- Caused by us: yes / no / unknown
++- Alternative explanation:
++- Certainty:
++- Replicated / Control: (conditional)
++- Artifacts: (conditional)
++- Supports:
++- Refutes:
++- Unlocks: (conditional)
++- Next:
++"""
++
++
++def _selftest() -> int:
++    sys.path.insert(0, str(ROOT / "tools"))
++    from evidence_parse import parse_evidence  # pylint: disable=import-error
++
++    def run_cli(argv: list[str]) -> int:
++        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
++            return main(argv)
++
++    checks: list[tuple[str, bool]] = []
++    d = Path(tempfile.mkdtemp())
++    (d / "evidence.md").write_text(_template_text(), encoding="utf-8")
++
++    base = [
++        "--run", str(d),
++        "--query", "Sample Product CVE 2026",
++        "--date", "2026-07-07T00:00:00Z",
++        "--finding", "Vendor advisory describes a fixed auth bypass.",
++        "--provenance", "https://vendor.example/advisory.html",
++    ]
++    rc = run_cli(base + ["--json"])
++    text = (d / "evidence.md").read_text(encoding="utf-8")
++    recs = parse_evidence(d)
++    checks.append(("first write replaces template E-001", rc == 0 and "phenomenon / candidate / finding" not in text))
++    checks.append(("parser sees one low-maturity record", len(recs) == 1 and recs[0]["id"] == "E-001" and not recs[0]["confirmed"]))
++    checks.append(("web research default trust is untrusted", recs[0]["trust"] == "untrusted"))
++    checks.append(("Artifacts field scopes URL away from artifact parser", recs[0]["artifacts"] == [] and recs[0]["artifacts_scoped"]))
++
++    rc2 = run_cli(base + [
++        "--finding", "Independent docs mention the same product behavior.",
++        "--provenance", "https://docs.example/product",
++        "--certainty", "0.5",
++        "--maturity", "candidate",
++    ])
++    recs2 = parse_evidence(d)
++    checks.append(("second write appends E-002", rc2 == 0 and [r["id"] for r in recs2] == ["E-001", "E-002"]))
++    checks.append(("canonical 0.5 stays unconfirmed candidate", recs2[1]["maturity"] == "candidate" and not recs2[1]["confirmed"]))
++
++    bad = Path(tempfile.mkdtemp())
++    (bad / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    rc3 = run_cli(base + ["--run", str(bad), "--certainty", "0.8", "--maturity", "finding"])
++    checks.append(("web research cannot be promoted directly", rc3 == 2))
++
++    proof = Path(tempfile.mkdtemp())
++    (proof / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    rc4 = run_cli([
++        "--run", str(proof),
++        "--source", "target-session-artifact",
++        "--action", "probe saved response",
++        "--finding", "Saved response demonstrates the behavior.",
++        "--provenance", "evidence/proof.html",
++        "--certainty", "0.8",
++        "--maturity", "finding",
++        "--reportable", "yes",
++        "--replicated-control", "baseline and mutant differ stably",
++        "--artifacts", "evidence/proof.html",
++    ])
++    proof_rec = parse_evidence(proof)[0]
++    checks.append(("target artifact default trust is untrusted", proof_rec["trust"] == "untrusted"))
++    checks.append(("non-web confirmed entry can be recorded with proof fields", rc4 == 0))
++
++    rc5 = run_cli(base + ["--date", "yesterday"])
++    checks.append(("malformed date is rejected", rc5 == 2))
++
++    bad_names = [name for name, ok in checks if not ok]
++    for name, ok in checks:
++        print(("ok   " if ok else "FAIL ") + name)
++    print("record_evidence selftest " + ("passed" if not bad_names else f"FAILED ({len(bad_names)})"))
++    return 0 if not bad_names else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/review/records/2026-07-07-record-evidence-closure/target.md b/review/records/2026-07-07-record-evidence-closure/target.md
+new file mode 100644
+index 0000000..d01e368
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/target.md
+@@ -0,0 +1,7 @@
++# Maintenance Review Target
++
++- Target: Codex-authored web-research evidence recording closure
++- In-scope assets: `.claude/skills/web-research/SKILL.md`, `.claude/skills/xunji-web-research-sync/SKILL.md`, `tools/record_evidence.py`, `tools/selftest_all.py`
++- Out-of-scope assets: `.claude/hooks/`, `tools/harness/guard.py`, `sentinel/`, live target run files
++- Existing intel / recon report: none
++- Notes: This is repository maintenance review, not a live engagement. The change closes a Claude primary-driver skill/tool gap where web research referenced `tools/record_evidence.py` before the tool existed.
+diff --git a/review/records/2026-07-07-record-evidence-closure/surface.md b/review/records/2026-07-07-record-evidence-closure/surface.md
+new file mode 100644
+index 0000000..a2a103d
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/surface.md
+@@ -0,0 +1,5 @@
++# Surface
++
++- Repository maintenance diff only.
++- No target network surface.
++- Reviewed files are listed in `target.md`.
+diff --git a/review/records/2026-07-07-record-evidence-closure/frontier.md b/review/records/2026-07-07-record-evidence-closure/frontier.md
+new file mode 100644
+index 0000000..fc42d86
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/frontier.md
+@@ -0,0 +1,18 @@
++# Frontier
++
++## Open Fronts
++
++- None for this maintenance record.
++
++## Deferred Fronts
++
++- None.
++
++## Closed Fronts
++
++### F-001 web-research evidence recorder
++
++- Status: closed
++- Barrier class: documentation/tooling closure
++- Failure budget: n/a
++- Result: `tools/record_evidence.py` implemented, documented from Claude-side web research skills, and covered by `selftest_all.py`.
+diff --git a/review/records/2026-07-07-record-evidence-closure/hypotheses.md b/review/records/2026-07-07-record-evidence-closure/hypotheses.md
+new file mode 100644
+index 0000000..9c6c350
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/hypotheses.md
+@@ -0,0 +1,8 @@
++# Hypotheses
++
++## H-001
++
++- Status: confirmed
++- Claim: `.claude/skills/web-research/SKILL.md` referenced a non-existent evidence recorder, breaking the "research complete when recorded" protocol.
++- What would confirm: command-reference scan shows the missing tool before the fix; post-fix scan shows no missing `python tools/*.py` commands.
++- What would reject: the tool already existed or the skill no longer referenced it.
+diff --git a/review/records/2026-07-07-record-evidence-closure/evidence.md b/review/records/2026-07-07-record-evidence-closure/evidence.md
+new file mode 100644
+index 0000000..65d49dd
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/evidence.md
+@@ -0,0 +1,24 @@
++# Evidence Ledger
++
++> Certainty: use only the canonical scale: `1.0` direct/reproducible,
++> `0.8` controlled/replayed confirmed, `0.5` suspected candidate, `0.3` clue/noise.
++
++## E-001 - Claude-side web-research skills referenced a missing evidence recorder;
++
++- Maturity: finding
++- Reportable: yes
++- Time: 2026-07-06T23:03:38Z
++- Action: Web research query: web-research record_evidence closure
++- Source: source-code-review
++- Trust: operator-reviewed
++- Query: web-research record_evidence closure
++- Result: Claude-side web-research skills referenced a missing evidence recorder; tools/record_evidence.py now provides canonical E-entry writing, conservative web-research maturity defaults, template E-001 replacement, selftest coverage, and aggregate selftest registration.
++- Provenance: evidence/diff.patch
++- Caused by us: no
++- Alternative explanation: Recorded source may be stale, wrong, incomplete, or not applicable until verified against current target artifacts.
++- Certainty: 0.8
++- Replicated / Control: Post-fix command scan shows all_doc_python_commands 160 missing 0 and all_selftests 42 not_registered 0; targeted selftests passed; full selftest_all passed 46/46; check_rules, check_templates, runtime_boundary, py_compile, and git diff --check passed.
++- Artifacts: evidence/diff.patch, evidence/selftest_all_full.txt, evidence/selftest_all.txt, evidence/closure_scan.txt, evidence/check_rules.txt, evidence/check_templates.txt, evidence/check_runtime_boundary.txt, evidence/git_diff_check.txt, evidence/py_compile.txt
++- Supports: H-001
++- Refutes: -
++- Next: Peer-review findings were adjudicated in the disposition record.
+diff --git a/review/records/2026-07-07-record-evidence-closure/false_positive.md b/review/records/2026-07-07-record-evidence-closure/false_positive.md
+new file mode 100644
+index 0000000..d5560a7
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/false_positive.md
+@@ -0,0 +1,5 @@
++# False-Positive Checks
++
++- Could be environmental: no; the pre-fix failure was a repository-local missing file reference.
++- Impact verified: yes; the missing command would prevent the Claude web-research protocol from mechanically recording canonical `## E-xxx` entries.
++- Benign explanation: manual evidence writing was documented as fallback, but that bypassed the intended tool-backed schema and numbering.
+diff --git a/review/records/2026-07-07-record-evidence-closure/decisions.md b/review/records/2026-07-07-record-evidence-closure/decisions.md
+new file mode 100644
+index 0000000..8b29c28
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/decisions.md
+@@ -0,0 +1,8 @@
++# Decisions
++
++## D-001
++
++- Loaded rule files this cycle: `AGENTS.md`, `xunji-web-research-sync`, `xunji-peer-review-panel`
++- Chosen front: F-001 web-research evidence recorder
++- Why this is worth pursuing now: `.claude/skills/web-research` made recording evidence the completion condition, but the referenced recorder did not exist.
++- Decision: implement the recorder, update Claude-side skills, add aggregate selftest coverage, and record an independent maintenance review.
+diff --git a/review/records/2026-07-07-record-evidence-closure/review.md b/review/records/2026-07-07-record-evidence-closure/review.md
+new file mode 100644
+index 0000000..6731402
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/review.md
+@@ -0,0 +1,6 @@
++# Review
++
++- Shallow work smells: addressed by command-reference scan and targeted selftests.
++- Repeated-barrier loops: none.
++- Failure-budget triggers: n/a.
++- Next autonomous front: none; peer-review findings were adjudicated in the disposition record.
+diff --git a/review/records/2026-07-07-record-evidence-closure/report.md b/review/records/2026-07-07-record-evidence-closure/report.md
+new file mode 100644
+index 0000000..1a9c4b0
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure/report.md
+@@ -0,0 +1,13 @@
++# Maintenance Report
++
++## Confirmed Findings
++
++### Web research evidence recording closure
++
++- Evidence IDs: E-001
++- Summary: The Claude-side web research protocol now has a real local recorder for canonical evidence ledger entries. The tool replaces the stock `E-001` template on first write, appends subsequent entries with stable numbering, defaults web research to low-maturity untrusted evidence, blocks direct web-research promotion to `finding`, and is included in `tools/selftest_all.py`.
++- Verification: full `python3 tools/selftest_all.py` passed 46/46, plus command-reference and selftest-registration scans are clean.
++
++## Candidate / Phenomena
++
++- Peer-review backend availability was partial; see the disposition record for the arkcli/Claude review limitations and fixes.
+diff --git a/review/records/2026-07-07-record-evidence-closure-disposition.md b/review/records/2026-07-07-record-evidence-closure-disposition.md
+new file mode 100644
+index 0000000..cae6795
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure-disposition.md
+@@ -0,0 +1,40 @@
++# Driver Disposition — record_evidence Closure
++
++- Verdict: PASS with recorded review limitation
++- Time: 2026-07-07
++- Author: Codex
++- Review scope: `review/records/2026-07-07-record-evidence-closure/`
++- diff_fingerprint: 01733d9b60b43676
++- reviewed_diff: 01733d9b60b43676
++- Arkcli/peer_review record: `review/records/2026-07-07-record-evidence-closure-peer-review.md`
++- Claude fresh-context record: `review/records/2026-07-07-record-evidence-closure-claude-review.md`
++
++## Findings Disposition
++
++| Finding | Disposition |
++|---|---|
++| peer_review PR-001/PR-002: review panel/backend errors; aggregation partial. | Accepted limitation. Arkcli produced one usable backend result and backend-error warnings; Claude backend required driver action. Supplemented with direct `claude -p` fresh-context review. |
++| Claude WARN: selftest evidence was partial and review overclaimed full coverage. | Accepted and fixed. Ran full `python3 tools/selftest_all.py`; artifact `evidence/selftest_all_full.txt` shows 46 passed, 0 failed. Updated `evidence.md` and `report.md`. |
++| Claude WARN: `--trust` defaulted to `operator-reviewed` for web research. | Accepted and fixed. `record_evidence.py` now derives default trust from source: `web-research` and `target-*` default to `untrusted`; other sources default to `operator-reviewed`. Added selftests. |
++| Claude WARN: manual-write fallback was removed without replacement. | Accepted and fixed. Both Claude-side web-research skills now document a recovery path: use `--dry-run` and paste the canonical block, or hand-write the same canonical fields and log recovery in `decisions.md` if tool execution is unavailable. |
++| Claude INFO: default alternative explanation was web-research shaped for all sources. | Accepted and fixed. Defaults are now source-sensitive for `web-research`, `target-*`, and other source labels. |
++| Claude INFO: no update/edit path for existing E-ids. | Accepted residual. The tool intentionally handles append/template replacement only; promotion or correction remains a deliberate Markdown edit so the driver reconsiders evidence maturity. |
++| Claude INFO: no cross-reference validation for `Supports`/`Refutes`. | Accepted residual. Existing closure tooling parses evidence references; the recorder stays small and avoids becoming a full ledger editor. |
++
++## Verification
++
++- `python3 tools/record_evidence.py --selftest`
++- `python3 tools/selftest_all.py --only check_run,record_evidence,timestamp_gate,peer_review`
++- `python3 tools/selftest_all.py`
++- `python3 tools/check_rules.py`
++- `python3 tools/check_templates.py`
++- `python3 tools/check_runtime_boundary.py`
++- `python3 -m py_compile tools/record_evidence.py`
++- `git diff --check`
++- full documentation command scan: `all_doc_python_commands 160 missing 0`
++- selftest-registration scan: `all_selftests 42 not_registered 0`
++
++## Residual Risk
++
++- `peer_review.py` arkcli panel was partial: one usable arkcli backend, one timeout, one parse error. This is recorded as a review limitation, not counted as a Codex self-review.
++- The review scope is under `review/records/`, so `tools/check_run.py` intentionally refuses it as a non-`runs/` path. The maintenance record still uses run-shaped files and artifact-backed evidence for review clarity.
+diff --git a/review/records/2026-07-07-record-evidence-closure-peer-review.md b/review/records/2026-07-07-record-evidence-closure-peer-review.md
+new file mode 100644
+index 0000000..4324c72
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure-peer-review.md
+@@ -0,0 +1,77 @@
++# Peer Review Panel — 2026-07-07-record-evidence-closure
++
++_backend: panel:arkcli · 2026-07-06T23:10Z_
++> 候选, 非裁决。driver 须逐条过证据门。
++
++## Verdict: NEEDS_DRIVER
++
++_backend: panel:arkcli_
++_brain: codex_
++_bundle_hash: 480872302f5e2187ddcb6e8d197239e6b6c0e588_
++_evidence_index_hash: 09866dfafe393b0e9d920ca9c410195dc70e044a_
++
++## Findings
++- [WARN] PR-001 arkcli panel had backend errors; review is partial | Evidence: kimi-k2.7-code: timeout >300s; minimax-m3: parse error; output tail: FTER state is shown) and the category (this is maintenance, not a security finding).
++
++I'll go with WARN verdict.
++
++Now let me also think about what the author (Claude) might have missed:
++- They might not have shown the BEFORE state to confirm the recorder was actually missing
++- They might not have shown that the new tool actually captures the things it's supposed to
++- They might not have tested the tool with real evidence entries (only syntax check)
++- The review.md attribution issue
++
++Let me write | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
++- [WARN] PR-002 review panel had backend errors; aggregation is partial | Evidence: claude: NEEDS_DRIVER e_index entries and artifacts prove facts.
++
++ROLE FOCUS — closure_skeptic:
++Spend most of your review budget on frontier closure quality: open/deferred fronts, shallow Type B
++barriers, high-value surfaces, stale review coverage, and whether closure language is stronger than
++the recorded work supports. | Why: At least one requested heterogeneous reviewer failed or was unavailable.
++
++## Blind-spot check
++- [arkcli] [glm-5.2] <things the author likely overlooked>
++
++## Context-limit notes
++- [arkcli] [glm-5.2] <where you are unsure or might be wrong due to Chinese-language or local (CNVD / Taiwan) context you do not fully grasp>
++- [arkcli] [glm-5.2] `report.md`: "Maintenance Report... The Claude-side web research protocol now has a real local recorder for canonical evidence ledger entries. The tool replaces the stock E-001 template on first write..."
++- [arkcli] [glm-5.2] `evidence.md` / `evidence_index`: E-001 is about "Claude-side web-research skills referenced a missing evidence recorder". Artifacts include `evidence/check_rules.txt`, `evidence/closure_scan.txt`, `evidence/diff.patch`, etc. These are code commits/diffs for a tool called `tools/record_evidence.py`.
++- [arkcli] [glm-5.2] `decisions.md`: "Chosen front: F-001 web-research evidence recorder... implement the recorder, update Claude-side skills, add aggregate selftest coverage, and record an independent maintenance review."
++- [arkcli] [glm-5.2] `evidence/check_rules.txt`: "rule check passed"
++- [arkcli] [glm-5.2] `evidence/closure_scan.txt`: "all_doc_python_commands 160 missing 0\nall_selftests 42 not_registered 0"
++- [arkcli] [glm-5.2] `evidence/diff.patch`: 22kb diff
++- [arkcli] [glm-5.2] `evidence/git_diff_check.txt`: "git diff --check passed"
++- [arkcli] [glm-5.2] `evidence/py_compile.txt`: "py_compile tools/record_evidence.py passed"
++- [arkcli] [glm-5.2] `evidence/selftest_all.txt`: "4 passed, 0 failed"
++- [arkcli] [glm-5.2] `evidence/check_rules.txt` (size 18): "rule check passed\n"
++- [arkcli] [glm-5.2] `evidence/closure_scan.txt` (size 72): "all_doc_python_commands 160 missing 0\nall_selftests 42 not_registered 0\n"
++- [arkcli] [glm-5.2] `evidence/diff.patch` (size 22724): no excerpt provided.
++- [arkcli] [glm-5.2] `evidence/git_diff_check.txt` (size 24): "git diff --check passed\n"
++- [arkcli] [glm-5.2] `evidence/py_compile.txt` (size 43): "py_compile tools/record_evidence.py passed\n"
++- [arkcli] [glm-5.2] `evidence/selftest_all.txt` (size 352): "running 4 selftest suite(s)... PASS record_evidence 0.0s web research -> evidence ledger\n4 passed, 0 failed"
++- [arkcli] kimi-k2.7-code: timeout >300s
++- [arkcli] minimax-m3: parse error; output tail: FTER state is shown) and the category (this is maintenance, not a security finding).
++
++I'll go with WARN verdict.
++
++Now let me also think about what the author (Claude) might have missed:
++- They might not have shown the BEFORE state to confirm the recorder was actually missing
++- They might not have shown that the new tool actually captures the things it's supposed to
++- They might not have tested the tool with real evidence entries (only syntax check)
++- The review.md attribution issue
++
++Let me write
++- claude: NEEDS_DRIVER e_index entries and artifacts prove facts.
++
++ROLE FOCUS — closure_skeptic:
++Spend most of your review budget on frontier closure quality: open/deferred fronts, shallow Type B
++barriers, high-value surfaces, stale review coverage, and whether closure language is stronger than
++the recorded work supports.
++- panel completed 1/2 required heterogeneous backends
++
++> ERROR: claude: NEEDS_DRIVER e_index entries and artifacts prove facts.
++
++ROLE FOCUS — closure_skeptic:
++Spend most of your review budget on frontier closure quality: open/deferred fronts, shallow Type B
++barriers, high-value surfaces, stale review coverage, and whether closure language is stronger than
++the recorded work supports.
+\ No newline at end of file
+diff --git a/review/records/2026-07-07-record-evidence-closure-claude-review.md b/review/records/2026-07-07-record-evidence-closure-claude-review.md
+new file mode 100644
+index 0000000..8c1efd8
+--- /dev/null
++++ b/review/records/2026-07-07-record-evidence-closure-claude-review.md
+@@ -0,0 +1,48 @@
++Now I have all the information I need. Let me compile the fresh-context review.
++
++---
++
++## Claude Fresh-Context Review — record_evidence closure
++
++- **Verdict:** WARN
++- **Findings:**
++
++  - **WARN — Selftest evidence is partial; review overclaims full coverage**
++    `evidence/selftest_all.txt` shows only 4 suites were run (`--only check_run,peer_review,timestamp_gate,record_evidence`). The `closure_scan.txt` claims `all_selftests 42 not_registered 0` but that's a static count from the `SUITES` list, not a live execution. `report.md` says "4 passed, 0 failed" — true for the 4 run, but the diff adds `record_evidence` to a 42‑entry battery and only 1/10th of it was exercised. A full-battery run before declaring closure would catch import-order side-effects, module shadowing (the tool imports `evidence_parse`), or temp‑file contention.
++
++  - **WARN — `--trust` defaults to `operator-reviewed`, misleading for web‑research**
++    `record_evidence.py:205`: `--trust` default is `"operator-reviewed"`. Every entry emitted by the tool — including web‑research entries where `--source web-research` — gets `Trust: operator-reviewed`. Web research is an *unverified external source*; labeling it operator‑reviewed before the operator has reviewed it weakens the trust signal. The `evidence_parse.py:152` inference logic happens to assign the same label for non‑target sources, so this is consistent (not a regression), but the tool has a chance to be better than the inference fallback — it knows the source at write time. Consider: source `"web-research"` → trust `"untrusted"`; source `"target-*"` → trust `"untrusted"`; everything else → `"operator-reviewed"`.
++
++  - **WARN — Manual‑write fallback removed from `web-research/SKILL.md` with no replacement**
++    `web-research/SKILL.md` diff removes the fallback block:
++    ```markdown
++    If `record_evidence.py` is not available, write directly to `evidence.md` with: ...
++    ```
++    The original fallback was weak (free‑form prose, no E‑id, no canonical fields), but it was *something* — a protocol‑compliant operator could still record evidence when the tool wasn't present. Now the tool IS present, so this is correct in theory, but if the tool ever breaks (Python path issue, missing `evidence.md`, write‑permission failure), the skill offers no documented recovery path. A one‑line "if the tool fails, fall back to `record_evidence.py --dry-run` and hand‑write the block" would preserve the safety margin without weakening the mechanical‑first discipline.
++
++  - **INFO — `--alternative-explanation` default is web‑research‑specific but applied universally**
++    `record_evidence.py:217-220`: the default alt‑explanation is `"Recorded source may be stale, wrong, incomplete, or not applicable until verified against current target artifacts."` This is exactly right for web‑research entries. For a `target-session-artifact` entry with `certainty=0.8` and `artifacts=evidence/proof.html`, the same boilerplate is misleading — the source IS a current target artifact. The caller can override it, but a source‑sensitive default would be cleaner. Not a blocker.
++
++  - **INFO — Tool is append‑only; no update/edit path**
++    `append_entry()` always appends (or replaces the template on first write). There's no mechanism to update an existing E‑id entry after the fact (e.g., promote a `phenomenon` to `candidate` after cross‑validation). The `evidence.md` file is plain Markdown and can be hand‑edited, but the mechanical path is one‑directional. This is a deliberate simplicity choice, not a bug, but it means the "recording closure" is append‑closure, not lifecycle‑closure.
++
++  **No findings on the following (verified clean):**
++
++  - **E‑id numbering**: `_next_id()` at line 139 scans all `## E-\d+` headers and increments from max+1. Template replacement at line 146–164 correctly detects the single stock `E-001` block with all 8 required field markers and re‑uses the same ID. Tested in selftest (lines 382–384).
++  - **Conservative defaults**: Default `phenomenon`/`0.3` is enforced at `argparse` level (lines 212–213, `default=`). Cross‑validation pathway (`--maturity candidate --certainty 0.5`) is documented in both skills and validated in selftest (line 394–395).
++  - **Web‑research promotion gate**: `_validate_args` at line 118–122 hard‑blocks `source=web-research` combined with `certainty >= 0.8` or `maturity=finding`. Selftest at line 398–399 confirms exit code 2 for this case.
++  - **Certainty↔maturity consistency**: Lines 109–116 enforce bidirectional consistency (`>=0.8` ⇔ `finding`, `< 0.8` ⇔ not‑`finding`).
++  - **Confirmed‑evidence artifact/control gate**: Line 114–116 requires `--artifacts` and `--replicated-control` when certainty ≥ 0.8.
++  - **Artifact scoping**: The tool emits `Artifacts: none` for web‑research entries. Selftest at line 384 confirms the parser (`evidence_parse.py`) correctly scopes this field and doesn't mis‑parse URLs in other fields as missing file artifacts.
++  - **Atomic write**: Lines 268–270 use tempfile + `os.Path.replace()` — safe against partial writes.
++  - **Docs accuracy**: Both skill files reference the real, existing `tools/record_evidence.py`. Default behavior (`phenomenon`/`0.3`, `--maturity candidate --certainty 0.5` after cross‑validation) is documented identically in both skills. The `xunji-web-research-sync` doc correctly distinguishes evidence recording from `decisions.md` recording (line 85: "Write decisions.md only when the research changed a run decision").
++  - **No weakening of evidence discipline**: The change removes a weak prose‑only fallback and replaces it with a mechanical tool that enforces canonical fields, correct E‑id numbering, conservative defaults, and a hard gate against direct web‑research‑to‑finding promotion. Evidence discipline is *strengthened*, not weakened.
++  - **selftest_all.py integration**: The new `record_evidence` entry at line 66 is correctly placed adjacent to `timestamp_gate` (its upstream dependency in the web‑research pipeline), follows the same `(name, argv, note)` tuple format, and would be exercised by a full `python tools/selftest_all.py` run.
++
++- **Residual risk / limitations**
++
++  1. **No integration test with a real run directory**: The selftest uses `tempfile.mkdtemp()` with synthetic `evidence.md` content. A real run's `evidence.md` might have edge cases (UTF‑8 BOM, Windows CRLF, large 100+ entry files, entries with trailing `E-xxx` in prose). The tool uses `errors="replace"` on reads which would silently mangle encoding errors.
++  2. **No `--date` format validation**: The tool accepts any string for `--date`. A malformed date (e.g., `"yesterday"`) would be written into `Time:` verbatim. The skill docs recommend `$(python tools/timestamp_gate.py --iso)` but the tool doesn't enforce it.
++  3. **No cross‑reference validation**: `--supports` and `--refutes` accept arbitrary strings but the tool never verifies those E‑ids/H‑ids/F‑ids exist in the current ledger. An entry can reference a non‑existent E‑id and the tool won't warn.
++  4. **Single‑block‑only template detection**: `_template_placeholder_span()` at line 147 requires exactly one `## E-\d+` block. If someone writes two template stubs (unlikely but possible), the tool falls through to append‑mode and creates `E-003`, leaving stale templates. This is conservative (no data loss) but means the template‑replace path is fragile to accidental edits.
++  5. **The peer review panel was partial**: PR‑001 and PR‑002 confirm arkcli backends (kimi‑k2.7‑code, minimax‑m3) failed; only `glm‑5.2` produced usable output. The Claude fresh‑context review fills this gap but the heterogeneous coverage isn't as broad as intended.

@@ -63,6 +63,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("xday_match",      ["tools/xday_match.py", "--selftest"],      "fingerprint→local xday retrieval"),
     ("knowledge_seed",  ["tools/knowledge_seed.py", "--selftest"],  "fingerprint→knowledge write-back"),
     ("timestamp_gate",  ["tools/timestamp_gate.py", "--selftest"],  "web research time gate"),
+    ("record_evidence", ["tools/record_evidence.py", "--selftest"], "web research -> evidence ledger"),
     ("decode_viewstate", ["tools/decode_viewstate.py", "--selftest"], "ASP.NET ViewState decoder"),
     ("input_shape",     ["tools/input_shape.py", "--selftest"],     "request shape parser"),
     ("oob_listener",    ["tools/oob_listener.py", "--selftest"],    "local OOB listener"),

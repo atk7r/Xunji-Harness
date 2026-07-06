@@ -68,14 +68,16 @@ python tools/record_evidence.py --run <run_dir> \
   --provenance "<URL or source>"
 ```
 
-If `record_evidence.py` is not available, write directly to `evidence.md` with:
-```markdown
-- Source: WebResearch, <date>
-- Query: <search query>
-- Finding: <what was found>
-- Provenance: <URL>
-- Confidence: low/medium/high (based on source authority + cross-validation)
-```
+The tool records web research as `Maturity: phenomenon` / `Certainty: 0.3` by
+default. Use `--maturity candidate --certainty 0.5` only after cross-validation.
+Do not promote web research directly to `finding`; verify against current target
+artifacts first.
+
+If the write path fails but the tool can still run, use `--dry-run` and paste the
+generated `## E-xxx` block into `evidence.md`. If Python/tool execution is
+unavailable, hand-copy the same canonical fields (`Maturity`, `Certainty`,
+`Source`, `Trust`, `Provenance`, `Artifacts`) and record the recovery in
+`decisions.md`.
 
 ### Step 5: Return to Caller
 

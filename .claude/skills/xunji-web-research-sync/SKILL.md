@@ -67,9 +67,27 @@ current target.
 
 ## Recording
 
-Write the query, date, source URL, and confidence into `evidence.md` or
-`decisions.md`. Web research alone is usually `phenomenon` or `candidate`; it
-becomes `finding` only after active proof and the evidence gate.
+Prefer the mechanical evidence recorder so the run ledger keeps canonical
+`Maturity:` and `Certainty:` fields:
+
+```bash
+python tools/record_evidence.py --run <run_dir> \
+  --source web-research \
+  --query "<search query>" \
+  --date "$(python tools/timestamp_gate.py --iso)" \
+  --finding "<what was found>" \
+  --provenance "<URL or source>"
+```
+
+Web research alone defaults to `Maturity: phenomenon` / `Certainty: 0.3`.
+Use `--maturity candidate --certainty 0.5` only after cross-validation. It
+becomes `finding` only after active proof and the evidence gate. Write
+`decisions.md` only when the research changed a run decision rather than adding
+a reusable evidence lead.
+
+If the recorder cannot write but still runs, use `--dry-run` and paste the
+generated block into `evidence.md`. If tool execution itself is unavailable,
+hand-write the same canonical fields and log the recovery in `decisions.md`.
 
 Use `.claude/skills/web-research/SKILL.md` for the full legacy protocol when a
 run already depends on that skill.

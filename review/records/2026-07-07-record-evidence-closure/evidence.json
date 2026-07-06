@@ -1,0 +1,63 @@
+{
+  "total": 1,
+  "confirmed": [
+    "E-001"
+  ],
+  "confirmed_findings": [
+    "E-001"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 - Claude-side web-research skills referenced a missing evidence recorder;",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "source-code-review",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "source-code-review",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/diff.patch",
+        "evidence/selftest_all_full.txt",
+        "evidence/selftest_all.txt",
+        "evidence/closure_scan.txt",
+        "evidence/check_rules.txt",
+        "evidence/check_templates.txt",
+        "evidence/check_runtime_boundary.txt",
+        "evidence/git_diff_check.txt",
+        "evidence/py_compile.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/diff.patch",
+        "evidence/selftest_all_full.txt",
+        "evidence/selftest_all.txt",
+        "evidence/closure_scan.txt",
+        "evidence/check_rules.txt",
+        "evidence/check_templates.txt",
+        "evidence/check_runtime_boundary.txt",
+        "evidence/git_diff_check.txt",
+        "evidence/py_compile.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "H-001"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": false
+    }
+  ]
+}
