@@ -129,6 +129,9 @@ AGENT_SCAFFOLD = """# Agent {agent}
 - Context pack: {context_rel}
 - Created: {created}
 - Budget used: 0 requests / 0 bytes
+- Reasoning style: personalized-rdt
+- Loop budget: {loop_budget} recurrent step(s)
+- Operator profile: {profile_source}
 
 ## Safety / Guard Invariants
 
@@ -144,14 +147,24 @@ AGENT_SCAFFOLD = """# Agent {agent}
 - Read the context pack.
 - State the narrow hypothesis lane.
 
+## Operator Profile / RDT Controls
+
+{rdt_controls}
+
 ## Recurrent Loop
 
 ### Step 1
+- Original front: {front}
+- Known E-ids:
+- Constraint / ruled-out shape:
 - Hypothesis:
 - Expected signal:
+- Last action:
+- Last outcome:
 - Action / analysis:
 - Observation:
-- Refutation:
+- Control / alternative:
+- Drop condition:
 - Next hypothesis:
 
 ## Coda
@@ -161,6 +174,11 @@ Role: {role}
 Assigned front: {front}
 Scope: {scope}
 Budget used:
+Loop budget:
+Operator preference check:
+  - Did I over-breadth LOW issues?
+  - Did I stop on a gate without reading source?
+  - Did I leave an autonomous action undone?
 Maturity: phenomenon | candidate
 Supports:
 Refutes:
@@ -251,6 +269,10 @@ def scan(run_dir: Path) -> list[dict]:
 def _field(text: str, name: str) -> str:
     m = re.search(rf"(?im)^{HWS}*[-*]?{HWS}*{re.escape(name)}{HWS}*[:：]{HWS}*([^\n]*)$", text)
     return m.group(1).strip() if m else ""
+
+
+def _has_field_label(text: str, name: str) -> bool:
+    return bool(re.search(rf"(?im)^{HWS}*[-*]?{HWS}*{re.escape(name)}{HWS}*[:：]", text))
 
 
 def _int_field(text: str, name: str) -> int:
@@ -595,6 +617,55 @@ def _front_title(run_dir: Path, front: str) -> str:
     return front
 
 
+def _front_text(run_dir: Path, front: str) -> str:
+    for f in parse_frontiers(run_dir):
+        if f.get("id") == front:
+            return str(f.get("text") or "")
+    return ""
+
+
+def _agent_rdt_profile(run_dir: Path, role: str, front: str) -> dict:
+    front_text = _front_text(run_dir, front)
+    if _context_pack is not None and hasattr(_context_pack, "resolve_rdt_profile"):
+        return _context_pack.resolve_rdt_profile(run_dir, role=role, front_text=front_text)
+    return {
+        "source": "built-in defaults (context_pack unavailable)",
+        "style": "openmythos-inspired",
+        "loop_budget": 3,
+        "role_focus": "role_default",
+        "front_profile": "role_default",
+        "decision_style": "autonomous_until_blocked",
+        "fallback_seconds": 0,
+        "depth_bias": "prefer_depth_after_repeated_low",
+        "depth_pivot_after_low_cycles": 3,
+        "evidence_style": "artifact_first",
+        "review_style": "truth_over_agreement",
+        "live_replay_policy": "stop_on_guard_volume_warning",
+        "retrospective_lessons": [],
+    }
+
+
+def _format_rdt_controls(profile: dict) -> str:
+    lines = [
+        f"- RDT style: {profile.get('style')} (reasoning pattern only; no OpenMythos runtime dependency)",
+        f"- Role focus: {profile.get('role_focus')}",
+        f"- Front profile: {profile.get('front_profile')}",
+        f"- Decision style: {profile.get('decision_style')} (fallback_seconds={profile.get('fallback_seconds')})",
+        f"- Evidence style: {profile.get('evidence_style')}",
+        f"- Review style: {profile.get('review_style')}",
+        f"- Live replay policy: {profile.get('live_replay_policy')}",
+        f"- Depth pivot: after {profile.get('depth_pivot_after_low_cycles')} low/noise cycles, pivot from breadth to mechanism depth",
+        "- Step contract: every recurrent step restates Original front, Known E-ids, Constraints, Last action, Last outcome, Drop condition, and Next hypothesis.",
+        "- Trust boundary: operator profile is preference/context only, never target evidence and never a finding.",
+    ]
+    lessons = [str(x) for x in profile.get("retrospective_lessons", []) if str(x).strip()]
+    if lessons:
+        lines.append("- Retrospective lessons:")
+        for item in lessons[:6]:
+            lines.append(f"  - {item}")
+    return "\n".join(lines)
+
+
 def create_agent_assignment(run_dir: Path, *, role: str, front: str,
                             scope: str = "", agent: str | None = None) -> dict:
     role = _role(role)
@@ -609,6 +680,7 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
 
     created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     scope_text = scope or "run target scope"
+    rdt_profile = _agent_rdt_profile(run_dir, role, front)
     agent_path = agents_dir(run_dir) / f"{agent_id}.md"
     _atomic_write(agent_path, AGENT_SCAFFOLD.format(
         agent=agent_id,
@@ -617,6 +689,9 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
         scope=scope_text,
         context_rel=display_path(ctx_path),
         created=created,
+        loop_budget=rdt_profile["loop_budget"],
+        profile_source=rdt_profile["source"],
+        rdt_controls=_format_rdt_controls(rdt_profile),
     ))
 
     data = load_assignments(run_dir)
@@ -627,6 +702,9 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
         "front_title": _front_title(run_dir, front),
         "scope": scope_text,
         "status": "assigned",
+        "reasoning_style": "personalized-rdt",
+        "loop_budget": rdt_profile["loop_budget"],
+        "operator_profile": rdt_profile["source"],
         "context": display_path(ctx_path),
         "agent_file": display_path(agent_path),
         "created_at": created,
@@ -769,6 +847,44 @@ def agent_discipline_issues(run_dir: Path) -> list[dict]:
         if missing_sections:
             issues.append({"severity": "warn", "agent": agent, "kind": "missing-loop-section",
                            "detail": f"{agent} missing section(s): {', '.join(missing_sections)}."})
+        rdt_declared = (
+            re.search(r"(?im)personalized-rdt", text)
+            or _has_field_label(text, "Loop budget")
+            or _has_field_label(text, "Operator profile")
+            or re.search(r"(?im)^##\s+Operator Profile / RDT Controls\b", text)
+        )
+        loop = re.search(r"(?ims)^##\s+Recurrent Loop\b.*?(?=^##\s+|\Z)", text)
+        if rdt_declared and not _has_field_label(text, "Loop budget"):
+            issues.append({"severity": "warn", "agent": agent, "kind": "missing-loop-budget",
+                           "detail": f"{agent} declares personalized RDT but has no Loop budget."})
+        if rdt_declared and not (_has_field_label(text, "Operator profile")
+                                 or re.search(r"(?im)^##\s+Operator Profile / RDT Controls\b", text)):
+            issues.append({"severity": "warn", "agent": agent, "kind": "missing-operator-profile",
+                           "detail": f"{agent} declares personalized RDT but has no operator profile/RDT control block."})
+        if rdt_declared and loop:
+            steps = re.findall(r"(?ims)^###\s+Step\s+\d+\b.*?(?=^###\s+Step\s+\d+\b|^##\s+|\Z)", loop.group(0))
+            if not steps:
+                issues.append({"severity": "warn", "agent": agent, "kind": "missing-rdt-step",
+                               "detail": f"{agent} Recurrent Loop has no `### Step N` block."})
+            for idx, step in enumerate(steps[:1], start=1):
+                required_step_fields = [
+                    "Original front",
+                    "Known E-ids",
+                    "Constraint / ruled-out shape",
+                    "Hypothesis",
+                    "Expected signal",
+                    "Last action",
+                    "Last outcome",
+                    "Action / analysis",
+                    "Observation",
+                    "Control / alternative",
+                    "Drop condition",
+                    "Next hypothesis",
+                ]
+                missing_step_fields = [field for field in required_step_fields if not _has_field_label(step, field)]
+                if missing_step_fields:
+                    issues.append({"severity": "warn", "agent": agent, "kind": "missing-rdt-step-field",
+                                   "detail": f"{agent} Step {idx} missing RDT field(s): {', '.join(missing_step_fields)}."})
         safety = re.search(r"(?ims)^##\s+Safety / Guard.*?(?=^##\s+|\Z)", text)
         safety_text = safety.group(0).lower() if safety else ""
         for token, kind in (
@@ -1014,7 +1130,8 @@ def print_plan(run_dir: Path, limit: int) -> int:
 
 def print_assign(run_dir: Path, role: str, front: str, scope: str = "") -> int:
     rec = create_agent_assignment(run_dir, role=role, front=front, scope=scope)
-    print(f"[agent-board] assigned {rec['agent']} role={rec['role']} front={rec['front']}")
+    print(f"[agent-board] assigned {rec['agent']} role={rec['role']} front={rec['front']} "
+          f"loop_budget={rec.get('loop_budget')}")
     print(f"  agent:  {rec['agent_file']}")
     print(f"  context:{rec['context']}")
     print(f"  state:  {display_path(_assignments_path(run_dir))}")
@@ -1301,11 +1418,21 @@ def _selftest() -> int:
         legacy_new_exit = main([str(run), "--new", "F-777"])
         assign_cli_exit = main(["assign", str(run), "--role", "web-auth", "--front", "F-001"])
         status_cli_exit = main(["status", str(run)])
-        agent_check_empty_exit = main(["agent-check", str(empty_run)])
+    agent_check_empty_exit = main(["agent-check", str(empty_run)])
     agent_clean = d / "agent_clean"
     agent_clean.mkdir()
-    create_agent_assignment(agent_clean, role="web-hunter", front="F-001")
+    agent_clean_rec = create_agent_assignment(agent_clean, role="web-hunter", front="F-001")
+    agent_clean_file = ROOT / agent_clean_rec["agent_file"] if not Path(agent_clean_rec["agent_file"]).is_absolute() else Path(agent_clean_rec["agent_file"])
+    agent_clean_text = agent_clean_file.read_text(encoding="utf-8")
     agent_clean_issues = agent_discipline_issues(agent_clean)
+    agent_rdt_bad = d / "agent_rdt_bad"
+    agent_rdt_bad.mkdir()
+    rdt_bad_rec = create_agent_assignment(agent_rdt_bad, role="web-hunter", front="F-001")
+    rdt_bad_file = ROOT / rdt_bad_rec["agent_file"] if not Path(rdt_bad_rec["agent_file"]).is_absolute() else Path(rdt_bad_rec["agent_file"])
+    rdt_bad_file.write_text(
+        rdt_bad_file.read_text(encoding="utf-8").replace("- Drop condition:\n", ""),
+        encoding="utf-8")
+    rdt_bad_issues = agent_discipline_issues(agent_rdt_bad)
     status_sync = d / "status_sync"
     status_sync.mkdir()
     sync_rec = create_agent_assignment(status_sync, role="web-hunter", front="F-001")
@@ -1405,6 +1532,13 @@ def _selftest() -> int:
         ("status command exits 0", status_cli_exit == 0),
         ("agent-check empty run exits 0", agent_check_empty_exit == 0),
         ("agent-check clean scaffold has no issues", agent_clean_issues == []),
+        ("agent scaffold includes personalized RDT controls",
+         "Loop budget:" in agent_clean_text
+         and "Operator Profile / RDT Controls" in agent_clean_text
+         and "Original front:" in agent_clean_text
+         and agent_clean_rec.get("reasoning_style") == "personalized-rdt"),
+        ("agent-check catches incomplete personalized RDT step",
+         any(i["kind"] == "missing-rdt-step-field" for i in rdt_bad_issues)),
         ("status sync: complete file flips assignment to done",
          sync_rows and sync_rows[0].get("status") == "done"
          and sync_state["assignments"][0].get("status") == "done"),

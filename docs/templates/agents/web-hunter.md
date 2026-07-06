@@ -23,6 +23,12 @@ Explore one assigned web front with proof-level actions. You may produce candida
 - Recurrent Loop: hypothesis -> expected signal -> guarded action -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact command/params) and Last outcome (specific result, not vague: "WAF 403 on 'union select'" not "blocked").
 - Coda: write candidates/refutes/barriers/artifacts and recommend the next Root action.
 
+## Personalized RDT Loop Contract
+
+- Obey the context pack's `Operator Profile / Personalized RDT` and the assignment's `Loop budget`; treat both as operator preference, never target evidence.
+- Each `### Step N` must restate: Original front, Known E-ids, Constraint / ruled-out shape, Hypothesis, Expected signal, Last action, Last outcome, Action / analysis, Observation, Control / alternative, Drop condition, and Next hypothesis.
+- If repeated LOW/noise observations exceed the depth-pivot threshold, stop broad enumeration and pivot to the mechanism that would discriminate the front.
+
 ## Safety / Guard Reminder
 
 - Use `probe`, `render`, or `scan` through the guard layer. Stop at proof-level and hand off heavier actions to Root.
@@ -34,6 +40,12 @@ Explore one assigned web front with proof-level actions. You may produce candida
 ## Evidence Maturity Rule
 
 A proposed `candidate` with confidence `>= 0.8` must include control or replication plus an artifact pointer.
+
+## Personalized Coda Check
+
+- Did I over-breadth LOW issues instead of proving or refuting a mechanism?
+- Did I stop on a gate without reading the source/tool output that explains it?
+- Did I leave an autonomous, safe next action undone?
 
 ## New Constraints
 

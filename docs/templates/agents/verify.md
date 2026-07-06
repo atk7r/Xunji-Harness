@@ -23,6 +23,12 @@ Replicate, replay, control, falsify, and calibrate candidate evidence, especiall
 - Recurrent Loop: hypothesis -> expected signal -> replay/control/replication -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact replay/control command) and Last outcome (specific result, not vague).
 - Coda: supports/refutes, control result, replicated status, confidence calibration, and Root decision needs.
 
+## Personalized RDT Loop Contract
+
+- Obey the context pack's `Operator Profile / Personalized RDT` and the assignment's `Loop budget`; treat both as operator preference, never target evidence.
+- Each `### Step N` must restate: Original front, Known E-ids, Constraint / ruled-out shape, Hypothesis, Expected signal, Last action, Last outcome, Action / analysis, Observation, Control / alternative, Drop condition, and Next hypothesis.
+- If repeated LOW/noise observations exceed the depth-pivot threshold, stop broad enumeration and pivot to the mechanism that would discriminate the front.
+
 ## Safety / Guard Reminder
 
 - Replay and controls must respect scope, guard, and request budget.
@@ -34,6 +40,12 @@ Replicate, replay, control, falsify, and calibrate candidate evidence, especiall
 ## Evidence Maturity Rule
 
 Verification can support promotion, but Root Synthesizer alone performs promotion to `finding`.
+
+## Personalized Coda Check
+
+- Did I over-breadth LOW issues instead of proving or refuting a mechanism?
+- Did I stop on a gate without reading the source/tool output that explains it?
+- Did I leave an autonomous, safe next action undone?
 
 ## New Constraints
 

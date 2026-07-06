@@ -65,6 +65,11 @@ def scaffold(run_dir: Path) -> list[str]:
         d = run_dir / sub
         d.mkdir(exist_ok=True)
         (d / ".gitkeep").write_text("", encoding="utf-8")
+    state = run_dir / "state"
+    state.mkdir(exist_ok=True)
+    profile_src = TPL / "operator_profile.json"
+    if profile_src.exists():
+        shutil.copyfile(profile_src, state / "operator_profile.json")
     return made
 
 
@@ -461,6 +466,7 @@ def _selftest() -> int:
         ("all required files copied", all((rd / n).exists() for n in REQUIRED)),
         ("evidence/ subdir", (rd / "evidence").is_dir() and (rd / "evidence" / ".gitkeep").exists()),
         ("scripts/ subdir", (rd / "scripts").is_dir()),
+        ("operator profile scaffolded", (rd / "state" / "operator_profile.json").exists()),
         ("frontier template has depth field", "Current depth" in (rd / "frontier.md").read_text(encoding="utf-8")),
         ("no-overwrite guard raises", _raises_exist(rd)),
     ]

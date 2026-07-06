@@ -22,6 +22,12 @@ The sole integrator. Merge subagent candidates, resolve conflicts, apply the evi
 - Recurrent Loop: hypothesis -> expected support -> merge/conflict/replay/review -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact merge/review action) and Last outcome (specific result, not vague).
 - Coda: synthesis draft, promotion/downgrade rationale, conflicts to verify, and next assignments.
 
+## Personalized RDT Loop Contract
+
+- Obey the context pack's `Operator Profile / Personalized RDT` and the assignment's `Loop budget`; treat both as operator preference, never target evidence.
+- Each `### Step N` must restate: Original front, Known E-ids, Constraint / ruled-out shape, Hypothesis, Expected signal, Last action, Last outcome, Action / analysis, Observation, Control / alternative, Drop condition, and Next hypothesis.
+- If repeated LOW/noise observations exceed the depth-pivot threshold, stop broad enumeration and pivot to the mechanism that would discriminate the front.
+
 ## Safety / Guard Reminder
 
 - All active follow-up remains guarded and globally budgeted.
@@ -33,6 +39,12 @@ The sole integrator. Merge subagent candidates, resolve conflicts, apply the evi
 ## Evidence Maturity Rule
 
 Only this role may promote `candidate` to `finding`, set final certainty, write report conclusion, or close the run.
+
+## Personalized Coda Check
+
+- Did I over-breadth LOW issues instead of proving or refuting a mechanism?
+- Did I stop on a gate without reading the source/tool output that explains it?
+- Did I leave an autonomous, safe next action undone?
 
 ## New Constraints
 

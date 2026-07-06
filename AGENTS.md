@@ -9,6 +9,25 @@ Codex does not create a separate engagement runtime or safety model. The source 
 truth remains the run directory, and the governing discipline remains `CLAUDE.md`,
 `.claude/hooks/`, `docs/WORKFLOW.md`, the evidence gate, and the guard layer.
 
+## Default Edit Target
+
+When the operator asks to change Xunji framework behavior, Root behavior,
+Agent/Subagent workflow, skills, prompts, run lifecycle, or safety discipline
+without explicitly saying "Codex-side" or `.agents/skills`, assume the requested
+change is for the **Claude Code primary driver**. In that default case:
+
+- update `.claude/skills/` for skill/driver guidance;
+- update `CLAUDE.md`, `docs/WORKFLOW*.md`, `docs/templates/`, and `tools/` when
+  the shared framework behavior itself needs to change;
+- do **not** treat `.agents/skills/` as the Root driver's instruction source.
+
+The `.agents/skills/` tree is for Codex-side auxiliary/advisory/maintenance
+behavior only. Edit it only when the operator explicitly asks for Codex-side
+behavior, when maintaining Codex review/delegation mechanics, or when mirroring a
+shared change is intentionally necessary and recorded. If both trees need changes,
+state which part is Claude primary-driver behavior and which part is Codex
+auxiliary behavior before or while editing.
+
 ## Useful Contributions
 
 Codex is especially useful for:

@@ -23,6 +23,12 @@ Audit source, diffs, dependencies, configuration, routes, and authorization boun
 - Recurrent Loop: hypothesis -> expected source signal -> code analysis -> observation -> refutation -> next hypothesis. Each new hypothesis MUST anchor on the previous step's concrete result — state Last action (exact file/function analyzed) and Last outcome (specific finding, not vague).
 - Coda: source-level phenomenon/candidate, exact file pointers, needed verification, and barriers.
 
+## Personalized RDT Loop Contract
+
+- Obey the context pack's `Operator Profile / Personalized RDT` and the assignment's `Loop budget`; treat both as operator preference, never target evidence.
+- Each `### Step N` must restate: Original front, Known E-ids, Constraint / ruled-out shape, Hypothesis, Expected signal, Last action, Last outcome, Action / analysis, Observation, Control / alternative, Drop condition, and Next hypothesis.
+- If repeated LOW/noise observations exceed the depth-pivot threshold, stop broad enumeration and pivot to the mechanism that would discriminate the front.
+
 ## Safety / Guard Reminder
 
 - Runtime proof remains Root/verification responsibility and must use guarded tools.
@@ -34,6 +40,12 @@ Audit source, diffs, dependencies, configuration, routes, and authorization boun
 ## Evidence Maturity Rule
 
 Static/source-only output is `phenomenon`; it becomes `candidate` only when paired with a plausible reachable path and verification plan.
+
+## Personalized Coda Check
+
+- Did I over-breadth LOW issues instead of proving or refuting a mechanism?
+- Did I stop on a gate without reading the source/tool output that explains it?
+- Did I leave an autonomous, safe next action undone?
 
 ## New Constraints
 

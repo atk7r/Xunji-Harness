@@ -20,6 +20,10 @@ Read these when exact behavior matters:
   `tools/saturation.py` for command behavior.
 - `xunji-reviewops` when board output affects closure, report, or review.
 
+Claude Code primary-driver behavior lives in `.claude/skills/`. The parallel
+`.agents/skills/` tree is Codex-side guidance for advisory/maintenance work and
+must not be treated as the Root driver's instruction source.
+
 ## Root Posture
 
 - Root chooses fronts autonomously while safe open fronts remain.
@@ -30,6 +34,32 @@ Read these when exact behavior matters:
 - Single Synthesizer merges through the evidence gate, allocates canonical E-ids,
   resolves conflicts, and updates canonical Markdown.
 - All Agents share the same hook, guard state, request budget, and host breakers.
+
+## Personalized RDT / Operator Profile
+
+`state/operator_profile.json` is the per-run preference layer for Agent reasoning
+shape. `setup_run.py` scaffolds it, `context_pack.py` injects it into context
+packs, and `workers.py assign` copies the resolved loop budget/profile source into
+each new `agents/A-*.md`.
+
+Use it like this:
+
+- Before assigning Agents, check whether `state/operator_profile.json` exists and
+  whether the operator has given a current preference or constraint that should be
+  reflected there.
+- If Root edits the profile, record the reason in `decisions.md`; if the change
+  comes from operator steering, first capture that steering in `hints.md`.
+- After `workers.py assign`, skim the generated Agent/context pack for
+  `Reasoning style: personalized-rdt`, `Loop budget`, and `Operator Profile`.
+- Treat the profile as operator preference only. It is not evidence, not a guard
+  override, not target authorization, and not authority to promote a candidate.
+- `Loop budget` means reasoning-loop depth for the Agent prompt. It does not
+  change the shared request budget, hook/guard limits, host breakers, or
+  Shared Barrier Group failure budgets.
+- `openmythos-inspired` means use the Prelude -> recurrent loop -> Coda
+  reasoning shape.
+  Do not import OpenMythos, run an OpenMythos service, or let it become a target
+  network executor. Active target actions still go through guarded Xunji tools.
 
 ## When To Assign Agents
 
@@ -66,6 +96,7 @@ python tools/workers.py suggest runs/<dir>
 python tools/workers.py plan runs/<dir>
 python tools/workers.py assign runs/<dir> --role web-hunter --front F-001
 python tools/context_pack.py runs/<dir> --agent A-web-hunter-001
+rg -n "Reasoning style|Loop budget|Operator Profile" runs/<dir>/agents/A-web-hunter-001.md runs/<dir>/context/F-001.web-hunter.md
 ```
 
 Before merging:
@@ -87,6 +118,9 @@ For each done Agent:
 
 - Verify the output has a role, front, loop, safety reminder, and artifact or
   command pointers.
+- For personalized-RDT Agents, verify `Loop budget`, `Operator Profile`, and
+  recurrent-step fields are present; `workers.py agent-check` enforces this only
+  on new RDT-marked files so older runs are not spammed.
 - **Agents set `Maturity: candidate` ONLY.** NEVER accept `Maturity: finding` from
   an agent — downgrade to `candidate`. Only the Single Synthesizer promotes through
   the replay evidence gate (`replay.py` IDENTICAL or CONSISTENT verdict +

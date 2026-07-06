@@ -470,6 +470,12 @@ only for older runs.
   context packs, assignment state, conflict records, and synthesis drafts. It is
   **not** a JSON orchestrator — it never spawns Agents and never writes canonical
   findings. Same guardrail as the graph: tooling assists, it never drives.
+- `state/operator_profile.json` is optional per-run personalization for Agent
+  reasoning shape: loop budgets, role focus, evidence/review style, and
+  retrospective lessons. `context_pack.py` injects it into context packs and
+  `workers.py assign` copies the resolved loop budget into each Agent scaffold.
+  The profile is operator preference only, never target evidence, never a guard
+  bypass, and never authority to promote a candidate.
 
 ## Evidence maturity
 

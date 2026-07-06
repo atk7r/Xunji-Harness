@@ -54,6 +54,55 @@ ROLE_TEMPLATES = {
     "synthesizer": "synthesizer.md",
 }
 
+DEFAULT_OPERATOR_PROFILE = {
+    "schema": 1,
+    "decision_style": "autonomous_until_blocked",
+    "fallback_seconds": 600,
+    "depth_bias": "prefer_depth_after_repeated_low",
+    "evidence_style": "artifact_first",
+    "review_style": "truth_over_agreement",
+    "live_replay_policy": "stop_on_guard_volume_warning",
+    "rdt": {
+        "style": "openmythos-inspired",
+        "default_loop_budget": 3,
+        "depth_pivot_after_low_cycles": 3,
+        "front_budgets": {
+            "static_infoleak_config": 3,
+            "auth_sso_token_signature": 6,
+            "js_api_chunk_signature": 6,
+            "candidate_verification": 5,
+            "closure_review": 8,
+        },
+        "role_profiles": {
+            "surface": {"loop_budget": 3, "focus": "coverage_breadth"},
+            "web": {"loop_budget": 5, "focus": "mechanism_depth"},
+            "web-auth": {"loop_budget": 6, "focus": "auth_boundary_depth"},
+            "web-hunter": {"loop_budget": 5, "focus": "mechanism_depth"},
+            "code-audit": {"loop_budget": 5, "focus": "source_to_runtime_path"},
+            "exploit": {"loop_budget": 4, "focus": "proof_boundary_and_handoff"},
+            "verify": {"loop_budget": 5, "focus": "control_and_falsification"},
+            "review": {"loop_budget": 8, "focus": "missed_fronts_false_positive_closure"},
+            "report": {"loop_budget": 3, "focus": "evidence_bound_consistency"},
+            "synthesizer": {"loop_budget": 6, "focus": "conflict_resolution_and_gate"},
+        },
+    },
+    "retrospective_lessons": [
+        "check agent status and conflicts before closure",
+        "read gate/source after repeated check failures",
+        "when large JS exceeds body caps, pivot to range/chunk discovery",
+        "after three LOW/noise cycles on the same front, pivot from breadth to mechanism depth",
+        "consolidate closure blockers proactively instead of leaving orphaned agent output",
+    ],
+}
+
+_FRONT_PROFILE_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("closure_review", re.compile(r"\b(closure|review|report|merge|synthesi[sz]e)\b", re.I)),
+    ("candidate_verification", re.compile(r"\b(candidate|verify|replicat|control|replay|evidence)\b", re.I)),
+    ("auth_sso_token_signature", re.compile(r"\b(auth|login|sso|oauth|saml|cas|idp|token|jwt|session|signature|sign)\b", re.I)),
+    ("js_api_chunk_signature", re.compile(r"\b(js|javascript|bundle|chunk|api|graphql|swagger|openapi|sign|hmac)\b", re.I)),
+    ("static_infoleak_config", re.compile(r"\b(static|infoleak|exposure|config|debug|secret|source|sourcemap|backup)\b", re.I)),
+]
+
 
 def resolve_run_dir(path: str | Path) -> Path:
     p = Path(path)
@@ -75,6 +124,124 @@ def _load_json(path: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _deepcopy_jsonable(data: dict) -> dict:
+    return json.loads(json.dumps(data, ensure_ascii=False))
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    merged = _deepcopy_jsonable(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _as_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _profile_rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def load_operator_profile(run_dir: Path) -> tuple[dict, str]:
+    """Load per-run operator preferences without treating them as evidence."""
+    path = run_dir / "state" / "operator_profile.json"
+    data = _load_json(path)
+    if data:
+        return _deep_merge(DEFAULT_OPERATOR_PROFILE, data), _profile_rel(path)
+    return _deepcopy_jsonable(DEFAULT_OPERATOR_PROFILE), "built-in defaults (state/operator_profile.json missing)"
+
+
+def _role_profile(profile: dict, role: str) -> dict:
+    rdt = profile.get("rdt") if isinstance(profile.get("rdt"), dict) else {}
+    profiles = rdt.get("role_profiles") if isinstance(rdt.get("role_profiles"), dict) else {}
+    role_l = role.strip().lower()
+    if isinstance(profiles.get(role_l), dict):
+        return dict(profiles[role_l])
+    if role_l == "web" and isinstance(profiles.get("web-hunter"), dict):
+        return dict(profiles["web-hunter"])
+    return {}
+
+
+def _front_profile(front_text: str, role: str) -> str:
+    combined = f"{role}\n{front_text}"
+    if role in {"verify", "verification"}:
+        return "candidate_verification"
+    if role in {"review", "report", "synthesizer", "independent-review"}:
+        return "closure_review"
+    for name, rx in _FRONT_PROFILE_RULES:
+        if rx.search(combined):
+            return name
+    return "role_default"
+
+
+def resolve_rdt_profile(run_dir: Path, *, role: str, front_text: str = "") -> dict:
+    profile, source = load_operator_profile(run_dir)
+    rdt = profile.get("rdt") if isinstance(profile.get("rdt"), dict) else {}
+    role_cfg = _role_profile(profile, role)
+    default_budget = _as_int(
+        rdt.get("default_loop_budget"),
+        int(DEFAULT_OPERATOR_PROFILE["rdt"]["default_loop_budget"]),
+    )
+    role_budget = _as_int(role_cfg.get("loop_budget"), default_budget)
+    front_key = _front_profile(front_text, role)
+    front_budgets = rdt.get("front_budgets") if isinstance(rdt.get("front_budgets"), dict) else {}
+    front_budget = _as_int(front_budgets.get(front_key), 0)
+    lessons = profile.get("retrospective_lessons") if isinstance(profile.get("retrospective_lessons"), list) else []
+    return {
+        "source": source,
+        "style": str(rdt.get("style") or "openmythos-inspired"),
+        "loop_budget": max(role_budget, front_budget, 1),
+        "role_focus": str(role_cfg.get("focus") or "role_default"),
+        "front_profile": front_key,
+        "decision_style": str(profile.get("decision_style") or "autonomous_until_blocked"),
+        "fallback_seconds": _as_int(profile.get("fallback_seconds"), int(DEFAULT_OPERATOR_PROFILE["fallback_seconds"])),
+        "depth_bias": str(profile.get("depth_bias") or "prefer_depth_after_repeated_low"),
+        "depth_pivot_after_low_cycles": _as_int(rdt.get("depth_pivot_after_low_cycles"), 3),
+        "evidence_style": str(profile.get("evidence_style") or "artifact_first"),
+        "review_style": str(profile.get("review_style") or "truth_over_agreement"),
+        "live_replay_policy": str(profile.get("live_replay_policy") or "stop_on_guard_volume_warning"),
+        "retrospective_lessons": [str(x) for x in lessons[:6]],
+    }
+
+
+def render_operator_profile_lines(run_dir: Path, *, role: str, front_text: str = "",
+                                  include_heading: bool = True) -> list[str]:
+    rdt = resolve_rdt_profile(run_dir, role=role, front_text=front_text)
+    lines: list[str] = []
+    if include_heading:
+        lines += ["## Operator Profile / Personalized RDT"]
+    lines += [
+        f"- Source: {rdt['source']}",
+        f"- RDT style: {rdt['style']} (reasoning pattern only; no OpenMythos runtime dependency)",
+        f"- Recommended loop budget: {rdt['loop_budget']} recurrent step(s)",
+        f"- Role focus: {rdt['role_focus']}",
+        f"- Front profile: {rdt['front_profile']}",
+        f"- Decision style: {rdt['decision_style']} (fallback_seconds={rdt['fallback_seconds']})",
+        f"- Evidence style: {rdt['evidence_style']}",
+        f"- Review style: {rdt['review_style']}",
+        f"- Live replay policy: {rdt['live_replay_policy']}",
+        f"- Depth pivot: after {rdt['depth_pivot_after_low_cycles']} low/noise cycles, pivot from breadth to mechanism depth",
+        "- Step contract: every recurrent step restates Original front, Known E-ids, Constraints, Last action, Last outcome, Drop condition, and Next hypothesis.",
+        "- Trust boundary: operator profile is preference/context only, never target evidence and never a finding.",
+    ]
+    lessons = rdt.get("retrospective_lessons") or []
+    if lessons:
+        lines.append("- Retrospective lessons:")
+        for item in lessons:
+            lines.append(f"  - {item}")
+    return lines
 
 
 def _field(text: str, name: str) -> str:
@@ -322,6 +489,7 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
     lines += ["", "## Relevant Knowledge / Xday Pointers"]
     lines.extend(_knowledge_xday_summary(kb_ids, kb_dir=kb_dir, xday_dir=xday_dir, weap_dir=weap_dir))
     lines += ["", "## Recent Decisions / Barriers", decisions_tail or "- (decisions.md missing or empty)"]
+    lines += ["", *render_operator_profile_lines(run_dir, role=role, front_text=front_text)]
     lines += ["", "## Role Instructions"]
     if role_text:
         lines.append(f"Source: docs/templates/agents/{role_template.name}")
@@ -394,16 +562,52 @@ def _selftest() -> int:
     ]}), encoding="utf-8")
     (d / "evidence.md").write_text("# Evidence\n\n## E-001\n- Front: F-001\n- Maturity: candidate\n", encoding="utf-8")
     (d / "decisions.md").write_text("# Decisions\n\n## D-001\n- Chosen front: F-001\n", encoding="utf-8")
+    (d / "state").mkdir()
+    (d / "state" / "operator_profile.json").write_text(json.dumps({
+        "schema": 1,
+        "decision_style": "autonomous_until_review",
+        "rdt": {
+            "role_profiles": {
+                "web-auth": {"loop_budget": 7, "focus": "custom_auth_depth"}
+            }
+        },
+        "retrospective_lessons": ["custom lesson"]
+    }), encoding="utf-8")
     pack = build_pack(d, front="F-001", role="web-auth", agent="A-web-auth-001",
                       kb_dir=kb, xday_dir=xday, weap_dir=weap)
     out = d / "context" / "F-001.web-auth.md"
     _atomic_write(out, pack)
+    malformed = d / "malformed_profile"
+    malformed.mkdir()
+    (malformed / "frontier.md").write_text(
+        "# Frontier\n\n### F-001\n- Front: app.example auth token\n- Status: open\n", encoding="utf-8")
+    (malformed / "state").mkdir()
+    (malformed / "state" / "operator_profile.json").write_text(json.dumps({
+        "fallback_seconds": "later",
+        "rdt": {
+            "default_loop_budget": "many",
+            "depth_pivot_after_low_cycles": "soon",
+            "role_profiles": {
+                "web-auth": {"loop_budget": "high", "focus": "custom_auth_depth"}
+            }
+        }
+    }), encoding="utf-8")
+    malformed_rdt = resolve_rdt_profile(
+        malformed, role="web-auth",
+        front_text=(malformed / "frontier.md").read_text(encoding="utf-8"))
     checks = [
         ("pack names front and role", "Context Pack F-001 / web-auth" in pack),
         ("pack includes matched coverage", "app.example" in pack and "kb:foobar-cms" in pack),
         ("pack includes knowledge pointer", "knowledge `foobar-cms`" in pack and "FooBar CMS" in pack),
         ("pack includes xday pointer without dumping note body", "local xday pointer" in pack and "local note" not in pack),
         ("pack includes evidence block", "E-001" in pack),
+        ("pack includes personalized operator profile", "Operator Profile / Personalized RDT" in pack
+         and "Recommended loop budget: 7" in pack and "custom_auth_depth" in pack
+         and "custom lesson" in pack),
+        ("malformed numeric profile values fall back safely",
+         malformed_rdt["loop_budget"] == 6
+         and malformed_rdt["fallback_seconds"] == DEFAULT_OPERATOR_PROFILE["fallback_seconds"]
+         and malformed_rdt["depth_pivot_after_low_cycles"] == 3),
         ("pack includes output contract", "Maturity: phenomenon | candidate" in pack),
         ("atomic write created file", out.exists() and out.read_text(encoding="utf-8") == pack),
     ]

@@ -1,0 +1,14 @@
+# Test Summary
+
+- `python3 tools/context_pack.py --selftest`: passed.
+- `python3 tools/workers.py --selftest`: passed, including clean personalized scaffold and incomplete RDT step detection.
+- `python3 tools/setup_run.py --selftest`: passed, including `state/operator_profile.json` scaffold.
+- `python3 -m py_compile tools/context_pack.py tools/workers.py tools/setup_run.py`: passed.
+- `python3 tools/selftest_all.py --only context_pack,workers,setup_run,check_templates`: 4 passed, 0 failed.
+- `python3 tools/saturation.py --selftest`: passed.
+- `python3 tools/bench.py score-all bench --json-out /tmp/xunji-bench-agent-board.json`: 11/11 fixtures clean; detection 11/11; calibration 11/11; false positives 0; unresolved conflicts 0.
+- `python3 tools/check_rules.py`: rule check passed.
+- `python3 tools/workers.py agent-check runs/oppo_20260707_20260707`: clean after compatibility narrowing.
+- `python3 tools/check_run.py runs/oppo_20260707_20260707`: run check passed.
+- `git diff --check`: passed.
+

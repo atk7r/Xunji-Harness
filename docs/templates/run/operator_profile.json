@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "decision_style": "autonomous_until_blocked",
+  "fallback_seconds": 600,
+  "depth_bias": "prefer_depth_after_repeated_low",
+  "evidence_style": "artifact_first",
+  "review_style": "truth_over_agreement",
+  "live_replay_policy": "stop_on_guard_volume_warning",
+  "rdt": {
+    "style": "openmythos-inspired",
+    "default_loop_budget": 3,
+    "depth_pivot_after_low_cycles": 3,
+    "front_budgets": {
+      "static_infoleak_config": 3,
+      "auth_sso_token_signature": 6,
+      "js_api_chunk_signature": 6,
+      "candidate_verification": 5,
+      "closure_review": 8
+    },
+    "role_profiles": {
+      "surface": {
+        "loop_budget": 3,
+        "focus": "coverage_breadth"
+      },
+      "web": {
+        "loop_budget": 5,
+        "focus": "mechanism_depth"
+      },
+      "web-auth": {
+        "loop_budget": 6,
+        "focus": "auth_boundary_depth"
+      },
+      "web-hunter": {
+        "loop_budget": 5,
+        "focus": "mechanism_depth"
+      },
+      "code-audit": {
+        "loop_budget": 5,
+        "focus": "source_to_runtime_path"
+      },
+      "exploit": {
+        "loop_budget": 4,
+        "focus": "proof_boundary_and_handoff"
+      },
+      "verify": {
+        "loop_budget": 5,
+        "focus": "control_and_falsification"
+      },
+      "review": {
+        "loop_budget": 8,
+        "focus": "missed_fronts_false_positive_closure"
+      },
+      "report": {
+        "loop_budget": 3,
+        "focus": "evidence_bound_consistency"
+      },
+      "synthesizer": {
+        "loop_budget": 6,
+        "focus": "conflict_resolution_and_gate"
+      }
+    }
+  },
+  "retrospective_lessons": [
+    "check agent status and conflicts before closure",
+    "read gate/source after repeated check failures",
+    "when large JS exceeds body caps, pivot to range/chunk discovery",
+    "after three LOW/noise cycles on the same front, pivot from breadth to mechanism depth",
+    "consolidate closure blockers proactively instead of leaving orphaned agent output"
+  ]
+}
