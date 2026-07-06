@@ -262,37 +262,24 @@ Only two pauses; each requires a codex gate before the pause:
   reference "Independent review of safety-critical code".
 ## Review Architecture（审查架构）
 
-日常推进始终由 Claude Code 驱动。复审按可用性自动降级，4 级：
+Claude Code 永远是 live run 与集成主驾驶。复审输出是候选，不是证据；
+最终结论仍要过 evidence/artifact/tests/recorded rationale。
 
-### Tier 1 — 配置齐全（codex + arkcli 均可用）
+### Claude Code 主驾驶或由 Claude Code 修改代码
 
-| 场景 | 审查者 |
-|------|--------|
-| 日常推进 | Claude Code |
-| 单点高危复审 | Codex + arkcli panel |
-| 代码/报告/收口 复审 | Codex + arkcli panel |
-| arkcli panel | kimi-k2.7-code + minimax-m3 + glm-5.2 |
-| 大脑 | codex |
+Claude Code 负责修改、集成、测试与落盘；Codex/arkcli 是复审补盲。
 
-### Tier 2 — 无 codex（或 codex 不可用）
+| 可用性 | 修改者 | 复审者 | 大脑 / 综合 |
+|------|------|------|-------------|
+| Codex + arkcli 都可用 | Claude Code | Codex + arkcli panel | Codex |
+| Codex 不可用 | Claude Code | arkcli panel | arkcli panel |
+| arkcli 不可用 | Claude Code | Codex | Codex |
+| Codex 与 arkcli 都不可用 | Claude Code | Claude Code fresh-context 同族 | Claude Code（最弱兜底） |
 
-| 场景 | 审查者 |
-|------|--------|
-| 日常推进 | Claude Code |
-| 单点高危复审 | arkcli panel |
-| 代码/报告/收口 复审 | arkcli panel |
-| arkcli panel | kimi-k2.7-code + minimax-m3 + glm-5.2 |
-| 大脑 | arkcli panel |
+arkcli panel 默认模型：kimi-k2.7-code + minimax-m3 + glm-5.2。
 
-### Tier 3 — 无 arkcli（或 arkcli 不可用）
+### 接收 Codex-authored diff
 
-| 场景 | 审查者 |
-|------|--------|
-| 日常推进 | Claude Code |
-| 单点高危复审 | Codex |
-| 代码/报告/收口 复审 | Codex |
-| 大脑 | Codex |
-
-### Tier 4 — 全部不可用
-
-所有复审由 Claude Code 派出同族子代理执行。单模型审查是最后手段，非默认。
+如果 Claude Code 集成 Codex 提交的仓库 diff，Claude Code 只需要验收接口契约：
+Codex 自审不算独立复审；高风险或安全关键 diff 必须有可审计的复审记录、
+测试结果与处置理由。Codex 侧完整操作矩阵属于 Codex 根指令 `AGENTS.md`。

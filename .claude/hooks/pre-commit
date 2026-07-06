@@ -7,19 +7,21 @@
 无记录 → 拒绝提交，提示 driver 跑异构复审后再提交。
 
 Tier 4（全部不可用）时：driver 手动写 review/records/manual-fallback-<date>.md
-记录复审过程。manual-fallback 记录必须包含 "Verdict:" 行、非空内容、staged。
+记录复审过程。manual-fallback 记录必须包含 "Verdict:" 行、非空内容、staged,
+并写入当前 diff_fingerprint / reviewed_diff。
 
 哲学：和 safety_gate 不同——这是流程闸门，FAIL-OPEN（自身异常时放行不卡提交）。
 """
+from __future__ import annotations
 
 import hashlib
-import os
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 FRAMEWORK_DIRS = ["tools/", ".claude/", "docs/", "sentinel/"]
+FINGERPRINT_LEN = 16
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -42,7 +44,7 @@ def staged_framework_files(repo: Path) -> list[str]:
 
 def diff_fingerprint(repo: Path) -> str:
     r = _git("-C", str(repo), "diff", "--cached", "--", *FRAMEWORK_DIRS)
-    return hashlib.sha256(r.stdout.encode()).hexdigest()[:16]
+    return hashlib.sha256(r.stdout.encode()).hexdigest()[:FINGERPRINT_LEN]
 
 
 def _is_staged_or_committed(repo: Path, f: Path) -> bool:
@@ -61,6 +63,14 @@ def _has_approval(text: str) -> bool:
     return verdict in ("PASS", "WARN", "PASSED")
 
 
+def _covers_diff(text: str, fp: str) -> bool:
+    """Review records, including manual fallback, must bind to this staged diff."""
+    import re
+    pat = re.compile(
+        rf"(?im)^\s*(?:[-*]\s*)?(?:diff_fingerprint|reviewed_diff|Diff fingerprint)\s*[:：]\s*([0-9a-f]{{{FINGERPRINT_LEN}}})\b")
+    return any(m.group(1).lower() == fp.lower() for m in pat.finditer(text))
+
+
 def find_review_record(repo: Path, fp: str) -> Path | None:
     review_dir = repo / "review" / "records"
     if not review_dir.exists():
@@ -77,13 +87,11 @@ def find_review_record(repo: Path, fp: str) -> Path | None:
         # Empty files don't count
         if len(text.strip()) < 20:
             continue
-        # Direct fingerprint match: the review covered this exact diff
-        if fp in text:
-            if _has_approval(text):
-                return f
-            continue
-        # manual-fallback: only accepted if has approval + recent
-        if f.name.startswith("manual-fallback-") and _has_approval(text):
+        # Direct fingerprint match: the review covered this exact diff.
+        if _has_approval(text) and _covers_diff(text, fp):
+            return f
+        # manual-fallback: accepted only if approval + recent + current diff binding.
+        if f.name.startswith("manual-fallback-") and _has_approval(text) and _covers_diff(text, fp):
             mtime = f.stat().st_mtime
             age_hours = (datetime.now().timestamp() - mtime) / 3600
             if age_hours < 24:
@@ -97,6 +105,12 @@ def main() -> int:
         return 0  # not in a git repo — nothing to check
 
     framework_files = staged_framework_files(repo)
+    if "--fingerprint" in sys.argv[1:]:
+        if not framework_files:
+            print("[pre-commit] WARN: no staged framework files; fingerprint is for an empty framework diff",
+                  file=sys.stderr)
+        print(diff_fingerprint(repo))
+        return 0
     if not framework_files:
         return 0
 
@@ -112,8 +126,10 @@ def main() -> int:
     print(f"[pre-commit]   staged: {', '.join(framework_files[:5])}{'…' if len(framework_files) > 5 else ''}", file=sys.stderr)
     print(f"[pre-commit]", file=sys.stderr)
     print(f"[pre-commit]   提交前必须完成异构复审（Tier 1-3）并记录到 review/records/。", file=sys.stderr)
-    print(f"[pre-commit]   复审记录必须: staged + 非空 + Verdict: PASS/WARN。", file=sys.stderr)
-    print(f"[pre-commit]   Tier 4 时: review/records/manual-fallback-<date>.md + Verdict: PASS。", file=sys.stderr)
+    print(f"[pre-commit]   复审记录必须: staged + 非空 + Verdict: PASS/WARN + 当前 diff_fingerprint/reviewed_diff。", file=sys.stderr)
+    print(f"[pre-commit]   Tier 4 时: review/records/manual-fallback-<date>.md + Verdict: PASS + 当前 fingerprint。", file=sys.stderr)
+    print(f"[pre-commit]   流程: 先 stage 所有框架改动 → 取 fingerprint → 写/更新 review 记录 → stage 记录。", file=sys.stderr)
+    print(f"[pre-commit]   若之后又 stage 框架文件, 重新取 fingerprint。命令: python3 .claude/hooks/pre-commit --fingerprint", file=sys.stderr)
     return 1
 
 

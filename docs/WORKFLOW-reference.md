@@ -529,14 +529,17 @@ arkcli panel -> ARK data-plane models)
 and a backend is up, `tools/peer_review.py --into-run runs/<dir>` (or
 `check_run.py --auto-peer-review`) satisfies the gate with an *orthogonal* model — a
 same-model sub-agent only reduces bias, not the shared blind spots a different vendor
-catches. The default matrix assumes Claude Code is the driver and applies to both
-single high-risk review and code/report/closure review: use Codex plus the arkcli
-panel when both are available (brain: Codex), arkcli when Codex is missing (brain:
-arkcli panel), Codex when arkcli is missing (brain: Codex), and Claude Code
-same-family only when neither external reviewer is available. Absent egress consent,
-the fresh-context sub-agent is the always-available, egress-free fallback. Standing
-authorization granted for the sub-agent — do it without re-asking. `check_run.py`
-HARD-fails a closure claim with no `Independent Review` record.
+catches. For Claude Code-driven runs or Claude-authored code/report/closure review,
+use Codex plus the arkcli panel when both are available (brain: Codex), arkcli when
+Codex is missing (brain: arkcli panel), Codex when arkcli is missing (brain: Codex),
+and Claude Code same-family only when neither external reviewer is available.
+Codex-authored maintenance diff policy lives in Codex's `AGENTS.md`; Claude only
+needs to verify that such a diff has a review record and does not treat Codex
+self-review as an independent vote.
+Absent egress consent, the fresh-context sub-agent is the always-available,
+egress-free fallback. Standing authorization granted for the sub-agent — do it
+without re-asking. `check_run.py` HARD-fails a closure claim with no
+`Independent Review` record.
 
 Claude Code is primary and Codex is auxiliary: Codex commonly appears here as a
 heterogeneous review backend, but it can also provide advice or delegated help when

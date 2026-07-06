@@ -1976,11 +1976,25 @@ def _selftest() -> int:
     d5 = Path(tempfile.mkdtemp())
     (d5 / "target.md").write_text(
         '# Target\n- Existing intel / recon report: (path or "none"; ingest first)\n', encoding="utf-8")
+    d_type_b_bad = Path(tempfile.mkdtemp())
+    (d_type_b_bad / "frontier.md").write_text(
+        "# Frontier\n## Closed Fronts\n\n"
+        "### F-001 login surface\n- Status: blocked_type_b\n- Why closed: all justified paths exhausted\n",
+        encoding="utf-8")
+    d_type_b_ok = Path(tempfile.mkdtemp())
+    (d_type_b_ok / "frontier.md").write_text(
+        "# Frontier\n## Closed Fronts\n\n"
+        "### F-001 login surface\n- Status: blocked_type_b\n- Evidence: E-001\n",
+        encoding="utf-8")
     checks += [
         ("shallow-close w/o Vectors tried -> warn (F-001)", any("F-001" in w for w in sc)),
         ("shallow-close WITH Vectors tried -> no warn (F-002)", not any("F-002" in w for w in sc)),
         ("deep-close -> no warn (F-003)", not any("F-003" in w for w in sc)),
         ("recon template placeholder -> not cited (no FP)", _recon_cited(d5) is None),
+        ("Type B closure without E-id -> hard gate message",
+         any("blocked_type_b" in w and "E-xxx" in w for w in check_type_b_evidence(d_type_b_bad))),
+        ("Type B closure with E-id -> no hard gate message",
+         check_type_b_evidence(d_type_b_ok) == []),
     ]
 
     # --- 指纹入库收口门 (任务1) ---
@@ -2582,9 +2596,9 @@ def _selftest() -> int:
 
 def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
     """--auto-peer-review: 收口时若 review.md 缺独立复审记录, 自动按复审矩阵跑 panel:
-    codex+arkcli 满配; 缺 codex 用 arkcli; 缺 arkcli 用 codex; 都缺则 Claude 同族兜底/driver。
-    若 driver=codex(仅代码维护/仓库改动), Codex 不算独立票, 矩阵切到 arkcli+Claude Code/API,
-    但综合大脑仍为 Codex。
+    Claude driver: codex+arkcli 满配; 缺 codex 用 arkcli; 缺 arkcli 用 codex; 都缺则 Claude 同族兜底/driver。
+    Codex-authored diff: Codex 不算独立票; 满配用 arkcli+Claude Code/API; 缺 arkcli 必须 Claude Code/API;
+    综合/决策权仍为 Codex。
     慢+数据出境, 故仅显式 flag。幂等: 已有记录则不重跑。复审是候选非裁决。"""
     report = run_dir / "report.md"
     if not report.exists():
@@ -2626,10 +2640,10 @@ def main() -> int:
                         help="run the structured-evidence parser regression and exit")
     parser.add_argument("--auto-peer-review", action="store_true",
                         help="收口时若 review.md 缺独立复审记录, 自动跑 tools/peer_review.py "
-                             "(默认 Claude driver: Codex+arkcli panel; Codex driver: arkcli+Claude, 慢/数据出境)写进 review.md "
+                             "(claude-authored: Codex+arkcli; codex-authored: arkcli+Claude, 缺 arkcli 则 Claude, 慢/数据出境)写进 review.md "
                              "满足独立复审硬门。幂等(有记录不重跑)、默认关、selftest 不触发")
     parser.add_argument("--review-driver", choices=["claude", "codex"], default=None,
-                        help="配合 --auto-peer-review: 当前主操作面/作者模型。codex 仅用于代码维护, 避免 Codex 自审票, 用 arkcli+Claude 给意见, Codex 综合。")
+                        help="配合 --auto-peer-review: 作者/评审对象模式。claude-authored: Codex+arkcli; codex-authored: arkcli+Claude, 避免 Codex 自审票。")
     parser.add_argument("--replay-verify", action="store_true",
                         help="收口前自动重放核实: 对 .replay.json 录像跑 replay_run(走 guard / "
                              "target.md 授权 scope / 幂等 GET 才重放 / DELETE 永不 / 写操作默认 skip), "
@@ -2676,6 +2690,9 @@ def main() -> int:
     # Evidence hard gate: certainty must use the canonical 1.0 / 0.8 / 0.5 / 0.3 scale.
     errors.extend(check_certainty_scale(run_dir))
 
+    # Evidence-backed closure hard gate: Type B closes must cite a concrete E-entry.
+    errors.extend(check_type_b_evidence(run_dir))
+
     # Quality warnings (do not fail the structural gate; surface for the driver).
     warnings = check_evidence_certainty(run_dir)
     warnings.extend(check_evidence_maturity(run_dir))  # 成熟度分层: phenomenon/candidate/finding 一致性
@@ -2685,7 +2702,6 @@ def main() -> int:
     warnings.extend(check_coverage_health(run_dir))   # 覆盖台账三联检(防 lump / 缺建 / 子集蒙混; 输入一次加载)
     warnings.extend(check_shallow_close(run_dir))     # 纵深: 高价值前沿 depth=shallow 关闭却无 Vectors tried
     warnings.extend(check_closed_artifacts(run_dir))  # 交叉验证: Closed Front 需声明 Artifacts verified (防空 stdout body 错误关闭)
-    warnings.extend(check_type_b_evidence(run_dir))   # Type B 闭合必须引用 E-xxx 证据条目 (防 prose-only 关闭)
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
     warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)

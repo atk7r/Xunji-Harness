@@ -2,12 +2,14 @@
 """异构复审模块 (peer review) —— 把"另一个模型当独立复审员"做成可接入的独立部件。
 
 背景: review/independent-reviewer.md 把复审实现列为三种 —— 子代理 / 人开新会话 /
-【另一个模型(独立性更强)】。本模块自动化第三种, 并按矩阵选后端(默认 Claude Code 是主驾驶):
-    满配: Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 三模型 panel(Kimi-K2.7-Code/MiniMax-M3/GLM-5.2)
-    缺 Codex: arkcli panel; 缺 arkcli: Codex; 都缺: Claude Code 同族模型(兜底)
-为什么这个顺序: A2 盲区在权重里, 补盲要【正交的错误分布】。满配大脑是 Codex;
-arkcli panel 是外部异构补盲团; Claude 自家只减 bias 不减盲区, 故仅作兜底。
-如果当前主操作面是 Codex(仅代码维护/仓库改动, 不用于 live run), 用 --driver codex:
+【另一个模型(独立性更强)】。本模块自动化第三种, 并按"谁改代码/谁是评审对象"选后端:
+    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 三模型 panel;
+      缺 Codex 用 arkcli panel; 缺 arkcli 用 Codex; 都缺才 Claude Code 同族兜底。
+    Codex-authored maintenance diff: Codex 不算独立票, 满配用 arkcli panel + Claude Code/API 复审;
+      缺 arkcli 时用 Claude Code/API 复审。最终综合/决策权仍在 Codex。
+为什么这个顺序: A2 盲区在权重里, 补盲要【正交的错误分布】。Claude 主驾满配大脑是 Codex;
+arkcli panel 是外部异构补盲团; Claude 自家只减 bias 不减盲区, 故仅在 Claude 主驾时作兜底。
+如果评审对象是 Codex-authored maintenance diff, 用 --driver codex:
 Codex 后端不再计为独立复审票, 矩阵切到 arkcli panel + Claude Code/API, 但综合大脑仍为 Codex。
 
 接入方式(其他功能 import):
@@ -503,9 +505,25 @@ def _is_heterogeneous(name: str, cfg: dict, driver: str | None = None) -> bool:
     return bool(cfg["backends"].get(name, {}).get("heterogeneous", False))
 
 
+def _driver_matrix_order(driver: str | None = None) -> list[str]:
+    """Preferred reviewer order for the active author/review-subject mode."""
+    driver = _normalize_driver(driver)
+    if driver == "codex":
+        # Codex-authored changes need external review: arkcli panel plus Claude Code/API.
+        return ["arkcli", "claude"]
+    # Claude Code-authored/driven changes use Codex plus arkcli when available.
+    return ["codex", "arkcli"]
+
+
 def _available_heterogeneous_backends(cfg: dict, driver: str | None = None) -> list[str]:
+    preferred = _driver_matrix_order(driver)
+    priority = list(cfg.get("priority", []))
+    # Keep private-config legacy backends usable and allow priority to disable a
+    # backend, but never let priority invert the active driver matrix.
+    order = [name for name in preferred if name in priority]
+    order += [name for name in priority if name not in order]
     return [
-        name for name in cfg.get("priority", [])
+        name for name in order
         if _is_heterogeneous(name, cfg, driver) and backend_available(name, cfg)
     ]
 
@@ -546,9 +564,9 @@ def build_rubric(base: str | None = None, *, role: str | None = None,
 
 def _effective_panel_min(selected: list[str], explicit_min: int | None, configured_min) -> int:
     """Default policy matrix:
-    - codex + arkcli available: require both.
-    - only codex or only arkcli available: accept that one backend.
-    - neither available: fall back to Claude same-family driver/API path."""
+    - Claude driver: codex + arkcli require both; one missing accepts the other.
+    - Codex-authored diff: arkcli + Claude Code/API require both; no arkcli requires Claude.
+    - Claude driver with neither external backend: fall back to same-family Claude."""
     if explicit_min is not None:
         return explicit_min
     if str(configured_min).strip().lower() == "auto":
@@ -1138,7 +1156,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
     if same_family_fallback:
         review_note = "同族 Claude 兜底复审, 独立性弱于 Codex/arkcli; 仍是候选非裁决。"
     elif backend_root == "claude" and driver == "codex":
-        review_note = "Claude Code/API 相对 Codex 主操作面是独立复审; 候选非裁决。"
+        review_note = "Claude Code/API 相对 Codex-authored diff 是独立复审; 候选非裁决。"
     else:
         review_note = "异构独立复审, 候选非裁决。"
     ledger = ["## Review Finding Ledger",
@@ -1215,6 +1233,10 @@ def _selftest() -> int:
                    all(not (isinstance(x, dict) and x.get("thinking") == "disabled")
                        for x in cfg["backends"]["arkcli"]["models"])))
     checks += [
+        ("driver matrix order: claude -> codex,arkcli",
+         _driver_matrix_order("claude") == ["codex", "arkcli"]),
+        ("driver matrix order: codex -> arkcli,claude",
+         _driver_matrix_order("codex") == ["arkcli", "claude"]),
         ("panel auto min: codex+arkcli -> 2",
          _effective_panel_min(["codex", "arkcli"], None, "auto") == 2),
         ("panel auto min: codex-driver arkcli+claude -> 2",
@@ -1242,6 +1264,16 @@ def _selftest() -> int:
          _matrix_brain(cfg, [], "claude") == "claude code same-family"),
         ("matrix brain: codex driver full -> codex",
          _matrix_brain(cfg, ["arkcli", "claude"], "codex") == "codex"),
+    ]
+    fake_all = json.loads(json.dumps(DEFAULT_CONFIG))
+    fake_all["priority"] = ["claude", "arkcli", "codex"]  # private config cannot invert the matrix
+    for n in ("codex", "arkcli", "claude"):
+        fake_all["backends"][n]["kind"] = "anthropic-or-driver"
+    checks += [
+        ("matrix selection ignores inverted priority for claude driver",
+         _available_heterogeneous_backends(fake_all, "claude")[:2] == ["codex", "arkcli"]),
+        ("matrix selection for codex driver is arkcli+claude",
+         _available_heterogeneous_backends(fake_all, "codex")[:2] == ["arkcli", "claude"]),
     ]
 
     # 优先级选择: 模拟可用性
@@ -1426,8 +1458,8 @@ def _selftest() -> int:
                                            driver="codex"))
     rv_codex_driver = (d_run / "review.md").read_text(encoding="utf-8")
     checks.append(("codex driver 下 Claude 记录为独立复审",
-                   "Claude Code/API 相对 Codex 主操作面是独立复审" in rv_codex_driver
-                   and "same-family peer_review fallback · claude" not in rv_codex_driver.split("Claude Code/API 相对 Codex 主操作面是独立复审")[-1]))
+                   "Claude Code/API 相对 Codex-authored diff 是独立复审" in rv_codex_driver
+                   and "same-family peer_review fallback · claude" not in rv_codex_driver.split("Claude Code/API 相对 Codex-authored diff 是独立复审")[-1]))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
@@ -1440,11 +1472,11 @@ def _selftest() -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="异构复审矩阵 (Claude driver: Codex+arkcli panel; missing one -> the other; none -> Claude fallback)")
+    ap = argparse.ArgumentParser(description="异构复审矩阵 (Claude-authored: Codex+arkcli; Codex-authored: arkcli+Claude)")
     ap.add_argument("scope", nargs="?", help="run 目录, 如 runs/<target>")
     ap.add_argument("--backend", help="强制单后端: codex|arkcli|claude (legacy: deepseek|glm)。不指定则按矩阵跑 panel。")
     ap.add_argument("--driver", choices=["claude", "codex"], default=None,
-                    help="当前主操作面/作者模型(默认 claude; 可用 XUNJI_REVIEW_DRIVER 覆盖)。codex 仅用于代码维护, 排除 Codex 自审票, 默认 arkcli+Claude, 大脑仍 Codex。")
+                    help="作者/评审对象模式(默认 claude; 可用 XUNJI_REVIEW_DRIVER 覆盖)。claude-authored: Codex+arkcli; codex-authored: arkcli+Claude, 排除 Codex 自审票。")
     ap.add_argument("--out", help="把复审写到该文件(如 review/records/<x>.md)")
     ap.add_argument("--json-out", help="把结构化复审结果写到 JSON 文件")
     ap.add_argument("--into-run", action="store_true",

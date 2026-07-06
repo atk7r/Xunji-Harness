@@ -33,14 +33,17 @@ current behavior and update the stale doc.
 - Reviewer output is candidate material. Claude/Root must adjudicate it through
   evidence, tests, diffs, and recorded rationale.
 
-## Live-Run Matrix
+## Claude Driver Matrix
 
-For Claude Code live runs and closure/reporter review:
+For Claude Code live runs and Claude-authored code/report/closure review:
 
-- Preferred full review: Codex + arkcli panel.
-- No Codex: arkcli panel.
-- No arkcli: Codex.
-- Neither external backend: fresh-context Claude same-family fallback only
+- Full availability: Claude Code modifies/drives; Codex + arkcli panel review;
+  Codex is the synthesis brain.
+- No Codex: Claude Code modifies/drives; arkcli panel reviews; arkcli panel is
+  the synthesis brain.
+- No arkcli: Claude Code modifies/drives; Codex reviews; Codex is the synthesis
+  brain.
+- Neither Codex nor arkcli: fresh-context Claude same-family fallback only
   transparently; it reduces bias but not shared blind spots.
 
 Use the default Claude-driver command for run closure:
@@ -56,17 +59,22 @@ the review material first:
 python3 tools/peer_review.py runs/<dir> --bundle-only
 ```
 
-## Delegated Codex Diffs
+## Accepting Codex-Authored Diffs
 
-When Claude delegates repository edits to Codex, Claude remains the integration
-driver. Do not count Codex as an independent reviewer of its own diff.
+When Claude Code integrates a Codex-authored repository diff, Claude Code only
+needs the acceptance contract:
 
-For high-risk Codex-authored code, report, or closure-impacting changes:
+- Codex self-review is not an independent review vote.
+- Require a review record for high-risk code, report, closure-impacting, or
+  safety-critical changes.
+- Check that the record names the external reviewer(s), notes any missing
+  reviewer limitation, and includes dispositions tied to tests, diffs, or
+  artifacts.
+- If the record is missing or stale, run or request a fresh Claude-side review
+  before accepting the diff.
 
-- Review the diff with Claude Code plus arkcli panel when available.
-- Record findings and Claude's dispositions in `review/records/<date>-<topic>.md`.
-- If arkcli is unavailable, record that limitation and review with tests plus a
-  fresh-context Claude/available external reviewer.
+The Codex-side author/review matrix belongs in `AGENTS.md`, not this Claude
+driver skill.
 
 ## Arkcli Panel Defaults
 

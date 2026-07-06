@@ -142,7 +142,8 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一�
 ### 已落地
 - **异构独立复审 = R-6 的实现** — `tools/peer_review.py` 默认按 Claude Code 主驾驶运行
   Codex gpt-5.5 high + arkcli 三模型 panel(Kimi-K2.7-Code/MiniMax-M3/GLM-5.2), 单点高危和
-  代码/报告/收口复审都走这套; 缺一边则用剩余异构后端, 都缺才 Claude 同族兜底。
+  代码/报告/收口复审都走这套; 缺 Codex 用 arkcli, 缺 arkcli 用 Codex, 都缺才 Claude 同族兜底。
+  Codex-authored maintenance diff 的复审矩阵放在 Codex 根指令 `AGENTS.md`, 不在公共流程文档展开。
   arkcli panel 默认允许各模型自己的 thinking/推理策略, 不写 `--thinking disabled`。
   候选非裁决, 接 `check_run --auto-peer-review`。
   R-6「从干净上下文重证发现」由【异构】模型落地; 同模型只减 bias 不减盲区(A2)。
@@ -176,7 +177,8 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一�
 ### 未完成 / 预留(卡点已标)
 - ✅ **B2-② 多异构 panel** — 默认链路已接 arkcli 三模型 panel(GLM5.2/Kimi2.7/MiniMax-M3);
   Claude Code 主驾驶时满配默认跑 Codex+arkcli panel, 大脑为 Codex; 无 Codex 时大脑为 arkcli
-  panel; 无 arkcli 时大脑为 Codex。旧 DeepSeek/GLM OpenAI-compatible 后端保留为
+  panel; 无 arkcli 时大脑为 Codex。Codex-authored maintenance review 细节见 `AGENTS.md`。
+  旧 DeepSeek/GLM OpenAI-compatible 后端保留为
   `--backend`/私有配置扩展, 不再是默认链路。
 - ⬜ **B1-③ API 后端核对产物** — codex 版已做(rubric 第7点); API 版卡 key。
 - ⬜ **B3-② 通用利用原语**(撬 A3 能力墙, 当前方向): ① OOB 带外回调监听器(推荐起点, 盲 RCE/SSRF/

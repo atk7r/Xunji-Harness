@@ -29,12 +29,16 @@ record — this is a gate, not a suggestion: you cannot mark the run closed with
 
 "另一个模型"这条(独立性最强)已做成可接入模块 `tools/peer_review.py`:
 `review("runs/<target>", out_file="review/records/<date>-<target>.md")`，或 CLI
-`python tools/peer_review.py runs/<target> --out review/records/<...>.md`。Claude Code
-正常主驾驶时, 单点高危复审、代码/报告/收口复审都按同一矩阵跑: 满配用
-**Codex(gpt-5.5 high) + arkcli 三模型 panel(Kimi-K2.7-Code / MiniMax-M3 / GLM-5.2)**,
-大脑为 Codex; 无 Codex 时只跑 arkcli panel, 大脑为 arkcli panel; 无 arkcli 时只跑 Codex,
-大脑为 Codex; 两者都无时才退到 Claude Code fresh-context 同族模型。Codex 是首席复审官;
-arkcli panel 是外部异构补盲团; Claude 自家只减 bias 不减盲区故仅兜底。
+`python tools/peer_review.py runs/<target> --out review/records/<...>.md`。
+
+Claude Code 正常主驾驶时, 单点高危复审、代码/报告/收口复审都按同一矩阵跑:
+满配用 **Codex(gpt-5.5 high) + arkcli 三模型 panel(Kimi-K2.7-Code / MiniMax-M3 / GLM-5.2)**,
+大脑为 Codex; 无 Codex 时只跑 arkcli panel, 大脑为 arkcli panel; 无 arkcli 时只跑
+Codex, 大脑为 Codex; 两者都无时才退到 Claude Code fresh-context 同族模型。
+Codex-authored maintenance diff 的作者侧复审矩阵属于 Codex 根指令 `AGENTS.md`, 这里不展开。
+
+Codex 是 Claude 主驾满配时的首席复审官; arkcli panel 是外部异构补盲团;
+Claude 自家只减 bias 不减盲区, 所以仅作兜底。
 arkcli panel 默认不禁用 thinking/推理策略; 只有私有配置显式写 `thinking` 字段时才覆盖模型默认行为。
 产出是**候选非裁决**: driver/Codex 裁决仍必须过证据门
 (不盲从工具/语境误报, 不忽视真盲补)。实测 Codex 逮到 driver + check_run 都漏的满分 CRITICAL

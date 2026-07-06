@@ -68,25 +68,26 @@ run:
 Passing `check_run` means the structure is present. It does not prove the report
 is correct. Keep hunting if the evidence graph still exposes a live front.
 
-## Codex Code-Maintenance Mode
+## Codex-Authored Maintenance Mode
 
 This mode is only for repository maintenance, code changes, documentation changes,
 tooling changes, and review of those diffs. It is not a live engagement runtime
 and must not replace the Claude Code guard/hook boundary for target-facing work.
 
-When Codex is the code-maintenance driver:
+When Codex authors the maintenance diff:
 
 - Daily/live run work is still not Codex's runtime; do not use Codex or `.codex/`
   artifacts as proof that a live run was safe.
 - Codex does not count as an independent reviewer of its own code change.
-- Use `python tools/peer_review.py <scope> --driver codex` for Codex-driven code
-  review. The reviewer votes are `arkcli panel` plus `Claude Code/API` when
-  available; the synthesis brain remains Codex, which must adjudicate their
-  findings through evidence, tests, diffs, and recorded rationale.
-- If arkcli is unavailable, use Claude Code/API or a fresh-context Claude Code
-  review as the external vote. If Claude is unavailable, use arkcli panel. If
-  neither external reviewer is available, record that limitation and do not
-  pretend Codex self-review is independent.
+- Use `python tools/peer_review.py <scope> --driver codex` for Codex-authored code
+  review. With full availability, the reviewer votes are `arkcli panel` plus
+  `Claude Code/API`; the synthesis brain remains Codex, which must adjudicate
+  their findings through evidence, tests, diffs, and recorded rationale.
+- If arkcli is unavailable, Claude Code/API or a fresh-context Claude Code review
+  is still required. If Claude is unavailable but arkcli is available, use arkcli
+  panel and record the missing-Claude limitation. If neither external reviewer
+  is available, record that limitation and do not pretend Codex self-review is
+  independent.
 - For safety-critical behavior changes under `.claude/hooks/`,
   `tools/harness/guard.py`, or `sentinel/`, still run the required tests and
   record an independent review in `review/records/<date>-<topic>.md`.

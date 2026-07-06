@@ -78,6 +78,14 @@ def record_recon(run_dir: Path, value: str) -> None:
     t.write_text(new, encoding="utf-8")
 
 
+def record_target(run_dir: Path, value: str) -> None:
+    """Fill target.md `Target:` from an explicit CLI target before no-recon coverage derivation."""
+    t = run_dir / "target.md"
+    txt = t.read_text(encoding="utf-8", errors="replace")
+    new = re.sub(r"(- Target:).*", lambda m: f"{m.group(1)} {value}", txt, count=1)
+    t.write_text(new, encoding="utf-8")
+
+
 def record_scope(run_dir: Path, recon_path: Path) -> str:
     """从 recon 的 ownership 派生默认 scope, 填进 target.md 的 Target/In-scope/Out-of-scope
     (现在这些字段 setup 留空 = scope 脊梁缺失, mokwon dogfood 实测的头号问题)。派生不驱动:
@@ -278,6 +286,38 @@ def _merge_egress_recheck(run_dir):
     cov_path.write_text(_json.dumps(cov, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _coverage_ready(run_dir: Path) -> bool:
+    cov_path = run_dir / "classify" / "coverage.json"
+    try:
+        cov = json.loads(cov_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    assets = cov.get("assets")
+    return isinstance(assets, list) and any(isinstance(a, dict) and a.get("host") for a in assets)
+
+
+def _parse_target_asset(raw: str) -> tuple[str, str, int] | None:
+    """Parse target.md Target into (host, scheme, port) without accepting prose."""
+    val = raw.strip()
+    if not val or val.startswith("(") or re.search(r"\s", val):
+        return None
+    m = re.match(r"(?:(https?)://)?([^/\s#]+)(?:[/?#].*)?$", val)
+    if not m:
+        return None
+    scheme = m.group(1) or "https"
+    host = m.group(2)
+    port = 443 if scheme == "https" else 80
+    pm = re.match(r"^(.+):(\d+)$", host)
+    if pm:
+        host = pm.group(1)
+        port = int(pm.group(2))
+    if not host or host.startswith("(") or not re.match(r"^[A-Za-z0-9_.:-]+$", host):
+        return None
+    if port < 1 or port > 65535:
+        return None
+    return host, scheme, port
+
+
 def _derive_coverage_from_target(run_dir: Path) -> str:
     """无 Guanlan recon 时, 从 target.md 的 Target 字段提取 host, 生成最小骨架
     coverage.json。资产标记为 reachable: unknown, source: target-derived。"""
@@ -285,16 +325,12 @@ def _derive_coverage_from_target(run_dir: Path) -> str:
     host, scheme, port = None, "https", 443
     if target_md.exists():
         for line in target_md.read_text(encoding="utf-8", errors="replace").splitlines():
-            m = re.match(r"- Target:\s*(https?://)?([^/\s#]+)", line)
+            m = re.match(r"- Target:\s*(.*)$", line)
             if m:
-                host = m.group(2)
-                if m.group(1):
-                    scheme = m.group(1).rstrip("://")
-                    port = 443 if scheme == "https" else 80
-                # Extract explicit port from host if present
-                pm = re.match(r"(.+):(\d+)$", host)
-                if pm:
-                    host, port = pm.group(1), int(pm.group(2))
+                parsed = _parse_target_asset(m.group(1))
+                if parsed is None:
+                    return "target.md Target 为空或格式不适合自动推导, 跳过 coverage 推导"
+                host, scheme, port = parsed
                 break
     if not host:
         return "target.md 无 Target 字段, 跳过 coverage 推导"
@@ -315,6 +351,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="初始化授权目标 run 工作台(派生不驱动)")
     ap.add_argument("slug", nargs="?", help="目标短名 → run 目录 runs/<slug>_<date>")
     ap.add_argument("recon", nargs="?", help="recon JSON 路径(可选; 给了就 ingest)")
+    ap.add_argument("--target", default=None,
+                    help="无 recon 时写入 target.md Target 并派生最小 coverage.json, 如 https://example.com:8443")
     ap.add_argument("--date", default=None, help="YYYYMMDD; 默认今天")
     ap.add_argument("--classify", action="store_true",
                     help="顺带跑 classify_hosts 建 coverage.json(实时探测=主动侦察, 需授权)")
@@ -336,6 +374,7 @@ def main() -> int:
     made = scaffold(run_dir)
     print(f"[setup] 建 run 骨架 {run_dir}")
     print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
+    coverage_ready = False
 
     recon_ok = False
     if args.recon:
@@ -361,6 +400,7 @@ def main() -> int:
             # 轴 B: 默认【零重探】从 Guanlan 产物折 coverage.json(check_run 收口硬门要它)。
             try:
                 cinfo = adapt_coverage(rp, run_dir)
+                coverage_ready = _coverage_ready(run_dir)
                 print(f"[setup] Guanlan→coverage(零重探): {cinfo}")
             except Exception as e:
                 print(f"[!] coverage 适配失败(可手跑 classify_hosts 兜底): {e}", file=sys.stderr)
@@ -371,10 +411,14 @@ def main() -> int:
                 print(f"[!] knowledge 匹配失败(可手查): {e}", file=sys.stderr)
     else:
         record_recon(run_dir, "none")
+        if args.target:
+            record_target(run_dir, args.target)
         print("[setup] 无 recon: 从 target.md 推导最小 coverage.json …")
         try:
             cinfo = _derive_coverage_from_target(run_dir)
-            print(f"[setup] target→coverage(最小骨架): {cinfo}")
+            coverage_ready = _coverage_ready(run_dir)
+            label = "target→coverage(最小骨架)" if coverage_ready else "target→coverage"
+            print(f"[setup] {label}: {cinfo}")
         except Exception as e:
             print(f"[!] coverage 自动推导失败(可手建): {e}", file=sys.stderr)
 
@@ -388,8 +432,12 @@ def main() -> int:
         if r.stderr:
             sys.stderr.write(r.stderr)
         _merge_egress_recheck(run_dir)
+        coverage_ready = _coverage_ready(run_dir)
 
-    print(f"[下一步] 直接打可达高价值(coverage 已就位); 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
+    if coverage_ready:
+        print(f"[下一步] 直接打可达高价值(coverage 已就位); 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
+    else:
+        print(f"[下一步] 先填写 target.md 的 Target/In-scope 并生成 coverage.json; 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
     return 0
 
 
@@ -447,8 +495,33 @@ def _selftest() -> int:
     rd2 = d / "t2_20260101"
     scaffold(rd2)
     record_recon(rd2, "none")
-    checks.append(("no-recon target records 'none'",
-                   "recon report: none" in (rd2 / "target.md").read_text(encoding="utf-8")))
+    no_target_info = _derive_coverage_from_target(rd2)
+    bad_target = d / "bad_target_20260101"
+    scaffold(bad_target)
+    record_target(bad_target, "not a url")
+    bad_target_info = _derive_coverage_from_target(bad_target)
+    rd3 = d / "t3_20260101"
+    scaffold(rd3)
+    record_recon(rd3, "none")
+    record_target(rd3, "http://example.org:8080/app")
+    target_info = _derive_coverage_from_target(rd3)
+    target_cov = json.loads((rd3 / "classify" / "coverage.json").read_text(encoding="utf-8"))
+    checks += [
+        ("no-recon target records 'none'",
+         "recon report: none" in (rd2 / "target.md").read_text(encoding="utf-8")),
+        ("no-recon without Target does not claim coverage built",
+         "Target 为空" in no_target_info and not (rd2 / "classify" / "coverage.json").exists()),
+        ("malformed target does not write coverage",
+         "格式不适合" in bad_target_info and not (bad_target / "classify" / "coverage.json").exists()),
+        ("record_target fills target.md Target",
+         "- Target: http://example.org:8080/app" in (rd3 / "target.md").read_text(encoding="utf-8")),
+        ("no-recon explicit target writes coverage",
+         (rd3 / "classify" / "coverage.json").exists() and "example.org" in target_info),
+        ("target-derived coverage parses scheme and port",
+         target_cov["assets"][0]["host"] == "example.org"
+         and target_cov["assets"][0]["scheme"] == "http"
+         and target_cov["assets"][0]["port"] == 8080),
+    ]
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

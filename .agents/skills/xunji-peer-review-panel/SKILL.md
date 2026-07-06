@@ -30,22 +30,25 @@ current behavior and update the stale doc.
 - When Codex reviews a Claude-driven run, act as an external reviewer: produce
   candidates, contradictions, and missing-evidence calls. Claude/Root still
   decides through the run evidence gate.
-- When Codex drives repository maintenance, Codex does not count as an
-  independent reviewer of its own diff. Use the Codex-driver matrix below.
+- When Codex authors repository maintenance, Codex does not count as an
+  independent reviewer of its own diff. Use the Codex-authored matrix below.
 - Do not use `.codex/` artifacts as proof that the live engagement boundary was
   active.
 
 ## Driver Matrix
 
-For a Claude Code live run, Codex is normally the heterogeneous reviewer:
+For Claude Code-driven live runs or Claude-authored code/report/closure changes:
 
-- Preferred full review: Codex + arkcli panel.
-- No Codex: arkcli panel.
-- No arkcli: Codex.
-- Neither external backend: fresh-context Claude same-family fallback only
+- Full availability: Claude Code modifies/drives; Codex + arkcli panel review;
+  Codex is the synthesis brain.
+- No Codex: Claude Code modifies/drives; arkcli panel reviews; arkcli panel is
+  the synthesis brain.
+- No arkcli: Claude Code modifies/drives; Codex reviews; Codex is the synthesis
+  brain.
+- Neither Codex nor arkcli: fresh-context Claude same-family fallback only
   transparently; it reduces bias but not shared blind spots.
 
-For Codex-driven code maintenance, use:
+For Codex-authored code maintenance, use:
 
 ```bash
 python3 tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
@@ -53,9 +56,12 @@ python3 tools/peer_review.py <scope> --driver codex --out review/records/<date>-
 
 In this mode:
 
-- Codex is the synthesis brain but not an independent vote.
-- Independent votes are arkcli panel plus Claude Code/API when available.
-- If one external side is unavailable, use the other and record the limitation.
+- Codex authors the change and remains the final synthesis brain.
+- Codex does not count as an independent reviewer of its own diff.
+- Full availability: arkcli panel plus Claude Code/API review.
+- No arkcli: Claude Code/API or fresh-context Claude Code review is required.
+- No Claude Code but arkcli available: use arkcli panel and record the missing
+  Claude limitation.
 - If neither external reviewer is available, do not pretend Codex self-review is
   independent.
 
