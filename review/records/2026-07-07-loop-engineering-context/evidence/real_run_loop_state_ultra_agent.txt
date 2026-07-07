@@ -1,0 +1,20 @@
+# Loop State
+
+- Phase: Driver
+- Open/deferred/closed fronts: 1 / 0 / 1
+- Evidence: 2 total; new this cycle: 0; certainty upgrades: 0
+- Coverage: 0 tested cells; new this cycle: 0; untested applicable cells: 0
+- No-progress cycles: 0 (continue)
+- Agents: 2 assignments; unresolved conflicts: 0
+- Fan-out required: no
+- Completion pause candidate: no
+
+## Next Actions
+
+- Expand or justify low-saturation fronts before any explored-enough claim.
+- Choose the next front from actionable/open fronts and record a Root graph pass.
+
+## Low Saturation
+
+- F-001: ratio=0.0 tried=0 untried=6
+- F-002: ratio=0.0 tried=0 untried=3

@@ -309,6 +309,11 @@ Project-discipline and run-structure checks in `tools/`:
 - `python tools/state_project.py runs/<dir>` — derives `state/projection.json` and
   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
   canonical and projection must not be hand-edited back into facts.
+- `python tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle
+  snapshot `state/loop_state.{json,md}` after graph / Agent Board / saturation /
+  coverage-matrix inputs are refreshed. It records evidence deltas, certainty upgrades,
+  coverage improvement, Coda convergence, unresolved conflicts, and fan-out/closure
+  hints. Advisory only: it never selects a front, promotes evidence, or closes a run.
 
 These tools verify structure and discipline only — never a replacement for the evidence
 gate or autonomous judgement.

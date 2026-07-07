@@ -1,0 +1,275 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-07-loop-engineering-context",
+  "files": {
+    "report.md": {
+      "sha1": "2aa6728a63885f2dffee7f05daa2de1a09eee3e3",
+      "size": 3154
+    },
+    "evidence.md": {
+      "sha1": "ebe5629a0a92d3c090a89bfec0a7d694d93ae99a",
+      "size": 2882
+    },
+    "frontier.md": {
+      "sha1": "76d3f22b5c83c4a8c48a8df542fce2102726fb22",
+      "size": 858
+    },
+    "decisions.md": {
+      "sha1": "91c2d976b583106807303cf964f91862e402a6e2",
+      "size": 377
+    },
+    "review.md": {
+      "sha1": "cb04913865a4f81dab74847e031a28aefdc32d59",
+      "size": 277
+    },
+    "target.md": {
+      "sha1": "08f91be898ee9cb60c2b135a69aebe422b21f44f",
+      "size": 674
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-001",
+          "F-002",
+          "F-003"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/diff.patch",
+            "path": "evidence/diff.patch",
+            "exists": true,
+            "size": 40333,
+            "sha1": "34dc82ed046d67897285f2db401023461bc47573"
+          },
+          {
+            "token": "evidence/diff.txt",
+            "path": "evidence/diff.txt",
+            "exists": true,
+            "size": 40333,
+            "sha1": "34dc82ed046d67897285f2db401023461bc47573",
+            "excerpt": "diff --git a/docs/ROUTER.md b/docs/ROUTER.md\nindex 4bcd82b..e6a29ea 100644\n--- a/docs/ROUTER.md\n+++ b/docs/ROUTER.md\n@@ -309,6 +309,11 @@ Project-discipline and run-structure checks in `tools/`:\n - `python tools/state_project.py runs/<dir>` — derives `state/projection.json` and\n   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains\n   canonical and projection must not be hand-edited back into facts.\n+- `python tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle\n+  snapshot `state/loop_state.{json,md}` after graph / Agent Board / saturation /\n+  coverage-matrix inputs are refreshed. It records evidence deltas, certainty upgrades,\n+  coverage improvement, Coda convergence, unresolved conflicts, and fan-out/closure\n+  hints. Advisory only: it never selects a front, promotes evidence, or closes a run.\n \n These tools verify structure and discipline only — never a replacement for the evidence\n gate or autonomous judgement.\ndiff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md\nindex 8e9ffa4..35d54f2 100644\n--- a/docs/WORKFLOW-reference.md\n+++ b/docs/WORKFLOW-reference.md\n@@ -16,6 +16,8 @@ runs/<slug>_<date>/\n                     false_positive · decisions · review · report\n   evidence.json     auto-derived index of evidence.md (check_run writes it)\n   graph.json        derived state graph (graph.py writes it)\n+  state/            derived caches: projection.json · events.jsonl ·\n+                    workflow_checkpoint.json · coverage_matrix.* · loop_state.*\n   evidence/         sensor proof artifacts: *.html, *.replay.json, render_<host>/, screenshots\n   classify/         classify_hosts output: coverage.json + per-host bodies\n   scripts/          PoC / helper scripts (author-and-handoff)\n@@ -23,7 +25,8 @@ runs/<slug>_<date>/\n ```\n \n Keep the run **root** to the core `.md` files plus the auto-derived\n-`evidence.json` / `coverage.json` / `graph.json`. Proof artifacts belong under\n+`evidence.json` / `coverage.json` / `graph.json`; broader derived projections belong under\n+`state/`. Proof artifacts belong under\n `evidence/`, PoC under `scripts/`, coverage under `classify/`. To make the right\n place the easy place: `probe --save NAME --run runs/<dir>` drops the body **and** its\n `.replay.json` into `<run>/evidence/`; `render --run runs/<dir>` defaults its output\n@@ -439,6 +442,14 @@ Markdown stays the source of truth; the graph is a projection, like `coverage.js\n data for tools such as `workers`, `bench`, and `check_run`; it must never be edited\n as the narrative source of truth or used to overwrite Markdown.\n \n+`tools/loop_state.py` joins the graph, projection, Agent Board conflict state,\n+saturation, evidence parser, and coverage matrix into `<run>/state/loop_state.json`\n+and `<run>/state/loop_state.md`. This is the per-cycle closed-loop snapshot:\n+evidence delta, certainty upgrades, coverage-matrix improvement, no-progress\n+cycle count, Coda convergence, fan-out-required hints, unresolved conflicts, and\n+closure gate hints. It is derived and advisory only. It never selects the next\n+front, promotes Agent output, closes a front, or writes report conclusions.\n+\n ## Agent Board\n \n The run directory is a blackboard. Collaboration is now Root Orchestrator +\ndiff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md\nindex 06d92ba..cd84759 100644\n--- a/docs/WORKFLOW.md\n+++ b/docs/WORKFLOW.md\n@@ -61,8 +61,15 @@ python tools/graph.py runs/<dir>\n python tools/workers.py status runs/<dir>\n python tools/workers.py conflicts runs/<dir>\n python tools/saturation.py runs/<dir>\n+python tools/coverage_matrix.py runs/<dir> --write\n+python tools/loop_state.py runs/<dir> --write\n ```\n `graph.py` 运行后自动写入 `state/workflow_checkpoint.json`（轻量阶段快照：phase / open/deferred/blocked/closed fronts / confirmed evidence），用于跨会话恢复和阶段追踪。\n+`loop_state.py` writes `state/loop_state.{json,md}` as the closed-loop progress\n+snapshot: evidence delta, certainty upgrades, coverage-matrix improvement,\n+Coda convergence, Agent Board conflicts, and fan-out/closure gate hints. It is a\n+derived cache only; Root still chooses the next front and the evidence gate still\n+owns promotion.\n \n The point is to make \"what just got unlocked / neglected / contradicted / unassigned\"\n a query, not a full re-read of every block. Ask:\ndiff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md\nindex afb0ed0..ae69787 100644\n--- a/docs/templates/loop_prompt.md\n+++ b/docs/templates/loop_prompt.md\n@@ -1,64 +1,87 @@\n # Xunji Loop Protocol: {{RUN_DIR}}\n \n You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.\n-End each turn with `下一行动: <action>` or `BLOCKED: <reason>`.\n+Run exactly one autonomous iteration. End each turn with `下一行动: <action>` or\n+`BLOCKED: <reason>`.\n \n ## Iteration\n \n ### 1. Drift Recovery\n If `.claude/drift_block.json` is active, read its `required_rereads`, refresh `{{RUN_DIR}}/frontier.md` when `frontier_stale` is set, and log `Drift recovery` in decisions.md.\n \n-### 2. Root Graph Pass\n-Read frontier.md (all fronts), recent decisions.md, recent evidence.md, hints.md if present, state/assignments.json, and state/conflicts.json.\n+### 2. Closed-Loop State Pass\n+Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent evidence.md, hints.md if present, state/assignments.json, state/conflicts.json, and state/loop_state.md.\n \n ```bash\n-python tools/graph.py \"{{RUN_DIR}}\"\n-python tools/workers.py status \"{{RUN_DIR}}\"\n-python tools/workers.py conflicts \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/graph.py \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/workers.py status \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/workers.py conflicts \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/saturation.py \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/coverage_matrix.py \"{{RUN_DIR}}\" --write\n+{{PYTHON}} tools/loop_state.py \"{{RUN_DIR}}\" --write\n ```\n \n-Append one `Root graph pass:` line to decisions.md: open/deferred counts, agent coverage, unresolved conflicts, stay/pivot/assign choice, target F-XXX.\n+Append one `Root graph pass:` line to decisions.md: open/deferred counts, agent coverage, unresolved conflicts, evidence delta, coverage delta, no-progress cycle count, stay/pivot/assign choice, target F-XXX.\n \n If closure is near, the same barrier keeps failing, 3 cycles produced no new evidence, or a hint asks for metacog, append one compact `Divergence trigger:` block and assign a verify/review/surface Agent when useful: Trigger / Blind spot hypothesis / Assigned role / Proposed action / Target object / Expected signal / Safety class / Why current trajectory likely missed it.\n \n+If `state/loop_state.json` says `progress.coda_converged=true`, stop the autonomous drive and trigger Completion pause checks. Do not continue probing just because Type A fronts remain; Coda convergence means the last two cycles produced no new evidence, no certainty upgrade, and no coverage-matrix improvement.\n+\n ### 3. Plan / Assign / Act\n Guard-routed tools only.\n \n ```bash\n-python tools/workers.py assign \"{{RUN_DIR}}\" --role web-hunter --front F-XXX\n-python tools/probe.py GET \"https://target/path\" --save NAME --run \"{{RUN_DIR}}\"\n-python tools/probe.py GET \"https://target/path\" -H \"K: V\" --save NAME --run \"{{RUN_DIR}}\"\n-python tools/probe.py POST \"https://target/path\" --data '{\"k\":\"v\"}' -H \"Content-Type: application/json\" --save NAME --run \"{{RUN_DIR}}\"\n-python tools/scan.py sqlmap \"https://target/path?id=1\"\n-python tools/scan.py nuclei \"https://target/\"\n+{{PYTHON}} tools/workers.py suggest \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/workers.py plan \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/workers.py assign \"{{RUN_DIR}}\" --role web-hunter --front F-XXX\n+{{PYTHON}} tools/probe.py GET \"https://target/path\" --save NAME --run \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/probe.py GET \"https://target/path\" -H \"K: V\" --save NAME --run \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/probe.py POST \"https://target/path\" --data '{\"k\":\"v\"}' -H \"Content-Type: application/json\" --save NAME --run \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/scan.py sqlmap \"https://target/path?id=1\"\n+{{PYTHON}} tools/scan.py nuclei \"https://target/\"\n ```\n \n-Timeout / host-backoff → deferred (Type A). Save artifact before raising certainty. Agents produce candidates/refutations only; the Single Synthesizer promotes findings.\n+If `state/loop_state.json` says `gates.fanout_required=true`, use the Agent Board: assign at least two disjoint lanes unless a concrete shared barrier or request budget reason is recorded. Agents produce candidates/refutations only; the Single Synthesizer promotes findings.\n+\n+Timeout / host-backoff → deferred (Type A). Save artifact before raising certainty. A sensor result or Agent note is not a finding until the evidence gate is applied.\n \n ### 4. Gates\n Before promotion, report, or closure:\n \n ```bash\n-python tools/workers.py merge-check \"{{RUN_DIR}}\"\n-python tools/workers.py synthesize \"{{RUN_DIR}}\"\n-python tools/peer_review.py --into-run \"{{RUN_DIR}}\"\n-python tools/check_run.py \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/workers.py agent-check \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/workers.py merge-check \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/workers.py synthesize \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/check_run.py \"{{RUN_DIR}}\"\n+```\n+\n+Only at Completion pause / closure:\n+\n+```bash\n+{{PYTHON}} tools/check_run.py \"{{RUN_DIR}}\" --replay-verify\n+{{PYTHON}} tools/peer_review.py \"{{RUN_DIR}}\" --into-run\n ```\n \n-Every 10 cycles:\n+Closure still requires: no hard `check_run` gates, independent review resolved, retrospective.md with real Self and Framework/tooling sections, no unresolved PR ledger items, and `GHOST_COMPLETE` written only after those pass.\n+\n+Every 10 cycles or when `loop_state` shows stale deferred work:\n \n ```bash\n-python tools/deferred_queue.py --run \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/deferred_queue.py --run \"{{RUN_DIR}}\"\n ```\n \n On stage transition or drift recovery:\n \n ```bash\n-python tools/session_handoff.py write \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/session_handoff.py write \"{{RUN_DIR}}\"\n ```\n \n ### 5. Update\n-Record the action result in the run files before ending the turn.\n+Record the action result in the run files before ending the turn. Then refresh:\n+\n+```bash\n+{{PYTHON}} tools/loop_state.py \"{{RUN_DIR}}\" --write\n+```\n \n ### 6. Stop\n Run one iteration only. Ask the operator only when blocked.\ndiff --git a/tools/loop_bootstrap.py b/tools/loop_bootstrap.py\nindex cee75fb..ee168b2 100644\n--- a/tools/loop_bootstrap.py\n+++ b/tools/loop_bootstrap.py\n@@ -3,9 +3,9 @@\n \"\"\"loop_bootstrap.py —— 一条命令启动 Xunji 全自动渗透流水线。\n \n 用法:\n-  python tools/loop_bootstrap.py <slug> <recon.json>       # 新目标\n-  python tools/loop_bootstrap.py --resume runs/<dir>        # 续接已有 run\n-  python tools/loop_bootstrap.py --selftest                 # 自检\n+  python3 tools/loop_bootstrap.py <slug> <recon.json>       # 新目标\n+  python3 tools/loop_bootstrap.py --resume runs/<dir>       # 续接已有 run\n+  python3 tools/loop_bootstrap.py --selftest                # 自检\n \n 输出: 一个可保存到文件的 loop prompt 路径，和 /loop 启动指令。\n \"\"\"\n@@ -22,6 +22,7 @@ from pathlib import Path\n ROOT = Path(__file__).resolve().parents[1]\n RUNS = ROOT / \"runs\"\n LOOP_TEMPLATE = ROOT / \"docs\" / \"templates\" / \"loop_prompt.md\"\n+PYTHON_CMD = sys.executable or \"python3\"\n \n try:\n     sys.stdout.reconfigure(encoding=\"utf-8\")\n@@ -58,7 +59,7 @@ def _read_template() -> str:\n             pass\n     return (\n         \"你是 Xunji 自主 Driver，对 run={{RUN_DIR}} 执行一轮探测。\\n\"\n-        \"1. Reason pass: 读 frontier.md → 选前沿 → 安全探测 → 更新状态。\\n\"\n+        \"1. Reason pass: `{{PYTHON}} tools/loop_state.py \\\"{{RUN_DIR}}\\\" --write`。\\n\"\n         \"2. 结尾: 下一行动: <action> 或 BLOCKED: <reason>。\\n\"\n     )\n \n@@ -66,7 +67,7 @@ def _read_template() -> str:\n def _generate_loop_prompt(run_dir: Path) -> str:\n     \"\"\"用实际 run 目录路径替换模板中的 {{RUN_DIR}}。\"\"\"\n     template = _read_template()\n-    return template.replace(\"{{RUN_DIR}}\", str(run_dir))\n+    return template.replace(\"{{RUN_DIR}}\", str(run_dir)).replace(\"{{PYTHON}}\", PYTHON_CMD)\n \n \n def _write_initial_state(run_dir: Path) -> None:\n@@ -84,6 +85,25 @@ def _write_initial_state(run_dir: Path) -> None:\n         print(f\"[bootstrap] 注意: 写 session_state.json 失败（后续轮次会重建）\", file=sys.stderr)\n \n \n+def _refresh_loop_state(run_dir: Path) -> bool:\n+    \"\"\"Refresh derived loop caches. These are advisory caches; Markdown stays canonical.\"\"\"\n+    cmd = [PYTHON_CMD, str(ROOT / \"tools\" / \"loop_state.py\"), str(run_dir), \"--write\"]\n+    try:\n+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)\n+    except Exception as e:\n+        print(f\"[bootstrap] loop_state 刷新失败: {e}\", file=sys.stderr)\n+        return False\n+    if r.stdout.strip():\n+        print(r.stdout.rstrip())\n+    if r.returncode != 0:\n+        if r.stderr.strip():\n+            print(r.stderr.rstrip(), file=sys.stderr)\n+        print(\"[bootstrap] loop_state 刷新失败\", file=sys.stderr)\n+        return False\n+    print(f\"[bootstrap] loop state: {run_dir / 'state' / 'loop_state.json'}\")\n+    return True\n+\n+\n # ---- commands ----\n \n def cmd_new(slug: str, recon_path: str) -> int:\n@@ -109,6 +129,8 @@ def cmd_new(slug: str, recon_path: str) -> int:\n     print(f\"[bootstrap] run 目录: {run_dir}\")\n \n     _write_initial_state(run_dir)\n+    if not _refresh_loop_state(run_dir):\n+        return 1\n \n     # 生成 loop prompt 文件\n     prompt_text = _generate_loop_prompt(run_dir)\n@@ -130,8 +152,10 @@ def cmd_resume(run_path: str) -> int:\n     print(f\"[bootstrap] 续接 run: {run_dir}\")\n \n     # 写 handoff\n-    subprocess.run([sys.executable, str(ROOT / \"tools\" / \"session_handoff.py\"),\n+    subprocess.run([PYTHON_CMD, str(ROOT / \"tools\" / \"session_handoff.py\"),\n                     \"write\", str(run_dir)], timeout=30)\n+    if not _refresh_loop_state(run_dir):\n+        return 1\n \n     prompt_text = _generate_loop_prompt(run_dir)\n     prompt_file = run_dir / \"loop_prompt.md\"\n@@ -155,8 +179,10 @@ def _print_launch_instructions(run_dir: Path, prompt_file: Path) -> None:\n     print()\n     print(\"=\" * 60)\n     print(\"  监控:\")\n-    print(f\"    python tools/check_run.py {run_dir}\")\n+    print(f\"    {PYTHON_CMD} tools/loop_state.py {run_dir} --write\")\n+    print(f\"    {PYTHON_CMD} tools/check_run.py {run_dir}\")\n     print(f\"    tail -f {run_dir}/decisions.md\")\n+    print(f\"    cat {run_dir}/state/loop_state.md\")\n     print(\"=\" * 60)\n \n \n@@ -177,8 +203,12 @@ def _selftest() -> int:\n     checks.append((\"prompt non-empty\", bool(fb.strip())))\n     checks.append((\"prompt has run path\", str(p) in fb))\n     checks.append((\"no template var left\", \"{{RUN_DIR}}\" not in fb))\n+    checks.append((\"python var replaced\", \"{{PYTHON}}\" not in fb and PYTHON_CMD in fb))\n     _write_initial_state(p)\n     checks.append((\"session_state written\", (p / \"session_state.json\").exists()))\n+    refresh_ok = _refresh_loop_state(p)\n+    checks.append((\"loop_state refresh ok\", refresh_ok and (p / \"state\" / \"loop_state.json\").exists()))\n+    checks.append((\"loop_state refresh fails closed\", _refresh_loop_state(p / \"missing-run\") is False))\n     checks.append((\"validate run ok\", _validate_run(p) is True))\n     checks.append((\"validate non-run fails\", _validate_run(Path(\"/nonexistent\")) is False))\n \ndiff --git a/tools/saturation.py b/tools/saturation.py\nindex 0ed406a..3cda995 100644\n--- a/tools/saturation.py\n+++ b/tools/saturation.py\n@@ -448,6 +448,20 @@ def check(run_dir: Path) -> tuple[list[str], list[str]]:\n     return warns, errors\n \n \n+def front_saturation(run_dir: Path) -> list[dict]:\n+    \"\"\"Return saturation records for all open/deferred fronts in a run.\n+\n+    Public helper for derived-state tools. It keeps Markdown canonical and does\n+    not write any files.\n+    \"\"\"\n+    fr = run_dir / \"frontier.md\"\n+    if not fr.exists():\n+        return []\n+    text = fr.read_text(encoding=\"utf-8\", errors=\"replace\")\n+    constraints = _parse_constraints(run_dir)\n+    return [compute(block[\"text\"], constraints) for block in _parse_front_blocks(text)]\n+\n+\n def _scan_agent_new_constraints(run_dir: Path) -> list[dict]:\n     \"\"\"扫描 agents/*.md 中的 ## New Constraints 块, 提取建议的约束条目。\"\"\"\n     agents_dir = run_dir / \"agents\"\n@@ -676,6 +690,7 @@ def _selftest() -> int:\n     constraints = _parse_constraints(run)\n     f1 = compute(blocks[0][\"text\"], constraints)\n     f2 = compute(blocks[1][\"text\"], constraints)\n+    derived = front_saturation(run)\n \n     import io\n     import contextlib\n@@ -699,6 +714,7 @@ def _selftest() -> int:\n         (\"suggest exits 0\", suggest_exit == 0),\n         (\"suggest output is stable json shape\",\n          suggest_items and {\"front\", \"saturation\", \"penalty\"} <= set(suggest_items[0])),\n+        (\"public front_saturation helper returns records\", derived and derived[0][\"front\"] == \"F-001\"),\n     ]\n     bad = [name for name, ok in checks if not ok]\n     for name, ok in checks:\ndiff --git a/tools/selftest_all.py b/tools/selftest_all.py\nindex 4c693d1..e9bc47d 100644\n--- a/tools/selftest_all.py\n+++ b/tools/selftest_all.py\n@@ -75,6 +75,7 @@ SUITES: list[tuple[str, list[str], str]] = [\n     (\"state_project\",   [\"tools/state_project.py\", \"--selftest\"], \"markdown-derived run state projection\"),\n     (\"context_pack\",    [\"tools/context_pack.py\", \"--selftest\"], \"minimal subagent context pack\"),\n     # --- loop pipeline ---\n+    (\"loop_state\",       [\"tools/loop_state.py\", \"--selftest\"], \"closed-loop progress and gate snapshot\"),\n     (\"loop_bootstrap\",   [\"tools/loop_bootstrap.py\", \"--selftest\"],   \"autonomous loop launcher\"),\n     (\"session_handoff\",  [\"tools/session_handoff.py\", \"--selftest\"],  \"session handoff tool\"),\n     (\"deferred_queue\",   [\"tools/deferred_queue.py\", \"--selftest\"],   \"deferred asset retry manager\"),\ndiff --git a/tools/loop_state.py b/tools/loop_state.py\nnew file mode 100644\nindex 0000000..a7609b3\n--- /dev/null\n+++ b/tools/loop_state.py\n@@ -0,0 +1,519 @@\n+#!/usr/bin/env python3\n+\"\"\"Derived closed-loop state for a Xunji run.\n+\n+Markdown remains canonical. This tool joins the existing derived views\n+(`graph.py`, `state_project.py`, `coverage_matrix.py`, `saturation.py`, and the\n+Agent Board state) into one compact per-cycle loop snapshot. It measures whether\n+the last cycle produced substance, highlights gates the Root must handle, and\n+writes `state/loop_state.{json,md}` when asked.\n+\n+It does not choose the next front, close a front, promote evidence, or write\n+canonical run facts.\n+\"\"\"\n+from __future__ import annotations\n+\n+import argparse\n+import json\n+import sys\n+import tempfile\n+import time\n+from pathlib import Path\n+\n+try:\n+    sys.stdout.reconfigure(encoding=\"utf-8\")  # type: ignore[attr-defined]\n+except Exception:\n+    pass\n+\n+ROOT = Path(__file__).resolve().parents[1]\n+sys.path.insert(0, str(ROOT / \"tools\"))\n+\n+from evidence_parse import parse_evidence  # noqa: E402\n+import coverage_matrix  # noqa: E402\n+import graph  # noqa: E402\n+import saturation  # noqa: E402\n+import state_project  # noqa: E402\n+import workers  # noqa: E402\n+\n+SCHEMA = \"xunji.loop_state.v1\"\n+CONFIRMED = 0.8\n+PYTHON_CMD = sys.executable or \"python3\"\n+\n+\n+def _resolve_run_dir(path: str | Path) -> Path:\n+    p = Path(path)\n+    return (p if p.is_absolute() else ROOT / p).resolve()\n+\n+\n+def _read_json(path: Path, default):\n+    try:\n+        data = json.loads(path.read_text(encoding=\"utf-8\", errors=\"replace\"))\n+        return data if isinstance(data, type(default)) else default\n+    except Exception:\n+        return default\n+\n+\n+def _write(path: Path, text: str) -> None:\n+    path.parent.mkdir(parents=True, exist_ok=True)\n+    path.write_text(text, encoding=\"utf-8\")\n+\n+\n+def _evidence_summary(run_dir: Path) -> dict:\n+    records = parse_evidence(run_dir)\n+    cert_by_id: dict[str, float] = {}\n+    confirmed: list[str] = []\n+    findings: list[str] = []\n+    for rec in records:\n+        certs = rec.get(\"certainties\") or []\n+        cert = max(certs) if certs else 0.0\n+        cert_by_id[str(rec.get(\"id\"))] = cert\n+        if cert >= CONFIRMED and not rec.get(\"superseded\"):\n+            confirmed.append(str(rec.get(\"id\")))\n+            if rec.get(\"maturity\") == \"finding\":\n+                findings.append(str(rec.get(\"id\")))\n+    return {\n+        \"total\": len(records),\n+        \"ids\": sorted(cert_by_id),\n+        \"cert_by_id\": cert_by_id,\n+        \"confirmed\": sorted(confirmed),\n+        \"confirmed_findings\": sorted(findings),\n+    }\n+\n+\n+def _coverage_summary(run_dir: Path, *, write: bool) -> dict:\n+    data = coverage_matrix.write_outputs(run_dir) if write else coverage_matrix.derive(run_dir)\n+    tested_cells = sorted(\n+        f\"{row['asset']}::{group}\"\n+        for row in data.get(\"rows\", [])\n+        for group, value in row.get(\"cells\", {}).items()\n+        if value == \"tested\"\n+    )\n+    untested_cells = sorted(\n+        f\"{row['asset']}::{group}\"\n+        for row in data.get(\"rows\", [])\n+        for group, value in row.get(\"cells\", {}).items()\n+        if value == \"untested\"\n+    )\n+    return {\n+        \"source\": data.get(\"source\", \"\"),\n+        \"rows\": len(data.get(\"rows\", [])),\n+        \"tested_cells\": tested_cells,\n+        \"untested_cells\": untested_cells,\n+        \"tested_cell_count\": len(tested_cells),\n+        \"untested_cell_count\": len(untested_cells),\n+        \"empty_columns\": data.get(\"empty_columns\", []),\n+        \"row_gaps\": data.get(\"row_gaps\", []),\n+        \"warnings\": data.get(\"warnings\", []),\n+    }\n+\n+\n+def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n+    fronts = [f for f in projection.get(\"fronts\", []) if str(f.get(\"id\", \"\")).startswith(\"F-\")]\n+    open_fronts = [\n+        f for f in fronts\n+        if str(f.get(\"status\", \"\")).lower() in {\"open\", \"probing\", \"working\"}\n+    ]\n+    deferred_fronts = [f for f in fronts if \"deferred\" in str(f.get(\"status\", \"\")).lower()]\n+    closed_fronts = [f for f in fronts if \"closed\" in str(f.get(\"status\", \"\")).lower()]\n+    barriers = [\n+        str(f.get(\"barrier\") or \"unknown\").strip().lower()\n+        for f in open_fronts\n+        if str(f.get(\"barrier\") or \"\").strip().lower() not in {\"\", \"unknown\", \"none\", \"-\"}\n+    ]\n+    unique_barriers = sorted(set(barriers))\n+\n+    low_saturation: list[dict] = []\n+    for result in saturation.front_saturation(run_dir):\n+        ratio = result.get(\"ratio\")\n+        if ratio is not None and ratio < 0.6:\n+            low_saturation.append({\n+                \"front\": result.get(\"front\"),\n+                \"ratio\": round(float(ratio), 3),\n+                \"tried\": result.get(\"tried_count\"),\n+                \"untried\": result.get(\"untried_count\"),\n+            })\n+\n+    return {\n+        \"total\": len(fronts),\n+        \"open\": [f.get(\"id\") for f in open_fronts],\n+        \"deferred\": [f.get(\"id\") for f in deferred_fronts],\n+        \"closed\": [f.get(\"id\") for f in closed_fronts],\n+        \"open_count\": len(open_fronts),\n+        \"deferred_count\": len(deferred_fronts),\n+        \"closed_count\": len(closed_fronts),\n+        \"actionable\": view.get(\"actionable\", []),\n+        \"unlocked_deferred\": view.get(\"unlocked_deferred\", []),\n+        \"closed_but_unlocked\": view.get(\"closed_but_unlocked\", []),\n+        \"dangling_facts\": view.get(\"dangling_facts\", []),\n+        \"unique_barriers\": unique_barriers,\n+        \"diverse_barriers\": len(unique_barriers) >= 2,\n+        \"low_saturation\": low_saturation,\n+    }\n+\n+\n+def _agent_summary(run_dir: Path, *, write: bool) -> dict:\n+    assignments = workers.load_assignments(run_dir).get(\"assignments\", [])\n+    if write:\n+        conflicts = workers.build_conflicts(run_dir).get(\"conflicts\", [])\n+    else:\n+        conflicts = _read_json(run_dir / \"state\" / \"conflicts.json\", {}).get(\"conflicts\", [])\n+    unresolved = [c for c in conflicts if c.get(\"status\") == \"unresolved\"]\n+    rows = []\n+    for rec in assignments:\n+        if isinstance(rec, dict):\n+            rows.append({\n+                \"agent\": rec.get(\"agent\"),\n+                \"role\": rec.get(\"role\"),\n+                \"front\": rec.get(\"front\"),\n+                \"status\": rec.get(\"status\"),\n+            })\n+    return {\n+        \"assignments\": rows,\n+        \"assignment_count\": len(rows),\n+        \"unresolved_conflicts\": len(unresolved),\n+        \"conflict_types\": sorted({str(c.g",
+            "excerpt_truncated_chars": 15926
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [
+          "F-001",
+          "F-002",
+          "F-003"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/selftest_all.txt",
+            "path": "evidence/selftest_all.txt",
+            "exists": true,
+            "size": 2991,
+            "sha1": "d28f3a7134f882c26ca5702ee991d262b1d14867",
+            "excerpt": "running 47 selftest suite(s) with /Library/Developer/CommandLineTools/usr/bin/python3\n\n  PASS  check_run          0.1s  evidence gate + closure\n  PASS  classify_hosts    13.1s  recon -> coverage\n  PASS  scope              0.0s  run scope derive/match\n  PASS  peer_review        0.1s  heterogeneous review\n  PASS  probe              4.6s  active HTTP sensor\n  PASS  render             0.1s  headless browser + --eval replay\n  PASS  anti_drift         3.5s  anti-drift anchor (rules+process re-inject)\n  PASS  proxy              0.1s  engagement egress proxy (渗透走/模型不走)\n  PASS  codex_proxy        0.0s  Codex review proxy hygiene\n  PASS  replay            13.6s  evidence replay\n  PASS  setup_run          0.1s  run scaffolding\n  PASS  ingest_recon       0.0s  Guanlan recon adapter\n  PASS  bench              0.0s  R-1 self-eval scorer\n  PASS  check_knowledge    0.0s  public knowledge grounding structure\n  PASS  local_hygiene      0.1s  local/publication hygiene guard\n  PASS  runtime_boundary   0.0s  Codex hooks absence guard\n  PASS  check_templates    0.0s  template/reference drift guard\n  PASS  knowledge_match    0.0s  fingerprint→knowledge retrieval\n  PASS  xday_match         0.0s  fingerprint→local xday retrieval\n  PASS  knowledge_seed     0.0s  fingerprint→knowledge write-back\n  PASS  timestamp_gate     0.0s  web research time gate\n  PASS  record_evidence    0.0s  web research -> evidence ledger\n  PASS  decode_viewstate   0.0s  ASP.NET ViewState decoder\n  PASS  input_shape        0.0s  request shape parser\n  PASS  oob_listener       1.0s  local OOB listener\n  PASS  sensor_oob         0.2s  OOB callback artifact sensor\n  PASS  sensor_mutate      0.1s  payload mutation artifact sensor\n  PASS  sensor_blind_diff   1.1s  blind differential artifact sensor\n  PASS  sensor_upload      1.1s  harmless upload proof sensor\n  PASS  sensor_client_graybox   0.1s  client graybox phenomenon sensor\n  PASS  state_project      0.0s  markdown-derived run state projection\n  PASS  context_pack       0.0s  minimal subagent context pack\n  PASS  loop_state         0.1s  closed-loop progress and gate snapshot\n  PASS  loop_bootstrap     0.1s  autonomous loop launcher\n  PASS  session_handoff    0.1s  session handoff tool\n  PASS  deferred_queue     0.0s  deferred asset retry manager\n  PASS  workers            0.2s  fan-out worker planning helpers\n  PASS  saturation         0.0s  front saturation scoring\n  PASS  coverage_matrix    0.0s  asset x vuln-family coverage matrix\n  PASS  safety_gate        0.0s  hard-boundary gate\n  PASS  ip_blacklist       0.0s  local IP/domain deny hook\n  PASS  output_gate        0.0s  output drift Stop gate\n  PASS  run_gate           1.2s  coverage/depth Stop gate\n  PASS  check_hook         2.8s  safety_gate live-fire\n  PASS  sentinel_replay    0.0s  behavior detectors 26-case\n  PASS  verify_layers      1.2s  safety-floor coverage\n  PASS  guard_smoke        0.0s  guard rate/cap/breaker smoke\n\n47 passed, 0 failed  (45.1s total)\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [
+          "F-001",
+          "F-002",
+          "F-003"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/bench_score_all.txt",
+            "path": "evidence/bench_score_all.txt",
+            "exists": true,
+            "size": 3906,
+            "sha1": "6f86318f1b488df2e3aef640557d65d66819e2d6",
+            "excerpt": "== bench: auth-idor-profile ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 2 recorded requests / 8 max  (lower bound: saved replay or recorded events)\n  first-evidence: 2.0s\n    ✓ profile-idor [E-001] cert=0.9≥0.8\n== bench: auth-idor-tenant-record ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 3 recorded requests / 10 max  (lower bound: saved replay or recorded events)\n  first-evidence: 1.8s\n    ✓ tenant-record-idor [E-001] cert=1.0≥0.8\n== bench: example-dvwa-sqli ==\n  detection : 2/2 (100%)   calibrated 2/2\n  false-pos : 0   (confirmed entries total: 3)\n  budget    : 0 recorded requests / 100 max  (lower bound: saved replay or recorded events)\n    ✓ sqli-union [E-001] cert=1.0≥0.8\n    ✓ xss-reflected [E-003] cert=0.9≥0.8\n== bench: injection-error-sqli ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 1)\n  budget    : 2 recorded requests / 6 max  (lower bound: saved replay or recorded events)\n  first-evidence: 1.1s\n    ✓ error-sqli [E-001] cert=0.8≥0.8\n== bench: injection-nosql-filter ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 2 recorded requests / 8 max  (lower bound: saved replay or recorded events)\n  first-evidence: 1.5s\n    ✓ nosql-filter-injection [E-001] cert=0.9≥0.8\n== bench: path-normalization-bypass ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 3 recorded requests / 10 max  (lower bound: saved replay or recorded events)\n  first-evidence: 2.0s\n    ✓ path-normalization-bypass [E-001] cert=0.9≥0.8\n== bench: path-traversal-download ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 2 recorded requests / 8 max  (lower bound: saved replay or recorded events)\n  first-evidence: 1.4s\n    ✓ download-path-traversal [E-001] cert=1.0≥0.8\n== bench: recorded-closure-static-site ==\n  detection : 0/0   calibrated 0/0\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 2 recorded requests / 6 max  (lower bound: saved replay or recorded events)\n  first-evidence: 2.0s\n  closure   : ✓ markers=True review=True no_positive=True\n== bench: ultra-agent-collab ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 3 recorded requests / 6 max  (lower bound: saved replay or recorded events)\n  first-evidence: 2.5s\n    ✓ profile-idor [E-001] cert=0.8≥0.8\n  agents    : 2 agents / 2 assignments; high fronts 1/1 assigned\n  conversion: 1/2 candidate/refutation agents -> findings (50%)\n  conflicts : 1 total; 0 unresolved\n  agent budget: {'A-web-auth-001': 2, 'A-verify-001': 1}\n  agent first-evidence: {'A-web-auth-001': 2.5, 'A-verify-001': 1.0}\n== bench: upload-mime-bypass ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 2 recorded requests / 12 max  (lower bound: saved replay or recorded events)\n  first-evidence: 3.0s\n    ✓ upload-mime-bypass [E-001] cert=0.9≥0.8\n== bench: upload-path-control ==\n  detection : 1/1 (100%)   calibrated 1/1\n  false-pos : 0   (confirmed entries total: 2)\n  budget    : 2 recorded requests / 12 max  (lower bound: saved replay or recorded events)\n  first-evidence: 2.5s\n    ✓ upload-path-control [E-001] cert=0.8≥0.8\n== bench summary ==\n  fixtures  : 11/11 clean\n  detection : 11/11 (100%)\n  calibration: 11/11 (100%)\n  false-pos : 0 (mean trap rate 0%)\n  budget    : 23 recorded; 0 fixture(s) over max\n  first-evidence avg: 1.98s\n  closure   : 1/1 correct\n  agents    : 2 agents / 2 assignments; missed-high=0 role-mismatch=0\n  conflicts : 0 unresolved; collab-check-fail=0\n  fp-suppression: 11 negative confirmed events\n  agent first-evidence avg: 1.75s\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [
+          "F-001",
+          "F-002",
+          "F-003"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/check_rules.txt",
+            "path": "evidence/check_rules.txt",
+            "exists": true,
+            "size": 18,
+            "sha1": "6e4be8266323611639310b21bc51562d32574dfc",
+            "excerpt": "rule check passed\n"
+          },
+          {
+            "token": "evidence/check_templates.txt",
+            "path": "evidence/check_templates.txt",
+            "exists": true,
+            "size": 22,
+            "sha1": "8dcf38ce1d69c8bcb94effec805965fd44aa3ea5",
+            "excerpt": "template check passed\n"
+          },
+          {
+            "token": "evidence/py_compile.txt",
+            "path": "evidence/py_compile.txt",
+            "exists": true,
+            "size": 108,
+            "sha1": "bdaa8286bce17b73774f262d5271071a3ce9ed95",
+            "excerpt": "py_compile passed for tools/loop_state.py tools/loop_bootstrap.py tools/selftest_all.py tools/saturation.py\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-005",
+        "head": "## E-005",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-001",
+          "F-002",
+          "F-003"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/loop_bootstrap_selftest.txt",
+            "path": "evidence/loop_bootstrap_selftest.txt",
+            "exists": true,
+            "size": 1006,
+            "sha1": "3a0a665d48dfef5ea862f9f4ca2d5a18213e2039",
+            "excerpt": "[loop_state] run directory does not exist: /private/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/tmpwv503kst/missing-run\n[bootstrap] loop_state 刷新失败\nok   template exists\nok   prompt non-empty\nok   prompt has run path\nok   no template var left\nok   python var replaced\nok   session_state written\nok   loop_state refresh ok\nok   loop_state refresh fails closed\nok   validate run ok\nok   validate non-run fails\nloop_bootstrap selftest passed\n# Loop State\n\n- Phase: Driver\n- Open/deferred/closed fronts: 1 / 0 / 0\n- Evidence: 0 total; new this cycle: 0; certainty upgrades: 0\n- Coverage: 0 tested cells; new this cycle: 0; untested applicable cells: 0\n- No-progress cycles: 0 (continue)\n- Agents: 0 assignments; unresolved conflicts: 0\n- Fan-out required: no\n- Completion pause candidate: no\n\n## Next Actions\n\n- Choose the next front from actionable/open fronts and record a Root graph pass.\n[bootstrap] loop state: /var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/tmpwv503kst/state/loop_state.json\n"
+          },
+          {
+            "token": "evidence/loop_focused_selftest.txt",
+            "path": "evidence/loop_focused_selftest.txt",
+            "exists": true,
+            "size": 442,
+            "sha1": "1c1496c42aeea8bae424ed69465723e16e6e8976",
+            "excerpt": "running 5 selftest suite(s) with /Library/Developer/CommandLineTools/usr/bin/python3\n\n  PASS  loop_state         0.1s  closed-loop progress and gate snapshot\n  PASS  loop_bootstrap     0.1s  autonomous loop launcher\n  PASS  workers            0.2s  fan-out worker planning helpers\n  PASS  saturation         0.0s  front saturation scoring\n  PASS  coverage_matrix    0.0s  asset x vuln-family coverage matrix\n\n5 passed, 0 failed  (0.4s total)\n"
+          },
+          {
+            "token": "evidence/loop_state_selftest.txt",
+            "path": "evidence/loop_state_selftest.txt",
+            "exists": true,
+            "size": 522,
+            "sha1": "d94f5ff5ca0672575c6e081bd663c83dd89de21d",
+            "excerpt": "ok   writes loop state json\nok   writes loop state markdown\nok   fanout required with four diverse open fronts\nok   coverage attention is surfaced\nok   first snapshot does not count existing evidence as new\nok   no-progress cycles increase\nok   coda converges after two no-progress cycles\nok   certainty upgrade resets no-progress\nok   coverage improvement is recorded\nok   coverage outputs written\nok   graph checkpoint written\nok   agent conflicts are surfaced\nok   default derive is no-write\nloop_state selftest passed\n"
+          },
+          {
+            "token": "evidence/saturation_selftest.txt",
+            "path": "evidence/saturation_selftest.txt",
+            "exists": true,
+            "size": 381,
+            "sha1": "6cca0d913672e4cdc6d3c22412e656688e8e565b",
+            "excerpt": "ok   empty run without frontier returns 1\nok   closed fronts are excluded\nok   open front low saturation is computed\nok   constraints count as tried\nok   check emits low-saturation warning\nok   full report exits 0\nok   front detail exits 0\nok   suggest exits 0\nok   suggest output is stable json shape\nok   public front_saturation helper returns records\nsaturation selftest passed\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-006",
+        "head": "## E-006",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-001",
+          "F-002"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/real_run_loop_state_recorded_closure.txt",
+            "path": "evidence/real_run_loop_state_recorded_closure.txt",
+            "exists": true,
+            "size": 445,
+            "sha1": "aea31cef280704fd7ebe5959958e111d69b8fb06",
+            "excerpt": "# Loop State\n\n- Phase: Reviewer\n- Open/deferred/closed fronts: 0 / 0 / 0\n- Evidence: 2 total; new this cycle: 0; certainty upgrades: 0\n- Coverage: 0 tested cells; new this cycle: 0; untested applicable cells: 0\n- No-progress cycles: 0 (continue)\n- Agents: 0 assignments; unresolved conflicts: 0\n- Fan-out required: no\n- Completion pause candidate: yes\n\n## Next Actions\n\n- No open front visible; run review/closure checks or reopen missing work.\n"
+          },
+          {
+            "token": "evidence/real_run_loop_state_ultra_agent.txt",
+            "path": "evidence/real_run_loop_state_ultra_agent.txt",
+            "exists": true,
+            "size": 619,
+            "sha1": "8393fc0e057bd51de8a1ca08a9391f16359148c9",
+            "excerpt": "# Loop State\n\n- Phase: Driver\n- Open/deferred/closed fronts: 1 / 0 / 1\n- Evidence: 2 total; new this cycle: 0; certainty upgrades: 0\n- Coverage: 0 tested cells; new this cycle: 0; untested applicable cells: 0\n- No-progress cycles: 0 (continue)\n- Agents: 2 assignments; unresolved conflicts: 0\n- Fan-out required: no\n- Completion pause candidate: no\n\n## Next Actions\n\n- Expand or justify low-saturation fronts before any explored-enough claim.\n- Choose the next front from actionable/open fronts and record a Root graph pass.\n\n## Low Saturation\n\n- F-001: ratio=0.0 tried=0 untried=6\n- F-002: ratio=0.0 tried=0 untried=3\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "4bbd7db328f93cd234d083ceac3da304cc00b901"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Loop Engineering Maintenance Review Context\n\n## Scope\n\nThis review covers a Codex-authored repository maintenance diff implementing the operator request:\n\n> 实现完整的可闭环的方案，完成后需要 arkcli + claude code 复审。复审通过并且全部完成后提交。\n\nThe implementation should be judged against these requirements:\n\n- Adds a complete closed-loop engineering layer for AI-autonomous Xunji runs.\n- Keeps Markdown run files as canonical truth.\n- Does not recreate an orchestrator or let a tool choose/close/promote findings.\n- Wires loop state into bootstrap, loop prompt, workflow docs, and aggregate selftests.\n- Preserves Agent Board advisory boundaries.\n- Supports Coda/no-progress detection through evidence delta, certainty upgrades, and coverage-matrix improvement.\n- Exposes closure/fan-out/conflict/saturation hints without bypassing evidence gates.\n\n## Changed Files\n\n- `tools/loop_state.py` — new derived closed-loop progress and gate snapshot.\n- `tools/saturation.py` — exposes a public `front_saturation()` helper consumed by `loop_state.py`.\n- `tools/loop_bootstrap.py` — refreshes loop state on new/resume and emits current Python command.\n- `docs/templates/loop_prompt.md` — updates the per-iteration prompt to run graph, workers, saturation, coverage matrix, loop state, Agent Board checks, and closure gates.\n- `tools/selftest_all.py` — adds `loop_state` suite.\n- `docs/WORKFLOW.md` — adds `coverage_matrix --write` and `loop_state --write` to the Root graph pass.\n- `docs/WORKFLOW-reference.md` — documents `state/loop_state.*` and the state directory layout.\n- `docs/ROUTER.md` — adds `loop_state.py` to the verification tool list.\n\n## Evidence\n\n- `E-001`: full maintenance diff at `evidence/diff.patch`.\n- `E-002`: full aggregate selftest output at `evidence/selftest_all.txt`.\n- `E-003`: benchmark score-all output at `evidence/bench_score_all.txt`.\n- `E-004`: architecture/template/compile checks.\n- `E-005`: focused loop selftests for no-write mode, Coda/no-progress behavior, coverage deltas, cache writes, and bootstrap refresh/fail-closed.\n- `E-006`: real recorded-run loop_state smoke output without `--write`.\n\n## Review Questions\n\n- Does `tools/loop_state.py` stay derived/advisory, or does any behavior drift into orchestration?\n- Are Coda convergence and progress deltas calculated from appropriate signals?\n- Does bootstrap/resume wiring fail safely if loop-state refresh fails?\n- Does `loop_prompt.md` give Claude Code enough complete cycle instructions without adding unsafe or stale requirements?\n- Are generated caches kept out of canonical evidence/facts?\n- Are tests sufficient for this change, and are there missing regressions around no-write mode, Agent Board conflicts, and coverage deltas?\n\n## Expected Reviewer Output\n\nReturn PASS only if there is no blocker. WARN is acceptable only for non-blocking improvement suggestions. BLOCKER requires a concrete file/line or artifact reference and a recommended fix. Do not treat the review-scope evidence IDs as the same IDs that appear inside benchmark fixture output; benchmark output reports fixture-internal E-ids.\n",
+    "frontier.md": "# Frontier\n\n### F-001 Loop State Integration\n- Status: review-pending\n- Front: Add a derived per-cycle loop snapshot without replacing Markdown truth.\n- Evidence: E-001, E-005, E-006\n- Next: independent reviewer judgement on semantic correctness.\n\n### F-002 Bootstrap And Prompt Wiring\n- Status: review-pending\n- Front: Make `loop_bootstrap.py` and `docs/templates/loop_prompt.md` refresh loop state and route Root through graph, Agent Board, saturation, coverage matrix, and closure gates.\n- Evidence: E-001, E-005, E-006\n- Next: independent reviewer judgement on semantic correctness.\n\n### F-003 Workflow Documentation And Selftest Registration\n- Status: review-pending\n- Front: Document the new closed-loop state layer and register it in aggregate selftests.\n- Evidence: E-001, E-004, E-005\n- Next: independent reviewer judgement on semantic correctness.\n",
+    "decisions.md": "# Decisions\n\n## D-001\n- Time: 2026-07-07\n- Runtime: Codex maintenance driver\n- Phase: implementation review\n- Loaded rule files: AGENTS.md, xunji-local-maintenance, xunji-run-lifecycle, xunji-agent-board, xunji-benchmark-eval, xunji-peer-review-panel, xunji-reviewops\n- Chosen front: F-001, F-002, F-003\n- Result: ready for arkcli + Claude Code independent maintenance review.\n",
+    "review.md": "# Review\n\n## Pending Independent Review\n\n- Required reviewers: arkcli panel and Claude Code/API or fresh-context Claude Code.\n- Status: pending.\n- Note: This scope is a maintenance review packet. `frontier.md` items are review questions, not a claim that a live run is closed.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 180000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "47f25c4430051960838ee392a93b977d61b72f16"
+}

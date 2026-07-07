@@ -16,6 +16,8 @@ runs/<slug>_<date>/
                     false_positive · decisions · review · report
   evidence.json     auto-derived index of evidence.md (check_run writes it)
   graph.json        derived state graph (graph.py writes it)
+  state/            derived caches: projection.json · events.jsonl ·
+                    workflow_checkpoint.json · coverage_matrix.* · loop_state.*
   evidence/         sensor proof artifacts: *.html, *.replay.json, render_<host>/, screenshots
   classify/         classify_hosts output: coverage.json + per-host bodies
   scripts/          PoC / helper scripts (author-and-handoff)
@@ -23,7 +25,8 @@ runs/<slug>_<date>/
 ```
 
 Keep the run **root** to the core `.md` files plus the auto-derived
-`evidence.json` / `coverage.json` / `graph.json`. Proof artifacts belong under
+`evidence.json` / `coverage.json` / `graph.json`; broader derived projections belong under
+`state/`. Proof artifacts belong under
 `evidence/`, PoC under `scripts/`, coverage under `classify/`. To make the right
 place the easy place: `probe --save NAME --run runs/<dir>` drops the body **and** its
 `.replay.json` into `<run>/evidence/`; `render --run runs/<dir>` defaults its output
@@ -438,6 +441,14 @@ Markdown stays the source of truth; the graph is a projection, like `coverage.js
 `type=front|status|action|evidence` records derived from Markdown. It is cache/index
 data for tools such as `workers`, `bench`, and `check_run`; it must never be edited
 as the narrative source of truth or used to overwrite Markdown.
+
+`tools/loop_state.py` joins the graph, projection, Agent Board conflict state,
+saturation, evidence parser, and coverage matrix into `<run>/state/loop_state.json`
+and `<run>/state/loop_state.md`. This is the per-cycle closed-loop snapshot:
+evidence delta, certainty upgrades, coverage-matrix improvement, no-progress
+cycle count, Coda convergence, fan-out-required hints, unresolved conflicts, and
+closure gate hints. It is derived and advisory only. It never selects the next
+front, promotes Agent output, closes a front, or writes report conclusions.
 
 ## Agent Board
 

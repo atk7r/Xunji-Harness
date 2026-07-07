@@ -1,0 +1,251 @@
+{
+  "total": 6,
+  "confirmed": [
+    "E-001",
+    "E-005",
+    "E-006"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-005",
+    "E-006"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "code-maintenance-diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "code-maintenance-diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/diff.patch",
+        "evidence/diff.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/diff.patch",
+        "evidence/diff.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-selftest",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-selftest",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/selftest_all.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/selftest_all.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-benchmark",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-benchmark",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/bench_score_all.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/bench_score_all.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-rule-checks",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-rule-checks",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/check_rules.txt",
+        "evidence/check_templates.txt",
+        "evidence/py_compile.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/check_rules.txt",
+        "evidence/check_templates.txt",
+        "evidence/py_compile.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "focused-loop-selftests",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "focused-loop-selftests",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/loop_state_selftest.txt",
+        "evidence/loop_bootstrap_selftest.txt",
+        "evidence/loop_focused_selftest.txt",
+        "evidence/saturation_selftest.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/loop_state_selftest.txt",
+        "evidence/loop_bootstrap_selftest.txt",
+        "evidence/loop_focused_selftest.txt",
+        "evidence/saturation_selftest.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-006",
+      "head": "## E-006",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "real-run-loop-state-smoke",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "real-run-loop-state-smoke",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/real_run_loop_state_ultra_agent.txt",
+        "evidence/real_run_loop_state_recorded_closure.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/real_run_loop_state_ultra_agent.txt",
+        "evidence/real_run_loop_state_recorded_closure.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

@@ -3,9 +3,9 @@
 """loop_bootstrap.py —— 一条命令启动 Xunji 全自动渗透流水线。
 
 用法:
-  python tools/loop_bootstrap.py <slug> <recon.json>       # 新目标
-  python tools/loop_bootstrap.py --resume runs/<dir>        # 续接已有 run
-  python tools/loop_bootstrap.py --selftest                 # 自检
+  python3 tools/loop_bootstrap.py <slug> <recon.json>       # 新目标
+  python3 tools/loop_bootstrap.py --resume runs/<dir>       # 续接已有 run
+  python3 tools/loop_bootstrap.py --selftest                # 自检
 
 输出: 一个可保存到文件的 loop prompt 路径，和 /loop 启动指令。
 """
@@ -22,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
 LOOP_TEMPLATE = ROOT / "docs" / "templates" / "loop_prompt.md"
+PYTHON_CMD = sys.executable or "python3"
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -58,7 +59,7 @@ def _read_template() -> str:
             pass
     return (
         "你是 Xunji 自主 Driver，对 run={{RUN_DIR}} 执行一轮探测。\n"
-        "1. Reason pass: 读 frontier.md → 选前沿 → 安全探测 → 更新状态。\n"
+        "1. Reason pass: `{{PYTHON}} tools/loop_state.py \"{{RUN_DIR}}\" --write`。\n"
         "2. 结尾: 下一行动: <action> 或 BLOCKED: <reason>。\n"
     )
 
@@ -66,7 +67,7 @@ def _read_template() -> str:
 def _generate_loop_prompt(run_dir: Path) -> str:
     """用实际 run 目录路径替换模板中的 {{RUN_DIR}}。"""
     template = _read_template()
-    return template.replace("{{RUN_DIR}}", str(run_dir))
+    return template.replace("{{RUN_DIR}}", str(run_dir)).replace("{{PYTHON}}", PYTHON_CMD)
 
 
 def _write_initial_state(run_dir: Path) -> None:
@@ -82,6 +83,25 @@ def _write_initial_state(run_dir: Path) -> None:
         sf.write_text(_json_mod.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         print(f"[bootstrap] 注意: 写 session_state.json 失败（后续轮次会重建）", file=sys.stderr)
+
+
+def _refresh_loop_state(run_dir: Path) -> bool:
+    """Refresh derived loop caches. These are advisory caches; Markdown stays canonical."""
+    cmd = [PYTHON_CMD, str(ROOT / "tools" / "loop_state.py"), str(run_dir), "--write"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except Exception as e:
+        print(f"[bootstrap] loop_state 刷新失败: {e}", file=sys.stderr)
+        return False
+    if r.stdout.strip():
+        print(r.stdout.rstrip())
+    if r.returncode != 0:
+        if r.stderr.strip():
+            print(r.stderr.rstrip(), file=sys.stderr)
+        print("[bootstrap] loop_state 刷新失败", file=sys.stderr)
+        return False
+    print(f"[bootstrap] loop state: {run_dir / 'state' / 'loop_state.json'}")
+    return True
 
 
 # ---- commands ----
@@ -109,6 +129,8 @@ def cmd_new(slug: str, recon_path: str) -> int:
     print(f"[bootstrap] run 目录: {run_dir}")
 
     _write_initial_state(run_dir)
+    if not _refresh_loop_state(run_dir):
+        return 1
 
     # 生成 loop prompt 文件
     prompt_text = _generate_loop_prompt(run_dir)
@@ -130,8 +152,10 @@ def cmd_resume(run_path: str) -> int:
     print(f"[bootstrap] 续接 run: {run_dir}")
 
     # 写 handoff
-    subprocess.run([sys.executable, str(ROOT / "tools" / "session_handoff.py"),
+    subprocess.run([PYTHON_CMD, str(ROOT / "tools" / "session_handoff.py"),
                     "write", str(run_dir)], timeout=30)
+    if not _refresh_loop_state(run_dir):
+        return 1
 
     prompt_text = _generate_loop_prompt(run_dir)
     prompt_file = run_dir / "loop_prompt.md"
@@ -155,8 +179,10 @@ def _print_launch_instructions(run_dir: Path, prompt_file: Path) -> None:
     print()
     print("=" * 60)
     print("  监控:")
-    print(f"    python tools/check_run.py {run_dir}")
+    print(f"    {PYTHON_CMD} tools/loop_state.py {run_dir} --write")
+    print(f"    {PYTHON_CMD} tools/check_run.py {run_dir}")
     print(f"    tail -f {run_dir}/decisions.md")
+    print(f"    cat {run_dir}/state/loop_state.md")
     print("=" * 60)
 
 
@@ -177,8 +203,12 @@ def _selftest() -> int:
     checks.append(("prompt non-empty", bool(fb.strip())))
     checks.append(("prompt has run path", str(p) in fb))
     checks.append(("no template var left", "{{RUN_DIR}}" not in fb))
+    checks.append(("python var replaced", "{{PYTHON}}" not in fb and PYTHON_CMD in fb))
     _write_initial_state(p)
     checks.append(("session_state written", (p / "session_state.json").exists()))
+    refresh_ok = _refresh_loop_state(p)
+    checks.append(("loop_state refresh ok", refresh_ok and (p / "state" / "loop_state.json").exists()))
+    checks.append(("loop_state refresh fails closed", _refresh_loop_state(p / "missing-run") is False))
     checks.append(("validate run ok", _validate_run(p) is True))
     checks.append(("validate non-run fails", _validate_run(Path("/nonexistent")) is False))
 

@@ -1,0 +1,54 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "057737ed54524e2f4531ac8b8edb0760cd771ed4",
+  "evidence_index_hash": "467c0301a13756f0d3c820229891f694f20ab7ca",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "report.md Changed Files list omits tools/saturation.py, which the maintenance diff actually modifies to add the front_saturation helper consumed by loop_state.py",
+      "evidence": "evidence/diff.patch (E-001) diff --git a/tools/saturation.py, report.md##Changed Files",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Update report.md Changed Files to include tools/saturation.py and document the new public saturation.front_saturation API used by the loop state layer.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The changed-files ledger is a subset of the actual diff; this undermines scope transparency and could cause reviewers to miss a dependency change that affects front saturation scoring.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "test_coverage",
+      "claim": "E-005 loop_state selftests confirm happy-path behavior but do not exercise failure paths or dependency-tool faults (coverage_matrix / workers / graph / malformed evidence).",
+      "evidence": "evidence/loop_state_selftest.txt (E-005), evidence/loop_bootstrap_selftest.txt (E-005)",
+      "affected_eids": [
+        "E-005"
+      ],
+      "recommended_action": "Add negative-path selftests for missing run directory, missing/corrupt frontier.md, malformed evidence.md, and simulated failures of coverage_matrix.write_outputs / workers.build_conflicts.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] loop_state.py is a derived-state orchestrator that refreshes multiple subsystems; without failure-path coverage, regressions that silently omit gates or corrupt state/ caches are likely.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "minimax-m3: parse error; output tail: turity=\"artifact\" since it just represents the change.\n\n2. **WARN - Truncated evidence** - 15926 of likely 40000+ chars in E-001's diff excerpt means we cannot fully verify the implementation. The new 519-line tools/loop_state.py is only partially visible. Specifically:\n   - The no-progress cycle counter logic\n   - The Coda convergence logic\n   - Whether the code actually stays advisory as claimed\n   - The complete fan-out required logic\n\n3. **WARN - E-006 \"real recorded-run loop_state output\" -; glm-5.2: parse error; output tail: s\n- Race conditions if multiple processes write state/\n\n**Issue 10: The `saturation.py` changes add a `front_saturation` public helper.** This is called by `loop_state.py`. The selftest confirms it works. The function reads `frontier.md` and returns saturation records. This seems clean.\n\n**Issue 11: The `selftest_all.py` change just adds the `loop_state` suite to the list.** Simple and correct.\n\n**Issue 12: Important - the report says \"Does not recreate an orchestrator or let a tool choose/close",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [],
+  "context_limits": [
+    "[arkcli] minimax-m3: parse error; output tail: turity=\"artifact\" since it just represents the change.\n\n2. **WARN - Truncated evidence** - 15926 of likely 40000+ chars in E-001's diff excerpt means we cannot fully verify the implementation. The new 519-line tools/loop_state.py is only partially visible. Specifically:\n   - The no-progress cycle counter logic\n   - The Coda convergence logic\n   - Whether the code actually stays advisory as claimed\n   - The complete fan-out required logic\n\n3. **WARN - E-006 \"real recorded-run loop_state output\" -",
+    "[arkcli] glm-5.2: parse error; output tail: s\n- Race conditions if multiple processes write state/\n\n**Issue 10: The `saturation.py` changes add a `front_saturation` public helper.** This is called by `loop_state.py`. The selftest confirms it works. The function reads `frontier.md` and returns saturation records. This seems clean.\n\n**Issue 11: The `selftest_all.py` change just adds the `loop_state` suite to the list.** Simple and correct.\n\n**Issue 12: Important - the report says \"Does not recreate an orchestrator or let a tool choose/close"
+  ],
+  "error": ""
+}

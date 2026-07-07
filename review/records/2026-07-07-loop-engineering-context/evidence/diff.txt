@@ -1,0 +1,881 @@
+diff --git a/docs/ROUTER.md b/docs/ROUTER.md
+index 4bcd82b..e6a29ea 100644
+--- a/docs/ROUTER.md
++++ b/docs/ROUTER.md
+@@ -309,6 +309,11 @@ Project-discipline and run-structure checks in `tools/`:
+ - `python tools/state_project.py runs/<dir>` — derives `state/projection.json` and
+   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
+   canonical and projection must not be hand-edited back into facts.
++- `python tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle
++  snapshot `state/loop_state.{json,md}` after graph / Agent Board / saturation /
++  coverage-matrix inputs are refreshed. It records evidence deltas, certainty upgrades,
++  coverage improvement, Coda convergence, unresolved conflicts, and fan-out/closure
++  hints. Advisory only: it never selects a front, promotes evidence, or closes a run.
+ 
+ These tools verify structure and discipline only — never a replacement for the evidence
+ gate or autonomous judgement.
+diff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md
+index 8e9ffa4..35d54f2 100644
+--- a/docs/WORKFLOW-reference.md
++++ b/docs/WORKFLOW-reference.md
+@@ -16,6 +16,8 @@ runs/<slug>_<date>/
+                     false_positive · decisions · review · report
+   evidence.json     auto-derived index of evidence.md (check_run writes it)
+   graph.json        derived state graph (graph.py writes it)
++  state/            derived caches: projection.json · events.jsonl ·
++                    workflow_checkpoint.json · coverage_matrix.* · loop_state.*
+   evidence/         sensor proof artifacts: *.html, *.replay.json, render_<host>/, screenshots
+   classify/         classify_hosts output: coverage.json + per-host bodies
+   scripts/          PoC / helper scripts (author-and-handoff)
+@@ -23,7 +25,8 @@ runs/<slug>_<date>/
+ ```
+ 
+ Keep the run **root** to the core `.md` files plus the auto-derived
+-`evidence.json` / `coverage.json` / `graph.json`. Proof artifacts belong under
++`evidence.json` / `coverage.json` / `graph.json`; broader derived projections belong under
++`state/`. Proof artifacts belong under
+ `evidence/`, PoC under `scripts/`, coverage under `classify/`. To make the right
+ place the easy place: `probe --save NAME --run runs/<dir>` drops the body **and** its
+ `.replay.json` into `<run>/evidence/`; `render --run runs/<dir>` defaults its output
+@@ -439,6 +442,14 @@ Markdown stays the source of truth; the graph is a projection, like `coverage.js
+ data for tools such as `workers`, `bench`, and `check_run`; it must never be edited
+ as the narrative source of truth or used to overwrite Markdown.
+ 
++`tools/loop_state.py` joins the graph, projection, Agent Board conflict state,
++saturation, evidence parser, and coverage matrix into `<run>/state/loop_state.json`
++and `<run>/state/loop_state.md`. This is the per-cycle closed-loop snapshot:
++evidence delta, certainty upgrades, coverage-matrix improvement, no-progress
++cycle count, Coda convergence, fan-out-required hints, unresolved conflicts, and
++closure gate hints. It is derived and advisory only. It never selects the next
++front, promotes Agent output, closes a front, or writes report conclusions.
++
+ ## Agent Board
+ 
+ The run directory is a blackboard. Collaboration is now Root Orchestrator +
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index 06d92ba..cd84759 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -61,8 +61,15 @@ python tools/graph.py runs/<dir>
+ python tools/workers.py status runs/<dir>
+ python tools/workers.py conflicts runs/<dir>
+ python tools/saturation.py runs/<dir>
++python tools/coverage_matrix.py runs/<dir> --write
++python tools/loop_state.py runs/<dir> --write
+ ```
+ `graph.py` 运行后自动写入 `state/workflow_checkpoint.json`（轻量阶段快照：phase / open/deferred/blocked/closed fronts / confirmed evidence），用于跨会话恢复和阶段追踪。
++`loop_state.py` writes `state/loop_state.{json,md}` as the closed-loop progress
++snapshot: evidence delta, certainty upgrades, coverage-matrix improvement,
++Coda convergence, Agent Board conflicts, and fan-out/closure gate hints. It is a
++derived cache only; Root still chooses the next front and the evidence gate still
++owns promotion.
+ 
+ The point is to make "what just got unlocked / neglected / contradicted / unassigned"
+ a query, not a full re-read of every block. Ask:
+diff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md
+index afb0ed0..ae69787 100644
+--- a/docs/templates/loop_prompt.md
++++ b/docs/templates/loop_prompt.md
+@@ -1,64 +1,87 @@
+ # Xunji Loop Protocol: {{RUN_DIR}}
+ 
+ You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.
+-End each turn with `下一行动: <action>` or `BLOCKED: <reason>`.
++Run exactly one autonomous iteration. End each turn with `下一行动: <action>` or
++`BLOCKED: <reason>`.
+ 
+ ## Iteration
+ 
+ ### 1. Drift Recovery
+ If `.claude/drift_block.json` is active, read its `required_rereads`, refresh `{{RUN_DIR}}/frontier.md` when `frontier_stale` is set, and log `Drift recovery` in decisions.md.
+ 
+-### 2. Root Graph Pass
+-Read frontier.md (all fronts), recent decisions.md, recent evidence.md, hints.md if present, state/assignments.json, and state/conflicts.json.
++### 2. Closed-Loop State Pass
++Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent evidence.md, hints.md if present, state/assignments.json, state/conflicts.json, and state/loop_state.md.
+ 
+ ```bash
+-python tools/graph.py "{{RUN_DIR}}"
+-python tools/workers.py status "{{RUN_DIR}}"
+-python tools/workers.py conflicts "{{RUN_DIR}}"
++{{PYTHON}} tools/graph.py "{{RUN_DIR}}"
++{{PYTHON}} tools/workers.py status "{{RUN_DIR}}"
++{{PYTHON}} tools/workers.py conflicts "{{RUN_DIR}}"
++{{PYTHON}} tools/saturation.py "{{RUN_DIR}}"
++{{PYTHON}} tools/coverage_matrix.py "{{RUN_DIR}}" --write
++{{PYTHON}} tools/loop_state.py "{{RUN_DIR}}" --write
+ ```
+ 
+-Append one `Root graph pass:` line to decisions.md: open/deferred counts, agent coverage, unresolved conflicts, stay/pivot/assign choice, target F-XXX.
++Append one `Root graph pass:` line to decisions.md: open/deferred counts, agent coverage, unresolved conflicts, evidence delta, coverage delta, no-progress cycle count, stay/pivot/assign choice, target F-XXX.
+ 
+ If closure is near, the same barrier keeps failing, 3 cycles produced no new evidence, or a hint asks for metacog, append one compact `Divergence trigger:` block and assign a verify/review/surface Agent when useful: Trigger / Blind spot hypothesis / Assigned role / Proposed action / Target object / Expected signal / Safety class / Why current trajectory likely missed it.
+ 
++If `state/loop_state.json` says `progress.coda_converged=true`, stop the autonomous drive and trigger Completion pause checks. Do not continue probing just because Type A fronts remain; Coda convergence means the last two cycles produced no new evidence, no certainty upgrade, and no coverage-matrix improvement.
++
+ ### 3. Plan / Assign / Act
+ Guard-routed tools only.
+ 
+ ```bash
+-python tools/workers.py assign "{{RUN_DIR}}" --role web-hunter --front F-XXX
+-python tools/probe.py GET "https://target/path" --save NAME --run "{{RUN_DIR}}"
+-python tools/probe.py GET "https://target/path" -H "K: V" --save NAME --run "{{RUN_DIR}}"
+-python tools/probe.py POST "https://target/path" --data '{"k":"v"}' -H "Content-Type: application/json" --save NAME --run "{{RUN_DIR}}"
+-python tools/scan.py sqlmap "https://target/path?id=1"
+-python tools/scan.py nuclei "https://target/"
++{{PYTHON}} tools/workers.py suggest "{{RUN_DIR}}"
++{{PYTHON}} tools/workers.py plan "{{RUN_DIR}}"
++{{PYTHON}} tools/workers.py assign "{{RUN_DIR}}" --role web-hunter --front F-XXX
++{{PYTHON}} tools/probe.py GET "https://target/path" --save NAME --run "{{RUN_DIR}}"
++{{PYTHON}} tools/probe.py GET "https://target/path" -H "K: V" --save NAME --run "{{RUN_DIR}}"
++{{PYTHON}} tools/probe.py POST "https://target/path" --data '{"k":"v"}' -H "Content-Type: application/json" --save NAME --run "{{RUN_DIR}}"
++{{PYTHON}} tools/scan.py sqlmap "https://target/path?id=1"
++{{PYTHON}} tools/scan.py nuclei "https://target/"
+ ```
+ 
+-Timeout / host-backoff → deferred (Type A). Save artifact before raising certainty. Agents produce candidates/refutations only; the Single Synthesizer promotes findings.
++If `state/loop_state.json` says `gates.fanout_required=true`, use the Agent Board: assign at least two disjoint lanes unless a concrete shared barrier or request budget reason is recorded. Agents produce candidates/refutations only; the Single Synthesizer promotes findings.
++
++Timeout / host-backoff → deferred (Type A). Save artifact before raising certainty. A sensor result or Agent note is not a finding until the evidence gate is applied.
+ 
+ ### 4. Gates
+ Before promotion, report, or closure:
+ 
+ ```bash
+-python tools/workers.py merge-check "{{RUN_DIR}}"
+-python tools/workers.py synthesize "{{RUN_DIR}}"
+-python tools/peer_review.py --into-run "{{RUN_DIR}}"
+-python tools/check_run.py "{{RUN_DIR}}"
++{{PYTHON}} tools/workers.py agent-check "{{RUN_DIR}}"
++{{PYTHON}} tools/workers.py merge-check "{{RUN_DIR}}"
++{{PYTHON}} tools/workers.py synthesize "{{RUN_DIR}}"
++{{PYTHON}} tools/check_run.py "{{RUN_DIR}}"
++```
++
++Only at Completion pause / closure:
++
++```bash
++{{PYTHON}} tools/check_run.py "{{RUN_DIR}}" --replay-verify
++{{PYTHON}} tools/peer_review.py "{{RUN_DIR}}" --into-run
+ ```
+ 
+-Every 10 cycles:
++Closure still requires: no hard `check_run` gates, independent review resolved, retrospective.md with real Self and Framework/tooling sections, no unresolved PR ledger items, and `GHOST_COMPLETE` written only after those pass.
++
++Every 10 cycles or when `loop_state` shows stale deferred work:
+ 
+ ```bash
+-python tools/deferred_queue.py --run "{{RUN_DIR}}"
++{{PYTHON}} tools/deferred_queue.py --run "{{RUN_DIR}}"
+ ```
+ 
+ On stage transition or drift recovery:
+ 
+ ```bash
+-python tools/session_handoff.py write "{{RUN_DIR}}"
++{{PYTHON}} tools/session_handoff.py write "{{RUN_DIR}}"
+ ```
+ 
+ ### 5. Update
+-Record the action result in the run files before ending the turn.
++Record the action result in the run files before ending the turn. Then refresh:
++
++```bash
++{{PYTHON}} tools/loop_state.py "{{RUN_DIR}}" --write
++```
+ 
+ ### 6. Stop
+ Run one iteration only. Ask the operator only when blocked.
+diff --git a/tools/loop_bootstrap.py b/tools/loop_bootstrap.py
+index cee75fb..ee168b2 100644
+--- a/tools/loop_bootstrap.py
++++ b/tools/loop_bootstrap.py
+@@ -3,9 +3,9 @@
+ """loop_bootstrap.py —— 一条命令启动 Xunji 全自动渗透流水线。
+ 
+ 用法:
+-  python tools/loop_bootstrap.py <slug> <recon.json>       # 新目标
+-  python tools/loop_bootstrap.py --resume runs/<dir>        # 续接已有 run
+-  python tools/loop_bootstrap.py --selftest                 # 自检
++  python3 tools/loop_bootstrap.py <slug> <recon.json>       # 新目标
++  python3 tools/loop_bootstrap.py --resume runs/<dir>       # 续接已有 run
++  python3 tools/loop_bootstrap.py --selftest                # 自检
+ 
+ 输出: 一个可保存到文件的 loop prompt 路径，和 /loop 启动指令。
+ """
+@@ -22,6 +22,7 @@ from pathlib import Path
+ ROOT = Path(__file__).resolve().parents[1]
+ RUNS = ROOT / "runs"
+ LOOP_TEMPLATE = ROOT / "docs" / "templates" / "loop_prompt.md"
++PYTHON_CMD = sys.executable or "python3"
+ 
+ try:
+     sys.stdout.reconfigure(encoding="utf-8")
+@@ -58,7 +59,7 @@ def _read_template() -> str:
+             pass
+     return (
+         "你是 Xunji 自主 Driver，对 run={{RUN_DIR}} 执行一轮探测。\n"
+-        "1. Reason pass: 读 frontier.md → 选前沿 → 安全探测 → 更新状态。\n"
++        "1. Reason pass: `{{PYTHON}} tools/loop_state.py \"{{RUN_DIR}}\" --write`。\n"
+         "2. 结尾: 下一行动: <action> 或 BLOCKED: <reason>。\n"
+     )
+ 
+@@ -66,7 +67,7 @@ def _read_template() -> str:
+ def _generate_loop_prompt(run_dir: Path) -> str:
+     """用实际 run 目录路径替换模板中的 {{RUN_DIR}}。"""
+     template = _read_template()
+-    return template.replace("{{RUN_DIR}}", str(run_dir))
++    return template.replace("{{RUN_DIR}}", str(run_dir)).replace("{{PYTHON}}", PYTHON_CMD)
+ 
+ 
+ def _write_initial_state(run_dir: Path) -> None:
+@@ -84,6 +85,25 @@ def _write_initial_state(run_dir: Path) -> None:
+         print(f"[bootstrap] 注意: 写 session_state.json 失败（后续轮次会重建）", file=sys.stderr)
+ 
+ 
++def _refresh_loop_state(run_dir: Path) -> bool:
++    """Refresh derived loop caches. These are advisory caches; Markdown stays canonical."""
++    cmd = [PYTHON_CMD, str(ROOT / "tools" / "loop_state.py"), str(run_dir), "--write"]
++    try:
++        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
++    except Exception as e:
++        print(f"[bootstrap] loop_state 刷新失败: {e}", file=sys.stderr)
++        return False
++    if r.stdout.strip():
++        print(r.stdout.rstrip())
++    if r.returncode != 0:
++        if r.stderr.strip():
++            print(r.stderr.rstrip(), file=sys.stderr)
++        print("[bootstrap] loop_state 刷新失败", file=sys.stderr)
++        return False
++    print(f"[bootstrap] loop state: {run_dir / 'state' / 'loop_state.json'}")
++    return True
++
++
+ # ---- commands ----
+ 
+ def cmd_new(slug: str, recon_path: str) -> int:
+@@ -109,6 +129,8 @@ def cmd_new(slug: str, recon_path: str) -> int:
+     print(f"[bootstrap] run 目录: {run_dir}")
+ 
+     _write_initial_state(run_dir)
++    if not _refresh_loop_state(run_dir):
++        return 1
+ 
+     # 生成 loop prompt 文件
+     prompt_text = _generate_loop_prompt(run_dir)
+@@ -130,8 +152,10 @@ def cmd_resume(run_path: str) -> int:
+     print(f"[bootstrap] 续接 run: {run_dir}")
+ 
+     # 写 handoff
+-    subprocess.run([sys.executable, str(ROOT / "tools" / "session_handoff.py"),
++    subprocess.run([PYTHON_CMD, str(ROOT / "tools" / "session_handoff.py"),
+                     "write", str(run_dir)], timeout=30)
++    if not _refresh_loop_state(run_dir):
++        return 1
+ 
+     prompt_text = _generate_loop_prompt(run_dir)
+     prompt_file = run_dir / "loop_prompt.md"
+@@ -155,8 +179,10 @@ def _print_launch_instructions(run_dir: Path, prompt_file: Path) -> None:
+     print()
+     print("=" * 60)
+     print("  监控:")
+-    print(f"    python tools/check_run.py {run_dir}")
++    print(f"    {PYTHON_CMD} tools/loop_state.py {run_dir} --write")
++    print(f"    {PYTHON_CMD} tools/check_run.py {run_dir}")
+     print(f"    tail -f {run_dir}/decisions.md")
++    print(f"    cat {run_dir}/state/loop_state.md")
+     print("=" * 60)
+ 
+ 
+@@ -177,8 +203,12 @@ def _selftest() -> int:
+     checks.append(("prompt non-empty", bool(fb.strip())))
+     checks.append(("prompt has run path", str(p) in fb))
+     checks.append(("no template var left", "{{RUN_DIR}}" not in fb))
++    checks.append(("python var replaced", "{{PYTHON}}" not in fb and PYTHON_CMD in fb))
+     _write_initial_state(p)
+     checks.append(("session_state written", (p / "session_state.json").exists()))
++    refresh_ok = _refresh_loop_state(p)
++    checks.append(("loop_state refresh ok", refresh_ok and (p / "state" / "loop_state.json").exists()))
++    checks.append(("loop_state refresh fails closed", _refresh_loop_state(p / "missing-run") is False))
+     checks.append(("validate run ok", _validate_run(p) is True))
+     checks.append(("validate non-run fails", _validate_run(Path("/nonexistent")) is False))
+ 
+diff --git a/tools/saturation.py b/tools/saturation.py
+index 0ed406a..3cda995 100644
+--- a/tools/saturation.py
++++ b/tools/saturation.py
+@@ -448,6 +448,20 @@ def check(run_dir: Path) -> tuple[list[str], list[str]]:
+     return warns, errors
+ 
+ 
++def front_saturation(run_dir: Path) -> list[dict]:
++    """Return saturation records for all open/deferred fronts in a run.
++
++    Public helper for derived-state tools. It keeps Markdown canonical and does
++    not write any files.
++    """
++    fr = run_dir / "frontier.md"
++    if not fr.exists():
++        return []
++    text = fr.read_text(encoding="utf-8", errors="replace")
++    constraints = _parse_constraints(run_dir)
++    return [compute(block["text"], constraints) for block in _parse_front_blocks(text)]
++
++
+ def _scan_agent_new_constraints(run_dir: Path) -> list[dict]:
+     """扫描 agents/*.md 中的 ## New Constraints 块, 提取建议的约束条目。"""
+     agents_dir = run_dir / "agents"
+@@ -676,6 +690,7 @@ def _selftest() -> int:
+     constraints = _parse_constraints(run)
+     f1 = compute(blocks[0]["text"], constraints)
+     f2 = compute(blocks[1]["text"], constraints)
++    derived = front_saturation(run)
+ 
+     import io
+     import contextlib
+@@ -699,6 +714,7 @@ def _selftest() -> int:
+         ("suggest exits 0", suggest_exit == 0),
+         ("suggest output is stable json shape",
+          suggest_items and {"front", "saturation", "penalty"} <= set(suggest_items[0])),
++        ("public front_saturation helper returns records", derived and derived[0]["front"] == "F-001"),
+     ]
+     bad = [name for name, ok in checks if not ok]
+     for name, ok in checks:
+diff --git a/tools/selftest_all.py b/tools/selftest_all.py
+index 4c693d1..e9bc47d 100644
+--- a/tools/selftest_all.py
++++ b/tools/selftest_all.py
+@@ -75,6 +75,7 @@ SUITES: list[tuple[str, list[str], str]] = [
+     ("state_project",   ["tools/state_project.py", "--selftest"], "markdown-derived run state projection"),
+     ("context_pack",    ["tools/context_pack.py", "--selftest"], "minimal subagent context pack"),
+     # --- loop pipeline ---
++    ("loop_state",       ["tools/loop_state.py", "--selftest"], "closed-loop progress and gate snapshot"),
+     ("loop_bootstrap",   ["tools/loop_bootstrap.py", "--selftest"],   "autonomous loop launcher"),
+     ("session_handoff",  ["tools/session_handoff.py", "--selftest"],  "session handoff tool"),
+     ("deferred_queue",   ["tools/deferred_queue.py", "--selftest"],   "deferred asset retry manager"),
+diff --git a/tools/loop_state.py b/tools/loop_state.py
+new file mode 100644
+index 0000000..a7609b3
+--- /dev/null
++++ b/tools/loop_state.py
+@@ -0,0 +1,519 @@
++#!/usr/bin/env python3
++"""Derived closed-loop state for a Xunji run.
++
++Markdown remains canonical. This tool joins the existing derived views
++(`graph.py`, `state_project.py`, `coverage_matrix.py`, `saturation.py`, and the
++Agent Board state) into one compact per-cycle loop snapshot. It measures whether
++the last cycle produced substance, highlights gates the Root must handle, and
++writes `state/loop_state.{json,md}` when asked.
++
++It does not choose the next front, close a front, promote evidence, or write
++canonical run facts.
++"""
++from __future__ import annotations
++
++import argparse
++import json
++import sys
++import tempfile
++import time
++from pathlib import Path
++
++try:
++    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
++except Exception:
++    pass
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / "tools"))
++
++from evidence_parse import parse_evidence  # noqa: E402
++import coverage_matrix  # noqa: E402
++import graph  # noqa: E402
++import saturation  # noqa: E402
++import state_project  # noqa: E402
++import workers  # noqa: E402
++
++SCHEMA = "xunji.loop_state.v1"
++CONFIRMED = 0.8
++PYTHON_CMD = sys.executable or "python3"
++
++
++def _resolve_run_dir(path: str | Path) -> Path:
++    p = Path(path)
++    return (p if p.is_absolute() else ROOT / p).resolve()
++
++
++def _read_json(path: Path, default):
++    try:
++        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
++        return data if isinstance(data, type(default)) else default
++    except Exception:
++        return default
++
++
++def _write(path: Path, text: str) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(text, encoding="utf-8")
++
++
++def _evidence_summary(run_dir: Path) -> dict:
++    records = parse_evidence(run_dir)
++    cert_by_id: dict[str, float] = {}
++    confirmed: list[str] = []
++    findings: list[str] = []
++    for rec in records:
++        certs = rec.get("certainties") or []
++        cert = max(certs) if certs else 0.0
++        cert_by_id[str(rec.get("id"))] = cert
++        if cert >= CONFIRMED and not rec.get("superseded"):
++            confirmed.append(str(rec.get("id")))
++            if rec.get("maturity") == "finding":
++                findings.append(str(rec.get("id")))
++    return {
++        "total": len(records),
++        "ids": sorted(cert_by_id),
++        "cert_by_id": cert_by_id,
++        "confirmed": sorted(confirmed),
++        "confirmed_findings": sorted(findings),
++    }
++
++
++def _coverage_summary(run_dir: Path, *, write: bool) -> dict:
++    data = coverage_matrix.write_outputs(run_dir) if write else coverage_matrix.derive(run_dir)
++    tested_cells = sorted(
++        f"{row['asset']}::{group}"
++        for row in data.get("rows", [])
++        for group, value in row.get("cells", {}).items()
++        if value == "tested"
++    )
++    untested_cells = sorted(
++        f"{row['asset']}::{group}"
++        for row in data.get("rows", [])
++        for group, value in row.get("cells", {}).items()
++        if value == "untested"
++    )
++    return {
++        "source": data.get("source", ""),
++        "rows": len(data.get("rows", [])),
++        "tested_cells": tested_cells,
++        "untested_cells": untested_cells,
++        "tested_cell_count": len(tested_cells),
++        "untested_cell_count": len(untested_cells),
++        "empty_columns": data.get("empty_columns", []),
++        "row_gaps": data.get("row_gaps", []),
++        "warnings": data.get("warnings", []),
++    }
++
++
++def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
++    fronts = [f for f in projection.get("fronts", []) if str(f.get("id", "")).startswith("F-")]
++    open_fronts = [
++        f for f in fronts
++        if str(f.get("status", "")).lower() in {"open", "probing", "working"}
++    ]
++    deferred_fronts = [f for f in fronts if "deferred" in str(f.get("status", "")).lower()]
++    closed_fronts = [f for f in fronts if "closed" in str(f.get("status", "")).lower()]
++    barriers = [
++        str(f.get("barrier") or "unknown").strip().lower()
++        for f in open_fronts
++        if str(f.get("barrier") or "").strip().lower() not in {"", "unknown", "none", "-"}
++    ]
++    unique_barriers = sorted(set(barriers))
++
++    low_saturation: list[dict] = []
++    for result in saturation.front_saturation(run_dir):
++        ratio = result.get("ratio")
++        if ratio is not None and ratio < 0.6:
++            low_saturation.append({
++                "front": result.get("front"),
++                "ratio": round(float(ratio), 3),
++                "tried": result.get("tried_count"),
++                "untried": result.get("untried_count"),
++            })
++
++    return {
++        "total": len(fronts),
++        "open": [f.get("id") for f in open_fronts],
++        "deferred": [f.get("id") for f in deferred_fronts],
++        "closed": [f.get("id") for f in closed_fronts],
++        "open_count": len(open_fronts),
++        "deferred_count": len(deferred_fronts),
++        "closed_count": len(closed_fronts),
++        "actionable": view.get("actionable", []),
++        "unlocked_deferred": view.get("unlocked_deferred", []),
++        "closed_but_unlocked": view.get("closed_but_unlocked", []),
++        "dangling_facts": view.get("dangling_facts", []),
++        "unique_barriers": unique_barriers,
++        "diverse_barriers": len(unique_barriers) >= 2,
++        "low_saturation": low_saturation,
++    }
++
++
++def _agent_summary(run_dir: Path, *, write: bool) -> dict:
++    assignments = workers.load_assignments(run_dir).get("assignments", [])
++    if write:
++        conflicts = workers.build_conflicts(run_dir).get("conflicts", [])
++    else:
++        conflicts = _read_json(run_dir / "state" / "conflicts.json", {}).get("conflicts", [])
++    unresolved = [c for c in conflicts if c.get("status") == "unresolved"]
++    rows = []
++    for rec in assignments:
++        if isinstance(rec, dict):
++            rows.append({
++                "agent": rec.get("agent"),
++                "role": rec.get("role"),
++                "front": rec.get("front"),
++                "status": rec.get("status"),
++            })
++    return {
++        "assignments": rows,
++        "assignment_count": len(rows),
++        "unresolved_conflicts": len(unresolved),
++        "conflict_types": sorted({str(c.get("type")) for c in unresolved}),
++    }
++
++
++def _progress(previous: dict, evidence: dict, coverage: dict) -> dict:
++    prev_progress = previous.get("progress", {}) if previous else {}
++    prev_evidence_ids = set(prev_progress.get("evidence_ids", []))
++    now_evidence_ids = set(evidence["ids"])
++    new_evidence = sorted(now_evidence_ids - prev_evidence_ids) if previous else []
++
++    prev_cert = prev_progress.get("cert_by_id", {}) if previous else {}
++    upgrades = []
++    if previous:
++        for eid, cert in evidence["cert_by_id"].items():
++            old = float(prev_cert.get(eid, 0.0) or 0.0)
++            if cert > old:
++                upgrades.append({"id": eid, "from": old, "to": cert})
++
++    prev_cells = set(prev_progress.get("coverage_tested_cells", []))
++    now_cells = set(coverage["tested_cells"])
++    new_cells = sorted(now_cells - prev_cells) if previous else []
++
++    made_progress = bool(new_evidence or upgrades or new_cells)
++    prev_no_progress = int(prev_progress.get("no_progress_cycles", 0) or 0)
++    no_progress_cycles = 0 if made_progress or not previous else prev_no_progress + 1
++
++    return {
++        "evidence_total": evidence["total"],
++        "evidence_ids": evidence["ids"],
++        "new_evidence_ids": new_evidence,
++        "cert_by_id": evidence["cert_by_id"],
++        "certainty_upgrades": upgrades,
++        "confirmed_evidence": evidence["confirmed"],
++        "confirmed_findings": evidence["confirmed_findings"],
++        "coverage_tested_cells": coverage["tested_cells"],
++        "coverage_new_tested_cells": new_cells,
++        "coverage_tested_cell_count": coverage["tested_cell_count"],
++        "coverage_untested_cell_count": coverage["untested_cell_count"],
++        "made_progress": made_progress,
++        "no_progress_cycles": no_progress_cycles,
++        "coda_converged": no_progress_cycles >= 2,
++    }
++
++
++def _phase(fronts: dict, progress: dict) -> str:
++    if fronts["open_count"]:
++        return "Driver"
++    if fronts["deferred_count"] or progress["confirmed_evidence"]:
++        return "Reviewer"
++    if fronts["closed_count"]:
++        return "Closure"
++    return "Setup"
++
++
++def _gates(fronts: dict, agents: dict, progress: dict, coverage: dict) -> dict:
++    fanout_required = fronts["open_count"] >= 4 and fronts["diverse_barriers"]
++    completion_pause_candidate = (
++        progress["coda_converged"]
++        or (fronts["open_count"] == 0 and not fronts["unlocked_deferred"])
++    )
++    near_closure = completion_pause_candidate or (
++        fronts["open_count"] == 0 and bool(progress["confirmed_evidence"])
++    )
++    return {
++        "fanout_required": fanout_required,
++        "fanout_reason": (
++            "open fronts >= 4 and barrier classes are diverse"
++            if fanout_required else ""
++        ),
++        "completion_pause_candidate": completion_pause_candidate,
++        "needs_conflict_resolution": agents["unresolved_conflicts"] > 0,
++        "needs_coverage_attention": bool(coverage["empty_columns"] or coverage["row_gaps"]),
++        "needs_saturation_attention": bool(fronts["low_saturation"]),
++        "near_closure": near_closure,
++        "closure_commands": [
++            f"{PYTHON_CMD} tools/workers.py agent-check <run>",
++            f"{PYTHON_CMD} tools/workers.py merge-check <run>",
++            f"{PYTHON_CMD} tools/check_run.py <run>",
++            f"{PYTHON_CMD} tools/check_run.py <run> --replay-verify",
++            f"{PYTHON_CMD} tools/peer_review.py <run> --into-run",
++        ] if near_closure else [],
++    }
++
++
++def _next_actions(fronts: dict, agents: dict, progress: dict, gates: dict) -> list[str]:
++    actions: list[str] = []
++    if gates["needs_conflict_resolution"]:
++        actions.append("Resolve Agent Board conflicts before promotion or closure.")
++    if gates["fanout_required"]:
++        actions.append("Run workers.py suggest/plan and assign at least two disjoint Agent lanes.")
++    if fronts["closed_but_unlocked"]:
++        actions.append("Reopen or re-adjudicate fronts that are closed but unlocked by confirmed evidence.")
++    if fronts["unlocked_deferred"]:
++        actions.append("Activate deferred fronts unlocked by confirmed evidence.")
++    if gates["needs_saturation_attention"]:
++        actions.append("Expand or justify low-saturation fronts before any explored-enough claim.")
++    if gates["needs_coverage_attention"]:
++        actions.append("Update fronts/evidence for coverage matrix empty columns or sparse rows.")
++    if progress["coda_converged"]:
++        actions.append("Trigger completion pause: run closure gates, independent review, and retrospective.")
++    elif not fronts["open_count"] and not fronts["unlocked_deferred"]:
++        actions.append("No open front visible; run review/closure checks or reopen missing work.")
++    else:
++        actions.append("Choose the next front from actionable/open fronts and record a Root graph pass.")
++    return actions
++
++
++def derive(run_dir: Path, *, write: bool = False) -> dict:
++    run_dir = _resolve_run_dir(run_dir)
++    if not run_dir.exists():
++        raise FileNotFoundError(f"run directory does not exist: {run_dir}")
++
++    previous = _read_json(run_dir / "state" / "loop_state.json", {})
++    # Refresh the standard derived projections only in write mode. They remain
++    # caches; the default read path should not mutate a run directory.
++    projection = state_project.write_projection(run_dir) if write else state_project.derive(run_dir)
++    g = graph.build_graph(run_dir)
++    view = graph.derive_view(g, run_dir)
++    if write:
++        _write(run_dir / "graph.json", json.dumps({**g, "view": view}, ensure_ascii=False, indent=2) + "\n")
++        graph._write_checkpoint(run_dir, g)  # project-internal cache writer
++
++    evidence = _evidence_summary(run_dir)
++    coverage = _coverage_summary(run_dir, write=write)
++    fronts = _front_summary(run_dir, view, projection)
++    agents = _agent_summary(run_dir, write=write)
++    progress = _progress(previous, evidence, coverage)
++    gates = _gates(fronts, agents, progress, coverage)
++    phase = _phase(fronts, progress)
++    actions = _next_actions(fronts, agents, progress, gates)
++
++    return {
++        "schema": SCHEMA,
++        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
++        "canonical": "Markdown run files remain source of truth; this is a derived cache.",
++        "run_dir": str(run_dir),
++        "phase": phase,
++        "fronts": fronts,
++        "agents": agents,
++        "coverage": coverage,
++        "progress": progress,
++        "gates": gates,
++        "next_actions": actions,
++    }
++
++
++def render_markdown(data: dict) -> str:
++    progress = data["progress"]
++    fronts = data["fronts"]
++    agents = data["agents"]
++    gates = data["gates"]
++    lines = [
++        "# Loop State",
++        "",
++        f"- Phase: {data['phase']}",
++        f"- Open/deferred/closed fronts: {fronts['open_count']} / {fronts['deferred_count']} / {fronts['closed_count']}",
++        f"- Evidence: {progress['evidence_total']} total; new this cycle: {len(progress['new_evidence_ids'])}; certainty upgrades: {len(progress['certainty_upgrades'])}",
++        f"- Coverage: {progress['coverage_tested_cell_count']} tested cells; new this cycle: {len(progress['coverage_new_tested_cells'])}; untested applicable cells: {progress['coverage_untested_cell_count']}",
++        f"- No-progress cycles: {progress['no_progress_cycles']} ({'Coda converged' if progress['coda_converged'] else 'continue'})",
++        f"- Agents: {agents['assignment_count']} assignments; unresolved conflicts: {agents['unresolved_conflicts']}",
++        f"- Fan-out required: {'yes' if gates['fanout_required'] else 'no'}",
++        f"- Completion pause candidate: {'yes' if gates['completion_pause_candidate'] else 'no'}",
++        "",
++        "## Next Actions",
++        "",
++    ]
++    lines.extend(f"- {a}" for a in data.get("next_actions", []))
++    if fronts.get("low_saturation"):
++        lines.extend(["", "## Low Saturation", ""])
++        for item in fronts["low_saturation"]:
++            lines.append(
++                f"- {item['front']}: ratio={item['ratio']} tried={item['tried']} untried={item['untried']}"
++            )
++    if data["coverage"].get("empty_columns"):
++        lines.extend(["", "## Coverage Empty Columns", ""])
++        lines.extend(f"- {c}" for c in data["coverage"]["empty_columns"])
++    return "\n".join(lines) + "\n"
++
++
++def write_outputs(run_dir: Path) -> dict:
++    data = derive(run_dir, write=True)
++    state = _resolve_run_dir(run_dir) / "state"
++    _write(state / "loop_state.json", json.dumps(data, ensure_ascii=False, indent=2) + "\n")
++    _write(state / "loop_state.md", render_markdown(data))
++    return data
++
++
++def _selftest() -> int:
++    d = Path(tempfile.mkdtemp())
++    run = d / "run"
++    run.mkdir()
++    (run / "frontier.md").write_text(
++        "# Frontier\n\n"
++        "## Open Fronts\n\n"
++        "### F-001 Login\n"
++        "- Status: open\n"
++        "- Barrier class: auth-gate\n"
++        "- Surface subtype: login\n"
++        "- Vectors tried: auth bypass\n"
++        "- Untried classes: SQLi-login, enum, default-creds\n\n"
++        "### F-002 API\n"
++        "- Status: open\n"
++        "- Barrier class: api-filter\n"
++        "- Surface subtype: param-api\n"
++        "- Vectors tried: SQLi\n"
++        "- Untried classes: IDOR\n\n"
++        "### F-003 Admin\n"
++        "- Status: open\n"
++        "- Barrier class: admin-login\n"
++        "- Surface subtype: login\n"
++        "- Vectors tried: enum\n\n"
++        "### F-004 Upload\n"
++        "- Status: open\n"
++        "- Barrier class: upload-filter\n"
++        "- Surface subtype: upload\n"
++        "- Vectors tried: upload-to-shell\n",
++        encoding="utf-8",
++    )
++    (run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
++    (run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
++    (run / "evidence.md").write_text(
++        "# Evidence Ledger\n\n"
++        "## E-001\n"
++        "- Maturity: candidate\n"
++        "- Certainty: 0.5\n"
++        "- Supports: F-001\n",
++        encoding="utf-8",
++    )
++    (run / "coverage.json").write_text(json.dumps({"assets": [
++        {"host": "login.example", "reachable": True, "flags": ["LOGIN"]},
++        {"host": "api.example", "reachable": True, "flags": ["SURFACE:API"]},
++    ]}), encoding="utf-8")
++
++    first = write_outputs(run)
++    second = write_outputs(run)
++    third = write_outputs(run)
++    (run / "evidence.md").write_text(
++        "# Evidence Ledger\n\n"
++        "## E-001\n"
++        "- Maturity: finding\n"
++        "- Certainty: 0.8\n"
++        "- Control: baseline\n"
++        "- Supports: F-001\n",
++        encoding="utf-8",
++    )
++    (run / "frontier.md").write_text(
++        (run / "frontier.md").read_text(encoding="utf-8")
++        .replace("- Surface subtype: param-api\n- Vectors tried: SQLi\n",
++                 "- Surface subtype: param-api\n- Assets: api.example\n- Vectors tried: SQLi, IDOR\n"),
++        encoding="utf-8",
++    )
++    fourth = write_outputs(run)
++
++    agent_run = d / "agent_run"
++    agent_run.mkdir()
++    (agent_run / "frontier.md").write_text(
++        "# Frontier\n\n## Open Fronts\n\n### F-001\n- Status: open\n",
++        encoding="utf-8",
++    )
++    (agent_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    (agent_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
++    (agent_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
++    (agent_run / "agents").mkdir()
++    (agent_run / "state").mkdir()
++    (agent_run / "state" / "assignments.json").write_text(json.dumps({
++        "assignments": [
++            {"agent": "A-support-001", "role": "web-hunter", "front": "F-001", "status": "done"},
++            {"agent": "A-refute-001", "role": "verify", "front": "F-001", "status": "done"},
++        ],
++    }), encoding="utf-8")
++    (agent_run / "agents" / "A-support-001.md").write_text(
++        "# Agent A-support-001\n"
++        "- Role: web-hunter\n- Assigned front: F-001\n- Status: done\n"
++        "- Supports: candidate auth bypass\n- Refutes:\n- Confidence: 0.5\n",
++        encoding="utf-8",
++    )
++    (agent_run / "agents" / "A-refute-001.md").write_text(
++        "# Agent A-refute-001\n"
++        "- Role: verify\n- Assigned front: F-001\n- Status: done\n"
++        "- Supports:\n- Refutes: candidate auth bypass\n- Confidence: 0.5\n",
++        encoding="utf-8",
++    )
++    agent_state = write_outputs(agent_run)
++
++    no_write = d / "no_write"
++    no_write.mkdir()
++    (no_write / "frontier.md").write_text(
++        "# Frontier\n\n## Open Fronts\n\n### F-001\n- Status: open\n",
++        encoding="utf-8",
++    )
++    (no_write / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    (no_write / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
++    (no_write / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
++    no_write_data = derive(no_write, write=False)
++    checks = [
++        ("writes loop state json", (run / "state" / "loop_state.json").exists()),
++        ("writes loop state markdown", (run / "state" / "loop_state.md").exists()),
++        ("fanout required with four diverse open fronts", first["gates"]["fanout_required"]),
++        ("coverage attention is surfaced", first["gates"]["needs_coverage_attention"]),
++        ("first snapshot does not count existing evidence as new", first["progress"]["new_evidence_ids"] == []),
++        ("no-progress cycles increase", second["progress"]["no_progress_cycles"] == 1),
++        ("coda converges after two no-progress cycles", third["progress"]["coda_converged"]),
++        ("certainty upgrade resets no-progress", fourth["progress"]["certainty_upgrades"]
++         and fourth["progress"]["no_progress_cycles"] == 0),
++        ("coverage improvement is recorded", fourth["progress"]["coverage_new_tested_cells"]),
++        ("coverage outputs written", (run / "state" / "coverage_matrix.json").exists()),
++        ("graph checkpoint written", (run / "state" / "workflow_checkpoint.json").exists()),
++        ("agent conflicts are surfaced", agent_state["agents"]["unresolved_conflicts"] == 1
++         and agent_state["gates"]["needs_conflict_resolution"]),
++        ("default derive is no-write", no_write_data["schema"] == SCHEMA
++         and not (no_write / "state").exists()
++         and not (no_write / "graph.json").exists()),
++    ]
++    bad = [name for name, ok in checks if not ok]
++    for name, ok in checks:
++        print(("ok   " if ok else "FAIL ") + name)
++    print("loop_state selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
++    return 0 if not bad else 1
++
++
++def main(argv: list[str] | None = None) -> int:
++    argv = list(sys.argv[1:] if argv is None else argv)
++    ap = argparse.ArgumentParser(description="derive the Xunji closed-loop state for one run")
++    ap.add_argument("run_dir", nargs="?", type=Path)
++    ap.add_argument("--write", action="store_true", help="write state/loop_state.{json,md} and dependent caches")
++    ap.add_argument("--json", action="store_true", help="print JSON instead of Markdown")
++    ap.add_argument("--selftest", action="store_true")
++    args = ap.parse_args(argv)
++
++    if args.selftest:
++        return _selftest()
++    if not args.run_dir:
++        ap.error("run_dir is required")
++    try:
++        data = write_outputs(args.run_dir) if args.write else derive(args.run_dir, write=False)
++    except FileNotFoundError as e:
++        print(f"[loop_state] {e}", file=sys.stderr)
++        return 1
++    if args.json:
++        print(json.dumps(data, ensure_ascii=False, indent=2))
++    else:
++        print(render_markdown(data), end="")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

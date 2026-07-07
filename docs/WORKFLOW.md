@@ -61,8 +61,15 @@ python tools/graph.py runs/<dir>
 python tools/workers.py status runs/<dir>
 python tools/workers.py conflicts runs/<dir>
 python tools/saturation.py runs/<dir>
+python tools/coverage_matrix.py runs/<dir> --write
+python tools/loop_state.py runs/<dir> --write
 ```
 `graph.py` 运行后自动写入 `state/workflow_checkpoint.json`（轻量阶段快照：phase / open/deferred/blocked/closed fronts / confirmed evidence），用于跨会话恢复和阶段追踪。
+`loop_state.py` writes `state/loop_state.{json,md}` as the closed-loop progress
+snapshot: evidence delta, certainty upgrades, coverage-matrix improvement,
+Coda convergence, Agent Board conflicts, and fan-out/closure gate hints. It is a
+derived cache only; Root still chooses the next front and the evidence gate still
+owns promotion.
 
 The point is to make "what just got unlocked / neglected / contradicted / unassigned"
 a query, not a full re-read of every block. Ask:

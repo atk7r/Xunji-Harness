@@ -1,0 +1,14 @@
+ok   writes loop state json
+ok   writes loop state markdown
+ok   fanout required with four diverse open fronts
+ok   coverage attention is surfaced
+ok   first snapshot does not count existing evidence as new
+ok   no-progress cycles increase
+ok   coda converges after two no-progress cycles
+ok   certainty upgrade resets no-progress
+ok   coverage improvement is recorded
+ok   coverage outputs written
+ok   graph checkpoint written
+ok   agent conflicts are surfaced
+ok   default derive is no-write
+loop_state selftest passed

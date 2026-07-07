@@ -448,6 +448,20 @@ def check(run_dir: Path) -> tuple[list[str], list[str]]:
     return warns, errors
 
 
+def front_saturation(run_dir: Path) -> list[dict]:
+    """Return saturation records for all open/deferred fronts in a run.
+
+    Public helper for derived-state tools. It keeps Markdown canonical and does
+    not write any files.
+    """
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return []
+    text = fr.read_text(encoding="utf-8", errors="replace")
+    constraints = _parse_constraints(run_dir)
+    return [compute(block["text"], constraints) for block in _parse_front_blocks(text)]
+
+
 def _scan_agent_new_constraints(run_dir: Path) -> list[dict]:
     """扫描 agents/*.md 中的 ## New Constraints 块, 提取建议的约束条目。"""
     agents_dir = run_dir / "agents"
@@ -676,6 +690,7 @@ def _selftest() -> int:
     constraints = _parse_constraints(run)
     f1 = compute(blocks[0]["text"], constraints)
     f2 = compute(blocks[1]["text"], constraints)
+    derived = front_saturation(run)
 
     import io
     import contextlib
@@ -699,6 +714,7 @@ def _selftest() -> int:
         ("suggest exits 0", suggest_exit == 0),
         ("suggest output is stable json shape",
          suggest_items and {"front", "saturation", "penalty"} <= set(suggest_items[0])),
+        ("public front_saturation helper returns records", derived and derived[0]["front"] == "F-001"),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:

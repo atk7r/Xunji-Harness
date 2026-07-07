@@ -75,6 +75,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("state_project",   ["tools/state_project.py", "--selftest"], "markdown-derived run state projection"),
     ("context_pack",    ["tools/context_pack.py", "--selftest"], "minimal subagent context pack"),
     # --- loop pipeline ---
+    ("loop_state",       ["tools/loop_state.py", "--selftest"], "closed-loop progress and gate snapshot"),
     ("loop_bootstrap",   ["tools/loop_bootstrap.py", "--selftest"],   "autonomous loop launcher"),
     ("session_handoff",  ["tools/session_handoff.py", "--selftest"],  "session handoff tool"),
     ("deferred_queue",   ["tools/deferred_queue.py", "--selftest"],   "deferred asset retry manager"),

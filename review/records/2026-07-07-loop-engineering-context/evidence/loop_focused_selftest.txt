@@ -1,0 +1,9 @@
+running 5 selftest suite(s) with /Library/Developer/CommandLineTools/usr/bin/python3
+
+  PASS  loop_state         0.1s  closed-loop progress and gate snapshot
+  PASS  loop_bootstrap     0.1s  autonomous loop launcher
+  PASS  workers            0.2s  fan-out worker planning helpers
+  PASS  saturation         0.0s  front saturation scoring
+  PASS  coverage_matrix    0.0s  asset x vuln-family coverage matrix
+
+5 passed, 0 failed  (0.4s total)

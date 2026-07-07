@@ -1,0 +1,11 @@
+ok   empty run without frontier returns 1
+ok   closed fronts are excluded
+ok   open front low saturation is computed
+ok   constraints count as tried
+ok   check emits low-saturation warning
+ok   full report exits 0
+ok   front detail exits 0
+ok   suggest exits 0
+ok   suggest output is stable json shape
+ok   public front_saturation helper returns records
+saturation selftest passed
