@@ -58,8 +58,8 @@ In this mode:
 
 - Codex authors the change and remains the final synthesis brain.
 - Codex does not count as an independent reviewer of its own diff.
-- Full availability: arkcli panel plus Claude Code/API review.
-- No arkcli: Claude Code/API or fresh-context Claude Code review is required.
+- Full availability: arkcli panel plus Claude Code CLI review.
+- No arkcli: Claude Code CLI or fresh-context Claude Code review is required.
 - No Claude Code but arkcli available: use arkcli panel and record the missing
   Claude limitation.
 - If neither external reviewer is available, do not pretend Codex self-review is

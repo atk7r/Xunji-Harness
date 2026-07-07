@@ -5,12 +5,12 @@
 【另一个模型(独立性更强)】。本模块自动化第三种, 并按"谁改代码/谁是评审对象"选后端:
     Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 三模型 panel;
       缺 Codex 用 arkcli panel; 缺 arkcli 用 Codex; 都缺才 Claude Code 同族兜底。
-    Codex-authored maintenance diff: Codex 不算独立票, 满配用 arkcli panel + Claude Code/API 复审;
-      缺 arkcli 时用 Claude Code/API 复审。最终综合/决策权仍在 Codex。
+    Codex-authored maintenance diff: Codex 不算独立票, 满配用 arkcli panel + Claude Code CLI 复审;
+      缺 arkcli 时用 Claude Code CLI 复审。最终综合/决策权仍在 Codex。
 为什么这个顺序: A2 盲区在权重里, 补盲要【正交的错误分布】。Claude 主驾满配大脑是 Codex;
 arkcli panel 是外部异构补盲团; Claude 自家只减 bias 不减盲区, 故仅在 Claude 主驾时作兜底。
 如果评审对象是 Codex-authored maintenance diff, 用 --driver codex:
-Codex 后端不再计为独立复审票, 矩阵切到 arkcli panel + Claude Code/API, 但综合大脑仍为 Codex。
+  Codex 后端不再计为独立复审票, 矩阵切到 arkcli panel + Claude Code CLI, 但综合大脑仍为 Codex。
 
 接入方式(其他功能 import):
     from peer_review import review
@@ -86,10 +86,10 @@ DEFAULT_CONFIG: dict = {
                      "heterogeneous": True},
         "glm": {"kind": "openai", "base_url": "https://open.bigmodel.cn/api/paas/v4",
                 "model": "glm-4-plus", "api_key_env": "GLM_API_KEY", "heterogeneous": True},
-        # 兜底: 有 ANTHROPIC_API_KEY 走 API; 否则委托 driver spawn 子代理。heterogeneous=False:
-        # 同族 Claude 减 bias 不减盲区(A2), 只能在 codex/arkcli 都不可用时透明降级使用。
-        "claude": {"kind": "anthropic-or-driver", "base_url": "https://api.anthropic.com/v1",
-                   "model": "claude-opus-4-8", "api_key_env": "ANTHROPIC_API_KEY",
+        # Claude Code CLI: 走 `claude -p`, 不直连 Anthropic Messages API。对 Claude 主驾是同族兜底;
+        # 对 Codex-authored diff 是独立 reviewer。
+        "claude": {"kind": "claude-code-cli", "cmd": "claude", "effort": "high",
+                   "permission_mode": "dontAsk", "tools": "Read,Grep,Glob",
                    "heterogeneous": False},
     },
 }
@@ -531,8 +531,8 @@ def backend_available(name: str, cfg: dict) -> bool:
         return shutil.which(b.get("cmd", name)) is not None
     if kind == "openai":
         return bool(os.environ.get(b.get("api_key_env", "")))
-    if kind == "anthropic-or-driver":
-        return True   # 永远可用: 有 key 走 API, 没 key 委托 driver 子代理(兜底)
+    if kind == "claude-code-cli":
+        return shutil.which(b.get("cmd", name)) is not None
     return False
 
 
@@ -563,7 +563,7 @@ def _is_heterogeneous(name: str, cfg: dict, driver: str | None = None) -> bool:
     """独立/异构是相对当前主驾驶说的。
 
     默认主驾驶是 Claude Code: codex/arkcli/legacy API 算异构, claude 同族不算。
-    若主操作面切到 Codex: codex 变成自审, arkcli 与 Claude Code/API 才算独立复审。
+    若主操作面切到 Codex: codex 变成自审, arkcli 与 Claude Code CLI 才算独立复审。
     """
     driver = _normalize_driver(driver)
     if driver == "codex":
@@ -578,7 +578,7 @@ def _driver_matrix_order(driver: str | None = None) -> list[str]:
     """Preferred reviewer order for the active author/review-subject mode."""
     driver = _normalize_driver(driver)
     if driver == "codex":
-        # Codex-authored changes need external review: arkcli panel plus Claude Code/API.
+        # Codex-authored changes need external review: arkcli panel plus Claude Code CLI.
         return ["arkcli", "claude"]
     # Claude Code-authored/driven changes use Codex plus arkcli when available.
     return ["codex", "arkcli"]
@@ -634,7 +634,7 @@ def build_rubric(base: str | None = None, *, role: str | None = None,
 def _effective_panel_min(selected: list[str], explicit_min: int | None, configured_min) -> int:
     """Default policy matrix:
     - Claude driver: codex + arkcli require both; one missing accepts the other.
-    - Codex-authored diff: arkcli + Claude Code/API require both; no arkcli requires Claude.
+    - Codex-authored diff: arkcli + Claude Code CLI require both; no arkcli requires Claude.
     - Claude driver with neither external backend: fall back to same-family Claude."""
     if explicit_min is not None:
         return explicit_min
@@ -955,26 +955,34 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
     return _aggregate_arkcli_panel(results, errors, backend_used)
 
 
-def _run_anthropic(scope_dir: Path, rubric: str, b: dict, timeout: int,
-                   bundle: dict | None = None, driver: str | None = None,
-                   artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
-                   max_bundle_chars: int = BUNDLE_CHAR_CAP) -> ReviewResult:
-    key = os.environ.get(b.get("api_key_env", ""), "")
-    if not key:
-        # 兜底: 委托操作者在 Claude Code 里启动 fresh-context 复审。
-        rel = scope_dir.relative_to(ROOT).as_posix() if scope_dir.is_relative_to(ROOT) else str(scope_dir)
-        if _normalize_driver(driver) == "codex":
-            prompt = (f"[委托 Claude Code] 当前主操作面是 Codex, 且无 ANTHROPIC_API_KEY 可直接调用。"
-                      f"请在 Claude Code fresh-context 会话/子代理中复审 {rel}, 用以下契约。"
-                      f"Codex 不得把自己当独立复审票; Claude Code 复审仍是候选非裁决。\n\n{rubric}")
-            backend_used = "claude:code-fresh-context"
-        else:
-            prompt = (f"[委托 driver] 无异构后端且无 ANTHROPIC_API_KEY。请 driver spawn 一个 "
-                      f"general-purpose fresh-context 子代理复审 {rel}, 用以下契约。注意: 同模型只减 "
-                      f"bias 不减盲区(见 review-mechanism.md / A2), 这是最弱兜底。\n\n{rubric}")
-            backend_used = "claude:driver-subagent"
-        return ReviewResult(verdict="NEEDS_DRIVER", backend_used=backend_used,
-                            raw=prompt)
+def _extract_claude_cli_result(stdout: str) -> str:
+    """Claude Code `--output-format json` may print warnings before the JSON line."""
+    for line in reversed((stdout or "").splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            result = obj.get("result")
+            if isinstance(result, str) and result.strip():
+                return result
+            content = obj.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+    return stdout or ""
+
+
+def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,
+                    bundle: dict | None = None,
+                    artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
+                    max_bundle_chars: int = BUNDLE_CHAR_CAP) -> ReviewResult:
+    cmd_name = b.get("cmd", "claude")
+    if shutil.which(cmd_name) is None:
+        return ReviewResult(verdict="ERROR", backend_used="claude:code-cli",
+                            error=f"claude code cli not found: {cmd_name}")
     context = json.dumps(bundle or build_review_bundle(
         scope_dir,
         redact_egress=True,
@@ -984,21 +992,45 @@ def _run_anthropic(scope_dir: Path, rubric: str, b: dict, timeout: int,
     cap = _context_cap(PER_FILE_CAP * 8, max_bundle_chars)
     if len(context) > cap:
         context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars]"
-    payload = {"model": b["model"], "max_tokens": 4096, "system": rubric,
-               "messages": [{"role": "user",
-                             "content": f"Run audit trail (read-only) for {scope_dir.name}:\n\n{context}"}]}
-    req = urllib.request.Request(
-        b["base_url"].rstrip("/") + "/messages",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
-                 "Content-Type": "application/json"}, method="POST")
+
+    rel = scope_dir.relative_to(ROOT).as_posix() if scope_dir.is_relative_to(ROOT) else str(scope_dir)
+    prompt = (
+        "You are running as Claude Code CLI in non-interactive fresh-context mode.\n"
+        "You are a reviewer only: read-only, no edits, no active probing, no shell commands.\n"
+        f"Scope directory: {rel}\n\n"
+        f"{rubric}\n\n"
+        f"Review bundle JSON for {scope_dir.name}:\n\n{context}"
+    )
+    cmd = [
+        str(cmd_name),
+        "-p",
+        "--output-format", "json",
+        "--no-session-persistence",
+        "--permission-mode", str(b.get("permission_mode") or "dontAsk"),
+    ]
+    if b.get("effort"):
+        cmd += ["--effort", str(b.get("effort"))]
+    if b.get("model"):
+        cmd += ["--model", str(b.get("model"))]
+    if "tools" in b:
+        cmd += ["--tools", str(b.get("tools") or "")]
+    # If tools are enabled in private config, keep Claude scoped to the reviewed tree.
+    cmd += ["--add-dir", str(scope_dir)]
     try:
-        with proxymod.model_no_proxy_opener().open(req, timeout=timeout) as resp:   # 模型 API 不走交战代理
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-        content = "".join(blk.get("text", "") for blk in data.get("content", []))
+        proc = subprocess.run(cmd, input=prompt, text=True, capture_output=True,
+                              cwd=str(scope_dir), env=proxymod.model_safe_env(),
+                              timeout=timeout)
     except Exception as e:
-        return ReviewResult(verdict="ERROR", backend_used="claude", error=f"anthropic API 失败: {e}")
-    return parse_review_output(content, "claude")
+        return ReviewResult(verdict="ERROR", backend_used="claude:code-cli",
+                            error=f"claude code cli failed: {e}")
+    if proc.returncode != 0:
+        tail = ((proc.stderr or "") + (proc.stdout or ""))[-1200:]
+        return ReviewResult(verdict="ERROR", backend_used="claude:code-cli",
+                            error=f"claude code cli exit {proc.returncode}; tail: {tail}")
+    content = _extract_claude_cli_result(proc.stdout)
+    result = parse_review_output(content, "claude:code-cli")
+    result.raw = content or proc.stdout
+    return result
 
 
 # ===================== 主入口 =====================
@@ -1048,10 +1080,10 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     if not chosen:
         return ReviewResult(verdict="ERROR",
                             error="无可用复审后端(codex 未装 + arkcli 不可用 + 无 Claude 兜底)。"
-                                  "装 codex/arkcli 或配 ANTHROPIC_API_KEY。")
+                                  "装 codex/arkcli/claude CLI。")
     if require_heterogeneous and not _is_heterogeneous(chosen, cfg, driver):
         # 同族(Claude)不满足异构独立性 —— A2: 同族减 bias 不减盲区。auto-review 不用它满足异构门,
-        # 也不白跑它的 API。提示装真异构后端或 driver 自己 spawn 子代理。
+        # 也不白跑同族 CLI。提示装真异构后端或 driver 自己 spawn 子代理。
         rel = scope.relative_to(ROOT).as_posix() if scope.is_relative_to(ROOT) else str(scope)
         return ReviewResult(verdict="NEEDS_DRIVER", backend_used=f"{chosen}:same-family-rejected",
             raw=f"[需真异构] 唯一可用后端 '{chosen}' 是同族(非异构), 不满足异构独立复审门。装 codex "
@@ -1070,10 +1102,10 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
         result = _run_openai(scope, rubric, b, chosen, timeout, bundle,
                              artifact_excerpt_chars=artifact_excerpt_chars,
                              max_bundle_chars=max_bundle_chars)
-    elif kind == "anthropic-or-driver":
-        result = _run_anthropic(scope, rubric, b, timeout, bundle, driver=driver,
-                                artifact_excerpt_chars=artifact_excerpt_chars,
-                                max_bundle_chars=max_bundle_chars)
+    elif kind == "claude-code-cli":
+        result = _run_claude_cli(scope, rubric, b, timeout, bundle,
+                                 artifact_excerpt_chars=artifact_excerpt_chars,
+                                 max_bundle_chars=max_bundle_chars)
     else:
         result = ReviewResult(verdict="ERROR", error=f"未知后端 kind: {kind}")
     result.bundle_hash = bundle.get("sha1", "")
@@ -1131,6 +1163,17 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
     min_heterogeneous = _effective_panel_min(
         selected, min_heterogeneous, panel_cfg.get("min_heterogeneous", "auto"))
     if not selected:
+        if min_heterogeneous > 0:
+            return ReviewResult(
+                verdict="NEEDS_DRIVER",
+                backend_used="panel:",
+                error=f"panel completed 0/{min_heterogeneous} required heterogeneous backends",
+                context_limits=[
+                    f"panel completed 0/{min_heterogeneous} required heterogeneous backends"
+                ],
+                driver=driver,
+                brain=_matrix_brain(cfg, selected, driver),
+            )
         rr = review(scope, backend="claude", into_run=False, require_heterogeneous=False,
                     config=cfg, timeout=timeout, no_recon=no_recon,
                     role=roles[0] if roles else None, driver=driver)
@@ -1265,7 +1308,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
     if same_family_fallback:
         review_note = "同族 Claude 兜底复审, 独立性弱于 Codex/arkcli; 仍是候选非裁决。"
     elif backend_root == "claude" and driver == "codex":
-        review_note = "Claude Code/API 相对 Codex-authored diff 是独立复审; 候选非裁决。"
+        review_note = "Claude Code CLI 相对 Codex-authored diff 是独立复审; 候选非裁决。"
     else:
         review_note = "异构独立复审, 候选非裁决。"
     ledger = ["## Review Finding Ledger",
@@ -1381,7 +1424,8 @@ def _selftest() -> int:
     fake_all = json.loads(json.dumps(DEFAULT_CONFIG))
     fake_all["priority"] = ["claude", "arkcli", "codex"]  # private config cannot invert the matrix
     for n in ("codex", "arkcli", "claude"):
-        fake_all["backends"][n]["kind"] = "anthropic-or-driver"
+        fake_all["backends"][n]["kind"] = "claude-code-cli"
+        fake_all["backends"][n]["cmd"] = sys.executable
     checks += [
         ("matrix selection ignores inverted priority for claude driver",
          _available_heterogeneous_backends(fake_all, "claude")[:2] == ["codex", "arkcli"]),
@@ -1393,9 +1437,9 @@ def _selftest() -> int:
     fake = json.loads(json.dumps(DEFAULT_CONFIG))
     os.environ.pop("DEEPSEEK_API_KEY", None)
     os.environ.pop("GLM_API_KEY", None)
-    os.environ.pop("ANTHROPIC_API_KEY", None)
     fake["backends"]["arkcli"]["cmd"] = "__missing_arkcli__"
-    # claude 永远可用 -> 无 codex/无 arkcli 时应选 claude(兜底)
+    fake["backends"]["claude"]["cmd"] = sys.executable
+    # claude CLI 可用 -> 无 codex/无 arkcli 时应选 claude(兜底)
     sel_fallback = select_backend(
         {"priority": ["arkcli", "claude"], "backends": fake["backends"]})
     checks.append(("无 arkcli 时优先级落到 claude 兜底", sel_fallback == "claude"))
@@ -1403,9 +1447,8 @@ def _selftest() -> int:
     checks.append(("--backend 强制存在的后端",
                    select_backend(cfg, "arkcli") == "arkcli"))
     checks.append(("--backend 不存在 -> None", select_backend(cfg, "nope") is None))
-    # claude 兜底总是 available
-    checks.append(("anthropic-or-driver 永远 available",
-                   backend_available("claude", cfg) is True))
+    checks.append(("claude-code-cli cmd 存在时 available 或可被本地环境决定",
+                   backend_available("claude", cfg) == (shutil.which(cfg["backends"]["claude"]["cmd"]) is not None)))
     checks.append(("arkcli-panel cmd 存在时 available 或可被本地环境决定",
                    backend_available("arkcli", cfg) == (shutil.which(cfg["backends"]["arkcli"]["cmd"]) is not None)))
 
@@ -1471,6 +1514,9 @@ def _selftest() -> int:
     r3 = parse_review_output(none_sample)
     checks.append(("(none) 不计入 findings", len(r3.findings) == 0))
     checks.append(("(none) 不计入 blind", len(r3.blind_spots) == 0))
+    cli_json = 'warning\n{"type":"result","result":"## Verdict: PASS\\n## Findings\\n- (none)"}\n'
+    checks.append(("Claude CLI JSON result parser ignores warning",
+                   _extract_claude_cli_result(cli_json).startswith("## Verdict: PASS")))
 
     # gather_run_context: 对真实 hamastar run(若在)
     sample_run = ROOT / "runs" / "hamastar_20260615"
@@ -1591,8 +1637,8 @@ def _selftest() -> int:
                                            driver="codex"))
     rv_codex_driver = (d_run / "review.md").read_text(encoding="utf-8")
     checks.append(("codex driver 下 Claude 记录为独立复审",
-                   "Claude Code/API 相对 Codex-authored diff 是独立复审" in rv_codex_driver
-                   and "same-family peer_review fallback · claude" not in rv_codex_driver.split("Claude Code/API 相对 Codex-authored diff 是独立复审")[-1]))
+                   "Claude Code CLI 相对 Codex-authored diff 是独立复审" in rv_codex_driver
+                   and "same-family peer_review fallback · claude" not in rv_codex_driver.split("Claude Code CLI 相对 Codex-authored diff 是独立复审")[-1]))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
@@ -1719,7 +1765,7 @@ def main() -> int:
                            encoding="utf-8")
     print(r.as_markdown())
     if r.verdict == "NEEDS_DRIVER":
-        print("\n[!] 落到 Claude 兜底且无 API key —— 请 driver spawn fresh-context 子代理, "
+        print("\n[!] 未完成所需独立复审矩阵 —— 请 driver spawn fresh-context 子代理或补齐可用后端, "
               "prompt 见上(raw)。", file=sys.stderr)
         print("\n--- driver 子代理 prompt ---\n" + r.raw, file=sys.stderr)
     return 0 if r.verdict != "ERROR" else 1

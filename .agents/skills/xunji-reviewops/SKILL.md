@@ -81,9 +81,9 @@ When Codex authors the maintenance diff:
 - Codex does not count as an independent reviewer of its own code change.
 - Use `python tools/peer_review.py <scope> --driver codex` for Codex-authored code
   review. With full availability, the reviewer votes are `arkcli panel` plus
-  `Claude Code/API`; the synthesis brain remains Codex, which must adjudicate
+  `Claude Code CLI`; the synthesis brain remains Codex, which must adjudicate
   their findings through evidence, tests, diffs, and recorded rationale.
-- If arkcli is unavailable, Claude Code/API or a fresh-context Claude Code review
+- If arkcli is unavailable, Claude Code CLI or a fresh-context Claude Code review
   is still required. If Claude is unavailable but arkcli is available, use arkcli
   panel and record the missing-Claude limitation. If neither external reviewer
   is available, record that limitation and do not pretend Codex self-review is

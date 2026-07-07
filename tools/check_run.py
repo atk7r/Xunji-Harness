@@ -2656,7 +2656,7 @@ def _selftest() -> int:
 def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
     """--auto-peer-review: 收口时若 review.md 缺独立复审记录, 自动按复审矩阵跑 panel:
     Claude driver: codex+arkcli 满配; 缺 codex 用 arkcli; 缺 arkcli 用 codex; 都缺则 Claude 同族兜底/driver。
-    Codex-authored diff: Codex 不算独立票; 满配用 arkcli+Claude Code/API; 缺 arkcli 必须 Claude Code/API;
+    Codex-authored diff: Codex 不算独立票; 满配用 arkcli+Claude Code CLI; 缺 arkcli 必须 Claude Code CLI;
     综合/决策权仍为 Codex。
     慢+数据出境, 故仅显式 flag。幂等: 已有记录则不重跑。复审是候选非裁决。"""
     report = run_dir / "report.md"
@@ -2682,10 +2682,10 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
         return
     if r.verdict == "NEEDS_DRIVER":
         if (driver or "").strip().lower() == "codex":
-            print("[auto-peer-review] arkcli/Claude API 未完成 —— 需在 Claude Code fresh-context "
+            print("[auto-peer-review] arkcli/Claude Code CLI 未完成 —— 需在 Claude Code fresh-context "
                   "会话/子代理按 peer_review prompt 复审。")
         else:
-            print("[auto-peer-review] 无 codex/arkcli 或 Claude API 不可直接调用 —— 需 driver 在 "
+            print("[auto-peer-review] 无 codex/arkcli 或 Claude Code CLI 不可直接调用 —— 需 driver 在 "
                   "Claude Code 派 fresh-context 同族子代理复审。")
         return
     print(f"[auto-peer-review] backend={r.backend_used} verdict={r.verdict}, "
