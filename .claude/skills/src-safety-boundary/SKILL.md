@@ -38,17 +38,19 @@ Fundamentally different in who decides and what gets touched:
 
 - **Autonomous (free)** — (a) ALL authoring of any method / exploit / payload, and
   (b) auto-executing **reversible / two-way-door** effects: read, proof-of-
-  existence, a session you can close, a benign artifact you clean up. A single
+  existence, a session you can close, a benign artifact you record. A single
   `whoami` / `id`, a boolean SQLi differential, `${7*7}` SSTI eval, reaching an
   IDOR object, uploading a harmless `.txt` to prove an upload works. No asking;
   improvise freely inside the hard limits.
 - **Operator-gated** — auto-executing **irreversible-leaning but legitimate** live
   effects: spawning an interactive shell on the target, establishing persistence,
   pivoting past the web layer (OS/host, internal network, lateral movement),
-  permission / ownership / role / ACL / privilege changes. Default path = **hand
-  the code to the operator, who runs it** (the hook is then not even in the path).
-  Or proceed on-the-loop under a standing run pre-authorization. State plainly
-  what and why; a standing pre-auth for the run counts.
+  permission / ownership / role / ACL / privilege changes, and target-side
+  cleanup/deletion/overwrite of proof artifacts. Default path = **hand the code
+  to the operator, who runs it** (the hook is then not even in the path). Or
+  proceed on-the-loop only after the operator explicitly answers `yes` for the
+  exact cleanup. State plainly what and why; standing pre-auth does not replace a
+  cleanup yes.
 - **Hard (machine-blocked)** — auto-executing **never-justified, irreversible /
   harm-as-purpose** effects. No consent unlocks these for auto-execution.
 
@@ -110,6 +112,11 @@ against the three factors:
 - For auto-execution, prove the capability — backend/admin role attribute,
   parse-and-execute logic, write-reachability — rather than editing, adding,
   deleting, or tampering. Leave no backdoor / webshell residue from an auto-run.
+- If proof creates a target-side temporary artifact, use a neutral
+  `tmp-YYYYMMDD-<6-12hex>`, `diag-YYYYMMDD-<6-12hex>`, or
+  `proof-YYYYMMDD-<6-12hex>` name and record it. Never use project/run/Agent/vuln
+  labels in target-side names. Cleanup is operator-gated: ask first, and only run
+  the exact cleanup after the operator answers `yes`.
 - Weaponized tampering or persistence is **authored and handed off**, not
   auto-run.
 

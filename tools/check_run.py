@@ -330,7 +330,7 @@ def check_certainty_scale(run_dir: Path) -> list[str]:
 
 def _report_evidence_ids(rtext: str) -> set[str]:
     ids: set[str] = set()
-    for m in re.finditer(r"(?im)^\s*Evidence\s+IDs?\s*[:：]\s*(.*)$", rtext):
+    for m in re.finditer(r"(?im)^\s*[-*]?\s*Evidence\s+IDs?\s*[:：]\s*(.*)$", rtext):
         ids.update(re.findall(r"E-\d+[a-z]*", m.group(1)))
     return ids
 
@@ -604,6 +604,14 @@ def _report_is_final(run_dir: Path) -> bool:
     return bool(cited & confirmed)
 
 
+def _closure_gate_active(run_dir: Path) -> bool:
+    report = run_dir / "report.md"
+    if not report.exists():
+        return False
+    rtext = report.read_text(encoding="utf-8", errors="replace")
+    return bool(_closure_claimed(rtext) or _report_is_final(run_dir))
+
+
 def check_shallow_close(run_dir: Path) -> list[str]:
     """纵深护栏(警告, 每轮). 单 front 的深度投入是 driver 判断, 但"高价值前沿浅尝即弃"是
     漏挖根因(hamastar: RCE 的多个向量各试一两下就放弃)。把【关门时的深度】变成可检信号:
@@ -730,6 +738,79 @@ def check_workers(run_dir: Path) -> list[str]:
             "过【证据门】(proposed>=0.8 必须有 Control/复现, 否则降级)、分配 E-id、去重、更新 frontier, "
             "再把该 worker 标 `Status: merged`。别让并行成果丢, 也别跳证据门。"]
     return []
+
+
+def check_agent_lifecycle(run_dir: Path, *, closure: bool = False) -> tuple[list[str], list[str]]:
+    """Agent Board lifecycle gate.
+
+    workers.py cannot read Claude Code's private Agent runtime. The contract is
+    explicit run-dir state: Root records heartbeat/finish. During normal cycles
+    missing terminal state is a warning; during closure it is a hard gate.
+    """
+    if _workers is None:
+        return [], []
+    try:
+        issues = _workers.agent_lifecycle_issues(run_dir, closure=closure)
+    except Exception:
+        return [], []
+    errors: list[str] = []
+    warns: list[str] = []
+    for i in issues:
+        msg = f"Agent 生命周期{'(收口硬门)' if closure else ''}: {i.get('detail')}"
+        if i.get("severity") == "error":
+            errors.append(msg)
+        else:
+            warns.append(msg)
+    return errors, warns
+
+
+def check_closure_front_verification(run_dir: Path) -> list[str]:
+    """Closure-specific guard for two repeated premature-close patterns:
+
+    - "version says patched" without a live verification/control E-entry;
+    - 403/error/default page accepted without basic routing/bypass attempts.
+    """
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return []
+    text = fr.read_text(encoding="utf-8", errors="replace")
+    issues: list[str] = []
+    for block in re.split(r"(?=^###\s+F-\d+)", text, flags=re.MULTILINE):
+        fm = re.match(r"^###\s+(F-\d+)", block.lstrip())
+        if not fm:
+            continue
+        fid = fm.group(1)
+        status = _block_field(block, "Status").lower()
+        if not re.search(r"\b(closed|deferred|blocked|type\s*b|blocked_type_b)\b", status):
+            continue
+        head = block.strip().splitlines()[0][:70]
+        has_eid = bool(re.search(r"\bE-\d+\b", block))
+        has_control_words = bool(re.search(
+            r"(?i)\b(payload|probe|replay|control|refutes|vectors tried|验证|实测|复测|证伪)\b",
+            block))
+        version_safe_claim = bool(re.search(
+            r"(?i)(已修补|已修复|已加固|patched|fixed|not affected|unaffected|"
+            r"版本[^。\n]*(?:安全|修复|高于|大于|新于)|version[^.\n]*(?:patched|fixed|not affected|>=|>))",
+            block))
+        if version_safe_claim and not (has_eid and has_control_words):
+            issues.append(
+                f"收口硬门(版本号替代验证): {fid} {head!r} 用版本/修复状态关闭或降级, "
+                "但未同时引用 E-xxx 和 live payload/control/refutation 记录。版本号只能降优先级, "
+                "不能替代至少一次安全验证。")
+        barrier_claim = bool(re.search(
+            r"(?i)(\b403\b|access denied|forbidden|iis 默认|默认页|错误页|error page|"
+            r"not reachable|unreachable|不可达|拒绝访问)",
+            block))
+        bypass_attempted = bool(re.search(
+            r"(?i)(host header|x-forwarded-host|x-original-url|x-rewrite-url|x-forwarded-for|"
+            r"\bHEAD\b|\bOPTIONS\b|\bTRACE\b|method transform|method\s+变换|"
+            r"path transform|路径变换|path normalization|bypass|绕过)",
+            block))
+        if barrier_claim and not (has_eid and bypass_attempted):
+            issues.append(
+                f"收口硬门(403/错误页未先绕过): {fid} {head!r} 以 403/错误页/不可达类现象关闭或降级, "
+                "但未引用 E-xxx 且未记录 Host header、路径变换、HTTP 方法变换等基础 bypass 尝试。")
+    return issues
 
 
 def check_hints(run_dir: Path) -> list[str]:
@@ -1418,13 +1499,18 @@ _RETRO_FW_RE = r"(?im)^#{1,6}\s+.*(框架|framework|tooling|工具)"
 
 
 def _md_section_body(text: str, header_re: str) -> str | None:
-    """返回首个匹配 header 的 markdown 小节正文(到下一个标题行止)。无匹配 → None。"""
+    """返回首个匹配 header 的 markdown 小节正文(到同级/更高级标题行止)。无匹配 → None。"""
     m = re.search(header_re, text)
     if not m:
         return None
+    hm = re.match(r"(?m)^(#{1,6})\s", m.group(0))
+    level = len(hm.group(1)) if hm else 6
     start = m.end()
-    nxt = re.search(r"(?im)^#{1,6}\s", text[start:])
-    return text[start: start + nxt.start()] if nxt else text[start:]
+    tail = text[start:]
+    for nxt in re.finditer(r"(?m)^(#{1,6})\s", tail):
+        if len(nxt.group(1)) <= level:
+            return tail[:nxt.start()]
+    return tail
 
 
 def _retro_section_filled(body: str | None) -> bool:
@@ -1765,6 +1851,10 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     conflict_errors, conflict_warns = check_conflict_gate(run_dir)
     errors.extend(conflict_errors)
     warns.extend(conflict_warns)
+    lifecycle_errors, lifecycle_warns = check_agent_lifecycle(run_dir, closure=True)
+    errors.extend(lifecycle_errors)
+    warns.extend(lifecycle_warns)
+    errors.extend(check_closure_front_verification(run_dir))
 
     # 饱和度检查(闭环优化 P0): 衡量各 front 的 vuln-class 覆盖度
     if check_saturation is not None:
@@ -1910,6 +2000,8 @@ def _selftest() -> int:
     byid = {r["id"]: r for r in recs}
     checks = [
         ("preamble not counted", len(recs) == 9),
+        ("report Evidence IDs parser accepts bullet form",
+         _report_evidence_ids("- Evidence IDs: E-001, E-002") == {"E-001", "E-002"}),
         ("split certainty -> confirmed", byid["E-002"]["confirmed"] is True),
         ("off-doctrine 0.9 -> confirmed (C1)", byid["E-004"]["confirmed"] is True),
         ("downgrade w/ grid nums in note -> NOT confirmed (the 2026-06-17 fix)", byid["E-005"]["confirmed"] is False),
@@ -2090,6 +2182,21 @@ def _selftest() -> int:
         "# Frontier\n## Closed Fronts\n\n"
         "### F-001 login surface\n- Status: blocked_type_b\n- Evidence: E-001\n",
         encoding="utf-8")
+    d_frontv = Path(tempfile.mkdtemp())
+    (d_frontv / "frontier.md").write_text(
+        "# Frontier\n## Closed Fronts\n\n"
+        "### F-001 api version\n- Status: closed\n- Why closed: version 7.3 patched, not affected\n\n"
+        "### F-002 forbidden app\n- Status: deferred\n- Why closed: HTTP 403 / IIS 默认页, 不可达\n",
+        encoding="utf-8")
+    frontv_bad = check_closure_front_verification(d_frontv)
+    (d_frontv / "frontier.md").write_text(
+        "# Frontier\n## Closed Fronts\n\n"
+        "### F-001 api version\n- Status: closed\n- Evidence: E-001\n"
+        "- Vectors tried: live payload probe refutes CVE path; version 7.3 patched\n\n"
+        "### F-002 forbidden app\n- Status: deferred\n- Evidence: E-002\n"
+        "- Vectors tried: Host header bypass, path transform, HEAD/OPTIONS method transform all 403\n",
+        encoding="utf-8")
+    frontv_ok = check_closure_front_verification(d_frontv)
     checks += [
         ("shallow-close w/o Vectors tried -> warn (F-001)", any("F-001" in w for w in sc)),
         ("shallow-close WITH Vectors tried -> no warn (F-002)", not any("F-002" in w for w in sc)),
@@ -2099,6 +2206,9 @@ def _selftest() -> int:
          any("blocked_type_b" in w and "E-xxx" in w for w in check_type_b_evidence(d_type_b_bad))),
         ("Type B closure with E-id -> no hard gate message",
          check_type_b_evidence(d_type_b_ok) == []),
+        ("front verification: version-only close hard-fails", any("版本号替代验证" in e for e in frontv_bad)),
+        ("front verification: 403/error close without bypass hard-fails", any("403/错误页" in e for e in frontv_bad)),
+        ("front verification: E-backed payload/bypass records clear", frontv_ok == []),
     ]
 
     # --- 指纹入库收口门 (任务1) ---
@@ -2154,6 +2264,13 @@ def _selftest() -> int:
         "## 框架与工具问题 / Framework problems\n- probe.py 对 302 链跟随不透明, 误把跳转当原响应, 浪费两轮。\n",
         encoding="utf-8")
     retro_ok = check_retrospective(d_retro)
+    (d_retro / "retrospective.md").write_text(
+        "# Retrospective\n\n## Self (driver) problems / 自身问题\n\n"
+        "### 1. Tunnel vision\n- Spent all cycles on one front while other reachable assets stayed shallow.\n\n"
+        "## Framework / tooling problems / 框架与工具问题\n\n"
+        "### 1. Agent lifecycle\n- workers.py had no heartbeat or closure blocker for live agents.\n",
+        encoding="utf-8")
+    retro_nested_ok = check_retrospective(d_retro)
     # 整合: 终版报告(触发收口) + 无 retrospective → check_closure_discipline 带出复盘硬错
     d_retro2 = Path(tempfile.mkdtemp())
     (d_retro2 / "ev.html").write_text("x" * 10, encoding="utf-8")
@@ -2164,14 +2281,38 @@ def _selftest() -> int:
     (d_retro2 / "report.md").write_text(
         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
     retro_closure_err, _ = check_closure_discipline(d_retro2)
+    d_lifecycle = Path(tempfile.mkdtemp())
+    (d_lifecycle / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d_lifecycle / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
+    (d_lifecycle / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_lifecycle / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+    (d_lifecycle / "report.md").write_text(
+        "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
+    (d_lifecycle / "retrospective.md").write_text(
+        "# Retrospective\n\n## Self problems\n- Missed one agent status before closure.\n\n"
+        "## Framework problems\n- workers.py had no lifecycle hard gate.\n", encoding="utf-8")
+    if _workers is not None:
+        life_rec = _workers.create_agent_assignment(d_lifecycle, role="web-hunter", front="F-001")
+        lifecycle_err, _ = check_closure_discipline(d_lifecycle)
+        _workers.update_agent_lifecycle(d_lifecycle, life_rec["agent"], status="done",
+                                        note="merged into review", terminal=True)
+        lifecycle_done_err, _ = check_closure_discipline(d_lifecycle)
+    else:
+        lifecycle_err, lifecycle_done_err = [], []
     checks += [
         ("retrospective missing -> hard error", any("强制复盘" in e for e in retro_missing)),
         ("retrospective placeholder-only -> both sections error", len(retro_stub) == 2),
         ("retrospective half-filled -> framework section error only", len(retro_half) == 1
             and any("Framework" in e for e in retro_half)),
         ("retrospective both filled -> no error", retro_ok == []),
+        ("retrospective nested subsections count as filled", retro_nested_ok == []),
         ("closure trigger + no retrospective -> closure carries 复盘 error",
             any("强制复盘" in e for e in retro_closure_err)),
+        ("closure trigger + non-terminal agent -> lifecycle hard error",
+         _workers is None or any("Agent 生命周期" in e for e in lifecycle_err)),
+        ("finished agent clears lifecycle hard error",
+         _workers is None or not any("Agent 生命周期" in e for e in lifecycle_done_err)),
     ]
 
     # --- 台账完整性 (check_coverage_health ③ 子警, 任务8 + 任务#4 合并) ---
@@ -2835,7 +2976,7 @@ def main() -> int:
     warnings.extend(check_layout_drift(run_dir))       # 布局漂移: 证据/草稿散落 run 根目录(应归位 evidence/scripts/classify)
     warnings.extend(check_coverage_health(run_dir))   # 覆盖台账三联检(防 lump / 缺建 / 子集蒙混; 输入一次加载)
     if check_coverage_matrix is not None:
-        matrix_warns, matrix_errors = check_coverage_matrix(run_dir)
+        matrix_warns, matrix_errors = check_coverage_matrix(run_dir, closure=_closure_gate_active(run_dir))
         warnings.extend(matrix_warns)                 # 资产×漏洞类别矩阵: 整列空/行稀疏(覆盖方向跑偏)
         errors.extend(matrix_errors)
     warnings.extend(check_shallow_close(run_dir))     # 纵深: 高价值前沿 depth=shallow 关闭却无 Vectors tried
@@ -2843,6 +2984,9 @@ def main() -> int:
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
     warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)
+    if not _closure_gate_active(run_dir):
+        _, lifecycle_warns = check_agent_lifecycle(run_dir, closure=False)
+        warnings.extend(lifecycle_warns)               # Agent 生命周期: 未终态/心跳过期
     warnings.extend(check_untrusted_content(run_dir))  # 目标内容 prompt injection / hostile instruction 边界
     warnings.extend(check_hints(run_dir))              # 操作者 Hint: pending 未吸收
     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野

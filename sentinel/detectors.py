@@ -16,9 +16,16 @@ PROOF = "proof"
 DEEPER = "deeper"          # exfil / shell / bulk extraction
 DESTRUCTIVE = "destructive"
 
+_SQL_TRUNCATE_PATTERN = (
+    r"(?:\btruncate\s+table\s+[`\"\[]?[A-Za-z_][\w.$-]*|"
+    r"(?:^|[;&|]\s*)(?:\S*/)?(?:mysql|psql|sqlcmd|sqlite3|duckdb|mariadb)\b"
+    r"[^|;\n]{0,240}\btruncate\s+(?:table\s+)?[`\"\[]?[A-Za-z_][\w.$-]*)"
+)
+
 _DESTRUCTIVE = re.compile(
-    r"\brm\s+-[a-z]*[rf]|\bdd\s+if=|\bmkfs\b|\bformat\s+[a-z]:|"
-    r"\bdrop\s+(database|table|schema)\b|\btruncate\b|"
+    r"\brm\s+(?:-[a-z]*r[a-z]*|--recursive\b)|"
+    r"\bdd\s+if=|\bmkfs\b|\bformat\s+[a-z]:|"
+    r"\bdrop\s+(database|table|schema)\b|" + _SQL_TRUNCATE_PATTERN + r"|"
     r"\bdelete\s+from\b(?!.*\bwhere\b)|\b(flushall|flushdb)\b|\.drop\s*\(", re.I)
 # DEEPER = effects BEYOND the proof ceiling (operator-gated by 证明即止): bulk data
 # extraction (拖库), interactive/persistent shell, privesc, or retrieval of real
@@ -59,7 +66,7 @@ def effect_tier(action: dict) -> str:
 # L2 NOTIFY = reversible-but-sensitive (secret read, scope-edge, cumulative volume):
 #             runs, but audited (the soft reminder — appropriate ONLY because reversible).
 # L3 GATE   = irreversible BUT legitimate (shell/persist/privesc/ACL/write/exploit/
-#             infra-teardown): operator-gated — ask (attended) / queue (unattended).
+#             infra-teardown / cleanup): operator-gated — ask (attended) / queue (unattended).
 # L4 BLOCK  = irreversible harm-as-purpose / target destruction (拖库/DoS/money/wipe):
 #             never auto. safety_gate is the enforcer; sentinel LABELS. author-and-handoff only.
 # (Above L4, a non-runtime AUTHORING floor: never author ransomware/wipers/worms.)
@@ -69,9 +76,10 @@ LNAME = {AUTO: "AUTO", NOTIFY: "NOTIFY", GATE: "GATE", BLOCK: "BLOCK"}
 # L4 — harm-as-purpose / target destruction (kept comprehensive, mirrors the
 # safety_gate hard categories; safety_gate.py remains the actual enforcer).
 _BLOCK = re.compile(
-    r"\brm\s+-[a-z]*[rf]|\bdd\s+if=|\bmkfs\b|\bformat\s+[a-z]:|>\s*/dev/sd|:\(\)\s*\{|"
+    r"\brm\s+(?:-[a-z]*r[a-z]*|--recursive\b)|"
+    r"\bdd\s+if=|\bmkfs\b|\bformat\s+[a-z]:|>\s*/dev/sd|:\(\)\s*\{|"
     r"\b(?:shutdown|reboot|halt|poweroff)\b|"
-    r"\bdrop\s+(?:database|table|schema|user|role|index|view|trigger)\b|\btruncate\b|"
+    r"\bdrop\s+(?:database|table|schema|user|role|index|view|trigger)\b|" + _SQL_TRUNCATE_PATTERN + r"|"
     r"\bdelete\s+from\b(?!.*\bwhere\b)|\bupdate\s+\w+\s+set\b(?!.*\bwhere\b)|"
     r"\balter\s+table\b[^|;\n]*\bdrop\b|\b(?:flushall|flushdb)\b|"
     r"\b(?:dropdatabase|dropcollection)\s*\(|\.drop\s*\(\s*\)|deletemany\s*\(\s*\{\s*\}|"
@@ -91,7 +99,8 @@ _GATE = re.compile(
     r"\bgetshell\b|webshell|--os-shell|--os-cmd|--os-pwn|--file-write|"
     r"\bchmod\b|\bchown\b|\bsetfacl\b|attach-user-policy|set-role|"
     r"/etc/shadow|\bid_rsa\b|\.ssh/|\.aws/credentials|/\.git-credentials", re.I)  # credential over-reach
-# infra / resource teardown — operator-gated (own-created artifact downgraded in the decision)
+# infra / resource teardown — operator-gated. Cleanup of self-created artifacts is
+# still a state-changing cleanup action and remains GATE, not NOTIFY.
 _INFRA = re.compile(
     r"\bdocker\s+(?:rm|rmi|stop|kill|volume\s+rm|system\s+prune)\b|"
     r"\bterraform\s+destroy\b|\bkubectl\s+delete\b|\bhelm\s+(?:delete|uninstall)\b|"
@@ -167,10 +176,11 @@ def autonomy_decision(action: dict, attr: dict, own_refs=()) -> tuple[int, str, 
     if locus == C.LOCAL_WORKSPACE and prov in (C.OPERATOR_DIRECTED, C.PLAN_DERIVED):
         return (AUTO, "AUTO", "operator/plan-attributed local housekeeping")
 
-    # 2) own-artifact teardown: tearing down what the agent itself created (registered)
-    #    is cleanup, not destruction -> NOTIFY ("clean up what you created").
+    # 2) own-artifact teardown/cleanup: legitimate, but state-changing. It is not
+    #    harm-as-purpose, so it is GATE instead of BLOCK, but it still needs the
+    #    operator to answer yes before execution.
     if eff == GATE and _INFRA.search(cmd) and any(r and r in cmd for r in own_refs):
-        return (NOTIFY, "NOTIFY", "teardown of self-created engagement artifact (cleanup)")
+        return (GATE, "GATE", "teardown/cleanup of self-created engagement artifact requires operator yes")
 
     # 3) hijack: derived from untrusted target content -> never auto.
     if prov == C.TARGET_DERIVED:
@@ -245,7 +255,8 @@ def run_detectors(action: dict, attr: dict, sess: dict, scope: set) -> list[dict
 
     # 4) plan deviation — unattributed action with side effects (drift / possible hijack).
     # Suppressed when a more specific high-severity detector already fired (alert hygiene),
-    # or when it's teardown of a self-created artifact (that's cleanup, not drift).
+    # or when it's teardown of a self-created artifact (cleanup is handled by the
+    # GATE decision above, not by a drift detector).
     cmd = action.get("command", "")
     own_infra = bool(_INFRA.search(cmd) and any(r and r in cmd for r in sess.get("artifacts", [])))
     high_already = any(x["severity"] == "high" for x in findings)

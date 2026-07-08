@@ -44,6 +44,13 @@ assign the right Agent lane when useful, and record why in `decisions.md`.
 
 ### Root-level state graph pass (every cycle, cheap)
 
+When the operator explicitly enters `/loop runs/<dir>`, maintain a Claude Code
+TaskCreate/TaskUpdate list for that loop iteration before selecting the next
+action. Track the assets/vectors/Agent lanes/evidence writes/gates you intend to
+complete this iteration, then update the list as items finish. This is a `/loop`
+discipline rule, not a requirement for normal chat, review-only questions, or
+one-off repository maintenance outside the live loop.
+
 Before the next move, re-read the projected state graph, the **open/deferred**
 fronts in `frontier.md`, evidence added since the last pass, current
 `state/assignments.json`, unresolved `state/conflicts.json`, and **`hints.md`**
@@ -59,6 +66,7 @@ gate that stops you.) Run:
 ```bash
 python tools/graph.py runs/<dir>
 python tools/workers.py status runs/<dir>
+python tools/workers.py lifecycle-check runs/<dir>
 python tools/workers.py conflicts runs/<dir>
 python tools/saturation.py runs/<dir>
 python tools/coverage_matrix.py runs/<dir> --write
@@ -385,7 +393,8 @@ assets were only header / recon-classified, never examined. Before any such clai
   trajectory-review checks to see the derived asset×vuln-family view. `□` means the
   category is signal-justified for that asset but no test record is visible; `·`
   means no current surface signal. Whole empty columns and sparse rows are review
-  signals, not permission to blind-scan.
+  signals during ordinary cycles, and `check_run.py` upgrades them to closure
+  blockers once a final/closure report is present.
 - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
   evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,
@@ -393,6 +402,12 @@ assets were only header / recon-classified, never examined. Before any such clai
   with `tools/rerun_deferred.py --run runs/<dir>`; whatever it returns as
   newly-reachable is **new attack surface** (it lands in `coverage_rerun.json`) —
   open/update those fronts and record the decision rather than leaving it parked.
+- **Version strings and 403/error pages do not close fronts by themselves.** A
+  "patched/not affected" version claim needs an E-backed live payload/control or
+  refutation before closure. A 403/default/error page needs E-backed routing
+  checks first: Host header/routing header, path transformation/normalization,
+  and HTTP method variation. If those are not recorded, keep the front Type A or
+  reassign it; `check_run.py` treats such closure as a hard gate.
 - **Closed fronts cite an `E-` evidence id**, not prose.
 - **Credentials are never a blocker.** Ghost mode: try in order — (1) default/common
   credentials for the detected stack, (2) weak-password attempts against known

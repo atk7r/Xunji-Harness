@@ -37,6 +37,11 @@ interruption aid, not evidence:
 {{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" start --note "显式 /loop 迭代开始"
 ```
 
+Use Claude Code TaskCreate/TaskUpdate for this `/loop` iteration before choosing
+the next action. The task list must cover the concrete assets/vectors/Agent
+lanes/evidence writes/gates for this single iteration. Update it as work
+finishes. Do not impose this rule on normal chat outside `/loop`.
+
 ### 1. Drift Recovery
 If `.claude/drift_block.json` is active, read its `required_rereads`, refresh `{{RUN_DIR}}/frontier.md` when `frontier_stale` is set, and log `Drift recovery` in decisions.md.
 
@@ -52,6 +57,7 @@ Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent 
 ```bash
 {{PYTHON}} tools/graph.py "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py status "{{RUN_DIR}}"
+{{PYTHON}} tools/workers.py lifecycle-check "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py conflicts "{{RUN_DIR}}"
 {{PYTHON}} tools/saturation.py "{{RUN_DIR}}"
 {{PYTHON}} tools/coverage_matrix.py "{{RUN_DIR}}" --write
@@ -91,7 +97,9 @@ Guard-routed tools only.
 {{PYTHON}} tools/workers.py suggest "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py plan "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py assign "{{RUN_DIR}}" --role web-hunter --front F-XXX
+{{PYTHON}} tools/workers.py heartbeat "{{RUN_DIR}}" A-web-hunter-001 --status running --note "Agent tool started"
 {{PYTHON}} tools/probe.py GET "https://target/path" --save NAME --run "{{RUN_DIR}}"
+{{PYTHON}} tools/probe.py GET "https://target/large-doc" --save NAME --run "{{RUN_DIR}}" --save-chunks
 {{PYTHON}} tools/probe.py GET "https://target/path" -H "K: V" --save NAME --run "{{RUN_DIR}}"
 {{PYTHON}} tools/probe.py POST "https://target/path" --data '{"k":"v"}' -H "Content-Type: application/json" --save NAME --run "{{RUN_DIR}}"
 {{PYTHON}} tools/scan.py sqlmap "https://target/path?id=1"
@@ -101,6 +109,13 @@ Guard-routed tools only.
 If `state/loop_state.json` says `gates.fanout_required=true`, use the Agent Board: assign at least two disjoint lanes unless a concrete shared barrier or request budget reason is recorded. Agents produce candidates/refutations only; the Single Synthesizer promotes findings.
 
 Timeout / host-backoff → deferred (Type A). Save artifact before raising certainty. A sensor result or Agent note is not a finding until the evidence gate is applied.
+
+Version strings and 403/error pages are not closure evidence by themselves. If a
+version appears patched/not affected, record a safe live payload/control E-entry
+before closing that vector. If a front returns 403/default/error page, record
+E-backed Host header/routing header, path transformation, and HTTP method
+variation attempts before Type B closure; otherwise leave it Type A or assign an
+Agent lane.
 
 Before the chosen probe/agent/review action, append:
 
@@ -126,6 +141,7 @@ Before promotion, report, or closure:
 
 ```bash
 {{PYTHON}} tools/workers.py agent-check "{{RUN_DIR}}"
+{{PYTHON}} tools/workers.py lifecycle-check "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py merge-check "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py synthesize "{{RUN_DIR}}"
 {{PYTHON}} tools/check_run.py "{{RUN_DIR}}"

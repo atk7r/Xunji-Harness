@@ -80,6 +80,18 @@
   active run, current phase, pending verification entries, aggregated subagent
   state, blockers, and next action. It never replaces visible phase markers or
   `loop_journal.py` phase-start/phase-end records.
+- **Target-side proof artifact naming / cleanup:** If a proof action must create
+  a target-side temporary file or resource, use the neutral form
+  `tmp-YYYYMMDD-<6-12hex>.<safe-ext>`, `diag-YYYYMMDD-<6-12hex>.<safe-ext>`, or
+  `proof-YYYYMMDD-<6-12hex>.<safe-ext>`. Never include `xunji`, run directory
+  names, Agent ids, worker ids, vuln names, exploit names, tool names, or internal
+  project labels in target-side filenames/paths. Record the path/resource and
+  creation evidence in the run state before relying on it.
+- Cleanup is a state-changing target action. Deleting, overwriting, truncating,
+  or hiding a target-side artifact/resource is never automatic: stop and ask the
+  operator for explicit `yes`, then run only the exact cleanup that was approved.
+  If the hook returns `ask`, wait for that yes. If there is no yes, leave the
+  artifact recorded and carry the cleanup note into handoff/report material.
 - Every cycle, update the written state:
 
 ```text
@@ -109,6 +121,12 @@ observe -> update state graph -> decompose fronts
 
 - While safe fronts remain, **don't ask the operator which class to test next**;
   choose it yourself, record why in `decisions.md`.
+- **TaskCreate discipline for `/loop`:** An explicit `/loop runs/<dir>` iteration
+  must maintain a Claude Code TaskCreate/TaskUpdate task list before selecting
+  the next action. Use it for the current iteration's assets, vectors, Agent
+  lanes, evidence writes, and gates; update items as they complete. This
+  requirement is scoped to `/loop` operation and closure-driving autonomous
+  cycles, not normal chat or one-off repository maintenance.
 - **Convergence Gate (Coda trajectory review):** After every cycle, the Root
   reads each Coda/progress output from the derived state graph. If the past 2
   consecutive cycles produced **zero new evidence entries, zero certainty
@@ -128,6 +146,13 @@ observe -> update state graph -> decompose fronts
   downgrades / a hard rule / Type B (further work unlikely to add value).
   Missing credentials or network barriers are NOT close reasons — they are
   Type A problems to solve.
+- A product/version string is a prioritization signal, not a safety proof. If a
+  version appears patched/not affected, still record at least one safe live
+  verification/control E-entry before closing or downgrading that vector.
+- A 403, error page, IIS/default page, or similar routing barrier is not an end
+  state. Before closing/deferred Type B, record E-backed basic bypass attempts
+  such as Host header/routing header, path normalization/alternate path, and
+  HTTP method variation, or leave it Type A with a blocker.
 - Session length · token budget · an **already-solved** obstacle are **NOT** on that
   list — don't stop to ask; report progress and keep driving, don't request permission
   to continue. Reachability/DNS = Guanlan's domain: consume Guanlan's inventory as the

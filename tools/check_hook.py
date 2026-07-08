@@ -31,6 +31,10 @@ BLOCKED_COMMANDS = [
     "python tools/probe.py POST http://t.test/x --data 'ip=1;rm -rf /opt/app'",
     "mysql -e 'DROP DATABASE prod'",
     "mysql -e 'DROP TABLE users'",
+    "mysql -e 'TRUNCATE TABLE users'",
+    "mysql -e 'TRUNCATE users'",
+    "mysql -e 'TRUNCATE public.users'",
+    "psql -c 'TRUNCATE TABLE \"orders\"'",
     # harm-as-purpose / secure-wipe destruction (never auto):
     "vssadmin delete shadows /all /quiet",
     "wbadmin delete catalog -quiet",
@@ -67,6 +71,7 @@ BLOCKED_COMMANDS = [
     # destructive rm injected as a QUOTED payload to a target (both quote styles, long flag):
     "curl \"http://t.test/?c=rm -rf /opt/app\"",
     "curl 'http://t.test/?c=rm --recursive /app'",
+    "curl 'http://t.test/?c=rm -r /app'",
     "masscan 10.0.0.0/8",
     "terraform destroy -auto-approve",
     "kubectl delete pod web-0",
@@ -114,7 +119,9 @@ ALLOWED_COMMANDS = [
     "grep -n 'shutdown|reboot' .claude/hooks/safety_rules.json",
     "echo shutdown rule narrowed",
     "curl 'https://t.test/?x=1&shutdown=now'",
+    "curl https://t.test/ # cleanup tmp-20260708-a1b2c3d4.txt",
     "echo systemctl is a service manager",
+    "echo 'Truncate mode enabled for local parser'",
     "echo 'Restart-Computer reboots a Windows host'",
     "grep Restart-Computer .claude/hooks/safety_rules.json",
     "Get-Help Restart-Computer",
@@ -140,6 +147,17 @@ ALLOWED_COMMANDS = [
     "aws iam attach-user-policy --user-name x --policy-arn y",
 ]
 
+# Must ASK: cleanup of a recognizable target-side proof/temp artifact is a
+# legitimate but state-changing cleanup action. It is not silently allowed; the
+# operator must explicitly answer yes for that exact cleanup.
+ASK_COMMANDS = [
+    "curl -X DELETE https://example.test/uploads/tmp-20260708-a1b2c3d4.txt",
+    "curl 'https://example.test/?cmd=rm -f /tmp/tmp-20260708-a1b2c3d4.txt'",
+    "curl -X PUT https://example.test/uploads/diag-20260708-a1b2c3d4.txt --data-binary ''",
+    "curl -X POST https://example.test/cleanup -d 'path=/tmp/tmp-20260708-a1b2c3d4.txt&action=delete'",
+    "curl -X DELETE https://example.test/uploads/xunji_wcfg_export.txt",
+]
+
 
 def run_hook(command: str) -> tuple[int, str, str]:
     event = {"tool_input": {"command": command}}
@@ -154,14 +172,22 @@ def run_hook(command: str) -> tuple[int, str, str]:
 
 
 def is_denied(stdout: str) -> bool:
+    return permission_decision(stdout) == "deny"
+
+
+def is_ask(stdout: str) -> bool:
+    return permission_decision(stdout) == "ask"
+
+
+def permission_decision(stdout: str) -> str:
     if not stdout:
-        return False
+        return ""
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError:
-        return False
+        return ""
     output = data.get("hookSpecificOutput") or {}
-    return output.get("permissionDecision") == "deny"
+    return str(output.get("permissionDecision") or "")
 
 
 def main() -> int:
@@ -174,6 +200,11 @@ def main() -> int:
         _, stdout, stderr = run_hook(command)
         if stderr or not is_denied(stdout):
             failures.append(f"expected deny for: {command}")
+
+    for command in ASK_COMMANDS:
+        _, stdout, stderr = run_hook(command)
+        if stderr or not is_ask(stdout):
+            failures.append(f"expected ask for: {command}")
 
     for command in ALLOWED_COMMANDS:
         _, stdout, stderr = run_hook(command)

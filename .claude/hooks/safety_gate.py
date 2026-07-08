@@ -10,7 +10,8 @@ auto-approves anything: on no match it stays silent so Claude Code's normal
 permission flow applies.
 
 Protocol: reads the PreToolUse JSON event on stdin, writes a PreToolUse
-hookSpecificOutput JSON on stdout only when it decides to deny. Pure stdlib.
+hookSpecificOutput JSON on stdout only when it decides to deny or ask. Pure
+stdlib.
 """
 
 from __future__ import annotations
@@ -36,6 +37,89 @@ DEFAULT_RULES = [
     {"category": "dos", "pattern": r"\b(slowloris|loic|hoic|t50|mhddos|masscan)\b", "reason": "DoS / mass-flood tool"},
     {"category": "payment_transfer", "pattern": r"(-X\s*(POST|PUT|PATCH)|--data|\s-d\s)[^|;\n]*\b(transfer|withdraw|refund|payout)\b", "reason": "money-movement request"},
 ]
+
+TARGET_URL_RE = re.compile(r"(?:https?|ftp)://", re.IGNORECASE)
+
+# Neutral target-side temporary artifacts created by this framework must use this
+# shape. It gives the hook something precise to recognize without leaking project,
+# run, Agent, vuln, or tool names to the target.
+TARGET_TEMP_ARTIFACT_RE = re.compile(
+    r"\b(?:tmp|diag|proof)-\d{8}-[a-f0-9]{6,12}(?:\.[a-z0-9._-]+)?\b"
+    # Legacy escape hatch: old runs may need explicit-yes cleanup of already
+    # created xunji_* artifacts. New artifacts must use the neutral shape above.
+    r"|\bxunji(?:_[a-z0-9]{2,24}){1,4}\."
+    r"(?:txt|ini|conf|config|aspx|ashx|php|jsp|jspx|tmp|html|log)\b",
+    re.IGNORECASE,
+)
+
+TARGET_CLEANUP_EFFECT_RE = re.compile(
+    r"(-X|--request)\s*['\"]?(?:DELETE|PUT|PATCH)\b|"
+    r"\brm\s+-(?![a-z-]*r)[a-z-]*f[a-z-]*\b|"
+    r"\bunlink\b|\bos\.remove\b|\bfs\.unlink\b|"
+    r"\bRemove-Item\b|>\s*(?:/tmp/)?(?:tmp|diag|proof)-",
+    re.IGNORECASE,
+)
+
+TARGET_CLEANUP_WORD_RE = re.compile(
+    r"\b(cleanup|clean\s+up|remove|delete|del|unlink|overwrite|replace)\b|"
+    r"清理|删除|移除|覆盖|抹除",
+    re.IGNORECASE,
+)
+
+TARGET_BODY_FLAG_RE = re.compile(
+    r"(?:--data(?:-raw|-binary|-urlencode)?|-d|--json|-F|--form)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _word_token(command: str, start: int, end: int) -> str:
+    lefts = [command.rfind(ch, 0, start) for ch in (" ", "\t", "\n")]
+    left = max(lefts) + 1
+    rights = [command.find(ch, end) for ch in (" ", "\t", "\n")]
+    right_candidates = [idx for idx in rights if idx >= 0]
+    right = min(right_candidates) if right_candidates else len(command)
+    return command[left:right]
+
+
+def _quoted_segment(command: str, start: int, end: int) -> tuple[str, int] | None:
+    best: tuple[str, int] | None = None
+    for quote in ("'", '"', "`"):
+        left = command.rfind(quote, 0, start)
+        right = command.find(quote, end)
+        if left >= 0 and right >= 0:
+            if best is None or left > best[1]:
+                best = (command[left:right + 1], left)
+    return best
+
+
+def _artifact_in_target_context(command: str) -> bool:
+    """True only when the proof artifact is in the target request context.
+
+    A random local note like `curl https://t/ # cleanup tmp-...` is not enough.
+    The artifact must be part of the URL/quoted URL token, or part of an HTTP
+    request body/form argument while the command contains a target URL.
+    """
+    has_url = bool(TARGET_URL_RE.search(command))
+    for m in TARGET_TEMP_ARTIFACT_RE.finditer(command):
+        if TARGET_URL_RE.search(_word_token(command, m.start(), m.end())):
+            return True
+        quoted = _quoted_segment(command, m.start(), m.end())
+        if quoted:
+            segment, left = quoted
+            if TARGET_URL_RE.search(segment):
+                return True
+            if has_url and TARGET_BODY_FLAG_RE.search(command[max(0, left - 40):left]):
+                return True
+    return False
+
+
+def _cleanup_word_near_artifact(command: str) -> bool:
+    for m in TARGET_TEMP_ARTIFACT_RE.finditer(command):
+        start = max(0, m.start() - 80)
+        end = min(len(command), m.end() + 80)
+        if TARGET_CLEANUP_WORD_RE.search(command[start:end]):
+            return True
+    return False
 
 
 def load_rules() -> list[dict]:
@@ -63,7 +147,7 @@ def extract_command(event: dict) -> str:
     return " \n ".join(parts)
 
 
-def audit(category: str, reason: str, command: str) -> None:
+def audit(category: str, reason: str, command: str, decision: str = "DENY") -> None:
     """Append a HARD_STOP hit to the audit log. Best-effort: never let logging
     break the gate (a failed write must not change the deny decision)."""
     try:
@@ -71,21 +155,48 @@ def audit(category: str, reason: str, command: str) -> None:
         log.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.datetime.now().isoformat(timespec="seconds")
         with log.open("a", encoding="utf-8") as fh:
-            fh.write(f"{ts} | DENY | {category} | {reason} | {command[:120]}\n")
+            fh.write(f"{ts} | {decision} | {category} | {reason} | {command[:120]}\n")
     except Exception:
         pass
 
 
-def deny(reason: str) -> None:
+def decision(permission_decision: str, reason: str) -> None:
     out = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
+            "permissionDecision": permission_decision,
             "permissionDecisionReason": reason,
         }
     }
     print(json.dumps(out))
     sys.exit(0)
+
+
+def deny(reason: str) -> None:
+    decision("deny", reason)
+
+
+def ask(reason: str) -> None:
+    decision("ask", reason)
+
+
+def cleanup_requires_ask(command: str) -> str:
+    """Return a reason when this looks like target-side proof-artifact cleanup.
+
+    Generic target resource deletion remains hard-denied by the normal deny
+    rules. This soft gate is intentionally narrow: it only asks for target-side
+    deletion/overwrite when a URL and a recognizable proof-temp artifact name
+    are both present.
+    """
+    if not _artifact_in_target_context(command):
+        return ""
+    if not (TARGET_CLEANUP_EFFECT_RE.search(command)
+            or _cleanup_word_near_artifact(command)):
+        return ""
+    return (
+        "target-side cleanup/overwrite of a proof artifact requires explicit "
+        "operator yes"
+    )
 
 
 def selftest() -> int:
@@ -102,6 +213,7 @@ def selftest() -> int:
         # into a request) hard-denies at any path (the unquoted form is shell-
         # fragmented + inert, so it is intentionally NOT matched after the narrowing):
         '{"tool_name":"Bash","tool_input":{"command":"curl \'http://t/?c=rm -rf /app/data\'"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl \'http://t/?c=rm -r /app/data\'"}}',
         # data-dir rm the one-level catastrophic rule misses (F5 gap):
         '{"tool_name":"Bash","tool_input":{"command":"rm -rf /var/lib/mysql"}}',
         '{"tool_name":"Bash","tool_input":{"command":"sqlmap -u http://t/ --dump"}}',
@@ -113,23 +225,42 @@ def selftest() -> int:
         # native ask/allow flow, not hard-deny (this is the narrowing guarantee).
         '{"tool_name":"Bash","tool_input":{"command":"rm -rf tmp/build"}}',
         '{"tool_name":"Bash","tool_input":{"command":"rm -f runs/old/cookies.txt"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl https://t/ # cleanup tmp-20260708-a1b2c3d4.txt"}}',
+    ]
+    must_ask = [
+        '{"tool_name":"Bash","tool_input":{"command":"curl -X DELETE https://t/uploads/tmp-20260708-a1b2c3d4.txt"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl \'https://t/?cmd=rm -f /tmp/tmp-20260708-a1b2c3d4.txt\'"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl -X PUT https://t/uploads/diag-20260708-a1b2c3d4.txt --data-binary \'\'"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl -X POST https://t/cleanup -d \'path=/tmp/tmp-20260708-a1b2c3d4.txt&action=delete\'"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl -X DELETE https://t/uploads/xunji_wcfg_export.txt"}}',
     ]
     rules = load_rules()
 
-    def blocks(ev_text: str) -> bool:
+    def classify(ev_text: str) -> str:
         cmd = extract_command(json.loads(ev_text))
-        return any(
-            re.search(r["pattern"], cmd, re.IGNORECASE) for r in rules
-            if _safe_pattern(r["pattern"])
-        )
+        cleanup_reason = cleanup_requires_ask(cmd)
+        for r in rules:
+            if not _safe_pattern(r["pattern"]):
+                continue
+            if re.search(r["pattern"], cmd, re.IGNORECASE):
+                if cleanup_reason and r.get("category") == "delete_resource":
+                    return "ask"
+                return "deny"
+        if cleanup_reason:
+            return "ask"
+        return "pass"
 
     ok = True
     for ev in must_block:
-        if not blocks(ev):
+        if classify(ev) != "deny":
             print(f"[selftest] FAIL: should block -> {ev}", file=sys.stderr)
             ok = False
+    for ev in must_ask:
+        if classify(ev) != "ask":
+            print(f"[selftest] FAIL: should ask -> {ev}", file=sys.stderr)
+            ok = False
     for ev in must_pass:
-        if blocks(ev):
+        if classify(ev) != "pass":
             print(f"[selftest] FAIL: should allow -> {ev}", file=sys.stderr)
             ok = False
     print("[selftest] safety gate healthy" if ok else "[selftest] safety gate BROKEN",
@@ -171,6 +302,7 @@ def main() -> None:
     if not command:
         sys.exit(0)
 
+    cleanup_reason = cleanup_requires_ask(command)
     for rule in load_rules():
         try:
             m = re.search(rule["pattern"], command, re.IGNORECASE)
@@ -182,6 +314,17 @@ def main() -> None:
                 # session's stop-and-reword churn was not knowing the matched token.
                 matched = m.group(0).strip()
                 span = f"{m.start()}-{m.end()}"
+                if cleanup_reason and cat == "delete_resource":
+                    audit("cleanup_requires_yes", cleanup_reason,
+                          f"[matched {matched!r}@{span}] {command}", decision="ASK")
+                    ask(
+                        f"[safety-boundary] ASK (cleanup_requires_yes): {cleanup_reason}. "
+                        f"[matched substring {matched!r} at offset {span}] "
+                        f"Cleanup is a target-side state change. STOP and ASK the operator "
+                        f"for explicit yes before running this exact cleanup. If the operator "
+                        f"does not answer yes, leave the artifact recorded and do not clean it."
+                    )
+                    # ask() exits the hook; the deny path below is unreachable for this match.
                 audit(cat, reason, f"[matched {matched!r}@{span}] {command}")
                 deny(
                     f"[safety-boundary] BLOCKED ({cat}): {reason}. "
@@ -197,6 +340,15 @@ def main() -> None:
                 )
         except re.error:
             continue
+
+    if cleanup_reason:
+        audit("cleanup_requires_yes", cleanup_reason, command, decision="ASK")
+        ask(
+            f"[safety-boundary] ASK (cleanup_requires_yes): {cleanup_reason}. "
+            f"Cleanup is a target-side state change. STOP and ASK the operator for "
+            f"explicit yes before running this exact cleanup. If the operator does "
+            f"not answer yes, leave the artifact recorded and do not clean it."
+        )
 
     # No match -> stay silent, let normal permission flow decide.
     sys.exit(0)

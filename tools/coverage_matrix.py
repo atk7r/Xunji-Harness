@@ -495,7 +495,7 @@ def derive(run_dir: Path) -> dict:
     }
 
 
-def check(run_dir: Path) -> tuple[list[str], list[str]]:
+def check(run_dir: Path, *, closure: bool = False) -> tuple[list[str], list[str]]:
     data = derive(run_dir)
     warns: list[str] = []
     errors: list[str] = []
@@ -505,18 +505,20 @@ def check(run_dir: Path) -> tuple[list[str], list[str]]:
             f"{g}(applicable={data['column_stats'][g]['applicable']})"
             for g in data["empty_columns"]
         )
-        warns.append(
+        msg = (
             "覆盖矩阵: 下列漏洞类别在本 run 的适用资产上整列未见测试记录 —— "
             f"{details}。这通常表示方向跑偏; 收口前应确认是无适用信号, 还是缺前沿/缺 E-entry。")
+        (errors if closure else warns).append(("收口硬门(" + msg + ")") if closure else msg)
     if data["row_gaps"]:
         shown = ", ".join(
             f"{r['asset']}({r['tested']}/{r['applicable']} tested)"
             for r in data["row_gaps"][:8]
         )
-        warns.append(
+        msg = (
             "覆盖矩阵: 下列资产的适用类别大多仍为空 —— "
             f"{shown}{' …' if len(data['row_gaps']) > 8 else ''}。"
             "这说明资产可能没被测透, 或 frontier 未记录 Vectors tried。")
+        (errors if closure else warns).append(("收口硬门(" + msg + ")") if closure else msg)
     return warns, errors
 
 
@@ -625,6 +627,7 @@ def _selftest() -> int:
         encoding="utf-8")
     data = derive(run)
     warns, errors = check(run)
+    closure_warns, closure_errors = check(run, closure=True)
     write_outputs(run)
     bad_cov = d / "bad_cov"
     bad_cov.mkdir()
@@ -666,6 +669,7 @@ def _selftest() -> int:
         ("corrupt primary coverage warns while using nested coverage",
          "nested.example" in bad_by_asset and bad_cov_warns and not bad_cov_errors),
         ("check reports warnings only", warns and not errors),
+        ("closure check upgrades matrix gaps to errors", closure_errors and not closure_warns),
         ("state outputs are written", (run / "state" / "coverage_matrix.json").exists()
          and (run / "state" / "coverage_matrix.md").exists()),
     ]

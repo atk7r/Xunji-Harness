@@ -40,15 +40,16 @@ silently auto; L4 never downgrades.
 | level | decision | who judges | content | recorded to |
 |---|---|---|---|---|
 | **L1** | `AUTO` | machine (unattended) | reversible proof/recon (injection diff, version/db, `;id`, `/etc/passwd`, blind, harmless upload), in-scope, attributed | trace only |
-| **L2** | `NOTIFY` | machine + audit | **reversible** but noteworthy: cumulative volume, **teardown of self-created artifact** (own `docker rm`) | `runs/<t>/alerts.md` (audit) |
-| **L3** | `GATE` | operator (red-team) | **irreversible** but legitimate: shell / persist / privesc / ACL / write / exploit / **infra teardown of unknown** / **credential read** (`/etc/shadow`,`id_rsa`,`.aws/credentials`) / out-of-scope | `runs/<t>/pending_approval.md` |
+| **L2** | `NOTIFY` | machine + audit | **reversible** but noteworthy: cumulative volume | `runs/<t>/alerts.md` (audit) |
+| **L3** | `GATE` | operator (red-team) | **irreversible** but legitimate: shell / persist / privesc / ACL / write / exploit / **cleanup or teardown of self-created target/infra artifacts** / **infra teardown of unknown** / **credential read** (`/etc/shadow`,`id_rsa`,`.aws/credentials`) / out-of-scope | `runs/<t>/pending_approval.md` |
 | **L4** | `BLOCK` | nobody (never auto) | irreversible harm-as-purpose: 拖库 (`--dump`/mysqldump), DoS, money, destruction (`rm -rf`/`DROP`/`TRUNCATE`/wipe/`vssadmin delete`) | `runs/<t>/alerts.md` (hard) |
 | (floor) | *never author* | — | ransomware / wipers / worms / supply-chain (harm-as-purpose payloads) | — |
 
 Key splits (why 4 not 3): **reversible-noteworthy (L2 NOTIFY, just audit) vs
 irreversible (L3 GATE, must ask)** — the soft reminder belongs only at L2. And
-**self-created infra teardown (L2 cleanup) vs unknown/target resource (L3/L4)** via
-the artifact registry — "clean up what you created."
+**self-created cleanup (L3 ask) vs destructive target-resource deletion (L4 block)**
+via the artifact registry and hook cleanup recognizer. Cleanup is legitimate
+only after the operator explicitly answers yes.
 
 Orthogonal axis — **scope**: an out-of-scope target forces at least `GATE`.
 Mapping to live layers: `safety_gate.py` hard-blocks L4 (the enforcer; `sentinel`
@@ -91,7 +92,7 @@ cooldown, on taint cool-down, or on an operator `reset breaker` / `解除熔断`
 **Axes feeding the decision**: effect category, **reversibility** (`is_reversible` —
 read=reversible→may NOTIFY; write/exec=irreversible→floor GATE), **locus** + **provenance**
 (incl. `hints.md` pure-directive authorization + `TARGET_DERIVED` taint), **scope**,
-**own-artifact registry** (`docker run --name …` recorded → own teardown = NOTIFY cleanup).
+**own-artifact registry** (`docker run --name …` recorded → own teardown = GATE cleanup).
 
 ## Files
 
@@ -123,10 +124,11 @@ python sentinel/verify_layers.py   # FP guard + effectiveness + breaker over-cla
   prediction (ProbGuard).
 - **Flip to inline** (deny/ask·queue) for high-confidence GATE/BLOCK once real-traffic
   `alerts.md` shows L3/L4 are never misclassified as L1. Until then: observe-only.
-- **Deferred (needs operator nod, touches the hard boundary)**: move infra teardown from
-  `safety_gate` L4-hard to L3 native-ask. NOT done — blanket removal would un-hard-block
-  TARGET-resource destruction (locus-blind). Operator tears down own infra in their own
-  terminal today (ungated); sentinel already LABELS own-artifact teardown as L2 cleanup.
+- **Deferred (needs operator nod, touches the hard boundary)**: broader infra teardown
+  from `safety_gate` L4-hard to L3 native-ask. NOT done — blanket removal would
+  un-hard-block TARGET-resource destruction (locus-blind). Target-side cleanup of
+  recognizable proof/temp artifacts is native-ask; generic target-resource
+  destruction stays hard-blocked.
 
 Grounding: AgentArmor (trace-as-program), CaMeL (control/data-flow provenance),
 ProbGuard (risk-threshold monitoring), TraceAegis (behavioral anomaly).

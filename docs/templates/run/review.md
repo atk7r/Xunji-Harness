@@ -15,16 +15,7 @@
 
 > peer_review.py 写入的 PR-xxx 待处理账本。BLOCKER 不能保持 pending/unresolved 收口。
 > DriverResolution 必须引用 E-id / artifact / control，或写清 accepted/dismissed/superseded/escalated。
-
-### PR-001 — BLOCKER — category
-
-- Status: pending
-- Claim:
-- EvidenceRefs:
-- AffectedEIDs:
-- RecommendedAction:
-- Why:
-- DriverResolution: pending
+> 本节默认留空；不要手工保留 PR-xxx 占位。只有真实 peer_review 输出才写 `### PR-xxx`。
 
 ## R-001
 

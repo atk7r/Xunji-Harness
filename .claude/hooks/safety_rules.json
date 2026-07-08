@@ -13,8 +13,8 @@
     },
     {
       "category": "destructive",
-      "pattern": "\\A(?=[\\s\\S]*['\"][^'\"]*\\brm\\s+-{1,2}[a-z]*[rf])(?=[\\s\\S]*(?:https?|ftp)://)",
-      "reason": "destructive rm -rf SHIPPED TO A TARGET as a payload (a quoted rm -rf inside a request, alongside a URL) -- destroying target data is never a proof step. Narrowed from the old any-rm-co-located-with-any-URL form (which false-fired on a STANDALONE local scratch rm that merely shared a line with a probe URL); the rm -rf must now appear INSIDE a quoted string (i.e. injected as data). Catastrophic local rm is still covered by the root/system-path rule above; benign repo-relative rm falls through to ask/allow."
+      "pattern": "\\A(?=[\\s\\S]*['\"][^'\"]*\\brm\\s+(?:(?:-{1,2}(?=[a-z-]*r)[a-z-]+)|--recursive\\b))(?=[\\s\\S]*(?:https?|ftp)://)",
+      "reason": "destructive recursive rm SHIPPED TO A TARGET as a payload (a quoted rm -r/rm -rf/rm --recursive inside a request, alongside a URL) -- destroying target data is never a proof step. Narrowed from the old any-rm-co-located-with-any-URL form (which false-fired on a STANDALONE local scratch rm that merely shared a line with a probe URL); recursive rm must appear INSIDE a quoted string (i.e. injected as data). Catastrophic local rm is still covered by the root/system-path rule above; benign repo-relative rm falls through to ask/allow."
     },
     {
       "category": "destructive",
@@ -98,8 +98,8 @@
     },
     {
       "category": "destructive",
-      "pattern": "\\btruncate\\s+(table\\s+)?\\w",
-      "reason": "table data wipe (TRUNCATE)"
+      "pattern": "(?:\\btruncate\\s+table\\s+[`\"\\[]?[A-Za-z_][\\w.$-]*|(?:^|[;&|]\\s*)(?:\\S*/)?(?:mysql|psql|sqlcmd|sqlite3|duckdb|mariadb)\\b[^|;\\n]{0,240}\\btruncate\\s+(?:table\\s+)?[`\"\\[]?[A-Za-z_][\\w.$-]*)",
+      "reason": "table data wipe (TRUNCATE; direct TABLE form or SQL-client truncate)"
     },
     {
       "category": "destructive",

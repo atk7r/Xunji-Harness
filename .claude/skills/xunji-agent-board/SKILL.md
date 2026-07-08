@@ -33,7 +33,20 @@ must not be treated as the Root driver's instruction source.
   `next-evidence`; they do not write final findings or closure.
 - Single Synthesizer merges through the evidence gate, allocates canonical E-ids,
   resolves conflicts, and updates canonical Markdown.
+- `workers.py assign` means "lane prepared", not "Claude Agent is running".
+  When Root actually starts a Claude Agent tool, record
+  `workers.py heartbeat <run> <agent> --status running --note "<started>"`.
+  When the Agent returns or is intentionally abandoned/blocked, record
+  `workers.py finish <run> <agent> --status <done|blocked|failed|abandoned>`.
+  Closure is blocked while any assigned Agent remains non-terminal.
 - All Agents share the same hook, guard state, request budget, and host breakers.
+- Target-side temp artifacts created by Root or Agents must use neutral
+  `tmp-YYYYMMDD-<6-12hex>`, `diag-YYYYMMDD-<6-12hex>`, or
+  `proof-YYYYMMDD-<6-12hex>` names. Never include `xunji`, run dirs, Agent ids,
+  vuln names, exploit names, or internal tool labels in target-side paths.
+- Cleanup/delete/overwrite of any target-side artifact is operator-gated. Root or
+  Agents must ask the operator and only execute the exact cleanup after an
+  explicit `yes`; otherwise leave the artifact recorded for handoff.
 
 ## Personalized RDT / Operator Profile
 
@@ -131,6 +144,7 @@ Start with the Root graph pass:
 ```bash
 python tools/graph.py runs/<dir>
 python tools/workers.py status runs/<dir>
+python tools/workers.py lifecycle-check runs/<dir>
 python tools/workers.py conflicts runs/<dir>
 python tools/saturation.py runs/<dir>
 ```
@@ -141,6 +155,7 @@ Plan and assign:
 python tools/workers.py suggest runs/<dir>
 python tools/workers.py plan runs/<dir>
 python tools/workers.py assign runs/<dir> --role web-hunter --front F-001
+python tools/workers.py heartbeat runs/<dir> A-web-hunter-001 --status running --note "Agent tool started"
 python tools/context_pack.py runs/<dir> --agent A-web-hunter-001
 rg -n "Reasoning style|Loop budget|Operator Profile" runs/<dir>/agents/A-web-hunter-001.md runs/<dir>/context/F-001.web-hunter.md
 ```
@@ -149,6 +164,7 @@ Before merging:
 
 ```bash
 python tools/workers.py agent-check runs/<dir>
+python tools/workers.py lifecycle-check runs/<dir> --closure
 python tools/workers.py merge-check runs/<dir>
 python tools/workers.py conflicts runs/<dir>
 python tools/workers.py synthesize runs/<dir>

@@ -170,6 +170,49 @@ def _range_header_value(byte_range: str) -> str:
     return br if br.lower().startswith("bytes=") else f"bytes={br}"
 
 
+def _write_body_chunks(save: str, raw: bytes, *, chunk_size: int) -> dict:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    base = Path(save)
+    chunk_dir = base.with_name(base.name + ".chunks")
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    chunks: list[dict] = []
+    for idx, offset in enumerate(range(0, len(raw), chunk_size)):
+        part = raw[offset:offset + chunk_size]
+        part_path = chunk_dir / f"part-{idx:04d}.bin"
+        part_path.write_bytes(part)
+        chunks.append({
+            "file": str(part_path),
+            "offset": offset,
+            "bytes": len(part),
+            "sha1": hashlib.sha1(part).hexdigest(),
+        })
+    if not chunks:
+        part_path = chunk_dir / "part-0000.bin"
+        part_path.write_bytes(b"")
+        chunks.append({"file": str(part_path), "offset": 0, "bytes": 0,
+                       "sha1": hashlib.sha1(b"").hexdigest()})
+    manifest = {
+        "schema": "xunji.probe.body_chunks.v1",
+        "saved_body": save,
+        "chunk_dir": str(chunk_dir),
+        "chunk_size": chunk_size,
+        "full_len": len(raw),
+        "full_sha1": hashlib.sha1(raw).hexdigest(),
+        "chunks": chunks,
+    }
+    manifest_path = save + ".chunks.json"
+    Path(manifest_path).write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
+                                   encoding="utf-8")
+    return {
+        "manifest": manifest_path,
+        "chunk_dir": str(chunk_dir),
+        "chunks": len(chunks),
+        "full_len": len(raw),
+        "full_sha1": manifest["full_sha1"],
+    }
+
+
 def _header_value(headers: dict, name: str) -> str | None:
     name_l = name.lower()
     for k, v in headers.items():
@@ -182,7 +225,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
          auth_key: str | None, timeout: int, save: str | None = None,
          retry: int = 0, retry_wait: float = 1.5,
          want_headers: bool = False, no_redirect: bool = False,
-         byte_range: str | None = None) -> dict:
+         byte_range: str | None = None, save_chunks: bool = False,
+         chunk_size: int = guardmod.MAX_BODY_BYTES) -> dict:
     host = urlparse(url).hostname or "unknown"
     afc = AuthFailCounter()
     if auth_key:
@@ -304,6 +348,13 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         Path(save).write_bytes(body)
         summary["saved"] = save
         summary["saved_bytes"] = len(body)
+        chunk_info = None
+        if save_chunks:
+            chunk_info = _write_body_chunks(save, raw, chunk_size=chunk_size)
+            summary["chunk_manifest"] = chunk_info["manifest"]
+            summary["chunk_count"] = chunk_info["chunks"]
+            summary["chunk_full_len"] = chunk_info["full_len"]
+            summary["chunk_full_sha1"] = chunk_info["full_sha1"]
         # snippet 覆盖率: 当 body 远超 240-char snippet 时, driver 可能仅依赖 snippet
         # 而遗漏关键内容(codex review 实战教训: 3 次因 body 空/snippet 短导致错误分析)。
         # 此字段告诉 driver "snippet 只涵盖了 X% 的响应, 需要读 saved 文件"。
@@ -328,6 +379,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                          **_snippet_kwargs(_snippet_enc)},
             "saved_body": save,
         }
+        if chunk_info:
+            replay["saved_body_chunks"] = chunk_info["manifest"]
         # 文件名【追加】.replay.json(不用 with_suffix: 它替换最后扩展名 -> a.html/a.txt 都成
         # a.replay.json 互相覆盖、x.tar.gz 丢 .gz —— dogfood 第5次 WARN)。追加保证唯一对应。
         replay_path = save + ".replay.json"
@@ -363,6 +416,14 @@ def _selftest() -> int:
                 pass
 
             def do_GET(self):
+                if self.path.startswith("/large"):
+                    b = b"L" * (guardmod.MAX_BODY_BYTES + 17)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                    return
                 if self.path.startswith("/range"):
                     b = b"0123456789"
                     if self.headers.get("Range") == "bytes=2-5":
@@ -432,6 +493,20 @@ def _selftest() -> int:
                 checks.append(("请求头完整存(Cookie 原值在, 供重放认证请求)", "sess=secret123" in hreq))
                 checks.append(("响应头完整存(Set-Cookie 原值在, 不脱敏)", "Identity.External=" in hresp))
                 checks.append(("summary 引用 replay 路径", bool(d.get("replay"))))
+            large = Path(tempfile.mkdtemp()) / "large.txt"
+            dl = send("GET", f"http://127.0.0.1:{port}/large", {}, None, None, 5,
+                      save=str(large), save_chunks=True)
+            manifest = Path(str(large) + ".chunks.json")
+            manifest_data = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
+            checks.append(("--save-chunks keeps normal saved body capped",
+                           large.is_file() and large.stat().st_size == guardmod.MAX_BODY_BYTES
+                           and dl.get("truncated") is True))
+            checks.append(("--save-chunks writes manifest with full body metadata",
+                           manifest.exists()
+                           and manifest_data.get("full_len") == guardmod.MAX_BODY_BYTES + 17
+                           and manifest_data.get("full_sha1") == hashlib.sha1(
+                               b"L" * (guardmod.MAX_BODY_BYTES + 17)).hexdigest()
+                           and dl.get("chunk_manifest") == str(manifest)))
             # 认证流: --no-redirect 不跟随 302, 捕获【跳转那一跳】的 Set-Cookie(会话 cookie)
             nr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5,
                       want_headers=True, no_redirect=True)
@@ -521,6 +596,11 @@ def main() -> int:
     ap.add_argument("--range", dest="byte_range", default=None,
                     help="HTTP byte range helper, e.g. 0-262143 or bytes=0-262143. "
                          "Adds a Range header unless one was supplied explicitly.")
+    ap.add_argument("--save-chunks", action="store_true",
+                    help="with --save, also write the full response into <save>.chunks/ plus "
+                         "<save>.chunks.json manifest. The normal saved body remains guard-capped.")
+    ap.add_argument("--chunk-size", type=int, default=guardmod.MAX_BODY_BYTES,
+                    help="bytes per --save-chunks part (default: guard cap size)")
     ap.add_argument("--samples", type=int, default=1,
                     help="DIFF 模式每侧采样次数；>1 时做稳定性判定(去噪)")
     args = ap.parse_args()
@@ -582,7 +662,8 @@ def main() -> int:
                                            data, args.auth_key, args.timeout,
                                            args.save, args.retry, args.retry_wait,
                                            args.headers, args.no_redirect,
-                                           args.byte_range)}
+                                           args.byte_range, args.save_chunks,
+                                           args.chunk_size)}
     except SessionTripped as e:
         out = {"error": f"session-volume-breaker: {e}"}
     except RateBudgetExceeded as e:
