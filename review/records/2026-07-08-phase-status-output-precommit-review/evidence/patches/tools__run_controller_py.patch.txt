@@ -1,0 +1,173 @@
+diff --git a/tools/run_controller.py b/tools/run_controller.py
+index 2473a08..7dadd79 100644
+--- a/tools/run_controller.py
++++ b/tools/run_controller.py
+@@ -10,6 +10,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import json
++import os
+ import sys
+ import tempfile
+ import time
+@@ -25,8 +26,37 @@ sys.path.insert(0, str(ROOT / "tools"))
+ 
+ import loop_state  # noqa: E402
+ import progress_ledger  # noqa: E402
++import status_style  # noqa: E402
+ 
+ SCHEMA = "xunji.run_controller.shadow.v1"
++STATE_CN = {
++    "DRIVER_ACTIVE": "主驾驶继续推进",
++    "NEEDS_REVIEW": "需要先复审/解冲突",
++    "NEEDS_AGENT_FANOUT": "需要并行分派 Agent",
++    "NEEDS_PIVOT": "需要轨迹复盘并换路",
++    "CLOSURE_CANDIDATE": "仅是收口复核候选",
++}
++ACTION_CN = {
++    "resolve_agent_or_review_conflicts_before_promotion_or_closure": "先解决 Agent/复审冲突，再考虑提升或收口",
++    "assign_at_least_two_disjoint_agent_lanes_or_record_a_budget_reason": "分派至少两条不重叠 Agent 线路，或记录预算原因",
++    "record_trajectory_review_then_pivot_continue_or_assign_review_surface_agent": "记录轨迹复盘，然后换机制/继续理由/分派复审或面扩 Agent",
++    "update_frontier_or_evidence_for_coverage_gaps": "补 frontier/evidence 中的覆盖缺口说明",
++    "expand_or_justify_low_saturation_fronts": "扩展低饱和前线，或写明为什么不继续",
++    "fix_unclassified_front_statuses_before_closure_review": "修正未分类前线状态后再收口复核",
++    "add_negative_evidence_or_reactivate_high_threat_deferred_front": "给高威胁延后前线补负向证据，或重新激活",
++    "link_or_action_open_threat_hypotheses": "给开放威胁假设补 Linked IS/C/E 或下一步动作",
++    "continue_driver_on_actionable_open_front": "继续推进可行动开放前线",
++    "run_closure_gates_replay_peer_review_and_retrospective": "跑收口硬门、replay、独立复审和复盘",
++    "create_or_reopen_a_front_before_claiming_closure": "先创建或重开前线，不能直接宣称结束",
++}
++REQUIRE_CN = {
++    "zero open fronts or evidence-backed deferred/closed rationale": "开放前线归零，或每个延后/关闭都有证据支撑的理由",
++    "python tools/check_run.py <run>": "运行结构检查：python tools/check_run.py <run>",
++    "python tools/check_run.py <run> --replay-verify": "运行 replay 核实：python tools/check_run.py <run> --replay-verify",
++    "independent review resolved": "独立复审已完成且问题已处理",
++    "retrospective.md completed": "retrospective.md 已真实填写",
++    "GHOST_COMPLETE only after hard gates pass": "只有硬门全部通过后才允许写 GHOST_COMPLETE",
++}
+ 
+ 
+ def _resolve_run_dir(path: str | Path) -> Path:
+@@ -39,6 +69,29 @@ def _write(path: Path, text: str) -> None:
+     path.write_text(text, encoding="utf-8")
+ 
+ 
++def _pretty_block(title: str, rows: list[str], *, color: str = "purple", enabled: bool | None = None) -> str:
++    return status_style.box(title, rows, color=color, enabled=enabled)
++
++
++def _state_display(state: str) -> str:
++    return f"{STATE_CN.get(state, state)} ({state})"
++
++
++def _action_display(action: str) -> str:
++    return f"{ACTION_CN.get(action, action)} ({action})"
++
++
++def _stop_reason_display(reason: str) -> str:
++    if reason == "shadow controller never grants stop; only hard closure gates plus Root adjudication can do that":
++        return "影子控制面永不批准停止；只有硬收口闸门通过并由 Root 判定后才可停止"
++    return reason
++
++
++def _require_display(requirement: str) -> str:
++    cn = REQUIRE_CN.get(requirement)
++    return f"{cn} ({requirement})" if cn else requirement
++
++
+ def _mentor_stop_blockers(loop_data: dict) -> list[str]:
+     blocking_kinds = {
+         "high-threat-deferred-without-evidence",
+@@ -143,20 +196,31 @@ def derive(run_dir: Path, *, loop_data: dict | None = None, ledger_data: dict |
+     }
+ 
+ 
+-def render_markdown(data: dict) -> str:
++def render_markdown(data: dict, *, color: bool | None = None) -> str:
++    blockers = data.get("stop_blockers", [])
++    panel = _pretty_block("控制面建议", [
++        status_style.field("当前状态", _state_display(data["state"]), "yellow", enabled=color),
++        status_style.field("可以停止", "是" if data["can_stop"] else "否", "green" if data["can_stop"] else "red", enabled=color),
++        status_style.field("停止原因", _stop_reason_display(data["can_stop_reason"]), "red", enabled=color),
++        status_style.field("下一步必须动作", _action_display(data["next_required_action"]), "green", enabled=color),
++        status_style.field("停止阻断项", str(len(blockers)) + (f"（{', '.join(blockers[:4])}）" if blockers else ""), "red" if blockers else "green", enabled=color),
++        status_style.field("性质", "影子控制面，只提醒，不替 Root 选洞、不提升证据、不批准收口", "gray", enabled=color),
++    ], color="purple", enabled=color)
+     lines = [
+-        "# Run Controller Shadow",
++        "# Xunji 控制面建议",
++        "",
++        panel,
+         "",
+-        f"- State: {data['state']}",
+-        f"- Can stop: {'yes' if data['can_stop'] else 'no'}",
+-        f"- Can stop reason: {data['can_stop_reason']}",
+-        f"- Next required action: {data['next_required_action']}",
++        f"- {status_style.field('状态', _state_display(data['state']), 'yellow', enabled=color)}",
++        f"- {status_style.field('可以停止', '是' if data['can_stop'] else '否', 'green' if data['can_stop'] else 'red', enabled=color)}",
++        f"- {status_style.field('停止原因', _stop_reason_display(data['can_stop_reason']), 'red', enabled=color)}",
++        f"- {status_style.field('下一步必须动作', _action_display(data['next_required_action']), 'green', enabled=color)}",
+     ]
+     if data.get("stop_blockers"):
+-        lines.extend(["", "## Stop Blockers", ""])
++        lines.extend(["", "## 停止阻断项 (Stop Blockers)", ""])
+         lines.extend(f"- {b}" for b in data["stop_blockers"])
+-    lines.extend(["", "## Stop Requires", ""])
+-    lines.extend(f"- {r}" for r in data["stop_requires"])
++    lines.extend(["", "## 停止仍需满足 (Stop Requires)", ""])
++    lines.extend(f"- {_require_display(r)}" for r in data["stop_requires"])
+     return "\n".join(lines) + "\n"
+ 
+ 
+@@ -164,7 +228,7 @@ def write_shadow(run_dir: Path) -> dict:
+     run_dir = _resolve_run_dir(run_dir)
+     data = derive(run_dir)
+     _write(run_dir / "state" / "controller.shadow.json", json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+-    _write(run_dir / "state" / "controller_diff.md", render_markdown(data))
++    _write(run_dir / "state" / "controller_diff.md", render_markdown(data, color=False))
+     return data
+ 
+ 
+@@ -190,6 +254,14 @@ def _selftest() -> int:
+     ledger = progress_ledger.derive(run, loop_data=loop_data)
+     controller = derive(run, loop_data=loop_data, ledger_data=ledger)
+     shadow = write_shadow(run)
++    old_color = os.environ.get("XUNJI_COLOR")
++    os.environ["XUNJI_COLOR"] = "1"
++    write_shadow(run)
++    persisted_diff = (run / "state" / "controller_diff.md").read_text(encoding="utf-8", errors="replace")
++    if old_color is None:
++        os.environ.pop("XUNJI_COLOR", None)
++    else:
++        os.environ["XUNJI_COLOR"] = old_color
+ 
+     closed = d / "closed"
+     closed.mkdir()
+@@ -225,6 +297,8 @@ def _selftest() -> int:
+         ("shadow files written", (run / "state" / "controller.shadow.json").exists()
+          and (run / "state" / "controller_diff.md").exists()
+          and shadow["schema"] == SCHEMA),
++        ("persisted controller markdown does not contain ANSI when color forced",
++         "\033[" not in persisted_diff),
+         ("shadow controller is explicitly advisory",
+          controller["advisory_only"] is True
+          and controller["can_stop"] is False
+@@ -233,7 +307,8 @@ def _selftest() -> int:
+          closed_ctl["state"] == "CLOSURE_CANDIDATE"
+          and closed_ctl["signals"]["closure_review_candidate"]
+          and not closed_ctl["can_stop"]),
+-        ("markdown render contains stop blockers", "Stop Blockers" in render_markdown(controller)),
++        ("markdown render contains Chinese stop blockers", "Xunji 控制面建议" in render_markdown(controller)
++         and "Stop Blockers" in render_markdown(controller)),
+     ]
+     bad = [name for name, ok in checks if not ok]
+     for name, ok in checks:
+@@ -263,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
+     if args.json:
+         print(json.dumps(data, ensure_ascii=False, indent=2))
+     else:
+-        print(render_markdown(data), end="")
++        print(render_markdown(data, color=status_style.color_enabled()), end="")
+     return 0
+ 
+ 

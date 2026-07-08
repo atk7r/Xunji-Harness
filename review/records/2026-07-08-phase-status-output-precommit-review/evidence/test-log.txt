@@ -1,0 +1,48 @@
+# Author Test Log Summary
+
+The following commands were run in the repository before external review and returned exit code 0 in the current Codex session:
+
+- python3 -m py_compile tools/status_style.py tools/loop_journal.py tools/loop_state.py tools/run_controller.py tools/loop_bootstrap.py tools/setup_run.py
+- python3 -m py_compile tools/loop_journal.py tools/setup_run.py
+- python3 tools/status_style.py --selftest
+- python3 tools/loop_journal.py --selftest
+- python3 tools/setup_run.py --selftest
+- python3 tools/loop_state.py --selftest
+- python3 tools/run_controller.py --selftest
+- python3 tools/loop_bootstrap.py --selftest
+- python3 tools/selftest_all.py --only status_style,setup_run,loop_journal,loop_state,progress_ledger,run_controller,loop_bootstrap,check_templates
+- python3 tools/selftest_all.py
+- python3 tools/check_rules.py
+- python3 tools/check_templates.py
+- git diff --check
+
+Representative observed outputs:
+
+```text
+status_style selftest passed
+loop_journal selftest passed
+setup_run selftest passed
+loop_state selftest passed
+run_controller selftest passed
+loop_bootstrap selftest passed
+8 passed, 0 failed  (0.6s total)
+52 passed, 0 failed  (46.0s total)
+rule check passed
+template check passed
+```
+
+Regression-specific observations:
+
+```text
+persisted markdown does not contain ANSI even when color forced
+persisted controller markdown does not contain ANSI when color forced
+plain directory is rejected
+evidence-only directory is rejected
+setup phase banner is visible
+setup phase journal closes
+phase banner renders Chinese
+phase end banner renders Chinese
+empty run renders Setup phase
+deferred fronts render Reviewer phase
+closed fronts render Report phase
+```

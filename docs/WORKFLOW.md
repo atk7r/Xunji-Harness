@@ -62,6 +62,7 @@ python tools/workers.py status runs/<dir>
 python tools/workers.py conflicts runs/<dir>
 python tools/saturation.py runs/<dir>
 python tools/coverage_matrix.py runs/<dir> --write
+python tools/loop_journal.py runs/<dir> status
 python tools/loop_state.py runs/<dir> --write
 python tools/progress_ledger.py runs/<dir> --write
 python tools/run_controller.py runs/<dir> --shadow
@@ -75,6 +76,29 @@ material/artifact-backed progress, and `run_controller.py --shadow` writes the
 next required control-plane action plus stop blockers. These are derived caches
 only; Root still chooses the next front and the evidence gate still owns
 promotion and closure.
+
+`loop_journal.py` reads/writes `state/loop_journal.jsonl`, an append-only derived
+journal for interruption recovery. It records explicit `/loop` cycle start, plan,
+action, write-result, interrupt, and end events. It is not evidence and does not
+replace `decisions.md` or `session_handoff.md`.
+
+阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
+phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a
+clear Chinese phase marker and, once a run directory exists, record it in the
+loop journal:
+
+```bash
+python tools/loop_journal.py runs/<dir> phase-start --phase "Root Orchestrator" --note "why this phase starts"
+python tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --note "result and next phase"
+```
+
+Only mark phases actually entered. `Resume`, `/loop`, handoff, and closure gates
+are lifecycle mechanics, not extra Router phases.
+
+Operator-facing lifecycle output should be Chinese, box-style, and `[标签]`
+based when possible, with ANSI color as presentation only. Show current phase,
+open/deferred/closed fronts, evidence delta, coverage delta, Agent conflicts,
+stop blockers, and next required action before detailed raw state.
 
 The point is to make "what just got unlocked / neglected / contradicted / unassigned"
 a query, not a full re-read of every block. Ask:

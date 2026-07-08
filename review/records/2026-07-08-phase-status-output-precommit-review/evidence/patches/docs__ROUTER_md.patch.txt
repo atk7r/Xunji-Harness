@@ -1,0 +1,74 @@
+diff --git a/docs/ROUTER.md b/docs/ROUTER.md
+index 98f8fb4..39ff146 100644
+--- a/docs/ROUTER.md
++++ b/docs/ROUTER.md
+@@ -26,6 +26,20 @@ PreToolUse hook.
+   `src-safety-boundary` for platform submissions (pivot off the table, data changes
+   need platform authorization).
+ 
++## Entry Semantics
++
++Routing invariant:
++
++- Normal chat: answer normally; do not mutate run state.
++- Setup: target/recon/URL/markdown preparation only; do not start loop.
++- Resume: read run files and handoff; do not start loop.
++- Hint: write/update `hints.md` before the next lifecycle decision.
++- Loop: only when the message contains explicit `/loop`. `/loop runs/<dir>` uses
++  the fixed protocol in `docs/templates/loop_prompt.md` and the canonical run
++  files; no generated per-run prompt is required.
++
++Natural language never starts loop by itself. `/loop` is the loop boundary.
++
+ ## Capability Skills (invoke when the task fits)
+ 
+ **Procedure/tooling** skills, not playbooks — a recurring, error-prone *mechanism*,
+@@ -84,6 +98,36 @@ target run, the run-level files and agent board are the work product:
+ 
+ ## Phase Routing
+ 
++### Phase Start / End Visibility
++
++The Router phases are exactly: `Setup`, `Root Orchestrator`, `Hunter`,
++`Reviewer`, and `Report`. Each phase that is actually entered must produce a
++Chinese, box-style visible start marker and a matching visible end marker. Use
++bracket tags as the no-color fallback and ANSI color when the terminal supports
++it:
++
++```text
++╭─ [Xunji] [阶段开始] [Hunter｜验证挖掘] ...
++...
++╭─ [Xunji] [阶段结束] [Hunter｜验证挖掘] ...
++```
++
++When a run directory exists, record the same transition in
++`state/loop_journal.jsonl`:
++
++```bash
++python tools/loop_journal.py runs/<dir> phase-start --phase "<Phase>" --note "<why>"
++python tools/loop_journal.py runs/<dir> phase-end --phase "<Phase>" --note "<result; next phase>"
++```
++
++Do not fake markers for phases skipped by the current turn. `Resume`, `/loop`,
++handoff, drift recovery, and closure gates are lifecycle mechanics, not extra
++Router phases.
++
++Operator-facing lifecycle/status prints should be Chinese first. Prefer compact
++`[标签]` panels that show current phase, run directory, front counts, evidence
++delta, stop blockers, and next required action before raw JSON or file paths.
++
+ ### Setup
+ 
+ When starting a new target run.
+@@ -309,6 +353,11 @@ Project-discipline and run-structure checks in `tools/`:
+ - `python tools/state_project.py runs/<dir>` — derives `state/projection.json` and
+   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
+   canonical and projection must not be hand-edited back into facts.
++- `python tools/loop_journal.py runs/<dir> status` — reads
++  `state/loop_journal.jsonl`, the derived interruption journal for explicit `/loop`
++  cycles. Use `start|plan|action|write-result|interrupt|end` inside a loop turn,
++  and `phase-start|phase-end --phase "<Phase>"` when entering/leaving Router phases.
++  It is not evidence and never replaces `decisions.md`.
+ - `python tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle
+   snapshot `state/loop_state.{json,md}` after graph / Agent Board / saturation /
+   coverage-matrix inputs are refreshed. It records evidence deltas, certainty upgrades,

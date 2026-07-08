@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""loop_bootstrap.py —— 一条命令启动 Xunji 全自动渗透流水线。
+"""loop_bootstrap.py —— 准备 Xunji loop 运行状态。
 
 用法:
   python3 tools/loop_bootstrap.py <slug> <recon.json>       # 新目标
   python3 tools/loop_bootstrap.py --resume runs/<dir>       # 续接已有 run
   python3 tools/loop_bootstrap.py --selftest                # 自检
 
-输出: 一个可保存到文件的 loop prompt 路径，和 /loop 启动指令。
+输出: 状态准备结果和 Claude Code `/loop runs/<dir>` 启动指令。
+固定 loop 协议在 docs/templates/loop_prompt.md；不生成 per-run prompt。
 """
 
 from __future__ import annotations
@@ -23,14 +24,58 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
 LOOP_TEMPLATE = ROOT / "docs" / "templates" / "loop_prompt.md"
 PYTHON_CMD = sys.executable or "python3"
+sys.path.insert(0, str(ROOT / "tools"))
+
+import loop_journal  # noqa: E402
+import status_style  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
+STATE_CN = {
+    "DRIVER_ACTIVE": "主驾驶继续推进",
+    "NEEDS_REVIEW": "需要先复审/解冲突",
+    "NEEDS_AGENT_FANOUT": "需要并行分派 Agent",
+    "NEEDS_PIVOT": "需要轨迹复盘并换路",
+    "CLOSURE_CANDIDATE": "仅是收口复核候选",
+}
+ACTION_CN = {
+    "resolve_agent_or_review_conflicts_before_promotion_or_closure": "先解决 Agent/复审冲突，再考虑提升或收口",
+    "assign_at_least_two_disjoint_agent_lanes_or_record_a_budget_reason": "分派至少两条不重叠 Agent 线路，或记录预算原因",
+    "record_trajectory_review_then_pivot_continue_or_assign_review_surface_agent": "记录轨迹复盘，然后换机制/继续理由/分派复审或面扩 Agent",
+    "update_frontier_or_evidence_for_coverage_gaps": "补 frontier/evidence 中的覆盖缺口说明",
+    "expand_or_justify_low_saturation_fronts": "扩展低饱和前线，或写明为什么不继续",
+    "fix_unclassified_front_statuses_before_closure_review": "修正未分类前线状态后再收口复核",
+    "add_negative_evidence_or_reactivate_high_threat_deferred_front": "给高威胁延后前线补负向证据，或重新激活",
+    "link_or_action_open_threat_hypotheses": "给开放威胁假设补 Linked IS/C/E 或下一步动作",
+    "continue_driver_on_actionable_open_front": "继续推进可行动开放前线",
+    "run_closure_gates_replay_peer_review_and_retrospective": "跑收口硬门、replay、独立复审和复盘",
+    "create_or_reopen_a_front_before_claiming_closure": "先创建或重开前线，不能直接宣称结束",
+}
+
 
 # ---- helpers ----
+
+def _pretty_block(title: str, rows: list[str]) -> str:
+    return status_style.box(title, rows, color="cyan", enabled=status_style.color_enabled())
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        data = _json_mod.loads(path.read_text(encoding="utf-8", errors="replace"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _state_display(state: str) -> str:
+    return f"{STATE_CN.get(state, state)} ({state})" if state else "未知"
+
+
+def _action_display(action: str) -> str:
+    return f"{ACTION_CN.get(action, action)} ({action})" if action else "未知"
 
 def _find_run_by_slug(slug: str) -> Path | None:
     """按 slug 前缀找最近创建的 run 目录。"""
@@ -50,26 +95,9 @@ def _validate_run(run_dir: Path) -> bool:
         return True  # fail-open
 
 
-def _read_template() -> str:
-    """读 loop 模板文件。不存在时返回内置最小模板。"""
-    if LOOP_TEMPLATE.exists():
-        try:
-            return LOOP_TEMPLATE.read_text(encoding="utf-8")
-        except Exception:
-            pass
-    return (
-        "你是 Xunji 自主 Driver，对 run={{RUN_DIR}} 执行一轮探测。\n"
-        "1. Reason pass: `{{PYTHON}} tools/loop_state.py \"{{RUN_DIR}}\" --write`; "
-        "`{{PYTHON}} tools/progress_ledger.py \"{{RUN_DIR}}\" --write`; "
-        "`{{PYTHON}} tools/run_controller.py \"{{RUN_DIR}}\" --shadow`。\n"
-        "2. 结尾: 下一行动: <action> 或 BLOCKED: <reason>。\n"
-    )
-
-
-def _generate_loop_prompt(run_dir: Path) -> str:
-    """用实际 run 目录路径替换模板中的 {{RUN_DIR}}。"""
-    template = _read_template()
-    return template.replace("{{RUN_DIR}}", str(run_dir)).replace("{{PYTHON}}", PYTHON_CMD)
+def _loop_command(run_dir: Path) -> str:
+    """The explicit Claude Code entry command. The fixed template stays in docs."""
+    return f"/loop {run_dir}"
 
 
 def _write_initial_state(run_dir: Path) -> None:
@@ -110,7 +138,49 @@ def _refresh_loop_state(run_dir: Path) -> bool:
     print(f"[bootstrap] loop state: {run_dir / 'state' / 'loop_state.json'}")
     print(f"[bootstrap] progress ledger: {run_dir / 'state' / 'progress_ledger.json'}")
     print(f"[bootstrap] controller shadow: {run_dir / 'state' / 'controller.shadow.json'}")
+    _journal(run_dir, "state_refresh", "loop/progress/controller advisory caches refreshed")
     return True
+
+
+def _print_status_summary(run_dir: Path) -> None:
+    color = status_style.color_enabled()
+    loop_data = _read_json(run_dir / "state" / "loop_state.json")
+    controller = _read_json(run_dir / "state" / "controller.shadow.json")
+    journal = loop_journal.summarize(run_dir)
+    fronts = loop_data.get("fronts", {})
+    progress = loop_data.get("progress", {})
+    gates = loop_data.get("gates", {})
+    rows = [
+        status_style.field("运行目录", run_dir, "gray", enabled=color),
+        status_style.field("推断阶段", status_style.phase_display(str(loop_data.get("phase") or "未知"), enabled=color), "blue", enabled=color),
+        status_style.field(
+            "当前打开阶段",
+            status_style.phase_display(journal.get("open_phase"), enabled=color) if journal.get("open_phase") else status_style.tag("无", "gray", enabled=color),
+            "cyan",
+            enabled=color,
+        ),
+        status_style.field("前线", f"开放 {fronts.get('open_count', 0)} / 延后 {fronts.get('deferred_count', 0)} / 已关闭 {fronts.get('closed_count', 0)}", "white", enabled=color),
+        status_style.field("证据", f"总计 {progress.get('evidence_total', 0)}；本轮新增 {len(progress.get('new_evidence_ids', []))}；置信提升 {len(progress.get('certainty_upgrades', []))}", "white", enabled=color),
+        status_style.field("覆盖", f"已测 {progress.get('coverage_tested_cell_count', 0)}；未测 {progress.get('coverage_untested_cell_count', 0)}", "white", enabled=color),
+        status_style.field("需要并行分派", "是" if gates.get("fanout_required") else "否", "yellow" if gates.get("fanout_required") else "green", enabled=color),
+        status_style.field("收口复核候选", "是" if gates.get("completion_pause_candidate") else "否", "purple" if gates.get("completion_pause_candidate") else "gray", enabled=color),
+        status_style.field("控制面状态", _state_display(str(controller.get("state") or "")), "yellow", enabled=color),
+        status_style.field("下一步必须动作", _action_display(str(controller.get("next_required_action") or "")), "green", enabled=color),
+    ]
+    blockers = controller.get("stop_blockers") if isinstance(controller.get("stop_blockers"), list) else []
+    if blockers:
+        rows.append(status_style.field("停止阻断项", "，".join(str(b) for b in blockers[:6]), "red", enabled=color))
+    print(_pretty_block("Xunji 当前状态总览", rows))
+
+
+def _journal(run_dir: Path, event: str, note: str) -> None:
+    """Best-effort derived journal write; failure must not block setup/resume."""
+    if not run_dir.is_dir():
+        return
+    try:
+        loop_journal.append_event(run_dir, event, note=note)
+    except Exception as e:
+        print(f"[bootstrap] journal write skipped: {e}", file=sys.stderr)
 
 
 # ---- commands ----
@@ -138,16 +208,11 @@ def cmd_new(slug: str, recon_path: str) -> int:
     print(f"[bootstrap] run 目录: {run_dir}")
 
     _write_initial_state(run_dir)
+    _journal(run_dir, "bootstrap", f"new run prepared from recon {recon_full}")
     if not _refresh_loop_state(run_dir):
         return 1
 
-    # 生成 loop prompt 文件
-    prompt_text = _generate_loop_prompt(run_dir)
-    prompt_file = run_dir / "loop_prompt.md"
-    prompt_file.write_text(prompt_text, encoding="utf-8")
-
-    # 输出操作者指令
-    _print_launch_instructions(run_dir, prompt_file)
+    _print_launch_instructions(run_dir)
     return 0
 
 
@@ -163,39 +228,33 @@ def cmd_resume(run_path: str) -> int:
     # 写 handoff
     subprocess.run([PYTHON_CMD, str(ROOT / "tools" / "session_handoff.py"),
                     "write", str(run_dir)], timeout=30)
+    _journal(run_dir, "resume_prepare", "resume state prepared; loop not started until explicit /loop")
     if not _refresh_loop_state(run_dir):
         return 1
 
-    prompt_text = _generate_loop_prompt(run_dir)
-    prompt_file = run_dir / "loop_prompt.md"
-    prompt_file.write_text(prompt_text, encoding="utf-8")
-
-    _print_launch_instructions(run_dir, prompt_file)
+    _print_launch_instructions(run_dir)
     return 0
 
 
-def _print_launch_instructions(run_dir: Path, prompt_file: Path) -> None:
+def _print_launch_instructions(run_dir: Path) -> None:
     """打印操作者启动和监控指令。"""
-    prompt_text = prompt_file.read_text(encoding="utf-8")
+    _print_status_summary(run_dir)
     print()
-    print("=" * 60)
-    print("  复制以下内容，粘贴到 Claude Code 聊天中:")
-    print("=" * 60)
-    print()
-    print(f"/loop dynamic")
-    print()
-    print(prompt_text)
-    print()
-    print("=" * 60)
-    print("  监控:")
-    print(f"    {PYTHON_CMD} tools/loop_state.py {run_dir} --write")
-    print(f"    {PYTHON_CMD} tools/progress_ledger.py {run_dir} --write")
-    print(f"    {PYTHON_CMD} tools/run_controller.py {run_dir} --shadow")
-    print(f"    {PYTHON_CMD} tools/check_run.py {run_dir}")
-    print(f"    tail -f {run_dir}/decisions.md")
-    print(f"    cat {run_dir}/state/loop_state.md")
-    print(f"    cat {run_dir}/state/controller_diff.md")
-    print("=" * 60)
+    print(_pretty_block("Claude Code 启动入口", [
+        status_style.field("启动命令", _loop_command(run_dir), "green", enabled=status_style.color_enabled()),
+        status_style.field("固定协议", LOOP_TEMPLATE, "gray", enabled=status_style.color_enabled()),
+        status_style.field("提示", "不生成 per-run loop_prompt.md；Claude Code 在 /loop 中读取固定协议和 run 文件。", "blue", enabled=status_style.color_enabled()),
+    ]))
+    print(_pretty_block("常用监控命令", [
+        status_style.field("日志", f"{PYTHON_CMD} tools/loop_journal.py {run_dir} status", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("运行态", f"{PYTHON_CMD} tools/loop_state.py {run_dir} --write", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("进展账本", f"{PYTHON_CMD} tools/progress_ledger.py {run_dir} --write", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("控制面", f"{PYTHON_CMD} tools/run_controller.py {run_dir} --shadow", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("结构检查", f"{PYTHON_CMD} tools/check_run.py {run_dir}", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("决策流", f"tail -f {run_dir}/decisions.md", "gray", enabled=status_style.color_enabled()),
+        status_style.field("运行态文件", f"cat {run_dir}/state/loop_state.md", "gray", enabled=status_style.color_enabled()),
+        status_style.field("控制面文件", f"cat {run_dir}/state/controller_diff.md", "gray", enabled=status_style.color_enabled()),
+    ]))
 
 
 # ---- selftest ----
@@ -211,17 +270,17 @@ def _selftest() -> int:
     (p / "frontier.md").write_text("# f\n## Open Fronts\n### F-001\n- Status: open\n", encoding="utf-8")
 
     checks.append(("template exists", LOOP_TEMPLATE.exists()))
-    fb = _generate_loop_prompt(p)
-    checks.append(("prompt non-empty", bool(fb.strip())))
-    checks.append(("prompt has run path", str(p) in fb))
-    checks.append(("no template var left", "{{RUN_DIR}}" not in fb))
-    checks.append(("python var replaced", "{{PYTHON}}" not in fb and PYTHON_CMD in fb))
+    checks.append(("loop command names run", _loop_command(p) == f"/loop {p}"))
+    checks.append(("no per-run prompt before refresh", not (p / "loop_prompt.md").exists()))
     _write_initial_state(p)
     checks.append(("session_state written", (p / "session_state.json").exists()))
     refresh_ok = _refresh_loop_state(p)
     checks.append(("loop_state refresh ok", refresh_ok and (p / "state" / "loop_state.json").exists()))
     checks.append(("progress ledger refresh ok", refresh_ok and (p / "state" / "progress_ledger.json").exists()))
     checks.append(("controller shadow refresh ok", refresh_ok and (p / "state" / "controller.shadow.json").exists()))
+    checks.append(("loop journal written", (p / "state" / "loop_journal.jsonl").exists()))
+    checks.append(("status summary reads refreshed state", _read_json(p / "state" / "loop_state.json").get("phase") == "Root Orchestrator"))
+    checks.append(("refresh does not create per-run prompt", not (p / "loop_prompt.md").exists()))
     checks.append(("loop_state refresh fails closed", _refresh_loop_state(p / "missing-run") is False))
     checks.append(("validate run ok", _validate_run(p) is True))
     checks.append(("validate non-run fails", _validate_run(Path("/nonexistent")) is False))

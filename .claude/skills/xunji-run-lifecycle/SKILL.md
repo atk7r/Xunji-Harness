@@ -36,6 +36,58 @@ between sessions, and close only when the run files support it.
 - When a cycle touches several areas, keep lifecycle state here and let the
   narrower skill govern the specialized judgment.
 
+## Entry Routing
+
+Classify the operator message before touching run state:
+
+- Ordinary project questions or normal chat stay chat. Do not mutate a run and do
+  not start `/loop`.
+- Natural-language targets, URLs, markdown notes, or recon paths without `/loop`
+  mean setup/preparation only. Create or identify the run when appropriate, but
+  do not enter autonomous loop mode.
+- Existing `runs/<dir>` plus continue/resume/previous intent means resume from
+  files: read `session_handoff.md` when present, then the canonical Markdown
+  files. Do not start `/loop` unless the operator explicitly wrote `/loop`.
+- Operator leads, constraints, and priorities during an active run become
+  `hints.md` entries before the next lifecycle decision. Leads are not evidence.
+- Only an explicit `/loop` token enters loop mode. If `/loop` lacks a run path or
+  setup inputs, ask for the missing run/target boundary instead of guessing.
+- For `/loop runs/<dir>`, read the fixed protocol in `docs/templates/loop_prompt.md`
+  and bind `{{RUN_DIR}}` to the provided run path. Do not require or regenerate a
+  per-run `loop_prompt.md`.
+
+When the message shape is ambiguous, use Claude Code's language understanding and
+the run files to choose chat/setup/resume/hint. You may explain the chosen route
+in `decisions.md` or `hints.md` when it affects a run. The binding invariant is:
+natural language never starts loop by itself; `/loop` does.
+
+## Phase Visibility
+
+The run has five Router phases: `Setup`, `Root Orchestrator`, `Hunter`,
+`Reviewer`, and `Report`. Every phase that is actually entered must have an
+obvious Chinese, box-style operator-facing start marker and an obvious end
+marker. Use `[标签]` as the no-color fallback and ANSI color when the terminal
+supports it. Do not emit a marker for a phase you skipped.
+
+When a run directory exists, use the loop journal marker so interruptions can
+recover the open phase:
+
+```bash
+python tools/loop_journal.py runs/<dir> phase-start --phase "Root Orchestrator" --note "why this phase starts"
+python tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --note "result and next phase"
+```
+
+For `Setup`, `tools/setup_run.py` prints the visible setup start/end marker. For
+`/loop`, follow `docs/templates/loop_prompt.md`: enter Root Orchestrator before
+the state graph pass, Hunter before proof/verification/Agent action, Reviewer
+before merge/evidence/closure checks, and Report only when report material is
+being drafted or finalized. `Resume`, handoff, drift recovery, and closure gates
+are lifecycle mechanics, not extra phases.
+
+Operator-facing lifecycle/status output should be Chinese first, bracket-tagged,
+and summarize the current phase, run directory, front counts, evidence/coverage
+delta, stop blockers, and next required action before raw state paths or JSON.
+
 ## Setup
 
 Create a new run in one shot:
@@ -99,6 +151,7 @@ python tools/check_run.py runs/<dir>
 For loop/control-plane state, refresh the advisory caches:
 
 ```bash
+python tools/loop_journal.py runs/<dir> status
 python tools/loop_state.py runs/<dir> --write
 python tools/progress_ledger.py runs/<dir> --write
 python tools/run_controller.py runs/<dir> --shadow
@@ -111,7 +164,8 @@ Interpretation:
 - Blockers must be fixed before closure.
 - `state/workflow_checkpoint.json`, `evidence.json`, `graph.json`,
   `state/loop_state.json`, `state/progress_ledger.json`, and
-  `state/controller.shadow.json` are derived projections. Never edit them as
+  `state/controller.shadow.json` are derived projections. `state/loop_journal.jsonl`
+  is an append-only derived interruption journal. Never edit any of them as
   primary truth.
 - Coda convergence means the current trajectory needs review, pivot, or Agent
   variance. It is not a Completion pause while open fronts, Type A barriers,

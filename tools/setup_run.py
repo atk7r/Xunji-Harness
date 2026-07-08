@@ -44,9 +44,30 @@ REQUIRED = ["target.md", "surface.md", "frontier.md", "hypotheses.md", "evidence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import loop_journal  # noqa: E402
+
 
 def _today() -> str:
     return datetime.date.today().strftime("%Y%m%d")
+
+
+def _phase_banner(kind: str, phase: str, *, run_dir: Path, note: str = "") -> str:
+    event = "phase_start" if kind.strip().lower() == "start" else "phase_end"
+    return loop_journal.render_phase_banner({
+        "event": event,
+        "run_dir": str(run_dir),
+        "cycle": 0,
+        "note": note,
+        "data": {"phase": phase},
+    }).rstrip()
+
+
+def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:
+    """Best-effort derived phase marker. Markdown/templates remain canonical."""
+    try:
+        loop_journal.append_event(run_dir, event, note=note, data={"phase": phase})
+    except Exception as exc:
+        print(f"[setup] phase journal skipped: {exc}", file=sys.stderr)
 
 
 def scaffold(run_dir: Path) -> list[str]:
@@ -377,6 +398,8 @@ def main() -> int:
         return 1
 
     made = scaffold(run_dir)
+    print(_phase_banner("start", "Setup", run_dir=run_dir, note="prepare authorized run workbench"))
+    _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
     print(f"[setup] 建 run 骨架 {run_dir}")
     print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
     coverage_ready = False
@@ -443,6 +466,8 @@ def main() -> int:
         print(f"[下一步] 直接打可达高价值(coverage 已就位); 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
     else:
         print(f"[下一步] 先填写 target.md 的 Target/In-scope 并生成 coverage.json; 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
+    _phase_journal(run_dir, "phase_end", "Setup", f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})")
+    print(_phase_banner("end", "Setup", run_dir=run_dir, note=f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})"))
     return 0
 
 
@@ -462,6 +487,9 @@ def _selftest() -> int:
     d = Path(tempfile.mkdtemp())
     rd = d / "t_20260101"
     made = scaffold(rd)
+    _phase_journal(rd, "phase_start", "Setup", "selftest")
+    _phase_journal(rd, "phase_end", "Setup", "selftest done")
+    journal = loop_journal.summarize(rd)
     checks = [
         ("all required files copied", all((rd / n).exists() for n in REQUIRED)),
         ("evidence/ subdir", (rd / "evidence").is_dir() and (rd / "evidence" / ".gitkeep").exists()),
@@ -469,6 +497,11 @@ def _selftest() -> int:
         ("operator profile scaffolded", (rd / "state" / "operator_profile.json").exists()),
         ("frontier template has depth field", "Current depth" in (rd / "frontier.md").read_text(encoding="utf-8")),
         ("no-overwrite guard raises", _raises_exist(rd)),
+        ("setup phase banner is visible",
+         "[Xunji] [阶段开始]" in _phase_banner("start", "Setup", run_dir=rd)
+         and "[Setup｜准备运行]" in _phase_banner("start", "Setup", run_dir=rd)),
+        ("setup phase journal closes",
+         journal["last_cycle_phase_events"][-1]["event"] == "phase_end" and not journal["open_phase"]),
     ]
     recon = {"target": "t", "assets": [{"host": "a.example", "category": "c", "reachability": "confirmed", "ownership": "core"}]}
     rp = d / "recon.json"

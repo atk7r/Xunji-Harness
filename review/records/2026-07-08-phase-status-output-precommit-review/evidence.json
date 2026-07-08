@@ -1,0 +1,71 @@
+{
+  "total": 1,
+  "confirmed": [],
+  "confirmed_findings": [],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository-diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository-diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/patches/_claude__skills__xunji-run-lifecycle__SKILL_md.patch.txt",
+        "evidence/patches/CLAUDE_md.patch.txt",
+        "evidence/patches/docs__ROUTER_md.patch.txt",
+        "evidence/patches/docs__WORKFLOW-reference_md.patch.txt",
+        "evidence/patches/docs__WORKFLOW_md.patch.txt",
+        "evidence/patches/docs__templates__loop_prompt_md.patch.txt",
+        "evidence/patches/tools__loop_bootstrap_py.patch.txt",
+        "evidence/patches/tools__loop_state_py.patch.txt",
+        "evidence/patches/tools__run_controller_py.patch.txt",
+        "evidence/patches/tools__selftest_all_py.patch.txt",
+        "evidence/patches/tools__setup_run_py.patch.txt",
+        "evidence/patches/tools__loop_journal_py.patch.txt",
+        "evidence/patches/tools__status_style_py.patch.txt",
+        "evidence/test-log.txt",
+        "evidence/consumer-scan.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/patches/_claude__skills__xunji-run-lifecycle__SKILL_md.patch.txt",
+        "evidence/patches/CLAUDE_md.patch.txt",
+        "evidence/patches/docs__ROUTER_md.patch.txt",
+        "evidence/patches/docs__WORKFLOW-reference_md.patch.txt",
+        "evidence/patches/docs__WORKFLOW_md.patch.txt",
+        "evidence/patches/docs__templates__loop_prompt_md.patch.txt",
+        "evidence/patches/tools__loop_bootstrap_py.patch.txt",
+        "evidence/patches/tools__loop_state_py.patch.txt",
+        "evidence/patches/tools__run_controller_py.patch.txt",
+        "evidence/patches/tools__selftest_all_py.patch.txt",
+        "evidence/patches/tools__setup_run_py.patch.txt",
+        "evidence/patches/tools__loop_journal_py.patch.txt",
+        "evidence/patches/tools__status_style_py.patch.txt",
+        "evidence/test-log.txt",
+        "evidence/consumer-scan.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}
