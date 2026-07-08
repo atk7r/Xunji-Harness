@@ -30,6 +30,10 @@ try:
     import state_project as _state_project   # Markdown-derived machine projection
 except Exception:
     _state_project = None
+try:
+    import loop_state as _loop_state   # closed-loop controller snapshot
+except Exception:
+    _loop_state = None
 from evidence_parse import parse_evidence, write_evidence_index  # 唯一权威证据解析器(已抽出到独立模块)
 
 try:
@@ -43,6 +47,7 @@ except Exception:
 
 
 ROOT = Path(__file__).resolve().parents[1]
+NON_ACTIONABLE_COVERAGE_FLAGS = {"AUTH_GATE", "STUB_PAGE"}
 REQUIRED_FILES = [
     "target.md",
     "surface.md",
@@ -454,7 +459,7 @@ def check_untrusted_content(run_dir: Path) -> list[str]:
 # _resolve_artifact 找到(收口门不坏), 但证据与草稿混作一团、不利审计 —— WARN 提醒归位(不硬失败,
 # 历史 run 不受累)。probe/render 加 --run 后裸名/默认产物自动落 evidence/, 正确放法=省事放法。
 _PROOF_SUFFIXES = {".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".js", ".json"}
-_ROOT_OK_FILES = {"evidence.json", "coverage.json", "graph.json"}
+_ROOT_OK_FILES = {"evidence.json", "coverage.json", "graph.json", "session_state.json"}
 
 
 def _loose_proof_files(run_dir: Path) -> list[str]:
@@ -555,9 +560,19 @@ def check_coverage_health(run_dir: Path) -> list[str]:
         total = cov.get("total", 0)
         examined = cov.get("examined", 0)
         reachable = cov.get("reachable", 0)
+        def _candidate_asset(a: dict) -> bool:
+            flags = [str(f) for f in (a.get("flags") or [])]
+            actionable_flags = [f for f in flags if f not in NON_ACTIONABLE_COVERAGE_FLAGS]
+            stack = a.get("stack")
+            if stack in ("SpringBoot-api", "Vue-SPA"):
+                return True
+            if stack == "?" and not flags:
+                return True
+            return bool(actionable_flags)
+
         candidates = [a for a in cov.get("assets", [])
                       if a.get("reachable") is True and a.get("examined") is True
-                      and (a.get("stack") in ("?", "SpringBoot-api", "Vue-SPA") or a.get("flags"))]
+                      and _candidate_asset(a)]
         if candidates:
             names = ", ".join(a["host"] for a in candidates[:15])
             warns.append(
@@ -762,6 +777,43 @@ def check_agent_lifecycle(run_dir: Path, *, closure: bool = False) -> tuple[list
         else:
             warns.append(msg)
     return errors, warns
+
+
+LOOP_CLOSURE_BLOCKER_MESSAGES = {
+    "open_fronts_present": "仍有 open/probing/blocked_type_a front; 收口前必须继续推进、重开裁定或降级为 evidence-backed Type B。",
+    "unlocked_deferred_fronts": "存在被确认型证据重新解锁的 deferred front; 收口前必须激活或重新裁定。",
+    "unclassified_front_status": "frontier.md 存在无法分类的 Status; 使用 open/probing/deferred/closed/blocked_type_a/blocked_type_b 等标准状态。",
+    "unresolved_agent_conflicts": "Agent Board 仍有 unresolved conflict; 收口前必须 merge/resolve。",
+    "coverage_attention_required": "覆盖矩阵仍有空列或稀疏资产行; 收口前必须补测、补 frontier/evidence，或记录结构化不适用理由。",
+    "saturation_attention_required": "仍有低饱和 front; 收口前必须扩展测试类别，或用证据化 Type B/约束账本解释剩余 untried class。",
+}
+
+
+def check_loop_state_closure_blockers(run_dir: Path) -> list[str]:
+    """Hard-bind check_run to loop_state/run_controller closure blockers.
+
+    run_controller consumes loop_state, but check_run is the deterministic gate
+    users actually run before closure. Keeping the blocker list hard-failed here
+    prevents the two surfaces from disagreeing about whether the run can stop.
+    """
+    if not _closure_gate_active(run_dir):
+        return []
+    if _loop_state is None:
+        return [
+            "收口硬门(loop_state): tools/loop_state.py 无法 import —— check_run 不能确认控制面"
+            "收口阻断项。先修 loop_state import/selftest，再重跑收口。"]
+    try:
+        data = _loop_state.derive(run_dir, write=False)
+    except Exception as e:
+        return [f"收口硬门(loop_state): 无法派生闭环状态({e}) —— 先修 loop_state/check_run 不一致。"]
+    gates = data.get("gates") if isinstance(data.get("gates"), dict) else {}
+    blockers = gates.get("closure_blockers") if isinstance(gates.get("closure_blockers"), list) else []
+    out: list[str] = []
+    for blocker in blockers:
+        key = str(blocker)
+        detail = LOOP_CLOSURE_BLOCKER_MESSAGES.get(key, "loop_state 标记此项仍阻断收口。")
+        out.append(f"收口硬门(loop_state): {key} — {detail}")
+    return out
 
 
 def check_closure_front_verification(run_dir: Path) -> list[str]:
@@ -2148,6 +2200,17 @@ def _selftest() -> int:
         '{"total":1,"examined":1,"reachable":1,"assets":[]}', encoding="utf-8")
     cov_warn_after = _built(d2)
     cerr_after, _ = check_closure_discipline(d2)
+    _lump = lambda rd: [w for w in check_coverage_health(rd) if "检视覆盖(防lump)" in w]
+    d_lump = Path(tempfile.mkdtemp())
+    (d_lump / "coverage.json").write_text(json.dumps({
+        "total": 4, "examined": 4, "reachable": 4,
+        "assets": [
+            {"host": "unknown.example", "reachable": True, "examined": True, "stack": "?", "flags": []},
+            {"host": "stub.example", "reachable": True, "examined": True, "stack": "?", "flags": ["STUB_PAGE"]},
+            {"host": "forbidden.example", "reachable": True, "examined": True, "stack": "?", "flags": ["AUTH_GATE"]},
+            {"host": "login.example", "reachable": True, "examined": True, "stack": "?", "flags": ["LOGIN"]},
+        ]}), encoding="utf-8")
+    lump_warn = "\n".join(_lump(d_lump))
     # control: no recon cited -> no coverage gate (avoid FP on operator-given targets)
     d3 = Path(tempfile.mkdtemp())
     (d3 / "target.md").write_text("# Target\n- Existing intel / recon report: N/A\n", encoding="utf-8")
@@ -2157,8 +2220,26 @@ def _selftest() -> int:
         ("final report + no coverage -> closure HARD error", any("覆盖台账" in e for e in cerr_before)),
         ("coverage built -> coverage warn clears", cov_warn_after == []),
         ("coverage built -> closure coverage error clears", not any("覆盖台账" in e for e in cerr_after)),
+        ("防lump: unknown and actionable LOGIN remain candidates",
+         "unknown.example" in lump_warn and "login.example" in lump_warn),
+        ("防lump: stub/403-only assets are not independent-app candidates",
+         "stub.example" not in lump_warn and "forbidden.example" not in lump_warn),
         ("no recon cited -> no coverage gate (no FP)", _built(d3) == [] and _recon_cited(d3) is None),
     ]
+
+    d_loop = Path(tempfile.mkdtemp())
+    (d_loop / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d_loop / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001\n- Maturity: finding\n- Replicated: yes\n"
+        "- Artifacts: `ev.html`\n- Certainty: 0.8\n",
+        encoding="utf-8")
+    (d_loop / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+    (d_loop / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n### F-001\n- Status: open\n- Barrier class: app-layer\n",
+        encoding="utf-8")
+    loop_blockers = check_loop_state_closure_blockers(d_loop)
+    checks.append(("loop_state closure blockers are check_run hard-gated",
+                   any("open_fronts_present" in e for e in loop_blockers)))
 
     # --- 纵深护栏 (check_shallow_close) + recon 占位排除 (P0-3) ---
     d4 = Path(tempfile.mkdtemp())
@@ -3011,6 +3092,7 @@ def main() -> int:
     maturity_errors, maturity_warns = check_report_maturity(run_dir)
     errors.extend(maturity_errors)
     warnings.extend(maturity_warns)
+    errors.extend(check_loop_state_closure_blockers(run_dir))
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
     errors.extend(closure_errors)

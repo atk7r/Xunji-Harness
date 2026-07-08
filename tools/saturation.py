@@ -267,6 +267,9 @@ def _parse_front_blocks(text: str) -> list[dict]:
             block_text = m.group(0)
             fid = m.group(1)
             status = (_field(block_text, "Status") or section).lower()
+            status_tokens = set(re.findall(r"[a-z0-9_]+", status.replace("-", "_")))
+            if status_tokens & {"closed", "closing", "final", "done", "complete", "completed", "blocked_type_b"}:
+                continue
             blocks.append({
                 "id": fid,
                 "section": section,
@@ -666,6 +669,12 @@ def _selftest() -> int:
         "- Surface subtype: param-api\n"
         "- Vectors tried: SQLi, IDOR\n"
         "- Untried classes: SSRF\n\n"
+        "### F-003\n"
+        "- Front: terminal but misplaced\n"
+        "- Status: blocked_type_b\n"
+        "- Surface subtype: login\n"
+        "- Vectors tried: auth bypass\n"
+        "- Untried classes: enum\n\n"
         "## Closed Fronts\n"
         "### F-099\n"
         "- Front: closed login\n"
@@ -706,6 +715,7 @@ def _selftest() -> int:
     checks = [
         ("empty run without frontier returns 1", empty_exit == 1),
         ("closed fronts are excluded", all(b["id"] != "F-099" for b in blocks)),
+        ("terminal statuses outside Closed Fronts are excluded", all(b["id"] != "F-003" for b in blocks)),
         ("open front low saturation is computed", f1["front"] == "F-001" and round(f1["ratio"], 2) == 0.25),
         ("constraints count as tried", f2["front"] == "F-002" and f2["untried_count"] == 0),
         ("check emits low-saturation warning", any("F-001" in w for w in warns) and not errors),

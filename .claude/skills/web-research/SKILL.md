@@ -18,6 +18,11 @@ knowledge-grounded, and evidence-tracked.
 - Finding current documentation for a framework's auth/upload/serialization
 - Any external intelligence gathering that will feed into evidence or decisions
 
+Immediate trigger: if live target evidence names a product+version, component
+version, CVE/CNVD ID, or advisory-shaped issue, invoke this protocol in the same
+cycle before closing that front, setting severity, or writing final report text.
+Known-vulnerability lookup is part of the active front, not report cleanup.
+
 ## Protocol (硬顺序 — do not reorder)
 
 ### Step 1: Time Gate

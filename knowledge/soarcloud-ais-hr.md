@@ -4,7 +4,7 @@ product: 飛騰雲端 AIS 人資系統 (Soar Cloud AIS HR) + eServices portal
 vendor: 飛騰雲端系統股份有限公司 (Soar Cloud System CO., LTD.)
 aliases: [AIS, SoarCloud HR, 飛騰雲端, scshr, eServices]
 category: saas-hr
-last_reviewed: 2026-06-15
+last_reviewed: 2026-07-09
 maturity: seed
 signatures: ["ais.webform.js", "__logincompanyid", "伺服端資訊", "eservices.styles.css"]
 ---
@@ -30,6 +30,9 @@ No payloads/PoC. Seeded from a real run (see runs/<run>/ in workspace, not here)
 - Server-info page (`伺服端資訊`) dumps Version (e.g. 7.3.YYYY.MMDD), APPVersion, MachineName,
   Environment (Azure), Mode (Rent = multi-tenant), DeploymentDate, sometimes RunTimeLogActions /
   DbCommand* / ProgramItems. Acts as an unauth version oracle.
+- DevExpress `DXR.axd` can return 304/conditional-cache-shaped responses on otherwise
+  reachable hosts. Treat that as a component/routing signal to correlate with saved
+  headers and other ASP.NET assets, not as proof that the endpoint is empty.
 - Distinguishing notes: per-tenant builds can diverge by years (oracle gives exact build).
   Do not confuse the WebForms backend subdomains (machine-to-machine) with the eServices
   human login.
@@ -62,11 +65,39 @@ No payloads/PoC. Seeded from a real run (see runs/<run>/ in workspace, not here)
     known/recoverable. Requires a key signal before it is more than a hypothesis.
   - Reference: CWE-502; ASP.NET ViewState deserialization advisories
   - source: driver-reasoning
+- Anchor: 2025 ZUSO ART / NVD HRD CVE cluster
+  - Affected: HRD Human Resource Management System through version 7.3.2025.0408.
+    Live version strings above that range should still receive at least one safe
+    function-level control before closure; version alone is not a refutation.
+  - CVE-2025-5192 / ZA-2025-04: missing authentication in the client application.
+  - CVE-2025-48780 / ZA-2025-05: deserialization in the download-file function.
+  - CVE-2025-48781 / ZA-2025-06: externally controlled path in the download-file
+    function, partial arbitrary file read.
+  - CVE-2025-48782 / ZA-2025-07: unrestricted upload of dangerous file type in
+    the upload-file function.
+  - CVE-2025-48783 / ZA-2025-08: externally controlled path in the delete-file
+    function. This is destructive; do not auto-execute delete proofs.
+  - CVE-2025-48784 / ZA-2025-09: missing authorization allowing system-setting
+    modification. Treat setting changes as operator-gated state changes.
+  - References: ZUSO ART advisories ZA-2025-04..09; NVD CVE-2025-5192,
+    CVE-2025-48780..48784.
+  - source: public-advisory
 
 ## Verification Principle (existence proof)
 
 - Server-info: GET root unauth, confirm `伺服端資訊` markers + a fresh `ASP.NET_SessionId`
   (no auth sent). Presence is the proof; do not mine for secrets beyond identification.
+- CVE lookup: once a live page yields product+version, run the current web-research
+  protocol in the same cycle and record the CVE range comparison before closing
+  or assigning severity.
+- File-function probes: record the request shape separately from the security
+  conclusion. For JSON APIs that wrap an inner object as a string `Value`, use
+  `probe.py --value-json` or `--value-json-file` so the inner JSON is escaped
+  consistently. Exercise a path-format matrix before concluding a function is
+  absent: benign relative name, traversal-shaped relative path, absolute Windows
+  path, and an expected-deny control. An error changing from null-reference to
+  access-denied is evidence that the function exists but is blocked by filesystem
+  permissions, not evidence that the function is absent.
 - Open registration: prove with a controlled differential — a second register of the SAME
   throwaway email returns `Username '…' is already taken.`, attributing creation to the prior
   matched-password POST. One throwaway account only; do NOT access tenant data after.

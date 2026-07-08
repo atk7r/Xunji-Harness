@@ -70,6 +70,19 @@ def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:
         print(f"[setup] phase journal skipped: {exc}", file=sys.stderr)
 
 
+def _set_active_run(run_dir: Path) -> None:
+    """Best-effort statusline pointer update. It is display state, not evidence."""
+    try:
+        import xunji_statusline  # noqa: E402
+
+        if xunji_statusline.set_active_run(str(run_dir)):
+            print(f"[setup] statusline active run: runs/{run_dir.name}")
+        else:
+            print(f"[setup] statusline active run skipped: {run_dir}", file=sys.stderr)
+    except Exception as exc:
+        print(f"[setup] statusline active run skipped: {exc}", file=sys.stderr)
+
+
 def scaffold(run_dir: Path) -> list[str]:
     """从模板建齐必需文件 + evidence/ scripts/ 子目录(含 .gitkeep)。不覆盖已存在目录。"""
     run_dir.mkdir(parents=True, exist_ok=False)   # exist_ok=False → 已存在则 FileExistsError
@@ -400,6 +413,9 @@ def main() -> int:
     made = scaffold(run_dir)
     print(_phase_banner("start", "Setup", run_dir=run_dir, note="prepare authorized run workbench"))
     _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
+    # This CLI creates a new run. Future existing-run modes should not pass through
+    # this branch unless they intentionally want to select that run in the statusline.
+    _set_active_run(run_dir)
     print(f"[setup] 建 run 骨架 {run_dir}")
     print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
     coverage_ready = False
@@ -560,6 +576,60 @@ def _selftest() -> int:
          target_cov["assets"][0]["host"] == "example.org"
          and target_cov["assets"][0]["scheme"] == "http"
          and target_cov["assets"][0]["port"] == 8080),
+    ]
+
+    tmp_root = ROOT / "tmp"
+    tmp_root.mkdir(exist_ok=True)
+    import xunji_statusline  # noqa: E402
+
+    active_parent = Path(tempfile.mkdtemp(dir=tmp_root))
+    active_rd = active_parent / "run"
+    active_pointer = active_parent / ".claude" / "xunji_active_run"
+    original_active_pointer = xunji_statusline.ACTIVE_RUN
+    real_active_before = original_active_pointer.read_text(encoding="utf-8", errors="replace") \
+        if original_active_pointer.exists() else None
+    try:
+        scaffold(active_rd)
+        xunji_statusline.ACTIVE_RUN = active_pointer
+        _set_active_run(active_rd)
+        active = xunji_statusline.active_run()
+    finally:
+        xunji_statusline.ACTIVE_RUN = original_active_pointer
+        shutil.rmtree(active_parent, ignore_errors=True)
+    real_active_after = original_active_pointer.read_text(encoding="utf-8", errors="replace") \
+        if original_active_pointer.exists() else None
+    checks += [
+        ("setup writes statusline active run pointer", active == active_rd.resolve()),
+        ("setup active-run selftest restores module pointer",
+         xunji_statusline.ACTIVE_RUN == original_active_pointer),
+        ("setup active-run selftest leaves real pointer untouched",
+         real_active_after == real_active_before),
+        ("setup active-run selftest cleans temp dir", not active_parent.exists()),
+    ]
+
+    original_set_active_run = xunji_statusline.set_active_run
+    try:
+        xunji_statusline.set_active_run = lambda _raw: False
+        try:
+            _set_active_run(rd3)
+            false_ok = True
+        except Exception:
+            false_ok = False
+
+        def _raise_set_active(_raw: str) -> bool:
+            raise RuntimeError("selftest boom")
+
+        xunji_statusline.set_active_run = _raise_set_active
+        try:
+            _set_active_run(rd3)
+            exception_ok = True
+        except Exception:
+            exception_ok = False
+    finally:
+        xunji_statusline.set_active_run = original_set_active_run
+    checks += [
+        ("active-run helper tolerates rejected pointer", false_ok),
+        ("active-run helper tolerates pointer exception", exception_ok),
     ]
 
     bad = [n for n, ok in checks if not ok]

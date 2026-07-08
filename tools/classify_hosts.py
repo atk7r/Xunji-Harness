@@ -50,6 +50,19 @@ _REDIRECT_RES = [
     re.compile(r"""(?:window\.)?location(?:\.href|\.replace)?\s*(?:=|\()\s*['"]([^'"]+)['"]""", re.I),
     re.compile(r"""<meta[^>]+http-equiv=['"]?refresh['"]?[^>]*url=([^'">\s]+)""", re.I),
 ]
+COMMON_SUBPATHS = (
+    "/SCSRwd/",
+    "/Identity/Account/Login",
+    "/Identity/Account/Register",
+    "/eServices/",
+    "/Login.aspx",
+    "/Default.aspx",
+)
+NON_ACTIONABLE_FLAGS = {"AUTH_GATE", "STUB_PAGE"}
+NON_ACTIONABLE_VERDICT_NOTE = (
+    "non-actionable root/auth page; still requires a recorded frontier/evidence "
+    "verdict or Type A blocker before closure"
+)
 
 
 def detect_redirect(body: str) -> str | None:
@@ -169,6 +182,51 @@ def classify_body(body: str, kb_sigs: "list[tuple[str, list[str]]] | None" = Non
     return stack, flags
 
 
+def _should_try_common_subpaths(body: str) -> bool:
+    low = body.lower()
+    default_markers = (
+        "welcome to iis", "internet information services", "iis windows server",
+        "under construction", "default web site",
+    )
+    if any(m in low for m in default_markers):
+        return True
+    compact = re.sub(r"<[^>]+>", "", body).strip()
+    return 0 < len(compact) < 200
+
+
+def _non_actionable_content_flags(body: str, meta: dict) -> list[str]:
+    flags: list[str] = []
+    try:
+        status = int(meta.get("status") or 0)
+    except Exception:
+        status = 0
+    if status in {401, 403}:
+        flags.append("AUTH_GATE")
+    if _should_try_common_subpaths(body) and not meta.get("discovered_path"):
+        flags.append("STUB_PAGE")
+    return flags
+
+
+def _try_common_subpaths(base_url: str, host: str, save_dir: Path, timeout: int) -> tuple[str, dict] | None:
+    for path in COMMON_SUBPATHS:
+        nxt = urljoin(base_url, path)
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", urlparse(nxt).path or "/")[:60]
+        out = save_dir / f"{host}{safe}.html"
+        d = probe.send("GET", nxt, {}, None, None, timeout, save=str(out), retry=0)
+        if "error" in d:
+            continue
+        try:
+            body = out.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            body = d.get("snippet", "") or ""
+        stack, flags = classify_body(body)
+        if stack != "?" or flags:
+            d["discovered_path"] = nxt
+            d["discovered_path_reason"] = "root looked like default/stub page"
+            return body, d
+    return None
+
+
 def fetch_body(host: str, save_dir: Path, timeout: int) -> tuple[str, dict]:
     """https 优先, 失败回退 http; 返回 (body, meta)。复用 send(save=) 拿 guard-capped body。
     若 body 是 JS/meta 客户端跳转(同主机), 跟一跳, 返回【跳转目标】的内容(meta['redirected_to'])。"""
@@ -198,6 +256,10 @@ def fetch_body(host: str, save_dir: Path, timeout: int) -> tuple[str, dict]:
                         d2["redirected_to"] = nxt
                         return body, d2
                 d.setdefault("redirected_to", nxt)   # record even if not followed
+            if _should_try_common_subpaths(body):
+                discovered = _try_common_subpaths(url, host, save_dir, timeout)
+                if discovered is not None:
+                    return discovered
             return body, d
     return "", d  # last error meta
 
@@ -219,6 +281,14 @@ def _selftest() -> int:
                    detect_redirect('<meta http-equiv="refresh" content="1;url=html/x.htm">') == "html/x.htm"))
     checks.append(("redirect: location.replace", detect_redirect("location.replace('/login')") == "/login"))
     checks.append(("redirect: none on big page", detect_redirect('<a href="/x">' + "y" * 3000) is None))
+    checks.append(("common subpaths trigger on IIS default page",
+                   _should_try_common_subpaths("<title>Welcome to IIS</title>") is True))
+    checks.append(("common subpaths do not trigger on full app page",
+                   _should_try_common_subpaths("<html>" + "x" * 3000 + "</html>") is False))
+    checks.append(("stub page gets non-actionable flag",
+                   "STUB_PAGE" in _non_actionable_content_flags("<title>Welcome to IIS</title>", {"status": 200})))
+    checks.append(("403 gets auth-gate flag",
+                   "AUTH_GATE" in _non_actionable_content_flags("Forbidden", {"status": 403})))
     checks.append(("classify: AIS by ais.webform.js",
                    classify_body('<script src="/Scripts/ais.webform.js"></script>')[0] == "AIS-WebForms"))
     checks.append(("classify: AIS by 伺服端資訊", classify_body("伺服端資訊")[0] == "AIS-WebForms"))
@@ -289,6 +359,89 @@ def _selftest() -> int:
         finally:
             srv.shutdown()
 
+    class H2(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            b = (APP if self.path.startswith("/SCSRwd/") else "<title>Welcome to IIS</title>").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+    with probe.selftest_isolation():
+        srv2 = socketserver.TCPServer(("127.0.0.1", 0), H2)
+        port2 = srv2.server_address[1]
+        threading.Thread(target=srv2.serve_forever, daemon=True).start()
+        try:
+            d3 = Path(tempfile.mkdtemp())
+            body2, meta2 = fetch_body(f"127.0.0.1:{port2}", d3, 5)
+            stack2, flags2 = classify_body(body2)
+            checks.append(("integration: IIS default page common-subpath discovers AIS",
+                           stack2 == "AIS-WebForms"
+                           and (meta2.get("discovered_path") or "").endswith("/SCSRwd/")))
+            d4 = Path(tempfile.mkdtemp())
+            cov2, _, _ = run_classify([f"127.0.0.1:{port2}"], d4, [], 0.0, 5, flush_every=1)
+            checks.append(("coverage records discovered_path",
+                           cov2 and cov2[0].get("discovered_path", "").endswith("/SCSRwd/")
+                           and "DISCOVERED_PATH" in cov2[0].get("flags", [])))
+        finally:
+            srv2.shutdown()
+
+    class H3(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            b = b"<title>Welcome to IIS</title>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+    with probe.selftest_isolation():
+        srv3 = socketserver.TCPServer(("127.0.0.1", 0), H3)
+        port3 = srv3.server_address[1]
+        threading.Thread(target=srv3.serve_forever, daemon=True).start()
+        try:
+            d5 = Path(tempfile.mkdtemp())
+            cov3, _, interesting3 = run_classify([f"127.0.0.1:{port3}"], d5, [], 0.0, 5, flush_every=1)
+            checks.append(("IIS default-only page is marked but not interesting",
+                           cov3 and "STUB_PAGE" in cov3[0].get("flags", [])
+                           and cov3[0].get("verdict_required") is True
+                           and interesting3 == []))
+        finally:
+            srv3.shutdown()
+
+    class H4(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            b = b"Forbidden"
+            self.send_response(403)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+    with probe.selftest_isolation():
+        srv4 = socketserver.TCPServer(("127.0.0.1", 0), H4)
+        port4 = srv4.server_address[1]
+        threading.Thread(target=srv4.serve_forever, daemon=True).start()
+        try:
+            d6 = Path(tempfile.mkdtemp())
+            cov4, _, interesting4 = run_classify([f"127.0.0.1:{port4}"], d6, [], 0.0, 5, flush_every=1)
+            checks.append(("403 page is marked auth-gate but not interesting",
+                           cov4 and "AUTH_GATE" in cov4[0].get("flags", [])
+                           and cov4[0].get("verdict_required") is True
+                           and interesting4 == []))
+        finally:
+            srv4.shutdown()
+
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -346,16 +499,30 @@ def run_classify(hosts: list, out_dir: Path, kb_sigs, delay: float, timeout: int
                     ti = (m.group(1).strip()[:30] if m else "")
                     ln = meta.get("len", len(body))
                     redir = meta.get("redirected_to")
+                    discovered = meta.get("discovered_path")
+                    flags = [*flags, *_non_actionable_content_flags(body, meta)]
                     if redir:
                         flags = [*flags, "REDIRECT"]
                         ln = len(body)               # len of the RESOLVED page, not the stub
+                    if discovered:
+                        flags = [*flags, "DISCOVERED_PATH"]
+                        ln = len(body)
                     rows.append((h, stack, ti, " ".join(flags)))
+                    non_actionable_only = bool(flags) and all(f in NON_ACTIONABLE_FLAGS for f in flags)
                     cov = {"host": h, "reachable": True, "examined": True,
                            "stack": stack, "flags": flags, "title": ti, "len": ln}
+                    if non_actionable_only:
+                        cov["verdict_required"] = True
+                        cov["note"] = NON_ACTIONABLE_VERDICT_NOTE
                     if redir:
                         cov["redirected_to"] = redir
+                    if discovered:
+                        cov["discovered_path"] = discovered
                     coverage.append(cov)
-                    if stack in ("?", "SpringBoot-api", "Vue-SPA") or flags:   # 有意思=未识别/带攻击面标记
+                    actionable_flags = [f for f in flags if f not in NON_ACTIONABLE_FLAGS]
+                    if stack in ("SpringBoot-api", "Vue-SPA") \
+                            or (stack == "?" and "STUB_PAGE" not in flags and "AUTH_GATE" not in flags) \
+                            or actionable_flags:
                         interesting.append((h, stack, ti, " ".join(flags), ln))
             if i % flush_every == 0 or i == total:       # 增量落盘: 中断也留部分 coverage
                 flush()
@@ -437,6 +604,14 @@ def main() -> int:
             print(f"  {h:30} [{st}] len={ln} {ti} {fl}")
     else:
         print("  (无 —— 全部归入已知共享栈)")
+    verdict_required = [a for a in coverage if a.get("verdict_required")]
+    if verdict_required:
+        print("\n===== VERDICT REQUIRED (anti-lump 降噪, 但不可静默丢弃) =====")
+        for a in verdict_required[:20]:
+            print(f"  {str(a.get('host', '')):30} [{a.get('stack', '?')}] "
+                  f"{' '.join(str(f) for f in (a.get('flags') or []))} :: {a.get('note', '')}")
+        if len(verdict_required) > 20:
+            print(f"  … {len(verdict_required) - 20} more")
     print(f"\n[DONE] {len(rows)} hosts -> {out_dir}/classify.txt ; {len(interesting)} interesting")
     return 0
 

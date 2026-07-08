@@ -35,6 +35,7 @@ STATE_CN = {
     "NEEDS_AGENT_FANOUT": "需要并行分派 Agent",
     "NEEDS_PIVOT": "需要轨迹复盘并换路",
     "CLOSURE_CANDIDATE": "仅是收口复核候选",
+    "LOOP_COMPLETE": "运行已完成",
 }
 ACTION_CN = {
     "resolve_agent_or_review_conflicts_before_promotion_or_closure": "先解决 Agent/复审冲突，再考虑提升或收口",
@@ -48,6 +49,7 @@ ACTION_CN = {
     "continue_driver_on_actionable_open_front": "继续推进可行动开放前线",
     "run_closure_gates_replay_peer_review_and_retrospective": "跑收口硬门、replay、独立复审和复盘",
     "create_or_reopen_a_front_before_claiming_closure": "先创建或重开前线，不能直接宣称结束",
+    "do_not_schedule_another_loop_iteration": "不要再排下一轮 /loop",
 }
 REQUIRE_CN = {
     "zero open fronts or evidence-backed deferred/closed rationale": "开放前线归零，或每个延后/关闭都有证据支撑的理由",
@@ -82,6 +84,8 @@ def _action_display(action: str) -> str:
 
 
 def _stop_reason_display(reason: str) -> str:
+    if reason == "completion marker present; do not schedule another /loop iteration":
+        return "已写完成标记；不要再排下一轮 /loop"
     if reason == "shadow controller never grants stop; only hard closure gates plus Root adjudication can do that":
         return "影子控制面永不批准停止；只有硬收口闸门通过并由 Root 判定后才可停止"
     return reason
@@ -111,6 +115,8 @@ def _state_name(loop_data: dict, ledger: dict, blockers: list[str]) -> str:
     progress = loop_data.get("progress", {})
     fronts = loop_data.get("fronts", {})
     cycle = ledger.get("cycle", {})
+    if gates.get("loop_complete"):
+        return "LOOP_COMPLETE"
     if gates.get("needs_conflict_resolution") or "unresolved-agent-conflict" in blockers:
         return "NEEDS_REVIEW"
     if gates.get("fanout_required"):
@@ -130,6 +136,8 @@ def _next_required_action(state: str, loop_data: dict, blockers: list[str]) -> s
     gates = loop_data.get("gates", {})
     fronts = loop_data.get("fronts", {})
     progress = loop_data.get("progress", {})
+    if state == "LOOP_COMPLETE":
+        return "do_not_schedule_another_loop_iteration"
     if state == "NEEDS_REVIEW":
         return "resolve_agent_or_review_conflicts_before_promotion_or_closure"
     if state == "NEEDS_AGENT_FANOUT":
@@ -164,6 +172,7 @@ def derive(run_dir: Path, *, loop_data: dict | None = None, ledger_data: dict | 
     blockers = sorted(set(gate_blockers + mentor_blockers))
     state = _state_name(loop_data, ledger_data, blockers)
     next_action = _next_required_action(state, loop_data, blockers)
+    loop_complete = state == "LOOP_COMPLETE"
     return {
         "schema": SCHEMA,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -172,8 +181,12 @@ def derive(run_dir: Path, *, loop_data: dict | None = None, ledger_data: dict | 
         "mode": "shadow",
         "advisory_only": True,
         "state": state,
-        "can_stop": False,
-        "can_stop_reason": "shadow controller never grants stop; only hard closure gates plus Root adjudication can do that",
+        "can_stop": loop_complete,
+        "can_stop_reason": (
+            "completion marker present; do not schedule another /loop iteration"
+            if loop_complete
+            else "shadow controller never grants stop; only hard closure gates plus Root adjudication can do that"
+        ),
         "stop_blockers": blockers,
         "next_required_action": next_action,
         "signals": {
@@ -184,6 +197,8 @@ def derive(run_dir: Path, *, loop_data: dict | None = None, ledger_data: dict | 
             "artifact_backed_progress": bool(ledger_data.get("cycle", {}).get("artifact_backed_progress")),
             "fanout_required": bool(loop_data.get("gates", {}).get("fanout_required")),
             "closure_review_candidate": bool(loop_data.get("gates", {}).get("completion_pause_candidate")),
+            "loop_complete": bool(loop_data.get("gates", {}).get("loop_complete")),
+            "completion_markers": loop_data.get("gates", {}).get("completion_markers", []),
         },
         "stop_requires": [
             "zero open fronts or evidence-backed deferred/closed rationale",
@@ -288,6 +303,9 @@ def _selftest() -> int:
     (closed / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
     closed_loop = loop_state.write_outputs(closed)
     closed_ctl = derive(closed, loop_data=closed_loop, ledger_data=progress_ledger.derive(closed, loop_data=closed_loop))
+    (closed / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
+    complete_loop = loop_state.write_outputs(closed)
+    complete_ctl = derive(closed, loop_data=complete_loop, ledger_data=progress_ledger.derive(closed, loop_data=complete_loop))
 
     checks = [
         ("type-a open coda becomes pivot not stop",
@@ -307,6 +325,13 @@ def _selftest() -> int:
          closed_ctl["state"] == "CLOSURE_CANDIDATE"
          and closed_ctl["signals"]["closure_review_candidate"]
          and not closed_ctl["can_stop"]),
+        ("completion marker allows loop stop without treating candidate as enough",
+         complete_ctl["state"] == "LOOP_COMPLETE"
+         and complete_ctl["can_stop"]
+         and complete_ctl["signals"]["completion_markers"] == ["GHOST_COMPLETE"]
+         and complete_ctl["next_required_action"] == "do_not_schedule_another_loop_iteration"),
+        ("completion marker render tells operator not to reschedule",
+         "不要再排下一轮 /loop" in render_markdown(complete_ctl)),
         ("markdown render contains Chinese stop blockers", "Xunji 控制面建议" in render_markdown(controller)
          and "Stop Blockers" in render_markdown(controller)),
     ]

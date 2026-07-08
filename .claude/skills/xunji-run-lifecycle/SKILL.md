@@ -102,7 +102,12 @@ Create a new run in one shot:
 python tools/setup_run.py <slug> [recon.json]
 ```
 
-Use `--classify` only for an authorized current egress recheck:
+`setup_run.py` sets `.claude/xunji_active_run` to the newly created run as local
+statusline display state. This does not enter `/loop`, choose a front, or make any
+evidence/closure decision.
+
+Use `--classify` only while creating a new run, and only when an authorized
+current egress recheck is allowed. It is not an existing-run refresh mode:
 
 ```bash
 python tools/setup_run.py <slug> <recon.json> --classify
@@ -168,6 +173,11 @@ Interpretation:
 - Passing means the required structure is present, not that the work is correct.
 - Warnings should either be fixed or explicitly resolved in run files.
 - Blockers must be fixed before closure.
+- If a local hook or `check_run` blocks, handle it in the same cycle: read the
+  blocker, edit the canonical run file or tool issue that caused it, rerun the
+  blocked command, and repeat until it passes or becomes a real external Type A
+  blocker. Do not end the turn with "next action: fix gate" when the fix is
+  local and executable now.
 - `state/workflow_checkpoint.json`, `evidence.json`, `graph.json`,
   `state/loop_state.json`, `state/progress_ledger.json`, and
   `state/controller.shadow.json` are derived projections. `state/loop_journal.jsonl`

@@ -49,7 +49,7 @@ Xunji 自主驱动依赖 CLAUDE.md + anti-drift anchor hook + Stop gate 约束�
 | 连续多轮未 Exec 任何新 probe | 计数器（output_gate 维护） | 停滞 |
 | 连续多轮围绕同一 front（无 front 切换） | 计数器（output_gate 维护） | 隧道视野 |
 
-**原则**：output_gate.py 在每次 Stop 时检测上述信号，将结果写入 `runs/<active_run>/session_state.json`；anti_drift.py 在每次 UserPromptSubmit 时**只读**该文件，根据状态选择闪卡模式。检测到的信号直接作用于**下回合**——模型不需要"意识到"自己漂移。
+**原则**：output_gate.py 在每次 Stop 时检测上述信号，将结果写入 `runs/<active_run>/state/session_state.json`；anti_drift.py 在每次 UserPromptSubmit 时**只读**该文件，根据状态选择闪卡模式。根目录 `session_state.json` 仅作为历史兼容读取路径，新的写入权威是 `state/session_state.json`。检测到的信号直接作用于**下回合**——模型不需要"意识到"自己漂移。
 
 ### 2.2 session_state.json — 由谁写入
 
@@ -630,5 +630,5 @@ flashcard_mode       str    ← 当前闪卡模式标识
 3. **anti_drift 保持 fail-open**：`session_state.json` 损坏/不存在 → fallback 到静态规则，绝不因状态追踪而阻断回合。output_gate 写入失败 → 静默放行，不因计数故障而卡死会话。两个组件独立 fail-open。
 4. **对策三不为对策一的前置依赖**：可以先上线首尾分布，独立观察效果；速查卡的会话状态追踪可以作为增强叠加。但对策一的 MVP 必须先实现 output_gate 的外部计数——没有它，闪卡模式判定缺乏可靠的数据源。
 5. **会话重启是安全网而非主要对策**：如果前两条生效，50 轮阈值可能很少触发——这是好事，因为会话中断有操作员成本。会话重启的 turn 计数同样来自 output_gate 维护的 `session_state.json`。
-6. **所有会话状态文件放在 run 目录下**（`session_state.json`、`session_handoff.md`），而非 `.claude/.state/`——因为状态的生命周期绑定于 run，而非全局会话。切换 run 时自动清零。
+6. **所有会话状态文件放在 run 目录下**（运行态写入 `state/session_state.json`，人工交接仍是 `session_handoff.md`），而非 `.claude/.state/`——因为状态的生命周期绑定于 run，而非全局会话。根目录 `session_state.json` 是旧路径兼容，不是新写入目标。
 7. **停滞检测的 MVP 降级**：Stop event 中不直接包含 tool_use 信息，精确的 "是否执行了新 probe" 需要解析 tool call 记录。MVP 用文本特征近似（输出中是否有 probe 相关描述/关键字），后续可升级为解析完整 Stop event 的 `tool_use` 字段（如果 Claude Code 在 Stop event 中暴露）。

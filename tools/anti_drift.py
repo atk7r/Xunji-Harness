@@ -87,6 +87,7 @@ BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
     "Reason pass: 每轮先重读整个 frontier.md(所有 open+deferred 前沿)再选 — 防隧道视野",
     "回合协议: 结尾只允许「下一行动: <具体action>」或「BLOCKED: <外部依赖>」; 禁止 ? / 是否 / 继续还是",
     "联网检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 前必须先 python tools/timestamp_gate.py --search-hint --kind vuln 获取当前时间并逐条执行其输出的约束; 非 CVE/CNVD 检索用 --kind generic",
+    "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮执行 timestamp_gate --kind vuln → knowledge/xday → WebSearch/WebFetch, 再决定关闭或定级",
     "操作者约束持久化: 收到 directive/constraint 后先更新 hints.md(HINT-xxx, Kind=directive/constraint, Status=pending) 再继续; 每轮 Reason pass 无条件 Read hints.md —— constraint 是全 run 级原则非当前前沿上下文, 跨轮有效直到操作者显式解除",
     "Knowledge-first: 识别到产品签名后, 先 grep knowledge/ 匹配条目(Read 对应的 knowledge/*.md) 再 WebSearch —— 签名→knowledge 是硬步骤非可选; 消费了错误厂商的 CVE 而 correct knowledge 未读 = 协议错误",
 ]
@@ -126,8 +127,18 @@ class SessionStateManager:
     """Unified session_state.json read/write — single authority (Decision 2)."""
 
     @staticmethod
+    def path(run_dir: Path, *, for_write: bool = False) -> Path:
+        state_path = run_dir / "state" / "session_state.json"
+        legacy_path = run_dir / "session_state.json"
+        if for_write:
+            return state_path
+        if state_path.exists() or not legacy_path.exists():
+            return state_path
+        return legacy_path
+
+    @staticmethod
     def load(run_dir: Path) -> dict:
-        sf = run_dir / "session_state.json"
+        sf = SessionStateManager.path(run_dir)
         if not sf.exists():
             return {}
         try:
@@ -138,7 +149,8 @@ class SessionStateManager:
     @staticmethod
     def save(run_dir: Path, state: dict) -> None:
         state["updated_at"] = time.time()
-        sf = run_dir / "session_state.json"
+        sf = SessionStateManager.path(run_dir, for_write=True)
+        sf.parent.mkdir(parents=True, exist_ok=True)
         tmp = sf.with_suffix(".json.tmp")
         try:
             tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -533,6 +545,9 @@ def _selftest() -> int:
         json.dumps({"drift_flags": ["protocol_violation"], "updated_at": time.time()}), encoding="utf-8")
     checks.append(("get_drift_flags returns list",
                    SessionStateManager.get_drift_flags(rd) == ["protocol_violation"]))
+    SessionStateManager.save(rd, {"drift_flags": ["frontier_stale"]})
+    checks.append(("session_state save writes state/ path",
+                   (rd / "state" / "session_state.json").exists()))
 
     # build_anchor with drift_flags — uses temp locations, NOT real project files
     import tempfile as _tm

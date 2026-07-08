@@ -1,0 +1,115 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "d9619d6bfc04f4c908191bd741cd69d68c7a4d9b",
+  "evidence_index_hash": "7077e865ffae7f5133146362baac14f694855fd2",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "evidence_skeptic",
+      "claim": "Selftest mutates the real .claude/xunji_active_run pointer and its restoration is only crash-safe inside the try/finally; a crash before or during read/restore can leave the operator’s active-run pointer corrupted or pointing at a deleted temp directory.",
+      "evidence": "evidence/diff.txt:selftest block showing old_active read, _set_active_run, finally restore, evidence/test-log.txt",
+      "affected_eids": [
+        "E-002"
+      ],
+      "recommended_action": "Make the active-run pointer selftest hermetic by parameterizing or monkeypatching xunji_statusline.ACTIVE_RUN to a temporary path, and add cleanup of the temp directory. Optionally add a test for the _set_active_run failure/warning path.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The Expected Invariant requires selftests to restore pre-existing active-run pointer. While the diff attempts restoration, the test reads and writes the actual global state file without isolation. A crash before the finally block executes can corrupt operator statusline state. This is a testing-hygiene blind spot not acknowledged in the report.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "missed_surface",
+      "claim": "The report does not verify whether setup_run.py --classify also sets the active-run pointer, which could overwrite the operator's current run pointer during an egress recheck.",
+      "evidence": "evidence/diff.txt:main() _set_active_run insertion location, frontier.md:F-002 boundary preservation question",
+      "affected_eids": [],
+      "recommended_action": "Inspect the full setup_run.py to confirm --classify does not pass through the active-run setter, or document the behavior if it does.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The skill docs state --classify is for authorized egress recheck only and setup_run.py should not choose fronts or make evidence decisions. If the classify code path reaches the same main() location, it would silently change the active-run display state, potentially surprising the operator.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "minimax-m3: parse error; output tail: ates up. The active pointer would remain set to the temp run. **This is a potential bug** - the restore is not robust.\n\n   Looking again:\n   ```python\n   old_active = xunji_statusline.ACTIVE_RUN.read_text(encoding=\"utf-8\", errors=\"replace\") \\\n       if xunji_statusline.ACTIVE_RUN.exists() else None\n   try:\n       _set_active_run(active_rd)\n       active = xunji_statusline.active_run()\n   finally:\n       if old_active is None:\n           xunji_statusline.clear_active_run()\n       else:\n          ; glm-5.2: parse error; output tail:  Claude. The report.md says \"This is Codex-authored maintenance. Codex self-review is not an independent review.\" So the author of the diff is Codex, and the review is asking for independent review. The review.md says \"Pending `tools/peer_review.py --driver codex` run.\" - so the independent review hasn't been done yet. I'm being asked to be that independent reviewer.\n\nWait, the report says \"Codex-authored maintenance\" and \"Codex self-review is not an independent review.\" So the diff was authored",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Selftest leaks temp directories — never cleans up `tmp/tmpXXXXXX/run/` after scaffold test",
+      "evidence": "`evidence/diff.txt:88-104` (selftest block lacks `shutil.rmtree` or equivalent cleanup of `active_rd.parent`)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] Each selftest invocation leaves an orphaned scaffolded run under `repo/tmp/`; repeated runs accumulate garbage. The `finally` block only restores the active-run pointer, not the filesystem.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`import xunji_statusline` module-level side effects are unverified",
+      "evidence": "`evidence/diff.txt:54` adds `import xunji_statusline` at module top; no audit of `xunji_statusline.py` import-time behavior in evidence or review scope",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] If `xunji_statusline` has import-time side effects (file reads, connections, hooks), they would execute whenever `setup_run.py` is imported — not just when `_set_active_run()` runs. Likely innocuous but unverified.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`check_rules.py` evidence is a single opaque line",
+      "evidence": "`evidence/test-log.txt:40` shows only \"rule check passed\" with no individual rule names or check output",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] Unlike the 26-line setup_run selftest output or the 10-line statusline selftest output, the rules check provides zero transparency into what was evaluated.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-007",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Selftest doesn't assert correctness of `clear_active_run()` for the no-prior-pointer case",
+      "evidence": "`evidence/diff.txt:98-99` calls `clear_active_run()` when `old_active is None` but never asserts the result",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The first-ever-run scenario is tested for non-crashing but not for correctness — the test never verifies that after clearing, `active_run()` returns `None`/empty.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-008",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`review.md` was empty at review start — the independent review process was incomplete",
+      "evidence": "`review.md:5` states \"Pending tools/peer_review.py --driver codex run.\"",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] This is a process gap — the review file should not have been committed/registered as complete before the independent reviewer ran. Now resolved by this review.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[claude] Temp directory leak in selftest is the clearest concrete defect — every other concern is a documentation/transparency gap, not a code bug.",
+    "[claude] The `_set_active_run()` call site placement (after scaffold, before coverage) is a deliberate design choice, not a bug — but it means the statusline can transiently point at a partially-built run. The \"display state only\" documentation mitigates this.",
+    "[claude] The diff doesn't modify `xunji_statusline.py` at all — it only consumes its public API (`set_active_run`, `active_run`, `clear_active_run`, `ACTIVE_RUN`). This is good separation of concerns.",
+    "[claude] The combined selftest output format (individual checks appearing before the test suite header) is unusual but not incorrect — likely concatenated from `setup_run --selftest` + `xunji_statusline --selftest` + `check_rules` output."
+  ],
+  "context_limits": [
+    "[arkcli] minimax-m3: parse error; output tail: ates up. The active pointer would remain set to the temp run. **This is a potential bug** - the restore is not robust.\n\n   Looking again:\n   ```python\n   old_active = xunji_statusline.ACTIVE_RUN.read_text(encoding=\"utf-8\", errors=\"replace\") \\\n       if xunji_statusline.ACTIVE_RUN.exists() else None\n   try:\n       _set_active_run(active_rd)\n       active = xunji_statusline.active_run()\n   finally:\n       if old_active is None:\n           xunji_statusline.clear_active_run()\n       else:\n          ",
+    "[arkcli] glm-5.2: parse error; output tail:  Claude. The report.md says \"This is Codex-authored maintenance. Codex self-review is not an independent review.\" So the author of the diff is Codex, and the review is asking for independent review. The review.md says \"Pending `tools/peer_review.py --driver codex` run.\" - so the independent review hasn't been done yet. I'm being asked to be that independent reviewer.\n\nWait, the report says \"Codex-authored maintenance\" and \"Codex self-review is not an independent review.\" So the diff was authored",
+    "[claude] I cannot verify `xunji_statusline.py` import-time behavior since that file is not in the review scope and read access was denied. My concern about module-level side effects could be confirmed or dismissed by a 10-second audit of that file.",
+    "[claude] The Chinese-language skill files (`.claude/skills/xunji-run-lifecycle/SKILL.md`, `.claude/skills/xunji-setup-ingest/SKILL.md`) and `docs/WORKFLOW.md` are partially in Chinese — I verified the diff hunk additions but cannot fully assess whether the surrounding Chinese prose in those files creates any contradiction with the new English-language additions.",
+    "[claude] `check_rules.py` is referenced as a safety gate but its contents are not in the review scope — I cannot assess whether \"rule check passed\" means anything substantive."
+  ],
+  "error": ""
+}

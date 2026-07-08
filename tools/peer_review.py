@@ -1125,6 +1125,8 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     if (into_run and result.verdict not in ("ERROR", "NEEDS_DRIVER")
             and (_is_heterogeneous(backend_root, cfg, driver) or may_record_same_family)):
         _append_run_review(scope, result)
+    elif into_run and result.verdict == "NEEDS_DRIVER":
+        _append_manual_driver_template(scope, result)
     if out_file:
         out = Path(out_file)
         if not out.is_absolute():
@@ -1164,7 +1166,7 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
         selected, min_heterogeneous, panel_cfg.get("min_heterogeneous", "auto"))
     if not selected:
         if min_heterogeneous > 0:
-            return ReviewResult(
+            result = ReviewResult(
                 verdict="NEEDS_DRIVER",
                 backend_used="panel:",
                 error=f"panel completed 0/{min_heterogeneous} required heterogeneous backends",
@@ -1174,6 +1176,9 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
                 driver=driver,
                 brain=_matrix_brain(cfg, selected, driver),
             )
+            if into_run:
+                _append_manual_driver_template(scope, result)
+            return result
         rr = review(scope, backend="claude", into_run=False, require_heterogeneous=False,
                     config=cfg, timeout=timeout, no_recon=no_recon,
                     role=roles[0] if roles else None, driver=driver)
@@ -1274,6 +1279,8 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
 
     if into_run and result.verdict not in {"ERROR", "NEEDS_DRIVER"}:
         _append_run_review(scope, result)
+    elif into_run and result.verdict == "NEEDS_DRIVER":
+        _append_manual_driver_template(scope, result)
     if out_file:
         out = Path(out_file)
         if not out.is_absolute():
@@ -1356,6 +1363,46 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
              f"> {review_note}矩阵大脑: {result.brain or '(unknown)'}。事实只来自 evidence_index/artifact hash; "
              "report/review/decisions 只是 claim。driver 必须逐条处理 PR-xxx。\n\n"
              + result.as_markdown() + "\n\n" + "\n".join(ledger) + "\n")
+    rv.write_text(existing.rstrip() + "\n\n" + block, encoding="utf-8")
+
+
+def _append_manual_driver_template(run_dir: Path, result: ReviewResult) -> None:
+    """Record review-backend failure plus a fill-in template without satisfying
+    check_run's completed-review marker.
+
+    This is a workflow aid only. The header intentionally avoids the completion
+    marker that _append_run_review writes.
+    """
+    rv = run_dir / "review.md"
+    existing = rv.read_text(encoding="utf-8", errors="replace") if rv.exists() else "# Review\n"
+    existing = _strip_template_review_placeholders(existing)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    raw = result.raw or result.error or "(no backend details)"
+    block = f"""## Review Backend Limitation / Manual Driver Template ({stamp})
+> peer_review could not complete the required reviewer matrix. This section is not a completed review and does not satisfy the closure gate.
+
+- BackendUsed: {result.backend_used or '(none)'}
+- Verdict: {result.verdict}
+- Brain: {result.brain or '(unknown)'}
+- BundleHash: {result.bundle_hash or '(missing)'}
+- EvidenceIndexHash: {result.evidence_index_hash or '(missing)'}
+- BackendError: {result.error or '(none)'}
+
+### Manual Fresh-Context Reviewer To Fill
+- Reviewer:
+- Review scope:
+- Files/artifacts opened:
+- Evidence gate verdict:
+- Coverage/frontier verdict:
+- Report consistency verdict:
+- Findings:
+- DriverResolution:
+
+### Backend Details
+```json
+{raw}
+```
+"""
     rv.write_text(existing.rstrip() + "\n\n" + block, encoding="utf-8")
 
 
@@ -1639,6 +1686,14 @@ def _selftest() -> int:
                        for x in b_machine.get("machine_findings", []))))
     p_need = review_panel(d_machine, backends=[], min_heterogeneous=1)
     checks.append(("review_panel with no backends needs driver", p_need.verdict == "NEEDS_DRIVER"))
+    d_need_tpl = Path(tempfile.mkdtemp())
+    p_need_tpl = review_panel(d_need_tpl, backends=[], min_heterogeneous=1, into_run=True)
+    need_tpl_text = (d_need_tpl / "review.md").read_text(encoding="utf-8") if (d_need_tpl / "review.md").exists() else ""
+    checks.append(("NEEDS_DRIVER into_run writes manual template without completion marker",
+                   p_need_tpl.verdict == "NEEDS_DRIVER"
+                   and "Review Backend Limitation" in need_tpl_text
+                   and "Independent Review" not in need_tpl_text
+                   and "独立复审" not in need_tpl_text))
     rr_bad = ReviewResult(
         verdict="WARN",
         findings=[Finding("WARN", "bad eid", "E-404", "why", id="PR-009", affected_eids=["E-404"])],

@@ -26,6 +26,11 @@ It keeps searches current, knowledge-grounded, and recorded.
 3. Search/fetch current sources.
 4. Record the research as evidence or a decision input.
 
+Immediate trigger: when live evidence identifies a product+version, a component
+version, or any CVE/CNVD/security-advisory-shaped lead, do this sequence in the
+same cycle before deciding front closure or severity. Do not defer known-vuln
+lookup to final report cleanup.
+
 ## Time Gate
 
 ```bash

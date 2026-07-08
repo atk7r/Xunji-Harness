@@ -1,0 +1,35 @@
+Command: python3 tools/check_hook.py
+Exit: 0
+hook check passed
+
+Command: python3 .claude/hooks/safety_gate.py --selftest
+Exit: 0
+[selftest] safety gate healthy
+
+Command: python3 .claude/hooks/run_gate.py --selftest
+Exit: 0
+run_gate selftest passed
+
+Command: python3 .claude/hooks/output_gate.py --selftest
+Exit: 0
+output_gate selftest passed
+
+Command: python3 tools/harness/guard.py
+Exit: 0
+guard OK; cap truncated=True len=262144; outstanding uploads=71
+session-breaker selftest OK (count trip + bytes trip + cooldown clear + retry-count)
+RequestRecorder smoke-test OK
+
+Command: python3 sentinel/replay.py
+Exit: 0
+26/26 passed
+
+Command: python3 sentinel/verify_layers.py
+Exit: 0
+benign: 17   false-positives: 0
+dangerous: 26   misses: 0
+VERDICT: EFFECTIVE, NO FALSE POSITIVES
+
+Command: python3 tools/check_rules.py
+Exit: 0
+rule check passed

@@ -1,0 +1,286 @@
+{
+  "total": 7,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004",
+    "E-005",
+    "E-006",
+    "E-007"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004",
+    "E-005",
+    "E-006",
+    "E-007"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/final3-diff.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/final3-diff.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local command output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local command output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/final3-test-log.txt",
+        "evidence/final3-diff.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/final3-test-log.txt",
+        "evidence/final3-diff.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/final3-diff.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/final3-diff.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-002",
+        "F-004"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/final3-diff.txt",
+        "evidence/final3-test-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/final3-diff.txt",
+        "evidence/final3-test-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff and local command output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff and local command output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/final3-diff.txt",
+        "evidence/final3-test-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/final3-diff.txt",
+        "evidence/final3-test-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-002",
+        "F-003",
+        "F-004"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-006",
+      "head": "## E-006",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff and local command output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff and local command output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/final3-diff.txt",
+        "evidence/final3-test-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/final3-diff.txt",
+        "evidence/final3-test-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-002",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-007",
+      "head": "## E-007",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff and local command output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff and local command output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/final3-diff.txt",
+        "evidence/final3-test-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/final3-diff.txt",
+        "evidence/final3-test-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

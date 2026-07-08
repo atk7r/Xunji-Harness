@@ -41,6 +41,7 @@ SCHEMA = "xunji.loop_state.v1"
 CONFIRMED = 0.8
 PYTHON_CMD = sys.executable or "python3"
 OPEN_STATUS_TOKENS = {"open", "probing", "working", "blocked_type_a"}
+CLOSED_STATUS_TOKENS = {"closed", "closing", "final", "done", "complete", "completed", "blocked_type_b"}
 ACTION_TEXT_CN = {
     "Resolve Agent Board conflicts before promotion or closure.": "先解决 Agent Board 冲突，再考虑提升证据或收口。",
     "Run workers.py suggest/plan and assign at least two disjoint Agent lanes.": "运行 workers.py suggest/plan，并分派至少两条不重叠 Agent 线路。",
@@ -54,6 +55,7 @@ ACTION_TEXT_CN = {
     "No open front visible, but closure blockers remain; reopen or justify missing work before closure.": "当前看不到开放前线，但仍有收口阻断项；收口前必须重开或解释缺失工作。",
     "No open front visible; run review/closure checks or reopen missing work.": "当前看不到开放前线；运行复审/收口检查，或重开缺失工作。",
     "Choose the next front from actionable/open fronts and record a Root graph pass.": "从可行动/开放前线中选择下一条，并记录 Root graph pass。",
+    "Run is marked complete; do not schedule another /loop iteration.": "运行已标记完成；不要再排下一轮 /loop。",
 }
 
 
@@ -86,19 +88,19 @@ def _status_tokens(raw: object) -> set[str]:
 
 def _is_open_status(raw: object) -> bool:
     tokens = _status_tokens(raw)
-    if {"closed", "deferred"} & tokens:
+    if (CLOSED_STATUS_TOKENS | {"deferred"}) & tokens:
         return False
     return bool(tokens & OPEN_STATUS_TOKENS)
 
 
 def _is_deferred_status(raw: object) -> bool:
     tokens = _status_tokens(raw)
-    return "deferred" in tokens and "closed" not in tokens
+    return "deferred" in tokens and not (CLOSED_STATUS_TOKENS & tokens)
 
 
 def _is_closed_status(raw: object) -> bool:
     tokens = _status_tokens(raw)
-    return "closed" in tokens and "deferred" not in tokens
+    return bool(CLOSED_STATUS_TOKENS & tokens) and "deferred" not in tokens
 
 
 def _evidence_summary(run_dir: Path) -> dict:
@@ -383,8 +385,25 @@ def _gates(fronts: dict, agents: dict, progress: dict, coverage: dict) -> dict:
     }
 
 
+def _completion_markers(run_dir: Path) -> list[str]:
+    path = run_dir / "decisions.md"
+    if not path.exists():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return []
+    markers = []
+    for marker in ("GHOST_COMPLETE", "NORMAL_COMPLETE"):
+        if re.search(rf"(?<![A-Z0-9_]){marker}(?![A-Z0-9_])", text):
+            markers.append(marker)
+    return markers
+
+
 def _next_actions(fronts: dict, agents: dict, progress: dict, gates: dict) -> list[str]:
     actions: list[str] = []
+    if gates.get("loop_complete"):
+        return ["Run is marked complete; do not schedule another /loop iteration."]
     if gates["needs_conflict_resolution"]:
         actions.append("Resolve Agent Board conflicts before promotion or closure.")
     if gates["fanout_required"]:
@@ -579,6 +598,9 @@ def derive(run_dir: Path, *, write: bool = False) -> dict:
     agents = _agent_summary(run_dir, write=write)
     progress = _progress(previous, evidence, coverage)
     gates = _gates(fronts, agents, progress, coverage)
+    completion_markers = _completion_markers(run_dir)
+    gates["completion_markers"] = completion_markers
+    gates["loop_complete"] = bool(completion_markers)
     phase = _phase(fronts, progress)
     actions = _next_actions(fronts, agents, progress, gates)
     mentor_hints = _mentor_hints(run_dir, fronts, agents, progress, gates)
@@ -614,6 +636,7 @@ def render_markdown(data: dict, *, color: bool | None = None) -> str:
         status_style.field("无进展轮数", f"{progress['no_progress_cycles']}（{'需要轨迹复盘/换路' if progress['coda_converged'] else '继续推进'}）", "yellow" if progress["coda_converged"] else "green", enabled=color),
         status_style.field("Agent 状态", f"任务 {agents['assignment_count']}；未解决冲突 {agents['unresolved_conflicts']}", "purple" if agents["unresolved_conflicts"] else "white", enabled=color),
         status_style.field("需要并行分派", _yes_no(gates["fanout_required"]), "yellow" if gates["fanout_required"] else "green", enabled=color),
+        status_style.field("Loop 已完成", _yes_no(gates.get("loop_complete")), "green" if gates.get("loop_complete") else "gray", enabled=color),
         status_style.field("接近收口复核", _yes_no(gates["completion_pause_candidate"]), "purple" if gates["completion_pause_candidate"] else "gray", enabled=color),
         status_style.field("收口阻断项", str(len(blockers)) + (f"（{', '.join(blockers[:4])}）" if blockers else ""), blocker_color, enabled=color),
     ], color="cyan", enabled=color)
@@ -644,6 +667,7 @@ def render_markdown(data: dict, *, color: bool | None = None) -> str:
         f"- {status_style.field('无进展轮数', no_progress_line, 'yellow' if progress['coda_converged'] else 'green', enabled=color)}",
         f"- {status_style.field('Agents', agents_line, 'purple' if agents['unresolved_conflicts'] else 'white', enabled=color)}",
         f"- {status_style.field('需要并行分派', _yes_no(gates['fanout_required']), 'yellow' if gates['fanout_required'] else 'green', enabled=color)}",
+        f"- {status_style.field('Loop 已完成', _yes_no(gates.get('loop_complete')), 'green' if gates.get('loop_complete') else 'gray', enabled=color)}",
         f"- {status_style.field('收口复核候选', _yes_no(gates['completion_pause_candidate']), 'purple' if gates['completion_pause_candidate'] else 'gray', enabled=color)}",
         "",
         "## 下一步建议 (Next Actions)",
@@ -890,6 +914,20 @@ def _selftest() -> int:
     (type_b_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
     type_b_state = write_outputs(type_b_run)
 
+    closing_run = d / "closing_run"
+    closing_run.mkdir()
+    (closing_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n"
+        "### F-001\n"
+        "- Status: open -> CLOSING (final)\n"
+        "- Barrier class: explored-enough\n",
+        encoding="utf-8",
+    )
+    (closing_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (closing_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (closing_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    closing_state = write_outputs(closing_run)
+
     setup_phase_run = d / "setup_phase_run"
     setup_phase_run.mkdir()
     (setup_phase_run / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
@@ -925,6 +963,20 @@ def _selftest() -> int:
     (report_phase_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
     (report_phase_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
     report_phase_state = write_outputs(report_phase_run)
+
+    complete_run = d / "complete_run"
+    complete_run.mkdir()
+    (complete_run / "frontier.md").write_text(
+        "# Frontier\n\n## Closed Fronts\n\n"
+        "### F-001\n"
+        "- Status: closed\n"
+        "- Barrier class: none\n",
+        encoding="utf-8",
+    )
+    (complete_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (complete_run / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
+    (complete_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    complete_state = write_outputs(complete_run)
 
     checks = [
         ("writes loop state json", (run / "state" / "loop_state.json").exists()),
@@ -985,7 +1037,17 @@ def _selftest() -> int:
          and type_b_state["fronts"]["open_count"] == 0
          and not type_b_state["fronts"]["unclassified_status"]
          and type_b_state["gates"]["completion_pause_candidate"]
-         and not type_b_state["gates"]["near_closure"]),
+         and type_b_state["gates"]["near_closure"]),
+        ("mixed open-closing final status is terminal, not open",
+         closing_state["fronts"]["open_count"] == 0
+         and closing_state["fronts"]["closed"] == ["F-001"]
+         and not closing_state["fronts"]["unclassified_status"]
+         and closing_state["gates"]["completion_pause_candidate"]),
+        ("completion marker sets loop_complete and stops next-loop scheduling",
+         complete_state["gates"]["loop_complete"]
+         and complete_state["gates"]["completion_markers"] == ["GHOST_COMPLETE"]
+         and complete_state["next_actions"] == [
+             "Run is marked complete; do not schedule another /loop iteration."]),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:

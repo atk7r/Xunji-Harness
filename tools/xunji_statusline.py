@@ -55,6 +55,7 @@ ACTION_LABELS = {
     "continue_driver_on_actionable_open_front": "继续验证可行动入口",
     "run_closure_gates_replay_peer_review_and_retrospective": "跑收口检查",
     "create_or_reopen_a_front_before_claiming_closure": "创建或重开验证入口",
+    "do_not_schedule_another_loop_iteration": "运行已完成",
 }
 
 
@@ -245,6 +246,23 @@ def _blocker_summary(controller: dict) -> tuple[str, int]:
     return ("无阻断" if count == 0 else f"阻断 {count} 个", count)
 
 
+def _state_stale(run_dir: Path) -> bool:
+    try:
+        latest_md = max((p.stat().st_mtime for p in run_dir.glob("*.md")), default=0.0)
+    except Exception:
+        return False
+    if latest_md <= 0:
+        return False
+    derived = [run_dir / "state" / "loop_state.json", run_dir / "state" / "controller.shadow.json"]
+    mtimes: list[float] = []
+    for p in derived:
+        try:
+            mtimes.append(p.stat().st_mtime)
+        except Exception:
+            return True
+    return latest_md > min(mtimes) + 0.001
+
+
 def _last_plan_note(journal: dict) -> str:
     last = journal.get("last_event") if isinstance(journal.get("last_event"), dict) else {}
     note = str(last.get("note") or "").strip()
@@ -294,9 +312,10 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)
     journal = _journal_summary(run_dir)
     phase = _phase(loop_data, journal)
     blocker_text, blocker_count = _blocker_summary(controller)
+    stale_text = " | 状态待刷新" if _state_stale(run_dir) else ""
     interrupt = " | 中断待续" if journal.get("interrupted") else ""
     line = " | ".join([
-        f"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag(phase, color=bool(color))} {run_dir.name}{interrupt}",
+        f"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag(phase, color=bool(color))} {run_dir.name}{interrupt}{stale_text}",
         _front_summary(loop_data),
         _agent_summary(run_dir),
         status_style.paint(blocker_text, "red" if blocker_count else "green", enabled=color),
@@ -365,6 +384,9 @@ def _selftest() -> int:
         invalid_rejected = set_active_run(str(outside_dir)) is False
         outside = render_statusline({"workspace": {"current_dir": str(outside_dir)}}, color=False)
         after_render = {p: p.stat().st_mtime_ns for p in watched}
+        future = max(p.stat().st_mtime for p in watched) + 5
+        os.utime(run / "frontier.md", (future, future))
+        stale_plain = render_statusline(root_current, color=False)
     finally:
         if old_pointer is None:
             clear_active_run()
@@ -380,6 +402,7 @@ def _selftest() -> int:
         ("XUNJI_COLOR command path has ansi", proc.returncode == 0 and "\033[" in env_colored and "[Hunter｜验证]" in env_colored),
         ("unknown phase fallback is styled", "\033[" in unknown_phase and "[Unexpected Phase]" in unknown_phase),
         ("normal render is read-only", before_render == after_render),
+        ("stale derived state is visible", "状态待刷新" in stale_plain),
         ("invalid outside run pointer is rejected", invalid_rejected),
         ("outside Xunji prints nothing", outside == ""),
     ]

@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import loop_journal  # noqa: E402
 import status_style  # noqa: E402
 import xunji_statusline  # noqa: E402
+from anti_drift import SessionStateManager  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -54,6 +55,7 @@ ACTION_CN = {
     "continue_driver_on_actionable_open_front": "继续推进可行动开放前线",
     "run_closure_gates_replay_peer_review_and_retrospective": "跑收口硬门、replay、独立复审和复盘",
     "create_or_reopen_a_front_before_claiming_closure": "先创建或重开前线，不能直接宣称结束",
+    "do_not_schedule_another_loop_iteration": "运行已完成；不要再排下一轮 /loop",
 }
 
 
@@ -102,16 +104,15 @@ def _loop_command(run_dir: Path) -> str:
 
 
 def _write_initial_state(run_dir: Path) -> None:
-    """写初始 session_state.json。失败不阻断——state 可由后续轮次重建。"""
+    """写初始 state/session_state.json。失败不阻断——state 可由后续轮次重建。"""
     state = {
         "drift_flags": [],
         "updated_at": time.time(),
         "reread_pending": False,
         "drift_block_count": 0,
     }
-    sf = run_dir / "session_state.json"
     try:
-        sf.write_text(_json_mod.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        SessionStateManager.save(run_dir, state)
     except Exception:
         print(f"[bootstrap] 注意: 写 session_state.json 失败（后续轮次会重建）", file=sys.stderr)
 
@@ -348,7 +349,7 @@ def _selftest() -> int:
             xunji_statusline.ACTIVE_RUN.write_text(old_active_resume, encoding="utf-8")
     checks.append(("cmd_resume real set-active renders selected run", rc_resume_real == 0 and p.name in rendered_resume))
     _write_initial_state(p)
-    checks.append(("session_state written", (p / "session_state.json").exists()))
+    checks.append(("session_state written", (p / "state" / "session_state.json").exists()))
     refresh_ok = _refresh_loop_state(p)
     checks.append(("loop_state refresh ok", refresh_ok and (p / "state" / "loop_state.json").exists()))
     checks.append(("progress ledger refresh ok", refresh_ok and (p / "state" / "progress_ledger.json").exists()))

@@ -85,10 +85,32 @@ next required control-plane action plus stop blockers. These are derived caches
 only; Root still chooses the next front and the evidence gate still owns
 promotion and closure.
 
+If a coverage-matrix cell is genuinely not applicable despite asset surface
+signals, record a structured waiver instead of prose:
+`- Coverage waiver: asset=<host>; groups=<MatrixGroup[,MatrixGroup]>; reason=<why>; evidence=<E-id>`.
+Waivers render as `~` in `state/coverage_matrix.md` and do not count as tested
+evidence or close a front by themselves.
+
 `loop_journal.py` reads/writes `state/loop_journal.jsonl`, an append-only derived
 journal for interruption recovery. It records explicit `/loop` cycle start, plan,
 action, write-result, interrupt, and end events. It is not evidence and does not
 replace `decisions.md` or `session_handoff.md`.
+
+Coverage classification may mark root 401/403 pages as `AUTH_GATE` and pure
+default/stub pages as `STUB_PAGE`. These flags only suppress anti-lump
+"independent application candidate" noise. They do not close the asset: final
+closure still needs the asset named in a frontier/evidence/report verdict, and
+403/default/error-page conclusions still need E-backed routing or bypass attempts
+or an explicit Type A blocker. `classify_hosts.py` writes
+`verdict_required: true` and prints a `VERDICT REQUIRED` section for assets that
+are non-actionable only, so they are not silently dropped just because they were
+removed from the noisy `INTERESTING` list.
+
+When live evidence identifies a product+version, component version, CVE/CNVD ID,
+or security-advisory-shaped lead, run the web-research protocol in that same
+cycle: `timestamp_gate.py --search-hint --kind vuln`, then local knowledge/xday
+lookup, then authoritative current sources. Record the result before closing the
+front, assigning severity, or writing final report text.
 
 Claude Code statusline uses `tools/xunji_statusline.py` from the project
 `.claude/settings.json`. It is a read-only, two-second display of the active run:
@@ -96,8 +118,8 @@ current Router phase, run name, pending verification entries, aggregated Agent
 state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_run`
 plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
 state, choose work, write evidence, or enforce phase discipline. The active-run
-pointer is local runtime state and is updated by `loop_bootstrap.py` and the fixed
-`/loop runs/<dir>` protocol.
+pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
+and the fixed `/loop runs/<dir>` protocol.
 
 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
 phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a

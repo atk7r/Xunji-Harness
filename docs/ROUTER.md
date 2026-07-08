@@ -146,7 +146,9 @@ Output:
   root cause: 30+ assets silently un-examined, 6 operator nudges).
 - **Coverage is built FOR you, zero re-probe**: Guanlan already did dedup / wildcard-fold
   / liveness / ownership, so **do NOT bulk-run `classify_hosts` to rebuild it (= re-OSINT,
-  the time-sink)** — that tool is opt-in for a your-own-egress recheck only. `check_run`
+  the time-sink)** — that tool is opt-in for a your-own-egress recheck only. In
+  `setup_run.py`, `--classify` is still a one-shot new-run setup option, not an
+  existing-run refresh mode. `check_run`
   hard-fails a final report that cited a recon but never built `coverage.json`.
 - **Threat-triage each distinct-app cluster**: after `coverage.json` is built, assign a
   `Threat role` (admin-mgmt / identity-auth / data-pii / transaction / content-cms /
@@ -313,8 +315,9 @@ Project-discipline and run-structure checks in `tools/`:
   from the Guanlan recon with ZERO re-probe** (Guanlan already did dedup / wildcard-fold /
   liveness / ownership — do NOT bulk-run classify_hosts to rebuild it = re-OSINT).
   `reachable=True` only for Guanlan-confirmed ∩ in-scope → the gate demands verdicts for
-  the genuinely-reachable subset. `--classify` is opt-in (re-probe from your own egress
-  only when you need your-vantage liveness, e.g. after the proxy is up). **Start every run
+  the genuinely-reachable subset. `--classify` is opt-in during new-run setup
+  (re-probe from your own egress only when you need your-vantage liveness, e.g.
+  after the proxy is up), not an existing-run refresh mode. **Start every run
   with this**; never hand-curate surface.md (selection bias → blind spots). Builds the
   workbench; makes no front choices.
 - `python tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a

@@ -1,0 +1,78 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "d5de9ff13086c05ebaa0aec46a65f4e097aeed5b",
+  "evidence_index_hash": "0932bbb9b96732d348a850894b0edfa802de4d78",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "evidence_gate",
+      "claim": "Evidence E-004 is confirmed at certainty 0.8 but cites superseded Round-1 artifacts (evidence/followup-diff.txt and evidence/test-log-rerun.txt) that do not include the Round-2 safety assertions for the active-run pointer selftest.",
+      "evidence": "evidence_index:E-004, report.md:Round 2 Follow-Up, evidence/followup-diff.txt, evidence/final-diff.txt",
+      "affected_eids": [
+        "E-004"
+      ],
+      "recommended_action": "Supersede or update E-004 to point to evidence/final-diff.txt and evidence/final-test-log.txt, or mark it as stale history and rely on E-002/E-005 for F-003.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The report explicitly states that final-diff.txt/final-test-log.txt are the authoritative current artifacts, yet E-004 remains confirmed with followup-diff.txt, creating a ledger inconsistency. The Round-1 diff lacks the 'restores module pointer' and 'leaves real pointer untouched' checks added in Round 2.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "The failure/exception branch of _set_active_run (pointer-write skipped or xunji_statusline.set_active_run validation failure) is not exercised by any selftest or artifact.",
+      "evidence": "evidence/final-diff.txt:tools/setup_run.py _set_active_run, evidence/final-test-log.txt, review.md:Round 2 PR-008",
+      "affected_eids": [
+        "E-002",
+        "E-005"
+      ],
+      "recommended_action": "Add a focused negative test that monkeypatches set_active_run to return False or raise, and asserts setup continues with a visible warning and does not fail.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The helper is best-effort display state, but a regression in error handling or module validation would silently pass because no test covers the skip/except branches.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "missed_surface",
+      "claim": "No end-to-end artifact verifies that the production CLI python tools/setup_run.py <slug> actually writes the real .claude/xunji_active_run file; the active-run selftest monkeypatches the module constant to an isolated temp pointer.",
+      "evidence": "evidence/final-diff.txt:tools/setup_run.py _selftest, evidence/final-test-log.txt",
+      "affected_eids": [
+        "E-002",
+        "E-005"
+      ],
+      "recommended_action": "Consider a lightweight integration test or CI step that creates a temp Xunji root, runs setup_run.py without monkeypatching ACTIVE_RUN, and asserts the real pointer file contains the new run path.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The selftest validates the helper logic but does not prove the production statusline file is updated by an actual setup invocation.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "minimax-m3: parse error; output tail: t cleans temp dir\", not active_parent.exists()),\n]\n```\n\nThis is the proper isolation pattern. Good.\n\nThe test log shows:\n- `ok   setup writes statusline active run pointer`\n- `ok   setup active-run selftest restores module pointer`\n- `ok   setup active-run selftest leaves real pointer untouched`\n- `ok   setup active-run selftest cleans temp dir`\n\nAll four new checks pass. Good.\n\nLet me also check: does `_set_active_run` get called even on `--classify` mode? Looking at the diff, the call is added; glm-5.2: parse error; output tail: is (PR-008) and accepts it as a residual WARN. The report's invariant says \"Pointer write failure should not break setup; it should be visible as a warning\" - but there's no test proving this.\n\n**Finding 4 (WARN/BLOCKER)**: Actually, let me check whether the report contradicts itself. The report says \"The current code also asserts module pointer restoration, asserts the real active-run pointer file remains untouched\" - this is backed by final-diff.txt and final-test-log.txt (E-002, E-005) but E-",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[claude] **Evidence-to-code-review category mismatch**: All 5 evidence entries apply the web-vuln pentesting evidence discipline (certainty 0.8, control-experiment rule, artifact-hash verification) to a repository maintenance diff. The \"Control\" fields (e.g., E-001: \"The helper is best-effort and uses `xunji_statusline.set_active_run()` validation\") don't satisfy the pentesting control-experiment rule (\"first demonstrate the mechanism activates under normal conditions, then show its absence\"). The evidence format shows strain when applied outside its original domain — this is a process design concern rather than a correctness error.",
+    "[claude] **`shutil` import not independently verifiable in this scope**: The final-diff.txt diff hunk uses `shutil.rmtree()` (line 143) but only shows the diff context. The full `setup_run.py` source outside this review scope would show whether `import shutil` exists. The test passing (final-test-log.txt) provides strong circumstantial evidence that it is imported, but this remains an unverified dependency from a review-completeness standpoint.",
+    "[claude] **`_set_active_run()` failure/warning path is untested**: The PR-008 \"acceptable residual WARN\" disposition is correct — the function is documented as best-effort display state, and success + non-mutation are well-covered. A failure in `set_active_run()` returning False or raising would print a warning to stderr and not block setup. I concur this is acceptable. However, the same gap was flagged in both Round 1 (PR-008 accepted) and Round 2 (PR-008 noted) — it was never actually addressed with a test, only documented as \"acceptable.\"",
+    "[claude] **`check_rules.py` output is opaque**: The test log shows only `\"rule check passed\"` — I cannot assess whether the safety checks are substantive or a no-op pass-through. This has been noted in every review round without resolution.",
+    "[claude] **The diff adds an unconditional `import xunji_statusline` at module level in `setup_run.py`**: If `xunji_statusline.py` ever gains a broken import (e.g., a missing dependency), `setup_run.py` becomes completely unusable — even for operations that never touch the statusline. PR-009 was dismissed because \"setup should fail loudly if the statusline module itself is syntactically broken.\" I agree with the dismissal for *syntactic* breakage, but a *transitive import error* (e.g., `xunji_statusline.py` imports `status_style` which imports a missing module) would also make `setup_run.py` unreachable, which is a stronger coupling than necessary for a best-effort display feature. A lazy import inside `_set_active_run()` would be more resilient."
+  ],
+  "context_limits": [
+    "[arkcli] minimax-m3: parse error; output tail: t cleans temp dir\", not active_parent.exists()),\n]\n```\n\nThis is the proper isolation pattern. Good.\n\nThe test log shows:\n- `ok   setup writes statusline active run pointer`\n- `ok   setup active-run selftest restores module pointer`\n- `ok   setup active-run selftest leaves real pointer untouched`\n- `ok   setup active-run selftest cleans temp dir`\n\nAll four new checks pass. Good.\n\nLet me also check: does `_set_active_run` get called even on `--classify` mode? Looking at the diff, the call is added",
+    "[arkcli] glm-5.2: parse error; output tail: is (PR-008) and accepts it as a residual WARN. The report's invariant says \"Pointer write failure should not break setup; it should be visible as a warning\" - but there's no test proving this.\n\n**Finding 4 (WARN/BLOCKER)**: Actually, let me check whether the report contradicts itself. The report says \"The current code also asserts module pointer restoration, asserts the real active-run pointer file remains untouched\" - this is backed by final-diff.txt and final-test-log.txt (E-002, E-005) but E-",
+    "[claude] I was denied read access to `tools/xunji_statusline.py`, `tools/setup_run.py` (full source), `tools/check_rules.py`, and `.claude/skills/*` — my assessment of import-time behavior, `set_active_run()` internals, `clear_active_run()` behavior, and `shutil` import existence relies entirely on the diff fragments, test output, and prior review claims in this review scope.",
+    "[claude] The Chinese-language skill files (`.claude/skills/xunji-run-lifecycle/SKILL.md`, `.claude/skills/xunji-setup-ingest/SKILL.md`) were only seen through diff hunks. Surrounding prose could contain additional boundary language I cannot verify.",
+    "[claude] The prior review rounds flagged that arkcli panel members (minimax-m3, glm-5.2) had parse errors — the panel review was partial. The PR-003/PR-005 process-limitation acknowledgments mean some review dimensions were never independently covered by those backends."
+  ],
+  "error": ""
+}

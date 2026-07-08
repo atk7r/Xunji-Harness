@@ -36,7 +36,9 @@ With recon, setup should:
 - write `knowledge_hits.md` when local signatures match.
 
 `setup_run.py` prepares the workbench. It does not pick fronts, decide findings,
-or attack the target.
+or attack the target. After the run skeleton exists, it also sets
+`.claude/xunji_active_run` so the Claude Code statusline points at the new run;
+that pointer is local display state only.
 
 ## Scope And Coverage
 
@@ -48,11 +50,25 @@ or attack the target.
   That bakes driver selection bias into the run.
 - Do not bulk-run `classify_hosts` just to rebuild Guanlan coverage.
 
-Use active egress recheck only when authorized:
+Use active egress recheck only while creating a new run, and only when
+authorized. `--classify` is not an existing-run refresh mode:
 
 ```bash
 python tools/setup_run.py <slug> <recon.json> --classify
 ```
+
+When `classify_hosts.py` sees a root/default IIS or tiny stub page during that
+authorized active classify pass, it may try the narrow built-in common application
+subpaths and records any hit as `discovered_path` in coverage. Treat that as
+content classification of the same asset, not a license to redo OSINT or port
+discovery.
+
+If no subpath produces an application, `STUB_PAGE` and `AUTH_GATE` are
+non-actionable classification flags. They reduce anti-lump candidate noise only;
+they do not close or waive the asset. `coverage.json` marks such assets with
+`verdict_required: true`, and CLI output lists them under `VERDICT REQUIRED`.
+The run still needs a frontier/evidence verdict, and 403/default-page closure
+still needs routing/bypass evidence or a Type A blocker.
 
 ## Threat Triage
 

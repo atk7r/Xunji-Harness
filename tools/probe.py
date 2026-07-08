@@ -170,6 +170,36 @@ def _range_header_value(byte_range: str) -> str:
     return br if br.lower().startswith("bytes=") else f"bytes={br}"
 
 
+def _compact_json_text(raw: str) -> str:
+    return json.dumps(json.loads(raw), ensure_ascii=False, separators=(",", ":"))
+
+
+def _request_data_from_args(args: argparse.Namespace) -> tuple[bytes | None, bool]:
+    sources = [
+        args.data is not None,
+        args.data_file is not None,
+        args.data_json_file is not None,
+        args.value_json is not None,
+        args.value_json_file is not None,
+    ]
+    if sum(1 for x in sources if x) > 1:
+        raise ValueError("choose only one of --data/--data-file/--data-json-file/--value-json/--value-json-file")
+    if args.data is not None:
+        return args.data.encode(), True
+    if args.data_file is not None:
+        return Path(args.data_file).read_bytes(), False
+    if args.data_json_file is not None:
+        raw = Path(args.data_json_file).read_text(encoding="utf-8")
+        return _compact_json_text(raw).encode(), True
+    if args.value_json is not None:
+        value = _compact_json_text(args.value_json)
+        return json.dumps({"Value": value}, ensure_ascii=False, separators=(",", ":")).encode(), True
+    if args.value_json_file is not None:
+        value = _compact_json_text(Path(args.value_json_file).read_text(encoding="utf-8"))
+        return json.dumps({"Value": value}, ensure_ascii=False, separators=(",", ":")).encode(), True
+    return None, False
+
+
 def _write_body_chunks(save: str, raw: bytes, *, chunk_size: int) -> dict:
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
@@ -543,6 +573,43 @@ def _selftest() -> int:
     checks.append(("无 --run + 无扩展名 -> 补 .html", _place_save("foo", None) == "foo.html"))
     checks.append(("已带扩展名不重复补", _place_save("a.json", None) == "a.json"))
     checks.append(("显式路径(含分隔符)无扩展名也不补/不改(Codex#7)", _place_save("sub/tomcat9", "runs/t") == "sub/tomcat9"))
+    raw_body_file = Path(tempfile.mkdtemp()) / "body.bin"
+    raw_body_file.write_bytes(b"raw=1")
+    json_body_file = Path(tempfile.mkdtemp()) / "body.json"
+    json_body_file.write_text('{"b": 2, "a": [1, true]}', encoding="utf-8")
+    value_body, value_is_json = _request_data_from_args(argparse.Namespace(
+        data=None, data_file=None, data_json_file=None,
+        value_json='{"FileName":"web.config","Depth":1}', value_json_file=None))
+    full_body, full_is_json = _request_data_from_args(argparse.Namespace(
+        data=None, data_file=None, data_json_file=str(json_body_file),
+        value_json=None, value_json_file=None))
+    raw_body, raw_is_json = _request_data_from_args(argparse.Namespace(
+        data=None, data_file=str(raw_body_file), data_json_file=None,
+        value_json=None, value_json_file=None))
+    value_obj = json.loads(value_body.decode("utf-8")) if value_body else {}
+    checks.append(("--data-json-file compacts complete JSON body",
+                   full_is_json and full_body == b'{"b":2,"a":[1,true]}'))
+    checks.append(("--data-file preserves raw bytes and content-type flag",
+                   raw_body == b"raw=1" and raw_is_json is False))
+    checks.append(("--value-json wraps inner JSON as Value string",
+                   value_is_json and isinstance(value_obj.get("Value"), str)
+                   and json.loads(value_obj["Value"])["FileName"] == "web.config"))
+    try:
+        _request_data_from_args(argparse.Namespace(
+            data="{}", data_file=None, data_json_file=str(json_body_file),
+            value_json=None, value_json_file=None))
+        conflict_raised = False
+    except ValueError:
+        conflict_raised = True
+    checks.append(("request body sources are mutually exclusive", conflict_raised))
+    try:
+        _request_data_from_args(argparse.Namespace(
+            data=None, data_file=None, data_json_file=None,
+            value_json="{bad-json", value_json_file=None))
+        invalid_json_raised = False
+    except json.JSONDecodeError:
+        invalid_json_raised = True
+    checks.append(("invalid --value-json raises JSONDecodeError", invalid_json_raised))
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -572,6 +639,14 @@ def main() -> int:
     ap.add_argument("url2", nargs="?", help="second URL for DIFF mode")
     ap.add_argument("--selftest", action="store_true", help="run regression and exit")
     ap.add_argument("--data", default=None)
+    ap.add_argument("--data-file", default=None,
+                    help="raw request body from file; does not auto-set Content-Type")
+    ap.add_argument("--data-json-file", default=None,
+                    help="read a complete JSON request body from file and compact it before sending")
+    ap.add_argument("--value-json", default=None,
+                    help="wrap JSON as an escaped string Value field: {\"Value\":\"<compact-json>\"}")
+    ap.add_argument("--value-json-file", default=None,
+                    help="like --value-json, but read the inner JSON from a file")
     ap.add_argument("-H", "--header", action="append", default=[], help="k: v")
     ap.add_argument("--auth-key", default=None,
                     help="endpoint key for the brute-force lock counter")
@@ -620,8 +695,13 @@ def main() -> int:
         if ":" in h:
             k, v = h.split(":", 1)
             headers[k.strip()] = v.strip()
-    data = args.data.encode() if args.data else None
-    if data and "Content-Type" not in headers:
+    try:
+        data, json_body = _request_data_from_args(args)
+    except json.JSONDecodeError as e:
+        ap.error(f"invalid JSON request body: {e.msg} at line {e.lineno} column {e.colno}")
+    except (OSError, ValueError) as e:
+        ap.error(str(e))
+    if data and json_body and "Content-Type" not in headers:
         headers["Content-Type"] = "application/json"
 
     try:

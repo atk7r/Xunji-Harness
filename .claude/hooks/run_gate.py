@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -74,6 +75,15 @@ except Exception:
         return ts
 
     class SessionStateManager:
+        @staticmethod
+        def path(run_dir, *, for_write=False):
+            state_path = Path(run_dir) / "state" / "session_state.json"
+            legacy_path = Path(run_dir) / "session_state.json"
+            if for_write:
+                return state_path
+            if state_path.exists() or not legacy_path.exists():
+                return state_path
+            return legacy_path
         @staticmethod
         def load(run_dir):
             return {}
@@ -154,7 +164,12 @@ def _check_session_timeout(
     active_run = active_run or find_active_run(runs_root, within_sec=DRIFT_TIMEOUT_WINDOW_SEC)
     if active_run is None:
         return None, ""
-    sf = active_run / "session_state.json"
+    try:
+        sf = SessionStateManager.path(active_run)
+    except Exception:
+        sf = active_run / "state" / "session_state.json"
+        if not sf.exists():
+            sf = active_run / "session_state.json"
     if not sf.exists():
         return None, ""
     now = time.time()
@@ -457,26 +472,58 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
     if not should_remind:
         return None, ""
 
-    # Check if Agent Board has been used
+    decisions = run_dir / "decisions.md"
+    try:
+        dtext = decisions.read_text(encoding="utf-8", errors="replace") if decisions.exists() else ""
+    except Exception:
+        dtext = ""
+    if re.search(r"(?im)^\s*-\s*Agent Board (?:budget reason|fanout override)\s*[:：]\s*\S", dtext):
+        return None, ""
+
     agents_dir_path = run_dir / "agents"
     assignments_path = run_dir / "state" / "assignments.json"
+    try:
+        data = json.loads(assignments_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        data = {}
+    assignments = [a for a in data.get("assignments", []) if isinstance(a, dict)] \
+        if isinstance(data.get("assignments"), list) else []
 
-    has_agents = agents_dir_path.is_dir() and any(agents_dir_path.glob("A-*.md"))
-    has_assignments = False
-    if assignments_path.exists():
+    agents = {p.stem for p in agents_dir_path.glob("A-*.md")} if agents_dir_path.is_dir() else set()
+    problems: list[str] = []
+    if len(assignments) < 2:
+        problems.append(f"只记录了 {len(assignments)} 个 assignment, 需要 >=2")
+
+    fronts = {str(a.get("front") or "").strip() for a in assignments}
+    fronts.discard("")
+    if len(fronts) < 2:
+        problems.append("assignment 未覆盖至少两个不同 front")
+
+    missing_files = [str(a.get("agent") or "?") for a in assignments if str(a.get("agent") or "") not in agents]
+    if missing_files:
+        problems.append("缺少 agents/A-*.md 文件: " + ", ".join(missing_files[:5]))
+
+    started = []
+    for a in assignments:
+        status = str(a.get("status") or "").strip().lower()
         try:
-            data = json.loads(assignments_path.read_text(encoding="utf-8", errors="replace"))
-            has_assignments = isinstance(data.get("assignments"), list) and len(data["assignments"]) > 0
+            hb = int(a.get("heartbeat_count") or 0)
         except Exception:
-            pass
+            hb = 0
+        if hb > 0 or status in {"running", "working", "done", "merged", "blocked", "failed", "abandoned"}:
+            started.append(str(a.get("agent") or "?"))
+    if len(started) < min(2, len(assignments)):
+        problems.append("assignment 刚创建但未记录 heartbeat/start; spawn 后需 workers.py heartbeat --status running")
 
-    if has_agents or has_assignments:
-        return None, ""  # Agent Board used, pass
+    if problems:
+        return "block", (
+            f"open fronts={open_count} 且 barrier 多样, Agent Board 不能全串行。"
+            + "；".join(problems)
+            + "。请用 workers.py assign 分配 >=2 条不重叠 front lane，并在 Agent 启动时记录 heartbeat；"
+              "若确因预算/外部依赖不能 fanout，在 decisions.md 写 `Agent Board budget reason:`。"
+        )
 
-    return "block", (
-        f"open fronts >= 4 且独立(无共享 barrier)，但未使用 Agent Board。"
-        f"请用 workers.py assign 分配 >= 2 个 subagent。"
-    )
+    return None, ""
 
 
 def _extract_field(section: str, field_name: str) -> str:
@@ -618,7 +665,9 @@ def build_message(run_dir: Path, check_out: str) -> str:
     if len(tail) > 1600:
         tail = tail[-1600:]
     return ("[收口闸门] 你似乎在收尾 runs/" + run_dir.name + ", 但 check_run 未通过。"
-            "收口不是在聊天里宣布'测完了', 而是 run 文件过闸门。先处理下面的硬门再收尾"
+            "收口不是在聊天里宣布'测完了', 而是 run 文件过闸门。"
+            "同一回合内读取下面的硬门、修 run 文件/工具问题、重跑 check_run, 直到通过或确认外部 Type A 阻断。"
+            "先处理下面的硬门再收尾"
             "(覆盖台账缺建→跑 ingest_recon+classify_hosts; 假证据→补真产物或降级; "
             "缺独立复审→派 fresh-context reviewer):\n\n" + tail)
 
@@ -628,7 +677,7 @@ def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -
         f"[收口闸门] 你似乎在收尾 runs/{run_dir.name}, "
         f"但 frontier.md 仍有 {open_fronts} 个 open front。"
         "FINAL 必须同时满足 open fronts=0 且 check_run 通过; "
-        "请继续推进、降级或写入证据化 deferred/closed 理由。"
+        "请在同一回合继续推进、降级或写入证据化 deferred/closed 理由, 然后重跑 check_run。"
     )
     if check_out.strip():
         tail = check_out.strip()
@@ -1232,7 +1281,7 @@ def _selftest() -> int:
     checks.append(("agent board gate: diverse no agents -> block", mode4 == "block"))
     checks.append(("agent board gate: block message readable", "Agent Board" in (msg4 or "")))
 
-    # Case 5: >= 4 open fronts diverse, has agents/ dir -> pass
+    # Case 5: >= 4 open fronts diverse, has only agents/ dir -> block
     ab_run5 = ab_test / "diverse_with_agents"
     ab_run5.mkdir()
     (ab_run5 / "frontier.md").write_text(
@@ -1245,9 +1294,9 @@ def _selftest() -> int:
     (ab_run5 / "agents").mkdir()
     (ab_run5 / "agents" / "A-web-hunter-001.md").write_text("# Agent\n", encoding="utf-8")
     mode5, _ = _check_agent_board(ab_run5)
-    checks.append(("agent board gate: diverse with agents -> pass", mode5 is None))
+    checks.append(("agent board gate: diverse with only an agent file -> block", mode5 == "block"))
 
-    # Case 6: >= 4 open fronts diverse, has assignments.json -> pass
+    # Case 6: >= 4 open fronts diverse, has one assignment.json -> block
     ab_run6 = ab_test / "diverse_with_assignments"
     ab_run6.mkdir()
     (ab_run6 / "frontier.md").write_text(
@@ -1259,10 +1308,35 @@ def _selftest() -> int:
         encoding="utf-8")
     (ab_run6 / "state").mkdir(parents=True)
     (ab_run6 / "state" / "assignments.json").write_text(
-        json.dumps({"schema": 1, "assignments": [{"agent": "A-web-hunter-001", "status": "assigned"}]}),
+        json.dumps({"schema": 1, "assignments": [{"agent": "A-web-hunter-001", "front": "F-001", "status": "assigned"}]}),
         encoding="utf-8")
     mode6, _ = _check_agent_board(ab_run6)
-    checks.append(("agent board gate: diverse with assignments.json -> pass", mode6 is None))
+    checks.append(("agent board gate: diverse with one assignment -> block", mode6 == "block"))
+
+    # Case 7: >= 4 open fronts diverse, two started disjoint lanes -> pass
+    ab_run7 = ab_test / "diverse_with_two_started_lanes"
+    ab_run7.mkdir()
+    (ab_run7 / "frontier.md").write_text((ab_run6 / "frontier.md").read_text(encoding="utf-8"), encoding="utf-8")
+    (ab_run7 / "agents").mkdir()
+    for aid in ("A-web-hunter-001", "A-web-hunter-002"):
+        (ab_run7 / "agents" / f"{aid}.md").write_text("# Agent\n", encoding="utf-8")
+    (ab_run7 / "state").mkdir(parents=True)
+    (ab_run7 / "state" / "assignments.json").write_text(
+        json.dumps({"schema": 1, "assignments": [
+            {"agent": "A-web-hunter-001", "front": "F-001", "role": "web-hunter", "status": "running", "heartbeat_count": 1},
+            {"agent": "A-web-hunter-002", "front": "F-002", "role": "auth-reviewer", "status": "running", "heartbeat_count": 1},
+        ]}),
+        encoding="utf-8")
+    mode7, _ = _check_agent_board(ab_run7)
+    checks.append(("agent board gate: two started disjoint lanes -> pass", mode7 is None))
+
+    # Case 8: explicit budget reason -> pass without assignments
+    ab_run8 = ab_test / "diverse_with_budget_reason"
+    ab_run8.mkdir()
+    (ab_run8 / "frontier.md").write_text((ab_run6 / "frontier.md").read_text(encoding="utf-8"), encoding="utf-8")
+    (ab_run8 / "decisions.md").write_text("# Decisions\n- Agent Board budget reason: single safe lane left in scope\n", encoding="utf-8")
+    mode8, _ = _check_agent_board(ab_run8)
+    checks.append(("agent board gate: budget reason override -> pass", mode8 is None))
 
     bad = [n for n, ok in checks if not ok]
     # 输出到 stderr(与 safety_gate 一致): SessionStart 接线时不刷 context, 手动跑仍可见。

@@ -81,6 +81,12 @@ If `state/loop_state.json` says `progress.coda_converged=true`, treat it as a tr
 
 If `state/controller.shadow.json` gives a `next_required_action`, treat it as a control-plane challenge: record whether you follow it or override it, and cite the evidence-bound reason. The controller is advisory; it never selects the exploit step, promotes evidence, or closes the run.
 
+If `state/controller.shadow.json` has `can_stop=true` because a completion marker
+(`GHOST_COMPLETE` or `NORMAL_COMPLETE`) is already present, do not create or
+reschedule another loop iteration. If a scheduled loop exists in the current
+Claude Code session, cancel it before ending. Append the normal `end` journal
+event and finish with `BLOCKED: run already complete`.
+
 ### 3. Plan / Assign / Act
 If the selected move performs proof, verification, probing, or Agent execution,
 enter Hunter before the action and end Hunter after the action result has been

@@ -75,6 +75,7 @@ GROUP_CLASS_MAP: dict[str, set[str]] = {
     group: {_canonical(c) for c in classes if _canonical(c)}
     for group, classes in GROUPS
 }
+GROUP_BY_LOWER = {group.lower(): group for group, _ in GROUPS}
 
 
 EVIDENCE_GROUP_PATTERNS: dict[str, list[re.Pattern]] = {
@@ -336,6 +337,62 @@ def _parse_evidence_blocks(run_dir: Path) -> dict[str, dict]:
     return out
 
 
+def _parse_coverage_waivers(run_dir: Path) -> tuple[list[dict], list[str]]:
+    """Parse structured coverage waivers from canonical markdown.
+
+    Format, one line:
+      - Coverage waiver: asset=host.example; groups=Upload,XXE; reason=no upload surface; evidence=E-001
+
+    Waivers are only for matrix breadth accounting. They do not prove a finding
+    and do not close a front by themselves.
+    """
+    waivers: list[dict] = []
+    warnings: list[str] = []
+    for rel in ("frontier.md", "constraints.md", "decisions.md"):
+        path = run_dir / rel
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if "Coverage waiver:" not in line:
+                continue
+            raw = line.split("Coverage waiver:", 1)[1].strip()
+            fields = {
+                k.strip().lower(): v.strip()
+                for k, v in re.findall(r"([A-Za-z_ -]+)\s*=\s*([^;]+)", raw)
+            }
+            asset_raw = fields.get("asset") or fields.get("assets") or ""
+            groups_raw = fields.get("group") or fields.get("groups") or ""
+            reason = fields.get("reason") or ""
+            if not asset_raw or not groups_raw or not reason:
+                warnings.append(
+                    f"{rel}:{lineno}: Coverage waiver 缺 asset/groups/reason 字段, 已忽略")
+                continue
+            groups: set[str] = set()
+            for part in re.split(r"[,|/，、]+", groups_raw):
+                key = part.strip().lower()
+                if not key:
+                    continue
+                if key not in GROUP_BY_LOWER:
+                    warnings.append(
+                        f"{rel}:{lineno}: Coverage waiver group={part.strip()} 不在矩阵组名中, 已忽略该组")
+                    continue
+                groups.add(GROUP_BY_LOWER[key])
+            if not groups:
+                continue
+            wildcard = asset_raw.strip() in {"*", "all", "ALL"}
+            waivers.append({
+                "source": f"{rel}:{lineno}",
+                "asset": asset_raw,
+                "asset_tokens": sorted(_asset_tokens_from_value(asset_raw)),
+                "wildcard": wildcard,
+                "groups": sorted(groups),
+                "reason": reason,
+                "evidence": fields.get("evidence") or fields.get("evidenceid") or "",
+            })
+    return waivers, warnings
+
+
 def _evidence_groups(text: str) -> set[str]:
     if not EVIDENCE_TEST_FIELD_RE.search(text):
         return set()
@@ -397,8 +454,22 @@ def _class_groups(classes: set[str]) -> set[str]:
     return out
 
 
+def _waiver_applies(row: dict, group: str, waivers: list[dict]) -> bool:
+    row_tokens = set(row.get("tokens") or [])
+    for waiver in waivers:
+        if group not in set(waiver.get("groups") or []):
+            continue
+        if waiver.get("wildcard"):
+            return True
+        if row_tokens & set(waiver.get("asset_tokens") or []):
+            return True
+    return False
+
+
 def derive(run_dir: Path) -> dict:
     cov_path, cov, coverage_warnings = _load_coverage(run_dir)
+    waivers, waiver_warnings = _parse_coverage_waivers(run_dir)
+    coverage_warnings.extend(waiver_warnings)
     assets = [a for a in cov.get("assets", []) if isinstance(a, dict) and _asset_display(a)]
     relevant = [a for a in assets if _asset_relevant(a)]
     if not relevant:
@@ -450,7 +521,7 @@ def derive(run_dir: Path) -> dict:
             if group in tested:
                 cells[group] = "tested"
             elif group in applicable:
-                cells[group] = "untested"
+                cells[group] = "waived" if _waiver_applies(row, group, waivers) else "untested"
             else:
                 cells[group] = "not_applicable"
         row["cells"] = cells
@@ -461,7 +532,9 @@ def derive(run_dir: Path) -> dict:
         column_stats[group] = {
             "tested": sum(1 for r in matrix if r["cells"][group] == "tested"),
             "untested": sum(1 for r in matrix if r["cells"][group] == "untested"),
-            "applicable": sum(1 for r in matrix if r["cells"][group] in {"tested", "untested"}),
+            "waived": sum(1 for r in matrix if r["cells"][group] == "waived"),
+            "applicable": sum(1 for r in matrix if r["cells"][group] in {"tested", "untested", "waived"}),
+            "actionable": sum(1 for r in matrix if r["cells"][group] in {"tested", "untested"}),
         }
 
     row_gaps = []
@@ -479,7 +552,7 @@ def derive(run_dir: Path) -> dict:
 
     empty_columns = [
         group for group, stats in column_stats.items()
-        if stats["applicable"] > 0 and stats["tested"] == 0
+        if stats["actionable"] > 0 and stats["tested"] == 0
     ]
 
     return {
@@ -490,8 +563,9 @@ def derive(run_dir: Path) -> dict:
         "column_stats": column_stats,
         "empty_columns": empty_columns,
         "row_gaps": row_gaps,
+        "waivers": waivers,
         "warnings": coverage_warnings,
-        "legend": {"tested": "✓", "untested": "□", "not_applicable": "·"},
+        "legend": {"tested": "✓", "untested": "□", "waived": "~", "not_applicable": "·"},
     }
 
 
@@ -499,7 +573,7 @@ def check(run_dir: Path, *, closure: bool = False) -> tuple[list[str], list[str]
     data = derive(run_dir)
     warns: list[str] = []
     errors: list[str] = []
-    warns.extend(f"覆盖矩阵: coverage.json 解析异常, 已尝试下一个候选 —— {w}" for w in data.get("warnings", []))
+    warns.extend(f"覆盖矩阵: {w}" for w in data.get("warnings", []))
     if data["empty_columns"]:
         details = ", ".join(
             f"{g}(applicable={data['column_stats'][g]['applicable']})"
@@ -528,7 +602,7 @@ def render_markdown(data: dict) -> str:
     lines = [
         "# Coverage Matrix",
         "",
-        "Legend: ✓ tested / □ applicable but untested / · no current surface signal",
+        "Legend: ✓ tested / □ applicable but untested / ~ structured waiver / · no current surface signal",
         "",
         "| asset | " + " | ".join(groups) + " | fronts |",
         "|---|" + "|".join("---" for _ in groups) + "|---|",
@@ -546,6 +620,13 @@ def render_markdown(data: dict) -> str:
         lines.extend(["", "## Sparse Rows", ""])
         for r in data["row_gaps"]:
             lines.append(f"- {r['asset']}: {r['tested']}/{r['applicable']} applicable groups tested")
+    if data.get("waivers"):
+        lines.extend(["", "## Structured Waivers", ""])
+        for w in data["waivers"]:
+            ev = f"; evidence={w.get('evidence')}" if w.get("evidence") else ""
+            lines.append(
+                f"- {w.get('source')}: asset={w.get('asset')}; groups={', '.join(w.get('groups') or [])}; "
+                f"reason={w.get('reason')}{ev}")
     return "\n".join(lines) + "\n"
 
 
@@ -639,8 +720,23 @@ def _selftest() -> int:
     )
     bad_cov_data = derive(bad_cov)
     bad_cov_warns, bad_cov_errors = check(bad_cov)
+    waiver_run = d / "waiver"
+    waiver_run.mkdir()
+    (waiver_run / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "waived.example", "reachable": True, "flags": ["SURFACE:URL_FETCH"]},
+    ]}), encoding="utf-8")
+    (waiver_run / "frontier.md").write_text(
+        "# Frontier\n\n"
+        "## Deferred Fronts\n\n"
+        "### F-001\n"
+        "- Status: deferred\n"
+        "- Coverage waiver: asset=waived.example; groups=SSRF; reason=URL fetch sink absent in saved body; evidence=E-001\n",
+        encoding="utf-8")
+    waiver_data = derive(waiver_run)
+    waiver_warns, waiver_errors = check(waiver_run, closure=True)
     by_asset = {r["asset"]: r for r in data["rows"]}
     bad_by_asset = {r["asset"]: r for r in bad_cov_data["rows"]}
+    waiver_by_asset = {r["asset"]: r for r in waiver_data["rows"]}
     checks = [
         ("only reachable/unknown rows are included", "d.example" not in by_asset),
         ("auth vector fills Auth cell", by_asset["a.example"]["cells"]["Auth"] == "tested"),
@@ -668,6 +764,14 @@ def _selftest() -> int:
          by_asset["confounder.example"]["cells"]["Injection"] == "untested"),
         ("corrupt primary coverage warns while using nested coverage",
          "nested.example" in bad_by_asset and bad_cov_warns and not bad_cov_errors),
+        ("structured coverage waiver marks cell waived",
+         waiver_by_asset["waived.example"]["cells"]["SSRF"] == "waived"
+         and waiver_data["empty_columns"] == []
+         and waiver_warns == [] and waiver_errors == []),
+        ("structured coverage waiver renders reason",
+         "Coverage waiver" not in "\n".join(waiver_data.get("warnings", []))
+         and "Structured Waivers" in render_markdown(waiver_data)
+         and "URL fetch sink absent" in render_markdown(waiver_data)),
         ("check reports warnings only", warns and not errors),
         ("closure check upgrades matrix gaps to errors", closure_errors and not closure_warns),
         ("state outputs are written", (run / "state" / "coverage_matrix.json").exists()

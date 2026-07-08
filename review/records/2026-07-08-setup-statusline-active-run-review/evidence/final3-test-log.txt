@@ -1,0 +1,55 @@
+[setup] statusline active run skipped: /var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/tmpv54gcsy6/t3_20260101
+[setup] statusline active run skipped: selftest boom
+[setup] statusline active run: runs/run
+ok   all required files copied
+ok   evidence/ subdir
+ok   scripts/ subdir
+ok   operator profile scaffolded
+ok   frontier template has depth field
+ok   no-overwrite guard raises
+ok   setup phase banner is visible
+ok   setup phase journal closes
+ok   target.md records recon path
+ok   recon path with backslashes intact (no re.sub group bug)
+ok   surface_recon.md written w/ asset
+ok   ingest reports asset count
+ok   scope 派生填进 target.md Target
+ok   scope 派生填进 In-scope assets
+ok   record_scope 报派生计数
+ok   adapt_coverage 写 classify/coverage.json
+ok   coverage 含资产 a.example
+ok   coverage examined=0(零重探, 没发包)
+ok   coverage source 标 guanlan-adapter
+ok   no-recon target records 'none'
+ok   no-recon without Target does not claim coverage built
+ok   malformed target does not write coverage
+ok   record_target fills target.md Target
+ok   no-recon explicit target writes coverage
+ok   target-derived coverage parses scheme and port
+ok   setup writes statusline active run pointer
+ok   setup active-run selftest restores module pointer
+ok   setup active-run selftest leaves real pointer untouched
+ok   setup active-run selftest cleans temp dir
+ok   active-run helper tolerates rejected pointer
+ok   active-run helper tolerates pointer exception
+setup_run selftest passed
+ok   plain statusline is human-readable
+ok   open fronts use pentest wording
+ok   subagents are aggregated
+ok   next action uses plan note
+ok   colored statusline has ansi
+ok   XUNJI_COLOR command path has ansi
+ok   unknown phase fallback is styled
+ok   normal render is read-only
+ok   invalid outside run pointer is rejected
+ok   outside Xunji prints nothing
+xunji_statusline selftest passed
+rule check passed
+running 2 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14
+
+  PASS  setup_run          0.1s  run scaffolding
+  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline
+
+2 passed, 0 failed  (0.1s total)
+
+active=runs/scshr-r2_20260708

@@ -1,0 +1,146 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "6ddeb13bff54bc7e068005f002d84400dc0ad9df",
+  "evidence_index_hash": "4320dbe9a491042982bf0caa97a189e9c1ebb82b",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "evidence_gate",
+      "claim": "Confirmed evidence E-001/E-002/E-003 still rests on the original diff/test log, whose selftest mutates the real .claude/xunji_active_run pointer and leaks temp directories.",
+      "evidence": "evidence_index:E-001, evidence_index:E-002, evidence_index:E-003, evidence/diff.txt:575-595, evidence/test-log.txt, decisions.md:D-004, evidence/followup-diff.txt:575-601, evidence/test-log-rerun.txt",
+      "affected_eids": [
+        "E-001",
+        "E-002",
+        "E-003"
+      ],
+      "recommended_action": "Downgrade or supersede E-001/E-002/E-003; update the evidence ledger so confirmed findings point only at the followup artifacts, and remove confirmed status from original-diff-only entries.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The original selftest reads and writes the real ACTIVE_RUN path and leaves temp directories behind. D-004 explicitly accepts this as a defect, so evidence that violates an expected invariant cannot support a confirmed (>=0.8) finding.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "The report's 'Diff Under Review' section presents the original diff, while the Round 1 Follow-Up states the current diff is evidence/followup-diff.txt.",
+      "evidence": "report.md:Diff Under Review, report.md:Round 1 Follow-Up, evidence/followup-diff.txt, evidence/test-log-rerun.txt",
+      "affected_eids": [],
+      "recommended_action": "Replace the 'Diff Under Review' block with the followup diff, or add a prominent note that the section is superseded by evidence/followup-diff.txt.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Readers verifying the change against the stated invariants will see the unsafe original selftest instead of the fixed version, creating a contradiction within the report.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "controls",
+      "claim": "The revised selftest restores the original ACTIVE_RUN module constant in finally but does not assert that the original pointer/file is actually restored.",
+      "evidence": "evidence/followup-diff.txt:575-601, evidence/test-log-rerun.txt:last line active=runs/scshr-r2_20260708",
+      "affected_eids": [
+        "E-004"
+      ],
+      "recommended_action": "Add an explicit assertion after finally that xunji_statusline.active_run() equals the pre-test original pointer (or that the original file state is unchanged).",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Restoration is only demonstrated by an external post-test print. A silent failure in finally would not be caught by the selftest, weakening the regression coverage claim.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "false_positive_or_ambiguity",
+      "claim": "--classify semantics are ambiguous: the skill doc describes it as an authorized current egress recheck, while D-005 treats it strictly as one-shot run creation.",
+      "evidence": ".claude/skills/xunji-run-lifecycle/SKILL.md excerpt in evidence/diff.txt, decisions.md:D-005, report.md:Expected Invariants",
+      "affected_eids": [],
+      "recommended_action": "Reconcile the skill doc and decision: clarify whether --classify can operate on an existing run, and if so, ensure the active-run pointer update is gated to a successful new skeleton or explicitly documented.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] If --classify can target an existing run, automatically repointing the active-run pointer may surprise the operator. The docs and the decision contradict each other.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "minimax-m3: parse error; output tail:  a potential issue worth flagging. The decision D-005 dismisses a concern that may actually be valid based on the documentation.\n\nLet me think more carefully. The diff adds `_set_active_run(run_dir)` which is called unconditionally in `main()` after `scaffold(run_dir)`. The `scaffold()` function creates a NEW run directory. If `--classify` is for rechecking an existing run, then calling `setup_run.py --classify` would:\n1. Create a new run directory (via scaffold)\n2. Set the active-run pointer to; glm-5.2: parse error; output tail: ferent final state. But the report.md shows the original diff (ff2f45a), not the followup (9d8f26c).\n\n## Critical Issue 6: Missing `import shutil` in followup-diff.txt\n\nLooking at the followup-diff.txt, the selftest uses `shutil.rmtree(active_parent, ignore_errors=True)` but I don't see `import shutil` being added in the diff. Let me check if it's already imported elsewhere...\n\nThe diff only shows the changes. `shutil` might already be imported at the top of `setup_run.py`. But if it's not, this",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "E-002 evidence entry is stale — describes corrected behavior but cites v1 (unsafe) artifacts `evidence/diff.txt` and `evidence/test-log.txt` instead of the followup versions.",
+      "evidence": "evidence.md:29 (E-002 Artifacts field) vs evidence/followup-diff.txt (actual corrected code)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] A reader following E-002's artifact references sees the old, unsafe selftest that the review flagged. E-004 was added to document the fix but E-002 was never updated to point to corrected artifacts or cross-reference E-004.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-007",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Report embeds stale v1 diff as \"Diff Under Review\" — only the separate \"Round 1 Follow-Up\" section points to the corrected followup-diff.txt.",
+      "evidence": "report.md:31-142 (v1 diff) vs report.md:195-204 (acknowledges followup)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The report's primary diff section presents code that was already found to have two defects (pointer mutation, temp dir leak). This is misleading on first read even though the follow-up section corrects it.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-008",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "No test coverage for `_set_active_run()` failure/warning path — the \"best-effort\" guarantee is only tested for success.",
+      "evidence": "evidence/followup-diff.txt:95-105 (selftest block only tests success, never `set_active_run()` returning False or raising)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The function is documented as best-effort with printed warnings, but the warning path is untested. If `set_active_run()` changes behavior, the warning might silently break.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-009",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "No import resilience — `import xunji_statusline` at module level in `setup_run.py` with no `try/except ImportError` fallback.",
+      "evidence": "evidence/followup-diff.txt:54",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] If `xunji_statusline.py` gains a broken import, `setup_run.py` becomes completely unusable even for operations that don't touch the statusline. PR-005 dismissal only covered \"side effects\" not dependency resilience.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-010",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "All four frontier entries (F-001 through F-004) remain \"open-for-review\" — no formal front closure.",
+      "evidence": "frontier.md:5,10,15,20 (all Status: open-for-review)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] After two rounds of review, the fronts should be explicitly adjudicated with a verdict and rationale, not left open indefinitely.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [kimi-k2.7-code] The evidence ledger was not pruned after the follow-up diff was produced; original-diff entries remain confirmed.",
+    "[arkcli] [kimi-k2.7-code] The report body was not updated to display the follow-up diff, so the primary artifact a reviewer sees is stale.",
+    "[arkcli] [kimi-k2.7-code] No in-test assertion verifies restoration of the pre-existing active-run pointer.",
+    "[arkcli] [kimi-k2.7-code] The import-time side effects of xunji_statusline are asserted in review.md PR-005 but not independently evidenced in this bundle.",
+    "[arkcli] [kimi-k2.7-code] The actual behavior of --classify and whether it can target an existing run directory was not probed in the provided artifacts.",
+    "[claude] The `evidence.md` format lacks a \"superseded-by\" or \"obsoleted\" field, making it easy for stale entries (E-001, E-002) to coexist with their corrections (E-004) without cross-referencing. This is a process design issue, not a one-off mistake — it will recur.",
+    "[claude] The `_set_active_run()` unconditional main() call means ANY future code path through main() sets the active-run pointer. D-005 dismisses the `--classify` concern, but the general principle is under-documented: there's no comment explaining *why* it's desirable for every invocation to set the pointer, or when a future mode should skip it.",
+    "[claude] The followup selftest creates `.claude` as a side effect of `set_active_run()` but never asserts it exists explicitly — the test passes because `active_run()` returns the right value, not because the file was written to the correct path.",
+    "[claude] The `xunji_statusline.py` module itself was never in-scope for review — all claims about its import-time behavior, API contracts, and safety rest on trust, not verification."
+  ],
+  "context_limits": [
+    "[arkcli] minimax-m3: parse error; output tail:  a potential issue worth flagging. The decision D-005 dismisses a concern that may actually be valid based on the documentation.\n\nLet me think more carefully. The diff adds `_set_active_run(run_dir)` which is called unconditionally in `main()` after `scaffold(run_dir)`. The `scaffold()` function creates a NEW run directory. If `--classify` is for rechecking an existing run, then calling `setup_run.py --classify` would:\n1. Create a new run directory (via scaffold)\n2. Set the active-run pointer to",
+    "[arkcli] glm-5.2: parse error; output tail: ferent final state. But the report.md shows the original diff (ff2f45a), not the followup (9d8f26c).\n\n## Critical Issue 6: Missing `import shutil` in followup-diff.txt\n\nLooking at the followup-diff.txt, the selftest uses `shutil.rmtree(active_parent, ignore_errors=True)` but I don't see `import shutil` being added in the diff. Let me check if it's already imported elsewhere...\n\nThe diff only shows the changes. `shutil` might already be imported at the top of `setup_run.py`. But if it's not, this",
+    "[claude] I was unable to read `xunji_statusline.py` and `setup_run.py` full source — read access outside the review scope was denied. My assessment of import-time behavior, `set_active_run()` internals, and `--classify` code paths relies entirely on the diff fragments and review claims.",
+    "[claude] The Chinese-language skill files (`.claude/skills/*`) were only seen through diff hunks. Their surrounding prose might contain language about setup boundaries that I can't fully verify.",
+    "[claude] `check_rules.py` output is a single opaque line — I cannot assess whether the safety checks are substantive."
+  ],
+  "error": ""
+}
