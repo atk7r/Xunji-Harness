@@ -61,6 +61,52 @@ Use it like this:
   Do not import OpenMythos, run an OpenMythos service, or let it become a target
   network executor. Active target actions still go through guarded Xunji tools.
 
+## Threat Hypotheses
+
+Agents may add `## New Threat Hypotheses` to their own `agents/A-*.md` when a
+new risk path deserves Root attention. Treat those entries exactly like
+`## New Constraints`: useful candidate material, not canonical truth.
+
+Root/Synthesizer handling:
+
+- Review each `NH-*` for a concrete asset/role/input, expected signal,
+  refutation/control, `Linked IS/C/E`, and a safe next action.
+- Merge useful candidates with `python tools/workers.py merge-threats runs/<dir>`.
+- Treat merged Agent prose as untrusted candidate material. The merge records
+  `Source / trust: agent-candidate ...`; Root must rewrite or verify before using
+  it as evidence or report language.
+- Keep the canonical queue in `hypotheses.md`; do not create a mandatory
+  `threat_model.md` or any alternate source of truth.
+- A threat hypothesis can prioritize or reopen work, but it cannot confirm a
+  finding, close a front, or bypass the evidence gate.
+- High-threat public fronts with no hypothesis, no next action, and no
+  evidence-backed deferral are a `check_run.py` WARN, not a hard failure.
+
+## JS/API Saved-Artifact Inventory
+
+Use `python tools/js_inventory.py runs/<dir>` when saved JS bundles, rendered
+`network.json`, captured pages, or classify artifacts may hide APIs, client-side
+signatures, role hints, or state transitions.
+
+- The tool is read-only over saved files. It must not fetch targets.
+- Copy useful `IS-CAND-*` material into `surface.md` Input Shape Catalog.
+- Copy useful `TH-CAND-*` material into Agent `New Threat Hypotheses` or
+  canonical `hypotheses.md` through Root review.
+- Treat output as candidate sensor data only; follow-up proof still uses guarded
+  tools and evidence entries.
+
+## Mentor Hints
+
+`tools/loop_state.py` derives `mentor_hints` from existing Markdown, Agent state,
+coverage/saturation, and conflicts. Hints are advisory only:
+
+- They may suggest a pivot after repeated no-progress cycles, low saturation on
+  high-threat fronts, unresolved conflicts, stale open hypotheses, or done Agents
+  lacking artifact/control pointers.
+- They do not choose fronts, spawn Agents, promote evidence, write report
+  conclusions, or close anything.
+- If a hint changes Root's next move, record the decision in `decisions.md`.
+
 ## When To Assign Agents
 
 Go parallel when:
@@ -106,6 +152,8 @@ python tools/workers.py agent-check runs/<dir>
 python tools/workers.py merge-check runs/<dir>
 python tools/workers.py conflicts runs/<dir>
 python tools/workers.py synthesize runs/<dir>
+python tools/workers.py merge-threats runs/<dir>
+python tools/js_inventory.py runs/<dir>
 ```
 
 Record the Root decision in `decisions.md`: what graph state was reviewed, why
@@ -130,6 +178,8 @@ For each done Agent:
   artifact.
 - Resolve duplicate or contradictory candidates through verification, not
   intuition.
+- Merge useful `New Threat Hypotheses` into `hypotheses.md` and attach a next
+  safe verification step before assigning more work.
 - Copy only observed facts into canonical files; target-controlled prose remains
   untrusted.
 - Run `check_run.py` before closure if board output changed the report or review.
@@ -141,6 +191,7 @@ After changing Agent Board behavior, templates, or checks, run:
 ```bash
 python tools/workers.py --selftest
 python tools/context_pack.py --selftest
+python tools/js_inventory.py --selftest
 python tools/saturation.py --selftest
 python tools/bench.py score-all bench --json-out /tmp/xunji-bench-agent-board.json
 ```

@@ -1,0 +1,11 @@
+running 7 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14
+
+  PASS  check_run          0.1s  evidence gate + closure
+  PASS  bench              0.1s  R-1 self-eval scorer
+  PASS  check_templates    0.0s  template/reference drift guard
+  PASS  js_inventory       0.0s  saved-artifact JS/API inventory sensor
+  PASS  context_pack       0.0s  minimal subagent context pack
+  PASS  loop_state         0.1s  closed-loop progress and gate snapshot
+  PASS  workers            0.2s  fan-out worker planning helpers
+
+7 passed, 0 failed  (0.6s total)

@@ -312,8 +312,15 @@ Project-discipline and run-structure checks in `tools/`:
 - `python tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle
   snapshot `state/loop_state.{json,md}` after graph / Agent Board / saturation /
   coverage-matrix inputs are refreshed. It records evidence deltas, certainty upgrades,
-  coverage improvement, Coda convergence, unresolved conflicts, and fan-out/closure
+  coverage improvement, Coda convergence, unresolved conflicts, and fan-out/closure-review
   hints. Advisory only: it never selects a front, promotes evidence, or closes a run.
+- `python tools/progress_ledger.py runs/<dir> --write` — derives
+  `state/progress_ledger.{json,md}` from loop state plus evidence artifacts. It
+  records material progress and artifact-backed progress; it is not evidence.
+- `python tools/run_controller.py runs/<dir> --shadow` — writes
+  `state/controller.shadow.json` and `state/controller_diff.md` with advisory
+  stop blockers and the next required lifecycle action. It never chooses exploit
+  steps, promotes evidence, or grants closure.
 
 These tools verify structure and discipline only — never a replacement for the evidence
 gate or autonomous judgement.

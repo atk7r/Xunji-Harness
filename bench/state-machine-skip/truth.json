@@ -1,0 +1,26 @@
+{
+  "name": "state-machine-skip",
+  "run": "sample_run",
+  "expected_findings": [
+    {
+      "id": "workflow-skip",
+      "markers": ["state transition", "draft -> approved", "skip review"],
+      "min_certainty": 0.8
+    }
+  ],
+  "expected_process": [
+    {
+      "id": "state-edge-recorded",
+      "signals": ["State transition: draft -> approved", "State edge"],
+      "in": ["surface.md"],
+      "must": true
+    },
+    {
+      "id": "state-control-linked",
+      "signals": ["Linked threat hypothesis: H-001", "E-001"],
+      "in": ["surface.md", "hypotheses.md", "evidence.md"],
+      "must": true
+    }
+  ],
+  "budget": {"max_requests": 4}
+}

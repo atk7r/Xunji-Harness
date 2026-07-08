@@ -391,6 +391,20 @@ def _load_front_constraints(run_dir: Path, front_id: str) -> list[dict]:
     return constraints
 
 
+def _load_front_hypotheses(run_dir: Path, front_id: str, limit: int = 4) -> list[str]:
+    """Return H-blocks tied to this front, especially threat hypotheses."""
+    path = run_dir / "hypotheses.md"
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    out: list[str] = []
+    for m in re.finditer(r"(?ms)^##[ \t]+H-\d+.*?(?=^##[ \t]+H-\d+|\Z)", text):
+        block = m.group(0).strip()
+        if re.search(rf"(?<![A-Za-z0-9_-]){re.escape(front_id)}(?![A-Za-z0-9_-])", block):
+            out.append(block)
+    return out[:limit]
+
+
 def _load_cross_run_context(run_dir: Path, front_id: str) -> list[str]:
     """提取该 front 的 barrier class 在历史 run 中的表现, 返回 context 行列表。"""
     fr = run_dir / "frontier.md"
@@ -465,6 +479,14 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
             lines.append(f"- {host}: reachable={a.get('reachable')} stack={a.get('stack')} flags={flags}")
     else:
         lines.append("- (no coverage asset matched this front text)")
+
+    hypotheses = _load_front_hypotheses(run_dir, front)
+    if hypotheses:
+        lines += ["", "## Relevant Hypotheses / Threat Hypotheses"]
+        lines += [
+            "Use these as falsifiable queues only. They are not findings until Root promotes evidence."
+        ]
+        lines.extend(hypotheses)
 
     # 约束切片: 该 front 已被尝试并排除的 mechanism class + input shape
     constraints = _load_front_constraints(run_dir, front)
@@ -556,6 +578,18 @@ def _selftest() -> int:
     (d / "target.md").write_text("# Target\n- In-scope assets: app.example\n", encoding="utf-8")
     (d / "frontier.md").write_text(
         "# Frontier\n\n### F-001\n- Front: app.example auth kb:foobar-cms\n- Status: open\n", encoding="utf-8")
+    (d / "hypotheses.md").write_text(
+        "# Hypotheses\n\n"
+        "## H-001\n\n"
+        "- Claim: app.example hidden admin API may expose cross-role data\n"
+        "- Status: open\n"
+        "- Front: F-001\n"
+        "- Threat hypothesis: hidden admin API may expose cross-role data\n"
+        "- Asset/role/input: app.example user GET /api/admin/users\n"
+        "- Expected signal: role-specific response difference\n"
+        "- Refutation/control: unauth and user both 403\n"
+        "- Linked IS/C/E: IS-001\n",
+        encoding="utf-8")
     (d / "coverage.json").write_text(json.dumps({"assets": [
         {"host": "app.example", "reachable": True, "stack": "kb:foobar-cms", "flags": ["LOGIN"]},
         {"host": "other.example", "reachable": True},
@@ -601,6 +635,9 @@ def _selftest() -> int:
         ("pack includes knowledge pointer", "knowledge `foobar-cms`" in pack and "FooBar CMS" in pack),
         ("pack includes xday pointer without dumping note body", "local xday pointer" in pack and "local note" not in pack),
         ("pack includes evidence block", "E-001" in pack),
+        ("pack includes relevant threat hypothesis", "Relevant Hypotheses / Threat Hypotheses" in pack
+         and "hidden admin API may expose cross-role data" in pack
+         and "Linked IS/C/E: IS-001" in pack),
         ("pack includes personalized operator profile", "Operator Profile / Personalized RDT" in pack
          and "Recommended loop budget: 7" in pack and "custom_auth_depth" in pack
          and "custom lesson" in pack),

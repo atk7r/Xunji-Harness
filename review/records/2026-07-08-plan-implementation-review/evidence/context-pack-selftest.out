@@ -1,0 +1,11 @@
+ok   pack names front and role
+ok   pack includes matched coverage
+ok   pack includes knowledge pointer
+ok   pack includes xday pointer without dumping note body
+ok   pack includes evidence block
+ok   pack includes relevant threat hypothesis
+ok   pack includes personalized operator profile
+ok   malformed numeric profile values fall back safely
+ok   pack includes output contract
+ok   atomic write created file
+context_pack selftest passed

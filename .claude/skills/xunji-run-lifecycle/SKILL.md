@@ -96,13 +96,26 @@ Run structural checks at reviewer checkpoints and before report work:
 python tools/check_run.py runs/<dir>
 ```
 
+For loop/control-plane state, refresh the advisory caches:
+
+```bash
+python tools/loop_state.py runs/<dir> --write
+python tools/progress_ledger.py runs/<dir> --write
+python tools/run_controller.py runs/<dir> --shadow
+```
+
 Interpretation:
 
 - Passing means the required structure is present, not that the work is correct.
 - Warnings should either be fixed or explicitly resolved in run files.
 - Blockers must be fixed before closure.
-- `state/workflow_checkpoint.json`, `evidence.json`, and `graph.json` are derived
-  projections. Never edit them as primary truth.
+- `state/workflow_checkpoint.json`, `evidence.json`, `graph.json`,
+  `state/loop_state.json`, `state/progress_ledger.json`, and
+  `state/controller.shadow.json` are derived projections. Never edit them as
+  primary truth.
+- Coda convergence means the current trajectory needs review, pivot, or Agent
+  variance. It is not a Completion pause while open fronts, Type A barriers,
+  coverage gaps, saturation gaps, or unresolved review/Agent conflicts remain.
 
 Keep artifacts in their lanes: proof under `evidence/`, PoC/helper scripts under
 `scripts/`, coverage under `classify/`, and only core Markdown plus derived indexes

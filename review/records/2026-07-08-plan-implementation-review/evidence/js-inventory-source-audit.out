@@ -1,0 +1,2 @@
+PASS js_inventory imports no network client modules and calls no urlopen/request/create_connection
+imports= ['__future__', 'argparse', 'json', 'pathlib', 're', 'sys', 'tempfile', 'urllib.parse']

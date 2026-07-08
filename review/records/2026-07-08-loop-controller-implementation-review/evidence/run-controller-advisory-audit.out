@@ -1,0 +1,13 @@
+Command: production-path grep before def _selftest in shadow tools
+Scope excludes selftest temp-run writers.
+===== tools/run_controller.py production path =====
+37:def _write(path: Path, text: str) -> None:
+39:    path.write_text(text, encoding="utf-8")
+141:            "GHOST_COMPLETE only after hard gates pass",
+166:    _write(run_dir / "state" / "controller.shadow.json", json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+167:    _write(run_dir / "state" / "controller_diff.md", render_markdown(data))
+===== tools/progress_ledger.py production path =====
+46:def _write(path: Path, text: str) -> None:
+48:    path.write_text(text, encoding="utf-8")
+169:    _write(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+170:    _write(run_dir / "state" / "progress_ledger.md", render_markdown(data))

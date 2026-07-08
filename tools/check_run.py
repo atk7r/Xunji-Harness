@@ -916,6 +916,62 @@ def check_threat_triage(run_dir: Path) -> list[str]:
     return warns
 
 
+def _blankish_field(value: str | None) -> bool:
+    v = (value or "").strip()
+    if re.fullmatch(r"<[^>]*>", v):
+        return True
+    return v.lower() in {"", "-", "n/a", "na", "none", "unknown", "todo", "pending"}
+
+
+def _block_field(block: str, name: str) -> str:
+    hws = r"[^\S\n]"
+    m = re.search(rf"(?im)^{hws}*[-*]?{hws}*{re.escape(name)}{hws}*[:：]{hws}*([^\n]*)$", block)
+    return m.group(1).strip() if m else ""
+
+
+def check_threat_hypotheses(run_dir: Path) -> list[str]:
+    """Soft warning for high-threat public fronts with no falsifiable next path.
+
+    This intentionally stays a WARN: threat hypotheses are a discovery aid, not a
+    compatibility-breaking source of truth.
+    """
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return []
+    ftext = fr.read_text(encoding="utf-8", errors="replace")
+    hyp_text = (run_dir / "hypotheses.md").read_text(encoding="utf-8", errors="replace") \
+        if (run_dir / "hypotheses.md").exists() else ""
+    ev_text = _evidence_blocks_text(run_dir)
+    warns: list[str] = []
+    for block in re.split(r"(?=^###\s+F-\d+)", ftext, flags=re.MULTILINE):
+        fm = re.match(r"^###\s+(F-\d+)", block.lstrip())
+        if not fm:
+            continue
+        fid = fm.group(1)
+        role = _block_field(block, "Threat role").lower()
+        exposure = _block_field(block, "Threat exposure").lower()
+        if role not in _HIGH_THREAT_ROLES or exposure != "public-unauth":
+            continue
+        linked = _block_field(block, "Linked hypotheses")
+        has_hypothesis = (
+            not _blankish_field(linked)
+            or bool(re.search(rf"(?<![A-Za-z0-9_-]){re.escape(fid)}(?![A-Za-z0-9_-])", hyp_text))
+        )
+        has_next_action = not _blankish_field(_block_field(block, "Next autonomous move"))
+        status = _block_field(block, "Status").lower()
+        evidence_backed_deferral = "deferred" in status and bool(
+            re.search(rf"(?<![A-Za-z0-9_-]){re.escape(fid.lower())}(?![A-Za-z0-9_-])", ev_text)
+        )
+        if not has_hypothesis and not has_next_action and not evidence_backed_deferral:
+            head = block.strip().splitlines()[0][:60] if block.strip() else fid
+            warns.append(
+                f"威胁假设软警: {head!r} threat={role} exposure={exposure} 但无 Linked hypotheses/"
+                "hypotheses.md 关联、无 Next autonomous move、也非 evidence-backed deferral —— "
+                "高威胁 public front 缺少可证伪下一步, 容易变成看过但没真正打。补 H-xxx 威胁假设"
+                "(含 Expected signal/Refutation/control/Linked IS-C-E) 或记录下一步/负向 E-entry。")
+    return warns
+
+
 def check_surface_populated(run_dir: Path) -> list[str]:
     """surface.md 填充护栏(警告). surface.md 模板存在但 Entry Points 或 Assets 部分
     空内容(只有模板占位符或空行) —— 提示 driver 填充 surface.md。模板已建, 只是使用
@@ -2645,6 +2701,25 @@ def _selftest() -> int:
          not any("证据存疑" in w for w in _summarize_replay([{"verdict": "IDENTICAL", "method": "GET", "url": "http://x/a"}]))),
         ("replay 汇总: 空结果 -> 空", _summarize_replay([]) == []),
     ]
+    d21 = Path(tempfile.mkdtemp())
+    (d21 / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n"
+        "### F-001 identity public API\n"
+        "- Status: open\n"
+        "- Threat role: identity-auth\n"
+        "- Threat exposure: public-unauth\n"
+        "- Next autonomous move:\n"
+        "- Linked hypotheses:\n",
+        encoding="utf-8")
+    (d21 / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    threat_warn = check_threat_hypotheses(d21)
+    (d21 / "hypotheses.md").write_text(
+        "# Hypotheses\n\n## H-001\n- Front: F-001\n- Threat hypothesis: public identity API IDOR\n",
+        encoding="utf-8")
+    checks += [
+        ("威胁假设软警: HIGH+ public front 无 H/next/E -> 报警", bool(threat_warn)),
+        ("威胁假设软警: 关联 H 后消失", check_threat_hypotheses(d21) == []),
+    ]
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
@@ -2773,6 +2848,7 @@ def main() -> int:
     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
     warnings.extend(check_metacog_pass(run_dir))       # 收口前第二系统发散: 防主驱动盲区
     warnings.extend(check_threat_triage(run_dir))     # 威胁分级: HIGH+ deferred 无 E-entry → WARN
+    warnings.extend(check_threat_hypotheses(run_dir)) # 威胁假设: HIGH+ public front 无 H/next/E-backed deferral → WARN
     warnings.extend(check_surface_populated(run_dir))  # surface.md 填充: Entry Points/Assets 空 → WARN
     warnings.extend(check_agent_constraint_freshness(run_dir))  # Agent 约束新鲜度: done agent 可能错过新约束
     # 自动异构复审(--auto-peer-review): 收口时若缺独立复审记录, 自动跑 peer_review 写进 review.md

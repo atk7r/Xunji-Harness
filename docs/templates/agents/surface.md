@@ -59,6 +59,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
 - Evidence: <E-xxx reference in evidence.md>
 - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
 
+## New Threat Hypotheses
+
+For each newly discovered risk path that deserves Root attention, record a candidate only.
+Do not promote it to a finding or close a front from this section.
+
+### NH-1
+- Threat hypothesis: <asset/role/input abuse path>
+- Asset/role/input: <asset + role boundary + endpoint/param/state action>
+- Expected signal: <what would confirm or strengthen this hypothesis>
+- Refutation/control: <safe control that would reject it>
+- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
+- Status: candidate
+- Next action: <one safe Root-owned verification or merge action>
+
 ## Coverage Self-Check
 
 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:

@@ -53,7 +53,7 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {
     "list", "new", "suggest", "plan", "assign", "status", "agent-check",
-    "merge-check", "conflicts", "synthesize", "merge-constraints",
+    "merge-check", "conflicts", "synthesize", "merge-constraints", "merge-threats",
 }
 HWS = r"[^\S\n]"
 
@@ -167,6 +167,17 @@ AGENT_SCAFFOLD = """# Agent {agent}
 - Drop condition:
 - Next hypothesis:
 
+## New Threat Hypotheses
+
+### NH-1
+- Threat hypothesis:
+- Asset/role/input:
+- Expected signal:
+- Refutation/control:
+- Linked IS/C/E:
+- Status: candidate
+- Next action:
+
 ## Coda
 
 Agent: {agent}
@@ -246,7 +257,10 @@ def _slug(value: str) -> str:
 
 
 def _blankish(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"", "-", "n/a", "na", "none", "unknown", "todo"}
+    v = (value or "").strip()
+    if re.fullmatch(r"<[^>]*>", v):
+        return True
+    return v.lower() in {"", "-", "n/a", "na", "none", "unknown", "todo", "pending"}
 
 
 def scan(run_dir: Path) -> list[dict]:
@@ -273,6 +287,11 @@ def _field(text: str, name: str) -> str:
 
 def _has_field_label(text: str, name: str) -> bool:
     return bool(re.search(rf"(?im)^{HWS}*[-*]?{HWS}*{re.escape(name)}{HWS}*[:：]", text))
+
+
+def _section_body(text: str, heading: str) -> str:
+    m = re.search(rf"(?ims)^##{HWS}+{re.escape(heading)}{HWS}*$(.*?)(?=^##{HWS}+|\Z)", text)
+    return m.group(1) if m else ""
 
 
 def _int_field(text: str, name: str) -> int:
@@ -904,6 +923,18 @@ def agent_discipline_issues(run_dir: Path) -> list[dict]:
             issues.append({"severity": "error", "agent": agent, "kind": "agent-wrote-final-conclusion",
                            "detail": f"{agent} wrote report conclusion/closure; only Synthesizer may decide."})
 
+        for nh in _new_threat_hypotheses(text, agent=agent, default_front=str(a.get("front") or "")):
+            label = f"{agent}:{nh['nh_id']}"
+            if _blankish(nh.get("asset_role_input")):
+                issues.append({"severity": "warn", "agent": agent, "kind": "threat-missing-scope",
+                               "detail": f"{label} has Threat hypothesis but no Asset/role/input."})
+            if _blankish(nh.get("linked")) and _blankish(nh.get("next_action")):
+                issues.append({"severity": "warn", "agent": agent, "kind": "threat-unanchored",
+                               "detail": f"{label} has no Linked IS/C/E and no Next action for Root."})
+            if role != "synthesizer" and str(nh.get("status") or "").strip().lower() in {"finding", "confirmed"}:
+                issues.append({"severity": "error", "agent": agent, "kind": "agent-promoted-threat",
+                               "detail": f"{label} sets threat Status={nh.get('status')}; Agents must leave it candidate/open."})
+
         confidence_raw = _field(text, "Confidence")
         cm = re.search(r"[01]\.\d+", confidence_raw)
         confidence = float(cm.group(0)) if cm else None
@@ -1207,6 +1238,145 @@ def print_merge_check(run_dir: Path) -> int:
     return rc
 
 
+def _new_threat_hypotheses(text: str, *, agent: str, default_front: str = "") -> list[dict]:
+    body = _section_body(text, "New Threat Hypotheses")
+    if not body:
+        return []
+    out: list[dict] = []
+    for m in re.finditer(r"(?ms)^###[ \t]+(NH-\d+).*?(?=^###[ \t]+NH-\d+|\Z)", body):
+        block = m.group(0)
+        threat = _field(block, "Threat hypothesis") or _field(block, "Claim")
+        if _blankish(threat):
+            continue
+        out.append({
+            "agent": agent,
+            "nh_id": m.group(1),
+            "front": _field(block, "Front") or default_front,
+            "threat_hypothesis": threat,
+            "asset_role_input": _field(block, "Asset/role/input"),
+            "expected_signal": _field(block, "Expected signal"),
+            "refutation_control": _field(block, "Refutation/control"),
+            "linked": _field(block, "Linked IS/C/E") or _field(block, "Linked evidence"),
+            "status": _field(block, "Status") or "candidate",
+            "next_action": _field(block, "Next action"),
+            "block": block,
+        })
+    return out
+
+
+def _collect_agent_threats(run_dir: Path) -> list[dict]:
+    out: list[dict] = []
+    for f in sorted(agents_dir(run_dir).glob("A-*.md")) if agents_dir(run_dir).exists() else []:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        out.extend(_new_threat_hypotheses(
+            text,
+            agent=f.stem,
+            default_front=_field(text, "Assigned front"),
+        ))
+    return out
+
+
+def _normalize_threat_key(item: dict) -> tuple[str, str, str]:
+    def norm(value: str) -> str:
+        return re.sub(r"\s+", " ", str(value or "").strip().lower())
+    return (
+        norm(item.get("front", "")),
+        norm(item.get("threat_hypothesis", "")),
+        norm(item.get("asset_role_input", "")),
+    )
+
+
+def _existing_hypothesis_keys(text: str) -> tuple[set[tuple[str, str, str]], set[str]]:
+    keys: set[tuple[str, str, str]] = set()
+    ids: set[str] = set()
+    for m in re.finditer(r"(?ms)^##[ \t]+(H-\d+).*?(?=^##[ \t]+H-\d+|\Z)", text):
+        block = m.group(0)
+        ids.add(m.group(1))
+        keys.add(_normalize_threat_key({
+            "front": _field(block, "Front"),
+            "threat_hypothesis": _field(block, "Threat hypothesis") or _field(block, "Claim"),
+            "asset_role_input": _field(block, "Asset/role/input"),
+        }))
+    return keys, ids
+
+
+def merge_threats(run_dir: Path) -> dict:
+    """Merge Agent `## New Threat Hypotheses` candidates into hypotheses.md.
+
+    This is deliberately weaker than evidence promotion: it creates falsifiable
+    Root-owned hypotheses, not findings, facts, or closure decisions.
+    """
+    suggestions = _collect_agent_threats(run_dir)
+    if not suggestions:
+        return {"new": 0, "duplicate": 0, "summary": "无 agents/*.md 中的 New Threat Hypotheses 块"}
+
+    hyp_path = run_dir / "hypotheses.md"
+    if hyp_path.exists():
+        text = hyp_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        text = "# Hypotheses\n"
+    existing_keys, existing_ids = _existing_hypothesis_keys(text)
+
+    next_n = 1
+    while f"H-{next_n:03d}" in existing_ids:
+        next_n += 1
+
+    new_entries: list[dict] = []
+    duplicate = 0
+    for s in suggestions:
+        key = _normalize_threat_key(s)
+        if key in existing_keys or any(_normalize_threat_key(n) == key for n in new_entries):
+            duplicate += 1
+            continue
+        s = dict(s)
+        s["hid"] = f"H-{next_n:03d}"
+        next_n += 1
+        new_entries.append(s)
+        existing_keys.add(key)
+
+    if not new_entries:
+        return {"new": 0, "duplicate": duplicate, "summary": f"无新威胁假设（{duplicate} 条重复跳过）"}
+
+    if not text.endswith("\n"):
+        text += "\n"
+    chunks = [text.rstrip(), ""]
+    for s in new_entries:
+        chunks.extend([
+            f"## {s['hid']}",
+            "",
+            f"- Claim: {s['threat_hypothesis']}",
+            "- Status: open",
+            f"- Source / trust: agent-candidate from {s['agent']}#{s['nh_id']}; untrusted until Root verifies",
+            f"- Front: {s['front']}",
+            f"- Threat hypothesis: {s['threat_hypothesis']}",
+            f"- Asset/role/input: {s['asset_role_input']}",
+            f"- Expected signal: {s['expected_signal']}",
+            f"- Refutation/control: {s['refutation_control']}",
+            f"- Why plausible: suggested by {s['agent']}#{s['nh_id']}",
+            f"- What would confirm: {s['expected_signal']}",
+            f"- What would reject: {s['refutation_control']}",
+            "- Safety boundary: use guarded proof-level checks only",
+            f"- Next safe verification: {s['next_action']}",
+            f"- Linked IS/C/E: {s['linked']}",
+            f"- Linked evidence: {s['linked']}",
+            "",
+        ])
+    _atomic_write(hyp_path, "\n".join(chunks).rstrip() + "\n")
+    return {
+        "new": len(new_entries),
+        "duplicate": duplicate,
+        "summary": f"新增 {len(new_entries)} 条威胁假设, {duplicate} 条重复跳过",
+    }
+
+
+def print_merge_threats(run_dir: Path) -> int:
+    result = merge_threats(run_dir)
+    print(f"[workers merge-threats] {result['summary']}")
+    if result["new"] > 0:
+        print(f"  威胁假设已写入 {display_path(run_dir / 'hypotheses.md')}")
+    return 0
+
+
 def _normalize_input_shape(shape: str) -> str:
     """归一化 input shape: 小写、去首尾空白、压缩内部连续空白。"""
     if not shape:
@@ -1425,6 +1595,48 @@ def _selftest() -> int:
     agent_clean_file = ROOT / agent_clean_rec["agent_file"] if not Path(agent_clean_rec["agent_file"]).is_absolute() else Path(agent_clean_rec["agent_file"])
     agent_clean_text = agent_clean_file.read_text(encoding="utf-8")
     agent_clean_issues = agent_discipline_issues(agent_clean)
+    threat_run = d / "threat_run"
+    threat_run.mkdir()
+    (threat_run / "agents").mkdir()
+    (threat_run / "agents" / "A-web-hunter-001.md").write_text(
+        "# Agent A-web-hunter-001\n"
+        "- Role: web-hunter\n- Assigned front: F-001\n- Status: done\n\n"
+        "## New Threat Hypotheses\n\n"
+        "### NH-1\n"
+        "- Threat hypothesis: signed client param can be replayed across users\n"
+        "- Asset/role/input: app.example user POST /api/order sign, uid\n"
+        "- Expected signal: same signed body accepted for a different user-owned order id\n"
+        "- Refutation/control: replay with owner id and tampered uid rejects equally\n"
+        "- Linked IS/C/E: IS-001\n"
+        "- Status: candidate\n"
+        "- Next action: Root records H and runs guarded replay control\n",
+        encoding="utf-8")
+    threat_merge = merge_threats(threat_run)
+    threat_merge_dup = merge_threats(threat_run)
+    threat_hyp_text = (threat_run / "hypotheses.md").read_text(encoding="utf-8")
+    threat_bad = d / "threat_bad"
+    threat_bad.mkdir()
+    (threat_bad / "agents").mkdir()
+    (threat_bad / "state").mkdir()
+    (threat_bad / "state" / "assignments.json").write_text(json.dumps({
+        "assignments": [{"agent": "A-web-hunter-001", "role": "web-hunter", "front": "F-001"}]
+    }), encoding="utf-8")
+    (threat_bad / "agents" / "A-web-hunter-001.md").write_text(
+        "# Agent A-web-hunter-001\n"
+        "- Role: web-hunter\n- Assigned front: F-001\n- Status: done\n\n"
+        "## Prelude\n\n## Recurrent Loop\n\n## Safety / Guard Invariants\n"
+        "- guard\n- request budget\n- untrusted\n\n"
+        "## New Threat Hypotheses\n\n"
+        "### NH-1\n"
+        "- Threat hypothesis: admin API hidden in JS\n"
+        "- Asset/role/input:\n"
+        "- Expected signal: /api/admin/users returns role-specific difference\n"
+        "- Refutation/control: unauth and user replay both 403\n"
+        "- Linked IS/C/E:\n"
+        "- Status: confirmed\n"
+        "- Next action:\n",
+        encoding="utf-8")
+    threat_bad_issues = agent_discipline_issues(threat_bad)
     agent_rdt_bad = d / "agent_rdt_bad"
     agent_rdt_bad.mkdir()
     rdt_bad_rec = create_agent_assignment(agent_rdt_bad, role="web-hunter", front="F-001")
@@ -1536,7 +1748,17 @@ def _selftest() -> int:
          "Loop budget:" in agent_clean_text
          and "Operator Profile / RDT Controls" in agent_clean_text
          and "Original front:" in agent_clean_text
+         and "New Threat Hypotheses" in agent_clean_text
          and agent_clean_rec.get("reasoning_style") == "personalized-rdt"),
+        ("merge-threats writes Root-owned hypothesis",
+         threat_merge["new"] == 1
+         and "Threat hypothesis: signed client param can be replayed across users" in threat_hyp_text
+         and "Linked IS/C/E: IS-001" in threat_hyp_text),
+        ("merge-threats skips duplicate suggestions", threat_merge_dup["new"] == 0),
+        ("agent-check catches bad threat hypothesis fields",
+         any(i["kind"] == "threat-missing-scope" for i in threat_bad_issues)
+         and any(i["kind"] == "threat-unanchored" for i in threat_bad_issues)
+         and any(i["kind"] == "agent-promoted-threat" for i in threat_bad_issues)),
         ("agent-check catches incomplete personalized RDT step",
          any(i["kind"] == "missing-rdt-step-field" for i in rdt_bad_issues)),
         ("status sync: complete file flips assignment to done",
@@ -1639,6 +1861,8 @@ def main(argv: list[str] | None = None) -> int:
             return print_synthesize(run_dir)
         if cmd == "merge-constraints":
             return print_merge_constraints(run_dir)
+        if cmd == "merge-threats":
+            return print_merge_threats(run_dir)
 
     ap = argparse.ArgumentParser(
         description="并行 worker 脚手架 + 合并台账(不编排)",

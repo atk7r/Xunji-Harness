@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 import time
@@ -37,6 +38,11 @@ import workers  # noqa: E402
 SCHEMA = "xunji.loop_state.v1"
 CONFIRMED = 0.8
 PYTHON_CMD = sys.executable or "python3"
+OPEN_STATUS_TOKENS = {"open", "probing", "working", "blocked_type_a"}
+
+
+def _strip_fenced_code(text: str) -> str:
+    return re.sub(r"(?ms)^(```|~~~)[^\n]*\n.*?^\1[ \t]*\n?", "", text)
 
 
 def _resolve_run_dir(path: str | Path) -> Path:
@@ -55,6 +61,28 @@ def _read_json(path: Path, default):
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _status_tokens(raw: object) -> set[str]:
+    normalized = str(raw or "").lower().replace("-", "_")
+    return {t for t in re.findall(r"[a-z0-9_]+", normalized) if t}
+
+
+def _is_open_status(raw: object) -> bool:
+    tokens = _status_tokens(raw)
+    if {"closed", "deferred"} & tokens:
+        return False
+    return bool(tokens & OPEN_STATUS_TOKENS)
+
+
+def _is_deferred_status(raw: object) -> bool:
+    tokens = _status_tokens(raw)
+    return "deferred" in tokens and "closed" not in tokens
+
+
+def _is_closed_status(raw: object) -> bool:
+    tokens = _status_tokens(raw)
+    return "closed" in tokens and "deferred" not in tokens
 
 
 def _evidence_summary(run_dir: Path) -> dict:
@@ -106,14 +134,59 @@ def _coverage_summary(run_dir: Path, *, write: bool) -> dict:
     }
 
 
+def _front_section_statuses(run_dir: Path) -> dict[str, str]:
+    text = (run_dir / "frontier.md").read_text(encoding="utf-8", errors="replace") \
+        if (run_dir / "frontier.md").exists() else ""
+    text = _strip_fenced_code(text)
+    out: dict[str, str] = {}
+    for section, status in (
+        ("Open Fronts", "open"),
+        ("Deferred Fronts", "deferred"),
+        ("Closed Fronts", "closed"),
+    ):
+        m = re.search(rf"(?ms)^##[ \t]+{re.escape(section)}\b(.*?)(?=^##[ \t]+|\Z)", text)
+        if not m:
+            continue
+        for fm in re.finditer(r"(?m)^###[ \t]+(F-\d+)\b", m.group(1)):
+            out[fm.group(1)] = status
+    return out
+
+
 def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
-    fronts = [f for f in projection.get("fronts", []) if str(f.get("id", "")).startswith("F-")]
-    open_fronts = [
-        f for f in fronts
-        if str(f.get("status", "")).lower() in {"open", "probing", "working"}
+    real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}
+    fronts = [
+        f for f in projection.get("fronts", [])
+        if str(f.get("id", "")).startswith("F-")
+        and (not real_front_ids or str(f.get("id")) in real_front_ids)
     ]
-    deferred_fronts = [f for f in fronts if "deferred" in str(f.get("status", "")).lower()]
-    closed_fronts = [f for f in fronts if "closed" in str(f.get("status", "")).lower()]
+    section_statuses = _front_section_statuses(run_dir)
+
+    def front_status(f: dict) -> str:
+        raw = str(f.get("status", "") or "").strip()
+        if raw.lower() in {"", "unknown"}:
+            raw = section_statuses.get(str(f.get("id")), raw)
+        return raw
+
+    open_fronts = [f for f in fronts if _is_open_status(front_status(f))]
+    deferred_fronts = [f for f in fronts if _is_deferred_status(front_status(f))]
+    closed_fronts = [f for f in fronts if _is_closed_status(front_status(f))]
+    blocked_type_a = [
+        f.get("id") for f in fronts
+        if "blocked_type_a" in _status_tokens(front_status(f))
+    ]
+    blocked_type_b = [
+        f.get("id") for f in fronts
+        if "blocked_type_b" in _status_tokens(front_status(f))
+    ]
+    unclassified_status = [
+        f.get("id") for f in fronts
+        if (
+            not _is_open_status(front_status(f))
+            and not _is_deferred_status(front_status(f))
+            and not _is_closed_status(front_status(f))
+            and "blocked_type_b" not in _status_tokens(front_status(f))
+        )
+    ]
     barriers = [
         str(f.get("barrier") or "unknown").strip().lower()
         for f in open_fronts
@@ -137,6 +210,9 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
         "open": [f.get("id") for f in open_fronts],
         "deferred": [f.get("id") for f in deferred_fronts],
         "closed": [f.get("id") for f in closed_fronts],
+        "blocked_type_a": blocked_type_a,
+        "blocked_type_b": blocked_type_b,
+        "unclassified_status": unclassified_status,
         "open_count": len(open_fronts),
         "deferred_count": len(deferred_fronts),
         "closed_count": len(closed_fronts),
@@ -226,12 +302,25 @@ def _phase(fronts: dict, progress: dict) -> str:
 
 def _gates(fronts: dict, agents: dict, progress: dict, coverage: dict) -> dict:
     fanout_required = fronts["open_count"] >= 4 and fronts["diverse_barriers"]
-    completion_pause_candidate = (
-        progress["coda_converged"]
-        or (fronts["open_count"] == 0 and not fronts["unlocked_deferred"])
-    )
-    near_closure = completion_pause_candidate or (
-        fronts["open_count"] == 0 and bool(progress["confirmed_evidence"])
+    needs_conflict_resolution = agents["unresolved_conflicts"] > 0
+    needs_coverage_attention = bool(coverage["empty_columns"] or coverage["row_gaps"])
+    needs_saturation_attention = bool(fronts["low_saturation"])
+    closure_blockers: list[str] = []
+    if fronts["open_count"]:
+        closure_blockers.append("open_fronts_present")
+    if fronts["unlocked_deferred"]:
+        closure_blockers.append("unlocked_deferred_fronts")
+    if fronts.get("unclassified_status"):
+        closure_blockers.append("unclassified_front_status")
+    if needs_conflict_resolution:
+        closure_blockers.append("unresolved_agent_conflicts")
+    if needs_coverage_attention:
+        closure_blockers.append("coverage_attention_required")
+    if needs_saturation_attention:
+        closure_blockers.append("saturation_attention_required")
+    completion_pause_candidate = fronts["total"] > 0 and not closure_blockers
+    near_closure = completion_pause_candidate and bool(
+        progress["confirmed_evidence"] or fronts["closed_count"] or fronts["deferred_count"]
     )
     return {
         "fanout_required": fanout_required,
@@ -240,9 +329,11 @@ def _gates(fronts: dict, agents: dict, progress: dict, coverage: dict) -> dict:
             if fanout_required else ""
         ),
         "completion_pause_candidate": completion_pause_candidate,
-        "needs_conflict_resolution": agents["unresolved_conflicts"] > 0,
-        "needs_coverage_attention": bool(coverage["empty_columns"] or coverage["row_gaps"]),
-        "needs_saturation_attention": bool(fronts["low_saturation"]),
+        "needs_progress_pivot": bool(progress["coda_converged"]),
+        "needs_conflict_resolution": needs_conflict_resolution,
+        "needs_coverage_attention": needs_coverage_attention,
+        "needs_saturation_attention": needs_saturation_attention,
+        "closure_blockers": closure_blockers,
         "near_closure": near_closure,
         "closure_commands": [
             f"{PYTHON_CMD} tools/workers.py agent-check <run>",
@@ -268,13 +359,165 @@ def _next_actions(fronts: dict, agents: dict, progress: dict, gates: dict) -> li
         actions.append("Expand or justify low-saturation fronts before any explored-enough claim.")
     if gates["needs_coverage_attention"]:
         actions.append("Update fronts/evidence for coverage matrix empty columns or sparse rows.")
+    if fronts.get("unclassified_status"):
+        actions.append("Fix unclassified front statuses before closure review.")
     if progress["coda_converged"]:
-        actions.append("Trigger completion pause: run closure gates, independent review, and retrospective.")
+        actions.append("Coda convergence: record a trajectory review, pivot/continue rationale, or review/surface Agent assignment; this is not a closure signal by itself.")
+    if gates["completion_pause_candidate"]:
+        actions.append("Closure review candidate: run hard closure gates, replay verification, independent review, and retrospective before any pause.")
     elif not fronts["open_count"] and not fronts["unlocked_deferred"]:
-        actions.append("No open front visible; run review/closure checks or reopen missing work.")
+        if gates.get("closure_blockers"):
+            actions.append("No open front visible, but closure blockers remain; reopen or justify missing work before closure.")
+        else:
+            actions.append("No open front visible; run review/closure checks or reopen missing work.")
     else:
         actions.append("Choose the next front from actionable/open fronts and record a Root graph pass.")
     return actions
+
+
+def _front_blocks_text(run_dir: Path) -> list[tuple[str, str]]:
+    text = (run_dir / "frontier.md").read_text(encoding="utf-8", errors="replace") \
+        if (run_dir / "frontier.md").exists() else ""
+    text = _strip_fenced_code(text)
+    out: list[tuple[str, str]] = []
+    for m in re.finditer(r"(?ms)^###[ \t]+(F-\d+).*?(?=^###[ \t]+F-\d+|\Z)", text):
+        out.append((m.group(1), m.group(0)))
+    return out
+
+
+def _field(block: str, name: str) -> str:
+    m = re.search(rf"(?im)^\s*[-*]?\s*{re.escape(name)}\s*[:：]\s*([^\n]*)$", block)
+    return m.group(1).strip() if m else ""
+
+
+def _open_high_threat_fronts(run_dir: Path) -> list[str]:
+    out: list[str] = []
+    for fid, block in _front_blocks_text(run_dir):
+        status = _field(block, "Status").lower()
+        role = _field(block, "Threat role").lower()
+        exposure = _field(block, "Threat exposure").lower()
+        if _is_open_status(status) and role in {"admin-mgmt", "identity-auth", "data-pii"}:
+            out.append(fid if exposure != "public-unauth" else f"{fid}(public-unauth)")
+    return out
+
+
+def _high_threat_deferred_without_evidence(run_dir: Path) -> list[str]:
+    ev_text = (run_dir / "evidence.md").read_text(encoding="utf-8", errors="replace").lower() \
+        if (run_dir / "evidence.md").exists() else ""
+    out: list[str] = []
+    for fid, block in _front_blocks_text(run_dir):
+        status = _field(block, "Status").lower()
+        role = _field(block, "Threat role").lower()
+        exposure = _field(block, "Threat exposure").lower()
+        if "deferred" in status and role in {"admin-mgmt", "identity-auth", "data-pii"} \
+                and exposure == "public-unauth" and fid.lower() not in ev_text:
+            out.append(fid)
+    return out
+
+
+def _open_threat_hypotheses_without_action(run_dir: Path) -> list[str]:
+    path = run_dir / "hypotheses.md"
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    out: list[str] = []
+    for m in re.finditer(r"(?ms)^##[ \t]+(H-\d+).*?(?=^##[ \t]+H-\d+|\Z)", text):
+        block = m.group(0)
+        if not _field(block, "Threat hypothesis"):
+            continue
+        status = (_field(block, "Status") or "open").lower()
+        if status not in {"open", "suspected", "candidate"}:
+            continue
+        next_action = _field(block, "Next safe verification") or _field(block, "Next action")
+        linked = _field(block, "Linked IS/C/E") or _field(block, "Linked evidence")
+        if not next_action.strip() and not re.search(r"\b[EC]-\d+\b|\bIS-\d+\b", linked):
+            out.append(m.group(1))
+    return out
+
+
+def _mentor_hints(run_dir: Path, fronts: dict, agents: dict, progress: dict, gates: dict) -> list[dict]:
+    hints: list[dict] = []
+
+    def add(kind: str, reason: str, action: str, severity: str = "advisory") -> None:
+        hints.append({
+            "kind": kind,
+            "severity": severity,
+            "reason": reason,
+            "suggested_action": action,
+            "advisory_only": True,
+        })
+
+    if progress["no_progress_cycles"] >= 2:
+        add(
+            "no-progress-pivot",
+            f"{progress['no_progress_cycles']} consecutive cycles produced no new evidence, certainty upgrade, or coverage cell.",
+            "Pivot to a materially different mechanism, role, input shape, or control before spending more budget.",
+        )
+
+    repeated = []
+    for fid, block in _front_blocks_text(run_dir):
+        m = re.search(r"Same barrier failures:\s*(\d+)", block, re.I)
+        if m and int(m.group(1)) >= 2:
+            repeated.append(f"{fid}={m.group(1)}")
+    if repeated:
+        add(
+            "repeated-barrier",
+            "Same-barrier failures are accumulating: " + ", ".join(repeated[:6]),
+            "Record an explicit continue/pivot decision and avoid retrying the same bypass family without a changed precondition.",
+        )
+
+    high_open = _open_high_threat_fronts(run_dir)
+    if gates["needs_saturation_attention"] and high_open:
+        add(
+            "low-saturation-high-threat",
+            "Low saturation overlaps open high-threat front(s): " + ", ".join(high_open[:6]),
+            "Prefer mechanism-depth expansion or a documented Type B deferral over broad low-value enumeration.",
+        )
+
+    if gates["needs_conflict_resolution"]:
+        add(
+            "unresolved-agent-conflict",
+            f"{agents['unresolved_conflicts']} Agent conflict(s) remain unresolved.",
+            "Resolve through verification/control before promotion or closure.",
+        )
+
+    try:
+        discipline = workers.agent_discipline_issues(run_dir)
+    except Exception as exc:
+        discipline = []
+        add(
+            "agent-discipline-audit-unavailable",
+            f"Agent discipline audit failed: {type(exc).__name__}.",
+            "Run tools/workers.py agent-check manually before relying on Agent completion.",
+        )
+    agent_artifact_issues = [
+        i for i in discipline
+        if i.get("kind") in {"missing-artifact-pointer", "agent-missing-control"}
+    ]
+    if agent_artifact_issues:
+        names = sorted({str(i.get("agent")) for i in agent_artifact_issues})
+        add(
+            "done-agent-without-artifact-control",
+            "Done Agent claim material lacks artifact/control pointers: " + ", ".join(names[:6]),
+            "Downgrade candidate confidence or request artifact/control before synthesis.",
+        )
+
+    deferred = _high_threat_deferred_without_evidence(run_dir)
+    if deferred:
+        add(
+            "high-threat-deferred-without-evidence",
+            "High-threat public deferred front(s) lack E-entry support: " + ", ".join(deferred[:6]),
+            "Add a representative negative E-entry or reactivate the front.",
+        )
+
+    stale_h = _open_threat_hypotheses_without_action(run_dir)
+    if stale_h:
+        add(
+            "open-threat-hypothesis-without-action",
+            "Open threat hypotheses lack action/linkage: " + ", ".join(stale_h[:8]),
+            "Attach a Linked IS/C/E or one safe next verification step.",
+        )
+    return hints
 
 
 def derive(run_dir: Path, *, write: bool = False) -> dict:
@@ -300,6 +543,7 @@ def derive(run_dir: Path, *, write: bool = False) -> dict:
     gates = _gates(fronts, agents, progress, coverage)
     phase = _phase(fronts, progress)
     actions = _next_actions(fronts, agents, progress, gates)
+    mentor_hints = _mentor_hints(run_dir, fronts, agents, progress, gates)
 
     return {
         "schema": SCHEMA,
@@ -312,6 +556,7 @@ def derive(run_dir: Path, *, write: bool = False) -> dict:
         "coverage": coverage,
         "progress": progress,
         "gates": gates,
+        "mentor_hints": mentor_hints,
         "next_actions": actions,
     }
 
@@ -331,12 +576,18 @@ def render_markdown(data: dict) -> str:
         f"- No-progress cycles: {progress['no_progress_cycles']} ({'Coda converged' if progress['coda_converged'] else 'continue'})",
         f"- Agents: {agents['assignment_count']} assignments; unresolved conflicts: {agents['unresolved_conflicts']}",
         f"- Fan-out required: {'yes' if gates['fanout_required'] else 'no'}",
-        f"- Completion pause candidate: {'yes' if gates['completion_pause_candidate'] else 'no'}",
+        f"- Closure review candidate: {'yes' if gates['completion_pause_candidate'] else 'no'}",
         "",
         "## Next Actions",
         "",
     ]
     lines.extend(f"- {a}" for a in data.get("next_actions", []))
+    if data.get("mentor_hints"):
+        lines.extend(["", "## Mentor Hints", ""])
+        for item in data["mentor_hints"]:
+            lines.append(
+                f"- {item['kind']}: {item['reason']} Suggested: {item['suggested_action']} (advisory only)"
+            )
     if fronts.get("low_saturation"):
         lines.extend(["", "## Low Saturation", ""])
         for item in fronts["low_saturation"]:
@@ -464,6 +715,105 @@ def _selftest() -> int:
     (no_write / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
     (no_write / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
     no_write_data = derive(no_write, write=False)
+
+    blocked_run = d / "blocked_run"
+    blocked_run.mkdir()
+    (blocked_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n"
+        "### F-001 Admin\n"
+        "- Status: open, blocked_type_a\n"
+        "- Threat role: admin-mgmt\n"
+        "- Threat exposure: public-unauth\n"
+        "- Barrier class: auth-layer\n\n"
+        "### F-002 API\n"
+        "- Status: working (blocked_type_a)\n"
+        "- Barrier class: routing-layer\n",
+        encoding="utf-8",
+    )
+    (blocked_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (blocked_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (blocked_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    write_outputs(blocked_run)
+    write_outputs(blocked_run)
+    blocked_state = write_outputs(blocked_run)
+
+    hyphen_run = d / "hyphen_run"
+    hyphen_run.mkdir()
+    (hyphen_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n"
+        "### F-001\n"
+        "- Status: open (blocked-type-a: waiting)\n"
+        "- Barrier class: auth-layer\n",
+        encoding="utf-8",
+    )
+    (hyphen_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (hyphen_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (hyphen_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    hyphen_state = write_outputs(hyphen_run)
+
+    unknown_run = d / "unknown_run"
+    unknown_run.mkdir()
+    (unknown_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n"
+        "### F-001\n"
+        "- Status: needs triage\n"
+        "- Barrier class: app-layer\n",
+        encoding="utf-8",
+    )
+    (unknown_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (unknown_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (unknown_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    unknown_state = write_outputs(unknown_run)
+
+    conflicting_run = d / "conflicting_run"
+    conflicting_run.mkdir()
+    (conflicting_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n"
+        "### F-001\n"
+        "- Status: closed, deferred\n"
+        "- Barrier class: app-layer\n",
+        encoding="utf-8",
+    )
+    (conflicting_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (conflicting_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (conflicting_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    conflicting_state = write_outputs(conflicting_run)
+
+    section_fallback_run = d / "section_fallback_run"
+    section_fallback_run.mkdir()
+    (section_fallback_run / "frontier.md").write_text(
+        "# Frontier\n\n"
+        "## Deferred Fronts\n\n"
+        "```md\n"
+        "### F-999 Example only\n"
+        "- Status: deferred\n"
+        "```\n\n"
+        "### F-001\n"
+        "- Barrier class: network-layer\n\n"
+        "## Closed Fronts\n\n"
+        "### F-002\n"
+        "- Barrier class: none\n",
+        encoding="utf-8",
+    )
+    (section_fallback_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (section_fallback_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (section_fallback_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    section_fallback_state = write_outputs(section_fallback_run)
+
+    type_b_run = d / "type_b_run"
+    type_b_run.mkdir()
+    (type_b_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n"
+        "### F-001\n"
+        "- Status: blocked_type_b\n"
+        "- Barrier class: explored-enough\n",
+        encoding="utf-8",
+    )
+    (type_b_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (type_b_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (type_b_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    type_b_state = write_outputs(type_b_run)
+
     checks = [
         ("writes loop state json", (run / "state" / "loop_state.json").exists()),
         ("writes loop state markdown", (run / "state" / "loop_state.md").exists()),
@@ -472,6 +822,9 @@ def _selftest() -> int:
         ("first snapshot does not count existing evidence as new", first["progress"]["new_evidence_ids"] == []),
         ("no-progress cycles increase", second["progress"]["no_progress_cycles"] == 1),
         ("coda converges after two no-progress cycles", third["progress"]["coda_converged"]),
+        ("mentor hints include no-progress pivot",
+         any(h.get("kind") == "no-progress-pivot" for h in third.get("mentor_hints", []))
+         and "Mentor Hints" in render_markdown(third)),
         ("certainty upgrade resets no-progress", fourth["progress"]["certainty_upgrades"]
          and fourth["progress"]["no_progress_cycles"] == 0),
         ("coverage improvement is recorded", fourth["progress"]["coverage_new_tested_cells"]),
@@ -479,9 +832,41 @@ def _selftest() -> int:
         ("graph checkpoint written", (run / "state" / "workflow_checkpoint.json").exists()),
         ("agent conflicts are surfaced", agent_state["agents"]["unresolved_conflicts"] == 1
          and agent_state["gates"]["needs_conflict_resolution"]),
+        ("mentor hints include unresolved Agent conflict",
+         any(h.get("kind") == "unresolved-agent-conflict" for h in agent_state.get("mentor_hints", []))),
         ("default derive is no-write", no_write_data["schema"] == SCHEMA
          and not (no_write / "state").exists()
          and not (no_write / "graph.json").exists()),
+        ("type-a blocked statuses remain open",
+         blocked_state["fronts"]["open_count"] == 2
+         and set(blocked_state["fronts"]["blocked_type_a"]) == {"F-001", "F-002"}),
+        ("coda convergence is not closure while type-a fronts are open",
+         blocked_state["progress"]["coda_converged"]
+         and not blocked_state["gates"]["completion_pause_candidate"]
+         and "open_fronts_present" in blocked_state["gates"]["closure_blockers"]),
+        ("hyphenated type-a spelling remains open",
+         hyphen_state["fronts"]["open_count"] == 1
+         and hyphen_state["fronts"]["blocked_type_a"] == ["F-001"]),
+        ("unclassified statuses block closure review",
+         unknown_state["fronts"]["unclassified_status"] == ["F-001"]
+         and not unknown_state["gates"]["completion_pause_candidate"]
+         and "unclassified_front_status" in unknown_state["gates"]["closure_blockers"]),
+        ("conflicting terminal statuses block closure review",
+         conflicting_state["fronts"]["unclassified_status"] == ["F-001"]
+         and not conflicting_state["fronts"]["closed"]
+         and not conflicting_state["fronts"]["deferred"]
+         and "unclassified_front_status" in conflicting_state["gates"]["closure_blockers"]),
+        ("section headings provide deferred/closed fallback status",
+         section_fallback_state["fronts"]["deferred"] == ["F-001"]
+         and section_fallback_state["fronts"]["closed"] == ["F-002"]
+         and "F-999" not in section_fallback_state["fronts"]["deferred"]
+         and not section_fallback_state["fronts"]["unclassified_status"]),
+        ("blocked type-b is not open or unclassified",
+         type_b_state["fronts"]["blocked_type_b"] == ["F-001"]
+         and type_b_state["fronts"]["open_count"] == 0
+         and not type_b_state["fronts"]["unclassified_status"]
+         and type_b_state["gates"]["completion_pause_candidate"]
+         and not type_b_state["gates"]["near_closure"]),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:

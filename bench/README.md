@@ -101,5 +101,7 @@ time-to-first-evidence 上升时返回 1, 可当 A/B 回归门。
 
 - `example-dvwa-sqli/` —— 合成的 DVWA 风格样例(SQLi + reflected XSS + 一个"登录页非漏洞"
   陷阱), 演示 schema 与打分, 也是 `bench.py` 的随附回归样本。**非真实目标**。
-- 另有 10 个合成 fixture, 覆盖 auth/IDOR、injection、upload/path、path traversal、recorded
-  closure 和 Ultra-native Agent Board collaboration。它们只用于离线评估, 不含真实交战发现物。
+- 另有 17 个合成 fixture, 覆盖 auth/IDOR、injection、upload/path、path traversal、recorded
+  closure、Ultra-native Agent Board collaboration、JS/API hidden routes、client-side signature
+  hints、permission/state matrix、threat-hypothesis-to-evidence, and mentor-pivot canaries。
+  它们只用于离线评估, 不含真实交战发现物。

@@ -1,0 +1,8 @@
+running 4 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14
+
+  PASS  loop_state         0.1s  closed-loop progress and gate snapshot
+  PASS  progress_ledger    0.1s  material-progress ledger
+  PASS  run_controller     0.1s  advisory shadow run controller
+  PASS  loop_bootstrap     0.3s  autonomous loop launcher
+
+4 passed, 0 failed  (0.5s total)

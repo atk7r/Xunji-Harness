@@ -33,8 +33,26 @@
 - Auth required: none
 - Response shape: JSON {code: int, msg: string, data: object|null}
 - Seen on hosts: app.example.com
+- Source JS/artifact: evidence/render_app/network.json or evidence/app.bundle.js
+- Client-controlled params: phone, password
+- Client-side signature/token/nonce logic: none / sign(param+ts) in app.bundle.js
+- Role or permission hint: public-unauth / user-owned id / admin-only route hint
+- State transition: none / draft->submitted / created->paid
+- Linked threat hypothesis: H-001
 - Tested payload classes: SQLi-login (C-004), NoSQLi (C-005)
 - Saturation: 2/5 (SQLi, NoSQLi, type-confusion, SSTI, auth-bypass)
+
+## Permission / State Working Matrix (Conditional)
+
+<!-- 条件段 —— 只有存在多角色/多账号或可观察状态机时填写。
+     单账号时写 cross-role: N/A (single account)。矩阵只是工作笔记:
+     不能凭矩阵关闭 front, 结论仍要回到 H/IS/C/E 和 evidence gate。 -->
+
+- cross-role: N/A (single account)
+
+| Front | Action/request | Role A expected | Role B observed E-id | State edge | Next control |
+|---|---|---|---|---|---|
+| F-001 | GET /api/profile?id=... | owner-only | E-001 | n/a | replay with victim-owned id |
 
 ## Discovery Channels
 

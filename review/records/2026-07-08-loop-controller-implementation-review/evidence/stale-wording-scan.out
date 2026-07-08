@@ -1,0 +1,3 @@
+Command: rg -n "(Coda stop signal|stop the autonomous drive|Completion pause checks)" CLAUDE.md docs/templates/loop_prompt.md .claude/skills/xunji-run-lifecycle/SKILL.md docs/WORKFLOW.md docs/WORKFLOW-reference.md docs/ROUTER.md tools/loop_state.py tools/run_controller.py tools/loop_bootstrap.py
+Files: CLAUDE.md docs/templates/loop_prompt.md .claude/skills/xunji-run-lifecycle/SKILL.md docs/WORKFLOW.md docs/WORKFLOW-reference.md docs/ROUTER.md tools/loop_state.py tools/run_controller.py tools/loop_bootstrap.py
+Result: no stale wording found

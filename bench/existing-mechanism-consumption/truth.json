@@ -1,0 +1,32 @@
+{
+  "name": "existing-mechanism-consumption",
+  "run": "sample_run",
+  "expected_findings": [
+    {
+      "id": "hidden-export-idor",
+      "markers": ["hidden tenant export", "surface js refs", "loop_state no-progress pivot"],
+      "min_certainty": 0.8
+    }
+  ],
+  "expected_process": [
+    {
+      "id": "consumed-surface-discovery-channels",
+      "signals": ["JS refs consumed", "Source JS/artifact: evidence/app.bundle.js"],
+      "in": ["agents/A-web-hunter-001.md", "surface.md"],
+      "must": true
+    },
+    {
+      "id": "consumed-frontier-unruled-out",
+      "signals": ["Unruled out consumed: exportId owner check"],
+      "in": ["agents/A-web-hunter-001.md"],
+      "must": true
+    },
+    {
+      "id": "consumed-loop-state-hint",
+      "signals": ["Mentor Hints", "no-progress-pivot consumed"],
+      "in": ["state/loop_state.md", "agents/A-web-hunter-001.md"],
+      "must": true
+    }
+  ],
+  "budget": {"max_requests": 4}
+}

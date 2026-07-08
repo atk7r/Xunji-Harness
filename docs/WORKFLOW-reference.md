@@ -17,7 +17,8 @@ runs/<slug>_<date>/
   evidence.json     auto-derived index of evidence.md (check_run writes it)
   graph.json        derived state graph (graph.py writes it)
   state/            derived caches: projection.json · events.jsonl ·
-                    workflow_checkpoint.json · coverage_matrix.* · loop_state.*
+                    workflow_checkpoint.json · coverage_matrix.* · loop_state.* ·
+                    progress_ledger.* · controller.shadow.json · controller_diff.md
   evidence/         sensor proof artifacts: *.html, *.replay.json, render_<host>/, screenshots
   classify/         classify_hosts output: coverage.json + per-host bodies
   scripts/          PoC / helper scripts (author-and-handoff)
@@ -102,6 +103,32 @@ and ingest it (core "Ingest Existing Intelligence First") before any probing.
   - Why it matters:
   - Normal explanations:
   - Follow-up:
+
+## Input Shape Catalog
+
+### IS-001
+
+- URL pattern:
+- Content-Type:
+- Key params:
+- Auth required:
+- Response shape:
+- Seen on hosts:
+- Source JS/artifact:
+- Client-controlled params:
+- Client-side signature/token/nonce logic:
+- Role or permission hint:
+- State transition:
+- Linked threat hypothesis:
+- Tested payload classes:
+- Saturation:
+
+## Permission / State Working Matrix (Conditional)
+
+- cross-role: N/A (single account)
+
+| Front | Action/request | Role A expected | Role B observed E-id | State edge | Next control |
+|---|---|---|---|---|---|
 ```
 
 ### hypotheses.md — queue of falsifiable claims
@@ -113,16 +140,23 @@ and ingest it (core "Ingest Existing Intelligence First") before any probing.
 
 - Claim:
 - Status: open / suspected / confirmed / rejected / abandoned
+- Source / trust: <operator-reviewed | agent-candidate from A-...; untrusted until Root verifies>
+- Threat hypothesis: <optional; concrete asset/role/input abuse path>
+- Asset/role/input:
+- Expected signal:
+- Refutation/control:
 - Why plausible:
 - What would confirm:
 - What would reject:
 - Safety boundary:
 - Next safe verification:
+- Linked IS/C/E:
 - Linked evidence:
 ```
 
 One hypothesis = one concrete risk. Do not bundle multiple investigation ideas into
-a single hypothesis.
+a single hypothesis. Threat hypothesis fields are optional discovery aids, not a
+separate threat-model source of truth.
 
 ### frontier.md — exploration frontier (not a fixed checklist)
 
@@ -447,8 +481,20 @@ saturation, evidence parser, and coverage matrix into `<run>/state/loop_state.js
 and `<run>/state/loop_state.md`. This is the per-cycle closed-loop snapshot:
 evidence delta, certainty upgrades, coverage-matrix improvement, no-progress
 cycle count, Coda convergence, fan-out-required hints, unresolved conflicts, and
-closure gate hints. It is derived and advisory only. It never selects the next
+closure-review hints. It is derived and advisory only. It never selects the next
 front, promotes Agent output, closes a front, or writes report conclusions.
+
+`tools/progress_ledger.py` writes `<run>/state/progress_ledger.json` and `.md`.
+It records whether the last cycle produced material progress, whether evidence
+progress has saved artifact backing, and whether Coda/no-progress counters are
+accumulating. It is a progress audit cache, not evidence.
+
+`tools/run_controller.py --shadow` writes `<run>/state/controller.shadow.json`
+and `<run>/state/controller_diff.md`. It consumes loop/progress state and reports
+the shadow control-plane state, stop blockers, and next required lifecycle action.
+It is advisory only: it never chooses exploit steps, promotes evidence, or grants
+`GHOST_COMPLETE`. Its `can_stop` field is intentionally false in shadow mode;
+only hard closure gates plus Root adjudication can authorize a stop.
 
 ## Agent Board
 
@@ -481,6 +527,10 @@ only for older runs.
   context packs, assignment state, conflict records, and synthesis drafts. It is
   **not** a JSON orchestrator — it never spawns Agents and never writes canonical
   findings. Same guardrail as the graph: tooling assists, it never drives.
+- Agents may write `## New Threat Hypotheses` exactly as candidate material.
+  Root/Synthesizer reviews and merges useful entries with
+  `tools/workers.py merge-threats`; canonical tracking stays in `hypotheses.md`,
+  never a mandatory `threat_model.md`.
 - `state/operator_profile.json` is optional per-run personalization for Agent
   reasoning shape: loop budgets, role focus, evidence/review style, and
   retrospective lessons. `context_pack.py` injects it into context packs and

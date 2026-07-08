@@ -66,6 +66,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("record_evidence", ["tools/record_evidence.py", "--selftest"], "web research -> evidence ledger"),
     ("decode_viewstate", ["tools/decode_viewstate.py", "--selftest"], "ASP.NET ViewState decoder"),
     ("input_shape",     ["tools/input_shape.py", "--selftest"],     "request shape parser"),
+    ("js_inventory",    ["tools/js_inventory.py", "--selftest"],    "saved-artifact JS/API inventory sensor"),
     ("oob_listener",    ["tools/oob_listener.py", "--selftest"],    "local OOB listener"),
     ("sensor_oob",      ["tools/sensors/oob_listener.py", "--selftest"], "OOB callback artifact sensor"),
     ("sensor_mutate",   ["tools/sensors/mutate_payload.py", "--selftest"], "payload mutation artifact sensor"),
@@ -76,6 +77,8 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("context_pack",    ["tools/context_pack.py", "--selftest"], "minimal subagent context pack"),
     # --- loop pipeline ---
     ("loop_state",       ["tools/loop_state.py", "--selftest"], "closed-loop progress and gate snapshot"),
+    ("progress_ledger",  ["tools/progress_ledger.py", "--selftest"], "material-progress ledger"),
+    ("run_controller",   ["tools/run_controller.py", "--selftest"], "advisory shadow run controller"),
     ("loop_bootstrap",   ["tools/loop_bootstrap.py", "--selftest"],   "autonomous loop launcher"),
     ("session_handoff",  ["tools/session_handoff.py", "--selftest"],  "session handoff tool"),
     ("deferred_queue",   ["tools/deferred_queue.py", "--selftest"],   "deferred asset retry manager"),

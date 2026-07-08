@@ -1,0 +1,1 @@
+python3 -m py_compile tools/loop_state.py tools/progress_ledger.py tools/run_controller.py tools/loop_bootstrap.py: pass

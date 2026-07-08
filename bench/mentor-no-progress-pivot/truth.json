@@ -1,0 +1,26 @@
+{
+  "name": "mentor-no-progress-pivot",
+  "run": "sample_run",
+  "expected_findings": [
+    {
+      "id": "pivot-produced-refutation",
+      "markers": ["mentor no-progress-pivot", "materially different control", "refuted"],
+      "min_certainty": 0.8
+    }
+  ],
+  "expected_process": [
+    {
+      "id": "mentor-hint-visible",
+      "signals": ["Mentor Hints", "no-progress-pivot", "advisory only"],
+      "in": ["state/loop_state.md"],
+      "must": true
+    },
+    {
+      "id": "root-recorded-pivot",
+      "signals": ["no-progress-pivot consumed", "materially different mechanism"],
+      "in": ["decisions.md"],
+      "must": true
+    }
+  ],
+  "budget": {"max_requests": 2}
+}

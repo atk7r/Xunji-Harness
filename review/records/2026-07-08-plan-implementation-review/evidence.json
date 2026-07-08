@@ -1,0 +1,246 @@
+{
+  "total": 6,
+  "confirmed": [
+    "E-002",
+    "E-003",
+    "E-004",
+    "E-005",
+    "E-006"
+  ],
+  "confirmed_findings": [
+    "E-002",
+    "E-003",
+    "E-004",
+    "E-005",
+    "E-006"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001",
+      "certainties": [
+        0.3
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-maintenance-diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-maintenance-diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/implementation.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/implementation.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/selftest-selected.out",
+        "evidence/workers-selftest.out",
+        "evidence/context-pack-selftest.out",
+        "evidence/check-run-selftest.out",
+        "evidence/loop-state-selftest.out",
+        "evidence/js-inventory-selftest.out",
+        "evidence/bench-selftest.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/selftest-selected.out",
+        "evidence/workers-selftest.out",
+        "evidence/context-pack-selftest.out",
+        "evidence/check-run-selftest.out",
+        "evidence/loop-state-selftest.out",
+        "evidence/js-inventory-selftest.out",
+        "evidence/bench-selftest.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/bench-score-all.out",
+        "evidence/bench-score-all.json"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/bench-score-all.out",
+        "evidence/bench-score-all.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/check-rules.out",
+        "evidence/check-templates.out",
+        "evidence/git-diff-check.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/check-rules.out",
+        "evidence/check-templates.out",
+        "evidence/git-diff-check.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/js-inventory-no-network-control.out",
+        "evidence/js-inventory-source-audit.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/js-inventory-no-network-control.out",
+        "evidence/js-inventory-source-audit.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-006",
+      "head": "## E-006",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/workers-selftest.out",
+        "evidence/context-pack-selftest.out",
+        "evidence/check-run-selftest.out",
+        "evidence/loop-state-selftest.out",
+        "evidence/js-inventory-selftest.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/workers-selftest.out",
+        "evidence/context-pack-selftest.out",
+        "evidence/check-run-selftest.out",
+        "evidence/loop-state-selftest.out",
+        "evidence/js-inventory-selftest.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

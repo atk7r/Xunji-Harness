@@ -1,0 +1,275 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-08-plan-implementation-review",
+  "files": {
+    "report.md": {
+      "sha1": "add10021e46450d1abc7fdb3e6d510c2ecc38eac",
+      "size": 4430
+    },
+    "evidence.md": {
+      "sha1": "5888ca9b70383bd213dd1b56afba87ca48454d61",
+      "size": 2840
+    },
+    "target.md": {
+      "sha1": "ad4ce3a0c4c1bc007c66c81d57eb06197174da33",
+      "size": 548
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001",
+        "maturity": "phenomenon",
+        "certainties": [
+          0.3
+        ],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/implementation.diff",
+            "path": "evidence/implementation.diff",
+            "exists": true,
+            "size": 85020,
+            "sha1": "728b3707e5747627cb04edfff280d21a82edcd5f"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/bench-selftest.out",
+            "path": "evidence/bench-selftest.out",
+            "exists": true,
+            "size": 1753,
+            "sha1": "f9fe4566215acaef2f3074a6f77536c1ec70fd01"
+          },
+          {
+            "token": "evidence/check-run-selftest.out",
+            "path": "evidence/check-run-selftest.out",
+            "exists": true,
+            "size": 8351,
+            "sha1": "e1932bc16f8c2ebfc3cb13a86d7a2feba8addb39"
+          },
+          {
+            "token": "evidence/context-pack-selftest.out",
+            "path": "evidence/context-pack-selftest.out",
+            "exists": true,
+            "size": 441,
+            "sha1": "fd76a8af0b8efc049cb75658781c4196f8a4c66a"
+          },
+          {
+            "token": "evidence/js-inventory-selftest.out",
+            "path": "evidence/js-inventory-selftest.out",
+            "exists": true,
+            "size": 247,
+            "sha1": "4815d86bcee4d7b09424e5dcf6b4466d36cafcea"
+          },
+          {
+            "token": "evidence/loop-state-selftest.out",
+            "path": "evidence/loop-state-selftest.out",
+            "exists": true,
+            "size": 618,
+            "sha1": "8015b9557823f196b696872d9da1bf11198f3822"
+          },
+          {
+            "token": "evidence/selftest-selected.out",
+            "path": "evidence/selftest-selected.out",
+            "exists": true,
+            "size": 560,
+            "sha1": "2d4957ce1ed65a77f6f263fc12d79acb5077c00c"
+          },
+          {
+            "token": "evidence/workers-selftest.out",
+            "path": "evidence/workers-selftest.out",
+            "exists": true,
+            "size": 2334,
+            "sha1": "80695273342daa9e82af11765c2270845b98515a"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/bench-score-all.json",
+            "path": "evidence/bench-score-all.json",
+            "exists": true,
+            "size": 28981,
+            "sha1": "d17e6801a1d9328c87027a1f44e6f6745bdeba77",
+            "excerpt": "{\n  \"summary\": {\n    \"fixtures\": 18,\n    \"clean\": 18,\n    \"detection_rate\": 1.0,\n    \"calibration_rate\": 1.0,\n    \"false_positives\": 0,\n    \"false_positive_rate_mean\": 0.0,\n    \"request_budget_over\": 0,\n    \"request_budget_total\": 23,\n    \"time_to_first_evidence_avg_sec\": 1.98,\n    \"closure_correct\": 1,\n    \"closure_expected\": 1,\n    \"agent_assignments\": 2,\n    \"agent_count\": 4,\n    \"missed_high_value_fronts\": 0,\n    \"role_mismatched_fronts\": 0,\n    \"conflicts_unresolved\": 0,\n    \"collaboration_checks_failed\": 0,\n    \"false_positive_suppression_events\": 14,\n    \"agent_first_evidence_avg_sec\": 1.75,\n    \"total_expected_findings\": 18,\n    \"total_detected_findings\": 18,\n    \"total_calibrated_findings\": 18\n  },\n  \"scores\": [\n    {\n      \"fixture\": \"auth-idor-profile\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 2,\n      \"recorded_requests\": 2,\n      \"budget_max\": 8,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": 2.0,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"profile-idor\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.9,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 2,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 1,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"auth-idor-tenant-record\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 2,\n      \"recorded_requests\": 3,\n      \"budget_max\": 10,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": 1.8,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"tenant-record-idor\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 1.0,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 2,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 1,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"example-dvwa-sqli\",\n      \"expected\": 2,\n      \"detected\": 2,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 2,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 3,\n      \"recorded_requests\": 0,\n      \"budget_max\": 100,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": null,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"sqli-union\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 1.0,\n          \"calibrated\": true\n        },\n        {\n          \"id\": \"xss-reflected\",\n          \"detected\": true,\n          \"matched_eid\": \"E-003\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.9,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 3,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 1,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"existing-mechanism-consumption\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 1,\n      \"recorded_requests\": 0,\n      \"budget_max\": 4,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": null,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"hidden-export-idor\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.8,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [\n        {\n          \"id\": \"consumed-surface-discovery-channels\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"JS refs consumed\",\n            \"Source JS/artifact: evidence/app.bundle.js\"\n          ]\n        },\n        {\n          \"id\": \"consumed-frontier-unruled-out\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Unruled out consumed: exportId owner check\"\n          ]\n        },\n        {\n          \"id\": \"consumed-loop-state-hint\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Mentor Hints\",\n            \"no-progress-pivot consumed\"\n          ]\n        }\n      ],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 1,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 1,\n        \"confirmed_findings\": 1,\n        \"candidate_to_finding_conversion\": 1.0,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 0,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"injection-error-sqli\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 1,\n      \"recorded_requests\": 2,\n      \"budget_max\": 6,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": 1.1,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"error-sqli\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.8,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 1,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 0,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"injection-nosql-filter\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 2,\n      \"recorded_requests\": 2,\n      \"budget_max\": 8,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": 1.5,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"nosql-filter-injection\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.9,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 2,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 1,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"js-hidden-api-threat\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 1,\n      \"recorded_requests\": 0,\n      \"budget_max\": 4,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": null,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"hidden-admin-role-diff\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.8,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [\n        {\n          \"id\": \"js-inventory-produced-input-shape\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"JS Inventory\",\n            \"IS-CAND-001\",\n            \"Candidate Threat Hypotheses\"\n          ]\n        },\n        {\n          \"id\": \"surface-recorded-js-source\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Source JS/artifact: evidence/app.js\",\n            \"Role or permission hint: admin/management route\"\n          ]\n        }\n      ],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 1,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 0,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"mentor-no-progress-pivot\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 1,\n      \"recorded_requests\": 0,\n      \"budget_max\": 2,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": null,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"pivot-produced-refutation\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.8,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [\n        {\n          \"id\": \"mentor-hint-visible\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Mentor Hints\",\n            \"no-progress-pivot\",\n            \"advisory only\"\n          ]\n        },\n        {\n          \"id\": \"root-recorded-pivot\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"no-progress-pivot consumed\",\n            \"materially different mechanism\"\n          ]\n        }\n      ],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 1,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 1,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"path-normalization-bypass\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 2,\n      \"recorded_requests\": 3,\n      \"budget_max\": 10,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": 2.0,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"path-normalization-bypass\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.9,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 2,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 1,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"path-traversal-download\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 2,\n      \"recorded_requests\": 2,\n      \"budget_max\": 8,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": 1.4,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"download-path-traversal\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 1.0,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 2,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 1,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"permission-matrix-idor\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 1,\n      \"recorded_requests\": 0,\n      \"budget_max\": 5,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": null,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"cross-role-idor\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.8,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [\n        {\n          \"id\": \"conditional-permission-matrix-used\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Permission / State Working Matrix\",\n            \"Role B observed E-id\",\n            \"Next control\"\n          ]\n        },\n        {\n          \"id\": \"matrix-linked-to-evidence-not-closure\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"E-001\",\n            \"replay with victim-owned id\"\n          ]\n        }\n      ],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 1,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 0,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"recorded-closure-static-site\",\n      \"expected\": 0,\n      \"detected\": 0,\n      \"detection_rate\": null,\n      \"calibrated\": 0,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 2,\n      \"recorded_requests\": 2,\n      \"budget_max\": 6,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": 2.0,\n      \"closure\": {\n        \"expected\": true,\n        \"correct\": true,\n        \"markers_ok\": true,\n        \"review_ok\": true,\n        \"no_positive_findings\": true\n      },\n      \"findings\": [],\n      \"fp_detail\": [],\n      \"process\": [],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 2,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 2,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"signed-client-param\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 1,\n      \"recorded_requests\": 0,\n      \"budget_max\": 3,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": null,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"signature-bound-refutation\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.8,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [\n        {\n          \"id\": \"surface-recorded-signature-logic\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Client-side signature/token/nonce logic\",\n            \"Source JS/artifact: evidence/order.js\"\n          ]\n        },\n        {\n          \"id\": \"hypothesis-has-refutation-control\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Refutation/control: tampered owner id rejected\",\n            \"Linked IS/C/E: IS-001\"\n          ]\n        }\n      ],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 1,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 1,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"state-machine-skip\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 1,\n      \"recorded_requests\": 0,\n      \"budget_max\": 4,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": null,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"workflow-skip\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.8,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [\n        {\n          \"id\": \"state-edge-recorded\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"State transition: draft -> approved\",\n            \"State edge\"\n          ]\n        },\n        {\n          \"id\": \"state-control-linked\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Linked threat hypothesis: H-001\",\n            \"E-001\"\n          ]\n        }\n      ],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 0,\n        \"high_value_fronts\": 0,\n        \"assigned_high_value_fronts\": 0,\n        \"missed_high_value_fronts\": [],\n        \"role_mismatched_fronts\": [],\n        \"candidate_agents\": 0,\n        \"confirmed_findings\": 1,\n        \"candidate_to_finding_conversion\": null,\n        \"conflicts_total\": 0,\n        \"conflicts_unresolved\": 0,\n        \"conflict_resolution_correct\": null,\n        \"request_budget_by_agent\": {},\n        \"time_to_first_evidence_by_mode_sec\": {},\n        \"false_positive_suppression_events\": 0,\n        \"checks\": []\n      }\n    },\n    {\n      \"fixture\": \"threat-hypothesis-to-evidence\",\n      \"expected\": 1,\n      \"detected\": 1,\n      \"detection_rate\": 1.0,\n      \"calibrated\": 1,\n      \"calibration_rate\": 1.0,\n      \"false_positives\": 0,\n      \"false_positive_rate\": 0.0,\n      \"confirmed_total\": 1,\n      \"recorded_requests\": 0,\n      \"budget_max\": 3,\n      \"over_budget\": false,\n      \"time_to_first_evidence_sec\": null,\n      \"closure\": null,\n      \"findings\": [\n        {\n          \"id\": \"hypothesis-linked-refutation\",\n          \"detected\": true,\n          \"matched_eid\": \"E-001\",\n          \"min_certainty\": 0.8,\n          \"got_certainty\": 0.8,\n          \"calibrated\": true\n        }\n      ],\n      \"fp_detail\": [],\n      \"process\": [\n        {\n          \"id\": \"agent-produced-new-threat-hypothesis\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"New Threat Hypotheses\",\n            \"Linked IS/C/E: IS-001\",\n            \"Next action\"\n          ]\n        },\n        {\n          \"id\": \"root-merged-threat-hypothesis\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"Threat hypothesis:\",\n            \"Asset/role/input:\",\n            \"Expected signal:\",\n            \"Refutation/control:\"\n          ]\n        },\n        {\n          \"id\": \"evidence-linked-back-to-hypothesis\",\n          \"fired\": true,\n          \"must\": true,\n          \"signals\": [\n            \"H-001\",\n            \"IS-001\",\n            \"replay rejected\"\n          ]\n        }\n      ],\n      \"collaboration\": {\n        \"assignments\": 0,\n        \"agents\": 1,\n    ",
+            "excerpt_truncated_chars": 4981
+          },
+          {
+            "token": "evidence/bench-score-all.out",
+            "path": "evidence/bench-score-all.out",
+            "exists": true,
+            "size": 6931,
+            "sha1": "782dcd4f170e1da1a2ec9036a3cffe6ff9b6aa35"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/check-rules.out",
+            "path": "evidence/check-rules.out",
+            "exists": true,
+            "size": 18,
+            "sha1": "6e4be8266323611639310b21bc51562d32574dfc"
+          },
+          {
+            "token": "evidence/check-templates.out",
+            "path": "evidence/check-templates.out",
+            "exists": true,
+            "size": 22,
+            "sha1": "8dcf38ce1d69c8bcb94effec805965fd44aa3ea5"
+          },
+          {
+            "token": "evidence/git-diff-check.out",
+            "path": "evidence/git-diff-check.out",
+            "exists": true,
+            "size": 41,
+            "sha1": "ad2901d659ceba72f15fcd4e15cc151e6629f57d"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-005",
+        "head": "## E-005",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/js-inventory-no-network-control.out",
+            "path": "evidence/js-inventory-no-network-control.out",
+            "exists": true,
+            "size": 84,
+            "sha1": "08a2477f5f131866ccacc06ab9d1f87e4202f9da"
+          },
+          {
+            "token": "evidence/js-inventory-source-audit.out",
+            "path": "evidence/js-inventory-source-audit.out",
+            "exists": true,
+            "size": 195,
+            "sha1": "ab1d5b4109797667f544f2871261bc61f776817c"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-006",
+        "head": "## E-006",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/check-run-selftest.out",
+            "path": "evidence/check-run-selftest.out",
+            "exists": true,
+            "size": 8351,
+            "sha1": "e1932bc16f8c2ebfc3cb13a86d7a2feba8addb39"
+          },
+          {
+            "token": "evidence/context-pack-selftest.out",
+            "path": "evidence/context-pack-selftest.out",
+            "exists": true,
+            "size": 441,
+            "sha1": "fd76a8af0b8efc049cb75658781c4196f8a4c66a"
+          },
+          {
+            "token": "evidence/js-inventory-selftest.out",
+            "path": "evidence/js-inventory-selftest.out",
+            "exists": true,
+            "size": 247,
+            "sha1": "4815d86bcee4d7b09424e5dcf6b4466d36cafcea"
+          },
+          {
+            "token": "evidence/loop-state-selftest.out",
+            "path": "evidence/loop-state-selftest.out",
+            "exists": true,
+            "size": 618,
+            "sha1": "8015b9557823f196b696872d9da1bf11198f3822"
+          },
+          {
+            "token": "evidence/workers-selftest.out",
+            "path": "evidence/workers-selftest.out",
+            "exists": true,
+            "size": 2334,
+            "sha1": "80695273342daa9e82af11765c2270845b98515a"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "c258a06af115d86a9b472a4bfa8782bde951e4c6"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Maintenance Review Brief\n\n## Objective\n\nReview the Codex-authored implementation of the optimized Xunji plan. Judge whether the diff makes AI autonomous vulnerability discovery more likely to produce confirmed findings or stronger refutations without adding a new truth source, unsafe executor, or hard gate that breaks old runs.\n\n## Main Changes\n\n- Added seven bench canaries: existing mechanism consumption, JS hidden API threat, signed client param, permission matrix IDOR, state machine skip, threat hypothesis to evidence, and mentor no-progress pivot.\n- Added Agent `## New Threat Hypotheses`, `workers.py merge-threats`, context-pack injection of relevant hypotheses, and `check_run.py` WARN for high-threat public fronts with no H/next/E-backed deferral.\n- Added `tools/js_inventory.py`, a read-only saved-artifact JS/API sensor; registered its selftest.\n- Added conditional JS/API input-shape fields and permission/state matrix fields to `surface.md`.\n- Added derived `mentor_hints` to `loop_state.py`; hints are advisory only.\n- Updated Claude primary-driver skill `.claude/skills/xunji-agent-board/SKILL.md` and shared workflow docs/templates.\n\n## Review Questions\n\n1. Does any change create a second source of truth, bypass the evidence gate, or let Agents promote findings/closure?\n2. Are the new checks soft where promised, especially threat hypotheses and mentor hints?\n3. Is `js_inventory.py` truly read-only over saved artifacts, with no network target fetch?\n4. Do the canaries require outcome/action/evidence linkage rather than field presence only?\n5. Is any important Claude primary-driver behavior missing from `.claude/skills` or shared templates/tools?\n\n## Driver Answers\n\n1. No second source of truth is introduced: threat candidates merge into `hypotheses.md`; JS candidates merge into `surface.md`/`hypotheses.md`; `loop_state.py` remains a derived cache. Agents still cannot promote findings or closure; `workers.py agent-check` errors on Agent `Maturity: finding` and final conclusion fields. `merge-threats` now labels merged Agent prose as `Source / trust: agent-candidate ...; untrusted until Root verifies`, so target/Agent text is not silently treated as evidence.\n2. Threat hypotheses and mentor hints are soft/advisory: `check_run.py` adds only WARN text for high-threat public fronts lacking H/next/E-backed deferral, and `loop_state.py` emits `mentor_hints` without writing canonical evidence/front/report state.\n3. `js_inventory.py` reads files under the run directory only. It blocks explicit paths outside the run in selftest and passed a runtime no-network control with socket/urlopen monkeypatched to fail; see E-005.\n4. The seven new canaries require process plus linkage/outcome. Examples: `threat-hypothesis-to-evidence` requires Agent `NH-*`, canonical H fields, and an E-entry; `permission-matrix-idor` requires matrix row linked to E-001; `mentor-no-progress-pivot` requires hint plus decision plus E-entry. The full bench run is E-003.\n5. Claude primary-driver behavior was updated in `.claude/skills/xunji-agent-board/SKILL.md`; shared behavior was updated in `docs/WORKFLOW*.md`, `docs/templates`, and `tools`. `.agents/skills` was not edited.\n\n## Residual Limits\n\n- Synthetic bench fixtures prove framework process and regression signals, not real-world vulnerability yield by themselves.\n- Several fixtures intentionally have `recorded_requests: 0` because bench request count is a lower bound from saved replay/events; this is acceptable for process canaries but weaker than live A/B request accounting.\n- `.agents/skills` was not edited because the operator explicitly set the boundary: default framework behavior is Claude primary-driver plus shared templates/tools; `.agents/skills` is Codex auxiliary guidance only.\n\n## Verification Already Run\n\n- `python3 tools/workers.py --selftest`\n- `python3 tools/context_pack.py --selftest`\n- `python3 tools/check_run.py --selftest`\n- `python3 tools/loop_state.py --selftest`\n- `python3 tools/js_inventory.py --selftest`\n- `python3 tools/bench.py --selftest`\n- `python3 tools/selftest_all.py --only context_pack,workers,loop_state,check_run,js_inventory,bench,check_templates`\n- `python3 tools/bench.py score-all bench --json-out /tmp/xunji-bench-after-plan.json` -> 18/18 clean\n- `python3 tools/check_rules.py`\n- `python3 tools/check_templates.py`\n- `git diff --check`\n\n## Frozen Diff Artifact\n\n- `evidence/implementation.diff`\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 180000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "ebf25ac4035f615af094044b34ae067032af7192"
+}

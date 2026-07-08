@@ -1,0 +1,7 @@
+ok   extracts fetch endpoint
+ok   extracts axios endpoint
+ok   extracts saved network json endpoint
+ok   detects signature nonce logic
+ok   emits candidate threat hypothesis only
+ok   blocks explicit paths outside run
+js_inventory selftest passed

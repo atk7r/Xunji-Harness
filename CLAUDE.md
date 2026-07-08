@@ -89,15 +89,17 @@ observe -> update state graph -> decompose fronts
 
 - While safe fronts remain, **don't ask the operator which class to test next**;
   choose it yourself, record why in `decisions.md`.
-- **Convergence Gate (Coda stop signal):** After every cycle, the Root reads each
-  OpenMythos Coda output from the state graph. If the past 2 consecutive cycles
-  produced **zero new evidence entries, zero certainty upgrades, AND zero
-  coverage-matrix improvement** on any open front or applicable asset×vuln-family
-  cell, the Coda has converged — stop the autonomous drive and trigger the
-  Completion pause (Pause 2) regardless of remaining Type A fronts. "Type A" is
-  NOT a permanent license to continue; it expires when the Coda has nothing new
-  to say. Coverage-matrix improvement means a previously `□` cell became tested
-  through a recorded front/evidence update; relabeling, adding unsupported
+- **Convergence Gate (Coda trajectory review):** After every cycle, the Root
+  reads each Coda/progress output from the derived state graph. If the past 2
+  consecutive cycles produced **zero new evidence entries, zero certainty
+  upgrades, AND zero coverage-matrix improvement** on any open front or
+  applicable asset×vuln-family cell, the Coda has converged. This is a mandatory
+  trajectory-review signal, not a Completion pause by itself: record why the path
+  stalled, then pivot mechanism/input shape/role, assign a review/surface Agent,
+  or explicitly justify continuing with a changed precondition. Remaining open
+  fronts and Type A barriers still block stop until evidence-backed adjudication
+  resolves them. Coverage-matrix improvement means a previously `□` cell became
+  tested through a recorded front/evidence update; relabeling, adding unsupported
   applicability, or firing a class only to fill a cell does not count. Use
   `python tools/coverage_matrix.py runs/<dir> --write` as the derived coverage
   view; do not treat it as an attack checklist.

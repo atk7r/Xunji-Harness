@@ -1,0 +1,23 @@
+ok   writes loop state json
+ok   writes loop state markdown
+ok   fanout required with four diverse open fronts
+ok   coverage attention is surfaced
+ok   first snapshot does not count existing evidence as new
+ok   no-progress cycles increase
+ok   coda converges after two no-progress cycles
+ok   mentor hints include no-progress pivot
+ok   certainty upgrade resets no-progress
+ok   coverage improvement is recorded
+ok   coverage outputs written
+ok   graph checkpoint written
+ok   agent conflicts are surfaced
+ok   mentor hints include unresolved Agent conflict
+ok   default derive is no-write
+ok   type-a blocked statuses remain open
+ok   coda convergence is not closure while type-a fronts are open
+ok   hyphenated type-a spelling remains open
+ok   unclassified statuses block closure review
+ok   conflicting terminal statuses block closure review
+ok   section headings provide deferred/closed fallback status
+ok   blocked type-b is not open or unclassified
+loop_state selftest passed

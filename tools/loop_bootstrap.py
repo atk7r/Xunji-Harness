@@ -59,7 +59,9 @@ def _read_template() -> str:
             pass
     return (
         "你是 Xunji 自主 Driver，对 run={{RUN_DIR}} 执行一轮探测。\n"
-        "1. Reason pass: `{{PYTHON}} tools/loop_state.py \"{{RUN_DIR}}\" --write`。\n"
+        "1. Reason pass: `{{PYTHON}} tools/loop_state.py \"{{RUN_DIR}}\" --write`; "
+        "`{{PYTHON}} tools/progress_ledger.py \"{{RUN_DIR}}\" --write`; "
+        "`{{PYTHON}} tools/run_controller.py \"{{RUN_DIR}}\" --shadow`。\n"
         "2. 结尾: 下一行动: <action> 或 BLOCKED: <reason>。\n"
     )
 
@@ -87,20 +89,27 @@ def _write_initial_state(run_dir: Path) -> None:
 
 def _refresh_loop_state(run_dir: Path) -> bool:
     """Refresh derived loop caches. These are advisory caches; Markdown stays canonical."""
-    cmd = [PYTHON_CMD, str(ROOT / "tools" / "loop_state.py"), str(run_dir), "--write"]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    except Exception as e:
-        print(f"[bootstrap] loop_state 刷新失败: {e}", file=sys.stderr)
-        return False
-    if r.stdout.strip():
-        print(r.stdout.rstrip())
-    if r.returncode != 0:
-        if r.stderr.strip():
-            print(r.stderr.rstrip(), file=sys.stderr)
-        print("[bootstrap] loop_state 刷新失败", file=sys.stderr)
-        return False
+    commands = [
+        ("loop_state", [PYTHON_CMD, str(ROOT / "tools" / "loop_state.py"), str(run_dir), "--write"]),
+        ("progress_ledger", [PYTHON_CMD, str(ROOT / "tools" / "progress_ledger.py"), str(run_dir), "--write"]),
+        ("run_controller", [PYTHON_CMD, str(ROOT / "tools" / "run_controller.py"), str(run_dir), "--shadow"]),
+    ]
+    for name, cmd in commands:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except Exception as e:
+            print(f"[bootstrap] {name} 刷新失败: {e}", file=sys.stderr)
+            return False
+        if r.stdout.strip():
+            print(r.stdout.rstrip())
+        if r.returncode != 0:
+            if r.stderr.strip():
+                print(r.stderr.rstrip(), file=sys.stderr)
+            print(f"[bootstrap] {name} 刷新失败", file=sys.stderr)
+            return False
     print(f"[bootstrap] loop state: {run_dir / 'state' / 'loop_state.json'}")
+    print(f"[bootstrap] progress ledger: {run_dir / 'state' / 'progress_ledger.json'}")
+    print(f"[bootstrap] controller shadow: {run_dir / 'state' / 'controller.shadow.json'}")
     return True
 
 
@@ -180,9 +189,12 @@ def _print_launch_instructions(run_dir: Path, prompt_file: Path) -> None:
     print("=" * 60)
     print("  监控:")
     print(f"    {PYTHON_CMD} tools/loop_state.py {run_dir} --write")
+    print(f"    {PYTHON_CMD} tools/progress_ledger.py {run_dir} --write")
+    print(f"    {PYTHON_CMD} tools/run_controller.py {run_dir} --shadow")
     print(f"    {PYTHON_CMD} tools/check_run.py {run_dir}")
     print(f"    tail -f {run_dir}/decisions.md")
     print(f"    cat {run_dir}/state/loop_state.md")
+    print(f"    cat {run_dir}/state/controller_diff.md")
     print("=" * 60)
 
 
@@ -208,6 +220,8 @@ def _selftest() -> int:
     checks.append(("session_state written", (p / "session_state.json").exists()))
     refresh_ok = _refresh_loop_state(p)
     checks.append(("loop_state refresh ok", refresh_ok and (p / "state" / "loop_state.json").exists()))
+    checks.append(("progress ledger refresh ok", refresh_ok and (p / "state" / "progress_ledger.json").exists()))
+    checks.append(("controller shadow refresh ok", refresh_ok and (p / "state" / "controller.shadow.json").exists()))
     checks.append(("loop_state refresh fails closed", _refresh_loop_state(p / "missing-run") is False))
     checks.append(("validate run ok", _validate_run(p) is True))
     checks.append(("validate non-run fails", _validate_run(Path("/nonexistent")) is False))

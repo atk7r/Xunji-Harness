@@ -63,13 +63,18 @@ python tools/workers.py conflicts runs/<dir>
 python tools/saturation.py runs/<dir>
 python tools/coverage_matrix.py runs/<dir> --write
 python tools/loop_state.py runs/<dir> --write
+python tools/progress_ledger.py runs/<dir> --write
+python tools/run_controller.py runs/<dir> --shadow
 ```
 `graph.py` 运行后自动写入 `state/workflow_checkpoint.json`（轻量阶段快照：phase / open/deferred/blocked/closed fronts / confirmed evidence），用于跨会话恢复和阶段追踪。
 `loop_state.py` writes `state/loop_state.{json,md}` as the closed-loop progress
 snapshot: evidence delta, certainty upgrades, coverage-matrix improvement,
-Coda convergence, Agent Board conflicts, and fan-out/closure gate hints. It is a
-derived cache only; Root still chooses the next front and the evidence gate still
-owns promotion.
+Coda convergence, Agent Board conflicts, fan-out/closure-review hints, and
+advisory mentor hints. `progress_ledger.py` records whether the last cycle had
+material/artifact-backed progress, and `run_controller.py --shadow` writes the
+next required control-plane action plus stop blockers. These are derived caches
+only; Root still chooses the next front and the evidence gate still owns
+promotion and closure.
 
 The point is to make "what just got unlocked / neglected / contradicted / unassigned"
 a query, not a full re-read of every block. Ask:
@@ -173,6 +178,12 @@ facts (hosts, IPs, titles, banners) as given, and probe only to (1) fill a gap,
 (2) verify a signal a hypothesis needs, or (3) refresh a fact you believe changed —
 saying which in `decisions.md`. Re-collecting existing data wastes the request
 budget, the scarce resource against a rate-limited / WAF target.
+
+When saved JS bundles, rendered `network.json`, or captured pages may hide API
+routes, run `python tools/js_inventory.py runs/<dir>` over those saved artifacts.
+It is a read-only sensor: copy useful candidate input shapes into `surface.md` and
+use useful candidate threat hypotheses to update `hypotheses.md`; proof still goes
+through guarded actions and evidence entries.
 
 ## Threat Triage (at Setup)
 
@@ -338,7 +349,7 @@ assets were only header / recon-classified, never examined. Before any such clai
   or why the class did not apply; no fixed payload list (payloads stay local/operator-chosen);
   the gate wants evidence of *reasoning/attack attempt*, not exhaustive exploitation.
   Run `python tools/coverage_matrix.py runs/<dir> --write` before closure or Coda
-  convergence checks to see the derived asset×vuln-family view. `□` means the
+  trajectory-review checks to see the derived asset×vuln-family view. `□` means the
   category is signal-justified for that asset but no test record is visible; `·`
   means no current surface signal. Whole empty columns and sparse rows are review
   signals, not permission to blind-scan.

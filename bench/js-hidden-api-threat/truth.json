@@ -1,0 +1,26 @@
+{
+  "name": "js-hidden-api-threat",
+  "run": "sample_run",
+  "expected_findings": [
+    {
+      "id": "hidden-admin-role-diff",
+      "markers": ["hidden admin api", "role-specific response difference", "Source JS/artifact"],
+      "min_certainty": 0.8
+    }
+  ],
+  "expected_process": [
+    {
+      "id": "js-inventory-produced-input-shape",
+      "signals": ["JS Inventory", "IS-CAND-001", "Candidate Threat Hypotheses"],
+      "in": ["review.md"],
+      "must": true
+    },
+    {
+      "id": "surface-recorded-js-source",
+      "signals": ["Source JS/artifact: evidence/app.js", "Role or permission hint: admin/management route"],
+      "in": ["surface.md"],
+      "must": true
+    }
+  ],
+  "budget": {"max_requests": 4}
+}
