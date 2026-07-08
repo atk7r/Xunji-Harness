@@ -6,6 +6,7 @@ Updated: 2026-07-08
 
 | Topic | Purpose | Notes |
 |---|---|---|
+| `2026-07-08-xunji-statusline-precommit-review/` | Precommit review for Claude Code project statusline. | Review bundle, patch evidence, test log, and final gate record live here after commit cleanup. |
 | `2026-07-08-phase-status-output-precommit-review/` | Precommit review for visible loop phase/status panels. | Full bundle, final WARN review, patch evidence, test log, and the moved fingerprint gate record live here. |
 | `2026-07-08-loop-controller-implementation-review/` | Loop controller / Coda / shadow-controller implementation review. | Earlier peer-review reruns and dispositions are under `reruns/`. |
 | `2026-07-08-plan-implementation-review/` | Autonomous discovery optimization implementation review. | Final/rerun/disposition companions are under `reruns/`. |

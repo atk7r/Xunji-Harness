@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_journal  # noqa: E402
 import status_style  # noqa: E402
+import xunji_statusline  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -183,6 +184,15 @@ def _journal(run_dir: Path, event: str, note: str) -> None:
         print(f"[bootstrap] journal write skipped: {e}", file=sys.stderr)
 
 
+def _set_active_run(run_dir: Path) -> None:
+    """Best-effort statusline pointer update. It is local display state only."""
+    try:
+        if not xunji_statusline.set_active_run(str(run_dir)):
+            print(f"[bootstrap] active run pointer skipped: {run_dir}", file=sys.stderr)
+    except Exception as e:
+        print(f"[bootstrap] active run pointer skipped: {e}", file=sys.stderr)
+
+
 # ---- commands ----
 
 def cmd_new(slug: str, recon_path: str) -> int:
@@ -208,6 +218,7 @@ def cmd_new(slug: str, recon_path: str) -> int:
     print(f"[bootstrap] run 目录: {run_dir}")
 
     _write_initial_state(run_dir)
+    _set_active_run(run_dir)
     _journal(run_dir, "bootstrap", f"new run prepared from recon {recon_full}")
     if not _refresh_loop_state(run_dir):
         return 1
@@ -224,6 +235,7 @@ def cmd_resume(run_path: str) -> int:
         return 1
 
     print(f"[bootstrap] 续接 run: {run_dir}")
+    _set_active_run(run_dir)
 
     # 写 handoff
     subprocess.run([PYTHON_CMD, str(ROOT / "tools" / "session_handoff.py"),
@@ -260,10 +272,14 @@ def _print_launch_instructions(run_dir: Path) -> None:
 # ---- selftest ----
 
 def _selftest() -> int:
+    global _find_run_by_slug, _print_launch_instructions, _refresh_loop_state, _set_active_run
+
     import json as _json, tempfile
 
     checks: list[tuple[str, bool]] = []
-    p = Path(tempfile.mkdtemp())
+    tmp_root = ROOT / "tmp"
+    tmp_root.mkdir(exist_ok=True)
+    p = Path(tempfile.mkdtemp(dir=tmp_root))
     (p / "evidence").mkdir()
     (p / "evidence" / ".gitkeep").write_text("")
     (p / "target.md").write_text("# t", encoding="utf-8")
@@ -272,6 +288,65 @@ def _selftest() -> int:
     checks.append(("template exists", LOOP_TEMPLATE.exists()))
     checks.append(("loop command names run", _loop_command(p) == f"/loop {p}"))
     checks.append(("no per-run prompt before refresh", not (p / "loop_prompt.md").exists()))
+    old_active = xunji_statusline.ACTIVE_RUN.read_text(encoding="utf-8", errors="replace") \
+        if xunji_statusline.ACTIVE_RUN.exists() else None
+    try:
+        checks.append(("active run helper accepts run", xunji_statusline.set_active_run(str(p)) is True))
+    finally:
+        if old_active is None:
+            xunji_statusline.clear_active_run()
+        else:
+            xunji_statusline.ACTIVE_RUN.write_text(old_active, encoding="utf-8")
+
+    recon = p / "recon.json"
+    recon.write_text("{}", encoding="utf-8")
+    active_hook_calls: list[Path] = []
+    orig_set_active = _set_active_run
+    orig_find_run = _find_run_by_slug
+    orig_refresh = _refresh_loop_state
+    orig_print_launch = _print_launch_instructions
+    orig_subprocess_run = subprocess.run
+
+    class _FakeCompleted:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_set_active(run_dir: Path) -> None:
+        active_hook_calls.append(Path(run_dir).resolve())
+
+    def fake_run(*_args, **_kwargs) -> _FakeCompleted:
+        return _FakeCompleted()
+
+    try:
+        _set_active_run = fake_set_active
+        _find_run_by_slug = lambda _slug: p
+        _refresh_loop_state = lambda _run_dir: True
+        _print_launch_instructions = lambda _run_dir: None
+        subprocess.run = fake_run
+        rc_new = cmd_new("selftest", str(recon))
+        rc_resume = cmd_resume(str(p))
+    finally:
+        _set_active_run = orig_set_active
+        _find_run_by_slug = orig_find_run
+        _refresh_loop_state = orig_refresh
+        _print_launch_instructions = orig_print_launch
+        subprocess.run = orig_subprocess_run
+
+    checks.append(("cmd_new invokes active-run hook", rc_new == 0 and p.resolve() in active_hook_calls))
+    checks.append(("cmd_resume invokes active-run hook", rc_resume == 0 and active_hook_calls.count(p.resolve()) >= 2))
+
+    old_active_resume = xunji_statusline.ACTIVE_RUN.read_text(encoding="utf-8", errors="replace") \
+        if xunji_statusline.ACTIVE_RUN.exists() else None
+    try:
+        rc_resume_real = cmd_resume(str(p))
+        rendered_resume = xunji_statusline.render_statusline({"workspace": {"current_dir": str(ROOT)}}, color=False)
+    finally:
+        if old_active_resume is None:
+            xunji_statusline.clear_active_run()
+        else:
+            xunji_statusline.ACTIVE_RUN.write_text(old_active_resume, encoding="utf-8")
+    checks.append(("cmd_resume real set-active renders selected run", rc_resume_real == 0 and p.name in rendered_resume))
     _write_initial_state(p)
     checks.append(("session_state written", (p / "session_state.json").exists()))
     refresh_ok = _refresh_loop_state(p)

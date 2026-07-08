@@ -24,6 +24,8 @@ review/review_bundle.json
 
 # Local runtime config
 config.ini
+.claude/xunji_active_run
+.claude/xunji_active_run.*.tmp
 
 # Manual/security-sensitive work products — never publish real target findings
 reports/

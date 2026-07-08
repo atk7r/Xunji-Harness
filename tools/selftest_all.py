@@ -78,6 +78,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     # --- loop pipeline ---
     ("loop_state",       ["tools/loop_state.py", "--selftest"], "closed-loop progress and gate snapshot"),
     ("status_style",     ["tools/status_style.py", "--selftest"], "operator-facing colored status panels"),
+    ("xunji_statusline",  ["tools/xunji_statusline.py", "--selftest"], "Claude Code Xunji statusline"),
     ("progress_ledger",  ["tools/progress_ledger.py", "--selftest"], "material-progress ledger"),
     ("run_controller",   ["tools/run_controller.py", "--selftest"], "advisory shadow run controller"),
     ("loop_journal",     ["tools/loop_journal.py", "--selftest"],   "loop interruption journal"),

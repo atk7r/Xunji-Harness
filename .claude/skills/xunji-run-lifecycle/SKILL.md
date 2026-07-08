@@ -88,6 +88,12 @@ Operator-facing lifecycle/status output should be Chinese first, bracket-tagged,
 and summarize the current phase, run directory, front counts, evidence/coverage
 delta, stop blockers, and next required action before raw state paths or JSON.
 
+Claude Code's project statusline is enabled for Xunji through
+`.claude/settings.json` and `tools/xunji_statusline.py`. It should stay concise:
+`[Xunji-status] [Hunter｜验证] <run> | 待验证入口 N 个 | 子任务 ... | 无阻断 |
+下一步 ...`. Treat it as read-only display. It does not replace phase markers,
+`loop_journal.py`, or PreToolUse enforcement.
+
 ## Setup
 
 Create a new run in one shot:

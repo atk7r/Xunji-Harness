@@ -1,0 +1,85 @@
+# Peer Review Panel — 2026-07-08-xunji-statusline-precommit-review
+
+_backend: panel:arkcli+claude · 2026-07-08T07:56Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: WARN
+
+_backend: panel:arkcli+claude_  
+_brain: codex_  
+_bundle_hash: e4da094c9282574df92335322c30be72014646e5_  
+_evidence_index_hash: 2ea23fe8a5a188b28a31a41eb8506ed641cd2d30_  
+
+## Findings
+- [WARN] PR-001 `loop_bootstrap.py` selftest does not runtime-verify that `cmd_new`/`cmd_resume` invoke `_set_active_run` | Evidence: evidence.md:E-003, evidence/patches/tools__loop_bootstrap_py.patch.txt:sha1:c096b2339ee1f96d922f10fe8cded6f4d8dcceb6, evidence/test-log.txt:sha1:25767942a26f70e0efd02a643557c5867b348095 | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The test checks `xunji_statusline.set_active_run(str(p)) is True` directly but never exercises the call sites inside `cmd_new` and `cmd_resume`; the integration path is present in the patch but not regression-tested.
+- [WARN] PR-002 E-005 runtime confirmation is a single selftest execution and does not include Claude Code's actual `statusLine` renderer | Evidence: evidence.md:E-005, evidence/test-log.txt:sha1:25767942a26f70e0efd02a643557c5867b348095, report.md:Review Questions | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The test-log is one local execution; the report itself notes local tests cannot fully emulate Claude Code's proprietary renderer, so real integration remains an unverified assumption.
+- [WARN] PR-003 arkcli panel had backend errors; review is partial | Evidence: minimax-m3: parse error; output tail: ing assignments ✓
+- `status_style.paint(blocker_text, "red" if blocker_count else "green", enabled=color)` = `无阻断` ✓
+- `"下一步 " + _clip(_next_action(controller, journal))` = `下一步 F-004 接口枚举` ✓
+
+The format matches.
+
+**Coverage map**:
+- F-001: Statusline rendering (E-001, E-002, E-004) ✓
+- F-002: Xunji-only activation (E-001, E-002) - need to check E-002 for the "outside Xunji" check
+- F-003: Loop lifecycle integration (E-002, E-003) - the bootstrap and template patches
+- F-004: Regression coverage; glm-5.2: parse error; output tail:  confirmed findings (certainty >= 0.8) are carried into the report.
+
+E-001 supports F-001, F-002, F-004
+E-002 supports F-001, F-002
+E-003 supports F-002, F-003
+E-004 supports F-001, F-003
+E-005 supports F-004
+
+The report discusses all of these. The frontier.md has F-001 through F-004, all "open-for-review".
+
+Let me check if the report contradicts any evidence...
+
+The report says "9 files changed, 430 insertions(+), 1 deletion(-)". Let me count from the patches:
+1. .claude/settings.json - 6 lines | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+
+## Blind-spot check
+- [arkcli] [kimi-k2.7-code] No direct test that `cmd_new`/`cmd_resume` actually mutate `.claude/xunji_active_run`; only the helper is unit-tested.
+- [arkcli] [kimi-k2.7-code] No negative test for malformed/unreadable active-run pointer files or paths syntactically under ROOT but not valid run directories.
+- [arkcli] [kimi-k2.7-code] No test of the exact `.claude/settings.json` command under Claude Code's renderer; only emulated via subprocess with `XUNJI_COLOR=1`.
+- [arkcli] [kimi-k2.7-code] No performance or concurrency test for 2-second refresh against large `loop_journal.jsonl` files.
+- [arkcli] [kimi-k2.7-code] The "read-only" framing is accurate for normal refresh but could be sharpened to note the maintenance-command mutation surface.
+- [claude] **`statusLine` key casing is the single biggest unmitigated risk.** The settings.json uses `"statusLine"` (camelCase). Neither the selftest, json.tool validation, nor the test log verifies this is the correct Claude Code settings key. If Claude Code expects `"statusline"` (lowercase), the entire feature silently fails — no error, no crash, just an empty status bar. The report acknowledges this limitation ("local tests cannot fully emulate Claude Code's proprietary renderer") but does not cite authoritative documentation for the key name. The operator should verify this with Claude Code's actual settings schema before commit.
+- [claude] **`_agent_summary` has a semantic gap for "failed" agents.** The active detection matches `startswith(("assign", "work"))` and `s in {"?", ""}`. An agent whose status is `"failed"` or `"error"` would fall through to the default `f"子任务 {len(statuses)} 个已记录"` — the operator would see "子任务 N 个已记录" when agents are actually broken, not merely recorded. The statusline silently obscures agent failure.
+- [claude] **`_journal_summary` interrupted detection only checks current-cycle events.** If the last event written was `phase_start` for "Hunter" and then the process was killed (SIGKILL), no `interrupt` event was ever written. The `interrupted` field would be `False` because there's no `interrupt` event in the current cycle. The same applies if `phase_start` was written without a matching `phase_end` — the `open_phase` correctly identifies this, but `interrupted` does not. This means the `" | 中断待续"` suffix would not appear in some genuine interruption scenarios.
+- [claude] **`_is_xunji_context` checks `current_dir` under ROOT but the `_workspace_dir` fallback chain can produce a dir NOT under ROOT that still passes file-existence checks.** The two-stage check is: (1) `current_dir.relative_to(ROOT)` must not raise ValueError, AND (2) three sentinel files must exist at ROOT. Stage 1 already guarantees the current dir is under ROOT (since ROOT is derived from `Path(__file__).resolve().parents[1]`). But the fallback `os.getcwd()` + `os.environ.get("PWD")` means `current_dir` could be the operator's shell directory, which might accidentally be under the Xunji checkout — causing false activation. This is the same finding as above but framed differently.
+- [claude] **The diff stat in report.md shows "378 +" insertions for xunji_statusline.py, but the actual patch is a 409-line new file.** The `git diff --stat` count (378) doesn't match the raw line count (409). This could be due to `git diff --stat` counting only non-empty/non-comment lines differently, or the test-log may have been recorded against a slightly different version of the code than what is captured in the patch artifact. The patch artifact (which IS the evidence) shows 409 lines — this discrepancy in the report's narrative is a minor claim-integrity issue.
+- [claude] **No test for the `/loop` template integration path.** E-003 claims `docs/templates/loop_prompt.md` sets the active pointer at `/loop` start. The patch artifact shows the template line `{{PYTHON}} tools/xunji_statusline.py --set-active "{{RUN_DIR}}"` was added. But unlike `loop_bootstrap.py` (which has a selftest verifying `set_active_run` behavior), there is no test that the template expansion actually invokes the statusline correctly. The template uses `{{PYTHON}}` and `{{RUN_DIR}}` — template variables whose expansion logic isn't tested in this diff.
+
+## Context-limit notes
+- [arkcli] [kimi-k2.7-code] This bundle is a maintenance diff review (statusline feature), not a web pentest, so recon/surface assets and exploit-depth rubric items do not apply.
+- [arkcli] [kimi-k2.7-code] Chinese labels and documentation excerpts appear consistent; I have not independently verified every translated operator term against project conventions.
+- [arkcli] [kimi-k2.7-code] Artifact contents were cross-checked against claims using the provided excerpts and hashes; full file contents beyond the bundle were not inspected.
+- [arkcli] minimax-m3: parse error; output tail: ing assignments ✓
+- `status_style.paint(blocker_text, "red" if blocker_count else "green", enabled=color)` = `无阻断` ✓
+- `"下一步 " + _clip(_next_action(controller, journal))` = `下一步 F-004 接口枚举` ✓
+
+The format matches.
+
+**Coverage map**:
+- F-001: Statusline rendering (E-001, E-002, E-004) ✓
+- F-002: Xunji-only activation (E-001, E-002) - need to check E-002 for the "outside Xunji" check
+- F-003: Loop lifecycle integration (E-002, E-003) - the bootstrap and template patches
+- F-004: Regression coverage
+- [arkcli] glm-5.2: parse error; output tail:  confirmed findings (certainty >= 0.8) are carried into the report.
+
+E-001 supports F-001, F-002, F-004
+E-002 supports F-001, F-002
+E-003 supports F-002, F-003
+E-004 supports F-001, F-003
+E-005 supports F-004
+
+The report discusses all of these. The frontier.md has F-001 through F-004, all "open-for-review".
+
+Let me check if the report contradicts any evidence...
+
+The report says "9 files changed, 430 insertions(+), 1 deletion(-)". Let me count from the patches:
+1. .claude/settings.json - 6 lines
+- [claude] I cannot access the live repository files outside the review bundle directory. Cross-checks against `status_style.py` internals (to verify `color_enabled()` reads `XUNJI_COLOR=1`, confirming the colored command path) and the full `.gitignore` (to verify `tmp/` is already covered) rely solely on bundle contents.
+- [claude] The `statusLine` key name in `.claude/settings.json` — I do not know Claude Code's actual settings schema. This is the most consequential uncertainty in this review: if the key is wrong, the feature is dead on arrival and no test will catch it.
+- [claude] Chinese content in the statusline, journal notes, and documentation — I read these but may miss subtle semantic alignment issues between what the journal records and what the statusline extracts in the `_last_plan_note` regex or `ACTION_LABELS` mapping.

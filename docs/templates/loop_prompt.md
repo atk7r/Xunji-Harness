@@ -33,6 +33,7 @@ Record that this explicit `/loop` iteration has begun. This journal is a derived
 interruption aid, not evidence:
 
 ```bash
+{{PYTHON}} tools/xunji_statusline.py --set-active "{{RUN_DIR}}"
 {{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" start --note "显式 /loop 迭代开始"
 ```
 
