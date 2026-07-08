@@ -1,0 +1,4 @@
+Command: python3 tools/xunji_statusline.py
+Exit: 0
+
+[Xunji-status] [Root｜调度] hamastar_20260709 | 现场推导 | 待验证入口 5 个 | 无子任务 | 阻断 3 个 | 下一步 分派子任务

@@ -1,0 +1,11 @@
+Command: python3 tools/selftest_all.py --only xunji_statusline,loop_state,run_controller,loop_bootstrap --timeout 300
+Exit: 0
+
+running 4 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14
+
+  PASS  loop_state         0.1s  closed-loop progress and gate snapshot
+  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline
+  PASS  run_controller     0.1s  advisory shadow run controller
+  PASS  loop_bootstrap     0.6s  autonomous loop launcher
+
+4 passed, 0 failed  (0.9s total)

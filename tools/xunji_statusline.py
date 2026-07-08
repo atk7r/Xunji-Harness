@@ -2,8 +2,10 @@
 """Claude Code statusline for Xunji.
 
 This script is display-only during normal statusline use. It reads the active run
-pointer plus derived state files and prints one concise, operator-facing line.
-It never refreshes loop state, mutates run evidence, or drives an engagement.
+pointer plus derived state files and prints one concise, operator-facing line. If
+those derived caches are missing or stale, it falls back to a read-only in-memory
+derivation so the line does not falsely show Idle/0 fronts. It never refreshes
+cache files, mutates run evidence, or drives an engagement.
 """
 from __future__ import annotations
 
@@ -263,11 +265,38 @@ def _state_stale(run_dir: Path) -> bool:
     return latest_md > min(mtimes) + 0.001
 
 
+def _derived_state(run_dir: Path) -> tuple[dict | None, dict | None, str]:
+    """Read-only fallback for missing/stale cache files.
+
+    Statusline must not write run state, but showing Idle/0 fronts when Markdown
+    has advanced is worse than an in-memory derivation. Import lazily so normal
+    cached rendering stays cheap.
+    """
+    try:
+        import loop_state  # noqa: WPS433
+        import run_controller  # noqa: WPS433
+        loop_data = loop_state.derive(run_dir, write=False)
+        controller = run_controller.derive(run_dir, loop_data=loop_data)
+    except Exception as exc:
+        return None, None, exc.__class__.__name__
+    return loop_data, controller, ""
+
+
 def _last_plan_note(journal: dict) -> str:
     last = journal.get("last_event") if isinstance(journal.get("last_event"), dict) else {}
     note = str(last.get("note") or "").strip()
     event = str(last.get("event") or "").strip()
     if event not in {"plan", "action", "write_result", "phase_start", "phase_end"}:
+        return ""
+    phase = str((last.get("data") or {}).get("phase") or "").strip()
+    if event in {"phase_start", "phase_end"} and phase == "Setup":
+        return ""
+    low_note = note.lower()
+    if event in {"phase_start", "phase_end"} and (
+        low_note.startswith("run prepared")
+        or "prepare authorized run workbench" in low_note
+        or "next phase=root orchestrator" in low_note
+    ):
         return ""
     target = ""
     reason = ""
@@ -307,12 +336,23 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)
     if run_dir is None:
         return f"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag('Idle', color=bool(color))} 未选择运行目录"
 
+    stale = _state_stale(run_dir)
     loop_data = _load_json(run_dir / "state" / "loop_state.json", {})
     controller = _load_json(run_dir / "state" / "controller.shadow.json", {})
+    live_derived = False
+    derive_error = ""
+    if stale or not loop_data or not controller:
+        derived_loop, derived_controller, derive_error = _derived_state(run_dir)
+        if derived_loop is not None and derived_controller is not None:
+            loop_data, controller = derived_loop, derived_controller
+            live_derived = True
     journal = _journal_summary(run_dir)
     phase = _phase(loop_data, journal)
     blocker_text, blocker_count = _blocker_summary(controller)
-    stale_text = " | 状态待刷新" if _state_stale(run_dir) else ""
+    stale_text = (
+        " | 现场推导" if live_derived
+        else (" | 推导失败" if derive_error else (" | 状态待刷新" if stale else ""))
+    )
     interrupt = " | 中断待续" if journal.get("interrupted") else ""
     line = " | ".join([
         f"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag(phase, color=bool(color))} {run_dir.name}{interrupt}{stale_text}",
@@ -387,6 +427,31 @@ def _selftest() -> int:
         future = max(p.stat().st_mtime for p in watched) + 5
         os.utime(run / "frontier.md", (future, future))
         stale_plain = render_statusline(root_current, color=False)
+        missing_cache = temp / "missing-cache-run"
+        missing_cache.mkdir()
+        (missing_cache / "frontier.md").write_text(
+            "# Frontier\n\n## Open Fronts\n\n### F-009 Missing cache\n- Status: open\n",
+            encoding="utf-8",
+        )
+        (missing_cache / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+        (missing_cache / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+        (missing_cache / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+        (missing_cache / "state").mkdir()
+        (missing_cache / "state" / "loop_journal.jsonl").write_text(
+            json.dumps({"cycle": 1, "event": "phase_start", "data": {"phase": "Setup"}, "note": "prepare authorized run workbench"}, ensure_ascii=False) + "\n"
+            + json.dumps({"cycle": 1, "event": "phase_end", "data": {"phase": "Setup"}, "note": "run prepared; next phase=Root Orchestrator (/loop runs/missing-cache-run)"}, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        assert set_active_run(str(missing_cache))
+        missing_before = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
+        missing_plain = render_statusline(root_current, color=False)
+        missing_after = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
+        original_derived_state = _derived_state
+        try:
+            globals()["_derived_state"] = lambda _run_dir: (None, None, "RuntimeError")
+            failed_derive_plain = render_statusline(root_current, color=False)
+        finally:
+            globals()["_derived_state"] = original_derived_state
     finally:
         if old_pointer is None:
             clear_active_run()
@@ -402,7 +467,11 @@ def _selftest() -> int:
         ("XUNJI_COLOR command path has ansi", proc.returncode == 0 and "\033[" in env_colored and "[Hunter｜验证]" in env_colored),
         ("unknown phase fallback is styled", "\033[" in unknown_phase and "[Unexpected Phase]" in unknown_phase),
         ("normal render is read-only", before_render == after_render),
-        ("stale derived state is visible", "状态待刷新" in stale_plain),
+        ("stale cache uses live read-only derivation", "现场推导" in stale_plain and "状态待刷新" not in stale_plain),
+        ("missing cache does not show false idle", "Idle｜空闲" not in missing_plain and "待验证入口 1 个" in missing_plain),
+        ("setup journal note does not mask controller action", "run prepared" not in missing_plain and "下一步 继续验证可行动入口" in missing_plain),
+        ("missing cache live derivation is read-only", missing_before == missing_after),
+        ("failed live derivation is visible", "推导失败" in failed_derive_plain),
         ("invalid outside run pointer is rejected", invalid_rejected),
         ("outside Xunji prints nothing", outside == ""),
     ]

@@ -1,0 +1,132 @@
+{
+  "total": 4,
+  "confirmed": [],
+  "confirmed_findings": [],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 — active diff",
+      "certainties": [],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": false,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/active-diff.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/active-diff.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 — focused selftests passed",
+      "certainties": [],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": false,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/selftest-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/selftest-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 — hamastar active statusline corrected",
+      "certainties": [],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": false,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/statusline-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/statusline-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004 — diff check passed",
+      "certainties": [],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": false,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/diff-check-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/diff-check-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}
