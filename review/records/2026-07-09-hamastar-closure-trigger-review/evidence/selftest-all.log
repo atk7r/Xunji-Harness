@@ -1,0 +1,57 @@
+running 53 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14
+
+  PASS  check_run          0.1s  evidence gate + closure
+  PASS  classify_hosts    39.8s  recon -> coverage
+  PASS  scope              0.0s  run scope derive/match
+  PASS  peer_review        0.1s  heterogeneous review
+  PASS  probe              5.6s  active HTTP sensor
+  PASS  render             0.1s  headless browser + --eval replay
+  PASS  anti_drift         3.4s  anti-drift anchor (rules+process re-inject)
+  PASS  proxy              0.1s  engagement egress proxy (渗透走/模型不走)
+  PASS  codex_proxy        0.0s  Codex review proxy hygiene
+  PASS  replay            13.7s  evidence replay
+  PASS  setup_run          0.1s  run scaffolding
+  PASS  ingest_recon       0.0s  Guanlan recon adapter
+  PASS  bench              0.0s  R-1 self-eval scorer
+  PASS  check_knowledge    0.0s  public knowledge grounding structure
+  PASS  local_hygiene      0.1s  local/publication hygiene guard
+  PASS  runtime_boundary   0.0s  Codex hooks absence guard
+  PASS  check_templates    0.0s  template/reference drift guard
+  PASS  knowledge_match    0.0s  fingerprint→knowledge retrieval
+  PASS  xday_match         0.0s  fingerprint→local xday retrieval
+  PASS  knowledge_seed     0.0s  fingerprint→knowledge write-back
+  PASS  timestamp_gate     0.0s  web research time gate
+  PASS  record_evidence    0.0s  web research -> evidence ledger
+  PASS  decode_viewstate   0.0s  ASP.NET ViewState decoder
+  PASS  input_shape        0.0s  request shape parser
+  PASS  js_inventory       0.0s  saved-artifact JS/API inventory sensor
+  PASS  oob_listener       1.0s  local OOB listener
+  PASS  sensor_oob         0.2s  OOB callback artifact sensor
+  PASS  sensor_mutate      0.1s  payload mutation artifact sensor
+  PASS  sensor_blind_diff   1.1s  blind differential artifact sensor
+  PASS  sensor_upload      1.2s  harmless upload proof sensor
+  PASS  sensor_client_graybox   0.1s  client graybox phenomenon sensor
+  PASS  state_project      0.0s  markdown-derived run state projection
+  PASS  context_pack       0.0s  minimal subagent context pack
+  PASS  loop_state         0.1s  closed-loop progress and gate snapshot
+  PASS  status_style       0.0s  operator-facing colored status panels
+  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline
+  PASS  progress_ledger    0.1s  material-progress ledger
+  PASS  run_controller     0.1s  advisory shadow run controller
+  PASS  loop_journal       0.0s  loop interruption journal
+  PASS  loop_bootstrap     0.5s  autonomous loop launcher
+  PASS  session_handoff    0.1s  session handoff tool
+  PASS  deferred_queue     0.0s  deferred asset retry manager
+  PASS  workers            0.2s  fan-out worker planning helpers
+  PASS  saturation         0.0s  front saturation scoring
+  PASS  coverage_matrix    0.0s  asset x vuln-family coverage matrix
+  PASS  safety_gate        0.0s  hard-boundary gate
+  PASS  ip_blacklist       0.0s  local IP/domain deny hook
+  PASS  output_gate        0.0s  output drift Stop gate
+  PASS  run_gate           1.2s  coverage/depth Stop gate
+  PASS  check_hook         2.7s  safety_gate live-fire
+  PASS  sentinel_replay    0.0s  behavior detectors 26-case
+  PASS  verify_layers      1.2s  safety-floor coverage
+  PASS  guard_smoke        0.0s  guard rate/cap/breaker smoke
+
+53 passed, 0 failed  (73.8s total)

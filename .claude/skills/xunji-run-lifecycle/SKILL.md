@@ -221,8 +221,14 @@ Closure gates:
   Replicated or Control rationale.
 - If `target.md` cites recon, `coverage.json` must exist, reachable assets must be
   named, and high-value/login surfaces cannot be silently lumped away.
+- `retrospective.md` `Status:` / `Verdict:` values such as `FINAL` are closure
+  signals: they activate closure gates, but they are not completion actions.
 - `GHOST_COMPLETE` is written only after check_run hard gates pass, independent
   review is resolved, retrospective is filled, and the report is final.
+- When writing `GHOST_COMPLETE` or `NORMAL_COMPLETE`, cancel any active scheduled
+  `/loop` job in the same turn and append an `end` loop journal note containing
+  `cron_cancelled=<job-id|none>`. `check_run.py` hard-fails a completion marker
+  without that auditable cron disposition.
 
 ## Tool Selftests
 

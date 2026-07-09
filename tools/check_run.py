@@ -47,6 +47,8 @@ except Exception:
 
 
 ROOT = Path(__file__).resolve().parents[1]
+HWS = r"[^\S\n]"
+CRON_CANCELLED_RE = re.compile(r"\bcron_cancelled=(?:none|[A-Za-z0-9_.:-]+)\b")
 NON_ACTIONABLE_COVERAGE_FLAGS = {"AUTH_GATE", "STUB_PAGE"}
 REQUIRED_FILES = [
     "target.md",
@@ -619,12 +621,132 @@ def _report_is_final(run_dir: Path) -> bool:
     return bool(cited & confirmed)
 
 
-def _closure_gate_active(run_dir: Path) -> bool:
-    report = run_dir / "report.md"
-    if not report.exists():
+def _completion_marker_claimed(run_dir: Path) -> bool:
+    dec = run_dir / "decisions.md"
+    if not dec.exists():
         return False
-    rtext = report.read_text(encoding="utf-8", errors="replace")
-    return bool(_closure_claimed(rtext) or _report_is_final(run_dir))
+    text = dec.read_text(encoding="utf-8", errors="replace")
+    return bool(re.search(r"(?<![A-Z0-9_])(GHOST_COMPLETE|NORMAL_COMPLETE)(?![A-Z0-9_])", text))
+
+
+def _retrospective_closure_claimed(run_dir: Path) -> bool:
+    retro = run_dir / RETRO_FILE
+    if not retro.exists():
+        return False
+    text = retro.read_text(encoding="utf-8", errors="replace")
+    # Retrospective is a closure artifact, but drafts/templates may exist from
+    # setup. Only explicit Status/Verdict fields should activate closure gates;
+    # completion markers are canonical only in decisions.md, and prose such as
+    # "before GHOST_COMPLETE" must not reactivate closure.
+    if re.search(
+        rf"(?im)^{HWS}*[-*]?{HWS}*(Verdict|Status){HWS}*[:：]{HWS}*"
+        r"(FINAL|COMPLETE|CLOSED|收口|已完成)\b", text):
+        return True
+    return False
+
+
+def _closure_gate_active(run_dir: Path) -> bool:
+    """Whether any canonical run file claims or materially enters closure.
+
+    Closure used to be inferred only from report.md. That let a run write
+    `retrospective.md` with `Verdict: FINAL` while report.md stayed a stub,
+    bypassing closure-only coverage, loop_state, retrospective, and review gates.
+    Keep this as the single source of truth for closure-trigger checks.
+    """
+    report = run_dir / "report.md"
+    rtext = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
+    return bool(
+        (rtext and _closure_claimed(rtext))
+        or _report_is_final(run_dir)
+        or _decision_closing(run_dir)
+        or _completion_marker_claimed(run_dir)
+        or _retrospective_closure_claimed(run_dir)
+    )
+
+
+def _closure_gate_sources(run_dir: Path) -> list[str]:
+    out: list[str] = []
+    report = run_dir / "report.md"
+    rtext = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
+    if rtext and _closure_claimed(rtext):
+        out.append("report.md closure wording")
+    if _report_is_final(run_dir):
+        out.append("report.md confirmed Evidence IDs")
+    if _decision_closing(run_dir):
+        out.append("decisions.md closing status")
+    if _completion_marker_claimed(run_dir):
+        out.append("decisions.md completion marker")
+    if _retrospective_closure_claimed(run_dir):
+        out.append("retrospective.md closure verdict")
+    return out
+
+
+def _closure_gate_reason(run_dir: Path) -> str:
+    sources = _closure_gate_sources(run_dir)
+    return ", ".join(sources) if sources else "unknown closure signal"
+
+
+def _report_stub_or_missing(run_dir: Path, rtext: str) -> bool:
+    if not (run_dir / "report.md").exists():
+        return True
+    cleaned = re.sub(r"```.*?```|<!--.*?-->", "", rtext, flags=re.S)
+    confirmed_section = re.search(
+        r"(?ims)^##\s+(?:Confirmed Findings\b|Confirmed Vulnerabilities\b|确认发现|已确认发现|确认漏洞)"
+        r"(.*?)(?=^##\s|\Z)", cleaned)
+    summary_status = re.search(
+        rf"(?im)^{HWS}*-{HWS}*Status{HWS}*[:：]{HWS}*\S", cleaned)
+    confirmed_ids = re.findall(r"E-\d+[a-z]*", confirmed_section.group(1) if confirmed_section else "")
+    return not summary_status and not confirmed_ids
+
+
+def _confirmed_positive_eids(run_dir: Path) -> list[str]:
+    return sorted(
+        r["id"] for r in parse_evidence(run_dir)
+        if r["id"].startswith("E-") and r["confirmed"] and not r["superseded"]
+        and not (r["refutes_any"] and not r["supports"])
+    )
+
+
+def check_completion_cron_record(run_dir: Path) -> list[str]:
+    """Completion markers must leave an auditable scheduled-loop disposition.
+
+    The hamastar retrospective exposed a closure gap where `/loop` had been
+    marked complete while the scheduled loop kept running. The actual cancellation
+    happens in the Claude Code session, but the run directory still needs an
+    attributable record: `cron_cancelled=<job-id>` or `cron_cancelled=none`.
+    """
+    if not _completion_marker_claimed(run_dir):
+        return []
+    journal = run_dir / "state" / "loop_journal.jsonl"
+    if not journal.exists():
+        return [
+            "收口硬门(loop cron): decisions.md 已有 completion marker, 但缺 "
+            "state/loop_journal.jsonl 的 cron_cancelled=<id|none> 记录。FINAL 同回合必须"
+            "取消 active /loop 定时任务，或记录 cron_cancelled=none。"]
+    cron_recorded = False
+    for line in journal.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("event") or "").strip() not in {"cycle_end", "end"}:
+            continue
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        haystack = f"{item.get('note') or ''}\n{json.dumps(data, ensure_ascii=False, sort_keys=True)}"
+        if CRON_CANCELLED_RE.search(haystack):
+            cron_recorded = True
+            break
+    if not cron_recorded:
+        return [
+            "收口硬门(loop cron): decisions.md 已有 completion marker, 但 loop_journal 未记录 "
+            "cycle_end/end 事件中的 cron_cancelled=<id|none>。写 GHOST_COMPLETE/NORMAL_COMPLETE "
+            "的同回合必须先取消 active /loop 定时任务并把结果写入 end journal。"]
+    return []
+
 
 
 def check_shallow_close(run_dir: Path) -> list[str]:
@@ -951,7 +1073,9 @@ def _decision_closing(run_dir: Path) -> bool:
     if not dec.exists():
         return False
     text = dec.read_text(encoding="utf-8", errors="replace")
-    return bool(re.search(r"(?im)^\s*[-*]?\s*Status\s*[:：]\s*(CLOSING|FINAL|收口)\b", text))
+    return bool(re.search(
+        rf"(?im)^{HWS}*[-*]?{HWS}*Status{HWS}*[:：]{HWS}*(CLOSING|FINAL|收口)\b",
+        text))
 
 
 def check_metacog_pass(run_dir: Path) -> list[str]:
@@ -960,12 +1084,7 @@ def check_metacog_pass(run_dir: Path) -> list[str]:
     Metacog is a second-system divergence pass: it proposes one blind-spot hypothesis and
     one verifiable next action. It is not a confirmation path and never closes fronts.
     """
-    report = run_dir / "report.md"
-    closing_by_decision = _decision_closing(run_dir)
-    if not report.exists() and not closing_by_decision:
-        return []
-    rtext = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
-    if not (_closure_claimed(rtext) or _report_is_final(run_dir) or closing_by_decision):
+    if not _closure_gate_active(run_dir):
         return []
     dec = run_dir / "decisions.md"
     if not dec.exists():
@@ -1807,10 +1926,12 @@ def check_agent_constraint_freshness(run_dir: Path) -> list[str]:
 
 
 def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
-    """过早收口护栏(P0-1). 触发条件 = report.md 出现【强收口断言】(自首式) **或**
-    report.md 已是【实质终版报告】(状态式 _report_is_final: 引用了已确认发现)。后者堵住
-    "聊天里宣布完工、文件里不写收口措辞"的【静默收口】漏洞(hamastar run 实测: 收口闸门
-    因 report 无措辞被整段跳过, 30+ 资产漏挖却"run check passed")。返回 (errors, warns):
+    """过早收口护栏(P0-1).
+
+    触发条件统一由 `_closure_gate_active()` 判断: report 终版/收口措辞、
+    decisions 收口状态、completion marker、retrospective FINAL 都算。这样复盘
+    已宣告 FINAL 但 report 仍是模板时, coverage/review/loop_state 硬门也会启动。
+    返回 (errors, warns):
 
     - **硬错(errors → check_run 失败)**:
       ① review.md 无【独立复审/Independent Review】记录(self-review 治不了 self-review 偏见);
@@ -1818,15 +1939,20 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
       ③ 引用了 recon 情报却无 coverage.json(覆盖台账缺建 = 漏挖盲区, 不能在没建全量台账时收口)。
     - **软警(warns → 仅提示)**: 无 classify.txt、Closed Front 缺证据、屏障关门无 Refutes。
     """
-    report = run_dir / "report.md"
-    if not report.exists():
-        return [], []
-    rtext = report.read_text(encoding="utf-8", errors="replace")
-    if not (_closure_claimed(rtext) or _report_is_final(run_dir)):
+    if not _closure_gate_active(run_dir):
         return [], []  # 未声称收口、也非终版报告 -> 不触发, 不增日常负担
+    report = run_dir / "report.md"
+    rtext = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
 
     errors: list[str] = []
     warns: list[str] = []
+    gate_reason = _closure_gate_reason(run_dir)
+
+    if _confirmed_positive_eids(run_dir) and _report_stub_or_missing(run_dir, rtext):
+        errors.append(
+            "收口硬门(report): 已出现收口信号(" + gate_reason + "), 且 evidence.md 存在 confirmed "
+            "正向发现, 但 report.md 缺失或仍像模板空壳(无 Status 且 Confirmed Findings 未列 E-id)。"
+            "先写实质终版报告, 或撤回 FINAL/CLOSING/GHOST_COMPLETE 收口信号。")
 
     # 硬门(覆盖台账): 引用了 recon 情报却没把它折成 coverage.json, 等于资产清单只是手工
     # 誊录的子集 —— 不能在没建全量结构化台账的情况下产出终版报告/宣布收口(hamastar 根因)。
@@ -1848,12 +1974,7 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     report_body = re.sub(r"```.*?```|<!--.*?-->", "", rtext, flags=re.S)
     report_body = re.sub(r"(?im)^\s*Evidence\s+IDs?.*$", "", report_body)
     cited_ids = set(re.findall(r"E-\d+[a-z]*", report_body))
-    missing_hi = [r["id"] for r in parse_evidence(run_dir)
-                  if r["id"].startswith("E-") and r["confirmed"] and not r["superseded"]
-                  # 纯 negative(有 Refutes 且无 Supports)才豁免; mixed(Supports+Refutes)的确认
-                  # 正向发现仍须报(WARN3, Codex 复审)。
-                  and not (r["refutes_any"] and not r["supports"])
-                  and r["id"] not in cited_ids]
+    missing_hi = [eid for eid in _confirmed_positive_eids(run_dir) if eid not in cited_ids]
     if missing_hi:
         errors.append(
             f"收口硬门(漏报一致性): {', '.join(sorted(missing_hi))} 在 evidence 里已确认"
@@ -1900,6 +2021,8 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     errors.extend(check_unattacked_surface(run_dir))
     # 硬门(强制复盘): 每次渗透收口都要落 retrospective.md, 诚实写【自身问题】+【框架/工具问题】
     errors.extend(check_retrospective(run_dir))
+    # 硬门(loop lifecycle): completion marker 必须记录同回合 scheduled-loop 取消结果
+    errors.extend(check_completion_cron_record(run_dir))
     conflict_errors, conflict_warns = check_conflict_gate(run_dir)
     errors.extend(conflict_errors)
     warns.extend(conflict_warns)
@@ -2362,6 +2485,55 @@ def _selftest() -> int:
     (d_retro2 / "report.md").write_text(
         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
     retro_closure_err, _ = check_closure_discipline(d_retro2)
+    d_retro_final = Path(tempfile.mkdtemp())
+    (d_retro_final / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d_retro_final / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
+    (d_retro_final / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_retro_final / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+    (d_retro_final / "report.md").write_text("# Report\n\n## Summary\n- Status:\n\n## Confirmed Findings\n", encoding="utf-8")
+    (d_retro_final / "retrospective.md").write_text(
+        "# Retrospective\n\n- Verdict: FINAL\n\n"
+        "## Self problems\n- Closed before checking generated state against canonical files.\n\n"
+        "## Framework problems\n- check_run ignored retrospective FINAL as a closure signal.\n",
+        encoding="utf-8")
+    (d_retro_final / "coverage.json").write_text(json.dumps({
+        "total": 1,
+        "examined": 1,
+        "reachable": 1,
+        "assets": [{"host": "admin.example", "reachable": True, "flags": ["LOGIN"]}],
+    }), encoding="utf-8")
+    retro_final_err, _ = check_closure_discipline(d_retro_final)
+    retro_matrix_errors: list[str] = []
+    if check_coverage_matrix is not None:
+        _, retro_matrix_errors = check_coverage_matrix(
+            d_retro_final, closure=_closure_gate_active(d_retro_final))
+    d_report_cn = Path(tempfile.mkdtemp())
+    (d_report_cn / "ev.html").write_text("x" * 10, encoding="utf-8")
+    (d_report_cn / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n",
+        encoding="utf-8")
+    (d_report_cn / "report.md").write_text(
+        "# Report\n\n## Summary\n\n## 确认发现\n- 证据: E-001\n", encoding="utf-8")
+    report_cn_stub = _report_stub_or_missing(d_report_cn, (d_report_cn / "report.md").read_text(encoding="utf-8"))
+    d_retro_prose = Path(tempfile.mkdtemp())
+    (d_retro_prose / "retrospective.md").write_text(
+        "# Retrospective\n\n- Status: NEEDS_REPAIR\n\n"
+        "## Closure\nDo not write GHOST_COMPLETE until hard gates pass.\n",
+        encoding="utf-8")
+    d_cron = Path(tempfile.mkdtemp())
+    (d_cron / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
+    cron_missing = check_completion_cron_record(d_cron)
+    (d_cron / "state").mkdir()
+    (d_cron / "state" / "loop_journal.jsonl").write_text(
+        '{"event":"phase_end","note":"closure complete; cron_cancelled=none"}\n', encoding="utf-8")
+    cron_non_end = check_completion_cron_record(d_cron)
+    (d_cron / "state" / "loop_journal.jsonl").write_text(
+        '{"event":"cycle_end","note":"closure complete; cron_cancelled=none"}\n', encoding="utf-8")
+    cron_none = check_completion_cron_record(d_cron)
+    (d_cron / "state" / "loop_journal.jsonl").write_text(
+        '{"event":"cycle_end","note":"closure complete; cron_cancelled=2218d35d"}\n', encoding="utf-8")
+    cron_id = check_completion_cron_record(d_cron)
     d_lifecycle = Path(tempfile.mkdtemp())
     (d_lifecycle / "ev.html").write_text("x" * 10, encoding="utf-8")
     (d_lifecycle / "evidence.md").write_text(
@@ -2390,6 +2562,21 @@ def _selftest() -> int:
         ("retrospective nested subsections count as filled", retro_nested_ok == []),
         ("closure trigger + no retrospective -> closure carries 复盘 error",
             any("强制复盘" in e for e in retro_closure_err)),
+        ("retrospective Verdict: FINAL activates closure gate",
+            _closure_gate_active(d_retro_final) is True),
+        ("retrospective FINAL + report stub hard-fails report gate",
+            any("收口硬门(report)" in e for e in retro_final_err)),
+        ("retrospective FINAL activates coverage closure mode",
+            check_coverage_matrix is None or any("收口硬门" in e for e in retro_matrix_errors)),
+        ("report stub gate accepts Chinese 确认发现 section", report_cn_stub is False),
+        ("retrospective prose mentioning GHOST_COMPLETE does not trigger closure",
+            _closure_gate_active(d_retro_prose) is False),
+        ("completion marker without cron_cancelled record hard-fails",
+            any("loop cron" in e for e in cron_missing)),
+        ("completion marker ignores cron_cancelled on non-end journal event",
+            any("cycle_end/end" in e for e in cron_non_end)),
+        ("completion marker with cron_cancelled=none clears cron gate", cron_none == []),
+        ("completion marker with cron_cancelled=<id> clears cron gate", cron_id == []),
         ("closure trigger + non-terminal agent -> lifecycle hard error",
          _workers is None or any("Agent 生命周期" in e for e in lifecycle_err)),
         ("finished agent clears lifecycle hard error",
@@ -2951,16 +3138,13 @@ def _selftest() -> int:
 
 
 def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
-    """--auto-peer-review: 收口时若 review.md 缺独立复审记录, 自动按复审矩阵跑 panel:
+    """--auto-peer-review: 任一 canonical closure signal 出现且 review.md 缺独立复审记录时,
+    自动按复审矩阵跑 panel:
     Claude driver: codex+arkcli 满配; 缺 codex 用 arkcli; 缺 arkcli 用 codex; 都缺则 Claude 同族兜底/driver。
     Codex-authored diff: Codex 不算独立票; 满配用 arkcli+Claude Code CLI; 缺 arkcli 必须 Claude Code CLI;
     综合/决策权仍为 Codex。
     慢+数据出境, 故仅显式 flag。幂等: 已有记录则不重跑。复审是候选非裁决。"""
-    report = run_dir / "report.md"
-    if not report.exists():
-        return
-    rtext = report.read_text(encoding="utf-8", errors="replace")
-    if not (_closure_claimed(rtext) or _report_is_final(run_dir)):
+    if not _closure_gate_active(run_dir):
         return  # 未收口 -> 不触发
     rv_path = run_dir / "review.md"
     rv = rv_path.read_text(encoding="utf-8", errors="replace") if rv_path.exists() else ""

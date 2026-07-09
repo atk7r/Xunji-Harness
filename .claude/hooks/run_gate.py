@@ -44,7 +44,7 @@ SESSION_TIMEOUT_SEC = 30 * 60   # Phase 2: 超过 30 分钟未更新 + 有漂移
 
 sys.path.insert(0, str(ROOT / "tools"))
 try:
-    import check_run as _cr   # 复用 _report_is_final, 与 check_run 的"是否终版"判定一致
+    import check_run as _cr   # 复用收口判定, 与 check_run 的 closure gate 一致
 except Exception:
     _cr = None
 
@@ -141,6 +141,16 @@ def report_is_final(run_dir: Path) -> bool:
         return bool(_cr._report_is_final(run_dir))
     except Exception:
         return False
+
+
+def closure_gate_active(run_dir: Path) -> bool:
+    """复用 check_run._closure_gate_active, 避免 hook 与手动 check_run 的收口判定分裂。"""
+    if _cr is None:
+        return report_is_final(run_dir)
+    try:
+        return bool(_cr._closure_gate_active(run_dir))
+    except Exception:
+        return report_is_final(run_dir)
 
 
 def gate_skipped(run_dir: Path) -> bool:
@@ -752,7 +762,7 @@ def main() -> None:
 
         # ---- Existing closure gate ----
         run_dir = active_run
-        if run_dir is None or not report_is_final(run_dir):
+        if run_dir is None or not closure_gate_active(run_dir):
             sys.exit(0)
         # NORMAL mode closure: 独立复审 + CodexCompletionReview
         if _is_normal_mode() and not gate_skipped(run_dir):
@@ -856,6 +866,7 @@ def _selftest() -> int:
 
     # report_is_final via check_run import (终版 vs 存根)
     if _cr is not None:
+        checks.append(("check_run closure predicate is callable", callable(getattr(_cr, "_closure_gate_active", None))))
         rd = runs / "b_20260101"
         rd.mkdir()
         (rd / "ev.html").write_text("x" * 10, encoding="utf-8")
@@ -868,6 +879,11 @@ def _selftest() -> int:
         (rd2 / "report.md").write_text("# Report\nEvidence IDs:\n", encoding="utf-8")
         checks.append(("report_is_final TRUE on confirmed report", report_is_final(rd) is True))
         checks.append(("report_is_final FALSE on stub", report_is_final(rd2) is False))
+        rd_retro = runs / "retro_20260101"
+        rd_retro.mkdir()
+        (rd_retro / "report.md").write_text("# Report\nEvidence IDs:\n", encoding="utf-8")
+        (rd_retro / "retrospective.md").write_text("# Retrospective\n- Verdict: FINAL\n", encoding="utf-8")
+        checks.append(("closure_gate_active TRUE on retrospective FINAL", closure_gate_active(rd_retro) is True))
         rd3 = runs / "d_20260101"
         rd3.mkdir()
         (rd3 / "report.md").write_text(

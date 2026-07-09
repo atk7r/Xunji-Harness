@@ -577,8 +577,11 @@ port observations default to `Maturity: phenomenon` until active proof upgrades 
 
 ## Closure gate — `check_run.py` mechanics
 
-`tools/check_run.py` enforces closure discipline (core "Closure Discipline") only
-when `report.md` makes a strong closure claim:
+`tools/check_run.py` enforces closure discipline (core "Closure Discipline") when
+any canonical closure signal appears: strong closure wording or confirmed finding
+IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
+(`GHOST_COMPLETE` / `NORMAL_COMPLETE`) in `decisions.md`, or explicit
+`retrospective.md` `Status:` / `Verdict:` final/complete values.
 
 - **HARD FAIL** if `review.md` has no `Independent Review` record. Self-review does
   not fix self-review bias, so the independent reviewer is a hard requirement to
@@ -633,7 +636,16 @@ driver) got wrong/slow/missed (wrong calls, tunnel vision, premature closure, ev
 slips) and where the *framework/tooling* (tools/, hooks, guard, knowledge base, docs) held
 the run back — the basis for the next run being stronger, not a disclaimer. `check_run.py`
 HARD-fails closure if `retrospective.md` is missing or its **Self problems** / **Framework
-problems** sections are empty placeholders.
+problems** sections are empty placeholders. Retrospective `Status:` / `Verdict:`
+values such as `FINAL` activate closure gates, but they are not completion
+actions.
+
+**Completion marker and scheduled-loop disposition.** `GHOST_COMPLETE` /
+`NORMAL_COMPLETE` belongs only in `decisions.md` and only after closure gates pass.
+In the same turn, cancel the active scheduled `/loop` job if one exists, then
+append a loop journal `end` record (`cycle_end`) with
+`cron_cancelled=<job-id|none>` in the note. `check_run.py` HARD-fails a completion
+marker without that auditable end-of-cycle cron disposition.
 
 ## Independent review of safety-critical code (narrow gate)
 

@@ -416,7 +416,7 @@ assets were only header / recon-classified, never examined. Before any such clai
   category is signal-justified for that asset but no test record is visible; `·`
   means no current surface signal. Whole empty columns and sparse rows are review
   signals during ordinary cycles, and `check_run.py` upgrades them to closure
-  blockers once a final/closure report is present.
+  blockers once any canonical closure signal is present.
 - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
   evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,
@@ -457,9 +457,17 @@ assets were only header / recon-classified, never examined. Before any such clai
   it's missing or its **Self problems** / **Framework problems** are empty stubs. Procedure:
   reference "Run-closure detail".
 
+- **Closure signals vs completion actions.** A final report, `decisions.md`
+  `Status: CLOSING/FINAL`, and `retrospective.md` `Status:` / `Verdict:` values
+  such as `FINAL` all activate closure gates. They are not loop completion by
+  themselves. Only `GHOST_COMPLETE` / `NORMAL_COMPLETE` in `decisions.md` are
+  completion actions.
+
 - **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
   independent review resolved, retrospective written), write `GHOST_COMPLETE` at
-  the end of `decisions.md`. The loop detects this and stops. No operator
+  the end of `decisions.md`. In the same turn, cancel any active scheduled `/loop`
+  job and append a loop journal `end` record whose note contains
+  `cron_cancelled=<job-id|none>`. The loop detects this and stops. No operator
   review required.
 
 `check_run.py` HARD-fails / WARN mechanics for closure, and the same independent

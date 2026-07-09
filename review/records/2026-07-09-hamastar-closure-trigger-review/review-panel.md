@@ -1,0 +1,93 @@
+# Peer Review Panel — 2026-07-09-hamastar-closure-trigger-review
+
+_backend: panel:claude · 2026-07-09T10:26Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: NEEDS_DRIVER
+
+_backend: panel:claude_
+_brain: codex_
+_bundle_hash: 71269acec6e371f9f30bcc3d197e10a1bf361b5b_
+_evidence_index_hash: e76fddea3fce2d06a353dfbbf5766fdf62ec182e_
+
+## Findings
+- [WARN] PR-001 review panel had backend errors; aggregation is partial | Evidence: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 20260709181831000021272DB70A482A49"
+  }
+}
+; minimax-m3: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 202607091821310000DD426B8D88C2153E"
+  }
+}
+; glm-5.2: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 20260709182206000099C6D07E7F0B08AB"
+  }
+}
+ | Why: At least one requested heterogeneous reviewer failed or was unavailable.
+
+## Blind-spot check
+- [claude] **Asymmetry in closure-trigger vs. cron-gate scope:** `check_completion_cron_record` only fires for completion markers (`GHOST_COMPLETE`/`NORMAL_COMPLETE`), NOT for retrospective FINAL. This means: retrospective FINAL now triggers ALL other closure gates (coverage, review, report, surface, retrospective quality), but the cron-job-left-running bug that originally motivated the hamastar retrospective is NOT checked when closure is triggered solely by retrospective FINAL. The report (report.md:13-15) correctly describes the cron gate as "once GHOST_COMPLETE or NORMAL_COMPLETE is present" — so this is by design, not a bug. But the original hamastar scenario was "retrospective FINAL + cron left running," and the fix ensures the other gates fire but not the cron gate specifically. The operator would need to write a completion marker to trigger cron enforcement. Worth documenting explicitly: "retrospective FINAL is a closure SIGNAL (triggers all gates except cron); completion marker is a closure ACTION (triggers all gates including cron)."
+- [claude] **No test for the `_report_stub_or_missing` + confirmed findings scenario with a real report that simply uses non-English headers.** This combination would produce a hard error on an otherwise-valid report, which is a false positive. The severity is limited because the error tells the driver to write a real report, and the driver can fix the heading.
+- [claude] **The `_maybe_auto_peer_review` docstring** (active-diff.txt:379-381) still says "Codex-authored diff: Codex 不算独立票" — but the code now runs for any closure signal, not just Codex-authored diffs. The comment is stale relative to the code's trigger scope.
+- [claude] **No check for whether the hamastar retrospective's "Closure" section** (hamastar-retrospective-current.md:147-154) contains the phrase "GHOST_COMPLETE" in a way that could false-trigger `_completion_marker_claimed` if it were in decisions.md. The "Closure" section says "required repair before any new FINAL/GHOST_COMPLETE claim" — but since this is in retrospective.md, only `_retrospective_closure_claimed` checks it, and that function explicitly ignores prose mentions of GHOST_COMPLETE (selftest at active-diff.txt:370-371 confirms this). No cross-contamination risk here.
+- [claude] **The `HWS = r"[^\S\n]"`** pattern at active-diff.txt:100 is correct for horizontal whitespace exclusion, but on macOS with potential CRLF line endings in git-checkout files (the branch is `port/macos-crlf`), `\r` would be treated as horizontal whitespace by this character class. If a file has `\r\n` line endings and Python's `open()` doesn't translate them (unlikely with `encoding="utf-8"` since Python defaults to universal newlines), `\r` could appear before `\n` and be matched by `[^\S\n]`. This is a theoretical concern — Python's default `open()` does handle `\r\n` → `\n` translation.
+- [claude] **Diff-only verification, no live integration test:** All evidence is from selftests and code review. There's no test showing that `run_gate.py` actually delegates correctly to `check_run._closure_gate_active` in a real hook context (the selftest creates test run dirs but doesn't simulate the hook environment's import of `check_run`). The `run_gate.py` code at active-diff.txt:11-16 has fail-safe fallback to `report_is_final` if `_cr` is None or the import fails, which is correct behavior. But the actual delegation path (importing a private `_closure_gate_active` from another module) is fragile — if the function is renamed or its signature changes, run_gate.py will silently fall back to `report_is_final` without anyone noticing until the same bypass bug resurfaces. A selftest in run_gate.py that verifies `_cr._closure_gate_active` is callable and returns the expected type would catch this.
+
+## Context-limit notes
+- [claude] The Chinese-language regex keywords `收口` and `已完成` in `_retrospective_closure_claimed` and `_decision_closing` — I verified these mean "closure/final" and "completed" respectively, which is correct for the intended semantics. No issue.
+- [claude] The hamastar retrospective product names (SimMAGIC, Hamastar CMS, Magic Modules CMS) are Taiwan/Chinese web products — I'm treating these as the retrospective describes them and not second-guessing product-specific vulnerability claims since this review scope is about the closure mechanism, not the pentest findings themselves.
+- [claude] The `HWS` abbreviation (horizontal whitespace) and `ROOT` convention are project-internal conventions that I'm interpreting from context — no ambiguity.
+- arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 20260709181831000021272DB70A482A49"
+  }
+}
+; minimax-m3: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 202607091821310000DD426B8D88C2153E"
+  }
+}
+; glm-5.2: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 20260709182206000099C6D07E7F0B08AB"
+  }
+}
+
+- panel completed 1/2 required heterogeneous backends
+
+> ERROR: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 20260709181831000021272DB70A482A49"
+  }
+}
+; minimax-m3: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 202607091821310000DD426B8D88C2153E"
+  }
+}
+; glm-5.2: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": net/http: TLS handshake timeout, request_id: 20260709182206000099C6D07E7F0B08AB"
+  }
+}

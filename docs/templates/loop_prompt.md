@@ -85,7 +85,8 @@ If `state/controller.shadow.json` has `can_stop=true` because a completion marke
 (`GHOST_COMPLETE` or `NORMAL_COMPLETE`) is already present, do not create or
 reschedule another loop iteration. If a scheduled loop exists in the current
 Claude Code session, cancel it before ending. Append the normal `end` journal
-event and finish with `BLOCKED: run already complete`.
+event with `cron_cancelled=<job-id|none>` and finish with
+`BLOCKED: run already complete`.
 
 ### 3. Plan / Assign / Act
 If the selected move performs proof, verification, probing, or Agent execution,
@@ -160,7 +161,7 @@ Only when the controller and run files show a closure-review candidate:
 {{PYTHON}} tools/peer_review.py "{{RUN_DIR}}" --into-run
 ```
 
-Closure still requires: no hard `check_run` gates, independent review resolved, retrospective.md with real Self and Framework/tooling sections, no unresolved PR ledger items, and `GHOST_COMPLETE` written only after those pass.
+Closure still requires: no hard `check_run` gates, independent review resolved, retrospective.md with real Self and Framework/tooling sections, no unresolved PR ledger items, and `GHOST_COMPLETE` written only after those pass. In the same turn as writing `GHOST_COMPLETE` or `NORMAL_COMPLETE`, cancel the active scheduled `/loop` job if one exists and record the result in `state/loop_journal.jsonl` with `cron_cancelled=<job-id|none>`.
 
 After reviewer disposition is recorded in `review.md`, `decisions.md`, or the
 relevant run file, append:
@@ -209,6 +210,10 @@ Run one iteration only. Before ending normally, append:
 ```bash
 {{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" end --note "本轮以下一行动或阻塞状态结束"
 ```
+
+If this iteration wrote `GHOST_COMPLETE` or `NORMAL_COMPLETE`, the `end` note
+must instead include `cron_cancelled=<job-id|none>` after cancelling the active
+scheduled `/loop` job if one exists.
 
 If the loop is interrupted before Markdown files are consistent, append an
 `interrupt` event with the last completed step before handing back or restarting:
