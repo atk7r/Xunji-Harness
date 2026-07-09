@@ -13,8 +13,9 @@
 
 ## Framework / tooling problems / 框架与工具问题
 <tools/ hooks guard 知识库 文档 哪里拖了本 run 后腿: 缺能力、误报闸门、消息误导、
-知识陈旧、模板不顺手。每条问题必须带 `- Status: fixed|open|deferred`
-或明确写 no framework/tooling issue。>
+知识陈旧、模板不顺手。每条问题必须单独带 `- Status: fixed|open|deferred`；
+不能用整节共用的一个 Status 蒙混。fixed 必须填 Fixed by + Verification，
+open/deferred 必须填 Residual risk；或明确写 no framework/tooling issue。>
 
 ### FW-001
 

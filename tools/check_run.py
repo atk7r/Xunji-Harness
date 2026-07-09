@@ -1306,6 +1306,81 @@ def check_surface_populated(run_dir: Path) -> list[str]:
     return warns
 
 
+_INDEPENDENT_REVIEW_HEADING_RE = re.compile(
+    r"(?im)^##\s+[^\n]*(?:Independent Review|Independent Reviewer|独立复审)[^\n]*$"
+)
+
+
+def has_completed_independent_review(review_text: str) -> bool:
+    """Reject template/prose mentions while accepting structured or substantive reviews."""
+    matches = list(_INDEPENDENT_REVIEW_HEADING_RE.finditer(review_text or ""))
+    for match in matches:
+        heading = match.group(0)
+        if re.search(r"\b(?:pending|status|template|待复审|待填写)\b", heading, re.I):
+            continue
+        tail = review_text[match.end():]
+        h2 = list(re.finditer(r"(?m)^##\s+[^\n]+$", tail))
+        end = h2[0].start() if h2 else len(tail)
+        # peer_review.py writes `## Verdict:` immediately after the Independent
+        # Review preface. Include that one generated section, but stop before any
+        # later H2 so a filled self-review cannot make an untouched template pass.
+        if h2 and re.match(r"##\s+Verdict\s*[:：]", h2[0].group(0), re.I):
+            end = h2[1].start() if len(h2) > 1 else len(tail)
+        block = heading + tail[:end]
+        clean = re.sub(r"<!--.*?-->|<[^>]*>", "", block, flags=re.S)
+        verdict_match = re.search(
+            r"(?im)^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?Verdict\s*[:：]\s*"
+            r"(PASS|WARN|BLOCKER|PASSED|CONFIRMED)\b",
+            clean,
+        )
+        reviewer = _block_field(clean, "Reviewer")
+        backend = _block_field(clean, "Backend")
+        backend_meta = re.search(r"(?im)^_backend\s*[:：]\s*([^_\n]+)_", clean)
+        reviewer_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", reviewer, re.I))
+        backend_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", backend, re.I))
+        identity_ok = (
+            (not _blankish_field(reviewer) and not reviewer_placeholder)
+            or (not _blankish_field(backend) and not backend_placeholder)
+            or (backend_meta is not None and (
+                "heterogeneous peer_review" in heading.lower()
+                or "same-family peer_review fallback" in heading.lower()
+            ))
+        )
+        if verdict_match and identity_ok:
+            return True
+    return False
+
+
+def has_codex_completion_review(decisions_text: str) -> bool:
+    """Require a structured completion-review result, not a prose keyword mention."""
+    heading = re.search(r"(?im)^#{2,6}\s+CodexCompletionReview\b[^\n]*$", decisions_text or "")
+    if not heading:
+        return False
+    tail = decisions_text[heading.end():]
+    next_heading = re.search(r"(?m)^#{1,2}\s+", tail)
+    block = tail[:next_heading.start()] if next_heading else tail
+    reviewer = re.search(r"(?im)^\s*[-*]\s*Reviewer\s*[:：]\s*(\S.+)$", block)
+    verdict = re.search(
+        r"(?im)^\s*[-*]\s*Verdict\s*[:：]\s*\**(PASS|WARN|CONFIRMED)\b",
+        block,
+    )
+    return bool(reviewer and verdict and len(re.sub(r"\s+", "", block)) >= 80)
+
+
+def check_codex_completion_review(run_dir: Path) -> list[str]:
+    if not _completion_marker_claimed(run_dir):
+        return []
+    decisions = run_dir / "decisions.md"
+    text = decisions.read_text(encoding="utf-8", errors="replace") if decisions.exists() else ""
+    if has_codex_completion_review(text):
+        return []
+    return [
+        "收口硬门(CodexCompletionReview): decisions.md 已有 completion marker, 但缺真实"
+        "结构化 completion review。关键词/单行字段/待办散文不算；需要含 Reviewer + Verdict + "
+        "实质内容的 `## CodexCompletionReview` 小节。"
+    ]
+
+
 def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warns: list[str] = []
@@ -1318,9 +1393,7 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
 
     review_path = run_dir / "review.md"
     review_text = review_path.read_text(encoding="utf-8", errors="replace") if review_path.exists() else ""
-    independent_reviews = list(re.finditer(r"(?im)^##\s+(?:Independent Review|独立复审)\b", review_text))
-    last_independent_review = independent_reviews[-1] if independent_reviews else None
-    has_independent_review = last_independent_review is not None
+    has_independent_review = has_completed_independent_review(review_text)
     evidence_path = run_dir / "evidence.md"
     review_stale = False
     if has_independent_review and evidence_path.exists() and review_path.exists():
@@ -1742,16 +1815,35 @@ def _retro_section_filled(body: str | None) -> bool:
     return len("".join(kept)) >= MIN_RETRO_CHARS
 
 
-def _retro_framework_statused(body: str | None) -> bool:
-    """Framework/tooling lessons must say whether the framework is fixed/open/deferred.
+_RETRO_STATUS_RE = re.compile(
+    r"(?im)^\s*(?:[-*]\s*)?(?:Current\s+status|Fix\s+status|Status|状态|当前状态|修复状态)"
+    r"\s*[:：]\s*(fixed|open|deferred|已修|已修复|未修|待修|开放|延后)"
+    r"(?:\s|$|[;；,，。])"
+)
+
+
+def _retro_framework_items(body: str) -> list[str]:
+    """Split common numbered or heading-based framework issue records."""
+    problem_starts = list(re.finditer(r"(?im)^\s*[-*]\s*Problem\s*[:：]", body))
+    starts = problem_starts or list(re.finditer(r"(?m)^(?:#{3,6}\s+|\d+[.)、]\s+)", body))
+    if not starts:
+        return [body]
+    return [
+        body[m.start(): starts[i + 1].start() if i + 1 < len(starts) else len(body)]
+        for i, m in enumerate(starts)
+    ]
+
+
+def _retro_framework_status_errors(body: str | None) -> list[str]:
+    """Validate every framework lesson, including its repair proof or residual risk.
 
     A retrospective is allowed to say there were no framework issues, but if it
-    names tools/hooks/docs problems it must leave a repair status the next run can
-    consume. Otherwise the same lesson can reappear forever without becoming a
-    gate or backlog item.
+    names multiple tools/hooks/docs problems, one status line cannot discharge the
+    whole section. Fixed items need a concrete fix pointer and verification; open
+    or deferred items need an explicit residual risk.
     """
     if body is None:
-        return False
+        return ["framework section missing"]
     b = re.sub(r"<!--.*?-->", "", body, flags=re.S)
     b = re.sub(r"<[^>]*>", "", b)
     if re.search(
@@ -1759,13 +1851,32 @@ def _retro_framework_statused(body: str | None) -> bool:
         r"no framework issue|no tooling issue|no framework/tooling issue|none)\s*[。.]?\s*$",
         b,
     ):
-        return True
-    return bool(re.search(
-        r"(?im)^\s*(?:[-*]\s*)?(?:Current\s+status|Fix\s+status|Status|状态|当前状态|修复状态)"
-        r"\s*[:：]\s*(fixed|open|deferred|accepted|已修|已修复|未修|待修|开放|延后|接受|无|none|n/a)"
-        r"(?:\s|$|[;；,，。])",
-        b,
-    ))
+        return []
+    errors: list[str] = []
+    for index, item in enumerate(_retro_framework_items(b), 1):
+        label = item.strip().splitlines()[0][:80] if item.strip() else f"item {index}"
+        status_match = _RETRO_STATUS_RE.search(item)
+        if not status_match:
+            errors.append(f"{label}: missing Status")
+            continue
+        status = status_match.group(1).lower()
+        if status in {"fixed", "已修", "已修复"}:
+            fixed_by = _block_field(item, "Fixed by") or _block_field(item, "修复方式")
+            verification = _block_field(item, "Verification") or _block_field(item, "验证")
+            if _blankish_field(fixed_by):
+                errors.append(f"{label}: fixed but missing Fixed by")
+            if _blankish_field(verification):
+                errors.append(f"{label}: fixed but missing Verification")
+        else:
+            residual = _block_field(item, "Residual risk") or _block_field(item, "残余风险")
+            if _blankish_field(residual):
+                errors.append(f"{label}: {status} but missing Residual risk")
+    return errors
+
+
+def _retro_framework_statused(body: str | None) -> bool:
+    """Compatibility predicate for callers that only need pass/fail."""
+    return not _retro_framework_status_errors(body)
 
 
 def check_retrospective(run_dir: Path) -> list[str]:
@@ -1789,11 +1900,17 @@ def check_retrospective(run_dir: Path) -> list[str]:
             "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】节缺失或仍是"
             "空占位 —— 写清 tools/hooks/guard/知识库/文档 哪里拖了本 run 后腿(缺能力/误报闸门/消息误导/"
             "知识陈旧), 或诚实写明确无。")
-    elif not _retro_framework_statused(framework_body):
-        errors.append(
-            "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】节已写问题"
-            "但缺修复状态字段 —— 每个框架教训至少写 `- Status: fixed|open|deferred` 或明确写 no framework/tooling issue。"
-            "否则它只会在复盘里重复出现, 不能进入工具/模板/知识库闭环。")
+    else:
+        framework_status_errors = _retro_framework_status_errors(framework_body)
+        if framework_status_errors:
+            details = "; ".join(framework_status_errors[:5])
+            more = " …" if len(framework_status_errors) > 5 else ""
+            errors.append(
+                "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】"
+                "未逐条闭环 —— 每条问题都要有 `Status: fixed|open|deferred`; fixed 还要有非空 "
+                "`Fixed by` + `Verification`, open/deferred 还要有 `Residual risk`。"
+                f"具体缺口: {details}{more}"
+            )
     return errors
 
 
@@ -2152,11 +2269,12 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     # 硬门: 收口前必须有独立 Reviewer 复审记录
     review = run_dir / "review.md"
     rv = review.read_text(encoding="utf-8", errors="replace") if review.exists() else ""
-    if not re.search(r"Independent Review|独立复审", rv):
+    if not has_completed_independent_review(rv):
         errors.append(
             "收口硬门(P0-1): report 含强收口断言, 但 review.md 无【独立复审 / Independent "
             "Review】记录。自评治不了自评偏见; 收口前【必须】派独立 Reviewer 子代理(常驻授权, "
             "见 review/independent-reviewer.md)并落 review.md。撤回收口措辞或补复审后再过。")
+    errors.extend(check_codex_completion_review(run_dir))
     ledger_errors, ledger_warns = check_peer_review_ledger(run_dir)
     errors.extend(ledger_errors)
     warns.extend(ledger_warns)
@@ -2213,6 +2331,12 @@ def _selftest() -> int:
     consume it). Mirrors check_hook's self-testing pattern. No network, no run dir."""
     import os
     import tempfile
+    valid_review_text = (
+        "# Review\n\n## Independent Review\n"
+        "- Reviewer: selftest-fresh-context\n"
+        "- Time: 2026-01-01T00:00:00Z\n"
+        "- Verdict: PASS\n"
+    )
     d = Path(tempfile.mkdtemp())
     (d / "ev_real.html").write_text("x" * 10, encoding="utf-8")
     (d / "ev_real.html.replay.json").write_text("{}", encoding="utf-8")
@@ -2254,6 +2378,41 @@ def _selftest() -> int:
     byid = {r["id"]: r for r in recs}
     checks = [
         ("preamble not counted", len(recs) == 10),
+        ("completed independent review requires real identity and verdict",
+         has_completed_independent_review(valid_review_text)),
+        ("independent review prose mention does not satisfy gate",
+         not has_completed_independent_review(
+             "# Review\nIndependent Review is still required before closure.\n")),
+        ("independent review template placeholders do not satisfy gate",
+         not has_completed_independent_review(
+             "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
+             "- Verdict: (PASS / WARN / BLOCKER)\n")),
+        ("filled self-review after untouched independent template cannot satisfy gate",
+         not has_completed_independent_review(
+             "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
+             "- Verdict: (PASS / WARN / BLOCKER)\n\n## R-001 Self review\n"
+             + ("- Findings: driver checked its own evidence and claims PASS.\n" * 30))),
+        ("peer_review generated backend/verdict satisfies gate",
+         has_completed_independent_review(
+             "## Independent Review (same-family peer_review fallback)\n"
+             "_backend: claude_\n## Verdict: WARN\n")),
+        ("generic peer_review label cannot spoof generated review identity",
+         not has_completed_independent_review(
+             "## Independent Review (peer_review)\n"
+             "_backend: claude_\n## Verdict: WARN\n")),
+        ("fresh-context heading alone cannot spoof reviewer identity",
+         not has_completed_independent_review(
+             "## Independent Review (fresh-context self-review by driver)\n"
+             "## Verdict: PASS\n")),
+        ("completion review prose mention does not satisfy gate",
+         not has_codex_completion_review(
+             "CodexCompletionReview is still missing and must be added.\n")),
+        ("single completion review field does not satisfy gate",
+         not has_codex_completion_review("- CodexCompletionReview: CONFIRMED by fresh reviewer\n")),
+        ("substantive completion review section satisfies gate",
+         has_codex_completion_review(
+             "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
+             "- Summary: report coverage, evidence severity, and reachable assets were independently checked.\n")),
         ("report Evidence IDs parser accepts bullet form",
          _report_evidence_ids("- Evidence IDs: E-001, E-002") == {"E-001", "E-002"}),
         ("split certainty -> confirmed", byid["E-002"]["confirmed"] is True),
@@ -2501,7 +2660,7 @@ def _selftest() -> int:
     (d6 / "ev.html").write_text("x" * 10, encoding="utf-8")
     (d6 / "evidence.md").write_text(
         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
-    (d6 / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d6 / "review.md").write_text(valid_review_text, encoding="utf-8")
     (d6 / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
     (d6 / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
     fp_err_missing, _ = check_closure_discipline(d6)
@@ -2552,7 +2711,7 @@ def _selftest() -> int:
     (d_retro / "retrospective.md").write_text(  # 两节都填了真实内容
         "# Retrospective\n\n## 自身问题 / Self problems\n- 过早把 SSRF 前沿当不可达关闭, 漏看一个回连载体。\n\n"
         "## 框架与工具问题 / Framework problems\n- probe.py 对 302 链跟随不透明, 误把跳转当原响应, 浪费两轮。\n"
-        "- Status: open\n",
+        "- Status: open\n- Residual risk: redirect-chain evidence can still be misread until probe is fixed.\n",
         encoding="utf-8")
     retro_ok = check_retrospective(d_retro)
     (d_retro / "retrospective.md").write_text(
@@ -2560,15 +2719,30 @@ def _selftest() -> int:
         "### 1. Tunnel vision\n- Spent all cycles on one front while other reachable assets stayed shallow.\n\n"
         "## Framework / tooling problems / 框架与工具问题\n\n"
         "### 1. Agent lifecycle\n- workers.py had no heartbeat or closure blocker for live agents.\n"
-        "- Status: open\n",
+        "- Status: open\n- Residual risk: stale live agents can still be omitted at closure.\n",
         encoding="utf-8")
     retro_nested_ok = check_retrospective(d_retro)
+    (d_retro / "retrospective.md").write_text(
+        "# Retrospective\n\n## Self problems\n- Closed too early and skipped a control request.\n\n"
+        "## Framework problems\n"
+        "1. First tool issue\n- Status: fixed\n- Fixed by: tools/a.py\n- Verification: a selftest passed\n\n"
+        "2. Second tool issue\n- Residual risk: remains visible in the backlog\n",
+        encoding="utf-8")
+    retro_multi_missing = check_retrospective(d_retro)
+    (d_retro / "retrospective.md").write_text(
+        "# Retrospective\n\n## Self problems\n- Closed too early and skipped a control request.\n\n"
+        "## Framework problems\n"
+        "- Problem: first parser issue\n- Status: fixed\n- Fixed by: tools/a.py\n"
+        "- Verification: parser selftest\n\n"
+        "- Problem: second parser issue\n- Residual risk: still visible\n",
+        encoding="utf-8")
+    retro_problem_missing = check_retrospective(d_retro)
     # 整合: 终版报告(触发收口) + 无 retrospective → check_closure_discipline 带出复盘硬错
     d_retro2 = Path(tempfile.mkdtemp())
     (d_retro2 / "ev.html").write_text("x" * 10, encoding="utf-8")
     (d_retro2 / "evidence.md").write_text(
         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
-    (d_retro2 / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_retro2 / "review.md").write_text(valid_review_text, encoding="utf-8")
     (d_retro2 / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
     (d_retro2 / "report.md").write_text(
         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
@@ -2577,7 +2751,7 @@ def _selftest() -> int:
     (d_retro_final / "ev.html").write_text("x" * 10, encoding="utf-8")
     (d_retro_final / "evidence.md").write_text(
         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
-    (d_retro_final / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_retro_final / "review.md").write_text(valid_review_text, encoding="utf-8")
     (d_retro_final / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
     (d_retro_final / "report.md").write_text("# Report\n\n## Summary\n- Status:\n\n## Confirmed Findings\n", encoding="utf-8")
     (d_retro_final / "retrospective.md").write_text(
@@ -2612,6 +2786,7 @@ def _selftest() -> int:
         encoding="utf-8")
     d_cron = Path(tempfile.mkdtemp())
     (d_cron / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
+    completion_review_missing = check_codex_completion_review(d_cron)
     cron_missing = check_completion_cron_record(d_cron)
     (d_cron / "state").mkdir()
     (d_cron / "state" / "loop_journal.jsonl").write_text(
@@ -2623,11 +2798,17 @@ def _selftest() -> int:
     (d_cron / "state" / "loop_journal.jsonl").write_text(
         '{"event":"cycle_end","note":"closure complete; cron_cancelled=2218d35d"}\n', encoding="utf-8")
     cron_id = check_completion_cron_record(d_cron)
+    (d_cron / "decisions.md").write_text(
+        "# Decisions\n\n- GHOST_COMPLETE\n\n## CodexCompletionReview\n"
+        "- Reviewer: codex-fresh\n- Verdict: PASS\n"
+        "- Summary: report coverage, severity support, and reachable assets were independently checked.\n",
+        encoding="utf-8")
+    completion_review_ok = check_codex_completion_review(d_cron)
     d_lifecycle = Path(tempfile.mkdtemp())
     (d_lifecycle / "ev.html").write_text("x" * 10, encoding="utf-8")
     (d_lifecycle / "evidence.md").write_text(
         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
-    (d_lifecycle / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_lifecycle / "review.md").write_text(valid_review_text, encoding="utf-8")
     (d_lifecycle / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
     (d_lifecycle / "report.md").write_text(
         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
@@ -2649,9 +2830,13 @@ def _selftest() -> int:
         ("retrospective half-filled -> framework section error only", len(retro_half) == 1
             and any("Framework" in e for e in retro_half)),
         ("retrospective framework issue without status -> hard error",
-            any("修复状态" in e for e in retro_no_status)),
+            any("逐条闭环" in e for e in retro_no_status)),
         ("retrospective both filled -> no error", retro_ok == []),
         ("retrospective nested subsections count as filled", retro_nested_ok == []),
+        ("retrospective each framework item needs its own status",
+            any("Second tool issue: missing Status" in e for e in retro_multi_missing)),
+        ("retrospective repeated Problem fields are validated independently",
+            any("Problem: second parser issue: missing Status" in e for e in retro_problem_missing)),
         ("closure trigger + no retrospective -> closure carries 复盘 error",
             any("强制复盘" in e for e in retro_closure_err)),
         ("retrospective Verdict: FINAL activates closure gate",
@@ -2669,6 +2854,10 @@ def _selftest() -> int:
             any("cycle_end/end" in e for e in cron_non_end)),
         ("completion marker with cron_cancelled=none clears cron gate", cron_none == []),
         ("completion marker with cron_cancelled=<id> clears cron gate", cron_id == []),
+        ("completion marker without structured completion review hard-fails",
+            any("CodexCompletionReview" in e for e in completion_review_missing)),
+        ("structured completion review clears completion-review gate",
+            completion_review_ok == []),
         ("closure trigger + non-terminal agent -> lifecycle hard error",
          _workers is None or any("Agent 生命周期" in e for e in lifecycle_err)),
         ("finished agent clears lifecycle hard error",
@@ -2754,7 +2943,7 @@ def _selftest() -> int:
     d10 = Path(tempfile.mkdtemp())
     (d10 / "report.md").write_text(
         "# Report\nEvidence IDs: E-001\n## 确认发现\n- 证据: E-001\n", encoding="utf-8")
-    (d10 / "review.md").write_text("# Review\n## Independent Review\n- done\n", encoding="utf-8")
+    (d10 / "review.md").write_text(valid_review_text, encoding="utf-8")
     rv_before = (d10 / "review.md").read_text(encoding="utf-8")
     _maybe_auto_peer_review(d10)   # 幂等: 已有独立复审记录 -> 直接 return, 不改 review.md/不调模型
     rv_after = (d10 / "review.md").read_text(encoding="utf-8")
@@ -2863,7 +3052,7 @@ def _selftest() -> int:
     d_conf = Path(tempfile.mkdtemp())
     (d_conf / "state").mkdir()
     (d_conf / "ev.html").write_text("x" * 10, encoding="utf-8")
-    (d_conf / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_conf / "review.md").write_text(valid_review_text, encoding="utf-8")
     (d_conf / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
     (d_conf / "retrospective.md").write_text(
         "# Retrospective\n\n## 自身问题 / Self problems\n- conflict gate selftest filled.\n\n"
@@ -2929,14 +3118,16 @@ def _selftest() -> int:
     (d_mid_cov / "frontier.md").write_text(
         "# Frontier\n### F-001\n- Status: open\n- charlie login gate\n", encoding="utf-8")
     (d_mid_cov / "decisions.md").write_text(_five_decisions, encoding="utf-8")
-    (d_mid_cov / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
+    (d_mid_cov / "review.md").write_text(valid_review_text, encoding="utf-8")
     mid_cov_e, mid_cov_w = check_intermediate_gates(d_mid_cov)
 
     d_mid_fresh = Path(tempfile.mkdtemp())
     evp = d_mid_fresh / "evidence.md"
     rvp = d_mid_fresh / "review.md"
     evp.write_text("# Evidence Ledger\n## E-001\n- Certainty: 1.0\n", encoding="utf-8")
-    rvp.write_text("# Review\n## 独立复审\n- ok\n", encoding="utf-8")
+    rvp.write_text(
+        "# Review\n## 独立复审\n- Reviewer: selftest\n- Verdict: PASS\n",
+        encoding="utf-8")
     (d_mid_fresh / "decisions.md").write_text(_five_decisions, encoding="utf-8")
     os.utime(evp, (1000, 1000))
     os.utime(rvp, (1010, 1010))
@@ -2946,7 +3137,7 @@ def _selftest() -> int:
     evp2 = d_mid_stale / "evidence.md"
     rvp2 = d_mid_stale / "review.md"
     evp2.write_text("# Evidence Ledger\n## E-001\n- Certainty: 1.0\n", encoding="utf-8")
-    rvp2.write_text("# Review\n## Independent Review\n- old\n", encoding="utf-8")
+    rvp2.write_text(valid_review_text, encoding="utf-8")
     (d_mid_stale / "decisions.md").write_text(_five_decisions, encoding="utf-8")
     os.utime(rvp2, (1000, 1000))
     os.utime(evp2, (1010, 1010))
@@ -3257,7 +3448,7 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
         return  # 未收口 -> 不触发
     rv_path = run_dir / "review.md"
     rv = rv_path.read_text(encoding="utf-8", errors="replace") if rv_path.exists() else ""
-    if re.search(r"Independent Review|独立复审", rv):
+    if has_completed_independent_review(rv):
         return  # 幂等: 已有独立复审记录 -> 不重跑
     try:
         import peer_review  # 同目录(sys.path 已插入 tools/)

@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNS = ROOT / "runs"
+RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
 ACTIVE_WINDOW_SEC = 900   # 只对最近 15 分钟内改动过的 run 介入(= 当前正在做的那个)
 DRIFT_TIMEOUT_WINDOW_SEC = 6 * 60 * 60   # Phase 2 单独长窗口, 用于抓住超过 30 分钟的未解漂移
 SESSION_TIMEOUT_SEC = 30 * 60   # Phase 2: 超过 30 分钟未更新 + 有漂移信号 → 阻断
@@ -47,6 +47,11 @@ try:
     import check_run as _cr   # 复用收口判定, 与 check_run 的 closure gate 一致
 except Exception:
     _cr = None
+
+try:
+    import loop_state as _loop_state
+except Exception:
+    _loop_state = None
 
 try:
     from anti_drift import (
@@ -648,9 +653,22 @@ def decide_closure(is_final: bool, check_rc: int, open_fronts: int, stop_hook_ac
     return decide(is_final, check_rc, stop_hook_active)
 
 
+def _fallback_status_is_active(status: str) -> bool:
+    """Classify the canonical leading status without reading historical notes."""
+    primary = re.split(r"[,;；(（]", status.lower().replace("-", "_"), maxsplit=1)[0]
+    tokens = set(re.findall(r"[a-z0-9_]+", primary))
+    return bool(tokens & {"open", "probing", "working", "blocked_type_a"})
+
+
 def _count_open_fronts(run_dir: Path) -> int:
-    """Count fronts in frontier.md with Status: open (not probing/blocked_type_b/deferred/closed).
-    Returns 0 if frontier.md is missing or unparseable."""
+    """Count every active status using the same parser as the loop controller."""
+    if _loop_state is not None:
+        try:
+            data = _loop_state.derive(run_dir, write=False)
+            fronts = data.get("fronts") if isinstance(data.get("fronts"), dict) else {}
+            return int(fronts.get("open_count", 0) or 0)
+        except Exception:
+            pass
     fr = run_dir / "frontier.md"
     if not fr.exists():
         return 0
@@ -665,7 +683,7 @@ def _count_open_fronts(run_dir: Path) -> int:
             continue
         sm = _re_of.search(r"(?im)^\s*-?\s*Status\s*[:：]\s*(.+)$", block)
         status = sm.group(1).strip().lower() if sm else ""
-        if status == "open":
+        if _fallback_status_is_active(status):
             count += 1
     return count
 
@@ -685,14 +703,52 @@ def build_message(run_dir: Path, check_out: str) -> str:
 def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -> str:
     msg = (
         f"[收口闸门] 你似乎在收尾 runs/{run_dir.name}, "
-        f"但 frontier.md 仍有 {open_fronts} 个 open front。"
-        "FINAL 必须同时满足 open fronts=0 且 check_run 通过; "
+        f"但 frontier.md 仍有 {open_fronts} 个 active front(open/probing/blocked_type_a)。"
+        "FINAL 必须同时满足 active fronts=0 且 check_run 通过; "
         "请在同一回合继续推进、降级或写入证据化 deferred/closed 理由, 然后重跑 check_run。"
     )
     if check_out.strip():
         tail = check_out.strip()
         msg += "\n\ncheck_run:\n" + (tail[-1200:] if len(tail) > 1200 else tail)
     return msg
+
+
+def _has_completed_independent_review(review_text: str) -> bool:
+    if _cr is not None and callable(getattr(_cr, "has_completed_independent_review", None)):
+        try:
+            return bool(_cr.has_completed_independent_review(review_text))
+        except Exception:
+            return False
+    # Closure is the wrong place to degrade to a weaker parser. If the canonical
+    # structured predicate is unavailable, keep the run open until it is repaired.
+    return False
+
+
+def _has_codex_completion_review(decisions_text: str) -> bool:
+    if _cr is not None and callable(getattr(_cr, "has_codex_completion_review", None)):
+        try:
+            return bool(_cr.has_codex_completion_review(decisions_text))
+        except Exception:
+            return False
+    return False
+
+
+def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:
+    """Return a hard-block reason for missing Normal-mode closure prerequisites."""
+    if not _has_completed_independent_review(review_text):
+        return (
+            "[Normal 收口] report 已终版但缺独立复审。"
+            "请运行 peer_review 独立复审并处理全部 finding → "
+            "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
+        )
+    if not _has_codex_completion_review(decisions_text):
+        return (
+            "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
+            "NORMAL 模式暂停 #2 前必须经 codex agent 复审完整 run。"
+            "请 spawn fresh-context codex agent 审查完整 run, "
+            "将其裁决写入 decisions.md 的 CodexCompletionReview 字段。"
+        )
+    return ""
 
 
 def main() -> None:
@@ -773,25 +829,12 @@ def main() -> None:
                 dc = run_dir / "decisions.md"
                 dc_text = dc.read_text(encoding="utf-8", errors="replace") if dc.exists() else ""
 
-                # Check 1: independent review
-                if not _re.search(r"Independent Review|独立复审", rv):
-                    closure_msg = (
-                        "[Normal 收口] report 已终版但缺独立复审。"
-                        "请 spawn codex reviewer 完成独立复审 → "
-                        "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
-                    )
-                    print(json.dumps({"systemMessage": closure_msg}, ensure_ascii=False))
-                    sys.exit(0)
-
-                # Check 2: CodexCompletionReview
-                if "CodexCompletionReview" not in dc_text:
-                    cc_msg = (
-                        "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
-                        "NORMAL 模式暂停 #2 前必须经 codex agent 复审完整 run。"
-                        "请 spawn fresh-context codex agent 审查完整 run, "
-                        "将其裁决写入 decisions.md 的 CodexCompletionReview 字段。"
-                    )
-                    print(json.dumps({"decision": "block", "reason": cc_msg}, ensure_ascii=False))
+                prerequisite_block = _normal_closure_prerequisite(rv, dc_text)
+                if prerequisite_block:
+                    print(json.dumps(
+                        {"decision": "block", "reason": prerequisite_block},
+                        ensure_ascii=False,
+                    ))
                     sys.exit(0)
             except Exception:
                 pass  # FAIL-OPEN: decisions.md / review.md 读失败放行
@@ -834,18 +877,63 @@ def _selftest() -> int:
                    decide_closure(True, 1, 0, False) == "block"))
     checks.append(("closure matrix: final + no open fronts + check pass -> pass",
                    decide_closure(True, 0, 0, False) is None))
+    checks.append(("normal closure: missing independent review hard-blocks",
+                   "缺独立复审" in _normal_closure_prerequisite("# Review\n", "# Decisions\n")))
+    checks.append(("normal closure: missing completion review hard-blocks",
+                   "CodexCompletionReview" in _normal_closure_prerequisite(
+                       "## Independent Review\n- Reviewer: test\n- Verdict: PASS\n", "# Decisions\n")))
+    checks.append(("normal closure: both prerequisites pass",
+                   _normal_closure_prerequisite(
+                       "## Independent Review\n- Reviewer: test\n- Verdict: PASS\n",
+                       "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
+                       "- Summary: report coverage, severity support, and reachable assets were independently checked.\n") == ""))
+    checks.append(("normal closure: review prose mention does not satisfy gate",
+                   not _has_completed_independent_review(
+                       "# Review\nWe still need an Independent Review before closing.\n")))
+    checks.append(("normal closure: review template placeholders do not satisfy gate",
+                   not _has_completed_independent_review(
+                       "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
+                       "- Verdict: (PASS / WARN / BLOCKER)\n")))
+    original_check_run = globals().get("_cr")
+    try:
+        globals()["_cr"] = None
+        fallback_review_rejected = not _has_completed_independent_review(
+            "## Independent Review\n- Reviewer: fake\n- Verdict: PASS\n")
+    finally:
+        globals()["_cr"] = original_check_run
+    checks.append(("normal closure: unavailable canonical review parser fails closed",
+                   fallback_review_rejected))
+    checks.append(("normal closure: completion prose mention does not satisfy gate",
+                   not _has_codex_completion_review(
+                       "CodexCompletionReview is still missing and must be added.\n")))
+    original_check_run = globals().get("_cr")
+    try:
+        globals()["_cr"] = None
+        fallback_completion_rejected = not _has_codex_completion_review(
+            "## CodexCompletionReview\n- Reviewer: fake\n- Verdict: PASS\n"
+            "- Summary: fake but long enough to resemble a completed review record.\n")
+    finally:
+        globals()["_cr"] = original_check_run
+    checks.append(("normal closure: unavailable completion parser fails closed",
+                   fallback_completion_rejected))
+    checks.append(("fallback status parser ignores historical type-a note on closed status",
+                   not _fallback_status_is_active("closed_type_b (was blocked_type_a)")))
+    checks.append(("fallback status parser keeps canonical type-a active",
+                   _fallback_status_is_active("blocked_type_a (auth dependency)")))
     rd_open = Path(tempfile.mkdtemp()) / "open_run"
     rd_open.mkdir()
     (rd_open / "frontier.md").write_text(
         "# Frontier\n## Open Fronts\n"
         "### F-001\n- Status: open\n\n"
-        "### F-002\n- Status: open\n\n"
+        "### F-002\n- Status: probing\n\n"
+        "### F-004\n- Status: blocked_type_a\n\n"
         "## Deferred Fronts\n### F-003\n- Status: deferred\n",
         encoding="utf-8")
     open_msg = build_open_fronts_message(rd_open, _count_open_fronts(rd_open), "check failed")
-    checks.append(("closure path: open-front counter sees only open", _count_open_fronts(rd_open) == 2))
+    checks.append(("closure path: active-front counter includes open/probing/type-a",
+                   _count_open_fronts(rd_open) == 3))
     checks.append(("closure path: open-front message is blocking-readable",
-                   "2 个 open front" in open_msg and "check failed" in open_msg))
+                   "3 个 active front" in open_msg and "check failed" in open_msg))
 
     d = Path(tempfile.mkdtemp())
     runs = d / "runs"

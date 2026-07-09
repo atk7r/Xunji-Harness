@@ -119,7 +119,9 @@ state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_
 plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
 state, choose work, write evidence, or enforce phase discipline. The active-run
 pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
-and the fixed `/loop runs/<dir>` protocol.
+and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve this
+same explicit pointer before recent-file fallback, so a newer unrelated run cannot
+receive or escape the active run's process gates.
 
 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
 phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a
@@ -416,7 +418,10 @@ assets were only header / recon-classified, never examined. Before any such clai
   category is signal-justified for that asset but no test record is visible; `·`
   means no current surface signal. Whole empty columns and sparse rows are review
   signals during ordinary cycles, and `check_run.py` upgrades them to closure
-  blockers once any canonical closure signal is present.
+  blockers once any canonical closure signal is present. Sync may mark an asset
+  `examined` from an explicit canonical mention, but writes `verdict` only from a
+  terminal frontier status; an evidence/report mention alone never invents a
+  disposition or suppresses remaining work.
 - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
   evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,
@@ -448,21 +453,27 @@ assets were only header / recon-classified, never examined. Before any such clai
   (`review/independent-reviewer.md`), record under `## Independent Review` in `review.md`,
   resolve every finding. Standing-authorized (no re-asking); prefer a heterogeneous reviewer
   (`tools/peer_review.py --into-run`) when egress is consented. `check_run.py` **hard-fails** a
-  closure with no `Independent Review` record. Procedure: reference "Run-closure detail".
+  closure with no completed `Independent Review` record. A heading, prose mention, or untouched
+  template choices do not count; a real reviewer/backend plus a block-scoped verdict
+  is required. Procedure: reference "Run-closure detail".
 
 - **Mandatory retrospective before closure (HARD gate).** Close every pentest with an
   honest `retrospective.md` — what *I* got wrong/slow/missed (wrong calls, tunnel vision,
   premature closure, evidence slips) + where the framework/tooling held the run back; the
   basis for a stronger next run, not a disclaimer. `check_run.py` **hard-fails** closure if
   it's missing, its **Self problems** / **Framework problems** are empty stubs, or
-  Framework/tooling lessons lack a repair status (`fixed|open|deferred`). Procedure:
+  any individual Framework/tooling lesson lacks its own repair status
+  (`fixed|open|deferred`), or a fixed item lacks `Fixed by` + `Verification` /
+  an open or deferred item lacks `Residual risk`. Procedure:
   reference "Run-closure detail".
 
 - **Closure signals vs completion actions.** A final report, `decisions.md`
   `Status: CLOSING/FINAL`, and `retrospective.md` `Status:` / `Verdict:` values
   such as `FINAL` all activate closure gates. They are not loop completion by
   themselves. Only `GHOST_COMPLETE` / `NORMAL_COMPLETE` in `decisions.md` are
-  completion actions.
+  completion actions, and `check_run.py` accepts them only with a substantive
+  `## CodexCompletionReview` section containing Reviewer + Verdict + cross-check
+  detail, not a prose keyword mention or single self-asserted field.
 
 - **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
   independent review resolved, retrospective written), write `GHOST_COMPLETE` at

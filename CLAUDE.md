@@ -121,6 +121,12 @@ observe -> update state graph -> decompose fronts
 
 - While safe fronts remain, **don't ask the operator which class to test next**;
   choose it yourself, record why in `decisions.md`.
+- **Stop Coda is mechanically enforced.** While `.claude/xunji_active_run`
+  points to a run without a valid completion marker, the last non-empty output
+  line must be the only Coda line and must name one concrete object plus one
+  executable action: `下一行动: ...`. Empty/template values, generic "continue",
+  multiple actions/F-ids/Coda lines, an unrelated F-id, or `BLOCKED:` before the
+  active run has completed are rejected by `output_gate.py`.
 - **TaskCreate discipline for `/loop`:** An explicit `/loop runs/<dir>` iteration
   must maintain a Claude Code TaskCreate/TaskUpdate task list before selecting
   the next action. Use it for the current iteration's assets, vectors, Agent
@@ -283,7 +289,8 @@ Only two pauses; each requires a codex gate before the pause:
   (a) no confirmed findings are missing from `report.md`, (b) no evidence entries
   have severity unsupported by their artifacts, (c) no reachable asset is
   unaccounted-for in the frontier verdict. Record the codex verdict in
-  `- CodexCompletionReview:` in `decisions.md`. Only if codex confirms completion
+  a substantive `## CodexCompletionReview` section with Reviewer, Verdict, and
+  concrete cross-check results in `decisions.md`. Only if codex confirms completion
   may the Root pause and deliver the report.
 
 - If codex rejects the pause reason, the Root MUST continue — fix the issue

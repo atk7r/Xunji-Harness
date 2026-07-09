@@ -31,6 +31,8 @@ import sys
 import tempfile
 import time
 import urllib.request
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -275,8 +277,20 @@ def _cookie_dict_from_header(value: str | None) -> dict[str, str]:
     return out
 
 
-def _cookie_dict_from_set_cookies(values: list[str]) -> dict[str, str]:
-    out: dict[str, str] = {}
+def _cookie_expired(expires: str, *, now: float | None = None) -> bool:
+    """Interpret timezone-less legacy dates as UTC, matching HTTP-date semantics."""
+    try:
+        expires_at = parsedate_to_datetime(expires)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return expires_at.timestamp() <= (time.time() if now is None else now)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _cookie_dict_from_set_cookies(values: list[str]) -> dict[str, str | None]:
+    """Parse Set-Cookie updates; ``None`` means the server deleted the cookie."""
+    out: dict[str, str | None] = {}
     for raw in values:
         c = SimpleCookie()
         try:
@@ -284,8 +298,16 @@ def _cookie_dict_from_set_cookies(values: list[str]) -> dict[str, str]:
         except Exception:
             continue
         for name, morsel in c.items():
-            if morsel.value:
-                out[name] = morsel.value
+            expired = False
+            expires = str(morsel["expires"] or "").strip()
+            if expires:
+                expired = _cookie_expired(expires)
+            deleted = (
+                not morsel.value
+                or str(morsel["max-age"] or "").strip() == "0"
+                or expired
+            )
+            out[name] = None if deleted else morsel.value
     return out
 
 
@@ -299,7 +321,11 @@ def _load_cookie_jar(path: str | None) -> dict[str, str]:
     data = json.loads(Path(path).read_text(encoding="utf-8", errors="replace"))
     if not isinstance(data, dict):
         raise ValueError(f"cookie jar must be a JSON object: {path}")
-    return {str(k): str(v) for k, v in data.items() if str(k).strip() and str(v)}
+    return {
+        str(k): str(v)
+        for k, v in data.items()
+        if str(k).strip() and v is not None and str(v)
+    }
 
 
 def _save_cookie_jar(path: str | None, cookies: dict[str, str]) -> None:
@@ -307,12 +333,25 @@ def _save_cookie_jar(path: str | None, cookies: dict[str, str]) -> None:
         return
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(cookies, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp_name = ""
+    with tempfile.NamedTemporaryFile(
+        "w", delete=False, dir=p.parent, prefix=p.name + ".", suffix=".tmp", encoding="utf-8"
+    ) as f:
+        tmp_name = f.name
+        f.write(json.dumps(cookies, ensure_ascii=False, indent=2) + "\n")
+    os.chmod(tmp_name, 0o600)
+    Path(tmp_name).replace(p)
 
 
-def _merge_cookies_into_headers(headers: dict, cookies: dict[str, str]) -> dict:
-    merged = _cookie_dict_from_header(_header_value(headers, "Cookie"))
-    merged.update(cookies)
+def _merge_cookies_into_headers(
+    headers: dict,
+    cookies: dict[str, str],
+    *,
+    prefer_cookies: bool = False,
+) -> dict:
+    explicit = _cookie_dict_from_header(_header_value(headers, "Cookie"))
+    merged = dict(explicit) if prefer_cookies else dict(cookies)
+    merged.update(cookies if prefer_cookies else explicit)
     if merged:
         _set_header(headers, "Cookie", _cookie_header(merged))
     return headers
@@ -352,6 +391,7 @@ def _apply_preflight(args, headers: dict, data: bytes | None, json_body: bool) -
     """GET a form/bootstrap page, merge cookies, and inject an extracted CSRF token."""
     meta: dict = {}
     jar = _load_cookie_jar(getattr(args, "cookie_jar", None))
+    original_explicit_cookies = _cookie_dict_from_header(_header_value(headers, "Cookie"))
     _merge_cookies_into_headers(headers, jar)
     preflight_url = getattr(args, "preflight_get", None)
     if not preflight_url:
@@ -362,37 +402,54 @@ def _apply_preflight(args, headers: dict, data: bytes | None, json_body: bool) -
     if getattr(args, "extract_csrf", None) and not preflight_save:
         tmp_save = str(Path(tempfile.mkdtemp()) / "preflight.html")
         preflight_save = tmp_save
-    pre = send(
-        "GET", preflight_url, headers.copy(), None, None, args.timeout,
-        save=preflight_save, retry=args.retry, retry_wait=args.retry_wait,
-        want_headers=True, no_redirect=args.no_redirect,
-    )
-    new_cookies = _cookie_dict_from_set_cookies(pre.get("set_cookies", []))
-    if new_cookies:
-        jar.update(new_cookies)
-        _save_cookie_jar(getattr(args, "cookie_jar", None), jar)
-        _merge_cookies_into_headers(headers, jar)
-    meta = {
-        "url": preflight_url,
-        "status": pre.get("status"),
-        "cookies": sorted(new_cookies),
-    }
-    if getattr(args, "extract_csrf", None):
-        if not preflight_save or not Path(preflight_save).exists():
-            raise ValueError("--extract-csrf requires a readable preflight body")
-        token = _extract_csrf_token(Path(preflight_save).read_bytes(), args.extract_csrf)
-        field = args.csrf_field or "__RequestVerificationToken"
-        data, json_body = _inject_csrf(data, json_body=json_body, field=field, token=token)
-        if not json_body and not _header_value(headers, "Content-Type"):
-            _set_header(headers, "Content-Type", "application/x-www-form-urlencoded")
-        meta.update({"csrf_field": field, "csrf_extracted": True})
-    if tmp_save:
-        for p in (Path(tmp_save), Path(tmp_save + ".replay.json")):
-            try:
-                p.unlink()
-            except OSError:
-                pass
-    return headers, data, json_body, meta
+    try:
+        pre = send(
+            "GET", preflight_url, headers.copy(), None, None, args.timeout,
+            save=preflight_save, retry=args.retry, retry_wait=args.retry_wait,
+            want_headers=True, no_redirect=args.no_redirect,
+        )
+        cookie_updates = _cookie_dict_from_set_cookies(pre.get("set_cookies", []))
+        if cookie_updates:
+            for name, value in cookie_updates.items():
+                if value is None:
+                    jar.pop(name, None)
+                else:
+                    jar[name] = value
+            _save_cookie_jar(getattr(args, "cookie_jar", None), jar)
+            # A fresh Set-Cookie is the browser-equivalent update and therefore
+            # wins over a same-name Cookie supplied for the initial GET. Build
+            # from the original explicit header so deleted jar cookies cannot
+            # survive through the already-merged preflight request header.
+            post_cookies = dict(jar)
+            post_cookies.update(original_explicit_cookies)
+            for name, value in cookie_updates.items():
+                if value is None:
+                    post_cookies.pop(name, None)
+                else:
+                    post_cookies[name] = value
+            _set_header(headers, "Cookie", _cookie_header(post_cookies))
+        meta = {
+            "url": preflight_url,
+            "status": pre.get("status"),
+            "cookies": sorted(cookie_updates),
+        }
+        if getattr(args, "extract_csrf", None):
+            if not preflight_save or not Path(preflight_save).exists():
+                raise ValueError("--extract-csrf requires a readable preflight body")
+            token = _extract_csrf_token(Path(preflight_save).read_bytes(), args.extract_csrf)
+            field = args.csrf_field or "__RequestVerificationToken"
+            data, json_body = _inject_csrf(data, json_body=json_body, field=field, token=token)
+            if not json_body and not _header_value(headers, "Content-Type"):
+                _set_header(headers, "Content-Type", "application/x-www-form-urlencoded")
+            meta.update({"csrf_field": field, "csrf_extracted": True})
+        return headers, data, json_body, meta
+    finally:
+        if tmp_save:
+            for p in (Path(tmp_save), Path(tmp_save + ".replay.json")):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
 
 def send(method: str, url: str, headers: dict, data: bytes | None,
@@ -596,6 +653,11 @@ def _selftest() -> int:
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html")
                     self.send_header("Set-Cookie", "csrf_session=ABC; path=/; httponly")
+                    self.send_header("Set-Cookie", "stale_session=; max-age=0; path=/")
+                    self.send_header(
+                        "Set-Cookie",
+                        "expired_session=STALE; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/",
+                    )
                     self.send_header("Content-Length", str(len(b)))
                     self.end_headers()
                     self.wfile.write(b)
@@ -725,6 +787,11 @@ def _selftest() -> int:
                            rr2.get("status") == 206 and rr2.get("snippet") == "2345"
                            and rr2.get("range") == "bytes=2-5"))
             jar = Path(tempfile.mkdtemp()) / "cookies.json"
+            _save_cookie_jar(str(jar), {
+                "csrf_session": "JAR_OLD",
+                "stale_session": "OLD",
+                "expired_session": "OLD",
+            })
             chain_args = argparse.Namespace(
                 preflight_get=f"http://127.0.0.1:{port}/csrf",
                 preflight_save=None,
@@ -736,7 +803,12 @@ def _selftest() -> int:
                 retry_wait=1.5,
                 no_redirect=False,
             )
-            ch_headers, ch_data, ch_json, ch_meta = _apply_preflight(chain_args, {}, b"u=a", False)
+            ch_headers, ch_data, ch_json, ch_meta = _apply_preflight(
+                chain_args,
+                {"Cookie": "csrf_session=EXPLICIT_OLD; explicit_only=KEEP"},
+                b"u=a",
+                False,
+            )
             csrf_post = send("POST", f"http://127.0.0.1:{port}/submit",
                              ch_headers, ch_data, None, 5)
             jar_data = json.loads(jar.read_text(encoding="utf-8")) if jar.exists() else {}
@@ -745,7 +817,14 @@ def _selftest() -> int:
                            and ch_meta.get("csrf_extracted") is True and ch_json is False))
             checks.append(("--preflight-get merges Set-Cookie into final request",
                            "csrf_session=ABC" in ch_headers.get("Cookie", "")
-                           and jar_data.get("csrf_session") == "ABC"))
+                           and "explicit_only=KEEP" in ch_headers.get("Cookie", "")
+                           and "stale_session=" not in ch_headers.get("Cookie", "")
+                           and "expired_session=" not in ch_headers.get("Cookie", "")
+                           and jar_data.get("csrf_session") == "ABC"
+                           and "stale_session" not in jar_data
+                           and "expired_session" not in jar_data))
+            checks.append(("cookie jar is owner-only",
+                           jar.exists() and (jar.stat().st_mode & 0o077) == 0))
             checks.append(("preflight chained POST succeeds", csrf_post.get("status") == 200))
         finally:
             srv.shutdown()
@@ -754,6 +833,18 @@ def _selftest() -> int:
     checks.append(("--run + 裸名 -> <run>/evidence/", Path(ps_bare) == Path("runs/t_20260101/evidence/ev_x.html")))
     checks.append(("--run + 显式路径 -> 原样尊重", _place_save("sub/ev.html", "runs/t") == "sub/ev.html"))
     checks.append(("无 --run -> 原样", _place_save("ev.html", None) == "ev.html"))
+    cookie_headers = {"Cookie": "same=explicit; explicit_only=1"}
+    _merge_cookies_into_headers(cookie_headers, {"same": "jar", "jar_only": "1"})
+    checks.append(("explicit Cookie overrides loaded jar before preflight",
+                   "same=explicit" in cookie_headers["Cookie"]
+                   and "jar_only=1" in cookie_headers["Cookie"]))
+    malformed_jar = Path(tempfile.mkdtemp()) / "cookies.json"
+    malformed_jar.write_text('{"drop": null, "keep": "v"}', encoding="utf-8")
+    checks.append(("cookie jar ignores JSON null deletion markers",
+                   _load_cookie_jar(str(malformed_jar)) == {"keep": "v"}))
+    checks.append(("timezone-less Expires values are interpreted as UTC",
+                   not _cookie_expired("Thu, 01 Jan 1970 01:00:00", now=0)
+                   and _cookie_expired("Wed, 31 Dec 1969 23:00:00", now=0)))
     # #3: 无扩展名裸名补 .html(dogfood: --save tomcat9 存成裸名, driver 以为 .html 报错)
     checks.append(("--run + 无扩展名裸名 -> 补 .html 落 evidence/",
                    Path(_place_save("tomcat9", "runs/t")) == Path("runs/t/evidence/tomcat9.html")))

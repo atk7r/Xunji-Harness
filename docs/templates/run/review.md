@@ -2,8 +2,9 @@
 
 ## Independent Review
 
-> 独立复审记录。check_run 识别此标记 + 时间戳作为有效复审。peer_review.py 成功后自动写入。
-> 当 codex API 不可达时，driver 可手工填写此节。
+> 独立复审记录。仅有本标题或下方占位符不算完成；check_run 要求真实 Reviewer/Backend
+> 身份与明确 Verdict，或一份有具体发现和裁定的实质 free-form 复审。peer_review.py 成功后
+> 自动写入；后端不可达时可由 fresh-context reviewer 手工填写，但不能由 driver 自评冒充。
 
 - Reviewer: (codex / arkcli-panel / manual-driver)
 - Time: (ISO timestamp)

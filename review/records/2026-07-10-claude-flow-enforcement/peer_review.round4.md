@@ -1,0 +1,48 @@
+# Peer Review Panel — 2026-07-10-claude-flow-enforcement
+
+_backend: panel:arkcli+claude · 2026-07-09T21:01Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: WARN
+
+_backend: panel:arkcli+claude_  
+_brain: codex_  
+_bundle_hash: ebbebdc2474ea10cb8cef27b435fe94c1373dbcb_  
+_evidence_index_hash: 9f453f460271624fa56c903ac42e9884b6091206_  
+
+## Findings
+- [WARN] PR-001 E-001 cites runtime verification results in context.md, but the claimed selftest_all.log and hook integration transcripts are not indexed as evidence artifacts. | Evidence: context.md:Verification before review section (claims `selftest_all.log` SHA1 `8c0e1fdc510f8ce6fc4ddf8b4e1c4cbc32d388ce`), evidence_index:E-001:artifacts | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] Environment-provided logs are not confirmation on their own, and unindexed artifacts cannot be cross-checked. context.md makes strong claims about real Stop events, but only diff/selftest code is present in the ledger.
+- [WARN] PR-002 has_completed_independent_review accepts a same-family peer_review fallback as satisfying the independent-review hard gate. | Evidence: check_run.diff:@@ -1308,2 +1308,92@@ (`identity_ok` accepts `'peer_review' in heading.lower() and backend_meta is not None`), docs.diff:@@ -615,8 +618,9@@ (fresh-context sub-agent fallback wording) | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] A Claude-family backend reviewing Claude-authored changes does not provide the heterogeneous independence the gate is meant to enforce.
+- [WARN] PR-003 The Coda multi-action splitter in output_gate.py omits common conjunctions such as Chinese `和`, `并`, and bare English `and`/`or`, allowing two distinct executable actions to hide in a single Coda. | Evidence: output_gate.diff:@@ -146,36 +210,111@@ (`_has_multiple_action_clauses` separator regex), output_gate.diff:@@ -434,10 +639,36@@ (selftest only covers `运行 check_run 与 peer_review`) | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The author fixed the specific `与` case noted in disposition.md but left structurally identical conjunctions untested, creating an obvious bypass of the single-action Stop rule.
+- [WARN] PR-004 run_gate.py is a safety-critical closure hook, yet its diff is not provided as a stand-alone artifact; it only appears inside the monolithic reviewed.diff. | Evidence: evidence_index:E-001:artifacts, reviewed.diff:diff_summary.changed_files includes `.claude/hooks/run_gate.py` | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] Without a dedicated artifact, reviewers must trust reviewed.diff excerpts for run_gate changes, undermining the per-component review discipline advertised in context.md.
+- [WARN] PR-005 E-001's evidence_index entry has empty supports and refutes arrays, so the ledger does not mechanically link diff artifacts to specific sub-claims. | Evidence: evidence_index:E-001:supports, evidence_index:E-001:refutes | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] Mechanical closure checks rely on explicit claim-to-evidence mapping; empty arrays make it impossible to audit why the finding is confirmed.
+- [WARN] PR-006 arkcli panel had backend errors; review is partial | Evidence: minimax-m3: parse error; output tail: hat if the backend is "codex" only? That wouldn't match the placeholder pattern, so it would be accepted. Good.
+
+5. **The `_fallback_status_is_active("working (closed)")` claim in disposition.md** - "intentionally treats the leading canonical status as current." This is a behavior choice. Is it documented in the docs? Looking at the docs.diff, the WORKFLOW-reference.md doesn't seem to mention this edge case. So this is a code behavior that isn't documented in user-facing docs.
+
+6. **The "no F-id; glm-5.2: parse error; output tail: override jar → Set-Cookie updates override both. This means explicit cookies from the Cookie header override the jar, but Set-Cookie from the preflight response overrides explicit cookies. The comment says "A fresh Set-Cookie is the browser-equivalent update and therefore wins over a same-name Cookie supplied for the initial GET." This makes sense for browser-equivalent behavior.
+
+But wait - what about cookies that are in the explicit header but NOT in the jar and NOT in the Set-Cookie response? | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+
+## Blind-spot check
+- [claude] **The `和` separator omission is the clearest bypass path I see that the prior Claude reviewers missed or mischaracterized.** Round 3's PR-001 flagged many separators as missing (`与`, `及`, `或`, `接着`, `同时`) that are actually present, but missed `和` which is genuinely absent. This is likely because the reviewer mentally grouped `与`/`和`/`及` as equivalent and saw `与` in the list, assuming `和` was covered — but `和` is syntactically distinct and the regex is literal.
+- [claude] **The `_retro_framework_items` splitter** (`check_run.diff:116-125`) correctly handles numbered items, heading-based items, and `Problem:` fields, but cannot split free-form paragraphs with multiple issues separated only by blank lines. The disposition acknowledges this as an intentional tradeoff (`disposition.md:42-44`), but the practical risk is real: a retrospective that says "Probe redirect handling was confusing. Coverage reports were misleading." in one paragraph gets one Status check for two issues. The template's requirement for "numbered/heading/`Problem:` records" mitigates this, but if an operator ignores the template and writes free-form, the gate weakens.
+- [claude] **The `_fallback_protocol_state` frontier parser** (`output_gate.diff:115`) uses `^###[ \t]+(F-\d+)` to match H3 headings. If the operator uses an unusual heading format like `### Front F-001` or `### (Active) F-001`, the regex won't match and the front won't be counted. The fallback would then report zero active fronts, effectively disabling Coda enforcement through a formatting accident. This is narrow but worth noting since the fallback is the last line of defense when `loop_state` is unavailable.
+- [claude] **No adversarial selftests exist for Unicode/homoglyph bypasses** — e.g., using a Cyrillic 'а' in "BLOCKED" or full-width characters to construct a Coda that looks valid to a human but evades the regex. The `_strip_invisible` function handles zero-width characters, but homoglyphs in the Coda prefix would cause `CODA_RE` to not match, resulting in "缺少回合 Coda" (a false negative for the model, not a bypass of enforcement).
+- [claude] **`_save_cookie_jar` TOCTOU:** On systems with permissive umask (not macOS), the temp file exists with default permissions for a brief window before `os.chmod(tmp_name, 0o600)` (`probe.diff:57-64`). On macOS the default tempfile permission is 0o600, so this is platform-specific.
+
+## Context-limit notes
+- [arkcli] minimax-m3: parse error; output tail: hat if the backend is "codex" only? That wouldn't match the placeholder pattern, so it would be accepted. Good.
+
+5. **The `_fallback_status_is_active("working (closed)")` claim in disposition.md** - "intentionally treats the leading canonical status as current." This is a behavior choice. Is it documented in the docs? Looking at the docs.diff, the WORKFLOW-reference.md doesn't seem to mention this edge case. So this is a code behavior that isn't documented in user-facing docs.
+
+6. **The "no F-id
+- [arkcli] glm-5.2: parse error; output tail: override jar → Set-Cookie updates override both. This means explicit cookies from the Cookie header override the jar, but Set-Cookie from the preflight response overrides explicit cookies. The comment says "A fresh Set-Cookie is the browser-equivalent update and therefore wins over a same-name Cookie supplied for the initial GET." This makes sense for browser-equivalent behavior.
+
+But wait - what about cookies that are in the explicit header but NOT in the jar and NOT in the Set-Cookie response?
+- [claude] This is a code review of the Xunji framework itself, not an external penetration test. The traditional pentest rubric items (coverage ledger of recon assets, missed surface, shallow closure of attack fronts, RCE/getshell probing) do not apply. I adapted the rubric to the actual scope: framework correctness, regression safety, and enforcement bypass analysis.
+- [claude] The evidence SHA1 claims (E-001: `reviewed.diff` SHA1 `5f72b9...`, E-002: `selftest_all.log` SHA1 `8c0e1f...`) are claimed in the bundle metadata; I cannot independently recompute SHA1 without shell access, but the files I read match their described content.
+- [claude] The `selftest_all.log` shows 54/0 pass on Python 3.14 on macOS (arm64). Results could differ on other platforms/Python versions, but this is a reasonable single-environment regression baseline.
+- [claude] Chinese-language regex patterns in output_gate (vague phrase detection, multi-action detection) are syntactically correct based on my reading. The `vague_only` set covers common Chinese evasion phrases, and the `vague_phrase` regex catches plausible paraphrases. That said, a sufficiently creative Chinese rephrasing could produce semantically vague but syntactically valid Codas that bypass the deny-list — this is inherent in any mechanical filter.
+- [claude] I do not have access to the `loop_state.py` module to verify its `derive()` method returns the expected structure. My analysis treats it as a black box that the hooks depend on.
+- [claude] The `check_run.py` `has_completed_independent_review` correctly handles `peer_review.py` output format (including the `_backend:` meta line) and `fresh-context` reviewer markings. The `run_gate.py` fallback version is a simpler subset as noted above.

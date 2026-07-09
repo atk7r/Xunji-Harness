@@ -583,7 +583,10 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
 (`GHOST_COMPLETE` / `NORMAL_COMPLETE`) in `decisions.md`, or explicit
 `retrospective.md` `Status:` / `Verdict:` final/complete values.
 
-- **HARD FAIL** if `review.md` has no `Independent Review` record. Self-review does
+- **HARD FAIL** if `review.md` has no completed `Independent Review` record.
+  A heading, prose mention, or untouched Reviewer/Verdict choices do not count;
+  the record needs a real reviewer/backend identity and a block-scoped verdict.
+  Long legacy prose without reviewer identity does
   not fix self-review bias, so the independent reviewer is a hard requirement to
   close — not a suggestion. (a real engagement showed that even after this guard was built, the
   driver still tried to close prematurely twice; a soft warning does not hold.)
@@ -615,8 +618,10 @@ needs to verify that such a diff has a review record and does not treat Codex
 self-review as an independent vote.
 Absent egress consent, the fresh-context sub-agent is the always-available,
 egress-free fallback. Standing authorization granted for the sub-agent — do it
-without re-asking. `check_run.py` HARD-fails a closure claim with no
-`Independent Review` record.
+without re-asking. `check_run.py` HARD-fails a closure claim with no completed
+`Independent Review` record, and Normal-mode Stop also requires a structured
+substantive `## CodexCompletionReview` section rather than accepting a prose mention
+or a self-asserted single-line field.
 
 Claude Code is primary and Codex is auxiliary: Codex commonly appears here as a
 heterogeneous review backend, but it can also provide advice or delegated help when
@@ -637,13 +642,18 @@ driver) got wrong/slow/missed (wrong calls, tunnel vision, premature closure, ev
 slips) and where the *framework/tooling* (tools/, hooks, guard, knowledge base, docs) held
 the run back — the basis for the next run being stronger, not a disclaimer. `check_run.py`
 HARD-fails closure if `retrospective.md` is missing, its **Self problems** /
-**Framework problems** sections are empty placeholders, or Framework/tooling
-lessons lack a repair status (`fixed|open|deferred`, with fix/verification or
-residual risk). Retrospective `Status:` / `Verdict:` values such as `FINAL`
+**Framework problems** sections are empty placeholders, or any individual
+Framework/tooling lesson lacks its own repair status (`fixed|open|deferred`). A
+fixed item also needs non-empty `Fixed by` + `Verification`; an open/deferred
+item needs `Residual risk`. One status line for the whole section does not close
+multiple lessons. Retrospective `Status:` / `Verdict:` values such as `FINAL`
 activate closure gates, but they are not completion actions.
 
 **Completion marker and scheduled-loop disposition.** `GHOST_COMPLETE` /
 `NORMAL_COMPLETE` belongs only in `decisions.md` and only after closure gates pass.
+`check_run.py` also requires a substantive `## CodexCompletionReview` section with
+Reviewer + Verdict + concrete cross-check detail at that point. A single-line
+field, prose mention, or "still missing" note does not count.
 In the same turn, cancel the active scheduled `/loop` job if one exists, then
 append a loop journal `end` record (`cycle_end`) with
 `cron_cancelled=<job-id|none>` in the note. `check_run.py` HARD-fails a completion

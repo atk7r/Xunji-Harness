@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -36,6 +37,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
+ACTIVE_RUN_POINTER = Path(os.environ.get(
+    "XUNJI_ACTIVE_RUN_FILE", str(ROOT / ".claude" / "xunji_active_run")))
 CONFIG_INI = ROOT / "config.ini"
 CONFIG_EXAMPLE_INI = ROOT / "config.example.ini"
 ACTIVE_WINDOW_SEC = 6 * 3600   # a run that saw any file change in the last 6h = the one in flight
@@ -85,7 +88,7 @@ def is_normal_mode() -> bool:
 BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
     "自主驱动: safe 前沿还在就别停下问(会话长/已解决障碍/选下一类 都不是停止理由)",
     "Reason pass: 每轮先重读整个 frontier.md(所有 open+deferred 前沿)再选 — 防隧道视野",
-    "回合协议: 结尾只允许「下一行动: <具体action>」或「BLOCKED: <外部依赖>」; 禁止 ? / 是否 / 继续还是",
+    "回合协议: active run 未完成时结尾必须且只能有一个「下一行动: <一个对象+一个具体动作>」; 空值/占位/泛泛继续/多动作/多F-id/错误F-id/BLOCKED都会被 Stop hook 硬拦",
     "联网检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 前必须先 python tools/timestamp_gate.py --search-hint --kind vuln 获取当前时间并逐条执行其输出的约束; 非 CVE/CNVD 检索用 --kind generic",
     "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮执行 timestamp_gate --kind vuln → knowledge/xday → WebSearch/WebFetch, 再决定关闭或定级",
     "操作者约束持久化: 收到 directive/constraint 后先更新 hints.md(HINT-xxx, Kind=directive/constraint, Status=pending) 再继续; 每轮 Reason pass 无条件 Read hints.md —— constraint 是全 run 级原则非当前前沿上下文, 跨轮有效直到操作者显式解除",
@@ -185,8 +188,45 @@ class SessionStateManager:
         return state
 
 
-def find_active_run(runs_root: Path, within_sec: int = ACTIVE_WINDOW_SEC) -> Path | None:
-    """Most recently touched run dir (any *.md changed within the window). Cheap: one glob."""
+def _run_from_pointer(runs_root: Path, pointer: Path = ACTIVE_RUN_POINTER) -> Path | None:
+    """Resolve the explicit statusline/run-lifecycle pointer inside ``runs_root``.
+
+    The pointer is authoritative when valid. Restricting it to ``runs_root`` keeps
+    temp selftests and stale/edited pointer files from selecting an arbitrary path.
+    """
+    try:
+        raw = pointer.read_text(encoding="utf-8", errors="replace").strip()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    value = Path(raw).expanduser()
+    candidates = [value] if value.is_absolute() else [ROOT / value, runs_root / value]
+    root = runs_root.resolve()
+    for candidate in candidates:
+        try:
+            run_dir = candidate.resolve()
+            run_dir.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if run_dir.is_dir() and any(
+            (run_dir / marker).exists()
+            for marker in ("target.md", "frontier.md", "evidence.md", "decisions.md", "review.md")
+        ):
+            return run_dir
+    return None
+
+
+def find_active_run(
+    runs_root: Path,
+    within_sec: int = ACTIVE_WINDOW_SEC,
+    *,
+    active_pointer: Path | None = None,
+) -> Path | None:
+    """Return the explicit active run, then fall back to recent Markdown activity."""
+    pointed = _run_from_pointer(runs_root, active_pointer or ACTIVE_RUN_POINTER)
+    if pointed is not None:
+        return pointed
     if not runs_root.is_dir():
         return None
     best: Path | None = None
@@ -491,8 +531,8 @@ def build_anchor(
         lines.append("")
         lines.append("【输出前自检 —— 生成回复前必须逐条确认】")
         if "protocol_violation" in drift_flags:
-            lines.append("  □ 结尾是否【仅】为「下一行动: <action>」或「BLOCKED: <reason>」？")
-            lines.append("    → 不含 ? ？吗 呢 吧 | 不含 是否/继续/你决定/等待用户/你觉得/怎么看")
+            lines.append("  □ 最后一个非空行是否【唯一】的「下一行动: <对象+具体动作>」？")
+            lines.append("    → 不含空值/占位/泛泛继续/多动作/多F-id/错误F-id；未完成 run 不得用 BLOCKED 逃避")
         if "frontier_stale" in drift_flags:
             lines.append("  □ 已 Read frontier.md 【并 EDIT 更新】状态了吗？(只读不改 = mtime 不变 = 下轮仍提醒)")
         if "option_list" in drift_flags:
@@ -525,6 +565,19 @@ def _selftest() -> int:
     checks.append(("find_active_run picks recent", find_active_run(runs) == runs / "a_x"))
     checks.append(("stale window -> none", find_active_run(runs, within_sec=-1) is None))
     checks.append(("no runs dir -> none", find_active_run(d / "nope") is None))
+    pointed = runs / "pointed"
+    pointed.mkdir()
+    (pointed / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
+    pointer = d / "active_run"
+    pointer.write_text(str(pointed), encoding="utf-8")
+    checks.append(("explicit pointer wins over newer run",
+                   find_active_run(runs, active_pointer=pointer) == pointed.resolve()))
+    outside = d / "outside"
+    outside.mkdir()
+    (outside / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
+    pointer.write_text(str(outside), encoding="utf-8")
+    checks.append(("outside pointer is ignored",
+                   find_active_run(runs, active_pointer=pointer) == pointed))
 
     # SessionStateManager tests
     time.sleep(1.1)  # ensure mtime is later than a_x/report.md created above

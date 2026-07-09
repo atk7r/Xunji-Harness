@@ -148,6 +148,11 @@ python tools/saturation.py runs/<dir>
 python tools/coverage_matrix.py runs/<dir> --write --sync-coverage
 ```
 
+`--sync-coverage` treats evidence/report host mentions as examination signals
+only. It writes a coverage `verdict` only when the canonical frontier has a
+terminal status, so prose cannot make unfinished work disappear from worker
+suggestions or closure review.
+
 Read `hints.md` every cycle when it exists. If the operator gives a directive,
 constraint, or lead in chat, write or update `hints.md` before choosing the next
 front. Leads are not facts; verify them through the evidence gate.
@@ -212,13 +217,16 @@ python tools/check_run.py runs/<dir> --auto-peer-review --review-driver claude
 
 Closure gates:
 
-- `review.md` must contain an `Independent Review` record; self-review does not
-  cure self-review bias.
+- `review.md` must contain a completed `Independent Review` record with a real
+  reviewer/backend and block-scoped verdict. A heading,
+  prose mention, or untouched template choices do not count; self-review does
+  not cure self-review bias.
 - Resolve `PR-xxx` review ledger blockers before closure.
 - `retrospective.md` must honestly fill the Self problems and Framework/tooling
-  problems sections. Framework/tooling lessons must include a repair status such
-  as `- Status: fixed|open|deferred` plus the fix/verification or residual risk;
-  unstatused lessons are not closed-loop and fail closure.
+  problems sections. Every Framework/tooling lesson needs its own repair status
+  such as `- Status: fixed|open|deferred`; fixed items also need `Fixed by` +
+  `Verification`, and open/deferred items need `Residual risk`. One section-wide
+  status cannot close multiple lessons.
 - `report.md` may list only finding-maturity evidence in `Evidence IDs:`.
 - Confirmed entries need the canonical certainty scale, saved artifacts, and
   Replicated or Control rationale.

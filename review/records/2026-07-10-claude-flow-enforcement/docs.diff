@@ -1,0 +1,167 @@
+diff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md
+index 9928f56..965fdd7 100644
+--- a/.claude/skills/xunji-run-lifecycle/SKILL.md
++++ b/.claude/skills/xunji-run-lifecycle/SKILL.md
+@@ -150,2 +150,7 @@ python tools/coverage_matrix.py runs/<dir> --write --sync-coverage
+ 
++`--sync-coverage` treats evidence/report host mentions as examination signals
++only. It writes a coverage `verdict` only when the canonical frontier has a
++terminal status, so prose cannot make unfinished work disappear from worker
++suggestions or closure review.
++
+ Read `hints.md` every cycle when it exists. If the operator gives a directive,
+@@ -214,9 +219,12 @@ Closure gates:
+ 
+-- `review.md` must contain an `Independent Review` record; self-review does not
+-  cure self-review bias.
++- `review.md` must contain a completed `Independent Review` record with a real
++  reviewer/backend and block-scoped verdict. A heading,
++  prose mention, or untouched template choices do not count; self-review does
++  not cure self-review bias.
+ - Resolve `PR-xxx` review ledger blockers before closure.
+ - `retrospective.md` must honestly fill the Self problems and Framework/tooling
+-  problems sections. Framework/tooling lessons must include a repair status such
+-  as `- Status: fixed|open|deferred` plus the fix/verification or residual risk;
+-  unstatused lessons are not closed-loop and fail closure.
++  problems sections. Every Framework/tooling lesson needs its own repair status
++  such as `- Status: fixed|open|deferred`; fixed items also need `Fixed by` +
++  `Verification`, and open/deferred items need `Residual risk`. One section-wide
++  status cannot close multiple lessons.
+ - `report.md` may list only finding-maturity evidence in `Evidence IDs:`.
+diff --git a/CLAUDE.md b/CLAUDE.md
+index f104b2b..ee1b212 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -123,2 +123,8 @@ observe -> update state graph -> decompose fronts
+   choose it yourself, record why in `decisions.md`.
++- **Stop Coda is mechanically enforced.** While `.claude/xunji_active_run`
++  points to a run without a valid completion marker, the last non-empty output
++  line must be the only Coda line and must name one concrete object plus one
++  executable action: `下一行动: ...`. Empty/template values, generic "continue",
++  multiple actions/F-ids/Coda lines, an unrelated F-id, or `BLOCKED:` before the
++  active run has completed are rejected by `output_gate.py`.
+ - **TaskCreate discipline for `/loop`:** An explicit `/loop runs/<dir>` iteration
+@@ -285,3 +291,4 @@ Only two pauses; each requires a codex gate before the pause:
+   unaccounted-for in the frontier verdict. Record the codex verdict in
+-  `- CodexCompletionReview:` in `decisions.md`. Only if codex confirms completion
++  a substantive `## CodexCompletionReview` section with Reviewer, Verdict, and
++  concrete cross-check results in `decisions.md`. Only if codex confirms completion
+   may the Root pause and deliver the report.
+diff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md
+index f7295e8..af1aa35 100644
+--- a/docs/WORKFLOW-reference.md
++++ b/docs/WORKFLOW-reference.md
+@@ -585,3 +585,6 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
+ 
+-- **HARD FAIL** if `review.md` has no `Independent Review` record. Self-review does
++- **HARD FAIL** if `review.md` has no completed `Independent Review` record.
++  A heading, prose mention, or untouched Reviewer/Verdict choices do not count;
++  the record needs a real reviewer/backend identity and a block-scoped verdict.
++  Long legacy prose without reviewer identity does
+   not fix self-review bias, so the independent reviewer is a hard requirement to
+@@ -617,4 +620,6 @@ Absent egress consent, the fresh-context sub-agent is the always-available,
+ egress-free fallback. Standing authorization granted for the sub-agent — do it
+-without re-asking. `check_run.py` HARD-fails a closure claim with no
+-`Independent Review` record.
++without re-asking. `check_run.py` HARD-fails a closure claim with no completed
++`Independent Review` record, and Normal-mode Stop also requires a structured
++substantive `## CodexCompletionReview` section rather than accepting a prose mention
++or a self-asserted single-line field.
+ 
+@@ -639,5 +644,7 @@ the run back — the basis for the next run being stronger, not a disclaimer. `c
+ HARD-fails closure if `retrospective.md` is missing, its **Self problems** /
+-**Framework problems** sections are empty placeholders, or Framework/tooling
+-lessons lack a repair status (`fixed|open|deferred`, with fix/verification or
+-residual risk). Retrospective `Status:` / `Verdict:` values such as `FINAL`
++**Framework problems** sections are empty placeholders, or any individual
++Framework/tooling lesson lacks its own repair status (`fixed|open|deferred`). A
++fixed item also needs non-empty `Fixed by` + `Verification`; an open/deferred
++item needs `Residual risk`. One status line for the whole section does not close
++multiple lessons. Retrospective `Status:` / `Verdict:` values such as `FINAL`
+ activate closure gates, but they are not completion actions.
+@@ -646,2 +653,5 @@ activate closure gates, but they are not completion actions.
+ `NORMAL_COMPLETE` belongs only in `decisions.md` and only after closure gates pass.
++`check_run.py` also requires a substantive `## CodexCompletionReview` section with
++Reviewer + Verdict + concrete cross-check detail at that point. A single-line
++field, prose mention, or "still missing" note does not count.
+ In the same turn, cancel the active scheduled `/loop` job if one exists, then
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index 8a65ed7..ef710fc 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -121,3 +121,5 @@ state, choose work, write evidence, or enforce phase discipline. The active-run
+ pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
+-and the fixed `/loop runs/<dir>` protocol.
++and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve this
++same explicit pointer before recent-file fallback, so a newer unrelated run cannot
++receive or escape the active run's process gates.
+ 
+@@ -418,3 +420,6 @@ assets were only header / recon-classified, never examined. Before any such clai
+   signals during ordinary cycles, and `check_run.py` upgrades them to closure
+-  blockers once any canonical closure signal is present.
++  blockers once any canonical closure signal is present. Sync may mark an asset
++  `examined` from an explicit canonical mention, but writes `verdict` only from a
++  terminal frontier status; an evidence/report mention alone never invents a
++  disposition or suppresses remaining work.
+ - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
+@@ -450,3 +455,5 @@ assets were only header / recon-classified, never examined. Before any such clai
+   (`tools/peer_review.py --into-run`) when egress is consented. `check_run.py` **hard-fails** a
+-  closure with no `Independent Review` record. Procedure: reference "Run-closure detail".
++  closure with no completed `Independent Review` record. A heading, prose mention, or untouched
++  template choices do not count; a real reviewer/backend plus a block-scoped verdict
++  is required. Procedure: reference "Run-closure detail".
+ 
+@@ -457,3 +464,5 @@ assets were only header / recon-classified, never examined. Before any such clai
+   it's missing, its **Self problems** / **Framework problems** are empty stubs, or
+-  Framework/tooling lessons lack a repair status (`fixed|open|deferred`). Procedure:
++  any individual Framework/tooling lesson lacks its own repair status
++  (`fixed|open|deferred`), or a fixed item lacks `Fixed by` + `Verification` /
++  an open or deferred item lacks `Residual risk`. Procedure:
+   reference "Run-closure detail".
+@@ -464,3 +473,5 @@ assets were only header / recon-classified, never examined. Before any such clai
+   themselves. Only `GHOST_COMPLETE` / `NORMAL_COMPLETE` in `decisions.md` are
+-  completion actions.
++  completion actions, and `check_run.py` accepts them only with a substantive
++  `## CodexCompletionReview` section containing Reviewer + Verdict + cross-check
++  detail, not a prose keyword mention or single self-asserted field.
+ 
+diff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md
+index d796c71..8de9e4b 100644
+--- a/docs/templates/loop_prompt.md
++++ b/docs/templates/loop_prompt.md
+@@ -8,4 +8,9 @@ this repository.
+ You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.
+-Run exactly one autonomous iteration. End each turn with `下一行动: <action>` or
+-`BLOCKED: <reason>`. Do not treat derived state as canonical evidence.
++Run exactly one autonomous iteration. Until the run has a valid completion
++marker, end with exactly one final Coda line: `下一行动: <object + concrete
++action>`. Empty/template values, generic "continue", multiple Coda lines, and an
++unrelated or multiple F-id/action list are invalid. `BLOCKED:` cannot discharge
++an unfinished active run; record the external dependency in canonical state and
++make that record or the next viable pivot the single next action. Do not treat
++derived state as canonical evidence.
+ 
+diff --git a/docs/templates/run/retrospective.md b/docs/templates/run/retrospective.md
+index e2784a9..09b54cf 100644
+--- a/docs/templates/run/retrospective.md
++++ b/docs/templates/run/retrospective.md
+@@ -15,4 +15,5 @@
+ <tools/ hooks guard 知识库 文档 哪里拖了本 run 后腿: 缺能力、误报闸门、消息误导、
+-知识陈旧、模板不顺手。每条问题必须带 `- Status: fixed|open|deferred`
+-或明确写 no framework/tooling issue。>
++知识陈旧、模板不顺手。每条问题必须单独带 `- Status: fixed|open|deferred`；
++不能用整节共用的一个 Status 蒙混。fixed 必须填 Fixed by + Verification，
++open/deferred 必须填 Residual risk；或明确写 no framework/tooling issue。>
+ 
+diff --git a/docs/templates/run/review.md b/docs/templates/run/review.md
+index 45cb2ff..c2df477 100644
+--- a/docs/templates/run/review.md
++++ b/docs/templates/run/review.md
+@@ -4,4 +4,5 @@
+ 
+-> 独立复审记录。check_run 识别此标记 + 时间戳作为有效复审。peer_review.py 成功后自动写入。
+-> 当 codex API 不可达时，driver 可手工填写此节。
++> 独立复审记录。仅有本标题或下方占位符不算完成；check_run 要求真实 Reviewer/Backend
++> 身份与明确 Verdict，或一份有具体发现和裁定的实质 free-form 复审。peer_review.py 成功后
++> 自动写入；后端不可达时可由 fresh-context reviewer 手工填写，但不能由 driver 自评冒充。
+ 

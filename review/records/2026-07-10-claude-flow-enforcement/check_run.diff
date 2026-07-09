@@ -1,0 +1,294 @@
+diff --git a/tools/check_run.py b/tools/check_run.py
+index 28371e2..58f2ecb 100644
+--- a/tools/check_run.py
++++ b/tools/check_run.py
+@@ -1308,0 +1309,75 @@ def check_surface_populated(run_dir: Path) -> list[str]:
++_INDEPENDENT_REVIEW_HEADING_RE = re.compile(
++    r"(?im)^##\s+[^\n]*(?:Independent Review|Independent Reviewer|独立复审)[^\n]*$"
++)
++
++
++def has_completed_independent_review(review_text: str) -> bool:
++    """Reject template/prose mentions while accepting structured or substantive reviews."""
++    matches = list(_INDEPENDENT_REVIEW_HEADING_RE.finditer(review_text or ""))
++    for match in matches:
++        heading = match.group(0)
++        if re.search(r"\b(?:pending|status|template|待复审|待填写)\b", heading, re.I):
++            continue
++        tail = review_text[match.end():]
++        h2 = list(re.finditer(r"(?m)^##\s+[^\n]+$", tail))
++        end = h2[0].start() if h2 else len(tail)
++        # peer_review.py writes `## Verdict:` immediately after the Independent
++        # Review preface. Include that one generated section, but stop before any
++        # later H2 so a filled self-review cannot make an untouched template pass.
++        if h2 and re.match(r"##\s+Verdict\s*[:：]", h2[0].group(0), re.I):
++            end = h2[1].start() if len(h2) > 1 else len(tail)
++        block = heading + tail[:end]
++        clean = re.sub(r"<!--.*?-->|<[^>]*>", "", block, flags=re.S)
++        verdict_match = re.search(
++            r"(?im)^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?Verdict\s*[:：]\s*"
++            r"(PASS|WARN|BLOCKER|PASSED|CONFIRMED)\b",
++            clean,
++        )
++        reviewer = _block_field(clean, "Reviewer")
++        backend = _block_field(clean, "Backend")
++        backend_meta = re.search(r"(?im)^_backend\s*[:：]\s*([^_\n]+)_", clean)
++        reviewer_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", reviewer, re.I))
++        backend_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", backend, re.I))
++        identity_ok = (
++            (not _blankish_field(reviewer) and not reviewer_placeholder)
++            or (not _blankish_field(backend) and not backend_placeholder)
++            or (backend_meta is not None and (
++                "heterogeneous peer_review" in heading.lower()
++                or "same-family peer_review fallback" in heading.lower()
++            ))
++        )
++        if verdict_match and identity_ok:
++            return True
++    return False
++
++
++def has_codex_completion_review(decisions_text: str) -> bool:
++    """Require a structured completion-review result, not a prose keyword mention."""
++    heading = re.search(r"(?im)^#{2,6}\s+CodexCompletionReview\b[^\n]*$", decisions_text or "")
++    if not heading:
++        return False
++    tail = decisions_text[heading.end():]
++    next_heading = re.search(r"(?m)^#{1,2}\s+", tail)
++    block = tail[:next_heading.start()] if next_heading else tail
++    reviewer = re.search(r"(?im)^\s*[-*]\s*Reviewer\s*[:：]\s*(\S.+)$", block)
++    verdict = re.search(
++        r"(?im)^\s*[-*]\s*Verdict\s*[:：]\s*\**(PASS|WARN|CONFIRMED)\b",
++        block,
++    )
++    return bool(reviewer and verdict and len(re.sub(r"\s+", "", block)) >= 80)
++
++
++def check_codex_completion_review(run_dir: Path) -> list[str]:
++    if not _completion_marker_claimed(run_dir):
++        return []
++    decisions = run_dir / "decisions.md"
++    text = decisions.read_text(encoding="utf-8", errors="replace") if decisions.exists() else ""
++    if has_codex_completion_review(text):
++        return []
++    return [
++        "收口硬门(CodexCompletionReview): decisions.md 已有 completion marker, 但缺真实"
++        "结构化 completion review。关键词/单行字段/待办散文不算；需要含 Reviewer + Verdict + "
++        "实质内容的 `## CodexCompletionReview` 小节。"
++    ]
++
++
+@@ -1321,3 +1396 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
+-    independent_reviews = list(re.finditer(r"(?im)^##\s+(?:Independent Review|独立复审)\b", review_text))
+-    last_independent_review = independent_reviews[-1] if independent_reviews else None
+-    has_independent_review = last_independent_review is not None
++    has_independent_review = has_completed_independent_review(review_text)
+@@ -1745,2 +1818,21 @@ def _retro_section_filled(body: str | None) -> bool:
+-def _retro_framework_statused(body: str | None) -> bool:
+-    """Framework/tooling lessons must say whether the framework is fixed/open/deferred.
++_RETRO_STATUS_RE = re.compile(
++    r"(?im)^\s*(?:[-*]\s*)?(?:Current\s+status|Fix\s+status|Status|状态|当前状态|修复状态)"
++    r"\s*[:：]\s*(fixed|open|deferred|已修|已修复|未修|待修|开放|延后)"
++    r"(?:\s|$|[;；,，。])"
++)
++
++
++def _retro_framework_items(body: str) -> list[str]:
++    """Split common numbered or heading-based framework issue records."""
++    problem_starts = list(re.finditer(r"(?im)^\s*[-*]\s*Problem\s*[:：]", body))
++    starts = problem_starts or list(re.finditer(r"(?m)^(?:#{3,6}\s+|\d+[.)、]\s+)", body))
++    if not starts:
++        return [body]
++    return [
++        body[m.start(): starts[i + 1].start() if i + 1 < len(starts) else len(body)]
++        for i, m in enumerate(starts)
++    ]
++
++
++def _retro_framework_status_errors(body: str | None) -> list[str]:
++    """Validate every framework lesson, including its repair proof or residual risk.
+@@ -1749,3 +1841,3 @@ def _retro_framework_statused(body: str | None) -> bool:
+-    names tools/hooks/docs problems it must leave a repair status the next run can
+-    consume. Otherwise the same lesson can reappear forever without becoming a
+-    gate or backlog item.
++    names multiple tools/hooks/docs problems, one status line cannot discharge the
++    whole section. Fixed items need a concrete fix pointer and verification; open
++    or deferred items need an explicit residual risk.
+@@ -1754 +1846 @@ def _retro_framework_statused(body: str | None) -> bool:
+-        return False
++        return ["framework section missing"]
+@@ -1762,7 +1854,26 @@ def _retro_framework_statused(body: str | None) -> bool:
+-        return True
+-    return bool(re.search(
+-        r"(?im)^\s*(?:[-*]\s*)?(?:Current\s+status|Fix\s+status|Status|状态|当前状态|修复状态)"
+-        r"\s*[:：]\s*(fixed|open|deferred|accepted|已修|已修复|未修|待修|开放|延后|接受|无|none|n/a)"
+-        r"(?:\s|$|[;；,，。])",
+-        b,
+-    ))
++        return []
++    errors: list[str] = []
++    for index, item in enumerate(_retro_framework_items(b), 1):
++        label = item.strip().splitlines()[0][:80] if item.strip() else f"item {index}"
++        status_match = _RETRO_STATUS_RE.search(item)
++        if not status_match:
++            errors.append(f"{label}: missing Status")
++            continue
++        status = status_match.group(1).lower()
++        if status in {"fixed", "已修", "已修复"}:
++            fixed_by = _block_field(item, "Fixed by") or _block_field(item, "修复方式")
++            verification = _block_field(item, "Verification") or _block_field(item, "验证")
++            if _blankish_field(fixed_by):
++                errors.append(f"{label}: fixed but missing Fixed by")
++            if _blankish_field(verification):
++                errors.append(f"{label}: fixed but missing Verification")
++        else:
++            residual = _block_field(item, "Residual risk") or _block_field(item, "残余风险")
++            if _blankish_field(residual):
++                errors.append(f"{label}: {status} but missing Residual risk")
++    return errors
++
++
++def _retro_framework_statused(body: str | None) -> bool:
++    """Compatibility predicate for callers that only need pass/fail."""
++    return not _retro_framework_status_errors(body)
+@@ -1792,5 +1903,11 @@ def check_retrospective(run_dir: Path) -> list[str]:
+-    elif not _retro_framework_statused(framework_body):
+-        errors.append(
+-            "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】节已写问题"
+-            "但缺修复状态字段 —— 每个框架教训至少写 `- Status: fixed|open|deferred` 或明确写 no framework/tooling issue。"
+-            "否则它只会在复盘里重复出现, 不能进入工具/模板/知识库闭环。")
++    else:
++        framework_status_errors = _retro_framework_status_errors(framework_body)
++        if framework_status_errors:
++            details = "; ".join(framework_status_errors[:5])
++            more = " …" if len(framework_status_errors) > 5 else ""
++            errors.append(
++                "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】"
++                "未逐条闭环 —— 每条问题都要有 `Status: fixed|open|deferred`; fixed 还要有非空 "
++                "`Fixed by` + `Verification`, open/deferred 还要有 `Residual risk`。"
++                f"具体缺口: {details}{more}"
++            )
+@@ -2155 +2272 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
+-    if not re.search(r"Independent Review|独立复审", rv):
++    if not has_completed_independent_review(rv):
+@@ -2159,0 +2277 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
++    errors.extend(check_codex_completion_review(run_dir))
+@@ -2215,0 +2334,6 @@ def _selftest() -> int:
++    valid_review_text = (
++        "# Review\n\n## Independent Review\n"
++        "- Reviewer: selftest-fresh-context\n"
++        "- Time: 2026-01-01T00:00:00Z\n"
++        "- Verdict: PASS\n"
++    )
+@@ -2256,0 +2381,35 @@ def _selftest() -> int:
++        ("completed independent review requires real identity and verdict",
++         has_completed_independent_review(valid_review_text)),
++        ("independent review prose mention does not satisfy gate",
++         not has_completed_independent_review(
++             "# Review\nIndependent Review is still required before closure.\n")),
++        ("independent review template placeholders do not satisfy gate",
++         not has_completed_independent_review(
++             "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
++             "- Verdict: (PASS / WARN / BLOCKER)\n")),
++        ("filled self-review after untouched independent template cannot satisfy gate",
++         not has_completed_independent_review(
++             "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
++             "- Verdict: (PASS / WARN / BLOCKER)\n\n## R-001 Self review\n"
++             + ("- Findings: driver checked its own evidence and claims PASS.\n" * 30))),
++        ("peer_review generated backend/verdict satisfies gate",
++         has_completed_independent_review(
++             "## Independent Review (same-family peer_review fallback)\n"
++             "_backend: claude_\n## Verdict: WARN\n")),
++        ("generic peer_review label cannot spoof generated review identity",
++         not has_completed_independent_review(
++             "## Independent Review (peer_review)\n"
++             "_backend: claude_\n## Verdict: WARN\n")),
++        ("fresh-context heading alone cannot spoof reviewer identity",
++         not has_completed_independent_review(
++             "## Independent Review (fresh-context self-review by driver)\n"
++             "## Verdict: PASS\n")),
++        ("completion review prose mention does not satisfy gate",
++         not has_codex_completion_review(
++             "CodexCompletionReview is still missing and must be added.\n")),
++        ("single completion review field does not satisfy gate",
++         not has_codex_completion_review("- CodexCompletionReview: CONFIRMED by fresh reviewer\n")),
++        ("substantive completion review section satisfies gate",
++         has_codex_completion_review(
++             "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
++             "- Summary: report coverage, evidence severity, and reachable assets were independently checked.\n")),
+@@ -2504 +2663 @@ def _selftest() -> int:
+-    (d6 / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d6 / "review.md").write_text(valid_review_text, encoding="utf-8")
+@@ -2555 +2714 @@ def _selftest() -> int:
+-        "- Status: open\n",
++        "- Status: open\n- Residual risk: redirect-chain evidence can still be misread until probe is fixed.\n",
+@@ -2563 +2722 @@ def _selftest() -> int:
+-        "- Status: open\n",
++        "- Status: open\n- Residual risk: stale live agents can still be omitted at closure.\n",
+@@ -2565,0 +2725,15 @@ def _selftest() -> int:
++    (d_retro / "retrospective.md").write_text(
++        "# Retrospective\n\n## Self problems\n- Closed too early and skipped a control request.\n\n"
++        "## Framework problems\n"
++        "1. First tool issue\n- Status: fixed\n- Fixed by: tools/a.py\n- Verification: a selftest passed\n\n"
++        "2. Second tool issue\n- Residual risk: remains visible in the backlog\n",
++        encoding="utf-8")
++    retro_multi_missing = check_retrospective(d_retro)
++    (d_retro / "retrospective.md").write_text(
++        "# Retrospective\n\n## Self problems\n- Closed too early and skipped a control request.\n\n"
++        "## Framework problems\n"
++        "- Problem: first parser issue\n- Status: fixed\n- Fixed by: tools/a.py\n"
++        "- Verification: parser selftest\n\n"
++        "- Problem: second parser issue\n- Residual risk: still visible\n",
++        encoding="utf-8")
++    retro_problem_missing = check_retrospective(d_retro)
+@@ -2571 +2745 @@ def _selftest() -> int:
+-    (d_retro2 / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_retro2 / "review.md").write_text(valid_review_text, encoding="utf-8")
+@@ -2580 +2754 @@ def _selftest() -> int:
+-    (d_retro_final / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_retro_final / "review.md").write_text(valid_review_text, encoding="utf-8")
+@@ -2614,0 +2789 @@ def _selftest() -> int:
++    completion_review_missing = check_codex_completion_review(d_cron)
+@@ -2625,0 +2801,6 @@ def _selftest() -> int:
++    (d_cron / "decisions.md").write_text(
++        "# Decisions\n\n- GHOST_COMPLETE\n\n## CodexCompletionReview\n"
++        "- Reviewer: codex-fresh\n- Verdict: PASS\n"
++        "- Summary: report coverage, severity support, and reachable assets were independently checked.\n",
++        encoding="utf-8")
++    completion_review_ok = check_codex_completion_review(d_cron)
+@@ -2630 +2811 @@ def _selftest() -> int:
+-    (d_lifecycle / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_lifecycle / "review.md").write_text(valid_review_text, encoding="utf-8")
+@@ -2652 +2833 @@ def _selftest() -> int:
+-            any("修复状态" in e for e in retro_no_status)),
++            any("逐条闭环" in e for e in retro_no_status)),
+@@ -2654,0 +2836,4 @@ def _selftest() -> int:
++        ("retrospective each framework item needs its own status",
++            any("Second tool issue: missing Status" in e for e in retro_multi_missing)),
++        ("retrospective repeated Problem fields are validated independently",
++            any("Problem: second parser issue: missing Status" in e for e in retro_problem_missing)),
+@@ -2671,0 +2857,4 @@ def _selftest() -> int:
++        ("completion marker without structured completion review hard-fails",
++            any("CodexCompletionReview" in e for e in completion_review_missing)),
++        ("structured completion review clears completion-review gate",
++            completion_review_ok == []),
+@@ -2757 +2946 @@ def _selftest() -> int:
+-    (d10 / "review.md").write_text("# Review\n## Independent Review\n- done\n", encoding="utf-8")
++    (d10 / "review.md").write_text(valid_review_text, encoding="utf-8")
+@@ -2866 +3055 @@ def _selftest() -> int:
+-    (d_conf / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_conf / "review.md").write_text(valid_review_text, encoding="utf-8")
+@@ -2932 +3121 @@ def _selftest() -> int:
+-    (d_mid_cov / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_mid_cov / "review.md").write_text(valid_review_text, encoding="utf-8")
+@@ -2939 +3128,3 @@ def _selftest() -> int:
+-    rvp.write_text("# Review\n## 独立复审\n- ok\n", encoding="utf-8")
++    rvp.write_text(
++        "# Review\n## 独立复审\n- Reviewer: selftest\n- Verdict: PASS\n",
++        encoding="utf-8")
+@@ -2949 +3140 @@ def _selftest() -> int:
+-    rvp2.write_text("# Review\n## Independent Review\n- old\n", encoding="utf-8")
++    rvp2.write_text(valid_review_text, encoding="utf-8")
+@@ -3260 +3451 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
+-    if re.search(r"Independent Review|独立复审", rv):
++    if has_completed_independent_review(rv):

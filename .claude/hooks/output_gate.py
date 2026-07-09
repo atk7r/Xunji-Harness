@@ -30,6 +30,27 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
 SESSION_STATE_STALE_SEC = 50 * 60  # session timeout 50 min
 INVISIBLE_RE = re.compile(r"[​‌‍⁠﻿ ]")
+CODA_RE = re.compile(
+    r"(?im)^[^\S\n]*(下一行动|BLOCKED)[^\S\n]*[:：][^\S\n]*(.*?)[^\S\n]*$"
+)
+_ACTION_WORDS_ZH = (
+    r"运行|执行|检查|验证|更新|记录|分派|读取|修复|重跑|测试|扫描|探测|复审|回放|"
+    r"保存|写入|提交|创建|生成|删除|关闭|打开|调用|发送|汇总|同步|标记|裁定|重试|"
+    r"继续|尝试|对照|分析|调查|确认|解析|抓取|请求|枚举|注入|绕过|检索|搜索|刷新|"
+    r"迁移|清理|构建|审计"
+)
+_ACTION_WORDS_EN = (
+    r"run|execute|check|verify|update|record|assign|read|fix|test|scan|review|replay|"
+    r"save|write|commit|create|generate|delete|close|open|call|send|summarize|sync|mark|"
+    r"adjudicate|retry|continue|try|compare|analyze|investigate|confirm|parse|fetch|request|"
+    r"enumerate|inject|bypass|search|refresh|migrate|clean|build|audit"
+)
+_ACTION_RE = re.compile(rf"(?:{_ACTION_WORDS_ZH})|\b(?:{_ACTION_WORDS_EN})\b", re.I)
+_TOOL_RE = re.compile(
+    r"\b(?:check_run|peer_review|workers|coverage_matrix|probe|render|loop_state)"
+    r"(?:\.py)?\b",
+    re.I,
+)
 sys.path.insert(0, str(ROOT / "tools"))
 
 try:
@@ -103,15 +124,69 @@ def _tail_has_question(msg: str) -> bool:
     return bool(re.search(r'[?？]|[吗呢吧啊][\s。！,，]*$', tail))
 
 
+def _turn_coda(msg: str) -> tuple[str, str, str]:
+    """Return ``(kind, detail, error)`` for one concrete final Coda line."""
+    clean = _strip_invisible(msg or "").rstrip()
+    matches = list(CODA_RE.finditer(clean))
+    if not matches:
+        return "", "", "缺少回合 Coda"
+    if len(matches) != 1:
+        return "", "", "只能有一个回合 Coda"
+    match = matches[0]
+    if match.end() != len(clean):
+        return "", "", "Coda 必须是最后一个非空行"
+    kind = match.group(1).upper()
+    detail = match.group(2).strip()
+    compact = re.sub(r"[\s`*_#<>。，、:：;；,.!?！？()（）\[\]-]", "", detail)
+    if len(compact) < 4 or re.search(r"<[^>]*>|\b(?:TODO|TBD)\b", detail, re.I):
+        return "", "", "Coda 内容为空、过短或仍是占位符"
+    vague = re.sub(r"[\s。！!，,；;]", "", detail).lower()
+    vague_only = {
+        "继续", "继续分析", "继续测试", "继续验证", "继续推进", "按流程继续",
+        "处理问题", "执行下一步", "等待", "等待用户", "later", "continue",
+    }
+    if vague in vague_only:
+        return "", "", "Coda 必须写清对象和动作，不能只写泛泛的继续/处理"
+    vague_phrase = re.search(
+        r"(?:根据|按照)(?:前面|上述|以上|之前|当前).*(?:继续|下一步)|"
+        r"继续(?:做|执行)?(?:下一步|后续工作|相关工作|剩余工作)|"
+        r"按(?:既定|上述|当前)?流程继续|进一步(?:分析|处理|推进)(?:问题|工作|流程)?$",
+        detail,
+        re.I,
+    )
+    concrete_anchor = re.search(
+        r"\bF-\d+\b|\b(?:python\d*|render|probe|check_run|peer_review|workers)\b|"
+        r"[A-Za-z0-9_.-]+\.(?:py|md|json|html)\b",
+        detail,
+        re.I,
+    )
+    if vague_phrase and not concrete_anchor:
+        return "", "", "Coda 是换一种说法的泛泛继续，仍缺具体对象和动作"
+    if len(set(re.findall(r"\bF-\d+\b", detail, re.I))) > 1:
+        return "", "", "Coda 只能推进一个 F-id，不能把多个前沿打包"
+    if kind != "BLOCKED" and not (_ACTION_RE.search(detail) or _TOOL_RE.search(detail)):
+        return "", "", "下一行动必须包含明确的可执行动作"
+    if _has_multiple_action_clauses(detail):
+        return "", "", "Coda 只能写一个动作，不能把动作清单塞进一行"
+    return kind, detail, ""
+
+
+def _has_multiple_action_clauses(detail: str) -> bool:
+    """Distinguish multiple executable clauses from one action with many parameters."""
+    parts = re.split(
+        r"(?:&&|\s+\+\s+|[，,；;、]|\s+/\s+|以及|并且|然后|随后|再去|接着|同时|"
+        rf"和|与|及|或|并(?=(?:{_ACTION_WORDS_ZH})|\b(?:{_ACTION_WORDS_EN})\b)|"
+        r"\b(?:and\s+then|and|or)\b)",
+        detail,
+        flags=re.I,
+    )
+    actionable = [part for part in parts if _ACTION_RE.search(part) or _TOOL_RE.search(part)]
+    return len(actionable) > 1
+
+
 def _tail_has_proper_close(msg: str) -> bool:
-    """Check if the tail (last 500 chars) ends with proper protocol close:
-    '下一行动:' / 'BLOCKED:' (allow trailing whitespace)."""
-    if not msg:
-        return False
-    tail = msg[-500:] if len(msg) > 500 else msg
-    # Strip trailing whitespace and zero-width chars for comparison
-    tail_clean = _strip_invisible(tail).rstrip()
-    return bool(re.search(r'(下一行动\s*:.*|BLOCKED\s*:.*)$', tail_clean, re.IGNORECASE))
+    """Whether the message has exactly one concrete final Coda line."""
+    return not _turn_coda(msg)[2]
 
 
 def detect_option_list(msg: str) -> bool:
@@ -146,36 +221,123 @@ def _next_drift_started_at(prev_state: dict, drift_flags: list[str], now: float)
     return now
 
 
-def _active_protocol_fronts(run_dir: Path) -> list[str]:
-    """Return fronts that still require an action-bearing turn ending.
+def _fallback_protocol_state(run_dir: Path, error: str = "") -> dict:
+    """Keep the Coda gate alive when the richer loop-state projection fails."""
+    active: set[str] = set()
+    blocked_a: set[str] = set()
+    try:
+        text = (run_dir / "frontier.md").read_text(encoding="utf-8", errors="replace")
+        for match in re.finditer(
+            r"(?ms)^#{2,6}[ \t]+[^\n]*?\b(F-\d+)\b.*?(?=^#{2,6}[ \t]+[^\n]*?\bF-\d+\b|\Z)",
+            text,
+        ):
+            block = match.group(0)
+            status_match = re.search(r"(?im)^\s*[-*]?\s*Status\s*[:：]\s*([^\n]+)", block)
+            status = status_match.group(1).lower().replace("-", "_") if status_match else ""
+            primary = re.split(r"[,;；(（]", status, maxsplit=1)[0]
+            tokens = set(re.findall(r"[a-z0-9_]+", primary))
+            if tokens & {"open", "probing", "working", "blocked_type_a"}:
+                active.add(match.group(1))
+            if "blocked_type_a" in tokens:
+                blocked_a.add(match.group(1))
+    except Exception:
+        pass
+    loop_complete = False
+    try:
+        decisions = (run_dir / "decisions.md").read_text(encoding="utf-8", errors="replace")
+        loop_complete = bool(re.search(
+            r"(?<![A-Z0-9_])(?:GHOST_COMPLETE|NORMAL_COMPLETE)(?![A-Z0-9_])",
+            decisions,
+        ))
+    except Exception:
+        pass
+    return {
+        "active_fronts": sorted(active),
+        "blocked_type_a": sorted(blocked_a),
+        "loop_complete": loop_complete,
+        "next_actions": [
+            "Repair/read canonical frontier state, then continue the active run"
+            + (f" ({error})" if error else "")
+        ],
+        "fallback": True,
+    }
 
-    This is read-only. If derived state is unavailable, fail open: output_gate is
-    process discipline, not the safety boundary.
+
+def _protocol_state(run_dir: Path) -> dict:
+    """Return the read-only run state needed for output protocol enforcement.
+
+    This is read-only. If derived state is unavailable, fall back to canonical
+    Markdown parsing so the Coda contract remains enforceable without pretending
+    the process hook is a safety boundary.
     """
     if _loop_state is None:
-        return []
+        return _fallback_protocol_state(run_dir, "loop_state import unavailable")
     try:
         data = _loop_state.derive(run_dir, write=False)
-    except Exception:
-        return []
+    except Exception as exc:
+        return _fallback_protocol_state(run_dir, exc.__class__.__name__)
     fronts = data.get("fronts") if isinstance(data.get("fronts"), dict) else {}
-    active = set()
-    for key in ("open", "blocked_type_a"):
-        values = fronts.get(key) if isinstance(fronts.get(key), list) else []
-        active.update(str(x) for x in values if str(x).strip())
-    return sorted(active)
+    active = {str(x) for x in (fronts.get("open") or []) if str(x).strip()}
+    blocked_a = {str(x) for x in (fronts.get("blocked_type_a") or []) if str(x).strip()}
+    gates = data.get("gates") if isinstance(data.get("gates"), dict) else {}
+    return {
+        "active_fronts": sorted(active),
+        "blocked_type_a": sorted(blocked_a),
+        "loop_complete": bool(gates.get("loop_complete")),
+        "next_actions": [str(x) for x in (data.get("next_actions") or []) if str(x).strip()],
+    }
+
+
+def _active_protocol_fronts(run_dir: Path) -> list[str]:
+    """Compatibility helper used by focused tests and callers."""
+    return list(_protocol_state(run_dir).get("active_fronts") or [])
 
 
 def _protocol_block_reason(msg: str, run_dir: Path) -> str:
-    active = _active_protocol_fronts(run_dir)
-    if not active or _tail_has_proper_close(msg):
+    state = _protocol_state(run_dir)
+    if not state:
+        return (
+            "[输出协议硬拦] 无法解析 active run 状态；先修复/读取 frontier.md，"
+            "并以唯一具体的 `下一行动:` 结尾。"
+        )
+    if state.get("loop_complete"):
+        return ""
+    active = list(state.get("active_fronts") or [])
+    kind, detail, coda_error = _turn_coda(msg)
+    if not coda_error and kind == "BLOCKED":
+        coda_error = (
+            "active run 尚未完成时不能用 BLOCKED 停止；应写一个能推进、"
+            "转向、记录外部依赖或形成证据化裁定的下一行动"
+        )
+    cited_fronts = set(re.findall(r"\bF-\d+\b", detail, re.I))
+    if not coda_error and active and cited_fronts and not (cited_fronts & set(active)):
+        coda_error = "Coda 引用的 F-id 不属于当前 active 前沿"
+    if not coda_error and not active and cited_fronts:
+        coda_error = "当前没有 active 前沿，Coda 不得引用不存在的活动 F-id"
+    process_anchor = re.search(
+        r"(?:check_run|classify_hosts|workers\.py|coverage_matrix\.py|frontier\.md|"
+        r"evidence\.md|report\.md|decisions\.md|retrospective\.md|hints\.md|"
+        r"surface\.md|conflicts?|冲突|子任务|subagent|Agent Board|分派|复审|"
+        r"peer_review|收口|覆盖台账)",
+        detail,
+        re.I,
+    )
+    if not coda_error and active and not cited_fronts and not process_anchor:
+        coda_error = "存在 active 前沿时，Coda 必须引用一个 active F-id 或明确的控制面对象"
+    if not coda_error and not active and not cited_fronts and not process_anchor:
+        coda_error = "当前没有 active 前沿，Coda 必须指向明确的收口或控制面对象"
+    if not coda_error:
         return ""
     sample = ", ".join(active[:6])
     more = "" if len(active) <= 6 else f" 等 {len(active)} 个"
+    scope = f"active 前沿({sample}{more})" if active else "尚未完成的 active run"
+    suggested = (state.get("next_actions") or [""])[0]
+    suggestion = f" 当前控制面建议: {suggested}" if suggested else ""
     return (
-        "[输出协议硬拦] 当前 run 仍有 open/probing/blocked_type_a 前沿"
-        f"({sample}{more})，本轮输出必须以单一 `下一行动: <具体 action>` 或 "
-        "`BLOCKED: <外部依赖>` 结尾。请删掉摘要/多选/询问式结尾，补一个可执行下一行动。"
+        f"[输出协议硬拦] 当前 {scope}；{coda_error}。"
+        "本轮必须以唯一且具体的 `下一行动: <对象 + 可执行动作>` 结尾。"
+        "空值、占位符、泛泛“继续分析”、多动作/多 F-id、多个 Coda、错误 F-id 或 BLOCKED 均不放行。"
+        f"{suggestion}"
     )
 
 
@@ -331,6 +493,39 @@ def _selftest() -> int:
     checks.append(("proper close: 下一行动", _tail_has_proper_close("下一行动: F-001 扫描端口") is True))
     checks.append(("proper close: BLOCKED", _tail_has_proper_close("BLOCKED: 网络不可达") is True))
     checks.append(("proper close: trailing space", _tail_has_proper_close("BLOCKED: 外部依赖  ") is True))
+    checks.append(("empty coda rejected", _tail_has_proper_close("下一行动:") is False))
+    checks.append(("placeholder coda rejected", _tail_has_proper_close("下一行动: <具体 action>") is False))
+    checks.append(("vague coda rejected", _tail_has_proper_close("下一行动: 继续分析") is False))
+    checks.append(("paraphrased vague coda rejected",
+                   _tail_has_proper_close("下一行动: 根据前面的分析继续做下一步") is False))
+    checks.append(("front id without executable action is rejected",
+                   _tail_has_proper_close("下一行动: F-001 登录入口") is False))
+    checks.append(("prior-result wording with concrete front and tool passes syntax",
+                   _tail_has_proper_close("下一行动: 根据前面的结果继续用 render 验证 F-001") is True))
+    checks.append(("multiple codas rejected",
+                   _tail_has_proper_close("下一行动: F-001 检查登录\n下一行动: F-002 检查接口") is False))
+    checks.append(("multiple front ids rejected",
+                   _tail_has_proper_close("下一行动: 检查 F-001 + F-002") is False))
+    checks.append(("multiple actions rejected",
+                   _tail_has_proper_close("下一行动: 运行 check_run、回放验证和独立复审") is False))
+    checks.append(("two tools joined by conjunction are multiple actions",
+                   _tail_has_proper_close("下一行动: 运行 check_run 与 peer_review") is False))
+    checks.append(("two tools joined by 和 are multiple actions",
+                   _tail_has_proper_close("下一行动: 运行 check_run 和 peer_review") is False))
+    checks.append(("two English actions joined by bare and are rejected",
+                   _tail_has_proper_close("下一行动: run check_run and review evidence.md") is False))
+    checks.append(("two Chinese actions joined by 并 are rejected",
+                   _tail_has_proper_close("下一行动: 读取 frontier.md 并更新 evidence.md") is False))
+    checks.append(("save verb cannot hide a second action",
+                   _tail_has_proper_close("下一行动: 运行 check_run 和保存结果") is False))
+    checks.append(("two executable clauses separated by comma are rejected",
+                   _tail_has_proper_close("下一行动: 读取 frontier.md，更新 evidence.md") is False))
+    checks.append(("one scan action may contain multiple port parameters",
+                   _tail_has_proper_close("下一行动: 扫描 F-001 的 80，443 端口") is True))
+    checks.append(("single action may contain conjunction inside one front",
+                   _tail_has_proper_close("下一行动: 验证 F-001 登录和会话边界") is True))
+    checks.append(("single English action may contain joined objects",
+                   _tail_has_proper_close("下一行动: scan F-001 headers and cookies") is True))
     checks.append(("no proper close: prose", _tail_has_proper_close("继续分析结果") is False))
     checks.append(("no proper close: question", _tail_has_proper_close("是否继续测试？") is False))
     checks.append(("no proper close: empty", _tail_has_proper_close("") is False))
@@ -409,8 +604,65 @@ def _selftest() -> int:
                    "输出协议硬拦" in _protocol_block_reason("本轮完成，继续。", open_run)))
     checks.append(("open run with 下一行动 passes protocol",
                    _protocol_block_reason("下一行动: F-001 尝试登录错误页对照", open_run) == ""))
-    checks.append(("closed run without 下一行动 passes protocol",
+    checks.append(("closed but incomplete run still requires closure action",
+                   "输出协议硬拦" in _protocol_block_reason("收口检查完成。", closed_run)))
+    checks.append(("closed run with concrete closure action passes",
+                   _protocol_block_reason("下一行动: 运行 check_run 收口检查", closed_run) == ""))
+    checks.append(("closed incomplete run rejects generic action",
+                   "必须指向明确的收口或控制面对象" in _protocol_block_reason(
+                       "下一行动: 分析其他问题", closed_run)))
+    checks.append(("closure candidate cannot use BLOCKED as a pause",
+                   "不能用 BLOCKED" in _protocol_block_reason("BLOCKED: 等待操作者继续", closed_run)))
+    checks.append(("closure candidate rejects arbitrary front id",
+                   "当前没有 active 前沿" in _protocol_block_reason(
+                       "下一行动: F-999 检查另一个入口", closed_run)))
+    (closed_run / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
+    checks.append(("completion marker releases output protocol",
                    _protocol_block_reason("收口检查完成。", closed_run) == ""))
+    checks.append(("active front cannot use BLOCKED coda",
+                   "不能用 BLOCKED" in _protocol_block_reason("BLOCKED: 等待外部凭据到位", open_run)))
+    checks.append(("wrong active front id is rejected",
+                   "不属于当前 active" in _protocol_block_reason(
+                       "下一行动: F-999 检查另一个入口", open_run)))
+    checks.append(("active run requires front id or control-plane object",
+                   "必须引用一个 active F-id" in _protocol_block_reason(
+                       "下一行动: 检查登录错误页响应差异", open_run)))
+    checks.append(("explicit control-plane action may omit front id",
+                   _protocol_block_reason("下一行动: 运行 workers.py 分派子任务", open_run) == ""))
+    checks.append(("bare Agent token is not a control-plane bypass",
+                   "必须引用一个 active F-id" in _protocol_block_reason(
+                       "下一行动: 运行 Agent 完成工作", open_run)))
+    original_loop_state = globals().get("_loop_state")
+    fallback_heading_run = d / "fallback_heading_run"
+    fallback_heading_run.mkdir()
+    (fallback_heading_run / "frontier.md").write_text(
+        "# Frontier\n\n## Front F-002 — login\n- Status: working\n",
+        encoding="utf-8",
+    )
+    (fallback_heading_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    try:
+        globals()["_loop_state"] = None
+        fallback_state = _protocol_state(open_run)
+        fallback_heading_state = _protocol_state(fallback_heading_run)
+        fallback_block = _protocol_block_reason("本轮先停在这里。", open_run)
+        fallback_pass = _protocol_block_reason("下一行动: F-001 检查登录错误页", open_run)
+    finally:
+        globals()["_loop_state"] = original_loop_state
+    checks.append(("loop_state failure keeps fallback active-front Coda enforcement",
+                   fallback_state.get("fallback") is True
+                   and fallback_state.get("active_fronts") == ["F-001"]
+                   and "输出协议硬拦" in fallback_block
+                   and fallback_pass == ""))
+    checks.append(("fallback parser accepts labeled F-id headings",
+                   fallback_heading_state.get("active_fronts") == ["F-002"]))
+    original_protocol_state = globals().get("_protocol_state")
+    try:
+        globals()["_protocol_state"] = lambda _run_dir: {}
+        empty_state_block = _protocol_block_reason("下一行动: F-001 检查入口", open_run)
+    finally:
+        globals()["_protocol_state"] = original_protocol_state
+    checks.append(("empty protocol state fails closed",
+                   "无法解析 active run 状态" in empty_state_block))
 
     runs_root = d / "runs"
     live_run = runs_root / "live_run"
@@ -421,9 +673,18 @@ def _selftest() -> int:
     (live_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
     (live_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
     (live_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    decoy_run = runs_root / "newer_but_not_active"
+    decoy_run.mkdir()
+    (decoy_run / "frontier.md").write_text(
+        "# Frontier\n\n## Closed Fronts\n\n### F-901\n- Status: closed\n",
+        encoding="utf-8")
+    (decoy_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    pointer = d / "active_run_pointer"
+    pointer.write_text(str(live_run), encoding="utf-8")
     event = {"last_assistant_message": "本轮完成，继续。"}
     env = dict(_os.environ)
     env["XUNJI_RUNS_ROOT"] = str(runs_root)
+    env["XUNJI_ACTIVE_RUN_FILE"] = str(pointer)
     proc = subprocess.run(
         [sys.executable, str(Path(__file__).resolve())],
         input=json.dumps(event, ensure_ascii=False),
@@ -434,9 +695,35 @@ def _selftest() -> int:
         env=env,
         timeout=10,
     )
-    checks.append(("hook subprocess blocks real run root with open front",
+    checks.append(("hook subprocess honors explicit active pointer and blocks open front",
                    proc.returncode == 0 and '"decision": "block"' in (proc.stdout or "")
                    and "F-900" in (proc.stdout or "")))
+
+    closure_run = runs_root / "closure_run"
+    closure_run.mkdir()
+    (closure_run / "frontier.md").write_text(
+        "# Frontier\n\n## Closed Fronts\n\n### F-902\n- Status: closed\n",
+        encoding="utf-8")
+    (closure_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (closure_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (closure_run / "retrospective.md").write_text(
+        "# Retrospective\n\n- Verdict: FINAL\n", encoding="utf-8")
+    pointer.write_text(str(closure_run), encoding="utf-8")
+    proper_event = {"last_assistant_message": "下一行动: 运行 check_run 收口检查"}
+    output_proc = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve())],
+        input=json.dumps(proper_event, ensure_ascii=False), text=True, capture_output=True,
+        encoding="utf-8", errors="replace", env=env, timeout=10,
+    )
+    run_proc = subprocess.run(
+        [sys.executable, str(ROOT / ".claude" / "hooks" / "run_gate.py")],
+        input=json.dumps(proper_event, ensure_ascii=False), text=True, capture_output=True,
+        encoding="utf-8", errors="replace", env=env, timeout=15,
+    )
+    checks.append(("explicit-pointer Stop pipeline: output Coda passes then closure gate blocks",
+                   not (output_proc.stdout or "").strip()
+                   and '"decision": "block"' in (run_proc.stdout or "")
+                   and "缺独立复审" in (run_proc.stdout or "")))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
