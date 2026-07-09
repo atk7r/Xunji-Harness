@@ -62,6 +62,16 @@ DEFAULT_CONFIG: dict = {
         "max_backends": 2,
         "roles": ["evidence_skeptic", "closure_skeptic", "report_consistency"],
     },
+    "retry": {
+        "max_attempts": 2,
+        "retryable_error_patterns": [
+            "timeout", "timed out", "no output", "no verdict", "parse error",
+            "connection", "temporar", "rate limit", "quota", "exit",
+            "超时", "逾时", "无输出", "無輸出", "无 verdict", "無 verdict",
+            "解析失败", "解析失敗", "连接", "連線", "暂时", "暫時",
+            "限流", "速率", "配额", "配額", "退出",
+        ],
+    },
     "egress": {
         "redact_secrets": True,
         "include_artifacts": "snippets",
@@ -312,6 +322,55 @@ def _redact_text(text: str) -> str:
     return out
 
 
+def _diff_summary(text: str, *, file_cap: int = 120, hunk_cap: int = 240) -> dict:
+    """Small structural summary for diff artifacts.
+
+    Review bundles may shrink or truncate large diff excerpts. This keeps the
+    file/hunk map visible so reviewers can verify scope without reading the
+    whole patch in context.
+    """
+    files: list[str] = []
+    hunks: list[dict] = []
+    current = ""
+    seen: set[str] = set()
+    for line in text.splitlines():
+        if line.startswith("diff --git "):
+            m = re.match(r"diff --git a/(.+?) b/(.+)$", line)
+            if m:
+                current = m.group(2).strip()
+                if current not in seen:
+                    files.append(current)
+                    seen.add(current)
+            else:
+                current = ""
+            continue
+        if line.startswith("Index: "):
+            current = line.split(":", 1)[1].strip()
+            if current and current not in seen:
+                files.append(current)
+                seen.add(current)
+            continue
+        if line.startswith("+++ ") and not current:
+            target = line[4:].strip()
+            if target.startswith("b/"):
+                target = target[2:]
+            if target and target != "/dev/null" and target not in seen:
+                files.append(target)
+                seen.add(target)
+                current = target
+            continue
+        if line.startswith("@@"):
+            hunks.append({"file": current or "(unknown)", "header": line[:220]})
+    return {
+        "changed_files_count": len(files),
+        "changed_files": files[:file_cap],
+        "changed_files_truncated": max(0, len(files) - file_cap),
+        "hunk_count": len(hunks),
+        "hunks": hunks[:hunk_cap],
+        "hunks_truncated": max(0, len(hunks) - hunk_cap),
+    }
+
+
 def _artifact_path(run_dir: Path, token: str) -> Path | None:
     root = run_dir.resolve()
     tok = token.strip().strip("`\"'").rstrip(").,;:，。）")
@@ -342,10 +401,13 @@ def _artifact_record(run_dir: Path, token: str, *, redact: bool = False,
         "size": p.stat().st_size,
         "sha1": _sha1_file(p),
     }
-    if include_excerpt and p.suffix.lower() in {".html", ".json", ".txt", ".log", ".xml"}:
+    suffix = p.suffix.lower()
+    if include_excerpt and suffix in {".html", ".json", ".txt", ".log", ".xml", ".diff", ".patch", ".md"}:
         txt = p.read_text(encoding="utf-8", errors="replace")
         if redact:
             txt = _redact_text(txt)
+        if suffix in {".diff", ".patch"}:
+            item["diff_summary"] = _diff_summary(txt)
         cap = _artifact_excerpt_cap(excerpt_chars)
         item["excerpt"] = txt[:cap]
         if len(txt) > cap:
@@ -1033,6 +1095,84 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,
     return result
 
 
+def _review_error_text(result: ReviewResult) -> str:
+    if result.error:
+        return result.error
+    if result.verdict == "ERROR" and not (result.raw or "").strip():
+        return "no output / no verdict in backend response"
+    if result.verdict == "ERROR":
+        return "no verdict in backend response"
+    return ""
+
+
+def _retry_attempts(cfg: dict, backend: str) -> int:
+    retry_cfg = cfg.get("retry", {}) if isinstance(cfg.get("retry"), dict) else {}
+    backend_cfg = cfg.get("backends", {}).get(backend, {})
+    raw = backend_cfg.get("max_attempts", retry_cfg.get("max_attempts", 1))
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _retryable_review_error(result: ReviewResult, cfg: dict) -> bool:
+    if result.verdict != "ERROR":
+        return False
+    retry_cfg = cfg.get("retry", {}) if isinstance(cfg.get("retry"), dict) else {}
+    patterns = retry_cfg.get("retryable_error_patterns") or []
+    text = _review_error_text(result).lower()
+    return any(str(p).lower() in text for p in patterns)
+
+
+def _run_backend_once(scope: Path, rubric: str, cfg: dict, name: str, timeout: int,
+                      bundle: dict, artifact_excerpt_chars: int,
+                      max_bundle_chars: int) -> ReviewResult:
+    b = cfg["backends"][name]
+    kind = b.get("kind")
+    if kind == "cli-agent":
+        return _run_codex(scope, rubric, b, timeout, bundle,
+                          artifact_excerpt_chars=artifact_excerpt_chars,
+                          max_bundle_chars=max_bundle_chars)
+    if kind == "arkcli-panel":
+        return _run_arkcli_panel(scope, rubric, b, timeout, bundle,
+                                 artifact_excerpt_chars=artifact_excerpt_chars,
+                                 max_bundle_chars=max_bundle_chars)
+    if kind == "openai":
+        return _run_openai(scope, rubric, b, name, timeout, bundle,
+                           artifact_excerpt_chars=artifact_excerpt_chars,
+                           max_bundle_chars=max_bundle_chars)
+    if kind == "claude-code-cli":
+        return _run_claude_cli(scope, rubric, b, timeout, bundle,
+                               artifact_excerpt_chars=artifact_excerpt_chars,
+                               max_bundle_chars=max_bundle_chars)
+    return ReviewResult(verdict="ERROR", backend_used=name, error=f"未知后端 kind: {kind}")
+
+
+def _run_backend_with_retries(scope: Path, rubric: str, cfg: dict, name: str,
+                              timeout: int, bundle: dict,
+                              artifact_excerpt_chars: int,
+                              max_bundle_chars: int) -> ReviewResult:
+    attempts = _retry_attempts(cfg, name)
+    failures: list[str] = []
+    result = ReviewResult(verdict="ERROR", backend_used=name, error="not run")
+    for attempt in range(1, attempts + 1):
+        result = _run_backend_once(scope, rubric, cfg, name, timeout, bundle,
+                                   artifact_excerpt_chars, max_bundle_chars)
+        if result.verdict != "ERROR":
+            if failures:
+                result.context_limits.append(
+                    f"{name} succeeded after {attempt} attempt(s); previous failures: "
+                    + " | ".join(failures))
+            return result
+        failures.append(f"attempt {attempt}: {_review_error_text(result)}")
+        if attempt >= attempts or not _retryable_review_error(result, cfg):
+            break
+    if failures:
+        result.context_limits.extend(failures)
+        result.error = result.error or failures[-1]
+    return result
+
+
 # ===================== 主入口 =====================
 def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
            out_file=None, into_run: bool = False, require_heterogeneous: bool = False,
@@ -1074,40 +1214,50 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
         return ReviewResult(verdict="ERROR", error=str(e))
     if backend is None:
         candidates = _available_heterogeneous_backends(cfg, driver)
-        chosen = candidates[0] if candidates else select_backend(cfg, None)
+        selected: list[str] = candidates or ([select_backend(cfg, None)] if select_backend(cfg, None) else [])
     else:
-        chosen = select_backend(cfg, backend)
-    if not chosen:
+        forced = select_backend(cfg, backend)
+        selected = [forced] if forced else []
+    if not selected:
         return ReviewResult(verdict="ERROR",
                             error="无可用复审后端(codex 未装 + arkcli 不可用 + 无 Claude 兜底)。"
                                   "装 codex/arkcli/claude CLI。")
-    if require_heterogeneous and not _is_heterogeneous(chosen, cfg, driver):
-        # 同族(Claude)不满足异构独立性 —— A2: 同族减 bias 不减盲区。auto-review 不用它满足异构门,
-        # 也不白跑同族 CLI。提示装真异构后端或 driver 自己 spawn 子代理。
-        rel = scope.relative_to(ROOT).as_posix() if scope.is_relative_to(ROOT) else str(scope)
-        return ReviewResult(verdict="NEEDS_DRIVER", backend_used=f"{chosen}:same-family-rejected",
-            raw=f"[需真异构] 唯一可用后端 '{chosen}' 是同族(非异构), 不满足异构独立复审门。装 codex "
-                f"或 arkcli, 或 driver spawn fresh-context 子代理复审 {rel}。")
-    b = cfg["backends"][chosen]
-    kind = b.get("kind")
-    if kind == "cli-agent":
-        result = _run_codex(scope, rubric, b, timeout, bundle,
-                            artifact_excerpt_chars=artifact_excerpt_chars,
-                            max_bundle_chars=max_bundle_chars)
-    elif kind == "arkcli-panel":
-        result = _run_arkcli_panel(scope, rubric, b, timeout, bundle,
-                                   artifact_excerpt_chars=artifact_excerpt_chars,
-                                   max_bundle_chars=max_bundle_chars)
-    elif kind == "openai":
-        result = _run_openai(scope, rubric, b, chosen, timeout, bundle,
-                             artifact_excerpt_chars=artifact_excerpt_chars,
-                             max_bundle_chars=max_bundle_chars)
-    elif kind == "claude-code-cli":
-        result = _run_claude_cli(scope, rubric, b, timeout, bundle,
-                                 artifact_excerpt_chars=artifact_excerpt_chars,
-                                 max_bundle_chars=max_bundle_chars)
-    else:
-        result = ReviewResult(verdict="ERROR", error=f"未知后端 kind: {kind}")
+    failed_backends: list[str] = []
+    result: ReviewResult | None = None
+    chosen = ""
+    for candidate in selected:
+        if require_heterogeneous and not _is_heterogeneous(candidate, cfg, driver):
+            # 同族(Claude)不满足异构独立性 —— A2: 同族减 bias 不减盲区。auto-review 不用它满足异构门,
+            # 也不白跑同族 CLI。提示装真异构后端或 driver 自己 spawn 子代理。
+            rel = scope.relative_to(ROOT).as_posix() if scope.is_relative_to(ROOT) else str(scope)
+            result = ReviewResult(verdict="NEEDS_DRIVER", backend_used=f"{candidate}:same-family-rejected",
+                raw=f"[需真异构] 唯一可用后端 '{candidate}' 是同族(非异构), 不满足异构独立复审门。装 codex "
+                    f"或 arkcli, 或 driver spawn fresh-context 子代理复审 {rel}。")
+            chosen = candidate
+            if backend is not None:
+                break
+            failed_backends.append(f"{candidate}: same-family rejected")
+            continue
+        rr = _run_backend_with_retries(scope, rubric, cfg, candidate, timeout, bundle,
+                                       artifact_excerpt_chars, max_bundle_chars)
+        if rr.verdict != "ERROR":
+            result = rr
+            chosen = candidate
+            break
+        failed_backends.append(f"{candidate}: {_review_error_text(rr)}")
+        result = rr
+        chosen = candidate
+        if backend is not None:
+            break
+    if result is None:
+        result = ReviewResult(verdict="ERROR", backend_used=",".join(selected),
+                              error="no backend attempted")
+    if failed_backends and result.verdict != "ERROR":
+        result.context_limits.append(
+            "backend fallback used after failures: " + " | ".join(failed_backends))
+    elif failed_backends and result.verdict == "ERROR":
+        result.error = result.error or "all selected backends failed"
+        result.context_limits.extend(failed_backends)
     result.bundle_hash = bundle.get("sha1", "")
     result.evidence_index_hash = bundle.get("evidence_index", {}).get("sha1", "")
     result.driver = driver
@@ -1125,7 +1275,8 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     if (into_run and result.verdict not in ("ERROR", "NEEDS_DRIVER")
             and (_is_heterogeneous(backend_root, cfg, driver) or may_record_same_family)):
         _append_run_review(scope, result)
-    elif into_run and result.verdict == "NEEDS_DRIVER":
+    elif (into_run and result.verdict == "NEEDS_DRIVER"
+          and "same-family-rejected" not in (result.backend_used or "")):
         _append_manual_driver_template(scope, result)
     if out_file:
         out = Path(out_file)
@@ -1441,6 +1592,9 @@ def resolve_finding(run_dir: Path, pr_id: str, status: str, resolution: str) -> 
 
 # ===================== CLI / selftest =====================
 def _selftest() -> int:
+    import re as _re
+    import tempfile
+
     checks = []
     cfg = load_config()
     checks.append(("默认配置 priority = codex > arkcli > claude",
@@ -1520,6 +1674,31 @@ def _selftest() -> int:
                    backend_available("claude", cfg) == (shutil.which(cfg["backends"]["claude"]["cmd"]) is not None)))
     checks.append(("arkcli-panel cmd 存在时 available 或可被本地环境决定",
                    backend_available("arkcli", cfg) == (shutil.which(cfg["backends"]["arkcli"]["cmd"]) is not None)))
+    retry_cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    retry_cfg["priority"] = ["codex", "arkcli"]
+    retry_cfg["retry"] = {"max_attempts": 2, "retryable_error_patterns": ["timeout", "no output"]}
+    retry_cfg["backends"]["codex"] = {"kind": "cli-agent", "cmd": sys.executable, "heterogeneous": True}
+    retry_cfg["backends"]["arkcli"] = {"kind": "cli-agent", "cmd": sys.executable, "heterogeneous": True}
+    d_retry = Path(tempfile.mkdtemp())
+    (d_retry / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    original_runner = _run_backend_once
+    retry_calls: list[str] = []
+    try:
+        def _fake_backend(scope, rubric, cfg_arg, name, timeout, bundle,
+                          artifact_excerpt_chars, max_bundle_chars):
+            retry_calls.append(name)
+            if name == "codex":
+                return ReviewResult(verdict="ERROR", backend_used="codex", error="codex timeout")
+            return ReviewResult(verdict="PASS", backend_used=name)
+        globals()["_run_backend_once"] = _fake_backend
+        retry_result = review(d_retry, config=retry_cfg, require_heterogeneous=True)
+    finally:
+        globals()["_run_backend_once"] = original_runner
+    checks.append(("single-backend review retries then falls back to next hetero backend",
+                   retry_calls == ["codex", "codex", "arkcli"]
+                   and retry_result.verdict == "PASS"
+                   and retry_result.backend_used == "arkcli"
+                   and any("backend fallback used" in x for x in retry_result.context_limits)))
 
     # 输出解析
     sample = """blah blah process log
@@ -1601,8 +1780,6 @@ def _selftest() -> int:
     checks.append(("as_markdown 含 finding", "E-017" in md))
 
     # into_run: 追加进 review.md 带独立复审标记(满足 check_run 门), 不覆盖已有内容
-    import re as _re
-    import tempfile
     d_run = Path(tempfile.mkdtemp())
     (d_run / "review.md").write_text("# Review\n## 已有内容\n- foo\n", encoding="utf-8")
     (d_run / "evidence.md").write_text(
@@ -1629,6 +1806,24 @@ def _selftest() -> int:
     b_tiny_bundle_cap = build_review_bundle(d_run, max_bundle_chars=100)
     long_art = b_long["evidence_index"]["entries"][0]["artifacts"][0]
     long_small_art = b_long_small["evidence_index"]["entries"][0]["artifacts"][0]
+    (d_run / "reviewed.diff").write_text(
+        "diff --git a/x b/x\n"
+        "--- a/x\n"
+        "+++ b/x\n"
+        "@@ -1 +1 @@\n"
+        "+changed\n"
+        "diff --git a/tools/probe.py b/tools/probe.py\n"
+        "--- a/tools/probe.py\n"
+        "+++ b/tools/probe.py\n"
+        "@@ -10 +10 @@\n"
+        "+probe changed\n",
+        encoding="utf-8")
+    (d_run / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001 — x\n- Certainty: 0.8\n- Control: yes\n"
+        "- Artifacts: `reviewed.diff`\n",
+        encoding="utf-8")
+    b_diff = build_review_bundle(d_run)
+    diff_art = b_diff["evidence_index"]["entries"][0]["artifacts"][0]
     (d_run / "evidence.md").write_text(
         "# Evidence Ledger\n\n## E-001 — x\n- Certainty: 0.8\n- Control: yes\n- Artifacts: `a.html`\n",
         encoding="utf-8")
@@ -1669,6 +1864,12 @@ def _selftest() -> int:
         ("bundle artifact excerpt cap remains configurable",
          long_small_art.get("excerpt_truncated_chars", 0) > 0
          and "KEEP_TAIL" not in long_small_art.get("excerpt", "")),
+        ("bundle includes diff artifact excerpt for maintenance review",
+         diff_art.get("exists") is True and "diff --git" in diff_art.get("excerpt", "")),
+        ("bundle diff artifact includes structural file summary",
+         diff_art.get("diff_summary", {}).get("changed_files_count") == 2
+         and "tools/probe.py" in diff_art.get("diff_summary", {}).get("changed_files", [])
+         and diff_art.get("diff_summary", {}).get("hunk_count") == 2),
         ("bundle max_bundle_chars emits warning when exceeded",
          b_tiny_bundle_cap.get("warnings")
          and any("exceed max_bundle_chars=100" in w for w in b_tiny_bundle_cap["warnings"])

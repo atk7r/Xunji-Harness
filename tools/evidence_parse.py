@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 _ART_TOKEN = re.compile(
-    r"(?:evidence/[\w./-]+|render[_-][\w./-]+|[\w][\w./-]*\.(?:html|json|js|css|xml|png|jpe?g|gif|txt|log|bin))",
+    r"(?:evidence/[\w./-]+|render[_-][\w./-]+|[\w][\w./-]*\.(?:html|json|js|css|xml|png|jpe?g|gif|txt|log|bin|diff|patch|md))",
     re.I)
 
 

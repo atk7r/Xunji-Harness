@@ -20,13 +20,14 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNS = ROOT / "runs"
+RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
 SESSION_STATE_STALE_SEC = 50 * 60  # session timeout 50 min
 INVISIBLE_RE = re.compile(r"[​‌‍⁠﻿ ]")
 sys.path.insert(0, str(ROOT / "tools"))
@@ -74,6 +75,11 @@ except Exception:
         @staticmethod
         def reset_if_stale(run_dir, hard_block_active=False):
             return {}
+
+try:
+    import loop_state as _loop_state
+except Exception:
+    _loop_state = None
 
 
 def _strip_invisible(s: str) -> str:
@@ -138,6 +144,39 @@ def _next_drift_started_at(prev_state: dict, drift_flags: list[str], now: float)
         if started:
             return started
     return now
+
+
+def _active_protocol_fronts(run_dir: Path) -> list[str]:
+    """Return fronts that still require an action-bearing turn ending.
+
+    This is read-only. If derived state is unavailable, fail open: output_gate is
+    process discipline, not the safety boundary.
+    """
+    if _loop_state is None:
+        return []
+    try:
+        data = _loop_state.derive(run_dir, write=False)
+    except Exception:
+        return []
+    fronts = data.get("fronts") if isinstance(data.get("fronts"), dict) else {}
+    active = set()
+    for key in ("open", "blocked_type_a"):
+        values = fronts.get(key) if isinstance(fronts.get(key), list) else []
+        active.update(str(x) for x in values if str(x).strip())
+    return sorted(active)
+
+
+def _protocol_block_reason(msg: str, run_dir: Path) -> str:
+    active = _active_protocol_fronts(run_dir)
+    if not active or _tail_has_proper_close(msg):
+        return ""
+    sample = ", ".join(active[:6])
+    more = "" if len(active) <= 6 else f" 等 {len(active)} 个"
+    return (
+        "[输出协议硬拦] 当前 run 仍有 open/probing/blocked_type_a 前沿"
+        f"({sample}{more})，本轮输出必须以单一 `下一行动: <具体 action>` 或 "
+        "`BLOCKED: <外部依赖>` 结尾。请删掉摘要/多选/询问式结尾，补一个可执行下一行动。"
+    )
 
 
 def main() -> None:
@@ -208,6 +247,8 @@ def main() -> None:
             else:
                 frontier_mtime = 0.0
 
+            protocol_block = _protocol_block_reason(msg, run_dir)
+
             # ---- Escalation tracking: consecutive drift count ----
             drift_count = _next_drift_count(prev_state, drift_flags)
             drift_started_at = _next_drift_started_at(prev_state, drift_flags, now)
@@ -223,6 +264,9 @@ def main() -> None:
                 "frontier_alerted_at": _frontier_alerted if _frontier_alerted > 0 else prev_state.get("frontier_alerted_at", 0),
             }
             SessionStateManager.save(run_dir, state)
+            if protocol_block:
+                print(json.dumps({"decision": "block", "reason": protocol_block}, ensure_ascii=False))
+                sys.exit(0)
 
         # ---- Drift notification: systemMessage only (no drift_block.json, Decision 2) ----
         if drift_flags:
@@ -255,6 +299,8 @@ def main() -> None:
 
 def _selftest() -> int:
     """Regression tests. Returns 0 if healthy."""
+    import os as _os
+    import subprocess
     import tempfile
 
     checks: list[tuple[str, bool]] = []
@@ -340,6 +386,57 @@ def _selftest() -> int:
     checks.append(("valid_ts future -> 0", _valid_ts(now_ts + 999, now_ts) == 0.0))
     checks.append(("valid_ts zero -> 0", _valid_ts(0, now_ts) == 0.0))
     checks.append(("valid_ts non-numeric -> 0", _valid_ts("abc", now_ts) == 0.0))
+
+    open_run = d / "open_run"
+    open_run.mkdir()
+    (open_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n### F-001\n- Status: open\n- Barrier class: auth-layer\n",
+        encoding="utf-8")
+    (open_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (open_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (open_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    closed_run = d / "closed_run"
+    closed_run.mkdir()
+    (closed_run / "frontier.md").write_text(
+        "# Frontier\n\n## Closed Fronts\n\n### F-001\n- Status: closed\n- Barrier class: none\n",
+        encoding="utf-8")
+    (closed_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (closed_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (closed_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    checks.append(("protocol fronts detect open run", _active_protocol_fronts(open_run) == ["F-001"]))
+    checks.append(("protocol fronts ignore closed run", _active_protocol_fronts(closed_run) == []))
+    checks.append(("open run without 下一行动 hard-blocks",
+                   "输出协议硬拦" in _protocol_block_reason("本轮完成，继续。", open_run)))
+    checks.append(("open run with 下一行动 passes protocol",
+                   _protocol_block_reason("下一行动: F-001 尝试登录错误页对照", open_run) == ""))
+    checks.append(("closed run without 下一行动 passes protocol",
+                   _protocol_block_reason("收口检查完成。", closed_run) == ""))
+
+    runs_root = d / "runs"
+    live_run = runs_root / "live_run"
+    live_run.mkdir(parents=True)
+    (live_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n### F-900\n- Status: open\n- Barrier class: auth-layer\n",
+        encoding="utf-8")
+    (live_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (live_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (live_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    event = {"last_assistant_message": "本轮完成，继续。"}
+    env = dict(_os.environ)
+    env["XUNJI_RUNS_ROOT"] = str(runs_root)
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve())],
+        input=json.dumps(event, ensure_ascii=False),
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=10,
+    )
+    checks.append(("hook subprocess blocks real run root with open front",
+                   proc.returncode == 0 and '"decision": "block"' in (proc.stdout or "")
+                   and "F-900" in (proc.stdout or "")))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

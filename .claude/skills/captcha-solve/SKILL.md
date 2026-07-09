@@ -48,6 +48,8 @@ load page (acquire its JS + cookies)
   of 360 or a pixel offset the page's JS maps to an angle).
 - **Text / distorted**: out of scope for in-page solving; if needed, hand the
   image to an OCR/solver step — keep it a separate tool, not baked in here.
+  Use `tools/captcha_ocr.py` for bounded local OCR diagnostics; after 3-5 empty
+  attempts, record an OCR barrier / Type B condition instead of blind guessing.
 
 ## Gotchas (learned the hard way; generalize, don't hardcode)
 

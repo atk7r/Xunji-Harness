@@ -52,6 +52,11 @@ Use the default Claude-driver command for run closure:
 python3 tools/peer_review.py runs/<dir> --into-run
 ```
 
+The default path retries transient/empty-output backend failures, then falls
+through to the next independent backend in the active matrix. A Codex timeout
+should therefore become arkcli panel review when arkcli is available, not a
+silent manual-review shortcut.
+
 Use bundle-only when egress is not yet accepted or the operator wants to inspect
 the review material first:
 

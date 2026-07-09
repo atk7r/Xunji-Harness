@@ -39,6 +39,10 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs
   or reversibly encoded; slider captcha where the target position is sent
   client-side; arithmetic captcha with simple expression. "Click to verify"
   behavioral captcha with no server-side validation.
+- Signature (captcha OCR barrier): small noisy text captcha where bounded local
+  OCR attempts return empty across several PSM modes. This is a testing barrier,
+  not a bypass signal; record it as Type B/OCR barrier unless another server-side
+  weakness is proven.
 - Signature (user enumeration): different error messages for "user not found"
   vs "wrong password"; different response times for valid vs invalid users;
   password reset flow confirms/denies user existence.
@@ -81,8 +85,9 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs
 - Existence proof: test password policy by submitting a weak password and
   observing the error message. Test rate limiting by sending 5-10 rapid login
   attempts and observing response status/timing. Test captcha by inspecting
-  the captcha response for leaked answers. Test user enumeration by comparing
-  login errors for known-valid vs known-invalid usernames.
+  the captcha response for leaked answers. If using OCR, bound it to 3-5 attempts
+  and record `tools/captcha_ocr.py` output when all attempts are empty. Test user
+  enumeration by comparing login errors for known-valid vs known-invalid usernames.
 - Hard stops: confirm the weakness exists. Do NOT run a full brute-force
   attack (even with a small wordlist) — that is operator-gated. Do NOT use
   discovered valid usernames to attempt login. The finding is the weakness
@@ -100,6 +105,9 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs
 - Captcha that appears weak may still have server-side replay protection or
   HMAC signing — test that the extracted answer actually works on a real
   request before concluding bypass.
+- Captcha that defeats OCR is not evidence that the target is secure; it only
+  supports a barrier/deferred decision unless paired with server-side enforcement
+  evidence.
 - Some systems use adaptive rate limiting (increasing delays) rather than
   hard cutoffs — a consistent ~2s response time after rapid attempts is a
   rate limit (just a subtle one).

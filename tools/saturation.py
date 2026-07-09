@@ -236,6 +236,59 @@ def _parse_list_field(text: str, name: str) -> list[str]:
     return [p.strip().rstrip(".,;: ") for p in parts if p.strip()]
 
 
+_NA_RE = re.compile(
+    r"(?i)(?:\bN/?A\b|\bnot[ -]?applicable\b|\bnot\s+relevant\b|"
+    r"\bwaiv(?:e|ed|er)\b|不适用|不適用|不涉及|不需要|无需|無需|"
+    r"无适用|無適用|忽略|跳过|跳過)"
+)
+
+
+def _strip_na_reason(item: str) -> tuple[str, str]:
+    """Return (class text, waiver reason) for entries like `SQLi-login (N/A - captcha)`.
+
+    Driver-maintained `Untried classes:` often carries a concise reason inline.
+    If that inline note says N/A/not-applicable, it is a structured waiver for
+    saturation math rather than an untried class.
+    """
+    raw = item.strip().rstrip(".,;: ")
+    if not raw:
+        return "", ""
+    reason = ""
+    for m in re.finditer(r"[\(\[][^\)\]]*[\)\]]", raw):
+        chunk = m.group(0).strip("()[] ").strip()
+        if _NA_RE.search(chunk):
+            reason = chunk
+            raw = (raw[:m.start()] + raw[m.end():]).strip()
+            break
+    if not reason and _NA_RE.search(raw):
+        parts = re.split(r"\s+(?:--|-|—|–|:)\s+", raw, maxsplit=1)
+        if len(parts) == 2:
+            raw, reason = parts[0].strip(), parts[1].strip()
+        else:
+            reason = raw
+            raw = _NA_RE.sub("", raw).strip()
+    return raw.rstrip(".,;: "), reason
+
+
+def _parse_class_field(text: str, name: str) -> tuple[list[str], dict[str, str]]:
+    """Parse class list fields, returning active classes plus explicit N/A waivers."""
+    raw = _field(text, name)
+    if not raw:
+        return [], {}
+    classes: list[str] = []
+    waivers: dict[str, str] = {}
+    for part in re.split(r"[;,]", raw):
+        cls_raw, reason = _strip_na_reason(part)
+        cls = _canonical(cls_raw)
+        if not cls:
+            continue
+        if reason:
+            waivers[cls] = reason
+        else:
+            classes.append(cls)
+    return classes, waivers
+
+
 def _front_sections(text: str) -> list[tuple[str, str]]:
     """将 frontier.md 按 ## 标题拆分, 返回 (section_name, body) 对。"""
     sections: list[tuple[str, str]] = []
@@ -349,8 +402,9 @@ def compute(front_block: str, constraints: list[dict]) -> dict:
         front_id = fm.group(1)
 
     # 解析 Vectors tried (已尝试的向量)
-    tried_raw = _parse_list_field(front_block, "Vectors tried")
-    tried: set[str] = {_canonical(t) for t in tried_raw if _canonical(t)}
+    tried_classes, tried_waivers = _parse_class_field(front_block, "Vectors tried")
+    tried: set[str] = {t for t in tried_classes if t}
+    waived: dict[str, str] = dict(tried_waivers)
 
     # 从 constraints 中提取该 front 的所有 mechanism classes
     front_constraints = [c for c in constraints if c.get("front") == front_id]
@@ -359,24 +413,26 @@ def compute(front_block: str, constraints: list[dict]) -> dict:
         if mc:
             tried.add(mc)
 
-    # 解析 Untried classes
-    untried_raw = _parse_list_field(front_block, "Untried classes")
-    untried_set: set[str] = {_canonical(u) for u in untried_raw if _canonical(u)}
+    # 解析 Untried classes。显式 N/A / not-applicable 标注从分母里移除,
+    # 否则 driver 写了正确解释仍会被计成低饱和。
+    untried_classes, untried_waivers = _parse_class_field(front_block, "Untried classes")
+    waived.update(untried_waivers)
+    untried_set: set[str] = {u for u in untried_classes if u}
 
     surface = None
     denominator_source = "estimated"
 
     if untried_set:
         # Driver 显式维护了 Untried classes
-        untried = untried_set - tried
-        denominator_source = "driver"
+        untried = untried_set - tried - set(waived)
+        denominator_source = "driver" if not waived else "driver+n/a"
     else:
         # 用内置映射表兜底
         surface = _infer_surface_subtype(front_block)
         if surface and surface in SURFACE_VULN_CLASSES:
             applicable = {_canonical(c) for c in SURFACE_VULN_CLASSES[surface]}
             applicable.discard("")
-            untried = applicable - tried
+            untried = applicable - tried - set(waived)
         else:
             # 无法推断 → ratio=None
             return {
@@ -387,6 +443,8 @@ def compute(front_block: str, constraints: list[dict]) -> dict:
                 "denominator_source": "unknown",
                 "tried_list": sorted(tried),
                 "untried_list": [],
+                "waived_list": sorted(waived),
+                "waiver_reasons": waived,
                 "surface": surface,
             }
 
@@ -400,9 +458,12 @@ def compute(front_block: str, constraints: list[dict]) -> dict:
         "ratio": ratio,
         "tried_count": tried_count,
         "untried_count": untried_count,
+        "waived_count": len(waived),
         "denominator_source": denominator_source,
         "tried_list": sorted(tried),
         "untried_list": sorted(untried),
+        "waived_list": sorted(waived),
+        "waiver_reasons": waived,
         "surface": surface,
     }
 
@@ -527,11 +588,14 @@ def _print_full_report(run_dir: Path) -> int:
             print(f"  {fid}: sat= ? (无法推断表面子类型, 无法计算)")
         else:
             print(f"  {fid}: sat={sat:.0%} tried={result['tried_count']} "
-                  f"untried={result['untried_count']} source={result['denominator_source']}")
+                  f"untried={result['untried_count']} waived={result.get('waived_count', 0)} "
+                  f"source={result['denominator_source']}")
             if result["tried_list"]:
                 print(f"    tried: {', '.join(result['tried_list'][:8])}")
             if result["untried_list"]:
                 print(f"    untried: {', '.join(result['untried_list'][:8])}")
+            if result.get("waived_list"):
+                print(f"    waived: {', '.join(result['waived_list'][:8])}")
     return 0
 
 
@@ -555,6 +619,7 @@ def _print_front_detail(run_dir: Path, front_id: str) -> int:
     print(f"  饱和度: {result['ratio']:.0%}" if result["ratio"] is not None else "  饱和度: ? (无法计算)")
     print(f"  已尝试: {result['tried_count']}")
     print(f"  未尝试: {result['untried_count']}")
+    print(f"  不适用: {result.get('waived_count', 0)}")
     print(f"  分母来源: {result['denominator_source']}")
     print(f"  表面子类型: {result['surface'] or '未推断'}")
 
@@ -566,6 +631,12 @@ def _print_front_detail(run_dir: Path, front_id: str) -> int:
         print(f"  未尝试类别:")
         for u in result["untried_list"]:
             print(f"    - {u}")
+    if result.get("waived_list"):
+        reasons = result.get("waiver_reasons") or {}
+        print("  不适用类别:")
+        for w in result["waived_list"]:
+            reason = f" ({reasons.get(w)})" if reasons.get(w) else ""
+            print(f"    - {w}{reason}")
 
     # 该 front 的约束
     front_constraints = [c for c in constraints if c.get("front") == front_id]
@@ -669,6 +740,12 @@ def _selftest() -> int:
         "- Surface subtype: param-api\n"
         "- Vectors tried: SQLi, IDOR\n"
         "- Untried classes: SSRF\n\n"
+        "### F-004\n"
+        "- Front: captcha login\n"
+        "- Status: open\n"
+        "- Surface subtype: login\n"
+        "- Vectors tried: auth bypass\n"
+        "- Untried classes: SQLi-login (N/A - CAPTCHA blocks form submission), enum (not applicable: no username field), default-creds, SSRF (不涉及: no outbound fetch)\n\n"
         "### F-003\n"
         "- Front: terminal but misplaced\n"
         "- Status: blocked_type_b\n"
@@ -699,6 +776,7 @@ def _selftest() -> int:
     constraints = _parse_constraints(run)
     f1 = compute(blocks[0]["text"], constraints)
     f2 = compute(blocks[1]["text"], constraints)
+    f4 = compute(blocks[2]["text"], constraints)
     derived = front_saturation(run)
 
     import io
@@ -718,6 +796,9 @@ def _selftest() -> int:
         ("terminal statuses outside Closed Fronts are excluded", all(b["id"] != "F-003" for b in blocks)),
         ("open front low saturation is computed", f1["front"] == "F-001" and round(f1["ratio"], 2) == 0.25),
         ("constraints count as tried", f2["front"] == "F-002" and f2["untried_count"] == 0),
+        ("Untried classes N/A annotations are waived",
+         f4["front"] == "F-004" and f4["untried_count"] == 1 and f4["waived_count"] == 3
+         and round(f4["ratio"], 2) == 0.5),
         ("check emits low-saturation warning", any("F-001" in w for w in warns) and not errors),
         ("full report exits 0", full_exit == 0),
         ("front detail exits 0", detail_exit == 0),

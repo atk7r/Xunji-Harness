@@ -627,18 +627,20 @@ gate, guard/hook boundary, and review requirements still apply.
 own dedicated proxy channel (`tools/harness/codex_proxy.py`, configured via `CODEX_PROXY`
 env or `tools/harness/codex_proxy.conf`), isolated from the engagement proxy
 (`XUNJI_PROXY`) and the model-API direct channel. Without it, codex is unreachable and
-peer_review falls through to the arkcli panel, then the Claude fallback. See
-`review/independent-reviewer.md` "Codex 代理（必须）".
+peer_review retries transient/empty-output failures, then falls through to the arkcli
+panel; Claude fallback is recorded as same-family unless the active driver matrix
+allows it. See `review/independent-reviewer.md` "Codex 代理（必须）".
 
 **Mandatory retrospective before closure — procedure.** Every pentest closes with an honest
 `retrospective.md` (scaffolded from `docs/templates/run/retrospective.md`): what *I* (the
 driver) got wrong/slow/missed (wrong calls, tunnel vision, premature closure, evidence-gate
 slips) and where the *framework/tooling* (tools/, hooks, guard, knowledge base, docs) held
 the run back — the basis for the next run being stronger, not a disclaimer. `check_run.py`
-HARD-fails closure if `retrospective.md` is missing or its **Self problems** / **Framework
-problems** sections are empty placeholders. Retrospective `Status:` / `Verdict:`
-values such as `FINAL` activate closure gates, but they are not completion
-actions.
+HARD-fails closure if `retrospective.md` is missing, its **Self problems** /
+**Framework problems** sections are empty placeholders, or Framework/tooling
+lessons lack a repair status (`fixed|open|deferred`, with fix/verification or
+residual risk). Retrospective `Status:` / `Verdict:` values such as `FINAL`
+activate closure gates, but they are not completion actions.
 
 **Completion marker and scheduled-loop disposition.** `GHOST_COMPLETE` /
 `NORMAL_COMPLETE` belongs only in `decisions.md` and only after closure gates pass.

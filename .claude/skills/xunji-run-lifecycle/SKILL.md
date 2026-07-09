@@ -145,6 +145,7 @@ python tools/graph.py runs/<dir>
 python tools/workers.py status runs/<dir>
 python tools/workers.py conflicts runs/<dir>
 python tools/saturation.py runs/<dir>
+python tools/coverage_matrix.py runs/<dir> --write --sync-coverage
 ```
 
 Read `hints.md` every cycle when it exists. If the operator gives a directive,
@@ -215,7 +216,9 @@ Closure gates:
   cure self-review bias.
 - Resolve `PR-xxx` review ledger blockers before closure.
 - `retrospective.md` must honestly fill the Self problems and Framework/tooling
-  problems sections.
+  problems sections. Framework/tooling lessons must include a repair status such
+  as `- Status: fixed|open|deferred` plus the fix/verification or residual risk;
+  unstatused lessons are not closed-loop and fail closure.
 - `report.md` may list only finding-maturity evidence in `Evidence IDs:`.
 - Confirmed entries need the canonical certainty scale, saved artifacts, and
   Replicated or Control rationale.
@@ -229,6 +232,12 @@ Closure gates:
   `/loop` job in the same turn and append an `end` loop journal note containing
   `cron_cancelled=<job-id|none>`. `check_run.py` hard-fails a completion marker
   without that auditable cron disposition.
+
+Probe chain note:
+
+- For token/cookie flows, keep evidence inside `probe.py`: use
+  `--preflight-get`, `--extract-csrf`, `--csrf-field`, `--cookie-jar`, and
+  `--preflight-save` instead of hand-running curl outside the replay chain.
 
 ## Tool Selftests
 

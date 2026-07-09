@@ -24,14 +24,16 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import ssl
 import sys
 import tempfile
 import time
 import urllib.request
+from http.cookies import SimpleCookie
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import guard as guardmod  # noqa: E402
@@ -251,6 +253,148 @@ def _header_value(headers: dict, name: str) -> str | None:
     return None
 
 
+def _set_header(headers: dict, name: str, value: str) -> None:
+    for k in list(headers):
+        if k.lower() == name.lower():
+            headers[k] = value
+            return
+    headers[name] = value
+
+
+def _cookie_dict_from_header(value: str | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not value:
+        return out
+    for part in value.split(";"):
+        if "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        k = k.strip()
+        if k:
+            out[k] = v.strip()
+    return out
+
+
+def _cookie_dict_from_set_cookies(values: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for raw in values:
+        c = SimpleCookie()
+        try:
+            c.load(raw)
+        except Exception:
+            continue
+        for name, morsel in c.items():
+            if morsel.value:
+                out[name] = morsel.value
+    return out
+
+
+def _cookie_header(cookies: dict[str, str]) -> str:
+    return "; ".join(f"{k}={v}" for k, v in sorted(cookies.items()))
+
+
+def _load_cookie_jar(path: str | None) -> dict[str, str]:
+    if not path or not Path(path).exists():
+        return {}
+    data = json.loads(Path(path).read_text(encoding="utf-8", errors="replace"))
+    if not isinstance(data, dict):
+        raise ValueError(f"cookie jar must be a JSON object: {path}")
+    return {str(k): str(v) for k, v in data.items() if str(k).strip() and str(v)}
+
+
+def _save_cookie_jar(path: str | None, cookies: dict[str, str]) -> None:
+    if not path:
+        return
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(cookies, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _merge_cookies_into_headers(headers: dict, cookies: dict[str, str]) -> dict:
+    merged = _cookie_dict_from_header(_header_value(headers, "Cookie"))
+    merged.update(cookies)
+    if merged:
+        _set_header(headers, "Cookie", _cookie_header(merged))
+    return headers
+
+
+def _extract_csrf_token(body: bytes, pattern: str) -> str:
+    text = body.decode("utf-8", "replace")
+    m = re.search(pattern, text, flags=re.S)
+    if not m:
+        raise ValueError("--extract-csrf pattern did not match preflight body")
+    if "value" in m.groupdict():
+        return m.group("value")
+    if m.groups():
+        return m.group(1)
+    return m.group(0)
+
+
+def _inject_csrf(data: bytes | None, *, json_body: bool, field: str, token: str) -> tuple[bytes, bool]:
+    if json_body:
+        obj = json.loads((data or b"{}").decode("utf-8"))
+        if not isinstance(obj, dict):
+            raise ValueError("JSON CSRF injection requires a JSON object body")
+        obj[field] = token
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), True
+    pairs = parse_qsl((data or b"").decode("utf-8", "replace"), keep_blank_values=True)
+    replaced = False
+    for idx, (k, _v) in enumerate(pairs):
+        if k == field:
+            pairs[idx] = (k, token)
+            replaced = True
+    if not replaced:
+        pairs.append((field, token))
+    return urlencode(pairs).encode("utf-8"), False
+
+
+def _apply_preflight(args, headers: dict, data: bytes | None, json_body: bool) -> tuple[dict, bytes | None, bool, dict]:
+    """GET a form/bootstrap page, merge cookies, and inject an extracted CSRF token."""
+    meta: dict = {}
+    jar = _load_cookie_jar(getattr(args, "cookie_jar", None))
+    _merge_cookies_into_headers(headers, jar)
+    preflight_url = getattr(args, "preflight_get", None)
+    if not preflight_url:
+        return headers, data, json_body, meta
+
+    tmp_save = None
+    preflight_save = getattr(args, "preflight_save", None)
+    if getattr(args, "extract_csrf", None) and not preflight_save:
+        tmp_save = str(Path(tempfile.mkdtemp()) / "preflight.html")
+        preflight_save = tmp_save
+    pre = send(
+        "GET", preflight_url, headers.copy(), None, None, args.timeout,
+        save=preflight_save, retry=args.retry, retry_wait=args.retry_wait,
+        want_headers=True, no_redirect=args.no_redirect,
+    )
+    new_cookies = _cookie_dict_from_set_cookies(pre.get("set_cookies", []))
+    if new_cookies:
+        jar.update(new_cookies)
+        _save_cookie_jar(getattr(args, "cookie_jar", None), jar)
+        _merge_cookies_into_headers(headers, jar)
+    meta = {
+        "url": preflight_url,
+        "status": pre.get("status"),
+        "cookies": sorted(new_cookies),
+    }
+    if getattr(args, "extract_csrf", None):
+        if not preflight_save or not Path(preflight_save).exists():
+            raise ValueError("--extract-csrf requires a readable preflight body")
+        token = _extract_csrf_token(Path(preflight_save).read_bytes(), args.extract_csrf)
+        field = args.csrf_field or "__RequestVerificationToken"
+        data, json_body = _inject_csrf(data, json_body=json_body, field=field, token=token)
+        if not json_body and not _header_value(headers, "Content-Type"):
+            _set_header(headers, "Content-Type", "application/x-www-form-urlencoded")
+        meta.update({"csrf_field": field, "csrf_extracted": True})
+    if tmp_save:
+        for p in (Path(tmp_save), Path(tmp_save + ".replay.json")):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    return headers, data, json_body, meta
+
+
 def send(method: str, url: str, headers: dict, data: bytes | None,
          auth_key: str | None, timeout: int, save: str | None = None,
          retry: int = 0, retry_wait: float = 1.5,
@@ -446,6 +590,16 @@ def _selftest() -> int:
                 pass
 
             def do_GET(self):
+                if self.path.startswith("/csrf"):
+                    b = (b'<form><input type="hidden" name="__RequestVerificationToken" '
+                         b'value="TOKEN123"></form>')
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html")
+                    self.send_header("Set-Cookie", "csrf_session=ABC; path=/; httponly")
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                    return
                 if self.path.startswith("/large"):
                     b = b"L" * (guardmod.MAX_BODY_BYTES + 17)
                     self.send_response(200)
@@ -488,6 +642,16 @@ def _selftest() -> int:
                 self.send_header("Content-Length", str(len(b)))
                 self.end_headers()
                 self.wfile.write(b)
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8", "replace")
+                cookie = self.headers.get("Cookie") or ""
+                ok = "__RequestVerificationToken=TOKEN123" in body and "csrf_session=ABC" in cookie
+                self.send_response(200 if ok else 403)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"csrf-ok" if ok else b"csrf-bad")
 
         srv = socketserver.TCPServer(("127.0.0.1", 0), H)
         port = srv.server_address[1]
@@ -560,6 +724,29 @@ def _selftest() -> int:
             checks.append(("--range respects caller-supplied Range header casing",
                            rr2.get("status") == 206 and rr2.get("snippet") == "2345"
                            and rr2.get("range") == "bytes=2-5"))
+            jar = Path(tempfile.mkdtemp()) / "cookies.json"
+            chain_args = argparse.Namespace(
+                preflight_get=f"http://127.0.0.1:{port}/csrf",
+                preflight_save=None,
+                extract_csrf=r'name="__RequestVerificationToken"\s+value="([^"]+)"',
+                csrf_field="__RequestVerificationToken",
+                cookie_jar=str(jar),
+                timeout=5,
+                retry=0,
+                retry_wait=1.5,
+                no_redirect=False,
+            )
+            ch_headers, ch_data, ch_json, ch_meta = _apply_preflight(chain_args, {}, b"u=a", False)
+            csrf_post = send("POST", f"http://127.0.0.1:{port}/submit",
+                             ch_headers, ch_data, None, 5)
+            jar_data = json.loads(jar.read_text(encoding="utf-8")) if jar.exists() else {}
+            checks.append(("--preflight-get extracts csrf token",
+                           ch_data is not None and b"__RequestVerificationToken=TOKEN123" in ch_data
+                           and ch_meta.get("csrf_extracted") is True and ch_json is False))
+            checks.append(("--preflight-get merges Set-Cookie into final request",
+                           "csrf_session=ABC" in ch_headers.get("Cookie", "")
+                           and jar_data.get("csrf_session") == "ABC"))
+            checks.append(("preflight chained POST succeeds", csrf_post.get("status") == 200))
         finally:
             srv.shutdown()
     # 统一布局 _place_save: 裸文件名 + --run -> <run>/evidence/; 显式路径/无 --run 原样
@@ -647,6 +834,16 @@ def main() -> int:
                     help="wrap JSON as an escaped string Value field: {\"Value\":\"<compact-json>\"}")
     ap.add_argument("--value-json-file", default=None,
                     help="like --value-json, but read the inner JSON from a file")
+    ap.add_argument("--preflight-get", default=None,
+                    help="GET this page first, then merge Set-Cookie values into the final request")
+    ap.add_argument("--preflight-save", default=None,
+                    help="save the preflight response body and replay for evidence/token inspection")
+    ap.add_argument("--extract-csrf", default=None,
+                    help="regex applied to the preflight body; group 1 or named group 'value' is injected")
+    ap.add_argument("--csrf-field", default="__RequestVerificationToken",
+                    help="form/JSON field name for --extract-csrf")
+    ap.add_argument("--cookie-jar", default=None,
+                    help="JSON cookie jar to load/update across preflight and final request")
     ap.add_argument("-H", "--header", action="append", default=[], help="k: v")
     ap.add_argument("--auth-key", default=None,
                     help="endpoint key for the brute-force lock counter")
@@ -686,6 +883,7 @@ def main() -> int:
         ap.error("method and url are required (or use --selftest)")
 
     args.save = _place_save(args.save, args.run)   # 统一布局: --run 时裸文件名 -> <run>/evidence/
+    args.preflight_save = _place_save(args.preflight_save, args.run)
 
     global _PROXY
     _PROXY = args.proxy   # 仅存 --proxy 覆盖; 真正解析在 _opener(urllib_proxy_handlers), 直跑与 import 都走交战代理
@@ -703,6 +901,12 @@ def main() -> int:
         ap.error(str(e))
     if data and json_body and "Content-Type" not in headers:
         headers["Content-Type"] = "application/json"
+    try:
+        headers, data, json_body, preflight_meta = _apply_preflight(args, headers, data, json_body)
+    except json.JSONDecodeError as e:
+        ap.error(f"invalid JSON request body after CSRF injection: {e.msg} at line {e.lineno} column {e.colno}")
+    except (OSError, ValueError) as e:
+        ap.error(str(e))
 
     try:
         if args.method.upper() == "DIFF":
@@ -744,6 +948,8 @@ def main() -> int:
                                            args.headers, args.no_redirect,
                                            args.byte_range, args.save_chunks,
                                            args.chunk_size)}
+            if preflight_meta:
+                out["preflight"] = preflight_meta
     except SessionTripped as e:
         out = {"error": f"session-volume-breaker: {e}"}
     except RateBudgetExceeded as e:

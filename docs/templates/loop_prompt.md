@@ -60,7 +60,7 @@ Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent 
 {{PYTHON}} tools/workers.py lifecycle-check "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py conflicts "{{RUN_DIR}}"
 {{PYTHON}} tools/saturation.py "{{RUN_DIR}}"
-{{PYTHON}} tools/coverage_matrix.py "{{RUN_DIR}}" --write
+{{PYTHON}} tools/coverage_matrix.py "{{RUN_DIR}}" --write --sync-coverage
 {{PYTHON}} tools/loop_state.py "{{RUN_DIR}}" --write
 {{PYTHON}} tools/progress_ledger.py "{{RUN_DIR}}" --write
 {{PYTHON}} tools/run_controller.py "{{RUN_DIR}}" --shadow
@@ -109,6 +109,7 @@ Guard-routed tools only.
 {{PYTHON}} tools/probe.py GET "https://target/large-doc" --save NAME --run "{{RUN_DIR}}" --save-chunks
 {{PYTHON}} tools/probe.py GET "https://target/path" -H "K: V" --save NAME --run "{{RUN_DIR}}"
 {{PYTHON}} tools/probe.py POST "https://target/path" --data '{"k":"v"}' -H "Content-Type: application/json" --save NAME --run "{{RUN_DIR}}"
+{{PYTHON}} tools/probe.py POST "https://target/path" --preflight-get "https://target/form" --extract-csrf 'name="__RequestVerificationToken" value="([^"]+)"' --cookie-jar "{{RUN_DIR}}/state/probe-cookies.json" --preflight-save FORM --data 'field=value' --save NAME --run "{{RUN_DIR}}"
 {{PYTHON}} tools/scan.py sqlmap "https://target/path?id=1"
 {{PYTHON}} tools/scan.py nuclei "https://target/"
 ```

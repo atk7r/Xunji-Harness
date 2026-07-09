@@ -69,7 +69,7 @@ python tools/workers.py status runs/<dir>
 python tools/workers.py lifecycle-check runs/<dir>
 python tools/workers.py conflicts runs/<dir>
 python tools/saturation.py runs/<dir>
-python tools/coverage_matrix.py runs/<dir> --write
+python tools/coverage_matrix.py runs/<dir> --write --sync-coverage
 python tools/loop_journal.py runs/<dir> status
 python tools/loop_state.py runs/<dir> --write
 python tools/progress_ledger.py runs/<dir> --write
@@ -411,7 +411,7 @@ assets were only header / recon-classified, never examined. Before any such clai
   name the signal that made each relevant; a negative/deferred record states the barrier
   or why the class did not apply; no fixed payload list (payloads stay local/operator-chosen);
   the gate wants evidence of *reasoning/attack attempt*, not exhaustive exploitation.
-  Run `python tools/coverage_matrix.py runs/<dir> --write` before closure or Coda
+  Run `python tools/coverage_matrix.py runs/<dir> --write --sync-coverage` before closure or Coda
   trajectory-review checks to see the derived asset×vuln-family view. `□` means the
   category is signal-justified for that asset but no test record is visible; `·`
   means no current surface signal. Whole empty columns and sparse rows are review
@@ -454,7 +454,8 @@ assets were only header / recon-classified, never examined. Before any such clai
   honest `retrospective.md` — what *I* got wrong/slow/missed (wrong calls, tunnel vision,
   premature closure, evidence slips) + where the framework/tooling held the run back; the
   basis for a stronger next run, not a disclaimer. `check_run.py` **hard-fails** closure if
-  it's missing or its **Self problems** / **Framework problems** are empty stubs. Procedure:
+  it's missing, its **Self problems** / **Framework problems** are empty stubs, or
+  Framework/tooling lessons lack a repair status (`fixed|open|deferred`). Procedure:
   reference "Run-closure detail".
 
 - **Closure signals vs completion actions.** A final report, `decisions.md`

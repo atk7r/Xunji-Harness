@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "image": "/Users/ccj/Documents/AI/Xunji/captcha-ocr.gif",
+  "tesseract": "/opt/homebrew/bin/tesseract",
+  "attempts": [
+    {
+      "psm": 7,
+      "ok": true,
+      "returncode": 0,
+      "text": "axad",
+      "empty": false,
+      "stderr_tail": ""
+    },
+    {
+      "psm": 8,
+      "ok": true,
+      "returncode": 0,
+      "text": "axad ;",
+      "empty": false,
+      "stderr_tail": ""
+    },
+    {
+      "psm": 13,
+      "ok": true,
+      "returncode": 0,
+      "text": "axad ;",
+      "empty": false,
+      "stderr_tail": ""
+    }
+  ],
+  "best_text": "axad",
+  "all_empty": false,
+  "barrier_hint": ""
+}

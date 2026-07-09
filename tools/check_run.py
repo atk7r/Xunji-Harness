@@ -110,6 +110,25 @@ OPTIONAL_MARKERS = {
     ],
 }
 
+MARKER_ALIASES = {
+    "Loaded rule files this cycle:": [
+        "Loaded rule files:",
+        "Rule files loaded this cycle:",
+        "Loaded rules this cycle:",
+    ],
+    "Chosen front:": [
+        "Front chosen:",
+        "Selected front:",
+    ],
+    "Why this is worth pursuing now:": [
+        "Why pursue now:",
+        "Why now:",
+    ],
+    "Shallow work smells:": [
+        "Shallow work smell:",
+    ],
+}
+
 
 def _sha1_bytes(data: bytes) -> str:
     return hashlib.sha1(data).hexdigest()
@@ -168,14 +187,30 @@ def current_evidence_index_hash(run_dir: Path) -> str:
     return payload["sha1"]
 
 
+def _marker_present(text: str, marker: str) -> bool:
+    if marker in text:
+        return True
+    forms = [marker] + MARKER_ALIASES.get(marker, [])
+    for form in forms:
+        if form in text:
+            return True
+        if form.endswith(":"):
+            label = re.escape(form[:-1].strip())
+            if re.search(rf"(?im)^\s*(?:[-*]\s*)?(?:#{{1,6}}\s*)?{label}\s*[:：]?", text):
+                return True
+    return False
+
+
 def check_file(path: Path, markers: list[str]) -> list[str]:
     errors: list[str] = []
     if not path.exists():
         return [f"missing {path.name}"]
     text = path.read_text(encoding="utf-8", errors="replace")
     for marker in markers:
-        if marker not in text:
-            errors.append(f"{path.name} missing marker: {marker}")
+        if not _marker_present(text, marker):
+            aliases = MARKER_ALIASES.get(marker, [])
+            hint = f" (accepted aliases: {', '.join(aliases)})" if aliases else ""
+            errors.append(f"{path.name} missing marker: {marker}{hint}")
     return errors
 
 
@@ -279,6 +314,14 @@ def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:
                  "`probe --save NAME --run runs/<dir>` 留录像, 高 certainty 证据才可重放核实。"], [])
     try:
         results = _replay.replay_run(run_dir)
+    except SystemExit as e:
+        msg = str(e) or "replay dependency preflight failed"
+        return ([], [
+            "收口硬门(replay 环境): --replay-verify 无法启动重放: "
+            f"{msg}。如果使用 socks5/socks5h 交战代理, 先运行 "
+            "`python3 -m pip install -e '.[socks]'` 或改用 http:// 代理; "
+            "不得让 replay 静默跳过或直连。"
+        ])
     except Exception as e:   # 防御: replay 内部异常不该炸掉整个收口检查
         return ([f"replay 核实异常(已捕获, 不影响其余检查): {e}"], [])
     warns = _summarize_replay(results)
@@ -1699,6 +1742,32 @@ def _retro_section_filled(body: str | None) -> bool:
     return len("".join(kept)) >= MIN_RETRO_CHARS
 
 
+def _retro_framework_statused(body: str | None) -> bool:
+    """Framework/tooling lessons must say whether the framework is fixed/open/deferred.
+
+    A retrospective is allowed to say there were no framework issues, but if it
+    names tools/hooks/docs problems it must leave a repair status the next run can
+    consume. Otherwise the same lesson can reappear forever without becoming a
+    gate or backlog item.
+    """
+    if body is None:
+        return False
+    b = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+    b = re.sub(r"<[^>]*>", "", b)
+    if re.search(
+        r"(?im)^\s*(?:[-*]\s*)?(?:明确无框架问题|明确无工具问题|无框架问题|无工具问题|"
+        r"no framework issue|no tooling issue|no framework/tooling issue|none)\s*[。.]?\s*$",
+        b,
+    ):
+        return True
+    return bool(re.search(
+        r"(?im)^\s*(?:[-*]\s*)?(?:Current\s+status|Fix\s+status|Status|状态|当前状态|修复状态)"
+        r"\s*[:：]\s*(fixed|open|deferred|accepted|已修|已修复|未修|待修|开放|延后|接受|无|none|n/a)"
+        r"(?:\s|$|[;；,，。])",
+        b,
+    ))
+
+
 def check_retrospective(run_dir: Path) -> list[str]:
     """收口硬门(强制复盘): 收口时必须有 retrospective.md, 且【自身问题】与【框架/工具问题】
     两节都有真实内容(非空占位)。缺文件 / 缺节 / 仅占位 = 硬错。仅在收口触发(由
@@ -1714,11 +1783,17 @@ def check_retrospective(run_dir: Path) -> list[str]:
         errors.append(
             "收口硬门(强制复盘): retrospective.md 的【自身问题 / Self problems】节缺失或仍是空占位 —— "
             "写清这一 run 我自己哪里做错/漏看/做慢/过早收口/证据门松动, 具体到本次, 别写通用套话。")
-    if not _retro_section_filled(_md_section_body(text, _RETRO_FW_RE)):
+    framework_body = _md_section_body(text, _RETRO_FW_RE)
+    if not _retro_section_filled(framework_body):
         errors.append(
             "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】节缺失或仍是"
             "空占位 —— 写清 tools/hooks/guard/知识库/文档 哪里拖了本 run 后腿(缺能力/误报闸门/消息误导/"
             "知识陈旧), 或诚实写明确无。")
+    elif not _retro_framework_statused(framework_body):
+        errors.append(
+            "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】节已写问题"
+            "但缺修复状态字段 —— 每个框架教训至少写 `- Status: fixed|open|deferred` 或明确写 no framework/tooling issue。"
+            "否则它只会在复盘里重复出现, 不能进入工具/模板/知识库闭环。")
     return errors
 
 
@@ -2142,6 +2217,7 @@ def _selftest() -> int:
     (d / "ev_real.html").write_text("x" * 10, encoding="utf-8")
     (d / "ev_real.html.replay.json").write_text("{}", encoding="utf-8")
     (d / "footnote.txt").write_text("x" * 10, encoding="utf-8")
+    (d / "reviewed.diff").write_text("diff --git a/x b/x\n", encoding="utf-8")
     (d / "evidence.md").write_text(
         "# Evidence Ledger\n\n"
         "## E-001 — confirmed, artifact present, has control\n"
@@ -2169,12 +2245,15 @@ def _selftest() -> int:
         "## E-009 — artifact label parenthetical + shorthand should parse concretely\n"
         "- Maturity: finding\n- Control: yes\n- Certainty: 0.8\n"
         "- Artifacts (proof, .replay.json-backed): `ev_real.html`, ev_real.html.replay.json, footnote.txt* (+.replay.json), "
-        "evidence/glob_*.html, *.replay.json, evidence/*.html\n",
+        "evidence/glob_*.html, *.replay.json, evidence/*.html\n\n"
+        "## E-010 — diff artifact should parse for maintenance reviews\n"
+        "- Maturity: finding\n- Control: SHA1 recorded\n- Certainty: 1.0\n"
+        "- Artifacts: `reviewed.diff`\n",
         encoding="utf-8")
     recs = parse_evidence(d)
     byid = {r["id"]: r for r in recs}
     checks = [
-        ("preamble not counted", len(recs) == 9),
+        ("preamble not counted", len(recs) == 10),
         ("report Evidence IDs parser accepts bullet form",
          _report_evidence_ids("- Evidence IDs: E-001, E-002") == {"E-001", "E-002"}),
         ("split certainty -> confirmed", byid["E-002"]["confirmed"] is True),
@@ -2197,6 +2276,8 @@ def _selftest() -> int:
          "replay.json" not in byid["E-009"]["artifacts_missing"]
          and not any(str(a).endswith("glob_") for a in byid["E-009"]["artifacts_missing"])
          and not any(str(a).endswith(".html") and "*" in str(a) for a in byid["E-009"]["artifacts_missing"])),
+        ("diff artifact parses for maintenance review",
+         "reviewed.diff" in byid["E-010"]["artifacts_present"]),
         ("dangling citation detected", byid["E-002"]["artifacts_missing"] == ["ev_DELETED.html"]),
         ("prose filenames not cited", not any("jquery" in a or "webform" in a
                                               for a in byid["E-002"]["artifacts"])),
@@ -2463,16 +2544,23 @@ def _selftest() -> int:
         "# Retrospective\n\n## 自身问题 / Self problems\n- 过早把 SSRF 前沿当不可达关闭, 应再换一个内网回连载体试。\n\n"
         "## 框架与工具问题 / Framework problems\n<fill in>\n", encoding="utf-8")
     retro_half = check_retrospective(d_retro)
-    (d_retro / "retrospective.md").write_text(  # 两节都填了真实内容
+    (d_retro / "retrospective.md").write_text(  # 框架节有内容但缺修复状态
         "# Retrospective\n\n## 自身问题 / Self problems\n- 过早把 SSRF 前沿当不可达关闭, 漏看一个回连载体。\n\n"
         "## 框架与工具问题 / Framework problems\n- probe.py 对 302 链跟随不透明, 误把跳转当原响应, 浪费两轮。\n",
+        encoding="utf-8")
+    retro_no_status = check_retrospective(d_retro)
+    (d_retro / "retrospective.md").write_text(  # 两节都填了真实内容
+        "# Retrospective\n\n## 自身问题 / Self problems\n- 过早把 SSRF 前沿当不可达关闭, 漏看一个回连载体。\n\n"
+        "## 框架与工具问题 / Framework problems\n- probe.py 对 302 链跟随不透明, 误把跳转当原响应, 浪费两轮。\n"
+        "- Status: open\n",
         encoding="utf-8")
     retro_ok = check_retrospective(d_retro)
     (d_retro / "retrospective.md").write_text(
         "# Retrospective\n\n## Self (driver) problems / 自身问题\n\n"
         "### 1. Tunnel vision\n- Spent all cycles on one front while other reachable assets stayed shallow.\n\n"
         "## Framework / tooling problems / 框架与工具问题\n\n"
-        "### 1. Agent lifecycle\n- workers.py had no heartbeat or closure blocker for live agents.\n",
+        "### 1. Agent lifecycle\n- workers.py had no heartbeat or closure blocker for live agents.\n"
+        "- Status: open\n",
         encoding="utf-8")
     retro_nested_ok = check_retrospective(d_retro)
     # 整合: 终版报告(触发收口) + 无 retrospective → check_closure_discipline 带出复盘硬错
@@ -2495,7 +2583,8 @@ def _selftest() -> int:
     (d_retro_final / "retrospective.md").write_text(
         "# Retrospective\n\n- Verdict: FINAL\n\n"
         "## Self problems\n- Closed before checking generated state against canonical files.\n\n"
-        "## Framework problems\n- check_run ignored retrospective FINAL as a closure signal.\n",
+        "## Framework problems\n- check_run ignored retrospective FINAL as a closure signal.\n"
+        "- Status: fixed\n",
         encoding="utf-8")
     (d_retro_final / "coverage.json").write_text(json.dumps({
         "total": 1,
@@ -2544,7 +2633,8 @@ def _selftest() -> int:
         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
     (d_lifecycle / "retrospective.md").write_text(
         "# Retrospective\n\n## Self problems\n- Missed one agent status before closure.\n\n"
-        "## Framework problems\n- workers.py had no lifecycle hard gate.\n", encoding="utf-8")
+        "## Framework problems\n- workers.py had no lifecycle hard gate.\n"
+        "- Status: fixed\n", encoding="utf-8")
     if _workers is not None:
         life_rec = _workers.create_agent_assignment(d_lifecycle, role="web-hunter", front="F-001")
         lifecycle_err, _ = check_closure_discipline(d_lifecycle)
@@ -2558,6 +2648,8 @@ def _selftest() -> int:
         ("retrospective placeholder-only -> both sections error", len(retro_stub) == 2),
         ("retrospective half-filled -> framework section error only", len(retro_half) == 1
             and any("Framework" in e for e in retro_half)),
+        ("retrospective framework issue without status -> hard error",
+            any("修复状态" in e for e in retro_no_status)),
         ("retrospective both filled -> no error", retro_ok == []),
         ("retrospective nested subsections count as filled", retro_nested_ok == []),
         ("closure trigger + no retrospective -> closure carries 复盘 error",
@@ -2775,7 +2867,8 @@ def _selftest() -> int:
     (d_conf / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
     (d_conf / "retrospective.md").write_text(
         "# Retrospective\n\n## 自身问题 / Self problems\n- conflict gate selftest filled.\n\n"
-        "## 框架与工具问题 / Framework problems\n- conflict gate selftest filled.\n",
+        "## 框架与工具问题 / Framework problems\n- conflict gate selftest filled.\n"
+        "- Status: fixed\n",
         encoding="utf-8")
     (d_conf / "report.md").write_text(
         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
@@ -3103,12 +3196,28 @@ def _selftest() -> int:
         {"verdict": "SKIPPED-WRITE", "method": "POST", "url": "http://x/c"},
     ])
     rv_text = "\n".join(rv)
+    d_replay_env = Path(tempfile.mkdtemp())
+    (d_replay_env / "a.html.replay.json").write_text("{}", encoding="utf-8")
+    old_replay_mod = globals().get("_replay")
+
+    class _ReplayPreflightFail:
+        @staticmethod
+        def replay_run(_run_dir):
+            raise SystemExit("PySocks missing")
+
+    globals()["_replay"] = _ReplayPreflightFail
+    try:
+        _, replay_env_errors = run_replay_verify(d_replay_env)
+    finally:
+        globals()["_replay"] = old_replay_mod
     checks += [
         ("replay 汇总: DIVERGED 升显著警告", any("DIVERGED" in w and "http://x/b" in w for w in rv)),
         ("replay 汇总: 含计数汇总行", "IDENTICAL=1" in rv_text and "SKIPPED-WRITE=1" in rv_text),
         ("replay 汇总: 全 IDENTICAL 无 DIVERGED 警告",
          not any("证据存疑" in w for w in _summarize_replay([{"verdict": "IDENTICAL", "method": "GET", "url": "http://x/a"}]))),
         ("replay 汇总: 空结果 -> 空", _summarize_replay([]) == []),
+        ("replay preflight SystemExit becomes hard gate",
+         any("replay 环境" in e and "PySocks" in e for e in replay_env_errors)),
     ]
     d21 = Path(tempfile.mkdtemp())
     (d21 / "frontier.md").write_text(

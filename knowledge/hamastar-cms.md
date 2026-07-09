@@ -22,6 +22,8 @@ Product/framework signatures are public; specific customer instances are NOT nam
   (the `_v4.5` suffix is the framework generation marker); hidden fields
   `__VIEWSTATE` / `__VIEWSTATEGENERATOR` / `__EVENTVALIDATION` + ScriptManager;
   login fields `txtAccount` / `txtPW` / `txtVali` with captcha `Common/CheckCode.aspx?t=<hex>`;
+  the observed text captcha may be a small noisy GIF where local OCR returns empty
+  across bounded PSM attempts;
   inline `var lang = {…}` multi-language JSON; fancybox + `vue.min.js` + `jquery.min.js`;
   buttons `btnApplyAccount` (apply account) / `btnForgotPasswd` / `btnICLogin` (natural-person cert);
   banner `登入錯誤 3 次後…帳號即被鎖定`.
@@ -76,6 +78,10 @@ Product/framework signatures are public; specific customer instances are NOT nam
   shell) under the same gate — confirms the route-coverage hole. Do not submit changes or
   touch admin data.
 - Open redirect: confirm `ReturnUrl` reflected into the form action; do not actually phish.
+- Captcha barrier: if `Common/CheckCode.aspx` returns a small noisy GIF and 3-5 bounded
+  OCR attempts through `tools/captcha_ocr.py` all return empty, record the OCR barrier
+  and switch to server-side captcha-enforcement or post-captcha boundary evidence. Do
+  not continue blind captcha guessing.
 - Hard stops (confidentiality / availability / integrity): prove existence only — no data
   pull, no database dump, no tamper, no persistence. One probe per finding, proof-level.
 
@@ -85,6 +91,9 @@ Product/framework signatures are public; specific customer instances are NOT nam
   real login. It is a route-coverage gap, not an auth bypass; grade it as such.
 - A 500 may mean the feature is simply unconfigured (e.g. forgot-password not wired up), not
   an exploitable flaw — the info-disclosure stands, RCE does not follow from it.
+- OCR failure on this captcha shape is not evidence of a bypass or password weakness; it is
+  a testing barrier unless the captcha answer leaks client-side or the server accepts a
+  controlled post-captcha request.
 - Customer sites share the framework, but each instance must be verified on its own (same
   framework ≠ same config / same patch level).
 

@@ -79,7 +79,7 @@ No payloads/PoC. Seeded from a real run (see runs/<run>/ in workspace, not here)
     function. This is destructive; do not auto-execute delete proofs.
   - CVE-2025-48784 / ZA-2025-09: missing authorization allowing system-setting
     modification. Treat setting changes as operator-gated state changes.
-  - References: ZUSO ART advisories ZA-2025-04..09; NVD CVE-2025-5192,
+  - Reference: ZUSO ART advisories ZA-2025-04..09; NVD CVE-2025-5192,
     CVE-2025-48780..48784.
   - source: public-advisory
 

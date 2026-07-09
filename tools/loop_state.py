@@ -83,7 +83,13 @@ def _write(path: Path, text: str) -> None:
 
 def _status_tokens(raw: object) -> set[str]:
     normalized = str(raw or "").lower().replace("-", "_")
-    return {t for t in re.findall(r"[a-z0-9_]+", normalized) if t}
+    tokens: set[str] = set()
+    for tok in re.findall(r"[a-z0-9_]+", normalized):
+        if not tok:
+            continue
+        tokens.add(tok)
+        tokens.update(part for part in tok.split("_") if part)
+    return tokens
 
 
 def _is_open_status(raw: object) -> bool:
@@ -906,6 +912,9 @@ def _selftest() -> int:
         "# Frontier\n\n## Open Fronts\n\n"
         "### F-001\n"
         "- Status: blocked_type_b\n"
+        "- Barrier class: explored-enough\n\n"
+        "### F-002\n"
+        "- Status: closed_type_b\n"
         "- Barrier class: explored-enough\n",
         encoding="utf-8",
     )
@@ -1034,6 +1043,7 @@ def _selftest() -> int:
          and not section_fallback_state["fronts"]["unclassified_status"]),
         ("blocked type-b is not open or unclassified",
          type_b_state["fronts"]["blocked_type_b"] == ["F-001"]
+         and set(type_b_state["fronts"]["closed"]) == {"F-001", "F-002"}
          and type_b_state["fronts"]["open_count"] == 0
          and not type_b_state["fronts"]["unclassified_status"]
          and type_b_state["gates"]["completion_pause_candidate"]

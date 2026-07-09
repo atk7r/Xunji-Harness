@@ -65,6 +65,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("timestamp_gate",  ["tools/timestamp_gate.py", "--selftest"],  "web research time gate"),
     ("record_evidence", ["tools/record_evidence.py", "--selftest"], "web research -> evidence ledger"),
     ("decode_viewstate", ["tools/decode_viewstate.py", "--selftest"], "ASP.NET ViewState decoder"),
+    ("captcha_ocr",      ["tools/captcha_ocr.py", "--selftest"],      "bounded captcha OCR wrapper"),
     ("input_shape",     ["tools/input_shape.py", "--selftest"],     "request shape parser"),
     ("js_inventory",    ["tools/js_inventory.py", "--selftest"],    "saved-artifact JS/API inventory sensor"),
     ("oob_listener",    ["tools/oob_listener.py", "--selftest"],    "local OOB listener"),

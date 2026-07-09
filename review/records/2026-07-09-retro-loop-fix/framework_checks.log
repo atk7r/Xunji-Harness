@@ -1,0 +1,6 @@
+knowledge check passed (40 file(s))
+template check passed
+runtime boundary check passed
+python_command_refs total=305 missing=0
+selftest_entrypoints total=50 not_registered=0
+closure_audit passed

@@ -314,6 +314,18 @@ def _parse_front_blocks(run_dir: Path) -> list[dict]:
     return blocks
 
 
+def _coverage_status_token(value: str) -> str:
+    value = value.lower().replace("-", "_")
+    toks = set(re.findall(r"[a-z0-9_]+", value))
+    if toks & {"confirmed", "finding", "vulnerable"}:
+        return "confirmed"
+    if toks & {"rejected", "refuted", "closed", "blocked_type_b", "closed_type_b"}:
+        return "closed"
+    if toks & {"deferred", "blocked_type_a"}:
+        return "deferred"
+    return ""
+
+
 def _parse_evidence_blocks(run_dir: Path) -> dict[str, dict]:
     ev = run_dir / "evidence.md"
     if not ev.exists():
@@ -639,6 +651,86 @@ def write_outputs(run_dir: Path) -> dict:
     return data
 
 
+def sync_coverage_json(run_dir: Path) -> dict:
+    """Conservatively write Markdown-derived touch/verdict state into coverage.json.
+
+    `coverage.json` starts as the recon/classification baseline. During an attack
+    cycle the canonical records are still frontier/evidence/report, but leaving
+    coverage at examined=0 makes reviewers think assets were never touched. This
+    sync marks an asset examined only when its host is explicitly mentioned in a
+    canonical run file. It writes a verdict only when a terminal front or evidence
+    status is visible; open/probing fronts remain verdict=None.
+    """
+    cov_path, cov, warnings = _load_coverage(run_dir)
+    if cov_path is None or not isinstance(cov, dict):
+        return {"path": "", "changed": 0, "warnings": warnings}
+    assets = [a for a in cov.get("assets", []) if isinstance(a, dict)]
+    if not assets:
+        return {"path": str(cov_path), "changed": 0, "warnings": warnings}
+
+    data = derive(run_dir)
+    rows = {str(r.get("asset") or ""): r for r in data.get("rows", []) if isinstance(r, dict)}
+    front_status = {f["id"]: _coverage_status_token(str(f.get("status") or ""))
+                    for f in _parse_front_blocks(run_dir)}
+    ev_text = (run_dir / "evidence.md").read_text(encoding="utf-8", errors="replace") \
+        if (run_dir / "evidence.md").exists() else ""
+    report_text = (run_dir / "report.md").read_text(encoding="utf-8", errors="replace") \
+        if (run_dir / "report.md").exists() else ""
+
+    changed = 0
+    for asset in assets:
+        name = _asset_display(asset)
+        if not name:
+            continue
+        row = rows.get(name)
+        row_touched = bool(row and (row.get("fronts") or row.get("tested")))
+        token_set = _host_tokens(name)
+        evidence_touched = _mentions_any_host(ev_text, token_set)
+        report_touched = _mentions_any_host(report_text, token_set)
+        touched = row_touched or evidence_touched or report_touched
+        if touched and asset.get("examined") is not True:
+            asset["examined"] = True
+            changed += 1
+
+        verdict = ""
+        if row:
+            statuses = {_coverage_status_token(front_status.get(fid, "")) for fid in row.get("fronts", [])}
+            statuses.discard("")
+            if "confirmed" in statuses:
+                verdict = "confirmed"
+            elif "closed" in statuses:
+                verdict = "closed"
+            elif "deferred" in statuses:
+                verdict = "deferred"
+        if not verdict and evidence_touched:
+            verdict = "evidence-recorded"
+        if not verdict and report_touched:
+            verdict = "reported"
+        if verdict and asset.get("verdict") != verdict:
+            asset["verdict"] = verdict
+            changed += 1
+
+        tested_groups = sorted(row.get("tested") or []) if row else []
+        if tested_groups and asset.get("tested_groups") != tested_groups:
+            asset["tested_groups"] = tested_groups
+            changed += 1
+
+    if changed:
+        cov["total"] = len(assets)
+        cov["examined"] = sum(1 for a in assets if a.get("examined") is True)
+        cov["reachable"] = sum(1 for a in assets if a.get("reachable") is True)
+        tmp = cov_path.with_name(cov_path.name + ".tmp")
+        tmp.write_text(json.dumps(cov, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(cov_path)
+    return {
+        "path": str(cov_path),
+        "changed": changed,
+        "examined": cov.get("examined", 0),
+        "total": cov.get("total", len(assets)),
+        "warnings": warnings,
+    }
+
+
 def _selftest() -> int:
     d = Path(tempfile.mkdtemp())
     run = d / "run"
@@ -734,6 +826,35 @@ def _selftest() -> int:
         encoding="utf-8")
     waiver_data = derive(waiver_run)
     waiver_warns, waiver_errors = check(waiver_run, closure=True)
+    sync_run = d / "sync"
+    sync_run.mkdir()
+    (sync_run / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "open.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+        {"host": "done.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+        {"host": "typeb.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+        {"host": "quiet.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+    ]}), encoding="utf-8")
+    (sync_run / "frontier.md").write_text(
+        "# Frontier\n\n"
+        "## Open Fronts\n\n"
+        "### F-001\n"
+        "- Front: open.example login\n"
+        "- Status: open\n"
+        "- Vectors tried: auth-bypass\n\n"
+        "## Deferred Fronts\n\n"
+        "### F-002\n"
+        "- Front: done.example login\n"
+        "- Status: deferred\n"
+        "- Vectors tried: auth-bypass\n\n"
+        "## Closed Fronts\n\n"
+        "### F-003\n"
+        "- Front: typeb.example login\n"
+        "- Status: closed_type_b\n"
+        "- Vectors tried: auth-bypass\n",
+        encoding="utf-8")
+    sync_info = sync_coverage_json(sync_run)
+    sync_cov = json.loads((sync_run / "coverage.json").read_text(encoding="utf-8"))
+    sync_by_host = {a["host"]: a for a in sync_cov["assets"]}
     by_asset = {r["asset"]: r for r in data["rows"]}
     bad_by_asset = {r["asset"]: r for r in bad_cov_data["rows"]}
     waiver_by_asset = {r["asset"]: r for r in waiver_data["rows"]}
@@ -776,6 +897,16 @@ def _selftest() -> int:
         ("closure check upgrades matrix gaps to errors", closure_errors and not closure_warns),
         ("state outputs are written", (run / "state" / "coverage_matrix.json").exists()
          and (run / "state" / "coverage_matrix.md").exists()),
+        ("sync coverage marks touched assets examined",
+         sync_info["changed"] >= 2
+         and sync_by_host["open.example"]["examined"] is True
+         and sync_by_host["done.example"]["examined"] is True
+         and sync_by_host["typeb.example"]["examined"] is True
+         and sync_by_host["quiet.example"]["examined"] is False),
+        ("sync coverage only writes terminal verdicts",
+         sync_by_host["open.example"].get("verdict") is None
+         and sync_by_host["done.example"].get("verdict") == "deferred"
+         and sync_by_host["typeb.example"].get("verdict") == "closed"),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:
@@ -790,6 +921,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("run_dir", nargs="?", type=Path)
     ap.add_argument("--json", action="store_true", help="print JSON instead of Markdown")
     ap.add_argument("--write", action="store_true", help="write state/coverage_matrix.{json,md}")
+    ap.add_argument("--sync-coverage", action="store_true",
+                    help="conservatively sync Markdown-derived examined/verdict fields into coverage.json")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
 
@@ -802,6 +935,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[coverage_matrix] run 目录不存在: {run_dir}", file=sys.stderr)
         return 1
     data = write_outputs(run_dir) if args.write else derive(run_dir)
+    if args.sync_coverage:
+        data["coverage_sync"] = sync_coverage_json(run_dir)
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
     else:

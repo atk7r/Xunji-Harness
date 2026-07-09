@@ -1,0 +1,52 @@
+ok   empty -> []
+ok   clean -> []
+ok   BLOCKED ok
+ok   是否继续 detected
+ok   要不要继续 detected
+ok   你决定 detected
+ok   English detected
+ok   DRIFT_PATTERNS non-empty
+ok   deep pattern not in tail
+ok   tail ? detected
+ok   tail ? detected (ASCII)
+ok   no question mark
+ok   empty no question
+ok   proper close: 下一行动
+ok   proper close: BLOCKED
+ok   proper close: trailing space
+ok   no proper close: prose
+ok   no proper close: question
+ok   no proper close: empty
+ok   no proper close: mid-sentence only
+ok   option list detected
+ok   option list with paren
+ok   option list with Chinese
+ok   single option only
+ok   no option list
+ok   proper close with zero-width
+ok   drift detect with zero-width
+ok   option list with zero-width
+ok   strip_invisible removes zwsp
+ok   strip_invisible no-op
+ok   session_state roundtrip
+ok   session_state missing -> {}
+ok   drift count first hit -> 1
+ok   drift count increments on drift
+ok   drift count resets on clean
+ok   drift count bad prior -> 1
+ok   drift started first hit -> now
+ok   drift started preserves streak
+ok   drift started resets on clean
+ok   drift started bad prior -> now
+ok   valid_ts valid
+ok   valid_ts negative -> 0
+ok   valid_ts future -> 0
+ok   valid_ts zero -> 0
+ok   valid_ts non-numeric -> 0
+ok   protocol fronts detect open run
+ok   protocol fronts ignore closed run
+ok   open run without 下一行动 hard-blocks
+ok   open run with 下一行动 passes protocol
+ok   closed run without 下一行动 passes protocol
+ok   hook subprocess blocks real run root with open front
+output_gate selftest passed
