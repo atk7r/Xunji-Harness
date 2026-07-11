@@ -1,0 +1,28 @@
+# Peer Review — 2026-07-11-run-transition-hardening
+
+_backend: claude:code-cli · 2026-07-11T02:33Z_
+> 候选, 非裁决。driver 须逐条过证据门: 不盲从(驳工具/语境误报), 不忽视(采纳真盲补)。
+
+## Verdict: WARN
+
+_backend: claude:code-cli_  
+_brain: codex_  
+_bundle_hash: 6952cbb4ee4df421a79b4641a38c1d29393bbe2d_  
+_evidence_index_hash: 43f3a7811b6d4e70c9396ae232e85a7bde62bf26_  
+
+## Findings
+- (none)
+
+## Blind-spot check
+- **`--target` in `_lifecycle_target_name` is the most actionable gap.** The author wrote the selftest for `--classify` and `--date` but missed `--target`. This is a classic "what arguments does this CLI actually take?" blind spot — `_lifecycle_target_name` needs to either use `--target`'s value or reject it explicitly.
+- **The PreToolUse hook evaluates lifecycle commands using the PENDING contract, not the run's actual contract.** At `evidence/transition-core.diff:682`, `evaluate_pretool(ROOT, event, pending)` uses the pending contract, not the run's contract. This is correct (no run exists yet), but it means the prompt checks (like "target name must be in prompt_excerpt") operate on the INITIAL prompt that triggered the bootstrap, not any subsequent prompt. This is by design but worth noting — the operator can't change their mind mid-bootstrap without a new UserPromptSubmit.
+- **No test for concurrent `write_transition_claim` from the same session.** The race test at line 907-924 tests two different sessions claiming the same target, but not the same session making two claims. Same-session double-claim would overwrite the same file (hash is `sha256(target)-sha256(session)`), so it's not a race but a silent overwrite. If the first lifecycle command fails at runtime, a second lifecycle command from the same session overwrites the first claim — the downstream `claim_pending_contract` would see only the second claim. This is acceptable but untested.
+- **The `reset` of `_lifecycle_target_name` returning `""` for `--clear-active` is potentially confusing** — the function is named "target name" but doesn't return one for clear-active. At line 352, `if script.name not in {"setup_run.py", "loop_bootstrap.py"}: return ""` covers `xunji_statusline.py --clear-active` (since it's not `--set-active` or `--resume`). The PreToolUse logic handles `--clear-active` separately with its own prompt check, making the empty return correct but the code path is non-obvious.
+- **No integration test for the full "pending → claim → contract → pointer" flow as a subprocess chain.** The selftests test each component in isolation (UserPromptSubmit writes pending, PreToolUse writes claim, `claim_pending_contract` consumes both) but never as a single end-to-end test where `setup_run.py` actually executes, reaches `set_active_run`, and the pointer is verified afterwards. This is understandable (subprocess orchestration is hard) but means the contract between the hook evaluation and the tool's runtime isn't integration-tested.
+- **`_control_invocation` strips `2>&1` and `2>/dev/null` but not `2>&1 1>&2` or `1>/dev/null 2>&1`** — only one suffix is stripped (the `break` after the first match). A malformed double-redirect like `command 2>&1 1>&2` would leave `1>&2` which contains `>` (caught by the regex), so it's safe. But the single-strip approach means the parser relies on the regex as a backstop rather than being a proper shell tokenizer. This is a pragmatic parser, not a shell emulator, which is fine for its purpose but worth calling out.
+
+## Context-limit notes
+- I cannot read the live source files (`tools/setup_run.py`, `.claude/hooks/output_gate.py`, etc.) directly — the read was denied. All analysis is from the diff artifacts in the evidence directory. If the live code has been further modified since the diff was captured, my analysis might be stale.
+- I cannot verify whether `setup_run.py` actually supports `--target` as a CLI option. The `_lifecycle_target_name` has it in `value_options`, but the selftest never exercises it. If `setup_run.py` doesn't support `--target`, then adding it to `value_options` is just defensive and my WARN finding about it becomes informational.
+- The Chinese-language documentation (CLAUDE.md, WORKFLOW.md, etc.) contains protocol-level nuance that I've parsed carefully, but there may be Chinese-specific idioms or CNVD conventions I've misinterpreted.
+- I am reviewing the diff as presented in the review bundle, which was generated at a specific commit. The `excerpt_truncated_chars: 30124` in the transition-core.diff metadata means I'm seeing most but not all of the diff — the last few hundred lines might be cut off.

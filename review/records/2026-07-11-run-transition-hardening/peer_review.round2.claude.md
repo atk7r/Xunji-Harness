@@ -1,0 +1,28 @@
+# Peer Review — 2026-07-11-run-transition-hardening
+
+_backend: claude:code-cli · 2026-07-11T01:56Z_
+> 候选, 非裁决。driver 须逐条过证据门: 不盲从(驳工具/语境误报), 不忽视(采纳真盲补)。
+
+## Verdict: WARN
+
+_backend: claude:code-cli_  
+_brain: codex_  
+_bundle_hash: cdce873adb5cbdd2f8b9dfb84c1812d5c1b4ad7c_  
+_evidence_index_hash: ca081b53234be666ff8788808134ead3c78b9222_  
+
+## Findings
+- (none)
+
+## Blind-spot check
+- **`_control_invocation` Python binary regex rejects micro-version binaries**: The pattern `python(?:3(?:\.\d+)?)?` matched by `re.fullmatch` accepts `python`, `python3`, and `python3.14` but rejects `python3.14.2` (micro/patch version). The selftest event at line 594 uses `python3` which matches. If the operator's `PYTHON_CMD` resolves to a path ending in `python3.14.2`, the control invocation would fail to parse, the Bash call would be treated as a non-control command, and lifecycle transition checks would not apply. The command would then fall through to general PreToolUse evaluation against the contract with an active run. This is a narrow edge case (most systems use `python3` or `python3.N`) but worth documenting.
+- **`_control_invocation` suffix stripping asymmetry with `1>&2`**: The function strips only ` 2>&1` and ` 2>/dev/null`. A command like `python3 tools/setup_run.py slug recon.json 1>&2` (redirecting stdout to stderr, a legitimate pattern for debugging) is NOT stripped. The unchanged command would hit the metacharacter check at `>`, be rejected, and the Bash call would fail the `_control_invocation` parse — causing it to be treated as a non-control command. The round-1 reviewer noted this and the disposition dismissed it (intentional conservative parsing). This is correct but worth a documentation note: the two accepted suffixes are whitelisted; all other redirects require the command to pass through as a non-control target action.
+- **No test for `_control_invocation` with `python` (no version number)**: All selftest control commands use `python3`. The regex accepts bare `python`, but no test exercises this path. If the operator's environment defaults to `python` → `python3`, this would work. If `python` points to Python 2 or doesn't exist, the control command would fail at the OS level, not the gate level.
+- **`transfer_contract` `setdefault` preserves origin_run across transfers but chain tracking is one level deep**: `transfer_contract(A, B)` sets `origin_run=A`. Then `write_contract(B, event)` overwrites `origin_run=B` (via `_contract_from_event`). Then `transfer_contract(B, C)` copies `origin_run=B`. The `origin_run` field only tracks the immediate source, not the full chain. This is sufficient for the single-hop transfer pattern (old run → new run) but would lose information on A→B→C chains. The disposition claims this was "accepted and fixed" but the fix only adds field verification to selftests, not chain-awareness.
+- **Round-1 review was also a Claude model** (panel:claude). The heterogeneous requirement called for arkcli panel (kimi-k2.7-code + glm-5.2) as a second reviewer, but both models failed (timeout + parse error). This means BOTH reviews come from the Claude model family. The arkcli failure is recorded in disposition as `PR-001` with status "open limitation." My review adds a genuinely heterogeneous perspective that the first round didn't have.
+
+## Context-limit notes
+- I cannot verify that the live `.claude/hooks/output_gate.py`, `.claude/hooks/run_gate.py`, `tools/turn_contract.py`, and `tools/xunji_statusline.py` files match their diff artifacts. My analysis trusts the diff artifacts in `evidence/` and the selftest log showing 57/57 pass as evidence of correctness.
+- I cannot access the `cqytxy_20260702` run referenced in the old `run_gate.py` comment as historical justification for the Stop retry design change. I accept the comment at face value.
+- The Chinese-language hook messages and documentation are clear to me, but I may miss subtle semantic nuances in phrases like "受控工具/hook 原子写入" or "重入放行只结束当前聊天回合" that a native speaker would interpret differently.
+- The `_active_protocol_fronts` function is called from `output_gate._denied_result_claim_reason` but its implementation is not visible in the diff artifacts. I trust the selftest `"frontier.md denial cannot bypass a real active F-id"` as evidence it works correctly.
+- This is a code-maintenance run (no web target, no recon, no coverage.json). Rubric items 2 (Coverage ledger) and 3 (False positives) are adapted accordingly — "no recon" explains the absence of coverage/classify files, which is expected and not flagged.

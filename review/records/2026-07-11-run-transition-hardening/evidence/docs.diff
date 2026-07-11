@@ -1,0 +1,206 @@
+diff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md
+index e3e5ed5..0066320 100644
+--- a/.claude/skills/xunji-run-lifecycle/SKILL.md
++++ b/.claude/skills/xunji-run-lifecycle/SKILL.md
+@@ -102,9 +102,12 @@ Create a new run in one shot:
+ python tools/setup_run.py <slug> [recon.json]
+ ```
+ 
+-`setup_run.py` sets `.claude/xunji_active_run` to the newly created run as local
+-statusline display state. This does not enter `/loop`, choose a front, or make any
+-evidence/closure decision.
++`setup_run.py` completes the workbench, inherits the current operator turn
++contract, and only then atomically sets `.claude/xunji_active_run`. This does not
++enter `/loop`, choose a front, or make any evidence/closure decision. Never clear
++or Write/Edit the pointer directly. When `/loop` initially attempts CronCreate for
++a requested new run, let the gate reject that premature schedule, run setup, then
++CronList and CronCreate again with the new run directory name.
+ 
+ Use `--classify` only while creating a new run, and only when an authorized
+ current egress recheck is allowed. It is not an existing-run refresh mode:
+diff --git a/.claude/skills/xunji-setup-ingest/SKILL.md b/.claude/skills/xunji-setup-ingest/SKILL.md
+index 13dbb4f..f60632e 100644
+--- a/.claude/skills/xunji-setup-ingest/SKILL.md
++++ b/.claude/skills/xunji-setup-ingest/SKILL.md
+@@ -36,9 +36,10 @@ With recon, setup should:
+ - write `knowledge_hits.md` when local signatures match.
+ 
+ `setup_run.py` prepares the workbench. It does not pick fronts, decide findings,
+-or attack the target. After the run skeleton exists, it also sets
+-`.claude/xunji_active_run` so the Claude Code statusline points at the new run;
+-that pointer is local display state only.
++or attack the target. After the full workbench exists, it inherits the current
++operator turn contract and atomically sets `.claude/xunji_active_run` so the
++Claude Code statusline and hooks point at the same run. An old run's Agent Board
++does not block this lifecycle transition. Never hand-edit or clear the pointer.
+ 
+ ## Scope And Coverage
+ 
+diff --git a/.gitignore b/.gitignore
+index 2985ff8..8874b22 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -26,6 +26,8 @@ review/review_bundle.json
+ config.ini
+ .claude/xunji_active_run
+ .claude/xunji_active_run.*.tmp
++.claude/xunji_pending_turns/
++.claude/xunji_transition_claims/
+ 
+ # Manual/security-sensitive work products — never publish real target findings
+ reports/
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 04f5228..d4bea04 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -130,6 +130,19 @@ observe -> update state graph -> decompose fronts
+   Execution begins/resumes only from a prompt with an explicit action verb such
+   as `/loop`, continue/resume, execute, implement, or fix. Ambiguous declarative
+   prompts default read-only; never infer permission to resume target work.
++- **Run switches are transactions, not pointer edits.** When the current prompt
++  explicitly creates or resumes a run, use `setup_run.py`, `loop_bootstrap.py`, or
++  a prompt-named `xunji_statusline.py --set-active`. These paths inherit the same
++  operator turn contract before atomically changing `.claude/xunji_active_run`.
++  Never Write/Edit/remove that pointer directly. If `/loop` tries CronCreate before
++  a requested new run exists, finish setup first, then run CronList and CronCreate
++  against the new run name; do not schedule the old run as a workaround.
++  Turn contracts bind only the explicit pointer; they never guess from the most
++  recently modified run. While a no-run bootstrap contract is pending, only
++  read-only inspection and that prompt's exact setup/resume/set-active transition
++  are allowed; PreToolUse binds it to a target/session/prompt-hash claim before
++  execution. Do not probe or write run material before binding, and never guess
++  between concurrent claims.
+ - **Stop Coda is mechanically enforced only for `EXECUTE`.** While `.claude/xunji_active_run`
+   points to a run without a valid completion marker, the last non-empty output
+   line must be the only Coda line and must name one concrete object plus one
+@@ -142,7 +155,10 @@ observe -> update state graph -> decompose fronts
+   Fix the prerequisite and retry the original action in the same turn. While the
+   denial is unresolved, free-form final text is rejected; if execution truly
+   cannot continue, use only the exact three-line
+-  `XUNJI_EXECUTION_STATUS=DENIED` envelope required by `output_gate.py`.
++  `XUNJI_EXECUTION_STATUS=DENIED` envelope required by `output_gate.py`. Its Coda
++  uses a current `F-id`, or `frontier.md` while a new run has no active front yet.
++  Stop hooks hard-block the first invalid attempt; a Claude Code
++  `stop_hook_active` retry is idempotent and cannot change canonical run state.
+ - Claude Code internal `<task-notification>` messages are lifecycle events, not
+   operator prompts. They must never create, refresh, or change the current turn
+   contract; Agent receipts from before the notification remain current-turn proof.
+diff --git a/docs/AI_ENV_SETUP.md b/docs/AI_ENV_SETUP.md
+index e8eb2b3..79f0565 100644
+--- a/docs/AI_ENV_SETUP.md
++++ b/docs/AI_ENV_SETUP.md
+@@ -131,6 +131,10 @@ python3 tools/loop_bootstrap.py --resume runs/<dir>
+ 
+ `setup_run.py` 会创建 run 骨架、记录 recon、派生 scope，并从 Guanlan recon 直接生成 `coverage.json`。不要手工从人类报告挑一小撮资产去写 `surface.md`，也不要默认用 `classify_hosts` 对已有 Guanlan recon 全量重探；`--classify` 只用于需要本机出口重新确认可达性的场景。
+ 
++这些入口会在完成准备后继承当前 Claude 回合契约，再原子切换 active run。
++不要直接编辑或删除 `.claude/xunji_active_run`。如果 `/loop` 在新 run 创建前的
++CronCreate 被拒绝，先完成 setup，再针对新 run 重新执行 CronList/CronCreate。
++
+ active run 通常由 `setup_run.py` / `loop_bootstrap.py` 设置。如果 statusline 没有指向正确 run，可手动设置：
+ 
+ ```bash
+diff --git a/docs/ROUTER.md b/docs/ROUTER.md
+index 3408daf..b7cb671 100644
+--- a/docs/ROUTER.md
++++ b/docs/ROUTER.md
+@@ -141,6 +141,10 @@ Output:
+   builds the skeleton + `evidence/`/`scripts/` subdirs, folds the FULL asset table via
+   ingest_recon into `surface_recon.md`, records the recon path in `target.md`, **and
+   builds `coverage.json` directly from the Guanlan recon (zero re-probe)**.
++- **Switch only after setup completes**: setup inherits the current operator turn
++  contract and then atomically updates the active-run pointer. An old run's Agent
++  Board does not govern this lifecycle command. Never clear/edit the pointer to
++  escape a gate; after setup, rerun CronList/CronCreate for the new run.
+ - **Never hand-curate `surface.md` from the human report** — a curated subset encodes
+   the driver's selection bias as ground truth and blinds the anti-lump guard (hamastar
+   root cause: 30+ assets silently un-examined, 6 operator nudges).
+diff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md
+index 6095719..d7db24d 100644
+--- a/docs/WORKFLOW-reference.md
++++ b/docs/WORKFLOW-reference.md
+@@ -509,6 +509,16 @@ depth fields. `tools/turn_contract.py` writes the current prompt's
+ and foreground peer-review events are appended to the hash-linked
+ `state/runtime_events.jsonl`; only transcript-backed events validate process claims.
+ These control-plane files are hook-owned and are not editable narrative state.
++Run selection is also hook/tool-owned: setup, resume, and explicit prompt-named
++set-active copy the current contract before replacing the active pointer. A
++no-active-run EXECUTE prompt uses a short-lived pending contract that is consumed
++on first binding. Direct pointer edits, unrelated run switches, and unrequested
++clear-active operations are rejected. Pending bootstrap permits only reads and its
++current-session lifecycle transition until binding. A target/session/prompt-hash
++claim prevents cross-session pending selection; concurrent claims fail closed.
++Stop hooks block the first invalid output
++and treat Claude Code's `stop_hook_active` retry as idempotent; retry never marks a
++run complete or changes a front.
+ 
+ ## Agent Board
+ 
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index 9893b16..a887d01 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -102,6 +102,20 @@ no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while on
+ allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
+ `state/runtime_events.jsonl` is a hook-owned hash chain for actual Agent/Cron/review
+ tool events; never edit it or the turn/run-status JSON files directly.
++When no run exists, an EXECUTE prompt is held briefly in the hook-owned
++`.claude/xunji_pending_turns/` bootstrap area. `setup_run.py`,
++`loop_bootstrap.py --resume`, and a prompt-named `xunji_statusline.py --set-active`
++consume/copy that contract before atomically changing `.claude/xunji_active_run`.
++With an existing run, the same paths copy its current contract to the target run.
++Direct pointer Write/Edit/removal is forbidden. Setup/resume and documented local
++state/journal commands are lifecycle control, so an old run's Agent Board cannot
++mistake them for target work. Contract hooks never fall back to a recently modified
++run when the pointer is absent; they use the pending bootstrap transaction instead.
++While that transaction is pending, only reads and the current session's authorized
++setup/resume/set-active command are allowed; target actions and arbitrary writes wait
++until the contract is bound into the run. PreToolUse writes a short-lived claim
++containing the exact target run, session, and prompt hash; the lifecycle tool must
++consume that claim. Multiple valid claims for one target fail closed.
+ Target-action denials and later successful target actions are also recorded by
+ hash. A denial is unresolved until a later successful event has the same tool and
+ execution-action hash (for Bash, the command; descriptive metadata is ignored).
+@@ -110,7 +124,10 @@ unresolved target-action denial; this prevents a model that ignored EXPLAIN or
+ PAUSE restrictions from rephrasing an unexecuted action as a result. The only
+ non-result fallback is the gate's fixed three-line
+ `XUNJI_EXECUTION_STATUS=DENIED` envelope, and normal Agent/closure gates still
+-apply to it.
++apply to it. The final anchor is an active `F-id`, or `frontier.md` if setup has not
++created an active front. A Stop hook blocks once; `stop_hook_active` re-entry must
++return successfully to avoid Claude Code's forced block-cap override. This ends a
++chat turn only and never changes canonical completion state.
+ Claude Code may emit `<task-notification>` through `UserPromptSubmit` when an
+ Agent finishes. `turn_contract.py` treats it as an internal lifecycle message:
+ it may receive the existing mode context but cannot replace or refresh the
+@@ -140,9 +157,9 @@ state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_
+ plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
+ state, choose work, write evidence, or enforce phase discipline. The active-run
+ pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
+-and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve this
+-same explicit pointer before recent-file fallback, so a newer unrelated run cannot
+-receive or escape the active run's process gates.
++and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve only
++this explicit pointer; file recency is never run authority, so an unrelated run
++cannot receive or escape another run's process gates.
+ 
+ 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
+ phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a
+diff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md
+index 176661c..fa5b86e 100644
+--- a/docs/templates/loop_prompt.md
++++ b/docs/templates/loop_prompt.md
+@@ -5,6 +5,13 @@ This is the fixed Claude Code `/loop` protocol. Do not copy/paste it through
+ `{{RUN_DIR}}` to that run path and `{{PYTHON}}` to the active Python command for
+ this repository.
+ 
++`/loop` is for an existing run. If the operator's `/loop` text explicitly asks to
++create a new run, Claude Code may attempt CronCreate before that run exists. Treat
++the expected denial as a bootstrap signal: run the requested `setup_run.py` first,
++allow its contract-preserving active-run switch, then perform a fresh CronList and
++CronCreate whose prompt names the new run. Never clear the old pointer or schedule
++the old run to get past the gate.
++
+ You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.
+ Run one **material** autonomous iteration: state pass, required Agent execution,
+ merge/verification, canonical writes, and refreshed gates. Planning, one request,

@@ -1,0 +1,23 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "claude:code-cli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "96bffae36281603559e3c21e822f373dc1a8495e",
+  "evidence_index_hash": "bc855bd32b47270bad49c174632441bd5d3f7da6",
+  "findings": [],
+  "blind_spots": [
+    "**The review's own audit trail is fragmented**: 6 rounds of review (round1, round2-claude, round2-arkcli, final, final2, final3, final4 — that's 7 actually), each finding issues the previous missed. The arkcli heterogeneous panel completely failed (Kimi ARK 500, GLM unparseable). This means the entire review is Claude-on-Claude, which the review architecture explicitly says is the \"weakest fallback.\" The structural limitation of same-model review is evidenced by the `decide()` dead code surviving all 7 review passes.",
+    "**`RUN_BIND_RE` over-match is the one finding no prior reviewer caught**: Every prior reviewer analyzed `CLEAR_ACTIVE_RE` coverage gaps, checked the control-script allowlist, and verified the pending-contract flow. None checked whether `classify_prompt()` could misclassify an informational query as EXECUTE because of a regex over-match. This is exactly the kind of blind spot a heterogeneous reviewer is supposed to catch.",
+    "**The selftest's 57/57 pass masks integration-level gaps**: The `turn_contract` suite (0.4s), `output_gate` suite (0.5s), and `run_gate` suite (0.1s) all pass individually. Combined execution time of ~1.0s for what are now hundreds of assertions suggests narrow-path testing. The `decide()` dead-code finding is one symptom — the test exercises a code path that `main()` makes unreachable, and no test catches this because no full-flow test exercises `main()` → `decide()` with `stop_hook_active=True`.",
+    "**`transfer_contract` does not validate source contract mode**: If the source contract is `PAUSED_BY_OPERATOR`, the target run inherits PAUSED mode. This could mean switching to a new run leaves it in a paused state, requiring the operator to re-authorize execution. This is a usability issue, not a security issue, but it wasn't discussed in any review."
+  ],
+  "context_limits": [
+    "I cannot read live source files (`.claude/hooks/output_gate.py`, `.claude/hooks/run_gate.py`, `tools/turn_contract.py`, `tools/xunji_statusline.py`) due to the guard layer blocking access outside the review directory. All analysis relies on the evidence diffs, selftest log, and review bundle. If the live code has been modified since the evidence was captured, my findings may be against stale state.",
+    "The `_active_protocol_fronts` function in `output_gate.py` is not visible in any diff. If that function has bugs (incorrect front ID extraction from `frontier.md`), the no-front denial envelope anchor computation would produce wrong results. I cannot verify this.",
+    "Chinese-language policy text (CLAUDE.md additions, denial messages, hook comments) may contain operational nuance I partially miss. My `RUN_BIND_RE` over-match analysis assumes the regex was intended to match only transition/binding contexts — if the broad `active[ -]?run` match was intentional to force EXECUTE for any prompt mentioning the active run, then this is by design, not a bug.",
+    "The `cqytxy_20260702` run referenced in the old `run_gate.py` comment is cited as evidence for the Stop retry behavior. I cannot verify this retrospective reference."
+  ],
+  "error": ""
+}

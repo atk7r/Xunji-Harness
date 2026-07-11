@@ -1,0 +1,105 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "claude:code-cli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "91c52fdaf74f05fbc3c95903b9aa05608f3c8232",
+  "evidence_index_hash": "6164b0f7ec60bd2733052809d432a9461ef7bc39",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "documentation_integrity",
+      "claim": "review.md references non-existent peer_review.final3.claude.md",
+      "evidence": "review.md:6",
+      "affected_eids": [],
+      "recommended_action": "Update review.md to reference the actual latest Claude review file (peer_review.final2.claude.md) or generate the missing final3 review and include it.",
+      "why": "review.md claims See peer_review.final3.claude.md for the final refreshed fingerprint but Glob confirms no final3 file exists. This erodes audit trail integrity.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "metadata_consistency",
+      "claim": "Evidence maturity field inconsistent between evidence.md (verified) and review bundle (candidate)",
+      "evidence": "evidence.md:5,15,25,35, review bundle evidence_index.entries[].maturity",
+      "affected_eids": [
+        "E-001",
+        "E-002",
+        "E-003",
+        "E-004"
+      ],
+      "recommended_action": "Regenerate the review bundle after updating evidence.md maturity, so the bundle metadata matches the canonical evidence ledger.",
+      "why": "All four entries show Maturity: verified in evidence.md but maturity: candidate in the review bundle JSON. Consumers of the bundle see stale/contradictory maturity metadata.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "maintenance_hazard",
+      "claim": "_lifecycle_target_name argument parser is coupled to setup_run.py flag schema and not forward-compatible",
+      "evidence": "evidence/transition-core.diff:340-375",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add a selftest that verifies unknown flags are safely skipped, and document in _lifecycle_target_name docstring which setup_run.py flags it knows about.",
+      "why": "The hand-rolled positional parser only knows --date and --target. A new value-consuming flag added to setup_run.py would silently break claim binding without any test catching it.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "stop_hook_design",
+      "claim": "run_gate stop_hook_active early exit swallows all gate evaluations and drift notifications",
+      "evidence": "evidence/stop-hooks.diff:220-226",
+      "affected_eids": [
+        "E-002"
+      ],
+      "recommended_action": "Document in run_gate header that early sys.exit(0) on stop_hook_active means no gate, drift, or status information is emitted on retry. Consider adding a systemMessage summary before exiting.",
+      "why": "The early exit at line 226 fires before active_run resolution and Phase 3 drift checks. If a transient issue caused the first block and was resolved before retry, the retry silently passes without informing the operator or re-evaluating the now-resolved state.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "test_coverage_gap",
+      "claim": "No integration test for the full pending-contract-to-pointer chain as a single subprocess flow",
+      "evidence": "evidence/transition-core.diff:819-941",
+      "affected_eids": [
+        "E-001",
+        "E-004"
+      ],
+      "recommended_action": "Add an end-to-end subprocess test that: (1) UserPromptSubmit writes pending, (2) PreToolUse allows setup_run.py, (3) verifies the pointer points to the new run with the correct consumed contract.",
+      "why": "Each component is tested in isolation (separate subprocess invocations) but no single test drives the complete hook-to-tool-to-hook chain. The contract between hook evaluation and tool runtime is untested at the integration level.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "code_clarity",
+      "claim": "_control_invocation suffix stripping asymmetry: only one redirect suffix is stripped despite claiming to fold benign fd redirections",
+      "evidence": "evidence/transition-core.diff:523-526",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Document the single-suffix behavior in the docstring, or use a loop to strip multiple known-safe suffixes. The regex backstop makes it safe but the single-strip semantics are surprising.",
+      "why": "The break after the first match means only one redirect suffix is handled. 2>&1 2>/dev/null is rejected (not stripped) while 2>/dev/null 2>&1 is accepted. This asymmetry is flagged in every review round and consistently dismissed, but it remains surprising to future maintainers.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "The review.md never updated after the final2 review — the bundle hash in final2.claude.md (6952cbb4e...) differs from the review bundles own sha1 (91c52fda...), meaning review.md references a different evidence snapshot than what the reviewer saw",
+    "_active_protocol_fronts function in output_gate has no implementation visible in any diff — front bypass prevention depends entirely on selftest assertions without source-level verification",
+    "Approximately 45% of transition-core.diff is truncated from the excerpt (25,000 of 55,711 characters missing), including portions of xunji_statusline.py set_active_run implementation and late selftest assertions",
+    "_lifecycle_target_name returns empty string for setup_run.py --target without a positional slug — correct fail-closed behavior but untested in selftest",
+    "Chinese-language semantic concern: the denial envelope text _未执行目标动作；不存在该动作的实测结果_ strongly asserts the absence of results; if paraphrased out of context after a different type of failure, this could be misleading"
+  ],
+  "context_limits": [
+    "Live source files were inaccessible; all analysis relies on evidence diff artifacts and selftest log",
+    "_active_protocol_fronts function cited as the anchor-resolver for output_gate is not visible in any diff",
+    "I may miss subtle semantic nuances in Chinese policy text around 当前操作者 vs 当前 session authority gradient",
+    "This is a code-maintenance run with no web target — rubric items 2/3/6 are adapted accordingly"
+  ],
+  "error": ""
+}

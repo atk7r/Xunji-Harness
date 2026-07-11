@@ -130,6 +130,19 @@ observe -> update state graph -> decompose fronts
   Execution begins/resumes only from a prompt with an explicit action verb such
   as `/loop`, continue/resume, execute, implement, or fix. Ambiguous declarative
   prompts default read-only; never infer permission to resume target work.
+- **Run switches are transactions, not pointer edits.** When the current prompt
+  explicitly creates or resumes a run, use `setup_run.py`, `loop_bootstrap.py`, or
+  a prompt-named `xunji_statusline.py --set-active`. These paths inherit the same
+  operator turn contract before atomically changing `.claude/xunji_active_run`.
+  Never Write/Edit/remove that pointer directly. If `/loop` tries CronCreate before
+  a requested new run exists, finish setup first, then run CronList and CronCreate
+  against the new run name; do not schedule the old run as a workaround.
+  Turn contracts bind only the explicit pointer; they never guess from the most
+  recently modified run. While a no-run bootstrap contract is pending, only
+  read-only inspection and that prompt's exact setup/resume/set-active transition
+  are allowed; PreToolUse binds it to a target/session/prompt-hash claim before
+  execution. Do not probe or write run material before binding, and never guess
+  between concurrent claims.
 - **Stop Coda is mechanically enforced only for `EXECUTE`.** While `.claude/xunji_active_run`
   points to a run without a valid completion marker, the last non-empty output
   line must be the only Coda line and must name one concrete object plus one
@@ -142,7 +155,10 @@ observe -> update state graph -> decompose fronts
   Fix the prerequisite and retry the original action in the same turn. While the
   denial is unresolved, free-form final text is rejected; if execution truly
   cannot continue, use only the exact three-line
-  `XUNJI_EXECUTION_STATUS=DENIED` envelope required by `output_gate.py`.
+  `XUNJI_EXECUTION_STATUS=DENIED` envelope required by `output_gate.py`. Its Coda
+  uses a current `F-id`, or `frontier.md` while a new run has no active front yet.
+  Stop hooks hard-block the first invalid attempt; a Claude Code
+  `stop_hook_active` retry is idempotent and cannot change canonical run state.
 - Claude Code internal `<task-notification>` messages are lifecycle events, not
   operator prompts. They must never create, refresh, or change the current turn
   contract; Agent receipts from before the notification remain current-turn proof.

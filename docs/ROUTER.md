@@ -141,6 +141,10 @@ Output:
   builds the skeleton + `evidence/`/`scripts/` subdirs, folds the FULL asset table via
   ingest_recon into `surface_recon.md`, records the recon path in `target.md`, **and
   builds `coverage.json` directly from the Guanlan recon (zero re-probe)**.
+- **Switch only after setup completes**: setup inherits the current operator turn
+  contract and then atomically updates the active-run pointer. An old run's Agent
+  Board does not govern this lifecycle command. Never clear/edit the pointer to
+  escape a gate; after setup, rerun CronList/CronCreate for the new run.
 - **Never hand-curate `surface.md` from the human report** — a curated subset encodes
   the driver's selection bias as ground truth and blinds the anti-lump guard (hamastar
   root cause: 30+ assets silently un-examined, 6 operator nudges).

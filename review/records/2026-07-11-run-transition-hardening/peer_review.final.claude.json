@@ -1,0 +1,24 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "claude:code-cli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "a04b07596ff0c7225c9658b32c3f99d9352562ec",
+  "evidence_index_hash": "96c1dfb2da1d9db5c245b0051abe738413ba33cb",
+  "findings": [],
+  "blind_spots": [
+    "**`classify_prompt` with `active_run=False` unconditionally returns EXECUTE**: At `evidence/transition-core.diff:227`, when no active run exists, ALL prompts are classified as EXECUTE (including pure questions). This is intentional (bootstrap mode requires EXECUTE to store a pending contract), but it means a question-only prompt in no-run state (\"what runs exist?\") would trigger Coda requirements unnecessarily. The `write_pending_contract` gate at line 278 filters these out (requires RUN_TRANSITION_RE or RUN_BIND_RE match), so the pending contract is correctly not written. But the model still sees EXECUTE classification and must produce a Coda line. This is a minor UX annoyance, not a correctness bug. Neither prior review flagged this.",
+    "**`_lifecycle_target_name` for `setup_run.py` doesn't handle `--classify` flag's argument consumption**: At `evidence/transition-core.diff:367`, flags are handled by `if token.startswith(\"-\"): index += 1; continue`. This correctly skips flag-only tokens like `--classify` (no argument). But if someone writes `setup_run.py --classify slug`, the token after `--classify` (`slug`) starts with a letter (not `-`), so it's added to positionals — correct behavior since `--classify` is flag-only and `slug` IS the positional argument. This is actually correct but the interaction is non-obvious and untested.",
+    "**Documentation drift risk between CLAUDE.md and skill files**: The CLAUDE.md changes at `evidence/docs.diff:60-72` describe \"Run switches are transactions, not pointer edits\" with detailed rules about pending contracts, claims, and Cron ordering. The skill files (`xunji-run-lifecycle/SKILL.md`, `xunji-setup-ingest/SKILL.md`) summarize the same rules more concisely. If future changes update one but not the other, operators could receive conflicting instructions. The round-2 review didn't flag documentation consistency as a concern.",
+    "**The `CLEAR_ACTIVE_RE` is only tested with Chinese prompts**: At `evidence/transition-core.diff:750`, the test `clear_with_operator_allowed` uses `\"清除 active run 指针\"`. The regex also has English patterns (`clear|remove|unset`), but no English test case exists. If the English patterns don't match as expected (e.g., `\"clear the active run\"` doesn't match because the `.{0,20}` greedily consumes past \"active run\"), this path would be untested.",
+    "**`_control_invocation` strips `2>/dev/null` but not `2>/dev/null 2>&1`**: At `evidence/transition-core.diff:523-525`, the suffix stripping checks `\" 2>&1\"` then `\" 2>/dev/null\"` in sequence. A command ending in `\" 2>/dev/null 2>&1\"` (a common combined redirect) would: strip `\" 2>&1\"` first → remaining ends in `\" 2>/dev/null\"` → stripped. This works. But `\" 2>&1 2>/dev/null\"` (reversed order) would: strip `\" 2>&1\"` → remaining no longer ends in `\" 2>/dev/null\"` → NOT stripped. The chaining only works in one order. This is consistent with the round-1 finding about fd parsing asymmetry (dismissed as intentional conservative parsing)."
+  ],
+  "context_limits": [
+    "I cannot verify that the live working-tree files match their diff artifacts — my analysis relies on the SHA1-verified artifacts in `evidence/` and the selftest log. If uncommitted modifications exist beyond the diff captures, I would miss them.",
+    "I cannot access the `cqytxy_20260702` run cited in the old `run_gate.py` comment as historical evidence for the Stop retry design decision. I accept the comment's claim at face value.",
+    "The Chinese-language hook messages, policy text, and documentation (e.g., \"受控工具/hook 原子写入\", \"重入放行只结束当前聊天回合\", \"清除 active-run 指针必须由当前操作者 prompt 明确授权\") are clear to me, but I may miss subtle semantic nuances a native speaker would catch — particularly around the implied scope of \"当前操作者\" (current operator).",
+    "The `_active_protocol_fronts` function called from `output_gate._denied_result_claim_reason` has no implementation visible in any diff artifact. I trust the selftest `\"frontier.md denial cannot bypass a real active F-id\"` as evidence it works correctly."
+  ],
+  "error": ""
+}

@@ -70,17 +70,18 @@ def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:
         print(f"[setup] phase journal skipped: {exc}", file=sys.stderr)
 
 
-def _set_active_run(run_dir: Path) -> None:
-    """Best-effort statusline pointer update. It is display state, not evidence."""
+def _set_active_run(run_dir: Path) -> bool:
+    """Atomically select a fully prepared run, inheriting any live turn contract."""
     try:
         import xunji_statusline  # noqa: E402
 
         if xunji_statusline.set_active_run(str(run_dir)):
             print(f"[setup] statusline active run: runs/{run_dir.name}")
-        else:
-            print(f"[setup] statusline active run skipped: {run_dir}", file=sys.stderr)
+            return True
+        print(f"[setup] active run switch failed: {run_dir}", file=sys.stderr)
     except Exception as exc:
-        print(f"[setup] statusline active run skipped: {exc}", file=sys.stderr)
+        print(f"[setup] active run switch failed: {exc}", file=sys.stderr)
+    return False
 
 
 def scaffold(run_dir: Path) -> list[str]:
@@ -413,9 +414,6 @@ def main() -> int:
     made = scaffold(run_dir)
     print(_phase_banner("start", "Setup", run_dir=run_dir, note="prepare authorized run workbench"))
     _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
-    # This CLI creates a new run. Future existing-run modes should not pass through
-    # this branch unless they intentionally want to select that run in the statusline.
-    _set_active_run(run_dir)
     print(f"[setup] 建 run 骨架 {run_dir}")
     print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
     coverage_ready = False
@@ -484,6 +482,13 @@ def main() -> int:
         print(f"[下一步] 先填写 target.md 的 Target/In-scope 并生成 coverage.json; 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
     _phase_journal(run_dir, "phase_end", "Setup", f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})")
     print(_phase_banner("end", "Setup", run_dir=run_dir, note=f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})"))
+    # Commit the run transition only after setup has produced its complete local
+    # workbench. set_active_run copies a valid current turn contract before it
+    # atomically replaces the pointer.
+    if not _set_active_run(run_dir):
+        print("[!] run 已建好但未切换 active 指针；旧 run 保持 active，请修复控制面后重试 set-active。",
+              file=sys.stderr)
+        return 1
     return 0
 
 

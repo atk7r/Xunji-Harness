@@ -223,25 +223,9 @@ def find_active_run(
     *,
     active_pointer: Path | None = None,
 ) -> Path | None:
-    """Return the explicit active run, then fall back to recent Markdown activity."""
-    pointed = _run_from_pointer(runs_root, active_pointer or ACTIVE_RUN_POINTER)
-    if pointed is not None:
-        return pointed
-    if not runs_root.is_dir():
-        return None
-    best: Path | None = None
-    best_mt = 0.0
-    now = time.time()
-    for md in runs_root.glob("*/*.md"):
-        try:
-            mt = md.stat().st_mtime
-        except Exception:
-            continue
-        if mt > best_mt:
-            best_mt, best = mt, md.parent
-    if best is not None and (now - best_mt) <= within_sec:
-        return best
-    return None
+    """Return only the explicit active run; recency is not run authority."""
+    del within_sec  # retained for caller compatibility
+    return _run_from_pointer(runs_root, active_pointer or ACTIVE_RUN_POINTER)
 
 
 def _detect_stage(run_dir: Path) -> str:
@@ -393,6 +377,8 @@ def _overdue_steps(run_dir: Path) -> list[str]:
 
 def build_anchor(
     runs_root: Path = RUNS,
+    *,
+    active_pointer: Path | None = None,
 ) -> str:
     lines = []
 
@@ -412,7 +398,7 @@ def build_anchor(
     lines.append("")
 
     # ---- Phase 1: read session_state.json and inject re-read instructions ----
-    run = find_active_run(runs_root)
+    run = find_active_run(runs_root, active_pointer=active_pointer)
     drift_flags: list[str] = []
     if run is not None:
         SessionStateManager.reset_if_stale(run)
@@ -529,14 +515,14 @@ def _selftest() -> int:
     checks.append(("anchor is compact (<3KB)", len(a) < 3072))
     # drift patterns list
     checks.append(("drift patterns non-empty", len(DRIFT_PATTERNS) >= 5))
-    # find_active_run: picks the most-recent run within window, ignores stale
+    # find_active_run: explicit pointer is the only run authority.
     d = Path(tempfile.mkdtemp())
     checks.append(("stage Detection exists", _detect_stage(d) == "Setup"))
     runs = d / "runs"
     (runs / "a_x").mkdir(parents=True)
     (runs / "a_x" / "report.md").write_text("# r", encoding="utf-8")
-    checks.append(("find_active_run picks recent", find_active_run(runs) == runs / "a_x"))
-    checks.append(("stale window -> none", find_active_run(runs, within_sec=-1) is None))
+    checks.append(("missing pointer never guesses a recent run", find_active_run(runs) is None))
+    checks.append(("recency window cannot authorize a run", find_active_run(runs, within_sec=9999) is None))
     checks.append(("no runs dir -> none", find_active_run(d / "nope") is None))
     pointed = runs / "pointed"
     pointed.mkdir()
@@ -550,7 +536,7 @@ def _selftest() -> int:
     (outside / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
     pointer.write_text(str(outside), encoding="utf-8")
     checks.append(("outside pointer is ignored",
-                   find_active_run(runs, active_pointer=pointer) == pointed))
+                   find_active_run(runs, active_pointer=pointer) is None))
 
     # SessionStateManager tests
     time.sleep(1.1)  # ensure mtime is later than a_x/report.md created above
@@ -587,7 +573,9 @@ def _selftest() -> int:
     (test_run / "session_state.json").write_text(
         json.dumps({"drift_flags": ["protocol_violation", "frontier_stale"], "frontier_mtime": 0.0,
                      "claude_mtime": 0.0, "updated_at": time.time()}), encoding="utf-8")
-    anchor_with_drift = build_anchor(runs_root=_tmp_runs)
+    test_pointer = _td / "active-run"
+    test_pointer.write_text(str(test_run), encoding="utf-8")
+    anchor_with_drift = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
     checks.append(("anchor injects protocol_violation warning",
                    "先 Read CLAUDE.md — 回合协议违规" in anchor_with_drift))
     checks.append(("anchor injects frontier_stale warning",
@@ -607,7 +595,8 @@ def _selftest() -> int:
     old_stale = time.time() - SESSION_STATE_STALE_SEC - 120
     (fresh_run / "session_state.json").write_text(
         json.dumps({"drift_flags": ["protocol_violation"], "updated_at": old_stale}), encoding="utf-8")
-    anchor_fresh = build_anchor(runs_root=_tmp_runs)
+    test_pointer.write_text(str(fresh_run), encoding="utf-8")
+    anchor_fresh = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
     checks.append(("stale session_state auto-reset",
                    "先 Read CLAUDE.md — 回合协议违规" not in anchor_fresh))
 
@@ -674,10 +663,8 @@ def _selftest() -> int:
                    and "state-parser-failure" in parser_fail[2]))
 
     # Case 5: verify build_anchor injects the reminder
-    anchor_ab = build_anchor(runs_root=_tmp_runs)
-    # The anchor should have the reminder because the most recent active run (ab_dir or fresh_run)
-    # has diverse barriers. But _tmp_runs has other runs too — find_active_run picks the most recent.
-    # Since ab_dir was touched most recently above, it should be the active run.
+    test_pointer.write_text(str(ab_dir), encoding="utf-8")
+    anchor_ab = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
     checks.append(("agent board: anchor injects reminder", "Agent Board 强制" in anchor_ab))
 
     # Case 6: missing frontier.md -> not needed

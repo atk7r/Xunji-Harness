@@ -102,6 +102,20 @@ no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while on
 allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
 `state/runtime_events.jsonl` is a hook-owned hash chain for actual Agent/Cron/review
 tool events; never edit it or the turn/run-status JSON files directly.
+When no run exists, an EXECUTE prompt is held briefly in the hook-owned
+`.claude/xunji_pending_turns/` bootstrap area. `setup_run.py`,
+`loop_bootstrap.py --resume`, and a prompt-named `xunji_statusline.py --set-active`
+consume/copy that contract before atomically changing `.claude/xunji_active_run`.
+With an existing run, the same paths copy its current contract to the target run.
+Direct pointer Write/Edit/removal is forbidden. Setup/resume and documented local
+state/journal commands are lifecycle control, so an old run's Agent Board cannot
+mistake them for target work. Contract hooks never fall back to a recently modified
+run when the pointer is absent; they use the pending bootstrap transaction instead.
+While that transaction is pending, only reads and the current session's authorized
+setup/resume/set-active command are allowed; target actions and arbitrary writes wait
+until the contract is bound into the run. PreToolUse writes a short-lived claim
+containing the exact target run, session, and prompt hash; the lifecycle tool must
+consume that claim. Multiple valid claims for one target fail closed.
 Target-action denials and later successful target actions are also recorded by
 hash. A denial is unresolved until a later successful event has the same tool and
 execution-action hash (for Bash, the command; descriptive metadata is ignored).
@@ -110,7 +124,10 @@ unresolved target-action denial; this prevents a model that ignored EXPLAIN or
 PAUSE restrictions from rephrasing an unexecuted action as a result. The only
 non-result fallback is the gate's fixed three-line
 `XUNJI_EXECUTION_STATUS=DENIED` envelope, and normal Agent/closure gates still
-apply to it.
+apply to it. The final anchor is an active `F-id`, or `frontier.md` if setup has not
+created an active front. A Stop hook blocks once; `stop_hook_active` re-entry must
+return successfully to avoid Claude Code's forced block-cap override. This ends a
+chat turn only and never changes canonical completion state.
 Claude Code may emit `<task-notification>` through `UserPromptSubmit` when an
 Agent finishes. `turn_contract.py` treats it as an internal lifecycle message:
 it may receive the existing mode context but cannot replace or refresh the
@@ -140,9 +157,9 @@ state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_
 plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
 state, choose work, write evidence, or enforce phase discipline. The active-run
 pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
-and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve this
-same explicit pointer before recent-file fallback, so a newer unrelated run cannot
-receive or escape the active run's process gates.
+and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve only
+this explicit pointer; file recency is never run authority, so an unrelated run
+cannot receive or escape another run's process gates.
 
 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
 phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a

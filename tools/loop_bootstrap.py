@@ -185,13 +185,16 @@ def _journal(run_dir: Path, event: str, note: str) -> None:
         print(f"[bootstrap] journal write skipped: {e}", file=sys.stderr)
 
 
-def _set_active_run(run_dir: Path) -> None:
-    """Best-effort statusline pointer update. It is local display state only."""
+def _set_active_run(run_dir: Path) -> bool:
+    """Select a prepared run and inherit the current operator turn contract."""
     try:
         if not xunji_statusline.set_active_run(str(run_dir)):
-            print(f"[bootstrap] active run pointer skipped: {run_dir}", file=sys.stderr)
+            print(f"[bootstrap] active run switch failed: {run_dir}", file=sys.stderr)
+            return False
+        return True
     except Exception as e:
-        print(f"[bootstrap] active run pointer skipped: {e}", file=sys.stderr)
+        print(f"[bootstrap] active run switch failed: {e}", file=sys.stderr)
+        return False
 
 
 # ---- commands ----
@@ -219,7 +222,8 @@ def cmd_new(slug: str, recon_path: str) -> int:
     print(f"[bootstrap] run 目录: {run_dir}")
 
     _write_initial_state(run_dir)
-    _set_active_run(run_dir)
+    if not _set_active_run(run_dir):
+        return 1
     _journal(run_dir, "bootstrap", f"new run prepared from recon {recon_full}")
     if not _refresh_loop_state(run_dir):
         return 1
@@ -236,13 +240,14 @@ def cmd_resume(run_path: str) -> int:
         return 1
 
     print(f"[bootstrap] 续接 run: {run_dir}")
-    _set_active_run(run_dir)
 
     # 写 handoff
     subprocess.run([PYTHON_CMD, str(ROOT / "tools" / "session_handoff.py"),
                     "write", str(run_dir)], timeout=30)
     _journal(run_dir, "resume_prepare", "resume state prepared; loop not started until explicit /loop")
     if not _refresh_loop_state(run_dir):
+        return 1
+    if not _set_active_run(run_dir):
         return 1
 
     _print_launch_instructions(run_dir)
@@ -313,8 +318,9 @@ def _selftest() -> int:
         stdout = ""
         stderr = ""
 
-    def fake_set_active(run_dir: Path) -> None:
+    def fake_set_active(run_dir: Path) -> bool:
         active_hook_calls.append(Path(run_dir).resolve())
+        return True
 
     def fake_run(*_args, **_kwargs) -> _FakeCompleted:
         return _FakeCompleted()

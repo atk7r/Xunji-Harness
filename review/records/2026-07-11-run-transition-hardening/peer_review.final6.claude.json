@@ -1,0 +1,68 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "claude:code-cli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "b9bf19894a208d85525f9878db5a44e3aef72e4d",
+  "evidence_index_hash": "6b6c926bdfd37169f824dbdc41fd8334d8e65cf4",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`_lifecycle_target_name` `--resume` branch has no direct selftest",
+      "evidence": "`turn_contract.py` _selftest in transition-core.diff lines 880-895 — tests only setup_run.py tuples",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "Regression in resume argument parsing would not be caught by selftest suite",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`run_gate.py` early-return on `stop_hook_active` masks independent co-occurring gate failures",
+      "evidence": "`run_gate.py` diff line 276-277 (`if stop_active: sys.exit(0)`) in stop-hooks.diff",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "Operator loses diagnostic visibility when multiple gates fail simultaneously; only the first blocking hook's reason is surfaced",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`_denied_result_claim_reason` depends on unguarded external function `_active_protocol_fronts`",
+      "evidence": "`output_gate.py` diff lines 24-25 in stop-hooks.diff",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "If `_active_protocol_fronts` returns empty list for a run with active fronts, the denial gate silently falls back to `frontier.md` anchor",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Pending-bootstrap tool allowlist test coverage is single-point (only `probe.py`)",
+      "evidence": "`turn_contract.py` subprocess tests in transition-core.diff lines 968-978",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "The `tool not in {...}` gate at line 811 is tested for only one denied tool; regression in the allowlist set may not be caught",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "Cross-session pending contract collision if Claude Code reuses session IDs across processes",
+    "Date-boundary race: `_lifecycle_target_name` and tool execution compute run-name dates independently; midnight crossing causes fail-closed mismatch",
+    "`CLEAR_ACTIVE_RE` regex greediness: ambiguous operator prompts like \"clear evidence and restart the active run\" could inadvertently authorize clear-active",
+    "`_control_invocation` accepts bare `python` without version check — deployment risk on systems where `python` ≠ Python 3",
+    "Selftest for `_lifecycle_target_name` covers setup_run.py paths thoroughly but misses `loop_bootstrap.py --resume` and `xunji_statusline.py --set-active` tuples directly"
+  ],
+  "context_limits": [
+    "All analysis based on diff artifacts in review bundle; live working tree not accessible for cross-check",
+    "`_active_protocol_fronts` function not shown in any diff — assumed correct based on selftest assertions",
+    "One token redacted by egress filter at turn_contract.py line 473 — does not affect findings"
+  ],
+  "error": ""
+}

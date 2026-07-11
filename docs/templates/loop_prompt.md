@@ -5,6 +5,13 @@ This is the fixed Claude Code `/loop` protocol. Do not copy/paste it through
 `{{RUN_DIR}}` to that run path and `{{PYTHON}}` to the active Python command for
 this repository.
 
+`/loop` is for an existing run. If the operator's `/loop` text explicitly asks to
+create a new run, Claude Code may attempt CronCreate before that run exists. Treat
+the expected denial as a bootstrap signal: run the requested `setup_run.py` first,
+allow its contract-preserving active-run switch, then perform a fresh CronList and
+CronCreate whose prompt names the new run. Never clear the old pointer or schedule
+the old run to get past the gate.
+
 You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.
 Run one **material** autonomous iteration: state pass, required Agent execution,
 merge/verification, canonical writes, and refreshed gates. Planning, one request,

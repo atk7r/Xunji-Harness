@@ -131,6 +131,10 @@ python3 tools/loop_bootstrap.py --resume runs/<dir>
 
 `setup_run.py` 会创建 run 骨架、记录 recon、派生 scope，并从 Guanlan recon 直接生成 `coverage.json`。不要手工从人类报告挑一小撮资产去写 `surface.md`，也不要默认用 `classify_hosts` 对已有 Guanlan recon 全量重探；`--classify` 只用于需要本机出口重新确认可达性的场景。
 
+这些入口会在完成准备后继承当前 Claude 回合契约，再原子切换 active run。
+不要直接编辑或删除 `.claude/xunji_active_run`。如果 `/loop` 在新 run 创建前的
+CronCreate 被拒绝，先完成 setup，再针对新 run 重新执行 CronList/CronCreate。
+
 active run 通常由 `setup_run.py` / `loop_bootstrap.py` 设置。如果 statusline 没有指向正确 run，可手动设置：
 
 ```bash

@@ -114,7 +114,7 @@ except Exception:
 _DENIED_ONLY_RE = re.compile(
     r"\AXUNJI_EXECUTION_STATUS=DENIED\n"
     r"未执行目标动作；不存在该动作的实测结果。\n"
-    r"下一行动: F-\d{3} 修复 PreToolUse 前置条件后重试同一动作\Z"
+    r"下一行动: (?:F-\d{3}|frontier\.md) 修复 PreToolUse 前置条件后重试同一动作\Z"
 )
 
 
@@ -132,19 +132,42 @@ def _active_run_declared(pointer: Path | None = None) -> bool:
 def _denied_result_claim_reason(
     msg: str,
     denied: list[dict],
+    run_dir: Path | None = None,
 ) -> str:
     if not denied:
         return ""
-    if _DENIED_ONLY_RE.fullmatch(_strip_invisible(msg).strip()):
-        return ""
+    active = _active_protocol_fronts(run_dir) if run_dir is not None else []
+    anchor = active[0] if active else "frontier.md"
+    clean = _strip_invisible(msg).strip()
+    if run_dir is None:
+        if _DENIED_ONLY_RE.fullmatch(clean):
+            return ""
+    else:
+        expected = (
+            "XUNJI_EXECUTION_STATUS=DENIED\n"
+            "未执行目标动作；不存在该动作的实测结果。\n"
+            f"下一行动: {anchor} 修复 PreToolUse 前置条件后重试同一动作"
+        )
+        if clean == expected:
+            return ""
     return (
         "[未执行动作真实性硬拦] 本回合仍有未被同工具、同执行动作成功回执消解的"
         " PreToolUse 目标动作拒绝。禁止自由文本和任何结果转述；继续完成前置条件并"
         "重试原动作，或仅输出以下三行：\n"
         "XUNJI_EXECUTION_STATUS=DENIED\n"
         "未执行目标动作；不存在该动作的实测结果。\n"
-        "下一行动: F-<当前前沿三位编号> 修复 PreToolUse 前置条件后重试同一动作"
+        f"下一行动: {anchor} 修复 PreToolUse 前置条件后重试同一动作"
     )
+
+
+def _emit_gate_violation(reason: str, *, stop_hook_active: bool) -> None:
+    """Block once; Claude Code Stop retries are advisory to avoid hook churn."""
+    if stop_hook_active:
+        print(json.dumps({
+            "systemMessage": "[Stop 重入放行，canonical run 状态仍未满足] " + reason,
+        }, ensure_ascii=False))
+        return
+    print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
 
 
 def _strip_invisible(s: str) -> str:
@@ -333,8 +356,13 @@ def _protocol_state(run_dir: Path) -> dict:
 
 
 def _active_protocol_fronts(run_dir: Path) -> list[str]:
-    """Compatibility helper used by focused tests and callers."""
-    return list(_protocol_state(run_dir).get("active_fronts") or [])
+    """Cross-check derived state with canonical Markdown before choosing an anchor."""
+    derived = {str(x) for x in (_protocol_state(run_dir).get("active_fronts") or [])
+               if str(x).strip()}
+    canonical = {str(x) for x in (
+        _fallback_protocol_state(run_dir, "canonical cross-check").get("active_fronts") or [])
+                 if str(x).strip()}
+    return sorted(derived | canonical)
 
 
 def _protocol_block_reason(msg: str, run_dir: Path) -> str:
@@ -396,6 +424,7 @@ def main() -> None:
     run_dir = None
     turn_mode = "EXECUTE"
     contract: dict = {}
+    stop_active = bool(event.get("stop_hook_active"))
     try:
         msg = event.get("last_assistant_message") or ""
         if not isinstance(msg, str) or not msg.strip():
@@ -449,9 +478,9 @@ def main() -> None:
                 since=float(contract.get("updated_at") or 0.0),
             )
             denied_claim = _denied_result_claim_reason(
-                msg, unresolved)
+                msg, unresolved, run_dir)
             if denied_claim:
-                print(json.dumps({"decision": "block", "reason": denied_claim}, ensure_ascii=False))
+                _emit_gate_violation(denied_claim, stop_hook_active=stop_active)
                 sys.exit(0)
             # Reset stale session_state (Decision B-2)
             stale_sec = SESSION_STATE_STALE_SEC
@@ -491,7 +520,7 @@ def main() -> None:
             }
             SessionStateManager.save(run_dir, state)
             if protocol_block:
-                print(json.dumps({"decision": "block", "reason": protocol_block}, ensure_ascii=False))
+                _emit_gate_violation(protocol_block, stop_hook_active=stop_active)
                 sys.exit(0)
 
         # ---- Drift notification: systemMessage only (no drift_block.json, Decision 2) ----
@@ -522,11 +551,11 @@ def main() -> None:
         if (run_dir is not None or _active_run_declared()) and turn_mode not in {
             "EXPLAIN_ONLY", "PAUSED_BY_OPERATOR"
         }:
-            print(json.dumps({
-                "decision": "block",
-                "reason": "[输出协议 fail-closed] active run 的 output_gate 内部异常："
-                          + type(exc).__name__ + "。先修 hook/selftest，不得无 Coda 静默结束。",
-            }, ensure_ascii=False))
+            _emit_gate_violation(
+                "[输出协议 fail-closed] active run 的 output_gate 内部异常："
+                + type(exc).__name__ + "。先修 hook/selftest，不得无 Coda 静默结束。",
+                stop_hook_active=stop_active,
+            )
         sys.exit(0)
 
 
@@ -712,6 +741,19 @@ def _selftest() -> int:
                    "输出协议硬拦" in _protocol_block_reason("收口检查完成。", closed_run)))
     checks.append(("closed run with concrete closure action passes",
                    _protocol_block_reason("下一行动: 运行 check_run 收口检查", closed_run) == ""))
+    no_front_denial = (
+        "XUNJI_EXECUTION_STATUS=DENIED\n"
+        "未执行目标动作；不存在该动作的实测结果。\n"
+        "下一行动: frontier.md 修复 PreToolUse 前置条件后重试同一动作"
+    )
+    checks.append(("no-front denial envelope is accepted by truth gate",
+                   not _denied_result_claim_reason(
+                       no_front_denial, denied_receipt, closed_run)))
+    checks.append(("no-front denial envelope is accepted by Coda gate",
+                   _protocol_block_reason(no_front_denial, closed_run) == ""))
+    checks.append(("frontier.md denial cannot bypass a real active F-id",
+                   bool(_denied_result_claim_reason(
+                       no_front_denial, denied_receipt, open_run))))
     checks.append(("closed incomplete run rejects generic action",
                    "必须指向明确的收口或控制面对象" in _protocol_block_reason(
                        "下一行动: 分析其他问题", closed_run)))
@@ -802,6 +844,16 @@ def _selftest() -> int:
     checks.append(("hook subprocess honors explicit active pointer and blocks open front",
                    proc.returncode == 0 and '"decision": "block"' in (proc.stdout or "")
                    and "F-900" in (proc.stdout or "")))
+    retry_proc = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve())],
+        input=json.dumps({**event, "stop_hook_active": True}, ensure_ascii=False),
+        text=True, capture_output=True, encoding="utf-8", errors="replace",
+        env=env, timeout=10,
+    )
+    checks.append(("Stop retry is advisory instead of entering another block loop",
+                   retry_proc.returncode == 0
+                   and '"systemMessage"' in (retry_proc.stdout or "")
+                   and '"decision": "block"' not in (retry_proc.stdout or "")))
     (live_run / "state").mkdir(exist_ok=True)
     (live_run / "state" / "turn_contract.json").write_text(json.dumps({
         "schema": "xunji.turn_contract.v1", "mode": "EXPLAIN_ONLY",
@@ -842,6 +894,15 @@ def _selftest() -> int:
                    not (output_proc.stdout or "").strip()
                    and '"decision": "block"' in (run_proc.stdout or "")
                    and "缺独立复审" in (run_proc.stdout or "")))
+    run_retry_proc = subprocess.run(
+        [sys.executable, str(ROOT / ".claude" / "hooks" / "run_gate.py")],
+        input=json.dumps({**proper_event, "stop_hook_active": True}, ensure_ascii=False),
+        text=True, capture_output=True, encoding="utf-8", errors="replace",
+        env=env, timeout=15,
+    )
+    checks.append(("run gate Stop retry exits cleanly without another block",
+                   run_retry_proc.returncode == 0
+                   and not (run_retry_proc.stdout or "").strip()))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

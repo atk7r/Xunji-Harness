@@ -102,9 +102,12 @@ Create a new run in one shot:
 python tools/setup_run.py <slug> [recon.json]
 ```
 
-`setup_run.py` sets `.claude/xunji_active_run` to the newly created run as local
-statusline display state. This does not enter `/loop`, choose a front, or make any
-evidence/closure decision.
+`setup_run.py` completes the workbench, inherits the current operator turn
+contract, and only then atomically sets `.claude/xunji_active_run`. This does not
+enter `/loop`, choose a front, or make any evidence/closure decision. Never clear
+or Write/Edit the pointer directly. When `/loop` initially attempts CronCreate for
+a requested new run, let the gate reject that premature schedule, run setup, then
+CronList and CronCreate again with the new run directory name.
 
 Use `--classify` only while creating a new run, and only when an authorized
 current egress recheck is allowed. It is not an existing-run refresh mode:

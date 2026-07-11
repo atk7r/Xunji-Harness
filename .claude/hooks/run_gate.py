@@ -7,7 +7,7 @@
 全部静默放行。根因: 闸门被动, 只在 driver 主动调用且 report 写了收口措辞时才硬审。
 
 本 hook 在 Claude 每次停止响应时触发: 若存在【刚刚改动过的、且已写成实质终版报告的】run,
-就替 driver 跑一遍 check_run; 没过就持续 decision=block, 把硬门结果怼回 driver 面前,
+  就替 driver 跑一遍 check_run; 首次没过返回 decision=block, 把硬门结果怼回 driver 面前,
 逼它去建覆盖台账/补真产物/派独立复审, 而不是就此收工。
 
 Phase 架构:
@@ -17,11 +17,12 @@ Phase 架构:
 
 与 safety_gate 的根本区别(复审重点):
   - safety_gate 拦【不可逆危害】, 必须 FAIL-CLOSED(读不到事件就拒绝)。
-  - run_gate 的通知路径可降级；active run 的 Agent/Cron/收口客观硬门 FAIL-CLOSED。
+  - run_gate 的首次 Agent/Cron/收口客观硬门 FAIL-CLOSED；Claude Code 标记
+    stop_hook_active 的重入调用必须幂等放行，canonical run 状态不会因此变成完成。
     只有事件无法解析或确实没有 active run 时静默放行。
-防循环: 仅纯提醒类路径使用 systemMessage; 客观硬门(check_run / severity / replay / timeout /
-Agent Board / completion review)不因 stop_hook_active 降级。cqytxy_20260702 证明“最多拦一次”
-会把硬门退化成提醒, driver 会继续收口。
+防循环: 首次 Stop 保持硬拦；Claude Code 因任一 Stop hook 发起重入后，所有 Stop hook
+必须返回成功，否则客户端最终会在阻断上限后强制结束。重入放行只结束当前聊天回合，
+不写 completion marker、不改变 check_run 结果，也不关闭任何 front。
 
 Protocol: 读 stdin 的 Stop 事件; 仅在需要时往 stdout 写 {"decision":"block","reason":...}
 (拦) 或 {"systemMessage":...}(提示)。其余 exit 0 静默。纯 stdlib。
@@ -39,8 +40,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
-ACTIVE_WINDOW_SEC = 900   # 只对最近 15 分钟内改动过的 run 介入(= 当前正在做的那个)
-DRIFT_TIMEOUT_WINDOW_SEC = 6 * 60 * 60   # Phase 2 单独长窗口, 用于抓住超过 30 分钟的未解漂移
+ACTIVE_WINDOW_SEC = 900   # 调用兼容参数；run 选择只认显式 pointer，不认 mtime
+DRIFT_TIMEOUT_WINDOW_SEC = 6 * 60 * 60   # 调用兼容参数；漂移年龄由 session_state 自身时间戳判断
 SESSION_TIMEOUT_SEC = 30 * 60   # Phase 2: 超过 30 分钟未更新 + 有漂移信号 → 阻断
 
 sys.path.insert(0, str(ROOT / "tools"))
@@ -121,28 +122,21 @@ _RESULT_TERMINATORS = (
 _SUBFIELDS = ("Observed", "DataObtained", "Mechanism", "SeverityBasis")
 
 
-def find_active_run(runs_root: Path, within_sec: int = ACTIVE_WINDOW_SEC) -> Path | None:
-    """Return active run using the shared anti_drift implementation.
-    Fallback is fail-open compatible and only used when anti_drift cannot import."""
+def find_active_run(
+    runs_root: Path,
+    within_sec: int = ACTIVE_WINDOW_SEC,
+    *,
+    active_pointer: Path | None = None,
+) -> Path | None:
+    """Return only the explicitly selected run; never infer authority by mtime."""
     if _shared_find_active_run is not None:
         try:
-            return _shared_find_active_run(runs_root, within_sec=within_sec)
+            return _shared_find_active_run(
+                runs_root, within_sec=within_sec, active_pointer=active_pointer)
         except Exception:
             return None
-    if not runs_root.is_dir():
-        return None
-    now = time.time()
-    best: Path | None = None
-    best_mt = 0.0
-    for rpt in runs_root.glob("*/*.md"):
-        try:
-            mt = rpt.stat().st_mtime
-        except Exception:
-            continue
-        if mt > best_mt:
-            best_mt, best = mt, rpt.parent
-    if best is not None and (now - best_mt) <= within_sec:
-        return best
+    # Import failure is fail-open. Guessing a recent run can bind another run's
+    # Stop gate and is less safe than returning no active run.
     return None
 
 
@@ -643,13 +637,13 @@ def decide(is_final: bool, check_rc: int, stop_hook_active: bool):
     """纯决策(便于自测): 返回 'block' / 'notify' / None(放行)。
     - 非终版报告 → 放行(还没收尾, 别打扰)。
     - check_run 通过 → 放行。
-    - check_run 未过 → 始终 block(强制修复, 不降级)。提醒是无效的——本 run 实测:
-      driver 在 stop_hook_active 降级为 notify 后宣布 FINAL, 而 check_run 仍有 4 硬门。
-      去掉降级: 修复前永不收口。"""
+    - check_run 未过 → 首次 block；Stop 重入只放行聊天回合，canonical gate 仍失败。"""
     if not is_final:
         return None
     if check_rc == 0:
         return None
+    if stop_hook_active:
+        return "notify"
     return "block"
 
 
@@ -663,7 +657,7 @@ def decide_closure(is_final: bool, check_rc: int, open_fronts: int, stop_hook_ac
     if not is_final:
         return None
     if open_fronts > 0:
-        return "block"
+        return "notify" if stop_hook_active else "block"
     return decide(is_final, check_rc, stop_hook_active)
 
 
@@ -776,6 +770,12 @@ def main() -> None:
     except Exception:
         sys.exit(0)
     stop_active = bool(event.get("stop_hook_active"))
+    # Claude Code sets this after any Stop hook has already blocked once. Blocking
+    # again creates an unsupported retry loop and is eventually overridden by the
+    # client. Canonical files and gates remain unchanged, so ending this chat turn
+    # is not equivalent to run completion.
+    if stop_active:
+        sys.exit(0)
     active_run = None
     try:
         # ---- Phase 3: drift session check (soft first, hard on repeated protocol drift) ----
@@ -919,7 +919,8 @@ def _selftest() -> int:
     checks.append(("not final -> pass", decide(False, 1, False) is None))
     checks.append(("final + check pass -> pass", decide(True, 0, False) is None))
     checks.append(("final + check fail -> block", decide(True, 1, False) == "block"))
-    checks.append(("final + fail + stop_active -> block (强制, 不降级)", decide(True, 1, True) == "block"))
+    checks.append(("final + fail + stop_active -> notify (no Stop retry loop)",
+                   decide(True, 1, True) == "notify"))
     checks.append(("closure matrix: non-final + check fail -> pass",
                    decide_closure(False, 1, 0, False) is None))
     checks.append(("closure matrix: final + open fronts + check pass -> block",
@@ -1031,15 +1032,19 @@ def _selftest() -> int:
     r1 = runs / "a_20260101"
     r1.mkdir()
     (r1 / "report.md").write_text("# Report\n", encoding="utf-8")
+    (r1 / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
     r_norpt = runs / "z_20260101"   # 无 report.md → 还没收尾 → 不该被选
     r_norpt.mkdir()
     (r_norpt / "f.md").write_text("x", encoding="utf-8")
-    # find_active_run now delegates to anti_drift: scans all *.md, picks most recent
-    time.sleep(1.1)
-    (r1 / "touch.md").write_text("fresh", encoding="utf-8")  # make r1 more recent than r_norpt
-    checks.append(("find_active_run picks most-recent run with *.md", find_active_run(runs, within_sec=900) == r1))
-    checks.append(("find_active_run picks runs even without report.md", find_active_run(runs, within_sec=900) is not None))
-    checks.append(("stale run -> none", find_active_run(runs, within_sec=-1) is None))
+    checks.append(("find_active_run never guesses the most-recent run",
+                   find_active_run(runs, within_sec=900) is None))
+    active_pointer = d / "active-run"
+    active_pointer.write_text(str(r1), encoding="utf-8")
+    checks.append(("find_active_run honors the explicit pointer",
+                   find_active_run(runs, active_pointer=active_pointer) == r1.resolve()))
+    active_pointer.write_text(str(d / "outside"), encoding="utf-8")
+    checks.append(("find_active_run rejects an outside pointer",
+                   find_active_run(runs, active_pointer=active_pointer) is None))
     checks.append(("no runs dir -> none", find_active_run(d / "nope") is None))
 
     # report_is_final via check_run import (终版 vs 存根)
@@ -1120,8 +1125,10 @@ def _selftest() -> int:
                     "updated_at": old_timeout_touch}), encoding="utf-8")
     os.utime(str(timeout_candidate / "frontier.md"), (old_timeout_touch, old_timeout_touch))
     os.utime(str(timeout_candidate / "session_state.json"), (old_timeout_touch, old_timeout_touch))
-    mode_long_window, _ = _check_session_timeout(timeout_runs)
-    checks.append(("session timeout: >15m drift candidate still blocks", mode_long_window == "block"))
+    mode_long_window, _ = _check_session_timeout(
+        timeout_runs, active_run=timeout_candidate)
+    checks.append(("session timeout: explicit >15m drift run still blocks",
+                   mode_long_window == "block"))
 
     # Phase 3: drift session check (notify first, then hard block repeated protocol drift)
     import tempfile as _tempfile_mod

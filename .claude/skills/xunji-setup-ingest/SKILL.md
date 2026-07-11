@@ -36,9 +36,10 @@ With recon, setup should:
 - write `knowledge_hits.md` when local signatures match.
 
 `setup_run.py` prepares the workbench. It does not pick fronts, decide findings,
-or attack the target. After the run skeleton exists, it also sets
-`.claude/xunji_active_run` so the Claude Code statusline points at the new run;
-that pointer is local display state only.
+or attack the target. After the full workbench exists, it inherits the current
+operator turn contract and atomically sets `.claude/xunji_active_run` so the
+Claude Code statusline and hooks point at the same run. An old run's Agent Board
+does not block this lifecycle transition. Never hand-edit or clear the pointer.
 
 ## Scope And Coverage
 

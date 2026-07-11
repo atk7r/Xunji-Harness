@@ -509,6 +509,16 @@ depth fields. `tools/turn_contract.py` writes the current prompt's
 and foreground peer-review events are appended to the hash-linked
 `state/runtime_events.jsonl`; only transcript-backed events validate process claims.
 These control-plane files are hook-owned and are not editable narrative state.
+Run selection is also hook/tool-owned: setup, resume, and explicit prompt-named
+set-active copy the current contract before replacing the active pointer. A
+no-active-run EXECUTE prompt uses a short-lived pending contract that is consumed
+on first binding. Direct pointer edits, unrelated run switches, and unrequested
+clear-active operations are rejected. Pending bootstrap permits only reads and its
+current-session lifecycle transition until binding. A target/session/prompt-hash
+claim prevents cross-session pending selection; concurrent claims fail closed.
+Stop hooks block the first invalid output
+and treat Claude Code's `stop_hook_active` retry as idempotent; retry never marks a
+run complete or changes a front.
 
 ## Agent Board
 

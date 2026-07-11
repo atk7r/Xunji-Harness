@@ -145,6 +145,21 @@ def set_active_run(raw: str) -> bool:
     run_dir = _resolve_run(raw)
     if run_dir is None:
         return False
+    current = active_run()
+    if current != run_dir:
+        try:
+            import turn_contract  # noqa: WPS433
+
+            if current is None:
+                # UserPromptSubmit stores a short-lived pending contract when no
+                # run exists. Claim it before the first pointer is installed.
+                turn_contract.claim_pending_contract(run_dir)
+            else:
+                # A valid current-turn contract belongs to the operator prompt,
+                # not to the old pointer. Copy it before the atomic switch.
+                turn_contract.transfer_contract(current, run_dir)
+        except Exception:
+            return False
     ACTIVE_RUN.parent.mkdir(parents=True, exist_ok=True)
     tmp_name = ""
     with tempfile.NamedTemporaryFile(
@@ -449,6 +464,12 @@ def _selftest() -> int:
         before_render = {p: p.stat().st_mtime_ns for p in watched}
         plain = render_statusline(root_current, color=False)
         colored = render_statusline(root_current, color=True)
+        (run / "state" / "turn_contract.json").write_text(json.dumps({
+            "schema": "xunji.turn_contract.v1",
+            "mode": "EXECUTE",
+            "session_id": "statusline-transition",
+            "updated_at": time.time(),
+        }), encoding="utf-8")
         (run / "state" / "run_status.json").write_text(json.dumps({
             "status": "paused_by_operator",
         }), encoding="utf-8")
@@ -491,6 +512,10 @@ def _selftest() -> int:
             encoding="utf-8",
         )
         assert set_active_run(str(missing_cache))
+        inherited_contract = _load_json(
+            missing_cache / "state" / "turn_contract.json", {})
+        source_contract_after = _load_json(
+            run / "state" / "turn_contract.json", {})
         missing_before = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
         missing_plain = render_statusline(root_current, color=False)
         missing_after = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
@@ -520,6 +545,11 @@ def _selftest() -> int:
         ("missing cache does not show false idle", "Idle｜空闲" not in missing_plain and "待验证入口 1 个" in missing_plain),
         ("setup journal note does not mask controller action", "run prepared" not in missing_plain and "下一步 继续验证可行动入口" in missing_plain),
         ("missing cache live derivation is read-only", missing_before == missing_after),
+        ("active-run switch inherits current turn contract before pointer update",
+         inherited_contract.get("session_id") == "statusline-transition"
+         and inherited_contract.get("origin_run") == run.name
+         and inherited_contract.get("bound_run") == missing_cache.name
+         and source_contract_after.get("session_id") == "statusline-transition"),
         ("failed live derivation is visible", "推导失败" in failed_derive_plain),
         ("invalid outside run pointer is rejected", invalid_rejected),
         ("outside Xunji prints nothing", outside == ""),
