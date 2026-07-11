@@ -184,11 +184,22 @@ Interpretation:
   blocked command, and repeat until it passes or becomes a real external Type A
   blocker. Do not end the turn with "next action: fix gate" when the fix is
   local and executable now.
+- A denied target action remains unresolved until the hook ledger contains a
+  later successful receipt for the same tool and identical execution-relevant
+  input. Descriptive tool metadata does not count. Do not turn a
+  denial into a result, even by paraphrase. Retry after fixing the prerequisite;
+  if that is impossible, use only the exact three-line denial envelope required
+  by `output_gate.py`.
 - `state/workflow_checkpoint.json`, `evidence.json`, `graph.json`,
   `state/loop_state.json`, `state/progress_ledger.json`, and
   `state/controller.shadow.json` are derived projections. `state/loop_journal.jsonl`
   is an append-only derived interruption journal. Never edit any of them as
   primary truth.
+- `state/runtime_events.jsonl`, `state/turn_contract.json`, and
+  `state/run_status.json` are hook-owned process records. Never edit them directly.
+- `EXPLAIN_ONLY` is read-only and has no Coda. `PAUSED_BY_OPERATOR` keeps active
+  fronts intact, stops the current run task through bound CronList/Delete/List,
+  and is not a completion action. A later execute/resume prompt starts a new turn.
 - Coda convergence means the current trajectory needs review, pivot, or Agent
   variance. It is not a Completion pause while open fronts, Type A barriers,
   coverage gaps, saturation gaps, or unresolved review/Agent conflicts remain.
@@ -212,15 +223,15 @@ Claude-driver review paths:
 
 ```bash
 python tools/peer_review.py runs/<dir> --into-run
-python tools/check_run.py runs/<dir> --auto-peer-review --review-driver claude
+python tools/check_run.py runs/<dir>
 ```
 
 Closure gates:
 
-- `review.md` must contain a completed `Independent Review` record with a real
-  reviewer/backend and block-scoped verdict. A heading,
-  prose mention, or untouched template choices do not count; self-review does
-  not cure self-review bias.
+- `review.md` must contain a current content-addressed `ReviewReceipt` generated
+  by a transcript-observed foreground peer-review invocation whose output has
+  matching receipt and bundle-hash markers. A heading, copied
+  output, manual reviewer prose, or untouched template does not count.
 - Resolve `PR-xxx` review ledger blockers before closure.
 - `retrospective.md` must honestly fill the Self problems and Framework/tooling
   problems sections. Every Framework/tooling lesson needs its own repair status
@@ -236,8 +247,14 @@ Closure gates:
   signals: they activate closure gates, but they are not completion actions.
 - `GHOST_COMPLETE` is written only after check_run hard gates pass, independent
   review is resolved, retrospective is filled, and the report is final.
+- Before the marker, invoke a completion Agent with
+  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
+  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.
+  Require `XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all four checks in
+  the response, then record substantive cross-check results in `decisions.md`.
 - When writing `GHOST_COMPLETE` or `NORMAL_COMPLETE`, cancel any active scheduled
-  `/loop` job in the same turn and append an `end` loop journal note containing
+  `/loop` job in the same turn: current-turn CronList, delete only the observed
+  current-run job, then CronList again. Append an `end` loop journal note containing
   `cron_cancelled=<job-id|none>`. `check_run.py` hard-fails a completion marker
   without that auditable cron disposition.
 

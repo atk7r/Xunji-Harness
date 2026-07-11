@@ -1,0 +1,216 @@
+{
+  "total": 5,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004",
+    "E-005"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004",
+    "E-005"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 - Turn mode and pause transaction",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "hooks.part-aa.diff",
+        "hooks.part-ab.diff",
+        "turn_contract.part-aa.diff",
+        "turn_contract.part-ab.diff",
+        "run_model.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "hooks.part-aa.diff",
+        "hooks.part-ab.diff",
+        "turn_contract.part-aa.diff",
+        "turn_contract.part-ab.diff",
+        "run_model.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "E-005"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 - Agent and Cron runtime authenticity",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "runtime_receipts.part-aa.diff",
+        "runtime_receipts.part-ab.diff",
+        "workers.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "runtime_receipts.part-aa.diff",
+        "runtime_receipts.part-ab.diff",
+        "workers.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "E-005"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 - Review and completion provenance",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "check_run.part-aa.diff",
+        "check_run.part-ab.diff",
+        "peer_review.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "check_run.part-aa.diff",
+        "check_run.part-ab.diff",
+        "peer_review.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "E-005"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004 - Canonical state and operator visibility",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "state.part-aa.diff",
+        "state.part-ab.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "state.part-aa.diff",
+        "state.part-ab.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "E-005"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005 - Full regression",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "selftest_all.log"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "selftest_all.log"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "E-001",
+        "E-002",
+        "E-003",
+        "E-004"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

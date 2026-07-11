@@ -1,0 +1,131 @@
+   681	        for hook in group.get("hooks", []) if isinstance(hook, dict)
+   682	    )
+   683	    pretool_groups = hooks.get("PreToolUse", [])
+   684	    global_pretool_first = bool(
+   685	        pretool_groups
+   686	        and isinstance(pretool_groups[0], dict)
+   687	        and not pretool_groups[0].get("matcher")
+   688	        and any(
+   689	            "tools/turn_contract.py" in str(hook.get("command") or "")
+   690	            for hook in pretool_groups[0].get("hooks", []) if isinstance(hook, dict)
+   691	        )
+   692	    )
+   693	    checks = [
+   694	        ("explain overrides action words", explain == EXPLAIN),
+   695	        ("history/audit prompt without execute verb is read-only", history_only == EXPLAIN),
+   696	        ("ambiguous active-run prompt defaults read-only", ambiguous == EXPLAIN),
+   697	        ("operator stop maps to pause", pause == PAUSE),
+   698	        ("repair request maps to execute", execute == EXECUTE),
+   699	        ("unrecognized English execution wording defaults read-only", indirect_english == EXPLAIN),
+   700	        ("target action blocked before real fanout", before_fanout),
+   701	        ("encoded network command blocked before fanout", encoded_before_fanout),
+   702	        ("renamed unknown script blocked before fanout", renamed_before_fanout),
+   703	        ("workers control command allowed before fanout", workers_allowed_before_fanout),
+   704	        ("out-of-tree workers.py cannot impersonate control plane",
+   705	         fake_workers_blocked_before_fanout),
+   706	        ("narrow sed print remains read-only before fanout", safe_sed_allowed_before_fanout),
+   707	        ("sed in-place mutation blocked before fanout", sed_in_place_blocked),
+   708	        ("sed write command blocked before fanout", sed_write_blocked),
+   709	        ("find file-output action blocked before fanout", find_file_output_blocked),
+   710	        ("protected control-plane denial is not a target-result action",
+   711	         protected_denial_not_target),
+   712	        ("old-session Agent receipts do not satisfy this turn", old_fanout_still_blocked),
+   713	        ("receipts without post-return disposition remain blocked",
+   714	         receipts_without_disposition_block),
+   715	        ("current receipts plus anchored disposition unlock target action",
+   716	         current_fanout_allows),
+   717	        ("missing contract blocks target action", missing_contract_blocks),
+   718	        ("malformed frontier blocks target action", malformed_frontier_blocks),
+   719	        ("missing frontier blocks target action", missing_frontier_blocks),
+   720	        ("malformed contract is rejected", malformed_contract_rejected),
+   721	        ("wrong contract schema is rejected", wrong_schema_rejected),
+   722	        ("cross-session contract reuse is rejected", wrong_session_rejected),
+   723	        ("stale contract is rejected", stale_contract_rejected),
+   724	        ("serial override requires current operator prompt", override.get("fanout_override") is True),
+   725	        ("internal task notification cannot replace operator turn contract",
+   726	         internal_notification_preserves_contract),
+   727	        ("Agent without binding tokens blocked", "必须包含" in evaluate_pretool(run, agent_bad, contract)),
+   728	        ("bound Agent call allowed", evaluate_pretool(run, agent_good, contract) == ""),
+   729	        ("completion Agent without full checklist is blocked",
+   730	         bool(evaluate_pretool(run, completion_bad, contract))),
+   731	        ("completion Agent with evidence hash and checklist is allowed",
+   732	         evaluate_pretool(run, completion_good, contract) == ""),
+   733	        ("explain mode blocks Bash", bool(evaluate_pretool(run, target_event, {"mode": EXPLAIN}))),
+   734	        ("pause mode allows CronList", evaluate_pretool(run, {"tool_name": "CronList", "tool_input": {}}, {"mode": PAUSE}) == ""),
+   735	        ("CronCreate requires current-turn CronList", cron_before_list),
+   736	        ("CronCreate allowed after current-turn empty CronList", cron_after_list),
+   737	        ("CronCreate without an active run is blocked",
+   738	         '"permissionDecision": "deny"' in (no_run_cron.stdout or "")),
+   739	        ("settings wires UserPromptSubmit contract", wired("UserPromptSubmit")),
+   740	        ("settings wires global PreToolUse contract", wired("PreToolUse")),
+   741	        ("settings runs turn contract selftest at SessionStart", session_start_selftest),
+   742	        ("global turn contract PreToolUse hook is first", global_pretool_first),
+   743	        ("settings wires Agent/Cron PostToolUse receipts", wired("PostToolUse")),
+   744	        ("settings wires failed tool receipts", wired("PostToolUseFailure")),
+   745	        ("settings wires Subagent lifecycle receipts",
+   746	         wired("SubagentStart") and wired("SubagentStop")),
+   747	        ("CronDelete rejects job not listed for this run", bool(evaluate_pretool(
+   748	            run, {"tool_name": "CronDelete", "tool_input": {"id": "otherjob"}}, contract))),
+   749	        ("memory write needs explicit approval", bool(evaluate_pretool(
+   750	            run, {"tool_name": "Write", "tool_input": {"file_path": "/tmp/.claude/x/memory/MEMORY.md"}},
+   751	            {"mode": EXECUTE}))),
+   752	        ("relative Bash memory path needs explicit approval", bool(evaluate_pretool(
+   753	            run, {"tool_name": "Bash", "tool_input": {
+   754	                "command": "mkdir -p .claude/x/memory && printf x > .claude/x/memory/MEMORY.md"}},
+   755	            contract))),
+   756	        ("read-only Bash memory access remains allowed", not bool(evaluate_pretool(
+   757	            run, {"tool_name": "Bash", "tool_input": {
+   758	                "command": "ls -la .claude/x/memory && cat .claude/x/memory/MEMORY.md"}},
+   759	            contract))),
+   760	        ("direct memory Read remains allowed", not bool(evaluate_pretool(
+   761	            run, {"tool_name": "Read", "tool_input": {
+   762	                "file_path": "/tmp/.claude/x/memory/MEMORY.md"}}, contract))),
+   763	        ("background review is blocked", bool(evaluate_pretool(
+   764	            run, {"tool_name": "Bash", "tool_input": {
+   765	                "command": "python tools/peer_review.py runs/x > /tmp/review.log 2>&1 & echo started"}},
+   766	            contract))),
+   767	        ("foreground review redirection is allowed", not bool(evaluate_pretool(
+   768	            run, {"tool_name": "Bash", "tool_input": {
+   769	                "command": "python tools/peer_review.py runs/x > /tmp/review.log 2>&1"}},
+   770	            contract))),
+   771	        ("protected runtime receipt cannot be edited", bool(evaluate_pretool(
+   772	            run, {"tool_name": "Write", "tool_input": {"file_path": str(run / "state" / "runtime_events.jsonl")}},
+   773	            contract))),
+   774	        ("protected runtime receipt remains readable", not bool(evaluate_pretool(
+   775	            run, {"tool_name": "Read", "tool_input": {"file_path": str(run / "state" / "runtime_events.jsonl")}},
+   776	            contract))),
+   777	    ]
+   778	    bad = [name for name, ok in checks if not ok]
+   779	    for name, ok in checks:
+   780	        print(("ok   " if ok else "FAIL ") + name)
+   781	    print("turn_contract selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+   782	    return 0 if not bad else 1
+   783	
+   784	
+   785	def main() -> int:
+   786	    parser = argparse.ArgumentParser(description="Xunji Claude Code turn contract hook")
+   787	    parser.add_argument("--selftest", action="store_true")
+   788	    args = parser.parse_args()
+   789	    if args.selftest:
+   790	        return _selftest()
+   791	    try:
+   792	        event = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace") or "{}")
+   793	    except Exception:
+   794	        return 0
+   795	    try:
+   796	        result = handle_event(event)
+   797	        if result:
+   798	            print(json.dumps(result, ensure_ascii=False))
+   799	    except Exception as exc:
+   800	        if str(event.get("hook_event_name") or "") == "PreToolUse":
+   801	            run_dir = find_active_run(RUNS, within_sec=6 * 60 * 60)
+   802	            if run_dir is not None:
+   803	                print(json.dumps(_deny(
+   804	                    "Xunji PreToolUse contract 内部异常，active run 按 fail-closed 阻断："
+   805	                    + type(exc).__name__), ensure_ascii=False))
+   806	        return 0
+   807	    return 0
+   808	
+   809	
+   810	if __name__ == "__main__":
+   811	    raise SystemExit(main())

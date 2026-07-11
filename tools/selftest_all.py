@@ -75,6 +75,9 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("sensor_upload",   ["tools/sensors/upload_probe.py", "--selftest"], "harmless upload proof sensor"),
     ("sensor_client_graybox", ["tools/sensors/client_graybox.py", "--selftest"], "client graybox phenomenon sensor"),
     ("state_project",   ["tools/state_project.py", "--selftest"], "markdown-derived run state projection"),
+    ("run_model",       ["tools/run_model.py", "--selftest"], "canonical front/status parser"),
+    ("runtime_receipts", ["tools/runtime_receipts.py", "--selftest"], "hook-derived Agent/Cron receipts"),
+    ("turn_contract",   ["tools/turn_contract.py", "--selftest"], "execute/explain/pause turn modes"),
     ("context_pack",    ["tools/context_pack.py", "--selftest"], "minimal subagent context pack"),
     # --- loop pipeline ---
     ("loop_state",       ["tools/loop_state.py", "--selftest"], "closed-loop progress and gate snapshot"),

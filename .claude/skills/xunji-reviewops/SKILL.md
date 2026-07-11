@@ -61,8 +61,8 @@ run:
    In Claude Code live runs, the review matrix is: full setup uses Codex plus the
    arkcli panel, with Codex as the synthesis brain; no Codex uses the arkcli
    panel as both reviewer set and brain; no arkcli uses Codex; neither available
-   falls back to a fresh-context Claude Code same-family reviewer. The arkcli
-   panel is Kimi-K2.7-Code + MiniMax-M3 + GLM-5.2.
+   leaves closure incomplete. A same-family pass can advise but is not an
+   independent vote. The arkcli panel is Kimi-K2.7-Code + GLM-5.2 only.
 4. If replay evidence is load-bearing or closure is near, run
    `python tools/check_run.py runs/<dir> --replay-verify` and re-adjudicate any
    `DIVERGED` evidence before relying on it.
@@ -72,6 +72,11 @@ run:
 
 Passing `check_run` means the structure is present. It does not prove the report
 is correct. Keep hunting if the evidence graph still exposes a live front.
+The independent-review gate additionally requires the latest content-addressed
+ReviewReceipt to match the current evidence index and a transcript-observed
+foreground invocation with matching receipt and bundle-hash output markers.
+Historical receipts remain audit history; only the latest
+hash is freshness-bearing, while every unresolved historical BLOCKER still matters.
 
 ## PR Ledger Closure
 

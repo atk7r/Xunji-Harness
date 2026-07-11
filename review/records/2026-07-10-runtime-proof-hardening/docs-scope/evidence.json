@@ -1,0 +1,63 @@
+{
+  "total": 1,
+  "confirmed": [
+    "E-001"
+  ],
+  "confirmed_findings": [
+    "E-001"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 - Claude-facing contract parity",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "root_rules.diff",
+        "workflow_core.diff",
+        "workflow_reference.diff",
+        "primary_skills.diff",
+        "agent_role_templates.diff",
+        "lifecycle_templates.diff",
+        "selftest_all.log",
+        "historical_failures.md",
+        "stale_reference_audit.json",
+        "installed-runtime-manifest.json"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "root_rules.diff",
+        "workflow_core.diff",
+        "workflow_reference.diff",
+        "primary_skills.diff",
+        "agent_role_templates.diff",
+        "lifecycle_templates.diff",
+        "selftest_all.log",
+        "historical_failures.md",
+        "stale_reference_audit.json",
+        "installed-runtime-manifest.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

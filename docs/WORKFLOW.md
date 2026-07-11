@@ -96,6 +96,27 @@ journal for interruption recovery. It records explicit `/loop` cycle start, plan
 action, write-result, interrupt, and end events. It is not evidence and does not
 replace `decisions.md` or `session_handoff.md`.
 
+`turn_contract.py` treats the current operator prompt as a transaction boundary.
+For an active run, `EXECUTE` may advance work, `EXPLAIN_ONLY` is read-only and has
+no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while only
+allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
+`state/runtime_events.jsonl` is a hook-owned hash chain for actual Agent/Cron/review
+tool events; never edit it or the turn/run-status JSON files directly.
+Target-action denials and later successful target actions are also recorded by
+hash. A denial is unresolved until a later successful event has the same tool and
+execution-action hash (for Bash, the command; descriptive metadata is ignored).
+In every turn mode, `output_gate.py` rejects all free-form final text after an
+unresolved target-action denial; this prevents a model that ignored EXPLAIN or
+PAUSE restrictions from rephrasing an unexecuted action as a result. The only
+non-result fallback is the gate's fixed three-line
+`XUNJI_EXECUTION_STATUS=DENIED` envelope, and normal Agent/closure gates still
+apply to it.
+Claude Code may emit `<task-notification>` through `UserPromptSubmit` when an
+Agent finishes. `turn_contract.py` treats it as an internal lifecycle message:
+it may receive the existing mode context but cannot replace or refresh the
+operator-authored contract. Otherwise the notification timestamp would
+invalidate the Agent receipt that caused it.
+
 Coverage classification may mark root 401/403 pages as `AUTH_GATE` and pure
 default/stub pages as `STUB_PAGE`. These flags only suppress anti-lump
 "independent application candidate" noise. They do not close the asset: final
@@ -197,16 +218,20 @@ into a conclusion.
 
 ## Serial vs Parallel
 
-The Agent Board is the default collaboration model, but "default" does not mean
-"always spawn more agents." Root chooses the smallest shape that preserves evidence
-quality and request discipline.
+The Agent Board is the default collaboration model. When the canonical front model
+reports at least four active fronts with no one shared concrete barrier, parallelism
+is mandatory in every `EXECUTE` turn: prepare two disjoint assignments and actually
+invoke two Agent tools with different assignment/front tokens. Old receipts and
+manual lifecycle prose do not satisfy a new turn.
 
-Stay **serial** when:
+Stay **serial** when the mandatory threshold is not active, or the current operator
+prompt explicitly grants a one-turn serial override:
 
 - There is one front, one asset, or one shared barrier, so another Agent would mostly
   duplicate traffic or context.
 - The front is low value and a single guarded proof step can settle it.
-- Request budget, WAF pressure, auth fragility, or host health is tight.
+- Request budget, WAF pressure, auth fragility, or host health requires a shared
+  barrier lane recorded by the front model.
 - A finding on one lane would materially change the next step for the others.
 
 Go **parallel** when:
@@ -222,6 +247,15 @@ Go **parallel** when:
 All Agents share the global guard state, request budget, host breakers, and run dir.
 Agent output is untrusted candidate material until the Single Synthesizer merges it
 through the evidence gate.
+
+`workers.py assign`, Agent Markdown, `heartbeat`, and `finish` are planning/display
+state only. Runtime proof comes from current-turn Claude `Agent` `PostToolUse`
+receipts whose prompts contain `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...` and whose
+tool-use IDs exist in the Claude transcript.
+Before the execute turn ends, each observed assignment must be `merged` with a
+canonical E/F/D disposition anchor, or `blocked/failed/abandoned` with `Reason:`
+and its canonical `Front:`. A terminal-looking `done` or chat summary is still
+unmerged work and the Stop gate rejects it.
 
 When an observation **grounds a product fingerprint** — i.e. while attacking an asset you
 fetch it and recognize the stack (or an opt-in `classify_hosts` tagged it `kb:<id>`) —
@@ -449,13 +483,14 @@ assets were only header / recon-classified, never examined. Before any such clai
   (`tools/knowledge_seed.py <id> --product … --from-body <saved>` scaffolds a
   `check_knowledge`-compliant skeleton — fill the TODOs).
 - **Independent review before closure (mandatory · HARD gate).** Self-review doesn't fix
-  self-review bias — spawn an independent fresh-context `general-purpose` reviewer
-  (`review/independent-reviewer.md`), record under `## Independent Review` in `review.md`,
-  resolve every finding. Standing-authorized (no re-asking); prefer a heterogeneous reviewer
-  (`tools/peer_review.py --into-run`) when egress is consented. `check_run.py` **hard-fails** a
-  closure with no completed `Independent Review` record. A heading, prose mention, or untouched
-  template choices do not count; a real reviewer/backend plus a block-scoped verdict
-  is required. Procedure: reference "Run-closure detail".
+  self-review bias. Run `tools/peer_review.py runs/<dir> --into-run` in the foreground,
+  retain the generated content-addressed `ReviewReceipt`, and resolve every finding.
+  `check_run.py` **hard-fails** a closure when the receipt is missing, stale relative
+  to the current evidence index, not backed by a transcript-observed foreground
+  invocation whose output carries the matching `XUNJI_REVIEW_RECEIPT` and
+  `XUNJI_REVIEW_BUNDLE` markers, or has unresolved ledger items. A heading, copied output, manual
+  Reviewer/Verdict, or untouched template does not count. Procedure: reference
+  "Run-closure detail".
 
 - **Mandatory retrospective before closure (HARD gate).** Close every pentest with an
   honest `retrospective.md` — what *I* got wrong/slow/missed (wrong calls, tunnel vision,
@@ -473,12 +508,17 @@ assets were only header / recon-classified, never examined. Before any such clai
   themselves. Only `GHOST_COMPLETE` / `NORMAL_COMPLETE` in `decisions.md` are
   completion actions, and `check_run.py` accepts them only with a substantive
   `## CodexCompletionReview` section containing Reviewer + Verdict + cross-check
-  detail, not a prose keyword mention or single self-asserted field.
+  detail and a real Agent receipt for
+  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current hash>
+  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`, plus
+  a response containing `XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all
+  four checks; a prose keyword or bare PASS/WARN does not count.
 
 - **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
   independent review resolved, retrospective written), write `GHOST_COMPLETE` at
   the end of `decisions.md`. In the same turn, cancel any active scheduled `/loop`
-  job and append a loop journal `end` record whose note contains
+  job after a successful current-turn `CronList`; only delete an ID observed for
+  this run, list again to prove quiescence, and append a loop journal `end` record whose note contains
   `cron_cancelled=<job-id|none>`. The loop detects this and stops. No operator
   review required.
 

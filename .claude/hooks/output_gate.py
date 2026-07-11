@@ -101,6 +101,50 @@ try:
     import loop_state as _loop_state
 except Exception:
     _loop_state = None
+try:
+    import turn_contract as _turn_contract
+except Exception:
+    _turn_contract = None
+try:
+    import runtime_receipts as _runtime_receipts
+except Exception:
+    _runtime_receipts = None
+
+
+_DENIED_ONLY_RE = re.compile(
+    r"\AXUNJI_EXECUTION_STATUS=DENIED\n"
+    r"未执行目标动作；不存在该动作的实测结果。\n"
+    r"下一行动: F-\d{3} 修复 PreToolUse 前置条件后重试同一动作\Z"
+)
+
+
+def _active_run_declared(pointer: Path | None = None) -> bool:
+    """Conservatively detect an operator-selected run if lookup itself failed."""
+    marker = pointer or Path(os.environ.get(
+        "XUNJI_ACTIVE_RUN_FILE", str(ROOT / ".claude" / "xunji_active_run")))
+    try:
+        return marker.is_file() and bool(marker.read_text(
+            encoding="utf-8", errors="replace").strip())
+    except Exception:
+        return marker.exists()
+
+
+def _denied_result_claim_reason(
+    msg: str,
+    denied: list[dict],
+) -> str:
+    if not denied:
+        return ""
+    if _DENIED_ONLY_RE.fullmatch(_strip_invisible(msg).strip()):
+        return ""
+    return (
+        "[未执行动作真实性硬拦] 本回合仍有未被同工具、同执行动作成功回执消解的"
+        " PreToolUse 目标动作拒绝。禁止自由文本和任何结果转述；继续完成前置条件并"
+        "重试原动作，或仅输出以下三行：\n"
+        "XUNJI_EXECUTION_STATUS=DENIED\n"
+        "未执行目标动作；不存在该动作的实测结果。\n"
+        "下一行动: F-<当前前沿三位编号> 修复 PreToolUse 前置条件后重试同一动作"
+    )
 
 
 def _strip_invisible(s: str) -> str:
@@ -331,13 +375,10 @@ def _protocol_block_reason(msg: str, run_dir: Path) -> str:
     sample = ", ".join(active[:6])
     more = "" if len(active) <= 6 else f" 等 {len(active)} 个"
     scope = f"active 前沿({sample}{more})" if active else "尚未完成的 active run"
-    suggested = (state.get("next_actions") or [""])[0]
-    suggestion = f" 当前控制面建议: {suggested}" if suggested else ""
     return (
         f"[输出协议硬拦] 当前 {scope}；{coda_error}。"
         "本轮必须以唯一且具体的 `下一行动: <对象 + 可执行动作>` 结尾。"
         "空值、占位符、泛泛“继续分析”、多动作/多 F-id、多个 Coda、错误 F-id 或 BLOCKED 均不放行。"
-        f"{suggestion}"
     )
 
 
@@ -352,13 +393,26 @@ def main() -> None:
     except Exception:
         sys.exit(0)
 
+    run_dir = None
+    turn_mode = "EXECUTE"
+    contract: dict = {}
     try:
         msg = event.get("last_assistant_message") or ""
         if not isinstance(msg, str) or not msg.strip():
             sys.exit(0)
 
+        run_dir = find_active_run(RUNS)
+        if run_dir is not None and _turn_contract is not None:
+            try:
+                contract = _turn_contract.load_contract(
+                    run_dir, session_id=str(event.get("session_id") or ""))
+                turn_mode = str(contract.get("mode") or "EXECUTE")
+            except Exception:
+                turn_mode = "EXECUTE"
+        protocol_exempt = turn_mode in {"EXPLAIN_ONLY", "PAUSED_BY_OPERATOR"}
+
         # ---- Drift detection ----
-        hits = detect_drift(msg)
+        hits = [] if protocol_exempt else detect_drift(msg)
         tail = msg[-500:] if len(msg) > 500 else msg
         tail_hits = [p for p in hits if re.search(re.escape(p), tail, re.IGNORECASE)]
 
@@ -379,16 +433,26 @@ def main() -> None:
             drift_flags.append("protocol_violation")
 
         # option_list: >=2 numbered option lines (autonomy decay)
-        if detect_option_list(msg):
+        if not protocol_exempt and detect_option_list(msg):
             drift_flags.append("option_list")
 
         # Find active run and check frontier staleness
-        run_dir = find_active_run(RUNS)
-
         if run_dir is not None:
             frontier = run_dir / "frontier.md"
             claude_md = ROOT / "CLAUDE.md"
             prev_state = SessionStateManager.load(run_dir)
+            if _runtime_receipts is None:
+                raise RuntimeError("runtime_receipts unavailable")
+            unresolved = _runtime_receipts.unresolved_target_denials(
+                run_dir,
+                session_id=str(event.get("session_id") or ""),
+                since=float(contract.get("updated_at") or 0.0),
+            )
+            denied_claim = _denied_result_claim_reason(
+                msg, unresolved)
+            if denied_claim:
+                print(json.dumps({"decision": "block", "reason": denied_claim}, ensure_ascii=False))
+                sys.exit(0)
             # Reset stale session_state (Decision B-2)
             stale_sec = SESSION_STATE_STALE_SEC
             prev_updated = _valid_ts(prev_state.get("updated_at"), now)
@@ -409,7 +473,7 @@ def main() -> None:
             else:
                 frontier_mtime = 0.0
 
-            protocol_block = _protocol_block_reason(msg, run_dir)
+            protocol_block = "" if protocol_exempt else _protocol_block_reason(msg, run_dir)
 
             # ---- Escalation tracking: consecutive drift count ----
             drift_count = _next_drift_count(prev_state, drift_flags)
@@ -454,8 +518,15 @@ def main() -> None:
             sys.exit(0)
 
         sys.exit(0)
-    except Exception:
-        # FAIL-OPEN 兜底: 本 gate 自身任何故障不卡会话
+    except Exception as exc:
+        if (run_dir is not None or _active_run_declared()) and turn_mode not in {
+            "EXPLAIN_ONLY", "PAUSED_BY_OPERATOR"
+        }:
+            print(json.dumps({
+                "decision": "block",
+                "reason": "[输出协议 fail-closed] active run 的 output_gate 内部异常："
+                          + type(exc).__name__ + "。先修 hook/selftest，不得无 Coda 静默结束。",
+            }, ensure_ascii=False))
         sys.exit(0)
 
 
@@ -466,6 +537,36 @@ def _selftest() -> int:
     import tempfile
 
     checks: list[tuple[str, bool]] = []
+    denied_receipt = [{"tool_name": "Bash", "target_action": True}]
+    checks.append(("denied target cannot invent HTTP/TLS measurements", bool(
+        _denied_result_claim_reason(
+            "GET / 返回 200，Server: nginx/1.24.0，TLS 正常，延迟 12ms。",
+            denied_receipt))))
+    checks.append(("denied target cannot invent Agent receipt coverage", bool(
+        _denied_result_claim_reason(
+            "两个 front 已由真实 Agent 回执覆盖，满足 fan-out。",
+            denied_receipt))))
+    checks.append(("free-form honest denial is still blocked", bool(
+        _denied_result_claim_reason(
+            "命令被 PreToolUse 拒绝，未执行，因此没有目标结果。",
+            denied_receipt))))
+    checks.append(("paraphrased claim cannot bypass unresolved-denial gate", bool(
+        _denied_result_claim_reason(
+            "站点有回应，握手过程也很顺利。", denied_receipt))))
+    checks.append(("free-form honest prose is rejected while denial is unresolved", bool(
+        _denied_result_claim_reason(
+            "命令被拒绝，未执行。", denied_receipt))))
+    checks.append(("fixed denial-only envelope is allowed", not bool(
+        _denied_result_claim_reason(
+            "XUNJI_EXECUTION_STATUS=DENIED\n"
+            "未执行目标动作；不存在该动作的实测结果。\n"
+            "下一行动: F-001 修复 PreToolUse 前置条件后重试同一动作",
+            denied_receipt))))
+    pointer = Path(tempfile.mkdtemp()) / "active-run"
+    checks.append(("missing active-run pointer is not declared", not _active_run_declared(pointer)))
+    pointer.write_text("runs/example\n", encoding="utf-8")
+    checks.append(("non-empty active-run pointer is fail-closed context",
+                   _active_run_declared(pointer)))
 
     # detect_drift
     checks.append(("empty -> []", detect_drift("") == []))
@@ -600,8 +701,11 @@ def _selftest() -> int:
     (closed_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
     checks.append(("protocol fronts detect open run", _active_protocol_fronts(open_run) == ["F-001"]))
     checks.append(("protocol fronts ignore closed run", _active_protocol_fronts(closed_run) == []))
+    open_coda_block = _protocol_block_reason("本轮完成，继续。", open_run)
     checks.append(("open run without 下一行动 hard-blocks",
-                   "输出协议硬拦" in _protocol_block_reason("本轮完成，继续。", open_run)))
+                   "输出协议硬拦" in open_coda_block))
+    checks.append(("Coda correction does not inject stale strategy advice",
+                   "当前控制面建议" not in open_coda_block))
     checks.append(("open run with 下一行动 passes protocol",
                    _protocol_block_reason("下一行动: F-001 尝试登录错误页对照", open_run) == ""))
     checks.append(("closed but incomplete run still requires closure action",
@@ -698,6 +802,20 @@ def _selftest() -> int:
     checks.append(("hook subprocess honors explicit active pointer and blocks open front",
                    proc.returncode == 0 and '"decision": "block"' in (proc.stdout or "")
                    and "F-900" in (proc.stdout or "")))
+    (live_run / "state").mkdir(exist_ok=True)
+    (live_run / "state" / "turn_contract.json").write_text(json.dumps({
+        "schema": "xunji.turn_contract.v1", "mode": "EXPLAIN_ONLY",
+        "session_id": "s-explain", "updated_at": time.time(),
+    }), encoding="utf-8")
+    explain_proc = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve())],
+        input=json.dumps({"session_id": "s-explain", "last_assistant_message":
+                          "原因是 Agent Board 过去只在 Stop 阶段检查。"}, ensure_ascii=False),
+        text=True, capture_output=True, encoding="utf-8", errors="replace",
+        env=env, timeout=10,
+    )
+    checks.append(("EXPLAIN_ONLY response is not forced to add Coda",
+                   explain_proc.returncode == 0 and not (explain_proc.stdout or "").strip()))
 
     closure_run = runs_root / "closure_run"
     closure_run.mkdir()

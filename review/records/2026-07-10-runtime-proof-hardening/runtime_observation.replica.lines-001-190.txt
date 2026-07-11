@@ -1,0 +1,190 @@
+     1	{
+     2	  "checks": {
+     3	    "bare_completion_pass_rejected": true,
+     4	    "completion_prompt_requires_checks": true,
+     5	    "completion_prompt_with_checks_allowed": true,
+     6	    "cron_allows_after_empty_list": true,
+     7	    "cron_final_quiescent": true,
+     8	    "cron_requires_list": true,
+     9	    "duplicate_cron_denied": true,
+    10	    "execute_status_active": true,
+    11	    "explain_denies_bash": true,
+    12	    "listed_delete_allowed": true,
+    13	    "malformed_assignments_denied": true,
+    14	    "malformed_contract_denied": true,
+    15	    "malformed_frontier_denied": true,
+    16	    "merged_agents_accepted": true,
+    17	    "pause_denies_edit": true,
+    18	    "post_agent_target_allowed": true,
+    19	    "pre_agent_target_denied": true,
+    20	    "receipt_chain_valid": true,
+    21	    "review_invocation_time_bound": true,
+    22	    "sessionstart_contract_selftest_wired": true,
+    23	    "structured_completion_accepted": true,
+    24	    "unmerged_agents_detected": true,
+    25	    "unrelated_delete_denied": true,
+    26	    "wrong_contract_schema_denied": true
+    27	  },
+    28	  "observations": {
+    29	    "agent_after_disposition": {
+    30	      "assignments": [
+    31	        "A-auth-001",
+    32	        "A-web-001"
+    33	      ],
+    34	      "count": 2,
+    35	      "disposition_satisfied": true,
+    36	      "fronts": [
+    37	        "F-001",
+    38	        "F-002"
+    39	      ],
+    40	      "pending": [],
+    41	      "satisfied": true
+    42	    },
+    43	    "agent_before_disposition": {
+    44	      "assignments": [
+    45	        "A-auth-001",
+    46	        "A-web-001"
+    47	      ],
+    48	      "count": 2,
+    49	      "disposition_satisfied": false,
+    50	      "fronts": [
+    51	        "F-001",
+    52	        "F-002"
+    53	      ],
+    54	      "pending": [
+    55	        "A-auth-001: disposition 早于本轮 Agent 返回",
+    56	        "A-web-001: disposition 早于本轮 Agent 返回"
+    57	      ],
+    58	      "satisfied": true
+    59	    },
+    60	    "bare_pass_rejected": true,
+    61	    "completion_prompt_missing_checks": {
+    62	      "hookSpecificOutput": {
+    63	        "hookEventName": "PreToolUse",
+    64	        "permissionDecision": "deny",
+    65	        "permissionDecisionReason": "Completion Agent prompt 必须包含 EVIDENCE_INDEX=<current sha1> 和 CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger；缺少: report_parity, severity_artifacts, reachable_frontier, review_ledger"
+    66	      }
+    67	    },
+    68	    "completion_prompt_structured": {},
+    69	    "cron_create_after_empty_list": {},
+    70	    "cron_create_before_list": {
+    71	      "hookSpecificOutput": {
+    72	        "hookEventName": "PreToolUse",
+    73	        "permissionDecision": "deny",
+    74	        "permissionDecisionReason": "Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。missing successful CronList receipt"
+    75	      }
+    76	    },
+    77	    "cron_quiescent": [
+    78	      true,
+    79	      "latest successful CronList proves no active run job"
+    80	    ],
+    81	    "delete_observed_job": {},
+    82	    "delete_unrelated_job": {
+    83	      "hookSpecificOutput": {
+    84	        "hookEventName": "PreToolUse",
+    85	        "permissionDecision": "deny",
+    86	        "permissionDecisionReason": "CronDelete 只可删除当前 CronList 观察到的本 run job：job job-unrelated was not observed as a task for run observed_run"
+    87	      }
+    88	    },
+    89	    "duplicate_create_without_relist": {
+    90	      "hookSpecificOutput": {
+    91	        "hookEventName": "PreToolUse",
+    92	        "permissionDecision": "deny",
+    93	        "permissionDecisionReason": "Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。CronList receipt predates latest CronCreate/CronDelete"
+    94	      }
+    95	    },
+    96	    "execute_context": {
+    97	      "hookSpecificOutput": {
+    98	        "additionalContext": "[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。 fanout_required=true (open/probing/working/type-A 均为 active); 先真实调用至少两个不同 front 的 Agent。",
+    99	        "hookEventName": "UserPromptSubmit"
+   100	      }
+   101	    },
+   102	    "explain_blocks_bash": {
+   103	      "hookSpecificOutput": {
+   104	        "hookEventName": "PreToolUse",
+   105	        "permissionDecision": "deny",
+   106	        "permissionDecisionReason": "当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。"
+   107	      }
+   108	    },
+   109	    "explain_context": {
+   110	      "hookSpecificOutput": {
+   111	        "additionalContext": "[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。",
+   112	        "hookEventName": "UserPromptSubmit"
+   113	      }
+   114	    },
+   115	    "foreground_review_observed": true,
+   116	    "malformed_assignments_blocks_agent": {
+   117	      "hookSpecificOutput": {
+   118	        "hookEventName": "PreToolUse",
+   119	        "permissionDecision": "deny",
+   120	        "permissionDecisionReason": "Agent Board 强制：Agent token 未绑定 workers.py 生成的 assignment/front。"
+   121	      }
+   122	    },
+   123	    "malformed_contract_blocks_target": {
+   124	      "hookSpecificOutput": {
+   125	        "hookEventName": "PreToolUse",
+   126	        "permissionDecision": "deny",
+   127	        "permissionDecisionReason": "缺少当前 session 的 turn contract；先由 UserPromptSubmit 记录 EXECUTE/EXPLAIN/PAUSE 模式。"
+   128	      }
+   129	    },
+   130	    "malformed_frontier_blocks_target": {
+   131	      "hookSpecificOutput": {
+   132	        "hookEventName": "PreToolUse",
+   133	        "permissionDecision": "deny",
+   134	        "permissionDecisionReason": "canonical frontier 状态缺失或有 schema error；active run 按 fail-closed 禁止目标动作，先修复 frontier.md 的 Status/Barrier class/Current depth。"
+   135	      }
+   136	    },
+   137	    "pause_blocks_edit": {
+   138	      "hookSpecificOutput": {
+   139	        "hookEventName": "PreToolUse",
+   140	        "permissionDecision": "deny",
+   141	        "permissionDecisionReason": "当前回合是 PAUSED_BY_OPERATOR：只允许读取状态并执行 CronList/CronDelete；不得继续目标动作或改写前沿。"
+   142	      }
+   143	    },
+   144	    "pause_context": {
+   145	      "hookSpecificOutput": {
+   146	        "additionalContext": "[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。",
+   147	        "hookEventName": "UserPromptSubmit"
+   148	      }
+   149	    },
+   150	    "pre_A-auth-001": {},
+   151	    "pre_A-web-001": {},
+   152	    "run_status": {
+   153	      "reason": "operator prompt requested execution/resume",
+   154	      "schema": "xunji.turn_contract.v1",
+   155	      "session_id": "s-exec",
+   156	      "status": "active",
+   157	      "updated_at": 1783730613.311324
+   158	    },
+   159	    "runtime_chain": {
+   160	      "errors": [],
+   161	      "events": 21
+   162	    },
+   163	    "structured_completion_accepted": true,
+   164	    "target_after_agents": {},
+   165	    "target_before_agents": {
+   166	      "hookSpecificOutput": {
+   167	        "hookEventName": "PreToolUse",
+   168	        "permissionDecision": "deny",
+   169	        "permissionDecisionReason": "Agent Board 强制：当前至少 4 个独立 active fronts（open/probing/working/type-A）；真实 Agent 回执覆盖两个不同 front 前，Root Bash 只允许只读命令和 workers/run_model/loop_state 控制面命令。"
+   170	      }
+   171	    },
+   172	    "wrong_schema_blocks_target": {
+   173	      "hookSpecificOutput": {
+   174	        "hookEventName": "PreToolUse",
+   175	        "permissionDecision": "deny",
+   176	        "permissionDecisionReason": "缺少当前 session 的 turn contract；先由 UserPromptSubmit 记录 EXECUTE/EXPLAIN/PAUSE 模式。"
+   177	      }
+   178	    }
+   179	  },
+   180	  "runtime_events": [
+   181	    {
+   182	      "action_sha256": "1112060b806e31b4e38a08977789c5bb218b08c6a319c0622a5caacc663e2945",
+   183	      "agent_id": "",
+   184	      "agent_type": "",
+   185	      "assignment": "",
+   186	      "completion_review": false,
+   187	      "decision": "deny",
+   188	      "decision_reason": "当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。",
+   189	      "evidence_index_hash": "",
+   190	      "front": "",

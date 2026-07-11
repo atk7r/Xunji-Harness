@@ -1,0 +1,184 @@
+{
+  "total": 4,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 - Prompt modes and active-run hooks",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "output_gate.diff",
+        "run_gate.hunks-01.diff",
+        "run_gate.hunks-02.diff",
+        "settings.diff",
+        "turn_contract.lines-001-170.txt",
+        "turn_contract.lines-171-340.txt",
+        "turn_contract.lines-341-510.txt",
+        "turn_contract.lines-511-end.txt",
+        "run_model.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "output_gate.diff",
+        "run_gate.hunks-01.diff",
+        "run_gate.hunks-02.diff",
+        "settings.diff",
+        "turn_contract.lines-001-170.txt",
+        "turn_contract.lines-171-340.txt",
+        "turn_contract.lines-341-510.txt",
+        "turn_contract.lines-511-end.txt",
+        "run_model.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 - Agent and Cron receipts",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "runtime_receipts.lines-001-150.txt",
+        "runtime_receipts.lines-151-300.txt",
+        "runtime_receipts.lines-301-450.txt",
+        "runtime_receipts.lines-451-end.txt",
+        "workers.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "runtime_receipts.lines-001-150.txt",
+        "runtime_receipts.lines-151-300.txt",
+        "runtime_receipts.lines-301-450.txt",
+        "runtime_receipts.lines-451-end.txt",
+        "workers.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 - Installed runtime observation",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "runtime_observation.source.txt",
+        "installed-settings.json",
+        "runtime_observation.summary.json",
+        "runtime_observation.replica.summary.json"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "runtime_observation.source.txt",
+        "installed-settings.json",
+        "runtime_observation.summary.json",
+        "runtime_observation.replica.summary.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004 - Repository regression",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "selftest_all.log",
+        "peer_review.round2.md",
+        "disposition.md"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "selftest_all.log",
+        "peer_review.round2.md",
+        "disposition.md"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

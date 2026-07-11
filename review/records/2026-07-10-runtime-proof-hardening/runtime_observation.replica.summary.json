@@ -1,0 +1,69 @@
+{
+  "agent_after_disposition": {
+    "assignments": [
+      "A-auth-001",
+      "A-web-001"
+    ],
+    "count": 2,
+    "disposition_satisfied": true,
+    "fronts": [
+      "F-001",
+      "F-002"
+    ],
+    "pending": [],
+    "satisfied": true
+  },
+  "checks": {
+    "bare_completion_pass_rejected": true,
+    "completion_prompt_requires_checks": true,
+    "completion_prompt_with_checks_allowed": true,
+    "cron_allows_after_empty_list": true,
+    "cron_final_quiescent": true,
+    "cron_requires_list": true,
+    "duplicate_cron_denied": true,
+    "execute_status_active": true,
+    "explain_denies_bash": true,
+    "listed_delete_allowed": true,
+    "malformed_assignments_denied": true,
+    "malformed_contract_denied": true,
+    "malformed_frontier_denied": true,
+    "merged_agents_accepted": true,
+    "pause_denies_edit": true,
+    "post_agent_target_allowed": true,
+    "pre_agent_target_denied": true,
+    "receipt_chain_valid": true,
+    "review_invocation_time_bound": true,
+    "sessionstart_contract_selftest_wired": true,
+    "structured_completion_accepted": true,
+    "unmerged_agents_detected": true,
+    "unrelated_delete_denied": true,
+    "wrong_contract_schema_denied": true
+  },
+  "cron_quiescent": [
+    true,
+    "latest successful CronList proves no active run job"
+  ],
+  "denials": {
+    "completion_prompt_missing_checks": "Completion Agent prompt 必须包含 EVIDENCE_INDEX=<current sha1> 和 CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger；缺少: report_parity, severity_artifacts, reachable_frontier, review_ledger",
+    "cron_create_before_list": "Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。missing successful CronList receipt",
+    "delete_unrelated_job": "CronDelete 只可删除当前 CronList 观察到的本 run job：job job-unrelated was not observed as a task for run observed_run",
+    "duplicate_create_without_relist": "Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。CronList receipt predates latest CronCreate/CronDelete",
+    "explain_blocks_bash": "当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。",
+    "malformed_assignments_blocks_agent": "Agent Board 强制：Agent token 未绑定 workers.py 生成的 assignment/front。",
+    "malformed_contract_blocks_target": "缺少当前 session 的 turn contract；先由 UserPromptSubmit 记录 EXECUTE/EXPLAIN/PAUSE 模式。",
+    "malformed_frontier_blocks_target": "canonical frontier 状态缺失或有 schema error；active run 按 fail-closed 禁止目标动作，先修复 frontier.md 的 Status/Barrier class/Current depth。",
+    "pause_blocks_edit": "当前回合是 PAUSED_BY_OPERATOR：只允许读取状态并执行 CronList/CronDelete；不得继续目标动作或改写前沿。",
+    "target_before_agents": "Agent Board 强制：当前至少 4 个独立 active fronts（open/probing/working/type-A）；真实 Agent 回执覆盖两个不同 front 前，Root Bash 只允许只读命令和 workers/run_model/loop_state 控制面命令。",
+    "wrong_schema_blocks_target": "缺少当前 session 的 turn contract；先由 UserPromptSubmit 记录 EXECUTE/EXPLAIN/PAUSE 模式。"
+  },
+  "event_count": 21,
+  "event_digest_sha256": "8b2f727d966a4c82199bc79cc0735f9e3576c936e35e5cd00c0bea679146da97",
+  "first_receipt_hash": "8fa0c9d18f07712b2cf007d82d860c7f8ed7dcf12d593bbc16e91479ad8627e2",
+  "last_receipt_hash": "f02916c7531fe47b31c7d58278bb112eaa49f7328bc5d30a79d0933ad66ba585",
+  "runtime_chain": {
+    "errors": [],
+    "events": 21
+  },
+  "schema": "xunji.runtime_observation.replica-digest.v1",
+  "structured_completion_accepted": true
+}

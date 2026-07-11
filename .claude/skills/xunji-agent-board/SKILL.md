@@ -34,8 +34,10 @@ must not be treated as the Root driver's instruction source.
 - Single Synthesizer merges through the evidence gate, allocates canonical E-ids,
   resolves conflicts, and updates canonical Markdown.
 - `workers.py assign` means "lane prepared", not "Claude Agent is running".
-  When Root actually starts a Claude Agent tool, record
-  `workers.py heartbeat <run> <agent> --status running --note "<started>"`.
+  When Root actually starts a Claude Agent tool, its prompt must include
+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. The hook records the real
+  transcript-backed receipt automatically. `heartbeat` is optional display state
+  and never proves execution.
   When the Agent returns or is intentionally abandoned/blocked, record
   `workers.py finish <run> <agent> --status <done|blocked|failed|abandoned>`.
   Closure is blocked while any assigned Agent remains non-terminal.
@@ -134,8 +136,13 @@ Go parallel when:
 Stay serial when:
 
 - There is one front, one asset, or one shared barrier.
-- Request budget, WAF pressure, auth fragility, or host health is tight.
 - One lane's result would materially change the next step for all others.
+
+When at least four active fronts do not all share one concrete barrier, every
+`EXECUTE` turn must actually invoke two Agents on disjoint assignment/front pairs.
+Only the operator's current prompt may grant a one-turn serial override. Old
+receipts, `heartbeat`, Agent files, model-claimed budgets, and decisions prose do
+not bypass this rule.
 
 ## Commands
 
@@ -155,10 +162,25 @@ Plan and assign:
 python tools/workers.py suggest runs/<dir>
 python tools/workers.py plan runs/<dir>
 python tools/workers.py assign runs/<dir> --role web-hunter --front F-001
-python tools/workers.py heartbeat runs/<dir> A-web-hunter-001 --status running --note "Agent tool started"
 python tools/context_pack.py runs/<dir> --agent A-web-hunter-001
 rg -n "Reasoning style|Loop budget|Operator Profile" runs/<dir>/agents/A-web-hunter-001.md runs/<dir>/context/F-001.web-hunter.md
 ```
+
+Then invoke the Claude `Agent` tool with
+`XUNJI_ASSIGNMENT=A-web-hunter-001 XUNJI_FRONT=F-001` in its prompt. Repeat for a
+second disjoint lane when fan-out is required. After the real call, `heartbeat`
+may mirror progress for humans, but it is not a gate credential.
+
+After Root adjudicates the result, close the assignment with an auditable note:
+
+```bash
+python tools/workers.py finish runs/<dir> A-web-hunter-001 --status merged --note "Evidence: E-007; Front: F-001; candidate merged"
+python tools/workers.py finish runs/<dir> A-web-hunter-002 --status blocked --note "Reason: shared auth barrier; Front: F-002"
+```
+
+`done` means the Agent returned but Root still owes merge/refute/adjudication; it
+does not satisfy the execute-turn Stop gate. The disposition timestamp must be
+newer than that Agent's current-turn receipt.
 
 Before merging:
 
@@ -206,6 +228,9 @@ After changing Agent Board behavior, templates, or checks, run:
 
 ```bash
 python tools/workers.py --selftest
+python tools/run_model.py --selftest
+python tools/runtime_receipts.py --selftest
+python tools/turn_contract.py --selftest
 python tools/context_pack.py --selftest
 python tools/js_inventory.py --selftest
 python tools/saturation.py --selftest

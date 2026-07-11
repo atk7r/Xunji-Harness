@@ -1,0 +1,97 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index ee1b212..7f5d515 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -124 +124,10 @@ observe -> update state graph -> decompose fronts
+-- **Stop Coda is mechanically enforced.** While `.claude/xunji_active_run`
++- **The current operator prompt is a turn contract.** `turn_contract.py` classifies
++  an active-run turn as `EXECUTE`, `EXPLAIN_ONLY`, or `PAUSED_BY_OPERATOR`.
++  A why/explain-only request is read-only: answer it directly, do not modify the
++  run, probe, spawn Agents, or add a fake Coda. An operator stop/pause preserves
++  every active front and permits only state reads plus `CronList`/bound
++  `CronDelete`; it is not Completion and must not create a completion marker.
++  Execution begins/resumes only from a prompt with an explicit action verb such
++  as `/loop`, continue/resume, execute, implement, or fix. Ambiguous declarative
++  prompts default read-only; never infer permission to resume target work.
++- **Stop Coda is mechanically enforced only for `EXECUTE`.** While `.claude/xunji_active_run`
+@@ -129,0 +139,7 @@ observe -> update state graph -> decompose fronts
++- **A denied target action is not a result.** It remains unresolved until the
++  same tool and identical execution-relevant input later has a transcript-backed
++  successful receipt; descriptive tool metadata does not count.
++  Fix the prerequisite and retry the original action in the same turn. While the
++  denial is unresolved, free-form final text is rejected; if execution truly
++  cannot continue, use only the exact three-line
++  `XUNJI_EXECUTION_STATUS=DENIED` envelope required by `output_gate.py`.
+@@ -181,4 +197,14 @@ observe -> update state graph -> decompose fronts
+-  (no SharedBarrier group). The Root MUST spawn >= 2 subagents via workers.py
+-  assign — never do all fronts serially when breadth would help.
+-- Stay serial only for: a single low-value front, a tight request budget under
+-  50k tokens, or fronts that share a barrier class (SharedBarrier group).
++  (no SharedBarrier group). In **every EXECUTE turn**, the Root MUST create at
++  least two disjoint `workers.py assign` lanes and actually invoke at least two
++  Claude `Agent` tool calls. Each prompt must carry
++  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`; only transcript-backed
++  `PostToolUse` receipts from the current session/turn count. Agent files,
++  `heartbeat`, `finished_at`, prose, and receipts from an older turn do not count.
++  Before Stop, every current-turn Agent must be dispositioned with
++  `workers.py finish`: `merged` cites a canonical `Evidence:/Front:/Decision:`
++  anchor; `blocked/failed/abandoned` cites `Reason:` plus its canonical `Front:`.
++  `done` or a displayed summary still means unmerged and remains blocked.
++- Stay serial only when fewer than four active fronts remain, all active fronts
++  share one concrete barrier class, or the operator's **current prompt** explicitly
++  allows serial execution. A note in `decisions.md`, a model-claimed token budget,
++  or an old override cannot bypass the gate.
+@@ -275,10 +301,6 @@ Only two pauses; each requires a codex gate before the pause:
+-- **Reviewer timeout escalation:** If the independent peer_review (via codex) is
+-  unavailable for 2 consecutive attempts (timeout / empty response / API error),
+-  the Root escalates: manually write the review into `review.md` as
+-  `Reviewer: manual-driver (codex unavailable <date>)`. The manual review MUST
+-  cover the same dimensions — evidence gate, coverage, false positives, shallow
+-  closure, claim integrity, missed surface, artifact cross-check. check_run
+-  accepts manual-driver reviews when codex is confirmed unavailable.
+-  Self-review bias is mitigated by: (a) the manual review MUST be written in
+-  review.md before the Root reads it for the completion decision, (b) the
+-  requirement to cite specific file:line evidence, not prose impressions.
++- **Independent review cannot be self-filled.** A timeout, empty response, API
++  error, manual `Reviewer:` prose, copied backend output, or a hand-written PASS
++  never satisfies closure. Run `tools/peer_review.py ... --into-run` in the
++  foreground, retain its content-addressed `ReviewReceipt`, resolve every ledger
++  item, and rerun after evidence changes. If the required backend matrix remains
++  unavailable, the run remains open/paused with the limitation recorded.
+@@ -293,2 +315,6 @@ Only two pauses; each requires a codex gate before the pause:
+-  concrete cross-check results in `decisions.md`. Only if codex confirms completion
+-  may the Root pause and deliver the report.
++  concrete cross-check results in `decisions.md`. The Agent prompt must include
++  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
++  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.
++  Its response must echo `XUNJI_COMPLETION_VERDICT=PASS`, the same evidence hash,
++  and all four checks; bare PASS/WARN prose does not count. Only that current
++  transcript-backed receipt plus the structured section satisfies the gate.
+@@ -305,0 +332,3 @@ Only two pauses; each requires a codex gate before the pause:
++- Never promote a retrospective or run note into Claude long-term memory unless
++  the operator explicitly approves that memory write in the current prompt.
++  Runtime receipt/turn-state files are hook-owned and must never be edited directly.
+diff --git a/docs/ROUTER.md b/docs/ROUTER.md
+index a40fbfb..3408daf 100644
+--- a/docs/ROUTER.md
++++ b/docs/ROUTER.md
+@@ -232,8 +232,6 @@ Output: `review.md` · reopened/downgraded fronts if needed · next autonomous f
+-**Before any closure / "explored enough" claim, the Reviewer MUST include an independent
+-reviewer** — a fresh-context `general-purpose` sub-agent (standing-authorized) per
+-`review/independent-reviewer.md`; self-review does not fix self-review bias. Its findings
+-go under `## Independent Review` in `review.md` and must be resolved before closing.
+-`tools/check_run.py` enforces this at the closure gate. When the operator accepts data
+-egress and a heterogeneous backend is available, prefer `tools/peer_review.py --into-run`
+-(or `check_run.py --auto-peer-review`) — an *orthogonal* model catches shared blind spots
+-a same-model sub-agent can't; the sub-agent is the egress-free fallback.
++**Before any closure / "explored enough" claim, the Reviewer MUST obtain a real
++independent review.** Run `tools/peer_review.py runs/<dir> --into-run` in the
++foreground and resolve its PR ledger. `check_run.py` requires the generated
++content-addressed receipt, current evidence/bundle hashes, and a transcript-observed
++invocation. A heading, manual/fresh-context self-fill, copied output, or backend
++failure cannot satisfy the gate; unavailable independent review leaves closure open.
+@@ -355,0 +354,4 @@ Project-discipline and run-structure checks in `tools/`:
++- `python tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash
++  chain for actual Agent/Cron/foreground-review events. `workers.py` lifecycle
++  prose is not runtime proof; current-turn Agent receipts carry assignment/front
++  tokens and are transcript-backed.

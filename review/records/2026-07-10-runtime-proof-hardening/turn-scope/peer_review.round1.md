@@ -1,0 +1,47 @@
+# Peer Review Panel — turn-scope
+
+_backend: panel:arkcli+claude · 2026-07-10T15:57Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: BLOCKER
+
+_backend: panel:arkcli+claude_  
+_brain: codex_  
+_bundle_hash: 6426ded4338d82561130a73e9f777c8d6db9aa98_  
+_evidence_index_hash: 8bd437f0715af79f08ff8f274b95a6fd0fddcdda_  
+
+## Findings
+- [WARN] PR-001 Live Claude Code smoke coverage is limited to two favorable scenarios; pause/Cron/memory/runtime protections lack live CLI confirmation. | Evidence: evidence_index:E-002, live_claude_smoke.summary.json:74-86, live_claude_smoke.summary.json:131-138 | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The real-CLI artifact only demonstrates execute_fanout and explain_read_only denials. Critical new controls are backed by unit selftests (E-003) but not by a live Claude Code invocation.
+- [WARN] PR-002 Gate selftest outputs for anti_drift, output_gate, and run_gate are missing from the adversarial selftest log. | Evidence: evidence_index:E-003, adversarial_selftests.log | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The log shows command invocations but blank output for three of the five commands. Although selftest_all.log later lists output_gate/run_gate as PASS, the adversarial log does not expose their results.
+- [WARN] PR-003 arkcli panel had backend errors; review is partial | Evidence: minimax-m3: parse error; output tail: o this is consistent.
+
+5. The review.md says "This Codex-authored scope requires arkcli panel plus fresh Claude review. No completion or PASS is claimed before peer_review.md and peer_review.json are generated from the frozen bundle." But we don't have peer_review.md or peer_review.json in the bundle! The review.md acknowledges this — it's a self-aware statement that completion is pending.
+
+6. The report.md says "Same-user direct filesystem tampering remains outside the threat claim" — this is a; glm-5.2: parse error; output tail: . **Missing test for PAUSE mode in live smoke**: As noted, the live Claude smoke (E-002) only tests EXECUTE and EXPLAIN modes. PAUSED_BY_OPERATOR mode, which involves CronList/CronDelete and is the most operationally complex, is not validated against real Claude behavior.
+
+12. **The `live_claude_smoke.source.txt` uses `--dangerously-skip-permissions`**: This flag skips all permission checks. But the hooks still run. The test verifies that hooks deny the Bash command even with permissions skipped | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+
+## Blind-spot check
+- [arkcli] [kimi-k2.7-code] installed-runtime-manifest.json is environment-provided; no independent cross-check against committed git objects or signed package hashes is shown.
+- [arkcli] [kimi-k2.7-code] Live smoke uses deepseek-v4-pro inside Claude Code CLI; native Claude-family behavior on the same denials is not separately verified.
+- [arkcli] [kimi-k2.7-code] No regression test shows the unpatched hook version failing the same scenarios.
+- [arkcli] [kimi-k2.7-code] No .replay.json / network-response artifacts exist; findings rest on code diffs and selftest logs.
+- [arkcli] [kimi-k2.7-code] Residual ambiguity in classify_prompt for prompts ending in '?' is not quantified.
+- [arkcli] [kimi-k2.7-code] Single-observation live smoke runs are internally multi-check but still one CLI session per case.
+- [claude] **Fail-closed exception path has no live Claude test**: The diffs' most consequential change is converting output_gate.py and run_gate.py from fail-open (`except: pass`) to fail-closed (`except: print block JSON`). If this change contains a bug (e.g., the `find_active_run` re-check in the except block finds a stale run, or `json.dumps` itself fails), a legitimate Claude session could be permanently deadlocked with no recovery path short of manually deleting the turn_contract.json. The live smoke test never triggers an exception inside the hooks — it only tests the happy path where hooks execute successfully and deny the command.
+- [claude] **`turn_contract.py` selftest prints 38 checks; `output_gate.py` and `run_gate.py` selftests print zero**: The output format inconsistency between tools (per-check listing vs. silent-on-success) means a reviewer comparing logs cannot apply a uniform verification standard. If the output_gate and run_gate selftests follow a "print only on failure" pattern, the log provides no evidence of what was actually verified — unlike turn_contract's 38 named assertions. A future regression that silently no-ops the selftest body would be invisible in the log since it already shows nothing.
+- [claude] **`classify_prompt` default EXPLAIN could mask regressions**: The conservative default (ambiguous → EXPLAIN) is correct, but if a future change accidentally expands the PAUSE_RE or EXECUTE_RE patterns too broadly, the default-fallback behavior means no test would catch it unless it explicitly tests the boundary — the EXECUTE_RE test case uses `"彻底修复所有问题"` which is unambiguous, but fuzzy matches like `"修一下"` or `"改改"` aren't tested.
+- [claude] **6-hour STALE_SECONDS contract validity**: A contract is valid for 6 hours. If an operator issues a PAUSE and walks away, a new session within 6 hours with a prompt that doesn't match PAUSE_RE could potentially re-use a stale mode classification — though `classify_prompt` re-classifies each prompt independently, so this is mitigated. But the key word is "could" — the contract's `updated_at` clock starts when the *previous* prompt was classified, and the new prompt's classification doesn't depend on the old contract's mode (it's freshly classified). This means the 6-hour window only matters for `load_contract` session matching, not mode persistence. The threat of a contract being replayed across sessions is already tested in the selftest ("cross-session contract reuse is rejected", "stale contract is rejected").
+
+## Context-limit notes
+- [arkcli] minimax-m3: parse error; output tail: o this is consistent.
+
+5. The review.md says "This Codex-authored scope requires arkcli panel plus fresh Claude review. No completion or PASS is claimed before peer_review.md and peer_review.json are generated from the frozen bundle." But we don't have peer_review.md or peer_review.json in the bundle! The review.md acknowledges this — it's a self-aware statement that completion is pending.
+
+6. The report.md says "Same-user direct filesystem tampering remains outside the threat claim" — this is a
+- [arkcli] glm-5.2: parse error; output tail: . **Missing test for PAUSE mode in live smoke**: As noted, the live Claude smoke (E-002) only tests EXECUTE and EXPLAIN modes. PAUSED_BY_OPERATOR mode, which involves CronList/CronDelete and is the most operationally complex, is not validated against real Claude behavior.
+
+12. **The `live_claude_smoke.source.txt` uses `--dangerously-skip-permissions`**: This flag skips all permission checks. But the hooks still run. The test verifies that hooks deny the Bash command even with permissions skipped
+- [claude] I cannot inspect the full source of `output_gate.py`, `run_gate.py`, `anti_drift.py`, `runtime_receipts.py`, or `check_run.py` — I only have the diffs and the evidence bundle excerpts. My review of the fail-closed exception handling, the Agent Board receipt validation, and the selftest functions is based on the diff hunks, not the complete files. Subtle interactions between changed and unchanged code could be missed.
+- [claude] The `selftest_all.log` reports anti_drift as 3.4s (much longer than expected for a selftest). Without source access I cannot determine why — it could be network-bound checks, sleep-based tests, or a performance regression. The 3.4s duration is anomalous compared to other selftests (most are 0.0s–0.2s) and worth investigation.
+- [claude] The review explicitly requires arkcli panel review which I am not performing — I am the fresh-Claude independent review component. The review architecture (CLAUDE.md "Review Architecture" section) specifies that when Codex + arkcli are available, arkcli serves as the panel reviewer. I cannot verify whether that review was completed or what it found.

@@ -3,7 +3,7 @@
 
 背景: review/independent-reviewer.md 把复审实现列为三种 —— 子代理 / 人开新会话 /
 【另一个模型(独立性更强)】。本模块自动化第三种, 并按"谁改代码/谁是评审对象"选后端:
-    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 三模型 panel;
+    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 双模型 panel;
       缺 Codex 用 arkcli panel; 缺 arkcli 用 Codex; 都缺才 Claude Code 同族兜底。
     Codex-authored maintenance diff: Codex 不算独立票, 满配用 arkcli panel + Claude Code CLI 复审;
       缺 arkcli 时用 Claude Code CLI 复审。最终综合/决策权仍在 Codex。
@@ -76,18 +76,17 @@ DEFAULT_CONFIG: dict = {
         "redact_secrets": True,
         "include_artifacts": "snippets",
         "artifact_excerpt_chars": 24_000,
-        "max_bundle_chars": 180_000,
+        "max_bundle_chars": 110_000,
     },
     "backends": {
         # cli-agent: 自己能读文件, prompt 只给路径 + rubric
         "codex": {"kind": "cli-agent", "cmd": "codex", "sandbox": "read-only",
                   "model": "gpt-5.5", "effort": "high", "heterogeneous": True},
-        # arkcli 外部异构补盲团: 三模型独立审同一冻结 bundle, 聚合成候选 finding。
+        # arkcli 外部异构补盲团: 双模型独立审同一冻结 bundle, 聚合成候选 finding。
         "arkcli": {"kind": "arkcli-panel", "cmd": "arkcli", "heterogeneous": True,
                    "per_model_timeout": 300, "max_context_chars": 120_000,
                    "models": [
                        {"id": "kimi-k2.7-code"},
-                       {"id": "minimax-m3"},
                        {"id": "glm-5.2"},
                    ]},
         # 旧 OpenAI 兼容后端: 保留给 --backend 强制/私有配置, 不在默认链路。
@@ -181,7 +180,9 @@ CONTEXT_FILES = [
 CONTEXT_GLOBS = ["classify/*.txt", "classify/*.json"]
 PER_FILE_CAP = 24_000   # 每文件最多塞这么多字符给 API 后端
 ARTIFACT_EXCERPT_CAP = 24_000
-BUNDLE_CHAR_CAP = 180_000
+# Keep the frozen JSON plus rubric below the narrowest default panel context.
+# Full artifact hashes remain in the bundle when excerpts are reduced.
+BUNDLE_CHAR_CAP = 110_000
 
 
 def _artifact_excerpt_cap(value=None) -> int:
@@ -230,6 +231,7 @@ class ReviewResult:
     evidence_index_hash: str = ""
     driver: str = ""
     brain: str = ""
+    runtime_receipt_id: str = field(default="", repr=False)
 
     def as_dict(self) -> dict:
         return {
@@ -444,7 +446,14 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,
         })
     entries.sort(key=lambda x: str(x.get("id", "")))
     payload = {"schema": "xunji.evidence_index.v1", "entries": entries}
-    payload["sha1"] = _sha1_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    digest_entries = json.loads(json.dumps(entries, ensure_ascii=False))
+    for entry in digest_entries:
+        for artifact in entry.get("artifacts", []):
+            for key in ("excerpt", "excerpt_truncated_chars", "diff_summary"):
+                artifact.pop(key, None)
+    digest_payload = {"schema": "xunji.evidence_index.v1", "entries": digest_entries}
+    payload["sha1"] = _sha1_bytes(json.dumps(
+        digest_payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     return payload
 
 
@@ -537,7 +546,7 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,
         }
 
     bundle = {}
-    for _ in range(6):
+    for _ in range(16):
         evidence_index = build_evidence_index(
             run_dir,
             redact=redact_egress,
@@ -574,6 +583,12 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,
         out = out_dir / "review_bundle.json"
         out.write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
     return bundle
+
+
+def _bundle_context(bundle: dict) -> str:
+    """Serialize exactly as the bundle cap is measured; never pretty-print then cut."""
+    return json.dumps(
+        bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 # ===================== 后端选择 =====================
@@ -850,12 +865,11 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,
     if not key:
         return ReviewResult(verdict="ERROR", backend_used=name,
                             error=f"缺 {b.get('api_key_env')} 环境变量")
-    context = json.dumps(bundle or build_review_bundle(
+    context = _bundle_context(bundle or build_review_bundle(
         scope_dir,
         redact_egress=True,
         artifact_excerpt_chars=artifact_excerpt_chars,
-        max_bundle_chars=max_bundle_chars),
-                         ensure_ascii=False, indent=2)
+        max_bundle_chars=max_bundle_chars))
     cap = _context_cap(PER_FILE_CAP * 8, max_bundle_chars)
     if len(context) > cap:
         context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars]"
@@ -958,12 +972,11 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
     models = b.get("models") or []
     model_ids = [_arkcli_model_id(m) for m in models if _arkcli_model_id(m)]
     backend_used = "arkcli:" + "+".join(model_ids)
-    context = json.dumps(bundle or build_review_bundle(
+    context = _bundle_context(bundle or build_review_bundle(
         scope_dir,
         redact_egress=True,
         artifact_excerpt_chars=artifact_excerpt_chars,
-        max_bundle_chars=max_bundle_chars),
-                         ensure_ascii=False, indent=2)
+        max_bundle_chars=max_bundle_chars))
     cap = _context_cap(int(b.get("max_context_chars") or (PER_FILE_CAP * 5)), max_bundle_chars)
     if len(context) > cap:
         context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars for arkcli panel]"
@@ -1045,12 +1058,11 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,
     if shutil.which(cmd_name) is None:
         return ReviewResult(verdict="ERROR", backend_used="claude:code-cli",
                             error=f"claude code cli not found: {cmd_name}")
-    context = json.dumps(bundle or build_review_bundle(
+    context = _bundle_context(bundle or build_review_bundle(
         scope_dir,
         redact_egress=True,
         artifact_excerpt_chars=artifact_excerpt_chars,
-        max_bundle_chars=max_bundle_chars),
-                         ensure_ascii=False, indent=2)
+        max_bundle_chars=max_bundle_chars))
     cap = _context_cap(PER_FILE_CAP * 8, max_bundle_chars)
     if len(context) > cap:
         context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars]"
@@ -1473,7 +1485,33 @@ def _strip_template_review_placeholders(text: str) -> str:
     )
 
 
-def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
+def _write_review_receipt(run_dir: Path, result: ReviewResult, review_kind: str) -> str:
+    """Persist the machine provenance that Markdown review prose cannot prove."""
+    payload = {
+        "schema": "xunji.peer_review_receipt.v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "review_kind": review_kind,
+        "result": result.as_dict(),
+    }
+    receipt_id = hashlib.sha256(json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    record = dict(payload)
+    record["receipt_id"] = receipt_id
+    out = run_dir / "review" / "receipts" / f"{receipt_id}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.name + f".tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                   encoding="utf-8")
+    os.replace(tmp, out)
+    try:
+        os.chmod(out, 0o600)
+    except OSError:
+        pass
+    return receipt_id
+
+
+def _append_run_review(run_dir: Path, result: ReviewResult) -> str:
     """把复审【追加】进 runs/<t>/review.md 的独立复审区块 —— 满足 check_run 的独立复审硬门
     (re.search 'Independent Review|独立复审')。追加不覆盖(review.md 可能已有别的内容)。
     NEEDS_DRIVER/ERROR 不写(没真复审就不该满足门)。"""
@@ -1485,6 +1523,8 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
     driver = _normalize_driver(result.driver)
     same_family_fallback = backend_root == "claude" and driver == "claude"
     review_kind = "same-family peer_review fallback" if same_family_fallback else "heterogeneous peer_review"
+    receipt_id = _write_review_receipt(run_dir, result, review_kind)
+    result.runtime_receipt_id = receipt_id
     if same_family_fallback:
         review_note = "同族 Claude 兜底复审, 独立性弱于 Codex/arkcli; 仍是候选非裁决。"
     elif backend_root == "claude" and driver == "codex":
@@ -1492,12 +1532,19 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
     else:
         review_note = "异构独立复审, 候选非裁决。"
     ledger = ["## Review Finding Ledger",
+              f"- ReviewReceipt: {receipt_id}",
               f"- BundleHash: {result.bundle_hash or '(missing)'}",
               f"- EvidenceIndexHash: {result.evidence_index_hash or '(missing)'}"]
+    used_ids = set(re.findall(r"(?m)^###\s+(PR-\d+)\b", existing))
+    next_pr = max((int(item.split("-")[1]) for item in used_ids), default=0) + 1
     if result.findings:
-        for i, f in enumerate(result.findings, 1):
-            if not f.id:
-                f.id = f"PR-{i:03d}"
+        for f in result.findings:
+            if not f.id or f.id in used_ids or not re.fullmatch(r"PR-\d+", f.id):
+                while f"PR-{next_pr:03d}" in used_ids:
+                    next_pr += 1
+                f.id = f"PR-{next_pr:03d}"
+                next_pr += 1
+            used_ids.add(f.id)
             ledger += [
                 f"### {f.id} — {f.severity} — {f.category}",
                 f"- Status: pending",
@@ -1515,6 +1562,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
              "report/review/decisions 只是 claim。driver 必须逐条处理 PR-xxx。\n\n"
              + result.as_markdown() + "\n\n" + "\n".join(ledger) + "\n")
     rv.write_text(existing.rstrip() + "\n\n" + block, encoding="utf-8")
+    return receipt_id
 
 
 def _append_manual_driver_template(run_dir: Path, result: ReviewResult) -> None:
@@ -1603,7 +1651,7 @@ def _selftest() -> int:
                    cfg["panel"]["min_heterogeneous"] == "auto"))
     checks.append(("默认 arkcli panel 模型顺序",
                    [_arkcli_model_id(x) for x in cfg["backends"]["arkcli"]["models"]]
-                   == ["kimi-k2.7-code", "minimax-m3", "glm-5.2"]))
+                   == ["kimi-k2.7-code", "glm-5.2"]))
     checks.append(("默认 arkcli panel 不禁用 thinking",
                    all(not (isinstance(x, dict) and x.get("thinking") == "disabled")
                        for x in cfg["backends"]["arkcli"]["models"])))
@@ -1749,8 +1797,8 @@ def _selftest() -> int:
              findings=[Finding("WARN", "possible shallow closure", "F-001", "needs one more control",
                                category="shallow_closure", affected_eids=["E-001"])],
              backend_used="arkcli:kimi-k2.7-code"))],
-        ["minimax-m3: timeout >1s"],
-        "arkcli:glm-5.2+kimi-k2.7-code+minimax-m3")
+        ["kimi-k2.7-code: timeout >1s"],
+        "arkcli:kimi-k2.7-code+glm-5.2")
     checks.append(("arkcli panel 聚合 WARN + backend_error", panel.verdict == "WARN" and len(panel.findings) == 2))
     checks.append(("arkcli panel PR id 唯一化", [f.id for f in panel.findings] == ["PR-001", "PR-002"]))
     panel_matrix = ReviewResult(verdict="PASS", backend_used="panel:codex+arkcli", brain="codex")
@@ -1836,8 +1884,15 @@ def _selftest() -> int:
     rv1 = (d_run / "review.md").read_text(encoding="utf-8")
     resolve_finding(d_run, "PR-001", "dismissed", "Evidence: E-001 artifact a.html supports dismissal")
     rv_resolved = (d_run / "review.md").read_text(encoding="utf-8")
-    _append_run_review(d_run, ReviewResult(verdict="PASS", backend_used="arkcli:glm-5.2+kimi-k2.7-code+minimax-m3"))
+    _append_run_review(d_run, ReviewResult(verdict="PASS", backend_used="arkcli:kimi-k2.7-code+glm-5.2"))
     rv2 = (d_run / "review.md").read_text(encoding="utf-8")
+    _append_run_review(d_run, ReviewResult(
+        verdict="WARN", findings=[Finding("WARN", "second", "E-001", "check")],
+        backend_used="arkcli:glm-5.2", bundle_hash=b_run["sha1"],
+        evidence_index_hash=b_run["evidence_index"]["sha1"],
+    ))
+    rv3 = (d_run / "review.md").read_text(encoding="utf-8")
+    receipt_ids = re.findall(r"(?m)^- ReviewReceipt: ([0-9a-f]{64})$", rv3)
     d_tpl = Path(tempfile.mkdtemp())
     (d_tpl / "review.md").write_text(
         "# Review\n\n## Review Finding Ledger\n\n"
@@ -1852,6 +1907,11 @@ def _selftest() -> int:
         ("into_run 保留已有内容(追加不覆盖)", "已有内容" in rv1),
         ("into_run 写 verdict/finding", "BLOCKER" in rv1 and "x" in rv1),
         ("into_run 写 PR pending ledger", "Review Finding Ledger" in rv1 and "Status: pending" in rv1),
+        ("into_run writes content-addressed receipt files",
+         len(receipt_ids) == 3 and all((d_run / "review" / "receipts" / f"{rid}.json").is_file()
+                                       for rid in receipt_ids)),
+        ("repeated reviews allocate globally unique PR ids",
+         rv3.count("### PR-001") == 1 and rv3.count("### PR-002") == 1),
         ("into_run strips old blank PR template before appending",
          rv_tpl.count("### PR-001") == 1 and "— category" not in rv_tpl),
         ("resolve_finding 更新 status/resolution",
@@ -1875,6 +1935,10 @@ def _selftest() -> int:
          and any("exceed max_bundle_chars=100" in w for w in b_tiny_bundle_cap["warnings"])
          and any("artifact excerpts reached 0" in w for w in b_tiny_bundle_cap["warnings"])
          and b_tiny_bundle_cap["egress_redaction"]["artifact_excerpt_chars"] < ARTIFACT_EXCERPT_CAP),
+        ("backend bundle context uses the capped compact serialization",
+         _bundle_context(b_long) == json.dumps(
+             b_long, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+         and "\n" not in _bundle_context(b_long)),
         ("into_run 二次追加不覆盖(两区块)", rv2.count("Independent Review") == 2),
     ]
     d_machine = Path(tempfile.mkdtemp())
@@ -2052,6 +2116,9 @@ def main() -> int:
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps(r.as_dict(), ensure_ascii=False, indent=2),
                            encoding="utf-8")
+    if args.into_run and r.runtime_receipt_id:
+        print(f"XUNJI_REVIEW_RECEIPT={r.runtime_receipt_id}")
+        print(f"XUNJI_REVIEW_BUNDLE={r.bundle_hash}")
     print(r.as_markdown())
     if r.verdict == "NEEDS_DRIVER":
         print("\n[!] 未完成所需独立复审矩阵 —— 请 driver spawn fresh-context 子代理或补齐可用后端, "

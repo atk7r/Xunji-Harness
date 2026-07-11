@@ -1,0 +1,73 @@
+diff --git a/tools/check_run.py b/tools/check_run.py
+index 58f2ecb..5cc455d 100644
+--- a/tools/check_run.py
++++ b/tools/check_run.py
+@@ -2946 +3162 @@ def _selftest() -> int:
+-    (d10 / "review.md").write_text(valid_review_text, encoding="utf-8")
++    _install_valid_review(d10)
+@@ -3037,0 +3254,20 @@ def _selftest() -> int:
++    pr_current_hash = current_evidence_index_hash(d_pr)
++    with (d_pr / "review.md").open("a", encoding="utf-8") as handle:
++        handle.write(
++            "\n## Independent Review (heterogeneous peer_review · claude · later)\n"
++            "## Review Finding Ledger\n"
++            f"- EvidenceIndexHash: {pr_current_hash}\n- (none)\n")
++    pr_refreshed_e, _ = check_peer_review_ledger(d_pr)
++
++    d_pr_dup = Path(tempfile.mkdtemp())
++    (d_pr_dup / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    dup_hash = current_evidence_index_hash(d_pr_dup)
++    (d_pr_dup / "review.md").write_text(
++        "# Review\n## Review Finding Ledger\n"
++        f"- EvidenceIndexHash: {dup_hash}\n"
++        "### PR-001 — WARN — first\n- Status: dismissed\n- DriverResolution: Reason: fixed\n"
++        "## Review Finding Ledger\n"
++        f"- EvidenceIndexHash: {dup_hash}\n"
++        "### PR-001 — WARN — second\n- Status: dismissed\n- DriverResolution: Reason: fixed\n",
++        encoding="utf-8")
++    pr_dup_e, _ = check_peer_review_ledger(d_pr_dup)
+@@ -3048,0 +3285,4 @@ def _selftest() -> int:
++        ("peer_review ledger: latest fresh hash supersedes historical stale hash",
++         not any("evidence_index 已变" in e for e in pr_refreshed_e)),
++        ("peer_review ledger: duplicate PR ids hard fail",
++         any("PR id 重复" in e for e in pr_dup_e)),
+@@ -3121 +3361 @@ def _selftest() -> int:
+-    (d_mid_cov / "review.md").write_text(valid_review_text, encoding="utf-8")
++    _install_valid_review(d_mid_cov)
+@@ -3128,3 +3368 @@ def _selftest() -> int:
+-    rvp.write_text(
+-        "# Review\n## 独立复审\n- Reviewer: selftest\n- Verdict: PASS\n",
+-        encoding="utf-8")
++    _install_valid_review(d_mid_fresh)
+@@ -3133 +3370,0 @@ def _selftest() -> int:
+-    os.utime(rvp, (1010, 1010))
+@@ -3140 +3377 @@ def _selftest() -> int:
+-    rvp2.write_text(valid_review_text, encoding="utf-8")
++    _install_valid_review(d_mid_stale)
+@@ -3142,2 +3379 @@ def _selftest() -> int:
+-    os.utime(rvp2, (1000, 1000))
+-    os.utime(evp2, (1010, 1010))
++    evp2.write_text("# Evidence Ledger\n## E-001\n- Certainty: 0.8\n", encoding="utf-8")
+@@ -3157 +3393 @@ def _selftest() -> int:
+-        ("intermediate review: 独立复审 header counts when review is fresh",
++        ("intermediate review: current receipt counts when evidence hash matches",
+@@ -3159 +3395 @@ def _selftest() -> int:
+-        ("intermediate review: evidence newer than review makes review stale",
++        ("intermediate review: evidence hash change invalidates receipt regardless of mtime",
+@@ -3451 +3687 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
+-    if has_completed_independent_review(rv):
++    if has_completed_independent_review(rv, run_dir):
+@@ -3514,0 +3751 @@ def main() -> int:
++    errors.extend(check_front_schema(run_dir))
+@@ -3551 +3788,5 @@ def main() -> int:
+-    warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)
++    worker_merge_issues = check_workers(run_dir)
++    if _closure_gate_active(run_dir):
++        errors.extend(worker_merge_issues)             # 收口时 done 未 merge 是硬门
++    else:
++        warnings.extend(worker_merge_issues)
+@@ -3578,0 +3820 @@ def main() -> int:
++    errors.extend(check_chain_maturity(run_dir))
+@@ -3595 +3837 @@ def main() -> int:
+-    print("run check passed")
++    print("STRUCTURAL_PASS: run structure is consistent; this is not completion proof")

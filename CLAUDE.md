@@ -121,12 +121,31 @@ observe -> update state graph -> decompose fronts
 
 - While safe fronts remain, **don't ask the operator which class to test next**;
   choose it yourself, record why in `decisions.md`.
-- **Stop Coda is mechanically enforced.** While `.claude/xunji_active_run`
+- **The current operator prompt is a turn contract.** `turn_contract.py` classifies
+  an active-run turn as `EXECUTE`, `EXPLAIN_ONLY`, or `PAUSED_BY_OPERATOR`.
+  A why/explain-only request is read-only: answer it directly, do not modify the
+  run, probe, spawn Agents, or add a fake Coda. An operator stop/pause preserves
+  every active front and permits only state reads plus `CronList`/bound
+  `CronDelete`; it is not Completion and must not create a completion marker.
+  Execution begins/resumes only from a prompt with an explicit action verb such
+  as `/loop`, continue/resume, execute, implement, or fix. Ambiguous declarative
+  prompts default read-only; never infer permission to resume target work.
+- **Stop Coda is mechanically enforced only for `EXECUTE`.** While `.claude/xunji_active_run`
   points to a run without a valid completion marker, the last non-empty output
   line must be the only Coda line and must name one concrete object plus one
   executable action: `下一行动: ...`. Empty/template values, generic "continue",
   multiple actions/F-ids/Coda lines, an unrelated F-id, or `BLOCKED:` before the
   active run has completed are rejected by `output_gate.py`.
+- **A denied target action is not a result.** It remains unresolved until the
+  same tool and identical execution-relevant input later has a transcript-backed
+  successful receipt; descriptive tool metadata does not count.
+  Fix the prerequisite and retry the original action in the same turn. While the
+  denial is unresolved, free-form final text is rejected; if execution truly
+  cannot continue, use only the exact three-line
+  `XUNJI_EXECUTION_STATUS=DENIED` envelope required by `output_gate.py`.
+- Claude Code internal `<task-notification>` messages are lifecycle events, not
+  operator prompts. They must never create, refresh, or change the current turn
+  contract; Agent receipts from before the notification remain current-turn proof.
 - **TaskCreate discipline for `/loop`:** An explicit `/loop runs/<dir>` iteration
   must maintain a Claude Code TaskCreate/TaskUpdate task list before selecting
   the next action. Use it for the current iteration's assets, vectors, Agent
@@ -178,10 +197,20 @@ observe -> update state graph -> decompose fronts
   canonical findings. The Single Synthesizer merges through the evidence gate; parallel
   breadth never relaxes confirmation.
 - **Agent Board is mandatory when open fronts >= 4 and barrier classes are diverse**
-  (no SharedBarrier group). The Root MUST spawn >= 2 subagents via workers.py
-  assign — never do all fronts serially when breadth would help.
-- Stay serial only for: a single low-value front, a tight request budget under
-  50k tokens, or fronts that share a barrier class (SharedBarrier group).
+  (no SharedBarrier group). In **every EXECUTE turn**, the Root MUST create at
+  least two disjoint `workers.py assign` lanes and actually invoke at least two
+  Claude `Agent` tool calls. Each prompt must carry
+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`; only transcript-backed
+  `PostToolUse` receipts from the current session/turn count. Agent files,
+  `heartbeat`, `finished_at`, prose, and receipts from an older turn do not count.
+  Before Stop, every current-turn Agent must be dispositioned with
+  `workers.py finish`: `merged` cites a canonical `Evidence:/Front:/Decision:`
+  anchor; `blocked/failed/abandoned` cites `Reason:` plus its canonical `Front:`.
+  `done` or a displayed summary still means unmerged and remains blocked.
+- Stay serial only when fewer than four active fronts remain, all active fronts
+  share one concrete barrier class, or the operator's **current prompt** explicitly
+  allows serial execution. A note in `decisions.md`, a model-claimed token budget,
+  or an old override cannot bypass the gate.
   See reference "Agent Board" + `docs/templates/agents/`.
 
 ## Dual Mind
@@ -272,16 +301,13 @@ Only two pauses; each requires a codex gate before the pause:
   `- CodexCriticalReview:` in the evidence entry. Only if codex confirms CRITICAL
   may the Root pause and ask the operator "继续打还是先出报告?".
 
-- **Reviewer timeout escalation:** If the independent peer_review (via codex) is
-  unavailable for 2 consecutive attempts (timeout / empty response / API error),
-  the Root escalates: manually write the review into `review.md` as
-  `Reviewer: manual-driver (codex unavailable <date>)`. The manual review MUST
-  cover the same dimensions — evidence gate, coverage, false positives, shallow
-  closure, claim integrity, missed surface, artifact cross-check. check_run
-  accepts manual-driver reviews when codex is confirmed unavailable.
-  Self-review bias is mitigated by: (a) the manual review MUST be written in
-  review.md before the Root reads it for the completion decision, (b) the
-  requirement to cite specific file:line evidence, not prose impressions.
+- **Independent review cannot be self-filled.** A timeout, empty response, API
+  error, manual `Reviewer:` prose, copied backend output, or a hand-written PASS
+  never satisfies closure. Run `tools/peer_review.py ... --into-run` in the
+  foreground. The hook-observed result must contain the matching
+  `XUNJI_REVIEW_RECEIPT` and `XUNJI_REVIEW_BUNDLE` markers; retain that
+  content-addressed receipt, resolve every ledger item, and rerun after evidence changes. If the required backend matrix remains
+  unavailable, the run remains open/paused with the limitation recorded.
 
 - **Pause 2 (Completion):** Triggered when all open fronts are adjudicated AND
   `check_run` passes AND independent review is complete. BEFORE pausing — spawn a
@@ -290,8 +316,12 @@ Only two pauses; each requires a codex gate before the pause:
   have severity unsupported by their artifacts, (c) no reachable asset is
   unaccounted-for in the frontier verdict. Record the codex verdict in
   a substantive `## CodexCompletionReview` section with Reviewer, Verdict, and
-  concrete cross-check results in `decisions.md`. Only if codex confirms completion
-  may the Root pause and deliver the report.
+  concrete cross-check results in `decisions.md`. The Agent prompt must include
+  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
+  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.
+  Its response must echo `XUNJI_COMPLETION_VERDICT=PASS`, the same evidence hash,
+  and all four checks; bare PASS/WARN prose does not count. Only that current
+  transcript-backed receipt plus the structured section satisfies the gate.
 
 - If codex rejects the pause reason, the Root MUST continue — fix the issue
   or downgrade the finding — and may NOT pause.
@@ -303,6 +333,9 @@ Only two pauses; each requires a codex gate before the pause:
   target state → `runs/<slug>_<date>/`.
 - Keep `frontier.md` + `decisions.md` current = the autonomy audit. Keep reports
   evidence-bound, cite the evidence ledger.
+- Never promote a retrospective or run note into Claude long-term memory unless
+  the operator explicitly approves that memory write in the current prompt.
+  Runtime receipt/turn-state files are hook-owned and must never be edited directly.
 - **No self-labeling restraint fields in generated content** (run artifacts / knowledge
   entries / reports) — no "harmless verification / harmless stop / safe-" headings or
   fields. The boundary is enforced by the guard + hook, not by annotating output;
@@ -335,7 +368,7 @@ Claude Code 负责修改、集成、测试与落盘；Codex/arkcli 是复审补�
 | arkcli 不可用 | Claude Code | Codex | Codex |
 | Codex 与 arkcli 都不可用 | Claude Code | Claude Code fresh-context 同族 | Claude Code（最弱兜底） |
 
-arkcli panel 默认模型：kimi-k2.7-code + minimax-m3 + glm-5.2。
+arkcli panel 默认模型：kimi-k2.7-code + glm-5.2。不得调用其他 arkcli 模型。
 
 ### 接收 Codex-authored diff
 

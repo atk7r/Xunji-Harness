@@ -1,0 +1,170 @@
+   171	    except Exception:
+   172	        return {}
+   173	    return data
+   174	
+   175	
+   176	def _tool_text(event: dict) -> str:
+   177	    value = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+   178	    try:
+   179	        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+   180	    except Exception:
+   181	        return str(value)
+   182	
+   183	
+   184	def _deny(reason: str) -> dict:
+   185	    return {
+   186	        "hookSpecificOutput": {
+   187	            "hookEventName": "PreToolUse",
+   188	            "permissionDecision": "deny",
+   189	            "permissionDecisionReason": reason,
+   190	        }
+   191	    }
+   192	
+   193	
+   194	def _safe_sed(tokens: list[str]) -> bool:
+   195	    scripts: list[str] = []
+   196	    index = 1
+   197	    while index < len(tokens):
+   198	        token = tokens[index]
+   199	        if token in {"-n", "--quiet", "--silent"}:
+   200	            index += 1
+   201	            continue
+   202	        if token in {"-e", "--expression"}:
+   203	            if index + 1 >= len(tokens):
+   204	                return False
+   205	            scripts.append(tokens[index + 1])
+   206	            index += 2
+   207	            continue
+   208	        if token.startswith("-"):
+   209	            return False
+   210	        if not scripts:
+   211	            scripts.append(token)
+   212	        index += 1
+   213	    return bool(scripts) and all(
+   214	        re.fullmatch(r"(?:\d+|\$)(?:,(?:\d+|\$))?p", script)
+   215	        for script in scripts
+   216	    )
+   217	
+   218	
+   219	def _readonly_shell(command: str) -> bool:
+   220	    """Allow a narrow shell read grammar; unknown syntax remains write-capable."""
+   221	    if not command.strip() or re.search(r">|`|\$\(|\$\{|\n|\r", command):
+   222	        return False
+   223	    allowed = {"cat", "head", "tail", "grep", "rg", "ls", "stat", "file", "wc", "find", "sed"}
+   224	    for segment in re.split(r"\s*(?:&&|\|\||;|\|)\s*", command):
+   225	        if not segment.strip():
+   226	            return False
+   227	        try:
+   228	            tokens = shlex.split(segment)
+   229	        except ValueError:
+   230	            return False
+   231	        if not tokens:
+   232	            return False
+   233	        executable = Path(tokens[0]).name
+   234	        if executable not in allowed:
+   235	            return False
+   236	        if executable == "sed" and not _safe_sed(tokens):
+   237	            return False
+   238	        if executable == "find" and any(
+   239	            token in {
+   240	                "-delete", "-exec", "-execdir", "-ok", "-okdir",
+   241	                "-fprint", "-fprint0", "-fls", "-fprintf",
+   242	            }
+   243	            for token in tokens[1:]
+   244	        ):
+   245	            return False
+   246	    return True
+   247	
+   248	
+   249	def _fanout_control_bash(command: str) -> bool:
+   250	    if _readonly_shell(command):
+   251	        return True
+   252	    if re.search(r"[;&|><`]|\$\(|\$\{|\n|\r", command):
+   253	        return False
+   254	    try:
+   255	        tokens = shlex.split(command)
+   256	    except ValueError:
+   257	        return False
+   258	    if len(tokens) < 2 or not re.fullmatch(
+   259	        r"python(?:3(?:\.\d+)?)?", Path(tokens[0]).name
+   260	    ):
+   261	        return False
+   262	    script = Path(tokens[1])
+   263	    if not script.is_absolute():
+   264	        script = ROOT / script
+   265	    return script.resolve() in CONTROL_SCRIPTS
+   266	
+   267	
+   268	def _assignment_exists(run_dir: Path, assignment: str, front: str) -> bool:
+   269	    try:
+   270	        data = json.loads((run_dir / "state" / "assignments.json").read_text(encoding="utf-8", errors="replace"))
+   271	    except Exception:
+   272	        return False
+   273	    for item in data.get("assignments", []) if isinstance(data, dict) else []:
+   274	        if not isinstance(item, dict):
+   275	            continue
+   276	        if str(item.get("agent") or "") == assignment and str(item.get("front") or "").upper() == front:
+   277	            return (run_dir / "agents" / f"{assignment}.md").exists()
+   278	    return False
+   279	
+   280	
+   281	def _is_target_action(event: dict) -> bool:
+   282	    tool = str(event.get("tool_name") or "")
+   283	    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+   284	    command = str(tool_input.get("command") or "")
+   285	    return tool == "WebFetch" or (tool == "Bash" and not _fanout_control_bash(command))
+   286	
+   287	
+   288	def _denial_is_target_action(event: dict, reason: str) -> bool:
+   289	    """Separate target-result denials from local control-plane policy denials."""
+   290	    local_policy_markers = (
+   291	        "运行时回执/回合状态只能由 hook 原子写入",
+   292	        "长期记忆写入需要操作者",
+   293	        "peer_review 不得后台运行",
+   294	    )
+   295	    return _is_target_action(event) and not any(
+   296	        marker in reason for marker in local_policy_markers)
+   297	
+   298	
+   299	def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
+   300	    tool = str(event.get("tool_name") or "")
+   301	    text = _tool_text(event)
+   302	    mode = str(contract.get("mode") or "")
+   303	    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+   304	    command = str(tool_input.get("command") or "")
+   305	
+   306	    if PROTECTED_RUNTIME_RE.search(text) and (
+   307	        tool in {"Write", "Edit", "Update", "MultiEdit", "NotebookEdit"} or tool == "Bash"
+   308	    ):
+   309	        return "运行时回执/回合状态只能由 hook 原子写入；Claude 工具不得直接修改这些控制面文件。"
+   310	
+   311	    if MEMORY_PATH_RE.search(text) and not contract.get("memory_approved"):
+   312	        memory_read = tool in {"Read", "Grep", "Glob"} or (
+   313	            tool == "Bash" and _readonly_shell(command)
+   314	        )
+   315	        if not memory_read:
+   316	            return "长期记忆写入需要操作者在当前 prompt 明确批准；retrospective 不能自行升级为 memory。"
+   317	    if tool == "Bash" and BACKGROUND_REVIEW_RE.search(command):
+   318	        return "peer_review 不得后台运行并与可变 evidence 并发；请前台冻结快照后完成复审。"
+   319	
+   320	    if mode == EXPLAIN:
+   321	        if tool not in {"Read", "Grep", "Glob", "WebSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"}:
+   322	            return "当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。"
+   323	        return ""
+   324	    if mode == PAUSE:
+   325	        if tool not in {"Read", "Grep", "Glob", "CronList", "CronDelete"}:
+   326	            return "当前回合是 PAUSED_BY_OPERATOR：只允许读取状态并执行 CronList/CronDelete；不得继续目标动作或改写前沿。"
+   327	        if tool == "CronDelete":
+   328	            job = runtime_receipts._job_id(tool_input)
+   329	            ok, note = runtime_receipts.cron_delete_allowed(
+   330	                run_dir, job,
+   331	                session_id=str(contract.get("session_id") or ""),
+   332	                since=float(contract.get("updated_at") or 0.0),
+   333	            )
+   334	            if not ok:
+   335	                return "暂停事务只可删除当前 CronList 观察到的本 run job：" + note
+   336	        return ""
+   337	    if not contract:
+   338	        if tool not in {"Read", "Grep", "Glob", "WebSearch", "CronList", "CronDelete"}:
+   339	            return "缺少当前 session 的 turn contract；先由 UserPromptSubmit 记录 EXECUTE/EXPLAIN/PAUSE 模式。"
+   340	        return ""

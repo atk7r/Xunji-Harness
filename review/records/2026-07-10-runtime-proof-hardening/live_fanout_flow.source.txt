@@ -1,0 +1,202 @@
+     1	#!/usr/bin/env python3
+     2	"""Exercise Agent receipt -> disposition -> Root release in real Claude Code."""
+     3	from __future__ import annotations
+     4	
+     5	import json
+     6	import os
+     7	import re
+     8	import subprocess
+     9	import sys
+    10	import tempfile
+    11	import uuid
+    12	from pathlib import Path
+    13	
+    14	
+    15	def repository_root(source: Path) -> Path:
+    16	    for parent in source.resolve().parents:
+    17	        if (parent / "tools" / "turn_contract.py").is_file():
+    18	            return parent
+    19	    raise RuntimeError("cannot locate Xunji repository root")
+    20	
+    21	
+    22	ROOT = repository_root(Path(__file__))
+    23	sys.path.insert(0, str(ROOT / "tools"))
+    24	
+    25	import runtime_receipts  # noqa: E402
+    26	
+    27	
+    28	def main() -> int:
+    29	    temp = Path(tempfile.mkdtemp(prefix="xunji-live-fanout-"))
+    30	    run = temp / "runs" / "fanout_run"
+    31	    (run / "state").mkdir(parents=True)
+    32	    (run / "agents").mkdir()
+    33	    (temp / "tools").mkdir()
+    34	    sentinel = temp / "FANOUT_RELEASED"
+    35	    (temp / "tools" / "probe.py").write_text(
+    36	        "from pathlib import Path\nPath('FANOUT_RELEASED').write_text('released')\n",
+    37	        encoding="utf-8",
+    38	    )
+    39	    (run / "target.md").write_text("# Target\n- Network target: none\n", encoding="utf-8")
+    40	    (run / "frontier.md").write_text(
+    41	        "# Frontier\n## Open Fronts\n" + "".join(
+    42	            f"### F-{idx:03d}\n- Status: open\n- Barrier class: {barrier}\n"
+    43	            "- Current depth: shallow\n- Failure budget: unused\n"
+    44	            for idx, barrier in enumerate(("app", "auth", "network", "routing"), 1)
+    45	        ) + "## Deferred Fronts\n## Closed Fronts\n",
+    46	        encoding="utf-8",
+    47	    )
+    48	    (run / "evidence.md").write_text(
+    49	        "# Evidence\n## E-900 - controlled Agent candidate\n", encoding="utf-8")
+    50	    assignments = [
+    51	        {"agent": "A-web-001", "front": "F-001", "status": "assigned"},
+    52	        {"agent": "A-auth-001", "front": "F-002", "status": "assigned"},
+    53	    ]
+    54	    (run / "state" / "assignments.json").write_text(json.dumps({
+    55	        "schema": 1, "assignments": assignments,
+    56	    }), encoding="utf-8")
+    57	    for item in assignments:
+    58	        (run / "agents" / f"{item['agent']}.md").write_text(
+    59	            f"# Agent\n- Role: verify\n- Assigned front: {item['front']}\n- Status: assigned\n",
+    60	            encoding="utf-8",
+    61	        )
+    62	
+    63	    hook = f'python3 "{ROOT / "tools" / "turn_contract.py"}"'
+    64	    output_gate = f'python3 "{ROOT / ".claude" / "hooks" / "output_gate.py"}"'
+    65	    run_gate = f'python3 "{ROOT / ".claude" / "hooks" / "run_gate.py"}"'
+    66	    settings = temp / "settings.json"
+    67	    settings.write_text(json.dumps({"hooks": {
+    68	        "UserPromptSubmit": [{"hooks": [{"type": "command", "command": hook}]}],
+    69	        "PreToolUse": [{"hooks": [{"type": "command", "command": hook}]}],
+    70	        "PostToolUse": [{"matcher": "Agent|Bash", "hooks": [
+    71	            {"type": "command", "command": hook},
+    72	        ]}],
+    73	        "PostToolUseFailure": [{"matcher": "Agent|Bash", "hooks": [
+    74	            {"type": "command", "command": hook},
+    75	        ]}],
+    76	        "SubagentStart": [{"hooks": [{"type": "command", "command": hook}]}],
+    77	        "SubagentStop": [{"hooks": [{"type": "command", "command": hook}]}],
+    78	        "Stop": [{"hooks": [
+    79	            {"type": "command", "command": output_gate},
+    80	            {"type": "command", "command": run_gate},
+    81	        ]}],
+    82	    }}, ensure_ascii=False, indent=2), encoding="utf-8")
+    83	
+    84	    probe = "python3 tools/probe.py GET https://example.test"
+    85	    finish_web = (
+    86	        f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+    87	        "--status merged --note 'Evidence: E-900 merged for Front: F-001'"
+    88	    )
+    89	    finish_auth = (
+    90	        f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-auth-001 "
+    91	        "--status merged --note 'Evidence: E-900 merged for Front: F-002'"
+    92	    )
+    93	    prompt = f"""Controlled local workflow test. Perform exactly this sequence and do not stop after an expected denial:
+    94	1. Call Agent once with prompt `XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001 Return candidate for F-001.`
+    95	2. Call Agent once with prompt `XUNJI_ASSIGNMENT=A-auth-001 XUNJI_FRONT=F-002 Return candidate for F-002.`
+    96	3. Call Bash exactly `{probe}`. It must be denied because disposition is still pending.
+    97	4. Call Bash exactly `{finish_web}`.
+    98	5. Call Bash exactly `{finish_auth}`.
+    99	6. Call Bash exactly `{probe}` again. It must now execute the local sentinel probe.
+   100	Do not invent target results. After step 6, report only whether the sentinel command executed,
+   101	then end with exactly `下一行动: 读取 F-001 证据索引`."""
+   102	    env = dict(os.environ)
+   103	    env["XUNJI_RUNS_ROOT"] = str(temp / "runs")
+   104	    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+   105	    proc = subprocess.run([
+   106	        "claude", "-p", "--output-format", "stream-json", "--verbose",
+   107	        "--include-hook-events", "--dangerously-skip-permissions",
+   108	        "--tools", "Agent,Bash", "--settings", str(settings),
+   109	        "--setting-sources", "local", "--max-budget-usd", "1.00",
+   110	        "--session-id", str(uuid.uuid4()), prompt,
+   111	    ], cwd=temp, env=env, text=True, capture_output=True, timeout=360)
+   112	    records = []
+   113	    for line in proc.stdout.splitlines():
+   114	        try:
+   115	            records.append(json.loads(line))
+   116	        except Exception:
+   117	            records.append({"raw": line})
+   118	    hook_events = [record for record in records if record.get("hook_event")]
+   119	    result_records = [
+   120	        record for record in records
+   121	        if isinstance(record, dict) and record.get("type") == "result"
+   122	    ]
+   123	    final_result_text = str(result_records[-1].get("result") or "") \
+   124	        if result_records else ""
+   125	    stop_hook_events = [
+   126	        record for record in hook_events
+   127	        if record.get("hook_event") == "Stop" and record.get("outcome") == "success"
+   128	    ]
+   129	    coda_matches = re.findall(
+   130	        r"(?im)^\s*下一行动\s*[:：]\s*(.*?)\s*$", final_result_text)
+   131	    final_coda_seen = bool(
+   132	        len(coda_matches) == 1
+   133	        and final_result_text.rstrip().splitlines()[-1].lstrip().startswith("下一行动")
+   134	        and len(set(re.findall(r"\bF-\d+\b", coda_matches[0], re.I))) == 1
+   135	        and next(iter(set(re.findall(r"\bF-\d+\b", coda_matches[0], re.I))), "")
+   136	        in {"F-001", "F-002", "F-003", "F-004"}
+   137	    )
+   138	    disposition_denial = any(
+   139	        record.get("hook_event") == "PreToolUse"
+   140	        and "post-return disposition" in str(record.get("output") or "")
+   141	        for record in hook_events
+   142	    )
+   143	    probe_allowed = any(
+   144	        record.get("hook_event") == "PreToolUse"
+   145	        and record.get("outcome") == "success"
+   146	        and not str(record.get("output") or "").strip()
+   147	        for record in hook_events
+   148	    ) and sentinel.exists()
+   149	    chain, chain_errors = runtime_receipts.validate_chain(run)
+   150	    fanout = runtime_receipts.agent_fanout(run)
+   151	    disposition = runtime_receipts.agent_disposition(run)
+   152	    unresolved_target_denials = runtime_receipts.unresolved_target_denials(run)
+   153	    all_denials = runtime_receipts.denied_tool_events(run)
+   154	    protected_non_target_denials = [
+   155	        event for event in all_denials
+   156	        if "只能由 hook 原子写入" in str(event.get("decision_reason") or "")
+   157	        and event.get("target_action") is False
+   158	    ]
+   159	    final_contract = json.loads((run / "state" / "turn_contract.json").read_text(
+   160	        encoding="utf-8"))
+   161	    operator_contract_preserved = (
+   162	        final_contract.get("session_id")
+   163	        and str(final_contract.get("prompt_excerpt") or "").startswith(
+   164	            "Controlled local workflow test.")
+   165	    )
+   166	    result = {
+   167	        "schema": "xunji.live_fanout_flow.v1",
+   168	        "claude_version": subprocess.run(
+   169	            ["claude", "--version"], text=True, capture_output=True, timeout=10,
+   170	        ).stdout.strip(),
+   171	        "returncode": proc.returncode,
+   172	        "stderr": proc.stderr[-2000:],
+   173	        "record_count": len(records),
+   174	        "disposition_denial_seen": disposition_denial,
+   175	        "post_disposition_probe_allowed": probe_allowed,
+   176	        "stop_hook_events": len(stop_hook_events),
+   177	        "final_coda_seen": final_coda_seen,
+   178	        "sentinel_created": sentinel.exists(),
+   179	        "sentinel_value": sentinel.read_text(encoding="utf-8") if sentinel.exists() else "",
+   180	        "fanout": fanout,
+   181	        "disposition": disposition,
+   182	        "runtime_chain": {"events": len(chain), "errors": chain_errors},
+   183	        "unresolved_target_denials": unresolved_target_denials,
+   184	        "protected_non_target_receipts": len(protected_non_target_denials),
+   185	        "operator_contract_preserved": operator_contract_preserved,
+   186	        "assignments": json.loads((run / "state" / "assignments.json").read_text(
+   187	            encoding="utf-8")),
+   188	        "hook_events": hook_events,
+   189	        "raw_records": records,
+   190	    }
+   191	    result["passed"] = bool(
+   192	        proc.returncode == 0 and disposition_denial and probe_allowed
+   193	        and fanout.get("satisfied") and disposition.get("disposition_satisfied")
+   194	        and len(stop_hook_events) >= 2 and final_coda_seen and operator_contract_preserved
+   195	        and not chain_errors and not unresolved_target_denials and sentinel.exists()
+   196	    )
+   197	    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+   198	    return 0 if result["passed"] else 1
+   199	
+   200	
+   201	if __name__ == "__main__":
+   202	    raise SystemExit(main())

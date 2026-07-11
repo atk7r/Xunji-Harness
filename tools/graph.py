@@ -13,7 +13,8 @@
   - evidence  `Unlocks:`      E -> F     (确认即解锁某前沿, 新增条件字段)
   - front     `Linked hypotheses:` F -> H (在测哪个假设, 已有)
   - front     `Unlocked-by:`  E -> F     (此前沿被某 Fact 解锁, 新增条件字段)
-前沿状态由它所在的 ## Open/Deferred/Closed Fronts 区段决定。已确认 Fact = E 且 certainty>=0.8。
+前沿状态由 `tools/run_model.py` 统一解析 canonical `Status:`；章节只用于发现
+格式冲突。已确认 Fact = E 且 certainty>=0.8。
 
 【护栏】图只【派生 + 建议】, 永不自主驱动或收口 —— 一旦它"决定下一步"就退化成被删过的
 JSON 编排器(check_rules 盯着的那个)。选哪个前沿永远是 driver 判断; 图只是把当前状态摆出来。
@@ -36,6 +37,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIRMED = 0.8  # certainty 门: >= 此值才算 Fact(已确认)
+sys.path.insert(0, str(ROOT / "tools"))
+import run_model  # noqa: E402
 
 
 def _blocks(text: str, head_re: str) -> list[tuple[str, str]]:
@@ -80,21 +83,12 @@ def build_graph(run_dir: Path) -> dict:
             for e2 in _ids(b, "Refutes", "E"):
                 edges.append({"src": eid, "dst": e2, "rel": "refutes"})
 
-    fr = run_dir / "frontier.md"
-    if fr.exists():
-        ftext = fr.read_text(encoding="utf-8", errors="replace")
-        for sec, status in (("Open Fronts", "open"),
-                            ("Deferred Fronts", "deferred"),
-                            ("Closed Fronts", "closed")):
-            m = re.search(rf"##\s*{sec}(.*?)(?=^##\s|\Z)", ftext, re.S | re.MULTILINE)
-            if not m:
-                continue
-            for fid, b in _blocks(m.group(1), r"###\s+(F-\d+)"):
-                nodes[fid] = {"type": "front", "status": status}
-                for h in _ids(b, "Linked hypotheses", "H"):
-                    edges.append({"src": fid, "dst": h, "rel": "tests"})
-                for e in _ids(b, "Unlocked-by", "E"):
-                    edges.append({"src": e, "dst": fid, "rel": "unlocks"})
+    for front in run_model.parse_fronts(run_dir):
+        nodes[front.id] = {"type": "front", "status": front.status}
+        for h in _ids(front.text, "Linked hypotheses", "H"):
+            edges.append({"src": front.id, "dst": h, "rel": "tests"})
+        for e in _ids(front.text, "Unlocked-by", "E"):
+            edges.append({"src": e, "dst": front.id, "rel": "unlocks"})
 
     seen: set = set()
     uniq: list[dict] = []
@@ -125,7 +119,7 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:
         if fn and fn["type"] == "front" and _confirmed(nodes, src):
             if fn["status"] == "deferred":
                 unlocked_deferred.append({"front": dst, "by": src})
-            elif fn["status"] == "closed":
+            elif fn["status"] in run_model.TERMINAL_STATUSES - {"deferred"}:
                 closed_but_unlocked.append({"front": dst, "by": src})
 
     dangling_facts = sorted(
@@ -137,7 +131,8 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:
         if n["type"] == "hypothesis" and hid not in touched)
 
     actionable = sorted(
-        {fid for fid, n in nodes.items() if n["type"] == "front" and n["status"] == "open"}
+        {fid for fid, n in nodes.items()
+         if n["type"] == "front" and n["status"] in run_model.OPEN_STATUSES}
         | {u["front"] for u in unlocked_deferred})
 
     confirmed_chains = [{"from": s, "to": d} for s, d in unlocks if _confirmed(nodes, s)]
@@ -227,13 +222,14 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:
     # 收集当前状态 —— 节点 type: front/evidence/hypothesis
     nodes = g.get("nodes", {})
     open_fronts = [nid for nid, nd in nodes.items()
-                   if nd.get("type") == "front" and nd.get("status") in ("open", "probing")]
+                   if nd.get("type") == "front" and nd.get("status") in run_model.OPEN_STATUSES]
     deferred_fronts = [nid for nid, nd in nodes.items()
                        if nd.get("type") == "front" and nd.get("status") == "deferred"]
     blocked_fronts = [nid for nid, nd in nodes.items()
                       if nd.get("type") == "front" and "blocked_type" in str(nd.get("status", ""))]
     closed_fronts = [nid for nid, nd in nodes.items()
-                     if nd.get("type") == "front" and nd.get("status") == "closed"]
+                     if nd.get("type") == "front"
+                     and nd.get("status") in run_model.TERMINAL_STATUSES - {"deferred"}]
     confirmed = [nid for nid, nd in nodes.items()
                  if nd.get("type") == "evidence" and (nd.get("certainty") or 0) >= 0.8]
     total_fronts = sum(1 for nd in nodes.values() if nd.get("type") == "front")

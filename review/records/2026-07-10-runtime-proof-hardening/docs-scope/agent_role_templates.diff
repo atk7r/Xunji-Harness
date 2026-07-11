@@ -1,0 +1,80 @@
+diff --git a/docs/templates/agents/code-audit.md b/docs/templates/agents/code-audit.md
+index 0de33a3..5e80050 100644
+--- a/docs/templates/agents/code-audit.md
++++ b/docs/templates/agents/code-audit.md
+@@ -42,2 +42,3 @@ Audit source, diffs, dependencies, configuration, routes, and authorization boun
+-- Root records `workers.py heartbeat` when this Claude Agent starts or makes
+-  material progress, and `workers.py finish` when it returns/blocks/fails.
++- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
++  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
++  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
+diff --git a/docs/templates/agents/exploit.md b/docs/templates/agents/exploit.md
+index bbbba28..9785a13 100644
+--- a/docs/templates/agents/exploit.md
++++ b/docs/templates/agents/exploit.md
+@@ -42,2 +42,3 @@ Adapt payloads or draft author-and-handoff PoC code for a candidate. Do not auto
+-- Root records `workers.py heartbeat` when this Claude Agent starts or makes
+-  material progress, and `workers.py finish` when it returns/blocks/fails.
++- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
++  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
++  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
+diff --git a/docs/templates/agents/report.md b/docs/templates/agents/report.md
+index 7f41f09..f49eef4 100644
+--- a/docs/templates/agents/report.md
++++ b/docs/templates/agents/report.md
+@@ -42,2 +42,3 @@ Draft report skeletons and consistency checks from already gated evidence. Do no
+-- Root records `workers.py heartbeat` when this Claude Agent starts or makes
+-  material progress, and `workers.py finish` when it returns/blocks/fails.
++- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
++  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
++  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
+diff --git a/docs/templates/agents/review.md b/docs/templates/agents/review.md
+index aee1872..7fd0c95 100644
+--- a/docs/templates/agents/review.md
++++ b/docs/templates/agents/review.md
+@@ -42,2 +42,3 @@ Clean-context review of evidence, closure, or safety-critical code changes. Find
+-- Root records `workers.py heartbeat` when this Claude Agent starts or makes
+-  material progress, and `workers.py finish` when it returns/blocks/fails.
++- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
++  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
++  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
+diff --git a/docs/templates/agents/surface.md b/docs/templates/agents/surface.md
+index 5a4f328..bf3f490 100644
+--- a/docs/templates/agents/surface.md
++++ b/docs/templates/agents/surface.md
+@@ -43,2 +43,3 @@ Convert recon, coverage, fingerprints, and threat roles into attack-surface cand
+-- Root records `workers.py heartbeat` when this Claude Agent starts or makes
+-  material progress, and `workers.py finish` when it returns/blocks/fails.
++- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
++  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
++  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
+diff --git a/docs/templates/agents/synthesizer.md b/docs/templates/agents/synthesizer.md
+index 799a3b3..70a54e8 100644
+--- a/docs/templates/agents/synthesizer.md
++++ b/docs/templates/agents/synthesizer.md
+@@ -41,2 +41,3 @@ The sole integrator. Merge subagent candidates, resolve conflicts, apply the evi
+-- Root records `workers.py heartbeat` when this Claude Agent starts or makes
+-  material progress, and `workers.py finish` when it returns/blocks/fails.
++- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
++  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
++  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
+diff --git a/docs/templates/agents/verify.md b/docs/templates/agents/verify.md
+index acabb7d..8a45c58 100644
+--- a/docs/templates/agents/verify.md
++++ b/docs/templates/agents/verify.md
+@@ -42,2 +42,3 @@ Replicate, replay, control, falsify, and calibrate candidate evidence, especiall
+-- Root records `workers.py heartbeat` when this Claude Agent starts or makes
+-  material progress, and `workers.py finish` when it returns/blocks/fails.
++- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
++  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
++  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
+diff --git a/docs/templates/agents/web-hunter.md b/docs/templates/agents/web-hunter.md
+index d8b4fa3..c14552b 100644
+--- a/docs/templates/agents/web-hunter.md
++++ b/docs/templates/agents/web-hunter.md
+@@ -42,2 +42,3 @@ Explore one assigned web front with proof-level actions. You may produce candida
+-- Root records `workers.py heartbeat` when this Claude Agent starts or makes
+-  material progress, and `workers.py finish` when it returns/blocks/fails.
++- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
++  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
++  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.

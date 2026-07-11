@@ -10,12 +10,14 @@ cache files, mutates run evidence, or drives an engagement.
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 try:
@@ -36,6 +38,8 @@ PHASE_LABELS = {
     "Reviewer": "Reviewer｜复审",
     "Report": "Report｜报告",
     "Idle": "Idle｜空闲",
+    "Paused": "Paused｜已暂停",
+    "Interrupted": "Interrupted｜中断待恢复",
 }
 PHASE_COLOR = {
     "Setup": "blue",
@@ -44,6 +48,8 @@ PHASE_COLOR = {
     "Reviewer": "purple",
     "Report": "green",
     "Idle": "gray",
+    "Paused": "gray",
+    "Interrupted": "red",
 }
 ACTION_LABELS = {
     "resolve_agent_or_review_conflicts_before_promotion_or_closure": "处理证据/子任务冲突",
@@ -204,8 +210,28 @@ def _journal_summary(run_dir: Path) -> dict:
 
 def _agent_summary(run_dir: Path) -> str:
     assignments = _load_json(run_dir / "state" / "assignments.json", {}).get("assignments", [])
-    if not isinstance(assignments, list) or not assignments:
+    planned = len(assignments) if isinstance(assignments, list) else 0
+    current_turn = False
+    try:
+        import runtime_receipts  # noqa: WPS433
+        import turn_contract  # noqa: WPS433
+        contract = turn_contract.load_contract(run_dir)
+        current_turn = str(contract.get("mode") or "") == "EXECUTE"
+        real = runtime_receipts.agent_fanout(
+            run_dir,
+            session_id=str(contract.get("session_id") or "") if current_turn else "",
+            since=float(contract.get("updated_at") or 0.0) if current_turn else 0.0,
+        )
+        real_count = int(real.get("count", 0) or 0)
+    except Exception:
+        real_count = 0
+    if not planned and not real_count:
         return "无子任务"
+    real_label = "本轮真实" if current_turn else "真实"
+    if planned and real_count < planned:
+        return f"子任务 计划{planned}/{real_label}{real_count}"
+    if real_count:
+        return f"子任务 {real_count} 个{real_label}回执"
     statuses = [str(a.get("status") or "").strip().lower() for a in assignments if isinstance(a, dict)]
     conflicts = _load_json(run_dir / "state" / "conflicts.json", {}).get("conflicts", [])
     unresolved = [
@@ -229,9 +255,24 @@ def _front_summary(loop_data: dict) -> str:
     return f"待验证入口 {open_count} 个"
 
 
-def _phase(loop_data: dict, journal: dict) -> str:
+def _event_age_seconds(journal: dict) -> float | None:
+    event = journal.get("last_event") if isinstance(journal.get("last_event"), dict) else {}
+    raw = str(event.get("ts") or "")
+    try:
+        return max(0.0, time.time() - calendar.timegm(time.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")))
+    except Exception:
+        return None
+
+
+def _phase(loop_data: dict, journal: dict, run_dir: Path) -> str:
+    status = _load_json(run_dir / "state" / "run_status.json", {})
+    if str(status.get("status") or "") == "paused_by_operator":
+        return "Paused"
     open_phase = str(journal.get("open_phase") or "").strip()
     if open_phase:
+        age = _event_age_seconds(journal)
+        if age is None or age > 5 * 60:
+            return "Interrupted"
         return open_phase
     phase = str(loop_data.get("phase") or "").strip()
     return phase or "Idle"
@@ -347,7 +388,7 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)
             loop_data, controller = derived_loop, derived_controller
             live_derived = True
     journal = _journal_summary(run_dir)
-    phase = _phase(loop_data, journal)
+    phase = _phase(loop_data, journal, run_dir)
     blocker_text, blocker_count = _blocker_summary(controller)
     stale_text = (
         " | 现场推导" if live_derived
@@ -389,8 +430,10 @@ def _selftest() -> int:
         ],
     }), encoding="utf-8")
     (run / "state" / "loop_journal.jsonl").write_text(
-        json.dumps({"cycle": 1, "event": "phase_start", "data": {"phase": "Hunter"}, "note": ""}, ensure_ascii=False) + "\n"
-        + json.dumps({"cycle": 1, "event": "plan", "data": {}, "note": "目标=F-004; 原因=接口枚举"}, ensure_ascii=False) + "\n",
+        json.dumps({"cycle": 1, "event": "phase_start", "data": {"phase": "Hunter"}, "note": "",
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False) + "\n"
+        + json.dumps({"cycle": 1, "event": "plan", "data": {}, "note": "目标=F-004; 原因=接口枚举",
+                      "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     old_pointer = ACTIVE_RUN.read_text(encoding="utf-8", errors="replace") if ACTIVE_RUN.exists() else None
@@ -406,6 +449,11 @@ def _selftest() -> int:
         before_render = {p: p.stat().st_mtime_ns for p in watched}
         plain = render_statusline(root_current, color=False)
         colored = render_statusline(root_current, color=True)
+        (run / "state" / "run_status.json").write_text(json.dumps({
+            "status": "paused_by_operator",
+        }), encoding="utf-8")
+        paused_plain = render_statusline(root_current, color=False)
+        (run / "state" / "run_status.json").unlink()
         outside_dir = Path(tempfile.mkdtemp())
         env = dict(os.environ)
         env["XUNJI_COLOR"] = "1"
@@ -461,7 +509,8 @@ def _selftest() -> int:
     checks = [
         ("plain statusline is human-readable", "[Xunji-status] [Hunter｜验证]" in plain),
         ("open fronts use pentest wording", "待验证入口 6 个" in plain and "F 6/1/3" not in plain),
-        ("subagents are aggregated", "子任务 2 个进行中" in plain),
+        ("planned agents are not presented as real", "子任务 计划2/真实0" in plain),
+        ("operator pause is visible", "[Paused｜已暂停]" in paused_plain),
         ("next action uses plan note", "下一步 F-004 接口枚举" in plain),
         ("colored statusline has ansi", "\033[" in colored and "[Hunter｜验证]" in colored),
         ("XUNJI_COLOR command path has ansi", proc.returncode == 0 and "\033[" in env_colored and "[Hunter｜验证]" in env_colored),

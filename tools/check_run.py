@@ -34,6 +34,14 @@ try:
     import loop_state as _loop_state   # closed-loop controller snapshot
 except Exception:
     _loop_state = None
+try:
+    import run_model as _run_model
+except Exception:
+    _run_model = None
+try:
+    import runtime_receipts as _runtime_receipts
+except Exception:
+    _runtime_receipts = None
 from evidence_parse import parse_evidence, write_evidence_index  # 唯一权威证据解析器(已抽出到独立模块)
 
 try:
@@ -182,6 +190,10 @@ def current_evidence_index_hash(run_dir: Path) -> str:
             "artifacts_missing": rec.get("artifacts_missing", []),
         })
     entries.sort(key=lambda x: str(x.get("id", "")))
+    for entry in entries:
+        for artifact in entry.get("artifacts", []):
+            for key in ("excerpt", "excerpt_truncated_chars", "diff_summary"):
+                artifact.pop(key, None)
     payload = {"schema": "xunji.evidence_index.v1", "entries": entries}
     payload["sha1"] = _sha1_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     return payload["sha1"]
@@ -378,6 +390,16 @@ def check_certainty_scale(run_dir: Path) -> list[str]:
     return errors
 
 
+def check_front_schema(run_dir: Path) -> list[str]:
+    if _run_model is None:
+        return ["frontier 状态模型不可用：tools/run_model.py import 失败。"]
+    try:
+        errors = _run_model.summary(run_dir).get("schema_errors", [])
+    except Exception as exc:
+        return [f"frontier 状态模型解析失败: {exc}"]
+    return [f"frontier canonical schema: {error}" for error in errors]
+
+
 def _report_evidence_ids(rtext: str) -> set[str]:
     ids: set[str] = set()
     for m in re.finditer(r"(?im)^\s*[-*]?\s*Evidence\s+IDs?\s*[:：]\s*(.*)$", rtext):
@@ -457,6 +479,49 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:
             "成熟度软警(report): report 正文引用了未达 finding 的证据条目 "
             f"({details})。若只是背景/开放问题, 请显式写明非确认发现; 若作为确认发现, 先过 evidence gate。")
     return errors, warnings
+
+
+def check_chain_maturity(run_dir: Path) -> list[str]:
+    """A confirmed composed chain cannot be stronger than its weakest E-id."""
+    path = run_dir / "chains.md"
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    records = {record["id"]: record for record in parse_evidence(run_dir)}
+    errors: list[str] = []
+    for match in re.finditer(r"(?ms)^##\s+(C-\d+)\b(.*?)(?=^##\s+C-\d+\b|\Z)", text):
+        cid, block = match.group(1), match.group(2)
+        status = _block_field(block, "Status").lower()
+        if "confirmed" not in status:
+            continue
+        eids = sorted(set(re.findall(r"\bE-\d+[a-z]*\b", block)))
+        if not eids:
+            errors.append(f"组合链硬门: {cid} 标为 confirmed 但 Hops 没有 E-id。")
+            continue
+        invalid: list[str] = []
+        certs: list[float] = []
+        for eid in eids:
+            record = records.get(eid)
+            if not record:
+                invalid.append(f"{eid}=missing")
+                continue
+            values = record.get("certainties") or []
+            cert = max(values) if values else 0.0
+            certs.append(cert)
+            if (record.get("maturity") != "finding" or not record.get("confirmed")
+                    or record.get("superseded")):
+                invalid.append(f"{eid}={record.get('maturity')}/{cert:g}")
+        if invalid:
+            errors.append(
+                f"组合链硬门: {cid} 仍写 confirmed，但弱跳未达 finding/0.8: "
+                + ", ".join(invalid) + "。证据降级必须立即使整条链变 suspected。")
+        weakest_raw = _block_field(block, "Weakest hop certainty")
+        weakest_match = re.search(r"[01](?:\.\d+)?", weakest_raw)
+        if certs and (not weakest_match or abs(float(weakest_match.group(0)) - min(certs)) > 1e-9):
+            errors.append(
+                f"组合链硬门: {cid} Weakest hop certainty 必须等于当前 E-id 最低 certainty "
+                f"({min(certs):g})，不能手填更高值。")
+    return errors
 
 
 def _has_target_content_artifacts(run_dir: Path) -> bool:
@@ -760,6 +825,14 @@ def check_completion_cron_record(run_dir: Path) -> list[str]:
     """
     if not _completion_marker_claimed(run_dir):
         return []
+    if _runtime_receipts is None:
+        return [
+            "收口硬门(loop cron): runtime_receipts 不可用，无法验证真实 CronList/CronDelete。"]
+    cron_ok, cron_note = _runtime_receipts.cron_quiescent(run_dir)
+    if not cron_ok:
+        return [
+            "收口硬门(loop cron receipt): 不能用 journal 自述证明定时任务已停止。"
+            "必须执行 CronList；如仍有本 run job，先 CronDelete，再次 CronList。" + cron_note]
     journal = run_dir / "state" / "loop_journal.jsonl"
     if not journal.exists():
         return [
@@ -941,6 +1014,30 @@ def check_agent_lifecycle(run_dir: Path, *, closure: bool = False) -> tuple[list
             errors.append(msg)
         else:
             warns.append(msg)
+    if _runtime_receipts is not None:
+        try:
+            planned = [
+                str(item.get("agent") or "")
+                for item in _workers.load_assignments(run_dir).get("assignments", [])
+                if isinstance(item, dict) and str(item.get("agent") or "")
+            ]
+            real = set(_runtime_receipts.agent_fanout(run_dir).get("assignments", []))
+            missing = sorted(set(planned) - real)
+            if missing:
+                msg = (
+                    "Agent 运行真实性: assignment 缺 transcript-backed Agent PostToolUse 回执: "
+                    + ", ".join(missing)
+                    + "。手写 heartbeat/status/finished_at 不算真实运行。")
+                (errors if closure else warns).append(msg)
+            disposition = _runtime_receipts.agent_disposition(run_dir)
+            if disposition.get("pending"):
+                msg = (
+                    "Agent 结果落实: " + "; ".join(disposition.get("pending", [])[:8])
+                    + "。每个真实 Agent 返回后必须 merge/adjudicate；done 或旧处置不能替代本次整合。")
+                (errors if closure else warns).append(msg)
+        except Exception:
+            if closure:
+                errors.append("Agent 运行真实性: 无法验证 runtime receipt，收口保持阻断。")
     return errors, warns
 
 
@@ -1311,48 +1408,64 @@ _INDEPENDENT_REVIEW_HEADING_RE = re.compile(
 )
 
 
-def has_completed_independent_review(review_text: str) -> bool:
-    """Reject template/prose mentions while accepting structured or substantive reviews."""
-    matches = list(_INDEPENDENT_REVIEW_HEADING_RE.finditer(review_text or ""))
-    for match in matches:
-        heading = match.group(0)
-        if re.search(r"\b(?:pending|status|template|待复审|待填写)\b", heading, re.I):
-            continue
-        tail = review_text[match.end():]
-        h2 = list(re.finditer(r"(?m)^##\s+[^\n]+$", tail))
-        end = h2[0].start() if h2 else len(tail)
-        # peer_review.py writes `## Verdict:` immediately after the Independent
-        # Review preface. Include that one generated section, but stop before any
-        # later H2 so a filled self-review cannot make an untouched template pass.
-        if h2 and re.match(r"##\s+Verdict\s*[:：]", h2[0].group(0), re.I):
-            end = h2[1].start() if len(h2) > 1 else len(tail)
-        block = heading + tail[:end]
-        clean = re.sub(r"<!--.*?-->|<[^>]*>", "", block, flags=re.S)
-        verdict_match = re.search(
-            r"(?im)^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?Verdict\s*[:：]\s*"
-            r"(PASS|WARN|BLOCKER|PASSED|CONFIRMED)\b",
-            clean,
-        )
-        reviewer = _block_field(clean, "Reviewer")
-        backend = _block_field(clean, "Backend")
-        backend_meta = re.search(r"(?im)^_backend\s*[:：]\s*([^_\n]+)_", clean)
-        reviewer_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", reviewer, re.I))
-        backend_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", backend, re.I))
-        identity_ok = (
-            (not _blankish_field(reviewer) and not reviewer_placeholder)
-            or (not _blankish_field(backend) and not backend_placeholder)
-            or (backend_meta is not None and (
-                "heterogeneous peer_review" in heading.lower()
-                or "same-family peer_review fallback" in heading.lower()
-            ))
-        )
-        if verdict_match and identity_ok:
-            return True
-    return False
+def _review_receipt_ids(review_text: str) -> list[str]:
+    return re.findall(r"(?im)^\s*-\s*ReviewReceipt\s*[:：]\s*([0-9a-f]{64})\s*$", review_text or "")
 
 
-def has_codex_completion_review(decisions_text: str) -> bool:
-    """Require a structured completion-review result, not a prose keyword mention."""
+def validate_independent_review_receipt(run_dir: Path, review_text: str) -> tuple[bool, str]:
+    """Validate tool provenance, frozen evidence, and content-addressed receipt."""
+    receipt_ids = _review_receipt_ids(review_text)
+    if not receipt_ids:
+        return False, "review.md has no ReviewReceipt generated by peer_review.py"
+    receipt_id = receipt_ids[-1]
+    path = run_dir / "review" / "receipts" / f"{receipt_id}.json"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return False, f"missing/corrupt review receipt {receipt_id}"
+    claimed = str(record.pop("receipt_id", ""))
+    actual = hashlib.sha256(json.dumps(
+        record, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    if claimed != receipt_id or actual != receipt_id:
+        return False, "review receipt content hash mismatch"
+    if record.get("schema") != "xunji.peer_review_receipt.v1":
+        return False, "review receipt schema mismatch"
+    result = record.get("result") if isinstance(record.get("result"), dict) else {}
+    if str(result.get("verdict") or "") not in {"PASS", "WARN", "BLOCKER", "CONFIRMED", "PASSED"}:
+        return False, "review receipt has no completed verdict"
+    backend = str(result.get("backend_used") or "")
+    if _blankish_field(backend) or backend.lower() in {"operator", "manual", "n/a"}:
+        return False, "review receipt has no independent backend"
+    current_hash = current_evidence_index_hash(run_dir)
+    if str(result.get("evidence_index_hash") or "") != current_hash:
+        return False, "review receipt evidence_index hash is stale"
+    bundle_path = run_dir / "review" / "review_bundle.json"
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return False, "review bundle missing/corrupt"
+    if str(result.get("bundle_hash") or "") != str(bundle.get("sha1") or ""):
+        return False, "review receipt bundle hash mismatch"
+    if _runtime_receipts is None or not _runtime_receipts.review_invocation_valid(
+        run_dir,
+        str(record.get("generated_at") or ""),
+        receipt_id=receipt_id,
+        bundle_hash=str(result.get("bundle_hash") or ""),
+    ):
+        return False, "no transcript-backed foreground peer_review.py --into-run invocation"
+    return True, ""
+
+
+def has_completed_independent_review(review_text: str, run_dir: Path | None = None) -> bool:
+    """Only a current hook-backed peer-review receipt satisfies the gate."""
+    if run_dir is None:
+        return False
+    return validate_independent_review_receipt(run_dir, review_text)[0]
+
+
+def has_codex_completion_review(decisions_text: str, run_dir: Path | None = None) -> bool:
+    """Require structured prose plus a real current Agent tool review receipt."""
     heading = re.search(r"(?im)^#{2,6}\s+CodexCompletionReview\b[^\n]*$", decisions_text or "")
     if not heading:
         return False
@@ -1364,7 +1477,11 @@ def has_codex_completion_review(decisions_text: str) -> bool:
         r"(?im)^\s*[-*]\s*Verdict\s*[:：]\s*\**(PASS|WARN|CONFIRMED)\b",
         block,
     )
-    return bool(reviewer and verdict and len(re.sub(r"\s+", "", block)) >= 80)
+    structured = bool(reviewer and verdict and len(re.sub(r"\s+", "", block)) >= 80)
+    if not structured or run_dir is None or _runtime_receipts is None:
+        return False
+    return _runtime_receipts.completion_review_valid(
+        run_dir, current_evidence_index_hash(run_dir))
 
 
 def check_codex_completion_review(run_dir: Path) -> list[str]:
@@ -1372,12 +1489,13 @@ def check_codex_completion_review(run_dir: Path) -> list[str]:
         return []
     decisions = run_dir / "decisions.md"
     text = decisions.read_text(encoding="utf-8", errors="replace") if decisions.exists() else ""
-    if has_codex_completion_review(text):
+    if has_codex_completion_review(text, run_dir):
         return []
     return [
         "收口硬门(CodexCompletionReview): decisions.md 已有 completion marker, 但缺真实"
         "结构化 completion review。关键词/单行字段/待办散文不算；需要含 Reviewer + Verdict + "
-        "实质内容的 `## CodexCompletionReview` 小节。"
+        "实质内容的 `## CodexCompletionReview` 小节，以及响应中绑定当前 evidence hash、"
+        "四项 CHECKS 和 `XUNJI_COMPLETION_VERDICT=PASS` 的 Agent runtime receipt。"
     ]
 
 
@@ -1393,17 +1511,9 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
 
     review_path = run_dir / "review.md"
     review_text = review_path.read_text(encoding="utf-8", errors="replace") if review_path.exists() else ""
-    has_independent_review = has_completed_independent_review(review_text)
-    evidence_path = run_dir / "evidence.md"
-    review_stale = False
-    if has_independent_review and evidence_path.exists() and review_path.exists():
-        try:
-            review_stale = evidence_path.stat().st_mtime > review_path.stat().st_mtime
-        except OSError:
-            review_stale = False
-    has_fresh_independent_review = has_independent_review and not review_stale
-    review_gap = ("without fresh independent review (evidence.md newer than review.md)"
-                  if review_stale else "without independent review")
+    has_independent_review = has_completed_independent_review(review_text, run_dir)
+    has_fresh_independent_review = has_independent_review
+    review_gap = "without current transcript-backed independent review receipt"
 
     if confirmed_n and decisions_n >= 4 and not has_fresh_independent_review:
         errors.append(
@@ -1489,15 +1599,31 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:
     warns: list[str] = []
 
     current_hash = current_evidence_index_hash(run_dir)
-    for hm in re.finditer(r"(?im)^\s*-\s*EvidenceIndexHash\s*[:：]\s*([0-9a-f]{40}|\(missing\))", text):
-        seen = hm.group(1)
+    seen_hashes = re.findall(
+        r"(?im)^\s*-\s*EvidenceIndexHash\s*[:：]\s*([0-9a-f]{40}|\(missing\))",
+        text,
+    )
+    if seen_hashes:
+        seen = seen_hashes[-1]
         if seen != "(missing)" and seen != current_hash:
             errors.append(
-                "复审硬门(evidence_index 已变): review.md 的 EvidenceIndexHash "
+                "复审硬门(evidence_index 已变): review.md 最新 ReviewReceipt 的 EvidenceIndexHash "
                 f"{seen} 与当前 {current_hash} 不一致 —— 证据/产物变更后旧 Codex/peer_review "
-                "裁决失效, 需重新跑 `python tools/peer_review.py --into-run runs/<dir>` 或写新的证据化裁决。")
+                "裁决失效, 需重新跑 `python tools/peer_review.py --into-run runs/<dir>`。"
+                "更早的历史 receipt 保留审计价值，不再反向污染最新裁决。")
 
-    for m in re.finditer(r"(?ms)^###\s+(PR-\d+)\s+—\s+(BLOCKER|WARN)\b(.*?)(?=^###\s+PR-\d+\s+—|^##\s|\Z)", text):
+    finding_blocks = list(re.finditer(
+        r"(?ms)^###\s+(PR-\d+)\s+—\s+(BLOCKER|WARN)\b(.*?)(?=^###\s+PR-\d+\s+—|^##\s|\Z)",
+        text,
+    ))
+    ids = [match.group(1) for match in finding_blocks]
+    duplicates = sorted({prid for prid in ids if ids.count(prid) > 1})
+    if duplicates:
+        errors.append(
+            "复审硬门(PR id 重复): " + ", ".join(duplicates)
+            + " 在多个 review ledger 中重复，无法可靠 resolve；重新复审时必须分配全局唯一 PR id。")
+
+    for m in finding_blocks:
         prid, sev, block = m.group(1), m.group(2), m.group(3)
         sm = re.search(r"(?im)^\s*-\s*Status\s*[:：]\s*([^\n]+)", block)
         rm = re.search(r"(?im)^\s*-\s*DriverResolution\s*[:：]\s*([^\n]+)", block)
@@ -2269,7 +2395,7 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     # 硬门: 收口前必须有独立 Reviewer 复审记录
     review = run_dir / "review.md"
     rv = review.read_text(encoding="utf-8", errors="replace") if review.exists() else ""
-    if not has_completed_independent_review(rv):
+    if not has_completed_independent_review(rv, run_dir):
         errors.append(
             "收口硬门(P0-1): report 含强收口断言, 但 review.md 无【独立复审 / Independent "
             "Review】记录。自评治不了自评偏见; 收口前【必须】派独立 Reviewer 子代理(常驻授权, "
@@ -2331,6 +2457,7 @@ def _selftest() -> int:
     consume it). Mirrors check_hook's self-testing pattern. No network, no run dir."""
     import os
     import tempfile
+    import peer_review as _peer_review_test
     valid_review_text = (
         "# Review\n\n## Independent Review\n"
         "- Reviewer: selftest-fresh-context\n"
@@ -2376,10 +2503,41 @@ def _selftest() -> int:
         encoding="utf-8")
     recs = parse_evidence(d)
     byid = {r["id"]: r for r in recs}
+
+    def _install_valid_review(run: Path) -> str:
+        bundle = _peer_review_test.build_review_bundle(run, write=True)
+        result = _peer_review_test.ReviewResult(
+            verdict="PASS", backend_used="codex", driver="claude", brain="codex",
+            bundle_hash=bundle["sha1"],
+            evidence_index_hash=bundle["evidence_index"]["sha1"],
+        )
+        _peer_review_test._append_run_review(run, result)
+        transcript = run / "review-transcript.jsonl"
+        tool_id = "tool-review-" + hashlib.sha1(str(run).encode()).hexdigest()[:12]
+        transcript.write_text(tool_id + "\n", encoding="utf-8")
+        if _runtime_receipts is not None:
+            _runtime_receipts.append_hook_event(run, {
+                "hook_event_name": "PostToolUse", "session_id": "selftest-review",
+                "transcript_path": str(transcript), "tool_name": "Bash",
+                "tool_use_id": tool_id,
+                "tool_input": {"command": f"python tools/peer_review.py {run} --into-run"},
+                "tool_response": {"stdout": (
+                    f"XUNJI_REVIEW_RECEIPT={result.runtime_receipt_id}\n"
+                    f"XUNJI_REVIEW_BUNDLE={result.bundle_hash}\nreview completed"
+                ), "stderr": ""},
+            })
+        return (run / "review.md").read_text(encoding="utf-8", errors="replace")
+
+    receipt_review_text = _install_valid_review(d)
+    receipt_review_valid, receipt_review_reason = validate_independent_review_receipt(
+        d, receipt_review_text)
     checks = [
         ("preamble not counted", len(recs) == 10),
-        ("completed independent review requires real identity and verdict",
-         has_completed_independent_review(valid_review_text)),
+        ("manual reviewer identity/verdict cannot satisfy gate",
+         not has_completed_independent_review(valid_review_text, d)),
+        ("tool-backed current review receipt satisfies gate"
+         + (f" ({receipt_review_reason})" if receipt_review_reason else ""),
+         receipt_review_valid and has_completed_independent_review(receipt_review_text, d)),
         ("independent review prose mention does not satisfy gate",
          not has_completed_independent_review(
              "# Review\nIndependent Review is still required before closure.\n")),
@@ -2392,10 +2550,10 @@ def _selftest() -> int:
              "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
              "- Verdict: (PASS / WARN / BLOCKER)\n\n## R-001 Self review\n"
              + ("- Findings: driver checked its own evidence and claims PASS.\n" * 30))),
-        ("peer_review generated backend/verdict satisfies gate",
-         has_completed_independent_review(
+        ("peer_review-looking prose without receipt cannot satisfy gate",
+         not has_completed_independent_review(
              "## Independent Review (same-family peer_review fallback)\n"
-             "_backend: claude_\n## Verdict: WARN\n")),
+             "_backend: claude_\n## Verdict: WARN\n", d)),
         ("generic peer_review label cannot spoof generated review identity",
          not has_completed_independent_review(
              "## Independent Review (peer_review)\n"
@@ -2409,10 +2567,10 @@ def _selftest() -> int:
              "CodexCompletionReview is still missing and must be added.\n")),
         ("single completion review field does not satisfy gate",
          not has_codex_completion_review("- CodexCompletionReview: CONFIRMED by fresh reviewer\n")),
-        ("substantive completion review section satisfies gate",
-         has_codex_completion_review(
+        ("substantive completion prose without Agent receipt cannot satisfy gate",
+         not has_codex_completion_review(
              "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
-             "- Summary: report coverage, evidence severity, and reachable assets were independently checked.\n")),
+             "- Summary: report coverage, evidence severity, and reachable assets were independently checked.\n", d)),
         ("report Evidence IDs parser accepts bullet form",
          _report_evidence_ids("- Evidence IDs: E-001, E-002") == {"E-001", "E-002"}),
         ("split certainty -> confirmed", byid["E-002"]["confirmed"] is True),
@@ -2494,6 +2652,14 @@ def _selftest() -> int:
         "- Refuted lead: E-010\n",
         encoding="utf-8")
     mat_context_errors, mat_context_warns = check_report_maturity(d_mat_context)
+    d_chain = Path(tempfile.mkdtemp())
+    (d_chain / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-019\n- Maturity: candidate\n- Certainty: 0.5\n",
+        encoding="utf-8")
+    (d_chain / "chains.md").write_text(
+        "# Chains\n## C-001\n- Hops: E-019\n- Weakest hop certainty: 0.8\n"
+        "- Terminal node: schema disclosure\n- Status: confirmed\n", encoding="utf-8")
+    chain_errors = check_chain_maturity(d_chain)
     checks += [
         ("maturity parser: phenomenon", mat_recs["E-010"]["maturity"] == "phenomenon"),
         ("maturity parser: candidate", mat_recs["E-011"]["maturity"] == "candidate"),
@@ -2515,6 +2681,8 @@ def _selftest() -> int:
          any("E-014" in w and "Maturity=finding" in w for w in mat_consistency)),
         ("maturity consistency: candidate above gate warns",
          any("E-015" in w and "Maturity=candidate" in w for w in mat_consistency)),
+        ("confirmed chain rejects candidate weakest hop",
+         any("E-019=candidate/0.5" in e for e in chain_errors)),
         ("evidence index keeps legacy confirmed and adds confirmed_findings",
          "E-015" in mat_index["confirmed"] and "E-015" not in mat_index["confirmed_findings"]
          and "E-012" in mat_index["confirmed_findings"]),
@@ -2786,11 +2954,22 @@ def _selftest() -> int:
         encoding="utf-8")
     d_cron = Path(tempfile.mkdtemp())
     (d_cron / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
+    (d_cron / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
     completion_review_missing = check_codex_completion_review(d_cron)
     cron_missing = check_completion_cron_record(d_cron)
     (d_cron / "state").mkdir()
     (d_cron / "state" / "loop_journal.jsonl").write_text(
         '{"event":"phase_end","note":"closure complete; cron_cancelled=none"}\n', encoding="utf-8")
+    cron_non_end_without_receipt = check_completion_cron_record(d_cron)
+    cron_transcript = d_cron / "cron-transcript.jsonl"
+    cron_transcript.write_text("tool-cron-list\ntool-completion-review\n", encoding="utf-8")
+    if _runtime_receipts is not None:
+        _runtime_receipts.append_hook_event(d_cron, {
+            "hook_event_name": "PostToolUse", "session_id": "selftest-cron",
+            "transcript_path": str(cron_transcript), "tool_name": "CronList",
+            "tool_use_id": "tool-cron-list", "tool_input": {},
+            "tool_response": {"tasks": []},
+        })
     cron_non_end = check_completion_cron_record(d_cron)
     (d_cron / "state" / "loop_journal.jsonl").write_text(
         '{"event":"cycle_end","note":"closure complete; cron_cancelled=none"}\n', encoding="utf-8")
@@ -2803,6 +2982,19 @@ def _selftest() -> int:
         "- Reviewer: codex-fresh\n- Verdict: PASS\n"
         "- Summary: report coverage, severity support, and reachable assets were independently checked.\n",
         encoding="utf-8")
+    completion_hash = current_evidence_index_hash(d_cron)
+    if _runtime_receipts is not None:
+        _runtime_receipts.append_hook_event(d_cron, {
+            "hook_event_name": "PostToolUse", "session_id": "selftest-completion",
+            "transcript_path": str(cron_transcript), "tool_name": "Agent",
+            "tool_use_id": "tool-completion-review",
+            "tool_input": {"prompt":
+                f"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={completion_hash} run={d_cron.name} "
+                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
+            "tool_response": {"result":
+                f"XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX={completion_hash} "
+                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
+        })
     completion_review_ok = check_codex_completion_review(d_cron)
     d_lifecycle = Path(tempfile.mkdtemp())
     (d_lifecycle / "ev.html").write_text("x" * 10, encoding="utf-8")
@@ -2821,9 +3013,25 @@ def _selftest() -> int:
         lifecycle_err, _ = check_closure_discipline(d_lifecycle)
         _workers.update_agent_lifecycle(d_lifecycle, life_rec["agent"], status="done",
                                         note="merged into review", terminal=True)
+        lifecycle_manual_done_err, _ = check_closure_discipline(d_lifecycle)
+        life_transcript = d_lifecycle / "agent-transcript.jsonl"
+        life_transcript.write_text("tool-life-agent\n", encoding="utf-8")
+        if _runtime_receipts is not None:
+            _runtime_receipts.append_hook_event(d_lifecycle, {
+                "hook_event_name": "PostToolUse", "session_id": "selftest-agent",
+                "transcript_path": str(life_transcript), "tool_name": "Agent",
+                "tool_use_id": "tool-life-agent",
+                "tool_input": {"prompt":
+                    f"XUNJI_ASSIGNMENT={life_rec['agent']} XUNJI_FRONT=F-001"},
+                "tool_response": {"result": "candidate complete"},
+            })
         lifecycle_done_err, _ = check_closure_discipline(d_lifecycle)
+        _workers.update_agent_lifecycle(
+            d_lifecycle, life_rec["agent"], status="merged",
+            note="Evidence: E-001 result adjudicated", terminal=True)
+        lifecycle_merged_err, _ = check_closure_discipline(d_lifecycle)
     else:
-        lifecycle_err, lifecycle_done_err = [], []
+        lifecycle_err, lifecycle_manual_done_err, lifecycle_done_err, lifecycle_merged_err = [], [], [], []
     checks += [
         ("retrospective missing -> hard error", any("强制复盘" in e for e in retro_missing)),
         ("retrospective placeholder-only -> both sections error", len(retro_stub) == 2),
@@ -2850,6 +3058,8 @@ def _selftest() -> int:
             _closure_gate_active(d_retro_prose) is False),
         ("completion marker without cron_cancelled record hard-fails",
             any("loop cron" in e for e in cron_missing)),
+        ("journal cron text without runtime receipt hard-fails",
+            any("receipt" in e for e in cron_non_end_without_receipt)),
         ("completion marker ignores cron_cancelled on non-end journal event",
             any("cycle_end/end" in e for e in cron_non_end)),
         ("completion marker with cron_cancelled=none clears cron gate", cron_none == []),
@@ -2860,8 +3070,14 @@ def _selftest() -> int:
             completion_review_ok == []),
         ("closure trigger + non-terminal agent -> lifecycle hard error",
          _workers is None or any("Agent 生命周期" in e for e in lifecycle_err)),
-        ("finished agent clears lifecycle hard error",
-         _workers is None or not any("Agent 生命周期" in e for e in lifecycle_done_err)),
+        ("hand-written finished status does not clear runtime authenticity gate",
+         _workers is None or any("Agent 运行真实性" in e for e in lifecycle_manual_done_err)),
+        ("real Agent receipt clears lifecycle authenticity error",
+         _workers is None or not any("Agent 运行真实性" in e for e in lifecycle_done_err)),
+        ("real Agent receipt still requires post-return disposition",
+         _workers is None or any("Agent 结果落实" in e for e in lifecycle_done_err)),
+        ("anchored post-return merge clears disposition gate",
+         _workers is None or not any("Agent 结果落实" in e for e in lifecycle_merged_err)),
     ]
 
     # --- 台账完整性 (check_coverage_health ③ 子警, 任务8 + 任务#4 合并) ---
@@ -2943,7 +3159,7 @@ def _selftest() -> int:
     d10 = Path(tempfile.mkdtemp())
     (d10 / "report.md").write_text(
         "# Report\nEvidence IDs: E-001\n## 确认发现\n- 证据: E-001\n", encoding="utf-8")
-    (d10 / "review.md").write_text(valid_review_text, encoding="utf-8")
+    _install_valid_review(d10)
     rv_before = (d10 / "review.md").read_text(encoding="utf-8")
     _maybe_auto_peer_review(d10)   # 幂等: 已有独立复审记录 -> 直接 return, 不改 review.md/不调模型
     rv_after = (d10 / "review.md").read_text(encoding="utf-8")
@@ -3035,6 +3251,26 @@ def _selftest() -> int:
         "- Maturity: finding\n- Control: yes\n- Artifacts: `ev.html`\n- Certainty: 1.0\n",
         encoding="utf-8")
     pr_stale_e, pr_stale_w = check_peer_review_ledger(d_pr)
+    pr_current_hash = current_evidence_index_hash(d_pr)
+    with (d_pr / "review.md").open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n## Independent Review (heterogeneous peer_review · claude · later)\n"
+            "## Review Finding Ledger\n"
+            f"- EvidenceIndexHash: {pr_current_hash}\n- (none)\n")
+    pr_refreshed_e, _ = check_peer_review_ledger(d_pr)
+
+    d_pr_dup = Path(tempfile.mkdtemp())
+    (d_pr_dup / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    dup_hash = current_evidence_index_hash(d_pr_dup)
+    (d_pr_dup / "review.md").write_text(
+        "# Review\n## Review Finding Ledger\n"
+        f"- EvidenceIndexHash: {dup_hash}\n"
+        "### PR-001 — WARN — first\n- Status: dismissed\n- DriverResolution: Reason: fixed\n"
+        "## Review Finding Ledger\n"
+        f"- EvidenceIndexHash: {dup_hash}\n"
+        "### PR-001 — WARN — second\n- Status: dismissed\n- DriverResolution: Reason: fixed\n",
+        encoding="utf-8")
+    pr_dup_e, _ = check_peer_review_ledger(d_pr_dup)
     checks += [
         ("peer_review ledger: pending BLOCKER hard fails",
          any("未处理 BLOCKER" in e and "PR-001" in e for e in pr_pending_e)),
@@ -3046,6 +3282,10 @@ def _selftest() -> int:
          any("缺证据锚点" in e for e in pr_bad_resolution_e)),
         ("peer_review ledger: evidence hash drift hard fails",
          any("evidence_index 已变" in e for e in pr_stale_e)),
+        ("peer_review ledger: latest fresh hash supersedes historical stale hash",
+         not any("evidence_index 已变" in e for e in pr_refreshed_e)),
+        ("peer_review ledger: duplicate PR ids hard fail",
+         any("PR id 重复" in e for e in pr_dup_e)),
     ]
 
     # --- Ultra-native agent-board conflict gate ---
@@ -3118,29 +3358,25 @@ def _selftest() -> int:
     (d_mid_cov / "frontier.md").write_text(
         "# Frontier\n### F-001\n- Status: open\n- charlie login gate\n", encoding="utf-8")
     (d_mid_cov / "decisions.md").write_text(_five_decisions, encoding="utf-8")
-    (d_mid_cov / "review.md").write_text(valid_review_text, encoding="utf-8")
+    _install_valid_review(d_mid_cov)
     mid_cov_e, mid_cov_w = check_intermediate_gates(d_mid_cov)
 
     d_mid_fresh = Path(tempfile.mkdtemp())
     evp = d_mid_fresh / "evidence.md"
     rvp = d_mid_fresh / "review.md"
     evp.write_text("# Evidence Ledger\n## E-001\n- Certainty: 1.0\n", encoding="utf-8")
-    rvp.write_text(
-        "# Review\n## 独立复审\n- Reviewer: selftest\n- Verdict: PASS\n",
-        encoding="utf-8")
+    _install_valid_review(d_mid_fresh)
     (d_mid_fresh / "decisions.md").write_text(_five_decisions, encoding="utf-8")
     os.utime(evp, (1000, 1000))
-    os.utime(rvp, (1010, 1010))
     fresh_review_e, _ = check_intermediate_gates(d_mid_fresh)
 
     d_mid_stale = Path(tempfile.mkdtemp())
     evp2 = d_mid_stale / "evidence.md"
     rvp2 = d_mid_stale / "review.md"
     evp2.write_text("# Evidence Ledger\n## E-001\n- Certainty: 1.0\n", encoding="utf-8")
-    rvp2.write_text(valid_review_text, encoding="utf-8")
+    _install_valid_review(d_mid_stale)
     (d_mid_stale / "decisions.md").write_text(_five_decisions, encoding="utf-8")
-    os.utime(rvp2, (1000, 1000))
-    os.utime(evp2, (1010, 1010))
+    evp2.write_text("# Evidence Ledger\n## E-001\n- Certainty: 0.8\n", encoding="utf-8")
     stale_review_e, _ = check_intermediate_gates(d_mid_stale)
 
     d_mid_barrier = Path(tempfile.mkdtemp())
@@ -3154,9 +3390,9 @@ def _selftest() -> int:
     checks += [
         ("intermediate coverage: stale examined=false ignored when E/front touched hosts",
          not any("Coverage gap" in x for x in (mid_cov_e + mid_cov_w))),
-        ("intermediate review: 独立复审 header counts when review is fresh",
+        ("intermediate review: current receipt counts when evidence hash matches",
          not any("peer_review overdue" in e or "Reviewer cycle overdue" in e for e in fresh_review_e)),
-        ("intermediate review: evidence newer than review makes review stale",
+        ("intermediate review: evidence hash change invalidates receipt regardless of mtime",
          any("peer_review overdue" in e for e in stale_review_e)
          and any("Reviewer cycle overdue" in e for e in stale_review_e)),
         ("intermediate same-barrier: closed/deferred fronts skipped, open/probing still warn",
@@ -3448,7 +3684,7 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
         return  # 未收口 -> 不触发
     rv_path = run_dir / "review.md"
     rv = rv_path.read_text(encoding="utf-8", errors="replace") if rv_path.exists() else ""
-    if has_completed_independent_review(rv):
+    if has_completed_independent_review(rv, run_dir):
         return  # 幂等: 已有独立复审记录 -> 不重跑
     try:
         import peer_review  # 同目录(sys.path 已插入 tools/)
@@ -3512,6 +3748,7 @@ def main() -> int:
         path = run_dir / name
         markers = REQUIRED_MARKERS.get(name, [])
         errors.extend(check_file(path, markers))
+    errors.extend(check_front_schema(run_dir))
 
     # Optional artifacts: only checked when the file is present.
     for name, markers in OPTIONAL_MARKERS.items():
@@ -3548,7 +3785,11 @@ def main() -> int:
     warnings.extend(check_closed_artifacts(run_dir))  # 交叉验证: Closed Front 需声明 Artifacts verified (防空 stdout body 错误关闭)
     warnings.extend(check_ledger_contradiction(run_dir))
     warnings.extend(check_graph_consistency(run_dir))  # 派生状态图: 解锁却 deferred / 关了却解锁
-    warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)
+    worker_merge_issues = check_workers(run_dir)
+    if _closure_gate_active(run_dir):
+        errors.extend(worker_merge_issues)             # 收口时 done 未 merge 是硬门
+    else:
+        warnings.extend(worker_merge_issues)
     if not _closure_gate_active(run_dir):
         _, lifecycle_warns = check_agent_lifecycle(run_dir, closure=False)
         warnings.extend(lifecycle_warns)               # Agent 生命周期: 未终态/心跳过期
@@ -3576,6 +3817,7 @@ def main() -> int:
     maturity_errors, maturity_warns = check_report_maturity(run_dir)
     errors.extend(maturity_errors)
     warnings.extend(maturity_warns)
+    errors.extend(check_chain_maturity(run_dir))
     errors.extend(check_loop_state_closure_blockers(run_dir))
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
@@ -3592,7 +3834,7 @@ def main() -> int:
             print(f"- {error}")
         return 1
 
-    print("run check passed")
+    print("STRUCTURAL_PASS: run structure is consistent; this is not completion proof")
     return 0
 
 

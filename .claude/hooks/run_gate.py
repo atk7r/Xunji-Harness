@@ -17,8 +17,8 @@ Phase 架构:
 
 与 safety_gate 的根本区别(复审重点):
   - safety_gate 拦【不可逆危害】, 必须 FAIL-CLOSED(读不到事件就拒绝)。
-  - run_gate 是【流程提醒】, 不防危害、只防遗漏, 必须 FAIL-OPEN: 自身任何异常(读不到事件 /
-    找不到 run / check_run 报错 / 超时)都【静默放行 exit 0】, 绝不因为一个提醒器而卡死会话。
+  - run_gate 的通知路径可降级；active run 的 Agent/Cron/收口客观硬门 FAIL-CLOSED。
+    只有事件无法解析或确实没有 active run 时静默放行。
 防循环: 仅纯提醒类路径使用 systemMessage; 客观硬门(check_run / severity / replay / timeout /
 Agent Board / completion review)不因 stop_hook_active 降级。cqytxy_20260702 证明“最多拦一次”
 会把硬门退化成提醒, driver 会继续收口。
@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -52,6 +53,14 @@ try:
     import loop_state as _loop_state
 except Exception:
     _loop_state = None
+try:
+    import turn_contract as _turn_contract
+except Exception:
+    _turn_contract = None
+try:
+    import runtime_receipts as _runtime_receipts
+except Exception:
+    _runtime_receipts = None
 
 try:
     from anti_drift import (
@@ -465,34 +474,28 @@ def _check_replay_quality(run_dir: Path) -> tuple[str | None, str]:
     return "block", msg
 
 
-def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
-    """Phase 5: Agent Board 强制门 — open fronts >= 4 且 barrier 多样时必须使用 Agent Board。
-
-    如果 frontier.md 中 open fronts >= 4 且 barrier classes 不共享(无 SharedBarrier group),
-    则检查 state/assignments.json 或 agents/ 目录是否存在且有内容。
-    未检测到 agent 使用 → block; 存在 shared barrier 或 open < 4 → 静默放行。
-
-    FAIL-OPEN: 解析失败静默放行。
-    """
+def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str | None, str]:
+    """Require planned lanes plus two transcript-backed Agents in this execute turn."""
     try:
         from anti_drift import _check_agent_board_needed as _ab_needed
-    except Exception:
-        return None, ""
+    except Exception as exc:
+        return "block", f"Agent Board 状态解析器不可用，按 fail-closed 阻断: {type(exc).__name__}"
 
     try:
         should_remind, open_count, _bg = _ab_needed(run_dir)
-    except Exception:
-        return None, ""
+    except Exception as exc:
+        return "block", f"Agent Board 状态解析失败，按 fail-closed 阻断: {type(exc).__name__}"
 
     if not should_remind:
         return None, ""
 
-    decisions = run_dir / "decisions.md"
-    try:
-        dtext = decisions.read_text(encoding="utf-8", errors="replace") if decisions.exists() else ""
-    except Exception:
-        dtext = ""
-    if re.search(r"(?im)^\s*-\s*Agent Board (?:budget reason|fanout override)\s*[:：]\s*\S", dtext):
+    if contract is None and _turn_contract is not None:
+        try:
+            contract = _turn_contract.load_contract(run_dir)
+        except Exception:
+            contract = {}
+    contract = contract or {}
+    if contract.get("fanout_override"):
         return None, ""
 
     agents_dir_path = run_dir / "agents"
@@ -518,24 +521,35 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
     if missing_files:
         problems.append("缺少 agents/A-*.md 文件: " + ", ".join(missing_files[:5]))
 
-    started = []
-    for a in assignments:
-        status = str(a.get("status") or "").strip().lower()
-        try:
-            hb = int(a.get("heartbeat_count") or 0)
-        except Exception:
-            hb = 0
-        if hb > 0 or status in {"running", "working", "done", "merged", "blocked", "failed", "abandoned"}:
-            started.append(str(a.get("agent") or "?"))
-    if len(started) < min(2, len(assignments)):
-        problems.append("assignment 刚创建但未记录 heartbeat/start; spawn 后需 workers.py heartbeat --status running")
+    receipt_state = _runtime_receipts.agent_fanout(
+        run_dir,
+        session_id=str(contract.get("session_id") or ""),
+        since=float(contract.get("updated_at") or 0.0),
+    ) if _runtime_receipts is not None else {
+        "satisfied": False, "assignments": [], "fronts": [],
+    }
+    if not receipt_state.get("satisfied"):
+        problems.append(
+            "当前执行回合缺少两个真实 Agent PostToolUse 回执（必须带 transcript 中存在的 tool_use_id，"
+            "并覆盖不同 assignment/front）；手写 heartbeat/status 不算")
+    elif _runtime_receipts is not None:
+        disposition = _runtime_receipts.agent_disposition(
+            run_dir,
+            session_id=str(contract.get("session_id") or ""),
+            since=float(contract.get("updated_at") or 0.0),
+        )
+        if not disposition.get("disposition_satisfied"):
+            problems.append(
+                "本轮 Agent 结果尚未逐条 merge/adjudicate: "
+                + "; ".join(disposition.get("pending", [])[:5])
+                + "；done/展示摘要不算落实，必须用 workers.py finish 写 canonical E/F/D/Reason 锚点")
 
     if problems:
         return "block", (
             f"open fronts={open_count} 且 barrier 多样, Agent Board 不能全串行。"
             + "；".join(problems)
-            + "。请用 workers.py assign 分配 >=2 条不重叠 front lane，并在 Agent 启动时记录 heartbeat；"
-              "若确因预算/外部依赖不能 fanout，在 decisions.md 写 `Agent Board budget reason:`。"
+            + "。请用 workers.py assign 分配 >=2 条不重叠 front lane，并真实调用 Agent；"
+              "只有操作者当前 prompt 明确 `允许串行` 才可形成一次性 override。"
         )
 
     return None, ""
@@ -713,10 +727,10 @@ def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -
     return msg
 
 
-def _has_completed_independent_review(review_text: str) -> bool:
+def _has_completed_independent_review(review_text: str, run_dir: Path | None = None) -> bool:
     if _cr is not None and callable(getattr(_cr, "has_completed_independent_review", None)):
         try:
-            return bool(_cr.has_completed_independent_review(review_text))
+            return bool(_cr.has_completed_independent_review(review_text, run_dir))
         except Exception:
             return False
     # Closure is the wrong place to degrade to a weaker parser. If the canonical
@@ -724,24 +738,25 @@ def _has_completed_independent_review(review_text: str) -> bool:
     return False
 
 
-def _has_codex_completion_review(decisions_text: str) -> bool:
+def _has_codex_completion_review(decisions_text: str, run_dir: Path | None = None) -> bool:
     if _cr is not None and callable(getattr(_cr, "has_codex_completion_review", None)):
         try:
-            return bool(_cr.has_codex_completion_review(decisions_text))
+            return bool(_cr.has_codex_completion_review(decisions_text, run_dir))
         except Exception:
             return False
     return False
 
 
-def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:
+def _normal_closure_prerequisite(review_text: str, decisions_text: str,
+                                 run_dir: Path | None = None) -> str:
     """Return a hard-block reason for missing Normal-mode closure prerequisites."""
-    if not _has_completed_independent_review(review_text):
+    if not _has_completed_independent_review(review_text, run_dir):
         return (
             "[Normal 收口] report 已终版但缺独立复审。"
             "请运行 peer_review 独立复审并处理全部 finding → "
             "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
         )
-    if not _has_codex_completion_review(decisions_text):
+    if not _has_codex_completion_review(decisions_text, run_dir):
         return (
             "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
             "NORMAL 模式暂停 #2 前必须经 codex agent 复审完整 run。"
@@ -761,9 +776,37 @@ def main() -> None:
     except Exception:
         sys.exit(0)
     stop_active = bool(event.get("stop_hook_active"))
+    active_run = None
     try:
         # ---- Phase 3: drift session check (soft first, hard on repeated protocol drift) ----
         active_run = find_active_run(RUNS)
+        turn_mode = "EXECUTE"
+        contract: dict = {}
+        if active_run is not None and _turn_contract is not None:
+            try:
+                contract = _turn_contract.load_contract(
+                    active_run, session_id=str(event.get("session_id") or ""))
+                turn_mode = str(contract.get("mode") or "EXECUTE")
+            except Exception:
+                turn_mode = "EXECUTE"
+        if turn_mode == "EXPLAIN_ONLY":
+            sys.exit(0)
+        if turn_mode == "PAUSED_BY_OPERATOR":
+            if _runtime_receipts is None:
+                print(json.dumps({"decision": "block", "reason":
+                    "[暂停事务] runtime_receipts 不可用，无法确认 Cron 已停止。"}, ensure_ascii=False))
+                sys.exit(0)
+            cron_ok, cron_note = _runtime_receipts.cron_quiescent(
+                active_run,
+                session_id=str(contract.get("session_id") or ""),
+                since=float(contract.get("updated_at") or 0.0),
+            )
+            if not cron_ok:
+                print(json.dumps({"decision": "block", "reason":
+                    "[暂停事务] 保留 open fronts，不得写 completion marker。先执行 CronList，"
+                    "如有本 run 任务则 CronDelete，再次 CronList 确认消失。" + cron_note},
+                    ensure_ascii=False))
+            sys.exit(0)
         # Dev mode: skip Phase 3 notification (drift detection still runs in output_gate)
         if not _is_dev_mode():
             drift_mode, drift_msg = _check_drift_session(active_run)
@@ -807,7 +850,7 @@ def main() -> None:
 
         # ---- Phase 5 (NEW): Agent Board 强制门 — open fronts >= 4 且 barrier 多样时禁止全串行 ----
         if active_run is not None:
-            ab_mode, ab_msg = _check_agent_board(active_run)
+            ab_mode, ab_msg = _check_agent_board(active_run, contract)
             if ab_mode is not None:
                 if ab_mode == "block":
                     print(json.dumps({"decision": "block", "reason": ab_msg}, ensure_ascii=False))
@@ -829,15 +872,20 @@ def main() -> None:
                 dc = run_dir / "decisions.md"
                 dc_text = dc.read_text(encoding="utf-8", errors="replace") if dc.exists() else ""
 
-                prerequisite_block = _normal_closure_prerequisite(rv, dc_text)
+                prerequisite_block = _normal_closure_prerequisite(rv, dc_text, run_dir)
                 if prerequisite_block:
                     print(json.dumps(
                         {"decision": "block", "reason": prerequisite_block},
                         ensure_ascii=False,
                     ))
                     sys.exit(0)
-            except Exception:
-                pass  # FAIL-OPEN: decisions.md / review.md 读失败放行
+            except Exception as exc:
+                print(json.dumps({
+                    "decision": "block",
+                    "reason": "[Normal 收口 fail-closed] 无法验证独立复审/CompletionReview："
+                              + type(exc).__name__,
+                }, ensure_ascii=False))
+                sys.exit(0)
         if gate_skipped(run_dir):
             sys.exit(0)   # 操作者已认可此 run 不收尾(教学样本/中止) → 不主动提醒
         open_fronts = _count_open_fronts(run_dir)
@@ -854,8 +902,13 @@ def main() -> None:
         else:
             print(json.dumps({"systemMessage": msg}, ensure_ascii=False))
         sys.exit(0)
-    except Exception:
-        # FAIL-OPEN 兜底: 提醒器自身的任何故障都不得卡死会话。
+    except Exception as exc:
+        if active_run is not None:
+            print(json.dumps({
+                "decision": "block",
+                "reason": "[运行流程 fail-closed] active run 的 run_gate 内部异常："
+                          + type(exc).__name__ + "。先修 hook/selftest，再继续执行。",
+            }, ensure_ascii=False))
         sys.exit(0)
 
 
@@ -877,16 +930,53 @@ def _selftest() -> int:
                    decide_closure(True, 1, 0, False) == "block"))
     checks.append(("closure matrix: final + no open fronts + check pass -> pass",
                    decide_closure(True, 0, 0, False) is None))
+    normal_run = Path(tempfile.mkdtemp())
+    (normal_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    valid_normal_review = ""
+    if _cr is not None and _runtime_receipts is not None:
+        import peer_review as _peer_review_test
+        bundle = _peer_review_test.build_review_bundle(normal_run, write=True)
+        result = _peer_review_test.ReviewResult(
+            verdict="PASS", backend_used="codex", driver="claude", brain="codex",
+            bundle_hash=bundle["sha1"], evidence_index_hash=bundle["evidence_index"]["sha1"],
+        )
+        _peer_review_test._append_run_review(normal_run, result)
+        normal_transcript = normal_run / "transcript.jsonl"
+        normal_transcript.write_text("tool-normal-review\ntool-normal-completion\n", encoding="utf-8")
+        _runtime_receipts.append_hook_event(normal_run, {
+            "hook_event_name": "PostToolUse", "session_id": "s-normal",
+            "transcript_path": str(normal_transcript), "tool_name": "Bash",
+            "tool_use_id": "tool-normal-review",
+            "tool_input": {"command": f"python tools/peer_review.py {normal_run} --into-run"},
+            "tool_response": {"stdout": (
+                f"XUNJI_REVIEW_RECEIPT={result.runtime_receipt_id}\n"
+                f"XUNJI_REVIEW_BUNDLE={result.bundle_hash}\nreview completed"
+            )},
+        })
+        evidence_hash = _cr.current_evidence_index_hash(normal_run)
+        _runtime_receipts.append_hook_event(normal_run, {
+            "hook_event_name": "PostToolUse", "session_id": "s-normal",
+            "transcript_path": str(normal_transcript), "tool_name": "Agent",
+            "tool_use_id": "tool-normal-completion",
+            "tool_input": {"prompt":
+                f"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={evidence_hash} run={normal_run.name} "
+                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
+            "tool_response": {"result":
+                f"XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX={evidence_hash} "
+                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
+        })
+        valid_normal_review = (normal_run / "review.md").read_text(encoding="utf-8")
+    normal_decisions = (
+        "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
+        "- Summary: report coverage, severity support, and reachable assets were independently checked.\n")
     checks.append(("normal closure: missing independent review hard-blocks",
                    "缺独立复审" in _normal_closure_prerequisite("# Review\n", "# Decisions\n")))
     checks.append(("normal closure: missing completion review hard-blocks",
                    "CodexCompletionReview" in _normal_closure_prerequisite(
-                       "## Independent Review\n- Reviewer: test\n- Verdict: PASS\n", "# Decisions\n")))
+                       valid_normal_review, "# Decisions\n", normal_run)))
     checks.append(("normal closure: both prerequisites pass",
                    _normal_closure_prerequisite(
-                       "## Independent Review\n- Reviewer: test\n- Verdict: PASS\n",
-                       "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
-                       "- Summary: report coverage, severity support, and reachable assets were independently checked.\n") == ""))
+                       valid_normal_review, normal_decisions, normal_run) == ""))
     checks.append(("normal closure: review prose mention does not satisfy gate",
                    not _has_completed_independent_review(
                        "# Review\nWe still need an Independent Review before closing.\n")))
@@ -1346,7 +1436,7 @@ def _selftest() -> int:
     mode1, _ = _check_agent_board(ab_run1)
     checks.append(("agent board gate: no frontier.md -> pass", mode1 is None))
 
-    # Case 2: < 4 open fronts (probing not counted) -> pass
+    # Case 2: < 4 active fronts (probing counts) -> pass
     ab_run2 = ab_test / "few_fronts"
     ab_run2.mkdir()
     (ab_run2 / "frontier.md").write_text(
@@ -1356,7 +1446,7 @@ def _selftest() -> int:
         "### F-003\n- Status: probing\n- Barrier class: WAF\n",
         encoding="utf-8")
     mode2, _ = _check_agent_board(ab_run2)
-    checks.append(("agent board gate: <4 open fronts (probing excluded) -> pass", mode2 is None))
+    checks.append(("agent board gate: <4 active fronts -> pass", mode2 is None))
 
     # Case 3: >= 4 open fronts with shared barrier -> pass
     ab_run3 = ab_test / "shared_barrier"
@@ -1417,7 +1507,7 @@ def _selftest() -> int:
     mode6, _ = _check_agent_board(ab_run6)
     checks.append(("agent board gate: diverse with one assignment -> block", mode6 == "block"))
 
-    # Case 7: >= 4 open fronts diverse, two started disjoint lanes -> pass
+    # Case 7: editable heartbeat fields alone do not pass; real Agent receipts do.
     ab_run7 = ab_test / "diverse_with_two_started_lanes"
     ab_run7.mkdir()
     (ab_run7 / "frontier.md").write_text((ab_run6 / "frontier.md").read_text(encoding="utf-8"), encoding="utf-8")
@@ -1431,16 +1521,87 @@ def _selftest() -> int:
             {"agent": "A-web-hunter-002", "front": "F-002", "role": "auth-reviewer", "status": "running", "heartbeat_count": 1},
         ]}),
         encoding="utf-8")
+    mode7_manual, _ = _check_agent_board(ab_run7)
+    checks.append(("agent board gate: hand-written heartbeat does not prove Agent use",
+                   mode7_manual == "block"))
+    if _runtime_receipts is not None:
+        transcript = ab_test / "agent-transcript.jsonl"
+        transcript.write_text("tool-real-1\ntool-real-2\n", encoding="utf-8")
+        for tool_id, aid, fid in (
+            ("tool-real-1", "A-web-hunter-001", "F-001"),
+            ("tool-real-2", "A-web-hunter-002", "F-002"),
+        ):
+            _runtime_receipts.append_hook_event(ab_run7, {
+                "hook_event_name": "PostToolUse", "session_id": "s-agent",
+                "transcript_path": str(transcript), "tool_name": "Agent",
+                "tool_use_id": tool_id,
+                "tool_input": {"prompt": f"XUNJI_ASSIGNMENT={aid} XUNJI_FRONT={fid}"},
+                "tool_response": {"result": "candidate completed"},
+            })
     mode7, _ = _check_agent_board(ab_run7)
-    checks.append(("agent board gate: two started disjoint lanes -> pass", mode7 is None))
+    checks.append(("agent board gate: Agent receipts without merge disposition still block",
+                   _runtime_receipts is None or mode7 == "block"))
+    assignment_data = json.loads((ab_run7 / "state" / "assignments.json").read_text(encoding="utf-8"))
+    for item in assignment_data["assignments"]:
+        item.update({
+            "status": "merged",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "last_note": f"Front: {item['front']} candidate adjudicated",
+        })
+    (ab_run7 / "state" / "assignments.json").write_text(
+        json.dumps(assignment_data), encoding="utf-8")
+    mode7_merged, _ = _check_agent_board(ab_run7)
+    checks.append(("agent board gate: real receipts plus anchored disposition -> pass",
+                   _runtime_receipts is None or mode7_merged is None))
+    current_contract = {
+        "mode": "EXECUTE", "session_id": "s-current", "updated_at": time.time() - 1,
+    }
+    mode7_old_turn, _ = _check_agent_board(ab_run7, current_contract)
+    checks.append(("agent board gate: previous-turn receipts do not bypass current turn",
+                   _runtime_receipts is None or mode7_old_turn == "block"))
+    if _runtime_receipts is not None:
+        with transcript.open("a", encoding="utf-8") as handle:
+            handle.write("tool-current-1\ntool-current-2\n")
+        for tool_id, aid, fid in (
+            ("tool-current-1", "A-web-hunter-001", "F-001"),
+            ("tool-current-2", "A-web-hunter-002", "F-002"),
+        ):
+            _runtime_receipts.append_hook_event(ab_run7, {
+                "hook_event_name": "PostToolUse", "session_id": "s-current",
+                "transcript_path": str(transcript), "tool_name": "Agent",
+                "tool_use_id": tool_id,
+                "tool_input": {"prompt": f"XUNJI_ASSIGNMENT={aid} XUNJI_FRONT={fid}"},
+                "tool_response": {"result": "candidate completed"},
+            })
+    mode7_current, _ = _check_agent_board(ab_run7, current_contract)
+    checks.append(("agent board gate: old disposition cannot settle new Agent calls",
+                   _runtime_receipts is None or mode7_current == "block"))
+    for item in assignment_data["assignments"]:
+        item.update({
+            "status": "merged",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "last_note": f"Front: {item['front']} current-turn candidate adjudicated",
+        })
+    (ab_run7 / "state" / "assignments.json").write_text(
+        json.dumps(assignment_data), encoding="utf-8")
+    mode7_current_merged, _ = _check_agent_board(ab_run7, current_contract)
+    checks.append(("agent board gate: current receipts plus current disposition -> pass",
+                   _runtime_receipts is None or mode7_current_merged is None))
 
-    # Case 8: explicit budget reason -> pass without assignments
+    # Case 8: free-text budget reason no longer bypasses; current operator prompt can.
     ab_run8 = ab_test / "diverse_with_budget_reason"
     ab_run8.mkdir()
     (ab_run8 / "frontier.md").write_text((ab_run6 / "frontier.md").read_text(encoding="utf-8"), encoding="utf-8")
     (ab_run8 / "decisions.md").write_text("# Decisions\n- Agent Board budget reason: single safe lane left in scope\n", encoding="utf-8")
+    mode8_text, _ = _check_agent_board(ab_run8)
+    checks.append(("agent board gate: decisions.md budget prose cannot bypass", mode8_text == "block"))
+    (ab_run8 / "state").mkdir(exist_ok=True)
+    (ab_run8 / "state" / "turn_contract.json").write_text(json.dumps({
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE", "session_id": "s-override",
+        "fanout_override": True, "updated_at": time.time(),
+    }), encoding="utf-8")
     mode8, _ = _check_agent_board(ab_run8)
-    checks.append(("agent board gate: budget reason override -> pass", mode8 is None))
+    checks.append(("agent board gate: current operator prompt override -> pass", mode8 is None))
 
     bad = [n for n, ok in checks if not ok]
     # 输出到 stderr(与 safety_gate 一致): SessionStart 接线时不刷 context, 手动跑仍可见。

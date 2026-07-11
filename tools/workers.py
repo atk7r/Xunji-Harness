@@ -37,7 +37,6 @@ driver 是唯一整合者: 把候选过【证据门】后并入 evidence.md。�
 from __future__ import annotations
 
 import argparse
-import calendar
 import contextlib
 import io
 import json
@@ -47,6 +46,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -75,6 +75,10 @@ try:
     import context_pack as _context_pack
 except Exception:
     _context_pack = None
+try:
+    import run_model as _run_model
+except Exception:
+    _run_model = None
 
 SCAFFOLD = """# Worker {wid}
 
@@ -367,6 +371,21 @@ def _front_sections(text: str) -> list[tuple[str, str]]:
 
 
 def parse_frontiers(run_dir: Path) -> list[dict]:
+    if _run_model is not None:
+        rows: list[dict] = []
+        for front in _run_model.parse_fronts(run_dir):
+            rows.append({
+                "id": front.id,
+                "section": front.section,
+                "status": front.status,
+                "barrier": front.barrier,
+                "depth": front.depth,
+                "title": front.title,
+                "same_barrier_failures": _int_field(front.text, "Same barrier failures"),
+                "text": front.text,
+                "schema_errors": list(front.schema_errors),
+            })
+        return rows
     path = run_dir / "frontier.md"
     if not path.exists():
         return []
@@ -863,14 +882,14 @@ def agent_status_rows(run_dir: Path) -> list[dict]:
 
 
 def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _parse_iso(ts: str | None) -> float | None:
     if not ts:
         return None
     try:
-        return float(calendar.timegm(time.strptime(ts.strip(), "%Y-%m-%dT%H:%M:%SZ")))
+        return datetime.fromisoformat(ts.strip().replace("Z", "+00:00")).timestamp()
     except Exception:
         return None
 

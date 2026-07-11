@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from evidence_parse import parse_evidence  # noqa: E402
+import run_model  # noqa: E402
 
 SCHEMA = 1
 HWS = r"[^\S\n]"
@@ -34,24 +35,15 @@ def _field(block: str, name: str) -> str:
 
 
 def parse_fronts(run_dir: Path) -> list[dict]:
-    text = _read(run_dir / "frontier.md")
-    fronts: list[dict] = []
-    for m in re.finditer(rf"(?ms)^###{HWS}+((?:F|H)-\d+)(.*?)(?=^###{HWS}+(?:F|H)-\d+|\Z)", text):
-        block = m.group(0)
-        head = block.splitlines()[0].strip()
-        status = (_field(block, "Status") or "unknown").lower()
-        barrier = (_field(block, "Barrier class") or "unknown").lower()
-        depth = (_field(block, "Current depth") or _field(block, "Depth") or "unknown").lower()
-        fronts.append({
-            "id": m.group(1),
-            "title": re.sub(r"^###\s*", "", head),
-            "status": status,
-            "barrier": barrier,
-            "depth": depth,
-            "same_barrier_failures": len(re.findall(r"same[- ]barrier|同一屏障", block, re.I)),
-            "text": block,
-        })
-    return fronts
+    return [{
+        "id": front.id,
+        "title": front.title,
+        "status": front.status,
+        "barrier": front.barrier,
+        "depth": front.depth,
+        "same_barrier_failures": len(re.findall(r"same[- ]barrier|同一屏障", front.text, re.I)),
+        "text": front.text,
+    } for front in run_model.parse_fronts(run_dir)]
 
 
 def load_coverage(run_dir: Path) -> dict:

@@ -2,15 +2,11 @@
 
 ## Independent Review
 
-> 独立复审记录。仅有本标题或下方占位符不算完成；check_run 要求真实 Reviewer/Backend
-> 身份与明确 Verdict，或一份有具体发现和裁定的实质 free-form 复审。peer_review.py 成功后
-> 自动写入；后端不可达时可由 fresh-context reviewer 手工填写，但不能由 driver 自评冒充。
-
-- Reviewer: (codex / arkcli-panel / manual-driver)
-- Time: (ISO timestamp)
-- Verdict: (PASS / WARN / BLOCKER)
-- BundleHash: (review_bundle hash, if produced)
-- EvidenceIndexHash: (content-addressed evidence_index hash, if produced)
+> 本节不能手填。请前台运行 `tools/peer_review.py runs/<dir> --into-run`；工具会追加
+> Reviewer/Backend、Verdict、BundleHash、EvidenceIndexHash 和 content-addressed
+> ReviewReceipt；Hook 还会绑定输出中的 receipt/bundle hash 标记。标题、复制输出、
+> manual-driver/fresh-context 自填或无回执 PASS 均不算完成。
+> 后端不可用时保留 limitation，run 不得收口。
 
 ## Review Finding Ledger
 
@@ -18,7 +14,7 @@
 > DriverResolution 必须引用 E-id / artifact / control，或写清 accepted/dismissed/superseded/escalated。
 > 本节默认留空；不要手工保留 PR-xxx 占位。只有真实 peer_review 输出才写 `### PR-xxx`。
 
-## R-001
+## Driver Review Notes (not independent)
 
 - Time:
 - Reviewed files:

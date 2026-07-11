@@ -1,0 +1,364 @@
+{
+  "files": {
+    ".agents/skills/captcha-solve/SKILL.md": {
+      "sha256": "8cb2e275a465921ca8b4466dba32490c303dd3fc677ec678d98d3e1c26dada73",
+      "size": 5129
+    },
+    ".agents/skills/network-proxy/SKILL.md": {
+      "sha256": "129605a9205f53cd75bbde4c62d8a2eee296d57ff8733c0c3ec0d2b5bc53fbd4",
+      "size": 3889
+    },
+    ".agents/skills/poc-package/SKILL.md": {
+      "sha256": "65f041ae93c5fcf6ea33f3b8016b2f40e01610184c0f03a10a3d188c7d6856ab",
+      "size": 5646
+    },
+    ".agents/skills/src-rules/SKILL.md": {
+      "sha256": "f4983480334f4277dbc295509e4b0ebb2053d64677072fa23b635c74d142b5a0",
+      "size": 5397
+    },
+    ".agents/skills/src-safety-boundary/SKILL.md": {
+      "sha256": "114de7b000f78cbfa5913b0a94e06a9d0b1d6c788d5f7113fdc87d9da97d9709",
+      "size": 6811
+    },
+    ".agents/skills/web-research/SKILL.md": {
+      "sha256": "72d980ef9f67b4a6a8e3225b2890ee2fedc7c17905d3f591e21b06e4d75cc7c4",
+      "size": 4891
+    },
+    ".agents/skills/xunji-agent-board/SKILL.md": {
+      "sha256": "78f17256b30c90e33b3506de2978bbb3dbd5411a97a04279c2824318f2b09887",
+      "size": 4011
+    },
+    ".agents/skills/xunji-benchmark-eval/SKILL.md": {
+      "sha256": "119ac13c97617494adfabc00fc56c43526e3a1240027d37bbab30d9ee6e947d8",
+      "size": 1897
+    },
+    ".agents/skills/xunji-closure-audit/SKILL.md": {
+      "sha256": "6e1b093379d02301a33abb6716f0e7e9c4edcef55a96fbe1cb41c5c1640c6f04",
+      "size": 4441
+    },
+    ".agents/skills/xunji-evidence-replay-gate/SKILL.md": {
+      "sha256": "a511f1780fb614dcf14e4aff261da132514dd7d4917803549c7eac802444a82b",
+      "size": 2853
+    },
+    ".agents/skills/xunji-exploit-discipline/SKILL.md": {
+      "sha256": "b58f7e66adf14702e413c4e606174ce03c0c8d1a27fdb0febb2ab2cc702ea684",
+      "size": 5479
+    },
+    ".agents/skills/xunji-exploit-techniques/SKILL.md": {
+      "sha256": "96d974c673d565626307fa4ccceb248690d3b75948c17b9bf7b62edd611917fc",
+      "size": 3254
+    },
+    ".agents/skills/xunji-exploit-techniques/references/captcha-boundary-bypass.md": {
+      "sha256": "f7dba55bc83bc1fc49d3e92cb79943813c93c293c8e996f756d2ebfb1fa96b89",
+      "size": 2255
+    },
+    ".agents/skills/xunji-exploit-techniques/references/client-crypto-replay.md": {
+      "sha256": "d4a33d53a995de4d1b5e2049b1120b5d3c9e1b96cc3d27437164cd31dd4effc5",
+      "size": 2236
+    },
+    ".agents/skills/xunji-exploit-techniques/references/sso-oauth-saml.md": {
+      "sha256": "c09a018fa4df2eecca7437e07eacebe5ec8132bef2258c5eeed1ca9ffbc06e48",
+      "size": 2691
+    },
+    ".agents/skills/xunji-exploit-techniques/references/upload-context-chain.md": {
+      "sha256": "7835dc7a439d5c79f21f3361d5523ddc7ec78616ca16fb14de39ac34ad87c628",
+      "size": 2433
+    },
+    ".agents/skills/xunji-exploit-techniques/references/webvpn-proxy-rewrite.md": {
+      "sha256": "dadc42038f1b427d87502f6ed197e2526535f32f65a0ec2351fd6b06ccdd884b",
+      "size": 2368
+    },
+    ".agents/skills/xunji-knowledge-flywheel/SKILL.md": {
+      "sha256": "57c7b97005bed4018cfb2e09d339feb67dbd5f3a424e5213684223540ac7c9e0",
+      "size": 3822
+    },
+    ".agents/skills/xunji-local-maintenance/SKILL.md": {
+      "sha256": "e9efcf6c0c457ee2979feb544c13cd3481c69d856e32104a692e507823c17743",
+      "size": 2806
+    },
+    ".agents/skills/xunji-peer-review-panel/SKILL.md": {
+      "sha256": "a5ff9eeeca5dc48d220d95c209a9c046b01171630df56506e1f085b30b54b61d",
+      "size": 4927
+    },
+    ".agents/skills/xunji-reviewops/SKILL.md": {
+      "sha256": "3689ed5dd56f485fd4ba30a3b0ee9d1f32c995275c73efc3891e2cfe341053fc",
+      "size": 8440
+    },
+    ".agents/skills/xunji-run-lifecycle/SKILL.md": {
+      "sha256": "e4aceadcb2f6044f22d918659c8fcf1eb1a186433d10e21fe040c82fa8288ffc",
+      "size": 6224
+    },
+    ".agents/skills/xunji-sentinel-guard-review/SKILL.md": {
+      "sha256": "6bcb048907419d97ce13997b8f128d219e4957c4ceb53466732475359e2ff6ac",
+      "size": 2602
+    },
+    ".agents/skills/xunji-setup-ingest/SKILL.md": {
+      "sha256": "2c1d828aee58600fa1db10f724bd5bcf2b86bfb6813937f4547f034d82cf8682",
+      "size": 2569
+    },
+    ".agents/skills/xunji-web-research-sync/SKILL.md": {
+      "sha256": "ced2ea3a28b25b7ed2af6a87465618d58d85d165753aadee80f8ea34125955be",
+      "size": 2256
+    },
+    ".claude/skills/captcha-solve/SKILL.md": {
+      "sha256": "58df58eae6b33534a2e066388db7a9434e19c2740a1b1112e3ca8c0aefd4bc15",
+      "size": 5246
+    },
+    ".claude/skills/network-proxy/SKILL.md": {
+      "sha256": "7f53346184c8ef85fd90e1d3db2044c825757339d828f36e5087d6ef02ac46da",
+      "size": 3816
+    },
+    ".claude/skills/poc-package/SKILL.md": {
+      "sha256": "9b7641168255c514cbcfe05c9dbe2874f7e39c7d8e6ee1cdf0ee0841b5d1e311",
+      "size": 5603
+    },
+    ".claude/skills/src-rules/SKILL.md": {
+      "sha256": "f4983480334f4277dbc295509e4b0ebb2053d64677072fa23b635c74d142b5a0",
+      "size": 5397
+    },
+    ".claude/skills/src-safety-boundary/SKILL.md": {
+      "sha256": "9023ef5960d5083b715acfc8590cc8f4b6097b930cd4ddb94029fe2459e6aabd",
+      "size": 7240
+    },
+    ".claude/skills/web-research/SKILL.md": {
+      "sha256": "5bfcd393f1116dea37c7fdad72cc5884889fc50095a7b2fd711925027b2c9c50",
+      "size": 5518
+    },
+    ".claude/skills/xunji-agent-board/SKILL.md": {
+      "sha256": "6adb12575544fdfba73a72fd9fc1524d44116cfe58b3d68318468ac7391e869d",
+      "size": 11129
+    },
+    ".claude/skills/xunji-benchmark-eval/SKILL.md": {
+      "sha256": "703639790b7f780c4b3ae417d476138180c34d3b75031477d71d5a7cb50fd9e0",
+      "size": 2629
+    },
+    ".claude/skills/xunji-evidence-replay-gate/SKILL.md": {
+      "sha256": "3c7dedc00fd8b368f39cd59b0c7b6f04e1391c674213b03e84fbe558b3b8ee9d",
+      "size": 3481
+    },
+    ".claude/skills/xunji-exploit-discipline/SKILL.md": {
+      "sha256": "c17f62ceaa40424237ed8da414ffb8b1ec08cf0edefc0172529ee379fc1737f3",
+      "size": 5423
+    },
+    ".claude/skills/xunji-exploit-techniques/SKILL.md": {
+      "sha256": "0c8f4637d50d4ea07c84eb9e39dd0f98e1bee8c80bf5b5968ec6542517a57dc1",
+      "size": 3182
+    },
+    ".claude/skills/xunji-exploit-techniques/references/captcha-boundary-bypass.md": {
+      "sha256": "f7dba55bc83bc1fc49d3e92cb79943813c93c293c8e996f756d2ebfb1fa96b89",
+      "size": 2255
+    },
+    ".claude/skills/xunji-exploit-techniques/references/client-crypto-replay.md": {
+      "sha256": "d4a33d53a995de4d1b5e2049b1120b5d3c9e1b96cc3d27437164cd31dd4effc5",
+      "size": 2236
+    },
+    ".claude/skills/xunji-exploit-techniques/references/sso-oauth-saml.md": {
+      "sha256": "c09a018fa4df2eecca7437e07eacebe5ec8132bef2258c5eeed1ca9ffbc06e48",
+      "size": 2691
+    },
+    ".claude/skills/xunji-exploit-techniques/references/upload-context-chain.md": {
+      "sha256": "7835dc7a439d5c79f21f3361d5523ddc7ec78616ca16fb14de39ac34ad87c628",
+      "size": 2433
+    },
+    ".claude/skills/xunji-exploit-techniques/references/webvpn-proxy-rewrite.md": {
+      "sha256": "dadc42038f1b427d87502f6ed197e2526535f32f65a0ec2351fd6b06ccdd884b",
+      "size": 2368
+    },
+    ".claude/skills/xunji-knowledge-flywheel/SKILL.md": {
+      "sha256": "c7a7fe8ac12ba87cd3d8f1da4676c6ce0533250f3e24861d0b3b0e9383a17650",
+      "size": 3601
+    },
+    ".claude/skills/xunji-local-maintenance/SKILL.md": {
+      "sha256": "7a0944ec0235c132c81f23b77850e981fff2e05cf8a692858aa3521463f5c7d7",
+      "size": 2580
+    },
+    ".claude/skills/xunji-peer-review-panel/SKILL.md": {
+      "sha256": "f1bfc70795ac3b507c7aa5b668822b4689434ddef584f8498a49c3d7f49aaa0f",
+      "size": 5418
+    },
+    ".claude/skills/xunji-reviewops/SKILL.md": {
+      "sha256": "7a1e5622029944837d1635986b5f8e19d6c9dc84c4bc68f817030d2509ae23f8",
+      "size": 8875
+    },
+    ".claude/skills/xunji-run-lifecycle/SKILL.md": {
+      "sha256": "5518236b613c8570ce7bf83ee1bb0d53d18146c5926b5eb91a361fb8c4662a31",
+      "size": 13015
+    },
+    ".claude/skills/xunji-sentinel-guard-review/SKILL.md": {
+      "sha256": "6fbeab7ae618b5e58065ae92ef20fd2e206648ccb818fb9dd44e4fa6490429d8",
+      "size": 2909
+    },
+    ".claude/skills/xunji-setup-ingest/SKILL.md": {
+      "sha256": "e7a682ce6617259b2879118de8a15caa8ac7e5bd3ea2b6240b0a328ceaec7131",
+      "size": 3899
+    },
+    ".claude/skills/xunji-web-research-sync/SKILL.md": {
+      "sha256": "c37ede62fc17c85e2b0219db0dae94fe5b3bde819d9d6e3bc1295534c91cac5a",
+      "size": 3817
+    },
+    "CLAUDE.md": {
+      "sha256": "de8650d18a8a31408149abbdabe432366268883651493ebb0ee3d91457b9c9b0",
+      "size": 25294
+    },
+    "docs/AI_ENV_SETUP.md": {
+      "sha256": "cc4b9f19d4841be35f567f1490d3db0602f43e50cfd228ecdf33b52c681c43f4",
+      "size": 8240
+    },
+    "docs/ANTI-DRIFT-DECAY.md": {
+      "sha256": "75c546593ebc9ed2bdebb8f990ccf334f50d47aad15120d08e5f5a8bc7b57349",
+      "size": 32980
+    },
+    "docs/ROADMAP.md": {
+      "sha256": "c35302539cd44b24b3db805279844792028d41dcdfd40cc5838aa60a902a9f77",
+      "size": 14536
+    },
+    "docs/ROUTER.md": {
+      "sha256": "3257e7d6b40c295d18f9733125910c5624cdfa1c4319b02c6dda0735ea7dff90",
+      "size": 23493
+    },
+    "docs/UNTRUSTED-CONTENT.md": {
+      "sha256": "7b9a3ee04cf77cb7344b7e8f8242958be0233ff18f0b34796dc33518630abb4c",
+      "size": 1325
+    },
+    "docs/WORKFLOW-reference.md": {
+      "sha256": "6b800337727f391b40c7e275b62581fb9da6a578d3b56d61b087260febd42c43",
+      "size": 34438
+    },
+    "docs/WORKFLOW.md": {
+      "sha256": "8ce3d40f52c0f865025c94c510e357460c16789ff20bd4178ddfcd7ee4ba58fb",
+      "size": 32103
+    },
+    "docs/XUNJI_PROJECT_INTRO.md": {
+      "sha256": "484814b1cc069ed74c4b10ec527bcf2ee548a8a3128d4b8fb795098895ba2d39",
+      "size": 10744
+    },
+    "docs/cognition/README.md": {
+      "sha256": "a4ecbe6a740ec27269f26b28e0f29a6b3c6bece5f3ba60dc64368a61826e3349",
+      "size": 14590
+    },
+    "docs/cognition/harmless-verification.md": {
+      "sha256": "b8e2c6169dacc9e544499ba9eb54f596635a505033727b0e49fb1cfbac59c2ae",
+      "size": 3718
+    },
+    "docs/cognition/reference.md": {
+      "sha256": "5bdbe86e59a714b85a0674ed025d22713ee4ab23c29a97ce2e143960a740b89a",
+      "size": 3126
+    },
+    "docs/cognition/retrospect.md": {
+      "sha256": "185ab7885e64e05f8ee478ba8a49b1f35ef31a22afcc03ad51fd331ae4ba35a2",
+      "size": 1265
+    },
+    "docs/templates/agents/code-audit.md": {
+      "sha256": "015c1585a45e66e2047a9bad9effc6d7475671a61b1f62fa57e2dd1ccf9d066e",
+      "size": 5198
+    },
+    "docs/templates/agents/exploit.md": {
+      "sha256": "a8e4311f5e91060a8fcef1eec722f63f63995b4b75085663cd10e5a4d86e0179",
+      "size": 5210
+    },
+    "docs/templates/agents/report.md": {
+      "sha256": "b9b71fa6ae1af1feef8323361f0819ad6b3a8b3dd7dab0eae75b9432f31737f5",
+      "size": 4889
+    },
+    "docs/templates/agents/review.md": {
+      "sha256": "98c334a1fade9b21fadb2490f421b1a8f4e25375b31e20369ac687accf3ed4a7",
+      "size": 5019
+    },
+    "docs/templates/agents/surface.md": {
+      "sha256": "142ac3c10894a5e5213982d84874caa99613596f6eb70d93f80af9af660cd720",
+      "size": 5119
+    },
+    "docs/templates/agents/synthesizer.md": {
+      "sha256": "4997395d95b0a44e27ee50d65649bef6df73af2f4585c868440c2e4d57ba2bbc",
+      "size": 5100
+    },
+    "docs/templates/agents/verify.md": {
+      "sha256": "4bb3b2e454abc1aa718bd5fd2aa3e601d4566eae2529466157309db4c26b4a55",
+      "size": 5063
+    },
+    "docs/templates/agents/web-hunter.md": {
+      "sha256": "e8a98a0c7aa63bf19f2b9c998cedcf4e3e7c45bd587759ef7a5e2dd34e1a247f",
+      "size": 5140
+    },
+    "docs/templates/loop_prompt.md": {
+      "sha256": "c13fd25967b8bb22a7d3ab2b923c9d5b6f4de7358ee840ab6a79dcbad4b93747",
+      "size": 13173
+    },
+    "docs/templates/poc-report.md": {
+      "sha256": "2cdace456336a3b37a6c58c26dc554156faf4d0430306ee7ed4a44abe19b441e",
+      "size": 2758
+    },
+    "docs/templates/run/chains.md": {
+      "sha256": "ef2261685a25bd502e5b43c9acff30c694894940dca838e95956ef1e1f61eadc",
+      "size": 1361
+    },
+    "docs/templates/run/constraints.md": {
+      "sha256": "071295d35e10d963f4ad6e82c6f0d3ace24b88915f1aa8e6c6f2f036162c2de7",
+      "size": 641
+    },
+    "docs/templates/run/decisions.md": {
+      "sha256": "938d6ed180b6a862d71a0698e53611ea9a04a3b8117e0b387257c8cd29fdbd4d",
+      "size": 518
+    },
+    "docs/templates/run/evidence.md": {
+      "sha256": "2b5490aac7928ce6775e0146ea990dc8f6f7850ef16210a2d454eaa4009ba89c",
+      "size": 1300
+    },
+    "docs/templates/run/false_positive.md": {
+      "sha256": "570ad7740ac326a63dd348df36da048278ba99f879669787b1b1a4d5ac290b40",
+      "size": 402
+    },
+    "docs/templates/run/frontier.md": {
+      "sha256": "3e13947f3e36218cc4d46208ea1fc205e56ddd45ede9c472d6731258b95e99d7",
+      "size": 1535
+    },
+    "docs/templates/run/hints.md": {
+      "sha256": "f2e11fddefa28f2e3986567c8514a4b43bedbe63c6f19c66cde2d7c5dca563cc",
+      "size": 1593
+    },
+    "docs/templates/run/hypotheses.md": {
+      "sha256": "c41a8e0fc873b01131106dcbde51e0a0dc64b892403e220fc177d854ea6d629e",
+      "size": 594
+    },
+    "docs/templates/run/report.md": {
+      "sha256": "3d33fd9ea146781681809763b5f4f4cdf5e713aaccd1820eaff49e7607edcb31",
+      "size": 895
+    },
+    "docs/templates/run/retrospective.md": {
+      "sha256": "59d9e3812d352aff52a5cf09674c2504b0230b65467865d544268c813973bb10",
+      "size": 1395
+    },
+    "docs/templates/run/review.md": {
+      "sha256": "a8dc724b1f41771a028fdfcb047564843bcd1443763013cab80cc3c4c2da9550",
+      "size": 1214
+    },
+    "docs/templates/run/surface.md": {
+      "sha256": "83d70acd35f416d6cfb41c4a43d7863b78371458a0517609da05c35fbdc2702a",
+      "size": 2466
+    },
+    "docs/templates/run/target.md": {
+      "sha256": "09c4eb3ccf96063daf2125892308acce3577d8503ba72ce80c99ea2e7441d4cf",
+      "size": 301
+    },
+    "docs/templates/worker.md": {
+      "sha256": "99b9b06121e5edb2f9222946fbf8ca58eb5079e11296072e8e7f0f7177d4654e",
+      "size": 7128
+    },
+    "review/independent-reviewer.md": {
+      "sha256": "7a1f5fbeb7d7e722ffbf2c6ca28883ca86141e2d7aae2356e744586f5fb9b245",
+      "size": 862
+    }
+  },
+  "files_scanned": 87,
+  "forbidden_matches": [],
+  "passed": true,
+  "patterns": {
+    "assignment_proves_agent_use": "assignment(?: file)? (?:counts as|proves) Agent",
+    "heading_alone_is_review_gate": "marker is what `?tools/check_run\\.py`? looks for",
+    "heartbeat_proves_execution": "heartbeat (?:counts as|proves) (?:Agent )?execution",
+    "manual_fresh_context_template": "Reviewer prompt \\(copy, fill",
+    "pause_forces_coda": "PAUSED_BY_OPERATOR.{0,120}(?:requires|must write).{0,30}Coda",
+    "pipe_delimited_front_status": "Status:\\s*open\\s*\\|\\s*Barrier"
+  },
+  "schema": "xunji.stale_reference_audit.v1"
+}

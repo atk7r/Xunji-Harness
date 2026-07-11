@@ -1,0 +1,8 @@
+diff --git a/tools/selftest_all.py b/tools/selftest_all.py
+index 6bcb036..5bfe18a 100644
+--- a/tools/selftest_all.py
++++ b/tools/selftest_all.py
+@@ -77,0 +78,3 @@ SUITES: list[tuple[str, list[str], str]] = [
++    ("run_model",       ["tools/run_model.py", "--selftest"], "canonical front/status parser"),
++    ("runtime_receipts", ["tools/runtime_receipts.py", "--selftest"], "hook-derived Agent/Cron receipts"),
++    ("turn_contract",   ["tools/turn_contract.py", "--selftest"], "execute/explain/pause turn modes"),

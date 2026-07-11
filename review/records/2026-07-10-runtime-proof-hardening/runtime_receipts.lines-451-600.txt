@@ -1,0 +1,150 @@
+   451	        if not candidate.is_absolute():
+   452	            candidate = Path(__file__).resolve().parents[1] / candidate
+   453	        candidate = candidate.resolve()
+   454	        if candidate == run_dir.resolve():
+   455	            return True
+   456	    return False
+   457	
+   458	
+   459	def review_invocation_valid(
+   460	    run_dir: str | Path,
+   461	    generated_at: str,
+   462	    *,
+   463	    receipt_id: str = "",
+   464	    bundle_hash: str = "",
+   465	) -> bool:
+   466	    """Bind a review receipt to the exact foreground command and its output."""
+   467	    try:
+   468	        parsed = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+   469	        if parsed.tzinfo is None:
+   470	            parsed = parsed.replace(tzinfo=timezone.utc)
+   471	        generated_ts = parsed.timestamp()
+   472	    except Exception:
+   473	        generated_ts = 0.0
+   474	    run = Path(run_dir).resolve()
+   475	    receipt_marker = f"XUNJI_REVIEW_RECEIPT={receipt_id}" if receipt_id else ""
+   476	    bundle_marker = f"XUNJI_REVIEW_BUNDLE={bundle_hash}" if bundle_hash else ""
+   477	    for event in reversed(valid_tool_events(run, "Bash")):
+   478	        try:
+   479	            tool_input = json.loads(str(event.get("input_excerpt") or "{}"))
+   480	        except Exception:
+   481	            tool_input = {}
+   482	        command = str(tool_input.get("command") or "") if isinstance(tool_input, dict) else ""
+   483	        if not _peer_review_command_matches(command, run):
+   484	            continue
+   485	        response = str(event.get("response_excerpt") or "")
+   486	        if receipt_marker and receipt_marker not in response:
+   487	            continue
+   488	        if bundle_marker and bundle_marker not in response:
+   489	            continue
+   490	        event_ts = float(event.get("ts") or 0)
+   491	        if generated_ts and generated_ts - 5 <= event_ts <= generated_ts + 120:
+   492	            return True
+   493	    return False
+   494	
+   495	
+   496	def cron_quiescent(
+   497	    run_dir: str | Path,
+   498	    *,
+   499	    session_id: str = "",
+   500	    since: float = 0.0,
+   501	) -> tuple[bool, str]:
+   502	    events = valid_tool_events(run_dir, session_id=session_id, since=since)
+   503	    cron = [event for event in events if str(event.get("tool_name") or "").startswith("Cron")]
+   504	    listed = [event for event in cron if event.get("tool_name") == "CronList"]
+   505	    if not listed:
+   506	        return False, "missing successful CronList receipt"
+   507	    latest_list = listed[-1]
+   508	    last_mutation = max(
+   509	        (int(event.get("seq", 0) or 0) for event in cron if event.get("tool_name") in {"CronCreate", "CronDelete"}),
+   510	        default=0,
+   511	    )
+   512	    if int(latest_list.get("seq", 0) or 0) < last_mutation:
+   513	        return False, "CronList receipt predates latest CronCreate/CronDelete"
+   514	
+   515	    active: dict[str, dict] = {}
+   516	    for event in cron:
+   517	        tool = event.get("tool_name")
+   518	        job = str(event.get("job_id") or "")
+   519	        if tool == "CronCreate" and event.get("run_mentioned") and job:
+   520	            active[job] = event
+   521	        elif tool == "CronDelete" and job:
+   522	            active.pop(job, None)
+   523	    response = str(latest_list.get("response_excerpt") or "").lower()
+   524	    run_name = Path(run_dir).name.lower()
+   525	    if active:
+   526	        return False, "active run Cron job receipt(s): " + ", ".join(sorted(active))
+   527	    listed_run_jobs = [str(job) for job in latest_list.get("listed_run_job_ids", []) if job]
+   528	    if listed_run_jobs:
+   529	        return False, "latest CronList contains active run job(s): " + ", ".join(listed_run_jobs)
+   530	    if run_name and run_name in response:
+   531	        return False, "latest CronList still mentions the active run"
+   532	    return True, "latest successful CronList proves no active run job"
+   533	
+   534	
+   535	def cron_delete_allowed(
+   536	    run_dir: str | Path,
+   537	    job_id: str,
+   538	    *,
+   539	    session_id: str = "",
+   540	    since: float = 0.0,
+   541	) -> tuple[bool, str]:
+   542	    """Bind CronDelete to a run job observed by a current CronList/Create receipt."""
+   543	    if not job_id:
+   544	        return False, "CronDelete has no parseable job id"
+   545	    events = valid_tool_events(run_dir, session_id=session_id, since=since)
+   546	    cron = [event for event in events if str(event.get("tool_name") or "").startswith("Cron")]
+   547	    listed = [event for event in cron if event.get("tool_name") == "CronList"]
+   548	    if not listed:
+   549	        return False, "missing successful current-turn CronList receipt"
+   550	    latest = listed[-1]
+   551	    observed = {str(item) for item in latest.get("listed_run_job_ids", []) if item}
+   552	    for event in cron:
+   553	        if event.get("tool_name") == "CronCreate" and event.get("run_mentioned"):
+   554	            observed.update(str(item) for item in event.get("job_ids", []) if item)
+   555	    if job_id not in observed:
+   556	        return False, f"job {job_id} was not observed as a task for run {Path(run_dir).name}"
+   557	    return True, "CronDelete is bound to an observed current-run job"
+   558	
+   559	
+   560	def _write_transcript(path: Path, *tool_ids: str) -> None:
+   561	    path.write_text("\n".join(json.dumps({"tool_use_id": item}) for item in tool_ids), encoding="utf-8")
+   562	
+   563	
+   564	def _selftest() -> int:
+   565	    run = Path(tempfile.mkdtemp()) / "run"
+   566	    (run / "state").mkdir(parents=True)
+   567	    transcript = run.parent / "transcript.jsonl"
+   568	    ids = (
+   569	        "tool-agent-1", "tool-agent-2", "tool-list-1", "tool-create-1",
+   570	        "tool-list-active", "tool-delete-1", "tool-list-2", "tool-review-1",
+   571	        "tool-completion-bad", "tool-completion-good", "tool-target-denied",
+   572	        "tool-target-failed", "tool-target-other", "tool-target-success",
+   573	    )
+   574	    _write_transcript(transcript, *ids)
+   575	
+   576	    def event(tool: str, tool_id: str, tool_input: dict, response: object) -> dict:
+   577	        return {
+   578	            "hook_event_name": "PostToolUse", "session_id": "s1",
+   579	            "transcript_path": str(transcript), "tool_name": tool,
+   580	            "tool_use_id": tool_id, "tool_input": tool_input,
+   581	            "tool_response": response,
+   582	        }
+   583	
+   584	    append_hook_event(run, event("Agent", ids[0], {
+   585	        "prompt": "XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001",
+   586	    }, {"result": "candidate done"}))
+   587	    append_hook_event(run, event("Agent", ids[1], {
+   588	        "prompt": "XUNJI_ASSIGNMENT=A-auth-001 XUNJI_FRONT=F-002",
+   589	    }, {"result": "candidate done"}))
+   590	    (run / "frontier.md").write_text("# Frontier\n## Open Fronts\n### F-001\n- Status: open\n### F-002\n- Status: open\n",
+   591	                                      encoding="utf-8")
+   592	    (run / "evidence.md").write_text("# Evidence\n## E-001\n", encoding="utf-8")
+   593	    (run / "state" / "assignments.json").write_text(json.dumps({"assignments": [
+   594	        {"agent": "A-web-001", "front": "F-001", "status": "merged",
+   595	         "updated_at": datetime.now(timezone.utc).isoformat(),
+   596	         "last_note": "Evidence: E-001 merged for Front: F-001"},
+   597	        {"agent": "A-auth-001", "front": "F-002", "status": "done",
+   598	         "updated_at": datetime.now(timezone.utc).isoformat(),
+   599	         "last_note": "candidate returned"},
+   600	    ]}), encoding="utf-8")

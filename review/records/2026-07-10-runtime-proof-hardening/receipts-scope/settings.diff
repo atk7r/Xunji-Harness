@@ -1,0 +1,70 @@
+diff --git a/.claude/settings.json b/.claude/settings.json
+index d459ea0..ffd84f5 100644
+--- a/.claude/settings.json
++++ b/.claude/settings.json
+@@ -23,0 +24,4 @@
++          {
++            "type": "command",
++            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\" --selftest"
++          },
+@@ -35,0 +40,8 @@
++      {
++        "hooks": [
++          {
++            "type": "command",
++            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
++          }
++        ]
++      },
+@@ -72,0 +85,9 @@
++      {
++        "matcher": "Agent|CronCreate|CronDelete|CronList|WebFetch",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
++          }
++        ]
++      },
+@@ -75,0 +97,4 @@
++          {
++            "type": "command",
++            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
++          },
+@@ -82,0 +108,31 @@
++    "PostToolUseFailure": [
++      {
++        "matcher": "Agent|CronCreate|CronDelete|CronList|Bash|WebFetch",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
++          }
++        ]
++      }
++    ],
++    "SubagentStart": [
++      {
++        "hooks": [
++          {
++            "type": "command",
++            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
++          }
++        ]
++      }
++    ],
++    "SubagentStop": [
++      {
++        "hooks": [
++          {
++            "type": "command",
++            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
++          }
++        ]
++      }
++    ],
+@@ -85,0 +142,4 @@
++          {
++            "type": "command",
++            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
++          },

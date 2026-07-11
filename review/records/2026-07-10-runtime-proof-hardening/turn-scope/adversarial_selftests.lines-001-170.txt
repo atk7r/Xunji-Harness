@@ -1,0 +1,170 @@
+     1	$ /opt/homebrew/opt/python@3.14/bin/python3.14 tools/run_model.py --selftest
+     2	ok   compound status still counts as open
+     3	ok   inline barrier is recovered
+     4	ok   compound format is flagged
+     5	ok   probing is active
+     6	ok   deferred is not active
+     7	ok   four diverse fronts require fanout
+     8	ok   duplicate front id is flagged
+     9	ok   section fallback does not hide missing Status
+    10	ok   open status inside Closed section is flagged and remains active
+    11	run_model selftest passed
+    12	
+    13	$ /opt/homebrew/opt/python@3.14/bin/python3.14 tools/turn_contract.py --selftest
+    14	ok   explain overrides action words
+    15	ok   history/audit prompt without execute verb is read-only
+    16	ok   ambiguous active-run prompt defaults read-only
+    17	ok   operator stop maps to pause
+    18	ok   repair request maps to execute
+    19	ok   unrecognized English execution wording defaults read-only
+    20	ok   target action blocked before real fanout
+    21	ok   encoded network command blocked before fanout
+    22	ok   renamed unknown script blocked before fanout
+    23	ok   workers control command allowed before fanout
+    24	ok   out-of-tree workers.py cannot impersonate control plane
+    25	ok   narrow sed print remains read-only before fanout
+    26	ok   sed in-place mutation blocked before fanout
+    27	ok   sed write command blocked before fanout
+    28	ok   find file-output action blocked before fanout
+    29	ok   protected control-plane denial is not a target-result action
+    30	ok   old-session Agent receipts do not satisfy this turn
+    31	ok   receipts without post-return disposition remain blocked
+    32	ok   current receipts plus anchored disposition unlock target action
+    33	ok   missing contract blocks target action
+    34	ok   malformed frontier blocks target action
+    35	ok   missing frontier blocks target action
+    36	ok   malformed contract is rejected
+    37	ok   wrong contract schema is rejected
+    38	ok   cross-session contract reuse is rejected
+    39	ok   stale contract is rejected
+    40	ok   serial override requires current operator prompt
+    41	ok   internal task notification cannot replace operator turn contract
+    42	ok   Agent without binding tokens blocked
+    43	ok   bound Agent call allowed
+    44	ok   completion Agent without full checklist is blocked
+    45	ok   completion Agent with evidence hash and checklist is allowed
+    46	ok   explain mode blocks Bash
+    47	ok   pause mode allows CronList
+    48	ok   CronCreate requires current-turn CronList
+    49	ok   CronCreate allowed after current-turn empty CronList
+    50	ok   CronCreate without an active run is blocked
+    51	ok   settings wires UserPromptSubmit contract
+    52	ok   settings wires global PreToolUse contract
+    53	ok   settings runs turn contract selftest at SessionStart
+    54	ok   global turn contract PreToolUse hook is first
+    55	ok   settings wires Agent/Cron PostToolUse receipts
+    56	ok   settings wires failed tool receipts
+    57	ok   settings wires Subagent lifecycle receipts
+    58	ok   CronDelete rejects job not listed for this run
+    59	ok   memory write needs explicit approval
+    60	ok   relative Bash memory path needs explicit approval
+    61	ok   read-only Bash memory access remains allowed
+    62	ok   direct memory Read remains allowed
+    63	ok   background review is blocked
+    64	ok   foreground review redirection is allowed
+    65	ok   protected runtime receipt cannot be edited
+    66	ok   protected runtime receipt remains readable
+    67	turn_contract selftest passed
+    68	
+    69	$ /opt/homebrew/opt/python@3.14/bin/python3.14 tools/runtime_receipts.py --selftest
+    70	ok   hash chain validates
+    71	ok   two real Agent receipts satisfy fanout
+    72	ok   done Agent remains unmerged
+    73	ok   anchored merged/blocked dispositions satisfy
+    74	ok   CronList with no jobs is quiescent
+    75	ok   created run job is active
+    76	ok   CronDelete binds to listed run job
+    77	ok   CronDelete rejects response-substring job prefix
+    78	ok   CronDelete rejects unlisted job
+    79	ok   post-delete CronList is still required
+    80	ok   post-delete CronList proves quiescence
+    81	ok   old-session CronList cannot satisfy current turn
+    82	ok   foreground review receipt is time-bound
+    83	ok   review receipt requires exact output marker
+    84	ok   shell-decorated review command is rejected
+    85	ok   unrelated later invocation cannot validate stale review
+    86	ok   bare PASS cannot satisfy completion review
+    87	ok   structured evidence-bound completion receipt passes
+    88	ok   tampered receipt chain cannot satisfy Agent fanout
+    89	ok   target denial is transcript-backed
+    90	ok   target denial remains unresolved without a retry
+    91	ok   failed identical retry does not resolve denial
+    92	ok   different successful command does not resolve denial
+    93	ok   successful same command resolves despite description drift
+    94	ok   Bash environment participates in action hash
+    95	ok   WebFetch extended parameters participate in action hash
+    96	runtime_receipts selftest passed
+    97	
+    98	$ /opt/homebrew/opt/python@3.14/bin/python3.14 tools/anti_drift.py --selftest
+    99	ok   anchor non-empty
+   100	ok   anchor carries binding rules
+   101	ok   anchor is compact (<3KB)
+   102	ok   drift patterns non-empty
+   103	ok   stage Detection exists
+   104	ok   find_active_run picks recent
+   105	ok   stale window -> none
+   106	ok   no runs dir -> none
+   107	ok   explicit pointer wins over newer run
+   108	ok   outside pointer is ignored
+   109	ok   session_state missing -> {}
+   110	ok   session_state reads drift_flags
+   111	ok   session_state corrupt -> {}
+   112	ok   get_drift_flags returns list
+   113	ok   session_state save writes state/ path
+   114	ok   anchor injects protocol_violation warning
+   115	ok   anchor injects frontier_stale warning
+   116	ok   anchor still has Tier-1 rules
+   117	ok   anchor has self-check section when drift
+   118	ok   anchor no drift_block reference
+   119	ok   stale session_state auto-reset
+   120	ok   agent board: <4 active fronts -> not needed
+   121	ok   agent board: shared barrier -> not needed
+   122	ok   agent board: shared barrier group detected
+   123	ok   agent board: diverse barriers -> needed
+   124	ok   agent board: no shared group in diverse
+   125	ok   agent board: all none/unknown -> needed
+   126	ok   agent board: none/unknown not grouped
+   127	ok   agent board: parser failure with frontier -> fail closed
+   128	ok   agent board: anchor injects reminder
+   129	ok   agent board: no frontier.md -> not needed
+   130	anti_drift selftest passed
+   131	
+   132	$ /opt/homebrew/opt/python@3.14/bin/python3.14 .claude/hooks/output_gate.py --selftest
+   133	ok   denied target cannot invent HTTP/TLS measurements
+   134	ok   denied target cannot invent Agent receipt coverage
+   135	ok   free-form honest denial is still blocked
+   136	ok   paraphrased claim cannot bypass unresolved-denial gate
+   137	ok   free-form honest prose is rejected while denial is unresolved
+   138	ok   fixed denial-only envelope is allowed
+   139	ok   missing active-run pointer is not declared
+   140	ok   non-empty active-run pointer is fail-closed context
+   141	ok   empty -> []
+   142	ok   clean -> []
+   143	ok   BLOCKED ok
+   144	ok   是否继续 detected
+   145	ok   要不要继续 detected
+   146	ok   你决定 detected
+   147	ok   English detected
+   148	ok   DRIFT_PATTERNS non-empty
+   149	ok   deep pattern not in tail
+   150	ok   tail ? detected
+   151	ok   tail ? detected (ASCII)
+   152	ok   no question mark
+   153	ok   empty no question
+   154	ok   proper close: 下一行动
+   155	ok   proper close: BLOCKED
+   156	ok   proper close: trailing space
+   157	ok   empty coda rejected
+   158	ok   placeholder coda rejected
+   159	ok   vague coda rejected
+   160	ok   paraphrased vague coda rejected
+   161	ok   front id without executable action is rejected
+   162	ok   prior-result wording with concrete front and tool passes syntax
+   163	ok   multiple codas rejected
+   164	ok   multiple front ids rejected
+   165	ok   multiple actions rejected
+   166	ok   two tools joined by conjunction are multiple actions
+   167	ok   two tools joined by 和 are multiple actions
+   168	ok   two English actions joined by bare and are rejected
+   169	ok   two Chinese actions joined by 并 are rejected
+   170	ok   save verb cannot hide a second action

@@ -43,8 +43,9 @@ For Claude Code live runs and Claude-authored code/report/closure review:
   the synthesis brain.
 - No arkcli: Claude Code modifies/drives; Codex reviews; Codex is the synthesis
   brain.
-- Neither Codex nor arkcli: fresh-context Claude same-family fallback only
-  transparently; it reduces bias but not shared blind spots.
+- Neither Codex nor arkcli: record `NEEDS_DRIVER`/backend limitation and keep
+  closure open. A fresh-context Claude same-family pass may advise the driver but
+  cannot become the independent closure receipt.
 
 Use the default Claude-driver command for run closure:
 
@@ -86,8 +87,7 @@ driver skill.
 The default arkcli panel models are:
 
 1. `kimi-k2.7-code`
-2. `minimax-m3`
-3. `glm-5.2`
+2. `glm-5.2`
 
 Default arkcli panel behavior does not disable thinking. Only pass `--thinking`
 when a private config explicitly sets a `thinking` field for a model.
@@ -127,8 +127,9 @@ python3 tools/peer_review.py --selftest
 - Record dispositions in `review.md` or `review/records/<date>-<topic>.md` when
   the review affects closure, report text, or safety-critical code.
 - Preserve the data-egress distinction: arkcli/Codex/API review sends bundle
-  content to external model providers; use bundle-only or fresh-context local
-  review when egress is not accepted.
+  content to external model providers. Use bundle-only for inspection when egress
+  is not accepted; a local same-family review is advisory and does not close the
+  independent-review gate.
 
 ## Maintenance Checks
 
@@ -142,7 +143,7 @@ python3 tools/selftest_all.py --only peer_review
 Then grep for stale claims:
 
 ```bash
-rg -n "arkcli panel|kimi-k2.7-code|minimax-m3|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
+rg -n "arkcli panel|kimi-k2.7-code|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
 ```
 
 If the change affects `.claude/hooks/`, `tools/harness/guard.py`, or `sentinel/`,

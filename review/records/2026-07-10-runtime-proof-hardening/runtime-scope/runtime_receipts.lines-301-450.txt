@@ -1,0 +1,150 @@
+   301	        and event.get("decision") == "deny"
+   302	        and (not target_only or event.get("target_action") is True)
+   303	        and (not session_id or str(event.get("session_id") or "") == session_id)
+   304	        and (not since or float(event.get("ts") or 0.0) >= since)
+   305	        and _transcript_has(event)
+   306	    ]
+   307	
+   308	
+   309	def unresolved_target_denials(
+   310	    run_dir: str | Path,
+   311	    *,
+   312	    session_id: str = "",
+   313	    since: float = 0.0,
+   314	) -> list[dict]:
+   315	    """Return target denials without a later successful identical tool input."""
+   316	    denied = denied_tool_events(
+   317	        run_dir, session_id=session_id, since=since, target_only=True)
+   318	    successful = [
+   319	        event for event in valid_tool_events(
+   320	            run_dir, session_id=session_id, since=since)
+   321	        if event.get("target_action") is True
+   322	    ]
+   323	    unresolved: list[dict] = []
+   324	    for denial in denied:
+   325	        denial_ts = float(denial.get("ts") or 0.0)
+   326	        resolved = any(
+   327	            float(event.get("ts") or 0.0) > denial_ts
+   328	            and event.get("tool_name") == denial.get("tool_name")
+   329	            and event.get("action_sha256") == denial.get("action_sha256")
+   330	            for event in successful
+   331	        )
+   332	        if not resolved:
+   333	            unresolved.append(denial)
+   334	    return unresolved
+   335	
+   336	
+   337	def agent_fanout(run_dir: str | Path, *, session_id: str = "", since: float = 0.0) -> dict:
+   338	    events = valid_tool_events(run_dir, "Agent", session_id=session_id, since=since)
+   339	    assignments = sorted({str(event.get("assignment")) for event in events if event.get("assignment")})
+   340	    fronts = sorted({str(event.get("front")) for event in events if event.get("front")})
+   341	    return {
+   342	        "assignments": assignments,
+   343	        "fronts": fronts,
+   344	        "count": len(assignments),
+   345	        "satisfied": len(assignments) >= 2 and len(fronts) >= 2,
+   346	    }
+   347	
+   348	
+   349	def agent_disposition(run_dir: str | Path, *, session_id: str = "", since: float = 0.0) -> dict:
+   350	    """Require every observed assignment to be explicitly merged or adjudicated."""
+   351	    run = Path(run_dir)
+   352	    receipts = agent_fanout(run, session_id=session_id, since=since)
+   353	    agent_events = valid_tool_events(run, "Agent", session_id=session_id, since=since)
+   354	    latest_receipt_ts: dict[str, float] = {}
+   355	    for event in agent_events:
+   356	        assignment = str(event.get("assignment") or "")
+   357	        if assignment:
+   358	            latest_receipt_ts[assignment] = max(
+   359	                latest_receipt_ts.get(assignment, 0.0), float(event.get("ts") or 0.0))
+   360	    try:
+   361	        data = json.loads((run / "state" / "assignments.json").read_text(
+   362	            encoding="utf-8", errors="replace"))
+   363	    except Exception:
+   364	        data = {}
+   365	    rows = {
+   366	        str(item.get("agent") or ""): item
+   367	        for item in data.get("assignments", []) if isinstance(item, dict)
+   368	    } if isinstance(data, dict) and isinstance(data.get("assignments"), list) else {}
+   369	    canonical = "\n".join(
+   370	        path.read_text(encoding="utf-8", errors="replace")
+   371	        for path in (run / "evidence.md", run / "frontier.md", run / "decisions.md")
+   372	        if path.exists()
+   373	    )
+   374	    pending: list[str] = []
+   375	    for assignment in receipts.get("assignments", []):
+   376	        row = rows.get(assignment, {})
+   377	        status = str(row.get("status") or "").strip().lower()
+   378	        note = str(row.get("last_note") or "").strip()
+   379	        updated_raw = str(row.get("updated_at") or row.get("finished_at") or "")
+   380	        try:
+   381	            updated_at = datetime.fromisoformat(updated_raw.replace("Z", "+00:00")).timestamp()
+   382	        except Exception:
+   383	            updated_at = 0.0
+   384	        if updated_at < latest_receipt_ts.get(assignment, 0.0):
+   385	            pending.append(f"{assignment}: disposition 早于本轮 Agent 返回")
+   386	            continue
+   387	        anchors = re.findall(r"\b[EDF]-\d+\b", note, re.I)
+   388	        anchors_exist = bool(anchors) and all(anchor.upper() in canonical.upper() for anchor in anchors)
+   389	        if status == "merged":
+   390	            if not re.search(r"(?i)\b(Evidence|Front|Decision|Refuted|Barrier)\s*[:：]", note) or not anchors_exist:
+   391	                pending.append(f"{assignment}: merged 缺 canonical E/F/D 处置锚点")
+   392	        elif status in {"blocked", "failed", "abandoned"}:
+   393	            if not re.search(r"(?i)\bReason\s*[:：]", note) or not re.search(r"\bF-\d+\b", note, re.I) or not anchors_exist:
+   394	                pending.append(f"{assignment}: {status} 缺 Reason + canonical Front 锚点")
+   395	        else:
+   396	            pending.append(f"{assignment}: status={status or '(missing)'} 尚未 merge/adjudicate")
+   397	    return {
+   398	        **receipts,
+   399	        "pending": pending,
+   400	        "disposition_satisfied": bool(receipts.get("satisfied")) and not pending,
+   401	    }
+   402	
+   403	
+   404	def completion_review_valid(run_dir: str | Path, evidence_index_hash: str) -> bool:
+   405	    for event in reversed(valid_tool_events(run_dir, "Agent")):
+   406	        if not event.get("completion_review"):
+   407	            continue
+   408	        if str(event.get("evidence_index_hash") or "") != evidence_index_hash:
+   409	            continue
+   410	        response = str(event.get("response_excerpt") or "")
+   411	        required_checks = (
+   412	            "report_parity", "severity_artifacts", "reachable_frontier", "review_ledger",
+   413	        )
+   414	        if (
+   415	            re.search(r"(?i)\bXUNJI_COMPLETION_VERDICT\s*=\s*PASS\b", response)
+   416	            and re.search(
+   417	                rf"(?i)\bEVIDENCE_INDEX\s*=\s*{re.escape(evidence_index_hash)}\b",
+   418	                response,
+   419	            )
+   420	            and all(check in response.lower() for check in required_checks)
+   421	        ):
+   422	            return True
+   423	    return False
+   424	
+   425	
+   426	def _peer_review_command_matches(command: str, run_dir: Path) -> bool:
+   427	    """Accept only a direct foreground peer_review invocation for this run."""
+   428	    if re.search(r"[;&|`$<>\n\r]", command):
+   429	        return False
+   430	    try:
+   431	        argv = shlex.split(command, posix=True)
+   432	    except ValueError:
+   433	        return False
+   434	    if len(argv) < 4 or not re.fullmatch(r"(?:python|python3)(?:\.\d+)?", Path(argv[0]).name):
+   435	        return False
+   436	    script = Path(argv[1])
+   437	    if not script.is_absolute():
+   438	        script = Path(__file__).resolve().parents[1] / script
+   439	    script = script.resolve()
+   440	    expected = (Path(__file__).resolve().parents[1] / "tools" / "peer_review.py").resolve()
+   441	    if script != expected:
+   442	        return False
+   443	    if "--into-run" not in argv or any(
+   444	        flag in argv for flag in ("--bundle-only", "--resolve", "--selftest")
+   445	    ):
+   446	        return False
+   447	    for raw in argv[2:]:
+   448	        if raw.startswith("-"):
+   449	            continue
+   450	        candidate = Path(raw)

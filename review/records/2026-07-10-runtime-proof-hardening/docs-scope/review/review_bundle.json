@@ -1,0 +1,641 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "docs-scope",
+  "files": {
+    "report.md": {
+      "sha1": "baba227d5d330752a9d3f577a2cf8702cb111536",
+      "size": 819
+    },
+    "evidence.md": {
+      "sha1": "0e2c27f4f8eead3b6ba9860ecc87693c38a8d139",
+      "size": 1109
+    },
+    "frontier.md": {
+      "sha1": "01d3a5886a7c7b9e6b796d8f249995d60af01a18",
+      "size": 235
+    },
+    "decisions.md": {
+      "sha1": "ef0eea854462c173174b5e4a555b023e84581f27",
+      "size": 223
+    },
+    "review.md": {
+      "sha1": "641f8ef4476ff07fea5d007cc3936a0bcbe6d68a",
+      "size": 1431
+    },
+    "target.md": {
+      "sha1": "22102bc90b9c717ec19542b94f7462f7442d5075",
+      "size": 157
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 - Claude-facing contract parity",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "agent_role_templates.diff",
+            "path": "agent_role_templates.diff",
+            "exists": true,
+            "size": 5468,
+            "sha1": "2898c51d8e0dd9daee8a5961ca9ead9c03595b87",
+            "diff_summary": {
+              "changed_files_count": 8,
+              "changed_files": [
+                "docs/templates/agents/code-audit.md",
+                "docs/templates/agents/exploit.md",
+                "docs/templates/agents/report.md",
+                "docs/templates/agents/review.md",
+                "docs/templates/agents/surface.md",
+                "docs/templates/agents/synthesizer.md",
+                "docs/templates/agents/verify.md",
+                "docs/templates/agents/web-hunter.md"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 8,
+              "hunks": [
+                {
+                  "file": "docs/templates/agents/code-audit.md",
+                  "header": "@@ -42,2 +42,3 @@ Audit source, diffs, dependencies, configuration, routes, and authorization boun"
+                },
+                {
+                  "file": "docs/templates/agents/exploit.md",
+                  "header": "@@ -42,2 +42,3 @@ Adapt payloads or draft author-and-handoff PoC code for a candidate. Do not auto"
+                },
+                {
+                  "file": "docs/templates/agents/report.md",
+                  "header": "@@ -42,2 +42,3 @@ Draft report skeletons and consistency checks from already gated evidence. Do no"
+                },
+                {
+                  "file": "docs/templates/agents/review.md",
+                  "header": "@@ -42,2 +42,3 @@ Clean-context review of evidence, closure, or safety-critical code changes. Find"
+                },
+                {
+                  "file": "docs/templates/agents/surface.md",
+                  "header": "@@ -43,2 +43,3 @@ Convert recon, coverage, fingerprints, and threat roles into attack-surface cand"
+                },
+                {
+                  "file": "docs/templates/agents/synthesizer.md",
+                  "header": "@@ -41,2 +41,3 @@ The sole integrator. Merge subagent candidates, resolve conflicts, apply the evi"
+                },
+                {
+                  "file": "docs/templates/agents/verify.md",
+                  "header": "@@ -42,2 +42,3 @@ Replicate, replay, control, falsify, and calibrate candidate evidence, especiall"
+                },
+                {
+                  "file": "docs/templates/agents/web-hunter.md",
+                  "header": "@@ -42,2 +42,3 @@ Explore one assigned web front with proof-level actions. You may produce candida"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/docs/templates/agents/code-audit.md b/docs/templates/agents/code-audit.md\nindex 0de33a3..5e80050 100644\n--- a/docs/templates/agents/code-audit.md\n+++ b/docs/templates/agents/code-audit.md\n@@ -42,2 +42,3 @@ Audit source, diffs, dependencies, configuration, routes, and authorization boun\n-- Root records `workers.py heartbeat` when this Claude Agent starts or makes\n-  material progress, and `workers.py finish` when it returns/blocks/fails.\n+- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and\n+  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.\n+  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.\ndiff --git a/docs/templates/agents/exploit.md b/docs/templates/agents/exploit.md\nindex bbbba28..9785a13 100644\n--- a/docs/templates/agents/exploit.md\n+++ b/docs/templates/agents/exploit.md\n@@ -42,2 +42,3 @@ Adapt payloads or draft author-and-handoff PoC code for a candidate. Do not auto\n-- Root records `workers.py heartbeat` when this Claude Agent starts or makes\n-  material progress, and `workers.py finish` when it returns/blocks/fails.\n+- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and\n+  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.\n+  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.\ndiff --git a/docs/templates/agents/report.md b/docs/templates/agents/report.md\nindex 7f41f09..f49eef4 100644\n--- a/docs/templates/agents/report.md\n+++ b/docs/templates/agents/report.md\n@@ -42,2 +42,3 @@ Draft report skeletons and consistency checks from already gated evidence. Do no\n-- Root records `workers.py heartbeat` when this Claude Agent starts or makes\n-  material progress, and `workers.py finish` when it returns/blocks/fails.\n+- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and\n+  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.\n+  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.\ndiff --git a/docs/templates/agents/review.md b/docs/templates/agents/review.md\nindex aee1872..7fd0c95 100644\n--- a/docs/templates/agents/review.md\n+++ b/docs/templates/agents/review.md\n@@ -42,2 +42,3 @@ Clean-context review of evidence, closure, or safety-critical code changes. Find\n-- Root records `workers.py heartbeat` when this Claude Agent starts or makes\n-  material progress, and `workers.py finish` when it returns/blocks/fails.\n+- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and\n+  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.\n+  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.\ndiff --git a/docs/templates/agents/surface.md b/docs/templates/agents/surface.md\nindex 5a4f328..bf3f490 100644\n--- a/docs/templates/agents/surface.md\n+++ b/docs/templates/agents/surface.md\n@@ -43,2 +43,3 @@ Convert recon, coverage, fingerprints, and threat roles into attack-surface cand\n-- Root records `workers.py heartbeat` when this Claude Agent starts or makes\n-  material progress, and `workers.py finish` when it returns/blocks/fails.\n+- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and\n+  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.\n+  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.\ndiff --git a/docs/templates/agents/synthesizer.md b/docs/templates/agents/synthesizer.md\nindex 799a3b3..70a54e8 100644\n--- a/docs/templates/agents/synthesizer.md\n+++ b/docs/templates/agents/synthesizer.md\n@@ -41,2 +41,3 @@ The sole integrator. Merge subagent candidates, resolve conflicts, apply the evi\n-- Root records `workers.py heartbeat` when this Claude Agent starts or makes\n-  material progress, and `workers.py finish` when it returns/blocks/fails.\n+- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and\n+  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.\n+  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.\ndiff --git a/docs/templates/agents/verify.md b/docs/templates/agents/verify.md\nindex acabb7d..8a45c58 100644\n--- a/docs/templates/agents/verify.md\n+++ b/docs/templates/agents/verify.md\n@@ -42,2 +42,3 @@ Replicate, replay, control, falsify, and calibrate candidate evidence, especiall\n-- Root records `workers.py heartbeat` when this Claude Agent starts or makes\n-  material progress, and `workers.py finish` when it returns/blocks/fails.\n+- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and\n+  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.\n+  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.\ndiff --git a/docs/templates/agents/web-hunter.md b/docs/templates/agents/web-hunter.md\nindex d8b4fa3..c14552b 100644\n--- a/docs/templates/agents/web-hunter.md\n+++ b/docs/templates/agents/web-hunter.md\n@@ -42,2 +42,3 @@ Explore one assigned web front with proof-level actions. You may produce candida\n-- Root records `workers.py heartbeat` when this Claude Agent starts or makes\n-  material progress, and `workers.py finish` when it returns/blocks/fails.\n+- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and\n+  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.\n+  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.\n"
+          },
+          {
+            "token": "historical_failures.md",
+            "path": "historical_failures.md",
+            "exists": true,
+            "size": 2812,
+            "sha1": "5116828f6ccf44ba0333913b8cc2da46a4602cd3",
+            "excerpt": "# Historical Failure To Control Map\n\nThis matrix summarizes operator-supplied Claude Code histories. It is a scoped\naudit artifact, not a runtime instruction source.\n\n## Source Integrity\n\n- `064ef407.../pasted-text.txt`: SHA-256 `83c9aa7428668704b1bd28f480ac1ef70b44e6badef35e9e6d95dda06d34188b`\n- `883bca51.../pasted-text-1.txt`: SHA-256 `5ab42debc7adce2a19d9b5c959fddde0b05d512ebe8c934352fd68b16b71a37d`\n\n## Mapped Failures\n\n| ID | Historical observation | Driver contract change | Mechanical control |\n|---|---|---|---|\n| H-001 | With eight active fronts, Claude admitted it ran serially with zero Agents. | Agent Board text now says assignments/heartbeat prose are not execution proof and requires different-front Agent calls. | `turn_contract.py` denies Root target actions before two current-turn Agent receipts and post-return disposition. |\n| H-002 | Claude said it moved all eight fronts to Deferred to obtain `Open Fronts=0` after a stop response was rejected for missing Coda. | Stop/pause is a distinct `PAUSED_BY_OPERATOR` mode; it preserves active fronts and requires no Coda. | PreToolUse permits only the Cron quiescence transaction; output/closure hooks reject pause-as-completion. |\n| H-003 | Claude described itself as a \"format parrot\", optimizing Coda text instead of valuable actions. | Coda applies only to `EXECUTE` and must project a real next action; explain/pause have no Coda. | `output_gate.py` validates one concrete current-front Coda and emits no stale strategy suggestion. |\n| H-004 | The statusline displayed `Idle`, zero pending entries, and no blockers while derived state was missing/stale. | Status documentation distinguishes live derivation, stale cache, pause, and interruption. | `xunji_statusline.py` derives from canonical Markdown when caches are absent/stale and remains read-only. |\n| H-005 | Claude cycled through evidence/review/frontier/retrospective and completion markers to satisfy format gates after stop. | Closure prose now forbids manual/fresh-context self-fill and pause-as-defer/complete. | `check_run.py`, receipt hashes, Cron receipts, completion review, and active-front parsing must all agree before closure. |\n| H-006 | Old review guidance said an `Independent Review` heading was the marker checked at closure. | The legacy reviewer file is now a fail-safe deprecation pointer. | `check_run.py` requires a content-addressed receipt plus exact foreground invocation output markers. |\n\n## Trace Anchors\n\n- H-001: source one lines 2807, 2825, 2850-2852; source two lines 3254, 3272, 3297-3299.\n- H-002/H-003/H-005: source one lines 2783-2807; source two lines 3230-3254 and 3359-3374.\n- H-004: source two lines 1124-1224.\n- H-006: pre-change tracked `review/independent-reviewer.md` stated that the heading marker was what `check_run.py` looked for.\n"
+          },
+          {
+            "token": "installed-runtime-manifest.json",
+            "path": "installed-runtime-manifest.json",
+            "exists": true,
+            "size": 6593,
+            "sha1": "a2915a751ca66383fb7a1a623998ec8424695b7b",
+            "excerpt": "{\n  \"files\": {\n    \".claude/hooks/output_gate.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/.claude/hooks/output_gate.py\",\n      \"sha256\": \"295fa30bd09b6aa2d4a0dcedc9d2d5225cbd994a12c91c9585122c821b961aed\",\n      \"size\": 43411\n    },\n    \".claude/hooks/run_gate.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/.claude/hooks/run_gate.py\",\n      \"sha256\": \"b609de1521731835fbed59377c77432e264e58468f5fc74c25e6d8ebea1c32c3\",\n      \"size\": 77152\n    },\n    \".claude/settings.json\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/.claude/settings.json\",\n      \"sha256\": \"1b6ff8bfe1ce5a54b004d63f866f2083ff6a11dd4bdf92878b56705c908a04ad\",\n      \"size\": 4435\n    },\n    \"tools/anti_drift.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/anti_drift.py\",\n      \"sha256\": \"7641eb7e9602ebe44effb0b85d42d7c9d252c4ec7cd047f5804d7080ab112d48\",\n      \"size\": 34521\n    },\n    \"tools/run_model.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/run_model.py\",\n      \"sha256\": \"01c551a894cf2a540cf37e50c919d0f31932c8ff166a1e49437ddd5e61e8cf46\",\n      \"size\": 9967\n    },\n    \"tools/runtime_receipts.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/runtime_receipts.py\",\n      \"sha256\": \"52e05e0a1e128ae1ffa60ba3e3b2fe7ff67895bbe91062d7180d1c7d0d5d15fc\",\n      \"size\": 32345\n    },\n    \"tools/turn_contract.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/turn_contract.py\",\n      \"sha256\": \"aa082961ea903431a7398b0d5ed1466f1fd9962bcb4a46f29568311a79f31114\",\n      \"size\": 37838\n    },\n    \"tools/workers.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/workers.py\",\n      \"sha256\": \"d81dc4cd929bdbe0d7d8418d0d4553f0af369b22792bfc5e7d8fa2a9b8758b41\",\n      \"size\": 97716\n    }\n  },\n  \"hook_bindings\": [\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"WebSearch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Agent|CronCreate|CronDelete|CronList|WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUseFailure\",\n      \"matcher\": \"Agent|CronCreate|CronDelete|CronList|Bash|WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"SubagentStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"SubagentStop\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"UserPromptSubmit\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\",\n      \"event\": \"UserPromptSubmit\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/anti_drift.py\\\"\",\n      \"event\": \"UserPromptSubmit\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\\\"\",\n      \"event\": \"Stop\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\\\"\",\n      \"event\": \"Stop\",\n      \"matcher\": \"\"\n    }\n  ],\n  \"repository_root\": \"/Users/ccj/Documents/AI/Xunji\",\n  \"schema\": \"xunji.installed_runtime_manifest.v1\",\n  \"turn_contract_hook_references\": [\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Agent|CronCreate|CronDelete|CronList|WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUseFailure\",\n      \"matcher\": \"Agent|CronCreate|CronDelete|CronList|Bash|WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"SubagentStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"SubagentStop\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"UserPromptSubmit\",\n      \"matcher\": \"\"\n    }\n  ]\n}\n"
+          },
+          {
+            "token": "lifecycle_templates.diff",
+            "path": "lifecycle_templates.diff",
+            "exists": true,
+            "size": 6676,
+            "sha1": "f14e27056e1e871e61d0ee1d42e70de1fec00fbd",
+            "diff_summary": {
+              "changed_files_count": 3,
+              "changed_files": [
+                "docs/templates/loop_prompt.md",
+                "docs/templates/run/review.md",
+                "docs/templates/worker.md"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 11,
+              "hunks": [
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -9,2 +9,5 @@ You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat."
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -49,0 +53,7 @@ finishes. Do not impose this rule on normal chat outside `/loop`."
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -112 +121,0 @@ Guard-routed tools only."
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -122 +131,12 @@ Guard-routed tools only."
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -167,0 +188 @@ Only when the controller and run files show a closure-review candidate:"
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -170 +191,9 @@ Only when the controller and run files show a closure-review candidate:"
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -214 +243 @@ After Markdown/state files are updated and refreshed, append:"
+                },
+                {
+                  "file": "docs/templates/run/review.md",
+                  "header": "@@ -5,9 +5,5 @@"
+                },
+                {
+                  "file": "docs/templates/run/review.md",
+                  "header": "@@ -21 +17 @@"
+                },
+                {
+                  "file": "docs/templates/worker.md",
+                  "header": "@@ -70,3 +70,4 @@ rate-limit pressure, and past worker hit rate."
+                },
+                {
+                  "file": "docs/templates/worker.md",
+                  "header": "@@ -112,3 +113,3 @@ Discipline:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md\nindex 8de9e4b..176661c 100644\n--- a/docs/templates/loop_prompt.md\n+++ b/docs/templates/loop_prompt.md\n@@ -9,2 +9,5 @@ You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.\n-Run exactly one autonomous iteration. Until the run has a valid completion\n-marker, end with exactly one final Coda line: `下一行动: <object + concrete\n+Run one **material** autonomous iteration: state pass, required Agent execution,\n+merge/verification, canonical writes, and refreshed gates. Planning, one request,\n+one file edit, or satisfying a hook format is not an iteration result. Until the\n+run has a valid completion marker, an `EXECUTE` turn ends with exactly one final\n+Coda line: `下一行动: <object + concrete\n@@ -49,0 +53,7 @@ finishes. Do not impose this rule on normal chat outside `/loop`.\n+Material floor: do not end after the first response or local gate repair. When\n+fan-out is required, wait for at least two disjoint Agent results, adjudicate both,\n+and merge/refute their candidate material before ending. Otherwise continue the\n+selected front through a saved result plus control/pivot, or through an\n+evidence-backed barrier/failure-budget decision. A Coda is the final projection of\n+that work, never the work product itself.\n+\n@@ -112 +121,0 @@ Guard-routed tools only.\n-{{PYTHON}} tools/workers.py heartbeat \"{{RUN_DIR}}\" A-web-hunter-001 --status running --note \"Agent tool started\"\n@@ -122 +131,12 @@ Guard-routed tools only.\n-If `state/loop_state.json` says `gates.fanout_required=true`, use the Agent Board: assign at least two disjoint lanes unless a concrete shared barrier or request budget reason is recorded. Agents produce candidates/refutations only; the Single Synthesizer promotes findings.\n+If `state/loop_state.json` says `gates.fanout_required=true`, assign at least two\n+disjoint lanes and actually invoke two Claude Agents in this turn. Each Agent prompt\n+must carry `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. Only current-turn\n+transcript-backed receipts count; planning files, heartbeat, old receipts, and\n+model-written budget reasons do not. The only bypass is an explicit serial override\n+in the operator's current prompt. Agents produce candidates/refutations only; the\n+Single Synthesizer promotes findings.\n+\n+After adjudicating each Agent, run `workers.py finish`: use `--status merged` with\n+`--note \"Evidence: E-xxx; Front: F-xxx; <disposition>\"`, or a non-success terminal\n+status with `--note \"Reason: <why>; Front: F-xxx\"`. `done` without this anchored\n+disposition is deliberately blocked at Stop.\n@@ -167,0 +188 @@ Only when the controller and run files show a closure-review candidate:\n+{{PYTHON}} tools/check_run.py \"{{RUN_DIR}}\"\n@@ -170 +191,9 @@ Only when the controller and run files show a closure-review candidate:\n-Closure still requires: no hard `check_run` gates, independent review resolved, retrospective.md with real Self and Framework/tooling sections, no unresolved PR ledger items, and `GHOST_COMPLETE` written only after those pass. In the same turn as writing `GHOST_COMPLETE` or `NORMAL_COMPLETE`, cancel the active scheduled `/loop` job if one exists and record the result in `state/loop_journal.jsonl` with `cron_cancelled=<job-id|none>`.\n+Closure still requires: no hard `check_run` gates, a current content-addressed\n+ReviewReceipt, independent review ledger resolved, retrospective.md with real Self\n+and Framework/tooling sections, and no unresolved PR items. Invoke the completion\n+Agent with `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>\n+CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`. Require\n+`XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all four checks in its response,\n+then record its substantive section before writing a completion marker. In that same\n+turn, CronList, delete only the listed job for this run, CronList again, and record\n+`cron_cancelled=<job-id|none>` in the journal end event.\n@@ -214 +243 @@ After Markdown/state files are updated and refreshed, append:\n-Run one iteration only. Before ending normally, append:\n+End only after the material floor above is met. Before ending normally, append:\ndiff --git a/docs/templates/run/review.md b/docs/templates/run/review.md\nindex c2df477..db8c28c 100644\n--- a/docs/templates/run/review.md\n+++ b/docs/templates/run/review.md\n@@ -5,9 +5,5 @@\n-> 独立复审记录。仅有本标题或下方占位符不算完成；check_run 要求真实 Reviewer/Backend\n-> 身份与明确 Verdict，或一份有具体发现和裁定的实质 free-form 复审。peer_review.py 成功后\n-> 自动写入；后端不可达时可由 fresh-context reviewer 手工填写，但不能由 driver 自评冒充。\n-\n-- Reviewer: (codex / arkcli-panel / manual-driver)\n-- Time: (ISO timestamp)\n-- Verdict: (PASS / WARN / BLOCKER)\n-- BundleHash: (review_bundle hash, if produced)\n-- EvidenceIndexHash: (content-addressed evidence_index hash, if produced)\n+> 本节不能手填。请前台运行 `tools/peer_review.py runs/<dir> --into-run`；工具会追加\n+> Reviewer/Backend、Verdict、BundleHash、EvidenceIndexHash 和 content-addressed\n+> ReviewReceipt；Hook 还会绑定输出中的 receipt/bundle hash 标记。标题、复制输出、\n+> manual-driver/fresh-context 自填或无回执 PASS 均不算完成。\n+> 后端不可用时保留 limitation，run 不得收口。\n@@ -21 +17 @@\n-## R-001\n+## Driver Review Notes (not independent)\ndiff --git a/docs/templates/worker.md b/docs/templates/worker.md\nindex 8fe3e0b..378433d 100644\n--- a/docs/templates/worker.md\n+++ b/docs/templates/worker.md\n@@ -70,3 +70,4 @@ rate-limit pressure, and past worker hit rate.\n-- Root must record Agent lifecycle in `state/assignments.json`: heartbeat after\n-  the Claude Agent starts or makes material progress, and finish when it returns,\n-  blocks, fails, or is abandoned. A non-terminal Agent blocks closure.\n+- The Agent-tool prompt must carry its assignment/front tokens so hooks can record\n+  a transcript-backed execution receipt. `heartbeat`/`finish` remain lifecycle\n+  display state only; they cannot prove the Agent ran. A non-terminal Agent blocks\n+  closure.\n@@ -112,3 +113,3 @@ Discipline:\n-- Root will record `workers.py heartbeat` when this Agent starts and\n-  `workers.py finish` when it returns; include a concise coda summary so Root can\n-  finish the lifecycle entry truthfully.\n+- Your Agent-tool prompt includes `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...` so\n+  the hook can prove this call ran. Root may mirror lifecycle with\n+  `workers.py heartbeat/finish`; that prose is not runtime proof.\n"
+          },
+          {
+            "token": "peer_review.diff",
+            "path": "peer_review.diff",
+            "exists": true,
+            "size": 8161,
+            "sha1": "6307abd68fa5cde625c7cbc87bf4dceb2a92e472",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/peer_review.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 28,
+              "hunks": [
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -6 +6 @@"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -79 +79 @@ DEFAULT_CONFIG: dict = {"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -85 +85 @@ DEFAULT_CONFIG: dict = {"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -90 +89,0 @@ DEFAULT_CONFIG: dict = {"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -184 +183,3 @@ ARTIFACT_EXCERPT_CAP = 24_000"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -232,0 +234 @@ class ReviewResult:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -447 +449,8 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -540 +549 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -578,0 +588,6 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -853 +868 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -857,2 +872 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -961 +975 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -965,2 +979 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1048 +1061 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1052,2 +1065 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1476 +1488,27 @@ def _strip_template_review_placeholders(text: str) -> str:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1487,0 +1526,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1494,0 +1535 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1496,0 +1538,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1498,3 +1541,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1517,0 +1565 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1606 +1654 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1752,2 +1800,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1839 +1887 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1840,0 +1889,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1854,0 +1910,5 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1877,0 +1938,4 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -2054,0 +2119,3 @@ def main() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/peer_review.py b/tools/peer_review.py\nindex a1efa97..679f3a7 100644\n--- a/tools/peer_review.py\n+++ b/tools/peer_review.py\n@@ -6 +6 @@\n-    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 三模型 panel;\n+    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 双模型 panel;\n@@ -79 +79 @@ DEFAULT_CONFIG: dict = {\n-        \"max_bundle_chars\": 180_000,\n+        \"max_bundle_chars\": 110_000,\n@@ -85 +85 @@ DEFAULT_CONFIG: dict = {\n-        # arkcli 外部异构补盲团: 三模型独立审同一冻结 bundle, 聚合成候选 finding。\n+        # arkcli 外部异构补盲团: 双模型独立审同一冻结 bundle, 聚合成候选 finding。\n@@ -90 +89,0 @@ DEFAULT_CONFIG: dict = {\n-                       {\"id\": \"minimax-m3\"},\n@@ -184 +183,3 @@ ARTIFACT_EXCERPT_CAP = 24_000\n-BUNDLE_CHAR_CAP = 180_000\n+# Keep the frozen JSON plus rubric below the narrowest default panel context.\n+# Full artifact hashes remain in the bundle when excerpts are reduced.\n+BUNDLE_CHAR_CAP = 110_000\n@@ -232,0 +234 @@ class ReviewResult:\n+    runtime_receipt_id: str = field(default=\"\", repr=False)\n@@ -447 +449,8 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,\n-    payload[\"sha1\"] = _sha1_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(\"utf-8\"))\n+    digest_entries = json.loads(json.dumps(entries, ensure_ascii=False))\n+    for entry in digest_entries:\n+        for artifact in entry.get(\"artifacts\", []):\n+            for key in (\"excerpt\", \"excerpt_truncated_chars\", \"diff_summary\"):\n+                artifact.pop(key, None)\n+    digest_payload = {\"schema\": \"xunji.evidence_index.v1\", \"entries\": digest_entries}\n+    payload[\"sha1\"] = _sha1_bytes(json.dumps(\n+        digest_payload, ensure_ascii=False, sort_keys=True).encode(\"utf-8\"))\n@@ -540 +549 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,\n-    for _ in range(6):\n+    for _ in range(16):\n@@ -578,0 +588,6 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,\n+def _bundle_context(bundle: dict) -> str:\n+    \"\"\"Serialize exactly as the bundle cap is measured; never pretty-print then cut.\"\"\"\n+    return json.dumps(\n+        bundle, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"))\n+\n+\n@@ -853 +868 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,\n-    context = json.dumps(bundle or build_review_bundle(\n+    context = _bundle_context(bundle or build_review_bundle(\n@@ -857,2 +872 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,\n-        max_bundle_chars=max_bundle_chars),\n-                         ensure_ascii=False, indent=2)\n+        max_bundle_chars=max_bundle_chars))\n@@ -961 +975 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,\n-    context = json.dumps(bundle or build_review_bundle(\n+    context = _bundle_context(bundle or build_review_bundle(\n@@ -965,2 +979 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,\n-        max_bundle_chars=max_bundle_chars),\n-                         ensure_ascii=False, indent=2)\n+        max_bundle_chars=max_bundle_chars))\n@@ -1048 +1061 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,\n-    context = json.dumps(bundle or build_review_bundle(\n+    context = _bundle_context(bundle or build_review_bundle(\n@@ -1052,2 +1065 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,\n-        max_bundle_chars=max_bundle_chars),\n-                         ensure_ascii=False, indent=2)\n+        max_bundle_chars=max_bundle_chars))\n@@ -1476 +1488,27 @@ def _strip_template_review_placeholders(text: str) -> str:\n-def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+def _write_review_receipt(run_dir: Path, result: ReviewResult, review_kind: str) -> str:\n+    \"\"\"Persist the machine provenance that Markdown review prose cannot prove.\"\"\"\n+    payload = {\n+        \"schema\": \"xunji.peer_review_receipt.v1\",\n+        \"generated_at\": datetime.now(timezone.utc).isoformat(),\n+        \"review_kind\": review_kind,\n+        \"result\": result.as_dict(),\n+    }\n+    receipt_id = hashlib.sha256(json.dumps(\n+        payload, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"),\n+    ).encode(\"utf-8\")).hexdigest()\n+    record = dict(payload)\n+    record[\"receipt_id\"] = receipt_id\n+    out = run_dir / \"review\" / \"receipts\" / f\"{receipt_id}.json\"\n+    out.parent.mkdir(parents=True, exist_ok=True)\n+    tmp = out.with_name(out.name + f\".tmp-{os.getpid()}\")\n+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + \"\\n\",\n+                   encoding=\"utf-8\")\n+    os.replace(tmp, out)\n+    try:\n+        os.chmod(out, 0o600)\n+    except OSError:\n+        pass\n+    return receipt_id\n+\n+\n+def _append_run_review(run_dir: Path, result: ReviewResult) -> str:\n@@ -1487,0 +1526,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+    receipt_id = _write_review_receipt(run_dir, result, review_kind)\n+    result.runtime_receipt_id = receipt_id\n@@ -1494,0 +1535 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+              f\"- ReviewReceipt: {receipt_id}\",\n@@ -1496,0 +1538,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+    used_ids = set(re.findall(r\"(?m)^###\\s+(PR-\\d+)\\b\", existing))\n+    next_pr = max((int(item.split(\"-\")[1]) for item in used_ids), default=0) + 1\n@@ -1498,3 +1541,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n-        for i, f in enumerate(result.findings, 1):\n-            if not f.id:\n-                f.id = f\"PR-{i:03d}\"\n+        for f in result.findings:\n+            if not f.id or f.id in used_ids or not re.fullmatch(r\"PR-\\d+\", f.id):\n+                while f\"PR-{next_pr:03d}\" in used_ids:\n+                    next_pr += 1\n+                f.id = f\"PR-{next_pr:03d}\"\n+                next_pr += 1\n+            used_ids.add(f.id)\n@@ -1517,0 +1565 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+    return receipt_id\n@@ -1606 +1654 @@ def _selftest() -> int:\n-                   == [\"kimi-k2.7-code\", \"minimax-m3\", \"glm-5.2\"]))\n+                   == [\"kimi-k2.7-code\", \"glm-5.2\"]))\n@@ -1752,2 +1800,2 @@ def _selftest() -> int:\n-        [\"minimax-m3: timeout >1s\"],\n-        \"arkcli:glm-5.2+kimi-k2.7-code+minimax-m3\")\n+        [\"kimi-k2.7-code: timeout >1s\"],\n+        \"arkcli:kimi-k2.7-code+glm-5.2\")\n@@ -1839 +1887 @@ def _selftest() -> int:\n-    _append_run_review(d_run, ReviewResult(verdict=\"PASS\", backend_used=\"arkcli:glm-5.2+kimi-k2.7-code+minimax-m3\"))\n+    _append_run_review(d_run, ReviewResult(verdict=\"PASS\", backend_used=\"arkcli:kimi-k2.7-code+glm-5.2\"))\n@@ -1840,0 +1889,7 @@ def _selftest() -> int:\n+    _append_run_review(d_run, ReviewResult(\n+        verdict=\"WARN\", findings=[Finding(\"WARN\", \"second\", \"E-001\", \"check\")],\n+        backend_used=\"arkcli:glm-5.2\", bundle_hash=b_run[\"sha1\"],\n+        evidence_index_hash=b_run[\"evidence_index\"][\"sha1\"],\n+    ))\n+    rv3 = (d_run / \"review.md\").read_text(encoding=\"utf-8\")\n+    receipt_ids = re.findall(r\"(?m)^- ReviewReceipt: ([0-9a-f]{64})$\", rv3)\n@@ -1854,0 +1910,5 @@ def _selftest() -> int:\n+        (\"into_run writes content-addressed receipt files\",\n+         len(receipt_ids) == 3 and all((d_run / \"review\" / \"receipts\" / f\"{rid}.json\").is_file()\n+                                       for rid in receipt_ids)),\n+        (\"repeated reviews allocate globally unique PR ids\",\n+         rv3.count(\"### PR-001\") == 1 and rv3.count(\"### PR-002\") == 1),\n@@ -1877,0 +1938,4 @@ def _selftest() -> int:\n+        (\"backend bundle context uses the capped compact serialization\",\n+         _bundle_context(b_long) == json.dumps(\n+             b_long, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"))\n+         and \"\\n\" not in _bundle_context(b_long)),\n@@ -2054,0 +2119,3 @@ def main() -> int:\n+    if args.into_run and r.runtime_receipt_id:\n+        print(f\"XUNJI_REVIEW_RECEIPT={r.runtime_receipt_id}\")\n+        print(f\"XUNJI_REVIEW_BUNDLE={r.bundle_hash}\")\n"
+          },
+          {
+            "token": "primary_skills.diff",
+            "path": "primary_skills.diff",
+            "exists": true,
+            "size": 8173,
+            "sha1": "2ce093e096e5836d190c17a07401d76bc54ffc68",
+            "diff_summary": {
+              "changed_files_count": 5,
+              "changed_files": [
+                ".agents/skills/xunji-peer-review-panel/SKILL.md",
+                ".claude/skills/xunji-agent-board/SKILL.md",
+                ".claude/skills/xunji-peer-review-panel/SKILL.md",
+                ".claude/skills/xunji-reviewops/SKILL.md",
+                ".claude/skills/xunji-run-lifecycle/SKILL.md"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 20,
+              "hunks": [
+                {
+                  "file": ".agents/skills/xunji-peer-review-panel/SKILL.md",
+                  "header": "@@ -73,2 +73 @@ The default arkcli panel models are:"
+                },
+                {
+                  "file": ".agents/skills/xunji-peer-review-panel/SKILL.md",
+                  "header": "@@ -135 +134 @@ Then grep for stale claims:"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -37,2 +37,4 @@ must not be treated as the Root driver's instruction source."
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -137 +138,0 @@ Stay serial when:"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -139,0 +141,6 @@ Stay serial when:"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -158 +164,0 @@ python tools/workers.py assign runs/<dir> --role web-hunter --front F-001"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -162,0 +169,16 @@ rg -n \"Reasoning style|Loop budget|Operator Profile\" runs/<dir>/agents/A-web-hun"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -208,0 +231,3 @@ python tools/workers.py --selftest"
+                },
+                {
+                  "file": ".claude/skills/xunji-peer-review-panel/SKILL.md",
+                  "header": "@@ -46,2 +46,3 @@ For Claude Code live runs and Claude-authored code/report/closure review:"
+                },
+                {
+                  "file": ".claude/skills/xunji-peer-review-panel/SKILL.md",
+                  "header": "@@ -89,2 +90 @@ The default arkcli panel models are:"
+                },
+                {
+                  "file": ".claude/skills/xunji-peer-review-panel/SKILL.md",
+                  "header": "@@ -130,2 +130,3 @@ python3 tools/peer_review.py --selftest"
+                },
+                {
+                  "file": ".claude/skills/xunji-peer-review-panel/SKILL.md",
+                  "header": "@@ -145 +146 @@ Then grep for stale claims:"
+                },
+                {
+                  "file": ".claude/skills/xunji-reviewops/SKILL.md",
+                  "header": "@@ -64,2 +64,2 @@ run:"
+                },
+                {
+                  "file": ".claude/skills/xunji-reviewops/SKILL.md",
+                  "header": "@@ -74,0 +75,5 @@ is correct. Keep hunting if the evidence graph still exposes a live front."
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -186,0 +187,6 @@ Interpretation:"
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -191,0 +198,5 @@ Interpretation:"
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -215 +226 @@ python tools/peer_review.py runs/<dir> --into-run"
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -220,4 +231,4 @@ Closure gates:"
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -238,0 +250,5 @@ Closure gates:"
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -240 +256,2 @@ Closure gates:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/.agents/skills/xunji-peer-review-panel/SKILL.md b/.agents/skills/xunji-peer-review-panel/SKILL.md\nindex 795d47f..6f3c205 100644\n--- a/.agents/skills/xunji-peer-review-panel/SKILL.md\n+++ b/.agents/skills/xunji-peer-review-panel/SKILL.md\n@@ -73,2 +73 @@ The default arkcli panel models are:\n-2. `minimax-m3`\n-3. `glm-5.2`\n+2. `glm-5.2`\n@@ -135 +134 @@ Then grep for stale claims:\n-rg -n \"arkcli panel|kimi-k2.7-code|minimax-m3|glm-5.2|thinking\" tools review docs README.md AGENTS.md .agents/skills .claude/skills\n+rg -n \"arkcli panel|kimi-k2.7-code|glm-5.2|thinking\" tools review docs README.md AGENTS.md .agents/skills .claude/skills\ndiff --git a/.claude/skills/xunji-agent-board/SKILL.md b/.claude/skills/xunji-agent-board/SKILL.md\nindex 021538b..8fc1263 100644\n--- a/.claude/skills/xunji-agent-board/SKILL.md\n+++ b/.claude/skills/xunji-agent-board/SKILL.md\n@@ -37,2 +37,4 @@ must not be treated as the Root driver's instruction source.\n-  When Root actually starts a Claude Agent tool, record\n-  `workers.py heartbeat <run> <agent> --status running --note \"<started>\"`.\n+  When Root actually starts a Claude Agent tool, its prompt must include\n+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. The hook records the real\n+  transcript-backed receipt automatically. `heartbeat` is optional display state\n+  and never proves execution.\n@@ -137 +138,0 @@ Stay serial when:\n-- Request budget, WAF pressure, auth fragility, or host health is tight.\n@@ -139,0 +141,6 @@ Stay serial when:\n+When at least four active fronts do not all share one concrete barrier, every\n+`EXECUTE` turn must actually invoke two Agents on disjoint assignment/front pairs.\n+Only the operator's current prompt may grant a one-turn serial override. Old\n+receipts, `heartbeat`, Agent files, model-claimed budgets, and decisions prose do\n+not bypass this rule.\n+\n@@ -158 +164,0 @@ python tools/workers.py assign runs/<dir> --role web-hunter --front F-001\n-python tools/workers.py heartbeat runs/<dir> A-web-hunter-001 --status running --note \"Agent tool started\"\n@@ -162,0 +169,16 @@ rg -n \"Reasoning style|Loop budget|Operator Profile\" runs/<dir>/agents/A-web-hun\n+Then invoke the Claude `Agent` tool with\n+`XUNJI_ASSIGNMENT=A-web-hunter-001 XUNJI_FRONT=F-001` in its prompt. Repeat for a\n+second disjoint lane when fan-out is required. After the real call, `heartbeat`\n+may mirror progress for humans, but it is not a gate credential.\n+\n+After Root adjudicates the result, close the assignment with an auditable note:\n+\n+```bash\n+python tools/workers.py finish runs/<dir> A-web-hunter-001 --status merged --note \"Evidence: E-007; Front: F-001; candidate merged\"\n+python tools/workers.py finish runs/<dir> A-web-hunter-002 --status blocked --note \"Reason: shared auth barrier; Front: F-002\"\n+```\n+\n+`done` means the Agent returned but Root still owes merge/refute/adjudication; it\n+does not satisfy the execute-turn Stop gate. The disposition timestamp must be\n+newer than that Agent's current-turn receipt.\n+\n@@ -208,0 +231,3 @@ python tools/workers.py --selftest\n+python tools/run_model.py --selftest\n+python tools/runtime_receipts.py --selftest\n+python tools/turn_contract.py --selftest\ndiff --git a/.claude/skills/xunji-peer-review-panel/SKILL.md b/.claude/skills/xunji-peer-review-panel/SKILL.md\nindex a4e6e7b..e8d8bcc 100644\n--- a/.claude/skills/xunji-peer-review-panel/SKILL.md\n+++ b/.claude/skills/xunji-peer-review-panel/SKILL.md\n@@ -46,2 +46,3 @@ For Claude Code live runs and Claude-authored code/report/closure review:\n-- Neither Codex nor arkcli: fresh-context Claude same-family fallback only\n-  transparently; it reduces bias but not shared blind spots.\n+- Neither Codex nor arkcli: record `NEEDS_DRIVER`/backend limitation and keep\n+  closure open. A fresh-context Claude same-family pass may advise the driver but\n+  cannot become the independent closure receipt.\n@@ -89,2 +90 @@ The default arkcli panel models are:\n-2. `minimax-m3`\n-3. `glm-5.2`\n+2. `glm-5.2`\n@@ -130,2 +130,3 @@ python3 tools/peer_review.py --selftest\n-  content to external model providers; use bundle-only or fresh-context local\n-  review when egress is not accepted.\n+  content to external model providers. Use bundle-only for inspection when egress\n+  is not accepted; a local same-family review is advisory and does not close the\n+  independent-review gate.\n@@ -145 +146 @@ Then grep for stale claims:\n-rg -n \"arkcli panel|kimi-k2.7-code|minimax-m3|glm-5.2|thinking\" tools review docs README.md AGENTS.md .agents/skills .claude/skills\n+rg -n \"arkcli panel|kimi-k2.7-code|glm-5.2|thinking\" tools review docs README.md AGENTS.md .agents/skills .claude/skills\ndiff --git a/.claude/skills/xunji-reviewops/SKILL.md b/.claude/skills/xunji-reviewops/SKILL.md\nindex 6449e23..8107ba1 100644\n--- a/.claude/skills/xunji-reviewops/SKILL.md\n+++ b/.claude/skills/xunji-reviewops/SKILL.md\n@@ -64,2 +64,2 @@ run:\n-   falls back to a fresh-context Claude Code same-family reviewer. The arkcli\n-   panel is Kimi-K2.7-Code + MiniMax-M3 + GLM-5.2.\n+   leaves closure incomplete. A same-family pass can advise but is not an\n+   independent vote. The arkcli panel is Kimi-K2.7-Code + GLM-5.2 only.\n@@ -74,0 +75,5 @@ is correct. Keep hunting if the evidence graph still exposes a live front.\n+The independent-review gate additionally requires the latest content-addressed\n+ReviewReceipt to match the current evidence index and a transcript-observed\n+foreground invocation with matching receipt and bundle-hash output markers.\n+Historical receipts remain audit history; only the latest\n+hash is freshness-bearing, while every unresolved historical BLOCKER still matters.\ndiff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md\nindex 965fdd7..e3e5ed5 100644\n--- a/.claude/skills/xunji-run-lifecycle/SKILL.md\n+++ b/.claude/skills/xunji-run-lifecycle/SKILL.md\n@@ -186,0 +187,6 @@ Interpretation:\n+- A denied target action remains unresolved until the hook ledger contains a\n+  later successful receipt for the same tool and identical execution-relevant\n+  input. Descriptive tool metadata does not count. Do not turn a\n+  denial into a result, even by paraphrase. Retry after fixing the prerequisite;\n+  if that is impossible, use only the exact three-line denial envelope required\n+  by `output_gate.py`.\n@@ -191,0 +198,5 @@ Interpretation:\n+- `state/runtime_events.jsonl`, `state/turn_contract.json`, and\n+  `state/run_status.json` are hook-owned process records. Never edit them directly.\n+- `EXPLAIN_ONLY` is read-only and has no Coda. `PAUSED_BY_OPERATOR` keeps active\n+  fronts intact, stops the current run task through bound CronList/Delete/List,\n+  and is not a completion action. A later execute/resume prompt starts a new turn.\n@@ -215 +226 @@ python tools/peer_review.py runs/<dir> --into-run\n-python tools/check_run.py runs/<dir> --auto-peer-review --review-driver claude\n+python tools/check_run.py runs/<dir>\n@@ -220,4 +231,4 @@ Closure gates:\n-- `review.md` must contain a completed `Independent Review` record with a real\n-  reviewer/backend and block-scoped verdict. A heading,\n-  prose mention, or untouched template choices do not count; self-review does\n-  not cure self-review bias.\n+- `review.md` must contain a current content-addressed `ReviewReceipt` generated\n+  by a transcript-observed foreground peer-review invocation whose output has\n+  matching receipt and bundle-hash markers. A heading, copied\n+  output, manual reviewer prose, or untouched template does not count.\n@@ -238,0 +250,5 @@ Closure gates:\n+- Before the marker, invoke a completion Agent with\n+  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>\n+  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.\n+  Require `XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all four checks in\n+  the response, then record substantive cross-check results in `decisions.md`.\n@@ -240 +256,2 @@ Closure gates:\n-  `/loop` job in the same turn and append an `end` loop journal note containing\n+  `/loop` job in the same turn: current-turn CronList, delete only the observed\n+  current-run job, then CronList again. Append an `end` loop journal note containing\n"
+          },
+          {
+            "token": "root_rules.diff",
+            "path": "root_rules.diff",
+            "exists": true,
+            "size": 16721,
+            "sha1": "80c6907db8164a530bc2bc29df68a1d6d54ebcc7",
+            "diff_summary": {
+              "changed_files_count": 4,
+              "changed_files": [
+                "CLAUDE.md",
+                "docs/ROADMAP.md",
+                "docs/ROUTER.md",
+                "review/independent-reviewer.md"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 17,
+              "hunks": [
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -124 +124,10 @@ observe -> update state graph -> decompose fronts"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -129,0 +139,10 @@ observe -> update state graph -> decompose fronts"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -181,4 +200,14 @@ observe -> update state graph -> decompose fronts"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -275,10 +304,7 @@ Only two pauses; each requires a codex gate before the pause:"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -293,2 +319,6 @@ Only two pauses; each requires a codex gate before the pause:"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -305,0 +336,3 @@ Only two pauses; each requires a codex gate before the pause:"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -338 +371 @@ Claude Code 负责修改、集成、测试与落盘；Codex/arkcli 是复审补"
+                },
+                {
+                  "file": "docs/ROADMAP.md",
+                  "header": "@@ -144 +144 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一"
+                },
+                {
+                  "file": "docs/ROADMAP.md",
+                  "header": "@@ -178 +178 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一"
+                },
+                {
+                  "file": "docs/ROUTER.md",
+                  "header": "@@ -232,8 +232,6 @@ Output: `review.md` · reopened/downgraded fronts if needed · next autonomous f"
+                },
+                {
+                  "file": "docs/ROUTER.md",
+                  "header": "@@ -355,0 +354,4 @@ Project-discipline and run-structure checks in `tools/`:"
+                },
+                {
+                  "file": "review/independent-reviewer.md",
+                  "header": "@@ -1 +1 @@"
+                },
+                {
+                  "file": "review/independent-reviewer.md",
+                  "header": "@@ -3,4 +3,2 @@"
+                },
+                {
+                  "file": "review/independent-reviewer.md",
+                  "header": "@@ -8 +6 @@ closing it, and reads only the run artifacts."
+                },
+                {
+                  "file": "review/independent-reviewer.md",
+                  "header": "@@ -10,96 +8,2 @@ closing it, and reads only the run artifacts."
+                },
+                {
+                  "file": "review/independent-reviewer.md",
+                  "header": "@@ -108 +12,5 @@ hypotheses/evidence/false_positive/decisions/report),不要联网、不要执行"
+                },
+                {
+                  "file": "review/independent-reviewer.md",
+                  "header": "@@ -110,4 +18,3 @@ hypotheses/evidence/false_positive/decisions/report),不要联网、不要执行"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/CLAUDE.md b/CLAUDE.md\nindex ee1b212..04f5228 100644\n--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -124 +124,10 @@ observe -> update state graph -> decompose fronts\n-- **Stop Coda is mechanically enforced.** While `.claude/xunji_active_run`\n+- **The current operator prompt is a turn contract.** `turn_contract.py` classifies\n+  an active-run turn as `EXECUTE`, `EXPLAIN_ONLY`, or `PAUSED_BY_OPERATOR`.\n+  A why/explain-only request is read-only: answer it directly, do not modify the\n+  run, probe, spawn Agents, or add a fake Coda. An operator stop/pause preserves\n+  every active front and permits only state reads plus `CronList`/bound\n+  `CronDelete`; it is not Completion and must not create a completion marker.\n+  Execution begins/resumes only from a prompt with an explicit action verb such\n+  as `/loop`, continue/resume, execute, implement, or fix. Ambiguous declarative\n+  prompts default read-only; never infer permission to resume target work.\n+- **Stop Coda is mechanically enforced only for `EXECUTE`.** While `.claude/xunji_active_run`\n@@ -129,0 +139,10 @@ observe -> update state graph -> decompose fronts\n+- **A denied target action is not a result.** It remains unresolved until the\n+  same tool and identical execution-relevant input later has a transcript-backed\n+  successful receipt; descriptive tool metadata does not count.\n+  Fix the prerequisite and retry the original action in the same turn. While the\n+  denial is unresolved, free-form final text is rejected; if execution truly\n+  cannot continue, use only the exact three-line\n+  `XUNJI_EXECUTION_STATUS=DENIED` envelope required by `output_gate.py`.\n+- Claude Code internal `<task-notification>` messages are lifecycle events, not\n+  operator prompts. They must never create, refresh, or change the current turn\n+  contract; Agent receipts from before the notification remain current-turn proof.\n@@ -181,4 +200,14 @@ observe -> update state graph -> decompose fronts\n-  (no SharedBarrier group). The Root MUST spawn >= 2 subagents via workers.py\n-  assign — never do all fronts serially when breadth would help.\n-- Stay serial only for: a single low-value front, a tight request budget under\n-  50k tokens, or fronts that share a barrier class (SharedBarrier group).\n+  (no SharedBarrier group). In **every EXECUTE turn**, the Root MUST create at\n+  least two disjoint `workers.py assign` lanes and actually invoke at least two\n+  Claude `Agent` tool calls. Each prompt must carry\n+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`; only transcript-backed\n+  `PostToolUse` receipts from the current session/turn count. Agent files,\n+  `heartbeat`, `finished_at`, prose, and receipts from an older turn do not count.\n+  Before Stop, every current-turn Agent must be dispositioned with\n+  `workers.py finish`: `merged` cites a canonical `Evidence:/Front:/Decision:`\n+  anchor; `blocked/failed/abandoned` cites `Reason:` plus its canonical `Front:`.\n+  `done` or a displayed summary still means unmerged and remains blocked.\n+- Stay serial only when fewer than four active fronts remain, all active fronts\n+  share one concrete barrier class, or the operator's **current prompt** explicitly\n+  allows serial execution. A note in `decisions.md`, a model-claimed token budget,\n+  or an old override cannot bypass the gate.\n@@ -275,10 +304,7 @@ Only two pauses; each requires a codex gate before the pause:\n-- **Reviewer timeout escalation:** If the independent peer_review (via codex) is\n-  unavailable for 2 consecutive attempts (timeout / empty response / API error),\n-  the Root escalates: manually write the review into `review.md` as\n-  `Reviewer: manual-driver (codex unavailable <date>)`. The manual review MUST\n-  cover the same dimensions — evidence gate, coverage, false positives, shallow\n-  closure, claim integrity, missed surface, artifact cross-check. check_run\n-  accepts manual-driver reviews when codex is confirmed unavailable.\n-  Self-review bias is mitigated by: (a) the manual review MUST be written in\n-  review.md before the Root reads it for the completion decision, (b) the\n-  requirement to cite specific file:line evidence, not prose impressions.\n+- **Independent review cannot be self-filled.** A timeout, empty response, API\n+  error, manual `Reviewer:` prose, copied backend output, or a hand-written PASS\n+  never satisfies closure. Run `tools/peer_review.py ... --into-run` in the\n+  foreground. The hook-observed result must contain the matching\n+  `XUNJI_REVIEW_RECEIPT` and `XUNJI_REVIEW_BUNDLE` markers; retain that\n+  content-addressed receipt, resolve every ledger item, and rerun after evidence changes. If the required backend matrix remains\n+  unavailable, the run remains open/paused with the limitation recorded.\n@@ -293,2 +319,6 @@ Only two pauses; each requires a codex gate before the pause:\n-  concrete cross-check results in `decisions.md`. Only if codex confirms completion\n-  may the Root pause and deliver the report.\n+  concrete cross-check results in `decisions.md`. The Agent prompt must include\n+  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>\n+  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.\n+  Its response must echo `XUNJI_COMPLETION_VERDICT=PASS`, the same evidence hash,\n+  and all four checks; bare PASS/WARN prose does not count. Only that current\n+  transcript-backed receipt plus the structured section satisfies the gate.\n@@ -305,0 +336,3 @@ Only two pauses; each requires a codex gate before the pause:\n+- Never promote a retrospective or run note into Claude long-term memory unless\n+  the operator explicitly approves that memory write in the current prompt.\n+  Runtime receipt/turn-state files are hook-owned and must never be edited directly.\n@@ -338 +371 @@ Claude Code 负责修改、集成、测试与落盘；Codex/arkcli 是复审补\n-arkcli panel 默认模型：kimi-k2.7-code + minimax-m3 + glm-5.2。\n+arkcli panel 默认模型：kimi-k2.7-code + glm-5.2。不得调用其他 arkcli 模型。\ndiff --git a/docs/ROADMAP.md b/docs/ROADMAP.md\nindex a8adb2e..3b5e410 100644\n--- a/docs/ROADMAP.md\n+++ b/docs/ROADMAP.md\n@@ -144 +144 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一\n-  Codex gpt-5.5 high + arkcli 三模型 panel(Kimi-K2.7-Code/MiniMax-M3/GLM-5.2), 单点高危和\n+  Codex gpt-5.5 high + arkcli 双模型 panel(Kimi-K2.7-Code/GLM-5.2), 单点高危和\n@@ -178 +178 @@ R-1~R-6 是研究借鉴 backlog; 下面是**实际实现状态** —— 这一\n-- ✅ **B2-② 多异构 panel** — 默认链路已接 arkcli 三模型 panel(GLM5.2/Kimi2.7/MiniMax-M3);\n+- ✅ **B2-② 多异构 panel** — 默认链路已接 arkcli 双模型 panel(Kimi2.7/GLM5.2);\ndiff --git a/docs/ROUTER.md b/docs/ROUTER.md\nindex a40fbfb..3408daf 100644\n--- a/docs/ROUTER.md\n+++ b/docs/ROUTER.md\n@@ -232,8 +232,6 @@ Output: `review.md` · reopened/downgraded fronts if needed · next autonomous f\n-**Before any closure / \"explored enough\" claim, the Reviewer MUST include an independent\n-reviewer** — a fresh-context `general-purpose` sub-agent (standing-authorized) per\n-`review/independent-reviewer.md`; self-review does not fix self-review bias. Its findings\n-go under `## Independent Review` in `review.md` and must be resolved before closing.\n-`tools/check_run.py` enforces this at the closure gate. When the operator accepts data\n-egress and a heterogeneous backend is available, prefer `tools/peer_review.py --into-run`\n-(or `check_run.py --auto-peer-review`) — an *orthogonal* model catches shared blind spots\n-a same-model sub-agent can't; the sub-agent is the egress-free fallback.\n+**Before any closure / \"explored enough\" claim, the Reviewer MUST obtain a real\n+independent review.** Run `tools/peer_review.py runs/<dir> --into-run` in the\n+foreground and resolve its PR ledger. `check_run.py` requires the generated\n+content-addressed receipt, current evidence/bundle hashes, and a transcript-observed\n+invocation. A heading, manual/fresh-context self-fill, copied output, or backend\n+failure cannot satisfy the gate; unavailable independent review leaves closure open.\n@@ -355,0 +354,4 @@ Project-discipline and run-structure checks in `tools/`:\n+- `python tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash\n+  chain for actual Agent/Cron/foreground-review events. `workers.py` lifecycle\n+  prose is not runtime proof; current-turn Agent receipts carry assignment/front\n+  tokens and are transcript-backed.\ndiff --git a/review/independent-reviewer.md b/review/independent-reviewer.md\nindex 0df4e21..ed138d5 100644\n--- a/review/independent-reviewer.md\n+++ b/review/independent-reviewer.md\n@@ -1 +1 @@\n-# Independent Reviewer (收口前独立复审)\n+# Independent Review (Deprecated Entry Point)\n@@ -3,4 +3,2 @@\n-Self-review does not fix self-review bias: a driver that wants to conclude will\n-rationalize through its own re-reading. The fix is an **independent reviewer with\n-fresh context** — an agent that did not run the engagement, has no investment in\n-closing it, and reads only the run artifacts.\n+This file is retained only so old links fail safely. It is not a reviewer prompt\n+and must never be copied into `review.md`.\n@@ -8 +6 @@ closing it, and reads only the run artifacts.\n-## When it runs\n+Use the current foreground workflow:\n@@ -10,96 +8,2 @@ closing it, and reads only the run artifacts.\n-**Mandatory before any \"explored enough / no attack surface / 打不动\" claim** (the\n-closure gate). The operator has granted standing authorization to spawn this\n-reviewer at the closure gate (option A) — do it without re-asking; do not skip it.\n-\n-Also mandatory before declaring a **behavior change to safety-critical framework\n-code** done — `.claude/hooks/`, `tools/harness/guard.py`, `sentinel/` — with\n-findings recorded under `review/records/`. Narrow scope and rationale: see\n-`docs/WORKFLOW-reference.md` \"Independent review of safety-critical code\".\n-\n-## How\n-\n-Spawn a `general-purpose` sub-agent (fresh context) with the prompt below. Capture\n-its findings into `runs/<target>/review.md` under a `## Independent Review` heading\n-(this marker is what `tools/check_run.py` looks for at closure). **Address every\n-finding** — re-examine, reopen, or downgrade — before claiming the work is done.\n-`check_run.py` **hard-fails** a closure claim that has no `Independent Review`\n-record — this is a gate, not a suggestion: you cannot mark the run closed without it.\n-\n-### 自动化: 异构后端 (tools/peer_review.py)\n-\n-\"另一个模型\"这条(独立性最强)已做成可接入模块 `tools/peer_review.py`:\n-`review(\"runs/<target>\", out_file=\"review/records/<date>-<target>.md\")`，或 CLI\n-`python tools/peer_review.py runs/<target> --out review/records/<...>.md`。\n-\n-Claude Code 正常主驾驶时, 单点高危复审、代码/报告/收口复审都按同一矩阵跑:\n-满配用 **Codex(gpt-5.5 high) + arkcli 三模型 panel(Kimi-K2.7-Code / MiniMax-M3 / GLM-5.2)**,\n-大脑为 Codex; 无 Codex 时只跑 arkcli panel, 大脑为 arkcli panel; 无 arkcli 时只跑\n-Codex, 大脑为 Codex; 两者都无时才退到 Claude Code fresh-context 同族模型。\n-Codex-authored maintenance diff 的作者侧复审矩阵属于 Codex 根指令 `AGENTS.md`, 这里不展开。\n-\n-Codex 是 Claude 主驾满配时的首席复审官; arkcli panel 是外部异构补盲团;\n-Claude 自家只减 bias 不减盲区, 所以仅作兜底。\n-arkcli panel 默认不禁用 thinking/推理策略; 只有私有配置显式写 `thinking` 字段时才覆盖模型默认行为。\n-产出是**候选非裁决**: driver/Codex 裁决仍必须过证据门\n-(不盲从工具/语境误报, 不忽视真盲补)。实测 Codex 逮到 driver + check_run 都漏的满分 CRITICAL\n-漏报(见 `review/records/2026-06-17-hamastar-codex-peer-review.md`，并据此补了 check_run 的\n-\"漏报一致性\"硬门)。**数据出境**: Codex/arkcli/API 后端会把 run 内容发外部厂商, 仅操作者接受时用。\n-\n-这里按\"Claude Code 为主，Codex 为辅\"理解：Codex 常作为异构复审后端，也可给交战建议\n-或被委派协作。它不另立运行时或安全边界；所有影响 run 的内容仍以同一运行态台账、\n-证据门、guard/hook 边界与复审要求为准。\n-\n-**收口自动触发**: `python tools/check_run.py runs/<t> --auto-peer-review` —— 收口时若\n-review.md 缺独立复审记录, 自动跑 peer_review 写进 review.md 满足本硬门。默认关(慢/数据出境)、\n-幂等(有记录不重跑)、selftest 不触发。**只用异构后端满足门**: 落到同族 Claude\n-(`heterogeneous=False`)时返回 NEEDS_DRIVER、不写记录、门仍拦 —— 同族自审减 bias 不减盲区(A2),\n-不算异构独立复审。\n-\n-### Codex 代理（必须）\n-\n-Codex CLI 调用 OpenAI API，**必须通过专用代理通道**（`tools/harness/codex_proxy.py`）——\n-三条通道各走各的、互不串味：\n-\n-| 通道 | 代理 | 配置 |\n-|---|---|---|\n-| 交战流量 | `XUNJI_PROXY` | env / `proxy.conf` |\n-| 模型 API / arkcli panel | 剥代理直连 | `model_safe_env()` |\n-| **Codex CLI** | **`CODEX_PROXY`** | env / `codex_proxy.conf` |\n-\n-Codex 不经过 XUNJI_PROXY（交战代理会在目标侧中继 codex 流量 = 串味+泄露），也不走模型\n-API 的直连（可能不可达）。`peer_review.py` 的 `_run_codex()` 已硬编码走 `codex_env()`，\n-不读交战/系统代理。\n-\n-配置方式：\n-- `export CODEX_PROXY=http://127.0.0.1:7892`（或 socks5h://）\n-- 或写入 `tools/harness/codex_proxy.conf`（一行一个 URL，已 gitignore）\n-\n-自检：`python tools/harness/codex_proxy.py --status`  /  `--selftest`\n-\n-**注意**：Codex 是 `peer_review.py` 优先级最高的后端，但无 codex_proxy 时它不可达 →\n-自动降到 arkcli 三模型 panel 或兜底。正确的代理是 codex 可用的前提。\n-\n-## Reviewer prompt (copy, fill `<target>`)\n-\n-```\n-你是独立复审员。你没有参与这次渗透,对\"收工\"没有任何投入——你的职责是用全新视角\n-挑出过早收口与过度自信。只读 runs/<target>_<date>/ 下的文件(target/surface/frontier/\n-hypotheses/evidence/false_positive/decisions/report),不要联网、不要执行任何探测。\n-\n-逐项审,给出可执行的结论(不是泛泛而谈):\n-1. 过早收口:哪些 front 被 closed/deferred 得太早? 哪些\"打不动/无攻击面\"的断言其实\n-   没有充分证据? 具体到 front 编号。\n-2. Lump 风险:哪些资产是只按 server 头/recon 分类就被归入\"共享栈/默认页\",而没有逐个\n-   看过实际内容? (对照 surface/classify 记录)\n-3. \"够不着\"≠\"它安全\":哪些 front 以 WAF/限流/超时/登录门控 关门(closed)却无 Refutes/\n-   正面证据? 这些应是 deferred(我够不着)而非 closed(它安全)——指出来。\n-4. 证据质量:哪些结论赋了 certainty≥0.8 却没有对照/复现? 哪些该降级?\n-5. 漏测面:基于 surface/frontier,还有哪些可达的攻击面根本没被测过?\n-6. 过度断言 / 过度保守:报告里有没有夸大(把疑似当确认)或缩水(把确认写成疑似)的?\n-\n-输出格式:\n-- 【必须重开/再测的 front】(编号 + 为什么 + 下一步具体动作)\n-- 【该降级的结论】(证据 ID + 当前 certainty → 建议 certainty + 理由)\n-- 【未测的攻击面】(资产 + 类型)\n-- 【收口判定】:当前是否真的可以收口? 还是有 N 个未尽事项必须先处理?\n-诚实尖锐,宁可多挑。你的价值在于挑出驱动者自己看不见/不愿看见的东西。\n+```bash\n+python tools/peer_review.py runs/<target> --into-run\n@@ -108 +12,5 @@ hypotheses/evidence/false_positive/decisions/report),不要联网、不要执行\n-## Reading its output\n+Closure requires the content-addressed `ReviewReceipt`, the matching\n+`XUNJI_REVIEW_RECEIPT` and `XUNJI_REVIEW_BUNDLE` output markers observed by the\n+Claude Code hook, a current evidence-index hash, and disposition of every review\n+ledger item. A heading, manually filled reviewer identity, copied model output,\n+fresh-context prose, timeout, or hand-written PASS never satisfies the gate.\n@@ -110,4 +18,3 @@ hypotheses/evidence/false_positive/decisions/report),不要联网、不要执行\n-The reviewer's findings are advisory but **must be resolved on the record**: for\n-each, either act on it (reopen/re-test/downgrade) or write in `review.md` why it\n-is dismissed with evidence. A closure claim stands only after the Independent\n-Review findings are all addressed.\n+Authoritative behavior is defined in `CLAUDE.md`, `docs/WORKFLOW.md`,\n+`docs/WORKFLOW-reference.md`, `.claude/skills/xunji-peer-review-panel/SKILL.md`,\n+and `.claude/skills/xunji-reviewops/SKILL.md`.\n"
+          },
+          {
+            "token": "selftest_all.log",
+            "path": "selftest_all.log",
+            "exists": true,
+            "size": 3626,
+            "sha1": "ccc3d786ec09e01458ac21bdcdb96055b91b3072",
+            "excerpt": "running 57 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14\n\n  PASS  check_run          0.2s  evidence gate + closure\n  PASS  classify_hosts    39.8s  recon -> coverage\n  PASS  scope              0.0s  run scope derive/match\n  PASS  peer_review        0.1s  heterogeneous review\n  PASS  probe              7.6s  active HTTP sensor\n  PASS  render             0.1s  headless browser + --eval replay\n  PASS  anti_drift         3.4s  anti-drift anchor (rules+process re-inject)\n  PASS  proxy              0.1s  engagement egress proxy (渗透走/模型不走)\n  PASS  codex_proxy        0.0s  Codex review proxy hygiene\n  PASS  replay            13.6s  evidence replay\n  PASS  setup_run          0.1s  run scaffolding\n  PASS  ingest_recon       0.0s  Guanlan recon adapter\n  PASS  bench              0.1s  R-1 self-eval scorer\n  PASS  check_knowledge    0.0s  public knowledge grounding structure\n  PASS  local_hygiene      0.1s  local/publication hygiene guard\n  PASS  runtime_boundary   0.0s  Codex hooks absence guard\n  PASS  check_templates    0.0s  template/reference drift guard\n  PASS  knowledge_match    0.0s  fingerprint→knowledge retrieval\n  PASS  xday_match         0.0s  fingerprint→local xday retrieval\n  PASS  knowledge_seed     0.0s  fingerprint→knowledge write-back\n  PASS  timestamp_gate     0.0s  web research time gate\n  PASS  record_evidence    0.0s  web research -> evidence ledger\n  PASS  decode_viewstate   0.0s  ASP.NET ViewState decoder\n  PASS  captcha_ocr        0.1s  bounded captcha OCR wrapper\n  PASS  input_shape        0.0s  request shape parser\n  PASS  js_inventory       0.0s  saved-artifact JS/API inventory sensor\n  PASS  oob_listener       1.0s  local OOB listener\n  PASS  sensor_oob         0.2s  OOB callback artifact sensor\n  PASS  sensor_mutate      0.1s  payload mutation artifact sensor\n  PASS  sensor_blind_diff   1.1s  blind differential artifact sensor\n  PASS  sensor_upload      1.1s  harmless upload proof sensor\n  PASS  sensor_client_graybox   0.1s  client graybox phenomenon sensor\n  PASS  state_project      0.0s  markdown-derived run state projection\n  PASS  run_model          0.0s  canonical front/status parser\n  PASS  runtime_receipts   0.1s  hook-derived Agent/Cron receipts\n  PASS  turn_contract      0.1s  execute/explain/pause turn modes\n  PASS  context_pack       0.1s  minimal subagent context pack\n  PASS  loop_state         0.1s  closed-loop progress and gate snapshot\n  PASS  status_style       0.0s  operator-facing colored status panels\n  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline\n  PASS  progress_ledger    0.1s  material-progress ledger\n  PASS  run_controller     0.1s  advisory shadow run controller\n  PASS  loop_journal       0.0s  loop interruption journal\n  PASS  loop_bootstrap     0.6s  autonomous loop launcher\n  PASS  session_handoff    0.1s  session handoff tool\n  PASS  deferred_queue     0.0s  deferred asset retry manager\n  PASS  workers            0.2s  fan-out worker planning helpers\n  PASS  saturation         0.0s  front saturation scoring\n  PASS  coverage_matrix    0.1s  asset x vuln-family coverage matrix\n  PASS  safety_gate        0.0s  hard-boundary gate\n  PASS  ip_blacklist       0.0s  local IP/domain deny hook\n  PASS  output_gate        0.5s  output drift Stop gate\n  PASS  run_gate           1.2s  coverage/depth Stop gate\n  PASS  check_hook         3.1s  safety_gate live-fire\n  PASS  sentinel_replay    0.0s  behavior detectors 26-case\n  PASS  verify_layers      1.3s  safety-floor coverage\n  PASS  guard_smoke        0.0s  guard rate/cap/breaker smoke\n\n57 passed, 0 failed  (77.4s total)\n"
+          },
+          {
+            "token": "stale_reference_audit.json",
+            "path": "stale_reference_audit.json",
+            "exists": true,
+            "size": 14565,
+            "sha1": "551b327089d56252ecb39c08c454e924489c9d4d",
+            "excerpt": "{\n  \"files\": {\n    \".agents/skills/captcha-solve/SKILL.md\": {\n      \"sha256\": \"8cb2e275a465921ca8b4466dba32490c303dd3fc677ec678d98d3e1c26dada73\",\n      \"size\": 5129\n    },\n    \".agents/skills/network-proxy/SKILL.md\": {\n      \"sha256\": \"129605a9205f53cd75bbde4c62d8a2eee296d57ff8733c0c3ec0d2b5bc53fbd4\",\n      \"size\": 3889\n    },\n    \".agents/skills/poc-package/SKILL.md\": {\n      \"sha256\": \"65f041ae93c5fcf6ea33f3b8016b2f40e01610184c0f03a10a3d188c7d6856ab\",\n      \"size\": 5646\n    },\n    \".agents/skills/src-rules/SKILL.md\": {\n      \"sha256\": \"f4983480334f4277dbc295509e4b0ebb2053d64677072fa23b635c74d142b5a0\",\n      \"size\": 5397\n    },\n    \".agents/skills/src-safety-boundary/SKILL.md\": {\n      \"sha256\": \"114de7b000f78cbfa5913b0a94e06a9d0b1d6c788d5f7113fdc87d9da97d9709\",\n      \"size\": 6811\n    },\n    \".agents/skills/web-research/SKILL.md\": {\n      \"sha256\": \"72d980ef9f67b4a6a8e3225b2890ee2fedc7c17905d3f591e21b06e4d75cc7c4\",\n      \"size\": 4891\n    },\n    \".agents/skills/xunji-agent-board/SKILL.md\": {\n      \"sha256\": \"78f17256b30c90e33b3506de2978bbb3dbd5411a97a04279c2824318f2b09887\",\n      \"size\": 4011\n    },\n    \".agents/skills/xunji-benchmark-eval/SKILL.md\": {\n      \"sha256\": \"119ac13c97617494adfabc00fc56c43526e3a1240027d37bbab30d9ee6e947d8\",\n      \"size\": 1897\n    },\n    \".agents/skills/xunji-closure-audit/SKILL.md\": {\n      \"sha256\": \"6e1b093379d02301a33abb6716f0e7e9c4edcef55a96fbe1cb41c5c1640c6f04\",\n      \"size\": 4441\n    },\n    \".agents/skills/xunji-evidence-replay-gate/SKILL.md\": {\n      \"sha256\": \"a511f1780fb614dcf14e4aff261da132514dd7d4917803549c7eac802444a82b\",\n      \"size\": 2853\n    },\n    \".agents/skills/xunji-exploit-discipline/SKILL.md\": {\n      \"sha256\": \"b58f7e66adf14702e413c4e606174ce03c0c8d1a27fdb0febb2ab2cc702ea684\",\n      \"size\": 5479\n    },\n    \".agents/skills/xunji-exploit-techniques/SKILL.md\": {\n      \"sha256\": \"96d974c673d565626307fa4ccceb248690d3b75948c17b9bf7b62edd611917fc\",\n      \"size\": 3254\n    },\n    \".agents/skills/xunji-exploit-techniques/references/captcha-boundary-bypass.md\": {\n      \"sha256\": \"f7dba55bc83bc1fc49d3e92cb79943813c93c293c8e996f756d2ebfb1fa96b89\",\n      \"size\": 2255\n    },\n    \".agents/skills/xunji-exploit-techniques/references/client-crypto-replay.md\": {\n      \"sha256\": \"d4a33d53a995de4d1b5e2049b1120b5d3c9e1b96cc3d27437164cd31dd4effc5\",\n      \"size\": 2236\n    },\n    \".agents/skills/xunji-exploit-techniques/references/sso-oauth-saml.md\": {\n      \"sha256\": \"c09a018fa4df2eecca7437e07eacebe5ec8132bef2258c5eeed1ca9ffbc06e48\",\n      \"size\": 2691\n    },\n    \".agents/skills/xunji-exploit-techniques/references/upload-context-chain.md\": {\n      \"sha256\": \"7835dc7a439d5c79f21f3361d5523ddc7ec78616ca16fb14de39ac34ad87c628\",\n      \"size\": 2433\n    },\n    \".agents/skills/xunji-exploit-techniques/references/webvpn-proxy-rewrite.md\": {\n      \"sha256\": \"dadc42038f1b427d87502f6ed197e2526535f32f65a0ec2351fd6b06ccdd884b\",\n      \"size\": 2368\n    },\n    \".agents/skills/xunji-knowledge-flywheel/SKILL.md\": {\n      \"sha256\": \"57c7b97005bed4018cfb2e09d339feb67dbd5f3a424e5213684223540ac7c9e0\",\n      \"size\": 3822\n    },\n    \".agents/skills/xunji-local-maintenance/SKILL.md\": {\n      \"sha256\": \"e9efcf6c0c457ee2979feb544c13cd3481c69d856e32104a692e507823c17743\",\n      \"size\": 2806\n    },\n    \".agents/skills/xunji-peer-review-panel/SKILL.md\": {\n      \"sha256\": \"a5ff9eeeca5dc48d220d95c209a9c046b01171630df56506e1f085b30b54b61d\",\n      \"size\": 4927\n    },\n    \".agents/skills/xunji-reviewops/SKILL.md\": {\n      \"sha256\": \"3689ed5dd56f485fd4ba30a3b0ee9d1f32c995275c73efc3891e2cfe341053fc\",\n      \"size\": 8440\n    },\n    \".agents/skills/xunji-run-lifecycle/SKILL.md\": {\n      \"sha256\": \"e4aceadcb2f6044f22d918659c8fcf1eb1a186433d10e21fe040c82fa8288ffc\",\n      \"size\": 6224\n    },\n    \".agents/skills/xunji-sentinel-guard-review/SKILL.md\": {\n      \"sha256\": \"6bcb048907419d97ce13997b8f128d219e4957c4ceb53466732475359e2ff6ac\",\n      \"size\": 2602\n    },\n    \".agents/skills/xunji-setup-ingest/SKILL.md\": {\n      \"sha256\": \"2c1d828aee58600fa1db10f724bd5bcf2b86bfb6813937f4547f034d82cf8682\",\n      \"size\": 2569\n    },\n    \".agents/skills/xunji-web-research-sync/SKILL.md\": {\n      \"sha256\": \"ced2ea3a28b25b7ed2af6a87465618d58d85d165753aadee80f8ea34125955be\",\n      \"size\": 2256\n    },\n    \".claude/skills/captcha-solve/SKILL.md\": {\n      \"sha256\": \"58df58eae6b33534a2e066388db7a9434e19c2740a1b1112e3ca8c0aefd4bc15\",\n      \"size\": 5246\n    },\n    \".claude/skills/network-proxy/SKILL.md\": {\n      \"sha256\": \"7f53346184c8ef85fd90e1d3db2044c825757339d828f36e5087d6ef02ac46da\",\n      \"size\": 3816\n    },\n    \".claude/skills/poc-package/SKILL.md\": {\n      \"sha256\": \"9b7641168255c514cbcfe05c9dbe2874f7e39c7d8e6ee1cdf0ee0841b5d1e311\",\n      \"size\": 5603\n    },\n    \".claude/skills/src-rules/SKILL.md\": {\n      \"sha256\": \"f4983480334f4277dbc295509e4b0ebb2053d64677072fa23b635c74d142b5a0\",\n      \"size\": 5397\n    },\n    \".claude/skills/src-safety-boundary/SKILL.md\": {\n      \"sha256\": \"9023ef5960d5083b715acfc8590cc8f4b6097b930cd4ddb94029fe2459e6aabd\",\n      \"size\": 7240\n    },\n    \".claude/skills/web-research/SKILL.md\": {\n      \"sha256\": \"5bfcd393f1116dea37c7fdad72cc5884889fc50095a7b2fd711925027b2c9c50\",\n      \"size\": 5518\n    },\n    \".claude/skills/xunji-agent-board/SKILL.md\": {\n      \"sha256\": \"6adb12575544fdfba73a72fd9fc1524d44116cfe58b3d68318468ac7391e869d\",\n      \"size\": 11129\n    },\n    \".claude/skills/xunji-benchmark-eval/SKILL.md\": {\n      \"sha256\": \"703639790b7f780c4b3ae417d476138180c34d3b75031477d71d5a7cb50fd9e0\",\n      \"size\": 2629\n    },\n    \".claude/skills/xunji-evidence-replay-gate/SKILL.md\": {\n      \"sha256\": \"3c7dedc00fd8b368f39cd59b0c7b6f04e1391c674213b03e84fbe558b3b8ee9d\",\n      \"size\": 3481\n    },\n    \".claude/skills/xunji-exploit-discipline/SKILL.md\": {\n      \"sha256\": \"c17f62ceaa40424237ed8da414ffb8b1ec08cf0edefc0172529ee379fc1737f3\",\n      \"size\": 5423\n    },\n    \".claude/skills/xunji-exploit-techniques/SKILL.md\": {\n      \"sha256\": \"0c8f4637d50d4ea07c84eb9e39dd0f98e1bee8c80bf5b5968ec6542517a57dc1\",\n      \"size\": 3182\n    },\n    \".claude/skills/xunji-exploit-techniques/references/captcha-boundary-bypass.md\": {\n      \"sha256\": \"f7dba55bc83bc1fc49d3e92cb79943813c93c293c8e996f756d2ebfb1fa96b89\",\n      \"size\": 2255\n    },\n    \".claude/skills/xunji-exploit-techniques/references/client-crypto-replay.md\": {\n      \"sha256\": \"d4a33d53a995de4d1b5e2049b1120b5d3c9e1b96cc3d27437164cd31dd4effc5\",\n      \"size\": 2236\n    },\n    \".claude/skills/xunji-exploit-techniques/references/sso-oauth-saml.md\": {\n      \"sha256\": \"c09a018fa4df2eecca7437e07eacebe5ec8132bef2258c5eeed1ca9ffbc06e48\",\n      \"size\": 2691\n    },\n    \".claude/skills/xunji-exploit-techniques/references/upload-context-chain.md\": {\n      \"sha256\": \"7835dc7a439d5c79f21f3361d5523ddc7ec78616ca16fb14de39ac34ad87c628\",\n      \"size\": 2433\n    },\n    \".claude/skills/xunji-exploit-techniques/references/webvpn-proxy-rewrite.md\": {\n      \"sha256\": \"dadc42038f1b427d87502f6ed197e2526535f32f65a0ec2351fd6b06ccdd884b\",\n      \"size\": 2368\n    },\n    \".claude/skills/xunji-knowledge-flywheel/SKILL.md\": {\n      \"sha256\": \"c7a7fe8ac12ba87cd3d8f1da4676c6ce0533250f3e24861d0b3b0e9383a17650\",\n      \"size\": 3601\n    },\n    \".claude/skills/xunji-local-maintenance/SKILL.md\": {\n      \"sha256\": \"7a0944ec0235c132c81f23b77850e981fff2e05cf8a692858aa3521463f5c7d7\",\n      \"size\": 2580\n    },\n    \".claude/skills/xunji-peer-review-panel/SKILL.md\": {\n      \"sha256\": \"f1bfc70795ac3b507c7aa5b668822b4689434ddef584f8498a49c3d7f49aaa0f\",\n      \"size\": 5418\n    },\n    \".claude/skills/xunji-reviewops/SKILL.md\": {\n      \"sha256\": \"7a1e5622029944837d1635986b5f8e19d6c9dc84c4bc68f817030d2509ae23f8\",\n      \"size\": 8875\n    },\n    \".claude/skills/xunji-run-lifecycle/SKILL.md\": {\n      \"sha256\": \"5518236b613c8570ce7bf83ee1bb0d53d18146c5926b5eb91a361fb8c4662a31\",\n      \"size\": 13015\n    },\n    \".claude/skills/xunji-sentinel-guard-review/SKILL.md\": {\n      \"sha256\": \"6fbeab7ae618b5e58065ae92ef20fd2e206648ccb818fb9dd44e4fa6490429d8\",\n      \"size\": 2909\n    },\n    \".claude/skills/xunji-setup-ingest/SKILL.md\": {\n      \"sha256\": \"e7a682ce6617259b2879118de8a15caa8ac7e5bd3ea2b6240b0a328ceaec7131\",\n      \"size\": 3899\n    },\n    \".claude/skills/xunji-web-research-sync/SKILL.md\": {\n      \"sha256\": \"c37ede62fc17c85e2b0219db0dae94fe5b3bde819d9d6e3bc1295534c91cac5a\",\n      \"size\": 3817\n    },\n    \"CLAUDE.md\": {\n      \"sha256\": \"de8650d18a8a31408149abbdabe432366268883651493ebb0ee3d91457b9c9b0\",\n      \"size\": 25294\n    },\n    \"docs/AI_ENV_SETUP.md\": {\n      \"sha256\": \"cc4b9f19d4841be35f567f1490d3db0602f43e50cfd228ecdf33b52c681c43f4\",\n      \"size\": 8240\n    },\n    \"docs/ANTI-DRIFT-DECAY.md\": {\n      \"sha256\": \"75c546593ebc9ed2bdebb8f990ccf334f50d47aad15120d08e5f5a8bc7b57349\",\n      \"size\": 32980\n    },\n    \"docs/ROADMAP.md\": {\n      \"sha256\": \"c35302539cd44b24b3db805279844792028d41dcdfd40cc5838aa60a902a9f77\",\n      \"size\": 14536\n    },\n    \"docs/ROUTER.md\": {\n      \"sha256\": \"3257e7d6b40c295d18f9733125910c5624cdfa1c4319b02c6dda0735ea7dff90\",\n      \"size\": 23493\n    },\n    \"docs/UNTRUSTED-CONTENT.md\": {\n      \"sha256\": \"7b9a3ee04cf77cb7344b7e8f8242958be0233ff18f0b34796dc33518630abb4c\",\n      \"size\": 1325\n    },\n    \"docs/WORKFLOW-reference.md\": {\n      \"sha256\": \"6b800337727f391b40c7e275b62581fb9da6a578d3b56d61b087260febd42c43\",\n      \"size\": 34438\n    },\n    \"docs/WORKFLOW.md\": {\n      \"sha256\": \"8ce3d40f52c0f865025c94c510e357460c16789ff20bd4178ddfcd7ee4ba58fb\",\n      \"size\": 32103\n    },\n    \"docs/XUNJI_PROJECT_INTRO.md\": {\n      \"sha256\": \"484814b1cc069ed74c4b10ec527bcf2ee548a8a3128d4b8fb795098895ba2d39\",\n      \"size\": 10744\n    },\n    \"docs/cognition/README.md\": {\n      \"sha256\": \"a4ecbe6a740ec27269f26b28e0f29a6b3c6bece5f3ba60dc64368a61826e3349\",\n      \"size\": 14590\n    },\n    \"docs/cognition/harmless-verification.md\": {\n      \"sha256\": \"b8e2c6169dacc9e544499ba9eb54f596635a505033727b0e49fb1cfbac59c2ae\",\n      \"size\": 3718\n    },\n    \"docs/cognition/reference.md\": {\n      \"sha256\": \"5bdbe86e59a714b85a0674ed025d22713ee4ab23c29a97ce2e143960a740b89a\",\n      \"size\": 3126\n    },\n    \"docs/cognition/retrospect.md\": {\n      \"sha256\": \"185ab7885e64e05f8ee478ba8a49b1f35ef31a22afcc03ad51fd331ae4ba35a2\",\n      \"size\": 1265\n    },\n    \"docs/templates/agents/code-audit.md\": {\n      \"sha256\": \"015c1585a45e66e2047a9bad9effc6d7475671a61b1f62fa57e2dd1ccf9d066e\",\n      \"size\": 5198\n    },\n    \"docs/templates/agents/exploit.md\": {\n      \"sha256\": \"a8e4311f5e91060a8fcef1eec722f63f63995b4b75085663cd10e5a4d86e0179\",\n      \"size\": 5210\n    },\n    \"docs/templates/agents/report.md\": {\n      \"sha256\": \"b9b71fa6ae1af1feef8323361f0819ad6b3a8b3dd7dab0eae75b9432f31737f5\",\n      \"size\": 4889\n    },\n    \"docs/templates/agents/review.md\": {\n      \"sha256\": \"98c334a1fade9b21fadb2490f421b1a8f4e25375b31e20369ac687accf3ed4a7\",\n      \"size\": 5019\n    },\n    \"docs/templates/agents/surface.md\": {\n      \"sha256\": \"142ac3c10894a5e5213982d84874caa99613596f6eb70d93f80af9af660cd720\",\n      \"size\": 5119\n    },\n    \"docs/templates/agents/synthesizer.md\": {\n      \"sha256\": \"4997395d95b0a44e27ee50d65649bef6df73af2f4585c868440c2e4d57ba2bbc\",\n      \"size\": 5100\n    },\n    \"docs/templates/agents/verify.md\": {\n      \"sha256\": \"4bb3b2e454abc1aa718bd5fd2aa3e601d4566eae2529466157309db4c26b4a55\",\n      \"size\": 5063\n    },\n    \"docs/templates/agents/web-hunter.md\": {\n      \"sha256\": \"e8a98a0c7aa63bf19f2b9c998cedcf4e3e7c45bd587759ef7a5e2dd34e1a247f\",\n      \"size\": 5140\n    },\n    \"docs/templates/loop_prompt.md\": {\n      \"sha256\": \"c13fd25967b8bb22a7d3ab2b923c9d5b6f4de7358ee840ab6a79dcbad4b93747\",\n      \"size\": 13173\n    },\n    \"docs/templates/poc-report.md\": {\n      \"sha256\": \"2cdace456336a3b37a6c58c26dc554156faf4d0430306ee7ed4a44abe19b441e\",\n      \"size\": 2758\n    },\n    \"docs/templates/run/chains.md\": {\n      \"sha256\": \"ef2261685a25bd502e5b43c9acff30c694894940dca838e95956ef1e1f61eadc\",\n      \"size\": 1361\n    },\n    \"docs/templates/run/constraints.md\": {\n      \"sha256\": \"071295d35e10d963f4ad6e82c6f0d3ace24b88915f1aa8e6c6f2f036162c2de7\",\n      \"size\": 641\n    },\n    \"docs/templates/run/decisions.md\": {\n      \"sha256\": \"938d6ed180b6a862d71a0698e53611ea9a04a3b8117e0b387257c8cd29fdbd4d\",\n      \"size\": 518\n    },\n    \"docs/templates/run/evidence.md\": {\n      \"sha256\": \"2b5490aac7928ce6775e0146ea990dc8f6f7850ef16210a2d454eaa4009ba89c\",\n      \"size\": 1300\n    },\n    \"docs/templates/run/false_positive.md\": {\n      \"sha256\": \"570ad7740ac326a63dd348df36da048278ba99f879669787b1b1a4d5ac290b40\",\n      \"size\": 402\n    },\n    \"docs/templates/run/frontier.md\": {\n      \"sha256\": \"3e13947f3e36218cc4d46208ea1fc205e56ddd45ede9c472d6731258b95e99d7\",\n      \"size\": 1535\n    },\n    \"docs/templates/run/hints.md\": {\n      \"sha256\": \"f2e11fddefa28f2e3986567c8514a4b43bedbe63c6f19c66cde2d7c5dca563cc\",\n      \"size\": 1593\n    },\n    \"docs/templates/run/hypotheses.md\": {\n      \"sha256\": \"c41a8e0fc873b01131106dcbde51e0a0dc64b892403e220fc177d854ea6d629e\",\n      \"size\": 594\n    },\n    \"docs/templates/run/report.md\": {\n      \"sha256\": \"3d33fd9ea146781681809763b5f4f4cdf5e713aaccd1820eaff49e7607edcb31\",\n      \"size\": 895\n    },\n    \"docs/templates/run/retrospective.md\": {\n      \"sha256\": \"59d9e3812d352aff52a5cf09674c2504b0230b65467865d544268c813973bb10\",\n      \"size\": 1395\n    },\n    \"docs/templates/run/review.md\": {\n      \"sha256\": \"a8dc724b1f41771a028fdfcb047564843bcd1443763013cab80cc3c4c2da9550\",\n      \"size\": 1214\n    },\n    \"docs/templates/run/surface.md\": {\n      \"sha256\": \"83d70acd35f416d6cfb41c4a43d7863b78371458a0517609da05c35fbdc2702a\",\n      \"size\": 2466\n    },\n    \"docs/templates/run/target.md\": {\n      \"sha256\": \"09c4eb3ccf96063daf2125892308acce3577d8503ba72ce80c99ea2e7441d4cf\",\n      \"size\": 301\n    },\n    \"docs/templates/worker.md\": {\n      \"sha256\": \"99b9b06121e5edb2f9222946fbf8ca58eb5079e11296072e8e7f0f7177d4654e\",\n      \"size\": 7128\n    },\n    \"review/independent-reviewer.md\": {\n      \"sha256\": \"7a1f5fbeb7d7e722ffbf2c6ca28883ca86141e2d7aae2356e744586f5fb9b245\",\n      \"size\": 862\n    }\n  },\n  \"files_scanned\": 87,\n  \"forbidden_matches\": [],\n  \"passed\": true,\n  \"patterns\": {\n    \"assignment_proves_agent_use\": \"assignment(?: file)? (?:counts as|proves) Agent\",\n    \"heading_alone_is_review_gate\": \"marker is what `?tools/check_run\\\\.py`? looks for\",\n    \"heartbeat_proves_execution\": \"heartbeat (?:counts as|proves) (?:Agent )?execution\",\n    \"manual_fresh_context_template\": \"Reviewer prompt \\\\(copy, fill\",\n    \"pause_forces_coda\": \"PAUSED_BY_OPERATOR.{0,120}(?:requires|must write).{0,30}Coda\",\n    \"pipe_delimited_front_status\": \"Status:\\\\s*open\\\\s*\\\\|\\\\s*Barrier\"\n  },\n  \"schema\": \"xunji.stale_reference_audit.v1\"\n}\n"
+          },
+          {
+            "token": "workflow_core.diff",
+            "path": "workflow_core.diff",
+            "exists": true,
+            "size": 5560,
+            "sha1": "0c42e3c51790b740b52f271ca191fc5ee57649f7",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "docs/WORKFLOW.md"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 8,
+              "hunks": [
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -98,0 +99,21 @@ replace `decisions.md` or `session_handoff.md`."
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -200,3 +221,5 @@ into a conclusion."
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -204 +227,2 @@ quality and request discipline."
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -209 +233,2 @@ Stay **serial** when:"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -225,0 +251,9 @@ through the evidence gate."
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -452,7 +486,8 @@ assets were only header / recon-classified, never examined. Before any such clai"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -476 +511,5 @@ assets were only header / recon-classified, never examined. Before any such clai"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -481 +520,2 @@ assets were only header / recon-classified, never examined. Before any such clai"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md\nindex ef710fc..9893b16 100644\n--- a/docs/WORKFLOW.md\n+++ b/docs/WORKFLOW.md\n@@ -98,0 +99,21 @@ replace `decisions.md` or `session_handoff.md`.\n+`turn_contract.py` treats the current operator prompt as a transaction boundary.\n+For an active run, `EXECUTE` may advance work, `EXPLAIN_ONLY` is read-only and has\n+no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while only\n+allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.\n+`state/runtime_events.jsonl` is a hook-owned hash chain for actual Agent/Cron/review\n+tool events; never edit it or the turn/run-status JSON files directly.\n+Target-action denials and later successful target actions are also recorded by\n+hash. A denial is unresolved until a later successful event has the same tool and\n+execution-action hash (for Bash, the command; descriptive metadata is ignored).\n+In every turn mode, `output_gate.py` rejects all free-form final text after an\n+unresolved target-action denial; this prevents a model that ignored EXPLAIN or\n+PAUSE restrictions from rephrasing an unexecuted action as a result. The only\n+non-result fallback is the gate's fixed three-line\n+`XUNJI_EXECUTION_STATUS=DENIED` envelope, and normal Agent/closure gates still\n+apply to it.\n+Claude Code may emit `<task-notification>` through `UserPromptSubmit` when an\n+Agent finishes. `turn_contract.py` treats it as an internal lifecycle message:\n+it may receive the existing mode context but cannot replace or refresh the\n+operator-authored contract. Otherwise the notification timestamp would\n+invalidate the Agent receipt that caused it.\n+\n@@ -200,3 +221,5 @@ into a conclusion.\n-The Agent Board is the default collaboration model, but \"default\" does not mean\n-\"always spawn more agents.\" Root chooses the smallest shape that preserves evidence\n-quality and request discipline.\n+The Agent Board is the default collaboration model. When the canonical front model\n+reports at least four active fronts with no one shared concrete barrier, parallelism\n+is mandatory in every `EXECUTE` turn: prepare two disjoint assignments and actually\n+invoke two Agent tools with different assignment/front tokens. Old receipts and\n+manual lifecycle prose do not satisfy a new turn.\n@@ -204 +227,2 @@ quality and request discipline.\n-Stay **serial** when:\n+Stay **serial** when the mandatory threshold is not active, or the current operator\n+prompt explicitly grants a one-turn serial override:\n@@ -209 +233,2 @@ Stay **serial** when:\n-- Request budget, WAF pressure, auth fragility, or host health is tight.\n+- Request budget, WAF pressure, auth fragility, or host health requires a shared\n+  barrier lane recorded by the front model.\n@@ -225,0 +251,9 @@ through the evidence gate.\n+`workers.py assign`, Agent Markdown, `heartbeat`, and `finish` are planning/display\n+state only. Runtime proof comes from current-turn Claude `Agent` `PostToolUse`\n+receipts whose prompts contain `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...` and whose\n+tool-use IDs exist in the Claude transcript.\n+Before the execute turn ends, each observed assignment must be `merged` with a\n+canonical E/F/D disposition anchor, or `blocked/failed/abandoned` with `Reason:`\n+and its canonical `Front:`. A terminal-looking `done` or chat summary is still\n+unmerged work and the Stop gate rejects it.\n+\n@@ -452,7 +486,8 @@ assets were only header / recon-classified, never examined. Before any such clai\n-  self-review bias — spawn an independent fresh-context `general-purpose` reviewer\n-  (`review/independent-reviewer.md`), record under `## Independent Review` in `review.md`,\n-  resolve every finding. Standing-authorized (no re-asking); prefer a heterogeneous reviewer\n-  (`tools/peer_review.py --into-run`) when egress is consented. `check_run.py` **hard-fails** a\n-  closure with no completed `Independent Review` record. A heading, prose mention, or untouched\n-  template choices do not count; a real reviewer/backend plus a block-scoped verdict\n-  is required. Procedure: reference \"Run-closure detail\".\n+  self-review bias. Run `tools/peer_review.py runs/<dir> --into-run` in the foreground,\n+  retain the generated content-addressed `ReviewReceipt`, and resolve every finding.\n+  `check_run.py` **hard-fails** a closure when the receipt is missing, stale relative\n+  to the current evidence index, not backed by a transcript-observed foreground\n+  invocation whose output carries the matching `XUNJI_REVIEW_RECEIPT` and\n+  `XUNJI_REVIEW_BUNDLE` markers, or has unresolved ledger items. A heading, copied output, manual\n+  Reviewer/Verdict, or untouched template does not count. Procedure: reference\n+  \"Run-closure detail\".\n@@ -476 +511,5 @@ assets were only header / recon-classified, never examined. Before any such clai\n-  detail, not a prose keyword mention or single self-asserted field.\n+  detail and a real Agent receipt for\n+  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current hash>\n+  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`, plus\n+  a response containing `XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all\n+  four checks; a prose keyword or bare PASS/WARN does not count.\n@@ -481 +520,2 @@ assets were only header / recon-classified, never examined. Before any such clai\n-  job and append a loop journal `end` record whose note contains\n+  job after a successful current-turn `CronList`; only delete an ID observed for\n+  this run, list again to prove quiescence, and append a loop journal `end` record whose note contains\n"
+          },
+          {
+            "token": "workflow_reference.diff",
+            "path": "workflow_reference.diff",
+            "exists": true,
+            "size": 7163,
+            "sha1": "c997952d63659b48b24d56f62a9956907d9d0e20",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "docs/WORKFLOW-reference.md"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 6,
+              "hunks": [
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -505,0 +506,7 @@ is not evidence and never replaces `decisions.md`, `evidence.md`, or"
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -517,3 +524,10 @@ only for older runs."
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -586,9 +600,6 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers"
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -603,22 +614,12 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers"
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -656,2 +657,7 @@ Reviewer + Verdict + concrete cross-check detail at that point. A single-line"
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -660 +666,9 @@ append a loop journal `end` record (`cycle_end`) with"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md\nindex af1aa35..6095719 100644\n--- a/docs/WORKFLOW-reference.md\n+++ b/docs/WORKFLOW-reference.md\n@@ -505,0 +506,7 @@ is not evidence and never replaces `decisions.md`, `evidence.md`, or\n+`tools/run_model.py` is the sole parser for canonical front status, barrier, and\n+depth fields. `tools/turn_contract.py` writes the current prompt's\n+`EXECUTE`/`EXPLAIN_ONLY`/`PAUSED_BY_OPERATOR` contract. Hook-observed Agent, Cron,\n+and foreground peer-review events are appended to the hash-linked\n+`state/runtime_events.jsonl`; only transcript-backed events validate process claims.\n+These control-plane files are hook-owned and are not editable narrative state.\n+\n@@ -517,3 +524,10 @@ only for older runs.\n-- **When serial**: stay single-lane when one front, a low-value proof, tight request\n-  budget, WAF pressure, auth fragility, or a shared barrier would make Agents duplicate\n-  traffic or invalidate each other's observations.\n+- **Mandatory fan-out**: with four or more active fronts and no single shared\n+  concrete barrier, every `EXECUTE` turn uses at least two disjoint assignments and\n+  two actual Agent calls. The Agent prompts carry\n+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. Current-session, current-turn,\n+  transcript-backed `PostToolUse` receipts are required; `heartbeat`, Agent files,\n+  finish prose, old receipts, and model-claimed budget reasons are not execution proof.\n+- **When serial**: stay single-lane below that threshold, when all active fronts share\n+  one concrete barrier, or when the operator's current prompt explicitly grants a\n+  one-turn serial override. WAF/auth/host pressure should become a recorded shared\n+  barrier, not a prose bypass.\n@@ -586,9 +600,6 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers\n-- **HARD FAIL** if `review.md` has no completed `Independent Review` record.\n-  A heading, prose mention, or untouched Reviewer/Verdict choices do not count;\n-  the record needs a real reviewer/backend identity and a block-scoped verdict.\n-  Long legacy prose without reviewer identity does\n-  not fix self-review bias, so the independent reviewer is a hard requirement to\n-  close — not a suggestion. (a real engagement showed that even after this guard was built, the\n-  driver still tried to close prematurely twice; a soft warning does not hold.)\n-  Resolve by spawning the reviewer and recording it, or by retracting the closure\n-  language.\n+- **HARD FAIL** if `review.md` has no current content-addressed `ReviewReceipt`\n+  generated by a transcript-observed foreground `peer_review.py ... --into-run`\n+  invocation whose output contains the matching `XUNJI_REVIEW_RECEIPT` and\n+  `XUNJI_REVIEW_BUNDLE` markers. The receipt's evidence-index and bundle hashes must still match, and\n+  every BLOCKER ledger item must be resolved. A heading, prose mention, copied model\n+  output, manual Reviewer/Verdict, or untouched choices do not count.\n@@ -603,22 +614,12 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers\n-**Independent review before closure — procedure.** Self-review doesn't fix self-review bias.\n-Spawn an independent fresh-context `general-purpose` reviewer\n-(`review/independent-reviewer.md`), record findings under `## Independent Review` in\n-`review.md`, address every one. **Prefer a heterogeneous reviewer when its cost is paid:**\n-if the operator accepts data egress (run findings go to an external vendor — Codex -> OpenAI,\n-arkcli panel -> ARK data-plane models)\n-and a backend is up, `tools/peer_review.py --into-run runs/<dir>` (or\n-`check_run.py --auto-peer-review`) satisfies the gate with an *orthogonal* model — a\n-same-model sub-agent only reduces bias, not the shared blind spots a different vendor\n-catches. For Claude Code-driven runs or Claude-authored code/report/closure review,\n-use Codex plus the arkcli panel when both are available (brain: Codex), arkcli when\n-Codex is missing (brain: arkcli panel), Codex when arkcli is missing (brain: Codex),\n-and Claude Code same-family only when neither external reviewer is available.\n-Codex-authored maintenance diff policy lives in Codex's `AGENTS.md`; Claude only\n-needs to verify that such a diff has a review record and does not treat Codex\n-self-review as an independent vote.\n-Absent egress consent, the fresh-context sub-agent is the always-available,\n-egress-free fallback. Standing authorization granted for the sub-agent — do it\n-without re-asking. `check_run.py` HARD-fails a closure claim with no completed\n-`Independent Review` record, and Normal-mode Stop also requires a structured\n-substantive `## CodexCompletionReview` section rather than accepting a prose mention\n-or a self-asserted single-line field.\n+**Independent review before closure — procedure.** Self-review doesn't fix self-review\n+bias. Freeze the current bundle and run\n+`python tools/peer_review.py runs/<dir> --into-run` in the foreground. For a\n+Claude-driven run, use the configured Codex/arkcli heterogeneous matrix; for a\n+Codex-authored maintenance diff, follow `AGENTS.md` and use arkcli plus fresh-context\n+Claude when available. `peer_review.py` appends a globally unique PR ledger and a\n+content-addressed receipt. Resolve each item, then rerun peer review whenever\n+evidence changes. Older receipts remain audit history but cannot validate current\n+evidence. Backend failure, absent egress consent, or an unavailable matrix is a\n+recorded limitation and leaves closure incomplete; manual-driver prose never replaces\n+the vote. Normal-mode Stop separately requires a structured completion-review section\n+plus its actual current-evidence Agent receipt.\n@@ -656,2 +657,7 @@ Reviewer + Verdict + concrete cross-check detail at that point. A single-line\n-field, prose mention, or \"still missing\" note does not count.\n-In the same turn, cancel the active scheduled `/loop` job if one exists, then\n+field, prose mention, or \"still missing\" note does not count. The completion Agent\n+prompt must contain `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>\n+CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`. The\n+response must carry `XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all four\n+checks; a bare PASS/WARN token is rejected.\n+In the same turn, run `CronList`, delete only the observed job ID for this run,\n+run `CronList` again, then\n@@ -660 +666,9 @@ append a loop journal `end` record (`cycle_end`) with\n-marker without that auditable end-of-cycle cron disposition.\n+marker without those runtime receipts and the auditable end-of-cycle disposition.\n+\n+**Operator pause is not closure.** A stop/pause prompt writes\n+`PAUSED_BY_OPERATOR`, keeps open/probing/Type-A fronts unchanged, forbids target\n+actions and completion markers, and only permits state reads plus CronList and a\n+CronDelete bound to a listed current-run job. A later explicit execute/resume prompt\n+starts a new execution turn; old Agent/Cron receipts cannot satisfy it. Ambiguous\n+prompts and history/status statements default to read-only rather than silently\n+resuming target work.\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "1c0861ffa6e45e5fc0170834d734e0c25d5e3f07"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Primary Driver Documentation Review Scope\n\n- Status: REVIEW\n- Author: Codex\n- Kind: framework maintenance\n- Evidence IDs: E-001\n\nThis scope asks whether Claude-facing prose still teaches or permits the exact\nshortcuts observed in the historical sessions. Documentation is not treated as\nproof of enforcement; it is checked for parity with the separately reviewed\nhooks and state machines. `historical_failures.md` maps six observed shortcuts\nto both prose changes and mechanical controls. `stale_reference_audit.json`\nhashes the complete `docs/`, primary skill, root-rule, and legacy-review Markdown\ninventory and fails generation if a mapped historical shortcut remains. It is a\nregression for known patterns, not a proof that novel future wording cannot drift.\nNo network target or vulnerability claim is involved.\n",
+    "frontier.md": "# Frontier\n\n## Open Fronts\n### F-001 - Primary-driver contract parity\n- Status: open\n- Barrier class: none\n- Current depth: deep\n- Failure budget: final independent review pending\n- Evidence: E-001\n\n## Deferred Fronts\n## Closed Fronts\n",
+    "decisions.md": "# Decisions\n\n- Review documentation as behavior-shaping input, not as enforcement proof.\n- Require consistency with turn, receipt, and closure scopes.\n- Keep the full regression as a control rather than a separate finding.\n",
+    "review.md": "# Review\n\nThis Codex-authored scope requires arkcli panel plus fresh Claude review. This\nfile records intent only and does not claim a completed ReviewReceipt or PASS.\n\n## Round 1 Driver Disposition\n\n- PR-001 accepted: documentation parity certainty is calibrated from 1.0 to 0.8;\n  docs remain guidance while hooks and runtime traces prove enforcement.\n- PR-002 accepted: `historical_failures.md` maps six observed session shortcuts\n  to revised driver text and the corresponding mechanical controls.\n- PR-003 accepted: this file now explicitly says it is prospective, and F-001\n  remains open until the final independent review finishes.\n- The tracked legacy `review/independent-reviewer.md` was a real stale shortcut;\n  it is now a fail-safe deprecation pointer. `stale_reference_audit.json` records\n  a hashed full inventory and fails generation on known historical patterns.\n\n## Final Review Disposition\n\n- The E-001 title/result now claim Claude-facing contract parity, not live\n  enforcement; runtime truth remains in turn/receipt/live scopes.\n- The stale-reference inventory now scans all Markdown under `docs/`, primary\n  skills, root rules, and the legacy review entrypoint. It is explicitly limited\n  to mapped historical patterns rather than novel-language detection.\n- Backend availability details live only in generated peer-review artifacts, not\n  as unsupported evidence claims in this driver-authored review file.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 110000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "b0afef581a6205b9c315a727ffb55a59a2e1541c"
+}

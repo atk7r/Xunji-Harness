@@ -6,8 +6,11 @@ This is the fixed Claude Code `/loop` protocol. Do not copy/paste it through
 this repository.
 
 You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.
-Run exactly one autonomous iteration. Until the run has a valid completion
-marker, end with exactly one final Coda line: `下一行动: <object + concrete
+Run one **material** autonomous iteration: state pass, required Agent execution,
+merge/verification, canonical writes, and refreshed gates. Planning, one request,
+one file edit, or satisfying a hook format is not an iteration result. Until the
+run has a valid completion marker, an `EXECUTE` turn ends with exactly one final
+Coda line: `下一行动: <object + concrete
 action>`. Empty/template values, generic "continue", multiple Coda lines, and an
 unrelated or multiple F-id/action list are invalid. `BLOCKED:` cannot discharge
 an unfinished active run; record the external dependency in canonical state and
@@ -46,6 +49,13 @@ Use Claude Code TaskCreate/TaskUpdate for this `/loop` iteration before choosing
 the next action. The task list must cover the concrete assets/vectors/Agent
 lanes/evidence writes/gates for this single iteration. Update it as work
 finishes. Do not impose this rule on normal chat outside `/loop`.
+
+Material floor: do not end after the first response or local gate repair. When
+fan-out is required, wait for at least two disjoint Agent results, adjudicate both,
+and merge/refute their candidate material before ending. Otherwise continue the
+selected front through a saved result plus control/pivot, or through an
+evidence-backed barrier/failure-budget decision. A Coda is the final projection of
+that work, never the work product itself.
 
 ### 1. Drift Recovery
 If `.claude/drift_block.json` is active, read its `required_rereads`, refresh `{{RUN_DIR}}/frontier.md` when `frontier_stale` is set, and log `Drift recovery` in decisions.md.
@@ -109,7 +119,6 @@ Guard-routed tools only.
 {{PYTHON}} tools/workers.py suggest "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py plan "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py assign "{{RUN_DIR}}" --role web-hunter --front F-XXX
-{{PYTHON}} tools/workers.py heartbeat "{{RUN_DIR}}" A-web-hunter-001 --status running --note "Agent tool started"
 {{PYTHON}} tools/probe.py GET "https://target/path" --save NAME --run "{{RUN_DIR}}"
 {{PYTHON}} tools/probe.py GET "https://target/large-doc" --save NAME --run "{{RUN_DIR}}" --save-chunks
 {{PYTHON}} tools/probe.py GET "https://target/path" -H "K: V" --save NAME --run "{{RUN_DIR}}"
@@ -119,7 +128,18 @@ Guard-routed tools only.
 {{PYTHON}} tools/scan.py nuclei "https://target/"
 ```
 
-If `state/loop_state.json` says `gates.fanout_required=true`, use the Agent Board: assign at least two disjoint lanes unless a concrete shared barrier or request budget reason is recorded. Agents produce candidates/refutations only; the Single Synthesizer promotes findings.
+If `state/loop_state.json` says `gates.fanout_required=true`, assign at least two
+disjoint lanes and actually invoke two Claude Agents in this turn. Each Agent prompt
+must carry `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. Only current-turn
+transcript-backed receipts count; planning files, heartbeat, old receipts, and
+model-written budget reasons do not. The only bypass is an explicit serial override
+in the operator's current prompt. Agents produce candidates/refutations only; the
+Single Synthesizer promotes findings.
+
+After adjudicating each Agent, run `workers.py finish`: use `--status merged` with
+`--note "Evidence: E-xxx; Front: F-xxx; <disposition>"`, or a non-success terminal
+status with `--note "Reason: <why>; Front: F-xxx"`. `done` without this anchored
+disposition is deliberately blocked at Stop.
 
 Timeout / host-backoff → deferred (Type A). Save artifact before raising certainty. A sensor result or Agent note is not a finding until the evidence gate is applied.
 
@@ -165,9 +185,18 @@ Only when the controller and run files show a closure-review candidate:
 ```bash
 {{PYTHON}} tools/check_run.py "{{RUN_DIR}}" --replay-verify
 {{PYTHON}} tools/peer_review.py "{{RUN_DIR}}" --into-run
+{{PYTHON}} tools/check_run.py "{{RUN_DIR}}"
 ```
 
-Closure still requires: no hard `check_run` gates, independent review resolved, retrospective.md with real Self and Framework/tooling sections, no unresolved PR ledger items, and `GHOST_COMPLETE` written only after those pass. In the same turn as writing `GHOST_COMPLETE` or `NORMAL_COMPLETE`, cancel the active scheduled `/loop` job if one exists and record the result in `state/loop_journal.jsonl` with `cron_cancelled=<job-id|none>`.
+Closure still requires: no hard `check_run` gates, a current content-addressed
+ReviewReceipt, independent review ledger resolved, retrospective.md with real Self
+and Framework/tooling sections, and no unresolved PR items. Invoke the completion
+Agent with `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
+CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`. Require
+`XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all four checks in its response,
+then record its substantive section before writing a completion marker. In that same
+turn, CronList, delete only the listed job for this run, CronList again, and record
+`cron_cancelled=<job-id|none>` in the journal end event.
 
 After reviewer disposition is recorded in `review.md`, `decisions.md`, or the
 relevant run file, append:
@@ -211,7 +240,7 @@ After Markdown/state files are updated and refreshed, append:
 ```
 
 ### 6. Iteration End
-Run one iteration only. Before ending normally, append:
+End only after the material floor above is met. Before ending normally, append:
 
 ```bash
 {{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" end --note "本轮以下一行动或阻塞状态结束"

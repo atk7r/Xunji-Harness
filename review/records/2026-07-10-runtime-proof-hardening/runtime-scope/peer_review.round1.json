@@ -1,0 +1,113 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "BLOCKER",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "8f45647870413913cafe6dce29c116b0b98d6448",
+  "evidence_index_hash": "74ca7a20317cd82bf92ea968b209d65d894b717a",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "evidence_gate",
+      "claim": "E-R03's installed runtime observation is confirmed at certainty 1.0 by a single harness-generated runtime_observation.json",
+      "evidence": "runtime_observation.lines-001-190.txt:2, installed-settings.json:1",
+      "affected_eids": [
+        "E-R03"
+      ],
+      "recommended_action": "Downgrade E-R03 certainty to <=0.5 unless corroborated by live session runtime_events.jsonl or independent hook telemetry; keep installed-settings.json as supporting evidence only.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The runtime_observation artifact appears to be output of a test harness (all checks true, observations map). Per evidence discipline, a single environment-generated artifact does not confirm operational behavior on its own. [review-output-invalid: PR-001 references unknown affected_eids: E-R03]",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "report.md and review.md are stubs that cannot demonstrate the reported confirmed findings are carried into the report or that an independent review occurred",
+      "evidence": "report.md (size 227 bytes), review.md (size 84 bytes)",
+      "affected_eids": [
+        "E-R01",
+        "E-R02",
+        "E-R03"
+      ],
+      "recommended_action": "Require report.md to enumerate each confirmed EID with artifact hash, and review.md to show independent reviewer identity, verdict rationale, and cross-checks.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] A 227-byte report and 84-byte review are stubs; they cannot substantiate the depth or mapping implied by the evidence_index. [review-output-invalid: PR-002 references unknown affected_eids: E-R01, E-R02, E-R03]",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "coverage_scope",
+      "claim": "The evidence_index contains only framework/control-plane findings and no target-asset vulnerability evidence or network replay artifacts",
+      "evidence": "evidence.md (entries E-R01–E-R03 only), target.md",
+      "affected_eids": [],
+      "recommended_action": "Clarify run scope in report.md/decisions.md: if this is a self-audit of Xunji controls, state that; if it is a web-pentest, provide target recon/probe/replay evidence or explicit coverage gaps.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The bundle lacks probe_*.html, *.replay.json, or host/classify artifacts, making the web-pentest framing unsupported by evidence.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "control_robustness",
+      "claim": "anti_drift._check_agent_board_needed silently swallows run_model import/parse failures and reports no fanout requirement",
+      "evidence": "workers.diff (anti_drift.py _check_agent_board_needed exception handler)",
+      "affected_eids": [
+        "E-R02"
+      ],
+      "recommended_action": "Log or surface the failure; add a selftest case for run_model import failure and route the error to run_gate or statusline.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] A broken run_model dependency would prevent the UserPromptSubmit reminder from detecting that four diverse active fronts need Agent Board fanout, creating a blind spot before the fail-closed run_gate. [review-output-invalid: PR-004 references unknown affected_eids: E-R02]",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "semantic_change",
+      "claim": "run_model now treats 'probing' and 'working' as active open fronts, expanding Agent Board fanout requirements compared to prior semantics",
+      "evidence": "run_model.diff:31, run_gate.hunks-02.diff:1433",
+      "affected_eids": [
+        "E-R01",
+        "E-R02"
+      ],
+      "recommended_action": "Document the change in decisions.md and ensure operators expect probing fronts to trigger fanout; evaluate whether this increases agent spawning unnecessarily.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The selftest comment changed from 'probing not counted' to 'probing counts', which is a material policy shift but is not explicitly justified in the evidence. [review-output-invalid: PR-005 references unknown affected_eids: E-R01, E-R02]",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "minimax-m3: parse error; output tail: at a Bash command containing \"peer_review.py\" and \"--into-run\" was run in the right time window. But the time window is 5 seconds before to 120 seconds after the review's `generated_at`. This is a wide window.\n\n13. **`completion_review_valid`**: Checks for \"XUNJI_COMPLETION_REVIEW\" in the input text, evidence_index_hash match, and \"PASS/WARN/CONFIRMED\" in response. The Agent could trivially produce these in its response.\n\n14. **The whole system relies on the Claude Code hooks being installed and; glm-5.2: parse error; output tail: es it block `Read`? `Read` is NOT in the list!\n   So Claude CAN use the `Read` tool to read `runtime_events.jsonl`. Is this intended? Probably, since the selftest checks \"protected runtime receipt remains readable\" using the `Read` tool. But wait, if `Read` is allowed, what about `Grep`? `Grep` is NOT in the list either. So Claude can `Grep` the runtime events. Is that a problem? It's read-only, so probably fine.\n\n   Look at `run_model.py` (line 97-110):\n   ```python\n   def normalize_status(raw:",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [kimi-k2.7-code] The runtime_observation.json is a harness output, not an independent live-session log; the author likely treated selftest pass as operational confirmation.",
+    "[arkcli] [kimi-k2.7-code] No negative evidence or refuted hypotheses are recorded in the evidence_index; every entry has certainty 1.0 with empty supports/refutes.",
+    "[arkcli] [kimi-k2.7-code] anti_drift.py's silent fallback on run_model failure could hide fanout requirements from operators.",
+    "[arkcli] [kimi-k2.7-code] The turn_contract classify_prompt fallback to EXPLAIN_ONLY for ambiguous prompts may cause false-positive denials; no operational false-positive rate evidence is provided.",
+    "[arkcli] [kimi-k2.7-code] No artifact proves the output_gate/run_gate selftests were executed in the installed runtime shown by E-R03.",
+    "[claude] **The entire review record is a single-model echo chamber.** The author (Codex) wrote the context, the evidence entries, the selftests, and the review bundle generator. This review record is being presented to me (a different Claude variant) as the independent reviewer, but I only have the frozen artifacts — I cannot run the code, cannot probe the actual hook behavior, and cannot verify the selftest actually catches real bypasses. The CLAUDE.md review architecture says \"Codex + arkcli panel\" is the preferred heterogeneous review when both are available. An arkcli panel review (kimi-k2.7-code + minimax-m3 + glm-5.2) might catch different issues than I can from a frozen bundle alone.",
+    "[claude] **The fail-closed shift (output_gate + run_gate) lacks a \"fail-open after N consecutive blocks\" circuit breaker.** If a hook has a persistent bug (e.g., a Python import fails after a dependency update), every subsequent session would be blocked for the active run with no automatic recovery. There's no dead-man's-switch to revert to FAIL-OPEN after detecting the hook itself is the problem.",
+    "[claude] **turn_contract.py `STALE_SECONDS = 30 * 60` (30 minutes)** — `turn_contract.lines-001-170.txt:35`. A contract goes stale after 30 minutes. If an EXPLAIN_ONLY turn takes 31 minutes (e.g., reviewing a long report), the next PreToolUse call in the same session would see an empty contract (stale → returns `{}`) and fall through to the \"缺少当前 session 的 turn contract\" branch (`turn_contract.lines-171-340.txt:230-233`). This would block tools, requiring a new UserPromptSubmit to refresh the contract. This feels fragile for long analysis sessions.",
+    "[claude] **`_assignment_exists` requires the agent markdown file to exist** — `turn_contract.lines-171-340.txt:183-193` checks `(run_dir / \"agents\" / f\"{assignment}.md\").exists()`. If `workers.py assign` creates the assignment in `assignments.json` but the agent file is created later (e.g., by a separate step), the Agent spawn would be blocked by the PreToolUse contract. This coupling between assignments.json and agent file creation isn't documented in the evidence prose.",
+    "[claude] **The evidence.md writes \"Control: Focused negative selftests and installed observation\" for E-R01/E-R02/E-R03** — but the observation (`runtime_observation.lines-001-190.txt`) runs against a synthetic temporary run, not the actual run directory. While the selftests validate logic in isolation, integration with the actual runtime (e.g., the real turn_contract.json file, real Claude Code hook event shapes) is assumed, not proven."
+  ],
+  "context_limits": [
+    "[arkcli] minimax-m3: parse error; output tail: at a Bash command containing \"peer_review.py\" and \"--into-run\" was run in the right time window. But the time window is 5 seconds before to 120 seconds after the review's `generated_at`. This is a wide window.\n\n13. **`completion_review_valid`**: Checks for \"XUNJI_COMPLETION_REVIEW\" in the input text, evidence_index_hash match, and \"PASS/WARN/CONFIRMED\" in response. The Agent could trivially produce these in its response.\n\n14. **The whole system relies on the Claude Code hooks being installed and",
+    "[arkcli] glm-5.2: parse error; output tail: es it block `Read`? `Read` is NOT in the list!\n   So Claude CAN use the `Read` tool to read `runtime_events.jsonl`. Is this intended? Probably, since the selftest checks \"protected runtime receipt remains readable\" using the `Read` tool. But wait, if `Read` is allowed, what about `Grep`? `Grep` is NOT in the list either. So Claude can `Grep` the runtime events. Is that a problem? It's read-only, so probably fine.\n\n   Look at `run_model.py` (line 97-110):\n   ```python\n   def normalize_status(raw:",
+    "[arkcli] PR-001 references unknown affected_eids: E-R03",
+    "[arkcli] PR-002 references unknown affected_eids: E-R01, E-R02, E-R03",
+    "[arkcli] PR-004 references unknown affected_eids: E-R02",
+    "[arkcli] PR-005 references unknown affected_eids: E-R01, E-R02",
+    "[claude] I reviewed only the frozen artifacts in the bundle, not the live source files. The actual `.claude/hooks/output_gate.py` and `run_gate.py` on disk may differ from the diffs if additional changes were made after the review snapshot was frozen. I cannot verify the diffs apply cleanly to the current HEAD.",
+    "[claude] The Chinese-language hook messages and operator workflow conventions (e.g., Coda format, 收口 closure gates) are project-specific idioms I interpret through the CLAUDE.md rules, but I may miss nuances in how these conventions interact with the new turn modes.",
+    "[claude] The evidence mentions \"repairs round-one PR-001/PR-002/PR-005\" (`context.md:8-9`) — I do not have access to the prior review round records to verify what was actually fixed vs. what may have been regressed.",
+    "[claude] The \"lazy-model (not privileged malicious process) threat boundary\" mentioned in `context.md:13` is a scoping statement I interpret as non-hostile-threat-model, but I cannot independently verify whether the code changes actually respect this boundary under all conditions."
+  ],
+  "error": ""
+}

@@ -1,0 +1,148 @@
+diff --git a/tools/check_run.py b/tools/check_run.py
+index 58f2ecb..5cc455d 100644
+--- a/tools/check_run.py
++++ b/tools/check_run.py
+@@ -36,0 +37,8 @@ except Exception:
++try:
++    import run_model as _run_model
++except Exception:
++    _run_model = None
++try:
++    import runtime_receipts as _runtime_receipts
++except Exception:
++    _runtime_receipts = None
+@@ -184,0 +193,4 @@ def current_evidence_index_hash(run_dir: Path) -> str:
++    for entry in entries:
++        for artifact in entry.get("artifacts", []):
++            for key in ("excerpt", "excerpt_truncated_chars", "diff_summary"):
++                artifact.pop(key, None)
+@@ -380,0 +393,10 @@ def check_certainty_scale(run_dir: Path) -> list[str]:
++def check_front_schema(run_dir: Path) -> list[str]:
++    if _run_model is None:
++        return ["frontier 状态模型不可用：tools/run_model.py import 失败。"]
++    try:
++        errors = _run_model.summary(run_dir).get("schema_errors", [])
++    except Exception as exc:
++        return [f"frontier 状态模型解析失败: {exc}"]
++    return [f"frontier canonical schema: {error}" for error in errors]
++
++
+@@ -461,0 +484,43 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:
++def check_chain_maturity(run_dir: Path) -> list[str]:
++    """A confirmed composed chain cannot be stronger than its weakest E-id."""
++    path = run_dir / "chains.md"
++    if not path.exists():
++        return []
++    text = path.read_text(encoding="utf-8", errors="replace")
++    records = {record["id"]: record for record in parse_evidence(run_dir)}
++    errors: list[str] = []
++    for match in re.finditer(r"(?ms)^##\s+(C-\d+)\b(.*?)(?=^##\s+C-\d+\b|\Z)", text):
++        cid, block = match.group(1), match.group(2)
++        status = _block_field(block, "Status").lower()
++        if "confirmed" not in status:
++            continue
++        eids = sorted(set(re.findall(r"\bE-\d+[a-z]*\b", block)))
++        if not eids:
++            errors.append(f"组合链硬门: {cid} 标为 confirmed 但 Hops 没有 E-id。")
++            continue
++        invalid: list[str] = []
++        certs: list[float] = []
++        for eid in eids:
++            record = records.get(eid)
++            if not record:
++                invalid.append(f"{eid}=missing")
++                continue
++            values = record.get("certainties") or []
++            cert = max(values) if values else 0.0
++            certs.append(cert)
++            if (record.get("maturity") != "finding" or not record.get("confirmed")
++                    or record.get("superseded")):
++                invalid.append(f"{eid}={record.get('maturity')}/{cert:g}")
++        if invalid:
++            errors.append(
++                f"组合链硬门: {cid} 仍写 confirmed，但弱跳未达 finding/0.8: "
++                + ", ".join(invalid) + "。证据降级必须立即使整条链变 suspected。")
++        weakest_raw = _block_field(block, "Weakest hop certainty")
++        weakest_match = re.search(r"[01](?:\.\d+)?", weakest_raw)
++        if certs and (not weakest_match or abs(float(weakest_match.group(0)) - min(certs)) > 1e-9):
++            errors.append(
++                f"组合链硬门: {cid} Weakest hop certainty 必须等于当前 E-id 最低 certainty "
++                f"({min(certs):g})，不能手填更高值。")
++    return errors
++
++
+@@ -762,0 +828,8 @@ def check_completion_cron_record(run_dir: Path) -> list[str]:
++    if _runtime_receipts is None:
++        return [
++            "收口硬门(loop cron): runtime_receipts 不可用，无法验证真实 CronList/CronDelete。"]
++    cron_ok, cron_note = _runtime_receipts.cron_quiescent(run_dir)
++    if not cron_ok:
++        return [
++            "收口硬门(loop cron receipt): 不能用 journal 自述证明定时任务已停止。"
++            "必须执行 CronList；如仍有本 run job，先 CronDelete，再次 CronList。" + cron_note]
+@@ -943,0 +1017,24 @@ def check_agent_lifecycle(run_dir: Path, *, closure: bool = False) -> tuple[list
++    if _runtime_receipts is not None:
++        try:
++            planned = [
++                str(item.get("agent") or "")
++                for item in _workers.load_assignments(run_dir).get("assignments", [])
++                if isinstance(item, dict) and str(item.get("agent") or "")
++            ]
++            real = set(_runtime_receipts.agent_fanout(run_dir).get("assignments", []))
++            missing = sorted(set(planned) - real)
++            if missing:
++                msg = (
++                    "Agent 运行真实性: assignment 缺 transcript-backed Agent PostToolUse 回执: "
++                    + ", ".join(missing)
++                    + "。手写 heartbeat/status/finished_at 不算真实运行。")
++                (errors if closure else warns).append(msg)
++            disposition = _runtime_receipts.agent_disposition(run_dir)
++            if disposition.get("pending"):
++                msg = (
++                    "Agent 结果落实: " + "; ".join(disposition.get("pending", [])[:8])
++                    + "。每个真实 Agent 返回后必须 merge/adjudicate；done 或旧处置不能替代本次整合。")
++                (errors if closure else warns).append(msg)
++        except Exception:
++            if closure:
++                errors.append("Agent 运行真实性: 无法验证 runtime receipt，收口保持阻断。")
+@@ -1314,38 +1411,2 @@ _INDEPENDENT_REVIEW_HEADING_RE = re.compile(
+-def has_completed_independent_review(review_text: str) -> bool:
+-    """Reject template/prose mentions while accepting structured or substantive reviews."""
+-    matches = list(_INDEPENDENT_REVIEW_HEADING_RE.finditer(review_text or ""))
+-    for match in matches:
+-        heading = match.group(0)
+-        if re.search(r"\b(?:pending|status|template|待复审|待填写)\b", heading, re.I):
+-            continue
+-        tail = review_text[match.end():]
+-        h2 = list(re.finditer(r"(?m)^##\s+[^\n]+$", tail))
+-        end = h2[0].start() if h2 else len(tail)
+-        # peer_review.py writes `## Verdict:` immediately after the Independent
+-        # Review preface. Include that one generated section, but stop before any
+-        # later H2 so a filled self-review cannot make an untouched template pass.
+-        if h2 and re.match(r"##\s+Verdict\s*[:：]", h2[0].group(0), re.I):
+-            end = h2[1].start() if len(h2) > 1 else len(tail)
+-        block = heading + tail[:end]
+-        clean = re.sub(r"<!--.*?-->|<[^>]*>", "", block, flags=re.S)
+-        verdict_match = re.search(
+-            r"(?im)^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?Verdict\s*[:：]\s*"
+-            r"(PASS|WARN|BLOCKER|PASSED|CONFIRMED)\b",
+-            clean,
+-        )
+-        reviewer = _block_field(clean, "Reviewer")
+-        backend = _block_field(clean, "Backend")
+-        backend_meta = re.search(r"(?im)^_backend\s*[:：]\s*([^_\n]+)_", clean)
+-        reviewer_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", reviewer, re.I))
+-        backend_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", backend, re.I))
+-        identity_ok = (
+-            (not _blankish_field(reviewer) and not reviewer_placeholder)
+-            or (not _blankish_field(backend) and not backend_placeholder)
+-            or (backend_meta is not None and (
+-                "heterogeneous peer_review" in heading.lower()
+-                or "same-family peer_review fallback" in heading.lower()
+-            ))
+-        )
+-        if verdict_match and identity_ok:
+-            return True
+-    return False
++def _review_receipt_ids(review_text: str) -> list[str]:
++    return re.findall(r"(?im)^\s*-\s*ReviewReceipt\s*[:：]\s*([0-9a-f]{64})\s*$", review_text or "")

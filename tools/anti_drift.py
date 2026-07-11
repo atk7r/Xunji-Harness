@@ -306,55 +306,28 @@ def _check_drift_alert(run_dir: Path) -> list[str]:
     except Exception:
         return []
 
-def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
-    """Check if Agent Board is mandatory: open fronts >= 4 and barrier classes are diverse
+def _check_agent_board_needed(run_dir: Path, _model=None) -> tuple[bool, int, dict]:
+    """Check if Agent Board is mandatory: active fronts >= 4 and barriers are diverse
     (no SharedBarrierGroup). Returns (should_remind, open_count, barrier_groups)."""
-    frontier = run_dir / "frontier.md"
-    if not frontier.exists():
-        return False, 0, {}
     try:
-        text = frontier.read_text(encoding="utf-8", errors="replace")
-    except Exception:
+        if _model is None:
+            import run_model as model
+        else:
+            model = _model
+        data = model.summary(run_dir)
+    except Exception as exc:
+        if (run_dir / "frontier.md").exists():
+            return True, 4, {"state-parser-failure": [type(exc).__name__]}
         return False, 0, {}
-
-    import re as _re_ab
-
-    # Find all ### F-xxx blocks, extract Status + Barrier class
-    open_fronts: list[str] = []
-    barrier_by_front: dict[str, str] = {}
-    for m in _re_ab.finditer(r"(?ms)^###[ \t]+(F-\d+).*?(?=^###[ \t]+|\Z)", text):
-        block = m.group(0)
-        fid = m.group(1)
-        st_match = _re_ab.search(rf"(?im)^\s*-?\s*Status\s*[:：]\s*([^\n]+)", block)
-        status = st_match.group(1).strip().lower() if st_match else ""
-        # Only count genuinely open fronts — exclude probing, blocked_type_b, deferred,
-        # and closed. Type B candidates and low-value fronts (e.g. user enumeration) should
-        # not force unnecessary agent spawning. (retrospective puffts P4)
-        if status != "open":
-            continue
-        bc_match = _re_ab.search(rf"(?im)^\s*-?\s*Barrier class\s*[:：]\s*([^\n]+)", block)
-        barrier = bc_match.group(1).strip().lower() if bc_match else "unknown"
-        open_fronts.append(fid)
-        barrier_by_front[fid] = barrier
-
-    open_count = len(open_fronts)
-    if open_count < 4:
-        return False, open_count, {}
-
-    # Build barrier groups — exclude trivial barriers from grouping
-    trivial = {"", "none", "unknown", "n/a"}
     barrier_groups: dict[str, list[str]] = {}
-    for fid in open_fronts:
-        bc = barrier_by_front[fid]
-        if bc in trivial:
+    for front in data.get("fronts", []):
+        if front.get("id") not in data.get("open", []):
             continue
-        barrier_groups.setdefault(bc, []).append(fid)
-
-    # SharedBarrierGroup exists if any barrier class has >= 2 fronts
-    has_shared = any(len(fronts) >= 2 for fronts in barrier_groups.values())
-    # Agent Board needed when barriers are diverse (no shared group)
-    should_remind = not has_shared
-    return should_remind, open_count, barrier_groups
+        barrier = str(front.get("barrier") or "unknown")
+        if barrier in {"", "none", "unknown", "n/a", "-"}:
+            continue
+        barrier_groups.setdefault(barrier, []).append(str(front.get("id")))
+    return bool(data.get("fanout_required")), int(data.get("open_count", 0)), barrier_groups
 
 
 def _overdue_steps(run_dir: Path) -> list[str]:
@@ -461,11 +434,11 @@ def build_anchor(
     lines.append("【本轮必做】")
     for r in BINDING_RULES_TIER1:
         lines.append(f"  · {r}")
-    # Agent Board 强制检查: open fronts >= 4 且无共享 barrier → 必须并行
+    # Agent Board 强制检查: active fronts >= 4 且无共享 barrier -> 必须并行
     if run is not None:
         agent_needed, n_open, _bg = _check_agent_board_needed(run)
         if agent_needed:
-            lines.append("  · Agent Board 强制: open fronts ≥ 4 且无共享 barrier → 本轮必须 spawn ≥ 2 个 subagent (通过 workers.py assign), 禁止 Root 全串行。")
+            lines.append("  · Agent Board 强制: active(open/probing/working/type-A) fronts ≥ 4 且无共享 barrier → 本轮必须 spawn ≥ 2 个 subagent (通过 workers.py assign), 禁止 Root 全串行。")
         # 操作者约束持久化检查: hints.md 有 pending constraint → 提示吸收
         hp = run / "hints.md"
         if hp.exists():
@@ -652,7 +625,7 @@ def _selftest() -> int:
         "### F-003\n- Status: probing\n- Barrier class: WAF\n",
         encoding="utf-8")
     needed_lt4, n_lt4, _ = _check_agent_board_needed(ab_dir)
-    checks.append(("agent board: <4 open fronts -> not needed", not needed_lt4 and n_lt4 == 2))
+    checks.append(("agent board: <4 active fronts -> not needed", not needed_lt4 and n_lt4 == 3))
 
     # Case 2: >= 4 open fronts with shared barrier (SharedBarrierGroup exists) -> should NOT remind
     (ab_dir / "frontier.md").write_text(
@@ -689,6 +662,16 @@ def _selftest() -> int:
     needed_none, n_none, bg_none = _check_agent_board_needed(ab_dir)
     checks.append(("agent board: all none/unknown -> needed", needed_none and n_none == 4))
     checks.append(("agent board: none/unknown not grouped", len(bg_none) == 0))
+
+    class _BrokenRunModel:
+        @staticmethod
+        def summary(_run):
+            raise RuntimeError("parser unavailable")
+
+    parser_fail = _check_agent_board_needed(ab_dir, _model=_BrokenRunModel())
+    checks.append(("agent board: parser failure with frontier -> fail closed",
+                   parser_fail[0] and parser_fail[1] >= 4
+                   and "state-parser-failure" in parser_fail[2]))
 
     # Case 5: verify build_anchor injects the reminder
     anchor_ab = build_anchor(runs_root=_tmp_runs)

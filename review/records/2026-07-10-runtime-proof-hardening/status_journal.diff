@@ -1,0 +1,147 @@
+diff --git a/tools/loop_journal.py b/tools/loop_journal.py
+index 2883a2c..0bf5e8e 100644
+--- a/tools/loop_journal.py
++++ b/tools/loop_journal.py
+@@ -12,0 +13,2 @@ import argparse
++import contextlib
++import hashlib
+@@ -13,0 +16 @@ import json
++import os
+@@ -18,0 +22,5 @@ from pathlib import Path
++try:
++    import fcntl
++except ImportError:  # pragma: no cover
++    fcntl = None
++
+@@ -53,0 +62,14 @@ def _journal_path(run_dir: Path) -> Path:
++@contextlib.contextmanager
++def _journal_lock(run_dir: Path):
++    path = run_dir / "state" / ".loop_journal.lock"
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with path.open("a+", encoding="utf-8") as handle:
++        if fcntl is not None:
++            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
++        try:
++            yield
++        finally:
++            if fcntl is not None:
++                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
++
++
+@@ -101,15 +123,24 @@ def append_event(run_dir: str | Path, event: str, *, note: str = "", data: dict
+-    events = load_events(run_dir)
+-    rec = {
+-        "schema": SCHEMA,
+-        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+-        "run_dir": str(run_dir),
+-        "cycle": _next_cycle(events, event),
+-        "event": event,
+-        "note": note,
+-        "data": data or {},
+-        "canonical": "Markdown run files remain source of truth; this journal is derived.",
+-    }
+-    path = _journal_path(run_dir)
+-    path.parent.mkdir(parents=True, exist_ok=True)
+-    with path.open("a", encoding="utf-8") as f:
+-        f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
++    with _journal_lock(run_dir):
++        events = load_events(run_dir)
++        rec = {
++            "schema": SCHEMA,
++            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
++            "run_dir": str(run_dir),
++            "cycle": _next_cycle(events, event),
++            "event": event,
++            "note": note,
++            "data": data or {},
++            "previous_event_hash": str(events[-1].get("event_hash") or "") if events else "",
++            "canonical": "Markdown run files remain source of truth; this journal is derived.",
++        }
++        rec["event_hash"] = hashlib.sha256(json.dumps(
++            rec, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
++        ).encode("utf-8")).hexdigest()
++        path = _journal_path(run_dir)
++        path.parent.mkdir(parents=True, exist_ok=True)
++        with path.open("a", encoding="utf-8") as f:
++            f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
++        try:
++            os.chmod(path, 0o600)
++        except OSError:
++            pass
+diff --git a/tools/xunji_statusline.py b/tools/xunji_statusline.py
+index 75c60b7..65451df 100644
+--- a/tools/xunji_statusline.py
++++ b/tools/xunji_statusline.py
+@@ -12,0 +13 @@ import argparse
++import calendar
+@@ -18,0 +20 @@ import tempfile
++import time
+@@ -38,0 +41,2 @@ PHASE_LABELS = {
++    "Paused": "Paused｜已暂停",
++    "Interrupted": "Interrupted｜中断待恢复",
+@@ -46,0 +51,2 @@ PHASE_COLOR = {
++    "Paused": "gray",
++    "Interrupted": "red",
+@@ -207 +213,16 @@ def _agent_summary(run_dir: Path) -> str:
+-    if not isinstance(assignments, list) or not assignments:
++    planned = len(assignments) if isinstance(assignments, list) else 0
++    current_turn = False
++    try:
++        import runtime_receipts  # noqa: WPS433
++        import turn_contract  # noqa: WPS433
++        contract = turn_contract.load_contract(run_dir)
++        current_turn = str(contract.get("mode") or "") == "EXECUTE"
++        real = runtime_receipts.agent_fanout(
++            run_dir,
++            session_id=str(contract.get("session_id") or "") if current_turn else "",
++            since=float(contract.get("updated_at") or 0.0) if current_turn else 0.0,
++        )
++        real_count = int(real.get("count", 0) or 0)
++    except Exception:
++        real_count = 0
++    if not planned and not real_count:
+@@ -208,0 +230,5 @@ def _agent_summary(run_dir: Path) -> str:
++    real_label = "本轮真实" if current_turn else "真实"
++    if planned and real_count < planned:
++        return f"子任务 计划{planned}/{real_label}{real_count}"
++    if real_count:
++        return f"子任务 {real_count} 个{real_label}回执"
+@@ -232 +258,13 @@ def _front_summary(loop_data: dict) -> str:
+-def _phase(loop_data: dict, journal: dict) -> str:
++def _event_age_seconds(journal: dict) -> float | None:
++    event = journal.get("last_event") if isinstance(journal.get("last_event"), dict) else {}
++    raw = str(event.get("ts") or "")
++    try:
++        return max(0.0, time.time() - calendar.timegm(time.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")))
++    except Exception:
++        return None
++
++
++def _phase(loop_data: dict, journal: dict, run_dir: Path) -> str:
++    status = _load_json(run_dir / "state" / "run_status.json", {})
++    if str(status.get("status") or "") == "paused_by_operator":
++        return "Paused"
+@@ -234,0 +273,3 @@ def _phase(loop_data: dict, journal: dict) -> str:
++        age = _event_age_seconds(journal)
++        if age is None or age > 5 * 60:
++            return "Interrupted"
+@@ -350 +391 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)
+-    phase = _phase(loop_data, journal)
++    phase = _phase(loop_data, journal, run_dir)
+@@ -392,2 +433,4 @@ def _selftest() -> int:
+-        json.dumps({"cycle": 1, "event": "phase_start", "data": {"phase": "Hunter"}, "note": ""}, ensure_ascii=False) + "\n"
+-        + json.dumps({"cycle": 1, "event": "plan", "data": {}, "note": "目标=F-004; 原因=接口枚举"}, ensure_ascii=False) + "\n",
++        json.dumps({"cycle": 1, "event": "phase_start", "data": {"phase": "Hunter"}, "note": "",
++                    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False) + "\n"
++        + json.dumps({"cycle": 1, "event": "plan", "data": {}, "note": "目标=F-004; 原因=接口枚举",
++                      "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False) + "\n",
+@@ -408,0 +452,5 @@ def _selftest() -> int:
++        (run / "state" / "run_status.json").write_text(json.dumps({
++            "status": "paused_by_operator",
++        }), encoding="utf-8")
++        paused_plain = render_statusline(root_current, color=False)
++        (run / "state" / "run_status.json").unlink()
+@@ -464 +512,2 @@ def _selftest() -> int:
+-        ("subagents are aggregated", "子任务 2 个进行中" in plain),
++        ("planned agents are not presented as real", "子任务 计划2/真实0" in plain),
++        ("operator pause is visible", "[Paused｜已暂停]" in paused_plain),

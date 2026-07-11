@@ -1,0 +1,37 @@
+# Peer Review Panel — closure-scope
+
+_backend: panel:claude · 2026-07-11T00:07Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: NEEDS_DRIVER
+
+_backend: panel:claude_  
+_brain: codex_  
+_bundle_hash: 1340815afa5cd2d60702ab2078f3a80a7ec978e7_  
+_evidence_index_hash: 4a762ccab7c1dddfc7314a268b72d73a96fd0539_  
+
+## Findings
+- [WARN] PR-001 review panel had backend errors; aggregation is partial | Evidence: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; minimax-m3: parse error; output tail: `check_closure_discipline` function is called with `closure=True` in some paths and `False` in others.** The selftest shows both modes work, but the report doesn't discuss when each mode is used in production. This is a configuration question that could lead to gates being bypassed if the wrong mode is used.
+
+8. **`workers.update_agent_lifecycle` is called with `terminal=True` in the selftest.** The report doesn't discuss what happens if this is called with `terminal=False` in production - would; glm-5.2: timeout >300s | Why: At least one requested heterogeneous reviewer failed or was unavailable.
+
+## Blind-spot check
+- [claude] **The documentation diffs are NOT inert — they rewrite enforcement semantics the code now depends on.** For example, `root_rules.diff` removes the manual-driver review escape hatch (old: "write the review into review.md as Reviewer: manual-driver") and replaces it with "never satisfies closure." The code's `has_completed_independent_review` now enforces tool-backed receipts. But if the documentation still contained the old escape hatch anywhere, the model would believe it can self-review. The disposition says "stale language was removed" but there's no per-file diff-to-rule mapping artifact — just a prose assertion. This is the exact cross-scope blind spot a heterogeneous reviewer should catch that same-model review would miss.
+- [claude] **`test_registry.diff` is silently unreferenced.** It adds run_model, runtime_receipts, and turn_contract to the selftest_all registry. If these registrations were missing, the 3 new tools wouldn't be tested by `selftest_all.py` — meaning the 57/57 PASS log would still show "57 passed" but wouldn't include the very tests that validate E-001/002/003's core claims. The evidence_index doesn't reference this diff, so no evidence confirms the registry is correct. This is a transitive dependency: selftest_all.log's claim value depends on selftest_all.py's registry being complete, which depends on test_registry.diff being correct, but that correctness is unproven.
+- [claude] **The `installed-runtime-manifest.json` lists 8 files with SHAs but doesn't include `check_run.py` itself.** The manifest tracks: output_gate.py, run_gate.py, settings.json, anti_drift.py, run_model.py, runtime_receipts.py, turn_contract.py, workers.py. But the largest code change under review (`check_run.py` with 4 hunk diffs) is NOT in the manifest. If check_run.py changed between when the diffs were captured and now, the manifest wouldn't detect it. The manifest tracks hook/tool runtime files, not the tool whose review is the subject of E-001 — but this creates a gap where the primary evidence subject (check_run.py) has no content-addressed binding to the test results.
+- [claude] **Round-1 PR-003 was dismissed with "report.md is a scope/index" but the underlying concern was about regression artifact visibility.** The PR-003 was filed when no selftest artifact existed in the bundle. The driver added selftest_all.log — but the round-1 reviewer's deeper concern was whether the regression is comprehensive. The one-line "PASS check_run 0.1s" doesn't reveal which internal assertions passed. If a new assertion was added but is trivially true (e.g., an empty list check that always passes), the log still shows PASS. No per-assertion trace exists in the evidence.
+- [claude] **The `_bundle_context()` issue is more subtle than it first appears.** The fix changed `json.dumps(bundle, indent=2)` to `_bundle_context(bundle)` = `json.dumps(bundle, separators=(",", ":"))`. The cap check and the context sent to backends now use compact form. But `build_review_bundle()` writes the file with `indent=2`. Two concerns: (1) If someone reads the written bundle and measures its length, they get a different number than the cap check measured — creating a reproducibility gap. (2) The pretty-printed file could legitimately exceed the cap that the compact check "passed," meaning the backend might receive a truncated bundle while the cap check says it fits.
+
+## Context-limit notes
+- [claude] I attempted to verify whether the `docs-scope` directory exists under `review/records/2026-07-10-runtime-proof-hardening/` but the parent directory read was denied. I cannot confirm or deny the existence of the separate docs review. The report's delegation to this scope remains unverifiable from the evidence I had access to.
+- [claude] The Chinese technical terminology in the diffs ("收口硬门", "组合链硬门", "复审硬门", "Agent 运行真实性", "Agent 结果落实") carries nuanced enforcement semantics. My reading suggests the code enforces them correctly as described in the diffs, but a Chinese-native reviewer might catch semantic inconsistencies I miss, particularly in the interaction between what `check_run.py` enforces and what `CLAUDE.md` (in Chinese via the docs diffs) tells the model to do.
+- [claude] I verified the diff files on disk have valid unified diff headers and their diff_summary metadata matches, but I did not (and cannot, as read-only) execute `git apply --check` to verify the PR-001 resolution claim about reverse-applicability.
+- [claude] The `peer_review.md`/`peer_review.json` files on disk are from round 1 (bundle_hash `a43a9e75...`, evidence_index_hash `a669b7ae...`). The current bundle (hash `1340815a...`, evidence_index_hash `4a762cc...`) has different hashes, confirming these are stale round-1 artifacts retained as audit trail. This is disclosed in disposition.md but the files themselves don't carry a "STALE — ROUND 1" label, creating a readability risk for future operators.
+- arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; minimax-m3: parse error; output tail: `check_closure_discipline` function is called with `closure=True` in some paths and `False` in others.** The selftest shows both modes work, but the report doesn't discuss when each mode is used in production. This is a configuration question that could lead to gates being bypassed if the wrong mode is used.
+
+8. **`workers.update_agent_lifecycle` is called with `terminal=True` in the selftest.** The report doesn't discuss what happens if this is called with `terminal=False` in production - would; glm-5.2: timeout >300s
+- panel completed 1/2 required heterogeneous backends
+
+> ERROR: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; minimax-m3: parse error; output tail: `check_closure_discipline` function is called with `closure=True` in some paths and `False` in others.** The selftest shows both modes work, but the report doesn't discuss when each mode is used in production. This is a configuration question that could lead to gates being bypassed if the wrong mode is used.
+
+8. **`workers.update_agent_lifecycle` is called with `terminal=True` in the selftest.** The report doesn't discuss what happens if this is called with `terminal=False` in production - would; glm-5.2: timeout >300s

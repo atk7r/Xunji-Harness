@@ -70,8 +70,7 @@ In this mode:
 The default arkcli panel models are:
 
 1. `kimi-k2.7-code`
-2. `minimax-m3`
-3. `glm-5.2`
+2. `glm-5.2`
 
 Default arkcli panel behavior does not disable thinking. Only pass `--thinking`
 when a private config explicitly sets a `thinking` field for a model.
@@ -132,7 +131,7 @@ python3 tools/selftest_all.py --only peer_review
 Then grep for stale claims:
 
 ```bash
-rg -n "arkcli panel|kimi-k2.7-code|minimax-m3|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
+rg -n "arkcli panel|kimi-k2.7-code|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
 ```
 
 If the change affects `.claude/hooks/`, `tools/harness/guard.py`, or `sentinel/`,

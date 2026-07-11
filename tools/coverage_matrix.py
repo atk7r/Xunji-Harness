@@ -42,6 +42,8 @@ except Exception:  # pragma: no cover - defensive fallback for broken imports
         raw = _field(text, name)
         return [p.strip() for p in re.split(r"[;,]", raw) if p.strip()]
 
+import run_model
+
 
 GROUPS: list[tuple[str, list[str]]] = [
     ("Auth", [
@@ -288,30 +290,12 @@ def _front_sections(text: str) -> list[tuple[str, str]]:
 
 
 def _parse_front_blocks(run_dir: Path) -> list[dict]:
-    fr = run_dir / "frontier.md"
-    if not fr.exists():
-        return []
-    text = fr.read_text(encoding="utf-8", errors="replace")
-    blocks: list[dict] = []
-    for section, body in _front_sections(text):
-        sec_low = section.lower()
-        if sec_low.startswith("open"):
-            section_status = "open"
-        elif sec_low.startswith("deferred"):
-            section_status = "deferred"
-        elif sec_low.startswith("closed"):
-            section_status = "closed"
-        else:
-            section_status = "unknown"
-        for m in re.finditer(r"(?ms)^###[ \t]+(F-\d+).*?(?=^###[ \t]+F-\d+|\Z)", body):
-            block_text = m.group(0)
-            blocks.append({
-                "id": m.group(1),
-                "status": (_field(block_text, "Status") or section_status).lower(),
-                "section": section,
-                "text": block_text,
-            })
-    return blocks
+    return [{
+        "id": front.id,
+        "status": front.status,
+        "section": front.section,
+        "text": front.text,
+    } for front in run_model.parse_fronts(run_dir)]
 
 
 def _coverage_status_token(value: str) -> str:

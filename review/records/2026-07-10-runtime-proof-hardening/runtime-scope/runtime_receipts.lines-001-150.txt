@@ -1,0 +1,150 @@
+     1	#!/usr/bin/env python3
+     2	"""Hook-derived runtime receipts for Agent, Cron, and completion events.
+     3	
+     4	Canonical findings still live in Markdown.  Runtime facts do not: an Agent spawn,
+     5	Cron deletion, or completion review is true only when a Claude Code hook observed
+     6	the tool event and the referenced tool-use id exists in the session transcript.
+     7	"""
+     8	from __future__ import annotations
+     9	
+    10	import argparse
+    11	import contextlib
+    12	import hashlib
+    13	import json
+    14	import os
+    15	import re
+    16	import shlex
+    17	import tempfile
+    18	import time
+    19	from datetime import datetime, timezone
+    20	from pathlib import Path
+    21	
+    22	try:
+    23	    import fcntl
+    24	except ImportError:  # pragma: no cover - Windows fallback remains atomic per write
+    25	    fcntl = None
+    26	
+    27	
+    28	SCHEMA = "xunji.runtime_receipt.v1"
+    29	EVENTS = "runtime_events.jsonl"
+    30	MAX_EXCERPT = 6000
+    31	
+    32	
+    33	def _json_bytes(value: object) -> bytes:
+    34	    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    35	
+    36	
+    37	def _hash(value: object) -> str:
+    38	    return hashlib.sha256(_json_bytes(value)).hexdigest()
+    39	
+    40	
+    41	def _action_hash(tool: str, tool_input: object) -> str:
+    42	    """Hash all tool semantics while ignoring only known presentation metadata."""
+    43	    payload = dict(tool_input) if isinstance(tool_input, dict) else {}
+    44	    if tool == "Bash":
+    45	        payload.pop("description", None)
+    46	        payload.pop("timeout", None)
+    47	    return _hash(payload)
+    48	
+    49	
+    50	def _event_path(run_dir: Path) -> Path:
+    51	    return run_dir / "state" / EVENTS
+    52	
+    53	
+    54	def _lock_path(run_dir: Path) -> Path:
+    55	    return run_dir / "state" / ".runtime_events.lock"
+    56	
+    57	
+    58	@contextlib.contextmanager
+    59	def _locked(run_dir: Path):
+    60	    lock = _lock_path(run_dir)
+    61	    lock.parent.mkdir(parents=True, exist_ok=True)
+    62	    with lock.open("a+", encoding="utf-8") as handle:
+    63	        if fcntl is not None:
+    64	            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    65	        try:
+    66	            yield
+    67	        finally:
+    68	            if fcntl is not None:
+    69	                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    70	
+    71	
+    72	def load_events(run_dir: str | Path) -> list[dict]:
+    73	    path = _event_path(Path(run_dir))
+    74	    if not path.exists():
+    75	        return []
+    76	    out: list[dict] = []
+    77	    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    78	        try:
+    79	            item = json.loads(line)
+    80	        except Exception:
+    81	            continue
+    82	        if isinstance(item, dict):
+    83	            out.append(item)
+    84	    return out
+    85	
+    86	
+    87	def _excerpt(value: object) -> str:
+    88	    if value is None:
+    89	        return ""
+    90	    if isinstance(value, str):
+    91	        text = value
+    92	    else:
+    93	        try:
+    94	            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    95	        except Exception:
+    96	            text = str(value)
+    97	    text = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{12,}", r"\1[REDACTED]", text)
+    98	    return text[:MAX_EXCERPT]
+    99	
+   100	
+   101	def _input_text(event: dict) -> str:
+   102	    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+   103	    return "\n".join(str(tool_input.get(key) or "") for key in (
+   104	        "prompt", "description", "command", "job_id", "id",
+   105	    ))
+   106	
+   107	
+   108	def _assignment_fields(text: str) -> tuple[str, str]:
+   109	    assignment = re.search(r"(?i)\bXUNJI_ASSIGNMENT\s*=\s*(A-[A-Za-z0-9._-]+)", text)
+   110	    front = re.search(r"(?i)\bXUNJI_FRONT\s*=\s*(F-\d+)", text)
+   111	    return (
+   112	        assignment.group(1) if assignment else "",
+   113	        front.group(1).upper() if front else "",
+   114	    )
+   115	
+   116	
+   117	def _evidence_hash(text: str) -> str:
+   118	    match = re.search(r"(?i)\bEVIDENCE_INDEX\s*=\s*([0-9a-f]{40,64})\b", text)
+   119	    return match.group(1).lower() if match else ""
+   120	
+   121	
+   122	def _job_id(value: object) -> str:
+   123	    if isinstance(value, dict):
+   124	        for key in ("id", "job_id", "jobId", "task_id"):
+   125	            raw = value.get(key)
+   126	            if isinstance(raw, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{6,64}", raw):
+   127	                return raw
+   128	        for child in value.values():
+   129	            found = _job_id(child)
+   130	            if found:
+   131	                return found
+   132	    if isinstance(value, list):
+   133	        for child in value:
+   134	            found = _job_id(child)
+   135	            if found:
+   136	                return found
+   137	    text = _excerpt(value)
+   138	    match = re.search(r"(?i)\b(?:job|task)?[_ -]?id\s*[:=]\s*([A-Za-z0-9_.:-]{6,64})", text)
+   139	    return match.group(1) if match else ""
+   140	
+   141	
+   142	def _job_ids(value: object) -> list[str]:
+   143	    found: list[str] = []
+   144	    if isinstance(value, dict):
+   145	        direct = _job_id({key: value.get(key) for key in ("id", "job_id", "jobId", "task_id")})
+   146	        if direct:
+   147	            found.append(direct)
+   148	        for child in value.values():
+   149	            found.extend(_job_ids(child))
+   150	    elif isinstance(value, list):

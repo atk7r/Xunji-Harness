@@ -67,9 +67,10 @@ rate-limit pressure, and past worker hit rate.
 - Target-side temp artifacts must use neutral `tmp/diag/proof-YYYYMMDD-<hex>`
   names only; never include project/run/Agent/vuln/tool labels.
 - Target-side cleanup/delete/overwrite requires an explicit operator `yes`.
-- Root must record Agent lifecycle in `state/assignments.json`: heartbeat after
-  the Claude Agent starts or makes material progress, and finish when it returns,
-  blocks, fails, or is abandoned. A non-terminal Agent blocks closure.
+- The Agent-tool prompt must carry its assignment/front tokens so hooks can record
+  a transcript-backed execution receipt. `heartbeat`/`finish` remain lifecycle
+  display state only; they cannot prove the Agent ran. A non-terminal Agent blocks
+  closure.
 
 ## The merge (legacy wording)
 
@@ -109,9 +110,9 @@ Discipline:
   colliding with other workers.
 - All requests go through the tools under tools/ (probe/render/scan); they share one global rate
   limit, do not bypass it.
-- Root will record `workers.py heartbeat` when this Agent starts and
-  `workers.py finish` when it returns; include a concise coda summary so Root can
-  finish the lifecycle entry truthfully.
+- Your Agent-tool prompt includes `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...` so
+  the hook can prove this call ran. Root may mirror lifecycle with
+  `workers.py heartbeat/finish`; that prose is not runtime proof.
 
 Write per the workers/W-<id>.md template: Assigned front / Status (working→done) / Candidate
 findings (each with proposed certainty + Control) / Leads for Root / Notes.

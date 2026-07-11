@@ -36,6 +36,7 @@ import saturation  # noqa: E402
 import state_project  # noqa: E402
 import status_style  # noqa: E402
 import workers  # noqa: E402
+import run_model  # noqa: E402
 
 SCHEMA = "xunji.loop_state.v1"
 CONFIRMED = 0.8
@@ -177,17 +178,28 @@ def _front_section_statuses(run_dir: Path) -> dict[str, str]:
 
 
 def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
-    real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}
-    fronts = [
-        f for f in projection.get("fronts", [])
-        if str(f.get("id", "")).startswith("F-")
-        and (not real_front_ids or str(f.get("id")) in real_front_ids)
-    ]
+    canonical = run_model.parse_fronts(run_dir)
+    canonical_used = bool(canonical)
+    if canonical:
+        fronts = [{
+            "id": front.id,
+            "status": front.status,
+            "barrier": front.barrier,
+            "depth": front.depth,
+            "schema_errors": list(front.schema_errors),
+        } for front in canonical]
+    else:
+        real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}
+        fronts = [
+            f for f in projection.get("fronts", [])
+            if str(f.get("id", "")).startswith("F-")
+            and (not real_front_ids or str(f.get("id")) in real_front_ids)
+        ]
     section_statuses = _front_section_statuses(run_dir)
 
     def front_status(f: dict) -> str:
         raw = str(f.get("status", "") or "").strip()
-        if raw.lower() in {"", "unknown"}:
+        if not canonical_used and raw.lower() in {"", "unknown"}:
             raw = section_statuses.get(str(f.get("id")), raw)
         return raw
 
@@ -217,6 +229,10 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
         if str(f.get("barrier") or "").strip().lower() not in {"", "unknown", "none", "-"}
     ]
     unique_barriers = sorted(set(barriers))
+    barrier_counts = {barrier: barriers.count(barrier) for barrier in unique_barriers}
+    all_share_one_barrier = bool(open_fronts) and any(
+        count == len(open_fronts) for count in barrier_counts.values()
+    )
 
     low_saturation: list[dict] = []
     for result in saturation.front_saturation(run_dir):
@@ -245,7 +261,7 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
         "closed_but_unlocked": view.get("closed_but_unlocked", []),
         "dangling_facts": view.get("dangling_facts", []),
         "unique_barriers": unique_barriers,
-        "diverse_barriers": len(unique_barriers) >= 2,
+        "diverse_barriers": not all_share_one_barrier,
         "low_saturation": low_saturation,
     }
 

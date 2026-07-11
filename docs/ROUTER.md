@@ -229,14 +229,12 @@ Load: `frontier.md` · `hypotheses.md` · `evidence.md` · `false_positive.md` �
 
 Output: `review.md` · reopened/downgraded fronts if needed · next autonomous front.
 
-**Before any closure / "explored enough" claim, the Reviewer MUST include an independent
-reviewer** — a fresh-context `general-purpose` sub-agent (standing-authorized) per
-`review/independent-reviewer.md`; self-review does not fix self-review bias. Its findings
-go under `## Independent Review` in `review.md` and must be resolved before closing.
-`tools/check_run.py` enforces this at the closure gate. When the operator accepts data
-egress and a heterogeneous backend is available, prefer `tools/peer_review.py --into-run`
-(or `check_run.py --auto-peer-review`) — an *orthogonal* model catches shared blind spots
-a same-model sub-agent can't; the sub-agent is the egress-free fallback.
+**Before any closure / "explored enough" claim, the Reviewer MUST obtain a real
+independent review.** Run `tools/peer_review.py runs/<dir> --into-run` in the
+foreground and resolve its PR ledger. `check_run.py` requires the generated
+content-addressed receipt, current evidence/bundle hashes, and a transcript-observed
+invocation. A heading, manual/fresh-context self-fill, copied output, or backend
+failure cannot satisfy the gate; unavailable independent review leaves closure open.
 
 ### Report
 
@@ -353,6 +351,10 @@ Project-discipline and run-structure checks in `tools/`:
   drafts the Root merge view. Legacy `--new` worker files remain readable, but new
   collaboration uses `docs/templates/agents/`. Advisory + ledger only — never writes
   canonical findings and never bypasses the Single Synthesizer.
+- `python tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash
+  chain for actual Agent/Cron/foreground-review events. `workers.py` lifecycle
+  prose is not runtime proof; current-turn Agent receipts carry assignment/front
+  tokens and are transcript-backed.
 - `python tools/state_project.py runs/<dir>` — derives `state/projection.json` and
   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
   canonical and projection must not be hand-edited back into facts.

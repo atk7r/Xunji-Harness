@@ -10,11 +10,19 @@ record visible phase-start / phase-end markers for the human operator.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import json
+import os
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -49,6 +57,20 @@ def _resolve_run_dir(path: str | Path) -> Path:
 
 def _journal_path(run_dir: Path) -> Path:
     return run_dir / "state" / JOURNAL
+
+
+@contextlib.contextmanager
+def _journal_lock(run_dir: Path):
+    path = run_dir / "state" / ".loop_journal.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _looks_like_scope_dir(run_dir: Path) -> bool:
@@ -98,21 +120,30 @@ def append_event(run_dir: str | Path, event: str, *, note: str = "", data: dict 
     if not _looks_like_scope_dir(run_dir):
         raise ValueError(f"directory does not look like a Xunji run/review scope: {run_dir}")
     event = event.strip().lower().replace("-", "_")
-    events = load_events(run_dir)
-    rec = {
-        "schema": SCHEMA,
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "run_dir": str(run_dir),
-        "cycle": _next_cycle(events, event),
-        "event": event,
-        "note": note,
-        "data": data or {},
-        "canonical": "Markdown run files remain source of truth; this journal is derived.",
-    }
-    path = _journal_path(run_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
+    with _journal_lock(run_dir):
+        events = load_events(run_dir)
+        rec = {
+            "schema": SCHEMA,
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "run_dir": str(run_dir),
+            "cycle": _next_cycle(events, event),
+            "event": event,
+            "note": note,
+            "data": data or {},
+            "previous_event_hash": str(events[-1].get("event_hash") or "") if events else "",
+            "canonical": "Markdown run files remain source of truth; this journal is derived.",
+        }
+        rec["event_hash"] = hashlib.sha256(json.dumps(
+            rec, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        path = _journal_path(run_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
     return rec
 
 

@@ -1,0 +1,131 @@
+diff --git a/tools/check_run.py b/tools/check_run.py
+index 58f2ecb..5cc455d 100644
+--- a/tools/check_run.py
++++ b/tools/check_run.py
+@@ -2378,0 +2506,28 @@ def _selftest() -> int:
++
++    def _install_valid_review(run: Path) -> str:
++        bundle = _peer_review_test.build_review_bundle(run, write=True)
++        result = _peer_review_test.ReviewResult(
++            verdict="PASS", backend_used="codex", driver="claude", brain="codex",
++            bundle_hash=bundle["sha1"],
++            evidence_index_hash=bundle["evidence_index"]["sha1"],
++        )
++        _peer_review_test._append_run_review(run, result)
++        transcript = run / "review-transcript.jsonl"
++        tool_id = "tool-review-" + hashlib.sha1(str(run).encode()).hexdigest()[:12]
++        transcript.write_text(tool_id + "\n", encoding="utf-8")
++        if _runtime_receipts is not None:
++            _runtime_receipts.append_hook_event(run, {
++                "hook_event_name": "PostToolUse", "session_id": "selftest-review",
++                "transcript_path": str(transcript), "tool_name": "Bash",
++                "tool_use_id": tool_id,
++                "tool_input": {"command": f"python tools/peer_review.py {run} --into-run"},
++                "tool_response": {"stdout": (
++                    f"XUNJI_REVIEW_RECEIPT={result.runtime_receipt_id}\n"
++                    f"XUNJI_REVIEW_BUNDLE={result.bundle_hash}\nreview completed"
++                ), "stderr": ""},
++            })
++        return (run / "review.md").read_text(encoding="utf-8", errors="replace")
++
++    receipt_review_text = _install_valid_review(d)
++    receipt_review_valid, receipt_review_reason = validate_independent_review_receipt(
++        d, receipt_review_text)
+@@ -2381,2 +2536,5 @@ def _selftest() -> int:
+-        ("completed independent review requires real identity and verdict",
+-         has_completed_independent_review(valid_review_text)),
++        ("manual reviewer identity/verdict cannot satisfy gate",
++         not has_completed_independent_review(valid_review_text, d)),
++        ("tool-backed current review receipt satisfies gate"
++         + (f" ({receipt_review_reason})" if receipt_review_reason else ""),
++         receipt_review_valid and has_completed_independent_review(receipt_review_text, d)),
+@@ -2395,2 +2553,2 @@ def _selftest() -> int:
+-        ("peer_review generated backend/verdict satisfies gate",
+-         has_completed_independent_review(
++        ("peer_review-looking prose without receipt cannot satisfy gate",
++         not has_completed_independent_review(
+@@ -2398 +2556 @@ def _selftest() -> int:
+-             "_backend: claude_\n## Verdict: WARN\n")),
++             "_backend: claude_\n## Verdict: WARN\n", d)),
+@@ -2412,2 +2570,2 @@ def _selftest() -> int:
+-        ("substantive completion review section satisfies gate",
+-         has_codex_completion_review(
++        ("substantive completion prose without Agent receipt cannot satisfy gate",
++         not has_codex_completion_review(
+@@ -2415 +2573 @@ def _selftest() -> int:
+-             "- Summary: report coverage, evidence severity, and reachable assets were independently checked.\n")),
++             "- Summary: report coverage, evidence severity, and reachable assets were independently checked.\n", d)),
+@@ -2496,0 +2655,8 @@ def _selftest() -> int:
++    d_chain = Path(tempfile.mkdtemp())
++    (d_chain / "evidence.md").write_text(
++        "# Evidence Ledger\n## E-019\n- Maturity: candidate\n- Certainty: 0.5\n",
++        encoding="utf-8")
++    (d_chain / "chains.md").write_text(
++        "# Chains\n## C-001\n- Hops: E-019\n- Weakest hop certainty: 0.8\n"
++        "- Terminal node: schema disclosure\n- Status: confirmed\n", encoding="utf-8")
++    chain_errors = check_chain_maturity(d_chain)
+@@ -2517,0 +2684,2 @@ def _selftest() -> int:
++        ("confirmed chain rejects candidate weakest hop",
++         any("E-019=candidate/0.5" in e for e in chain_errors)),
+@@ -2788,0 +2957 @@ def _selftest() -> int:
++    (d_cron / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+@@ -2793,0 +2963,10 @@ def _selftest() -> int:
++    cron_non_end_without_receipt = check_completion_cron_record(d_cron)
++    cron_transcript = d_cron / "cron-transcript.jsonl"
++    cron_transcript.write_text("tool-cron-list\ntool-completion-review\n", encoding="utf-8")
++    if _runtime_receipts is not None:
++        _runtime_receipts.append_hook_event(d_cron, {
++            "hook_event_name": "PostToolUse", "session_id": "selftest-cron",
++            "transcript_path": str(cron_transcript), "tool_name": "CronList",
++            "tool_use_id": "tool-cron-list", "tool_input": {},
++            "tool_response": {"tasks": []},
++        })
+@@ -2805,0 +2985,13 @@ def _selftest() -> int:
++    completion_hash = current_evidence_index_hash(d_cron)
++    if _runtime_receipts is not None:
++        _runtime_receipts.append_hook_event(d_cron, {
++            "hook_event_name": "PostToolUse", "session_id": "selftest-completion",
++            "transcript_path": str(cron_transcript), "tool_name": "Agent",
++            "tool_use_id": "tool-completion-review",
++            "tool_input": {"prompt":
++                f"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={completion_hash} run={d_cron.name} "
++                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
++            "tool_response": {"result":
++                f"XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX={completion_hash} "
++                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
++        })
+@@ -2823,0 +3016,12 @@ def _selftest() -> int:
++        lifecycle_manual_done_err, _ = check_closure_discipline(d_lifecycle)
++        life_transcript = d_lifecycle / "agent-transcript.jsonl"
++        life_transcript.write_text("tool-life-agent\n", encoding="utf-8")
++        if _runtime_receipts is not None:
++            _runtime_receipts.append_hook_event(d_lifecycle, {
++                "hook_event_name": "PostToolUse", "session_id": "selftest-agent",
++                "transcript_path": str(life_transcript), "tool_name": "Agent",
++                "tool_use_id": "tool-life-agent",
++                "tool_input": {"prompt":
++                    f"XUNJI_ASSIGNMENT={life_rec['agent']} XUNJI_FRONT=F-001"},
++                "tool_response": {"result": "candidate complete"},
++            })
+@@ -2824,0 +3029,4 @@ def _selftest() -> int:
++        _workers.update_agent_lifecycle(
++            d_lifecycle, life_rec["agent"], status="merged",
++            note="Evidence: E-001 result adjudicated", terminal=True)
++        lifecycle_merged_err, _ = check_closure_discipline(d_lifecycle)
+@@ -2826 +3034 @@ def _selftest() -> int:
+-        lifecycle_err, lifecycle_done_err = [], []
++        lifecycle_err, lifecycle_manual_done_err, lifecycle_done_err, lifecycle_merged_err = [], [], [], []
+@@ -2852,0 +3061,2 @@ def _selftest() -> int:
++        ("journal cron text without runtime receipt hard-fails",
++            any("receipt" in e for e in cron_non_end_without_receipt)),
+@@ -2863,2 +3073,8 @@ def _selftest() -> int:
+-        ("finished agent clears lifecycle hard error",
+-         _workers is None or not any("Agent 生命周期" in e for e in lifecycle_done_err)),
++        ("hand-written finished status does not clear runtime authenticity gate",
++         _workers is None or any("Agent 运行真实性" in e for e in lifecycle_manual_done_err)),
++        ("real Agent receipt clears lifecycle authenticity error",
++         _workers is None or not any("Agent 运行真实性" in e for e in lifecycle_done_err)),
++        ("real Agent receipt still requires post-return disposition",
++         _workers is None or any("Agent 结果落实" in e for e in lifecycle_done_err)),
++        ("anchored post-return merge clears disposition gate",
++         _workers is None or not any("Agent 结果落实" in e for e in lifecycle_merged_err)),
