@@ -1,0 +1,77 @@
+Verification summary for frozen outbound-privacy maintenance diff
+
+1. python3 tools/check_rules.py
+   result: rule check passed
+
+2. python3 tools/selftest_all.py
+   pre-review result: 58 passed, 0 failed (83.8s total)
+   post-round-1-fix result: 58 passed, 0 failed (85.0s total)
+   final post-round-2 result: 59 passed, 0 failed (84.7s total)
+   post-round-3 WebSocket/encoding result: 59 passed, 0 failed (84.0s total)
+   post-final-review fixes result: 60 passed, 0 failed (85.2s total)
+   post-final-3 false-positive/decoder fixes result: 60 passed, 0 failed (84.7s total)
+   includes: outbound_privacy, safety_gate, check_hook, probe, render, replay,
+   check_run, exploit, workers, sensor_upload, sensor_client_graybox,
+   sentinel_replay, verify_layers, guard_smoke
+
+3. Loopback-only Playwright integration
+   fixture: page executes fetch('/api', {method:'POST', body:'marker=xunji-proof'})
+   server POST count: 0
+   render error: outbound privacy blocked request body: project identifier
+
+4. git diff --check
+   result: passed before review scope creation
+
+5. Encoding/custom/file path cases in `tools/harness/privacy.py`
+   result: percent, base64, hex, case and NFKC project markers blocked;
+   unguarded custom URL script blocked; guarded custom script allowed;
+   inspectable neutral raw upload allowed; private-content and missing raw uploads blocked.
+
+6. Redirect controls in `tools/probe.py`
+   result: same-origin auth preserved; cross-origin auth stripped; a second
+   cross-origin hop could not regain Cookie/Authorization; redirect URL privacy
+   was revalidated before I/O.
+
+7. Loopback upload wire capture
+   result: HTTP 201, 200 multipart body bytes, no project identifier; exact
+   Content-Type/body saved as upload-wire.txt and sensor result as upload-result.json.
+
+8. Final-review privacy surfaces
+   result: URL userinfo requires an explicit auth exception and is hash-redacted;
+   multipart filenames require neutral unique proof names and replay records hash
+   filenames/private boundaries; response headers and bounded previews redact
+   token/PII fields; exploit.py proves its ViewState HTTP path inherits probe's
+   pre-I/O guard; client_graybox remains passive and performs no network I/O.
+
+9. git diff --check
+   result: passed after final-review fixes.
+
+10. Runtime response replay replication
+    result: two fresh loopback responses used distinct JSON token/email values,
+    X-Session-ID values and Location query secrets. Both replay JSON artifacts
+    contain field-class hash redactions and none of the eight raw values.
+
+11. False-positive controls
+    result: generic `/home/dashboard`, `/Users/settings`, and `/runs/list` target
+    routes pass at both validator and hook levels; actual local-home and dated
+    framework-run values remain denied.
+
+12. Cookie/Set-Cookie replay replication
+    result: two fresh loopback ports used different client Cookie, server
+    Set-Cookie and response-body values. Both replay records contain distinct
+    request/response header hashes and no reusable values; two separate replay
+    invocations returned SKIPPED-PRIVACY-REDACTED.
+
+13. Dated multipart boundary and current replay schema
+    result: upload sensor boundaries now use `----proof-YYYYMMDD-<8hex>`; two
+    fresh 201 wire captures use the dated shape. E-004 cites two fresh recorder
+    artifacts that both use `privacy.response_redactions`.
+
+14. Final post-boundary regression
+    result: rule check passed; 60 selftest suites passed, 0 failed in 84.7s.
+
+15. Marker-derived boundary follow-up
+    result: boundary now derives from the same upload marker, eliminating UTC vs
+    explicit-date divergence. Two fresh 201 captures show exact marker/filename/
+    boundary-core equality. Final rule check passed and 60 suites passed, 0 failed
+    in 85.3s.

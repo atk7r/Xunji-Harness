@@ -1,0 +1,39 @@
+{
+  "ts": "2026-07-12T19:50:07Z",
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:56614/response",
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 60,
+    "sha1": "29ba6b607136cfe95651363c17794f70566c61a4",
+    "ctype": "application/json",
+    "headers": {
+      "Server": "BaseHTTP/0.6 Python/3.9.6",
+      "Date": "Sun, 12 Jul 2026 19:50:07 GMT",
+      "Content-Type": "application/json",
+      "X-Session-ID": "<redacted:header:dce7455e5b31>",
+      "Location": "/callback?access_token=%3Credacted%3Aquery%3A97a6d17f9545%3E",
+      "Content-Length": "60"
+    },
+    "snippet": "{\"token\":\"<redacted:field:132e43c0f4ba>\",\"email\":\"<redacted:field:5e9b4cb37055>\"}"
+  },
+  "privacy": {
+    "schema": "outbound-privacy.v1",
+    "redacted_fields": [],
+    "replayable": true,
+    "auth_exception": false,
+    "response_redactions": [
+      "response.body.email",
+      "response.body.token",
+      "response.header:location",
+      "response.header:x-session-id"
+    ]
+  },
+  "saved_body": "<ephemeral-loopback-body-removed>"
+}

@@ -288,6 +288,13 @@ only — `POST`/`PUT` need `--force`, `DELETE` is never replayed; host must be i
 longer matches reality — the target was fixed/changed, or the finding was shaky —
 and the driver must re-adjudicate before reporting it. `UNREACHABLE` is not a failure
 (can't-reach ≠ false). Replay stays **opt-in** (live traffic, slow) — *not* running
+`SKIPPED-PRIVACY-REDACTED` means the recorder correctly removed reusable
+Cookie/token/PII. It must never send placeholders or count that result as a
+verification. Re-acquire the intended session, perform a fresh guarded
+replication, cite the new artifact/control, and add a per-entry `- Replay:` note.
+At a final report an unaddressed privacy-redacted replay supporting a confirmed
+finding is a hard closure error, just like an ignored load-bearing divergence.
+
 `--replay-verify` never fails a run, and the gate never forces you to run it. But once
 you **do** run it at a **final** report, a `DIVERGED` you leave **unaddressed** hard-fails
 the closure gate: re-adjudicate each one — downgrade the finding, or add a `- Replay:`
@@ -606,10 +613,17 @@ and harmless upload proof objects. They write JSON artifacts under
 `<run>/evidence/sensors/` when `--run` is supplied. A sensor artifact is still a
 candidate input: the Synthesizer must copy only supported facts into `evidence.md`, set
 the correct `Maturity:`, attach Control/Replicated, and apply the certainty scale.
+`upload_probe.py` generates a neutral unique marker, filename, and multipart
+boundary. Custom marker/filename inputs must use the same
+`proof-YYYYMMDD-<6-12hex>[.ext]` shape; project/run/Agent/operator labels and real
+personal data are rejected before the upload is sent.
 
 `client_graybox.py` is separate from the web-first main loop. Use it only when the
 engagement includes client/code artifacts; its ASAR/config/IPC/custom-protocol/local
 port observations default to `Maturity: phenomenon` until active proof upgrades them.
+It only reads local artifacts and supplied port listings; it does not send requests.
+`tools/exploit.py` is active, but its registered HTTP plugin routes through guarded
+`probe.send`, including the per-request privacy validator and redirect policy.
 
 ## Closure gate — `check_run.py` mechanics
 

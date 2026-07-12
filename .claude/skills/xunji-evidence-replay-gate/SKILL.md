@@ -17,10 +17,15 @@ evidence grounded in saved target responses and safe replays, not prose.
 - A confirmed entry needs `Artifacts:` plus `Replicated / Control:`.
 - Script output is not proof by itself. If a script performed the proof, preserve
   the request/response with recorder or re-run the proof with `probe --save`.
+- Saved replay URLs, request fields, response headers, and bounded response previews
+  must contain only hashed redactions for authentication or personal values; never
+  retain URL userinfo or returned token/PII values verbatim in the replay JSON.
 - **Agent-originated entries MUST carry `Maturity: candidate`.** An agent's
   certainty claim without a `.replay.json` artifact is NOT canonical evidence
-  certainty — the Synthesizer must run `replay.py` verification (IDENTICAL or
-  CONSISTENT verdict) before promoting to `Maturity: finding` with final certainty.
+  certainty. The Synthesizer must independently re-verify it: use replay when the
+  request is replayable (`IDENTICAL` or content-checked `CONSISTENT`), or for an
+  authenticated privacy-redacted request perform a fresh guarded replication
+  with a second saved artifact and explicit Control/Replicated evidence.
   When the driver writes an evidence entry based on agent output that has not been
   re-verified via `probe.py --save`, the entry stays at `Maturity: candidate`,
   `Certainty: <= 0.5`.
@@ -60,6 +65,10 @@ Replay rules:
   new content is still the vulnerable response.
 - `DIVERGED` means re-adjudicate: downgrade the finding, refresh evidence, or add
   a `- Replay:` explanation to the affected `E-xxx`.
+- `SKIPPED-PRIVACY-REDACTED` means Cookie/token/PII was deliberately replaced by
+  a hash placeholder. Never send the placeholder or call it verified; reacquire
+  the intended session, perform a fresh guarded replication, cite the new
+  artifact/control, and add the per-entry `- Replay:` explanation.
 - `UNREACHABLE` is inconclusive; "could not reach" is not "safe".
 
 ## Closure Gate

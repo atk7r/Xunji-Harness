@@ -24,6 +24,36 @@ runs/<target_slug>_<YYYYMMDD>/
 Short slugs. Do not store secrets, tokens, real personal data, or unnecessary
 sensitive content in the run directory. Field templates for each file: reference.
 
+Target-facing privacy is fail-closed in guarded tools. Generated URL payloads,
+headers, bodies, multipart names/content, and target writes must not contain
+project/run/Agent/operator identity or real personal data. Use neutral synthetic
+`tmp/diag/proof-YYYYMMDD-<6-12hex>` values. Required auth secrets are
+destination-bound; personal auth-body fields need `--allow-sensitive-auth`, and
+URL userinfo credentials need the same explicit exception. Both are hash-redacted
+from replay evidence; bounded response previews and response headers are sanitized
+before recording as well. A privacy-redacted request replay is not a
+successful verification. Add unstructured operator/org-specific names to the
+newline-separated `OUTBOUND_PRIVACY_DENY_VALUES` environment variable; guard
+errors and audit logs do not echo the matched private value.
+Guarded redirects revalidate each hop and remove authentication headers across
+origin changes; raw redirect-following commands with authentication are refused.
+The scanner wrapper uses a fixed neutral User-Agent and vetted default templates;
+custom nuclei templates/user-data are refused because external scanner-generated
+requests cannot be inspected individually by the Python guard.
+The command boundary includes HTTP(S), WebSocket(S), and FTP URL-bearing actions.
+The engagement proxy is operator-controlled trusted infrastructure: driver bytes
+are checked before proxying; proxy-side rewriting/header injection needs its own
+audit and is not silently certified by this guard.
+The operator-supplied destination hostname is scope-exempt, but generated or
+target-native path/body bytes are not. If a legitimate target route conflicts
+with a denied token, use an equivalent neutral proof or author-and-handoff the
+exact exceptional request; never add a silent bypass.
+Do not infer identity from generic target routes alone: `/home/dashboard`,
+`/Users/settings`, and `/runs/list` remain usable. The guard blocks the actual
+local home/configured identity values and dated framework-run identifiers.
+`tools/exploit.py` inherits the guarded `probe.send` request path. The
+`client_graybox.py` sensor is passive local ingestion and has no network egress.
+
 ## Cycle
 
 ```text

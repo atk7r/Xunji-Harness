@@ -258,22 +258,32 @@ def _summarize_replay(results: list[dict]) -> list[str]:
     警告(目标可能已改/已修/当时造假); 其余汇总计数。UNREACHABLE 不算失败(够不着≠假)。"""
     counts: dict = {}
     diverged: list[str] = []
+    privacy_redacted: list[str] = []
     for r in results:
         v = r.get("verdict", "?")
         counts[v] = counts.get(v, 0) + 1
         if v == "DIVERGED":
             diverged.append(f"{r.get('method','?')} {r.get('url','')} "
                             f"({r.get('old_status')}→{r.get('new_status')})")
+        elif v == "SKIPPED-PRIVACY-REDACTED":
+            privacy_redacted.append(f"{r.get('method','?')} {r.get('url','')}")
     warns: list[str] = []
     if diverged:
         warns.append("replay 核实 DIVERGED(证据存疑: 目标可能已改/已修/当时造假, driver 须核对内容是否"
                      "仍是漏洞响应): " + "; ".join(diverged[:8])
                      + (" …" if len(diverged) > 8 else ""))
+    if privacy_redacted:
+        warns.append(
+            "replay 核实 SKIPPED-PRIVACY-REDACTED(录像为避免泄露 Cookie/token/PII 已脱敏，"
+            "不能把占位符发回目标，也不能声称已重放验证): "
+            + "; ".join(privacy_redacted[:8])
+            + (" …" if len(privacy_redacted) > 8 else "")
+        )
     if counts:
         summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
         warns.append(f"replay 核实汇总: {summary} "
                      "(IDENTICAL/CONSISTENT=现实支持; DIVERGED=存疑; UNREACHABLE=够不着≠假; "
-                     "SKIPPED-*=写/破坏性/越界未自动重放, 留人工)")
+                     "SKIPPED-PRIVACY-REDACTED=需新鲜认证复核并逐条说明; 其余 SKIPPED-*=写/破坏性/越界未自动重放, 留人工)")
     return warns
 
 
@@ -293,15 +303,17 @@ def _artifact_keys(rec: dict) -> set:
     return out
 
 
-def _replay_unacked_findings(run_dir: Path, results: list[dict]) -> list[str]:
-    """把每条 DIVERGED 录像【绑到它支撑的已确认 E- 发现】(录像 <artifact>.replay.json ↔ 该 artifact,
+def _replay_unacked_findings(run_dir: Path, results: list[dict],
+                             verdicts: set[str] | None = None) -> list[str]:
+    """把指定异常/不可重放 verdict 的录像【绑到它支撑的已确认 E- 发现】(录像 <artifact>.replay.json ↔ 该 artifact,
     全名匹配见 _artifact_keys), 列出未 re-adjudication 的 E-id。只对【承重】分歧较真: 无确认 E- 支撑的
     录像分歧不拦; 该 E- 条目自己有 `- Replay:` = 已处理(逐条目判, 非全局计数, 不会被别处/模板误清)。
     同一产物被多条确认发现引用时, 每条未自带 ack 的都报(不靠 next 只取第一条 → 防遮蔽)。"""
+    verdicts = verdicts or {"DIVERGED"}
     recs = [r for r in parse_evidence(run_dir) if r["confirmed"]]
     unacked: list[str] = []
     for r in results:
-        if r.get("verdict") != "DIVERGED":
+        if r.get("verdict") not in verdicts:
             continue
         key = re.sub(r"\.replay\.json$", "",
                      str(r.get("file", "")).replace("\\", "/").split("/")[-1], flags=re.I).lower()
@@ -316,8 +328,8 @@ def _replay_unacked_findings(run_dir: Path, results: list[dict]) -> list[str]:
 def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:
     """--replay-verify(断-1): 收口前自动重放核实, 把 replay 从孤岛焊进收口闭环。调 replay.replay_run
     (走 guard / target.md 授权 scope / 幂等 GET 才重放 / DELETE 永不 / 写默认 skip)。慢+默认关。
-    返回 (warns, errors): DIVERGED 默认软警; 但【已终版报告 + DIVERGED + 未 re-adjudication】升硬门
-    (errors), 堵'跑了重放却放过存疑证据'。仍 opt-in —— 没传 --replay-verify / 没 DIVERGED 都不触发。"""
+    返回 (warns, errors): DIVERGED/PRIVACY-REDACTED 默认软警; 但【已终版报告 + 承重录像未逐条
+    re-adjudication】升硬门(errors)，堵'跑了重放却放过存疑/不可重放证据'。仍 opt-in。"""
     if _replay is None:
         return (["replay 核实跳过: 无法加载 replay 模块(同目录 tools/replay.py 缺失?)"], [])
     recs = list(run_dir.glob("**/*.replay.json"))
@@ -339,13 +351,24 @@ def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:
     warns = _summarize_replay(results)
     errors: list[str] = []
     if _report_is_final(run_dir):
-        unacked = _replay_unacked_findings(run_dir, results)
+        unacked = _replay_unacked_findings(run_dir, results, {"DIVERGED"})
+        privacy_unacked = _replay_unacked_findings(
+            run_dir, results, {"SKIPPED-PRIVACY-REDACTED"}
+        )
         if unacked:
             errors.append(
                 "收口硬门(replay 分歧未处理): --replay-verify 对 " + ", ".join(unacked) + " 的录像得 "
                 "DIVERGED 且 report 终版, 但这些 E- 条目无 `- Replay:` re-adjudication —— 跑了重放却放过"
                 "存疑证据 = 静默收口。逐条处理: 降级该发现(<0.8), 或在该 E- 条目加 `- Replay:` 说明为何"
                 "分歧后结论仍成立。(replay 仍 opt-in; 不强制重放、不自动否定发现)")
+        if privacy_unacked:
+            errors.append(
+                "收口硬门(replay 隐私脱敏未处理): --replay-verify 对 "
+                + ", ".join(privacy_unacked)
+                + " 的录像得 SKIPPED-PRIVACY-REDACTED 且 report 终版，但这些 E- 条目无 "
+                  "`- Replay:` 说明。脱敏录像不能重放认证秘密，也不能算已复核；逐条用当前授权会话做"
+                  "新鲜 guarded replication/Control，引用新产物，并在 `- Replay:` 记录复核路径。"
+            )
     return (warns, errors)
 
 
@@ -3466,6 +3489,12 @@ def _selftest() -> int:
          _replay_unacked_findings(d14, [{"file": "evidence/orphan.html.replay.json", "verdict": "DIVERGED"}]) == []),
         ("replay 绑定: 无 DIVERGED -> 空(opt-in/目标变更不罚)",
          _replay_unacked_findings(d14, [{"file": "evidence/sqli.html.replay.json", "verdict": "IDENTICAL"}]) == []),
+        ("replay 隐私脱敏绑定: 未逐条说明的承重发现需复核",
+         _replay_unacked_findings(
+             d14,
+             [{"file": "evidence/xss.html.replay.json", "verdict": "SKIPPED-PRIVACY-REDACTED"}],
+             {"SKIPPED-PRIVACY-REDACTED"},
+         ) == ["E-2"]),
     ]
     # bare-stem 命名也兼容(产物 shot ↔ shot.replay.json)
     d16 = Path(tempfile.mkdtemp())
@@ -3621,6 +3650,7 @@ def _selftest() -> int:
         {"verdict": "IDENTICAL", "method": "GET", "url": "http://x/a"},
         {"verdict": "DIVERGED", "method": "GET", "url": "http://x/b", "old_status": 200, "new_status": 404},
         {"verdict": "SKIPPED-WRITE", "method": "POST", "url": "http://x/c"},
+        {"verdict": "SKIPPED-PRIVACY-REDACTED", "method": "GET", "url": "http://x/private"},
     ])
     rv_text = "\n".join(rv)
     d_replay_env = Path(tempfile.mkdtemp())
@@ -3639,6 +3669,7 @@ def _selftest() -> int:
         globals()["_replay"] = old_replay_mod
     checks += [
         ("replay 汇总: DIVERGED 升显著警告", any("DIVERGED" in w and "http://x/b" in w for w in rv)),
+        ("replay 汇总: 隐私脱敏不冒充已重放", any("PRIVACY-REDACTED" in w and "http://x/private" in w for w in rv)),
         ("replay 汇总: 含计数汇总行", "IDENTICAL=1" in rv_text and "SKIPPED-WRITE=1" in rv_text),
         ("replay 汇总: 全 IDENTICAL 无 DIVERGED 警告",
          not any("证据存疑" in w for w in _summarize_replay([{"verdict": "IDENTICAL", "method": "GET", "url": "http://x/a"}]))),

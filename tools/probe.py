@@ -43,6 +43,8 @@ from harness.guard import (RateLimiter, AuthFailCounter, cap_body,  # noqa: E402
                            RateBudgetExceeded, BruteforceLock,
                            HostHealth, HostBackoff, SessionBudget, SessionTripped,
                            MIN_STATIC_ASSET_BYTES)
+from harness import privacy as privacymod  # noqa: E402
+from harness.privacy import OutboundPrivacyError  # noqa: E402
 from harness import proxy as proxymod  # noqa: E402  渗透流量走交战代理(模型调用不走)
 
 # Emit UTF-8 regardless of the OS locale, so this tool's JSON (ensure_ascii=False,
@@ -98,7 +100,40 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _opener(no_redirect: bool = False) -> urllib.request.OpenerDirector:
+class _PrivacyRedirect(urllib.request.HTTPRedirectHandler):
+    """Validate every redirect and never forward auth secrets across origins."""
+
+    def __init__(self, *, allow_sensitive_auth: bool = False,
+                 allow_legacy_cleanup: bool = False):
+        super().__init__()
+        self.allow_sensitive_auth = allow_sensitive_auth
+        self.allow_legacy_cleanup = allow_legacy_cleanup
+
+    @staticmethod
+    def _origin(url: str) -> tuple[str, str, int | None]:
+        parsed = urlparse(url)
+        return parsed.scheme.lower(), (parsed.hostname or "").lower(), parsed.port
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is None:
+            return None
+        if self._origin(req.full_url) != self._origin(redirected.full_url):
+            for mapping in (redirected.headers, redirected.unredirected_hdrs):
+                for key in list(mapping):
+                    if key.lower() in privacymod.AUTH_HEADER_NAMES:
+                        mapping.pop(key, None)
+        privacymod.validate_outbound_request(
+            redirected.get_method(), redirected.full_url,
+            {**redirected.unredirected_hdrs, **redirected.headers}, redirected.data,
+            allow_sensitive_auth=self.allow_sensitive_auth,
+            allow_legacy_cleanup=self.allow_legacy_cleanup,
+        )
+        return redirected
+
+
+def _opener(no_redirect: bool = False, *, allow_sensitive_auth: bool = False,
+            allow_legacy_cleanup: bool = False) -> urllib.request.OpenerDirector:
     # urllib_proxy_handlers 返回【完整连接 handler(含带 _CTX 的 HTTPS handler)】。这里【不要】再自己加
     # HTTPSHandler —— 否则普通 HTTPSHandler 会和 socks handler 抢 https, socks 连不上时悄悄走直连泄真实 IP
     # (实测坏代理仍回 200 的坑)。_PROXY 仅是 --proxy 覆盖; 内部 resolve() 让 import probe.send 的工具
@@ -106,6 +141,11 @@ def _opener(no_redirect: bool = False) -> urllib.request.OpenerDirector:
     handlers: list = list(proxymod.urllib_proxy_handlers(_PROXY, ssl_context=_CTX))
     if no_redirect:
         handlers.append(_NoRedirect())          # build_opener 用它替换默认 HTTPRedirectHandler
+    else:
+        handlers.append(_PrivacyRedirect(
+            allow_sensitive_auth=allow_sensitive_auth,
+            allow_legacy_cleanup=allow_legacy_cleanup,
+        ))
     return urllib.request.build_opener(*handlers)
 
 
@@ -457,7 +497,19 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
          retry: int = 0, retry_wait: float = 1.5,
          want_headers: bool = False, no_redirect: bool = False,
          byte_range: str | None = None, save_chunks: bool = False,
-         chunk_size: int = guardmod.MAX_BODY_BYTES) -> dict:
+         chunk_size: int = guardmod.MAX_BODY_BYTES,
+         allow_sensitive_auth: bool = False,
+         allow_legacy_cleanup: bool = False) -> dict:
+    req_headers = {"User-Agent": UA, **headers}
+    if byte_range and not any(k.lower() == "range" for k in req_headers):
+        req_headers["Range"] = _range_header_value(byte_range)
+    # Privacy is a pre-I/O boundary.  Reject generated project/operator identity
+    # and real PII before rate state mutates or an opener can touch the target.
+    privacymod.validate_outbound_request(
+        method, url, req_headers, data,
+        allow_sensitive_auth=allow_sensitive_auth,
+        allow_legacy_cleanup=allow_legacy_cleanup,
+    )
     host = urlparse(url).hostname or "unknown"
     afc = AuthFailCounter()
     if auth_key:
@@ -467,15 +519,16 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     sb = SessionBudget()
     sb.check()                         # 整场量熔断: 冷却期直接 abort(跨 host 总量/外渗)
 
-    req_headers = {"User-Agent": UA, **headers}
-    if byte_range and not any(k.lower() == "range" for k in req_headers):
-        req_headers["Range"] = _range_header_value(byte_range)
     req = urllib.request.Request(url=url, method=method.upper(),
                                  data=data, headers=req_headers)
     summary: dict = {"method": method.upper(), "url": url}
     if byte_range:
         summary["range"] = _header_value(req_headers, "Range")
-    opener = _opener(no_redirect)
+    opener = _opener(
+        no_redirect,
+        allow_sensitive_auth=allow_sensitive_auth,
+        allow_legacy_cleanup=allow_legacy_cleanup,
+    )
     last_err: str | None = None
     raw = b""
     status = 0
@@ -500,6 +553,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
             cookie_list = (e.headers.get_all("Set-Cookie") if e.headers else None) or []
             last_err = None
             break
+        except OutboundPrivacyError:
+            raise
         except Exception as e:
             last_err = str(e)
             if attempt < retry:
@@ -594,20 +649,32 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         if len(body) > 500:
             print(f"[probe] saved {len(body)} bytes → {save}  (snippet covers {summary['snippet_pct']}% only — read the saved file for full content)",
                   file=sys.stderr)
-        # 操作录像(.replay.json): 完整请求 + 响应摘要, 让 certainty>=0.8 的证据可被【重放核实】而非
-        # 只信描述(B1: 把造假从"P 张图"抬到"伪造自洽的请求+响应+sha1")。响应只存摘要(status/全
-        # sha1/len/headers/snippet) —— 全 body 已在 saved 文件, 不重复 dump(守模块"never dumps"原则)。
+        # 操作录像(.replay.json): 请求字段先脱敏；Cookie/Authorization/个人字段只留
+        # 不可逆短 hash。发生脱敏的录像会标成 replayable=false，replay.py 不会把占位符
+        # 发给目标。响应只存摘要(status/全 sha1/len/脱敏 headers/snippet)。
+        safe_request, request_privacy = privacymod.sanitize_request_record(
+            method, url, req_headers, data,
+            auth_exception=allow_sensitive_auth,
+        )
+        safe_response, response_redactions = privacymod.sanitize_response_record(
+            status, resp_headers, _snippet_val,
+        )
+        safe_snippet_encoding = _snippet_enc if not any(
+            item.startswith("response.body") for item in response_redactions
+        ) else None
         replay = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "request": {"method": method.upper(), "url": url,
-                        "headers": dict(headers),   # 存完整(含 Cookie/Authorization): 重放认证请求需原值;
-                        "body": data.decode("utf-8", "replace") if data else None},  # 目标非机密(能上云=不机密), 不脱敏
+            "request": safe_request,
             "response": {"status": status, "len": len(raw),
                          "sha1": hashlib.sha1(raw).hexdigest(),
                          "ctype": resp_headers.get("Content-Type", ""),
-                         "headers": resp_headers,   # 完整响应头(含 Set-Cookie), 供重放/核对
-                         "snippet": _snippet_val,
-                         **_snippet_kwargs(_snippet_enc)},
+                         "headers": safe_response["headers"],
+                         "snippet": safe_response["body_preview"],
+                         **_snippet_kwargs(safe_snippet_encoding)},
+            "privacy": {
+                **request_privacy,
+                "response_redactions": response_redactions,
+            },
             "saved_body": save,
         }
         if chunk_info:
@@ -641,6 +708,42 @@ def _selftest() -> int:
     import threading
 
     checks: list[tuple[str, bool]] = []
+    redirect = _PrivacyRedirect()
+    original = urllib.request.Request(
+        "https://a.example.test/start",
+        headers={"Cookie": "session=secret", "Authorization": "Bearer secret", "X-Test": "ok"},
+    )
+    cross = redirect.redirect_request(
+        original, None, 302, "Found", {}, "https://b.example.test/next"
+    )
+    cross_headers = {**cross.unredirected_hdrs, **cross.headers} if cross else {}
+    checks.append(("cross-origin redirect strips Cookie/Authorization",
+                   cross is not None
+                   and not any(k.lower() in privacymod.AUTH_HEADER_NAMES for k in cross_headers)
+                   and cross_headers.get("X-test") == "ok"))
+    same = redirect.redirect_request(
+        original, None, 302, "Found", {}, "https://a.example.test/next"
+    )
+    same_headers = {**same.unredirected_hdrs, **same.headers} if same else {}
+    checks.append(("same-origin redirect preserves required auth",
+                   same is not None
+                   and any(k.lower() == "cookie" for k in same_headers)
+                   and any(k.lower() == "authorization" for k in same_headers)))
+    second_cross = redirect.redirect_request(
+        cross, None, 302, "Found", {}, "https://c.example.test/final"
+    ) if cross else None
+    second_headers = ({**second_cross.unredirected_hdrs, **second_cross.headers}
+                      if second_cross else {})
+    checks.append(("multi-hop redirects cannot regain stripped auth",
+                   second_cross is not None
+                   and not any(k.lower() in privacymod.AUTH_HEADER_NAMES for k in second_headers)))
+    try:
+        redirect.redirect_request(
+            original, None, 302, "Found", {}, "https://b.example.test/?marker=xunji-proof"
+        )
+        checks.append(("redirect target privacy is revalidated", False))
+    except OutboundPrivacyError:
+        checks.append(("redirect target privacy is revalidated", True))
     with selftest_isolation():
         class H(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -695,6 +798,14 @@ def _selftest() -> int:
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
+                if self.path.startswith("/privacy-response"):
+                    b = b'{"token":"response-secret","email":"person@real.example.cn"}'
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                    return
                 b = b"ok-body"
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -746,9 +857,25 @@ def _selftest() -> int:
                                rj["response"]["status"] == 200 and len(rj["response"]["sha1"]) >= 40))
                 checks.append(("summary.sha1 == replay.sha1 前缀(截断一致)",
                                d.get("sha1") == rj["response"]["sha1"][:12]))
-                checks.append(("请求头完整存(Cookie 原值在, 供重放认证请求)", "sess=secret123" in hreq))
-                checks.append(("响应头完整存(Set-Cookie 原值在, 不脱敏)", "Identity.External=" in hresp))
+                checks.append(("replay 请求 Cookie 已脱敏且原值不落盘",
+                               "<redacted:header:" in hreq and "sess=secret123" not in hreq))
+                checks.append(("replay 响应 Set-Cookie 已脱敏",
+                               "<redacted:header:" in hresp and "Identity.External=" not in hresp))
+                checks.append(("含认证脱敏的 replay 标为不可重放",
+                               rj.get("privacy", {}).get("replayable") is False))
                 checks.append(("summary 引用 replay 路径", bool(d.get("replay"))))
+            private_response = Path(tempfile.mkdtemp()) / "response.json"
+            send("GET", f"http://127.0.0.1:{port}/privacy-response", {}, None, None, 5,
+                 save=str(private_response))
+            private_replay = Path(str(private_response) + ".replay.json")
+            if private_replay.is_file():
+                private_record = private_replay.read_text(encoding="utf-8")
+                checks.append(("replay response snippet redacts returned secret and PII",
+                               "response-secret" not in private_record
+                               and "person@real.example.cn" not in private_record
+                               and "response.body" in private_record))
+            else:
+                checks.append(("replay response snippet redacts returned secret and PII", False))
             diff_base = Path(tempfile.mkdtemp()) / "boolean.html"
             diff_b = Path(_diff_side_save(str(diff_base), "b"))
             da = send("GET", f"http://127.0.0.1:{port}/?v=true", {}, None, None, 5,
@@ -971,6 +1098,12 @@ def main() -> int:
     ap.add_argument("-H", "--header", action="append", default=[], help="k: v")
     ap.add_argument("--auth-key", default=None,
                     help="endpoint key for the brute-force lock counter")
+    ap.add_argument("--allow-sensitive-auth", action="store_true",
+                    help="explicit exception for personal data required in an authentication body; "
+                         "internal project/local identity markers remain blocked and replay evidence is redacted")
+    ap.add_argument("--allow-legacy-cleanup", action="store_true",
+                    help="allow only a legacy xunji_* proof-artifact reference during an operator-approved cleanup; "
+                         "the safety hook still requires explicit yes")
     ap.add_argument("--timeout", type=int, default=20)
     ap.add_argument("--tag", default=None, help="label recorded with the result")
     ap.add_argument("--save", default=None,
@@ -1043,7 +1176,8 @@ def main() -> int:
                 runs = [send("GET", url, headers, None, args.auth_key,
                              args.timeout, save if index == 0 else None,
                              args.retry, args.retry_wait,
-                             args.headers, byte_range=args.byte_range)
+                             args.headers, byte_range=args.byte_range,
+                             allow_sensitive_auth=args.allow_sensitive_auth)
                         for index in range(n)]
                 hs = sorted({r.get("sha1") for r in runs})
                 return runs[0], len(hs) == 1, hs
@@ -1078,7 +1212,9 @@ def main() -> int:
                                            args.save, args.retry, args.retry_wait,
                                            args.headers, args.no_redirect,
                                            args.byte_range, args.save_chunks,
-                                           args.chunk_size)}
+                                           args.chunk_size,
+                                           args.allow_sensitive_auth,
+                                           args.allow_legacy_cleanup)}
             if preflight_meta:
                 out["preflight"] = preflight_meta
     except SessionTripped as e:
@@ -1089,6 +1225,8 @@ def main() -> int:
         out = {"error": f"brute-force lock: {e}"}
     except HostBackoff as e:
         out = {"error": f"host-backoff: {e}"}
+    except OutboundPrivacyError as e:
+        out = {"error": f"outbound-privacy: {e}"}
 
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0 if "error" not in out else 1

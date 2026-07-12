@@ -30,21 +30,62 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness.guard import RateLimiter, HostHealth, HostBackoff  # noqa: E402
+from harness import privacy as privacymod  # noqa: E402
 from harness import proxy as proxymod  # noqa: E402  扫描器流量走交战代理(模型调用不走)
+
+NEUTRAL_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 # defaults chosen to stay inside proof-only verification + the rate ceiling
 SQLMAP_SAFE = ["--batch", "--level=1", "--risk=1",
                "--technique=BEUST",  # blind/error/union/stacked? -> drop S below
-               "--threads=1", "--delay=1", "--timeout=20", "--banner"]
+               "--threads=1", "--delay=1", "--timeout=20", "--ignore-redirects",
+               f"--user-agent={NEUTRAL_UA}", "--banner"]
 # stacked queries (S) can be state-changing; keep proof-only techniques:
 SQLMAP_TECH = "--technique=BEU"
 NUCLEI_SAFE = ["-rate-limit", "30", "-concurrency", "5", "-timeout", "15",
                "-severity", "info,low,medium,high,critical",
-               "-exclude-tags", "dos,intrusive,fuzz"]
+               "-exclude-tags", "dos,intrusive,fuzz", "-header", f"User-Agent: {NEUTRAL_UA}"]
 
 FORBIDDEN_SQLMAP = ("--dump", "--os-shell", "--os-pwn", "--os-cmd", "--file-write",
                     "--file-dest", "--sql-shell", "--priv-esc")
 FORBIDDEN_NUCLEI_TAGS = ("dos", "intrusive", "fuzz")
+FORBIDDEN_NUCLEI_TEMPLATE_FLAGS = ("-t", "-templates", "-template", "-ud", "-user-data")
+
+
+def _privacy_input_error(tool: str, target: str, extra: list[str]) -> str:
+    try:
+        privacymod.validate_outbound_request("GET", target, {}, None)
+    except privacymod.OutboundPrivacyError as e:
+        return str(e)
+    extra_reason = privacymod.privacy_reason(" ".join(extra), allow_generic_pii=True)
+    if extra_reason:
+        return f"outbound privacy blocked scanner arguments: {extra_reason}"
+    if tool == "nuclei" and any(
+            token == flag or token.startswith(flag + "=")
+            for token in extra for flag in FORBIDDEN_NUCLEI_TEMPLATE_FLAGS):
+        return ("custom nuclei templates/user-data are not inspectable per request; "
+                "use the vetted default template set or author-and-handoff")
+    return ""
+
+
+def _selftest() -> int:
+    checks = [
+        ("neutral fixed scanner UA", "xunji" not in NEUTRAL_UA.lower()),
+        ("project marker in scanner URL denied",
+         bool(_privacy_input_error("sqlmap", "https://target.test/?marker=xunji-proof", []))),
+        ("neutral scanner target allowed",
+         _privacy_input_error("sqlmap", "https://target.test/?id=1", []) == ""),
+        ("custom nuclei template denied",
+         bool(_privacy_input_error("nuclei", "https://target.test/", ["-t", "custom.yaml"]))),
+        ("project marker in extra args denied",
+         bool(_privacy_input_error("sqlmap", "https://target.test/", ["--prefix=xunji-proof"]))),
+    ]
+    bad = [name for name, ok in checks if not ok]
+    for name, ok in checks:
+        print(("ok   " if ok else "FAIL ") + name)
+    print("scan selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+    return 0 if not bad else 1
 
 
 def run(cmd: list[str], run_dir: str | None = None, name: str | None = None,
@@ -99,14 +140,23 @@ def main() -> int:
                     help="run 目录如 runs/<target>; 给则将扫描输出落 evidence/<name>.scan.json + .scan.txt")
     ap.add_argument("--name", default=None,
                     help="证据名称(如 E-xxx_scan); 需 --run。默认用 <tool>_<host>")
-    ap.add_argument("tool", choices=["sqlmap", "nuclei"])
-    ap.add_argument("target")
+    ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("tool", nargs="?", choices=["sqlmap", "nuclei"])
+    ap.add_argument("target", nargs="?")
     ap.add_argument("extra", nargs=argparse.REMAINDER,
                     help="extra args incl. -flags (vetted against the forbidden list)")
     args = ap.parse_args()
+    if args.selftest:
+        return _selftest()
+    if not args.tool or not args.target:
+        ap.error("tool and target are required (or use --selftest)")
 
     proxy = proxymod.resolve(args.proxy)   # 交战代理(XUNJI_PROXY/proxy.conf/--proxy); required 时没配 fail-closed
     host = urlparse(args.target).hostname or args.target
+    privacy_error = _privacy_input_error(args.tool, args.target, args.extra)
+    if privacy_error:
+        print(f"[scan] refused: {privacy_error}", file=sys.stderr)
+        return 5
     try:
         # 自熔断: 拒绝对已在退避冷却(连续失败/被目标限流)的 host 发起扫描器 —— 扫描器
         # 请求量大, 对正在封锁我的 host launch nuclei/sqlmap 只会加深封锁(本次教训)

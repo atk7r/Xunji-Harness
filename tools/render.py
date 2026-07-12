@@ -45,6 +45,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness.guard import (RateLimiter, cap_body, RateBudgetExceeded,  # noqa: E402
                            HostHealth, HostBackoff)
+from harness import privacy as privacymod  # noqa: E402
 from harness import proxy as proxymod  # noqa: E402  渗透流量走交战代理(模型调用不走)
 
 try:
@@ -106,6 +107,16 @@ def build_cookies(url: str, headers: list[str], cfile: str | None) -> list[dict]
     return out
 
 
+def _validate_browser_request(method: str, url: str, headers: dict,
+                              body: bytes | str | None, *,
+                              allow_sensitive_auth: bool = False) -> None:
+    """Browser sessions may carry explicit auth PII, never internal/local identity."""
+    privacymod.validate_outbound_request(
+        method, url, headers, body,
+        allow_sensitive_auth=allow_sensitive_auth,
+    )
+
+
 def _extract_scripts_and_forms(page) -> tuple[list[str], list[dict], str]:
     """Extract script src URLs, form structures, and visible text from the page.
 
@@ -141,12 +152,15 @@ def _extract_scripts_and_forms(page) -> tuple[list[str], list[dict], str]:
 def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
            cookies: list[dict] | None = None, eval_js: str | None = None,
            eval_wait_ms: int = 0, screenshot: bool = False,
-           wait_sec: int = 0, save_html: str | None = None) -> dict:
+           wait_sec: int = 0, save_html: str | None = None,
+           allow_sensitive_auth: bool = False) -> dict:
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:  # pragma: no cover
         return {"error": f"playwright unavailable: {e}. Run with the venv python."}
 
+    _validate_browser_request("GET", url, {}, None,
+                              allow_sensitive_auth=allow_sensitive_auth)
     host = urlparse(url).hostname or "unknown"
     hh = HostHealth()
     hh.check(host)            # 自熔断: host 在退避冷却期则抛 HostBackoff
@@ -167,6 +181,31 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
         if PROXY:
             ctx_kwargs["proxy"] = {"server": PROXY}
         ctx = browser.new_context(**ctx_kwargs)
+        privacy_blocks: list[str] = []
+
+        def route_with_privacy(route, request) -> None:
+            try:
+                try:
+                    request_headers = request.all_headers()
+                except Exception:
+                    request_headers = request.headers
+                try:
+                    request_body = request.post_data_buffer
+                except Exception:
+                    request_body = request.post_data
+                _validate_browser_request(
+                    request.method, request.url, request_headers, request_body,
+                    allow_sensitive_auth=allow_sensitive_auth,
+                )
+            except privacymod.OutboundPrivacyError as e:
+                privacy_blocks.append(str(e))
+                route.abort()
+                return
+            route.continue_()
+
+        # Intercept before I/O, including page JS and --eval fetch/XHR.  This is
+        # the browser counterpart to probe.send's privacy preflight.
+        ctx.route("**/*", route_with_privacy)
         if cookies:
             # inject an already-held session so authenticated pages render instead
             # of 302-ing to login (read-only: we navigate, we do not submit)
@@ -255,6 +294,8 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
                 except Exception as e:
                     result["eval_error"] = str(e)
                 page.wait_for_timeout(700)  # let eval-issued requestfinished events flush into `requests`
+            if privacy_blocks:
+                raise privacymod.OutboundPrivacyError(privacy_blocks[0])
             # keep only app/api-ish requests (drop static asset noise) for grounding. Captured AFTER
             # --eval so eval-issued (browser-replay) requests appear in the audit trail.
             api = [r for r in requests
@@ -305,6 +346,17 @@ def _selftest() -> int:
     checks.append(("render accepts save_html", "save_html" in sig))
     checks.append(("provenance marks target content untrusted",
                    provenance()["source"] == "target-content" and provenance()["trust"] == "untrusted"))
+    try:
+        _validate_browser_request("POST", "https://x.example/api", {}, "marker=xunji-proof")
+        checks.append(("browser privacy route blocks project marker", False))
+    except privacymod.OutboundPrivacyError:
+        checks.append(("browser privacy route blocks project marker", True))
+    try:
+        _validate_browser_request("POST", "https://x.example/login", {}, "email=person@real.example.cn",
+                                  allow_sensitive_auth=True)
+        checks.append(("browser permits required auth PII but not internal identity", True))
+    except privacymod.OutboundPrivacyError:
+        checks.append(("browser permits required auth PII but not internal identity", False))
 
     # _extract_scripts_and_forms returns correct shape even on empty
     scripts, forms, vtext = _extract_scripts_and_forms(_FakePage())
@@ -383,6 +435,9 @@ def main() -> int:
     ap.add_argument("--cookies-file", default=None,
                     help="从 JSON 读 cookie:render.py 导出的 cookies.json(playwright 列表)"
                          "或 {name:value} 字典;与 --cookie 合并")
+    ap.add_argument("--allow-sensitive-auth", action="store_true",
+                    help="explicit exception for personal data required by the intended target's authentication flow; "
+                         "internal project/local identity remains blocked")
     ap.add_argument("--screenshot", action="store_true",
                     help="take a full-page PNG screenshot (saved to out dir as page.png)")
     ap.add_argument("--save", default=None,
@@ -414,11 +469,14 @@ def main() -> int:
         res = render(args.url, out_dir, args.wait, args.timeout, cookies,
                      eval_js=eval_js, eval_wait_ms=args.eval_wait,
                      screenshot=args.screenshot, wait_sec=args.wait_sec,
-                     save_html=save_html)
+                     save_html=save_html,
+                     allow_sensitive_auth=args.allow_sensitive_auth)
     except RateBudgetExceeded as e:
         res = {"error": f"rate-limited: {e}"}
     except HostBackoff as e:
         res = {"error": f"host-backoff: {e}"}
+    except privacymod.OutboundPrivacyError as e:
+        res = {"error": f"outbound-privacy: {e}"}
 
     # Print a clean JSON summary matching the probe.py pattern
     summary = {

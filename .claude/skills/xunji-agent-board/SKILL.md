@@ -43,6 +43,11 @@ must not be treated as the Root driver's instruction source.
   `workers.py finish <run> <agent> --status <done|blocked|failed|abandoned>`.
   Closure is blocked while any assigned Agent remains non-terminal.
 - All Agents share the same hook, guard state, request budget, and host breakers.
+- Root and Agents must keep generated project/run/Agent/operator identity and real
+  personal data out of outbound URL payloads, headers, bodies, multipart
+  names/content, and target writes. Use neutral synthetic values. Required auth
+  Cookie/Authorization is destination-bound; personal auth-body fields require
+  the guarded explicit auth exception.
 - Target-side temp artifacts created by Root or Agents must use neutral
   `tmp-YYYYMMDD-<6-12hex>`, `diag-YYYYMMDD-<6-12hex>`, or
   `proof-YYYYMMDD-<6-12hex>` names. Never include `xunji`, run dirs, Agent ids,

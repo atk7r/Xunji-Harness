@@ -1,0 +1,8 @@
+multipart/form-data; boundary=----proof-20260713-e5f6a7b8
+
+------proof-20260713-e5f6a7b8
+Content-Disposition: form-data; name="file"; filename="proof-20260713-e5f6a7b8.txt"
+Content-Type: text/plain
+
+proof-20260713-e5f6a7b8
+------proof-20260713-e5f6a7b8--

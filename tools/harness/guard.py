@@ -24,6 +24,11 @@ import os
 import time
 from pathlib import Path
 
+try:
+    from . import privacy as privacymod
+except ImportError:  # direct execution: python tools/harness/guard.py
+    import privacy as privacymod  # type: ignore
+
 try:                       # Windows
     import msvcrt
 except ImportError:
@@ -445,15 +450,19 @@ class RequestRecorder:
     driver 的 script 攻击和 probe.py 证据采集是两条分离路径，导致 codex 复审时
     无法复核关键攻击行为。
 
-    使用方式（driver 侧）:
+    使用方式（driver 侧；validate 必须在网络 I/O 前调用）:
         rec = RequestRecorder(run_dir)
+        rec.validate(method="POST", url="https://target/login",
+                     request_body="user=test@example.com")
         rec.record(
-            method="POST", url="https://target/login", request_body="user=admin",
+            method="POST", url="https://target/login", request_body="user=test@example.com",
             response_status=200, response_body="登录失败", response_headers={"Content-Type": "text/html"},
             artifact_name="login_attempt_1"
         )
 
-    probe.py 内部已通过 --save 自动生成 .replay.json; 此层是给裸 script 的桥接。
+    probe.py 内部已通过 --save 自动生成 .replay.json; 此层是给操作者执行的
+    author-and-handoff script / framework integration 的桥接。Claude driver 不因
+    代码里出现 validate 名字就获得自定义网络脚本 auto-execution 权限。
     record() 对每个 artifact_name 递增编号，避免覆盖。"""
 
     def __init__(self, run_dir: str | Path):
@@ -461,6 +470,16 @@ class RequestRecorder:
         self.evidence_dir = self.run_dir / "evidence"
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         self._counter: dict[str, int] = {}
+
+    @staticmethod
+    def validate(method: str, url: str, request_body: str = "",
+                 request_headers: dict | None = None, *,
+                 allow_sensitive_auth: bool = False) -> None:
+        """Pre-I/O privacy check for custom scripts using this recorder."""
+        privacymod.validate_outbound_request(
+            method, url, request_headers or {}, request_body,
+            allow_sensitive_auth=allow_sensitive_auth,
+        )
 
     def record(
         self,
@@ -493,16 +512,26 @@ class RequestRecorder:
         filename = f"{base}.replay.json" if idx == 1 else f"{base}_{idx}.replay.json"
 
         body_hash = hashlib.sha256(response_body.encode("utf-8", errors="replace")).hexdigest()[:16]
+        safe_request, request_privacy = privacymod.sanitize_request_record(
+            method, url, request_headers or {}, request_body,
+        )
+        safe_response, response_redactions = privacymod.sanitize_response_record(
+            response_status, response_headers, response_body[:500],
+        )
         record = {
-            "method": method,
-            "url": url,
-            "request_body": request_body,
-            "request_headers": request_headers or {},
+            "method": safe_request["method"],
+            "url": safe_request["url"],
+            "request_body": safe_request["body"],
+            "request_headers": safe_request["headers"],
             "response_status": response_status,
             "response_body_sha256": body_hash,
-            "response_body_preview": response_body[:500] if response_body else "",
-            "response_headers": response_headers or {},
-            "note": note,
+            "response_body_preview": safe_response["body_preview"],
+            "response_headers": safe_response["headers"],
+            "privacy": {
+                **request_privacy,
+                "response_redactions": response_redactions,
+            },
+            "note": privacymod.sanitize_text_for_log(note),
             "recorded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         out = self.evidence_dir / filename
@@ -522,8 +551,15 @@ if __name__ == "__main__":
     import tempfile
     d = Path(tempfile.mkdtemp())
     rr = RequestRecorder(d)
-    p = rr.record(method="POST", url="https://x/login", response_status=200,
-                  response_body="fail", artifact_name="test_login")
+    p = rr.record(
+        method="POST", url="https://x/login", response_status=200,
+        response_body='{"token":"response-secret","email":"person@real.example.cn"}',
+        response_headers={"Content-Type": "application/json"},
+        artifact_name="test_login",
+    )
     assert p.exists(), "recorder output missing"
     assert "test_login.replay.json" in str(p)
+    recorded = p.read_text(encoding="utf-8")
+    assert "response-secret" not in recorded, "response secret persisted in replay preview"
+    assert "person@real.example.cn" not in recorded, "response PII persisted in replay preview"
     print("RequestRecorder smoke-test OK")

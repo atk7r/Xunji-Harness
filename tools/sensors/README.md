@@ -19,4 +19,7 @@ Tools:
   container variants. It does not ship payload lists.
 - `blind_diff.py` samples baseline vs mutant URLs through `probe.send`.
 - `upload_probe.py` sends a harmless multipart proof object through `probe.send`
-  and can register cleanup obligations in `UploadRegistry`.
+  with a neutral unique marker/filename/boundary and can register cleanup
+  obligations in `UploadRegistry`. Custom marker/filename values must keep the
+  `proof-YYYYMMDD-<6-12hex>[.ext]` shape; the boundary uses
+  `----proof-YYYYMMDD-<6-12hex>` derived from that upload's marker.

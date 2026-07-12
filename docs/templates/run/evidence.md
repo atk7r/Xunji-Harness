@@ -20,6 +20,7 @@
 - Alternative explanation:
 - Certainty:
 - Replicated / Control: (conditional — required once this entry is confirmed; the replay or baseline that rules out the benign explanation)
+- Replay: (conditional — required when replay is DIVERGED or SKIPPED-PRIVACY-REDACTED; record downgrade or the fresh guarded replication/control, never claim a redacted placeholder was replayed)
 - Artifacts: (conditional — required once this entry is confirmed; the saved file/dir that proves it, e.g. `evidence/<name>.html`. Save with `probe --save NAME --run runs/<dir>`.)
 - Supports:
 - Refutes:

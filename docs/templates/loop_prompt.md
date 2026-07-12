@@ -122,6 +122,13 @@ skip Hunter and enter the appropriate phase instead.
 
 Guard-routed tools only.
 
+Before target I/O, keep generated project/run/Agent/operator identity and real
+personal data out of request paths/queries, headers, bodies, multipart
+names/content, and target writes. Use neutral unique
+`tmp/diag/proof-YYYYMMDD-<6-12hex>` values. Only required authentication PII may
+use the guarded explicit auth exception; a privacy-redacted replay is not a
+successful verification.
+
 ```bash
 {{PYTHON}} tools/workers.py suggest "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py plan "{{RUN_DIR}}"

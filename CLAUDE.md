@@ -85,6 +85,37 @@
   pending verification entries, aggregated subagent state, blockers, and next action.
   It never replaces visible phase markers or
   `loop_journal.py` phase-start/phase-end records.
+- **Target-facing privacy boundary:** Root and every Agent must keep generated
+  project/run/Agent/operator identity and real personal data out of outbound URL
+  paths/queries, headers, bodies, multipart names/content, and target writes. Use
+  neutral synthetic values. The operator-supplied destination hostname itself is
+  scope, not a generated marker; opaque Cookie/Authorization values required by that
+  destination are allowed but are redacted from replay evidence. Personal data
+  required in an authentication body needs the guarded explicit
+  `--allow-sensitive-auth` exception; URL userinfo credentials require the same
+  exception and are always hash-redacted in replay URLs. Replay response headers
+  and bounded response previews are also redacted before recording. Internal control names such as
+  `XUNJI_PROXY` may remain local; they must never be copied into request bytes.
+  Put operator/org-specific names or identifiers that have no reliable generic
+  shape in newline-separated `OUTBOUND_PRIVACY_DENY_VALUES`; the guard compares
+  them in memory and reports only the category, never the matched value.
+  Guarded redirects revalidate every hop and strip Cookie/Authorization whenever
+  scheme, host, or port changes. Raw redirect-following commands with auth are
+  blocked; use `probe`/`render` instead.
+  `scan.py` fixes a neutral browser User-Agent, checks target/extra arguments,
+  disables sqlmap redirects, and refuses custom nuclei templates/user-data because
+  the Python wrapper cannot inspect every request generated inside an external
+  scanner process.
+  The command gate covers HTTP(S), WebSocket(S), and FTP URL-bearing actions.
+  `XUNJI_PROXY` is operator-controlled trusted egress: the guard validates
+  driver-originated bytes before proxying, but a proxy that independently
+  rewrites/injects bytes must be audited or replaced rather than assumed safe.
+  If a target-native path/body legitimately contains a denied identity token,
+  do not encode around the rule: use an equivalent neutral route/proof or
+  author-and-handoff that exact exceptional request to the operator.
+  Generic target routes such as `/home/dashboard`, `/Users/settings`, and
+  `/runs/list` are not identity by shape alone; only the actual local home,
+  configured identity values, and dated framework-run identifiers are blocked.
 - **Target-side proof artifact naming / cleanup:** If a proof action must create
   a target-side temporary file or resource, use the neutral form
   `tmp-YYYYMMDD-<6-12hex>.<safe-ext>`, `diag-YYYYMMDD-<6-12hex>.<safe-ext>`, or
@@ -92,6 +123,19 @@
   names, Agent ids, worker ids, vuln names, exploit names, tool names, or internal
   project labels in target-side filenames/paths. Record the path/resource and
   creation evidence in the run state before relying on it.
+- Use a fixed **format**, not one constant filename: the random 6-12 hex suffix
+  prevents collisions and accidental overwrite. Raw file-backed curl uploads
+  whose bytes cannot be inspected are blocked; use `tools/sensors/upload_probe.py`
+  for driver auto-execution. URL-bearing custom target scripts are
+  author-and-handoff because a hook cannot prove a named validation function is
+  actually called before every socket write; merely mentioning
+  `RequestRecorder.validate(...)` never unlocks auto-execution.
+  `tools/exploit.py` performs all HTTP through guarded `probe.send`; the optional
+  `client_graybox.py` sensor is passive local-file/port-list ingestion and emits no
+  target traffic.
+  `.replay.json` stores hashed redactions rather than reusable auth/PII; a
+  `SKIPPED-PRIVACY-REDACTED` replay is not verification and needs a fresh guarded
+  replication plus an evidence-level `Replay:` explanation before final closure.
 - Cleanup is a state-changing target action. Deleting, overwriting, truncating,
   or hiding a target-side artifact/resource is never automatic: stop and ask the
   operator for explicit `yes`, then run only the exact cleanup that was approved.

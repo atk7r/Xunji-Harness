@@ -22,6 +22,15 @@ import re
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+try:
+    from harness import privacy as privacymod
+    _PRIVACY_IMPORT_ERROR = ""
+except Exception as _privacy_error:  # fail closed for target network commands below
+    privacymod = None  # type: ignore[assignment]
+    _PRIVACY_IMPORT_ERROR = type(_privacy_error).__name__
+
 RULES_PATH = Path(__file__).with_name("safety_rules.json")
 
 # Built-in fallback used if safety_rules.json is missing or unreadable, so the
@@ -38,7 +47,7 @@ DEFAULT_RULES = [
     {"category": "payment_transfer", "pattern": r"(-X\s*(POST|PUT|PATCH)|--data|\s-d\s)[^|;\n]*\b(transfer|withdraw|refund|payout)\b", "reason": "money-movement request"},
 ]
 
-TARGET_URL_RE = re.compile(r"(?:https?|ftp)://", re.IGNORECASE)
+TARGET_URL_RE = re.compile(r"(?:https?|wss?|ftp)://", re.IGNORECASE)
 
 # Neutral target-side temporary artifacts created by this framework must use this
 # shape. It gives the hook something precise to recognize without leaking project,
@@ -147,6 +156,15 @@ def extract_command(event: dict) -> str:
     return " \n ".join(parts)
 
 
+def _safe_audit_command(command: str) -> str:
+    try:
+        return (privacymod.sanitize_text_for_log(command)
+                if privacymod is not None else "<command redaction unavailable>")
+    except Exception:
+        # Preserve the event without raw bytes if redaction itself breaks.
+        return "<command omitted: redaction failed>"
+
+
 def audit(category: str, reason: str, command: str, decision: str = "DENY") -> None:
     """Append a HARD_STOP hit to the audit log. Best-effort: never let logging
     break the gate (a failed write must not change the deny decision)."""
@@ -154,8 +172,9 @@ def audit(category: str, reason: str, command: str, decision: str = "DENY") -> N
         log = Path(__file__).resolve().parents[2] / "tools" / "harness" / ".state" / "audit.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.datetime.now().isoformat(timespec="seconds")
+        safe_command = _safe_audit_command(command)
         with log.open("a", encoding="utf-8") as fh:
-            fh.write(f"{ts} | {decision} | {category} | {reason} | {command[:120]}\n")
+            fh.write(f"{ts} | {decision} | {category} | {reason} | {safe_command[:120]}\n")
     except Exception:
         pass
 
@@ -199,6 +218,20 @@ def cleanup_requires_ask(command: str) -> str:
     )
 
 
+def outbound_privacy_reason(command: str, *, allow_legacy_cleanup: bool = False) -> str:
+    """Return a category-only reason without echoing the matched private value."""
+    if privacymod is not None:
+        return privacymod.outbound_command_privacy_reason(
+            command, allow_legacy_cleanup=allow_legacy_cleanup
+        )
+    # If the shared privacy module cannot load, URL-bearing Bash actions are
+    # categorically uninspectable.  Fail closed instead of maintaining a second,
+    # inevitably incomplete list of network tools here.
+    if TARGET_URL_RE.search(command):
+        return f"privacy guard unavailable ({_PRIVACY_IMPORT_ERROR or 'unknown import error'})"
+    return ""
+
+
 def selftest() -> int:
     """Fail-closed self-check: prove the gate still denies known-bad commands and
     stays silent on known-good ones. Returns 0 if healthy, 1 if the gate is broken.
@@ -218,6 +251,11 @@ def selftest() -> int:
         '{"tool_name":"Bash","tool_input":{"command":"rm -rf /var/lib/mysql"}}',
         '{"tool_name":"Bash","tool_input":{"command":"sqlmap -u http://t/ --dump"}}',
         '{"tool_name":"Bash","tool_input":{"command":"mysql -e \'DROP DATABASE prod\'"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl https://t/ -d \'marker=xunji-proof\'"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"python tools/probe.py POST https://t/ --data \'mobile=13800138000\'"}}',
+        json.dumps({"tool_name": "Bash", "tool_input": {
+            "command": f"curl https://t/ -H 'X-Note: {Path.home()}/run.txt'"
+        }}),
     ]
     must_pass = [
         '{"tool_name":"Bash","tool_input":{"command":"curl -s https://t/api/x"}}',
@@ -226,6 +264,14 @@ def selftest() -> int:
         '{"tool_name":"Bash","tool_input":{"command":"rm -rf tmp/build"}}',
         '{"tool_name":"Bash","tool_input":{"command":"rm -f runs/old/cookies.txt"}}',
         '{"tool_name":"Bash","tool_input":{"command":"curl https://t/ # cleanup tmp-20260708-a1b2c3d4.txt"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"XUNJI_PROXY=socks5h://127.0.0.1:1080 python tools/probe.py GET https://t/"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"python tools/probe.py POST https://t/login --data \'email=person@real.example.cn\' --allow-sensitive-auth"}}',
+        # The operator-supplied destination may itself contain the project word;
+        # it is not generated proof data and must not be rewritten.
+        '{"tool_name":"Bash","tool_input":{"command":"curl https://xunji.example.test/"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl https://t/home/dashboard"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl https://t/Users/settings"}}',
+        '{"tool_name":"Bash","tool_input":{"command":"curl https://t/runs/list"}}',
     ]
     must_ask = [
         '{"tool_name":"Bash","tool_input":{"command":"curl -X DELETE https://t/uploads/tmp-20260708-a1b2c3d4.txt"}}',
@@ -239,6 +285,8 @@ def selftest() -> int:
     def classify(ev_text: str) -> str:
         cmd = extract_command(json.loads(ev_text))
         cleanup_reason = cleanup_requires_ask(cmd)
+        if outbound_privacy_reason(cmd, allow_legacy_cleanup=bool(cleanup_reason)):
+            return "deny"
         for r in rules:
             if not _safe_pattern(r["pattern"]):
                 continue
@@ -263,6 +311,35 @@ def selftest() -> int:
         if classify(ev) != "pass":
             print(f"[selftest] FAIL: should allow -> {ev}", file=sys.stderr)
             ok = False
+    # Simulate the shared privacy module being unavailable: every URL-bearing
+    # command must fail closed, including custom/heredoc-style executors.
+    global privacymod, _PRIVACY_IMPORT_ERROR
+    saved_privacy, saved_error = privacymod, _PRIVACY_IMPORT_ERROR
+    try:
+        privacymod = None
+        _PRIVACY_IMPORT_ERROR = "SelftestImportError"
+        if not outbound_privacy_reason("python custom_sender.py https://t/"):
+            print("[selftest] FAIL: missing privacy module did not fail closed on custom URL command",
+                  file=sys.stderr)
+            ok = False
+        if outbound_privacy_reason("echo local-only"):
+            print("[selftest] FAIL: missing privacy module blocked URL-free local command",
+                  file=sys.stderr)
+            ok = False
+    finally:
+        privacymod, _PRIVACY_IMPORT_ERROR = saved_privacy, saved_error
+    if privacymod is not None:
+        saved_sanitizer = privacymod.sanitize_text_for_log
+        try:
+            def _broken_sanitizer(_command: str) -> str:
+                raise ValueError("selftest redaction failure")
+            privacymod.sanitize_text_for_log = _broken_sanitizer
+            if _safe_audit_command("private-value") != "<command omitted: redaction failed>":
+                print("[selftest] FAIL: audit redaction failure did not preserve an omitted event",
+                      file=sys.stderr)
+                ok = False
+        finally:
+            privacymod.sanitize_text_for_log = saved_sanitizer
     print("[selftest] safety gate healthy" if ok else "[selftest] safety gate BROKEN",
           file=sys.stderr)
     return 0 if ok else 1
@@ -303,6 +380,20 @@ def main() -> None:
         sys.exit(0)
 
     cleanup_reason = cleanup_requires_ask(command)
+    privacy_reason = outbound_privacy_reason(
+        command, allow_legacy_cleanup=bool(cleanup_reason)
+    )
+    if privacy_reason:
+        audit("outbound_privacy", privacy_reason, "<target command redacted>")
+        deny(
+            f"[safety-boundary] BLOCKED (outbound_privacy): {privacy_reason}. "
+            "Target-facing URL payloads, headers, bodies, multipart filenames/content, "
+            "and proof writes must not contain project/run/Agent/operator identity or "
+            "real personal data. Use neutral tmp/diag/proof-YYYYMMDD-<hex> values. "
+            "Necessary personal data in an authentication body is allowed only through "
+            "the guarded probe --allow-sensitive-auth exception; internal identity markers "
+            "remain forbidden. Do not bypass or encode around this check."
+        )
     for rule in load_rules():
         try:
             m = re.search(rule["pattern"], command, re.IGNORECASE)

@@ -1,0 +1,38 @@
+{
+  "ts": "2026-07-12T18:05:51Z",
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:65355/",
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Cookie": "<redacted:header:e56ccbb1ac05>"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 17,
+    "sha1": "c2e0c7e1de83ae9d7db4a3dfd7c4c5cbd1bafe1c",
+    "ctype": "text/plain",
+    "headers": {
+      "Server": "BaseHTTP/0.6 Python/3.9.6",
+      "Date": "Sun, 12 Jul 2026 18:05:51 GMT",
+      "Content-Type": "text/plain",
+      "Set-Cookie": "<redacted:header:f9cb1a8aa131>",
+      "Content-Length": "17"
+    },
+    "snippet": "privacy-replay-ok"
+  },
+  "privacy": {
+    "schema": "outbound-privacy.v1",
+    "redacted_fields": [
+      "header:cookie"
+    ],
+    "replayable": false,
+    "auth_exception": false,
+    "response_header_redactions": [
+      "header:set-cookie"
+    ]
+  },
+  "saved_body": "review/records/2026-07-13-outbound-privacy-hardening/privacy-replay-sample.txt"
+}

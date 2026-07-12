@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "hops": {
+    "hop1": {
+      "cookie": true,
+      "authorization": true
+    },
+    "hop2": {
+      "cookie": false,
+      "authorization": false
+    },
+    "hop3": {
+      "cookie": false,
+      "authorization": false
+    }
+  },
+  "control": "hop1 must receive auth; hop2 and hop3 must not"
+}

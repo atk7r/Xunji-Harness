@@ -1,0 +1,10 @@
+Command:
+  python3 tools/replay.py review/records/2026-07-13-outbound-privacy-hardening/privacy-replay-sample.txt.replay.json --scope 127.0.0.1
+
+Result:
+  [SKIPPED-PRIVACY-REDACTED] GET http://127.0.0.1:<ephemeral-port>/
+  summary: SKIPPED-PRIVACY-REDACTED=1
+
+Control:
+  privacy-replay-sample.txt.replay.json contains hash placeholders for request
+  Cookie and response Set-Cookie; neither reusable value appears in the file.

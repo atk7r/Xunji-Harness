@@ -100,10 +100,10 @@ def _selftest() -> int:
     (d / "app.js").write_text(
         "const {ipcMain, protocol} = require('electron');\n"
         "new BrowserWindow({webPreferences:{nodeIntegration:true, contextIsolation:false}});\n"
-        "protocol.registerFileProtocol('xunji', () => {}); fetch('https://api.example/v1');\n",
+        "protocol.registerFileProtocol('sample', () => {}); fetch('https://api.example/v1');\n",
         encoding="utf-8")
     ports = d / "ports.txt"
-    ports.write_text("node 123 ccj 10u IPv4 TCP 127.0.0.1:4567 (LISTEN)\n", encoding="utf-8")
+    ports.write_text("node 123 tester 10u IPv4 TCP 127.0.0.1:4567 (LISTEN)\n", encoding="utf-8")
     data = build([d], ports)
     kinds = {x["kind"] for x in data["leads"]}
     checks = [

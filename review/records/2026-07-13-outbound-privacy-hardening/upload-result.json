@@ -1,0 +1,31 @@
+{
+  "candidate": true,
+  "upload": {
+    "method": "POST",
+    "url": "http://127.0.0.1:50054/upload",
+    "status": 201,
+    "len": 2,
+    "truncated": false,
+    "sha1": "7a85f4764bbd",
+    "sha1_full": "7a85f4764bbd6daf1c3545efbbf0f279a6dc0beb",
+    "ctype": "",
+    "server": "BaseHTTP/0.6 Python/3.9.6",
+    "snippet": "b2s=",
+    "snippet_encoding": "base64",
+    "transport_error": false,
+    "application_error": false,
+    "auth_failure": false,
+    "blocked_by_policy": false,
+    "cdn_tls_reject": false,
+    "headers": {
+      "Server": "BaseHTTP/0.6 Python/3.9.6",
+      "Date": "Sun, 12 Jul 2026 18:22:18 GMT"
+    },
+    "set_cookies": []
+  },
+  "marker": "proof-20260713-a1b2c3d4",
+  "filename": "proof-20260713-a1b2c3d4.txt",
+  "field": "file",
+  "control": "Marker content is harmless and unique; compare with a disallowed or safe baseline if claiming bypass.",
+  "replicated": "Repeat with a fresh marker before certainty >=0.8."
+}

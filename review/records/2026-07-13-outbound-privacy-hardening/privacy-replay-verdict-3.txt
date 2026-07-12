@@ -1,0 +1,11 @@
+Command:
+  python3 tools/replay.py review/records/2026-07-13-outbound-privacy-hardening/privacy-replay-sample-3.txt.replay.json --scope 127.0.0.1
+
+Result:
+  [SKIPPED-PRIVACY-REDACTED] GET http://127.0.0.1:59969/
+
+  汇总: SKIPPED-PRIVACY-REDACTED=1
+
+Control:
+  This current-schema replay uses a third fresh Cookie/Set-Cookie pair and port;
+  neither reusable value appears in the record.

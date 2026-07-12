@@ -101,7 +101,8 @@ CASES = [
      "expect": {"lane": "scrutiny", "detectors": set()}},
     {"name": "in-scope harmless upload proof", "scope": SCOPE, "directives": [],
      "tool": "Bash",
-     "command": "curl 'http://192.168.191.138:8080/vulnerabilities/upload/' -F uploaded=@proof.txt",
+     "command": "python tools/sensors/upload_probe.py 'http://192.168.191.138:8080/vulnerabilities/upload/' "
+                "--marker proof-20260713-a1b2c3d4 --filename proof-20260713-a1b2c3d4.txt",
      "expect": {"lane": "scrutiny", "detectors": set()}},
 
     # --- BEYOND the proof ceiling on the in-scope target: effect_escalation

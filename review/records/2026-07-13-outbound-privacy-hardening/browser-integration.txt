@@ -1,0 +1,9 @@
+Loopback Playwright pre-I/O privacy integration
+
+Fixture behavior:
+  fetch('/api', {method:'POST', body:'marker=xunji-proof'})
+
+Observed server POST count: 0
+Observed render error: outbound privacy blocked request body: project identifier
+
+Control: the HTTP server's POST counter is independent of the browser exception.

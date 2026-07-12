@@ -1,0 +1,180 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "906aea0b79f0c28cd25b2bb8d42da3b70f580b27",
+  "evidence_index_hash": "61201c78ca8979d5da2668941f1d279e8615c2e6",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "evidence_gate",
+      "claim": "Environment-provided test summaries (verification.txt, browser-integration.txt) are reported as confirmed findings at certainty 1.0 despite being self-generated prose artifacts rather than independently inspectable request/response recordings.",
+      "evidence": "evidence_index:E-002, verification.txt, evidence_index:E-003, browser-integration.txt",
+      "affected_eids": [
+        "E-002",
+        "E-003"
+      ],
+      "recommended_action": "Downgrade E-002 and E-003 to candidate/supplementary status unless each sub-claim is backed by a concrete .replay.json, saved probe output, or raw command/output artifact. Re-run the browser fixture and regression cases with probe --save and attach the artifacts.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] verification.txt and browser-integration.txt are environment-generated summaries, not raw target responses. The evidence discipline states that environment-provided artifacts are never confirmation on their own, yet both entries are marked confirmed with certainty 1.0.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "artifact_cross_check",
+      "claim": "The new 697-line enforcement module tools/harness/privacy.py is cited but not excerpted or reviewable in the bundle.",
+      "evidence": "evidence_index:E-001, reviewed.diff:tools/harness/privacy.py @@ -0,0 +1,697 @@",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add a standalone excerpt or the full privacy.py file under the run dir, or split key functions into reviewable snippets, so independent reviewers can verify the encoding, normalization, deny-list, and exception logic.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] All subsequent privacy-boundary claims depend on this module, but the bundle only records its existence via a diff hunk header. Without source content, reviewers cannot confirm the implementation matches the claims.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "Upload sensor / multipart filename / content / boundary redaction claims lack concrete sensor artifacts.",
+      "evidence": "report.md:claim-3, docs/WORKFLOW-reference.md:upload_probe lines, evidence_index:E-002",
+      "affected_eids": [
+        "E-002"
+      ],
+      "recommended_action": "Run tools/sensors/upload_probe.py against a loopback fixture with --run set, capture the sensor JSON artifact and/or a .replay.json, and attach it as new evidence for the upload-boundary claim.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The report asserts that the upload sensor emits no project label in filename, content, or multipart boundary, but the only support is code diff plus a one-line test summary. No actual upload artifact is provided for cross-check.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "shallow_closure",
+      "claim": "E-002 bundles multiple distinct boundary claims under one confirmed finding without per-case artifacts, indicating shallow closure on high-value fronts.",
+      "evidence": "evidence_index:E-002, verification.txt:items 3-6",
+      "affected_eids": [
+        "E-002"
+      ],
+      "recommended_action": "Split E-002 into separate evidence entries for encoding bypasses, redirect controls, custom-script enforcement, and raw-upload blocking, each with its own saved probe/replay artifact and control.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Encoding bypasses, redirect auth stripping, custom script handling, and upload blocking are all asserted in a single prose verification file. A single passing test battery does not provide the depth of artifact-level evidence expected for a safety-critical boundary.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "Evidence entries E-001 through E-004 are marked confirmed and mature while decisions.md explicitly states independent round-2 review is pending and Codex self-review is not an independent vote.",
+      "evidence": "decisions.md:D-001, evidence_index:E-001..E-004",
+      "affected_eids": [
+        "E-001",
+        "E-002",
+        "E-003",
+        "E-004"
+      ],
+      "recommended_action": "Hold confirmed/mature status until the independent arkcli panel and fresh-context Claude Code review required by D-001 are completed; keep entries at candidate maturity until then.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] D-001 says this is safety-critical maintenance requiring independent review and that Codex self-review is not an independent vote. The evidence index contradicts this by marking all findings confirmed with certainty 1.0 while round-2 review is still pending.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "glm-5.2: parse error; output tail: ask first (because of DELETE + uploads path), get a cleanup_reason, and skip the privacy check entirely. The private header would go through. This is a real bypass.\n\nWait, let me re-read. The flow is:\n1. Check cleanup_requires_ask → if non-empty, it's a cleanup command\n2. Check privacy → only if NOT a cleanup command\n3. Then check rules\n\nBut cleanup_requires_ask returns a reason for commands that match cleanup patterns. The cleanup flow presumably asks the operator. But the privacy issue is: the",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-007",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Cleanup-enforcement bypass: privacy-violating commands that also match cleanup patterns skip the hard deny and only get \"ask\"",
+      "evidence": "`reviewed.diff` line 111 (`if privacy_reason and not cleanup_reason`)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] A command like `curl -X DELETE https://t/uploads/xunji-proof.txt` triggers both `outbound_privacy_reason` (project marker in URL path) and `cleanup_requires_ask` (DELETE to uploads). The condition `privacy_reason and not cleanup_reason` short-circuits — the privacy block is skipped, reducing to an \"ask\" prompt the operator might approve without noticing the project marker. This is a principled enforcement gap, not just a theoretical one.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-008",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Custom-script guard detection is trivially bypassable",
+      "evidence": "`reviewed.diff` line 1477 (`_PRIVACY_GUARD_CALL_RE`) through line 1483; line 1864 (`path.read_text` check)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The guard checks whether `validate_outbound_request` or `RequestRecorder.validate` appears anywhere in the script file. A script containing `# validate_outbound_request` in a comment (or in a dead string, or in `__doc__`) would pass the check but never call the guard before I/O. The regex search is necessary but not sufficient — it's a heuristic, not a security boundary. The same applies to inline `python -c` guards. The real defense is the `probe.py`/`render.py` internal validation path which is mandatory.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-009",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`scan.py` does not validate scanner-generated outbound requests",
+      "evidence": "`reviewed.diff` lines 1224-1233 (`scan.py` main); only the initial target URL and extra args are checked",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] `privacymod.validate_outbound_request(\"GET\", args.target, {}, None)` guards the initial URL, but sqlmap and nuclei generate their own HTTP requests during scanning. If a scanner parameter or template generates a request containing project-identifying data in headers/payloads, it bypasses the privacy boundary. The `--ignore-redirects` flag added to sqlmap mitigates redirect-based auth leakage but doesn't address generated request content.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-010",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Multipart/form-data replay records may incompletely redact structured MIME parts",
+      "evidence": "`reviewed.diff` lines 1744-1780 (`redact_body` function); no multipart parsing exists",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] `redact_body()` handles JSON, form-urlencoded, and raw text bodies but falls through to raw text regex for multipart. Individual MIME part bodies within a multipart upload are not individually redacted in replay evidence. The `validate_outbound_request` pre-I/O check prevents project markers from being sent, but authenticated PII in multipart parts (when `--allow-sensitive-auth` is used) could survive into replay records.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-011",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "E-003 evidence_index still shows `supports: []` contradicting disposition claim",
+      "evidence": "`evidence.json` line 115 (`\"supports\": []`); `disposition.md` line 8-13 (\"it now cites a dedicated browser-integration.txt and explicitly supports the browser privacy behavior\")",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The disposition claims the supports field was updated, but the evidence index parser shows empty supports. The evidence.md prose says `Supports: browser route enforcement` (not `F-001`). This is a documentation integrity gap — the engine and prose disagree.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-012",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`audit()` function silently drops log entries if redaction fails",
+      "evidence": "`reviewed.diff` lines 25-31 (`safe_command = privacymod.sanitize_text_for_log(command)...` inside `try/except: pass`)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] If `sanitize_text_for_log` raises (e.g., on malformed input), the entire audit log entry is silently lost. The previous code's `command[:120]` would never fail. This is a regression in audit reliability, not a privacy leak, but silent audit gaps undermine the trail.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [kimi-k2.7-code] No sampled agent/template-generated outbound text to verify claim that Root/Agents no longer emit identity/PII in generated target-facing fields.",
+    "[arkcli] [kimi-k2.7-code] No negative-test artifacts for percent/base64/hex/NFKC encoding bypass attempts.",
+    "[arkcli] [kimi-k2.7-code] No redirect-chain .replay.json demonstrating cross-origin Cookie/Authorization stripping across multiple hops.",
+    "[arkcli] [kimi-k2.7-code] No artifact showing that --allow-sensitive-auth permits necessary auth while still redacting it from replay.",
+    "[arkcli] [kimi-k2.7-code] Round-1 findings and the exact fix diff are absent, preventing verification that post-round-1 passing tests addressed root causes.",
+    "[claude] **Enforcement ordering gap in safety_gate.main():** The cleanup check `cleanup_requires_ask` is evaluated BEFORE the privacy check ranking. If both trigger, only the \"ask\" prompt is shown, not the hard privacy \"deny\". A redesign that checks privacy FIRST (regardless of cleanup status) or adds a distinct privacy-flagged ask would close this gap without blocking legitimate cleanup.",
+    "[claude] **The `_decoded_variants` token limit of 32** for base64 and hex detection could be exhausted in unusual payloads, but this is a low-practical-risk edge case since normal outbound requests don't carry that many candidate tokens.",
+    "[claude] **No end-to-end multi-hop redirect test with a real HTTP server** — the redirect handler is unit-tested with synthetic `Request` objects. A live test with a server returning 302 chains would provide stronger validation that Cookie/Authorization is actually stripped on the wire, not just in Python objects.",
+    "[claude] **render.py Playwright route error aggregation:** Only the first privacy violation error is raised (`privacy_blocks[0]`). If a page triggers 3 blocked sub-requests, only the first is reported; the other two are silently aborted. This could mask what exactly was blocked.",
+    "[claude] **No `--allow-sensitive-auth` annotation on `tools/scan.py`** — if a scanner is pointed at an authenticated endpoint, there's no way to pass credentials through the privacy guard via scan.py. This is consistent with scan being a proof-level tool, but it's worth noting as a deliberate design constraint.",
+    "[claude] The **round-1 peer review's PR-003** was partially dismissed, claiming encoding tests existed. The `privacy.py` selftest does indeed test percent-encoded (`x%75nji-proof`), base64 (`eHVuamk=`), hex (`78756e6a69`), case (`XuNjI-proof`), and NFKC (`ｘｕｎｊｉ-proof`). The verification summary line 21-23 confirms \"percent, base64, hex, case and NFKC project markers blocked.\" The dismissal was substantively correct but the `verification.txt` summary was too terse to make this obvious at review time — the real proof lives in the privacy.py selftest code, not in the summary.",
+    "[claude] The **round-1 PR-005** was defended by noting `check_hook.py` BLOCKED_COMMANDS now includes `\"curl -F file=@proof.php https://t.test/upload\"` and privacy.py's `outbound_command_privacy_reason` reads inspectable file bytes. The `check_hook.py` test is command-pattern-static, but privacy.py's runtime check (`_read_payload_file` → `privacy_reason`) provides dynamic validation for inspectable files. The gap between static `check_hook` patterns and runtime file content checks is bridged."
+  ],
+  "context_limits": [
+    "[arkcli] glm-5.2: parse error; output tail: ask first (because of DELETE + uploads path), get a cleanup_reason, and skip the privacy check entirely. The private header would go through. This is a real bypass.\n\nWait, let me re-read. The flow is:\n1. Check cleanup_requires_ask → if non-empty, it's a cleanup command\n2. Check privacy → only if NOT a cleanup command\n3. Then check rules\n\nBut cleanup_requires_ask returns a reason for commands that match cleanup patterns. The cleanup flow presumably asks the operator. But the privacy issue is: the",
+    "[claude] I could not read `safety_gate.py` directly from the main repo to verify `TARGET_URL_RE` and `extract_command` pre-existing behavior. Derived from diff hunks and selftest cases.",
+    "[claude] The `cleanup_requires_ask` function is not modified in this diff — I inferred its behavior from the selftest `must_ask` entries (e.g., DELETE to uploads/ matches). If the actual function has a narrower scope than what the selftest implies, the cleanup-bypass severity could be lower.",
+    "[claude] Chinese-language denial messages and `check_run.py` replay warnings appear syntactically consistent with the privacy module. I may miss subtle semantic nuances.",
+    "[claude] The CN ID regex (`\\d{6}(19|20)\\d{2}...`) covers standard mainland China ID format. Hong Kong/Macau/Taiwan ID numbers have different formats and would not be caught.",
+    "[claude] The `_TEST_PASSWORD_RE` or similar patterns for generic password-field detection (beyond `_AUTH_BODY_SECRET_RE`) may exist elsewhere in the codebase as a rate-limiter; I only analyzed what's in the diff."
+  ],
+  "error": ""
+}

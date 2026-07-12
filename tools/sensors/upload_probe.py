@@ -11,7 +11,6 @@ import argparse
 import http.server
 import json
 import os
-import secrets
 import shutil
 import sys
 import tempfile
@@ -24,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import probe  # noqa: E402
 from common import FastLocalHTTPServer, print_json, write_artifact  # noqa: E402
 from harness import guard as guardmod  # noqa: E402
+from harness import privacy as privacymod  # noqa: E402
 from harness.guard import UploadRegistry  # noqa: E402
 
 
@@ -71,8 +71,11 @@ def _headers(items: list[str]) -> dict:
     return out
 
 
-def multipart(field: str, filename: str, content: bytes, content_type: str) -> tuple[bytes, str]:
-    boundary = "----xunji-proof-" + secrets.token_hex(8)
+def multipart(field: str, filename: str, content: bytes, content_type: str,
+              boundary_marker: str | None = None) -> tuple[bytes, str]:
+    boundary_marker = boundary_marker or privacymod.neutral_marker("proof")
+    privacymod.validate_neutral_marker(boundary_marker)
+    boundary = "----" + boundary_marker
     safe_field = field.replace("\r", "_").replace("\n", "_").replace('"', "%22")
     safe_filename = filename.replace("\r", "_").replace("\n", "_").replace('"', "%22")
     safe_content_type = content_type.replace("\r", "_").replace("\n", "_")
@@ -86,7 +89,11 @@ def multipart(field: str, filename: str, content: bytes, content_type: str) -> t
 
 def run_upload(url: str, field: str, filename: str, marker: str, headers: dict,
                timeout: int, proxy: str | None) -> dict:
-    body, boundary = multipart(field, filename, marker.encode(), "text/plain")
+    privacymod.validate_neutral_marker(marker)
+    privacymod.validate_neutral_artifact_name(filename)
+    body, boundary = multipart(
+        field, filename, marker.encode(), "text/plain", boundary_marker=marker,
+    )
     h = {"Content-Type": f"multipart/form-data; boundary={boundary}", **headers}
     old_proxy = probe._PROXY
     if proxy is not None:
@@ -111,7 +118,8 @@ def cleanup(cleanup_url: str, method: str, headers: dict, timeout: int, proxy: s
     if proxy is not None:
         probe._PROXY = proxy
     try:
-        return probe.send(method, cleanup_url, headers, None, None, timeout, want_headers=True)
+        return probe.send(method, cleanup_url, headers, None, None, timeout,
+                          want_headers=True, allow_legacy_cleanup=True)
     finally:
         probe._PROXY = old_proxy
 
@@ -129,6 +137,7 @@ def _selftest() -> int:
         def do_POST(self):
             raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             seen["body"] = raw
+            seen["content_type"] = self.headers.get("Content-Type", "")
             self.send_response(201)
             self.send_header("Content-Length", "2")
             self.end_headers()
@@ -145,8 +154,10 @@ def _selftest() -> int:
         port = srv.server_address[1]
         t = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.05), daemon=True)
         t.start()
-        data = run_upload(f"http://127.0.0.1:{port}/upload", "file", "proof.txt", "XUNJI_MARKER", {}, 5, None)
-        clean = cleanup(f"http://127.0.0.1:{port}/upload/proof.txt", "DELETE", {}, 5, None)
+        marker = "proof-20260713-a1b2c3d4"
+        filename = marker + ".txt"
+        data = run_upload(f"http://127.0.0.1:{port}/upload", "file", filename, marker, {}, 5, None)
+        clean = cleanup(f"http://127.0.0.1:{port}/upload/{filename}", "DELETE", {}, 5, None)
     finally:
         if srv:
             srv.shutdown()
@@ -158,7 +169,14 @@ def _selftest() -> int:
     injected_headers = injected.split(b"\r\n\r\n", 1)[0]
     checks = [
         ("upload status captured", data["upload"].get("status") == 201),
-        ("multipart contains marker", b"XUNJI_MARKER" in seen.get("body", b"")),
+        ("multipart contains neutral marker", marker.encode() in seen.get("body", b"")),
+        ("multipart boundary uses neutral dated marker format",
+         bool(privacymod.NEUTRAL_MARKER_RE.fullmatch(
+             seen.get("content_type", "").split("boundary=", 1)[-1][4:]
+         ))),
+        ("multipart boundary matches the upload marker",
+         f"boundary=----{marker}" in seen.get("content_type", "")),
+        ("multipart leaks no project identifier", b"xunji" not in seen.get("body", b"").lower()),
         ("cleanup status captured", clean.get("status") == 204 and seen.get("deleted") is True),
         ("multipart headers block CRLF injection", b"\r\nX:" not in injected_headers),
     ]
@@ -191,8 +209,13 @@ def main() -> int:
         return _selftest()
     if not args.url:
         ap.error("url is required")
-    marker = args.marker or ("XUNJI-PROOF-" + secrets.token_hex(8))
-    filename = args.filename or (marker.lower() + ".txt")
+    marker = args.marker or privacymod.neutral_marker("proof")
+    filename = args.filename or (marker + ".txt")
+    try:
+        privacymod.validate_neutral_marker(marker)
+        privacymod.validate_neutral_artifact_name(filename)
+    except privacymod.OutboundPrivacyError as e:
+        ap.error(str(e))
     headers = _headers(args.header)
     data = run_upload(args.url, args.field, filename, marker, headers, args.timeout, args.proxy)
     if args.run and args.remote_ref:

@@ -1,0 +1,281 @@
+{
+  "total": 7,
+  "confirmed": [
+    "E-001",
+    "E-004",
+    "E-005",
+    "E-007"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-004",
+    "E-005",
+    "E-007"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 — Frozen Codex-authored maintenance diff",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "reviewed.diff",
+        "privacy.py.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "reviewed.diff",
+        "privacy.py.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 — Full regression battery",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "verification.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "verification.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 — Browser pre-I/O integration",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "browser-integration.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "browser-integration.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004 — Runtime replay redaction and non-replay verdict",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "privacy-replay-sample-2.txt.replay.json",
+        "privacy-replay-verdict-2.txt",
+        "privacy-replay-sample-3.txt.replay.json",
+        "privacy-replay-verdict-3.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "privacy-replay-sample-2.txt.replay.json",
+        "privacy-replay-verdict-2.txt",
+        "privacy-replay-sample-3.txt.replay.json",
+        "privacy-replay-verdict-3.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005 — Actual neutral upload wire bytes",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "upload-wire-5.txt",
+        "upload-result-5.json",
+        "upload-wire-6.txt",
+        "upload-result-6.json",
+        "upload-replication.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "upload-wire-5.txt",
+        "upload-result-5.json",
+        "upload-wire-6.txt",
+        "upload-result-6.json",
+        "upload-replication.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-006",
+      "head": "## E-006 — Loopback three-origin redirect credential candidate",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "redirect-wire.json"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "redirect-wire.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-007",
+      "head": "## E-007 — Runtime response replay redaction",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "response-redaction-runtime.replay.json",
+        "response-redaction-runtime-2.replay.json"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "response-redaction-runtime.replay.json",
+        "response-redaction-runtime-2.replay.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

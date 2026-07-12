@@ -36,6 +36,7 @@ _here = Path(__file__).resolve()
 sys.path.insert(0, str(_here.parent))           # tools/  (probe)
 sys.path.insert(0, str(_here.parents[1]))       # repo root (sentinel)
 import probe   # 同目录: 复用 send() 的 guard 层
+from harness import privacy as privacymod
 
 ROOT = Path(__file__).resolve().parents[1]
 WRITE_METHODS = {"POST", "PUT", "PATCH"}          # 有副作用: --force 才重放
@@ -85,6 +86,18 @@ def replay_one(rec_path, *, force: bool = False, timeout: int = 20,
     body = req.get("body")
     out: dict = {"file": str(rec_path), "method": method, "url": url,
                  "old_status": resp.get("status")}
+
+    # Redacted evidence deliberately contains no reusable Cookie/token/PII.  Do
+    # not send redaction placeholders or silently claim that an unauthenticated
+    # replay verified an authenticated observation.
+    privacy = rec.get("privacy", {}) or {}
+    if privacy.get("replayable") is False or privacymod.contains_redaction(req):
+        out["verdict"] = "SKIPPED-PRIVACY-REDACTED"
+        out["note"] = (
+            "request evidence contains privacy redactions; re-acquire required authentication "
+            "through the intended target flow and capture a fresh proof"
+        )
+        return out
 
     # scope 门(防篡改/越界录像打 scope 外): host 必须在 run 授权资产台账。allowed_hosts=None 时
     # 跳过(单文件无 run 上下文), 由 main 警告。
@@ -247,6 +260,15 @@ def _selftest() -> int:
             # 正确录像 -> IDENTICAL
             checks.append(("正确录像 -> IDENTICAL",
                            replay_one(mkrec("a.html.replay.json", "GET", url, 200, sha), allowed_hosts=LH)["verdict"] == "IDENTICAL"))
+            redacted = mkrec("redacted.replay.json", "GET", url, 200, sha)
+            redacted.write_text(json.dumps({
+                "request": {"method": "GET", "url": url,
+                            "headers": {"Cookie": "<redacted:header:0123456789ab>"}, "body": None},
+                "response": {"status": 200, "sha1": sha},
+                "privacy": {"replayable": False},
+            }), encoding="utf-8")
+            checks.append(("脱敏录像不发送占位符",
+                           replay_one(redacted, allowed_hosts=LH)["verdict"] == "SKIPPED-PRIVACY-REDACTED"))
             # status 同 sha 异(内容动态变) -> CONSISTENT
             checks.append(("status同 sha异 -> CONSISTENT",
                            replay_one(mkrec("b.html.replay.json", "GET", url, 200, "0" * 40), allowed_hosts=LH)["verdict"] == "CONSISTENT"))
