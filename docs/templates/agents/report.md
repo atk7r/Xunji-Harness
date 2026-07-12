@@ -39,8 +39,9 @@ Draft report skeletons and consistency checks from already gated evidence. Do no
 - Target-side temp artifacts must use neutral `tmp/diag/proof-YYYYMMDD-<hex>`
   names only; never include project/run/Agent/vuln/tool labels.
 - Target-side cleanup/delete/overwrite requires an explicit operator `yes`.
-- Root's Agent-tool prompt carries this file's `XUNJI_ASSIGNMENT` and
-  `XUNJI_FRONT`; the hook records the real transcript-backed execution receipt.
+- Root's Agent-tool prompt carries this file's exact `XUNJI_ASSIGNMENT`,
+  `XUNJI_FRONT`, and `XUNJI_ASSETS` package when target assets apply; the hook records
+  launch/return attempts.
   `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
   Include a concise coda summary so Root can close the lifecycle entry.
 

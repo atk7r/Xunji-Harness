@@ -84,6 +84,11 @@ material/artifact-backed progress, and `run_controller.py --shadow` writes the
 next required control-plane action plus stop blockers. These are derived caches
 only; Root still chooses the next front and the evidence gate still owns
 promotion and closure.
+`coverage_matrix.py --write` also writes `state/asset_ledger.json`, retaining every
+in-scope inventory row with a stable asset id, reachability, front links, assignment
+links, tested groups, and disposition. Before target traffic, every reachable/unknown
+asset must be explicitly named in a front. Upstream-unreachable rows remain visible as
+`unreachable-baseline`; they are accounted, not silently deleted.
 
 If a coverage-matrix cell is genuinely not applicable despite asset surface
 signals, record a structured waiver instead of prose:
@@ -133,6 +138,13 @@ Agent finishes. `turn_contract.py` treats it as an internal lifecycle message:
 it may receive the existing mode context but cannot replace or refresh the
 operator-authored contract. Otherwise the notification timestamp would
 invalidate the Agent receipt that caused it.
+
+Agent lifecycle is attempt-based. An async `Agent PostToolUse` with
+`status=async_launched` is a launch acknowledgement, not a returned result. Its
+`agentId` identifies the attempt; only the matching `SubagentStop` creates a
+post-return disposition obligation. Root's global fan-out/disposition debt never
+blocks a still-running child Agent from its own assignment. A child cannot spawn
+nested Agents or touch assets outside its package.
 
 Coverage classification may mark root 401/403 pages as `AUTH_GATE` and pure
 default/stub pages as `STUB_PAGE`. These flags only suppress anti-lump
@@ -237,9 +249,11 @@ into a conclusion.
 
 The Agent Board is the default collaboration model. When the canonical front model
 reports at least four active fronts with no one shared concrete barrier, parallelism
-is mandatory in every `EXECUTE` turn: prepare two disjoint assignments and actually
-invoke two Agent tools with different assignment/front tokens. Old receipts and
-manual lifecycle prose do not satisfy a new turn.
+is mandatory for the current coordination epoch: prepare two disjoint assignments and
+actually invoke two Agent tools. A bare `continue` keeps the epoch and existing running
+or returned attempts; it does not force duplicate Agents. The epoch resets only when
+active-front topology or asset coverage debt materially changes. Manual lifecycle
+prose never satisfies it.
 
 Stay **serial** when the mandatory threshold is not active, or the current operator
 prompt explicitly grants a one-turn serial override:
@@ -265,14 +279,17 @@ All Agents share the global guard state, request budget, host breakers, and run 
 Agent output is untrusted candidate material until the Single Synthesizer merges it
 through the evidence gate.
 
-`workers.py assign`, Agent Markdown, `heartbeat`, and `finish` are planning/display
-state only. Runtime proof comes from current-turn Claude `Agent` `PostToolUse`
-receipts whose prompts contain `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...` and whose
-tool-use IDs exist in the Claude transcript.
-Before the execute turn ends, each observed assignment must be `merged` with a
-canonical E/F/D disposition anchor, or `blocked/failed/abandoned` with `Reason:`
-and its canonical `Front:`. A terminal-looking `done` or chat summary is still
-unmerged work and the Stop gate rejects it.
+Every target-facing `workers.py assign` requires a bounded asset package, for example
+`--asset a.example --asset b.example`. Those hosts must exist in coverage and be named
+in the chosen front; non-terminal overlap is rejected except for verify/review roles.
+The Agent prompt must carry the exact package:
+`XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=a.example,b.example`.
+Before Stop, each returned assignment must be `merged` with a canonical E/F/D anchor,
+or `blocked/failed/abandoned` with `Reason:` and its canonical `Front:`. `merged` also
+requires every assigned host to have a transcript-backed successful target action by
+that Agent and a canonical E-entry. A zero-tool Agent, partial package, `done`, or chat
+summary is unmerged work. A blocked attempt ends the attempt but does not erase its
+assets from coverage debt.
 
 When an observation **grounds a product fingerprint** — i.e. while attacking an asset you
 fetch it and recognize the stack (or an opt-in `classify_hosts` tagged it `kb:<id>`) —
@@ -424,10 +441,15 @@ assets were only header / recon-classified, never examined. Before any such clai
   classify_hosts to rebuild it (= re-OSINT).** `check_run.py` reads it every run and
   lists distinct-app candidates to investigate (per-asset content examination happens
   when you actually attack the asset, not in a bulk pre-scan).
+  `Vectors tried` establishes only front-level history and never fills an asset matrix
+  cell by itself (single- or multi-asset). A matrix cell becomes tested only from an
+  E-entry that names that exact host and tested mechanism. This prevents either a broad
+  batch or a freshly split one-host front from laundering prose as executed coverage.
 - **Every reachable asset reaches a verdict — "examined" ≠ "tested".** Prioritising
   high-value is right, but low-value is **not** skipped: after the high-value depth
   pass, **auto-continue to the low-value assets** (cheap breadth via `tools/scan.py`).
-  Each reachable in-scope asset must be driven to a verdict — confirmed / rejected /
+  Each reachable or unknown in-scope asset must be explicitly accounted and driven to
+  a verdict — confirmed / rejected /
   `deferred` **with a reason** (login-gated · no creds · can't-reach · WAF). Only
   fingerprinted (classify looked at it) is **not** a verdict and **not** closure.
   `check_run.py` **hard-fails** a final report with reachable assets never named in a

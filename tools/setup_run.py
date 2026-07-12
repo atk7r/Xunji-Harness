@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import re
 import shutil
@@ -378,7 +379,12 @@ def _derive_coverage_from_target(run_dir: Path) -> str:
         "source": "target-derived",
         "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "note": "骨架 coverage — 无 Guanlan recon, 从 target.md Target 字段推导。reachable 待渗透时判定。",
-        "assets": [{"host": host, "port": port, "scheme": scheme, "reachable": "unknown"}],
+        "assets": [{
+            "asset_id": "ASSET-" + hashlib.sha1(host.lower().encode("utf-8")).hexdigest()[:12].upper(),
+            "host": host, "port": port, "scheme": scheme,
+            "scope_status": "in", "reachable": "unknown", "examined": False,
+            "verdict": None,
+        }],
         "total": 1, "reachable": 0, "unreachable": 0, "unknown": 1,
     }
     out = run_dir / "classify"
@@ -474,10 +480,25 @@ def main() -> int:
         if r.stderr:
             sys.stderr.write(r.stderr)
         _merge_egress_recheck(run_dir)
-        coverage_ready = _coverage_ready(run_dir)
+    coverage_ready = _coverage_ready(run_dir)
 
     if coverage_ready:
-        print(f"[下一步] 直接打可达高价值(coverage 已就位); 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
+        try:
+            import coverage_matrix
+            ledger = coverage_matrix.write_outputs(run_dir)
+            summary = ledger.get("summary", {})
+            print(
+                "[setup] asset ledger: "
+                f"total={summary.get('total', 0)} unassigned={summary.get('unassigned', 0)} "
+                f"unreachable={summary.get('unreachable', 0)}"
+            )
+        except Exception as e:
+            print(f"[!] asset ledger 初始化失败(目标动作前必须修复): {e}", file=sys.stderr)
+        print(
+            "[下一步] 先把 asset ledger 中所有 reachable/unknown 资产显式映射到 frontier，"
+            "再用 workers.py --asset 分配；不得只建宽泛 F-id。每轮收尾跑: "
+            f"python tools/check_run.py runs/{run_dir.name}"
+        )
     else:
         print(f"[下一步] 先填写 target.md 的 Target/In-scope 并生成 coverage.json; 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
     _phase_journal(run_dir, "phase_end", "Setup", f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})")

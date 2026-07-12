@@ -10,6 +10,7 @@ signal-justified blanks.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -184,6 +185,20 @@ def _asset_display(asset: dict) -> str:
     if port and ":" not in raw:
         raw = f"{raw}:{port}"
     return raw.strip().rstrip(".")
+
+
+def _asset_id(name: str) -> str:
+    return "ASSET-" + hashlib.sha1(name.lower().encode("utf-8")).hexdigest()[:12].upper()
+
+
+def _load_assignments(run_dir: Path) -> list[dict]:
+    try:
+        data = json.loads((run_dir / "state" / "assignments.json").read_text(
+            encoding="utf-8", errors="replace"))
+    except Exception:
+        return []
+    rows = data.get("assignments") if isinstance(data, dict) else None
+    return [item for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
 
 
 def _host_tokens(asset_name: str) -> set[str]:
@@ -467,35 +482,45 @@ def derive(run_dir: Path) -> dict:
     waivers, waiver_warnings = _parse_coverage_waivers(run_dir)
     coverage_warnings.extend(waiver_warnings)
     assets = [a for a in cov.get("assets", []) if isinstance(a, dict) and _asset_display(a)]
-    relevant = [a for a in assets if _asset_relevant(a)]
-    if not relevant:
-        relevant = assets
 
     rows = []
-    for a in relevant:
+    for a in assets:
         name = _asset_display(a)
+        reachability = a.get("reachable")
         rows.append({
+            "asset_id": str(a.get("asset_id") or _asset_id(name)),
             "asset": name,
             "tokens": sorted(_host_tokens(name)),
-            "applicable": sorted(_applicable_groups(a)),
+            "applicable": sorted(_applicable_groups(a)) if reachability is not False else [],
             "tested": [],
             "fronts": [],
-            "status": str(a.get("reachable", "")),
+            "assignments": [],
+            "assignment_statuses": [],
+            "reachability": reachability,
+            "status": str(reachability),
+            "examined": bool(a.get("examined")),
+            "inventory_verdict": str(a.get("verdict") or ""),
             "flags": [str(f) for f in (a.get("flags") or [])],
         })
 
     constraints = _parse_constraints(run_dir)
     evidence = _parse_evidence_blocks(run_dir)
-    for front in _parse_front_blocks(run_dir):
+    fronts = _parse_front_blocks(run_dir)
+    front_status = {front["id"]: _coverage_status_token(str(front.get("status") or ""))
+                    for front in fronts}
+    for front in fronts:
         tried_groups = _class_groups(_front_tried_classes(front, constraints)) | _front_evidence_groups(front, evidence)
-        if not tried_groups:
-            continue
         declared_tokens = _front_declared_asset_tokens(front["text"])
+        matched_rows: list[dict] = []
         for row in rows:
             row_tokens = set(row["tokens"])
             if (declared_tokens & row_tokens) or _mentions_any_host(front["text"], row_tokens):
                 row["fronts"].append(front["id"])
-                row["tested"] = sorted(set(row["tested"]) | tried_groups)
+                matched_rows.append(row)
+        if tried_groups and matched_rows:
+            coverage_warnings.append(
+                f"{front['id']}: front-level Vectors tried 不直接计入 {len(matched_rows)} 个资产的 tested cell；"
+                "每个资产必须由点名该 host 的 E-entry 证明测试覆盖")
 
     for eid, ev in evidence.items():
         ev_groups = set(ev.get("groups", set()))
@@ -506,6 +531,17 @@ def derive(run_dir: Path) -> dict:
             if _mentions_any_host(ev["text"], row_tokens):
                 row["fronts"] = sorted(set(row["fronts"]) | set(ev.get("front_refs", [])))
                 row["tested"] = sorted(set(row["tested"]) | ev_groups)
+
+    assignment_rows = _load_assignments(run_dir)
+    for assignment in assignment_rows:
+        assigned_assets = set(_asset_tokens_from_value(
+            ",".join(str(item) for item in (assignment.get("assets") or []))))
+        if not assigned_assets:
+            continue
+        for row in rows:
+            if set(row["tokens"]) & assigned_assets:
+                row["assignments"].append(str(assignment.get("agent") or ""))
+                row["assignment_statuses"].append(str(assignment.get("status") or ""))
 
     group_names = [g for g, _ in GROUPS]
     matrix = []
@@ -521,6 +557,41 @@ def derive(run_dir: Path) -> dict:
             else:
                 cells[group] = "not_applicable"
         row["cells"] = cells
+        row["fronts"] = sorted(set(row["fronts"]))
+        row["assignments"] = sorted(set(item for item in row["assignments"] if item))
+        row["assignment_statuses"] = sorted(set(
+            item.strip().lower() for item in row["assignment_statuses"] if item.strip()))
+        terminal_fronts = {front_status.get(fid, "") for fid in row["fronts"]}
+        terminal_fronts.discard("")
+        inventory_verdict = _coverage_status_token(row["inventory_verdict"])
+        active_assignment = any(status in {"assigned", "starting", "running", "working", "?", ""}
+                                for status in row["assignment_statuses"])
+        if row["reachability"] is False:
+            disposition = "unreachable-baseline"
+        elif inventory_verdict:
+            disposition = inventory_verdict
+        elif "confirmed" in terminal_fronts:
+            disposition = "confirmed"
+        elif "closed" in terminal_fronts:
+            disposition = "closed"
+        elif "deferred" in terminal_fronts:
+            disposition = "deferred"
+        elif row["tested"]:
+            disposition = (
+                "tested" if not any(value == "untested" for value in cells.values())
+                else "tested-partial"
+            )
+        elif active_assignment:
+            disposition = "assigned"
+        elif row["fronts"]:
+            disposition = "front-linked"
+        else:
+            disposition = "unassigned"
+        row["disposition"] = disposition
+        row["accounted"] = disposition not in {"unassigned"}
+        row["closure_ready"] = disposition in {
+            "unreachable-baseline", "confirmed", "closed", "deferred", "tested"
+        }
         matrix.append(row)
 
     column_stats = {}
@@ -551,6 +622,30 @@ def derive(run_dir: Path) -> dict:
         if stats["actionable"] > 0 and stats["tested"] == 0
     ]
 
+    accounting_gaps = [
+        {"asset_id": row["asset_id"], "asset": row["asset"],
+         "reachability": row["reachability"], "disposition": row["disposition"]}
+        for row in matrix
+        if row["reachability"] is not False and row["disposition"] == "unassigned"
+    ]
+    closure_gaps = [
+        {"asset_id": row["asset_id"], "asset": row["asset"],
+         "reachability": row["reachability"], "disposition": row["disposition"]}
+        for row in matrix
+        if row["reachability"] is not False and not row["closure_ready"]
+    ]
+    summary = {
+        "total": len(matrix),
+        "reachable": sum(1 for row in matrix if row["reachability"] is True),
+        "unknown": sum(1 for row in matrix if str(row["reachability"]).lower() == "unknown"),
+        "unreachable": sum(1 for row in matrix if row["reachability"] is False),
+        "front_linked": sum(1 for row in matrix if row["fronts"]),
+        "unassigned": len(accounting_gaps),
+        "assigned": sum(1 for row in matrix if row["disposition"] == "assigned"),
+        "disposed": sum(1 for row in matrix if row["closure_ready"]),
+        "closure_debt": len(closure_gaps),
+    }
+
     return {
         "schema": "xunji.coverage_matrix.v1",
         "source": str(cov_path.relative_to(run_dir)) if cov_path and cov_path.is_relative_to(run_dir) else str(cov_path or ""),
@@ -559,6 +654,9 @@ def derive(run_dir: Path) -> dict:
         "column_stats": column_stats,
         "empty_columns": empty_columns,
         "row_gaps": row_gaps,
+        "accounting_gaps": accounting_gaps,
+        "closure_gaps": closure_gaps,
+        "summary": summary,
         "waivers": waivers,
         "warnings": coverage_warnings,
         "legend": {"tested": "✓", "untested": "□", "waived": "~", "not_applicable": "·"},
@@ -570,6 +668,22 @@ def check(run_dir: Path, *, closure: bool = False) -> tuple[list[str], list[str]
     warns: list[str] = []
     errors: list[str] = []
     warns.extend(f"覆盖矩阵: {w}" for w in data.get("warnings", []))
+    if data.get("accounting_gaps"):
+        gaps = data["accounting_gaps"]
+        shown = ", ".join(item["asset"] for item in gaps[:10])
+        msg = (
+            f"资产账本: {len(gaps)}/{data['summary']['total']} 个范围内 reachable/unknown 资产"
+            "没有 front 或 assignment，仍处于 unassigned: "
+            f"{shown}{' …' if len(gaps) > 10 else ''}。先显式映射资产，不能让宽泛 F-id 掩盖遗漏。")
+        (errors if closure else warns).append(("收口硬门(" + msg + ")") if closure else msg)
+    if closure and data.get("closure_gaps"):
+        gaps = data["closure_gaps"]
+        shown = ", ".join(
+            f"{item['asset']}[{item['disposition']}]" for item in gaps[:10])
+        errors.append(
+            f"收口硬门(资产未完成): {len(gaps)}/{data['summary']['total']} 个 reachable/unknown 资产"
+            "尚未达到 tested/confirmed/closed/deferred 终态: "
+            f"{shown}{' …' if len(gaps) > 10 else ''}。")
     if data["empty_columns"]:
         details = ", ".join(
             f"{g}(applicable={data['column_stats'][g]['applicable']})"
@@ -599,14 +713,25 @@ def render_markdown(data: dict) -> str:
         "# Coverage Matrix",
         "",
         "Legend: ✓ tested / □ applicable but untested / ~ structured waiver / · no current surface signal",
+        ("Assets: total={total} reachable={reachable} unknown={unknown} unreachable={unreachable} "
+         "front-linked={front_linked} unassigned={unassigned} assigned={assigned} "
+         "disposed={disposed} closure-debt={closure_debt}").format(**data["summary"]),
         "",
-        "| asset | " + " | ".join(groups) + " | fronts |",
-        "|---|" + "|".join("---" for _ in groups) + "|---|",
+        "| asset | reachability | disposition | " + " | ".join(groups) + " | fronts | assignments |",
+        "|---|---|---|" + "|".join("---" for _ in groups) + "|---|---|",
     ]
     for row in data["rows"]:
         cells = [labels[row["cells"][g]] for g in groups]
         fronts = ", ".join(sorted(set(row["fronts"]))) or "-"
-        lines.append(f"| {row['asset']} | " + " | ".join(cells) + f" | {fronts} |")
+        assignments = ", ".join(row.get("assignments") or []) or "-"
+        lines.append(
+            f"| {row['asset']} | {row['status']} | {row['disposition']} | "
+            + " | ".join(cells) + f" | {fronts} | {assignments} |")
+    if data.get("accounting_gaps"):
+        lines.extend(["", "## Unassigned Assets", ""])
+        for row in data["accounting_gaps"]:
+            lines.append(
+                f"- {row['asset_id']} {row['asset']}: reachability={row['reachability']}; disposition=unassigned")
     if data["empty_columns"]:
         lines.extend(["", "## Empty Columns", ""])
         for g in data["empty_columns"]:
@@ -632,6 +757,20 @@ def write_outputs(run_dir: Path) -> dict:
     state.mkdir(parents=True, exist_ok=True)
     (state / "coverage_matrix.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (state / "coverage_matrix.md").write_text(render_markdown(data), encoding="utf-8")
+    ledger = {
+        "schema": "xunji.asset_ledger.v1",
+        "source": data.get("source"),
+        "summary": data.get("summary"),
+        "assets": [{
+            key: row.get(key) for key in (
+                "asset_id", "asset", "reachability", "examined", "flags", "fronts",
+                "assignments", "assignment_statuses", "tested", "inventory_verdict",
+                "disposition", "accounted", "closure_ready",
+            )
+        } for row in data.get("rows", [])],
+    }
+    (state / "asset_ledger.json").write_text(
+        json.dumps(ledger, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return data
 
 
@@ -753,6 +892,8 @@ def _selftest() -> int:
         {"host": "status-only.example", "reachable": True, "flags": ["LOGIN"]},
         {"host": "low-cert.example", "reachable": True, "flags": ["LOGIN"]},
         {"host": "confounder.example", "reachable": True, "flags": ["SURFACE:API"]},
+        {"host": "multi-a.example", "reachable": True, "flags": ["SURFACE:API"]},
+        {"host": "multi-b.example", "reachable": True, "flags": ["SURFACE:API"]},
         {"host": "d.example", "reachable": False, "flags": ["SURFACE:UPLOAD"]},
     ]}), encoding="utf-8")
     (run / "frontier.md").write_text(
@@ -780,7 +921,12 @@ def _selftest() -> int:
         "- Front: URL-form target without host token\n"
         "- Targets: https://url-field.example:8443/login\n"
         "- Status: probing\n"
-        "- Vectors tried: auth-bypass\n",
+        "- Vectors tried: auth-bypass\n\n"
+        "### F-006\n"
+        "- Front: broad API batch\n"
+        "- Assets: multi-a.example, multi-b.example\n"
+        "- Status: probing\n"
+        "- Vectors tried: SQLi, IDOR\n",
         encoding="utf-8",
     )
     (run / "evidence.md").write_text(
@@ -802,6 +948,22 @@ def _selftest() -> int:
         "- Action: checked confounder.example parameter handling\n"
         "- Result: normal validation response, no parameter anomaly\n"
         "- Note: false-positive confounder mentioned SQLi as an alternate hypothesis only\n"
+        "- Certainty: 0.5\n\n"
+        "## E-005\n"
+        "- Action: tested a.example authentication boundary\n"
+        "- Result: auth-gate bypass control rejected\n"
+        "- Certainty: 0.5\n\n"
+        "## E-006\n"
+        "- Action: tested b.example API parameter controls\n"
+        "- Result: SQLi injection control and IDOR swap both rejected\n"
+        "- Certainty: 0.5\n\n"
+        "## E-007\n"
+        "- Action: tested asset-field.example authentication boundary\n"
+        "- Result: auth-gate bypass control rejected\n"
+        "- Certainty: 0.5\n\n"
+        "## E-008\n"
+        "- Action: tested url-field.example:8443 authentication boundary\n"
+        "- Result: auth-gate bypass control rejected\n"
         "- Certainty: 0.5\n",
         encoding="utf-8")
     data = derive(run)
@@ -875,9 +1037,11 @@ def _selftest() -> int:
     bad_by_asset = {r["asset"]: r for r in bad_cov_data["rows"]}
     waiver_by_asset = {r["asset"]: r for r in waiver_data["rows"]}
     checks = [
-        ("only reachable/unknown rows are included", "d.example" not in by_asset),
-        ("auth vector fills Auth cell", by_asset["a.example"]["cells"]["Auth"] == "tested"),
-        ("api vectors fill Injection and IDOR", by_asset["b.example"]["cells"]["Injection"] == "tested"
+        ("all in-scope assets stay in ledger with unreachable explicitly accounted",
+         by_asset["d.example"]["disposition"] == "unreachable-baseline"
+         and all(v == "not_applicable" for v in by_asset["d.example"]["cells"].values())),
+        ("exact-host auth evidence fills Auth cell", by_asset["a.example"]["cells"]["Auth"] == "tested"),
+        ("exact-host API evidence fills Injection and IDOR", by_asset["b.example"]["cells"]["Injection"] == "tested"
          and by_asset["b.example"]["cells"]["IDOR"] == "tested"),
         ("url-fetch asset exposes empty SSRF column", by_asset["c.example"]["cells"]["SSRF"] == "untested"
          and "SSRF" in data["empty_columns"]),
@@ -899,6 +1063,13 @@ def _selftest() -> int:
          by_asset["low-cert.example"]["cells"]["Auth"] == "untested"),
         ("confounder note does not fill Injection coverage",
          by_asset["confounder.example"]["cells"]["Injection"] == "untested"),
+        ("multi-asset front vectors never copy one probe across the whole asset batch",
+         by_asset["multi-a.example"]["cells"]["Injection"] == "untested"
+         and by_asset["multi-b.example"]["cells"]["IDOR"] == "untested"
+         and any("front-level Vectors tried" in warning for warning in data["warnings"])),
+        ("partial per-asset group coverage remains closure debt",
+         by_asset["evidence-only.example"]["disposition"] == "tested-partial"
+         and not by_asset["evidence-only.example"]["closure_ready"]),
         ("corrupt primary coverage warns while using nested coverage",
          "nested.example" in bad_by_asset and bad_cov_warns and not bad_cov_errors),
         ("structured coverage waiver marks cell waived",
@@ -910,9 +1081,11 @@ def _selftest() -> int:
          and "Structured Waivers" in render_markdown(waiver_data)
          and "URL fetch sink absent" in render_markdown(waiver_data)),
         ("check reports warnings only", warns and not errors),
-        ("closure check upgrades matrix gaps to errors", closure_errors and not closure_warns),
-        ("state outputs are written", (run / "state" / "coverage_matrix.json").exists()
-         and (run / "state" / "coverage_matrix.md").exists()),
+        ("closure check upgrades matrix gaps to errors", bool(closure_errors)),
+        ("state outputs and full asset ledger are written",
+         (run / "state" / "coverage_matrix.json").exists()
+         and (run / "state" / "coverage_matrix.md").exists()
+         and (run / "state" / "asset_ledger.json").exists()),
         ("sync coverage marks touched assets examined",
          sync_info["changed"] >= 2
          and sync_by_host["open.example"]["examined"] is True

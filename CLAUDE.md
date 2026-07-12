@@ -63,6 +63,10 @@
   Guanlan-baseline assets for hard enforcement; egress-only additions are advisory.
   (retrospective #13: classify --all turned 19→114 reachable, creating an unsolvable
   contradiction between "don't re-OSINT" and "every asset needs a verdict.")
+- Setup also builds `state/asset_ledger.json`. Before any target action, every
+  reachable/unknown in-scope asset must be named in a canonical front; assets marked
+  unreachable by the upstream baseline remain explicitly accounted rather than
+  disappearing. A broad front title does not count unless it names each member.
 - `docs/ROUTER.md` decides which mode guidance to load; deterministic (runtime +
   phase + run state → files).
 - The five Router phases are `Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`,
@@ -77,8 +81,9 @@
   current phase, run dir, blockers, and next required action before any raw
   details.
 - Claude Code statusline is a read-only dashboard for this project. It shows the
-  active run, current phase, pending verification entries, aggregated subagent
-  state, blockers, and next action. It never replaces visible phase markers or
+  active run, current phase, asset total/front-linked/unassigned/disposed counts,
+  pending verification entries, aggregated subagent state, blockers, and next action.
+  It never replaces visible phase markers or
   `loop_journal.py` phase-start/phase-end records.
 - **Target-side proof artifact naming / cleanup:** If a proof action must create
   a target-side temporary file or resource, use the neutral form
@@ -213,16 +218,22 @@ observe -> update state graph -> decompose fronts
   canonical findings. The Single Synthesizer merges through the evidence gate; parallel
   breadth never relaxes confirmation.
 - **Agent Board is mandatory when open fronts >= 4 and barrier classes are diverse**
-  (no SharedBarrier group). In **every EXECUTE turn**, the Root MUST create at
-  least two disjoint `workers.py assign` lanes and actually invoke at least two
-  Claude `Agent` tool calls. Each prompt must carry
-  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`; only transcript-backed
-  `PostToolUse` receipts from the current session/turn count. Agent files,
-  `heartbeat`, `finished_at`, prose, and receipts from an older turn do not count.
-  Before Stop, every current-turn Agent must be dispositioned with
-  `workers.py finish`: `merged` cites a canonical `Evidence:/Front:/Decision:`
-  anchor; `blocked/failed/abandoned` cites `Reason:` plus its canonical `Front:`.
-  `done` or a displayed summary still means unmerged and remains blocked.
+  (no SharedBarrier group). The current **coordination epoch** must contain at least
+  two disjoint `workers.py assign` lanes and two real Claude `Agent` launches.
+  A bare continue/resume prompt preserves the epoch; do not create replacement Agents
+  unless active-front topology or asset coverage debt materially changed. Every
+  target-facing assignment carries repeatable `--asset HOST`, and each Agent prompt
+  must carry the exact matching tokens
+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2`.
+  `Agent PostToolUse(status=async_launched)` proves launch only. The matching
+  transcript-backed `SubagentStop` proves return; running Agents never owe disposition
+  and remain free to execute their own bounded lane. Global fan-out/disposition applies
+  to Root, and child Agents cannot spawn nested Agents.
+  After return, `merged` requires a canonical E/F/D anchor **and**, for every assigned
+  asset, a successful target-action receipt from that Agent plus a canonical E-entry.
+  Zero-tool and partially completed packages cannot merge. `blocked/failed/abandoned`
+  cites `Reason:` plus its canonical `Front:` but leaves unfinished asset coverage debt.
+  `done` still means unmerged.
 - Stay serial only when fewer than four active fronts remain, all active fronts
   share one concrete barrier class, or the operator's **current prompt** explicitly
   allows serial execution. A note in `decisions.md`, a model-claimed token budget,
@@ -361,6 +372,12 @@ Only two pauses; each requires a codex gate before the pause:
   one-off scripts. Don't reintroduce `apps/` · `schemas/` · `prompts/` · `policies/` ·
   `examples/` or a JSON orchestrator unless the operator explicitly asks to restore the
   old architecture.
+- Target egress is proxy fail-closed by default. `probe.py`/`render.py`/`scan.py` read
+  `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf`; absent proxy configuration
+  rejects target traffic. Only an operator who explicitly accepts direct egress may set
+  `XUNJI_PROXY_REQUIRED=0`, and the turn gate binds that opt-out to the current operator
+  prompt. Target `WebFetch`, raw curl/wget/requests/socket, and other unverified network
+  clients are rejected; a prompt reminder or Agent export is not a security boundary.
 - Any new active capability inherits the guard layer (rate limit · body cap ·
   brute-force lock · upload cleanup) and routes through it; the skill + hook define its
   limits.

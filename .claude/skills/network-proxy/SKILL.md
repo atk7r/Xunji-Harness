@@ -30,7 +30,14 @@ Do not confuse this with Xunji's active engagement proxy discipline:
 
 - Active Xunji target-facing tools (`probe.py`, `render.py`, `scan.py`, sensors)
   use `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf` through
-  `tools/harness/proxy.py`.
+  `tools/harness/proxy.py`. This channel is fail-closed by default; absent proxy
+  configuration rejects target traffic. Only an operator-approved direct-egress
+  session may set `XUNJI_PROXY_REQUIRED=0`.
+- Target `WebFetch`, other non-attested network tools, and raw
+  curl/wget/requests/socket are rejected by the turn gate; use the proxy-aware
+  project tools. `XUNJI_PROXY_REQUIRED=0` is accepted from a Claude Bash action
+  only when the current operator prompt explicitly approves direct egress.
+  Prompt reminders alone are not proxy enforcement.
 - Codex review traffic uses the dedicated `CODEX_PROXY` /
   `tools/harness/codex_proxy.conf` path.
 - Model/API calls must not be routed through the engagement proxy.

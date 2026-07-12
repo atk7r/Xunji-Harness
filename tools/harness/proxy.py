@@ -10,7 +10,8 @@ requests 都自动继承 —— 若把交战代理塞进 HTTPS_PROXY, 模型调�
 中继 = 串味 + 泄露)。所以交战代理走【专用】XUNJI_PROXY, 只有 active 工具显式读它; 模型调用另外【强制
 剥代理】(model_safe_env / model_no_proxy_opener), 双保险。
 
-fail-closed: XUNJI_PROXY_REQUIRED=1 时, active 工具没配代理就【拒绝直连】(防真实 IP 泄露), 不静默直连。
+fail-closed: active 工具默认要求代理；没配就【拒绝直连】(防真实 IP 泄露)。只有操作者显式设置
+XUNJI_PROXY_REQUIRED=0 才允许直连，不依赖模型记得 export。
 
 配置(优先级): `--proxy` 参数 > `XUNJI_PROXY` 环境变量 > `tools/harness/proxy.conf`(每行一个 url, # 注释)。
 支持 http:// 与 socks5://; **建议 socks5h://**(代理侧解析 DNS, 防 DNS 泄露; socks4a 在 PySocks 某些失败下
@@ -51,8 +52,16 @@ def engagement_proxy(override: str | None = None) -> str | None:
 
 
 def required() -> bool:
-    """XUNJI_PROXY_REQUIRED=1 → 强制: active 工具没代理就拒绝直连(fail-closed)。"""
-    return (os.environ.get("XUNJI_PROXY_REQUIRED") or "").strip().lower() in ("1", "true", "yes", "on")
+    """Active target traffic is fail-closed unless the operator opts out.
+
+    Model prompts are not a security boundary.  An absent environment variable
+    therefore means "proxy required"; only an explicit operator value of
+    ``0/false/no/off`` permits direct egress.
+    """
+    raw = (os.environ.get("XUNJI_PROXY_REQUIRED") or "").strip().lower()
+    if not raw:
+        return True
+    return raw not in ("0", "false", "no", "off")
 
 
 def resolve(override: str | None = None) -> str | None:
@@ -60,8 +69,9 @@ def resolve(override: str | None = None) -> str | None:
     p = engagement_proxy(override)
     if p is None and required():
         raise SystemExit(
-            "[proxy] XUNJI_PROXY_REQUIRED=1 但未配置交战代理 —— 拒绝直连(防真实 IP 泄露)。"
-            " 设 XUNJI_PROXY=socks5h://host:port 或写一行进 tools/harness/proxy.conf。")
+            "[proxy] 主动目标流量默认要求交战代理，但当前未配置 —— 拒绝直连(防真实 IP 泄露)。"
+            " 设 XUNJI_PROXY=socks5h://host:port / 写 tools/harness/proxy.conf；"
+            "仅操作者明确接受直连时才设置 XUNJI_PROXY_REQUIRED=0。")
     return p
 
 
@@ -232,7 +242,7 @@ def _selftest() -> int:
         globals()["_CONF"] = Path("__xunji_no_proxy_conf__")
         for k in _PROXY_VARS:
             os.environ.pop(k, None)
-        os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+        os.environ["XUNJI_PROXY_REQUIRED"] = "0"
 
         os.environ["XUNJI_PROXY"] = "socks5h://env:1080"
         checks.append(("override 胜过 env", engagement_proxy("http://arg:8080") == "http://arg:8080"))
@@ -277,13 +287,13 @@ def _selftest() -> int:
         ]
         # fail-closed
         os.environ.pop("HTTPS_PROXY", None)
-        os.environ["XUNJI_PROXY_REQUIRED"] = "1"
+        os.environ.pop("XUNJI_PROXY_REQUIRED", None)
         try:
             resolve(None)
             fc = False
         except SystemExit:
             fc = True
-        checks.append(("required 但没配 → fail-closed 抛错(不直连)", fc))
+        checks.append(("默认 required 且没配 → fail-closed 抛错(不直连)", fc))
         checks.append(("required 配了 override → 不抛、返回代理", resolve("http://relay:9") == "http://relay:9"))
     finally:
         globals()["_CONF"] = old_conf

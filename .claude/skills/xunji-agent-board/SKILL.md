@@ -27,7 +27,7 @@ must not be treated as the Root driver's instruction source.
 ## Root Posture
 
 - Root chooses fronts autonomously while safe open fronts remain.
-- Agents own one assigned front/role pair and coordinate only through the run
+- Agents own one assigned front/role/asset package and coordinate only through the run
   directory.
 - Agents write `phenomenon`, `candidate`, `refutes`, `barrier`, or
   `next-evidence`; they do not write final findings or closure.
@@ -35,9 +35,10 @@ must not be treated as the Root driver's instruction source.
   resolves conflicts, and updates canonical Markdown.
 - `workers.py assign` means "lane prepared", not "Claude Agent is running".
   When Root actually starts a Claude Agent tool, its prompt must include
-  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. The hook records the real
-  transcript-backed receipt automatically. `heartbeat` is optional display state
-  and never proves execution.
+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2`, exactly matching
+  the assignment's explicit `--asset` package. The hook records launch and return
+  attempts automatically. `heartbeat` is optional display state and never proves
+  execution.
   When the Agent returns or is intentionally abandoned/blocked, record
   `workers.py finish <run> <agent> --status <done|blocked|failed|abandoned>`.
   Closure is blocked while any assigned Agent remains non-terminal.
@@ -138,11 +139,13 @@ Stay serial when:
 - There is one front, one asset, or one shared barrier.
 - One lane's result would materially change the next step for all others.
 
-When at least four active fronts do not all share one concrete barrier, every
-`EXECUTE` turn must actually invoke two Agents on disjoint assignment/front pairs.
-Only the operator's current prompt may grant a one-turn serial override. Old
-receipts, `heartbeat`, Agent files, model-claimed budgets, and decisions prose do
-not bypass this rule.
+When at least four active fronts do not all share one concrete barrier, the current
+**coordination epoch** must contain two real Agents on disjoint assignment/front
+pairs. The epoch persists across bare `continue` prompts; do not create replacement
+Agents merely because the operator continued. It resets only when the active-front
+topology or asset coverage debt materially changes. Only the operator's current
+prompt may grant a serial override. `heartbeat`, Agent files, model-claimed budgets,
+and decisions prose never prove execution.
 
 ## Commands
 
@@ -161,15 +164,25 @@ Plan and assign:
 ```bash
 python tools/workers.py suggest runs/<dir>
 python tools/workers.py plan runs/<dir>
-python tools/workers.py assign runs/<dir> --role web-hunter --front F-001
+python tools/workers.py assign runs/<dir> --role web-hunter --front F-001 \
+  --asset app1.example --asset app2.example
 python tools/context_pack.py runs/<dir> --agent A-web-hunter-001
 rg -n "Reasoning style|Loop budget|Operator Profile" runs/<dir>/agents/A-web-hunter-001.md runs/<dir>/context/F-001.web-hunter.md
 ```
 
-Then invoke the Claude `Agent` tool with
-`XUNJI_ASSIGNMENT=A-web-hunter-001 XUNJI_FRONT=F-001` in its prompt. Repeat for a
-second disjoint lane when fan-out is required. After the real call, `heartbeat`
-may mirror progress for humans, but it is not a gate credential.
+Every target-facing assignment requires a bounded, explicit asset package. Each
+asset must already be named in that front and present in `coverage.json`; overlapping
+non-terminal packages are rejected except for verification/review roles. Then invoke
+the Claude `Agent` tool with the exact tokens
+`XUNJI_ASSIGNMENT=A-web-hunter-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=app1.example,app2.example`.
+The package in the prompt must exactly match `state/assignments.json`.
+
+For an async Agent, `Agent PostToolUse(status=async_launched)` proves **launch only**.
+The hook records the returned `agentId` as a unique attempt and projects the
+assignment to `running`; only the matching `SubagentStop` means the attempt returned.
+Running Agents never owe post-return disposition and must remain able to use their own
+assigned tools. Global fan-out/disposition gates apply to Root, not to a running child
+lane. Only Root may spawn Agents; nested Agent fan-out is rejected.
 
 After Root adjudicates the result, close the assignment with an auditable note:
 
@@ -178,9 +191,13 @@ python tools/workers.py finish runs/<dir> A-web-hunter-001 --status merged --not
 python tools/workers.py finish runs/<dir> A-web-hunter-002 --status blocked --note "Reason: shared auth barrier; Front: F-002"
 ```
 
-`done` means the Agent returned but Root still owes merge/refute/adjudication; it
-does not satisfy the execute-turn Stop gate. The disposition timestamp must be
-newer than that Agent's current-turn receipt.
+`done` means a real Agent returned but Root still owes merge/refute/adjudication; it
+does not satisfy the Stop gate. The disposition timestamp must be newer than the
+matching `SubagentStop`. `merged` additionally requires, for **every** assigned asset,
+at least one transcript-backed successful target action by that Agent and a canonical
+`E-xxx` entry naming the exact host. A zero-tool Agent or a partially completed asset
+package cannot be marked merged. `blocked/failed/abandoned` may end the attempt but do
+not erase that asset's coverage debt.
 
 Before merging:
 
@@ -201,6 +218,9 @@ and stop/pivot condition.
 ## Merge Discipline
 
 For each done Agent:
+
+- Compare `Assigned assets` with `## Asset Outcomes`; no asset may silently disappear
+  because it returned a login page, 302, captcha, WAF, or timeout.
 
 - Verify the output has a role, front, loop, safety reminder, and artifact or
   command pointers.

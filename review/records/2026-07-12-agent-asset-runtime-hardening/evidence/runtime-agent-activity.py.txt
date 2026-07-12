@@ -1,0 +1,183 @@
+def agent_attempts(
+    run_dir: str | Path,
+    *,
+    session_id: str = "",
+    since: float = 0.0,
+) -> list[dict]:
+    """Build assignment attempts from launch acknowledgements and SubagentStop."""
+    launches = valid_tool_events(run_dir, "Agent", session_id=session_id, since=since)
+    lifecycle = valid_lifecycle_events(run_dir, session_id=session_id, since=since)
+    stops: dict[str, list[float]] = {}
+    starts: dict[str, list[float]] = {}
+    for event in lifecycle:
+        agent_id = str(event.get("agent_id") or "")
+        if not agent_id:
+            continue
+        if event.get("hook_event_name") == "SubagentStop":
+            stops.setdefault(agent_id, []).append(float(event.get("ts") or 0.0))
+        elif event.get("hook_event_name") == "SubagentStart":
+            starts.setdefault(agent_id, []).append(float(event.get("ts") or 0.0))
+    attempts: list[dict] = []
+    for event in launches:
+        assignment = str(event.get("assignment") or "")
+        front = str(event.get("front") or "")
+        kind = "assignment"
+        if event.get("completion_review"):
+            assignment = "XUNJI-COMPLETION"
+            front = "REVIEW"
+            kind = "completion_review"
+        if not assignment or not front:
+            continue
+        launched_id, is_async, status = _launch_from_record(event)
+        attempt_id = launched_id or str(event.get("tool_use_id") or "")
+        launched_at = float(event.get("ts") or 0.0)
+        returned_at = 0.0
+        started_at = 0.0
+        if is_async:
+            # Agent ids are unique attempt identities. The closest matching
+            # Start is causal even when queueing or hook delivery exceeds an
+            # arbitrary wall-clock window.
+            matching_starts = starts.get(launched_id, [])
+            if matching_starts:
+                started_at = min(matching_starts, key=lambda ts: abs(ts - launched_at))
+            lifecycle_floor = started_at or launched_at
+            later_stops = [ts for ts in stops.get(launched_id, []) if ts >= lifecycle_floor]
+            returned_at = min(later_stops) if later_stops else 0.0
+        else:
+            returned_at = launched_at
+        attempts.append({
+            "attempt_id": attempt_id,
+            "assignment": assignment,
+            "front": front,
+            "agent_id": launched_id,
+            "actor_agent_id": str(event.get("agent_id") or ""),
+            "session_id": str(event.get("session_id") or ""),
+            "tool_use_id": str(event.get("tool_use_id") or ""),
+            "launched_at": launched_at,
+            "started_at": started_at,
+            "returned_at": returned_at,
+            "state": "returned" if returned_at else "running",
+            "is_async": is_async,
+            "launch_status": status,
+            "kind": kind,
+        })
+    return attempts
+
+
+def agent_actor(run_dir: str | Path, agent_id: str, *, since: float = 0.0) -> dict:
+    """Resolve a Claude subagent id to its exact assignment attempt."""
+    if not agent_id:
+        return {}
+    matches = [a for a in agent_attempts(run_dir, since=since) if a.get("agent_id") == agent_id]
+    if not matches:
+        return {}
+    return max(matches, key=lambda item: float(item.get("launched_at") or 0.0))
+
+
+def agent_asset_activity(run_dir: str | Path, assignment: str) -> dict[str, int]:
+    """Count successful target actions by the assignment's concrete assets."""
+    run = Path(run_dir)
+    try:
+        data = json.loads((run / "state" / "assignments.json").read_text(
+            encoding="utf-8", errors="replace"))
+    except Exception:
+        return {}
+    row = next((item for item in data.get("assignments", [])
+                if isinstance(item, dict) and str(item.get("agent") or "") == assignment), {})
+    assets = [str(item).strip().lower() for item in row.get("assets", []) if str(item).strip()]
+    if not assets:
+        return {}
+    attempts = [a for a in agent_attempts(run) if a.get("assignment") == assignment]
+    actor_ids = {str(a.get("agent_id") or "") for a in attempts if a.get("agent_id")}
+    if not actor_ids:
+        return {asset: 0 for asset in assets}
+    first_launch = min(float(a.get("launched_at") or 0.0) for a in attempts)
+    events = [event for event in valid_tool_events(run, since=first_launch)
+              if event.get("target_action") is True
+              and str(event.get("agent_id") or "") in actor_ids]
+    counts = {asset: 0 for asset in assets}
+    for event in events:
+        text = _input_text(event).lower()
+        for asset in assets:
+            host = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", asset).split("/", 1)[0]
+            if host and re.search(r"(?<![\w.\-])" + re.escape(host) + r"(?![\w.\-])", text):
+                counts[asset] += 1
+    return counts
+
+
+def agent_fanout(run_dir: str | Path, *, session_id: str = "", since: float = 0.0) -> dict:
+    attempts = [item for item in agent_attempts(
+        run_dir, session_id=session_id, since=since)
+                if item.get("kind") == "assignment"]
+    assignments = sorted({str(item.get("assignment")) for item in attempts if item.get("assignment")})
+    fronts = sorted({str(item.get("front")) for item in attempts if item.get("front")})
+    return {
+        "assignments": assignments,
+        "fronts": fronts,
+        "attempts": attempts,
+        "running": sorted({str(item.get("assignment")) for item in attempts
+                           if item.get("state") == "running"}),
+        "returned": sorted({str(item.get("assignment")) for item in attempts
+                            if item.get("state") == "returned"}),
+        "count": len(assignments),
+        "satisfied": len(assignments) >= 2 and len(fronts) >= 2,
+    }
+
+
+def agent_disposition(run_dir: str | Path, *, session_id: str = "", since: float = 0.0) -> dict:
+    """Require only returned attempts to be explicitly merged or adjudicated."""
+    run = Path(run_dir)
+    receipts = agent_fanout(run, session_id=session_id, since=since)
+    latest_return_ts: dict[str, float] = {}
+    for attempt in receipts.get("attempts", []):
+        assignment = str(attempt.get("assignment") or "")
+        returned_at = float(attempt.get("returned_at") or 0.0)
+        if assignment and returned_at:
+            latest_return_ts[assignment] = max(latest_return_ts.get(assignment, 0.0), returned_at)
+    try:
+        data = json.loads((run / "state" / "assignments.json").read_text(
+            encoding="utf-8", errors="replace"))
+    except Exception:
+        data = {}
+    rows = {
+        str(item.get("agent") or ""): item
+        for item in data.get("assignments", []) if isinstance(item, dict)
+    } if isinstance(data, dict) and isinstance(data.get("assignments"), list) else {}
+    canonical = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in (run / "evidence.md", run / "frontier.md", run / "decisions.md")
+        if path.exists()
+    )
+    pending: list[str] = []
+    for assignment in sorted(latest_return_ts):
+        row = rows.get(assignment, {})
+        status = str(row.get("status") or "").strip().lower()
+        note = str(row.get("last_note") or "").strip()
+        updated_raw = str(row.get("updated_at") or row.get("finished_at") or "")
+        try:
+            updated_at = datetime.fromisoformat(updated_raw.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            updated_at = 0.0
+        if updated_at < latest_return_ts.get(assignment, 0.0):
+            pending.append(f"{assignment}: disposition 早于真实 SubagentStop 返回")
+            continue
+        anchors = re.findall(r"\b[EDF]-\d+\b", note, re.I)
+        anchors_exist = bool(anchors) and all(anchor.upper() in canonical.upper() for anchor in anchors)
+        if status == "merged":
+            if not re.search(r"(?i)\b(Evidence|Front|Decision|Refuted|Barrier)\s*[:：]", note) or not anchors_exist:
+                pending.append(f"{assignment}: merged 缺 canonical E/F/D 处置锚点")
+            if row.get("assets") and row.get("coverage_merge_satisfied") is not True:
+                pending.append(f"{assignment}: merged 未通过逐资产动作 + canonical E-entry 验收")
+        elif status in {"blocked", "failed", "abandoned"}:
+            if not re.search(r"(?i)\bReason\s*[:：]", note) or not re.search(r"\bF-\d+\b", note, re.I) or not anchors_exist:
+                pending.append(f"{assignment}: {status} 缺 Reason + canonical Front 锚点")
+        else:
+            pending.append(f"{assignment}: status={status or '(missing)'} 尚未 merge/adjudicate")
+    return {
+        **receipts,
+        "pending": pending,
+        "disposition_satisfied": bool(receipts.get("satisfied")) and not pending,
+    }
+
+
+def completion_review_valid(run_dir: str | Path, evidence_index_hash: str) -> bool:

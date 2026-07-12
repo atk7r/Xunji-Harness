@@ -64,7 +64,7 @@ Plan or assign advisory lanes:
 ```bash
 python tools/workers.py suggest runs/<dir>
 python tools/workers.py plan runs/<dir>
-python tools/workers.py assign runs/<dir> --role web-hunter --front F-001
+python tools/workers.py assign runs/<dir> --role web-hunter --front F-001 --asset app.example
 python tools/context_pack.py runs/<dir> --agent A-web-hunter-001
 ```
 
@@ -78,6 +78,11 @@ python tools/workers.py synthesize runs/<dir>
 ```
 
 ## Output Contract
+
+Target-facing assignments bind an explicit asset package. The Agent prompt must
+repeat the exact `XUNJI_ASSIGNMENT`, `XUNJI_FRONT`, and `XUNJI_ASSETS` tokens.
+Async Agent PostToolUse proves launch; SubagentStop proves return. `merged`
+requires per-asset successful target receipts plus canonical E-entry coverage.
 
 Agent output may contain:
 

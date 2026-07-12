@@ -39,7 +39,7 @@ def _isolate_selftest_state() -> tuple:
         tmp_root,
     )
     os.environ.pop("XUNJI_PROXY", None)
-    os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+    os.environ["XUNJI_PROXY_REQUIRED"] = "0"
     probe._PROXY = None
     probe.proxymod._CONF = Path("__xunji_no_proxy_conf__")
     guardmod.STATE_DIR = tmp_root / "guard_state"

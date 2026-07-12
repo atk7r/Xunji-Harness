@@ -1,0 +1,905 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-12-agent-asset-runtime-hardening",
+  "files": {
+    "report.md": {
+      "sha1": "0c30390ff69acfaac00c64dc9a64b9138ae53521",
+      "size": 1172
+    },
+    "evidence.md": {
+      "sha1": "a5ae87a2ae115d729d13a79fd844148277cebb93",
+      "size": 3055
+    },
+    "frontier.md": {
+      "sha1": "764f1f2da7dc26458b54fcc51f529fdf87625baf",
+      "size": 556
+    },
+    "decisions.md": {
+      "sha1": "7cfb66d2c586b1e68a0979e7ff395c6659e1b859",
+      "size": 538
+    },
+    "review.md": {
+      "sha1": "bb26dab2faf7ab55aed041fd9fd7f83fd8c5725e",
+      "size": 1835
+    },
+    "target.md": {
+      "sha1": "a4581389eecd26559878a193168c9c2d9543982a",
+      "size": 391
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 - Agent runtime and assignment enforcement diff",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-001"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/runtime-agent-activity.py.txt",
+            "path": "evidence/runtime-agent-activity.py.txt",
+            "exists": true,
+            "size": 8796,
+            "sha1": "9c19dbc487fff57f475422e5b5ae6f9e254628e6",
+            "excerpt": "def agent_attempts(\n    run_dir: str | Path,\n    *,\n    session_id: str = \"\",\n    since: float = 0.0,\n) -> list[dict]:\n    \"\"\"Build assignment attempts from launch acknowledgements and SubagentStop.\"\"\"\n    launches = valid_tool_events(run_dir, \"Agent\", session_id=session_id, since=since)\n    lifecycle = valid_lifecycle_events(run_dir, session_id=session_id, since=since)\n    stops: dict[str, list[float]] = {}\n    starts: dict[str, list[float]] = {}\n    for event in lifecycle:\n        agent_id = str(event.get(\"agent_id\") or \"\")\n        if not agent_id:\n            continue\n        if event.get(\"hook_event_name\") == \"SubagentStop\":\n            stops.setdefault(agent_id, []).append(float(event.get(\"ts\") or 0.0))\n        elif event.get(\"hook_event_name\") == \"SubagentStart\":\n            starts.setdefault(agent_id, []).append(float(event.get(\"ts\") or 0.0))\n    attempts: list[dict] = []\n    for event in launches:\n        assignment = str(event.get(\"assignment\") or \"\")\n        front = str(event.get(\"front\") or \"\")\n        kind = \"assignment\"\n        if event.get(\"completion_review\"):\n            assignment = \"XUNJI-COMPLETION\"\n            front = \"REVIEW\"\n            kind = \"completion_review\"\n        if not assignment or not front:\n            continue\n        launched_id, is_async, status = _launch_from_record(event)\n        attempt_id = launched_id or str(event.get(\"tool_use_id\") or \"\")\n        launched_at = float(event.get(\"ts\") or 0.0)\n        returned_at = 0.0\n        started_at = 0.0\n        if is_async:\n            # Agent ids are unique attempt identities. The closest matching\n            # Start is causal even when queueing or hook delivery exceeds an\n            # arbitrary wall-clock window.\n            matching_starts = starts.get(launched_id, [])\n            if matching_starts:\n                started_at = min(matching_starts, key=lambda ts: abs(ts - launched_at))\n            lifecycle_floor = started_at or launched_at\n            later_stops = [ts for ts in stops.get(launched_id, []) if ts >= lifecycle_floor]\n            returned_at = min(later_stops) if later_stops else 0.0\n        else:\n            returned_at = launched_at\n        attempts.append({\n            \"attempt_id\": attempt_id,\n            \"assignment\": assignment,\n            \"front\": front,\n            \"agent_id\": launched_id,\n            \"actor_agent_id\": str(event.get(\"agent_id\") or \"\"),\n            \"session_id\": str(event.get(\"session_id\") or \"\"),\n            \"tool_use_id\": str(event.get(\"tool_use_id\") or \"\"),\n            \"launched_at\": launched_at,\n            \"started_at\": started_at,\n            \"returned_at\": returned_at,\n            \"state\": \"returned\" if returned_at else \"running\",\n            \"is_async\": is_async,\n            \"launch_status\": status,\n            \"kind\": kind,\n        })\n    return attempts\n\n\ndef agent_actor(run_dir: str | Path, agent_id: str, *, since: float = 0.0) -> dict:\n    \"\"\"Resolve a Claude subagent id to its exact assignment attempt.\"\"\"\n    if not agent_id:\n        return {}\n    matches = [a for a in agent_attempts(run_dir, since=since) if a.get(\"agent_id\") == agent_id]\n    if not matches:\n        return {}\n    return max(matches, key=lambda item: float(item.get(\"launched_at\") or 0.0))\n\n\ndef agent_asset_activity(run_dir: str | Path, assignment: str) -> dict[str, int]:\n    \"\"\"Count successful target actions by the assignment's concrete assets.\"\"\"\n    run = Path(run_dir)\n    try:\n        data = json.loads((run / \"state\" / \"assignments.json\").read_text(\n            encoding=\"utf-8\", errors=\"replace\"))\n    except Exception:\n        return {}\n    row = next((item for item in data.get(\"assignments\", [])\n                if isinstance(item, dict) and str(item.get(\"agent\") or \"\") == assignment), {})\n    assets = [str(item).strip().lower() for item in row.get(\"assets\", []) if str(item).strip()]\n    if not assets:\n        return {}\n    attempts = [a for a in agent_attempts(run) if a.get(\"assignment\") == assignment]\n    actor_ids = {str(a.get(\"agent_id\") or \"\") for a in attempts if a.get(\"agent_id\")}\n    if not actor_ids:\n        return {asset: 0 for asset in assets}\n    first_launch = min(float(a.get(\"launched_at\") or 0.0) for a in attempts)\n    events = [event for event in valid_tool_events(run, since=first_launch)\n              if event.get(\"target_action\") is True\n              and str(event.get(\"agent_id\") or \"\") in actor_ids]\n    counts = {asset: 0 for asset in assets}\n    for event in events:\n        text = _input_text(event).lower()\n        for asset in assets:\n            host = re.sub(r\"^[a-z][a-z0-9+.\\-]*://\", \"\", asset).split(\"/\", 1)[0]\n            if host and re.search(r\"(?<![\\w.\\-])\" + re.escape(host) + r\"(?![\\w.\\-])\", text):\n                counts[asset] += 1\n    return counts\n\n\ndef agent_fanout(run_dir: str | Path, *, session_id: str = \"\", since: float = 0.0) -> dict:\n    attempts = [item for item in agent_attempts(\n        run_dir, session_id=session_id, since=since)\n                if item.get(\"kind\") == \"assignment\"]\n    assignments = sorted({str(item.get(\"assignment\")) for item in attempts if item.get(\"assignment\")})\n    fronts = sorted({str(item.get(\"front\")) for item in attempts if item.get(\"front\")})\n    return {\n        \"assignments\": assignments,\n        \"fronts\": fronts,\n        \"attempts\": attempts,\n        \"running\": sorted({str(item.get(\"assignment\")) for item in attempts\n                           if item.get(\"state\") == \"running\"}),\n        \"returned\": sorted({str(item.get(\"assignment\")) for item in attempts\n                            if item.get(\"state\") == \"returned\"}),\n        \"count\": len(assignments),\n        \"satisfied\": len(assignments) >= 2 and len(fronts) >= 2,\n    }\n\n\ndef agent_disposition(run_dir: str | Path, *, session_id: str = \"\", since: float = 0.0) -> dict:\n    \"\"\"Require only returned attempts to be explicitly merged or adjudicated.\"\"\"\n    run = Path(run_dir)\n    receipts = agent_fanout(run, session_id=session_id, since=since)\n    latest_return_ts: dict[str, float] = {}\n    for attempt in receipts.get(\"attempts\", []):\n        assignment = str(attempt.get(\"assignment\") or \"\")\n        returned_at = float(attempt.get(\"returned_at\") or 0.0)\n        if assignment and returned_at:\n            latest_return_ts[assignment] = max(latest_return_ts.get(assignment, 0.0), returned_at)\n    try:\n        data = json.loads((run / \"state\" / \"assignments.json\").read_text(\n            encoding=\"utf-8\", errors=\"replace\"))\n    except Exception:\n        data = {}\n    rows = {\n        str(item.get(\"agent\") or \"\"): item\n        for item in data.get(\"assignments\", []) if isinstance(item, dict)\n    } if isinstance(data, dict) and isinstance(data.get(\"assignments\"), list) else {}\n    canonical = \"\\n\".join(\n        path.read_text(encoding=\"utf-8\", errors=\"replace\")\n        for path in (run / \"evidence.md\", run / \"frontier.md\", run / \"decisions.md\")\n        if path.exists()\n    )\n    pending: list[str] = []\n    for assignment in sorted(latest_return_ts):\n        row = rows.get(assignment, {})\n        status = str(row.get(\"status\") or \"\").strip().lower()\n        note = str(row.get(\"last_note\") or \"\").strip()\n        updated_raw = str(row.get(\"updated_at\") or row.get(\"finished_at\") or \"\")\n        try:\n            updated_at = datetime.fromisoformat(updated_raw.replace(\"Z\", \"+00:00\")).timestamp()\n        except Exception:\n            updated_at = 0.0\n        if updated_at < latest_return_ts.get(assignment, 0.0):\n            pending.append(f\"{assignment}: disposition 早于真实 SubagentStop 返回\")\n            continue\n        anchors = re.findall(r\"\\b[EDF]-\\d+\\b\", note, re.I)\n        anchors_exist = bool(anchors) and all(anchor.upper() in canonical.upper() for anchor in anchors)\n        if status == \"merged\":\n            if not re.search(r\"(?i)\\b(Evidence|Front|Decision|Refuted|Barrier)\\s*[:：]\", note) or not anchors_exist:\n                pending.append(f\"{assignment}: merged 缺 canonical E/F/D 处置锚点\")\n            if row.get(\"assets\") and row.get(\"coverage_merge_satisfied\") is not True:\n                pending.append(f\"{assignment}: merged 未通过逐资产动作 + canonical E-entry 验收\")\n        elif status in {\"blocked\", \"failed\", \"abandoned\"}:\n            if not re.search(r\"(?i)\\bReason\\s*[:：]\", note) or not re.search(r\"\\bF-\\d+\\b\", note, re.I) or not anchors_exist:\n                pending.append(f\"{assignment}: {status} 缺 Reason + canonical Front 锚点\")\n        else:\n            pending.append(f\"{assignment}: status={status or '(missing)'} 尚未 merge/adjudicate\")\n    return {\n        **receipts,\n        \"pending\": pending,\n        \"disposition_satisfied\": bool(receipts.get(\"satisfied\")) and not pending,\n    }\n\n\ndef completion_review_valid(run_dir: str | Path, evidence_index_hash: str) -> bool:\n"
+          },
+          {
+            "token": "evidence/runtime-receipts.diff",
+            "path": "evidence/runtime-receipts.diff",
+            "exists": true,
+            "size": 34661,
+            "sha1": "9cd17ec0f5db3b30625fee27da38cb07822ed963",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/runtime_receipts.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 16,
+              "hunks": [
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -28,6 +28,9 @@ except ImportError:  # pragma: no cover - Windows fallback remains atomic per wr"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -55,6 +58,10 @@ def _lock_path(run_dir: Path) -> Path:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -100,9 +107,32 @@ def _excerpt(value: object) -> str:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -114,6 +144,19 @@ def _assignment_fields(text: str) -> tuple[str, str]:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -180,6 +223,7 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -195,6 +239,7 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -202,6 +247,9 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -212,6 +260,140 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -229,6 +411,26 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -284,6 +486,40 @@ def valid_tool_events("
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -334,29 +570,151 @@ def unresolved_target_denials("
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -372,7 +730,7 @@ def agent_disposition(run_dir: str | Path, *, session_id: str = \"\", since: float"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -381,14 +739,16 @@ def agent_disposition(run_dir: str | Path, *, session_id: str = \"\", since: float"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -562,6 +922,8 @@ def _write_transcript(path: Path, *tool_ids: str) -> None:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -690,6 +1052,152 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/runtime_receipts.py",
+                  "header": "@@ -711,6 +1219,33 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/runtime_receipts.py b/tools/runtime_receipts.py\nindex aac0184..ac85c63 100644\n--- a/tools/runtime_receipts.py\n+++ b/tools/runtime_receipts.py\n@@ -28,6 +28,9 @@ except ImportError:  # pragma: no cover - Windows fallback remains atomic per wr\n SCHEMA = \"xunji.runtime_receipt.v1\"\n EVENTS = \"runtime_events.jsonl\"\n MAX_EXCERPT = 6000\n+PROJECTION_ERROR = \"runtime_projection_error.json\"\n+NONTERMINAL_ASSIGNMENT_STATUSES = {\"assigned\", \"starting\", \"running\", \"working\", \"?\", \"\"}\n+TERMINAL_ASSIGNMENT_STATUSES = {\"done\", \"merged\", \"blocked\", \"failed\", \"abandoned\"}\n \n \n def _json_bytes(value: object) -> bytes:\n@@ -55,6 +58,10 @@ def _lock_path(run_dir: Path) -> Path:\n     return run_dir / \"state\" / \".runtime_events.lock\"\n \n \n+def _projection_error_path(run_dir: Path) -> Path:\n+    return run_dir / \"state\" / PROJECTION_ERROR\n+\n+\n @contextlib.contextmanager\n def _locked(run_dir: Path):\n     lock = _lock_path(run_dir)\n@@ -100,9 +107,32 @@ def _excerpt(value: object) -> str:\n \n def _input_text(event: dict) -> str:\n     tool_input = event.get(\"tool_input\") if isinstance(event.get(\"tool_input\"), dict) else {}\n-    return \"\\n\".join(str(tool_input.get(key) or \"\") for key in (\n+    text = \"\\n\".join(str(tool_input.get(key) or \"\") for key in (\n         \"prompt\", \"description\", \"command\", \"job_id\", \"id\",\n     ))\n+    if text.strip():\n+        return text\n+    return str(event.get(\"input_excerpt\") or \"\")\n+\n+\n+def _mapping(value: object) -> dict:\n+    if isinstance(value, dict):\n+        return value\n+    if isinstance(value, str):\n+        try:\n+            parsed = json.loads(value)\n+        except Exception:\n+            return {}\n+        return parsed if isinstance(parsed, dict) else {}\n+    return {}\n+\n+\n+def _agent_launch_fields(value: object) -> tuple[str, bool, str]:\n+    response = _mapping(value)\n+    agent_id = str(response.get(\"agentId\") or response.get(\"agent_id\") or \"\").strip()\n+    status = str(response.get(\"status\") or \"\").strip().lower()\n+    is_async = bool(response.get(\"isAsync\")) or status in {\"async_launched\", \"running\"}\n+    return agent_id, is_async, status\n \n \n def _assignment_fields(text: str) -> tuple[str, str]:\n@@ -114,6 +144,19 @@ def _assignment_fields(text: str) -> tuple[str, str]:\n     )\n \n \n+def _assignment_assets(text: str) -> list[str]:\n+    match = re.search(r\"(?im)\\bXUNJI_ASSETS\\s*=\\s*([^\\s]+)\", text)\n+    if not match:\n+        return []\n+    out: list[str] = []\n+    for raw in match.group(1).split(\",\"):\n+        value = raw.strip().strip(\"[]{}'\\\"\").lower().rstrip(\".\")\n+        value = re.sub(r\"^[a-z][a-z0-9+.\\-]*://\", \"\", value).split(\"/\", 1)[0]\n+        if value and value not in out:\n+            out.append(value)\n+    return out\n+\n+\n def _evidence_hash(text: str) -> str:\n     match = re.search(r\"(?i)\\bEVIDENCE_INDEX\\s*=\\s*([0-9a-f]{40,64})\\b\", text)\n     return match.group(1).lower() if match else \"\"\n@@ -180,6 +223,7 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:\n     input_text = _input_text(event)\n     assignment, front = _assignment_fields(input_text)\n     response = event.get(\"tool_response\")\n+    launched_agent_id, agent_is_async, agent_status = _agent_launch_fields(response)\n     record = {\n         \"schema\": SCHEMA,\n         \"ts\": time.time(),\n@@ -195,6 +239,7 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:\n         \"target_action\": bool(event.get(\"xunji_target_action\")),\n         \"assignment\": assignment,\n         \"front\": front,\n+        \"assignment_assets\": _assignment_assets(input_text),\n         \"input_excerpt\": _excerpt(event.get(\"tool_input\") or {}),\n         \"input_sha256\": _hash(event.get(\"tool_input\") or {}),\n         \"action_sha256\": _action_hash(tool, event.get(\"tool_input\") or {}),\n@@ -202,6 +247,9 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:\n         \"response_excerpt\": _excerpt(response),\n         \"agent_id\": str(event.get(\"agent_id\") or \"\"),\n         \"agent_type\": str(event.get(\"agent_type\") or \"\"),\n+        \"launched_agent_id\": launched_agent_id,\n+        \"agent_is_async\": agent_is_async,\n+        \"agent_status\": agent_status,\n         \"job_id\": _job_id(response) or _job_id(event.get(\"tool_input\") or {}),\n         \"job_ids\": _job_ids(response) or _job_ids(event.get(\"tool_input\") or {}),\n         \"listed_run_job_ids\": _run_job_ids(response, run.name) if tool == \"CronList\" else [],\n@@ -212,6 +260,140 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:\n     return record\n \n \n+def _iso_timestamp(value: float) -> str:\n+    return datetime.fromtimestamp(value, timezone.utc).isoformat(timespec=\"milliseconds\").replace(\n+        \"+00:00\", \"Z\")\n+\n+\n+def _atomic_json(path: Path, value: dict) -> None:\n+    path.parent.mkdir(parents=True, exist_ok=True)\n+    fd, raw = tempfile.mkstemp(prefix=path.name + \".\", suffix=\".tmp\", dir=path.parent)\n+    try:\n+        with os.fdopen(fd, \"w\", encoding=\"utf-8\") as handle:\n+            json.dump(value, handle, ensure_ascii=False, indent=2)\n+            handle.write(\"\\n\")\n+        os.replace(raw, path)\n+    finally:\n+        try:\n+            os.unlink(raw)\n+        except FileNotFoundError:\n+            pass\n+\n+\n+def _project_agent_lifecycle(run_dir: Path, record: dict) -> None:\n+    \"\"\"Project trusted hook lifecycle into assignment attempts.\n+\n+    Agent PostToolUse is a launch acknowledgement when Claude returns\n+    ``status=async_launched``.  It must never be projected as completion.  The\n+    matching SubagentStop is the return boundary.\n+    \"\"\"\n+    path = run_dir / \"state\" / \"assignments.json\"\n+    if not path.exists():\n+        return\n+    try:\n+        data = json.loads(path.read_text(encoding=\"utf-8\", errors=\"replace\"))\n+    except Exception as exc:\n+        raise RuntimeError(\"cannot parse assignments.json for runtime projection\") from exc\n+    rows = data.get(\"assignments\") if isinstance(data, dict) else None\n+    if not isinstance(rows, list):\n+        raise RuntimeError(\"assignments.json has no valid assignments list\")\n+\n+    hook = str(record.get(\"hook_event_name\") or \"\")\n+    changed = False\n+    stamp = _iso_timestamp(float(record.get(\"ts\") or time.time()))\n+    if hook == \"PostToolUse\" and record.get(\"tool_name\") == \"Agent\" \\\n+            and record.get(\"success\") is True:\n+        assignment = str(record.get(\"assignment\") or \"\")\n+        front = str(record.get(\"front\") or \"\")\n+        launched_id = str(record.get(\"launched_agent_id\") or \"\")\n+        attempt_id = launched_id or str(record.get(\"tool_use_id\") or \"\")\n+        if not assignment or not front or not attempt_id:\n+            return\n+        derived = next((item for item in agent_attempts(run_dir)\n+                        if str(item.get(\"tool_use_id\") or \"\")\n+                        == str(record.get(\"tool_use_id\") or \"\")), {})\n+        derived_returned_at = float(derived.get(\"returned_at\") or 0.0)\n+        projected_state = (\n+            \"returned\" if derived_returned_at or not record.get(\"agent_is_async\") else \"running\"\n+        )\n+        for row in rows:\n+            if not isinstance(row, dict) or str(row.get(\"agent\") or \"\") != assignment:\n+                continue\n+            if str(row.get(\"front\") or \"\").upper() != front.upper():\n+                raise RuntimeError(\n+                    f\"assignment/front mismatch for {assignment}: \"\n+                    f\"receipt={front} state={row.get('front') or '(missing)'}\"\n+                )\n+            expected_assets = _assignment_assets(\n+                \"XUNJI_ASSETS=\" + \",\".join(str(item) for item in row.get(\"assets\", [])))\n+            receipt_assets = [str(item) for item in record.get(\"assignment_assets\", [])]\n+            if receipt_assets != expected_assets:\n+                raise RuntimeError(\n+                    f\"assignment asset mismatch for {assignment}: \"\n+                    f\"receipt={receipt_assets} state={expected_assets}\"\n+                )\n+            attempts = row.setdefault(\"attempts\", [])\n+            if not isinstance(attempts, list):\n+                attempts = []\n+                row[\"attempts\"] = attempts\n+            if not any(str(item.get(\"attempt_id\") or \"\") == attempt_id\n+                       for item in attempts if isinstance(item, dict)):\n+                attempt = {\n+                    \"attempt_id\": attempt_id,\n+                    \"agent_id\": launched_id,\n+                    \"tool_use_id\": str(record.get(\"tool_use_id\") or \"\"),\n+                    \"session_id\": str(record.get(\"session_id\") or \"\"),\n+                    \"launched_at\": stamp,\n+                    \"state\": projected_state,\n+                }\n+                if projected_state == \"returned\":\n+                    attempt[\"returned_at\"] = _iso_timestamp(derived_returned_at) \\\n",
+            "excerpt_truncated_chars": 25851
+          },
+          {
+            "token": "evidence/turn-contract.diff",
+            "path": "evidence/turn-contract.diff",
+            "exists": true,
+            "size": 52667,
+            "sha1": "52fe78f5bff3708667ef1dbe81a2e6bd93bdc69e",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/turn_contract.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 27,
+              "hunks": [
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -9,6 +9,7 @@ from __future__ import annotations"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -16,6 +17,7 @@ import shlex"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -49,6 +51,8 @@ CONTROL_SCRIPTS = {"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -61,6 +65,36 @@ CONTROL_SCRIPTS = {"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -94,7 +128,9 @@ BACKGROUND_REVIEW_RE = re.compile("
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -197,6 +233,10 @@ def _contract_from_event(event: dict, *, run_name: str = \"\") -> dict:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -204,8 +244,90 @@ def _contract_from_event(event: dict, *, run_name: str = \"\") -> dict:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -483,7 +605,7 @@ def _protected_control_reason(event: dict) -> str:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -576,24 +698,217 @@ def _fanout_control_bash(command: str) -> bool:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -614,6 +929,9 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -661,6 +979,12 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -711,7 +1035,7 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -723,7 +1047,57 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -739,13 +1113,30 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -753,12 +1144,11 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -781,7 +1171,7 @@ def _context_message(contract: dict, run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -907,21 +1297,35 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -932,6 +1336,9 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -941,6 +1348,9 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -968,7 +1378,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -977,6 +1387,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -1048,26 +1460,43 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -1076,6 +1505,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -1338,6 +1768,217 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -1371,7 +2012,57 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -1411,6 +2102,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/turn_contract.py",
+                  "header": "@@ -1430,8 +2123,8 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/turn_contract.py b/tools/turn_contract.py\nindex d7246f0..00e45ae 100644\n--- a/tools/turn_contract.py\n+++ b/tools/turn_contract.py\n@@ -9,6 +9,7 @@ from __future__ import annotations\n \n import argparse\n import hashlib\n+import ipaddress\n import json\n import os\n import re\n@@ -16,6 +17,7 @@ import shlex\n import sys\n import tempfile\n import time\n+from urllib.parse import urlsplit\n from datetime import datetime, timezone\n from pathlib import Path\n \n@@ -49,6 +51,8 @@ CONTROL_SCRIPTS = {\n     (ROOT / \"tools\" / name).resolve()\n     for name in (\n         \"graph.py\",\n+        \"coverage_matrix.py\",\n+        \"ingest_recon.py\",\n         \"loop_bootstrap.py\",\n         \"loop_journal.py\",\n         \"loop_state.py\",\n@@ -61,6 +65,36 @@ CONTROL_SCRIPTS = {\n         \"run_model.py\",\n     )\n }\n+PROXY_AWARE_TARGET_TOOLS = {\n+    (ROOT / \"tools\" / name).resolve() for name in (\n+        \"probe.py\", \"render.py\", \"scan.py\", \"replay.py\", \"rerun_deferred.py\",\n+        \"fetch_assets.py\", \"classify_hosts.py\", \"cdn_bypass.py\", \"exploit.py\",\n+    )\n+}\n+RAW_NETWORK_CLIENT_RE = re.compile(\n+    r\"(?i)(?:^|[\\s;&|])(curl|wget|httpx|nuclei|sqlmap)(?:\\s|$)|\"\n+    r\"\\b(?:requests\\.(?:get|post|request)|urllib\\.request|socket\\.(?:socket|create_connection))\\b\"\n+)\n+DIRECT_EGRESS_ENV_RE = re.compile(\n+    r\"(?i)\\bXUNJI_PROXY_REQUIRED\\s*=\\s*(?:0|false|no|off)\\b\"\n+)\n+DIRECT_EGRESS_APPROVAL_RE = re.compile(\n+    r\"(?:明确)?(?:允许|接受|批准|同意).{0,24}(?:直连|direct[ -]?egress)|\"\n+    r\"(?:allow|approve|accept).{0,24}direct[ -]?egress\",\n+    re.I,\n+)\n+DIRECT_EGRESS_DENIAL_RE = re.compile(\n+    r\"(?:不|不要|不得|禁止|拒绝).{0,16}(?:允许|接受|批准|同意|直连)|\"\n+    r\"(?:do\\s+not|don't|never|deny|forbid).{0,24}\"\n+    r\"(?:allow|approve|accept|direct[ -]?egress)\",\n+    re.I,\n+)\n+NON_EGRESS_TOOLS = {\n+    \"Agent\", \"AskUserQuestion\", \"CronCreate\", \"CronDelete\", \"CronList\",\n+    \"Edit\", \"Glob\", \"Grep\", \"ListMcpResourcesTool\", \"MultiEdit\", \"NotebookEdit\",\n+    \"Read\", \"ReadMcpResourceTool\", \"Skill\", \"TaskOutput\", \"TaskStop\", \"TodoWrite\",\n+    \"WebSearch\", \"Write\",\n+}\n \n EXPLAIN_RE = re.compile(\n     r\"告诉我(?:原因|为什么|想法)|为什么|不用修改|不要修改|无需修改|别修改|\"\n@@ -94,7 +128,9 @@ BACKGROUND_REVIEW_RE = re.compile(\n     re.I,\n )\n PROTECTED_RUNTIME_RE = re.compile(\n-    r\"(?:runtime_events\\.jsonl|\\.runtime_events\\.lock|turn_contract\\.json|run_status\\.json|\"\n+    r\"(?:runtime_events\\.jsonl|runtime_projection_error\\.json|coverage\\.json|\"\n+    r\"asset_ledger\\.json|\\.runtime_events\\.lock|\"\n+    r\"turn_contract\\.json|run_status\\.json|\"\n     r\"assignments\\.json|xunji_active_run|xunji_pending_turns|xunji_transition_claims|\"\n     r\"review[/\\\\]receipts[/\\\\][0-9a-f]{64}\\.json)\"\n     r\"(?=[.\\/\\\\\\\"'\\s;|&}]|$)\",\n@@ -197,6 +233,10 @@ def _contract_from_event(event: dict, *, run_name: str = \"\") -> dict:\n         \"prompt_sha256\": hashlib.sha256(prompt.encode(\"utf-8\", \"replace\")).hexdigest(),\n         \"prompt_excerpt\": prompt[:500],\n         \"memory_approved\": bool(MEMORY_APPROVAL_RE.search(prompt)),\n+        \"direct_egress_approved\": bool(\n+            DIRECT_EGRESS_APPROVAL_RE.search(prompt)\n+            and not DIRECT_EGRESS_DENIAL_RE.search(prompt)\n+        ),\n         \"fanout_override\": bool(re.search(r\"(?:明确)?允许串行|不要使用\\s*(?:Agent|子代理)|serial override\", prompt, re.I)),\n         \"origin_run\": run_name,\n         \"bound_run\": run_name,\n@@ -204,8 +244,90 @@ def _contract_from_event(event: dict, *, run_name: str = \"\") -> dict:\n     }\n \n \n+def _safe_run_summary(run_dir: Path) -> tuple[dict, str]:\n+    \"\"\"Keep hook execution deterministic when canonical state parsing fails.\"\"\"\n+    try:\n+        state = run_model.summary(run_dir)\n+    except Exception as exc:\n+        note = f\"{exc.__class__.__name__}: run_model.summary failed\"\n+        return {\"fronts\": [], \"open\": [], \"schema_errors\": [note]}, note\n+    return (state if isinstance(state, dict) else {\n+        \"fronts\": [], \"open\": [], \"schema_errors\": [\"invalid run_model summary\"],\n+    }), \"\"\n+\n+\n+def _coordination_signature(run_dir: Path) -> str:\n+    \"\"\"Hash only topology and coverage debt that should start a new fan-out epoch.\"\"\"\n+    state, summary_error = _safe_run_summary(run_dir)\n+    fronts = sorted(\n+        (str(item.get(\"id\") or \"\"), str(item.get(\"status\") or \"\"), str(item.get(\"barrier\") or \"\"))\n+        for item in state.get(\"fronts\", [])\n+        if isinstance(item, dict) and str(item.get(\"id\") or \"\") in set(state.get(\"open\", []))\n+    )\n+    assets: list[tuple] = []\n+    coverage_paths = [run_dir / \"coverage.json\", *sorted(run_dir.glob(\"**/coverage.json\"))]\n+    for path in coverage_paths:\n+        if not path.exists():\n+            continue\n+        try:\n+            coverage = json.loads(path.read_text(encoding=\"utf-8\", errors=\"replace\"))\n+        except Exception:\n+            continue\n+        for asset in coverage.get(\"assets\", []) if isinstance(coverage, dict) else []:\n+            if not isinstance(asset, dict) or asset.get(\"reachable\") is False:\n+                continue\n+            host = str(asset.get(\"host\") or asset.get(\"asset\") or asset.get(\"url\") or \"\").lower()\n+            if not host:\n+                continue\n+            assets.append((\n+                host,\n+                str(asset.get(\"reachable\")),\n+                bool(asset.get(\"examined\")),\n+                str(asset.get(\"verdict\") or \"\"),\n+                tuple(sorted(str(item) for item in (asset.get(\"tested_groups\") or []))),\n+            ))\n+        break\n+    try:\n+        import coverage_matrix  # noqa: WPS433\n+        matrix = coverage_matrix.derive(run_dir)\n+        assets = sorted(\n+            (str(row.get(\"asset\") or \"\"), str(row.get(\"reachability\")),\n+             str(row.get(\"disposition\") or \"\"), tuple(sorted(row.get(\"fronts\") or [])),\n+             tuple(sorted(row.get(\"tested\") or [])))\n+            for row in matrix.get(\"rows\", [])\n+            if isinstance(row, dict) and row.get(\"reachability\") is not False\n+        )\n+    except Exception:\n+        pass\n+    return hashlib.sha256(json.dumps(\n+        {\"fronts\": fronts, \"coverage_debt\": sorted(assets),\n+         \"summary_error\": summary_error},\n+        ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"),\n+    ).encode(\"utf-8\")).hexdigest()\n+\n+\n+def _previous_contract(run_dir: Path) -> dict:\n+    try:\n+        data = json.loads(contract_path(run_dir).read_text(encoding=\"utf-8\", errors=\"replace\"))\n+    except Exception:\n+        return {}\n+    return data if isinstance(data, dict) and data.get(\"schema\") == SCHEMA else {}\n+\n+\n def write_contract(run_dir: Path, event: dict) -> dict:\n+    previous = _previous_contract(run_dir)\n     contract = _contract_from_event(event, run_name=run_dir.name)\n+    signature = _coordination_signature(run_dir)\n+    previous_since = float(previous.get(\"fanout_epoch_started_at\") or 0.0)\n+    if previous.get(\"coordination_signature\") == signature and previous_since > 0:\n+        contract[\"fanout_epoch_started_at\"] = previous_since\n+        contract[\"fanout_epoch_id\"] = str(previous.get(\"fanout_epoch_id\") or \"\")\n+    else:\n+        contract[\"fanout_epoch_started_at\"] = float(contract[\"updated_at\"])\n+        contract[\"fanout_epoch_id\"] = hashlib.sha256(\n+            f\"{run_dir.resolve()}:{signature}:{contract['updated_at']}\".encode(\"utf-8\")\n+        ).hexdigest()[:16]\n+    contract[\"coordination_signature\"] = signature\n     _atomic_json(contract_path(run_dir), contract)\n     _write_run_status(run_dir, contract)\n     return contract\n@@ -483,7 +605,7 @@ def _protected_control_reason(event: dict) -> str:\n         return \"\"\n     if PROTECTED_RUNTIME_RE.search(_tool_text(event)):\n         return (\n-            \"active-run 指针、pending contract、运行时回执和回合状态只能由\"\n+            \"active-run 指针、pending contract、运行时回执、资产账本和回合状态只能由\"\n             \"受控工具/hook 原子写入；Claude 不得直接修改这些控制面文件。\"\n         )\n     return \"\"\n@@ -576,24 +698,217 @@ def _fanout_control_bash(command: str) -> bool:\n     return _control_invocation(command) is not None\n \n \n-def _assignment_exists(run_dir: Path, assignment: str, front: str) -> bool:\n+def _assignment_record(run_dir: Path, assignment: str, front: str = \"\") -> dict:\n     try:\n         data = json.loads((run_dir / \"state\" / \"assignments.json\").read_text(encoding=\"utf-8\", errors=\"replace\"))\n     except Exception:\n-        return False\n+        return {}\n     for item in data.get(\"assignments\", []) if isinstance(data, dict) else []:\n         if not isinstance(item, dict):\n             continue\n-        if str(item.get(\"agent\") or \"\") == assignment and str(item.get(\"front\") or \"\").upper() == front:\n-            return (run_dir / \"agents\" / f\"{assignment}.md\").exists()\n-    return False\n+        if str(item.get(\"agent\") or \"\") != assignment:\n+            continue\n+        if front and str(item.get(\"front\") or \"\").upper() != front.upper():\n+     ",
+            "excerpt_truncated_chars": 41785
+          },
+          {
+            "token": "evidence/workers-asset-merge.py.txt",
+            "path": "evidence/workers-asset-merge.py.txt",
+            "exists": true,
+            "size": 3498,
+            "sha1": "e34359dcccde5767c8fd6e4908702b3eb7682735",
+            "excerpt": "def _validate_asset_merge(run_dir: Path, rec: dict) -> dict:\n    assets = [_normalize_asset(item) for item in rec.get(\"assets\", []) if _normalize_asset(item)]\n    if not assets:\n        return {\"satisfied\": True, \"legacy_or_non_target\": True, \"assets\": {}}\n    if _runtime_receipts is None:\n        raise ValueError(\"runtime_receipts unavailable; cannot prove per-asset Agent activity\")\n    attempts = [item for item in _runtime_receipts.agent_attempts(run_dir)\n                if item.get(\"assignment\") == rec.get(\"agent\")]\n    if not any(item.get(\"state\") == \"returned\" for item in attempts):\n        raise ValueError(\"merged requires a real returned Agent attempt (SubagentStop)\")\n    activity = _runtime_receipts.agent_asset_activity(run_dir, str(rec.get(\"agent\") or \"\"))\n    no_activity = [host for host in assets if int(activity.get(host, 0) or 0) < 1]\n    evidence = _canonical_evidence_text(run_dir)\n    no_evidence = [host for host in assets if not re.search(\n        r\"(?<![\\w.\\-])\" + re.escape(host) + r\"(?![\\w.\\-])\", evidence)]\n    errors: list[str] = []\n    if no_activity:\n        errors.append(\"no successful target-action receipt: \" + \", \".join(no_activity))\n    if no_evidence:\n        errors.append(\"missing canonical E-entry: \" + \", \".join(no_evidence))\n    if errors:\n        raise ValueError(\"per-asset merge gate failed; \" + \"; \".join(errors))\n    return {\n        \"satisfied\": True,\n        \"validated_at\": _now_iso(),\n        \"assets\": {host: {\"target_actions\": int(activity.get(host, 0) or 0),\n                           \"canonical_evidence\": True} for host in assets},\n    }\n\n\ndef update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str = \"\",\n                           terminal: bool = False) -> dict:\n    data = load_assignments(run_dir)\n    status_norm = _normalized_agent_status(status)\n    allowed = TERMINAL_AGENT_STATUSES if terminal else (NONTERMINAL_AGENT_STATUSES | TERMINAL_AGENT_STATUSES)\n    if status_norm not in allowed:\n        raise ValueError(f\"invalid agent status {status!r}; use one of {sorted(allowed)}\")\n    if terminal and status_norm not in TERMINAL_AGENT_STATUSES:\n        raise ValueError(f\"finish requires terminal status; use one of {sorted(TERMINAL_AGENT_STATUSES)}\")\n    stamp = _now_iso()\n    for rec in data.get(\"assignments\", []):\n        if not isinstance(rec, dict):\n            continue\n        if str(rec.get(\"agent\") or \"\") != agent:\n            continue\n        merge_validation = None\n        if terminal and status_norm == \"merged\":\n            merge_validation = _validate_asset_merge(run_dir, rec)\n        rec[\"status\"] = status_norm\n        rec[\"updated_at\"] = stamp\n        rec[\"last_seen_at\"] = stamp\n        if note.strip():\n            rec[\"last_note\"] = note.strip()\n        rec[\"heartbeat_count\"] = int(rec.get(\"heartbeat_count\") or 0) + 1\n        if terminal:\n            rec[\"finished_at\"] = stamp\n            if status_norm == \"merged\":\n                rec[\"coverage_merge_satisfied\"] = True\n                rec[\"coverage_merge\"] = merge_validation\n            else:\n                rec[\"coverage_merge_satisfied\"] = False\n        _patch_agent_file_lifecycle(_agent_file_from_rec(rec), status=status_norm, note=note, stamp=stamp)\n        _atomic_write(_assignments_path(run_dir), json.dumps(data, ensure_ascii=False, indent=2) + \"\\n\")\n        return rec\n    raise KeyError(f\"agent not found in state/assignments.json: {agent}\")\n\n\ndef agent_lifecycle_issues(run_dir: Path, *, closure: bool = False,\n"
+          },
+          {
+            "token": "evidence/workers.diff",
+            "path": "evidence/workers.diff",
+            "exists": true,
+            "size": 30110,
+            "sha1": "be25bb7038049332c90c8d87b3fd120d04830938",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/workers.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 28,
+              "hunks": [
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -79,6 +79,10 @@ try:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -165,6 +169,7 @@ AGENT_SCAFFOLD = \"\"\"# Agent {agent}"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -188,6 +193,10 @@ AGENT_SCAFFOLD = \"\"\"# Agent {agent}"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -230,11 +239,16 @@ AGENT_SCAFFOLD = \"\"\"# Agent {agent}"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -436,6 +450,67 @@ def _asset_name(asset: dict) -> str:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -464,6 +539,30 @@ def _asset_agent_role(asset: dict) -> str:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -507,6 +606,8 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -524,6 +625,9 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -543,6 +647,7 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -579,7 +684,8 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -680,9 +786,21 @@ def _assignments_path(run_dir: Path) -> Path:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -753,8 +871,28 @@ def _format_rdt_controls(profile: dict) -> str:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -766,12 +904,17 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -780,12 +923,16 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -795,6 +942,8 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -919,6 +1068,49 @@ def _patch_agent_file_lifecycle(path: Path | None, *, status: str, note: str, st"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -934,6 +1126,9 @@ def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -942,6 +1137,11 @@ def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1334,10 +1534,15 @@ def print_plan(run_dir: Path, limit: int) -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1345,10 +1550,16 @@ def print_plan(run_dir: Path, limit: int) -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1755,10 +1966,19 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1767,7 +1987,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1810,7 +2030,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1919,11 +2140,119 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1945,7 +2274,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1974,9 +2303,19 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -2076,6 +2415,8 @@ def main(argv: list[str] | None = None) -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -2107,7 +2448,7 @@ def main(argv: list[str] | None = None) -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/workers.py b/tools/workers.py\nindex 5c1d976..6c336e2 100644\n--- a/tools/workers.py\n+++ b/tools/workers.py\n@@ -79,6 +79,10 @@ try:\n     import run_model as _run_model\n except Exception:\n     _run_model = None\n+try:\n+    import runtime_receipts as _runtime_receipts\n+except Exception:\n+    _runtime_receipts = None\n \n SCAFFOLD = \"\"\"# Worker {wid}\n \n@@ -165,6 +169,7 @@ AGENT_SCAFFOLD = \"\"\"# Agent {agent}\n \n - Role: {role}\n - Assigned front: {front}\n+- Assigned assets: {assets}\n - Scope: {scope}\n - Status: assigned\n - Context pack: {context_rel}\n@@ -188,6 +193,10 @@ AGENT_SCAFFOLD = \"\"\"# Agent {agent}\n   and run cleanup only after an explicit `yes`.\n - Produce candidates/refutations only; the Single Synthesizer owns promotion.\n - Do not add `Closure:` or `Report conclusion:` fields.\n+- The Agent launch prompt must include exactly:\n+  `XUNJI_ASSIGNMENT={agent} XUNJI_FRONT={front} XUNJI_ASSETS={asset_token}`.\n+- Cover every assigned asset. A barrier (login/302/captcha/WAF) is an outcome to\n+  investigate and record, not permission to silently drop that asset.\n \n ## Prelude\n \n@@ -230,11 +239,16 @@ AGENT_SCAFFOLD = \"\"\"# Agent {agent}\n - Status: candidate\n - Next action:\n \n+## Asset Outcomes\n+\n+{asset_outcomes}\n+\n ## Coda\n \n Agent: {agent}\n Role: {role}\n Assigned front: {front}\n+Assigned assets: {assets}\n Scope: {scope}\n Budget used:\n Loop budget:\n@@ -436,6 +450,67 @@ def _asset_name(asset: dict) -> str:\n     return raw\n \n \n+def _normalize_asset(value: str) -> str:\n+    raw = str(value or \"\").strip().lower().rstrip(\".\")\n+    raw = re.sub(r\"^[a-z][a-z0-9+.\\-]*://\", \"\", raw).split(\"/\", 1)[0]\n+    return raw\n+\n+\n+def _stable_asset_id(host: str) -> str:\n+    import hashlib\n+    return \"ASSET-\" + hashlib.sha1(_normalize_asset(host).encode(\"utf-8\")).hexdigest()[:12].upper()\n+\n+\n+def _resolve_assignment_assets(run_dir: Path, front: str, requested: list[str] | None,\n+                               role: str) -> tuple[list[str], dict[str, dict]]:\n+    inventory = {_normalize_asset(_asset_name(asset)): asset for asset in _load_coverage(run_dir)\n+                 if _normalize_asset(_asset_name(asset))}\n+    target_roles = {\"surface\", \"web-auth\", \"web-hunter\", \"exploit\", \"verify\"}\n+    values: list[str] = []\n+    for raw in requested or []:\n+        for part in re.split(r\"[,;，、]+\", raw):\n+            host = _normalize_asset(part)\n+            if host and host not in values:\n+                values.append(host)\n+    if inventory and role in target_roles and not values:\n+        raise ValueError(\n+            \"target-facing assignment requires explicit --asset HOST (repeatable); \"\n+            \"do not assign only a broad F-id\")\n+    unknown = [host for host in values if host not in inventory]\n+    if unknown:\n+        raise ValueError(\"asset(s) absent from coverage inventory: \" + \", \".join(unknown))\n+    front_text = _front_text(run_dir, front).lower()\n+    unlinked = [host for host in values if not re.search(\n+        r\"(?<![\\w.\\-])\" + re.escape(host) + r\"(?![\\w.\\-])\", front_text)]\n+    if unlinked:\n+        raise ValueError(\n+            \"asset(s) are not explicitly named in the selected frontier block: \"\n+            + \", \".join(unlinked))\n+    return values, inventory\n+\n+\n+def _coverage_snapshot(asset: dict) -> dict:\n+    return {\n+        \"examined\": bool(asset.get(\"examined\")),\n+        \"verdict\": asset.get(\"verdict\"),\n+        \"tested_groups\": sorted(str(item) for item in (asset.get(\"tested_groups\") or [])),\n+    }\n+\n+\n+def _asset_outcomes_scaffold(assets: list[str]) -> str:\n+    if not assets:\n+        return \"- No target asset package (non-target analysis lane).\"\n+    return \"\\n\".join(\n+        f\"### {_stable_asset_id(host)} — {host}\\n\"\n+        \"- Action receipts:\\n\"\n+        \"- Result:\\n\"\n+        \"- Barrier / control:\\n\"\n+        \"- Artifacts:\\n\"\n+        \"- Proposed disposition: tested | barrier | unreachable | deferred\"\n+        for host in assets\n+    )\n+\n+\n def _front_assets(front: dict, assets: list[dict]) -> list[dict]:\n     text = front[\"text\"].lower()\n     out: list[dict] = []\n@@ -464,6 +539,30 @@ def _asset_agent_role(asset: dict) -> str:\n def asset_suggestions(run_dir: Path) -> list[dict]:\n     \"\"\"Return advisory asset-level suggestions from coverage facts.\"\"\"\n     items: list[dict] = []\n+    try:\n+        import coverage_matrix\n+        rows = coverage_matrix.derive(run_dir).get(\"rows\", [])\n+    except Exception:\n+        rows = []\n+    if rows:\n+        for row in rows:\n+            if not isinstance(row, dict) or row.get(\"reachability\") is False:\n+                continue\n+            disposition = str(row.get(\"disposition\") or \"\")\n+            if disposition not in {\"unassigned\", \"front-linked\"}:\n+                continue\n+            host = str(row.get(\"asset\") or \"\")\n+            source = next((asset for asset in _load_coverage(run_dir)\n+                           if _normalize_asset(_asset_name(asset)) == _normalize_asset(host)), {})\n+            reasons = [disposition]\n+            if source.get(\"high_value\"):\n+                reasons.append(\"high_value\")\n+            if row.get(\"reachability\") is True:\n+                reasons.append(\"reachable_no_verdict\")\n+            items.append({\"asset\": host, \"role\": _asset_agent_role(source), \"reasons\": reasons})\n+        return sorted(items, key=lambda item: (\n+            \"high_value\" in item[\"reasons\"], \"reachable_no_verdict\" in item[\"reasons\"], item[\"asset\"]\n+        ), reverse=True)\n     for asset in _load_coverage(run_dir):\n         host = _asset_name(asset)\n         if not host or asset.get(\"examined\"):\n@@ -507,6 +606,8 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:\n         matched = _front_assets(f, assets)\n         hosts = [_asset_name(a) for a in matched if _asset_name(a)]\n         reachable = [a for a in matched if a.get(\"reachable\") is True]\n+        coverage_debt = [a for a in matched if a.get(\"reachable\") is not False\n+                         and not a.get(\"tested_groups\") and not a.get(\"verdict\")]\n         flags = sorted({str(x) for a in matched for x in (a.get(\"flags\") or [])})\n \n         if f[\"status\"] in {\"open\", \"probing\"}:\n@@ -524,6 +625,9 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:\n         if reachable:\n             score += 1\n             reasons.append(f\"{len(reachable)} reachable matched asset(s)\")\n+        if coverage_debt:\n+            score += min(4, len(coverage_debt))\n+            reasons.append(f\"coverage debt on {len(coverage_debt)} asset(s)\")\n         if flags:\n             score += 1\n             reasons.append(\"surface flags: \" + \", \".join(flags[:5]))\n@@ -543,6 +647,7 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:\n             \"barrier\": f[\"barrier\"],\n             \"depth\": f[\"depth\"],\n             \"assets\": hosts,\n+            \"coverage_debt\": [_asset_name(a) for a in coverage_debt if _asset_name(a)],\n             \"score\": score,\n             \"reasons\": reasons,\n             \"cautions\": cautions,\n@@ -579,7 +684,8 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:\n         if penalty != 0:\n             r[\"saturation_penalty\"] = penalty\n \n-    rows.sort(key=lambda r: (r[\"score\"], bool(r[\"assets\"]), r[\"front\"]), reverse=True)\n+    rows.sort(key=lambda r: (len(r.get(\"coverage_debt\") or []), r[\"score\"], bool(r[\"assets\"]), r[\"front\"]),\n+              reverse=True)\n     return rows[:limit] if limit else rows\n \n \n@@ -680,9 +786,21 @@ def _assignments_path(run_dir: Path) -> Path:\n \n def load_assignments(run_dir: Path) -> dict:\n     data = _load_json(_assignments_path(run_dir), {})\n-    if not isinstance(data.get(\"assignments\"), list):\n-        data = {\"schema\": 1, \"assignments\": []}\n-    data.setdefault(\"schema\", 1)\n+    if not isinstance(data, dict) or not isinstance(data.get(\"assignments\"), list):\n+        data = {\"schema\": 2, \"assignments\": []}\n+    try:\n+        schema = int(data.get(\"schema\", 1) or 1)\n+    except (TypeError, ValueError):\n+        schema = 1\n+    if schema < 2:\n+        for row in data[\"assignments\"]:\n+            if not isinstance(row, dict):\n+                continue\n+            row.setdefault(\"assets\", [])\n+            row.setdefault(\"attempts\", [])\n+        data[\"schema\"] = 2\n+    else:\n+        data[\"schema\"] = schema\n     return data\n \n \n@@ -753,8 +871,28 @@ def _format_rdt_controls(profile: dict) -> str:\n \n \n def create_agent_assignment(run_dir: Path, *, role: str, front: str,\n-                            scope: str = \"\", agent: str | None = None) -> dict:\n+                            scope: str = \"\", agent: str | None = None,\n+                            assets: list[str] | None = None) -> dict:\n     role = _role(role)\n+    asset_names, inventory = _resolve_assign",
+            "excerpt_truncated_chars": 21348
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002 - Asset ledger and coverage enforcement diff",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-002"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/asset-coverage.diff",
+            "path": "evidence/asset-coverage.diff",
+            "exists": true,
+            "size": 31795,
+            "sha1": "eea189b8ec3c3be2cf0d251381a9726332596aaa",
+            "diff_summary": {
+              "changed_files_count": 5,
+              "changed_files": [
+                "tools/coverage_matrix.py",
+                "tools/ingest_recon.py",
+                "tools/loop_state.py",
+                "tools/setup_run.py",
+                "tools/xunji_statusline.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 34,
+              "hunks": [
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -10,6 +10,7 @@ signal-justified blanks."
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -186,6 +187,20 @@ def _asset_display(asset: dict) -> str:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -467,35 +482,45 @@ def derive(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -507,6 +532,17 @@ def derive(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -521,6 +557,41 @@ def derive(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -551,6 +622,30 @@ def derive(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -559,6 +654,9 @@ def derive(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -570,6 +668,22 @@ def check(run_dir: Path, *, closure: bool = False) -> tuple[list[str], list[str]"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -599,14 +713,25 @@ def render_markdown(data: dict) -> str:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -632,6 +757,20 @@ def write_outputs(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -753,6 +892,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -780,7 +921,12 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -802,6 +948,22 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -875,9 +1037,11 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -899,6 +1063,13 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -910,9 +1081,11 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/ingest_recon.py",
+                  "header": "@@ -15,6 +15,7 @@ verification_tasks/infrastructure/stats), 未知 schema 则降级为顶层键概"
+                },
+                {
+                  "file": "tools/ingest_recon.py",
+                  "header": "@@ -185,6 +186,10 @@ def _asset_flags(a: dict) -> list[str]:"
+                },
+                {
+                  "file": "tools/ingest_recon.py",
+                  "header": "@@ -196,15 +201,25 @@ def build_coverage(recon: dict, report_md: str | None = None) -> dict:"
+                },
+                {
+                  "file": "tools/ingest_recon.py",
+                  "header": "@@ -212,7 +227,9 @@ def build_coverage(recon: dict, report_md: str | None = None) -> dict:"
+                },
+                {
+                  "file": "tools/ingest_recon.py",
+                  "header": "@@ -223,7 +240,9 @@ def build_coverage(recon: dict, report_md: str | None = None) -> dict:"
+                },
+                {
+                  "file": "tools/ingest_recon.py",
+                  "header": "@@ -246,6 +265,11 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -49,7 +49,7 @@ ACTION_TEXT_CN = {"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -155,6 +155,9 @@ def _coverage_summary(run_dir: Path, *, write: bool) -> dict:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -365,7 +368,9 @@ def _pretty_block(title: str, rows: list[str], *, color: str = \"cyan\", enabled:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -437,7 +442,9 @@ def _next_actions(fronts: dict, agents: dict, progress: dict, gates: dict) -> li"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -785,7 +792,12 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -22,6 +22,7 @@ from __future__ import annotations"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -378,7 +379,12 @@ def _derive_coverage_from_target(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -474,10 +480,25 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -55,7 +55,7 @@ ACTION_LABELS = {"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -234,8 +234,8 @@ def _agent_summary(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -270,6 +270,21 @@ def _front_summary(loop_data: dict) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -413,6 +428,7 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/coverage_matrix.py b/tools/coverage_matrix.py\nindex ce227e1..ef20305 100644\n--- a/tools/coverage_matrix.py\n+++ b/tools/coverage_matrix.py\n@@ -10,6 +10,7 @@ signal-justified blanks.\n from __future__ import annotations\n \n import argparse\n+import hashlib\n import json\n import re\n import sys\n@@ -186,6 +187,20 @@ def _asset_display(asset: dict) -> str:\n     return raw.strip().rstrip(\".\")\n \n \n+def _asset_id(name: str) -> str:\n+    return \"ASSET-\" + hashlib.sha1(name.lower().encode(\"utf-8\")).hexdigest()[:12].upper()\n+\n+\n+def _load_assignments(run_dir: Path) -> list[dict]:\n+    try:\n+        data = json.loads((run_dir / \"state\" / \"assignments.json\").read_text(\n+            encoding=\"utf-8\", errors=\"replace\"))\n+    except Exception:\n+        return []\n+    rows = data.get(\"assignments\") if isinstance(data, dict) else None\n+    return [item for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []\n+\n+\n def _host_tokens(asset_name: str) -> set[str]:\n     low = asset_name.lower()\n     toks = {low}\n@@ -467,35 +482,45 @@ def derive(run_dir: Path) -> dict:\n     waivers, waiver_warnings = _parse_coverage_waivers(run_dir)\n     coverage_warnings.extend(waiver_warnings)\n     assets = [a for a in cov.get(\"assets\", []) if isinstance(a, dict) and _asset_display(a)]\n-    relevant = [a for a in assets if _asset_relevant(a)]\n-    if not relevant:\n-        relevant = assets\n \n     rows = []\n-    for a in relevant:\n+    for a in assets:\n         name = _asset_display(a)\n+        reachability = a.get(\"reachable\")\n         rows.append({\n+            \"asset_id\": str(a.get(\"asset_id\") or _asset_id(name)),\n             \"asset\": name,\n             \"tokens\": sorted(_host_tokens(name)),\n-            \"applicable\": sorted(_applicable_groups(a)),\n+            \"applicable\": sorted(_applicable_groups(a)) if reachability is not False else [],\n             \"tested\": [],\n             \"fronts\": [],\n-            \"status\": str(a.get(\"reachable\", \"\")),\n+            \"assignments\": [],\n+            \"assignment_statuses\": [],\n+            \"reachability\": reachability,\n+            \"status\": str(reachability),\n+            \"examined\": bool(a.get(\"examined\")),\n+            \"inventory_verdict\": str(a.get(\"verdict\") or \"\"),\n             \"flags\": [str(f) for f in (a.get(\"flags\") or [])],\n         })\n \n     constraints = _parse_constraints(run_dir)\n     evidence = _parse_evidence_blocks(run_dir)\n-    for front in _parse_front_blocks(run_dir):\n+    fronts = _parse_front_blocks(run_dir)\n+    front_status = {front[\"id\"]: _coverage_status_token(str(front.get(\"status\") or \"\"))\n+                    for front in fronts}\n+    for front in fronts:\n         tried_groups = _class_groups(_front_tried_classes(front, constraints)) | _front_evidence_groups(front, evidence)\n-        if not tried_groups:\n-            continue\n         declared_tokens = _front_declared_asset_tokens(front[\"text\"])\n+        matched_rows: list[dict] = []\n         for row in rows:\n             row_tokens = set(row[\"tokens\"])\n             if (declared_tokens & row_tokens) or _mentions_any_host(front[\"text\"], row_tokens):\n                 row[\"fronts\"].append(front[\"id\"])\n-                row[\"tested\"] = sorted(set(row[\"tested\"]) | tried_groups)\n+                matched_rows.append(row)\n+        if tried_groups and matched_rows:\n+            coverage_warnings.append(\n+                f\"{front['id']}: front-level Vectors tried 不直接计入 {len(matched_rows)} 个资产的 tested cell；\"\n+                \"每个资产必须由点名该 host 的 E-entry 证明测试覆盖\")\n \n     for eid, ev in evidence.items():\n         ev_groups = set(ev.get(\"groups\", set()))\n@@ -507,6 +532,17 @@ def derive(run_dir: Path) -> dict:\n                 row[\"fronts\"] = sorted(set(row[\"fronts\"]) | set(ev.get(\"front_refs\", [])))\n                 row[\"tested\"] = sorted(set(row[\"tested\"]) | ev_groups)\n \n+    assignment_rows = _load_assignments(run_dir)\n+    for assignment in assignment_rows:\n+        assigned_assets = set(_asset_tokens_from_value(\n+            \",\".join(str(item) for item in (assignment.get(\"assets\") or []))))\n+        if not assigned_assets:\n+            continue\n+        for row in rows:\n+            if set(row[\"tokens\"]) & assigned_assets:\n+                row[\"assignments\"].append(str(assignment.get(\"agent\") or \"\"))\n+                row[\"assignment_statuses\"].append(str(assignment.get(\"status\") or \"\"))\n+\n     group_names = [g for g, _ in GROUPS]\n     matrix = []\n     for row in rows:\n@@ -521,6 +557,41 @@ def derive(run_dir: Path) -> dict:\n             else:\n                 cells[group] = \"not_applicable\"\n         row[\"cells\"] = cells\n+        row[\"fronts\"] = sorted(set(row[\"fronts\"]))\n+        row[\"assignments\"] = sorted(set(item for item in row[\"assignments\"] if item))\n+        row[\"assignment_statuses\"] = sorted(set(\n+            item.strip().lower() for item in row[\"assignment_statuses\"] if item.strip()))\n+        terminal_fronts = {front_status.get(fid, \"\") for fid in row[\"fronts\"]}\n+        terminal_fronts.discard(\"\")\n+        inventory_verdict = _coverage_status_token(row[\"inventory_verdict\"])\n+        active_assignment = any(status in {\"assigned\", \"starting\", \"running\", \"working\", \"?\", \"\"}\n+                                for status in row[\"assignment_statuses\"])\n+        if row[\"reachability\"] is False:\n+            disposition = \"unreachable-baseline\"\n+        elif inventory_verdict:\n+            disposition = inventory_verdict\n+        elif \"confirmed\" in terminal_fronts:\n+            disposition = \"confirmed\"\n+        elif \"closed\" in terminal_fronts:\n+            disposition = \"closed\"\n+        elif \"deferred\" in terminal_fronts:\n+            disposition = \"deferred\"\n+        elif row[\"tested\"]:\n+            disposition = (\n+                \"tested\" if not any(value == \"untested\" for value in cells.values())\n+                else \"tested-partial\"\n+            )\n+        elif active_assignment:\n+            disposition = \"assigned\"\n+        elif row[\"fronts\"]:\n+            disposition = \"front-linked\"\n+        else:\n+            disposition = \"unassigned\"\n+        row[\"disposition\"] = disposition\n+        row[\"accounted\"] = disposition not in {\"unassigned\"}\n+        row[\"closure_ready\"] = disposition in {\n+            \"unreachable-baseline\", \"confirmed\", \"closed\", \"deferred\", \"tested\"\n+        }\n         matrix.append(row)\n \n     column_stats = {}\n@@ -551,6 +622,30 @@ def derive(run_dir: Path) -> dict:\n         if stats[\"actionable\"] > 0 and stats[\"tested\"] == 0\n     ]\n \n+    accounting_gaps = [\n+        {\"asset_id\": row[\"asset_id\"], \"asset\": row[\"asset\"],\n+         \"reachability\": row[\"reachability\"], \"disposition\": row[\"disposition\"]}\n+        for row in matrix\n+        if row[\"reachability\"] is not False and row[\"disposition\"] == \"unassigned\"\n+    ]\n+    closure_gaps = [\n+        {\"asset_id\": row[\"asset_id\"], \"asset\": row[\"asset\"],\n+         \"reachability\": row[\"reachability\"], \"disposition\": row[\"disposition\"]}\n+        for row in matrix\n+        if row[\"reachability\"] is not False and not row[\"closure_ready\"]\n+    ]\n+    summary = {\n+        \"total\": len(matrix),\n+        \"reachable\": sum(1 for row in matrix if row[\"reachability\"] is True),\n+        \"unknown\": sum(1 for row in matrix if str(row[\"reachability\"]).lower() == \"unknown\"),\n+        \"unreachable\": sum(1 for row in matrix if row[\"reachability\"] is False),\n+        \"front_linked\": sum(1 for row in matrix if row[\"fronts\"]),\n+        \"unassigned\": len(accounting_gaps),\n+        \"assigned\": sum(1 for row in matrix if row[\"disposition\"] == \"assigned\"),\n+        \"disposed\": sum(1 for row in matrix if row[\"closure_ready\"]),\n+        \"closure_debt\": len(closure_gaps),\n+    }\n+\n     return {\n         \"schema\": \"xunji.coverage_matrix.v1\",\n         \"source\": str(cov_path.relative_to(run_dir)) if cov_path and cov_path.is_relative_to(run_dir) else str(cov_path or \"\"),\n@@ -559,6 +654,9 @@ def derive(run_dir: Path) -> dict:\n         \"column_stats\": column_stats,\n         \"empty_columns\": empty_columns,\n         \"row_gaps\": row_gaps,\n+        \"accounting_gaps\": accounting_gaps,\n+        \"closure_gaps\": closure_gaps,\n+        \"summary\": summary,\n         \"waivers\": waivers,\n         \"warnings\": coverage_warnings,\n         \"legend\": {\"tested\": \"✓\", \"untested\": \"□\", \"waived\": \"~\", \"not_applicable\": \"·\"},\n@@ -570,6 +668,22 @@ def check(run_dir: Path, *, closure: bool = False) -> tuple[list[str], list[str]\n     warns: list[str] = []\n     errors: list[str] = []\n     warns.extend(f\"覆盖矩阵: {w}\" for w in data.get(\"warnings\", []))\n+    if data.get(\"accounting_gaps\"):\n+        gaps = data[\"accounting_gaps\"]\n+        shown = \", \".join(item[\"asset\"] for item in gaps[:10])\n+        msg = (\n+            f\"资产账本: {len(gaps)}/{data['summary']['total']}",
+            "excerpt_truncated_chars": 21755
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003 - Proxy and differential evidence diff",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-003"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/proxy-diff-save.diff",
+            "path": "evidence/proxy-diff-save.diff",
+            "exists": true,
+            "size": 10093,
+            "sha1": "eb446fa15d553e95c929e0d354b0c6e812729feb",
+            "diff_summary": {
+              "changed_files_count": 4,
+              "changed_files": [
+                "tools/harness/proxy.py",
+                "tools/probe.py",
+                "tools/sensors/blind_diff.py",
+                "tools/sensors/upload_probe.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 12,
+              "hunks": [
+                {
+                  "file": "tools/harness/proxy.py",
+                  "header": "@@ -10,7 +10,8 @@ requests 都自动继承 —— 若把交战代理塞进 HTTPS_PROXY, 模型调"
+                },
+                {
+                  "file": "tools/harness/proxy.py",
+                  "header": "@@ -51,8 +52,16 @@ def engagement_proxy(override: str | None = None) -> str | None:"
+                },
+                {
+                  "file": "tools/harness/proxy.py",
+                  "header": "@@ -60,8 +69,9 @@ def resolve(override: str | None = None) -> str | None:"
+                },
+                {
+                  "file": "tools/harness/proxy.py",
+                  "header": "@@ -232,7 +242,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/harness/proxy.py",
+                  "header": "@@ -277,13 +287,13 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -129,7 +129,7 @@ def selftest_isolation():"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -749,6 +749,30 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -910,6 +934,15 @@ def _place_save(save: str | None, run: str | None) -> str | None:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -1006,15 +1039,17 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -1028,6 +1063,11 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/sensors/blind_diff.py",
+                  "header": "@@ -39,7 +39,7 @@ def _isolate_selftest_state() -> tuple:"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -39,7 +39,7 @@ def _isolate_selftest_state() -> tuple:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/harness/proxy.py b/tools/harness/proxy.py\nindex bc8f702..aa5eefc 100644\n--- a/tools/harness/proxy.py\n+++ b/tools/harness/proxy.py\n@@ -10,7 +10,8 @@ requests 都自动继承 —— 若把交战代理塞进 HTTPS_PROXY, 模型调\n 中继 = 串味 + 泄露)。所以交战代理走【专用】XUNJI_PROXY, 只有 active 工具显式读它; 模型调用另外【强制\n 剥代理】(model_safe_env / model_no_proxy_opener), 双保险。\n \n-fail-closed: XUNJI_PROXY_REQUIRED=1 时, active 工具没配代理就【拒绝直连】(防真实 IP 泄露), 不静默直连。\n+fail-closed: active 工具默认要求代理；没配就【拒绝直连】(防真实 IP 泄露)。只有操作者显式设置\n+XUNJI_PROXY_REQUIRED=0 才允许直连，不依赖模型记得 export。\n \n 配置(优先级): `--proxy` 参数 > `XUNJI_PROXY` 环境变量 > `tools/harness/proxy.conf`(每行一个 url, # 注释)。\n 支持 http:// 与 socks5://; **建议 socks5h://**(代理侧解析 DNS, 防 DNS 泄露; socks4a 在 PySocks 某些失败下\n@@ -51,8 +52,16 @@ def engagement_proxy(override: str | None = None) -> str | None:\n \n \n def required() -> bool:\n-    \"\"\"XUNJI_PROXY_REQUIRED=1 → 强制: active 工具没代理就拒绝直连(fail-closed)。\"\"\"\n-    return (os.environ.get(\"XUNJI_PROXY_REQUIRED\") or \"\").strip().lower() in (\"1\", \"true\", \"yes\", \"on\")\n+    \"\"\"Active target traffic is fail-closed unless the operator opts out.\n+\n+    Model prompts are not a security boundary.  An absent environment variable\n+    therefore means \"proxy required\"; only an explicit operator value of\n+    ``0/false/no/off`` permits direct egress.\n+    \"\"\"\n+    raw = (os.environ.get(\"XUNJI_PROXY_REQUIRED\") or \"\").strip().lower()\n+    if not raw:\n+        return True\n+    return raw not in (\"0\", \"false\", \"no\", \"off\")\n \n \n def resolve(override: str | None = None) -> str | None:\n@@ -60,8 +69,9 @@ def resolve(override: str | None = None) -> str | None:\n     p = engagement_proxy(override)\n     if p is None and required():\n         raise SystemExit(\n-            \"[proxy] XUNJI_PROXY_REQUIRED=1 但未配置交战代理 —— 拒绝直连(防真实 IP 泄露)。\"\n-            \" 设 XUNJI_PROXY=socks5h://host:port 或写一行进 tools/harness/proxy.conf。\")\n+            \"[proxy] 主动目标流量默认要求交战代理，但当前未配置 —— 拒绝直连(防真实 IP 泄露)。\"\n+            \" 设 XUNJI_PROXY=socks5h://host:port / 写 tools/harness/proxy.conf；\"\n+            \"仅操作者明确接受直连时才设置 XUNJI_PROXY_REQUIRED=0。\")\n     return p\n \n \n@@ -232,7 +242,7 @@ def _selftest() -> int:\n         globals()[\"_CONF\"] = Path(\"__xunji_no_proxy_conf__\")\n         for k in _PROXY_VARS:\n             os.environ.pop(k, None)\n-        os.environ.pop(\"XUNJI_PROXY_REQUIRED\", None)\n+        os.environ[\"XUNJI_PROXY_REQUIRED\"] = \"0\"\n \n         os.environ[\"XUNJI_PROXY\"] = \"socks5h://env:1080\"\n         checks.append((\"override 胜过 env\", engagement_proxy(\"http://arg:8080\") == \"http://arg:8080\"))\n@@ -277,13 +287,13 @@ def _selftest() -> int:\n         ]\n         # fail-closed\n         os.environ.pop(\"HTTPS_PROXY\", None)\n-        os.environ[\"XUNJI_PROXY_REQUIRED\"] = \"1\"\n+        os.environ.pop(\"XUNJI_PROXY_REQUIRED\", None)\n         try:\n             resolve(None)\n             fc = False\n         except SystemExit:\n             fc = True\n-        checks.append((\"required 但没配 → fail-closed 抛错(不直连)\", fc))\n+        checks.append((\"默认 required 且没配 → fail-closed 抛错(不直连)\", fc))\n         checks.append((\"required 配了 override → 不抛、返回代理\", resolve(\"http://relay:9\") == \"http://relay:9\"))\n     finally:\n         globals()[\"_CONF\"] = old_conf\ndiff --git a/tools/probe.py b/tools/probe.py\nindex 3240809..50e003b 100644\n--- a/tools/probe.py\n+++ b/tools/probe.py\n@@ -129,7 +129,7 @@ def selftest_isolation():\n     )\n     try:\n         os.environ.pop(\"XUNJI_PROXY\", None)\n-        os.environ.pop(\"XUNJI_PROXY_REQUIRED\", None)\n+        os.environ[\"XUNJI_PROXY_REQUIRED\"] = \"0\"\n         globals()[\"_PROXY\"] = None\n         proxymod._CONF = Path(\"__xunji_no_proxy_conf__\")\n         guardmod.STATE_DIR = tmp_root / \"guard_state\"\n@@ -749,6 +749,30 @@ def _selftest() -> int:\n                 checks.append((\"请求头完整存(Cookie 原值在, 供重放认证请求)\", \"sess=secret123\" in hreq))\n                 checks.append((\"响应头完整存(Set-Cookie 原值在, 不脱敏)\", \"Identity.External=\" in hresp))\n                 checks.append((\"summary 引用 replay 路径\", bool(d.get(\"replay\"))))\n+            diff_base = Path(tempfile.mkdtemp()) / \"boolean.html\"\n+            diff_b = Path(_diff_side_save(str(diff_base), \"b\"))\n+            da = send(\"GET\", f\"http://127.0.0.1:{port}/?v=true\", {}, None, None, 5,\n+                      save=_diff_side_save(str(diff_base), \"a\"))\n+            db = send(\"GET\", f\"http://127.0.0.1:{port}/?v=false\", {}, None, None, 5,\n+                      save=str(diff_b))\n+            checks.append((\"DIFF save naming preserves A base and writes distinct B body\",\n+                           diff_base.is_file() and diff_b.is_file()\n+                           and diff_b.name == \"boolean.b.html\"))\n+            checks.append((\"DIFF saves replay for both comparison sides\",\n+                           Path(str(diff_base) + \".replay.json\").is_file()\n+                           and Path(str(diff_b) + \".replay.json\").is_file()\n+                           and da.get(\"replay\") and db.get(\"replay\")))\n+            no_suffix_base = Path(tempfile.mkdtemp()) / \"boolean\"\n+            no_suffix_b = Path(_diff_side_save(str(no_suffix_base), \"b\"))\n+            send(\"GET\", f\"http://127.0.0.1:{port}/?plain=a\", {}, None, None, 5,\n+                 save=str(no_suffix_base))\n+            send(\"GET\", f\"http://127.0.0.1:{port}/?plain=b\", {}, None, None, 5,\n+                 save=str(no_suffix_b))\n+            checks.append((\"DIFF explicit no-suffix paths keep distinct A/B replay files\",\n+                           no_suffix_b.name == \"boolean.b\"\n+                           and Path(str(no_suffix_base) + \".replay.json\").is_file()\n+                           and Path(str(no_suffix_b) + \".replay.json\").is_file()\n+                           and str(no_suffix_base) != str(no_suffix_b)))\n             large = Path(tempfile.mkdtemp()) / \"large.txt\"\n             dl = send(\"GET\", f\"http://127.0.0.1:{port}/large\", {}, None, None, 5,\n                       save=str(large), save_chunks=True)\n@@ -910,6 +934,15 @@ def _place_save(save: str | None, run: str | None) -> str | None:\n     return str(Path(run) / \"evidence\" / save)\n \n \n+def _diff_side_save(base: str | None, side: str) -> str | None:\n+    if not base or side == \"a\":\n+        return base\n+    path = Path(base)\n+    if path.suffix:\n+        return str(path.with_name(path.stem + f\".{side}\" + path.suffix))\n+    return str(path.with_name(path.name + f\".{side}\"))\n+\n+\n def main() -> int:\n     ap = argparse.ArgumentParser()\n     ap.add_argument(\"method\", nargs=\"?\", help=\"GET/POST/PUT/... or DIFF for a two-URL comparison\")\n@@ -1006,15 +1039,17 @@ def main() -> int:\n                 return 2\n             n = max(1, args.samples)\n \n-            def sample(url: str) -> tuple[dict, bool, list]:\n+            def sample(url: str, save: str | None) -> tuple[dict, bool, list]:\n                 runs = [send(\"GET\", url, headers, None, args.auth_key,\n-                             args.timeout, None, args.retry, args.retry_wait,\n-                             args.headers, byte_range=args.byte_range) for _ in range(n)]\n+                             args.timeout, save if index == 0 else None,\n+                             args.retry, args.retry_wait,\n+                             args.headers, byte_range=args.byte_range)\n+                        for index in range(n)]\n                 hs = sorted({r.get(\"sha1\") for r in runs})\n                 return runs[0], len(hs) == 1, hs\n \n-            a, a_stable, a_h = sample(args.url)\n-            b, b_stable, b_h = sample(args.url2)\n+            a, a_stable, a_h = sample(args.url, _diff_side_save(args.save, \"a\"))\n+            b, b_stable, b_h = sample(args.url2, _diff_side_save(args.save, \"b\"))\n             same_hash = a.get(\"sha1\") == b.get(\"sha1\")\n             out = {\"tag\": args.tag, \"mode\": \"DIFF\", \"samples\": n,\n                    \"a\": a, \"b\": b,\n@@ -1028,6 +1063,11 @@ def main() -> int:\n                    \"note\": \"reliable_differential=true(两侧各自稳定且不同)才是\"\n                            \"布尔注入证据；某侧 *_stable=false 说明该响应本身在波动\"\n                            \"(动态内容/多IP负载均衡)，差异不可信，先排噪\"}\n+            if args.save:\n+                out[\"artifacts\"] = {\n+                    \"a\": {\"body\": a.get(\"saved\"), \"replay\": a.get(\"replay\")},\n+                    \"b\": {\"body\": b.get(\"saved\"), \"replay\": b.get(\"replay\")},\n+                }\n             if not a_stable:\n                 out[\"a_hashes\"] = a_h\n             if not b_stable:\ndiff --git a/tools/sensors/blind_diff.py b/tools/sensors/blind_diff.py\nindex 7d4bc2c..d4974c5 100644\n--- a/tools/sensors/blind_diff.py\n+++ b/tools/sensors/blind_diff.py\n@@ -39,7 +39,7 @@ def _isolate_selftest_state() -> tuple:\n         tmp_root,\n     )\n     os.environ.pop(\"XUNJI_PROXY\", None)\n-    os.environ.pop(\"XUNJI_PROXY_REQUIRED\", None)\n+    os.environ[\"XUNJI_PROXY_REQUIRED\"] = \"0\"\n     probe._PROXY = None\n     probe.proxymod._CONF = Path(\"__xunji_no_pro",
+            "excerpt_truncated_chars": 597
+          },
+          {
+            "token": "evidence/turn-contract-egress.py.txt",
+            "path": "evidence/turn-contract-egress.py.txt",
+            "exists": true,
+            "size": 19687,
+            "sha1": "eb8d5d9b33f016de11fb93fa0b21f7a966914656",
+            "excerpt": "def _event_destinations(event: dict) -> set[str]:\n    \"\"\"Extract explicit network destinations without treating artifact paths as hosts.\"\"\"\n    text = _tool_text(event)\n    destinations: set[str] = set()\n    for raw_url in re.findall(r\"(?i)\\b(?:https?|wss?)://[^\\s\\\"'<>]+\", text):\n        try:\n            host = urlsplit(raw_url.rstrip(\",);]}\")).hostname or \"\"\n        except ValueError:\n            host = \"\"\n        host = host.strip().lower().rstrip(\".\")\n        if host:\n            destinations.add(host)\n\n    command = str((event.get(\"tool_input\") or {}).get(\"command\") or \"\") \\\n        if isinstance(event.get(\"tool_input\"), dict) else \"\"\n    try:\n        tokens = shlex.split(command)\n    except ValueError:\n        tokens = []\n    file_suffixes = {\n        \".diff\", \".gif\", \".html\", \".json\", \".jsonl\", \".log\", \".md\",\n        \".png\", \".py\", \".replay\", \".txt\", \".yaml\", \".yml\",\n    }\n    bare_host = re.compile(\n        r\"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+\"\n        r\"[a-z]{2,63}(?::\\d+)?(?:/.*)?$\"\n    )\n    for token in tokens:\n        candidate = token.strip(\"[](),;\\\"'\")\n        if not candidate or \"://\" in candidate or \"/\" in candidate:\n            continue\n        host_candidate = candidate.rsplit(\":\", 1)[0] if candidate.count(\":\") == 1 else candidate\n        try:\n            destinations.add(str(ipaddress.ip_address(host_candidate)).lower())\n            continue\n        except ValueError:\n            pass\n        if Path(host_candidate).suffix.lower() in file_suffixes or not bare_host.fullmatch(candidate):\n            continue\n        try:\n            host = urlsplit(\"//\" + candidate).hostname or \"\"\n        except ValueError:\n            host = \"\"\n        if host:\n            destinations.add(host.lower().rstrip(\".\"))\n    return destinations\n\n\ndef _unassigned_assets(run_dir: Path) -> tuple[list[str], str]:\n    try:\n        import coverage_matrix  # noqa: WPS433\n        data = coverage_matrix.derive(run_dir)\n    except Exception as exc:\n        return [], f\"{exc.__class__.__name__}: coverage derivation failed\"\n    if any(run_dir.glob(\"**/coverage.json\")) and not data.get(\"rows\"):\n        return [], \"coverage file exists but no valid asset rows were derived\"\n    return ([str(item.get(\"asset\") or \"\") for item in data.get(\"accounting_gaps\", [])\n             if str(item.get(\"asset\") or \"\")], \"\")\n\n\ndef _proxy_egress_reason(run_dir: Path, event: dict) -> str:\n    \"\"\"Deny target egress paths that cannot prove use of the engagement proxy.\"\"\"\n    tool = str(event.get(\"tool_name\") or \"\")\n    tool_input = event.get(\"tool_input\") if isinstance(event.get(\"tool_input\"), dict) else {}\n    command = str(tool_input.get(\"command\") or \"\")\n    if tool == \"Bash\" and RAW_NETWORK_CLIENT_RE.search(command):\n        return (\n            \"交战代理硬门：active run 禁止使用裸 curl/wget/httpx/nuclei/sqlmap/requests/urllib/socket；\"\n            \"请走项目的 proxy-aware guarded tools。\"\n        )\n    touched, coverage_error = _event_known_hosts(run_dir, event)\n    if coverage_error:\n        return \"资产覆盖硬门：无法派生目标资产账本，拒绝在未知 scope/代理状态下执行：\" + coverage_error\n    if tool == \"WebFetch\":\n        return (\n            \"交战代理硬门：active run 中 WebFetch 无法证明经过 XUNJI_PROXY，且未知目标会\"\n            \"绕过资产账本；目标请求必须改用 tools/probe.py/render.py/scan.py，公共资料研究\"\n            \"使用 WebSearch/知识工具。\"\n        )\n    if tool != \"Bash\":\n        if touched or _event_destinations(event):\n            return (\n                \"交战代理硬门：该非 Bash 网络工具无法证明经过 XUNJI_PROXY；\"\n                \"目标请求必须改用 proxy-aware project tools。\"\n            )\n        return \"\"\n    try:\n        tokens = shlex.split(command)\n    except ValueError:\n        return \"交战代理硬门：无法解析目标命令，拒绝可能的直连出口。\"\n    approved = False\n    for token in tokens:\n        if not token.endswith(\".py\"):\n            continue\n        path = Path(token)\n        if not path.is_absolute():\n            path = ROOT / path\n        try:\n            approved = path.resolve() in PROXY_AWARE_TARGET_TOOLS\n        except Exception:\n            approved = False\n        if approved:\n            break\n    if approved:\n        rows, inventory_error = _coverage_rows(run_dir)\n        if inventory_error:\n            return \"资产覆盖硬门：无法派生目标资产账本：\" + inventory_error\n        if not rows:\n            return \"资产覆盖硬门：proxy-aware 目标工具执行前必须先建立 coverage/asset ledger。\"\n        destinations = _event_destinations(event)\n        unknown = sorted(destinations - _coverage_hostnames(rows))\n        if unknown:\n            return (\n                \"资产覆盖硬门：proxy-aware 目标工具只能访问 coverage ledger 已声明的 host/IP；\"\n                \"未知目标: \" + \", \".join(unknown)\n            )\n    if not approved:\n        if not touched:\n            return \"\"\n        return (\n            \"交战代理硬门：该目标命令未绑定项目的 proxy-aware 工具，无法证明出口代理；\"\n            \"改用 tools/probe.py、render.py 或 scan.py。\"\n        )\n    return \"\"\n\n\ndef _is_target_action(event: dict) -> bool:\n    tool = str(event.get(\"tool_name\") or \"\")\n    tool_input = event.get(\"tool_input\") if isinstance(event.get(\"tool_input\"), dict) else {}\n    command = str(tool_input.get(\"command\") or \"\")\n    if tool == \"WebFetch\" or (tool == \"Bash\" and not _fanout_control_bash(command)):\n        return True\n    if tool in NON_EGRESS_TOOLS:\n        return False\n    return bool(_event_destinations(event))\n\n\ndef _denial_is_target_action(event: dict, reason: str) -> bool:\n    \"\"\"Separate target-result denials from local control-plane policy denials.\"\"\"\n    local_policy_markers = (\n        \"active-run 指针\",\n        \"清除 active-run 指针必须由当前操作者 prompt 明确授权\",\n        \"长期记忆写入需要操作者\",\n        \"peer_review 不得后台运行\",\n    )\n    return _is_target_action(event) and not any(\n        marker in reason for marker in local_policy_markers)\n\n\ndef evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:\n    tool = str(event.get(\"tool_name\") or \"\")\n    text = _tool_text(event)\n    mode = str(contract.get(\"mode\") or \"\")\n    tool_input = event.get(\"tool_input\") if isinstance(event.get(\"tool_input\"), dict) else {}\n    command = str(tool_input.get(\"command\") or \"\")\n    tool_env = tool_input.get(\"env\") if isinstance(tool_input.get(\"env\"), dict) else {}\n    direct_env_opt_out = str(tool_env.get(\"XUNJI_PROXY_REQUIRED\") or \"\").strip().lower() \\\n        in {\"0\", \"false\", \"no\", \"off\"}\n\n    protected_reason = _protected_control_reason(event)\n    if protected_reason:\n        return protected_reason\n\n    invocation = _control_invocation(command) if tool == \"Bash\" else None\n    prompt_excerpt = str(contract.get(\"prompt_excerpt\") or \"\")\n    resume_allowed = False\n    if invocation and invocation[0].name == \"loop_bootstrap.py\" \\\n            and \"--resume\" in invocation[1]:\n        try:\n            resume_arg = invocation[1][invocation[1].index(\"--resume\") + 1]\n        except (ValueError, IndexError):\n            resume_arg = \"\"\n        resume_allowed = bool(\n            re.search(r\"(?:继续|恢复|续接|resume|continue)\", prompt_excerpt, re.I)\n            or (resume_arg and (\n                resume_arg.lower() in prompt_excerpt.lower()\n                or Path(resume_arg).name.lower() in prompt_excerpt.lower()\n            )))\n    if invocation and invocation[0].name in {\"setup_run.py\", \"loop_bootstrap.py\"} \\\n            and not ({\"--selftest\", \"--help\", \"-h\"} & set(invocation[1])) \\\n            and not RUN_TRANSITION_RE.search(prompt_excerpt) \\\n            and not resume_allowed:\n        return \"setup/resume run 转换必须由当前操作者 prompt 明确要求；不得借切换 run 规避当前回合约束。\"\n    if invocation and invocation[0].name == \"xunji_statusline.py\" \\\n            and \"--set-active\" in invocation[1]:\n        try:\n            target_arg = invocation[1][invocation[1].index(\"--set-active\") + 1]\n        except (ValueError, IndexError):\n            return \"--set-active 缺少 run 路径。\"\n        target_name = Path(target_arg).name.lower()\n        if target_name not in prompt_excerpt.lower() and target_arg.lower() not in prompt_excerpt.lower():\n            return \"--set-active 目标必须由当前操作者 prompt 明确点名；不得切换到无关 run。\"\n    if invocation and invocation[0].name == \"xunji_statusline.py\" \\\n            and \"--clear-active\" in invocation[1] \\\n            and not CLEAR_ACTIVE_RE.search(str(contract.get(\"prompt_excerpt\") or \"\")):\n        return \"清除 active-run 指针必须由当前操作者 prompt 明确授权；切换 run 请使用受控 --set-active/setup/resume。\"\n\n    if MEMORY_PATH_RE.search(text) and not contract.get(\"memory_approved\"):\n        memory_read = tool in {\"Read\", \"Grep\", \"Glob\"} or (\n            tool == \"Bash\" and _readonly_shell(command)\n        )\n        if not memory_read:\n            return \"长期记忆写入需要操作者在当前 prompt 明确批准；retrospective 不能自行升级为 memory。\"\n    if tool == \"Bash\" and BACKGROUND_REVIEW_RE.search(command):\n        return \"peer_review 不得后台运行并与可变 evidence 并发；请前台冻结快照后完成复审。\"\n    if tool == \"Bash\" and (DIRECT_EGRESS_ENV_RE.search(text) or direct_env_opt_out) \\\n            and n",
+            "excerpt_truncated_chars": 8901
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004 - Claude driver and documentation diff",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-004"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/driver-docs.diff",
+            "path": "evidence/driver-docs.diff",
+            "exists": true,
+            "size": 39433,
+            "sha1": "addc33b591107631787c4be7131982147b8047cf",
+            "diff_summary": {
+              "changed_files_count": 18,
+              "changed_files": [
+                ".agents/skills/xunji-agent-board/SKILL.md",
+                ".claude/skills/network-proxy/SKILL.md",
+                ".claude/skills/xunji-agent-board/SKILL.md",
+                "CLAUDE.md",
+                "docs/AI_ENV_SETUP.md",
+                "docs/ROUTER.md",
+                "docs/WORKFLOW-reference.md",
+                "docs/WORKFLOW.md",
+                "docs/templates/agents/code-audit.md",
+                "docs/templates/agents/exploit.md",
+                "docs/templates/agents/report.md",
+                "docs/templates/agents/review.md",
+                "docs/templates/agents/surface.md",
+                "docs/templates/agents/synthesizer.md",
+                "docs/templates/agents/verify.md",
+                "docs/templates/agents/web-hunter.md",
+                "docs/templates/loop_prompt.md",
+                "docs/templates/worker.md"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 35,
+              "hunks": [
+                {
+                  "file": ".agents/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -64,7 +64,7 @@ Plan or assign advisory lanes:"
+                },
+                {
+                  "file": ".agents/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -79,6 +79,11 @@ python tools/workers.py synthesize runs/<dir>"
+                },
+                {
+                  "file": ".claude/skills/network-proxy/SKILL.md",
+                  "header": "@@ -30,7 +30,14 @@ Do not confuse this with Xunji's active engagement proxy discipline:"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -27,7 +27,7 @@ must not be treated as the Root driver's instruction source."
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -35,9 +35,10 @@ must not be treated as the Root driver's instruction source."
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -138,11 +139,13 @@ Stay serial when:"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -161,15 +164,25 @@ Plan and assign:"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -178,9 +191,13 @@ python tools/workers.py finish runs/<dir> A-web-hunter-001 --status merged --not"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -202,6 +219,9 @@ and stop/pivot condition."
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -63,6 +63,10 @@"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -77,8 +81,9 @@"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -213,16 +218,22 @@ observe -> update state graph -> decompose fronts"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -361,6 +372,12 @@ Only two pauses; each requires a codex gate before the pause:"
+                },
+                {
+                  "file": "docs/AI_ENV_SETUP.md",
+                  "header": "@@ -102,14 +102,13 @@ Xunji 明确区分三类流量："
+                },
+                {
+                  "file": "docs/AI_ENV_SETUP.md",
+                  "header": "@@ -171,10 +170,12 @@ statusline 只读 `.claude/xunji_active_run` 和 run 下的 `state/*.json` / `st"
+                },
+                {
+                  "file": "docs/ROUTER.md",
+                  "header": "@@ -349,16 +349,18 @@ Project-discipline and run-structure checks in `tools/`:"
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -532,18 +532,28 @@ only for older runs."
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -554,6 +564,8 @@ only for older runs."
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -84,6 +84,11 @@ material/artifact-backed progress, and `run_controller.py --shadow` writes the"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -134,6 +139,13 @@ it may receive the existing mode context but cannot replace or refresh the"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -237,9 +249,11 @@ into a conclusion."
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -265,14 +279,17 @@ All Agents share the global guard state, request budget, host breakers, and run"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -424,10 +441,15 @@ assets were only header / recon-classified, never examined. Before any such clai"
+                },
+                {
+                  "file": "docs/templates/agents/code-audit.md",
+                  "header": "@@ -39,8 +39,9 @@ Audit source, diffs, dependencies, configuration, routes, and authorization boun"
+                },
+                {
+                  "file": "docs/templates/agents/exploit.md",
+                  "header": "@@ -39,8 +39,8 @@ Adapt payloads or draft author-and-handoff PoC code for a candidate. Do not auto"
+                },
+                {
+                  "file": "docs/templates/agents/report.md",
+                  "header": "@@ -39,8 +39,9 @@ Draft report skeletons and consistency checks from already gated evidence. Do no"
+                },
+                {
+                  "file": "docs/templates/agents/review.md",
+                  "header": "@@ -39,8 +39,9 @@ Clean-context review of evidence, closure, or safety-critical code changes. Find"
+                },
+                {
+                  "file": "docs/templates/agents/surface.md",
+                  "header": "@@ -40,8 +40,8 @@ Convert recon, coverage, fingerprints, and threat roles into attack-surface cand"
+                },
+                {
+                  "file": "docs/templates/agents/synthesizer.md",
+                  "header": "@@ -38,8 +38,9 @@ The sole integrator. Merge subagent candidates, resolve conflicts, apply the evi"
+                },
+                {
+                  "file": "docs/templates/agents/verify.md",
+                  "header": "@@ -39,8 +39,8 @@ Replicate, replay, control, falsify, and calibrate candidate evidence, especiall"
+                },
+                {
+                  "file": "docs/templates/agents/web-hunter.md",
+                  "header": "@@ -39,8 +39,8 @@ Explore one assigned web front with proof-level actions. You may produce candida"
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -125,7 +125,7 @@ Guard-routed tools only."
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -135,18 +135,22 @@ Guard-routed tools only."
+                },
+                {
+                  "file": "docs/templates/worker.md",
+                  "header": "@@ -3,7 +3,7 @@"
+                },
+                {
+                  "file": "docs/templates/worker.md",
+                  "header": "@@ -110,7 +110,8 @@ Discipline:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/.agents/skills/xunji-agent-board/SKILL.md b/.agents/skills/xunji-agent-board/SKILL.md\nindex 078dfc3..39c430e 100644\n--- a/.agents/skills/xunji-agent-board/SKILL.md\n+++ b/.agents/skills/xunji-agent-board/SKILL.md\n@@ -64,7 +64,7 @@ Plan or assign advisory lanes:\n ```bash\n python tools/workers.py suggest runs/<dir>\n python tools/workers.py plan runs/<dir>\n-python tools/workers.py assign runs/<dir> --role web-hunter --front F-001\n+python tools/workers.py assign runs/<dir> --role web-hunter --front F-001 --asset app.example\n python tools/context_pack.py runs/<dir> --agent A-web-hunter-001\n ```\n \n@@ -79,6 +79,11 @@ python tools/workers.py synthesize runs/<dir>\n \n ## Output Contract\n \n+Target-facing assignments bind an explicit asset package. The Agent prompt must\n+repeat the exact `XUNJI_ASSIGNMENT`, `XUNJI_FRONT`, and `XUNJI_ASSETS` tokens.\n+Async Agent PostToolUse proves launch; SubagentStop proves return. `merged`\n+requires per-asset successful target receipts plus canonical E-entry coverage.\n+\n Agent output may contain:\n \n - `phenomenon`: passive/source/surface observation.\ndiff --git a/.claude/skills/network-proxy/SKILL.md b/.claude/skills/network-proxy/SKILL.md\nindex 25aac1e..e2f693e 100644\n--- a/.claude/skills/network-proxy/SKILL.md\n+++ b/.claude/skills/network-proxy/SKILL.md\n@@ -30,7 +30,14 @@ Do not confuse this with Xunji's active engagement proxy discipline:\n \n - Active Xunji target-facing tools (`probe.py`, `render.py`, `scan.py`, sensors)\n   use `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf` through\n-  `tools/harness/proxy.py`.\n+  `tools/harness/proxy.py`. This channel is fail-closed by default; absent proxy\n+  configuration rejects target traffic. Only an operator-approved direct-egress\n+  session may set `XUNJI_PROXY_REQUIRED=0`.\n+- Target `WebFetch`, other non-attested network tools, and raw\n+  curl/wget/requests/socket are rejected by the turn gate; use the proxy-aware\n+  project tools. `XUNJI_PROXY_REQUIRED=0` is accepted from a Claude Bash action\n+  only when the current operator prompt explicitly approves direct egress.\n+  Prompt reminders alone are not proxy enforcement.\n - Codex review traffic uses the dedicated `CODEX_PROXY` /\n   `tools/harness/codex_proxy.conf` path.\n - Model/API calls must not be routed through the engagement proxy.\ndiff --git a/.claude/skills/xunji-agent-board/SKILL.md b/.claude/skills/xunji-agent-board/SKILL.md\nindex 8fc1263..5ffca02 100644\n--- a/.claude/skills/xunji-agent-board/SKILL.md\n+++ b/.claude/skills/xunji-agent-board/SKILL.md\n@@ -27,7 +27,7 @@ must not be treated as the Root driver's instruction source.\n ## Root Posture\n \n - Root chooses fronts autonomously while safe open fronts remain.\n-- Agents own one assigned front/role pair and coordinate only through the run\n+- Agents own one assigned front/role/asset package and coordinate only through the run\n   directory.\n - Agents write `phenomenon`, `candidate`, `refutes`, `barrier`, or\n   `next-evidence`; they do not write final findings or closure.\n@@ -35,9 +35,10 @@ must not be treated as the Root driver's instruction source.\n   resolves conflicts, and updates canonical Markdown.\n - `workers.py assign` means \"lane prepared\", not \"Claude Agent is running\".\n   When Root actually starts a Claude Agent tool, its prompt must include\n-  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. The hook records the real\n-  transcript-backed receipt automatically. `heartbeat` is optional display state\n-  and never proves execution.\n+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2`, exactly matching\n+  the assignment's explicit `--asset` package. The hook records launch and return\n+  attempts automatically. `heartbeat` is optional display state and never proves\n+  execution.\n   When the Agent returns or is intentionally abandoned/blocked, record\n   `workers.py finish <run> <agent> --status <done|blocked|failed|abandoned>`.\n   Closure is blocked while any assigned Agent remains non-terminal.\n@@ -138,11 +139,13 @@ Stay serial when:\n - There is one front, one asset, or one shared barrier.\n - One lane's result would materially change the next step for all others.\n \n-When at least four active fronts do not all share one concrete barrier, every\n-`EXECUTE` turn must actually invoke two Agents on disjoint assignment/front pairs.\n-Only the operator's current prompt may grant a one-turn serial override. Old\n-receipts, `heartbeat`, Agent files, model-claimed budgets, and decisions prose do\n-not bypass this rule.\n+When at least four active fronts do not all share one concrete barrier, the current\n+**coordination epoch** must contain two real Agents on disjoint assignment/front\n+pairs. The epoch persists across bare `continue` prompts; do not create replacement\n+Agents merely because the operator continued. It resets only when the active-front\n+topology or asset coverage debt materially changes. Only the operator's current\n+prompt may grant a serial override. `heartbeat`, Agent files, model-claimed budgets,\n+and decisions prose never prove execution.\n \n ## Commands\n \n@@ -161,15 +164,25 @@ Plan and assign:\n ```bash\n python tools/workers.py suggest runs/<dir>\n python tools/workers.py plan runs/<dir>\n-python tools/workers.py assign runs/<dir> --role web-hunter --front F-001\n+python tools/workers.py assign runs/<dir> --role web-hunter --front F-001 \\\n+  --asset app1.example --asset app2.example\n python tools/context_pack.py runs/<dir> --agent A-web-hunter-001\n rg -n \"Reasoning style|Loop budget|Operator Profile\" runs/<dir>/agents/A-web-hunter-001.md runs/<dir>/context/F-001.web-hunter.md\n ```\n \n-Then invoke the Claude `Agent` tool with\n-`XUNJI_ASSIGNMENT=A-web-hunter-001 XUNJI_FRONT=F-001` in its prompt. Repeat for a\n-second disjoint lane when fan-out is required. After the real call, `heartbeat`\n-may mirror progress for humans, but it is not a gate credential.\n+Every target-facing assignment requires a bounded, explicit asset package. Each\n+asset must already be named in that front and present in `coverage.json`; overlapping\n+non-terminal packages are rejected except for verification/review roles. Then invoke\n+the Claude `Agent` tool with the exact tokens\n+`XUNJI_ASSIGNMENT=A-web-hunter-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=app1.example,app2.example`.\n+The package in the prompt must exactly match `state/assignments.json`.\n+\n+For an async Agent, `Agent PostToolUse(status=async_launched)` proves **launch only**.\n+The hook records the returned `agentId` as a unique attempt and projects the\n+assignment to `running`; only the matching `SubagentStop` means the attempt returned.\n+Running Agents never owe post-return disposition and must remain able to use their own\n+assigned tools. Global fan-out/disposition gates apply to Root, not to a running child\n+lane. Only Root may spawn Agents; nested Agent fan-out is rejected.\n \n After Root adjudicates the result, close the assignment with an auditable note:\n \n@@ -178,9 +191,13 @@ python tools/workers.py finish runs/<dir> A-web-hunter-001 --status merged --not\n python tools/workers.py finish runs/<dir> A-web-hunter-002 --status blocked --note \"Reason: shared auth barrier; Front: F-002\"\n ```\n \n-`done` means the Agent returned but Root still owes merge/refute/adjudication; it\n-does not satisfy the execute-turn Stop gate. The disposition timestamp must be\n-newer than that Agent's current-turn receipt.\n+`done` means a real Agent returned but Root still owes merge/refute/adjudication; it\n+does not satisfy the Stop gate. The disposition timestamp must be newer than the\n+matching `SubagentStop`. `merged` additionally requires, for **every** assigned asset,\n+at least one transcript-backed successful target action by that Agent and a canonical\n+`E-xxx` entry naming the exact host. A zero-tool Agent or a partially completed asset\n+package cannot be marked merged. `blocked/failed/abandoned` may end the attempt but do\n+not erase that asset's coverage debt.\n \n Before merging:\n \n@@ -202,6 +219,9 @@ and stop/pivot condition.\n \n For each done Agent:\n \n+- Compare `Assigned assets` with `## Asset Outcomes`; no asset may silently disappear\n+  because it returned a login page, 302, captcha, WAF, or timeout.\n+\n - Verify the output has a role, front, loop, safety reminder, and artifact or\n   command pointers.\n - For personalized-RDT Agents, verify `Loop budget`, `Operator Profile`, and\ndiff --git a/CLAUDE.md b/CLAUDE.md\nindex d4bea04..fea6f71 100644\n--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -63,6 +63,10 @@\n   Guanlan-baseline assets for hard enforcement; egress-only additions are advisory.\n   (retrospective #13: classify --all turned 19→114 reachable, creating an unsolvable\n   contradiction between \"don't re-OSINT\" and \"every asset needs a verdict.\")\n+- Setup also builds `state/asset",
+            "excerpt_truncated_chars": 29959
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "e2418ad2d234670d5232469bc1e017d43245a47d"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Independent Maintenance Review Request\n\nThis is a frozen review bundle for a Codex-authored framework change, not a live target report.\n\n## Claims To Challenge\n\n1. Async Agent launch acknowledgements no longer create immediate disposition deadlocks.\n2. Root and child Agent gates are correctly scoped and cannot be bypassed through nested Agents or asset escape.\n3. Bare continue prompts preserve valid fan-out work without letting stale topology satisfy a changed run.\n4. Explicit asset packages and runtime/E-entry merge proof prevent selective or zero-tool completion.\n5. Full inventory accounting and evidence-only matrix cells prevent broad-front laundering.\n6. Proxy enforcement is fail-closed without breaking model-review isolation or authorized explicit direct mode.\n7. DIFF evidence saves both sides and remains replay-compatible.\n\n## Required Reviewer Output\n\nLead with concrete BLOCKER/WARN findings citing file/hunk evidence. Explicitly inspect false positives, fail-open paths, old-run compatibility, races, and tests that only prove their own assumptions.\n\n- Evidence IDs: E-001, E-002, E-003, E-004\n- Fingerprints captured: none; local maintenance only\n\n",
+    "frontier.md": "# Review Frontiers\n\n## Closed Fronts\n\n### F-001 - Async Agent attempt semantics\n- Status: closed\n- Barrier class: none\n- Current depth: deep\n- Evidence: E-001\n\n### F-002 - Asset allocation and coverage closure\n- Status: closed\n- Barrier class: none\n- Current depth: deep\n- Evidence: E-002\n\n### F-003 - Proxy fail-closed and DIFF artifacts\n- Status: closed\n- Barrier class: none\n- Current depth: deep\n- Evidence: E-003\n\n### F-004 - Driver protocol and template consistency\n- Status: closed\n- Barrier class: none\n- Current depth: moderate\n- Evidence: E-004\n\n",
+    "decisions.md": "# Review Decisions\n\n## D-001 - Review as Codex-authored maintenance\n- Status: claude-fallback-final-review-pending\n- Reason: Codex authored the diff and cannot count as its own independent reviewer.\n- Required panel: arkcli defaults (`kimi-k2.7-code`, `glm-5.2`) plus fresh-context Claude Code.\n\n## D-002 - Review questions\n- Status: post-fix-disposition-recorded\n- Reason: Check for async ordering races, actor misattribution, false allow/deny proxy cases, forged coverage, legacy-run migration, closure bypass, and documentation drift.\n",
+    "review.md": "# Independent Review\n\nRound 1 completed only the fresh-context Claude vote. Arkcli did not satisfy the\nrequired matrix: Kimi timed out and GLM's useful fail-open finding was recovered from\na parse-error tail. Round 2 produced a valid Kimi vote plus fresh-context Claude;\nKimi identified one BLOCKER and two related WARN items in unknown-destination and\nlegacy empty-asset enforcement. All were accepted, fixed, and reverified at 57/57.\nGLM again failed strict parsing and remains a recorded backend limitation. A final\nreview then returned WARN with no BLOCKER. Five concrete hardening items were accepted:\ncurrent-turn direct-egress approval, non-Bash egress denial, auditable projection\nerrors, agent-id causal matching without a fixed time window, and explicit schema-v1\nmigration. Two excerpt/intent findings were dismissed with direct code and test\nevidence. Because production code changed, one final current-hash review is pending;\nCodex self-review does not count. That review's only BLOCKER was a truncated-bundle\nclaim that the per-asset merge setter was absent; the setter exists and is now frozen\nas a dedicated artifact. Three WARN items were accepted: front mismatch projection,\nnegated direct-egress wording, and projection-time asset-token [REDACTED] They are\nfixed and reverified at 57/57; one post-fix current-hash review remains pending.\nThe post-fix panel then had no valid arkcli vote (Kimi timeout, GLM parser failure)\nand a fresh-context Claude WARN vote with no BLOCKER. Its one implementation issue,\nunguarded `run_model.summary()`, was fixed fail-closed; direct asset-ledger rewriting\nwas also hardened based on its adversarial prompt. All tests remain 57/57. Arkcli is\nnow recorded unavailable for this final hash, so the required fallback is one final\nfresh-context Claude-only review of the last delta.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 8746,
+    "max_bundle_chars": 110000,
+    "requested_artifact_excerpt_chars": 24000
+  },
+  "warnings": [
+    "artifact_excerpt_chars reduced from 24000 to 11511 to fit max_bundle_chars=110000",
+    "artifact_excerpt_chars reduced from 11511 to 8746 to fit max_bundle_chars=110000"
+  ],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "0b06d9b4f8d6be88582cc65227ae74c37f319112"
+}

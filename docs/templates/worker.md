@@ -3,7 +3,7 @@
 New runs should use `docs/templates/agents/` plus:
 
 ```bash
-python tools/workers.py assign runs/<dir> --role <role> --front <F-id>
+python tools/workers.py assign runs/<dir> --role <role> --front <F-id> --asset <host>
 python tools/workers.py status runs/<dir>
 python tools/workers.py lifecycle-check runs/<dir>
 python tools/workers.py agent-check runs/<dir>
@@ -110,7 +110,8 @@ Discipline:
   colliding with other workers.
 - All requests go through the tools under tools/ (probe/render/scan); they share one global rate
   limit, do not bypass it.
-- Your Agent-tool prompt includes `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...` so
+- Your Agent-tool prompt includes the exact
+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2` package so
   the hook can prove this call ran. Root may mirror lifecycle with
   `workers.py heartbeat/finish`; that prose is not runtime proof.
 

@@ -15,6 +15,7 @@ verification_tasks/infrastructure/stats), 未知 schema 则降级为顶层键概
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -185,6 +186,10 @@ def _asset_flags(a: dict) -> list[str]:
     return out
 
 
+def _asset_id(host: str) -> str:
+    return "ASSET-" + hashlib.sha1(host.lower().encode("utf-8")).hexdigest()[:12].upper()
+
+
 def build_coverage(recon: dict, report_md: str | None = None) -> dict:
     """把 Guanlan 产物折成 coverage.json(零重探)。reachable 取 Guanlan『已确认可达』(只对【真可达】
     逼裁决, 不纠缠待验证/低质量 = 轴 B『别执着不可达』); 低质量→False; 其余→unknown。flags 从 category
@@ -196,15 +201,25 @@ def build_coverage(recon: dict, report_md: str | None = None) -> dict:
     confirmed = _section_hosts(report_md, "已确认可达", "确认可达", "confirmed")
     lowq = _section_hosts(report_md, "低质量", "低質量", "low quality", "low-quality")
     assets: list = []
+    excluded_assets: list = []
     seen: set = set()
     for a in (recon.get("assets") or []):
         if not isinstance(a, dict):
             continue
         h = _scope._asset_host(a)
         sv = _scope.in_scope(h, inp, outp) if h else "out"
-        if not h or h in seen or sv == "out":
+        if not h or h in seen:
             continue
         seen.add(h)
+        if sv == "out":
+            excluded_assets.append({
+                "asset_id": _asset_id(h),
+                "host": h,
+                "scope_status": "out",
+                "reason": (a.get("reason") or a.get("ownership") or "scope rule")[:120],
+                "source": "guanlan",
+            })
+            continue
         # reachable=True 只给【严格 in-scope】(sv=="in")的: 防无 ownership 的 recon 里 unknown-scope 的
         # 无关 host 一旦出现在『已确认可达』段就被标可达 → 逼裁决/被攻击(Codex 复审 WARN#1)。
         if sv == "in":
@@ -212,7 +227,9 @@ def build_coverage(recon: dict, report_md: str | None = None) -> dict:
         else:
             reach = "unknown"
         assets.append({
-            "host": h, "reachable": reach, "examined": False, "stack": "",
+            "asset_id": _asset_id(h), "host": h,
+            "scope_status": "in" if sv == "in" else "review",
+            "reachable": reach, "examined": False, "stack": "",
             "flags": _asset_flags(a),
             "ownership": a.get("ownership"), "high_value": bool(a.get("is_high_value")),
             "category": a.get("category_id"), "reason": (a.get("reason") or "")[:120],
@@ -223,7 +240,9 @@ def build_coverage(recon: dict, report_md: str | None = None) -> dict:
             "verdict": None,
         })
     reachable_n = sum(1 for c in assets if c["reachable"] is True)
-    return {"total": len(assets), "examined": 0, "reachable": reachable_n,
+    return {"source_total": len(seen), "excluded": len(excluded_assets),
+            "excluded_assets": excluded_assets,
+            "total": len(assets), "examined": 0, "reachable": reachable_n,
             "planned": len(assets), "partial": False, "assets": assets,
             "source": "guanlan-adapter(no re-probe)"}
 
@@ -246,6 +265,11 @@ def _selftest() -> int:
     h = {a["host"]: a for a in cov["assets"]}
     checks = [
         ("unrelated 滤出(不入 coverage)", "spam.unrelated.com" not in h),
+        ("out-of-scope 资产仍在排除台账中可审计",
+         cov["source_total"] == 6 and cov["excluded"] == 1
+         and cov["excluded_assets"][0]["host"] == "spam.unrelated.com"),
+        ("in-scope 资产有稳定 asset_id",
+         all(re.fullmatch(r"ASSET-[0-9A-F]{12}", a.get("asset_id", "")) for a in cov["assets"])),
         ("已确认可达 → reachable True", h["auth.ex.edu.cn"]["reachable"] is True),
         ("低质量 → reachable False", h["dead.ex.edu.cn"]["reachable"] is False),
         ("待验证(不在 report)→ unknown(轴B: 不纠缠)", h["0.vpn.ex.edu.cn"]["reachable"] == "unknown"),

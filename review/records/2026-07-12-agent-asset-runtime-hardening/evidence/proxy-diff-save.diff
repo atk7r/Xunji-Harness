@@ -1,0 +1,191 @@
+diff --git a/tools/harness/proxy.py b/tools/harness/proxy.py
+index bc8f702..aa5eefc 100644
+--- a/tools/harness/proxy.py
++++ b/tools/harness/proxy.py
+@@ -10,7 +10,8 @@ requests 都自动继承 —— 若把交战代理塞进 HTTPS_PROXY, 模型调
+ 中继 = 串味 + 泄露)。所以交战代理走【专用】XUNJI_PROXY, 只有 active 工具显式读它; 模型调用另外【强制
+ 剥代理】(model_safe_env / model_no_proxy_opener), 双保险。
+ 
+-fail-closed: XUNJI_PROXY_REQUIRED=1 时, active 工具没配代理就【拒绝直连】(防真实 IP 泄露), 不静默直连。
++fail-closed: active 工具默认要求代理；没配就【拒绝直连】(防真实 IP 泄露)。只有操作者显式设置
++XUNJI_PROXY_REQUIRED=0 才允许直连，不依赖模型记得 export。
+ 
+ 配置(优先级): `--proxy` 参数 > `XUNJI_PROXY` 环境变量 > `tools/harness/proxy.conf`(每行一个 url, # 注释)。
+ 支持 http:// 与 socks5://; **建议 socks5h://**(代理侧解析 DNS, 防 DNS 泄露; socks4a 在 PySocks 某些失败下
+@@ -51,8 +52,16 @@ def engagement_proxy(override: str | None = None) -> str | None:
+ 
+ 
+ def required() -> bool:
+-    """XUNJI_PROXY_REQUIRED=1 → 强制: active 工具没代理就拒绝直连(fail-closed)。"""
+-    return (os.environ.get("XUNJI_PROXY_REQUIRED") or "").strip().lower() in ("1", "true", "yes", "on")
++    """Active target traffic is fail-closed unless the operator opts out.
++
++    Model prompts are not a security boundary.  An absent environment variable
++    therefore means "proxy required"; only an explicit operator value of
++    ``0/false/no/off`` permits direct egress.
++    """
++    raw = (os.environ.get("XUNJI_PROXY_REQUIRED") or "").strip().lower()
++    if not raw:
++        return True
++    return raw not in ("0", "false", "no", "off")
+ 
+ 
+ def resolve(override: str | None = None) -> str | None:
+@@ -60,8 +69,9 @@ def resolve(override: str | None = None) -> str | None:
+     p = engagement_proxy(override)
+     if p is None and required():
+         raise SystemExit(
+-            "[proxy] XUNJI_PROXY_REQUIRED=1 但未配置交战代理 —— 拒绝直连(防真实 IP 泄露)。"
+-            " 设 XUNJI_PROXY=socks5h://host:port 或写一行进 tools/harness/proxy.conf。")
++            "[proxy] 主动目标流量默认要求交战代理，但当前未配置 —— 拒绝直连(防真实 IP 泄露)。"
++            " 设 XUNJI_PROXY=socks5h://host:port / 写 tools/harness/proxy.conf；"
++            "仅操作者明确接受直连时才设置 XUNJI_PROXY_REQUIRED=0。")
+     return p
+ 
+ 
+@@ -232,7 +242,7 @@ def _selftest() -> int:
+         globals()["_CONF"] = Path("__xunji_no_proxy_conf__")
+         for k in _PROXY_VARS:
+             os.environ.pop(k, None)
+-        os.environ.pop("XUNJI_PROXY_REQUIRED", None)
++        os.environ["XUNJI_PROXY_REQUIRED"] = "0"
+ 
+         os.environ["XUNJI_PROXY"] = "socks5h://env:1080"
+         checks.append(("override 胜过 env", engagement_proxy("http://arg:8080") == "http://arg:8080"))
+@@ -277,13 +287,13 @@ def _selftest() -> int:
+         ]
+         # fail-closed
+         os.environ.pop("HTTPS_PROXY", None)
+-        os.environ["XUNJI_PROXY_REQUIRED"] = "1"
++        os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+         try:
+             resolve(None)
+             fc = False
+         except SystemExit:
+             fc = True
+-        checks.append(("required 但没配 → fail-closed 抛错(不直连)", fc))
++        checks.append(("默认 required 且没配 → fail-closed 抛错(不直连)", fc))
+         checks.append(("required 配了 override → 不抛、返回代理", resolve("http://relay:9") == "http://relay:9"))
+     finally:
+         globals()["_CONF"] = old_conf
+diff --git a/tools/probe.py b/tools/probe.py
+index 3240809..50e003b 100644
+--- a/tools/probe.py
++++ b/tools/probe.py
+@@ -129,7 +129,7 @@ def selftest_isolation():
+     )
+     try:
+         os.environ.pop("XUNJI_PROXY", None)
+-        os.environ.pop("XUNJI_PROXY_REQUIRED", None)
++        os.environ["XUNJI_PROXY_REQUIRED"] = "0"
+         globals()["_PROXY"] = None
+         proxymod._CONF = Path("__xunji_no_proxy_conf__")
+         guardmod.STATE_DIR = tmp_root / "guard_state"
+@@ -749,6 +749,30 @@ def _selftest() -> int:
+                 checks.append(("请求头完整存(Cookie 原值在, 供重放认证请求)", "sess=secret123" in hreq))
+                 checks.append(("响应头完整存(Set-Cookie 原值在, 不脱敏)", "Identity.External=" in hresp))
+                 checks.append(("summary 引用 replay 路径", bool(d.get("replay"))))
++            diff_base = Path(tempfile.mkdtemp()) / "boolean.html"
++            diff_b = Path(_diff_side_save(str(diff_base), "b"))
++            da = send("GET", f"http://127.0.0.1:{port}/?v=true", {}, None, None, 5,
++                      save=_diff_side_save(str(diff_base), "a"))
++            db = send("GET", f"http://127.0.0.1:{port}/?v=false", {}, None, None, 5,
++                      save=str(diff_b))
++            checks.append(("DIFF save naming preserves A base and writes distinct B body",
++                           diff_base.is_file() and diff_b.is_file()
++                           and diff_b.name == "boolean.b.html"))
++            checks.append(("DIFF saves replay for both comparison sides",
++                           Path(str(diff_base) + ".replay.json").is_file()
++                           and Path(str(diff_b) + ".replay.json").is_file()
++                           and da.get("replay") and db.get("replay")))
++            no_suffix_base = Path(tempfile.mkdtemp()) / "boolean"
++            no_suffix_b = Path(_diff_side_save(str(no_suffix_base), "b"))
++            send("GET", f"http://127.0.0.1:{port}/?plain=a", {}, None, None, 5,
++                 save=str(no_suffix_base))
++            send("GET", f"http://127.0.0.1:{port}/?plain=b", {}, None, None, 5,
++                 save=str(no_suffix_b))
++            checks.append(("DIFF explicit no-suffix paths keep distinct A/B replay files",
++                           no_suffix_b.name == "boolean.b"
++                           and Path(str(no_suffix_base) + ".replay.json").is_file()
++                           and Path(str(no_suffix_b) + ".replay.json").is_file()
++                           and str(no_suffix_base) != str(no_suffix_b)))
+             large = Path(tempfile.mkdtemp()) / "large.txt"
+             dl = send("GET", f"http://127.0.0.1:{port}/large", {}, None, None, 5,
+                       save=str(large), save_chunks=True)
+@@ -910,6 +934,15 @@ def _place_save(save: str | None, run: str | None) -> str | None:
+     return str(Path(run) / "evidence" / save)
+ 
+ 
++def _diff_side_save(base: str | None, side: str) -> str | None:
++    if not base or side == "a":
++        return base
++    path = Path(base)
++    if path.suffix:
++        return str(path.with_name(path.stem + f".{side}" + path.suffix))
++    return str(path.with_name(path.name + f".{side}"))
++
++
+ def main() -> int:
+     ap = argparse.ArgumentParser()
+     ap.add_argument("method", nargs="?", help="GET/POST/PUT/... or DIFF for a two-URL comparison")
+@@ -1006,15 +1039,17 @@ def main() -> int:
+                 return 2
+             n = max(1, args.samples)
+ 
+-            def sample(url: str) -> tuple[dict, bool, list]:
++            def sample(url: str, save: str | None) -> tuple[dict, bool, list]:
+                 runs = [send("GET", url, headers, None, args.auth_key,
+-                             args.timeout, None, args.retry, args.retry_wait,
+-                             args.headers, byte_range=args.byte_range) for _ in range(n)]
++                             args.timeout, save if index == 0 else None,
++                             args.retry, args.retry_wait,
++                             args.headers, byte_range=args.byte_range)
++                        for index in range(n)]
+                 hs = sorted({r.get("sha1") for r in runs})
+                 return runs[0], len(hs) == 1, hs
+ 
+-            a, a_stable, a_h = sample(args.url)
+-            b, b_stable, b_h = sample(args.url2)
++            a, a_stable, a_h = sample(args.url, _diff_side_save(args.save, "a"))
++            b, b_stable, b_h = sample(args.url2, _diff_side_save(args.save, "b"))
+             same_hash = a.get("sha1") == b.get("sha1")
+             out = {"tag": args.tag, "mode": "DIFF", "samples": n,
+                    "a": a, "b": b,
+@@ -1028,6 +1063,11 @@ def main() -> int:
+                    "note": "reliable_differential=true(两侧各自稳定且不同)才是"
+                            "布尔注入证据；某侧 *_stable=false 说明该响应本身在波动"
+                            "(动态内容/多IP负载均衡)，差异不可信，先排噪"}
++            if args.save:
++                out["artifacts"] = {
++                    "a": {"body": a.get("saved"), "replay": a.get("replay")},
++                    "b": {"body": b.get("saved"), "replay": b.get("replay")},
++                }
+             if not a_stable:
+                 out["a_hashes"] = a_h
+             if not b_stable:
+diff --git a/tools/sensors/blind_diff.py b/tools/sensors/blind_diff.py
+index 7d4bc2c..d4974c5 100644
+--- a/tools/sensors/blind_diff.py
++++ b/tools/sensors/blind_diff.py
+@@ -39,7 +39,7 @@ def _isolate_selftest_state() -> tuple:
+         tmp_root,
+     )
+     os.environ.pop("XUNJI_PROXY", None)
+-    os.environ.pop("XUNJI_PROXY_REQUIRED", None)
++    os.environ["XUNJI_PROXY_REQUIRED"] = "0"
+     probe._PROXY = None
+     probe.proxymod._CONF = Path("__xunji_no_proxy_conf__")
+     guardmod.STATE_DIR = tmp_root / "guard_state"
+diff --git a/tools/sensors/upload_probe.py b/tools/sensors/upload_probe.py
+index d78e516..c56d19f 100644
+--- a/tools/sensors/upload_probe.py
++++ b/tools/sensors/upload_probe.py
+@@ -39,7 +39,7 @@ def _isolate_selftest_state() -> tuple:
+         tmp_root,
+     )
+     os.environ.pop("XUNJI_PROXY", None)
+-    os.environ.pop("XUNJI_PROXY_REQUIRED", None)
++    os.environ["XUNJI_PROXY_REQUIRED"] = "0"
+     probe._PROXY = None
+     probe.proxymod._CONF = Path("__xunji_no_proxy_conf__")
+     guardmod.STATE_DIR = tmp_root / "guard_state"

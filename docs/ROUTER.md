@@ -349,16 +349,18 @@ Project-discipline and run-structure checks in `tools/`:
   re-read. Advisory only — never selects the next front (that stays the Root). See
   `docs/WORKFLOW-reference.md` "State Graph".
 - `python tools/workers.py runs/<dir>` — Agent Board bookkeeping: `assign` creates
-  `agents/A-*.md`, `context/*.md`, and `state/assignments.json`; `status` shows role /
-  front coverage; `agent-check` verifies Agent output discipline; `conflicts` derives
+  `agents/A-*.md`, `context/*.md`, and `state/assignments.json`; target-facing assign
+  requires explicit `--asset` packages, and `status` shows role/front/asset coverage;
+  `agent-check` verifies Agent output discipline; `conflicts` derives
   contradiction / duplicate / confidence / artifact / scope conflicts; `synthesize`
   drafts the Root merge view. Legacy `--new` worker files remain readable, but new
   collaboration uses `docs/templates/agents/`. Advisory + ledger only — never writes
   canonical findings and never bypasses the Single Synthesizer.
 - `python tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash
   chain for actual Agent/Cron/foreground-review events. `workers.py` lifecycle
-  prose is not runtime proof; current-turn Agent receipts carry assignment/front
-  tokens and are transcript-backed.
+  prose is not runtime proof. Async Agent PostToolUse proves launch, matching
+  SubagentStop proves return, and the coordination epoch survives bare continue
+  prompts. Assignment/front/asset tokens and tool receipts are transcript-backed.
 - `python tools/state_project.py runs/<dir>` — derives `state/projection.json` and
   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
   canonical and projection must not be hand-edited back into facts.

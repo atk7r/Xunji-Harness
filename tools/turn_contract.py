@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import shlex
 import sys
 import tempfile
 import time
+from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,6 +51,8 @@ CONTROL_SCRIPTS = {
     (ROOT / "tools" / name).resolve()
     for name in (
         "graph.py",
+        "coverage_matrix.py",
+        "ingest_recon.py",
         "loop_bootstrap.py",
         "loop_journal.py",
         "loop_state.py",
@@ -60,6 +64,36 @@ CONTROL_SCRIPTS = {
         "xunji_statusline.py",
         "run_model.py",
     )
+}
+PROXY_AWARE_TARGET_TOOLS = {
+    (ROOT / "tools" / name).resolve() for name in (
+        "probe.py", "render.py", "scan.py", "replay.py", "rerun_deferred.py",
+        "fetch_assets.py", "classify_hosts.py", "cdn_bypass.py", "exploit.py",
+    )
+}
+RAW_NETWORK_CLIENT_RE = re.compile(
+    r"(?i)(?:^|[\s;&|])(curl|wget|httpx|nuclei|sqlmap)(?:\s|$)|"
+    r"\b(?:requests\.(?:get|post|request)|urllib\.request|socket\.(?:socket|create_connection))\b"
+)
+DIRECT_EGRESS_ENV_RE = re.compile(
+    r"(?i)\bXUNJI_PROXY_REQUIRED\s*=\s*(?:0|false|no|off)\b"
+)
+DIRECT_EGRESS_APPROVAL_RE = re.compile(
+    r"(?:明确)?(?:允许|接受|批准|同意).{0,24}(?:直连|direct[ -]?egress)|"
+    r"(?:allow|approve|accept).{0,24}direct[ -]?egress",
+    re.I,
+)
+DIRECT_EGRESS_DENIAL_RE = re.compile(
+    r"(?:不|不要|不得|禁止|拒绝).{0,16}(?:允许|接受|批准|同意|直连)|"
+    r"(?:do\s+not|don't|never|deny|forbid).{0,24}"
+    r"(?:allow|approve|accept|direct[ -]?egress)",
+    re.I,
+)
+NON_EGRESS_TOOLS = {
+    "Agent", "AskUserQuestion", "CronCreate", "CronDelete", "CronList",
+    "Edit", "Glob", "Grep", "ListMcpResourcesTool", "MultiEdit", "NotebookEdit",
+    "Read", "ReadMcpResourceTool", "Skill", "TaskOutput", "TaskStop", "TodoWrite",
+    "WebSearch", "Write",
 }
 
 EXPLAIN_RE = re.compile(
@@ -94,7 +128,9 @@ BACKGROUND_REVIEW_RE = re.compile(
     re.I,
 )
 PROTECTED_RUNTIME_RE = re.compile(
-    r"(?:runtime_events\.jsonl|\.runtime_events\.lock|turn_contract\.json|run_status\.json|"
+    r"(?:runtime_events\.jsonl|runtime_projection_error\.json|coverage\.json|"
+    r"asset_ledger\.json|\.runtime_events\.lock|"
+    r"turn_contract\.json|run_status\.json|"
     r"assignments\.json|xunji_active_run|xunji_pending_turns|xunji_transition_claims|"
     r"review[/\\]receipts[/\\][0-9a-f]{64}\.json)"
     r"(?=[.\/\\\"'\s;|&}]|$)",
@@ -197,6 +233,10 @@ def _contract_from_event(event: dict, *, run_name: str = "") -> dict:
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8", "replace")).hexdigest(),
         "prompt_excerpt": prompt[:500],
         "memory_approved": bool(MEMORY_APPROVAL_RE.search(prompt)),
+        "direct_egress_approved": bool(
+            DIRECT_EGRESS_APPROVAL_RE.search(prompt)
+            and not DIRECT_EGRESS_DENIAL_RE.search(prompt)
+        ),
         "fanout_override": bool(re.search(r"(?:明确)?允许串行|不要使用\s*(?:Agent|子代理)|serial override", prompt, re.I)),
         "origin_run": run_name,
         "bound_run": run_name,
@@ -204,8 +244,90 @@ def _contract_from_event(event: dict, *, run_name: str = "") -> dict:
     }
 
 
+def _safe_run_summary(run_dir: Path) -> tuple[dict, str]:
+    """Keep hook execution deterministic when canonical state parsing fails."""
+    try:
+        state = run_model.summary(run_dir)
+    except Exception as exc:
+        note = f"{exc.__class__.__name__}: run_model.summary failed"
+        return {"fronts": [], "open": [], "schema_errors": [note]}, note
+    return (state if isinstance(state, dict) else {
+        "fronts": [], "open": [], "schema_errors": ["invalid run_model summary"],
+    }), ""
+
+
+def _coordination_signature(run_dir: Path) -> str:
+    """Hash only topology and coverage debt that should start a new fan-out epoch."""
+    state, summary_error = _safe_run_summary(run_dir)
+    fronts = sorted(
+        (str(item.get("id") or ""), str(item.get("status") or ""), str(item.get("barrier") or ""))
+        for item in state.get("fronts", [])
+        if isinstance(item, dict) and str(item.get("id") or "") in set(state.get("open", []))
+    )
+    assets: list[tuple] = []
+    coverage_paths = [run_dir / "coverage.json", *sorted(run_dir.glob("**/coverage.json"))]
+    for path in coverage_paths:
+        if not path.exists():
+            continue
+        try:
+            coverage = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        for asset in coverage.get("assets", []) if isinstance(coverage, dict) else []:
+            if not isinstance(asset, dict) or asset.get("reachable") is False:
+                continue
+            host = str(asset.get("host") or asset.get("asset") or asset.get("url") or "").lower()
+            if not host:
+                continue
+            assets.append((
+                host,
+                str(asset.get("reachable")),
+                bool(asset.get("examined")),
+                str(asset.get("verdict") or ""),
+                tuple(sorted(str(item) for item in (asset.get("tested_groups") or []))),
+            ))
+        break
+    try:
+        import coverage_matrix  # noqa: WPS433
+        matrix = coverage_matrix.derive(run_dir)
+        assets = sorted(
+            (str(row.get("asset") or ""), str(row.get("reachability")),
+             str(row.get("disposition") or ""), tuple(sorted(row.get("fronts") or [])),
+             tuple(sorted(row.get("tested") or [])))
+            for row in matrix.get("rows", [])
+            if isinstance(row, dict) and row.get("reachability") is not False
+        )
+    except Exception:
+        pass
+    return hashlib.sha256(json.dumps(
+        {"fronts": fronts, "coverage_debt": sorted(assets),
+         "summary_error": summary_error},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _previous_contract(run_dir: Path) -> dict:
+    try:
+        data = json.loads(contract_path(run_dir).read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) and data.get("schema") == SCHEMA else {}
+
+
 def write_contract(run_dir: Path, event: dict) -> dict:
+    previous = _previous_contract(run_dir)
     contract = _contract_from_event(event, run_name=run_dir.name)
+    signature = _coordination_signature(run_dir)
+    previous_since = float(previous.get("fanout_epoch_started_at") or 0.0)
+    if previous.get("coordination_signature") == signature and previous_since > 0:
+        contract["fanout_epoch_started_at"] = previous_since
+        contract["fanout_epoch_id"] = str(previous.get("fanout_epoch_id") or "")
+    else:
+        contract["fanout_epoch_started_at"] = float(contract["updated_at"])
+        contract["fanout_epoch_id"] = hashlib.sha256(
+            f"{run_dir.resolve()}:{signature}:{contract['updated_at']}".encode("utf-8")
+        ).hexdigest()[:16]
+    contract["coordination_signature"] = signature
     _atomic_json(contract_path(run_dir), contract)
     _write_run_status(run_dir, contract)
     return contract
@@ -483,7 +605,7 @@ def _protected_control_reason(event: dict) -> str:
         return ""
     if PROTECTED_RUNTIME_RE.search(_tool_text(event)):
         return (
-            "active-run 指针、pending contract、运行时回执和回合状态只能由"
+            "active-run 指针、pending contract、运行时回执、资产账本和回合状态只能由"
             "受控工具/hook 原子写入；Claude 不得直接修改这些控制面文件。"
         )
     return ""
@@ -576,24 +698,217 @@ def _fanout_control_bash(command: str) -> bool:
     return _control_invocation(command) is not None
 
 
-def _assignment_exists(run_dir: Path, assignment: str, front: str) -> bool:
+def _assignment_record(run_dir: Path, assignment: str, front: str = "") -> dict:
     try:
         data = json.loads((run_dir / "state" / "assignments.json").read_text(encoding="utf-8", errors="replace"))
     except Exception:
-        return False
+        return {}
     for item in data.get("assignments", []) if isinstance(data, dict) else []:
         if not isinstance(item, dict):
             continue
-        if str(item.get("agent") or "") == assignment and str(item.get("front") or "").upper() == front:
-            return (run_dir / "agents" / f"{assignment}.md").exists()
-    return False
+        if str(item.get("agent") or "") != assignment:
+            continue
+        if front and str(item.get("front") or "").upper() != front.upper():
+            continue
+        if not (run_dir / "agents" / f"{assignment}.md").exists():
+            return {}
+        return item
+    return {}
+
+
+def _assignment_exists(run_dir: Path, assignment: str, front: str) -> bool:
+    return bool(_assignment_record(run_dir, assignment, front))
+
+
+def _normalized_assets(values: object) -> list[str]:
+    out: list[str] = []
+    for raw in values if isinstance(values, list) else []:
+        value = str(raw).strip().lower().rstrip(".")
+        value = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", value).split("/", 1)[0]
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def _coverage_rows(run_dir: Path) -> tuple[list[dict], str]:
+    coverage_paths = [run_dir / "coverage.json", *sorted(run_dir.glob("**/coverage.json"))]
+    existing = [path for path in coverage_paths if path.exists()]
+    if not existing:
+        return [], ""
+    try:
+        import coverage_matrix  # noqa: WPS433
+        data = coverage_matrix.derive(run_dir)
+    except Exception as exc:
+        return [], f"{exc.__class__.__name__}: coverage derivation failed"
+    rows = [row for row in data.get("rows", []) if isinstance(row, dict)]
+    if not rows:
+        return [], "coverage file exists but no valid asset rows were derived"
+    return rows, ""
+
+
+def _event_known_hosts(run_dir: Path, event: dict) -> tuple[set[str], str]:
+    text = _tool_text(event).lower()
+    found: set[str] = set()
+    rows, error = _coverage_rows(run_dir)
+    if error:
+        return set(), error
+    for row in rows:
+        host = _normalized_assets([row.get("asset")])
+        if host and re.search(r"(?<![\w.\-])" + re.escape(host[0]) + r"(?![\w.\-])", text):
+            found.add(host[0])
+    return found, ""
+
+
+def _coverage_hostnames(rows: list[dict]) -> set[str]:
+    """Return host-only scope keys for URL/IP destination comparison."""
+    hosts: set[str] = set()
+    for row in rows:
+        for asset in _normalized_assets([row.get("asset")]):
+            try:
+                host = urlsplit("//" + asset).hostname or ""
+            except ValueError:
+                host = ""
+            host = host.strip().lower().rstrip(".")
+            if host:
+                hosts.add(host)
+    return hosts
+
+
+def _event_destinations(event: dict) -> set[str]:
+    """Extract explicit network destinations without treating artifact paths as hosts."""
+    text = _tool_text(event)
+    destinations: set[str] = set()
+    for raw_url in re.findall(r"(?i)\b(?:https?|wss?)://[^\s\"'<>]+", text):
+        try:
+            host = urlsplit(raw_url.rstrip(",);]}")).hostname or ""
+        except ValueError:
+            host = ""
+        host = host.strip().lower().rstrip(".")
+        if host:
+            destinations.add(host)
+
+    command = str((event.get("tool_input") or {}).get("command") or "") \
+        if isinstance(event.get("tool_input"), dict) else ""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = []
+    file_suffixes = {
+        ".diff", ".gif", ".html", ".json", ".jsonl", ".log", ".md",
+        ".png", ".py", ".replay", ".txt", ".yaml", ".yml",
+    }
+    bare_host = re.compile(
+        r"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+        r"[a-z]{2,63}(?::\d+)?(?:/.*)?$"
+    )
+    for token in tokens:
+        candidate = token.strip("[](),;\"'")
+        if not candidate or "://" in candidate or "/" in candidate:
+            continue
+        host_candidate = candidate.rsplit(":", 1)[0] if candidate.count(":") == 1 else candidate
+        try:
+            destinations.add(str(ipaddress.ip_address(host_candidate)).lower())
+            continue
+        except ValueError:
+            pass
+        if Path(host_candidate).suffix.lower() in file_suffixes or not bare_host.fullmatch(candidate):
+            continue
+        try:
+            host = urlsplit("//" + candidate).hostname or ""
+        except ValueError:
+            host = ""
+        if host:
+            destinations.add(host.lower().rstrip("."))
+    return destinations
+
+
+def _unassigned_assets(run_dir: Path) -> tuple[list[str], str]:
+    try:
+        import coverage_matrix  # noqa: WPS433
+        data = coverage_matrix.derive(run_dir)
+    except Exception as exc:
+        return [], f"{exc.__class__.__name__}: coverage derivation failed"
+    if any(run_dir.glob("**/coverage.json")) and not data.get("rows"):
+        return [], "coverage file exists but no valid asset rows were derived"
+    return ([str(item.get("asset") or "") for item in data.get("accounting_gaps", [])
+             if str(item.get("asset") or "")], "")
+
+
+def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
+    """Deny target egress paths that cannot prove use of the engagement proxy."""
+    tool = str(event.get("tool_name") or "")
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    command = str(tool_input.get("command") or "")
+    if tool == "Bash" and RAW_NETWORK_CLIENT_RE.search(command):
+        return (
+            "交战代理硬门：active run 禁止使用裸 curl/wget/httpx/nuclei/sqlmap/requests/urllib/socket；"
+            "请走项目的 proxy-aware guarded tools。"
+        )
+    touched, coverage_error = _event_known_hosts(run_dir, event)
+    if coverage_error:
+        return "资产覆盖硬门：无法派生目标资产账本，拒绝在未知 scope/代理状态下执行：" + coverage_error
+    if tool == "WebFetch":
+        return (
+            "交战代理硬门：active run 中 WebFetch 无法证明经过 XUNJI_PROXY，且未知目标会"
+            "绕过资产账本；目标请求必须改用 tools/probe.py/render.py/scan.py，公共资料研究"
+            "使用 WebSearch/知识工具。"
+        )
+    if tool != "Bash":
+        if touched or _event_destinations(event):
+            return (
+                "交战代理硬门：该非 Bash 网络工具无法证明经过 XUNJI_PROXY；"
+                "目标请求必须改用 proxy-aware project tools。"
+            )
+        return ""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return "交战代理硬门：无法解析目标命令，拒绝可能的直连出口。"
+    approved = False
+    for token in tokens:
+        if not token.endswith(".py"):
+            continue
+        path = Path(token)
+        if not path.is_absolute():
+            path = ROOT / path
+        try:
+            approved = path.resolve() in PROXY_AWARE_TARGET_TOOLS
+        except Exception:
+            approved = False
+        if approved:
+            break
+    if approved:
+        rows, inventory_error = _coverage_rows(run_dir)
+        if inventory_error:
+            return "资产覆盖硬门：无法派生目标资产账本：" + inventory_error
+        if not rows:
+            return "资产覆盖硬门：proxy-aware 目标工具执行前必须先建立 coverage/asset ledger。"
+        destinations = _event_destinations(event)
+        unknown = sorted(destinations - _coverage_hostnames(rows))
+        if unknown:
+            return (
+                "资产覆盖硬门：proxy-aware 目标工具只能访问 coverage ledger 已声明的 host/IP；"
+                "未知目标: " + ", ".join(unknown)
+            )
+    if not approved:
+        if not touched:
+            return ""
+        return (
+            "交战代理硬门：该目标命令未绑定项目的 proxy-aware 工具，无法证明出口代理；"
+            "改用 tools/probe.py、render.py 或 scan.py。"
+        )
+    return ""
 
 
 def _is_target_action(event: dict) -> bool:
     tool = str(event.get("tool_name") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = str(tool_input.get("command") or "")
-    return tool == "WebFetch" or (tool == "Bash" and not _fanout_control_bash(command))
+    if tool == "WebFetch" or (tool == "Bash" and not _fanout_control_bash(command)):
+        return True
+    if tool in NON_EGRESS_TOOLS:
+        return False
+    return bool(_event_destinations(event))
 
 
 def _denial_is_target_action(event: dict, reason: str) -> bool:
@@ -614,6 +929,9 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
     mode = str(contract.get("mode") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = str(tool_input.get("command") or "")
+    tool_env = tool_input.get("env") if isinstance(tool_input.get("env"), dict) else {}
+    direct_env_opt_out = str(tool_env.get("XUNJI_PROXY_REQUIRED") or "").strip().lower() \
+        in {"0", "false", "no", "off"}
 
     protected_reason = _protected_control_reason(event)
     if protected_reason:
@@ -661,6 +979,12 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             return "长期记忆写入需要操作者在当前 prompt 明确批准；retrospective 不能自行升级为 memory。"
     if tool == "Bash" and BACKGROUND_REVIEW_RE.search(command):
         return "peer_review 不得后台运行并与可变 evidence 并发；请前台冻结快照后完成复审。"
+    if tool == "Bash" and (DIRECT_EGRESS_ENV_RE.search(text) or direct_env_opt_out) \
+            and not contract.get("direct_egress_approved"):
+        return (
+            "交战代理硬门：XUNJI_PROXY_REQUIRED=0 只能由当前操作者 prompt 明确批准直连；"
+            "模型或历史环境变量不能自行关闭 fail-closed。"
+        )
 
     if mode == EXPLAIN:
         if tool not in {"Read", "Grep", "Glob", "WebSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"}:
@@ -711,7 +1035,7 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             return "CronDelete 只可删除当前 CronList 观察到的本 run job：" + note
         return ""
 
-    state = run_model.summary(run_dir)
+    state, _ = _safe_run_summary(run_dir)
     frontier_exists = (run_dir / "frontier.md").exists()
     state_invalid = not frontier_exists or (
         not state.get("fronts") or bool(state.get("schema_errors"))
@@ -723,7 +1047,57 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             "canonical frontier 状态缺失或有 schema error；active run 按 fail-closed "
             "禁止目标动作，先修复 frontier.md 的 Status/Barrier class/Current depth。"
         )
-    if not state.get("fanout_required") or contract.get("fanout_override"):
+    if _is_target_action(event):
+        proxy_reason = _proxy_egress_reason(run_dir, event)
+        if proxy_reason:
+            return proxy_reason
+        unassigned_assets, coverage_error = _unassigned_assets(run_dir)
+        touched_hosts, host_error = _event_known_hosts(run_dir, event)
+        if coverage_error or host_error:
+            return "资产覆盖硬门：账本派生失败，拒绝 fail-open：" + (coverage_error or host_error)
+        if touched_hosts and unassigned_assets:
+            shown = ", ".join(unassigned_assets[:8])
+            return (
+                f"资产覆盖硬门：仍有 {len(unassigned_assets)} 个 reachable/unknown 范围内资产未映射到"
+                f"任何 front/assignment（{shown}{' …' if len(unassigned_assets) > 8 else ''}）。"
+                "先在 frontier.md 逐资产点名；宽泛 F-id 不能代替资产账本。"
+            )
+    actor_agent_id = str(event.get("agent_id") or "").strip()
+    if actor_agent_id:
+        if tool == "Agent":
+            return "Agent Board 强制：只有 Root 可派 Agent；子 Agent 不得嵌套派生新 Agent。"
+        actor = runtime_receipts.agent_actor(run_dir, actor_agent_id)
+        if not actor:
+            return "Agent Board 强制：当前子 Agent 没有 transcript-backed assignment attempt，拒绝执行。"
+        if actor.get("state") != "running":
+            return "Agent Board 强制：该子 Agent attempt 已返回，不能在 SubagentStop 后继续执行。"
+        if actor.get("kind") == "completion_review":
+            if tool in {"Read", "Grep", "Glob"} or (
+                    tool == "Bash" and _readonly_shell(command)):
+                return ""
+            return "Completion review Agent 只允许读取冻结的 run 状态；不得修改、探测或再派 Agent。"
+        rec = _assignment_record(
+            run_dir, str(actor.get("assignment") or ""), str(actor.get("front") or ""))
+        if not rec:
+            return "Agent Board 强制：子 Agent attempt 对应的 assignment/front 已失效。"
+        assigned_assets = set(_normalized_assets(rec.get("assets")))
+        if _is_target_action(event) and not assigned_assets:
+            return (
+                "Agent Board 资产边界：legacy/空资产 assignment 不具备目标执行权限；"
+                "Root 必须创建带显式 asset package 的新 assignment。"
+            )
+        if _is_target_action(event):
+            touched, coverage_error = _event_known_hosts(run_dir, event)
+            if coverage_error:
+                return "Agent Board 资产边界：无法派生资产账本，拒绝 fail-open：" + coverage_error
+            outside = sorted(touched - assigned_assets)
+            if outside:
+                return (
+                    "Agent Board 资产边界：子 Agent 只能操作 assignment 的显式资产包；越界资产: "
+                    + ", ".join(outside)
+                )
+        # Child Agents run their own assigned lane. Global Root fan-out and
+        # post-return disposition must never block their probe/control actions.
         return ""
     if tool == "Agent":
         raw_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
@@ -739,13 +1113,30 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
         assignment, front = runtime_receipts._assignment_fields(prompt)
         if not assignment or not front:
             return "Agent Board 强制：Agent prompt 必须包含 XUNJI_ASSIGNMENT=A-... 和 XUNJI_FRONT=F-...。"
-        if not _assignment_exists(run_dir, assignment, front):
+        rec = _assignment_record(run_dir, assignment, front)
+        if not rec:
             return "Agent Board 强制：Agent token 未绑定 workers.py 生成的 assignment/front。"
+        status = str(rec.get("status") or "").strip().lower()
+        if status not in {"assigned", "starting"}:
+            return (
+                f"Agent Board attempt 唯一性：{assignment} status={status or '(missing)'}，"
+                "只有 assigned/starting assignment 可启动；重试或续派必须创建新 assignment。"
+            )
+        expected_assets = _normalized_assets(rec.get("assets"))
+        prompt_assets = runtime_receipts._assignment_assets(prompt)
+        if expected_assets and prompt_assets != expected_assets:
+            return (
+                "Agent Board 资产绑定：prompt 必须包含与 assignment 完全一致的 "
+                f"XUNJI_ASSETS={','.join(expected_assets)}。"
+            )
         return ""
+    if not state.get("fanout_required") or contract.get("fanout_override"):
+        return ""
+    epoch_since = float(contract.get("fanout_epoch_started_at")
+                        or contract.get("updated_at") or 0.0)
     fanout = runtime_receipts.agent_fanout(
         run_dir,
-        session_id=str(contract.get("session_id") or ""),
-        since=float(contract.get("updated_at") or 0.0),
+        since=epoch_since,
     )
     if fanout.get("satisfied"):
         if tool == "Bash" and _fanout_control_bash(command):
@@ -753,12 +1144,11 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
         if tool == "WebFetch" or tool == "Bash":
             disposition = runtime_receipts.agent_disposition(
                 run_dir,
-                session_id=str(contract.get("session_id") or ""),
-                since=float(contract.get("updated_at") or 0.0),
+                since=epoch_since,
             )
             if not disposition.get("disposition_satisfied"):
                 return (
-                    "Agent receipt 已返回但尚未完成 post-return disposition；先用 workers.py "
+                    "真实 SubagentStop 已返回但尚未完成 post-return disposition；先用 workers.py "
                     "把每个 assignment 更新为带 canonical E/F/D 锚点的 merged/blocked/failed，"
                     "且更新时间必须晚于 Agent 返回。"
                 )
@@ -781,7 +1171,7 @@ def _context_message(contract: dict, run_dir: Path) -> str:
         return "[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。"
     if mode == PAUSE:
         return "[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。"
-    state = run_model.summary(run_dir)
+    state, _ = _safe_run_summary(run_dir)
     fanout = (
         " fanout_required=true (open/probing/working/type-A 均为 active); "
         "先真实调用至少两个不同 front 的 Agent。"
@@ -907,21 +1297,35 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
 
 def _selftest() -> int:
     import subprocess
+    from unittest import mock
 
     root = Path(tempfile.mkdtemp())
     run = root / "run"
     (run / "state").mkdir(parents=True)
     (run / "agents").mkdir()
+    front_specs = (
+        ("app", "example.test public app"),
+        ("auth", "auth.example.test login"),
+        ("network", "network review"),
+        ("none", "workflow review"),
+    )
     (run / "frontier.md").write_text(
         "# Frontier\n## Open Fronts\n" + "".join(
-            f"### F-{idx:03d}\n- Status: open\n- Barrier class: {barrier}\n- Current depth: shallow\n"
-            for idx, barrier in enumerate(("app", "auth", "network", "none"), 1)
+            f"### F-{idx:03d}\n- Front: {label}\n- Status: open\n"
+            f"- Barrier class: {barrier}\n- Current depth: shallow\n"
+            for idx, (barrier, label) in enumerate(front_specs, 1)
         ), encoding="utf-8")
+    (run / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "example.test", "reachable": True, "examined": False},
+        {"host": "auth.example.test", "reachable": True, "examined": False},
+    ]}), encoding="utf-8")
     (run / "agents" / "A-web-001.md").write_text("# Agent\n", encoding="utf-8")
     (run / "agents" / "A-auth-001.md").write_text("# Agent\n", encoding="utf-8")
     (run / "state" / "assignments.json").write_text(json.dumps({"assignments": [
-        {"agent": "A-web-001", "front": "F-001"},
-        {"agent": "A-auth-001", "front": "F-002"},
+        {"agent": "A-web-001", "front": "F-001", "status": "assigned",
+         "assets": ["example.test"]},
+        {"agent": "A-auth-001", "front": "F-002", "status": "assigned",
+         "assets": ["auth.example.test"]},
     ]}), encoding="utf-8")
     explain = classify_prompt("为什么不用 Agent？只告诉我原因，不用修改")
     history_only = classify_prompt("这是这几次的历史，你来看看还有什么问题")
@@ -932,6 +1336,9 @@ def _selftest() -> int:
     no_run_question = classify_prompt("what runs exist?", active_run=False)
     active_run_question = classify_prompt("active run 是什么？")
     active_run_switch = classify_prompt("switch active run to runs/other_20260101")
+    negated_direct_cn = _contract_from_event({"prompt": "不要允许直连，继续使用代理"})
+    negated_direct_en = _contract_from_event({"prompt": "do not allow direct egress"})
+    explicit_direct = _contract_from_event({"prompt": "明确允许本回合直连"})
     contract = {
         "mode": EXECUTE,
         "session_id": "s",
@@ -941,6 +1348,9 @@ def _selftest() -> int:
         "updated_at": time.time(),
     }
     target_event = {"tool_name": "Bash", "tool_input": {"command": "python tools/probe.py https://example.test"}}
+    with mock.patch.object(run_model, "summary", side_effect=RuntimeError("broken state")):
+        summary_failure_signature = _coordination_signature(run)
+        summary_failure_reason = evaluate_pretool(run, target_event, contract)
     encoded_target = {"tool_name": "Bash", "tool_input": {
         "command": "python3 -c 'import socket; socket.create_connection((\"example.test\",443))'"}}
     renamed_target = {"tool_name": "Bash", "tool_input": {"command": "python3 /tmp/check.py"}}
@@ -968,7 +1378,7 @@ def _selftest() -> int:
         "command": "find . -type f -fprint /tmp/forged"}}
     agent_bad = {"tool_name": "Agent", "tool_input": {"prompt": "work F-001"}}
     agent_good = {"tool_name": "Agent", "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001",
+        "prompt": "XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=example.test",
     }}
     completion_bad = {"tool_name": "Agent", "tool_input": {
         "prompt": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=" + "a" * 40,
@@ -977,6 +1387,8 @@ def _selftest() -> int:
         "prompt": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=" + "a" * 40
                   + " CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger",
     }}
+    agent_bad_blocked = "必须包含" in evaluate_pretool(run, agent_bad, contract)
+    agent_good_allowed = evaluate_pretool(run, agent_good, contract) == ""
     before_fanout = "真实 Agent 回执" in evaluate_pretool(run, target_event, contract)
     encoded_before_fanout = bool(evaluate_pretool(run, encoded_target, contract))
     renamed_before_fanout = bool(evaluate_pretool(run, renamed_target, contract))
@@ -1048,26 +1460,43 @@ def _selftest() -> int:
         "tool_input": {"command": "rm .claude/xunji_active_run"},
     }
     pointer_write_blocked = bool(evaluate_pretool(run, pointer_write, contract))
+    coverage_write = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(run / "coverage.json"), "content": "{}"},
+    }
+    coverage_write_blocked = "资产账本" in evaluate_pretool(
+        run, coverage_write, contract)
+    coverage_sync_control = {
+        "tool_name": "Bash",
+        "tool_input": {"command": (
+            f"python3 {ROOT / 'tools' / 'coverage_matrix.py'} {run} --sync"
+        )},
+    }
+    coverage_sync_control_allowed = evaluate_pretool(
+        run, coverage_sync_control, contract) == ""
     pointer_shell_reason = evaluate_pretool(run, pointer_shell, contract)
     pointer_shell_is_local = not _denial_is_target_action(pointer_shell, pointer_shell_reason)
     transcript = root / "transcript.jsonl"
     transcript.write_text("old-agent-1\nold-agent-2\ncurrent-agent-1\ncurrent-agent-2\ncurrent-cron-list\n",
                           encoding="utf-8")
 
-    def receipt(tool_id: str, session: str, assignment: str, front: str) -> None:
+    def receipt(tool_id: str, session: str, assignment: str, front: str,
+                assets: str) -> None:
         runtime_receipts.append_hook_event(run, {
             "hook_event_name": "PostToolUse", "session_id": session,
             "transcript_path": str(transcript), "tool_name": "Agent",
             "tool_use_id": tool_id,
-            "tool_input": {"prompt": f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front}"},
+            "tool_input": {"prompt": (
+                f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front} XUNJI_ASSETS={assets}"
+            )},
             "tool_response": {"result": "done"},
         })
 
-    receipt("old-agent-1", "old-session", "A-web-001", "F-001")
-    receipt("old-agent-2", "old-session", "A-auth-001", "F-002")
+    receipt("old-agent-1", "old-session", "A-web-001", "F-001", "example.test")
+    receipt("old-agent-2", "old-session", "A-auth-001", "F-002", "auth.example.test")
     old_fanout_still_blocked = bool(evaluate_pretool(run, target_event, contract))
-    receipt("current-agent-1", "s", "A-web-001", "F-001")
-    receipt("current-agent-2", "s", "A-auth-001", "F-002")
+    receipt("current-agent-1", "s", "A-web-001", "F-001", "example.test")
+    receipt("current-agent-2", "s", "A-auth-001", "F-002", "auth.example.test")
     receipts_without_disposition_block = bool(evaluate_pretool(run, target_event, contract))
     (run / "evidence.md").write_text("# Evidence\n## E-001 - merged candidate\n", encoding="utf-8")
     assignment_state = json.loads((run / "state" / "assignments.json").read_text(encoding="utf-8"))
@@ -1076,6 +1505,7 @@ def _selftest() -> int:
             "status": "merged",
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "last_note": f"Evidence: E-001 merged for Front: {item['front']}",
+            "coverage_merge_satisfied": True,
         })
     (run / "state" / "assignments.json").write_text(
         json.dumps(assignment_state), encoding="utf-8")
@@ -1338,6 +1768,217 @@ def _selftest() -> int:
         and isinstance(internal_response, dict)
     )
 
+    proxy_run = root / "proxy-run"
+    (proxy_run / "state").mkdir(parents=True)
+    (proxy_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n### F-001\n- Front: a.example public app\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    (proxy_run / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "a.example", "reachable": True, "examined": False},
+    ]}), encoding="utf-8")
+    proxy_contract = {
+        "mode": EXECUTE, "session_id": "proxy-session", "prompt_excerpt": "继续执行",
+        "fanout_override": True, "updated_at": time.time(),
+    }
+    raw_curl = {"tool_name": "Bash", "tool_input": {
+        "command": "curl https://a.example/"}}
+    raw_requests = {"tool_name": "Bash", "tool_input": {
+        "command": "python3 -c 'import requests; requests.get(\"https://a.example\")'"}}
+    target_webfetch = {"tool_name": "WebFetch", "tool_input": {"url": "https://a.example/"}}
+    unknown_webfetch = {"tool_name": "WebFetch", "tool_input": {
+        "url": "https://unknown.example/"}}
+    guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"}}
+    unknown_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"}}
+    direct_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/"
+        )}}
+    direct_env_probe = {"tool_name": "Bash", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/",
+        "env": {"XUNJI_PROXY_REQUIRED": "0"},
+    }}
+    browser_target = {"tool_name": "mcp__browser__navigate", "tool_input": {
+        "url": "https://a.example/"}}
+    raw_curl_blocked = "交战代理硬门" in evaluate_pretool(proxy_run, raw_curl, proxy_contract)
+    raw_requests_blocked = "交战代理硬门" in evaluate_pretool(
+        proxy_run, raw_requests, proxy_contract)
+    target_webfetch_blocked = "交战代理硬门" in evaluate_pretool(
+        proxy_run, target_webfetch, proxy_contract)
+    unknown_webfetch_blocked = "交战代理硬门" in evaluate_pretool(
+        proxy_run, unknown_webfetch, proxy_contract)
+    guarded_probe_allowed = evaluate_pretool(proxy_run, guarded_probe, proxy_contract) == ""
+    unknown_guarded_probe_blocked = "未知目标: unknown.example" in evaluate_pretool(
+        proxy_run, unknown_guarded_probe, proxy_contract)
+    direct_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
+        proxy_run, direct_guarded_probe, proxy_contract)
+    direct_env_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
+        proxy_run, direct_env_probe, proxy_contract)
+    direct_with_operator_allowed = evaluate_pretool(
+        proxy_run, direct_guarded_probe,
+        {**proxy_contract, "direct_egress_approved": True}) == ""
+    nonbash_target_tool_blocked = "非 Bash 网络工具" in evaluate_pretool(
+        proxy_run, browser_target, proxy_contract)
+    (proxy_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n### F-001\n- Front: unmapped app\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    unassigned_asset_blocked = "资产覆盖硬门" in evaluate_pretool(
+        proxy_run, guarded_probe, proxy_contract)
+    (proxy_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n### F-001\n- Front: a.example public app\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+
+    corrupt_run = root / "corrupt-coverage-run"
+    corrupt_run.mkdir()
+    (corrupt_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n### F-001\n- Front: unknown target\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    (corrupt_run / "coverage.json").write_text("{broken", encoding="utf-8")
+    corrupt_reason = evaluate_pretool(
+        corrupt_run, {"tool_name": "Bash", "tool_input": {
+            "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"}},
+        proxy_contract)
+    corrupt_coverage_fails_closed = (
+        "资产覆盖硬门" in corrupt_reason and "coverage" in corrupt_reason)
+    nested_run = root / "nested-coverage-run"
+    (nested_run / "classify").mkdir(parents=True)
+    (nested_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n### F-001\n- Front: nested.example app\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    (nested_run / "coverage.json").write_text("{broken", encoding="utf-8")
+    (nested_run / "classify" / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "nested.example", "reachable": True},
+    ]}), encoding="utf-8")
+    nested_fallback_host_is_enforced = "交战代理硬门" in evaluate_pretool(
+        nested_run, {"tool_name": "Bash", "tool_input": {
+            "command": "curl https://nested.example/"}}, proxy_contract)
+
+    epoch_first = write_contract(proxy_run, {
+        "prompt": "继续执行", "session_id": "epoch-one", "transcript_path": str(transcript)})
+    epoch_second = write_contract(proxy_run, {
+        "prompt": "继续执行", "session_id": "epoch-two", "transcript_path": str(transcript)})
+    proxy_cov = json.loads((proxy_run / "coverage.json").read_text(encoding="utf-8"))
+    proxy_cov["assets"][0]["verdict"] = "closed"
+    (proxy_run / "coverage.json").write_text(json.dumps(proxy_cov), encoding="utf-8")
+    epoch_third = write_contract(proxy_run, {
+        "prompt": "继续执行", "session_id": "epoch-three", "transcript_path": str(transcript)})
+    fanout_epoch_persists = (
+        epoch_first["fanout_epoch_started_at"] == epoch_second["fanout_epoch_started_at"]
+        and epoch_first["fanout_epoch_id"] == epoch_second["fanout_epoch_id"])
+    material_debt_change_resets_epoch = (
+        epoch_third["fanout_epoch_id"] != epoch_second["fanout_epoch_id"]
+        and epoch_third["fanout_epoch_started_at"] >= epoch_second["updated_at"])
+
+    actor_run = root / "actor-run"
+    (actor_run / "state").mkdir(parents=True)
+    (actor_run / "agents").mkdir()
+    (actor_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n"
+        "### F-001\n- Front: a.example lane\n- Status: open\n- Barrier class: app\n- Current depth: shallow\n"
+        "### F-002\n- Front: b.example lane\n- Status: open\n- Barrier class: auth\n- Current depth: shallow\n"
+        "### F-003\n- Front: local code lane\n- Status: open\n- Barrier class: code\n- Current depth: shallow\n"
+        "### F-004\n- Front: synthesis lane\n- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    (actor_run / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "a.example", "reachable": True},
+        {"host": "b.example", "reachable": True},
+    ]}), encoding="utf-8")
+    (actor_run / "agents" / "A-one.md").write_text("# Agent\n", encoding="utf-8")
+    (actor_run / "agents" / "A-two.md").write_text("# Agent\n", encoding="utf-8")
+    (actor_run / "state" / "assignments.json").write_text(json.dumps({"assignments": [
+        {"agent": "A-one", "front": "F-001", "status": "assigned", "assets": ["a.example"]},
+        {"agent": "A-two", "front": "F-002", "status": "assigned", "assets": ["b.example"]},
+    ]}), encoding="utf-8")
+    actor_contract = {
+        "mode": EXECUTE, "session_id": "actor-session", "prompt_excerpt": "继续执行",
+        "updated_at": time.time(), "fanout_epoch_started_at": time.time() - 1,
+    }
+    actor_good_prompt = {"tool_name": "Agent", "tool_input": {"prompt":
+        "XUNJI_ASSIGNMENT=A-one XUNJI_FRONT=F-001 XUNJI_ASSETS=a.example"}}
+    actor_bad_assets_prompt = {"tool_name": "Agent", "tool_input": {"prompt":
+        "XUNJI_ASSIGNMENT=A-one XUNJI_FRONT=F-001 XUNJI_ASSETS=b.example"}}
+    asset_bound_prompt_allowed = evaluate_pretool(
+        actor_run, actor_good_prompt, actor_contract) == ""
+    mismatched_asset_prompt_blocked = "XUNJI_ASSETS=a.example" in evaluate_pretool(
+        actor_run, actor_bad_assets_prompt, actor_contract)
+    actor_transcript = root / "actor-transcript.jsonl"
+    actor_transcript.write_text(
+        "launch-one\nlaunch-two\nchild-one\nchild-two\nchild-one-action\nchild-two-action\n",
+        encoding="utf-8")
+
+    def actor_launch(tool_id: str, assignment: str, front: str, asset: str, child: str) -> None:
+        runtime_receipts.append_hook_event(actor_run, {
+            "hook_event_name": "PostToolUse", "session_id": "actor-session",
+            "transcript_path": str(actor_transcript), "tool_name": "Agent",
+            "tool_use_id": tool_id,
+            "tool_input": {"prompt": (
+                f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front} XUNJI_ASSETS={asset}")},
+            "tool_response": {"agentId": child, "isAsync": True, "status": "async_launched"},
+        })
+
+    actor_launch("launch-one", "A-one", "F-001", "a.example", "child-one")
+    actor_launch("launch-two", "A-two", "F-002", "b.example", "child-two")
+    child_own_action = {"tool_name": "Bash", "agent_id": "child-one", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"}}
+    child_outside_action = {"tool_name": "Bash", "agent_id": "child-one", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://b.example/"}}
+    child_nested_agent = {"tool_name": "Agent", "agent_id": "child-one", "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-two XUNJI_FRONT=F-002 XUNJI_ASSETS=b.example"}}
+    child_lane_allowed = evaluate_pretool(actor_run, child_own_action, actor_contract) == ""
+    child_asset_escape_blocked = "越界资产" in evaluate_pretool(
+        actor_run, child_outside_action, actor_contract)
+    nested_agent_blocked = "只有 Root 可派 Agent" in evaluate_pretool(
+        actor_run, child_nested_agent, actor_contract)
+    root_allowed_while_agents_running = evaluate_pretool(
+        actor_run, {**guarded_probe}, actor_contract) == ""
+    runtime_receipts.append_hook_event(actor_run, {
+        "hook_event_name": "SubagentStop", "session_id": "actor-session",
+        "transcript_path": str(actor_transcript), "agent_id": "child-one",
+        "agent_type": "general-purpose",
+    })
+    root_blocked_after_real_return = "SubagentStop" in evaluate_pretool(
+        actor_run, {**guarded_probe}, actor_contract)
+    child_two_action = {"tool_name": "Bash", "agent_id": "child-two", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://b.example/"}}
+    running_peer_not_blocked_by_returned_peer = evaluate_pretool(
+        actor_run, child_two_action, actor_contract) == ""
+    actor_assignments = json.loads(
+        (actor_run / "state" / "assignments.json").read_text(encoding="utf-8"))
+    for row in actor_assignments["assignments"]:
+        if row.get("agent") == "A-two":
+            row["assets"] = []
+    (actor_run / "state" / "assignments.json").write_text(
+        json.dumps(actor_assignments), encoding="utf-8")
+    legacy_empty_asset_child_blocked = "空资产 assignment" in evaluate_pretool(
+        actor_run, child_two_action, actor_contract)
+    with actor_transcript.open("a", encoding="utf-8") as handle:
+        handle.write("completion-launch\ncompletion-child\n")
+    runtime_receipts.append_hook_event(actor_run, {
+        "hook_event_name": "PostToolUse", "session_id": "actor-session",
+        "transcript_path": str(actor_transcript), "tool_name": "Agent",
+        "tool_use_id": "completion-launch",
+        "tool_input": {"prompt": (
+            "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=" + "c" * 40
+            + " CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger")},
+        "tool_response": {"agentId": "completion-child", "isAsync": True,
+                          "status": "async_launched"},
+    })
+    completion_child_read_allowed = evaluate_pretool(actor_run, {
+        "tool_name": "Read", "agent_id": "completion-child",
+        "tool_input": {"file_path": str(actor_run / "evidence.md")},
+    }, actor_contract) == ""
+    completion_child_write_blocked = "只允许读取" in evaluate_pretool(actor_run, {
+        "tool_name": "Write", "agent_id": "completion-child",
+        "tool_input": {"file_path": str(actor_run / "report.md"), "content": "forged"},
+    }, actor_contract)
+
     def wired(event_name: str) -> bool:
         return any(
             "tools/turn_contract.py" in str(hook.get("command") or "")
@@ -1371,7 +2012,57 @@ def _selftest() -> int:
         ("no-active-run ordinary question stays outside run execution", no_run_question == NORMAL),
         ("active-run informational question stays read-only", active_run_question == EXPLAIN),
         ("explicit active-run switch remains executable", active_run_switch == EXECUTE),
+        ("negated direct-egress phrases never grant approval",
+         not negated_direct_cn["direct_egress_approved"]
+         and not negated_direct_en["direct_egress_approved"]),
+        ("explicit direct-egress phrase grants current-turn approval",
+         explicit_direct["direct_egress_approved"]),
         ("target action blocked before real fanout", before_fanout),
+        ("run-model failure produces a deterministic fail-closed contract state",
+         bool(summary_failure_signature)
+         and "canonical frontier" in summary_failure_reason),
+        ("raw target curl is denied by proxy egress gate", raw_curl_blocked),
+        ("raw target requests code is denied by proxy egress gate", raw_requests_blocked),
+        ("target WebFetch is denied because it cannot attest engagement proxy",
+         target_webfetch_blocked),
+        ("unknown-host WebFetch cannot bypass the engagement proxy gate",
+         unknown_webfetch_blocked),
+        ("proxy-aware guarded target tool is allowed", guarded_probe_allowed),
+        ("proxy-aware tool rejects destinations absent from the asset ledger",
+         unknown_guarded_probe_blocked),
+        ("direct-egress opt-out requires current operator approval",
+         direct_without_operator_blocked and direct_env_without_operator_blocked),
+        ("current operator may explicitly approve direct egress",
+         direct_with_operator_allowed),
+        ("non-Bash target network tool cannot bypass proxy attestation",
+         nonbash_target_tool_blocked),
+        ("unassigned coverage asset blocks target action", unassigned_asset_blocked),
+        ("corrupt coverage fails closed instead of disabling the asset gate",
+         corrupt_coverage_fails_closed),
+        ("valid nested coverage still enforces hosts when root coverage is corrupt",
+         nested_fallback_host_is_enforced),
+        ("continue prompts preserve a material fanout epoch across sessions",
+         fanout_epoch_persists),
+        ("material coverage-debt change resets fanout epoch",
+         material_debt_change_resets_epoch),
+        ("asset-bound Agent prompt is accepted", asset_bound_prompt_allowed),
+        ("Agent prompt with mismatched asset package is denied",
+         mismatched_asset_prompt_blocked),
+        ("bound child Agent may execute its own target lane", child_lane_allowed),
+        ("child Agent cannot escape its assigned asset package", child_asset_escape_blocked),
+        ("child Agent cannot create nested Agent fanout", nested_agent_blocked),
+        ("Root is not deadlocked while async Agents are still running",
+         root_allowed_while_agents_running),
+        ("Root disposition gate starts only after real SubagentStop",
+         root_blocked_after_real_return),
+        ("running child is not blocked by a returned peer's disposition debt",
+         running_peer_not_blocked_by_returned_peer),
+        ("legacy empty-asset child cannot execute target actions",
+         legacy_empty_asset_child_blocked),
+        ("completion-review child can read frozen run state",
+         completion_child_read_allowed),
+        ("completion-review child cannot mutate run state",
+         completion_child_write_blocked),
         ("encoded network command blocked before fanout", encoded_before_fanout),
         ("renamed unknown script blocked before fanout", renamed_before_fanout),
         ("workers control command allowed before fanout", workers_allowed_before_fanout),
@@ -1411,6 +2102,8 @@ def _selftest() -> int:
         ("protected control-plane denial is not a target-result action",
          protected_denial_not_target),
         ("direct active-run pointer Write is blocked", pointer_write_blocked),
+        ("direct coverage ledger Write is blocked", coverage_write_blocked),
+        ("controlled coverage sync remains allowed", coverage_sync_control_allowed),
         ("active-run pointer shell denial is local, not a target result",
          pointer_shell_is_local),
         ("old-session Agent receipts do not satisfy this turn", old_fanout_still_blocked),
@@ -1430,8 +2123,8 @@ def _selftest() -> int:
         ("serial override requires current operator prompt", override.get("fanout_override") is True),
         ("internal task notification cannot replace operator turn contract",
          internal_notification_preserves_contract),
-        ("Agent without binding tokens blocked", "必须包含" in evaluate_pretool(run, agent_bad, contract)),
-        ("bound Agent call allowed", evaluate_pretool(run, agent_good, contract) == ""),
+        ("Agent without binding tokens blocked", agent_bad_blocked),
+        ("bound Agent call allowed", agent_good_allowed),
         ("completion Agent without full checklist is blocked",
          bool(evaluate_pretool(run, completion_bad, contract))),
         ("completion Agent with evidence hash and checklist is allowed",

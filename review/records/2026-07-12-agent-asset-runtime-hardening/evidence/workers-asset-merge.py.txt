@@ -1,0 +1,68 @@
+def _validate_asset_merge(run_dir: Path, rec: dict) -> dict:
+    assets = [_normalize_asset(item) for item in rec.get("assets", []) if _normalize_asset(item)]
+    if not assets:
+        return {"satisfied": True, "legacy_or_non_target": True, "assets": {}}
+    if _runtime_receipts is None:
+        raise ValueError("runtime_receipts unavailable; cannot prove per-asset Agent activity")
+    attempts = [item for item in _runtime_receipts.agent_attempts(run_dir)
+                if item.get("assignment") == rec.get("agent")]
+    if not any(item.get("state") == "returned" for item in attempts):
+        raise ValueError("merged requires a real returned Agent attempt (SubagentStop)")
+    activity = _runtime_receipts.agent_asset_activity(run_dir, str(rec.get("agent") or ""))
+    no_activity = [host for host in assets if int(activity.get(host, 0) or 0) < 1]
+    evidence = _canonical_evidence_text(run_dir)
+    no_evidence = [host for host in assets if not re.search(
+        r"(?<![\w.\-])" + re.escape(host) + r"(?![\w.\-])", evidence)]
+    errors: list[str] = []
+    if no_activity:
+        errors.append("no successful target-action receipt: " + ", ".join(no_activity))
+    if no_evidence:
+        errors.append("missing canonical E-entry: " + ", ".join(no_evidence))
+    if errors:
+        raise ValueError("per-asset merge gate failed; " + "; ".join(errors))
+    return {
+        "satisfied": True,
+        "validated_at": _now_iso(),
+        "assets": {host: {"target_actions": int(activity.get(host, 0) or 0),
+                           "canonical_evidence": True} for host in assets},
+    }
+
+
+def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str = "",
+                           terminal: bool = False) -> dict:
+    data = load_assignments(run_dir)
+    status_norm = _normalized_agent_status(status)
+    allowed = TERMINAL_AGENT_STATUSES if terminal else (NONTERMINAL_AGENT_STATUSES | TERMINAL_AGENT_STATUSES)
+    if status_norm not in allowed:
+        raise ValueError(f"invalid agent status {status!r}; use one of {sorted(allowed)}")
+    if terminal and status_norm not in TERMINAL_AGENT_STATUSES:
+        raise ValueError(f"finish requires terminal status; use one of {sorted(TERMINAL_AGENT_STATUSES)}")
+    stamp = _now_iso()
+    for rec in data.get("assignments", []):
+        if not isinstance(rec, dict):
+            continue
+        if str(rec.get("agent") or "") != agent:
+            continue
+        merge_validation = None
+        if terminal and status_norm == "merged":
+            merge_validation = _validate_asset_merge(run_dir, rec)
+        rec["status"] = status_norm
+        rec["updated_at"] = stamp
+        rec["last_seen_at"] = stamp
+        if note.strip():
+            rec["last_note"] = note.strip()
+        rec["heartbeat_count"] = int(rec.get("heartbeat_count") or 0) + 1
+        if terminal:
+            rec["finished_at"] = stamp
+            if status_norm == "merged":
+                rec["coverage_merge_satisfied"] = True
+                rec["coverage_merge"] = merge_validation
+            else:
+                rec["coverage_merge_satisfied"] = False
+        _patch_agent_file_lifecycle(_agent_file_from_rec(rec), status=status_norm, note=note, stamp=stamp)
+        _atomic_write(_assignments_path(run_dir), json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        return rec
+    raise KeyError(f"agent not found in state/assignments.json: {agent}")
+
+
+def agent_lifecycle_issues(run_dir: Path, *, closure: bool = False,

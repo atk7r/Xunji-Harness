@@ -49,7 +49,7 @@ ACTION_TEXT_CN = {
     "Reopen or re-adjudicate fronts that are closed but unlocked by confirmed evidence.": "重开或重新裁定那些已关闭但被确认型证据重新解锁的前线。",
     "Activate deferred fronts unlocked by confirmed evidence.": "激活被确认型证据解锁的延后前线。",
     "Expand or justify low-saturation fronts before any explored-enough claim.": "在声称探索充分前，扩展低饱和前线或写明不继续的理由。",
-    "Update fronts/evidence for coverage matrix empty columns or sparse rows.": "根据覆盖矩阵空列或稀疏行补 frontier/evidence。",
+    "Map unassigned assets and update per-asset evidence for coverage debt; front prose is not tested coverage.": "先映射未分配资产，再逐资产补证据；front 文字本身不算测试覆盖。",
     "Fix unclassified front statuses before closure review.": "先修正未分类前线状态，再进入收口复核。",
     "Coda convergence: record a trajectory review, pivot/continue rationale, or review/surface Agent assignment; this is not a closure signal by itself.": "Coda 已收敛：记录轨迹复盘、换路/继续理由，或分派复审/面扩 Agent；这本身不是收口信号。",
     "Closure review candidate: run hard closure gates, replay verification, independent review, and retrospective before any pause.": "收口复核候选：暂停前必须跑硬收口闸门、replay 核实、独立复审和复盘。",
@@ -155,6 +155,9 @@ def _coverage_summary(run_dir: Path, *, write: bool) -> dict:
         "untested_cell_count": len(untested_cells),
         "empty_columns": data.get("empty_columns", []),
         "row_gaps": data.get("row_gaps", []),
+        "asset_summary": data.get("summary", {}),
+        "accounting_gaps": data.get("accounting_gaps", []),
+        "closure_gaps": data.get("closure_gaps", []),
         "warnings": data.get("warnings", []),
     }
 
@@ -365,7 +368,9 @@ def _pretty_block(title: str, rows: list[str], *, color: str = "cyan", enabled: 
 def _gates(fronts: dict, agents: dict, progress: dict, coverage: dict) -> dict:
     fanout_required = fronts["open_count"] >= 4 and fronts["diverse_barriers"]
     needs_conflict_resolution = agents["unresolved_conflicts"] > 0
-    needs_coverage_attention = bool(coverage["empty_columns"] or coverage["row_gaps"])
+    needs_coverage_attention = bool(
+        coverage["empty_columns"] or coverage["row_gaps"]
+        or coverage.get("accounting_gaps") or coverage.get("closure_gaps"))
     needs_saturation_attention = bool(fronts["low_saturation"])
     closure_blockers: list[str] = []
     if fronts["open_count"]:
@@ -437,7 +442,9 @@ def _next_actions(fronts: dict, agents: dict, progress: dict, gates: dict) -> li
     if gates["needs_saturation_attention"]:
         actions.append("Expand or justify low-saturation fronts before any explored-enough claim.")
     if gates["needs_coverage_attention"]:
-        actions.append("Update fronts/evidence for coverage matrix empty columns or sparse rows.")
+        actions.append(
+            "Map unassigned assets and update per-asset evidence for coverage debt; "
+            "front prose is not tested coverage.")
     if fronts.get("unclassified_status"):
         actions.append("Fix unclassified front statuses before closure review.")
     if progress["coda_converged"]:
@@ -785,7 +792,12 @@ def _selftest() -> int:
         "- Maturity: finding\n"
         "- Certainty: 0.8\n"
         "- Control: baseline\n"
-        "- Supports: F-001\n",
+        "- Supports: F-001\n\n"
+        "## E-002\n"
+        "- Action: tested api.example parameter controls\n"
+        "- Result: SQLi injection and IDOR swap controls rejected\n"
+        "- Certainty: 0.5\n"
+        "- Supports: F-002\n",
         encoding="utf-8",
     )
     (run / "frontier.md").write_text(

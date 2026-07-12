@@ -125,7 +125,7 @@ Guard-routed tools only.
 ```bash
 {{PYTHON}} tools/workers.py suggest "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py plan "{{RUN_DIR}}"
-{{PYTHON}} tools/workers.py assign "{{RUN_DIR}}" --role web-hunter --front F-XXX
+{{PYTHON}} tools/workers.py assign "{{RUN_DIR}}" --role web-hunter --front F-XXX --asset host1.example --asset host2.example
 {{PYTHON}} tools/probe.py GET "https://target/path" --save NAME --run "{{RUN_DIR}}"
 {{PYTHON}} tools/probe.py GET "https://target/large-doc" --save NAME --run "{{RUN_DIR}}" --save-chunks
 {{PYTHON}} tools/probe.py GET "https://target/path" -H "K: V" --save NAME --run "{{RUN_DIR}}"
@@ -135,18 +135,22 @@ Guard-routed tools only.
 {{PYTHON}} tools/scan.py nuclei "https://target/"
 ```
 
-If `state/loop_state.json` says `gates.fanout_required=true`, assign at least two
-disjoint lanes and actually invoke two Claude Agents in this turn. Each Agent prompt
-must carry `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. Only current-turn
-transcript-backed receipts count; planning files, heartbeat, old receipts, and
-model-written budget reasons do not. The only bypass is an explicit serial override
-in the operator's current prompt. Agents produce candidates/refutations only; the
-Single Synthesizer promotes findings.
+If `state/loop_state.json` says `gates.fanout_required=true`, ensure the current
+coordination epoch has two disjoint Agent lanes. Bare continue/resume keeps existing
+attempts; do not spawn duplicates unless front topology or asset debt changed. Every
+target-facing assignment uses explicit `--asset` members and its Agent prompt carries
+the exact `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2` package.
+Async PostToolUse is launch only; SubagentStop is return. Running children are not
+blocked by Root's global disposition debt and cannot spawn nested Agents. Planning
+files, heartbeat, and model-written budget reasons do not prove execution. Agents
+produce candidates/refutations only; the Single Synthesizer promotes findings.
 
 After adjudicating each Agent, run `workers.py finish`: use `--status merged` with
 `--note "Evidence: E-xxx; Front: F-xxx; <disposition>"`, or a non-success terminal
 status with `--note "Reason: <why>; Front: F-xxx"`. `done` without this anchored
-disposition is deliberately blocked at Stop.
+disposition is deliberately blocked at Stop. `merged` additionally requires every
+assigned host to have that Agent's successful target-action receipt and an exact-host
+canonical E-entry; zero-tool and partial packages fail.
 
 Timeout / host-backoff → deferred (Type A). Save artifact before raising certainty. A sensor result or Agent note is not a finding until the evidence gate is applied.
 

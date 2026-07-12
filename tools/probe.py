@@ -129,7 +129,7 @@ def selftest_isolation():
     )
     try:
         os.environ.pop("XUNJI_PROXY", None)
-        os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+        os.environ["XUNJI_PROXY_REQUIRED"] = "0"
         globals()["_PROXY"] = None
         proxymod._CONF = Path("__xunji_no_proxy_conf__")
         guardmod.STATE_DIR = tmp_root / "guard_state"
@@ -749,6 +749,30 @@ def _selftest() -> int:
                 checks.append(("请求头完整存(Cookie 原值在, 供重放认证请求)", "sess=secret123" in hreq))
                 checks.append(("响应头完整存(Set-Cookie 原值在, 不脱敏)", "Identity.External=" in hresp))
                 checks.append(("summary 引用 replay 路径", bool(d.get("replay"))))
+            diff_base = Path(tempfile.mkdtemp()) / "boolean.html"
+            diff_b = Path(_diff_side_save(str(diff_base), "b"))
+            da = send("GET", f"http://127.0.0.1:{port}/?v=true", {}, None, None, 5,
+                      save=_diff_side_save(str(diff_base), "a"))
+            db = send("GET", f"http://127.0.0.1:{port}/?v=false", {}, None, None, 5,
+                      save=str(diff_b))
+            checks.append(("DIFF save naming preserves A base and writes distinct B body",
+                           diff_base.is_file() and diff_b.is_file()
+                           and diff_b.name == "boolean.b.html"))
+            checks.append(("DIFF saves replay for both comparison sides",
+                           Path(str(diff_base) + ".replay.json").is_file()
+                           and Path(str(diff_b) + ".replay.json").is_file()
+                           and da.get("replay") and db.get("replay")))
+            no_suffix_base = Path(tempfile.mkdtemp()) / "boolean"
+            no_suffix_b = Path(_diff_side_save(str(no_suffix_base), "b"))
+            send("GET", f"http://127.0.0.1:{port}/?plain=a", {}, None, None, 5,
+                 save=str(no_suffix_base))
+            send("GET", f"http://127.0.0.1:{port}/?plain=b", {}, None, None, 5,
+                 save=str(no_suffix_b))
+            checks.append(("DIFF explicit no-suffix paths keep distinct A/B replay files",
+                           no_suffix_b.name == "boolean.b"
+                           and Path(str(no_suffix_base) + ".replay.json").is_file()
+                           and Path(str(no_suffix_b) + ".replay.json").is_file()
+                           and str(no_suffix_base) != str(no_suffix_b)))
             large = Path(tempfile.mkdtemp()) / "large.txt"
             dl = send("GET", f"http://127.0.0.1:{port}/large", {}, None, None, 5,
                       save=str(large), save_chunks=True)
@@ -910,6 +934,15 @@ def _place_save(save: str | None, run: str | None) -> str | None:
     return str(Path(run) / "evidence" / save)
 
 
+def _diff_side_save(base: str | None, side: str) -> str | None:
+    if not base or side == "a":
+        return base
+    path = Path(base)
+    if path.suffix:
+        return str(path.with_name(path.stem + f".{side}" + path.suffix))
+    return str(path.with_name(path.name + f".{side}"))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("method", nargs="?", help="GET/POST/PUT/... or DIFF for a two-URL comparison")
@@ -1006,15 +1039,17 @@ def main() -> int:
                 return 2
             n = max(1, args.samples)
 
-            def sample(url: str) -> tuple[dict, bool, list]:
+            def sample(url: str, save: str | None) -> tuple[dict, bool, list]:
                 runs = [send("GET", url, headers, None, args.auth_key,
-                             args.timeout, None, args.retry, args.retry_wait,
-                             args.headers, byte_range=args.byte_range) for _ in range(n)]
+                             args.timeout, save if index == 0 else None,
+                             args.retry, args.retry_wait,
+                             args.headers, byte_range=args.byte_range)
+                        for index in range(n)]
                 hs = sorted({r.get("sha1") for r in runs})
                 return runs[0], len(hs) == 1, hs
 
-            a, a_stable, a_h = sample(args.url)
-            b, b_stable, b_h = sample(args.url2)
+            a, a_stable, a_h = sample(args.url, _diff_side_save(args.save, "a"))
+            b, b_stable, b_h = sample(args.url2, _diff_side_save(args.save, "b"))
             same_hash = a.get("sha1") == b.get("sha1")
             out = {"tag": args.tag, "mode": "DIFF", "samples": n,
                    "a": a, "b": b,
@@ -1028,6 +1063,11 @@ def main() -> int:
                    "note": "reliable_differential=true(两侧各自稳定且不同)才是"
                            "布尔注入证据；某侧 *_stable=false 说明该响应本身在波动"
                            "(动态内容/多IP负载均衡)，差异不可信，先排噪"}
+            if args.save:
+                out["artifacts"] = {
+                    "a": {"body": a.get("saved"), "replay": a.get("replay")},
+                    "b": {"body": b.get("saved"), "replay": b.get("replay")},
+                }
             if not a_stable:
                 out["a_hashes"] = a_h
             if not b_stable:

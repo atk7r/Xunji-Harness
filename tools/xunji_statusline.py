@@ -55,7 +55,7 @@ ACTION_LABELS = {
     "resolve_agent_or_review_conflicts_before_promotion_or_closure": "处理证据/子任务冲突",
     "assign_at_least_two_disjoint_agent_lanes_or_record_a_budget_reason": "分派子任务",
     "record_trajectory_review_then_pivot_continue_or_assign_review_surface_agent": "复盘换路",
-    "update_frontier_or_evidence_for_coverage_gaps": "补齐覆盖记录",
+    "update_frontier_or_evidence_for_coverage_gaps": "映射未分配资产并逐资产补证据",
     "expand_or_justify_low_saturation_fronts": "扩展验证入口",
     "fix_unclassified_front_statuses_before_closure_review": "修正入口状态",
     "add_negative_evidence_or_reactivate_high_threat_deferred_front": "补负向证据或重开高威胁入口",
@@ -234,8 +234,8 @@ def _agent_summary(run_dir: Path) -> str:
         current_turn = str(contract.get("mode") or "") == "EXECUTE"
         real = runtime_receipts.agent_fanout(
             run_dir,
-            session_id=str(contract.get("session_id") or "") if current_turn else "",
-            since=float(contract.get("updated_at") or 0.0) if current_turn else 0.0,
+            since=float(contract.get("fanout_epoch_started_at")
+                        or contract.get("updated_at") or 0.0) if current_turn else 0.0,
         )
         real_count = int(real.get("count", 0) or 0)
     except Exception:
@@ -268,6 +268,21 @@ def _front_summary(loop_data: dict) -> str:
     fronts = loop_data.get("fronts") if isinstance(loop_data.get("fronts"), dict) else {}
     open_count = int(fronts.get("open_count", 0) or 0)
     return f"待验证入口 {open_count} 个"
+
+
+def _asset_summary(run_dir: Path) -> str:
+    try:
+        import coverage_matrix  # noqa: WPS433
+        summary = coverage_matrix.derive(run_dir).get("summary", {})
+    except Exception:
+        summary = _load_json(run_dir / "state" / "asset_ledger.json", {}).get("summary", {})
+    total = int(summary.get("total", 0) or 0)
+    if not total:
+        return "资产账本待建立"
+    unassigned = int(summary.get("unassigned", 0) or 0)
+    linked = int(summary.get("front_linked", 0) or 0)
+    disposed = int(summary.get("disposed", 0) or 0)
+    return f"资产 {total}｜前沿关联 {linked}｜未分配 {unassigned}｜已处置 {disposed}"
 
 
 def _event_age_seconds(journal: dict) -> float | None:
@@ -413,6 +428,7 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)
     line = " | ".join([
         f"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag(phase, color=bool(color))} {run_dir.name}{interrupt}{stale_text}",
         _front_summary(loop_data),
+        _asset_summary(run_dir),
         _agent_summary(run_dir),
         status_style.paint(blocker_text, "red" if blocker_count else "green", enabled=color),
         "下一步 " + _clip(_next_action(controller, journal)),
