@@ -209,7 +209,8 @@ def cmd_new(slug: str, recon_path: str) -> int:
     print(f"[bootstrap] 目标: {slug} | recon: {recon_full}")
     cmd = [sys.executable, str(ROOT / "tools" / "setup_run.py"), slug, recon_full]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    print(r.stdout.rstrip())
+    if r.stdout.strip():
+        print(r.stdout.rstrip())
     if r.returncode != 0:
         print(r.stderr, file=sys.stderr)
         print("[bootstrap] setup_run 失败", file=sys.stderr)

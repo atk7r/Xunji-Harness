@@ -1,0 +1,37 @@
+python3 -m py_compile tools/setup_run.py
+PASS
+
+python3 tools/setup_run.py --selftest
+setup_run selftest passed
+Key checks:
+- full setup main succeeds in isolated root
+- full setup main is stdout-silent on success
+- full setup main has no stderr diagnostics on success
+- full setup main preserves closed Setup journal cycle
+- explicit --help preserves argparse stdout
+- explicit --help has no stderr diagnostics
+- --classify setup succeeds with isolated classifier
+- --classify executes egress recheck
+- --classify progress stdout stays silent
+- --classify has no stderr diagnostics on success
+- --classify preserves closed Setup journal cycle
+- active-run success helper is stdout-silent
+- active-run success helper has no stderr diagnostics
+- active-run helper reports rejected pointer on stderr
+- active-run helper reports pointer exception on stderr
+
+python3 tools/selftest_all.py --only setup_run,xunji_statusline,loop_journal,loop_bootstrap
+4 passed, 0 failed
+
+python3 tools/selftest_all.py
+60 passed, 0 failed
+
+python3 tools/check_rules.py
+rule check passed
+
+git diff --check
+PASS
+
+stdout audit:
+- Every normal-path print/write in tools/setup_run.py targets stderr.
+- Remaining stdout prints are confined to the explicit --selftest result block.

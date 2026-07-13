@@ -52,17 +52,6 @@ def _today() -> str:
     return datetime.date.today().strftime("%Y%m%d")
 
 
-def _phase_banner(kind: str, phase: str, *, run_dir: Path, note: str = "") -> str:
-    event = "phase_start" if kind.strip().lower() == "start" else "phase_end"
-    return loop_journal.render_phase_banner({
-        "event": event,
-        "run_dir": str(run_dir),
-        "cycle": 0,
-        "note": note,
-        "data": {"phase": phase},
-    }).rstrip()
-
-
 def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:
     """Best-effort derived phase marker. Markdown/templates remain canonical."""
     try:
@@ -77,7 +66,6 @@ def _set_active_run(run_dir: Path) -> bool:
         import xunji_statusline  # noqa: E402
 
         if xunji_statusline.set_active_run(str(run_dir)):
-            print(f"[setup] statusline active run: runs/{run_dir.name}")
             return True
         print(f"[setup] active run switch failed: {run_dir}", file=sys.stderr)
     except Exception as exc:
@@ -417,11 +405,8 @@ def main() -> int:
         print(f"[!] {run_dir} 已存在 —— 不覆盖。换 slug/date 或手动处理。", file=sys.stderr)
         return 1
 
-    made = scaffold(run_dir)
-    print(_phase_banner("start", "Setup", run_dir=run_dir, note="prepare authorized run workbench"))
+    scaffold(run_dir)
     _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
-    print(f"[setup] 建 run 骨架 {run_dir}")
-    print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
     coverage_ready = False
 
     recon_ok = False
@@ -436,47 +421,38 @@ def main() -> int:
             recon_ok = True
             record_recon(run_dir, str(rp))
             try:
-                info = ingest(rp, run_dir)
-                print(f"[setup] ingest_recon → {info}; target.md 已记录 recon 路径")
+                ingest(rp, run_dir)
             except Exception as e:
                 print(f"[!] ingest_recon 失败(已记录路径, 请手动 ingest): {e}", file=sys.stderr)
             try:
-                sinfo = record_scope(run_dir, rp)
-                print(f"[setup] {sinfo} → target.md(派生不驱动, 复核/可改)")
+                record_scope(run_dir, rp)
             except Exception as e:
                 print(f"[!] scope 派生失败(请手填 target.md In/Out-of-scope): {e}", file=sys.stderr)
             # 轴 B: 默认【零重探】从 Guanlan 产物折 coverage.json(check_run 收口硬门要它)。
             try:
-                cinfo = adapt_coverage(rp, run_dir)
+                adapt_coverage(rp, run_dir)
                 coverage_ready = _coverage_ready(run_dir)
-                print(f"[setup] Guanlan→coverage(零重探): {cinfo}")
             except Exception as e:
                 print(f"[!] coverage 适配失败(可手跑 classify_hosts 兜底): {e}", file=sys.stderr)
             try:
-                kinfo = knowledge_match(run_dir)
-                print(f"[setup] knowledge 签名匹配: {kinfo}")
+                knowledge_match(run_dir)
             except Exception as e:
                 print(f"[!] knowledge 匹配失败(可手查): {e}", file=sys.stderr)
     else:
         record_recon(run_dir, "none")
         if args.target:
             record_target(run_dir, args.target)
-        print("[setup] 无 recon: 从 target.md 推导最小 coverage.json …")
         try:
-            cinfo = _derive_coverage_from_target(run_dir)
+            _derive_coverage_from_target(run_dir)
             coverage_ready = _coverage_ready(run_dir)
-            label = "target→coverage(最小骨架)" if coverage_ready else "target→coverage"
-            print(f"[setup] {label}: {cinfo}")
         except Exception as e:
             print(f"[!] coverage 自动推导失败(可手建): {e}", file=sys.stderr)
 
     if recon_ok and args.classify:
         # P0: classify_hosts 作为 egress_recheck 增量层, 不覆写 Guanlan baseline
-        print("[setup] --classify: 跑 classify_hosts 作 egress_recheck 增量...")
         cmd = [sys.executable, str(ROOT / "tools" / "classify_hosts.py"), str(rp),
                "--out", str(run_dir / "classify"), "--egress-recheck"]
         r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
-        sys.stdout.write(r.stdout or "")
         if r.stderr:
             sys.stderr.write(r.stderr)
         _merge_egress_recheck(run_dir)
@@ -485,24 +461,10 @@ def main() -> int:
     if coverage_ready:
         try:
             import coverage_matrix
-            ledger = coverage_matrix.write_outputs(run_dir)
-            summary = ledger.get("summary", {})
-            print(
-                "[setup] asset ledger: "
-                f"total={summary.get('total', 0)} unassigned={summary.get('unassigned', 0)} "
-                f"unreachable={summary.get('unreachable', 0)}"
-            )
+            coverage_matrix.write_outputs(run_dir)
         except Exception as e:
             print(f"[!] asset ledger 初始化失败(目标动作前必须修复): {e}", file=sys.stderr)
-        print(
-            "[下一步] 先把 asset ledger 中所有 reachable/unknown 资产显式映射到 frontier，"
-            "再用 workers.py --asset 分配；不得只建宽泛 F-id。每轮收尾跑: "
-            f"python tools/check_run.py runs/{run_dir.name}"
-        )
-    else:
-        print(f"[下一步] 先填写 target.md 的 Target/In-scope 并生成 coverage.json; 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
     _phase_journal(run_dir, "phase_end", "Setup", f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})")
-    print(_phase_banner("end", "Setup", run_dir=run_dir, note=f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})"))
     # Commit the run transition only after setup has produced its complete local
     # workbench. set_active_run copies a valid current turn contract before it
     # atomically replaces the pointer.
@@ -525,6 +487,8 @@ def _raises_exist(existing: Path) -> bool:
 
 def _selftest() -> int:
     """纯本地回归: 骨架齐全 / 子目录 / recon 记录与 ingest / 不覆盖守卫。无网络。"""
+    import contextlib
+    import io
     import tempfile
     d = Path(tempfile.mkdtemp())
     rd = d / "t_20260101"
@@ -532,6 +496,10 @@ def _selftest() -> int:
     _phase_journal(rd, "phase_start", "Setup", "selftest")
     _phase_journal(rd, "phase_end", "Setup", "selftest done")
     journal = loop_journal.summarize(rd)
+    phase_events = [
+        str(item.get("event") or "")
+        for item in journal["last_cycle_phase_events"]
+    ]
     checks = [
         ("all required files copied", all((rd / n).exists() for n in REQUIRED)),
         ("evidence/ subdir", (rd / "evidence").is_dir() and (rd / "evidence" / ".gitkeep").exists()),
@@ -539,11 +507,111 @@ def _selftest() -> int:
         ("operator profile scaffolded", (rd / "state" / "operator_profile.json").exists()),
         ("frontier template has depth field", "Current depth" in (rd / "frontier.md").read_text(encoding="utf-8")),
         ("no-overwrite guard raises", _raises_exist(rd)),
-        ("setup phase banner is visible",
-         "[Xunji] [阶段开始]" in _phase_banner("start", "Setup", run_dir=rd)
-         and "[Setup｜准备运行]" in _phase_banner("start", "Setup", run_dir=rd)),
-        ("setup phase journal closes",
-         journal["last_cycle_phase_events"][-1]["event"] == "phase_end" and not journal["open_phase"]),
+        ("setup phase journal records start and end",
+         phase_events == ["phase_start", "phase_end"] and not journal["open_phase"]),
+    ]
+
+    main_root = d / "main-root"
+    (main_root / "runs").mkdir(parents=True)
+    main_run = main_root / "runs" / "bannercheck_20260102"
+    original_root = ROOT
+    original_set_active = globals()["_set_active_run"]
+    original_argv = list(sys.argv)
+    captured_stdout = io.StringIO()
+    captured_stderr = io.StringIO()
+    try:
+        globals()["ROOT"] = main_root
+        globals()["_set_active_run"] = lambda _run_dir: True
+        sys.argv = [
+            "setup_run.py", "bannercheck", "--target", "https://example.test",
+            "--date", "20260102",
+        ]
+        with contextlib.redirect_stdout(captured_stdout), contextlib.redirect_stderr(captured_stderr):
+            main_rc = main()
+    finally:
+        sys.argv = original_argv
+        globals()["_set_active_run"] = original_set_active
+        globals()["ROOT"] = original_root
+    main_output = captured_stdout.getvalue()
+    main_error = captured_stderr.getvalue()
+    main_journal = loop_journal.summarize(main_run)
+    main_phase_events = [
+        str(item.get("event") or "")
+        for item in main_journal["last_cycle_phase_events"]
+    ]
+    checks += [
+        ("full setup main succeeds in isolated root", main_rc == 0),
+        ("full setup main is stdout-silent on success", main_output == ""),
+        ("full setup main has no stderr diagnostics on success", main_error == ""),
+        ("full setup main preserves closed Setup journal cycle",
+         main_phase_events == ["phase_start", "phase_end"]
+         and not main_journal["open_phase"]),
+    ]
+
+    help_stdout = io.StringIO()
+    help_stderr = io.StringIO()
+    original_argv = list(sys.argv)
+    try:
+        sys.argv = ["setup_run.py", "--help"]
+        with contextlib.redirect_stdout(help_stdout), contextlib.redirect_stderr(help_stderr):
+            try:
+                main()
+                help_rc = None
+            except SystemExit as exc:
+                help_rc = exc.code
+    finally:
+        sys.argv = original_argv
+    checks += [
+        ("explicit --help preserves argparse stdout", help_rc == 0 and "usage:" in help_stdout.getvalue()),
+        ("explicit --help has no stderr diagnostics", help_stderr.getvalue() == ""),
+    ]
+
+    classify_recon = d / "classify-recon.json"
+    classify_recon.write_text(json.dumps({
+        "target": "classify.example",
+        "assets": [{
+            "host": "classify.example", "category": "web",
+            "reachability": "confirmed", "ownership": "core",
+        }],
+    }), encoding="utf-8")
+    classify_run = main_root / "runs" / "classifycheck_20260103"
+    classify_calls: list[list[str]] = []
+    original_root = ROOT
+    original_set_active = globals()["_set_active_run"]
+    original_subprocess_run = subprocess.run
+    original_argv = list(sys.argv)
+    classify_stdout = io.StringIO()
+    classify_stderr = io.StringIO()
+
+    def _fake_classify_run(cmd, **_kwargs):
+        classify_calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="classifier progress\n", stderr="")
+
+    try:
+        globals()["ROOT"] = main_root
+        globals()["_set_active_run"] = lambda _run_dir: True
+        subprocess.run = _fake_classify_run
+        sys.argv = [
+            "setup_run.py", "classifycheck", str(classify_recon),
+            "--classify", "--date", "20260103",
+        ]
+        with contextlib.redirect_stdout(classify_stdout), contextlib.redirect_stderr(classify_stderr):
+            classify_rc = main()
+    finally:
+        sys.argv = original_argv
+        subprocess.run = original_subprocess_run
+        globals()["_set_active_run"] = original_set_active
+        globals()["ROOT"] = original_root
+    classify_journal = loop_journal.summarize(classify_run)
+    checks += [
+        ("--classify setup succeeds with isolated classifier", classify_rc == 0),
+        ("--classify executes egress recheck",
+         len(classify_calls) == 1 and "--egress-recheck" in classify_calls[0]),
+        ("--classify progress stdout stays silent", classify_stdout.getvalue() == ""),
+        ("--classify has no stderr diagnostics on success", classify_stderr.getvalue() == ""),
+        ("--classify preserves closed Setup journal cycle",
+         [str(item.get("event") or "") for item in classify_journal["last_cycle_phase_events"]]
+         == ["phase_start", "phase_end"] and not classify_journal["open_phase"]),
     ]
     recon = {"target": "t", "assets": [{"host": "a.example", "category": "c", "reachability": "confirmed", "ownership": "core"}]}
     rp = d / "recon.json"
@@ -614,10 +682,13 @@ def _selftest() -> int:
     original_active_pointer = xunji_statusline.ACTIVE_RUN
     real_active_before = original_active_pointer.read_text(encoding="utf-8", errors="replace") \
         if original_active_pointer.exists() else None
+    active_stdout = io.StringIO()
+    active_stderr = io.StringIO()
     try:
         scaffold(active_rd)
         xunji_statusline.ACTIVE_RUN = active_pointer
-        _set_active_run(active_rd)
+        with contextlib.redirect_stdout(active_stdout), contextlib.redirect_stderr(active_stderr):
+            active_switched = _set_active_run(active_rd)
         active = xunji_statusline.active_run()
     finally:
         xunji_statusline.ACTIVE_RUN = original_active_pointer
@@ -625,7 +696,10 @@ def _selftest() -> int:
     real_active_after = original_active_pointer.read_text(encoding="utf-8", errors="replace") \
         if original_active_pointer.exists() else None
     checks += [
-        ("setup writes statusline active run pointer", active == active_rd.resolve()),
+        ("setup writes statusline active run pointer",
+         active_switched and active == active_rd.resolve()),
+        ("active-run success helper is stdout-silent", active_stdout.getvalue() == ""),
+        ("active-run success helper has no stderr diagnostics", active_stderr.getvalue() == ""),
         ("setup active-run selftest restores module pointer",
          xunji_statusline.ACTIVE_RUN == original_active_pointer),
         ("setup active-run selftest leaves real pointer untouched",
@@ -634,11 +708,15 @@ def _selftest() -> int:
     ]
 
     original_set_active_run = xunji_statusline.set_active_run
+    rejected_stdout = io.StringIO()
+    rejected_stderr = io.StringIO()
+    exception_stdout = io.StringIO()
+    exception_stderr = io.StringIO()
     try:
         xunji_statusline.set_active_run = lambda _raw: False
         try:
-            _set_active_run(rd3)
-            false_ok = True
+            with contextlib.redirect_stdout(rejected_stdout), contextlib.redirect_stderr(rejected_stderr):
+                false_ok = _set_active_run(rd3) is False
         except Exception:
             false_ok = False
 
@@ -647,15 +725,19 @@ def _selftest() -> int:
 
         xunji_statusline.set_active_run = _raise_set_active
         try:
-            _set_active_run(rd3)
-            exception_ok = True
+            with contextlib.redirect_stdout(exception_stdout), contextlib.redirect_stderr(exception_stderr):
+                exception_ok = _set_active_run(rd3) is False
         except Exception:
             exception_ok = False
     finally:
         xunji_statusline.set_active_run = original_set_active_run
     checks += [
-        ("active-run helper tolerates rejected pointer", false_ok),
-        ("active-run helper tolerates pointer exception", exception_ok),
+        ("active-run helper reports rejected pointer on stderr",
+         false_ok and rejected_stdout.getvalue() == ""
+         and "active run switch failed" in rejected_stderr.getvalue()),
+        ("active-run helper reports pointer exception on stderr",
+         exception_ok and exception_stdout.getvalue() == ""
+         and "active run switch failed: selftest boom" in exception_stderr.getvalue()),
     ]
 
     bad = [n for n, ok in checks if not ok]

@@ -1,0 +1,86 @@
+{
+  "total": 2,
+  "confirmed": [
+    "E-001",
+    "E-002"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-002"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 - setup phase banner deduplication",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "setup_run.diff",
+        "docs_excerpt.md",
+        "selftest.log"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "setup_run.diff",
+        "docs_excerpt.md",
+        "selftest.log"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 - focused regression",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "setup_run.diff",
+        "selftest.log"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "setup_run.diff",
+        "selftest.log"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

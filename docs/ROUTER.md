@@ -120,6 +120,12 @@ python tools/loop_journal.py runs/<dir> phase-start --phase "<Phase>" --note "<w
 python tools/loop_journal.py runs/<dir> phase-end --phase "<Phase>" --note "<result; next phase>"
 ```
 
+Mechanical Setup performed inside `setup_run.py` is the display exception: keep
+its journal start/end events, but keep successful setup stdout-silent. The
+selected-run statusline is its operator-facing display; failures and degraded
+setup diagnostics remain on stderr. Explicit `--help`/`--selftest` output is not
+normal setup progress. Other Router phases retain their visible start/end markers.
+
 Do not fake markers for phases skipped by the current turn. `Resume`, `/loop`,
 handoff, drift recovery, and closure gates are lifecycle mechanics, not extra
 Router phases.

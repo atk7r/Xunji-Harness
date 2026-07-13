@@ -1,0 +1,67 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "90edd53574524a6d0472d2a70e7ead6650ff7d98",
+  "evidence_index_hash": "f681217b0a42160a42ceaca39247c964ab230f73",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "evidence_gate",
+      "claim": "The selftest prevents accidental reintroduction of the banner helper and verifies a closed Setup journal cycle.",
+      "evidence": "setup_run.diff:@@ -539,11 +532,47 @@, selftest.log",
+      "affected_eids": [
+        "E-001",
+        "E-002"
+      ],
+      "recommended_action": "Add a static/AST check to the selftest (or check_rules.py) that asserts `_phase_banner`, `loop_journal.render_phase_banner`, and similar Setup banner helpers are not defined, imported, or called in `tools/setup_run.py`.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The current selftest only checks that `main()` output does not contain a few hard-coded marker strings and that the journal cycle closes. It does not guard against reintroducing the helper under a different name or with different output strings, so the claim is stronger than the evidence supports.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "artifact_cross_check",
+      "claim": "Both setup_run.py banner prints are removed and no banner helper remains.",
+      "evidence": "setup_run.diff, evidence_index.E-001.artifacts",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Include the post-change hashed `tools/setup_run.py` file as an artifact, or provide a full source artifact, so reviewers can independently verify there are no remaining `_phase_banner` definitions, imports, or call sites.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The evidence bundle only contains a diff artifact for `tools/setup_run.py`. While the diff shows removal of the helper and two prints, reviewers cannot directly open the final file to confirm no other references were left outside the displayed hunks.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "glm-5.2: parse error; output tail:  (not just write to the journal), then banners would still appear even though `_phase_banner` is removed. The selftest would catch this IF the printed output matches the checked strings, but might miss it if the format differs. I should flag this as something to verify.\n\nActually, looking at the selftest more carefully - it runs `main()` with `contextlib.redirect_stdout(captured)` and checks that `[Xunji] [阶段开始]` is NOT in the captured output. If `_phase_journal` internally causes `loop_journal`",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [kimi-k2.7-code] No static/AST absence check for banner helper reintroduction.",
+    "[arkcli] [kimi-k2.7-code] Selftest regression surface is narrow (output/journal only, no source assertions).",
+    "[arkcli] [kimi-k2.7-code] Docs already describe the exception but are not modified in this bundle, so doc drift is not guarded here.",
+    "[claude] **The panel review itself is the biggest blind spot.** It issued a WARN verdict with 5 findings, but 3 of those 5 findings (PR-001, PR-002+PR-004, PR-005) are factually wrong when checked against the diff. The code change is actually solid: both banner prints removed, journal events preserved, a thorough integration test added with stdout capture and multi-marker absence checks. The real \"finding\" here is meta: the independent review process produced incorrect findings, which defeats its purpose as a heterogeneous check.",
+    "[claude] **The integration test's stdout check is actually more thorough than acknowledged**: it checks for `[Xunji] [阶段开始]`, `[Xunji] [阶段结束]`, `XUNJI PHASE START`, AND `XUNJI PHASE END` — four distinct banner marker patterns — plus a positive control (`[setup] 建 run 骨架` in output). This catches not just the removed `_phase_banner` function but also any future attempt to inline banners or use alternative rendering paths.",
+    "[claude] **`loop_bootstrap.py` blind spot (from existing panel review) is valid but low-risk**: CLAUDE.md explicitly says \"Mechanical Setup inside `setup_run.py` is the one display exception,\" which implies no other file should produce Setup banners. The selftest success confirms this indirectly.",
+    "[claude] **`_phase_journal` exception swallowing (pre-existing)**: visible in the diff context at the `_phase_journal` function definition — the try/except silently discards journal write failures. Not introduced by this change, but worth noting as pre-existing technical debt.",
+    "[claude] **Error-path banner absence**: The original banner prints were placed AFTER the `scaffold()` call on the success path. The early-return error paths (run already exists, etc.) never had banners and still don't. No regression risk there."
+  ],
+  "context_limits": [
+    "[arkcli] glm-5.2: parse error; output tail:  (not just write to the journal), then banners would still appear even though `_phase_banner` is removed. The selftest would catch this IF the printed output matches the checked strings, but might miss it if the format differs. I should flag this as something to verify.\n\nActually, looking at the selftest more carefully - it runs `main()` with `contextlib.redirect_stdout(captured)` and checks that `[Xunji] [阶段开始]` is NOT in the captured output. If `_phase_journal` internally causes `loop_journal`",
+    "[claude] Unable to read `tools/setup_run.py` on disk directly (Read permission denied in this execution context). Analysis relies entirely on the review bundle's embedded diff (sha1 `095ab0f84f4f213dc0cb3aa100eed7e4f78585df`). If the diff is truncated or the on-disk file differs, some conclusions could be wrong. However, the diff is annotated with complete hunk headers and the file is 5299 bytes — well within the 24000-char excerpt limit — suggesting completeness.",
+    "[claude] Cannot verify `loop_journal.render_phase_banner()` or `loop_journal.summarize()` behavior independently. The selftest passing provides implicit verification, but I cannot confirm these functions have no side effects that interact with the banner removal.",
+    "[claude] Chinese-language documentation: I've read the Chinese sections in `docs_excerpt.md` (WORKFLOW.md, ROUTER.md, SKILL.md) and they consistently describe the same Setup exception. No contradictions detected. My Chinese reading is sufficient for this narrow scope.",
+    "[claude] The panel review frontmatter says `_brain: codex` — the Codex was supposed to synthesize the arkcli+claude panel output. The fact that 3/5 incorrect findings passed through Codex synthesis is a meta-concern about the review architecture pipeline."
+  ],
+  "error": ""
+}

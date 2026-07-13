@@ -193,15 +193,16 @@ lookup, then authoritative current sources. Record the result before closing the
 front, assigning severity, or writing final report text.
 
 Claude Code statusline uses `tools/xunji_statusline.py` from the project
-`.claude/settings.json`. It is a read-only, two-second display of the active run:
-current Router phase, run name, pending verification entries, aggregated Agent
-state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_run`
-plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
-state, choose work, write evidence, or enforce phase discipline. The active-run
-pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
-and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve only
-this explicit pointer; file recency is never run authority, so an unrelated run
-cannot receive or escape another run's process gates.
+`.claude/settings.json`. It is a read-only, two-second display containing only
+`[Xunji-status] [<phase>] <run>`。Claude 未提供明确的 Xunji workspace，或该
+workspace 尚未选择 active run 时，statusline 输出为空。它只读取
+`.claude/xunji_active_run`、阶段派生状态和 `state/loop_journal.jsonl`；不会刷新
+状态、选择工作、写证据或执行阶段约束。active-run pointer 是本地运行态，由
+`setup_run.py`、`loop_bootstrap.py` 和固定的 `/loop runs/<dir>` 协议更新。
+Anti-drift 与 Stop hooks 只解析这个显式指针；文件新旧永远不是 run authority，
+因此无关 run 不能接收或逃逸另一个 run 的流程门。
+`Paused` / `Interrupted` 可作为 phase tag 显示；缓存健康、阻断和下一步等详细
+状态继续由阶段 banner、journal 和检查命令承载，不向 statusline 追加字段。
 
 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
 phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a
@@ -212,6 +213,11 @@ loop journal:
 python tools/loop_journal.py runs/<dir> phase-start --phase "Root Orchestrator" --note "why this phase starts"
 python tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --note "result and next phase"
 ```
+
+`setup_run.py` 的机械 Setup 是显示例外：仍写入 Setup 的 `phase_start` / `phase_end`
+journal 事件，但成功路径不向 stdout 打印进度或 banner，由选中 run 的 statusline
+承担显示；失败和降级诊断继续写 stderr。显式 `--help` / `--selftest` 不属于普通
+setup 进度。其他实际进入的 Router 阶段继续显示 start/end marker。
 
 Only mark phases actually entered. `Resume`, `/loop`, handoff, and closure gates
 are lifecycle mechanics, not extra Router phases.

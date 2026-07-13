@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Claude Code statusline for Xunji.
 
-This script is display-only during normal statusline use. It reads the active run
-pointer plus derived state files and prints one concise, operator-facing line. If
-those derived caches are missing or stale, it falls back to a read-only in-memory
-derivation so the line does not falsely show Idle/0 fronts. It never refreshes
+This script is display-only during normal statusline use. It prints nothing until
+Claude provides an explicit Xunji workspace and that workspace has an active run.
+For an active run it renders only the current phase and run name. It never refreshes
 cache files, mutates run evidence, or drives an engagement.
 """
 from __future__ import annotations
@@ -13,7 +12,6 @@ import argparse
 import calendar
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -51,20 +49,6 @@ PHASE_COLOR = {
     "Paused": "gray",
     "Interrupted": "red",
 }
-ACTION_LABELS = {
-    "resolve_agent_or_review_conflicts_before_promotion_or_closure": "处理证据/子任务冲突",
-    "assign_at_least_two_disjoint_agent_lanes_or_record_a_budget_reason": "分派子任务",
-    "record_trajectory_review_then_pivot_continue_or_assign_review_surface_agent": "复盘换路",
-    "update_frontier_or_evidence_for_coverage_gaps": "映射未分配资产并逐资产补证据",
-    "expand_or_justify_low_saturation_fronts": "扩展验证入口",
-    "fix_unclassified_front_statuses_before_closure_review": "修正入口状态",
-    "add_negative_evidence_or_reactivate_high_threat_deferred_front": "补负向证据或重开高威胁入口",
-    "link_or_action_open_threat_hypotheses": "处理开放威胁假设",
-    "continue_driver_on_actionable_open_front": "继续验证可行动入口",
-    "run_closure_gates_replay_peer_review_and_retrospective": "跑收口检查",
-    "create_or_reopen_a_front_before_claiming_closure": "创建或重开验证入口",
-    "do_not_schedule_another_loop_iteration": "运行已完成",
-}
 
 
 def _load_json(path: Path, default):
@@ -89,16 +73,18 @@ def _read_input() -> dict:
         return {}
 
 
-def _workspace_dir(payload: dict) -> Path:
+def _workspace_dir(payload: dict) -> Path | None:
     workspace = payload.get("workspace") if isinstance(payload.get("workspace"), dict) else {}
     raw = (
         workspace.get("current_dir")
         or workspace.get("currentDir")
-        or payload.get("cwd")
-        or os.environ.get("PWD")
-        or os.getcwd()
     )
-    return Path(str(raw)).expanduser().resolve()
+    if not raw:
+        return None
+    try:
+        return Path(str(raw)).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
 
 
 def _is_xunji_context(current_dir: Path) -> bool:
@@ -223,68 +209,6 @@ def _journal_summary(run_dir: Path) -> dict:
     }
 
 
-def _agent_summary(run_dir: Path) -> str:
-    assignments = _load_json(run_dir / "state" / "assignments.json", {}).get("assignments", [])
-    planned = len(assignments) if isinstance(assignments, list) else 0
-    current_turn = False
-    try:
-        import runtime_receipts  # noqa: WPS433
-        import turn_contract  # noqa: WPS433
-        contract = turn_contract.load_contract(run_dir)
-        current_turn = str(contract.get("mode") or "") == "EXECUTE"
-        real = runtime_receipts.agent_fanout(
-            run_dir,
-            since=float(contract.get("fanout_epoch_started_at")
-                        or contract.get("updated_at") or 0.0) if current_turn else 0.0,
-        )
-        real_count = int(real.get("count", 0) or 0)
-    except Exception:
-        real_count = 0
-    if not planned and not real_count:
-        return "无子任务"
-    real_label = "本轮真实" if current_turn else "真实"
-    if planned and real_count < planned:
-        return f"子任务 计划{planned}/{real_label}{real_count}"
-    if real_count:
-        return f"子任务 {real_count} 个{real_label}回执"
-    statuses = [str(a.get("status") or "").strip().lower() for a in assignments if isinstance(a, dict)]
-    conflicts = _load_json(run_dir / "state" / "conflicts.json", {}).get("conflicts", [])
-    unresolved = [
-        c for c in conflicts
-        if isinstance(c, dict) and str(c.get("status") or "").strip().lower() == "unresolved"
-    ] if isinstance(conflicts, list) else []
-    if unresolved:
-        return f"子任务 {len(unresolved)} 个冲突"
-    active = [s for s in statuses if s.startswith(("assign", "work")) or s in {"?", ""}]
-    done = [s for s in statuses if s.startswith(("done", "complete", "completed"))]
-    if active:
-        return f"子任务 {len(active)} 个进行中"
-    if done:
-        return f"子任务 {len(done)} 个完成待合并"
-    return f"子任务 {len(statuses)} 个已记录"
-
-
-def _front_summary(loop_data: dict) -> str:
-    fronts = loop_data.get("fronts") if isinstance(loop_data.get("fronts"), dict) else {}
-    open_count = int(fronts.get("open_count", 0) or 0)
-    return f"待验证入口 {open_count} 个"
-
-
-def _asset_summary(run_dir: Path) -> str:
-    try:
-        import coverage_matrix  # noqa: WPS433
-        summary = coverage_matrix.derive(run_dir).get("summary", {})
-    except Exception:
-        summary = _load_json(run_dir / "state" / "asset_ledger.json", {}).get("summary", {})
-    total = int(summary.get("total", 0) or 0)
-    if not total:
-        return "资产账本待建立"
-    unassigned = int(summary.get("unassigned", 0) or 0)
-    linked = int(summary.get("front_linked", 0) or 0)
-    disposed = int(summary.get("disposed", 0) or 0)
-    return f"资产 {total}｜前沿关联 {linked}｜未分配 {unassigned}｜已处置 {disposed}"
-
-
 def _event_age_seconds(journal: dict) -> float | None:
     event = journal.get("last_event") if isinstance(journal.get("last_event"), dict) else {}
     raw = str(event.get("ts") or "")
@@ -313,12 +237,6 @@ def _phase_tag(phase: str, *, color: bool) -> str:
     return status_style.tag(label, PHASE_COLOR.get(phase, "white"), enabled=color)
 
 
-def _blocker_summary(controller: dict) -> tuple[str, int]:
-    blockers = controller.get("stop_blockers")
-    count = len(blockers) if isinstance(blockers, list) else 0
-    return ("无阻断" if count == 0 else f"阻断 {count} 个", count)
-
-
 def _state_stale(run_dir: Path) -> bool:
     try:
         latest_md = max((p.stat().st_mtime for p in run_dir.glob("*.md")), default=0.0)
@@ -326,117 +244,61 @@ def _state_stale(run_dir: Path) -> bool:
         return False
     if latest_md <= 0:
         return False
-    derived = [run_dir / "state" / "loop_state.json", run_dir / "state" / "controller.shadow.json"]
-    mtimes: list[float] = []
-    for p in derived:
-        try:
-            mtimes.append(p.stat().st_mtime)
-        except Exception:
-            return True
-    return latest_md > min(mtimes) + 0.001
+    try:
+        derived_mtime = (run_dir / "state" / "loop_state.json").stat().st_mtime
+    except Exception:
+        return True
+    return latest_md > derived_mtime + 0.001
 
 
-def _derived_state(run_dir: Path) -> tuple[dict | None, dict | None, str]:
-    """Read-only fallback for missing/stale cache files.
+def _derived_loop_state(run_dir: Path) -> tuple[dict | None, str]:
+    """Read-only fallback for a missing or stale phase cache.
 
-    Statusline must not write run state, but showing Idle/0 fronts when Markdown
-    has advanced is worse than an in-memory derivation. Import lazily so normal
-    cached rendering stays cheap.
+    Import lazily so normal cached rendering stays cheap. Controller, coverage,
+    Agent, and next-action derivations are deliberately outside statusline scope.
     """
     try:
         import loop_state  # noqa: WPS433
-        import run_controller  # noqa: WPS433
         loop_data = loop_state.derive(run_dir, write=False)
-        controller = run_controller.derive(run_dir, loop_data=loop_data)
     except Exception as exc:
-        return None, None, exc.__class__.__name__
-    return loop_data, controller, ""
-
-
-def _last_plan_note(journal: dict) -> str:
-    last = journal.get("last_event") if isinstance(journal.get("last_event"), dict) else {}
-    note = str(last.get("note") or "").strip()
-    event = str(last.get("event") or "").strip()
-    if event not in {"plan", "action", "write_result", "phase_start", "phase_end"}:
-        return ""
-    phase = str((last.get("data") or {}).get("phase") or "").strip()
-    if event in {"phase_start", "phase_end"} and phase == "Setup":
-        return ""
-    low_note = note.lower()
-    if event in {"phase_start", "phase_end"} and (
-        low_note.startswith("run prepared")
-        or "prepare authorized run workbench" in low_note
-        or "next phase=root orchestrator" in low_note
-    ):
-        return ""
-    target = ""
-    reason = ""
-    mt = re.search(r"目标=([^;；]+)", note)
-    mr = re.search(r"原因=([^;；]+)", note)
-    if mt:
-        target = mt.group(1).strip()
-    if mr:
-        reason = mr.group(1).strip()
-    if target and reason:
-        return f"{target} {reason}"
-    if target:
-        return target
-    cleaned = re.sub(r"^(即将执行|结果已写入运行文件|已选择目标=)", "", note).strip()
-    return cleaned
-
-
-def _next_action(controller: dict, journal: dict) -> str:
-    note = _last_plan_note(journal)
-    if note:
-        return note
-    action = str(controller.get("next_required_action") or "").strip()
-    return ACTION_LABELS.get(action, action or "等待下一步")
-
-
-def _clip(text: str, limit: int = 42) -> str:
-    text = " ".join(str(text).split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+        return None, exc.__class__.__name__
+    return loop_data, ""
 
 
 def render_statusline(payload: dict | None = None, *, color: bool | None = None) -> str:
     payload = payload or {}
     current_dir = _workspace_dir(payload)
-    if not _is_xunji_context(current_dir):
+    if current_dir is None or not _is_xunji_context(current_dir):
         return ""
     run_dir = active_run()
     if run_dir is None:
-        return f"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag('Idle', color=bool(color))} 未选择运行目录"
+        return ""
 
     stale = _state_stale(run_dir)
     loop_data = _load_json(run_dir / "state" / "loop_state.json", {})
-    controller = _load_json(run_dir / "state" / "controller.shadow.json", {})
-    live_derived = False
-    derive_error = ""
-    if stale or not loop_data or not controller:
-        derived_loop, derived_controller, derive_error = _derived_state(run_dir)
-        if derived_loop is not None and derived_controller is not None:
-            loop_data, controller = derived_loop, derived_controller
-            live_derived = True
+    if stale or not loop_data:
+        derived_loop, _ = _derived_loop_state(run_dir)
+        if derived_loop is not None:
+            loop_data = derived_loop
     journal = _journal_summary(run_dir)
     phase = _phase(loop_data, journal, run_dir)
-    blocker_text, blocker_count = _blocker_summary(controller)
-    stale_text = (
-        " | 现场推导" if live_derived
-        else (" | 推导失败" if derive_error else (" | 状态待刷新" if stale else ""))
+    return (
+        f"{status_style.tag('Xunji-status', 'cyan', enabled=color)} "
+        f"{_phase_tag(phase, color=bool(color))} {run_dir.name}"
     )
-    interrupt = " | 中断待续" if journal.get("interrupted") else ""
-    line = " | ".join([
-        f"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag(phase, color=bool(color))} {run_dir.name}{interrupt}{stale_text}",
-        _front_summary(loop_data),
-        _asset_summary(run_dir),
-        _agent_summary(run_dir),
-        status_style.paint(blocker_text, "red" if blocker_count else "green", enabled=color),
-        "下一步 " + _clip(_next_action(controller, journal)),
-    ])
-    return line
 
 
 def _selftest() -> int:
+    global ACTIVE_RUN
+
+    def fingerprint(path: Path | None) -> tuple[bool, bytes, int]:
+        if path is None:
+            return False, b"", 0
+        try:
+            return True, path.read_bytes(), path.stat().st_mtime_ns
+        except FileNotFoundError:
+            return False, b"", 0
+
     root_current = {"workspace": {"current_dir": str(ROOT)}}
     tmp_root = ROOT / "tmp"
     tmp_root.mkdir(exist_ok=True)
@@ -450,15 +312,17 @@ def _selftest() -> int:
         "phase": "Root Orchestrator",
         "fronts": {"open_count": 6},
     }), encoding="utf-8")
+    # Keep populated legacy summary sources beside the phase fixture. The exact
+    # output assertion below proves these fields cannot leak back into statusline.
     (run / "state" / "controller.shadow.json").write_text(json.dumps({
         "next_required_action": "continue_driver_on_actionable_open_front",
-        "stop_blockers": [],
+        "stop_blockers": ["legacy blocker must stay hidden"],
     }), encoding="utf-8")
     (run / "state" / "assignments.json").write_text(json.dumps({
-        "assignments": [
-            {"agent": "A-001", "status": "working"},
-            {"agent": "A-002", "status": "assigned"},
-        ],
+        "assignments": [{"agent": "A-001", "status": "working"}],
+    }), encoding="utf-8")
+    (run / "state" / "asset_ledger.json").write_text(json.dumps({
+        "summary": {"total": 9, "front_linked": 4, "unassigned": 5, "disposed": 0},
     }), encoding="utf-8")
     (run / "state" / "loop_journal.jsonl").write_text(
         json.dumps({"cycle": 1, "event": "phase_start", "data": {"phase": "Hunter"}, "note": "",
@@ -467,7 +331,12 @@ def _selftest() -> int:
                       "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    old_pointer = ACTIVE_RUN.read_text(encoding="utf-8", errors="replace") if ACTIVE_RUN.exists() else None
+    real_active_pointer = ACTIVE_RUN
+    real_run = active_run()
+    real_contract_path = real_run / "state" / "turn_contract.json" if real_run else None
+    real_pointer_before = fingerprint(real_active_pointer)
+    real_contract_before = fingerprint(real_contract_path)
+    ACTIVE_RUN = temp / "xunji_active_run"
     try:
         assert set_active_run(str(run))
         watched = [
@@ -475,11 +344,40 @@ def _selftest() -> int:
             run / "state" / "loop_state.json",
             run / "state" / "controller.shadow.json",
             run / "state" / "assignments.json",
+            run / "state" / "asset_ledger.json",
             run / "state" / "loop_journal.jsonl",
         ]
         before_render = {p: p.stat().st_mtime_ns for p in watched}
         plain = render_statusline(root_current, color=False)
         colored = render_statusline(root_current, color=True)
+        unspecified = render_statusline({}, color=False)
+        cwd_only = render_statusline({"cwd": str(ROOT)}, color=False)
+        empty_workspace = render_statusline(
+            {"workspace": {"current_dir": ""}}, color=False)
+        nested_workspace = render_statusline(
+            {"workspace": {"current_dir": str(ROOT / "tools")}}, color=False)
+        env = dict(os.environ)
+        env["XUNJI_COLOR"] = "1"
+        env.pop("NO_COLOR", None)
+        env.pop("XUNJI_NO_COLOR", None)
+        cli_program = (
+            "import sys\n"
+            "from pathlib import Path\n"
+            f"sys.path.insert(0, {str(ROOT / 'tools')!r})\n"
+            "import xunji_statusline as statusline\n"
+            f"statusline.ACTIVE_RUN = Path({str(ACTIVE_RUN)!r})\n"
+            "raise SystemExit(statusline.main([]))\n"
+        )
+        cli_proc = subprocess.run(
+            [sys.executable, "-c", cli_program],
+            input=json.dumps(root_current),
+            text=True,
+            capture_output=True,
+            env=env,
+            timeout=10,
+        )
+        cli_colored = cli_proc.stdout
+        after_render = {p: p.stat().st_mtime_ns for p in watched}
         (run / "state" / "turn_contract.json").write_text(json.dumps({
             "schema": "xunji.turn_contract.v1",
             "mode": "EXECUTE",
@@ -491,27 +389,30 @@ def _selftest() -> int:
         }), encoding="utf-8")
         paused_plain = render_statusline(root_current, color=False)
         (run / "state" / "run_status.json").unlink()
+        (run / "state" / "loop_journal.jsonl").write_text("", encoding="utf-8")
+        (run / "state" / "loop_state.json").write_text(json.dumps({
+            "phase": "Reviewer",
+        }), encoding="utf-8")
+        cached_plain = render_statusline(root_current, color=False)
+        (run / "state" / "loop_state.json").write_text(json.dumps({
+            "phase": "Setup",
+        }), encoding="utf-8")
+        setup_plain = render_statusline(root_current, color=False)
+        (run / "state" / "loop_journal.jsonl").write_text(json.dumps({
+            "cycle": 2,
+            "event": "phase_start",
+            "data": {"phase": "Hunter"},
+            "note": "",
+            "ts": "2000-01-01T00:00:00Z",
+        }) + "\n", encoding="utf-8")
+        interrupted_plain = render_statusline(root_current, color=False)
         outside_dir = Path(tempfile.mkdtemp())
-        env = dict(os.environ)
-        env["XUNJI_COLOR"] = "1"
-        env.pop("NO_COLOR", None)
-        env.pop("XUNJI_NO_COLOR", None)
-        proc = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve())],
-            input=json.dumps(root_current),
-            text=True,
-            capture_output=True,
-            env=env,
-            timeout=10,
-        )
-        env_colored = proc.stdout
         unknown_phase = _phase_tag("Unexpected Phase", color=True)
         invalid_rejected = set_active_run(str(outside_dir)) is False
         outside = render_statusline({"workspace": {"current_dir": str(outside_dir)}}, color=False)
-        after_render = {p: p.stat().st_mtime_ns for p in watched}
-        future = max(p.stat().st_mtime for p in watched) + 5
-        os.utime(run / "frontier.md", (future, future))
-        stale_plain = render_statusline(root_current, color=False)
+        clear_active_run()
+        no_active = render_statusline(root_current, color=False)
+        assert set_active_run(str(run))
         missing_cache = temp / "missing-cache-run"
         missing_cache.mkdir()
         (missing_cache / "frontier.md").write_text(
@@ -535,43 +436,61 @@ def _selftest() -> int:
         missing_before = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
         missing_plain = render_statusline(root_current, color=False)
         missing_after = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
-        original_derived_state = _derived_state
+        original_derived_state = _derived_loop_state
         try:
-            globals()["_derived_state"] = lambda _run_dir: (None, None, "RuntimeError")
+            globals()["_derived_loop_state"] = lambda _run_dir: (None, "RuntimeError")
             failed_derive_plain = render_statusline(root_current, color=False)
         finally:
-            globals()["_derived_state"] = original_derived_state
+            globals()["_derived_loop_state"] = original_derived_state
     finally:
-        if old_pointer is None:
-            clear_active_run()
-        else:
-            ACTIVE_RUN.write_text(old_pointer, encoding="utf-8")
+        ACTIVE_RUN = real_active_pointer
+    real_pointer_after = fingerprint(real_active_pointer)
+    real_contract_after = fingerprint(real_contract_path)
 
     checks = [
-        ("plain statusline is human-readable", "[Xunji-status] [Hunter｜验证]" in plain),
-        ("open fronts use pentest wording", "待验证入口 6 个" in plain and "F 6/1/3" not in plain),
-        # set_active_run may inherit an EXECUTE contract from the operator's real
-        # active run, changing only the label from "真实" to "本轮真实".
-        ("planned agents are not presented as real",
-         bool(re.search(r"子任务 计划2/(?:本轮)?真实0(?:\D|$)", plain))),
-        ("operator pause is visible", "[Paused｜已暂停]" in paused_plain),
-        ("next action uses plan note", "下一步 F-004 接口枚举" in plain),
+        ("plain statusline contains only status phase and run",
+         plain == f"[Xunji-status] [Hunter｜验证] {run.name}"),
+        ("populated legacy summary state cannot leak fields", " | " not in plain),
+        ("operator pause is visible without extra fields",
+         paused_plain == f"[Xunji-status] [Paused｜已暂停] {run.name}"),
+        ("cached phase is rendered without extra fields",
+         cached_plain == f"[Xunji-status] [Reviewer｜复审] {run.name}"),
+        ("setup phase is rendered without extra fields",
+         setup_plain == f"[Xunji-status] [Setup｜准备] {run.name}"),
+        ("stale open phase renders interrupted without extra fields",
+         interrupted_plain == f"[Xunji-status] [Interrupted｜中断待恢复] {run.name}"),
         ("colored statusline has ansi", "\033[" in colored and "[Hunter｜验证]" in colored),
-        ("XUNJI_COLOR command path has ansi", proc.returncode == 0 and "\033[" in env_colored and "[Hunter｜验证]" in env_colored),
         ("unknown phase fallback is styled", "\033[" in unknown_phase and "[Unexpected Phase]" in unknown_phase),
         ("normal render is read-only", before_render == after_render),
-        ("stale cache uses live read-only derivation", "现场推导" in stale_plain and "状态待刷新" not in stale_plain),
-        ("missing cache does not show false idle", "Idle｜空闲" not in missing_plain and "待验证入口 1 个" in missing_plain),
-        ("setup journal note does not mask controller action", "run prepared" not in missing_plain and "下一步 继续验证可行动入口" in missing_plain),
+        ("unspecified workspace prints nothing", unspecified == ""),
+        ("top-level cwd alone does not select a workspace", cwd_only == ""),
+        ("empty workspace prints nothing", empty_workspace == ""),
+        ("nested Xunji workspace renders the selected run",
+         nested_workspace == f"[Xunji-status] [Hunter｜验证] {run.name}"),
+        ("isolated CLI stdin-to-stdout path renders color",
+         cli_proc.returncode == 0
+         and "\033[" in cli_colored
+         and "[Hunter｜验证]" in cli_colored
+         and run.name in cli_colored),
+        ("workspace without active run prints nothing", no_active == ""),
+        ("missing cache still renders only phase and run",
+         missing_plain.startswith("[Xunji-status] [")
+         and missing_plain.endswith(f"] {missing_cache.name}")
+         and " | " not in missing_plain),
         ("missing cache live derivation is read-only", missing_before == missing_after),
         ("active-run switch inherits current turn contract before pointer update",
          inherited_contract.get("session_id") == "statusline-transition"
          and inherited_contract.get("origin_run") == run.name
          and inherited_contract.get("bound_run") == missing_cache.name
          and source_contract_after.get("session_id") == "statusline-transition"),
-        ("failed live derivation is visible", "推导失败" in failed_derive_plain),
+        ("failed live derivation stays concise",
+         failed_derive_plain == f"[Xunji-status] [Idle｜空闲] {missing_cache.name}"),
         ("invalid outside run pointer is rejected", invalid_rejected),
         ("outside Xunji prints nothing", outside == ""),
+        ("selftest uses an isolated active-run pointer",
+         ACTIVE_RUN == real_active_pointer
+         and real_pointer_before == real_pointer_after
+         and real_contract_before == real_contract_after),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:

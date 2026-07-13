@@ -1,0 +1,101 @@
+{
+  "total": 3,
+  "confirmed": [],
+  "confirmed_findings": [],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-SILENT-001 — implementation excerpt",
+      "head": "## E-SILENT-001 — implementation excerpt",
+      "certainties": [],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": false,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/setup_success_silent.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/setup_success_silent.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-SILENT-002 — focused verification",
+      "head": "## E-SILENT-002 — focused verification",
+      "certainties": [],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": false,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/selftest.log"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/selftest.log"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-SILENT-003 — Claude-primary policy excerpts",
+      "head": "## E-SILENT-003 — Claude-primary policy excerpts",
+      "certainties": [],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": false,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/docs.md"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/docs.md"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

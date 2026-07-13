@@ -77,22 +77,29 @@ python tools/loop_journal.py runs/<dir> phase-start --phase "Root Orchestrator" 
 python tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --note "result and next phase"
 ```
 
-For `Setup`, `tools/setup_run.py` prints the visible setup start/end marker. For
-`/loop`, follow `docs/templates/loop_prompt.md`: enter Root Orchestrator before
+For mechanical `Setup`, `tools/setup_run.py` keeps a successful invocation
+stdout-silent; the selected-run statusline is its visible state. Failures and
+degraded setup diagnostics remain on stderr. For `/loop`, follow
+`docs/templates/loop_prompt.md`: enter Root Orchestrator before
 the state graph pass, Hunter before proof/verification/Agent action, Reviewer
 before merge/evidence/closure checks, and Report only when report material is
 being drafted or finalized. `Resume`, handoff, drift recovery, and closure gates
 are lifecycle mechanics, not extra phases.
 
-Operator-facing lifecycle/status output should be Chinese first, bracket-tagged,
-and summarize the current phase, run directory, front counts, evidence/coverage
-delta, stop blockers, and next required action before raw state paths or JSON.
+Operator-facing lifecycle output should be Chinese first and bracket-tagged.
+Detailed phase banners may summarize front counts, evidence/coverage delta, stop
+blockers, and next actions before raw state paths or JSON; the persistent
+statusline is intentionally narrower.
+`setup_run.py` keeps Setup start/end in the loop journal without printing normal
+success progress. Explicit `--help` and `--selftest` output are diagnostics, not
+normal setup progress.
 
 Claude Code's project statusline is enabled for Xunji through
 `.claude/settings.json` and `tools/xunji_statusline.py`. It should stay concise:
-`[Xunji-status] [Hunter｜验证] <run> | 待验证入口 N 个 | 子任务 ... | 无阻断 |
-下一步 ...`. Treat it as read-only display. It does not replace phase markers,
-`loop_journal.py`, or PreToolUse enforcement.
+`[Xunji-status] [Hunter｜验证] <run>`. It prints nothing until Claude supplies an
+explicit Xunji workspace and that workspace has an active run. Treat it as
+read-only display. Outside mechanical Setup, it does not replace phase markers;
+it never replaces `loop_journal.py` or PreToolUse enforcement.
 
 ## Setup
 

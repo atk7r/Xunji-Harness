@@ -1,0 +1,40 @@
+# Peer Review Panel — 2026-07-13-statusline-simplification
+
+_backend: panel:arkcli+claude · 2026-07-13T04:09Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: WARN
+
+_backend: panel:arkcli+claude_
+_brain: codex_
+_bundle_hash: 853fca0b5e269846c1d3ce2a5f47250a4c8333ca_
+_evidence_index_hash: d777accd4fdbc42b3db7e7fa48d03b799de372a1_
+
+## Findings
+- [WARN] PR-001 E-002 confirmation leans on an environment-provided selftest.log | Evidence: selftest.log; statusline.diff:_selftest checks (@@ -535,43 +395,48 @@) | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The log is an environment artifact; per evidence discipline it is not confirmation on its own. The diff proves the tests are well-designed but not that they executed with these results in a controlled environment. Re-run in a fresh environment and capture a CI/signed log.
+- [WARN] PR-002 No artifact validates the actual Claude Code statusLine payload after cwd/PWD fallback removal | Evidence: statusline.diff:_workspace_dir (@@ -89,16 +69,19 @@); docs.diff:docs/AI_ENV_SETUP.md | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The new code intentionally returns empty if workspace keys are absent. The bundle contains no sample payload or settings.json evidence confirming the integration contract, so a silent blank statusline is possible if Claude’s payload shape differs.
+- [WARN] PR-003 arkcli panel had backend errors; review is partial | Evidence: glm-5.2: parse error; output tail: rn_contract.json"` which is in the temp directory. So the side effects are contained in the temp run directory. This seems OK.
+
+21. **One real concern: the test calls `set_active_run(str(outside_dir))` expecting it to return False (invalid_rejected). But `outside_dir` is created by `tempfile.mkdtemp()`, which is outside the Xunji root. If `set_active_run` validates that the path is under the Xunji runs directory, this would correctly return False. But if `set_active_run` now uses the `ACTIVE_RUN | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+
+## Blind-spot check
+- [arkcli] [kimi-k2.7-code] No integration test against a real or simulated Claude Code statusLine hook payload after the cwd/PWD/os.getcwd fallbacks were removed.
+- [arkcli] [kimi-k2.7-code] The subprocess CLI path for color output (old XUNJI_COLOR env invocation) was removed from selftest, leaving hook stdin/stdout color detection unexercised.
+- [arkcli] [kimi-k2.7-code] Behavior when `workspace.current_dir` points to a subdirectory of the Xunji repo is not shown or tested.
+- [arkcli] [kimi-k2.7-code] `_is_xunji_context` implementation is not exercised in the visible test matrix for boundary cases (workspace root vs. nested path vs. symlink).
+- [claude] **`_state_stale` semantic narrowing is correct but unremarked:** The old `_state_stale` checked `min(mtimes)` of `[loop_state.json, controller.shadow.json]`. The new code checks only `loop_state.json`. This means: in the old code, a missing `controller.shadow.json` (while `loop_state.json` was fresh) would trigger live derivation importing both `loop_state` AND `run_controller`. In the new code, it won't trigger live derivation at all (since `loop_state.json` is fresh). This is correct behavior (controller data is no longer consumed) but represents a behavioral change in the staleness trigger threshold that isn't documented in the decision record. The practical effect is zero since the statusline no longer reads controller data, but it's worth noting for anyone debugging stale-cache behavior.
+- [claude] **The `watched` list in selftest now over-covers:** The selftest's read-only assertion checks mtimes of 6 files including `controller.shadow.json`, `assignments.json`, `asset_ledger.json` — files the new statusline never reads. The `before_render == after_render` assertion would pass trivially for these (since nothing reads them). This is harmless (it catches future regressions if code accidentally writes these) but means the "read-only" check for these specific files is a no-op. The files actually read are `loop_state.json` and `loop_journal.jsonl` (plus `frontier.md` for staleness).
+- [claude] **`_workspace_dir` empty-string payload edge case is handled correctly:** `workspace: {"current_dir": ""}` would return `None` (not resolved to cwd), matching the spec. This is a strictness improvement, but no selftest exercises it — `render_statusline({})` is tested (empty dict), but `render_statusline({"workspace": {"current_dir": ""}})` is not. A pathological payload could theoretically trigger this.
+- [claude] **`_phase` internal consumption of `journal["interrupted"]` is the design linchpin:** The "interrupted" state was previously displayed both in the phase tag AND as a separate `" | 中断待续"` suffix. Now it's ONLY in the phase tag (`[Interrupted｜中断待恢复]`). This is correct because `_phase()` (unchanged) reads `journal["interrupted"]` and returns `"Interrupted"`, then `_phase_tag("Interrupted")` renders the Chinese label. The `_journal_summary()` function body is unchanged. No data flow was broken — the redundant suffix was removed.
+
+## Context-limit notes
+- [arkcli] [kimi-k2.7-code] Chinese-language documentation was interpreted literally; subtle operator-facing nuance may have been missed.
+- [arkcli] [kimi-k2.7-code] Actual `.claude/settings.json` payload shape and CI environment are not present in the review bundle, so integration claims cannot be fully verified from artifacts alone.
+- [arkcli] glm-5.2: parse error; output tail: rn_contract.json"` which is in the temp directory. So the side effects are contained in the temp run directory. This seems OK.
+
+21. **One real concern: the test calls `set_active_run(str(outside_dir))` expecting it to return False (invalid_rejected). But `outside_dir` is created by `tempfile.mkdtemp()`, which is outside the Xunji root. If `set_active_run` validates that the path is under the Xunji runs directory, this would correctly return False. But if `set_active_run` now uses the `ACTIVE_RUN
+- [claude] I cannot inspect `_phase()`, `_journal_summary()`, or `_phase_tag()` in full since they weren't in the diff hunks. I rely on: (a) the diff proving these functions were NOT modified, (b) the selftest passing 60/60, and (c) the phase-tag assertions (`[Setup｜准备]`, `[Reviewer｜复审]`, `[Interrupted｜中断待恢复]`, `[Paused｜已暂停]`) proving correct rendering.
+- [claude] I cannot verify the live file contents of `tools/xunji_statusline.py` — I trust the `reviewed.diff` artifact (sha1: `0ea1bbb692d5d71f435f1512c854de52b51c2269`).
+- [claude] I cannot verify the `loop_state.derive()` function behavior — the 60/60 selftest pass and the `_derived_loop_state` diff showing it imports only `loop_state` (no `run_controller`) are my evidence.
+- [claude] The `temp` variable in the selftest (`ACTIVE_RUN = temp / "xunji_active_run"`) is defined in an unchanged portion of the function, confirmed by the 60/60 pass.
+- [claude] This is repository maintenance, not a pentest — evidence discipline rubric applies loosely. The certainty 1.0 for E-001/E-002 is reasonable for a code change verified by deterministic selftest assertions.

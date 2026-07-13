@@ -75,16 +75,20 @@
   `[Xunji] [阶段开始] [Hunter｜验证挖掘]`) and ANSI color when the terminal supports it.
   Once a run directory exists, record the same transition with
   `tools/loop_journal.py phase-start|phase-end --phase ...`.
+  Mechanical Setup inside `setup_run.py` is the one display exception: record its
+  start/end in the journal, but keep a successful setup stdout-silent because the
+  selected-run statusline is the operator-facing display. Keep failures and
+  degraded setup diagnostics on stderr; explicit `--help`/`--selftest` output is
+  not normal setup progress.
   Do not invent markers for lifecycle mechanics such as resume, handoff, drift
   recovery, `/loop`, or closure gates. Operator-facing lifecycle/status output
   should be Chinese, keep bracket tags as no-color fallback, and summarize the
   current phase, run dir, blockers, and next required action before any raw
   details.
-- Claude Code statusline is a read-only dashboard for this project. It shows the
-  active run, current phase, asset total/front-linked/unassigned/disposed counts,
-  pending verification entries, aggregated subagent state, blockers, and next action.
-  It never replaces visible phase markers or
-  `loop_journal.py` phase-start/phase-end records.
+- Claude Code statusline is a read-only indicator for this project. It prints
+  nothing without an explicit Xunji workspace and active run; otherwise it shows
+  only `[Xunji-status] [<phase>] <run>`. Detailed progress and health remain in
+  visible phase banners and `loop_journal.py` phase-start/phase-end records.
 - **Target-facing privacy boundary:** Root and every Agent must keep generated
   project/run/Agent/operator identity and real personal data out of outbound URL
   paths/queries, headers, bodies, multipart names/content, and target writes. Use

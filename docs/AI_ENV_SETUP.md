@@ -149,7 +149,8 @@ python3 tools/xunji_statusline.py --set-active runs/<dir>
 - `PostToolUse`：sentinel 记录
 - `UserPromptSubmit`：anti-drift 注入
 - `Stop`：output gate 与 run gate
-- `statusLine`：每 2 秒读取 active run 的只读状态
+- `statusLine`：每 2 秒只读显示 `[Xunji-status] [<phase>] <run>`；未明确传入
+  Xunji workspace 或未选择 active run 时不显示
 
 Claude Code 通常会设置 `CLAUDE_PROJECT_DIR`。手动模拟 hook 或排障时，可在项目根目录临时设置：
 
@@ -162,7 +163,13 @@ python3 .claude/hooks/ip_blacklist.py --selftest
 python3 tools/xunji_statusline.py --selftest
 ```
 
-statusline 只读 `.claude/xunji_active_run` 和 run 下的 `state/*.json` / `state/loop_journal.jsonl`，不会替 AI 选择工作、刷新状态或写证据。
+statusline 只读 `.claude/xunji_active_run` 和阶段状态，不会替 AI 选择工作、刷新状态或写证据。
+如需手工模拟 statusLine 的 stdin 契约，不要直接空输入运行；应显式提供 workspace：
+
+```bash
+printf '{"workspace":{"current_dir":"%s"}}\n' "$PWD" | \
+  XUNJI_NO_COLOR=1 python3 tools/xunji_statusline.py
+```
 
 ## 8. 主动工具与证据保存
 

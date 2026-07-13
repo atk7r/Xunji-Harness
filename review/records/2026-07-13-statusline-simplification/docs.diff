@@ -1,0 +1,107 @@
+diff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md
+index 0066320..0302309 100644
+--- a/.claude/skills/xunji-run-lifecycle/SKILL.md
++++ b/.claude/skills/xunji-run-lifecycle/SKILL.md
+@@ -84,15 +84,17 @@ before merge/evidence/closure checks, and Report only when report material is
+ being drafted or finalized. `Resume`, handoff, drift recovery, and closure gates
+ are lifecycle mechanics, not extra phases.
+ 
+-Operator-facing lifecycle/status output should be Chinese first, bracket-tagged,
+-and summarize the current phase, run directory, front counts, evidence/coverage
+-delta, stop blockers, and next required action before raw state paths or JSON.
++Operator-facing lifecycle output should be Chinese first and bracket-tagged.
++Detailed phase banners may summarize front counts, evidence/coverage delta, stop
++blockers, and next actions before raw state paths or JSON; the persistent
++statusline is intentionally narrower.
+ 
+ Claude Code's project statusline is enabled for Xunji through
+ `.claude/settings.json` and `tools/xunji_statusline.py`. It should stay concise:
+-`[Xunji-status] [Hunter｜验证] <run> | 待验证入口 N 个 | 子任务 ... | 无阻断 |
+-下一步 ...`. Treat it as read-only display. It does not replace phase markers,
+-`loop_journal.py`, or PreToolUse enforcement.
++`[Xunji-status] [Hunter｜验证] <run>`. It prints nothing until Claude supplies an
++explicit Xunji workspace and that workspace has an active run. Treat it as
++read-only display. It does not replace phase markers, `loop_journal.py`, or
++PreToolUse enforcement.
+ 
+ ## Setup
+ 
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 770542f..023cfa9 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -80,11 +80,10 @@
+   should be Chinese, keep bracket tags as no-color fallback, and summarize the
+   current phase, run dir, blockers, and next required action before any raw
+   details.
+-- Claude Code statusline is a read-only dashboard for this project. It shows the
+-  active run, current phase, asset total/front-linked/unassigned/disposed counts,
+-  pending verification entries, aggregated subagent state, blockers, and next action.
+-  It never replaces visible phase markers or
+-  `loop_journal.py` phase-start/phase-end records.
++- Claude Code statusline is a read-only indicator for this project. It prints
++  nothing without an explicit Xunji workspace and active run; otherwise it shows
++  only `[Xunji-status] [<phase>] <run>`. Detailed progress and health remain in
++  visible phase banners and `loop_journal.py` phase-start/phase-end records.
+ - **Target-facing privacy boundary:** Root and every Agent must keep generated
+   project/run/Agent/operator identity and real personal data out of outbound URL
+   paths/queries, headers, bodies, multipart names/content, and target writes. Use
+diff --git a/docs/AI_ENV_SETUP.md b/docs/AI_ENV_SETUP.md
+index 3fbbc7f..9b992b7 100644
+--- a/docs/AI_ENV_SETUP.md
++++ b/docs/AI_ENV_SETUP.md
+@@ -149,7 +149,8 @@ python3 tools/xunji_statusline.py --set-active runs/<dir>
+ - `PostToolUse`：sentinel 记录
+ - `UserPromptSubmit`：anti-drift 注入
+ - `Stop`：output gate 与 run gate
+-- `statusLine`：每 2 秒读取 active run 的只读状态
++- `statusLine`：每 2 秒只读显示 `[Xunji-status] [<phase>] <run>`；未明确传入
++  Xunji workspace 或未选择 active run 时不显示
+ 
+ Claude Code 通常会设置 `CLAUDE_PROJECT_DIR`。手动模拟 hook 或排障时，可在项目根目录临时设置：
+ 
+@@ -162,7 +163,13 @@ python3 .claude/hooks/ip_blacklist.py --selftest
+ python3 tools/xunji_statusline.py --selftest
+ ```
+ 
+-statusline 只读 `.claude/xunji_active_run` 和 run 下的 `state/*.json` / `state/loop_journal.jsonl`，不会替 AI 选择工作、刷新状态或写证据。
++statusline 只读 `.claude/xunji_active_run` 和阶段状态，不会替 AI 选择工作、刷新状态或写证据。
++如需手工模拟 statusLine 的 stdin 契约，不要直接空输入运行；应显式提供 workspace：
++
++```bash
++printf '{"workspace":{"current_dir":"%s"}}\n' "$PWD" | \
++  XUNJI_NO_COLOR=1 python3 tools/xunji_statusline.py
++```
+ 
+ ## 8. 主动工具与证据保存
+ 
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index 3e49aab..d4e0bbc 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -193,15 +193,16 @@ lookup, then authoritative current sources. Record the result before closing the
+ front, assigning severity, or writing final report text.
+ 
+ Claude Code statusline uses `tools/xunji_statusline.py` from the project
+-`.claude/settings.json`. It is a read-only, two-second display of the active run:
+-current Router phase, run name, pending verification entries, aggregated Agent
+-state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_run`
+-plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
+-state, choose work, write evidence, or enforce phase discipline. The active-run
+-pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
+-and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve only
+-this explicit pointer; file recency is never run authority, so an unrelated run
+-cannot receive or escape another run's process gates.
++`.claude/settings.json`. It is a read-only, two-second display containing only
++`[Xunji-status] [<phase>] <run>`。Claude 未提供明确的 Xunji workspace，或该
++workspace 尚未选择 active run 时，statusline 输出为空。它只读取
++`.claude/xunji_active_run`、阶段派生状态和 `state/loop_journal.jsonl`；不会刷新
++状态、选择工作、写证据或执行阶段约束。active-run pointer 是本地运行态，由
++`setup_run.py`、`loop_bootstrap.py` 和固定的 `/loop runs/<dir>` 协议更新。
++Anti-drift 与 Stop hooks 只解析这个显式指针；文件新旧永远不是 run authority，
++因此无关 run 不能接收或逃逸另一个 run 的流程门。
++`Paused` / `Interrupted` 可作为 phase tag 显示；缓存健康、阻断和下一步等详细
++状态继续由阶段 banner、journal 和检查命令承载，不向 statusline 追加字段。
+ 
+ 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
+ phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a

@@ -1,0 +1,14 @@
+python3 tools/check_rules.py
+rule check passed
+
+python3 tools/selftest_all.py --only xunji_statusline
+1 passed, 0 failed
+
+python3 tools/selftest_all.py
+60 passed, 0 failed (86.6s total)
+
+Manual render with explicit Xunji workspace:
+[Xunji-status] [Setup｜准备] sxtbu_20260713_20260713
+
+Manual render with empty payload:
+<empty>
