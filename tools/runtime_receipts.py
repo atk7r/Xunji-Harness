@@ -705,6 +705,37 @@ def agent_fanout(run_dir: str | Path, *, session_id: str = "", since: float = 0.
     }
 
 
+def disposition_note_issues(run_dir: str | Path, status: str, note: str) -> list[str]:
+    """Validate one terminal disposition against canonical run anchors."""
+    run = Path(run_dir)
+    status = str(status or "").strip().lower()
+    note = str(note or "").strip()
+    canonical = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in (run / "evidence.md", run / "frontier.md", run / "decisions.md")
+        if path.exists()
+    )
+    anchors = [anchor.upper() for anchor in re.findall(r"\b[EDF]-\d+\b", note, re.I)]
+    canonical_anchors = {
+        anchor.upper() for anchor in re.findall(r"\b[EDF]-\d+\b", canonical, re.I)
+    }
+    missing = [anchor for anchor in anchors if anchor not in canonical_anchors]
+    issues: list[str] = []
+    if status == "merged":
+        if not re.search(r"(?i)\b(Evidence|Front|Decision|Refuted|Barrier)\s*[:：]", note):
+            issues.append("merged 缺 Evidence/Front/Decision/Refuted/Barrier 标签")
+        if not anchors:
+            issues.append("merged 缺 canonical E/F/D 锚点")
+    elif status in {"blocked", "failed", "abandoned"}:
+        if not re.search(r"(?i)\bReason\s*[:：]", note):
+            issues.append(f"{status} 缺 Reason:")
+        if not re.search(r"(?i)\bFront\s*[:：]\s*F-\d+\b", note):
+            issues.append(f"{status} 缺 Front: F-xxx")
+    if missing:
+        issues.append("canonical 锚点不存在: " + ", ".join(dict.fromkeys(missing)))
+    return issues
+
+
 def agent_disposition(run_dir: str | Path, *, session_id: str = "", since: float = 0.0) -> dict:
     """Require only returned attempts to be explicitly merged or adjudicated."""
     run = Path(run_dir)
@@ -724,11 +755,6 @@ def agent_disposition(run_dir: str | Path, *, session_id: str = "", since: float
         str(item.get("agent") or ""): item
         for item in data.get("assignments", []) if isinstance(item, dict)
     } if isinstance(data, dict) and isinstance(data.get("assignments"), list) else {}
-    canonical = "\n".join(
-        path.read_text(encoding="utf-8", errors="replace")
-        for path in (run / "evidence.md", run / "frontier.md", run / "decisions.md")
-        if path.exists()
-    )
     pending: list[str] = []
     for assignment in sorted(latest_return_ts):
         row = rows.get(assignment, {})
@@ -742,16 +768,13 @@ def agent_disposition(run_dir: str | Path, *, session_id: str = "", since: float
         if updated_at < latest_return_ts.get(assignment, 0.0):
             pending.append(f"{assignment}: disposition 早于真实 SubagentStop 返回")
             continue
-        anchors = re.findall(r"\b[EDF]-\d+\b", note, re.I)
-        anchors_exist = bool(anchors) and all(anchor.upper() in canonical.upper() for anchor in anchors)
+        note_issues = disposition_note_issues(run, status, note)
         if status == "merged":
-            if not re.search(r"(?i)\b(Evidence|Front|Decision|Refuted|Barrier)\s*[:：]", note) or not anchors_exist:
-                pending.append(f"{assignment}: merged 缺 canonical E/F/D 处置锚点")
+            pending.extend(f"{assignment}: {issue}" for issue in note_issues)
             if row.get("assets") and row.get("coverage_merge_satisfied") is not True:
                 pending.append(f"{assignment}: merged 未通过逐资产动作 + canonical E-entry 验收")
         elif status in {"blocked", "failed", "abandoned"}:
-            if not re.search(r"(?i)\bReason\s*[:：]", note) or not re.search(r"\bF-\d+\b", note, re.I) or not anchors_exist:
-                pending.append(f"{assignment}: {status} 缺 Reason + canonical Front 锚点")
+            pending.extend(f"{assignment}: {issue}" for issue in note_issues)
         else:
             pending.append(f"{assignment}: status={status or '(missing)'} 尚未 merge/adjudicate")
     return {
@@ -968,6 +991,8 @@ def _selftest() -> int:
     })
     (run / "state" / "assignments.json").write_text(json.dumps(data), encoding="utf-8")
     disposition_after = agent_disposition(run)
+    missing_anchor_issues = disposition_note_issues(
+        run, "blocked", "Reason: no credential; Front: F-002; Evidence: E-404")
     append_hook_event(run, event("CronList", ids[2], {}, {"tasks": []}))
     before, _ = cron_quiescent(run)
     append_hook_event(run, event("CronCreate", ids[3], {"prompt": f"/loop {run.name}"}, {"id": "deadbeef"}))
@@ -1203,6 +1228,8 @@ def _selftest() -> int:
         ("two real Agent receipts satisfy fanout", agent_fanout(run)["satisfied"]),
         ("done Agent remains unmerged", not disposition_before["disposition_satisfied"]),
         ("anchored merged/blocked dispositions satisfy", disposition_after["disposition_satisfied"]),
+        ("missing canonical anchor is reported precisely",
+         missing_anchor_issues == ["canonical 锚点不存在: E-404"]),
         ("CronList with no jobs is quiescent", before),
         ("created run job is active", not active),
         ("CronDelete binds to listed run job", delete_ok),

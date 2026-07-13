@@ -115,6 +115,7 @@ ROLE_ALIASES = {
     "surface-agent": "surface",
     "surface": "surface",
     "web": "web-hunter",
+    "hunter": "web-hunter",
     "web-auth": "web-auth",
     "web-hunter": "web-hunter",
     "web-hunter-agent": "web-hunter",
@@ -135,6 +136,7 @@ ROLE_ALIASES = {
     "report-agent": "report",
     "synthesizer": "synthesizer",
 }
+CANONICAL_AGENT_ROLES = frozenset(ROLE_ALIASES.values())
 
 TARGET_ARTIFACT_OPSEC_RE = re.compile(
     r"\b(?:xunji|agent|worker|exploit|webshell|poc|vuln|rce|sqli|xss|idor|ssrf|lfi|"
@@ -878,6 +880,9 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
                             scope: str = "", agent: str | None = None,
                             assets: list[str] | None = None) -> dict:
     role = _role(role)
+    if role not in CANONICAL_AGENT_ROLES:
+        raise ValueError(
+            f"unknown Agent role {role!r}; use one of {sorted(CANONICAL_AGENT_ROLES)}")
     asset_names, inventory = _resolve_assignment_assets(run_dir, front, assets, role)
     data = load_assignments(run_dir)
     if role not in {"verify", "review"}:
@@ -1116,20 +1121,52 @@ def _validate_asset_merge(run_dir: Path, rec: dict) -> dict:
 
 
 def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str = "",
-                           terminal: bool = False) -> dict:
+                           terminal: bool = False, amend: bool = False) -> dict:
     data = load_assignments(run_dir)
     status_norm = _normalized_agent_status(status)
-    allowed = TERMINAL_AGENT_STATUSES if terminal else (NONTERMINAL_AGENT_STATUSES | TERMINAL_AGENT_STATUSES)
+    allowed = TERMINAL_AGENT_STATUSES if terminal else NONTERMINAL_AGENT_STATUSES
     if status_norm not in allowed:
         raise ValueError(f"invalid agent status {status!r}; use one of {sorted(allowed)}")
     if terminal and status_norm not in TERMINAL_AGENT_STATUSES:
         raise ValueError(f"finish requires terminal status; use one of {sorted(TERMINAL_AGENT_STATUSES)}")
+    if amend and not terminal:
+        raise ValueError("disposition amendment is only valid for finish")
     stamp = _now_iso()
     for rec in data.get("assignments", []):
         if not isinstance(rec, dict):
             continue
         if str(rec.get("agent") or "") != agent:
             continue
+        previous_status = _normalized_agent_status(str(rec.get("status") or ""))
+        adjudicated = {"merged", "blocked", "failed", "abandoned"}
+        if not terminal and previous_status in TERMINAL_AGENT_STATUSES:
+            raise ValueError(
+                f"{agent} already has terminal status {previous_status}; "
+                "heartbeat cannot reopen a returned attempt")
+        if terminal and status_norm in adjudicated:
+            if _runtime_receipts is None:
+                raise ValueError(
+                    "runtime_receipts unavailable; cannot validate terminal disposition")
+            note_issues = _runtime_receipts.disposition_note_issues(run_dir, status_norm, note)
+            if note_issues:
+                raise ValueError("invalid disposition note; " + "; ".join(note_issues))
+        if terminal and previous_status in adjudicated:
+            if not amend:
+                if status_norm == previous_status and note.strip() == str(rec.get("last_note") or "").strip():
+                    return rec
+                raise ValueError(
+                    f"{agent} already has terminal disposition {previous_status}; "
+                    "use finish --amend to preserve an audit trail")
+            history = rec.setdefault("disposition_history", [])
+            history.append({
+                "status": previous_status,
+                "note": str(rec.get("last_note") or ""),
+                "updated_at": str(rec.get("updated_at") or ""),
+                "finished_at": str(rec.get("finished_at") or ""),
+                "amended_at": stamp,
+            })
+        elif amend:
+            raise ValueError(f"{agent} has no terminal disposition to amend")
         merge_validation = None
         if terminal and status_norm == "merged":
             merge_validation = _validate_asset_merge(run_dir, rec)
@@ -1611,9 +1648,10 @@ def print_heartbeat(run_dir: Path, agent: str, status: str, note: str) -> int:
     return 0
 
 
-def print_finish(run_dir: Path, agent: str, status: str, note: str) -> int:
+def print_finish(run_dir: Path, agent: str, status: str, note: str, amend: bool = False) -> int:
     try:
-        rec = update_agent_lifecycle(run_dir, agent, status=status, note=note, terminal=True)
+        rec = update_agent_lifecycle(
+            run_dir, agent, status=status, note=note, terminal=True, amend=amend)
     except Exception as e:
         print(f"[agent-board finish] ERROR: {e}", file=sys.stderr)
         return 1
@@ -2152,6 +2190,93 @@ def _selftest() -> int:
     except ValueError as exc:
         explicit_assets_required = "explicit --asset" in str(exc)
 
+    hunter_run = d / "hunter_role"
+    hunter_run.mkdir()
+    (hunter_run / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "hunter.example", "reachable": True, "examined": False},
+    ]}), encoding="utf-8")
+    (hunter_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n### F-001\n"
+        "- Front: hunter.example lane\n- Status: open\n"
+        "- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    hunter_alias_requires_assets = False
+    try:
+        create_agent_assignment(hunter_run, role="hunter", front="F-001")
+    except ValueError as exc:
+        hunter_alias_requires_assets = "explicit --asset" in str(exc)
+    unknown_role_rejected = False
+    try:
+        create_agent_assignment(hunter_run, role="mystery-hunter", front="F-001")
+    except ValueError as exc:
+        unknown_role_rejected = "unknown Agent role" in str(exc)
+
+    disposition_run = d / "disposition_run"
+    disposition_run.mkdir()
+    (disposition_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n### F-001\n- Front: review lane\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    (disposition_run / "decisions.md").write_text(
+        "# Decisions\n## D-001\n- Result: framework barrier\n", encoding="utf-8")
+    disposition_rec = create_agent_assignment(
+        disposition_run, role="review", front="F-001")
+    invalid_disposition_rejected = False
+    try:
+        update_agent_lifecycle(
+            disposition_run, disposition_rec["agent"], status="blocked",
+            note="Reason: barrier; Front: F-001; Evidence: E-404", terminal=True)
+    except ValueError as exc:
+        invalid_disposition_rejected = "E-404" in str(exc)
+    first_disposition = update_agent_lifecycle(
+        disposition_run, disposition_rec["agent"], status="blocked",
+        note="Reason: framework barrier; Front: F-001; Decision: D-001", terminal=True)
+    silent_terminal_rewrite_rejected = False
+    try:
+        update_agent_lifecycle(
+            disposition_run, disposition_rec["agent"], status="failed",
+            note="Reason: revised barrier; Front: F-001; Decision: D-001", terminal=True)
+    except ValueError as exc:
+        silent_terminal_rewrite_rejected = "finish --amend" in str(exc)
+    amended_disposition = update_agent_lifecycle(
+        disposition_run, disposition_rec["agent"], status="blocked",
+        note="Reason: corrected framework barrier; Front: F-001; Decision: D-001",
+        terminal=True, amend=True)
+    disposition_history_preserved = (
+        first_disposition.get("status") == "blocked"
+        and len(amended_disposition.get("disposition_history", [])) == 1
+        and amended_disposition["disposition_history"][0].get("note")
+        == "Reason: framework barrier; Front: F-001; Decision: D-001")
+    heartbeat_cannot_set_terminal = False
+    try:
+        update_agent_lifecycle(
+            disposition_run, disposition_rec["agent"], status="running",
+            note="reopened via heartbeat", terminal=False)
+    except ValueError as exc:
+        heartbeat_cannot_set_terminal = "cannot reopen" in str(exc)
+    done_rec = create_agent_assignment(
+        disposition_run, role="review", front="F-001")
+    update_agent_lifecycle(
+        disposition_run, done_rec["agent"], status="done",
+        note="runtime returned", terminal=True)
+    done_to_adjudicated = update_agent_lifecycle(
+        disposition_run, done_rec["agent"], status="blocked",
+        note="Reason: no target action; Front: F-001; Decision: D-001", terminal=True)
+    done_to_adjudicated_allowed = done_to_adjudicated.get("status") == "blocked"
+    receipts_missing_rec = create_agent_assignment(
+        disposition_run, role="review", front="F-001")
+    saved_runtime_receipts = _runtime_receipts
+    receipts_missing_fails_closed = False
+    try:
+        globals()["_runtime_receipts"] = None
+        update_agent_lifecycle(
+            disposition_run, receipts_missing_rec["agent"], status="blocked",
+            note="Reason: no validator; Front: F-001; Decision: D-001", terminal=True)
+    except ValueError as exc:
+        receipts_missing_fails_closed = "runtime_receipts unavailable" in str(exc)
+    finally:
+        globals()["_runtime_receipts"] = saved_runtime_receipts
+
     def build_merge_gate_run(name: str, assets_for_agent: list[str]) -> tuple[Path, dict, Path, str]:
         gate_run = d / name
         (gate_run / "state").mkdir(parents=True)
@@ -2317,6 +2442,22 @@ def _selftest() -> int:
         ("assign command exits 0", assign_cli_exit == 0),
         ("target-facing assignment requires an explicit asset package",
          explicit_assets_required),
+        ("hunter alias cannot create an empty target assignment",
+         hunter_alias_requires_assets),
+        ("unknown Agent role is rejected instead of becoming a legacy lane",
+         unknown_role_rejected),
+        ("invalid disposition note is rejected before state mutation",
+         invalid_disposition_rejected),
+        ("terminal disposition rewrite requires explicit amendment",
+         silent_terminal_rewrite_rejected),
+        ("explicit disposition amendment preserves prior audit state",
+         disposition_history_preserved),
+        ("heartbeat cannot write a terminal disposition",
+         heartbeat_cannot_set_terminal),
+        ("done assignment can advance to an adjudicated terminal state",
+         done_to_adjudicated_allowed),
+        ("missing disposition validator fails closed",
+         receipts_missing_fails_closed),
         ("zero-tool Agent cannot be marked merged", zero_activity_merge_blocked),
         ("partial asset package cannot be marked merged", partial_asset_merge_blocked),
         ("every asset action plus canonical E-entry satisfies merge gate",
@@ -2427,13 +2568,15 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("agent")
             ap.add_argument("--status", default="running",
-                            choices=sorted((NONTERMINAL_AGENT_STATUSES | TERMINAL_AGENT_STATUSES) - {"?"}))
+                            choices=sorted(NONTERMINAL_AGENT_STATUSES - {"?"}))
             ap.add_argument("--note", default="")
         elif cmd == "finish":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("agent")
             ap.add_argument("--status", default="done", choices=sorted(TERMINAL_AGENT_STATUSES))
             ap.add_argument("--note", default="")
+            ap.add_argument("--amend", action="store_true",
+                            help="replace an existing terminal disposition and preserve its history")
         elif cmd == "lifecycle-check":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("--closure", action="store_true",
@@ -2458,7 +2601,7 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "heartbeat":
             return print_heartbeat(run_dir, args.agent, args.status, args.note)
         if cmd == "finish":
-            return print_finish(run_dir, args.agent, args.status, args.note)
+            return print_finish(run_dir, args.agent, args.status, args.note, args.amend)
         if cmd == "lifecycle-check":
             return print_lifecycle_check(run_dir, closure=args.closure)
         if cmd == "status":

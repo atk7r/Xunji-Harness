@@ -181,6 +181,8 @@ non-terminal packages are rejected except for verification/review roles. Then in
 the Claude `Agent` tool with the exact tokens
 `XUNJI_ASSIGNMENT=A-web-hunter-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=app1.example,app2.example`.
 The package in the prompt must exactly match `state/assignments.json`.
+Use a documented role such as `web-hunter`; the compatibility alias `hunter` maps to
+`web-hunter` and therefore still requires explicit assets. Unknown roles fail closed.
 
 For an async Agent, `Agent PostToolUse(status=async_launched)` proves **launch only**.
 The hook records the returned `agentId` as a unique attempt and projects the
@@ -203,6 +205,18 @@ at least one transcript-backed successful target action by that Agent and a cano
 `E-xxx` entry naming the exact host. A zero-tool Agent or a partially completed asset
 package cannot be marked merged. `blocked/failed/abandoned` may end the attempt but do
 not erase that asset's coverage debt.
+
+An adjudicated terminal state is immutable through ordinary `finish`. If its note was
+wrong, amend it explicitly so the prior state remains auditable:
+
+```bash
+python tools/workers.py finish runs/<dir> A-web-hunter-002 --status blocked \
+  --note "Reason: corrected barrier; Front: F-002" --amend
+```
+
+Only anchors present in canonical `evidence.md`, `frontier.md`, or `decisions.md`
+count. A standalone file under `evidence/` is an artifact, not a canonical `E-xxx`
+ledger entry.
 
 Before merging:
 

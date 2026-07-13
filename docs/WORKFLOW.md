@@ -320,6 +320,12 @@ requires every assigned host to have a transcript-backed successful target actio
 that Agent and a canonical E-entry. A zero-tool Agent, partial package, `done`, or chat
 summary is unmerged work. A blocked attempt ends the attempt but does not erase its
 assets from coverage debt.
+Unknown Agent roles fail closed; `hunter` is a compatibility alias for `web-hunter`
+and does not waive the explicit asset package. Ordinary `finish` cannot overwrite an
+existing adjudicated terminal state. Corrections require `finish --amend`, which
+preserves the prior disposition in the assignment audit history. Only anchors in the
+canonical `evidence.md`, `frontier.md`, or `decisions.md` ledgers count; artifact files
+under `evidence/` do not create canonical `E-xxx` entries by themselves.
 
 When an observation **grounds a product fingerprint** — i.e. while attacking an asset you
 fetch it and recognize the stack (or an opt-in `classify_hosts` tagged it `kb:<id>`) —

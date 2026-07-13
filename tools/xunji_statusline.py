@@ -550,7 +550,10 @@ def _selftest() -> int:
     checks = [
         ("plain statusline is human-readable", "[Xunji-status] [Hunter｜验证]" in plain),
         ("open fronts use pentest wording", "待验证入口 6 个" in plain and "F 6/1/3" not in plain),
-        ("planned agents are not presented as real", "子任务 计划2/真实0" in plain),
+        # set_active_run may inherit an EXECUTE contract from the operator's real
+        # active run, changing only the label from "真实" to "本轮真实".
+        ("planned agents are not presented as real",
+         bool(re.search(r"子任务 计划2/(?:本轮)?真实0(?:\D|$)", plain))),
         ("operator pause is visible", "[Paused｜已暂停]" in paused_plain),
         ("next action uses plan note", "下一步 F-004 接口枚举" in plain),
         ("colored statusline has ansi", "\033[" in colored and "[Hunter｜验证]" in colored),

@@ -673,7 +673,7 @@ def _control_invocation(command: str) -> tuple[Path, list[str]] | None:
         if normalized.endswith(suffix):
             normalized = normalized[:-len(suffix)].rstrip()
             break
-    if re.search(r"[;&|><`]|\$\(|\$\{|\n|\r", normalized):
+    if _has_unquoted_shell_control(normalized):
         return None
     try:
         tokens = shlex.split(normalized)
@@ -690,6 +690,41 @@ def _control_invocation(command: str) -> tuple[Path, list[str]] | None:
     if script not in CONTROL_SCRIPTS:
         return None
     return script, tokens[2:]
+
+
+def _has_unquoted_shell_control(command: str) -> bool:
+    """Reject shell control syntax while allowing punctuation inside quoted data."""
+    quote = ""
+    escaped = False
+    i = 0
+    while i < len(command):
+        char = command[i]
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+        if quote == "'":
+            if char == "'":
+                quote = ""
+            i += 1
+            continue
+        if quote == '"':
+            if char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = ""
+            elif char == "`" or command.startswith("$(", i) or command.startswith("${", i):
+                return True
+            i += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char in ";&|><`\n\r" or command.startswith("$(", i) or command.startswith("${", i):
+            return True
+        elif char == "\\":
+            escaped = True
+        i += 1
+    return bool(quote or escaped)
 
 
 def _fanout_control_bash(command: str) -> bool:
@@ -904,7 +939,11 @@ def _is_target_action(event: dict) -> bool:
     tool = str(event.get("tool_name") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = str(tool_input.get("command") or "")
-    if tool == "WebFetch" or (tool == "Bash" and not _fanout_control_bash(command)):
+    if tool == "Bash" and _fanout_control_bash(command):
+        return False
+    # Every other Bash command remains target-capable. Do not let a future
+    # NON_EGRESS_TOOLS entry silently weaken the fail-closed shell boundary.
+    if tool == "WebFetch" or tool == "Bash":
         return True
     if tool in NON_EGRESS_TOOLS:
         return False
@@ -1147,10 +1186,12 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
                 since=epoch_since,
             )
             if not disposition.get("disposition_satisfied"):
+                pending = [str(item) for item in disposition.get("pending", []) if str(item).strip()]
+                detail = ("；待处理：" + "；".join(pending[:4])) if pending else ""
                 return (
                     "真实 SubagentStop 已返回但尚未完成 post-return disposition；先用 workers.py "
                     "把每个 assignment 更新为带 canonical E/F/D 锚点的 merged/blocked/failed，"
-                    "且更新时间必须晚于 Agent 返回。"
+                    "且更新时间必须晚于 Agent 返回。" + detail
                 )
         return ""
     if tool == "Bash":
@@ -1356,6 +1397,60 @@ def _selftest() -> int:
     renamed_target = {"tool_name": "Bash", "tool_input": {"command": "python3 /tmp/check.py"}}
     workers_control = {"tool_name": "Bash", "tool_input": {
         "command": f"python3 {ROOT / 'tools' / 'workers.py'} list {run}"}}
+    workers_asset_control = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'workers.py'} assign {run} "
+            "--role web-hunter --front F-001 --asset example.test"
+        )}}
+    workers_quoted_note_control = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            '--status blocked --note "Reason: shared barrier; Front: F-001"'
+        )}}
+    workers_quoted_punctuation_control = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            '--status blocked --note "Reason: auth; pipe | amp & gt > lt <; Front: F-001"'
+        )}}
+    workers_single_quoted_literal_control = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            "--status blocked --note 'Reason: literal $(id) ${HOME} `id`; Front: F-001'"
+        )}}
+    workers_escaped_substitution_literal = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            '--status blocked --note "Reason: literal \\$(id); Front: F-001"'
+        )}}
+    workers_ansi_c_literal_control = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            "--status blocked --note $'Reason: literal $(id); Front: F-001'"
+        )}}
+    workers_trailing_comment_control = {"tool_name": "Bash", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'workers.py'} list {run} # ignored"}}
+    workers_shell_chain = (
+        f"python3 {ROOT / 'tools' / 'workers.py'} list {run}; echo unsafe")
+    adversarial_control_commands = [
+        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} | cat",
+        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} && echo unsafe",
+        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} > /tmp/forged",
+        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+         '--status blocked --note "Reason: $(id); Front: F-001"'),
+        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+         '--status blocked --note "Reason: ${HOME}; Front: F-001"'),
+        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+         '--status blocked --note "Reason: `id`; Front: F-001"'),
+        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+         '--status blocked --note "Reason: \\\\$(id); Front: F-001"'),
+        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+         "--status blocked --note <(id)"),
+        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+         "--status blocked --note >(id)"),
+        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} # ignored $(id)",
+        f"python3 {ROOT / 'tools' / 'workers.py'} list '{run}",
+        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} \\",
+    ]
     setup_control = {"tool_name": "Bash", "tool_input": {
         "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} next {root / 'recon.json'} 2>&1"}}
     journal_control = {"tool_name": "Bash", "tool_input": {
@@ -1393,6 +1488,38 @@ def _selftest() -> int:
     encoded_before_fanout = bool(evaluate_pretool(run, encoded_target, contract))
     renamed_before_fanout = bool(evaluate_pretool(run, renamed_target, contract))
     workers_allowed_before_fanout = not bool(evaluate_pretool(run, workers_control, contract))
+    workers_asset_control_allowed = (
+        evaluate_pretool(run, workers_asset_control, contract) == ""
+        and not _is_target_action(workers_asset_control))
+    workers_quoted_note_allowed = (
+        evaluate_pretool(run, workers_quoted_note_control, contract) == ""
+        and _control_invocation(workers_quoted_note_control["tool_input"]["command"]) is not None)
+    quoted_punctuation_allowed = (
+        evaluate_pretool(run, workers_quoted_punctuation_control, contract) == ""
+        and _control_invocation(
+            workers_quoted_punctuation_control["tool_input"]["command"]) is not None)
+    single_quoted_literals_allowed = (
+        evaluate_pretool(run, workers_single_quoted_literal_control, contract) == ""
+        and _control_invocation(
+            workers_single_quoted_literal_control["tool_input"]["command"]) is not None)
+    escaped_substitution_literal_allowed = (
+        evaluate_pretool(run, workers_escaped_substitution_literal, contract) == ""
+        and _control_invocation(
+            workers_escaped_substitution_literal["tool_input"]["command"]) is not None)
+    ansi_c_literal_allowed = (
+        evaluate_pretool(run, workers_ansi_c_literal_control, contract) == ""
+        and _control_invocation(
+            workers_ansi_c_literal_control["tool_input"]["command"]) is not None)
+    trailing_comment_control_allowed = (
+        evaluate_pretool(run, workers_trailing_comment_control, contract) == ""
+        and _control_invocation(
+            workers_trailing_comment_control["tool_input"]["command"]) is not None)
+    workers_shell_chain_rejected = _control_invocation(workers_shell_chain) is None
+    adversarial_controls_fail_closed = all(
+        _control_invocation(command) is None
+        and bool(evaluate_pretool(
+            run, {"tool_name": "Bash", "tool_input": {"command": command}}, contract))
+        for command in adversarial_control_commands)
     bare_python_control_allowed = _control_invocation(
         f"python {ROOT / 'tools' / 'loop_state.py'} {run}") is not None
     micro_python_control_allowed = _control_invocation(
@@ -2066,6 +2193,24 @@ def _selftest() -> int:
         ("encoded network command blocked before fanout", encoded_before_fanout),
         ("renamed unknown script blocked before fanout", renamed_before_fanout),
         ("workers control command allowed before fanout", workers_allowed_before_fanout),
+        ("workers --asset control is not misclassified as target egress",
+         workers_asset_control_allowed),
+        ("quoted disposition punctuation remains valid control data",
+         workers_quoted_note_allowed),
+        ("all quoted shell punctuation remains inert control data",
+         quoted_punctuation_allowed),
+        ("single-quoted substitutions remain literal control data",
+         single_quoted_literals_allowed),
+        ("backslash-escaped substitution remains literal control data",
+         escaped_substitution_literal_allowed),
+        ("ANSI-C quoted substitutions remain literal control data",
+         ansi_c_literal_allowed),
+        ("trailing shell comments cannot turn control into target egress",
+         trailing_comment_control_allowed),
+        ("unquoted shell chaining cannot impersonate a control command",
+         workers_shell_chain_rejected),
+        ("adversarial shell syntax fails closed through evaluate_pretool",
+         adversarial_controls_fail_closed),
         ("bare python control command is recognized", bare_python_control_allowed),
         ("micro-version Python control command is recognized",
          micro_python_control_allowed),
