@@ -70,14 +70,62 @@ FORBIDDEN_TEXT_PATTERNS = [
 ]
 
 REQUIRED_FILES = [
+    Path("AGENTS.md"),
     Path("CLAUDE.md"),
+    Path("docs/ARCHITECTURE.md"),
     Path("docs/ROUTER.md"),
     Path("docs/WORKFLOW.md"),
     Path("docs/WORKFLOW-reference.md"),
     Path("docs/cognition/README.md"),
 ]
 
-REQUIRED_TEXT: dict[Path, list[str]] = {}
+REQUIRED_TEXT: dict[Path, list[str]] = {
+    Path("AGENTS.md"): ["docs/ARCHITECTURE.md"],
+    Path("CLAUDE.md"): ["docs/ARCHITECTURE.md"],
+    Path("docs/ARCHITECTURE.md"): [
+        "## 4. 当前架构",
+        "## 6. 过渡架构",
+        "## 7. 目标架构",
+        "## 8. 目录与 owner 地图",
+        "## 10. 变更协议",
+        "## 11. 当前不可破坏的不变量",
+        "## 12. Maintenance Checkpoint",
+    ],
+}
+
+CHECKPOINT_REQUIRED_FIELDS = (
+    "Date",
+    "Scope",
+    "Architecture impact",
+    "Verification",
+    "Independent review",
+)
+
+
+def check_maintenance_checkpoint(text: str) -> list[str]:
+    """Check checkpoint shape, not VCS freshness.
+
+    Freshness depends on the review/commit range and remains a fingerprint-review
+    responsibility. This tripwire prevents a missing, blank, or placeholder-only
+    checkpoint from passing merely because its heading survived.
+    """
+    errors: list[str] = []
+    match = re.search(
+        r"(?ms)^## 12\. Maintenance Checkpoint[ \t]*$\n(.*?)(?=^##[ \t]|\Z)",
+        text,
+    )
+    if not match:
+        return ["docs/ARCHITECTURE.md missing Maintenance Checkpoint body"]
+    body = match.group(1)
+    for field in CHECKPOINT_REQUIRED_FIELDS:
+        field_match = re.search(rf"(?m)^- {re.escape(field)}:[ \t]*(\S.*)$", body)
+        if not field_match:
+            errors.append(f"docs/ARCHITECTURE.md checkpoint missing non-empty field: {field}")
+            continue
+        value = field_match.group(1).strip()
+        if value.lower() in {"none", "n/a", "na", "pending", "tbd", "todo", "—", "-"} or "<" in value:
+            errors.append(f"docs/ARCHITECTURE.md checkpoint has placeholder field: {field}")
+    return errors
 
 
 def relative(path: Path) -> Path:
@@ -96,7 +144,7 @@ def iter_text_files() -> list[Path]:
                 continue
             if path.is_file():
                 files.append(path)
-    for name in ("README.md", "CLAUDE.md", "pyproject.toml", ".gitignore"):
+    for name in ("README.md", "AGENTS.md", "CLAUDE.md", "pyproject.toml", ".gitignore"):
         path = ROOT / name
         if path.exists():
             files.append(path)
@@ -139,6 +187,11 @@ def main() -> int:
         for required in required_items:
             if required not in text:
                 errors.append(f"{rel} missing required text: {required}")
+
+    architecture_doc = ROOT / "docs/ARCHITECTURE.md"
+    if architecture_doc.exists():
+        errors.extend(check_maintenance_checkpoint(
+            architecture_doc.read_text(encoding="utf-8", errors="replace")))
 
     if errors:
         print("rule check failed")

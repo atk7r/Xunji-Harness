@@ -403,6 +403,17 @@ Only two pauses; each requires a codex gate before the pause:
 
 ## Repository Discipline
 
+- **Shared architecture memory:** Before a non-trivial framework or repository
+  behavior change, read `docs/ARCHITECTURE.md` and the narrower owner documents it
+  names. If the change alters roles, authority, state ownership, data flow, Tool
+  contracts, lifecycle, safety/privacy, persistence, review/closure, concurrency,
+  or current/transitional/target design, update the relevant design sections in
+  the same diff. Every non-trivial maintenance change also updates that document's
+  `Maintenance Checkpoint` with scope, impact, verification, and durable review
+  record; a no-impact change records `Architecture impact: none — <reason>` there
+  without changing the design body or refreshing only a date. A proposed rule is
+  not canonical until its owner layer, source of truth, enforcement/test,
+  migration effect, and superseded rule are explicit.
 - Keep restrictions/boundaries out of this file → the skill declares them, the hooks
   enforce them. Routing → `docs/ROUTER.md`; cognition → `docs/cognition/README.md`;
   target state → `runs/<slug>_<date>/`.

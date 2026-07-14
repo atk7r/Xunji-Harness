@@ -162,6 +162,7 @@ hook 拦截：不可逆销毁（主机/文件抹除、`DROP`/`TRUNCATE`/无范�
 | 模块 | 作用 |
 |---|---|
 | `CLAUDE.md` | 始终加载的简短操作契约（角色 · 驱动 · 方法） |
+| `AGENTS.md` · `docs/ARCHITECTURE.md` | Codex 辅助契约 · Claude/Codex 共用的架构设计索引与变更协议 |
 | `docs/ROUTER.md` · `docs/WORKFLOW.md` · `docs/cognition/` | 路由 · 运行态工作流 · 判断纪律 |
 | `.claude/hooks/` | `safety_gate.py` + `safety_rules.json` —— L4 硬底线 |
 | `tools/harness/guard.py` | 限速 / 体上限 / 熔断器 / 会话预算 / 上传登记 |
