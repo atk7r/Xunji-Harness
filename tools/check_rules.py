@@ -80,8 +80,20 @@ REQUIRED_FILES = [
 ]
 
 REQUIRED_TEXT: dict[Path, list[str]] = {
-    Path("AGENTS.md"): ["docs/ARCHITECTURE.md"],
-    Path("CLAUDE.md"): ["docs/ARCHITECTURE.md"],
+    Path("AGENTS.md"): [
+        "docs/ARCHITECTURE.md",
+        "tools/harness/privacy.py",
+        "tools/harness/command_shape.py",
+    ],
+    Path("CLAUDE.md"): [
+        "docs/ARCHITECTURE.md",
+        "tools/harness/privacy.py",
+        "tools/harness/command_shape.py",
+    ],
+    Path("docs/WORKFLOW-reference.md"): [
+        "tools/harness/privacy.py",
+        "tools/harness/command_shape.py",
+    ],
     Path("docs/ARCHITECTURE.md"): [
         "## 4. 当前架构",
         "## 6. 过渡架构",

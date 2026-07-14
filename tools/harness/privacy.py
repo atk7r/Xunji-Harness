@@ -31,6 +31,21 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
+try:
+    from .command_shape import (
+        FIXTURE as COMMAND_SHAPE_FIXTURE,
+        ROOT as PROJECT_ROOT,
+        has_unquoted_shell_control,
+        local_setup_metadata_invocation,
+    )
+except ImportError:  # direct ``python tools/harness/privacy.py`` selftest
+    from command_shape import (  # type: ignore[no-redef]
+        FIXTURE as COMMAND_SHAPE_FIXTURE,
+        ROOT as PROJECT_ROOT,
+        has_unquoted_shell_control,
+        local_setup_metadata_invocation,
+    )
+
 
 class OutboundPrivacyError(ValueError):
     """Raised before I/O when target-facing bytes violate the privacy policy."""
@@ -96,14 +111,27 @@ _PAYLOAD_FLAGS = frozenset({
 })
 _AUTH_CLI_FLAGS = frozenset({"-b", "--cookie", "-u", "--user", "--oauth2-bearer"})
 _NETWORK_TOOL_RE = re.compile(
-    r"(?:^|[;&|\s])(?:curl|wget|http|xh|websocat|wscat)(?:\s|$)|"
+    r"(?:^|[;&|\s/])(?:curl|wget|http|xh|websocat|wscat)(?:\s|$)|"
     r"tools/(?:probe|render|scan|exploit)\.py|tools/sensors/[a-z0-9_-]+\.py",
     re.IGNORECASE,
 )
 _CUSTOM_NETWORK_EXEC_RE = re.compile(
-    r"(?:^|[;&|\s])(?:python(?:3(?:\.\d+)?)?|node|ruby|perl|php|bash|sh|zsh|pwsh|powershell|\./[^\s]+)(?:\s|$)",
+    r"(?:^|[;&|\s])(?:python(?:3(?:\.\d+)?)?|node|ruby|perl|php|bash|sh|zsh|pwsh|powershell|(?:\.{1,2}/|/)[^\s]+)(?:\s|$)",
     re.IGNORECASE,
 )
+_URL_TEXT_RE = re.compile(r"(?:https?|wss?|ftp)://[^\s\"'<>]+", re.IGNORECASE)
+_AUTH_HEADER_BLOCK_RE = re.compile(
+    r"(?im)(?P<prefix>^[ \t]*(?:authorization|proxy-authorization|cookie|set-cookie|"
+    r"x-api-key|x-auth-token|x-csrf-token|x-xsrf-token)[ \t]*[:=][ \t]*)"
+    r"(?P<value>[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*)"
+)
+_URL_SECRET_KEY_RE = re.compile(
+    r"^(?:key|access[_-]?key|credential|signature|sig)$", re.IGNORECASE
+)
+_NETWORK_SCRIPT_NAMES = frozenset({"probe.py", "render.py", "scan.py", "exploit.py"})
+_NETWORK_CLI_NAMES = frozenset({"curl", "wget", "http", "xh", "websocat", "wscat"})
+_ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.DOTALL)
+_PYTHON_NAME_RE = re.compile(r"python(?:3(?:\.\d+){0,2})?", re.IGNORECASE)
 
 
 def _digest(value: str | bytes) -> str:
@@ -597,7 +625,7 @@ def redact_url(url: str) -> tuple[str, list[str]]:
         redactions.append("url.path")
     pairs = []
     for key, value in parse_qsl(parsed.query, keep_blank_values=True):
-        if _SENSITIVE_KEY_RE.search(key):
+        if _SENSITIVE_KEY_RE.search(key) or _URL_SECRET_KEY_RE.search(key):
             pairs.append((key, _redaction("query", value)))
             redactions.append(f"url.query.{key}")
         else:
@@ -653,9 +681,34 @@ def contains_redaction(value) -> bool:
     return bool(_REDACTION_RE.search(str(value)))
 
 
-def sanitize_text_for_log(value: str) -> str:
-    safe, _ = _redact_text(str(value or ""))
+def sanitize_model_egress_text(value: str) -> str:
+    """Hard-redact model/log egress; caller consent cannot disable this pass."""
+    text = str(value or "")
+
+    def redact_url_match(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        # Keep common sentence punctuation outside the URL replacement.
+        trimmed = raw.rstrip(".,);]}")
+        suffix = raw[len(trimmed):]
+        try:
+            safe, _ = redact_url(trimmed)
+            return safe + suffix
+        except ValueError:
+            return _redaction("url", trimmed) + suffix
+
+    text = _URL_TEXT_RE.sub(redact_url_match, text)
+    text = _AUTH_HEADER_BLOCK_RE.sub(
+        lambda m: m.group("prefix") + _redaction("header", m.group("value")), text
+    )
+    text = _RAW_SECRET_VALUE_RE.sub(
+        lambda m: m.group("prefix") + _redaction("field", m.group("value")), text
+    )
+    safe, _ = _redact_text(text)
     return safe
+
+
+def sanitize_text_for_log(value: str) -> str:
+    return sanitize_model_egress_text(value)
 
 
 def _read_payload_file(token: str) -> tuple[str | bytes | None, str]:
@@ -677,11 +730,37 @@ def outbound_command_privacy_reason(command: str, *,
         command = _LEGACY_ARTIFACT_RE.sub("legacy-proof.txt", command)
     if not re.search(r"(?:https?|wss?|ftp)://", command, re.IGNORECASE):
         return ""
+    if has_unquoted_shell_control(command, reject_comments=False):
+        return "URL-bearing command contains shell control, expansion, comment, or redirection and cannot be inspected as one exact argv"
+    if local_setup_metadata_invocation(command, root=PROJECT_ROOT) is not None:
+        return ""
     try:
-        tokens = shlex.split(command, comments=True, posix=True)
+        tokens = shlex.split(command, comments=False, posix=True)
     except ValueError:
         return "target command cannot be parsed for outbound privacy"
-    known_network_tool = bool(_NETWORK_TOOL_RE.search(command))
+    executable_index = 0
+    while (executable_index < len(tokens)
+           and _ENV_ASSIGNMENT_RE.fullmatch(tokens[executable_index])):
+        executable_index += 1
+    executable = Path(tokens[executable_index]).name.lower() \
+        if executable_index < len(tokens) else ""
+    network_marker = bool(_NETWORK_TOOL_RE.search(command))
+    known_network_tool = network_marker and executable in _NETWORK_CLI_NAMES
+    if _PYTHON_NAME_RE.fullmatch(executable) and executable_index + 1 < len(tokens):
+        raw_script = Path(tokens[executable_index + 1])
+        script = raw_script if raw_script.is_absolute() else PROJECT_ROOT / raw_script
+        try:
+            script = script.resolve()
+            sensors = (PROJECT_ROOT / "tools" / "sensors").resolve()
+            known_network_tool = network_marker and ((
+                script.parent == (PROJECT_ROOT / "tools").resolve()
+                and script.name in _NETWORK_SCRIPT_NAMES
+            ) or (
+                script.parent == sensors
+                and bool(re.fullmatch(r"[a-z0-9_-]+\.py", script.name, re.IGNORECASE))
+            ))
+        except OSError:
+            known_network_tool = False
     if not known_network_tool and _CUSTOM_NETWORK_EXEC_RE.search(command):
         return "custom target-facing scripts are not an enforceable egress boundary; use guarded probe/render/scan/sensors or author-and-handoff"
     guarded_auth_exception = (
@@ -701,10 +780,15 @@ def outbound_command_privacy_reason(command: str, *,
         if re.match(r"(?:https?|wss?|ftp)://", token, re.IGNORECASE):
             try:
                 parsed = urlsplit(token)
+                if parsed.username is not None:
+                    return "URL userinfo requires a guarded explicit authentication path"
                 reason = privacy_reason(parsed.path, allow_generic_pii=guarded_auth_exception)
                 if reason:
                     return f"URL path contains {reason}"
-                for _key, value in parse_qsl(parsed.query, keep_blank_values=True):
+                for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+                    if (_SENSITIVE_KEY_RE.search(key) or _URL_SECRET_KEY_RE.search(key)) \
+                            and not guarded_auth_exception:
+                        return "query contains an authentication or sensitive field that requires guarded explicit auth exception"
                     reason = privacy_reason(value, allow_generic_pii=guarded_auth_exception)
                     if reason:
                         return f"query value contains {reason}"
@@ -778,6 +862,16 @@ def outbound_command_privacy_reason(command: str, *,
 def selftest() -> int:
     checks: list[tuple[str, bool]] = []
     marker = neutral_marker("proof", date="20260713", nonce="a1b2c3d4")
+    shape_cases = json.loads(COMMAND_SHAPE_FIXTURE.read_text(encoding="utf-8"))["cases"]
+    for case in shape_cases:
+        if "privacy" not in case:
+            continue
+        command = str(case["command"]).replace("{ROOT}", str(PROJECT_ROOT))
+        reason = outbound_command_privacy_reason(command)
+        checks.append((
+            f"privacy-command-shape fixture: {case['name']}",
+            (reason == "") if case["privacy"] == "allow" else bool(reason),
+        ))
     artifact = neutral_artifact_name("proof", ".txt", date="20260713", nonce="a1b2c3d4")
     checks.extend([
         ("neutral marker", marker == "proof-20260713-a1b2c3d4"),
@@ -919,6 +1013,26 @@ def selftest() -> int:
          bool(outbound_command_privacy_reason(
              "python custom_sender.py https://target.test/"
          ))),
+        ("unguarded Node target script denied",
+         bool(outbound_command_privacy_reason(
+             "node custom_sender.js https://target.test/"
+         ))),
+        ("unguarded Ruby target script denied",
+         bool(outbound_command_privacy_reason(
+             "ruby custom_sender.rb https://target.test/"
+         ))),
+        ("absolute custom target executable denied",
+         bool(outbound_command_privacy_reason(
+             "/tmp/custom_sender https://target.test/"
+         ))),
+        ("parent-relative custom target executable denied",
+         bool(outbound_command_privacy_reason(
+             "../custom_sender https://target.test/"
+         ))),
+        ("absolute Python interpreter custom sender denied",
+         bool(outbound_command_privacy_reason(
+             "/usr/bin/python3 custom_sender.py https://target.test/"
+         ))),
         ("inline custom target script still denied despite guard-name text",
          bool(outbound_command_privacy_reason(
              "python -c \"RequestRecorder.validate('GET','https://target.test/')\""
@@ -927,11 +1041,37 @@ def selftest() -> int:
          outbound_command_privacy_reason(
              "python tools/probe.py POST https://target.test/login --data email=person@real.example.cn --allow-sensitive-auth"
          ) == ""),
+        ("raw URL userinfo denied",
+         bool(outbound_command_privacy_reason(
+             "curl https://operator:hunter2@target.test/private"
+         ))),
+        ("raw sensitive query denied",
+         bool(outbound_command_privacy_reason(
+             "curl 'https://target.test/private?token=hunter2'"
+         ))),
     ])
+    safe_log = sanitize_model_egress_text(
+        "Authorization: Bearer hunter2\n"
+        "python tools/setup_run.py alpha --target "
+        "'https://operator:hunter2@target.test/path?key=opaque&note=ok'"
+    )
+    checks.append((
+        "model/log egress hard-redacts headers, userinfo, and sensitive query",
+        "hunter2" not in safe_log and "opaque" not in safe_log
+        and "operator" not in safe_log and "note=ok" in safe_log,
+    ))
+    folded_log = sanitize_model_egress_text(
+        "Authorization: Bearer first-line\n\tcontinuation-secret\nX-Note: keep"
+    )
+    checks.append((
+        "model/log egress redacts folded authentication header continuations",
+        "first-line" not in folded_log and "continuation-secret" not in folded_log
+        and "X-Note: keep" in folded_log,
+    ))
     with tempfile.TemporaryDirectory() as td:
         safe_file = Path(td) / "proof-20260713-a1b2c3d4.txt"
         safe_file.write_text("proof-20260713-a1b2c3d4", encoding="utf-8")
-        safe_upload = f"curl -F file=@{safe_file};filename=proof-20260713-a1b2c3d4.txt https://target.test/upload"
+        safe_upload = f"curl -F 'file=@{safe_file};filename=proof-20260713-a1b2c3d4.txt' https://target.test/upload"
         checks.append(("inspectable neutral raw upload allowed",
                        outbound_command_privacy_reason(safe_upload) == ""))
         safe_file.write_text("marker=xunji-proof", encoding="utf-8")

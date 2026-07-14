@@ -134,5 +134,6 @@ Then grep for stale claims:
 rg -n "arkcli panel|kimi-k2.7-code|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
 ```
 
-If the change affects `.claude/hooks/`, `tools/harness/guard.py`, or `sentinel/`,
+If the change affects `.claude/hooks/`, `tools/harness/privacy.py`,
+`tools/harness/command_shape.py`, `tools/harness/guard.py`, or `sentinel/`,
 also follow `xunji-reviewops` safety-critical review requirements.

@@ -36,6 +36,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -50,6 +51,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import proxy as proxymod          # noqa: E402  模型调用【绝不】走交战代理(剥代理 env + 空 opener)
 from harness import codex_proxy                # noqa: E402  Codex CLI 专用代理通道
+from harness import privacy as privacymod      # noqa: E402  model-egress hard redaction
 from evidence_parse import parse_evidence      # noqa: E402  Codex 裁决事实源: evidence_index, 不是散文叙事
 CONFIG_PATH = ROOT / "review" / "peer_review.json"
 DEFAULT_DRIVER = "claude"
@@ -98,7 +100,7 @@ DEFAULT_CONFIG: dict = {
         # Claude Code CLI: 走 `claude -p`, 不直连 Anthropic Messages API。对 Claude 主驾是同族兜底;
         # 对 Codex-authored diff 是独立 reviewer。
         "claude": {"kind": "claude-code-cli", "cmd": "claude", "effort": "high",
-                   "permission_mode": "dontAsk", "tools": "Read,Grep,Glob",
+                   "permission_mode": "dontAsk",
                    "heterogeneous": False},
     },
 }
@@ -318,10 +320,36 @@ def _sha1_file(path: Path) -> str:
 
 
 def _redact_text(text: str) -> str:
-    out = text
+    out = privacymod.sanitize_model_egress_text(text)
     for pat, repl in REDACTION_PATTERNS:
         out = pat.sub(repl, out)
     return out
+
+
+def _model_egress_value(value):
+    """Return a redacted copy of arbitrary bundle data before any model call."""
+    if isinstance(value, str):
+        return _redact_text(value)
+    if isinstance(value, list):
+        return [_model_egress_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_model_egress_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _model_egress_value(item) for key, item in value.items()}
+    return value
+
+
+def _model_egress_bundle(bundle: dict) -> dict:
+    safe = _model_egress_value(bundle)
+    if not isinstance(safe, dict):
+        raise TypeError("review bundle must be an object")
+    marker = safe.get("egress_redaction")
+    if not isinstance(marker, dict):
+        marker = {}
+        safe["egress_redaction"] = marker
+    marker["enabled"] = True
+    marker["mandatory"] = True
+    return safe
 
 
 def _diff_summary(text: str, *, file_cap: int = 120, hunk_cap: int = 240) -> dict:
@@ -830,23 +858,32 @@ def _run_codex(scope_dir: Path, rubric: str, b: dict, timeout: int,
                bundle: dict | None = None,
                artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
                max_bundle_chars: int = BUNDLE_CHAR_CAP) -> ReviewResult:
-    # Codex reads the frozen review_bundle.json on disk; it does not rebuild or
-    # inline the bundle, so excerpt sizing is controlled by review()/review_panel().
-    rel = scope_dir.relative_to(ROOT).as_posix() if scope_dir.is_relative_to(ROOT) else str(scope_dir)
-    prompt = (f"Review the CLOSED red-team run at {rel}. You may read any file under that "
-              f"directory (read-only). Prefer {rel}/review/review_bundle.json as the frozen input. "
-              f"Treat report.md/review.md/decisions.md as claims; facts must come from evidence_index "
-              f"and artifact hashes. Do not read or modify anything outside it.\n\n{rubric}")
-    argv = [b.get("cmd", "codex"), "exec", "-s", b.get("sandbox", "read-only")]
+    safe_bundle = _model_egress_bundle(bundle or build_review_bundle(
+        scope_dir, redact_egress=True,
+        artifact_excerpt_chars=artifact_excerpt_chars,
+        max_bundle_chars=max_bundle_chars))
+    context = _bundle_context(safe_bundle)
+    cap = _context_cap(PER_FILE_CAP * 8, max_bundle_chars)
+    if len(context) > cap:
+        context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars]"
+    prompt = (
+        "Review only the frozen, model-egress-redacted JSON below. Do not inspect local files. "
+        "Treat narrative claims as claims; facts must cite evidence_index entries or artifact hashes.\n\n"
+        f"{_redact_text(rubric)}\n\nReview bundle JSON:\n\n{context}"
+    )
+    argv = [b.get("cmd", "codex"), "exec", "--skip-git-repo-check",
+            "--ephemeral", "--ignore-user-config", "--ignore-rules",
+            "-s", b.get("sandbox", "read-only")]
     if b.get("model"):
         argv.extend(["-m", b["model"]])
     if b.get("effort"):
         argv.extend(["-c", f'model_reasoning_effort={b["effort"]}'])
     try:
-        proc = subprocess.run(argv, input=prompt, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace",
-                              cwd=str(ROOT), timeout=timeout,
-                              env=codex_proxy.codex_env())   # Codex CLI 走专用代理通道(与交战/模型API 隔离)
+        with tempfile.TemporaryDirectory(prefix="xunji-review-") as review_cwd:
+            proc = subprocess.run(argv, input=prompt, capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace",
+                                  cwd=review_cwd, timeout=timeout,
+                                  env=codex_proxy.codex_env())   # Codex CLI 走专用代理通道(与交战/模型API 隔离)
     except subprocess.TimeoutExpired:
         return ReviewResult(verdict="ERROR", backend_used="codex",
                             error=f"codex 超时(>{timeout}s)")
@@ -865,19 +902,19 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,
     if not key:
         return ReviewResult(verdict="ERROR", backend_used=name,
                             error=f"缺 {b.get('api_key_env')} 环境变量")
-    context = _bundle_context(bundle or build_review_bundle(
+    context = _bundle_context(_model_egress_bundle(bundle or build_review_bundle(
         scope_dir,
         redact_egress=True,
         artifact_excerpt_chars=artifact_excerpt_chars,
-        max_bundle_chars=max_bundle_chars))
+        max_bundle_chars=max_bundle_chars)))
     cap = _context_cap(PER_FILE_CAP * 8, max_bundle_chars)
     if len(context) > cap:
         context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars]"
     payload = {
         "model": b["model"], "temperature": 0,
         "messages": [
-            {"role": "system", "content": rubric},
-            {"role": "user", "content": f"Run audit trail (read-only) for {scope_dir.name}:\n\n{context}"},
+            {"role": "system", "content": _redact_text(rubric)},
+            {"role": "user", "content": f"Frozen review bundle (read-only):\n\n{context}"},
         ],
     }
     req = urllib.request.Request(
@@ -972,11 +1009,11 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
     models = b.get("models") or []
     model_ids = [_arkcli_model_id(m) for m in models if _arkcli_model_id(m)]
     backend_used = "arkcli:" + "+".join(model_ids)
-    context = _bundle_context(bundle or build_review_bundle(
+    context = _bundle_context(_model_egress_bundle(bundle or build_review_bundle(
         scope_dir,
         redact_egress=True,
         artifact_excerpt_chars=artifact_excerpt_chars,
-        max_bundle_chars=max_bundle_chars))
+        max_bundle_chars=max_bundle_chars)))
     cap = _context_cap(int(b.get("max_context_chars") or (PER_FILE_CAP * 5)), max_bundle_chars)
     if len(context) > cap:
         context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars for arkcli panel]"
@@ -986,8 +1023,8 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
         "Your output is a candidate review note, not a final decision. "
         "Treat report.md/review.md/decisions.md as claims; facts must cite evidence_index entries "
         "or artifact hashes from the review_bundle.\n\n"
-        f"{rubric}\n\n"
-        f"Run audit trail (read-only) for {scope_dir.name}:\n\n{context}"
+        f"{_redact_text(rubric)}\n\n"
+        f"Frozen review bundle (read-only):\n\n{context}"
     )
     results: list[tuple[str, ReviewResult]] = []
     errors: list[str] = []
@@ -1058,22 +1095,20 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,
     if shutil.which(cmd_name) is None:
         return ReviewResult(verdict="ERROR", backend_used="claude:code-cli",
                             error=f"claude code cli not found: {cmd_name}")
-    context = _bundle_context(bundle or build_review_bundle(
+    context = _bundle_context(_model_egress_bundle(bundle or build_review_bundle(
         scope_dir,
         redact_egress=True,
         artifact_excerpt_chars=artifact_excerpt_chars,
-        max_bundle_chars=max_bundle_chars))
+        max_bundle_chars=max_bundle_chars)))
     cap = _context_cap(PER_FILE_CAP * 8, max_bundle_chars)
     if len(context) > cap:
         context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars]"
 
-    rel = scope_dir.relative_to(ROOT).as_posix() if scope_dir.is_relative_to(ROOT) else str(scope_dir)
     prompt = (
         "You are running as Claude Code CLI in non-interactive fresh-context mode.\n"
         "You are a reviewer only: read-only, no edits, no active probing, no shell commands.\n"
-        f"Scope directory: {rel}\n\n"
-        f"{rubric}\n\n"
-        f"Review bundle JSON for {scope_dir.name}:\n\n{context}"
+        f"{_redact_text(rubric)}\n\n"
+        f"Frozen review bundle JSON:\n\n{context}"
     )
     cmd = [
         str(cmd_name),
@@ -1086,14 +1121,14 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,
         cmd += ["--effort", str(b.get("effort"))]
     if b.get("model"):
         cmd += ["--model", str(b.get("model"))]
-    if "tools" in b:
-        cmd += ["--tools", str(b.get("tools") or "")]
-    # If tools are enabled in private config, keep Claude scoped to the reviewed tree.
-    cmd += ["--add-dir", str(scope_dir)]
+    # Model reviewers receive only the hard-redacted frozen bundle.  Operator
+    # consent may choose the backend but cannot grant raw filesystem/model egress.
+    cmd += ["--tools", ""]
     try:
-        proc = subprocess.run(cmd, input=prompt, text=True, capture_output=True,
-                              cwd=str(scope_dir), env=proxymod.model_safe_env(),
-                              timeout=timeout)
+        with tempfile.TemporaryDirectory(prefix="xunji-review-") as review_cwd:
+            proc = subprocess.run(cmd, input=prompt, text=True, capture_output=True,
+                                  cwd=review_cwd, env=proxymod.model_safe_env(),
+                                  timeout=timeout)
     except Exception as e:
         return ReviewResult(verdict="ERROR", backend_used="claude:code-cli",
                             error=f"claude code cli failed: {e}")
@@ -1205,7 +1240,8 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
     cfg = config or load_config()
     driver = _normalize_driver(driver)
     egress_cfg = cfg.get("egress", {})
-    redact_egress = bool(egress_cfg.get("redact_secrets", True))
+    # Redaction is a hard model-egress boundary, not a configurable preference.
+    redact_egress = True
     include_artifacts = str(egress_cfg.get("include_artifacts", "snippets"))
     artifact_excerpt_chars = _artifact_excerpt_cap(egress_cfg.get("artifact_excerpt_chars"))
     max_bundle_chars = _bundle_char_cap(egress_cfg.get("max_bundle_chars"))
@@ -1414,7 +1450,7 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
             f"panel completed {hetero_count}/{min_heterogeneous} required heterogeneous backends")
 
     bundle = build_review_bundle(scope, write=True,
-                                 redact_egress=bool(cfg.get("egress", {}).get("redact_secrets", True)),
+                                 redact_egress=True,
                                  include_artifacts=str(cfg.get("egress", {}).get("include_artifacts", "snippets")),
                                  artifact_excerpt_chars=_artifact_excerpt_cap(
                                      cfg.get("egress", {}).get("artifact_excerpt_chars")),
@@ -1844,6 +1880,15 @@ def _selftest() -> int:
     b_unredacted = build_review_bundle(d_run, redact_egress=False)
     redacted_blob = json.dumps(b_redacted, ensure_ascii=False)
     unredacted_blob = json.dumps(b_unredacted, ensure_ascii=False)
+    mandatory_egress = _model_egress_bundle({
+        "claims": {
+            "secret": "Authorization: Bearer model-secret-1234\n"
+                      "https://operator:model-pass@target.test/path?key=opaque&note=ok",
+            "pii": "person@real.example.cn 13800138000",
+        },
+        "egress_redaction": {"enabled": False},
+    })
+    mandatory_blob = json.dumps(mandatory_egress, ensure_ascii=False)
     (d_run / "long.txt").write_text("A" * 1300 + "KEEP_TAIL", encoding="utf-8")
     (d_run / "evidence.md").write_text(
         "# Evidence Ledger\n\n## E-001 — x\n- Certainty: 0.8\n- Control: yes\n"
@@ -1919,6 +1964,12 @@ def _selftest() -> int:
         ("bundle 写入 review/review_bundle.json", (d_run / "review" / "review_bundle.json").exists()),
         ("bundle redacts obvious bearer token",
          "abcdefghijk123456" not in redacted_blob and "abcdefghijk123456" in unredacted_blob),
+        ("model egress redaction cannot be disabled by bundle metadata",
+         mandatory_egress["egress_redaction"]["enabled"] is True
+         and mandatory_egress["egress_redaction"]["mandatory"] is True
+         and all(raw not in mandatory_blob for raw in (
+             "model-secret-1234", "model-pass", "opaque",
+             "person@real.example.cn", "13800138000"))),
         ("bundle artifact excerpt keeps evidence after old 1200 char cap",
          "KEEP_TAIL" in long_art.get("excerpt", "")),
         ("bundle artifact excerpt cap remains configurable",
@@ -2077,7 +2128,7 @@ def main() -> int:
         bundle = build_review_bundle(
             scope,
             write=True,
-            redact_egress=bool(egress_cfg.get("redact_secrets", True)),
+            redact_egress=True,
             include_artifacts=str(egress_cfg.get("include_artifacts", "snippets")),
             artifact_excerpt_chars=_artifact_excerpt_cap(egress_cfg.get("artifact_excerpt_chars")),
             max_bundle_chars=_bundle_char_cap(egress_cfg.get("max_bundle_chars")),

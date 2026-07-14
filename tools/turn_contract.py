@@ -35,6 +35,10 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import run_model  # noqa: E402
 import runtime_receipts  # noqa: E402
+from harness.command_shape import (  # noqa: E402
+    has_unquoted_shell_control as _has_unquoted_shell_control,
+    parse_exact_python_command,
+)
 
 
 SCHEMA = "xunji.turn_contract.v1"
@@ -667,64 +671,13 @@ def _readonly_shell(command: str) -> bool:
 
 
 def _control_invocation(command: str) -> tuple[Path, list[str]] | None:
-    """Parse one exact in-repo Python control command, with benign fd folding."""
-    normalized = command.strip()
-    for suffix in (" 2>&1", " 2>/dev/null"):
-        if normalized.endswith(suffix):
-            normalized = normalized[:-len(suffix)].rstrip()
-            break
-    if _has_unquoted_shell_control(normalized):
+    """Parse one exact in-repo Python control command."""
+    invocation = parse_exact_python_command(
+        command, root=ROOT, allowed_scripts=CONTROL_SCRIPTS
+    )
+    if invocation is None:
         return None
-    try:
-        tokens = shlex.split(normalized)
-    except ValueError:
-        return None
-    if len(tokens) < 2 or not re.fullmatch(
-        r"python(?:3(?:\.\d+){0,2})?", Path(tokens[0]).name
-    ):
-        return None
-    script = Path(tokens[1])
-    if not script.is_absolute():
-        script = ROOT / script
-    script = script.resolve()
-    if script not in CONTROL_SCRIPTS:
-        return None
-    return script, tokens[2:]
-
-
-def _has_unquoted_shell_control(command: str) -> bool:
-    """Reject shell control syntax while allowing punctuation inside quoted data."""
-    quote = ""
-    escaped = False
-    i = 0
-    while i < len(command):
-        char = command[i]
-        if escaped:
-            escaped = False
-            i += 1
-            continue
-        if quote == "'":
-            if char == "'":
-                quote = ""
-            i += 1
-            continue
-        if quote == '"':
-            if char == "\\":
-                escaped = True
-            elif char == '"':
-                quote = ""
-            elif char == "`" or command.startswith("$(", i) or command.startswith("${", i):
-                return True
-            i += 1
-            continue
-        if char in {"'", '"'}:
-            quote = char
-        elif char in ";&|><`\n\r" or command.startswith("$(", i) or command.startswith("${", i):
-            return True
-        elif char == "\\":
-            escaped = True
-        i += 1
-    return bool(quote or escaped)
+    return invocation.script, list(invocation.args)
 
 
 def _fanout_control_bash(command: str) -> bool:
@@ -1435,6 +1388,7 @@ def _selftest() -> int:
         f"python3 {ROOT / 'tools' / 'workers.py'} list {run} | cat",
         f"python3 {ROOT / 'tools' / 'workers.py'} list {run} && echo unsafe",
         f"python3 {ROOT / 'tools' / 'workers.py'} list {run} > /tmp/forged",
+        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} 2>&1",
         (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
          '--status blocked --note "Reason: $(id); Front: F-001"'),
         (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
@@ -1452,7 +1406,7 @@ def _selftest() -> int:
         f"python3 {ROOT / 'tools' / 'workers.py'} list {run} \\",
     ]
     setup_control = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} next {root / 'recon.json'} 2>&1"}}
+        "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} next {root / 'recon.json'}"}}
     journal_control = {"tool_name": "Bash", "tool_input": {
         "command": f"python3 {ROOT / 'tools' / 'loop_journal.py'} {run} start --note begin"}}
     clear_active = {"tool_name": "Bash", "tool_input": {
@@ -1506,14 +1460,12 @@ def _selftest() -> int:
         evaluate_pretool(run, workers_escaped_substitution_literal, contract) == ""
         and _control_invocation(
             workers_escaped_substitution_literal["tool_input"]["command"]) is not None)
-    ansi_c_literal_allowed = (
-        evaluate_pretool(run, workers_ansi_c_literal_control, contract) == ""
-        and _control_invocation(
-            workers_ansi_c_literal_control["tool_input"]["command"]) is not None)
-    trailing_comment_control_allowed = (
-        evaluate_pretool(run, workers_trailing_comment_control, contract) == ""
-        and _control_invocation(
-            workers_trailing_comment_control["tool_input"]["command"]) is not None)
+    ansi_c_literal_rejected = (
+        _control_invocation(
+            workers_ansi_c_literal_control["tool_input"]["command"]) is None)
+    trailing_comment_control_rejected = (
+        _control_invocation(
+            workers_trailing_comment_control["tool_input"]["command"]) is None)
     workers_shell_chain_rejected = _control_invocation(workers_shell_chain) is None
     adversarial_controls_fail_closed = all(
         _control_invocation(command) is None
@@ -1685,7 +1637,7 @@ def _selftest() -> int:
         input=json.dumps({
             "hook_event_name": "PreToolUse", "session_id": "s-bootstrap",
             "tool_name": "Bash", "tool_input": {
-                "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} bootstrap {root / 'recon.json'} --date 20260101 2>&1"},
+                "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} bootstrap {root / 'recon.json'} --date 20260101"},
         }),
         text=True, capture_output=True, env=env, timeout=10,
     )
@@ -2203,10 +2155,10 @@ def _selftest() -> int:
          single_quoted_literals_allowed),
         ("backslash-escaped substitution remains literal control data",
          escaped_substitution_literal_allowed),
-        ("ANSI-C quoted substitutions remain literal control data",
-         ansi_c_literal_allowed),
-        ("trailing shell comments cannot turn control into target egress",
-         trailing_comment_control_allowed),
+        ("ANSI-C shell expansion is not accepted as exact control argv",
+         ansi_c_literal_rejected),
+        ("trailing shell comments are not accepted as exact control argv",
+         trailing_comment_control_rejected),
         ("unquoted shell chaining cannot impersonate a control command",
          workers_shell_chain_rejected),
         ("adversarial shell syntax fails closed through evaluate_pretool",

@@ -441,6 +441,7 @@ Only two pauses; each requires a codex gate before the pause:
   brute-force lock · upload cleanup) and routes through it; the skill + hook define its
   limits.
 - Before declaring a **behavior change to safety-critical code** done (`.claude/hooks/`
+  · `tools/harness/privacy.py` · `tools/harness/command_shape.py`
   · `tools/harness/guard.py` · `sentinel/`): get an independent fresh-context review,
   record it under `review/records/`; self-review doesn't fix self-review bias. See
   reference "Independent review of safety-critical code".

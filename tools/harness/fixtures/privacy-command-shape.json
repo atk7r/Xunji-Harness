@@ -1,0 +1,117 @@
+{
+  "schema": "xunji.privacy-command-shape.v1",
+  "cases": [
+    {
+      "name": "exact setup target metadata",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target 'https://example.test/path?key=opaque' --date 20260714",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "quoted ampersand and semicolon are data",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target 'https://example.test/path?note=a&semi=one;two'",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "setup unknown option",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ --future-mode yes",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "setup classify is active egress",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ --classify",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "compound semicolon",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ ; python3 custom_sender.py https://target.test/",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "compound and",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ && node sender.js https://target.test/",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "compound pipe",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ | ruby sender.rb https://target.test/",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "subshell",
+      "command": "(python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/)",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "command substitution",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target $(printf https://example.test/)",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "backtick substitution",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target `printf https://example.test/`",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "output redirection",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ > setup.log",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "loop bootstrap is not a network tool",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py alpha https://example.test/recon.json",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "loop journal is not a network tool",
+      "command": "python3 {ROOT}/tools/loop_journal.py https://example.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "statusline is not a network tool",
+      "command": "python3 {ROOT}/tools/xunji_statusline.py --set-active https://example.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "absolute custom sender",
+      "command": "/tmp/custom_sender https://target.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "absolute Python custom sender",
+      "command": "/usr/bin/python3 custom_sender.py https://target.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    }
+  ]
+}

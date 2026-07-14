@@ -128,7 +128,7 @@ Operator prompt
 Target-facing capability
   -> PreToolUse authority/safety gate
   -> typed Python tool/wrapper
-  -> scope + privacy + proxy + guard/budget
+  -> exact command channel + scope + privacy + proxy + guard/budget
   -> target
   -> redacted replay/artifact + receipt + evidence candidate
 
@@ -146,7 +146,7 @@ Observe-only side path
 | Root control plane | `CLAUDE.md`、state graph、Agent Board | 选前沿、分工、冲突调度、持续推进 | 不绕过 hook/guard，不直接伪造 finding |
 | Cognition / knowledge | `docs/cognition/`、`knowledge/` | 推理纪律、签名和弱点接地 | 不成为盲扫 playbook 或确认依据 |
 | Capability tools | `tools/probe.py`、`render.py`、`scan.py` 等 | 受控请求、浏览器、扫描器和离线分析 | 不建立裸网络出口 |
-| Runtime guard | `.claude/hooks/`、`tools/harness/guard.py`、privacy/proxy | authority、effect、速率、体量、出站隐私、receipt | 不替模型选择攻击策略 |
+| Runtime guard | `.claude/hooks/`、`tools/harness/command_shape.py`、privacy/proxy/guard | authority、exact argv、effect、速率、体量、出站隐私、receipt | 不替模型选择攻击策略 |
 | Persistence | `runs/` canonical 文件、artifact、replay、journal | 跨会话事实、审计、恢复 | derived cache 不反写 canonical |
 | Synthesis | Single Synthesizer、evidence gate | 晋级、去重、certainty、report parity | Agent/reviewer 不直接批准结论 |
 | Review / closure | `review/`、`peer_review.py`、`check_run.py` | 独立挑战、ledger、机械收口条件 | reviewer confidence 不变证据 |
@@ -239,11 +239,18 @@ WAF/block page、scanner 标签和模型判断都不能单独确认。确认需�
 Xunji 管的是自动执行的效果和执行者，而不是禁止技术思考或利用代码编写。
 
 - Hook 是 live Claude runtime 的 authority/effect 执法边界。
+- URL-bearing Bash 先分成三个通道：真实 target network、精确 local lifecycle metadata、
+  model/reviewer egress。`command_shape.py` 只承认无 compound、redirect、substitution、
+  未知选项的单一 argv；本地 Setup URL 记录不伪装成网络工具。
 - guard 提供 scope、proxy、速率、响应体、session budget、host backoff、auth 失败、
   upload registry 等工具层控制。
 - privacy 在出站前检查 project/run/Agent/operator identity、PII、secret 和真实 payload
   bytes；redirect 每跳重新校验并在跨 origin 时清理认证。
 - replay/artifact 在记录前脱敏；不可恢复脱敏不能伪装成可重放验证。
+- 发给 Codex、arkcli、Claude 或其他模型的 source/review bundle 必须经过同一硬脱敏；
+  operator consent 只能选择是否使用外部模型，不能关闭 secret、PII、credential 或
+  internal identity 的 model-egress redaction。模型 reviewer 只接收冻结脱敏 bundle，
+  不获得原始 run 文件读取能力。
 - sentinel 观察和归因，不替代 Hook，也不因自己产生告警就自动获得阻断权。
 
 任何新 target-facing 能力都必须复用相同内部链，不允许为了方便建立裸 `fetch`、
@@ -361,6 +368,8 @@ CCB Agent Runtime
 | `.claude/skills/` | Claude 主驾驶按需方法/流程 | `docs/ROUTER.md`、相关 Tool/Hook/test |
 | `.agents/skills/` | Codex 辅助维护/复审知识 | 仅 Codex-side 或明确镜像共享变化 |
 | `.claude/hooks/` | Claude live runtime 的强制 authority/effect/lifecycle gates | safety skill、hook tests、独立复审 |
+| `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
+| `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
 | `tools/harness/guard.py` | 主动工具统一运行时护栏 | wrappers、privacy/proxy、fixtures、独立复审 |
 | `tools/` | lifecycle、state projection、evidence、review、sensors | canonical owner、error/receipt contract、selftests |
 | `docs/WORKFLOW*.md` | live run 核心/按需参考流程 | templates、check_run、skills |
@@ -460,15 +469,15 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-14
-- Scope: `AGENTS.md`、`CLAUDE.md`、`README.md`、`docs/ARCHITECTURE.md`、
-  `tools/check_rules.py`
-- Architecture impact: yes — 建立 CC/CCB + Xunji 融合原则、Codex 自治纪律、
-  current/transitional/target 分层、owner 地图、规则准入与每轮同步协议。
-- Verification: `tools/check_rules.py` PASS；`git diff --check` PASS；
-  `py_compile tools/check_rules.py` PASS；checkpoint positive/negative fixture PASS；
-  `tools/selftest_all.py` 60/60 PASS。
-- Independent review: `review/records/2026-07-14-xunji-architecture-core-review.md`
-  （Codex 综合 arkcli panel 与 Claude Code fresh-context，包含限制与处置）。
+- Scope: P0-1 command/privacy/model-egress boundary — `tools/harness/command_shape.py`、
+  `tools/harness/privacy.py`、`tools/turn_contract.py`、`tools/peer_review.py`、
+  `tools/check_rules.py`、Claude/Codex ReviewOps skills 与相应规范/fixtures。
+- Architecture impact: yes — 把 URL-bearing 命令拆成真实网络、精确本地生命周期元数据、
+  模型出站三通道；移除 lifecycle-as-network 白名单，并把 model-egress 脱敏设为不可配置硬门。
+- Verification: command-shape/privacy/safety-gate/turn-contract/peer-review/check-hook focused
+  selftests PASS；`tools/check_rules.py`、`git diff --check` PASS；`tools/selftest_all.py` 61/61 PASS。
+- Independent review: 最终 diff 将记录到
+  `review/records/2026-07-14-p0-command-privacy-boundary-review.md`，提交前绑定 staged fingerprint。
 
 ## 13. 外部设计来源与采用边界
 

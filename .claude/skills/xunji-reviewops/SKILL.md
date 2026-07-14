@@ -1,6 +1,6 @@
 ---
 name: xunji-reviewops
-description: ReviewOps discipline for Xunji autonomous runs. Use when reviewing run evidence, resolving peer_review PR ledger items, judging Codex/heterogeneous review findings, closing reports, handling check_run failures, replay/artifact QA, or declaring safety-critical changes to .claude/hooks/, tools/harness/guard.py, or sentinel/ done. Protects autonomous AI closure from self-deception without adding exploit playbooks.
+description: ReviewOps discipline for Xunji autonomous runs. Use when reviewing run evidence, resolving peer_review PR ledger items, judging Codex/heterogeneous review findings, closing reports, handling check_run failures, replay/artifact QA, or declaring safety-critical changes to hooks, privacy/command-shape, guard, or sentinel done. Protects autonomous AI closure from self-deception without adding exploit playbooks.
 ---
 
 # Xunji ReviewOps
@@ -39,8 +39,8 @@ Run a ReviewOps pass when any of these are true:
 - `review.md` contains `## Review Finding Ledger` with pending PR items.
 - Evidence, report text, replay status, or artifacts changed after a review.
 - A HIGH/CRITICAL or `certainty >= 0.8` item needs independent severity support.
-- A change alters behavior under `.claude/hooks/`, `tools/harness/guard.py`, or
-  `sentinel/`.
+- A change alters behavior under `.claude/hooks/`, `tools/harness/privacy.py`,
+  `tools/harness/command_shape.py`, `tools/harness/guard.py`, or `sentinel/`.
 
 ## Run Review Loop
 
@@ -129,6 +129,8 @@ reopen, verify, gather a missing control, fix the ledger, or downgrade the claim
 Use this path only for behavior changes to:
 
 - `.claude/hooks/`
+- `tools/harness/privacy.py`
+- `tools/harness/command_shape.py`
 - `tools/harness/guard.py`
 - `sentinel/`
 
@@ -163,6 +165,7 @@ Claude Code's responsibilities are acceptance-side only:
 - The record must name reviewers, note unavailable reviewer limitations, and tie
   dispositions to tests, diffs, artifacts, or rationale.
 - The narrow safety-critical gate above still applies to `.claude/hooks/`,
+  `tools/harness/privacy.py`, `tools/harness/command_shape.py`,
   `tools/harness/guard.py`, and `sentinel/`: run the required tests and write the
   independent review record before declaring the change done.
 

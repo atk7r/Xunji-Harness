@@ -715,6 +715,8 @@ The same self-review-bias fix applies beyond pentest runs to **safety-critical
 framework code** — the machinery that decides what is allowed or destructive:
 
 - `.claude/hooks/` (safety_gate + rules — the hard block)
+- `tools/harness/privacy.py` and `tools/harness/command_shape.py` (outbound/model-egress
+  redaction plus the exact-command classifier imported by the hard block)
 - `tools/harness/guard.py` (rate / volume / auth / body / circuit breakers)
 - `sentinel/` (behavior classification + autonomy decision + circuit breaker)
 

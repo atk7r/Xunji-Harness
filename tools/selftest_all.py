@@ -50,6 +50,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("render",         ["tools/render.py", "--selftest"],         "headless browser + --eval replay"),
     ("scan",           ["tools/scan.py", "--selftest"],           "scanner input privacy + proof-only defaults"),
     ("exploit",        ["tools/exploit.py", "--selftest"],        "exploit plugins inherit guarded probe egress"),
+    ("command_shape", ["tools/harness/command_shape.py"],          "exact local-control argv parser + compound-command rejection"),
     ("outbound_privacy", ["tools/harness/privacy.py"],             "target-facing identity/PII guard + redaction"),
     ("anti_drift",     ["tools/anti_drift.py", "--selftest"],     "anti-drift anchor (rules+process re-inject)"),
     ("proxy",          ["tools/harness/proxy.py", "--selftest"],  "engagement egress proxy (渗透走/模型不走)"),

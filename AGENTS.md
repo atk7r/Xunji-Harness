@@ -149,8 +149,9 @@ Codex is especially useful for:
 
 Codex may edit this repository when the operator asks for project maintenance,
 documentation cleanup, tooling review fixes, or non-live-run refactors. For
-safety-critical behavior changes to `.claude/hooks/`, `tools/harness/guard.py`,
-or `sentinel/`, the existing independent-review requirement in
+safety-critical behavior changes to `.claude/hooks/`,
+`tools/harness/privacy.py`, `tools/harness/command_shape.py`,
+`tools/harness/guard.py`, or `sentinel/`, the existing independent-review requirement in
 `docs/WORKFLOW-reference.md` still applies.
 
 When Codex authors a code or documentation diff, Codex keeps final synthesis and
