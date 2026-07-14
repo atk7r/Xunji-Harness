@@ -134,7 +134,8 @@ BACKGROUND_REVIEW_RE = re.compile(
 PROTECTED_RUNTIME_RE = re.compile(
     r"(?:runtime_events\.jsonl|runtime_projection_error\.json|coverage\.json|"
     r"asset_ledger\.json|\.runtime_events\.lock|"
-    r"turn_contract\.json|run_status\.json|"
+    r"turn_contract\.json|run_status\.json|setup_source\.json|setup_transaction\.json|"
+    r"\.xunji_(?:activation|setup)\.lock|\.xunji_staging|"
     r"assignments\.json|xunji_active_run|xunji_pending_turns|xunji_transition_claims|"
     r"review[/\\]receipts[/\\][0-9a-f]{64}\.json)"
     r"(?=[.\/\\\"'\s;|&}]|$)",
@@ -459,8 +460,25 @@ def claim_pending_contract(
     *,
     pending_dir: Path | None = None,
     claims_dir: Path | None = None,
+    transaction_id: str = "",
+    source_hash: str = "",
+    expected_run: str = "",
 ) -> dict:
-    """Consume the exact session contract authorized for this target run."""
+    """Consume the exact hook claim and bind it to one setup transaction.
+
+    Claim contents still come only from PreToolUse.  Transaction callers may
+    supply the mechanically derived transaction/source identity, but cannot
+    supply a session, prompt hash, authority bit, or claim path.
+    """
+    if expected_run and expected_run != target_run.name:
+        raise RuntimeError("transition claim expected run mismatch")
+    identity_values = (transaction_id, source_hash, expected_run)
+    if any(identity_values) and not all(identity_values):
+        raise RuntimeError("transition claim transaction identity is incomplete")
+    if transaction_id and not re.fullmatch(r"[0-9a-f]{32}", transaction_id):
+        raise RuntimeError("transition claim transaction id is invalid")
+    if source_hash and not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+        raise RuntimeError("transition claim source hash is invalid")
     directory = pending_dir or PENDING_DIR
     if not directory.is_dir():
         return {}
@@ -515,6 +533,12 @@ def claim_pending_contract(
     contract = dict(contract)
     contract["bound_run"] = target_run.name
     contract["transitioned_from"] = "pending:no-active-run"
+    if transaction_id:
+        contract["transition_transaction"] = {
+            "transaction_id": transaction_id,
+            "source_sha256": source_hash,
+            "expected_run": expected_run,
+        }
     _atomic_json(contract_path(target_run), contract)
     _write_run_status(target_run, contract)
     try:
@@ -567,10 +591,26 @@ def load_contract(run_dir: Path, *, session_id: str = "") -> dict:
     return data
 
 
-def transfer_contract(source_run: Path, target_run: Path) -> dict:
-    """Copy the current valid turn contract before an active-run pointer switch."""
+def transfer_contract(
+    source_run: Path,
+    target_run: Path,
+    *,
+    transaction_id: str = "",
+    source_hash: str = "",
+    expected_run: str = "",
+) -> dict:
+    """Copy and transaction-bind the contract before a pointer switch."""
     source_run = source_run.resolve()
     target_run = target_run.resolve()
+    identity_values = (transaction_id, source_hash, expected_run)
+    if any(identity_values) and not all(identity_values):
+        raise RuntimeError("contract transfer transaction identity is incomplete")
+    if expected_run and expected_run != target_run.name:
+        raise RuntimeError("contract transfer expected run mismatch")
+    if transaction_id and not re.fullmatch(r"[0-9a-f]{32}", transaction_id):
+        raise RuntimeError("contract transfer transaction id is invalid")
+    if source_hash and not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+        raise RuntimeError("contract transfer source hash is invalid")
     if source_run == target_run:
         return load_contract(source_run)
     source_contract = load_contract(source_run)
@@ -580,6 +620,12 @@ def transfer_contract(source_run: Path, target_run: Path) -> dict:
     contract.setdefault("origin_run", source_run.name)
     contract["bound_run"] = target_run.name
     contract["transitioned_from"] = source_run.name
+    if transaction_id:
+        contract["transition_transaction"] = {
+            "transaction_id": transaction_id,
+            "source_sha256": source_hash,
+            "expected_run": expected_run,
+        }
     _atomic_json(contract_path(target_run), contract)
     _write_run_status(target_run, contract)
     return contract
@@ -910,9 +956,30 @@ def _denial_is_target_action(event: dict, reason: str) -> bool:
         "清除 active-run 指针必须由当前操作者 prompt 明确授权",
         "长期记忆写入需要操作者",
         "peer_review 不得后台运行",
+        "setup transaction",
     )
     return _is_target_action(event) and not any(
         marker in reason for marker in local_policy_markers)
+
+
+def _setup_transaction_reason(run_dir: Path) -> str:
+    """Block work while a published setup transaction is not committed."""
+    path = run_dir / "state" / "setup_transaction.json"
+    if not path.exists():
+        return ""  # legacy run
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except Exception:
+        return "setup transaction receipt is unreadable; only read/recovery lifecycle actions are allowed."
+    if not isinstance(receipt, dict) or receipt.get("schema") != "xunji.setup_transaction.v1":
+        return "setup transaction receipt schema is invalid; only read/recovery lifecycle actions are allowed."
+    status = str(receipt.get("status") or "")
+    if status not in {"committed", "recovered"}:
+        return (
+            f"setup transaction is {status or 'unknown'}, not committed; "
+            "only read/recovery lifecycle actions are allowed and CronCreate remains blocked."
+        )
+    return ""
 
 
 def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
@@ -962,6 +1029,14 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             and "--clear-active" in invocation[1] \
             and not CLEAR_ACTIVE_RE.search(str(contract.get("prompt_excerpt") or "")):
         return "清除 active-run 指针必须由当前操作者 prompt 明确授权；切换 run 请使用受控 --set-active/setup/resume。"
+
+    setup_transaction_reason = _setup_transaction_reason(run_dir)
+    lifecycle_recovery = bool(invocation and invocation[0].name in {
+        "setup_run.py", "loop_bootstrap.py", "xunji_statusline.py",
+    })
+    if setup_transaction_reason and tool not in {
+            "Read", "Grep", "Glob", "CronList"} and not lifecycle_recovery:
+        return setup_transaction_reason
 
     if MEMORY_PATH_RE.search(text) and not contract.get("memory_approved"):
         memory_read = tool in {"Read", "Grep", "Glob"} or (
@@ -1415,6 +1490,30 @@ def _selftest() -> int:
         "command": f"python3 {ROOT / 'tools' / 'xunji_statusline.py'} --set-active runs/other_20260101"}}
     resume_control = {"tool_name": "Bash", "tool_input": {
         "command": f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} --resume runs/other_20260101"}}
+    prepared_receipt_path = run / "state" / "setup_transaction.json"
+    prepared_receipt_path.write_text(json.dumps({
+        "schema": "xunji.setup_transaction.v1",
+        "transaction_id": "a" * 32,
+        "source_sha256": "b" * 64,
+        "status": "prepared_not_active",
+    }), encoding="utf-8")
+    prepared_target_blocked = "setup transaction" in evaluate_pretool(
+        run, target_event, contract)
+    prepared_cron_blocked = "setup transaction" in evaluate_pretool(
+        run, {"tool_name": "CronCreate", "tool_input": {
+            "prompt": f"/loop {run.name}"}}, contract)
+    prepared_read_allowed = evaluate_pretool(
+        run, {"tool_name": "Read", "tool_input": {
+            "file_path": str(prepared_receipt_path)}}, contract) == ""
+    prepared_recovery_event = {"tool_name": "Bash", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} --resume {run}"}}
+    prepared_recovery_contract = {
+        **contract,
+        "prompt_excerpt": f"resume run {run}",
+    }
+    prepared_recovery_allowed = evaluate_pretool(
+        run, prepared_recovery_event, prepared_recovery_contract) == ""
+    prepared_receipt_path.unlink()
     fake_workers_control = {"tool_name": "Bash", "tool_input": {
         "command": "python3 /tmp/workers.py list runs/x"}}
     safe_sed_read = {"tool_name": "Bash", "tool_input": {
@@ -1717,12 +1816,21 @@ def _selftest() -> int:
     exact_target = root / "exact_20260101"
     (exact_target / "state").mkdir(parents=True)
     write_transition_claim(exact_target.name, exact_a, claims_dir=exact_claims)
+    exact_txid = "a" * 32
+    exact_source_hash = "b" * 64
     exact_claimed = claim_pending_contract(
-        exact_target, pending_dir=exact_dir, claims_dir=exact_claims)
+        exact_target, pending_dir=exact_dir, claims_dir=exact_claims,
+        transaction_id=exact_txid, source_hash=exact_source_hash,
+        expected_run=exact_target.name)
     exact_session_claimed = (
         exact_claimed.get("session_id") == "exact-a"
         and load_pending_contract("exact-b", pending_dir=exact_dir).get("session_id") == "exact-b"
     )
+    exact_transaction_bound = exact_claimed.get("transition_transaction") == {
+        "transaction_id": exact_txid,
+        "source_sha256": exact_source_hash,
+        "expected_run": exact_target.name,
+    }
     race_dir = root / "race-pending"
     race_claims = root / "race-claims"
     race_a = write_pending_contract({
@@ -1821,12 +1929,25 @@ def _selftest() -> int:
         "prompt": "/loop 重新开一个新 run", "session_id": "s-transition",
         "transcript_path": str(transcript),
     })
-    transferred = transfer_contract(source_run, target_run)
+    transfer_txid = "c" * 32
+    transfer_source_hash = "d" * 64
+    transferred = transfer_contract(
+        source_run,
+        target_run,
+        transaction_id=transfer_txid,
+        source_hash=transfer_source_hash,
+        expected_run=target_run.name,
+    )
     transfer_preserves_contract = (
         transferred.get("prompt_sha256") == transferred_source.get("prompt_sha256")
         and transferred.get("session_id") == transferred_source.get("session_id")
         and transferred.get("origin_run") == source_run.name
         and transferred.get("bound_run") == target_run.name
+        and transferred.get("transition_transaction") == {
+            "transaction_id": transfer_txid,
+            "source_sha256": transfer_source_hash,
+            "expected_run": target_run.name,
+        }
         and load_contract(target_run, session_id="s-transition") == transferred
         and json.loads(run_status_path(target_run).read_text(encoding="utf-8"))["status"] == "active"
     )
@@ -2168,6 +2289,11 @@ def _selftest() -> int:
          micro_python_control_allowed),
         ("new-run setup command is lifecycle control before old-run fanout",
          setup_allowed_before_fanout),
+        ("prepared setup transaction blocks target work", prepared_target_blocked),
+        ("prepared setup transaction blocks CronCreate", prepared_cron_blocked),
+        ("prepared setup transaction remains readable", prepared_read_allowed),
+        ("prepared setup transaction permits explicit recovery lifecycle",
+         prepared_recovery_allowed),
         ("setup cannot be used without current operator run-transition intent",
          setup_without_operator_blocked),
         ("documented loop journal command is control before fanout",
@@ -2253,6 +2379,8 @@ def _selftest() -> int:
          ambiguous_pending_rejected),
         ("target claim selects the exact session among concurrent pending contracts",
          exact_session_claimed),
+        ("consumed target claim binds source, transaction, and expected run",
+         exact_transaction_bound),
         ("same-target concurrent session claims fail closed",
          same_target_race_rejected),
         ("no-run non-lifecycle prompt does not leave a pending contract",

@@ -516,13 +516,24 @@ depth fields. `tools/turn_contract.py` writes the current prompt's
 and foreground peer-review events are appended to the hash-linked
 `state/runtime_events.jsonl`; only transcript-backed events validate process claims.
 These control-plane files are hook-owned and are not editable narrative state.
-Run selection is also hook/tool-owned: setup, resume, and explicit prompt-named
-set-active copy the current contract before replacing the active pointer. A
-no-active-run EXECUTE prompt uses a short-lived pending contract that is consumed
+Run selection is also hook/tool-owned. `tools/setup_transaction.py` is the only
+active-pointer writer: setup, resume, explicit prompt-named set-active, and prepared
+recovery all call its compare-and-swap commit primitive. New setup validates source
+before formal directory creation, builds a complete run in hidden same-filesystem
+staging, writes `state/setup_source.json` plus a prepared
+`state/setup_transaction.json`, then atomically renames and attempts pointer CAS.
+CAS failure preserves the old pointer and an auditable `prepared_not_active` run;
+pointer-success/receipt-failure is recovered idempotently from the pointer, source
+hash, and transaction id and never creates a second run.
+
+A no-active-run EXECUTE prompt uses a short-lived pending contract that is consumed
 on first binding. Direct pointer edits, unrelated run switches, and unrequested
 clear-active operations are rejected. Pending bootstrap permits only reads and its
 current-session lifecycle transition until binding. A target/session/prompt-hash
-claim prevents cross-session pending selection; concurrent claims fail closed.
+claim prevents cross-session pending selection; concurrent claims fail closed. The
+transaction binds the consumed hook claim to source hash, transaction id, and exact
+expected run; CLI/source adapters never accept claim contents, claim paths, or
+operator-authority fields.
 Stop hooks block the first invalid output
 and treat Claude Code's `stop_hook_active` retry as idempotent; retry never marks a
 run complete or changes a front.

@@ -23,22 +23,29 @@ default.
 ## One-Shot Setup
 
 ```bash
-python tools/setup_run.py <slug> [recon.json]
+python tools/setup_run.py <slug> <recon.json>
+python tools/setup_run.py <slug> --target <http-or-https-url>
 ```
 
 With recon, setup should:
 
+- validate slug/date/source and recon schema before creating a formal run;
 - create the run skeleton from `docs/templates/run/`;
 - record the recon path in `target.md`;
 - derive default scope into `target.md` for review and correction;
 - write `surface_recon.md` from the full recon asset table;
 - build `classify/coverage.json` directly from Guanlan data with zero re-probe;
-- write `knowledge_hits.md` when local signatures match.
+- write `knowledge_hits.md` when local signatures match;
+- build source/transaction receipts and initial derived state under hidden
+  same-filesystem staging before publishing the run.
 
 `setup_run.py` prepares the workbench. It does not pick fronts, decide findings,
-or attack the target. After the full workbench exists, it inherits the current
-operator turn contract and atomically sets `.claude/xunji_active_run` so the
-Claude Code statusline and hooks point at the same run. An old run's Agent Board
+or attack the target. `tools/setup_transaction.py` is the sole commit owner:
+atomic rename publishes the complete run, then `commit_activation_cas()` inherits
+the current operator contract and changes `.claude/xunji_active_run`. Any
+ingest/coverage/ledger/journal/loop-state failure is fatal. CAS failure leaves an
+auditable `prepared_not_active` receipt and the old pointer intact; explicit resume
+or same-identity recovery uses the same CAS primitive. An old run's Agent Board
 does not block this lifecycle transition. Never hand-edit or clear the pointer.
 
 ## Scope And Coverage
@@ -86,6 +93,7 @@ they share IP ranges, naming patterns, CDN, or server headers.
 
 ```bash
 python tools/setup_run.py --selftest
+python tools/setup_transaction.py --selftest
 python tools/classify_hosts.py --selftest
 python tools/scope.py --selftest
 python tools/check_run.py runs/<dir>

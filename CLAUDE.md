@@ -67,6 +67,12 @@
   reachable/unknown in-scope asset must be named in a canonical front; assets marked
   unreachable by the upstream baseline remain explicitly accounted rather than
   disappearing. A broad front title does not count unless it names each member.
+- Setup is one transaction owned by `tools/setup_transaction.py`: validate slug,
+  date, URL/recon schema, and source hash before creating a formal run; build all
+  canonical files, coverage, asset ledger, initial loop state, source manifest,
+  and a prepared receipt under same-filesystem hidden staging; then atomic-rename
+  and compare-and-swap the active pointer. Any ingest/coverage/ledger/journal/state
+  failure is fatal, not a warning that still activates an incomplete run.
 - `docs/ROUTER.md` decides which mode guidance to load; deterministic (runtime +
   phase + run state → files).
 - The five Router phases are `Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`,
@@ -77,8 +83,8 @@
   `tools/loop_journal.py phase-start|phase-end --phase ...`.
   Mechanical Setup inside `setup_run.py` is the one display exception: record its
   start/end in the journal, but keep a successful setup stdout-silent because the
-  selected-run statusline is the operator-facing display. Keep failures and
-  degraded setup diagnostics on stderr; explicit `--help`/`--selftest` output is
+  selected-run statusline is the operator-facing display. Keep fail-closed setup
+  diagnostics on stderr; explicit `--help`/`--selftest` output is
   not normal setup progress.
   Do not invent markers for lifecycle mechanics such as resume, handoff, drift
   recovery, `/loop`, or closure gates. Operator-facing lifecycle/status output
@@ -187,6 +193,13 @@ observe -> update state graph -> decompose fronts
   explicitly creates or resumes a run, use `setup_run.py`, `loop_bootstrap.py`, or
   a prompt-named `xunji_statusline.py --set-active`. These paths inherit the same
   operator turn contract before atomically changing `.claude/xunji_active_run`.
+  All setup, resume, set-active, and prepared recovery paths call
+  `setup_transaction.commit_activation_cas()`; no adapter is a second pointer
+  writer. A rename-complete/CAS-failed run remains `prepared_not_active` with its
+  transaction receipt and the old pointer intact; it may be activated only by the
+  same transaction identity or an explicit resume. If the pointer committed before
+  the final receipt write, recovery binds pointer + source hash + transaction id
+  and records `recovered` without creating a duplicate run.
   Never Write/Edit/remove that pointer directly. If `/loop` tries CronCreate before
   a requested new run exists, finish setup first, then run CronList and CronCreate
   against the new run name; do not schedule the old run as a workaround.
@@ -194,8 +207,10 @@ observe -> update state graph -> decompose fronts
   recently modified run. While a no-run bootstrap contract is pending, only
   read-only inspection and that prompt's exact setup/resume/set-active transition
   are allowed; PreToolUse binds it to a target/session/prompt-hash claim before
-  execution. Do not probe or write run material before binding, and never guess
-  between concurrent claims.
+  execution. The transaction consumes that hook-owned claim and binds session id,
+  prompt hash, source hash, transaction id, and expected run; adapters/source data
+  cannot supply claim contents or `authority=operator`. Do not probe or write run
+  material before binding, and never guess between concurrent claims.
 - **Stop Coda is mechanically enforced only for `EXECUTE`.** While `.claude/xunji_active_run`
   points to a run without a valid completion marker, the last non-empty output
   line must be the only Coda line and must name one concrete object plus one

@@ -174,17 +174,33 @@ review record 和对应设计 owner 为事实源；两种工作不可混成一�
 ```text
 explicit setup/resume intent
   -> bind turn authority
-  -> validate source/scope before canonical mutation
-  -> create/prepare run state
-  -> commit active-run transition atomically
+  -> resolve + validate source/slug/date before formal run creation
+  -> prepare complete run under runs/.xunji_staging
+  -> freeze setup_source + prepared transaction receipt
+  -> atomic rename to runs/<dir>
+  -> commit active-run transition through one compare-and-swap writer
   -> Setup -> Root -> Hunter -> Reviewer -> Report
   -> check_run + zero open fronts + independent review
   -> terminal journal/completion evidence
 ```
 
-Setup/resume 不等于自动进入 `/loop`。Run 切换是事务，不是直接编辑 pointer；多个
-入口最终必须复用同一提交原语。失败要保留明确的可恢复状态，不能留下“像正式 run
-但未激活”的半成品，也不能悄悄切回最近修改目录。
+Setup/resume 不等于自动进入 `/loop`。`tools/setup_transaction.py` 是当前唯一 activation
+owner：`setup_run.py`、`loop_bootstrap.py`、`xunji_statusline.py --set-active` 与恢复路径
+都调用 `commit_activation_cas()`，不得各自写 pointer。正式目录在 rename 前已经包含
+canonical 文件、coverage、asset ledger、初始 loop projections、`state/setup_source.json`
+和 `state/setup_transaction.json`。结构校验仍针对 `prepared` receipt，但在 atomic
+rename 之前，隐藏 staging 内先原子改写为 `prepared_not_active`，因此正式目录第一次
+可见时就不存在裸 `prepared` crash 窗口。rename 后 CAS 失败保留完整 run，旧 pointer
+不变且不能创建 Cron；pointer 已提交但
+receipt 未补记时，同 source/transaction/run 身份可把它幂等恢复为 `recovered`，不得
+新建第二个 run。锁顺序固定为 setup lock → activation lock；恢复读取 pointer 也持有
+activation lock，禁止用 setup lock 单独推断并发 pointer 状态。Hook 生成的 transition
+claim 在提交前由事务消费，并在 contract/
+receipt 中绑定 session、operator prompt hash、source hash、transaction id 与 expected
+run；CLI 和 source 输入不能提供 claim 内容或 authority，`turn_contract` 边界不可加载
+时 activation fail-closed。只有 `runs/` 内的现存目录能成为 pointer authority；存在但
+损坏、身份缺失或与 `setup_source` hash 不一致的 transaction receipt 不能降级成 legacy
+run，必须在 pointer 改动前拒绝。
 
 ### 4.4 每轮自治循环
 
@@ -368,6 +384,7 @@ CCB Agent Runtime
 | `.claude/skills/` | Claude 主驾驶按需方法/流程 | `docs/ROUTER.md`、相关 Tool/Hook/test |
 | `.agents/skills/` | Codex 辅助维护/复审知识 | 仅 Codex-side 或明确镜像共享变化 |
 | `.claude/hooks/` | Claude live runtime 的强制 authority/effect/lifecycle gates | safety skill、hook tests、独立复审 |
+| `tools/setup_transaction.py` | staging、setup receipt、pointer lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
 | `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
 | `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
 | `tools/harness/guard.py` | 主动工具统一运行时护栏 | wrappers、privacy/proxy、fixtures、独立复审 |
@@ -460,7 +477,8 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 5. Hook/guard 管执行效果；不靠禁词或阉割方法制造安全感。
 6. Agent 与 reviewer 只给候选；Single Synthesizer 通过 evidence gate 决定结论。
 7. Derived cache/status/score 可重建且不反写 canonical truth。
-8. Run switch 和其他 canonical transition 使用单写者事务/CAS，不直接改 pointer。
+8. Run switch 和其他 canonical transition 使用 `setup_transaction.commit_activation_cas()`
+   单写者事务/CAS，不直接改 pointer；未提交 run 必须有 prepared receipt 和可解释状态。
 9. 独立复审必须独立、可审计、绑定当前 fingerprint；作者自审不算。
 10. Closure 是多信号机械状态；失败、deny、timeout、session length 和报告存在都不等于完成。
 11. 并行 breadth 不放松 authority、request budget、evidence 或 merge/closure 门。
@@ -469,15 +487,23 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-14
-- Scope: P0-1 command/privacy/model-egress boundary — `tools/harness/command_shape.py`、
-  `tools/harness/privacy.py`、`tools/turn_contract.py`、`tools/peer_review.py`、
-  `tools/check_rules.py`、Claude/Codex ReviewOps skills 与相应规范/fixtures。
-- Architecture impact: yes — 把 URL-bearing 命令拆成真实网络、精确本地生命周期元数据、
-  模型出站三通道；移除 lifecycle-as-network 白名单，并把 model-egress 脱敏设为不可配置硬门。
-- Verification: command-shape/privacy/safety-gate/turn-contract/peer-review/check-hook focused
-  selftests PASS；`tools/check_rules.py`、`git diff --check` PASS；`tools/selftest_all.py` 61/61 PASS。
-- Independent review: 最终 diff 将记录到
-  `review/records/2026-07-14-p0-command-privacy-boundary-review.md`，提交前绑定 staged fingerprint。
+- Scope: P0-2 setup transaction — `tools/setup_transaction.py`、`tools/setup_run.py`、
+  `tools/loop_bootstrap.py`、`tools/xunji_statusline.py`、`tools/turn_contract.py`、
+  `tools/check_rules.py`、setup-transaction fixture、自测注册与 lifecycle 规范。
+- Architecture impact: yes — 用同盘 staging + prepared receipt + atomic rename + 单一 pointer
+  CAS writer 取代 setup/bootstrap/statusline 多提交人；新增 `prepared_not_active` 与 pointer 后
+  receipt 幂等恢复语义，把 hook claim 绑定到 source/transaction/run identity；CAS snapshot 改为
+  必填，legacy resume 改为显式兼容路径，并由规则检查禁止 transaction owner 外直接写 pointer。
+- Verification: focused selftests、`check_rules.py`、`git diff --cached --check` PASS；完整
+  `selftest_all.py` 为 62 passed / 0 failed（86.8s）；Claude Code 按操作者要求作为主驾驶实际
+  执行 transaction/rules/full-suite/diff-check，四项 exit 0 且无 permission denial。
+- Independent review: Codex 作者不计自审票；arkcli 首轮对 `26d692ddb03716c7` 提出的
+  optional CAS snapshot 与 sole-writer 证据缺口已按 code/test 修复。最终 code bundle
+  `d07f126b6c88bacfc6224a0fd3899d1fc12bb7eb` 的结果为 partial WARN：唯一 finding 是
+  Kimi timeout backend error，blind-spot 列表为空，未输出新的 code finding；retry history
+  仍记录 GLM parse failure。操作者明确要求 Claude 用于主驾驶实跑而非 reviewer；缺失 Claude
+  review 与 arkcli 后端不完整均写入 `review/records/2026-07-14-p0-setup-transaction-review.md`，
+  不得表述为满矩阵 PASS。
 
 ## 13. 外部设计来源与采用边界
 

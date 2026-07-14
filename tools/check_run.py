@@ -619,6 +619,45 @@ def check_layout_drift(run_dir: Path) -> list[str]:
             "散落仍可被收口门解析(门不坏), 但证据与草稿混作一团、不利审计。"]
 
 
+def check_setup_transaction_state(run_dir: Path) -> list[str]:
+    """A published but uncommitted setup run must never look closable."""
+    receipt_path = run_dir / "state" / "setup_transaction.json"
+    source_path = run_dir / "state" / "setup_source.json"
+    if not receipt_path.exists():
+        return []  # legacy run
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8", errors="strict"))
+    except Exception as exc:
+        return [f"setup transaction receipt unreadable: {exc.__class__.__name__}"]
+    if not isinstance(receipt, dict) or receipt.get("schema") != "xunji.setup_transaction.v1":
+        return ["setup transaction receipt schema invalid"]
+    status = str(receipt.get("status") or "")
+    errors: list[str] = []
+    if status not in {"committed", "recovered"}:
+        errors.append(
+            f"setup transaction status={status or 'missing'}; run is not active/closable "
+            "until shared CAS recovery commits it"
+        )
+    txid = str(receipt.get("transaction_id") or "")
+    source_hash = str(receipt.get("source_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{32}", txid):
+        errors.append("setup transaction id invalid")
+    if not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+        errors.append("setup transaction source hash invalid")
+    if str(receipt.get("run_name") or run_dir.name) != run_dir.name:
+        errors.append("setup transaction expected run does not match directory")
+    try:
+        source = json.loads(source_path.read_text(encoding="utf-8", errors="strict"))
+    except Exception as exc:
+        errors.append(f"setup source manifest unreadable: {exc.__class__.__name__}")
+        return errors
+    if not isinstance(source, dict) or source.get("schema") != "xunji.setup_source.v1":
+        errors.append("setup source manifest schema invalid")
+    elif str(source.get("source_sha256") or "") != source_hash:
+        errors.append("setup source/transaction hash mismatch")
+    return errors
+
+
 def _recon_cited(run_dir: Path) -> str | None:
     """target.md 的『Existing intel / recon report:』字段若填了真实值(非空/非 N/A),
     返回该值, 否则 None —— 用于判断本 run 是否声明引用了外部 recon/OSINT 情报。"""
@@ -2554,7 +2593,29 @@ def _selftest() -> int:
     receipt_review_text = _install_valid_review(d)
     receipt_review_valid, receipt_review_reason = validate_independent_review_receipt(
         d, receipt_review_text)
+    tx_run = Path(tempfile.mkdtemp()) / "tx_20260101"
+    (tx_run / "state").mkdir(parents=True)
+    tx_source_hash = "b" * 64
+    (tx_run / "state" / "setup_source.json").write_text(json.dumps({
+        "schema": "xunji.setup_source.v1",
+        "source_sha256": tx_source_hash,
+    }), encoding="utf-8")
+    tx_receipt_path = tx_run / "state" / "setup_transaction.json"
+    tx_receipt = {
+        "schema": "xunji.setup_transaction.v1",
+        "transaction_id": "a" * 32,
+        "run_name": tx_run.name,
+        "source_sha256": tx_source_hash,
+        "status": "prepared_not_active",
+    }
+    tx_receipt_path.write_text(json.dumps(tx_receipt), encoding="utf-8")
+    prepared_tx_rejected = bool(check_setup_transaction_state(tx_run))
+    tx_receipt["status"] = "committed"
+    tx_receipt_path.write_text(json.dumps(tx_receipt), encoding="utf-8")
+    committed_tx_accepted = check_setup_transaction_state(tx_run) == []
     checks = [
+        ("prepared setup transaction is never closable", prepared_tx_rejected),
+        ("committed setup transaction passes identity check", committed_tx_accepted),
         ("preamble not counted", len(recs) == 10),
         ("manual reviewer identity/verdict cannot satisfy gate",
          not has_completed_independent_review(valid_review_text, d)),
@@ -3779,6 +3840,7 @@ def main() -> int:
         path = run_dir / name
         markers = REQUIRED_MARKERS.get(name, [])
         errors.extend(check_file(path, markers))
+    errors.extend(check_setup_transaction_state(run_dir))
     errors.extend(check_front_schema(run_dir))
 
     # Optional artifacts: only checked when the file is present.

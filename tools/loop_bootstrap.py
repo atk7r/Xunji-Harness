@@ -27,6 +27,8 @@ PYTHON_CMD = sys.executable or "python3"
 sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_journal  # noqa: E402
+import setup_run  # noqa: E402
+import setup_transaction  # noqa: E402
 import status_style  # noqa: E402
 import xunji_statusline  # noqa: E402
 from anti_drift import SessionStateManager  # noqa: E402
@@ -80,22 +82,20 @@ def _state_display(state: str) -> str:
 def _action_display(action: str) -> str:
     return f"{ACTION_CN.get(action, action)} ({action})" if action else "未知"
 
-def _find_run_by_slug(slug: str) -> Path | None:
-    """按 slug 前缀找最近创建的 run 目录。"""
-    candidates = sorted(RUNS.glob(f"{slug}_*"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return candidates[0] if candidates else None
-
-
 def _validate_run(run_dir: Path) -> bool:
-    """验证目录像合法 run：有 target.md 或有 evidence/ 子目录。FAIL-OPEN——拿不准不拦。"""
+    """Fail closed unless the explicit path is a structurally recognizable run."""
     try:
-        if not run_dir.is_dir():
+        resolved = run_dir.resolve()
+        resolved.relative_to(RUNS.resolve())
+        if not resolved.is_dir():
             return False
-        has_target = (run_dir / "target.md").exists()
-        has_evidence = (run_dir / "evidence").is_dir()
-        return has_target or has_evidence
+        return (
+            (resolved / "target.md").is_file()
+            and (resolved / "frontier.md").is_file()
+            and (resolved / "evidence").is_dir()
+        )
     except Exception:
-        return True  # fail-open
+        return False
 
 
 def _loop_command(run_dir: Path) -> str:
@@ -186,11 +186,14 @@ def _journal(run_dir: Path, event: str, note: str) -> None:
 
 
 def _set_active_run(run_dir: Path) -> bool:
-    """Select a prepared run and inherit the current operator turn contract."""
+    """Resume a prepared run through the shared activation CAS primitive."""
     try:
-        if not xunji_statusline.set_active_run(str(run_dir)):
-            print(f"[bootstrap] active run switch failed: {run_dir}", file=sys.stderr)
-            return False
+        setup_transaction.activate_existing_run(
+            run_dir,
+            root=ROOT,
+            runs_root=RUNS,
+            pointer=xunji_statusline.ACTIVE_RUN,
+        )
         return True
     except Exception as e:
         print(f"[bootstrap] active run switch failed: {e}", file=sys.stderr)
@@ -199,35 +202,39 @@ def _set_active_run(run_dir: Path) -> bool:
 
 # ---- commands ----
 
+def _create_new_transaction(slug: str, recon_full: str) -> setup_transaction.TransactionResult:
+    """Loop adapter: resolve source, then call the shared transaction directly."""
+    request = setup_run.resolve_setup_request(
+        slug, recon=recon_full, target=None, date=None, classify=False
+    )
+    return setup_transaction.create_and_activate(
+        request["run_name"],
+        source_manifest=request["source_manifest"],
+        build=lambda run_dir, fault: setup_run.prepare_staging_run(
+            request, run_dir, fault, bootstrap=True
+        ),
+        validate_source=request.get("validate_source"),
+        root=ROOT,
+        runs_root=RUNS,
+        pointer=xunji_statusline.ACTIVE_RUN,
+    )
+
+
 def cmd_new(slug: str, recon_path: str) -> int:
-    """新 run：setup_run → 写初始状态 → 输出启动指令。"""
+    """New-run adapter; the shared transaction is the sole commit owner."""
     recon_full = str(Path(recon_path).resolve())
     if not Path(recon_full).exists():
         print(f"[bootstrap] recon 文件不存在: {recon_full}", file=sys.stderr)
         return 1
 
     print(f"[bootstrap] 目标: {slug} | recon: {recon_full}")
-    cmd = [sys.executable, str(ROOT / "tools" / "setup_run.py"), slug, recon_full]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if r.stdout.strip():
-        print(r.stdout.rstrip())
-    if r.returncode != 0:
-        print(r.stderr, file=sys.stderr)
-        print("[bootstrap] setup_run 失败", file=sys.stderr)
+    try:
+        result = _create_new_transaction(slug, recon_full)
+    except setup_transaction.SetupTransactionError as exc:
+        print(f"[bootstrap:{exc.code}] {exc}", file=sys.stderr)
         return 1
-
-    run_dir = _find_run_by_slug(slug)
-    if run_dir is None:
-        print("[bootstrap] 未找到创建的 run 目录", file=sys.stderr)
-        return 1
+    run_dir = result.run_dir
     print(f"[bootstrap] run 目录: {run_dir}")
-
-    _write_initial_state(run_dir)
-    if not _set_active_run(run_dir):
-        return 1
-    _journal(run_dir, "bootstrap", f"new run prepared from recon {recon_full}")
-    if not _refresh_loop_state(run_dir):
-        return 1
 
     _print_launch_instructions(run_dir)
     return 0
@@ -279,12 +286,12 @@ def _print_launch_instructions(run_dir: Path) -> None:
 # ---- selftest ----
 
 def _selftest() -> int:
-    global _find_run_by_slug, _print_launch_instructions, _refresh_loop_state, _set_active_run
+    global _create_new_transaction, _print_launch_instructions, _refresh_loop_state, _set_active_run
 
     import json as _json, tempfile
 
     checks: list[tuple[str, bool]] = []
-    tmp_root = ROOT / "tmp"
+    tmp_root = RUNS
     tmp_root.mkdir(exist_ok=True)
     p = Path(tempfile.mkdtemp(dir=tmp_root))
     (p / "evidence").mkdir()
@@ -295,21 +302,30 @@ def _selftest() -> int:
     checks.append(("template exists", LOOP_TEMPLATE.exists()))
     checks.append(("loop command names run", _loop_command(p) == f"/loop {p}"))
     checks.append(("no per-run prompt before refresh", not (p / "loop_prompt.md").exists()))
-    old_active = xunji_statusline.ACTIVE_RUN.read_text(encoding="utf-8", errors="replace") \
-        if xunji_statusline.ACTIVE_RUN.exists() else None
+    original_active_pointer = xunji_statusline.ACTIVE_RUN
+    isolated_active_pointer = p / ".active-run"
+    xunji_statusline.ACTIVE_RUN = isolated_active_pointer
     try:
+        setup_transaction.activate_existing_run(
+            p,
+            root=ROOT,
+            runs_root=RUNS,
+            pointer=isolated_active_pointer,
+            pending_dir=p / ".pending",
+            claims_dir=p / ".claims",
+        )
         checks.append(("active run helper accepts run", xunji_statusline.set_active_run(str(p)) is True))
     finally:
-        if old_active is None:
-            xunji_statusline.clear_active_run()
-        else:
-            xunji_statusline.ACTIVE_RUN.write_text(old_active, encoding="utf-8")
+        xunji_statusline.ACTIVE_RUN = original_active_pointer
 
     recon = p / "recon.json"
-    recon.write_text("{}", encoding="utf-8")
+    recon.write_text(_json.dumps({
+        "assets": [{"host": "selftest.example", "ownership": "core"}],
+    }), encoding="utf-8")
     active_hook_calls: list[Path] = []
+    transaction_calls: list[tuple[str, str]] = []
     orig_set_active = _set_active_run
-    orig_find_run = _find_run_by_slug
+    orig_create_transaction = _create_new_transaction
     orig_refresh = _refresh_loop_state
     orig_print_launch = _print_launch_instructions
     orig_subprocess_run = subprocess.run
@@ -323,12 +339,18 @@ def _selftest() -> int:
         active_hook_calls.append(Path(run_dir).resolve())
         return True
 
+    def fake_create_transaction(slug: str, recon_path: str):
+        transaction_calls.append((slug, recon_path))
+        return setup_transaction.TransactionResult(
+            p.resolve(), "a" * 32, "b" * 64, "committed"
+        )
+
     def fake_run(*_args, **_kwargs) -> _FakeCompleted:
         return _FakeCompleted()
 
     try:
         _set_active_run = fake_set_active
-        _find_run_by_slug = lambda _slug: p
+        _create_new_transaction = fake_create_transaction
         _refresh_loop_state = lambda _run_dir: True
         _print_launch_instructions = lambda _run_dir: None
         subprocess.run = fake_run
@@ -336,24 +358,24 @@ def _selftest() -> int:
         rc_resume = cmd_resume(str(p))
     finally:
         _set_active_run = orig_set_active
-        _find_run_by_slug = orig_find_run
+        _create_new_transaction = orig_create_transaction
         _refresh_loop_state = orig_refresh
         _print_launch_instructions = orig_print_launch
         subprocess.run = orig_subprocess_run
 
-    checks.append(("cmd_new invokes active-run hook", rc_new == 0 and p.resolve() in active_hook_calls))
-    checks.append(("cmd_resume invokes active-run hook", rc_resume == 0 and active_hook_calls.count(p.resolve()) >= 2))
+    checks.append(("cmd_new delegates to shared setup transaction",
+                   rc_new == 0 and transaction_calls == [("selftest", str(recon.resolve()))]))
+    checks.append(("cmd_new does not perform a second active-pointer commit",
+                   active_hook_calls.count(p.resolve()) == 1))
+    checks.append(("cmd_resume invokes shared active CAS",
+                   rc_resume == 0 and p.resolve() in active_hook_calls))
 
-    old_active_resume = xunji_statusline.ACTIVE_RUN.read_text(encoding="utf-8", errors="replace") \
-        if xunji_statusline.ACTIVE_RUN.exists() else None
+    xunji_statusline.ACTIVE_RUN = isolated_active_pointer
     try:
         rc_resume_real = cmd_resume(str(p))
         rendered_resume = xunji_statusline.render_statusline({"workspace": {"current_dir": str(ROOT)}}, color=False)
     finally:
-        if old_active_resume is None:
-            xunji_statusline.clear_active_run()
-        else:
-            xunji_statusline.ACTIVE_RUN.write_text(old_active_resume, encoding="utf-8")
+        xunji_statusline.ACTIVE_RUN = original_active_pointer
     checks.append(("cmd_resume real set-active renders selected run", rc_resume_real == 0 and p.name in rendered_resume))
     _write_initial_state(p)
     checks.append(("session_state written", (p / "state" / "session_state.json").exists()))
@@ -372,6 +394,8 @@ def _selftest() -> int:
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n, file=sys.stderr)
     print(f"loop_bootstrap selftest {'passed' if not bad else f'FAILED ({len(bad)})'}", file=sys.stderr)
+    import shutil
+    shutil.rmtree(p, ignore_errors=True)
     return 0 if not bad else 1
 
 

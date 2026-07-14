@@ -140,9 +140,21 @@ tool events; never edit it or the turn/run-status JSON files directly.
 When no run exists, an EXECUTE prompt is held briefly in the hook-owned
 `.claude/xunji_pending_turns/` bootstrap area. `setup_run.py`,
 `loop_bootstrap.py --resume`, and a prompt-named `xunji_statusline.py --set-active`
-consume/copy that contract before atomically changing `.claude/xunji_active_run`.
+all delegate activation to `setup_transaction.commit_activation_cas()`; it
+consumes/copies the contract before atomically changing `.claude/xunji_active_run`.
 With an existing run, the same paths copy its current contract to the target run.
-Direct pointer Write/Edit/removal is forbidden. Setup/resume and documented local
+New setup validates its source before formal directory creation, prepares the
+complete run in hidden same-filesystem staging, writes source/prepared receipts,
+then changes the hidden receipt to `prepared_not_active` before atomic rename and
+pointer CAS. The first visible formal directory is therefore always explainable;
+CAS failure leaves the old pointer intact, while pointer-success/receipt-failure
+is recovered idempotently from the same transaction identity. Setup always takes
+the setup lock before the activation lock, and recovery reads the pointer only
+under the activation lock. A missing `turn_contract` boundary denies activation
+instead of silently skipping identity binding. Existing pointer targets must stay
+under `runs/`; a present but malformed/mismatched setup receipt is not treated as
+a legacy missing receipt and blocks activation before pointer mutation. Direct pointer
+Write/Edit/removal is forbidden. Setup/resume and documented local
 state/journal commands are lifecycle control, so an old run's Agent Board cannot
 mistake them for target work. Contract hooks never fall back to a recently modified
 run when the pointer is absent; they use the pending bootstrap transaction instead.
@@ -150,7 +162,8 @@ While that transaction is pending, only reads and the current session's authoriz
 setup/resume/set-active command are allowed; target actions and arbitrary writes wait
 until the contract is bound into the run. PreToolUse writes a short-lived claim
 containing the exact target run, session, and prompt hash; the lifecycle tool must
-consume that claim. Multiple valid claims for one target fail closed.
+consume that claim and bind it to source hash, transaction id, and expected run.
+Multiple valid claims for one target fail closed.
 Target-action denials and later successful target actions are also recorded by
 hash. A denial is unresolved until a later successful event has the same tool and
 execution-action hash (for Bash, the command; descriptive metadata is ignored).
@@ -197,8 +210,9 @@ Claude Code statusline uses `tools/xunji_statusline.py` from the project
 `[Xunji-status] [<phase>] <run>`。Claude 未提供明确的 Xunji workspace，或该
 workspace 尚未选择 active run 时，statusline 输出为空。它只读取
 `.claude/xunji_active_run`、阶段派生状态和 `state/loop_journal.jsonl`；不会刷新
-状态、选择工作、写证据或执行阶段约束。active-run pointer 是本地运行态，由
-`setup_run.py`、`loop_bootstrap.py` 和固定的 `/loop runs/<dir>` 协议更新。
+状态、选择工作、写证据或执行阶段约束。active-run pointer 是本地运行态，只由
+`tools/setup_transaction.py` 的共享 CAS 原语更新；`setup_run.py`、
+`loop_bootstrap.py`、set-active 和固定的 `/loop runs/<dir>` 协议只是适配入口。
 Anti-drift 与 Stop hooks 只解析这个显式指针；文件新旧永远不是 run authority，
 因此无关 run 不能接收或逃逸另一个 run 的流程门。
 `Paused` / `Interrupted` 可作为 phase tag 显示；缓存健康、阻断和下一步等详细
@@ -216,7 +230,7 @@ python tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --
 
 `setup_run.py` 的机械 Setup 是显示例外：仍写入 Setup 的 `phase_start` / `phase_end`
 journal 事件，但成功路径不向 stdout 打印进度或 banner，由选中 run 的 statusline
-承担显示；失败和降级诊断继续写 stderr。显式 `--help` / `--selftest` 不属于普通
+承担显示；任何失败都不激活 run，并把 fail-closed 诊断写 stderr。显式 `--help` / `--selftest` 不属于普通
 setup 进度。其他实际进入的 Router 阶段继续显示 start/end marker。
 
 Only mark phases actually entered. `Resume`, `/loop`, handoff, and closure gates

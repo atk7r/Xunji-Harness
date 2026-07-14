@@ -53,13 +53,17 @@ Read only the source needed for the lifecycle task:
 Prefer the one-shot scaffold:
 
 ```bash
-python tools/setup_run.py <slug> [recon.json]
+python tools/setup_run.py <slug> <recon.json>
+python tools/setup_run.py <slug> --target <http-or-https-url>
 ```
 
 Key invariants:
 
 - `setup_run.py` prepares the workbench; it does not select fronts or make attack
   judgments.
+- `setup_transaction.py` is the single setup/activation commit owner. All adapters
+  share hidden staging, prepared/recovered receipts, atomic rename, and pointer CAS;
+  no adapter writes the active pointer or mints transition authority.
 - With Guanlan recon, it ingests the full asset table, records the recon path in
   `target.md`, derives default scope for review, builds `classify/coverage.json`
   with zero re-probe, and writes `knowledge_hits.md` when signatures match.
@@ -140,6 +144,7 @@ When editing lifecycle docs or tools, run the narrow checks first:
 
 ```bash
 python tools/setup_run.py --selftest
+python tools/setup_transaction.py --selftest
 python tools/check_run.py --selftest
 python tools/session_handoff.py --selftest
 python tools/anti_drift.py --selftest
@@ -152,6 +157,7 @@ python tools/selftest_all.py --only peer_review
 python tools/selftest_all.py
 ```
 
-For safety-critical changes under `.claude/hooks/`, `tools/harness/guard.py`, or
+For safety-critical changes under `.claude/hooks/`, `tools/setup_transaction.py`,
+`tools/harness/guard.py`, or
 `sentinel/`, keep the independent-review requirement from
 `docs/WORKFLOW-reference.md`; this skill does not waive it.

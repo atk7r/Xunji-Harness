@@ -28,7 +28,9 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
@@ -46,6 +48,7 @@ REQUIRED = ["target.md", "surface.md", "frontier.md", "hypotheses.md", "evidence
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import loop_journal  # noqa: E402
+import setup_transaction  # noqa: E402
 
 
 def _today() -> str:
@@ -58,19 +61,6 @@ def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:
         loop_journal.append_event(run_dir, event, note=note, data={"phase": phase})
     except Exception as exc:
         print(f"[setup] phase journal skipped: {exc}", file=sys.stderr)
-
-
-def _set_active_run(run_dir: Path) -> bool:
-    """Atomically select a fully prepared run, inheriting any live turn contract."""
-    try:
-        import xunji_statusline  # noqa: E402
-
-        if xunji_statusline.set_active_run(str(run_dir)):
-            return True
-        print(f"[setup] active run switch failed: {run_dir}", file=sys.stderr)
-    except Exception as exc:
-        print(f"[setup] active run switch failed: {exc}", file=sys.stderr)
-    return False
 
 
 def scaffold(run_dir: Path) -> list[str]:
@@ -381,6 +371,342 @@ def _derive_coverage_from_target(run_dir: Path) -> str:
     return f"coverage.json (骨架: {host}, reachable 待判定)"
 
 
+def _validated_date(raw: str | None) -> str:
+    value = raw or _today()
+    if not re.fullmatch(r"[0-9]{8}", value):
+        raise setup_transaction.SetupTransactionError(
+            "invalid_date", "date must use YYYYMMDD"
+        )
+    try:
+        datetime.datetime.strptime(value, "%Y%m%d")
+    except ValueError as exc:
+        raise setup_transaction.SetupTransactionError(
+            "invalid_date", f"invalid calendar date: {value}"
+        ) from exc
+    return value
+
+
+def _validated_slug(raw: str) -> str:
+    value = str(raw or "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", value):
+        raise setup_transaction.SetupTransactionError(
+            "invalid_slug",
+            "slug must start with an alphanumeric and contain only A-Z, a-z, 0-9, _ or -",
+        )
+    return value
+
+
+def _validated_target_url(raw: str) -> str:
+    value = str(raw or "").strip()
+    if not value or re.search(r"[\x00-\x20\x7f]", value):
+        raise setup_transaction.SetupTransactionError(
+            "invalid_target_url", "target URL is empty or contains control/whitespace"
+        )
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError as exc:
+        raise setup_transaction.SetupTransactionError(
+            "invalid_target_url", f"target URL cannot be parsed: {exc}"
+        ) from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise setup_transaction.SetupTransactionError(
+            "invalid_target_url", "target URL must be absolute http/https with a host"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise setup_transaction.SetupTransactionError(
+            "invalid_target_url", "target URL must not embed userinfo credentials"
+        )
+    return value
+
+
+def _valid_recon_assets(recon: dict) -> bool:
+    assets = recon.get("assets")
+    if not isinstance(assets, list) or not assets:
+        return False
+    for item in assets:
+        if not isinstance(item, dict):
+            return False
+        candidate = next((
+            str(item.get(key) or "").strip()
+            for key in ("host", "asset", "name", "url")
+            if str(item.get(key) or "").strip()
+        ), "")
+        if not candidate:
+            return False
+    return True
+
+
+def resolve_setup_request(
+    slug: str,
+    *,
+    recon: str | None,
+    target: str | None,
+    date: str | None,
+    classify: bool,
+) -> dict:
+    """Resolve and validate all source material before a formal run exists."""
+    safe_slug = _validated_slug(slug)
+    safe_date = _validated_date(date)
+    if bool(recon) == bool(target):
+        raise setup_transaction.SetupTransactionError(
+            "ambiguous_source", "provide exactly one source: recon JSON or --target URL"
+        )
+    if classify and not recon:
+        raise setup_transaction.SetupTransactionError(
+            "classify_requires_recon", "--classify requires a validated recon source"
+        )
+
+    request: dict = {
+        "slug": safe_slug,
+        "date": safe_date,
+        "run_name": f"{safe_slug}_{safe_date}",
+        "classify": bool(classify),
+    }
+    if target:
+        target_url = _validated_target_url(target)
+        digest = hashlib.sha256(target_url.encode("utf-8")).hexdigest()
+        try:
+            from harness.privacy import redact_url
+
+            display, _ = redact_url(target_url)
+        except Exception:
+            display = f"{urlsplit(target_url).scheme}://{urlsplit(target_url).hostname}/<redacted>"
+        request.update({
+            "kind": "target_url",
+            "target": target_url,
+            "source_sha256": digest,
+            "source_manifest": {
+                "schema": setup_transaction.SOURCE_SCHEMA,
+                "kind": "target_url",
+                "source_sha256": digest,
+                "display": display,
+            },
+            "validate_source": None,
+        })
+        return request
+
+    recon_path = Path(str(recon)).expanduser()
+    if not recon_path.is_absolute():
+        recon_path = (Path.cwd() / recon_path).resolve()
+    try:
+        recon_bytes = recon_path.read_bytes()
+    except OSError as exc:
+        raise setup_transaction.SetupTransactionError(
+            "missing_recon", f"recon cannot be read: {recon_path}: {exc}"
+        ) from exc
+    try:
+        recon_data = json.loads(recon_bytes.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise setup_transaction.SetupTransactionError(
+            "invalid_recon_json", f"recon JSON is invalid: {recon_path}: {exc}"
+        ) from exc
+    if not isinstance(recon_data, dict) or not _valid_recon_assets(recon_data):
+        raise setup_transaction.SetupTransactionError(
+            "unknown_recon_schema",
+            "recon must be an object with a non-empty assets list of host-bearing objects",
+        )
+    source_hash = hashlib.sha256(recon_bytes).hexdigest()
+    report_path = recon_path.parent / "report.md"
+    try:
+        report_bytes = report_path.read_bytes() if report_path.exists() else None
+    except OSError as exc:
+        raise setup_transaction.SetupTransactionError(
+            "invalid_recon_report", f"adjacent report cannot be read: {exc}"
+        ) from exc
+    report_text = report_bytes.decode("utf-8", "replace") if report_bytes is not None else None
+    report_hash = hashlib.sha256(report_bytes).hexdigest() if report_bytes is not None else ""
+
+    def validate_source() -> None:
+        try:
+            if hashlib.sha256(recon_path.read_bytes()).hexdigest() != source_hash:
+                raise RuntimeError("recon source changed during setup")
+            if report_bytes is not None:
+                if not report_path.exists() or hashlib.sha256(report_path.read_bytes()).hexdigest() != report_hash:
+                    raise RuntimeError("adjacent recon report changed during setup")
+        except OSError as exc:
+            raise RuntimeError(f"source disappeared during setup: {exc}") from exc
+
+    manifest = {
+        "schema": setup_transaction.SOURCE_SCHEMA,
+        "kind": "recon_json",
+        "source_sha256": source_hash,
+        "reference": str(recon_path),
+    }
+    if report_hash:
+        manifest["adjacent_report_sha256"] = report_hash
+    request.update({
+        "kind": "recon_json",
+        "recon_path": recon_path,
+        "recon_data": recon_data,
+        "report_text": report_text,
+        "source_sha256": source_hash,
+        "source_manifest": manifest,
+        "validate_source": validate_source,
+    })
+    return request
+
+
+def _record_scope_data(run_dir: Path, recon: dict) -> str:
+    import scope as _scope
+
+    sc = _scope.derive_scope(recon)
+    in_line, out_line = _scope.render_scope_lines(sc)
+    target_file = run_dir / "target.md"
+    text = target_file.read_text(encoding="utf-8", errors="replace")
+
+    def setfield(value: str, name: str, replacement: str) -> str:
+        return re.sub(
+            rf"(- {re.escape(name)}:).*",
+            lambda match: f"{match.group(1)} {replacement}",
+            value,
+            count=1,
+        )
+
+    if sc["target"]:
+        text = setfield(text, "Target", sc["target"])
+    if in_line:
+        text = setfield(text, "In-scope assets", in_line)
+    if out_line:
+        text = setfield(text, "Out-of-scope assets", out_line)
+    if sc["notes"]:
+        prefix = (
+            "⚠ scope 启发式(recon 无 ownership), 归属待裁: "
+            if sc.get("heuristic") else "scope 复核(secondary/第三方托管): "
+        )
+        text = setfield(
+            text, "Notes", prefix + "; ".join(str(host) for host, _ in sc["notes"][:6])
+        )
+    target_file.write_text(text, encoding="utf-8")
+    return "scope prepared"
+
+
+def prepare_staging_run(
+    request: dict,
+    run_dir: Path,
+    fault: setup_transaction.FaultInjector | None = None,
+    *,
+    bootstrap: bool = False,
+) -> None:
+    """Build every canonical and initial derived file inside hidden staging."""
+    scaffold(run_dir)
+    if fault:
+        fault("journal")
+    loop_journal.append_event(
+        run_dir, "phase_start", note="prepare authorized run workbench",
+        data={"phase": "Setup"},
+    )
+
+    if request["kind"] == "recon_json":
+        if fault:
+            fault("ingest")
+        import ingest_recon
+
+        recon = request["recon_data"]
+        recon_path = request["recon_path"]
+        record_recon(run_dir, str(recon_path))
+        (run_dir / "surface_recon.md").write_text(
+            ingest_recon.render(recon, str(recon_path)), encoding="utf-8"
+        )
+        _record_scope_data(run_dir, recon)
+        if fault:
+            fault("coverage")
+        coverage = ingest_recon.build_coverage(recon, request.get("report_text"))
+        classify_dir = run_dir / "classify"
+        classify_dir.mkdir(parents=True, exist_ok=True)
+        (classify_dir / "coverage.json").write_text(
+            json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        if request.get("classify"):
+            command = [
+                sys.executable,
+                str(ROOT / "tools" / "classify_hosts.py"),
+                str(recon_path),
+                "--out", str(classify_dir),
+                "--egress-recheck",
+            ]
+            completed = subprocess.run(
+                command, capture_output=True, encoding="utf-8", errors="replace"
+            )
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout or "classifier failed").strip()
+                raise RuntimeError(detail)
+            _merge_egress_recheck(run_dir)
+        knowledge_match(run_dir)
+    else:
+        record_recon(run_dir, "none")
+        record_target(run_dir, request["target"])
+        if fault:
+            fault("coverage")
+        _derive_coverage_from_target(run_dir)
+
+    if not _coverage_ready(run_dir):
+        raise RuntimeError("coverage preparation produced no valid asset")
+    if fault:
+        fault("asset_ledger")
+    import coverage_matrix
+
+    coverage_matrix.write_outputs(run_dir)
+    if not (run_dir / "state" / "asset_ledger.json").exists():
+        raise RuntimeError("asset ledger was not written")
+
+    if bootstrap:
+        loop_journal.append_event(
+            run_dir, "bootstrap", note="new run prepared by shared setup transaction"
+        )
+    loop_journal.append_event(
+        run_dir,
+        "phase_end",
+        note=f"run prepared; next phase=Root Orchestrator (/loop runs/{request['run_name']})",
+        data={"phase": "Setup"},
+    )
+    state = {
+        "drift_flags": [],
+        "updated_at": time.time(),
+        "reread_pending": False,
+        "drift_block_count": 0,
+    }
+    (run_dir / "state" / "session_state.json").write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    if fault:
+        fault("loop_state")
+    import loop_state
+    import progress_ledger
+    import run_controller
+
+    loop_state.write_outputs(run_dir)
+    progress_ledger.write_outputs(run_dir)
+    run_controller.write_shadow(run_dir)
+
+
+def create_run(
+    slug: str,
+    *,
+    recon: str | None = None,
+    target: str | None = None,
+    date: str | None = None,
+    classify: bool = False,
+    bootstrap: bool = False,
+    fault: setup_transaction.FaultInjector | None = None,
+) -> setup_transaction.TransactionResult:
+    request = resolve_setup_request(
+        slug, recon=recon, target=target, date=date, classify=classify
+    )
+    return setup_transaction.create_and_activate(
+        request["run_name"],
+        source_manifest=request["source_manifest"],
+        build=lambda run_dir, nested_fault: prepare_staging_run(
+            request, run_dir, nested_fault, bootstrap=bootstrap
+        ),
+        validate_source=request.get("validate_source"),
+        root=ROOT,
+        runs_root=ROOT / "runs",
+        pointer=ROOT / ".claude" / "xunji_active_run",
+        fault=fault,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="初始化授权目标 run 工作台(派生不驱动)")
     ap.add_argument("slug", nargs="?", help="目标短名 → run 目录 runs/<slug>_<date>")
@@ -398,79 +724,19 @@ def main() -> int:
     if not args.slug:
         ap.error("need <slug> (or --selftest)")
 
-    date = args.date or _today()
-    slug = re.sub(r"[^A-Za-z0-9_-]", "_", args.slug)
-    run_dir = ROOT / "runs" / f"{slug}_{date}"
-    if run_dir.exists():
-        print(f"[!] {run_dir} 已存在 —— 不覆盖。换 slug/date 或手动处理。", file=sys.stderr)
-        return 1
-
-    scaffold(run_dir)
-    _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
-    coverage_ready = False
-
-    recon_ok = False
-    if args.recon:
-        rp = Path(args.recon)
-        if not rp.is_absolute():
-            rp = Path.cwd() / rp
-        if not rp.exists():
-            print(f"[!] recon 不存在: {rp}", file=sys.stderr)
-            record_recon(run_dir, "none")
-        else:
-            recon_ok = True
-            record_recon(run_dir, str(rp))
-            try:
-                ingest(rp, run_dir)
-            except Exception as e:
-                print(f"[!] ingest_recon 失败(已记录路径, 请手动 ingest): {e}", file=sys.stderr)
-            try:
-                record_scope(run_dir, rp)
-            except Exception as e:
-                print(f"[!] scope 派生失败(请手填 target.md In/Out-of-scope): {e}", file=sys.stderr)
-            # 轴 B: 默认【零重探】从 Guanlan 产物折 coverage.json(check_run 收口硬门要它)。
-            try:
-                adapt_coverage(rp, run_dir)
-                coverage_ready = _coverage_ready(run_dir)
-            except Exception as e:
-                print(f"[!] coverage 适配失败(可手跑 classify_hosts 兜底): {e}", file=sys.stderr)
-            try:
-                knowledge_match(run_dir)
-            except Exception as e:
-                print(f"[!] knowledge 匹配失败(可手查): {e}", file=sys.stderr)
-    else:
-        record_recon(run_dir, "none")
-        if args.target:
-            record_target(run_dir, args.target)
-        try:
-            _derive_coverage_from_target(run_dir)
-            coverage_ready = _coverage_ready(run_dir)
-        except Exception as e:
-            print(f"[!] coverage 自动推导失败(可手建): {e}", file=sys.stderr)
-
-    if recon_ok and args.classify:
-        # P0: classify_hosts 作为 egress_recheck 增量层, 不覆写 Guanlan baseline
-        cmd = [sys.executable, str(ROOT / "tools" / "classify_hosts.py"), str(rp),
-               "--out", str(run_dir / "classify"), "--egress-recheck"]
-        r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
-        if r.stderr:
-            sys.stderr.write(r.stderr)
-        _merge_egress_recheck(run_dir)
-    coverage_ready = _coverage_ready(run_dir)
-
-    if coverage_ready:
-        try:
-            import coverage_matrix
-            coverage_matrix.write_outputs(run_dir)
-        except Exception as e:
-            print(f"[!] asset ledger 初始化失败(目标动作前必须修复): {e}", file=sys.stderr)
-    _phase_journal(run_dir, "phase_end", "Setup", f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})")
-    # Commit the run transition only after setup has produced its complete local
-    # workbench. set_active_run copies a valid current turn contract before it
-    # atomically replaces the pointer.
-    if not _set_active_run(run_dir):
-        print("[!] run 已建好但未切换 active 指针；旧 run 保持 active，请修复控制面后重试 set-active。",
-              file=sys.stderr)
+    try:
+        create_run(
+            args.slug,
+            recon=args.recon,
+            target=args.target,
+            date=args.date,
+            classify=args.classify,
+        )
+    except setup_transaction.SetupTransactionError as exc:
+        hint = ""
+        if exc.code in {"run_exists", "prepared_not_active"}:
+            hint = "；可选择 resume / choose-date / choose-slug"
+        print(f"[setup:{exc.code}] {exc}{hint}", file=sys.stderr)
         return 1
     return 0
 
@@ -515,13 +781,11 @@ def _selftest() -> int:
     (main_root / "runs").mkdir(parents=True)
     main_run = main_root / "runs" / "bannercheck_20260102"
     original_root = ROOT
-    original_set_active = globals()["_set_active_run"]
     original_argv = list(sys.argv)
     captured_stdout = io.StringIO()
     captured_stderr = io.StringIO()
     try:
         globals()["ROOT"] = main_root
-        globals()["_set_active_run"] = lambda _run_dir: True
         sys.argv = [
             "setup_run.py", "bannercheck", "--target", "https://example.test",
             "--date", "20260102",
@@ -530,7 +794,6 @@ def _selftest() -> int:
             main_rc = main()
     finally:
         sys.argv = original_argv
-        globals()["_set_active_run"] = original_set_active
         globals()["ROOT"] = original_root
     main_output = captured_stdout.getvalue()
     main_error = captured_stderr.getvalue()
@@ -539,6 +802,12 @@ def _selftest() -> int:
         str(item.get("event") or "")
         for item in main_journal["last_cycle_phase_events"]
     ]
+    main_source = json.loads(
+        (main_run / setup_transaction.SOURCE_REL).read_text(encoding="utf-8")
+    ) if (main_run / setup_transaction.SOURCE_REL).exists() else {}
+    main_receipt = json.loads(
+        (main_run / setup_transaction.RECEIPT_REL).read_text(encoding="utf-8")
+    ) if (main_run / setup_transaction.RECEIPT_REL).exists() else {}
     checks += [
         ("full setup main succeeds in isolated root", main_rc == 0),
         ("full setup main is stdout-silent on success", main_output == ""),
@@ -546,6 +815,62 @@ def _selftest() -> int:
         ("full setup main preserves closed Setup journal cycle",
          main_phase_events == ["phase_start", "phase_end"]
          and not main_journal["open_phase"]),
+        ("full setup freezes a source manifest",
+         main_source.get("schema") == setup_transaction.SOURCE_SCHEMA
+         and len(str(main_source.get("source_sha256") or "")) == 64),
+        ("full setup commits a transaction receipt",
+         main_receipt.get("schema") == setup_transaction.RECEIPT_SCHEMA
+         and main_receipt.get("status") == "committed"),
+        ("full setup publishes initial derived state before activation",
+         all((main_run / "state" / name).exists() for name in (
+             "asset_ledger.json", "session_state.json", "loop_state.json",
+             "progress_ledger.json", "controller.shadow.json"))),
+        ("full setup leaves no visible staging directory",
+         not (main_root / "runs" / setup_transaction.STAGING_NAME).exists()),
+    ]
+
+    def request_error(code: str, **kwargs) -> bool:
+        try:
+            resolve_setup_request("valid", date="20260101", classify=False, **kwargs)
+        except setup_transaction.SetupTransactionError as exc:
+            return exc.code == code
+        return False
+
+    bad_json = d / "bad-recon.json"
+    bad_json.write_text("{", encoding="utf-8")
+    unknown_json = d / "unknown-recon.json"
+    unknown_json.write_text("{}", encoding="utf-8")
+    checks += [
+        ("missing recon fails before staging",
+         request_error("missing_recon", recon=str(d / "missing.json"), target=None)),
+        ("damaged recon fails before staging",
+         request_error("invalid_recon_json", recon=str(bad_json), target=None)),
+        ("unknown recon schema fails before staging",
+         request_error("unknown_recon_schema", recon=str(unknown_json), target=None)),
+        ("invalid URL fails before staging",
+         request_error("invalid_target_url", recon=None, target="not a url")),
+        ("URL userinfo fails before staging",
+         request_error("invalid_target_url", recon=None, target="https://user:pass@example.test/")),
+    ]
+    try:
+        resolve_setup_request(
+            "bad slug", recon=None, target="https://example.test", date="20260101",
+            classify=False,
+        )
+        bad_slug_rejected = False
+    except setup_transaction.SetupTransactionError as exc:
+        bad_slug_rejected = exc.code == "invalid_slug"
+    try:
+        resolve_setup_request(
+            "valid", recon=None, target="https://example.test", date="20260231",
+            classify=False,
+        )
+        bad_date_rejected = False
+    except setup_transaction.SetupTransactionError as exc:
+        bad_date_rejected = exc.code == "invalid_date"
+    checks += [
+        ("invalid slug is rejected rather than silently rewritten", bad_slug_rejected),
+        ("invalid calendar date is rejected", bad_date_rejected),
     ]
 
     help_stdout = io.StringIO()
@@ -577,7 +902,6 @@ def _selftest() -> int:
     classify_run = main_root / "runs" / "classifycheck_20260103"
     classify_calls: list[list[str]] = []
     original_root = ROOT
-    original_set_active = globals()["_set_active_run"]
     original_subprocess_run = subprocess.run
     original_argv = list(sys.argv)
     classify_stdout = io.StringIO()
@@ -589,7 +913,6 @@ def _selftest() -> int:
 
     try:
         globals()["ROOT"] = main_root
-        globals()["_set_active_run"] = lambda _run_dir: True
         subprocess.run = _fake_classify_run
         sys.argv = [
             "setup_run.py", "classifycheck", str(classify_recon),
@@ -600,7 +923,6 @@ def _selftest() -> int:
     finally:
         sys.argv = original_argv
         subprocess.run = original_subprocess_run
-        globals()["_set_active_run"] = original_set_active
         globals()["ROOT"] = original_root
     classify_journal = loop_journal.summarize(classify_run)
     checks += [
@@ -616,6 +938,16 @@ def _selftest() -> int:
     recon = {"target": "t", "assets": [{"host": "a.example", "category": "c", "reachability": "confirmed", "ownership": "core"}]}
     rp = d / "recon.json"
     rp.write_text(json.dumps(recon), encoding="utf-8")
+    frozen_request = resolve_setup_request(
+        "frozen", recon=str(rp), target=None, date="20260101", classify=False
+    )
+    rp.write_text(json.dumps({**recon, "mutated": True}), encoding="utf-8")
+    try:
+        frozen_request["validate_source"]()
+        source_mutation_rejected = False
+    except RuntimeError:
+        source_mutation_rejected = True
+    rp.write_text(json.dumps(recon), encoding="utf-8")
     record_recon(rd, str(rp))
     info = ingest(rp, rd)
     sinfo = record_scope(rd, rp)
@@ -629,6 +961,7 @@ def _selftest() -> int:
         ("scope 派生填进 target.md Target", "- Target: t" in tgt),
         ("scope 派生填进 In-scope assets", "*.a.example" in tgt),
         ("record_scope 报派生计数", "in-模式" in sinfo),
+        ("recon source mutation is rejected before publish", source_mutation_rejected),
     ]
     # adapt_coverage: Guanlan 产物 → coverage.json(零重探)
     adapt_coverage(rp, rd)
@@ -670,74 +1003,6 @@ def _selftest() -> int:
          target_cov["assets"][0]["host"] == "example.org"
          and target_cov["assets"][0]["scheme"] == "http"
          and target_cov["assets"][0]["port"] == 8080),
-    ]
-
-    tmp_root = ROOT / "tmp"
-    tmp_root.mkdir(exist_ok=True)
-    import xunji_statusline  # noqa: E402
-
-    active_parent = Path(tempfile.mkdtemp(dir=tmp_root))
-    active_rd = active_parent / "run"
-    active_pointer = active_parent / ".claude" / "xunji_active_run"
-    original_active_pointer = xunji_statusline.ACTIVE_RUN
-    real_active_before = original_active_pointer.read_text(encoding="utf-8", errors="replace") \
-        if original_active_pointer.exists() else None
-    active_stdout = io.StringIO()
-    active_stderr = io.StringIO()
-    try:
-        scaffold(active_rd)
-        xunji_statusline.ACTIVE_RUN = active_pointer
-        with contextlib.redirect_stdout(active_stdout), contextlib.redirect_stderr(active_stderr):
-            active_switched = _set_active_run(active_rd)
-        active = xunji_statusline.active_run()
-    finally:
-        xunji_statusline.ACTIVE_RUN = original_active_pointer
-        shutil.rmtree(active_parent, ignore_errors=True)
-    real_active_after = original_active_pointer.read_text(encoding="utf-8", errors="replace") \
-        if original_active_pointer.exists() else None
-    checks += [
-        ("setup writes statusline active run pointer",
-         active_switched and active == active_rd.resolve()),
-        ("active-run success helper is stdout-silent", active_stdout.getvalue() == ""),
-        ("active-run success helper has no stderr diagnostics", active_stderr.getvalue() == ""),
-        ("setup active-run selftest restores module pointer",
-         xunji_statusline.ACTIVE_RUN == original_active_pointer),
-        ("setup active-run selftest leaves real pointer untouched",
-         real_active_after == real_active_before),
-        ("setup active-run selftest cleans temp dir", not active_parent.exists()),
-    ]
-
-    original_set_active_run = xunji_statusline.set_active_run
-    rejected_stdout = io.StringIO()
-    rejected_stderr = io.StringIO()
-    exception_stdout = io.StringIO()
-    exception_stderr = io.StringIO()
-    try:
-        xunji_statusline.set_active_run = lambda _raw: False
-        try:
-            with contextlib.redirect_stdout(rejected_stdout), contextlib.redirect_stderr(rejected_stderr):
-                false_ok = _set_active_run(rd3) is False
-        except Exception:
-            false_ok = False
-
-        def _raise_set_active(_raw: str) -> bool:
-            raise RuntimeError("selftest boom")
-
-        xunji_statusline.set_active_run = _raise_set_active
-        try:
-            with contextlib.redirect_stdout(exception_stdout), contextlib.redirect_stderr(exception_stderr):
-                exception_ok = _set_active_run(rd3) is False
-        except Exception:
-            exception_ok = False
-    finally:
-        xunji_statusline.set_active_run = original_set_active_run
-    checks += [
-        ("active-run helper reports rejected pointer on stderr",
-         false_ok and rejected_stdout.getvalue() == ""
-         and "active run switch failed" in rejected_stderr.getvalue()),
-        ("active-run helper reports pointer exception on stderr",
-         exception_ok and exception_stdout.getvalue() == ""
-         and "active run switch failed: selftest boom" in exception_stderr.getvalue()),
     ]
 
     bad = [n for n, ok in checks if not ok]

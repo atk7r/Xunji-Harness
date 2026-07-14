@@ -143,7 +143,8 @@ files) · `docs/templates/run/`.
 
 Output:
 
-- **Create the run dir in ONE shot**: `python tools/setup_run.py <slug> [recon.json]` —
+- **Create the run dir in ONE shot**: `python tools/setup_run.py <slug> <recon.json>`
+  or `python tools/setup_run.py <slug> --target <http-or-https-url>` —
   builds the skeleton + `evidence/`/`scripts/` subdirs, folds the FULL asset table via
   ingest_recon into `surface_recon.md`, records the recon path in `target.md`, **and
   builds `coverage.json` directly from the Guanlan recon (zero re-probe)**.
@@ -315,7 +316,8 @@ Project-discipline and run-structure checks in `tools/`:
   so the next run recognizes it. `--from-body` suggests candidate `signatures:` (you
   confirm); fill the TODOs, `check_knowledge` validates. Public grounding tier only — never
   payloads. Seed on a recognition miss, not a blind mass-import.
-- `python tools/setup_run.py <slug> [recon.json]` — Setup-phase ONE-SHOT: build the run
+- `python tools/setup_run.py <slug> <recon.json>` or
+  `python tools/setup_run.py <slug> --target <http-or-https-url>` — Setup-phase ONE-SHOT: build the run
   dir from templates (+ `evidence/`/`scripts/` subdirs), fold recon via ingest_recon into
   `surface_recon.md`, record the recon path in `target.md`, derive a default
   `In-scope`/`Out-of-scope` into `target.md` from recon `ownership` (`tools/scope.py`;

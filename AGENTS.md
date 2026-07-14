@@ -44,6 +44,10 @@ discipline:
 - **Parallelize by effect.** Independent read-only investigation can fan out.
   Canonical state, active-run pointers, findings, reports, review dispositions,
   and closure have a single writer or an explicit compare-and-swap/merge contract.
+- **Setup has one commit owner.** `tools/setup_transaction.py` alone owns hidden
+  staging, prepared/recovered receipts, and active-pointer CAS. Setup, bootstrap,
+  resume, set-active, and future CCB adapters may adapt inputs but must not write
+  the pointer or mint transition-claim authority themselves.
 - **Load context on demand.** Keep always-loaded rules small. Route detailed
   methods to skills and reference docs, give delegated work the minimum context
   and capabilities it needs, and merge structured receipts instead of transcripts.
@@ -151,7 +155,7 @@ Codex may edit this repository when the operator asks for project maintenance,
 documentation cleanup, tooling review fixes, or non-live-run refactors. For
 safety-critical behavior changes to `.claude/hooks/`,
 `tools/harness/privacy.py`, `tools/harness/command_shape.py`,
-`tools/harness/guard.py`, or `sentinel/`, the existing independent-review requirement in
+`tools/setup_transaction.py`, `tools/harness/guard.py`, or `sentinel/`, the existing independent-review requirement in
 `docs/WORKFLOW-reference.md` still applies.
 
 When Codex authors a code or documentation diff, Codex keeps final synthesis and

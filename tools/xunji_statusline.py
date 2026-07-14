@@ -12,6 +12,7 @@ import argparse
 import calendar
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import status_style  # noqa: E402
 
 ACTIVE_RUN = ROOT / ".claude" / "xunji_active_run"
+RUNS_ROOT = ROOT / "runs"
 PHASE_LABELS = {
     "Setup": "Setup｜准备",
     "Root Orchestrator": "Root｜调度",
@@ -104,13 +106,6 @@ def _looks_like_run_dir(run_dir: Path) -> bool:
     return run_dir.is_dir() and any((run_dir / marker).exists() for marker in markers)
 
 
-def _run_ref(run_dir: Path) -> str:
-    try:
-        return str(run_dir.resolve().relative_to(ROOT))
-    except ValueError:
-        return str(run_dir.resolve())
-
-
 def _resolve_run(raw: str) -> Path | None:
     value = raw.strip()
     if not value:
@@ -119,7 +114,7 @@ def _resolve_run(raw: str) -> Path | None:
     run_dir = path if path.is_absolute() else ROOT / path
     run_dir = run_dir.resolve()
     try:
-        run_dir.relative_to(ROOT)
+        run_dir.relative_to(RUNS_ROOT.resolve())
     except ValueError:
         return None
     if not _looks_like_run_dir(run_dir):
@@ -131,42 +126,37 @@ def set_active_run(raw: str) -> bool:
     run_dir = _resolve_run(raw)
     if run_dir is None:
         return False
-    current = active_run()
-    if current != run_dir:
-        try:
-            import turn_contract  # noqa: WPS433
-
-            if current is None:
-                # UserPromptSubmit stores a short-lived pending contract when no
-                # run exists. Claim it before the first pointer is installed.
-                turn_contract.claim_pending_contract(run_dir)
-            else:
-                # A valid current-turn contract belongs to the operator prompt,
-                # not to the old pointer. Copy it before the atomic switch.
-                turn_contract.transfer_contract(current, run_dir)
-        except Exception:
-            return False
-    ACTIVE_RUN.parent.mkdir(parents=True, exist_ok=True)
-    tmp_name = ""
-    with tempfile.NamedTemporaryFile(
-        "w",
-        delete=False,
-        dir=ACTIVE_RUN.parent,
-        prefix=ACTIVE_RUN.name + ".",
-        suffix=".tmp",
-        encoding="utf-8",
-    ) as f:
-        tmp_name = f.name
-        f.write(_run_ref(run_dir) + "\n")
-    Path(tmp_name).replace(ACTIVE_RUN)
-    return True
-
-
-def clear_active_run() -> None:
     try:
-        ACTIVE_RUN.unlink()
-    except FileNotFoundError:
-        pass
+        import setup_transaction  # noqa: WPS433
+
+        setup_transaction.activate_existing_run(
+            run_dir,
+            root=ROOT,
+            runs_root=RUNS_ROOT,
+            pointer=ACTIVE_RUN,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def clear_active_run() -> bool:
+    """Clear the selected run through the shared CAS primitive.
+
+    An already-absent pointer is an idempotent success. Locking/CAS/I/O failures
+    stay observable to CLI callers instead of being reported as a successful
+    control-plane transition.
+    """
+    try:
+        import setup_transaction  # noqa: WPS433
+
+        setup_transaction.clear_activation_cas(
+            expected=setup_transaction.pointer_snapshot(ACTIVE_RUN),
+            pointer=ACTIVE_RUN,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def active_run() -> Path | None:
@@ -300,7 +290,7 @@ def _selftest() -> int:
             return False, b"", 0
 
     root_current = {"workspace": {"current_dir": str(ROOT)}}
-    tmp_root = ROOT / "tmp"
+    tmp_root = RUNS_ROOT
     tmp_root.mkdir(exist_ok=True)
     temp = Path(tempfile.mkdtemp(dir=tmp_root))
     run = temp / "run"
@@ -338,6 +328,19 @@ def _selftest() -> int:
     real_contract_before = fingerprint(real_contract_path)
     ACTIVE_RUN = temp / "xunji_active_run"
     try:
+        # Seed the isolated pointer through the same CAS primitive and isolated
+        # claim directories, so this renderer test cannot consume a real Claude
+        # bootstrap claim or introduce a second pointer-writer pattern.
+        import setup_transaction  # noqa: WPS433
+
+        setup_transaction.activate_existing_run(
+            run,
+            root=ROOT,
+            runs_root=RUNS_ROOT,
+            pointer=ACTIVE_RUN,
+            pending_dir=temp / ".pending",
+            claims_dir=temp / ".claims",
+        )
         assert set_active_run(str(run))
         watched = [
             ACTIVE_RUN,
@@ -410,8 +413,16 @@ def _selftest() -> int:
         unknown_phase = _phase_tag("Unexpected Phase", color=True)
         invalid_rejected = set_active_run(str(outside_dir)) is False
         outside = render_statusline({"workspace": {"current_dir": str(outside_dir)}}, color=False)
-        clear_active_run()
+        clear_ok = clear_active_run()
         no_active = render_statusline(root_current, color=False)
+        setup_transaction.activate_existing_run(
+            run,
+            root=ROOT,
+            runs_root=RUNS_ROOT,
+            pointer=ACTIVE_RUN,
+            pending_dir=temp / ".pending",
+            claims_dir=temp / ".claims",
+        )
         assert set_active_run(str(run))
         missing_cache = temp / "missing-cache-run"
         missing_cache.mkdir()
@@ -473,6 +484,7 @@ def _selftest() -> int:
          and "[Hunter｜验证]" in cli_colored
          and run.name in cli_colored),
         ("workspace without active run prints nothing", no_active == ""),
+        ("active-run clear reports committed control-plane result", clear_ok),
         ("missing cache still renders only phase and run",
          missing_plain.startswith("[Xunji-status] [")
          and missing_plain.endswith(f"] {missing_cache.name}")
@@ -496,6 +508,8 @@ def _selftest() -> int:
     for name, ok in checks:
         print(("ok   " if ok else "FAIL ") + name)
     print("xunji_statusline selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+    shutil.rmtree(temp, ignore_errors=True)
+    shutil.rmtree(outside_dir, ignore_errors=True)
     return 0 if not bad else 1
 
 
@@ -509,7 +523,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.selftest:
         return _selftest()
     if args.clear_active:
-        clear_active_run()
+        if not clear_active_run():
+            print("[xunji_statusline] failed to clear active run", file=sys.stderr)
+            return 1
         return 0
     if args.set_active:
         if not set_active_run(args.set_active):

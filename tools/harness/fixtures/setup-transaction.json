@@ -1,0 +1,22 @@
+{
+  "schema": "xunji.setup-transaction-fixture.v1",
+  "failure_cases": [
+    {"stage": "before_build", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "ingest", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "coverage", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "asset_ledger", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "journal", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "loop_state", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "source_manifest", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "prepared_receipt", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "before_atomic_rename", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "atomic_rename", "formal_run": "absent", "pointer": "unchanged"},
+    {"stage": "after_atomic_rename", "formal_run": "prepared_not_active", "pointer": "unchanged"},
+    {"stage": "before_pointer_cas", "formal_run": "prepared_not_active", "pointer": "unchanged"},
+    {"stage": "before_pointer_replace", "formal_run": "prepared_not_active", "pointer": "unchanged"},
+    {"stage": "after_pointer_before_receipt", "formal_run": "prepared_not_active", "pointer": "target"}
+  ],
+  "recovery_failure_cases": [
+    {"stage": "before_recovered_receipt", "formal_run": "prepared_not_active", "pointer": "target"}
+  ]
+}

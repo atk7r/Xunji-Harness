@@ -79,7 +79,7 @@ python tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --
 
 For mechanical `Setup`, `tools/setup_run.py` keeps a successful invocation
 stdout-silent; the selected-run statusline is its visible state. Failures and
-degraded setup diagnostics remain on stderr. For `/loop`, follow
+fail-closed setup diagnostics remain on stderr. For `/loop`, follow
 `docs/templates/loop_prompt.md`: enter Root Orchestrator before
 the state graph pass, Hunter before proof/verification/Agent action, Reviewer
 before merge/evidence/closure checks, and Report only when report material is
@@ -106,13 +106,18 @@ it never replaces `loop_journal.py` or PreToolUse enforcement.
 Create a new run in one shot:
 
 ```bash
-python tools/setup_run.py <slug> [recon.json]
+python tools/setup_run.py <slug> <recon.json>
+python tools/setup_run.py <slug> --target <http-or-https-url>
 ```
 
-`setup_run.py` completes the workbench, inherits the current operator turn
-contract, and only then atomically sets `.claude/xunji_active_run`. This does not
-enter `/loop`, choose a front, or make any evidence/closure decision. Never clear
-or Write/Edit the pointer directly. When `/loop` initially attempts CronCreate for
+`setup_run.py` validates input and delegates the whole commit to
+`tools/setup_transaction.py`: hidden same-filesystem staging, complete canonical
+and initial derived state, source/prepared receipts, atomic rename, then
+`commit_activation_cas()`. Setup, bootstrap, resume, set-active, and recovery are
+adapters to that one pointer writer. A CAS failure is `prepared_not_active`; a
+pointer-success/receipt-failure is recovered idempotently without a duplicate run.
+This does not enter `/loop`, choose a front, or make any evidence/closure decision.
+Never clear or Write/Edit the pointer directly. When `/loop` initially attempts CronCreate for
 a requested new run, let the gate reject that premature schedule, run setup, then
 CronList and CronCreate again with the new run directory name.
 
@@ -280,6 +285,7 @@ After editing lifecycle tools or templates, run:
 
 ```bash
 python tools/setup_run.py --selftest
+python tools/setup_transaction.py --selftest
 python tools/check_run.py --selftest
 python tools/session_handoff.py --selftest
 python tools/anti_drift.py --selftest

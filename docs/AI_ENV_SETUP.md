@@ -128,9 +128,16 @@ python3 tools/loop_bootstrap.py <slug> <recon.json>
 python3 tools/loop_bootstrap.py --resume runs/<dir>
 ```
 
-`setup_run.py` 会创建 run 骨架、记录 recon、派生 scope，并从 Guanlan recon 直接生成 `coverage.json`。不要手工从人类报告挑一小撮资产去写 `surface.md`，也不要默认用 `classify_hosts` 对已有 Guanlan recon 全量重探；`--classify` 只用于需要本机出口重新确认可达性的场景。
+`setup_run.py` 会先验证 slug/date/URL 或 recon schema，再由
+`setup_transaction.py` 在隐藏同盘 staging 中创建骨架、记录 recon、派生 scope、生成
+`coverage.json` / asset ledger / 初始 loop state / source 与 transaction receipt；完整后
+才 atomic rename 并 CAS 切 active pointer。不要手工从人类报告挑一小撮资产去写
+`surface.md`，也不要默认用 `classify_hosts` 对已有 Guanlan recon 全量重探；
+`--classify` 只用于需要本机出口重新确认可达性的场景。
 
-这些入口会在完成准备后继承当前 Claude 回合契约，再原子切换 active run。
+这些入口会在完成准备后继承当前 Claude 回合契约，再通过同一个 CAS 原语切换
+active run。CAS 冲突会保留 `prepared_not_active` receipt 和旧 pointer；显式 resume
+可通过同一原语恢复，不能手工改 pointer。
 不要直接编辑或删除 `.claude/xunji_active_run`。如果 `/loop` 在新 run 创建前的
 CronCreate 被拒绝，先完成 setup，再针对新 run 重新执行 CronList/CronCreate。
 

@@ -56,6 +56,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("proxy",          ["tools/harness/proxy.py", "--selftest"],  "engagement egress proxy (渗透走/模型不走)"),
     ("codex_proxy",    ["tools/harness/codex_proxy.py", "--selftest"], "Codex review proxy hygiene"),
     ("replay",         ["tools/replay.py", "--selftest"],         "evidence replay"),
+    ("setup_transaction", ["tools/setup_transaction.py", "--selftest"], "atomic setup + active-pointer CAS/recovery"),
     ("setup_run",      ["tools/setup_run.py", "--selftest"],      "run scaffolding"),
     ("ingest_recon",    ["tools/ingest_recon.py", "--selftest"],   "Guanlan recon adapter"),
     ("bench",          ["tools/bench.py", "--selftest"],          "R-1 self-eval scorer"),

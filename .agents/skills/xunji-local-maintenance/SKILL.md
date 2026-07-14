@@ -21,7 +21,7 @@ the Root driver.
 
 - Use this skill for ordinary repository edits and selftest selection.
 - Use `xunji-sentinel-guard-review` for `.claude/hooks/`,
-  `tools/harness/guard.py`, or `sentinel/` behavior changes.
+  `tools/setup_transaction.py`, `tools/harness/guard.py`, or `sentinel/` behavior changes.
 - Use `xunji-peer-review-panel` when Codex-authored maintenance needs external
   review. Codex does not count as independent reviewer of its own diff.
 - When the operator asks to "复审" / review a plan, diff, or maintenance change,

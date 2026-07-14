@@ -21,6 +21,8 @@ fix project issues here; Claude remains the live Root driver during real runs.
 
 - `tools/setup_run.py` for skeleton creation, recon recording, scope derivation,
   coverage adaptation, and knowledge hits.
+- `tools/setup_transaction.py` for hidden staging, source/transaction receipts,
+  atomic publish, active-pointer CAS, and prepared recovery.
 - `tools/ingest_recon.py` for recon rendering and Guanlan-to-coverage mapping.
 - `tools/scope.py` for in/out scope derivation and matching.
 - `tools/classify_hosts.py` for optional current-egress recheck behavior.
@@ -30,6 +32,11 @@ fix project issues here; Claude remains the live Root driver during real runs.
 ## Invariants
 
 - With recon, setup should ingest the full asset table into `surface_recon.md`.
+- Invalid slug/date/URL, missing/damaged/unknown recon, or any ingest/coverage/
+  ledger/journal/loop-state failure must leave the old pointer unchanged and no
+  half-built formal run.
+- Setup/bootstrap/resume/set-active must share `commit_activation_cas()`; adapters
+  never write the pointer or accept hook claim contents.
 - `coverage.json` should be built from Guanlan baseline with zero re-probe unless
   the user explicitly chooses current egress recheck.
 - `--classify` is active probing and must stay opt-in.
@@ -41,16 +48,19 @@ fix project issues here; Claude remains the live Root driver during real runs.
 
 ```bash
 python tools/setup_run.py --selftest
+python tools/setup_transaction.py --selftest
 python tools/ingest_recon.py <recon.json>
 python tools/classify_hosts.py --selftest
 python tools/scope.py --selftest
 python tools/check_run.py --selftest
-python tools/selftest_all.py --only setup_run,classify_hosts,scope,check_run
+python tools/selftest_all.py --only setup_transaction,setup_run,classify_hosts,scope,check_run
 ```
 
 ## Review Checklist
 
 - Does the change preserve no-overwrite run directory behavior?
+- Does a rename-complete CAS failure remain `prepared_not_active`, and does a
+  pointer-before-receipt failure recover idempotently?
 - Does `target.md` record recon path or `none` accurately?
 - Does scope derivation label heuristic uncertainty without driving attack
   choices?

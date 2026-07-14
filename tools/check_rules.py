@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -77,6 +78,8 @@ REQUIRED_FILES = [
     Path("docs/WORKFLOW.md"),
     Path("docs/WORKFLOW-reference.md"),
     Path("docs/cognition/README.md"),
+    Path("tools/setup_transaction.py"),
+    Path("tools/harness/fixtures/setup-transaction.json"),
 ]
 
 REQUIRED_TEXT: dict[Path, list[str]] = {
@@ -84,15 +87,18 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "docs/ARCHITECTURE.md",
         "tools/harness/privacy.py",
         "tools/harness/command_shape.py",
+        "tools/setup_transaction.py",
     ],
     Path("CLAUDE.md"): [
         "docs/ARCHITECTURE.md",
         "tools/harness/privacy.py",
         "tools/harness/command_shape.py",
+        "tools/setup_transaction.py",
     ],
     Path("docs/WORKFLOW-reference.md"): [
         "tools/harness/privacy.py",
         "tools/harness/command_shape.py",
+        "tools/setup_transaction.py",
     ],
     Path("docs/ARCHITECTURE.md"): [
         "## 4. 当前架构",
@@ -102,6 +108,9 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "## 10. 变更协议",
         "## 11. 当前不可破坏的不变量",
         "## 12. Maintenance Checkpoint",
+        "tools/setup_transaction.py",
+        "prepared_not_active",
+        "commit_activation_cas()",
     ],
 }
 
@@ -112,6 +121,110 @@ CHECKPOINT_REQUIRED_FIELDS = (
     "Verification",
     "Independent review",
 )
+
+ACTIVE_POINTER_OWNER = Path("tools/setup_transaction.py")
+ACTIVE_POINTER_MUTATORS = {
+    "write_text", "write_bytes", "unlink", "rename", "replace", "touch",
+}
+ACTIVE_POINTER_HELPERS = {
+    "_atomic_write", "atomic_write", "os.replace", "shutil.move",
+}
+
+
+def _call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _call_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return ""
+
+
+def active_pointer_mutations(path: Path, text: str) -> list[int]:
+    """Return non-test direct writes to the canonical active-run pointer.
+
+    ``tools/setup_transaction.py`` is the one writer.  Other modules may read
+    the pointer or pass it to the shared transaction API, but may not mutate it
+    directly.  This AST tripwire covers Path mutations, write-mode ``open()``,
+    common atomic-write helpers, and shell strings.  Selftest functions may
+    construct deliberately forbidden calls to verify the runtime guard.
+    """
+    if path == ACTIVE_POINTER_OWNER:
+        return []
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except SyntaxError:
+        return []
+
+    pointer_names: set[str] = set()
+
+    def mentions_pointer(node: ast.AST | None) -> bool:
+        if node is None:
+            return False
+        if isinstance(node, ast.Name) and node.id in pointer_names:
+            return True
+        return any(
+            isinstance(child, ast.Constant)
+            and isinstance(child.value, str)
+            and "xunji_active_run" in child.value
+            for child in ast.walk(node)
+        )
+
+    # Resolve the simple module/function aliases used by the repository.
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = node.value
+            if not mentions_pointer(value):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in pointer_names:
+                    pointer_names.add(target.id)
+                    changed = True
+
+    errors: list[int] = []
+
+    class MutationVisitor(ast.NodeVisitor):
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            if node.name == "_selftest" or node.name.startswith("test_"):
+                return
+            self.generic_visit(node)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node: ast.Call) -> None:
+            name = _call_name(node.func)
+            if isinstance(node.func, ast.Attribute):
+                if node.func.attr in ACTIVE_POINTER_MUTATORS and mentions_pointer(node.func.value):
+                    errors.append(node.lineno)
+            if name == "open" and node.args and mentions_pointer(node.args[0]):
+                mode = "r"
+                if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+                    mode = str(node.args[1].value)
+                for keyword in node.keywords:
+                    if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant):
+                        mode = str(keyword.value.value)
+                if any(flag in mode for flag in "wax+"):
+                    errors.append(node.lineno)
+            if name in ACTIVE_POINTER_HELPERS and node.args:
+                destination = node.args[1] if name in {"os.replace", "shutil.move"} \
+                    and len(node.args) > 1 else node.args[0]
+                if mentions_pointer(destination):
+                    errors.append(node.lineno)
+            self.generic_visit(node)
+
+        def visit_Constant(self, node: ast.Constant) -> None:
+            if not isinstance(node.value, str) or "xunji_active_run" not in node.value:
+                return
+            if re.search(r"(?:^|[;&|\n])\s*(?:rm|unlink|tee)\b|>{1,2}\s*[^\n]*xunji_active_run", node.value):
+                errors.append(node.lineno)
+
+    MutationVisitor().visit(tree)
+    return sorted(set(errors))
 
 
 def check_maintenance_checkpoint(text: str) -> list[str]:
@@ -166,6 +279,14 @@ def iter_text_files() -> list[Path]:
 def main() -> int:
     errors: list[str] = []
 
+    scanner_probe = Path("tools/_active_pointer_probe.py")
+    bad_probe = 'ACTIVE_RUN = Path(".claude/xunji_active_run")\nACTIVE_RUN.write_text("x")\n'
+    good_probe = 'ACTIVE_RUN = Path(".claude/xunji_active_run")\nACTIVE_RUN.read_text()\n'
+    if not active_pointer_mutations(scanner_probe, bad_probe):
+        errors.append("active-pointer mutation tripwire failed to detect a direct writer")
+    if active_pointer_mutations(scanner_probe, good_probe):
+        errors.append("active-pointer mutation tripwire rejected a read-only consumer")
+
     # 1. 架构回退: 旧目录重现
     for dirname in LEGACY_DIRS:
         path = ROOT / dirname
@@ -189,6 +310,12 @@ def main() -> int:
         for pattern in FORBIDDEN_TEXT_PATTERNS:
             if pattern.search(text):
                 errors.append(f"forbidden text pattern {pattern.pattern!r} in {rel}")
+        if path.suffix == ".py":
+            for line in active_pointer_mutations(rel, text):
+                errors.append(
+                    f"direct active-pointer mutation outside {ACTIVE_POINTER_OWNER}: "
+                    f"{rel}:{line}"
+                )
 
     # 4. 必含文本(当前为空)
     for rel, required_items in REQUIRED_TEXT.items():
