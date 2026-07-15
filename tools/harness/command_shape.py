@@ -131,11 +131,45 @@ def local_setup_metadata_invocation(
     operator-provided URL metadata path, not arbitrary future setup behavior.
     """
     setup_script = (root / "tools" / "setup_run.py").resolve()
+    loop_script = (root / "tools" / "loop_bootstrap.py").resolve()
     invocation = parse_exact_python_command(
-        command, root=root, allowed_scripts={setup_script}
+        command, root=root, allowed_scripts={setup_script, loop_script}
     )
     if invocation is None:
         return None
+    if invocation.script == loop_script:
+        args = invocation.args
+        source = ""
+        source_type = "auto"
+        type_seen = False
+        index = 0
+        while index < len(args):
+            token = args[index]
+            if token == "--source" and not source and index + 1 < len(args):
+                source = args[index + 1]
+                index += 2
+                continue
+            if token == "--type" and not type_seen and index + 1 < len(args):
+                source_type = args[index + 1]
+                type_seen = True
+                index += 2
+                continue
+            return None
+        if not source or source_type not in {"auto", "url"}:
+            return None
+        if len(source.encode("utf-8")) > 8192 or re.search(r"[\x00-\x20\x7f]", source):
+            return None
+        try:
+            parsed = urlsplit(source)
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+                return None
+            if parsed.username is not None or parsed.password is not None:
+                return None
+            if parsed.port is not None and not (1 <= parsed.port <= 65535):
+                return None
+        except ValueError:
+            return None
+        return invocation
     args = invocation.args
     positionals: list[str] = []
     target = ""

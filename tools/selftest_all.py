@@ -58,6 +58,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("codex_proxy",    ["tools/harness/codex_proxy.py", "--selftest"], "Codex review proxy hygiene"),
     ("replay",         ["tools/replay.py", "--selftest"],         "evidence replay"),
     ("setup_transaction", ["tools/setup_transaction.py", "--selftest"], "atomic setup + active-pointer CAS/recovery"),
+    ("setup_source", ["tools/setup_source.py"], "versioned setup source provenance + deterministic router"),
     ("setup_run",      ["tools/setup_run.py", "--selftest"],      "run scaffolding"),
     ("ingest_recon",    ["tools/ingest_recon.py", "--selftest"],   "Guanlan recon adapter"),
     ("bench",          ["tools/bench.py", "--selftest"],          "R-1 self-eval scorer"),

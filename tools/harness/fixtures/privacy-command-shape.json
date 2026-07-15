@@ -16,6 +16,34 @@
       "privacy": "allow"
     },
     {
+      "name": "exact loop source URL metadata",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source 'https://example.test/path?note=a&semi=one;two' --type auto",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "loop source unknown option",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --future yes",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "loop source URL userinfo is never local metadata",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source 'https://user:secret@example.test/' --type url",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "loop source repeated source is ambiguous",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --source https://other.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
       "name": "setup unknown option",
       "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ --future-mode yes",
       "shell_control": false,

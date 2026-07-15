@@ -23,9 +23,19 @@ default.
 ## One-Shot Setup
 
 ```bash
+python3 tools/loop_bootstrap.py --source <run-or-URL-or-file> --type auto
 python tools/setup_run.py <slug> <recon.json>
 python tools/setup_run.py <slug> --target <http-or-https-url>
 ```
+
+`loop_bootstrap.py --source` is the single operator-facing adapter. It resumes a
+recognizable run/run file, parses and locally snapshots an explicit HTTP(S) target
+without fetching, or recognizes Guanlan/recon JSON by content and sends it through
+the same setup transaction. Other file kinds require the candidate-normalizer path;
+until that path validates a `xunji.setup-source.v1` candidate, fail with
+`normalizer_required` and do not create a run, move the pointer, or create Cron.
+After first setup, scheduled and manual cycles use only the normalized
+`/loop runs/<dir>` form.
 
 With recon, setup should:
 
@@ -38,6 +48,19 @@ With recon, setup should:
 - write `knowledge_hits.md` when local signatures match;
 - build source/transaction receipts and initial derived state under hidden
   same-filesystem staging before publishing the run.
+
+The versioned source bundle lives separately from derived state:
+`sources/original/<snapshot>`, `sources/normalized.json`, and
+`sources/validator_receipt.json`. `target.md` cites their hash/paths and remains the
+canonical human boundary. Every candidate asset/scope/auth reference must resolve
+to source content that contains its value. Authorization language inside a file is
+only `source-data`; only a hook-bound operator prompt hash may mint
+`authority=operator`. If an adjacent recon `report.md` affects baseline
+reachability, it is frozen and hashed as `related_sources`, not read as an
+unrecorded side input.
+Unknown schema versions fail closed. The legacy underscore schema remains readable
+for existing formal runs; migration requires exact snapshot bytes matching every
+recorded hash and never reconstructs provenance from display text.
 
 `setup_run.py` prepares the workbench. It does not pick fronts, decide findings,
 or attack the target. `tools/setup_transaction.py` is the sole commit owner:
@@ -93,6 +116,7 @@ they share IP ranges, naming patterns, CDN, or server headers.
 
 ```bash
 python tools/setup_run.py --selftest
+python3 tools/setup_source.py
 python tools/setup_transaction.py --selftest
 python tools/classify_hosts.py --selftest
 python tools/scope.py --selftest

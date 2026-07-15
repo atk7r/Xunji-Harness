@@ -49,8 +49,15 @@
 - **Entry boundary:** normal chat stays normal chat. A URL, markdown note, recon
   path, or existing `runs/<dir>` mentioned in natural language prepares setup,
   resume, or `hints.md`; it does **not** start autonomous loop. Only an explicit
-  `/loop` token enters loop mode. When unsure, preserve chat/setup/resume
-  semantics and ask only for missing run/target boundary data; never infer loop.
+  `/loop` token enters loop mode. `/loop <source>` is adapted through
+  `tools/loop_bootstrap.py --source <input> --type auto`: existing run/run file
+  resumes, an explicit HTTP(S) URL is parsed and saved locally without fetching,
+  and Guanlan/recon JSON is ingested with zero re-probe. Other files must pass the
+  candidate normalizer and validator before setup; an unsupported or ambiguous
+  source fails without creating/activating a run. From the next cycle onward use
+  only `/loop runs/<normalized-run-dir>`, never the original URL/file. When unsure,
+  preserve chat/setup/resume semantics and ask only for missing run/target boundary
+  data; never infer loop.
 - **OSINT = the upstream tool Guanlan** (collect · dedup · fold wildcard DNS ·
   liveness · ownership). Xunji **consumes the clean inventory and attacks it — it does
   NOT re-do OSINT.** `setup_run <slug> <recon.json>` builds `coverage.json` with zero
@@ -69,7 +76,8 @@
   disappearing. A broad front title does not count unless it names each member.
 - Setup is one transaction owned by `tools/setup_transaction.py`: validate slug,
   date, URL/recon schema, and source hash before creating a formal run; build all
-  canonical files, coverage, asset ledger, initial loop state, source manifest,
+  canonical files, coverage, asset ledger, initial loop state, the versioned
+  `xunji.setup-source.v1` manifest plus original/normalized/validator artifacts,
   and a prepared receipt under same-filesystem hidden staging; then atomic-rename
   and compare-and-swap the active pointer. Any ingest/coverage/ledger/journal/state
   failure is fatal, not a warning that still activates an incomplete run.

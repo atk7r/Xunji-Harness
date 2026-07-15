@@ -174,8 +174,10 @@ review record 和对应设计 owner 为事实源；两种工作不可混成一�
 ```text
 explicit setup/resume intent
   -> bind turn authority
-  -> resolve + validate source/slug/date before formal run creation
+  -> route existing-run | URL | local file by deterministic content rules
+  -> normalize + validate xunji.setup-source.v1 before formal run creation
   -> prepare complete run under runs/.xunji_staging
+  -> freeze original snapshot + normalized candidate + validator receipt
   -> freeze setup_source + prepared transaction receipt
   -> atomic rename to runs/<dir>
   -> commit active-run transition through one compare-and-swap writer
@@ -201,6 +203,23 @@ run；CLI 和 source 输入不能提供 claim 内容或 authority，`turn_contra
 时 activation fail-closed。只有 `runs/` 内的现存目录能成为 pointer authority；存在但
 损坏、身份缺失或与 `setup_source` hash 不一致的 transaction receipt 不能降级成 legacy
 run，必须在 pointer 改动前拒绝。
+
+首次 `/loop <source>` 由 `tools/loop_bootstrap.py --source ... --type auto` 适配：合法
+existing run/run 内文件只 resume；HTTP(S) target URL 只做确定性解析和本地快照，不发起
+fetch；Guanlan/recon JSON 按内容识别并零重探导入；其余文件进入 candidate normalizer，
+当前 normalizer 尚未完成的类型以 `normalizer_required` fail closed。`tools/setup_source.py`
+冻结 `xunji.setup-source.v1`：原始输入、`sources/normalized.json` 与 validator receipt
+置于 `sources/`，`state/setup_source.json` 是事务身份副本，`target.md` 仍是人可读 canonical
+boundary；会影响 baseline reachable/low-quality 的相邻 recon report 作为带独立 hash 的
+`related_sources` snapshot 冻结，不能成为隐形第二输入。机械 validator 校验 hash、路径、URL/host/port、重复资产和 `source_ref` 值级
+对应关系；只有 hook 绑定的顶层 prompt hash 能加入 `authority=operator`，source/附件/
+target/tool/reviewer 文本只能是 data。从第二轮起 lifecycle/Cron 只携带规范化的
+`/loop runs/<dir>`，避免重新抽取漂移。未知 schema major fail closed；旧下划线 schema
+只用于 existing-run 只读兼容，迁移器必须取得与旧 hash 一致的原始/关联 snapshot，
+不能从旧 display/prose 猜回 provenance。JSON Schema 只冻结结构层；`source_ref` 值级
+对应、IDNA host、URL/host/port 一致性、operator prompt 绑定、asset host 一致性与 bundle
+hash 都是所有 runtime 必须实现的语义层。当前 owner 是 `validate_manifest()`；未来
+TypeScript validator 在取得 authority 前必须通过共享 fixture 与 Python 差分测试。
 
 ### 4.4 每轮自治循环
 
@@ -420,7 +439,9 @@ CCB Agent Runtime
 | `.claude/skills/` | Claude 主驾驶按需方法/流程 | `docs/ROUTER.md`、相关 Tool/Hook/test |
 | `.agents/skills/` | Codex 辅助维护/复审知识 | 仅 Codex-side 或明确镜像共享变化 |
 | `.claude/hooks/` | Claude live runtime 的强制 authority/effect/lifecycle gates | safety skill、hook tests、独立复审 |
+| `contracts/` + `tools/harness/fixtures/` | versioned cross-runtime schemas 与 conformance cases | Python/未来 TypeScript validator、未知版本 fail-closed、差分测试 |
 | `tools/harness/maintenance_authority.py` + `safety_critical_paths.json` | 顶层维护指令解析、exact scope 与普通 `/loop` protected-path floor | `turn_contract.py`、settings write receipts、output truth gate、manifest drift check、独立复审 |
+| `tools/setup_source.py` | setup source 路由、provenance normalization、bundle validator；不拥有 fetch/authority/pointer | schema/fixture、setup adapters/transaction、privacy、target.md、独立复审 |
 | `tools/setup_transaction.py` | staging、setup receipt、pointer lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
 | `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
 | `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
@@ -525,24 +546,28 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     Agent、Cron 或 canonical run-state 进展。
 14. Live Bash 是正向 capability allowlist，不用路径字符串黑名单证明任意解释器只读；
     tool-level/inline env 只能使用目标工具明确登记的 proxy/locale 键。
+15. Setup source 是带来源的候选输入，不是新 canonical authority：每个晋级字段必须能
+    回到冻结 snapshot，source 不能改变 turn/scope/tool/maintenance 权限，且原始 source
+    只参与首次 setup；后续 loop 绑定规范化 run。
 
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-15
-- Scope: P0-3 live framework-maintenance authority — `maintenance_authority.py` +
-  safety-critical manifest、`turn_contract.py`、write-tool runtime receipts、`output_gate.py`、
-  `.claude/settings.json`、selftest/rule registration 与 Claude primary-driver lifecycle/safety docs。
-- Architecture impact: yes — 在 EXECUTE/EXPLAIN/PAUSE 之外加入顶层 operator-only、
-  session/turn/prompt/reason/exact-path 绑定的 `MAINTENANCE` mode；普通 `/loop` 不再能修改
-  enforcement/trusted entrypoints，维护回合冻结 target/Agent/Cron/run-state 并由 write-tool
-  receipt + Stop truth gate 防止把 denied/failed action 叙述成成功。
-- Verification: focused maintenance parser、turn contract、runtime receipt、output gate、hook、
-  rule 与 py_compile/diff-format checks PASS；最终候选的完整 `selftest_all.py` 为
-  63 passed / 0 failed，原始机器日志 hash 随 fingerprint 保存在本轮 review record。
-- Independent review: Codex 作者不计自审票；本 checkpoint 只在最终 framework diff 的
+- Scope: P1-1/P1-2 setup-source contract and deterministic `/loop` source routing —
+  schema/fixture、`setup_source.py`、setup/transaction/bootstrap/turn/privacy adapters、
+  跨 runtime 语义不变量、primary-driver lifecycle docs、rule/selftest registration。
+- Architecture impact: yes — 增加 versioned `xunji.setup-source.v1` 跨 runtime contract、
+  `sources/` provenance bundle 与单一 deterministic source adapter；existing run、URL、recon
+  分流后仍共享 setup transaction/pointer owner，source 永远不能成为 operator authority。
+  Markdown/HTML/PDF/DOCX/text/ordinary JSON normalizer 明确保持 transitional fail-closed，
+  不描述为已实现。
+- Verification: focused source/setup/transaction/bootstrap/turn/privacy/rule checks、
+  py_compile 与 diff-format checks 必须 PASS；最终候选完整 `selftest_all.py` 结果与原始
+  machine log hash 随 fingerprint 写入本轮 review record。
+- Independent review: Codex 作者不计自审票；本 checkpoint 只在最终 safety-adjacent diff
   fingerprint 已由 arkcli panel + Claude Code fresh-context 按作者矩阵复审，且原始结果、
-  driver disposition、后端限制与该 fingerprint 一并保存在
-  `review/records/2026-07-15-p0-live-maintenance-authority-review.md` 时才满足提交门。
+  driver disposition、后端限制与 fingerprint 一并保存在
+  `review/records/2026-07-15-p1-setup-source-router-review.md` 时才满足提交门。
 
 ## 13. 外部设计来源与采用边界
 

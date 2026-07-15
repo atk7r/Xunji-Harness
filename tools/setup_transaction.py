@@ -27,13 +27,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
+import setup_source
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNS_ROOT = ROOT / "runs"
 ACTIVE_POINTER = ROOT / ".claude" / "xunji_active_run"
 STAGING_NAME = ".xunji_staging"
 SETUP_LOCK_NAME = ".xunji_setup.lock"
 ACTIVATION_LOCK_NAME = ".xunji_activation.lock"
-SOURCE_SCHEMA = "xunji.setup_source.v1"
+SOURCE_SCHEMA = setup_source.SCHEMA
 RECEIPT_SCHEMA = "xunji.setup_transaction.v1"
 SOURCE_REL = Path("state/setup_source.json")
 RECEIPT_REL = Path("state/setup_transaction.json")
@@ -55,6 +57,8 @@ DEFAULT_REQUIRED = (
     "state/controller.shadow.json",
     str(SOURCE_REL),
     str(RECEIPT_REL),
+    str(setup_source.NORMALIZED_REL),
+    str(setup_source.VALIDATOR_REL),
 )
 
 
@@ -314,8 +318,16 @@ def _validate_activation_receipt(run_dir: Path, receipt: dict) -> None:
             "invalid_transaction_receipt", "receipt status is invalid", run_dir=run_dir
         )
     source = _read_json(run_dir / SOURCE_REL)
-    if source.get("schema") != SOURCE_SCHEMA \
-            or str(source.get("source_sha256") or "") != source_hash:
+    try:
+        setup_source.validate_manifest(source, allow_legacy=True)
+        if source.get("schema") == SOURCE_SCHEMA:
+            setup_source.verify_bundle(run_dir, source)
+    except setup_source.SetupSourceError as exc:
+        raise SetupTransactionError(
+            exc.code, f"setup source manifest/bundle is invalid: {exc}",
+            run_dir=run_dir, transaction_id=transaction_id,
+        ) from exc
+    if str(source.get("source_sha256") or "") != source_hash:
         raise SetupTransactionError(
             "transaction_identity_mismatch",
             "setup source manifest does not match transaction receipt",
@@ -341,10 +353,13 @@ def _validate_prepared_run(run_dir: Path, required_files: tuple[str, ...]) -> No
         )
     source = _read_json(run_dir / SOURCE_REL)
     receipt = _read_receipt(run_dir)
-    if source.get("schema") != SOURCE_SCHEMA or not source.get("source_sha256"):
+    try:
+        setup_source.validate_manifest(source)
+        setup_source.verify_bundle(run_dir, source)
+    except setup_source.SetupSourceError as exc:
         raise SetupTransactionError(
-            "invalid_source_manifest", "prepared source manifest is invalid", run_dir=run_dir
-        )
+            exc.code, f"prepared source manifest/bundle is invalid: {exc}", run_dir=run_dir
+        ) from exc
     if not receipt.get("transaction_id") or receipt.get("status") != "prepared":
         raise SetupTransactionError(
             "invalid_prepared_receipt", "prepared transaction receipt is invalid", run_dir=run_dir
@@ -512,6 +527,19 @@ def commit_activation_cas(
             claims_dir=claims_dir,
         )
         if receipt and contract:
+            source = _read_json(target / SOURCE_REL)
+            if source.get("schema") == SOURCE_SCHEMA:
+                try:
+                    setup_source.bind_operator_prompt(
+                        target, contract, source_hash=source_hash
+                    )
+                except setup_source.SetupSourceError as exc:
+                    raise SetupTransactionError(
+                        exc.code,
+                        f"operator source binding failed: {exc}",
+                        run_dir=target,
+                        transaction_id=transaction_id,
+                    ) from exc
             receipt["contract_binding"] = {
                 "session_id": str(contract.get("session_id") or ""),
                 "prompt_sha256": str(contract.get("prompt_sha256") or ""),
@@ -624,8 +652,10 @@ def create_and_activate(
     """Prepare, publish, and activate one run as a recoverable transaction."""
     _validate_run_name(run_name)
     source = dict(source_manifest)
-    if source.get("schema") != SOURCE_SCHEMA:
-        raise SetupTransactionError("invalid_source_manifest", "unsupported source schema")
+    try:
+        setup_source.validate_manifest(source)
+    except setup_source.SetupSourceError as exc:
+        raise SetupTransactionError(exc.code, str(exc)) from exc
     source_hash = str(source.get("source_sha256") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", source_hash):
         raise SetupTransactionError("invalid_source_hash", "source hash must be sha256")
@@ -768,6 +798,8 @@ def _minimal_builder(run_dir: Path, fault: FaultInjector | None) -> None:
         "progress_ledger.json", "controller.shadow.json",
     ):
         (run_dir / "state" / name).write_text("{}\n", encoding="utf-8")
+    source, source_bytes = setup_source.normalize_url("https://example.test/")
+    setup_source.write_bundle(run_dir, source, source_bytes)
 
 
 def _selftest() -> int:
@@ -781,15 +813,11 @@ def _selftest() -> int:
         "target.md", "classify/coverage.json", "state/asset_ledger.json",
         "state/session_state.json", "state/loop_state.json",
         "state/progress_ledger.json", "state/controller.shadow.json",
-        str(SOURCE_REL), str(RECEIPT_REL),
+        str(SOURCE_REL), str(RECEIPT_REL), str(setup_source.NORMALIZED_REL),
+        str(setup_source.VALIDATOR_REL),
     )
-    source_hash = _sha256(b"fixture-source")
-    source = {
-        "schema": SOURCE_SCHEMA,
-        "kind": "target_url",
-        "source_sha256": source_hash,
-        "display": "https://example.test/",
-    }
+    source, _source_bytes = setup_source.normalize_url("https://example.test/")
+    source_hash = str(source["source_sha256"])
     checks: list[tuple[str, bool]] = []
     try:
         owner_failure_lock = root / ".owner-failure.lock"
@@ -920,7 +948,7 @@ def _selftest() -> int:
         (mismatch_run / "state").mkdir(parents=True)
         mismatch_source_hash = "2" * 64
         _atomic_json(mismatch_run / SOURCE_REL, {
-            "schema": SOURCE_SCHEMA,
+            "schema": "xunji.setup_source.v1",
             "source_sha256": mismatch_source_hash,
         })
         _write_receipt(mismatch_run, {
@@ -965,6 +993,7 @@ def _selftest() -> int:
             pending_dir=pending_dir, claims_dir=claims_dir,
         )
         claimed_receipt = _read_receipt(claimed.run_dir)
+        claimed_source = _read_json(claimed.run_dir / SOURCE_REL)
         claimed_contract = turn_contract.load_contract(
             claimed.run_dir, session_id="setup-transaction-selftest"
         )
@@ -981,6 +1010,17 @@ def _selftest() -> int:
             ("transaction receipt records hook-owned contract binding",
              claimed_receipt.get("contract_binding", {}).get("session_id")
              == "setup-transaction-selftest"),
+            ("hook prompt hash alone binds operator source authority",
+             claimed_source.get("operator_directive", {}).get("prompt_sha256")
+             == pending.get("prompt_sha256")
+             and any(
+                 item.get("authority") == "operator"
+                 and item.get("source_ref")
+                 == f"operator:prompt#sha256={pending.get('prompt_sha256')}"
+                 for item in claimed_source.get("authorization_claims", [])
+                 if isinstance(item, dict)
+             )
+             and bool(setup_source.verify_bundle(claimed.run_dir, claimed_source))),
             ("consumed transition claim is not replayable",
              turn_contract.claim_pending_contract(
                  claimed.run_dir, pending_dir=pending_dir, claims_dir=claims_dir

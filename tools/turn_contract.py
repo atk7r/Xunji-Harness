@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import run_model  # noqa: E402
 import runtime_receipts  # noqa: E402
+import setup_source  # noqa: E402
 from harness.command_shape import (  # noqa: E402
     has_unquoted_shell_control as _has_unquoted_shell_control,
     parse_exact_python_command,
@@ -82,6 +83,7 @@ LOCAL_VERIFICATION_SCRIPTS = {
         "tools/harness/guard.py",
         "tools/harness/maintenance_authority.py",
         "tools/harness/privacy.py",
+        "tools/setup_source.py",
         "tools/run_model.py",
         "tools/runtime_receipts.py",
         "tools/turn_contract.py",
@@ -163,6 +165,7 @@ PROTECTED_RUNTIME_RE = re.compile(
     r"(?:runtime_events\.jsonl|runtime_projection_error\.json|coverage\.json|"
     r"asset_ledger\.json|\.runtime_events\.lock|"
     r"turn_contract\.json|run_status\.json|setup_source\.json|setup_transaction\.json|"
+    r"sources[/\\](?:normalized\.json|validator_receipt\.json|original[/\\][^\s;|&]+)|"
     r"\.xunji_(?:activation|setup)\.lock|\.xunji_staging|"
     r"assignments\.json|xunji_active_run|xunji_pending_turns|xunji_transition_claims|"
     r"review[/\\]receipts[/\\][0-9a-f]{64}\.json)"
@@ -180,7 +183,8 @@ RUN_TRANSITION_RE = re.compile(
     re.I,
 )
 RUN_BIND_RE = re.compile(
-    r"(?:/loop\s+[^\n]*runs[/\\]|(?:恢复|续接|resume|continue).{0,24}(?:run|运行)|"
+    r"(?:/loop\s+(?:[^\n]*runs[/\\]|https?://\S+|(?:/|\.{1,2}/|[A-Za-z]:[/\\])\S+)|"
+    r"(?:恢复|续接|resume|continue).{0,24}(?:run|运行)|"
     r"(?:set-active|setup_run\.py|loop_bootstrap\.py)|"
     r"(?:设置|切换|选择|绑定|set|switch|select|bind).{0,20}active[ -]?run)",
     re.I,
@@ -477,6 +481,18 @@ def _lifecycle_target_name(invocation: tuple[Path, list[str]]) -> str:
             return Path(args[args.index("--resume") + 1]).name
         except (ValueError, IndexError):
             return ""
+    if script.name == "loop_bootstrap.py" and "--source" in args:
+        try:
+            source_value = args[args.index("--source") + 1]
+            source_type = args[args.index("--type") + 1] if "--type" in args else "auto"
+            route = setup_source.route_source(
+                source_value, source_type=source_type, runs_root=ROOT / "runs"
+            )
+        except (ValueError, IndexError, setup_source.SetupSourceError):
+            return ""
+        if route.kind == "run" and route.run_dir is not None:
+            return route.run_dir.name
+        return f"{route.slug}_{datetime.now().strftime('%Y%m%d')}" if route.slug else ""
     if script.name not in {"setup_run.py", "loop_bootstrap.py"}:
         return ""
     value_options = {"--date", "--target"}
@@ -1375,6 +1391,7 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
     invocation = _control_invocation(command) if tool == "Bash" else None
     prompt_excerpt = str(contract.get("prompt_excerpt") or "")
     resume_allowed = False
+    source_allowed = False
     if invocation and invocation[0].name == "loop_bootstrap.py" \
             and "--resume" in invocation[1]:
         try:
@@ -1387,10 +1404,21 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
                 resume_arg.lower() in prompt_excerpt.lower()
                 or Path(resume_arg).name.lower() in prompt_excerpt.lower()
             )))
+    if invocation and invocation[0].name == "loop_bootstrap.py" \
+            and "--source" in invocation[1]:
+        try:
+            source_arg = invocation[1][invocation[1].index("--source") + 1]
+        except (ValueError, IndexError):
+            source_arg = ""
+        # Unlike resume, first-source setup may create a new canonical run.  A
+        # basename collision is therefore not authority for a different path.
+        source_allowed = bool(
+            source_arg and source_arg.lower() in prompt_excerpt.lower()
+        )
     if invocation and invocation[0].name in {"setup_run.py", "loop_bootstrap.py"} \
             and not ({"--selftest", "--help", "-h"} & set(invocation[1])) \
             and not RUN_TRANSITION_RE.search(prompt_excerpt) \
-            and not resume_allowed:
+            and not resume_allowed and not source_allowed:
         return "setup/resume run 转换必须由当前操作者 prompt 明确要求；不得借切换 run 规避当前回合约束。"
     if invocation and invocation[0].name == "xunji_statusline.py" \
             and "--set-active" in invocation[1]:
@@ -1903,6 +1931,12 @@ def _selftest() -> int:
     ]
     setup_control = {"tool_name": "Bash", "tool_input": {
         "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} next {root / 'recon.json'}"}}
+    source_url = "https://new-source.example/path?key=opaque"
+    source_control = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f"--source '{source_url}' --type auto"
+        )}}
     journal_control = {"tool_name": "Bash", "tool_input": {
         "command": f"python3 {ROOT / 'tools' / 'loop_journal.py'} {run} start --note begin"}}
     clear_active = {"tool_name": "Bash", "tool_input": {
@@ -1997,6 +2031,15 @@ def _selftest() -> int:
     micro_python_control_allowed = _control_invocation(
         f"python3.14.2 {ROOT / 'tools' / 'loop_state.py'} {run}") is not None
     setup_allowed_before_fanout = not bool(evaluate_pretool(run, setup_control, contract))
+    source_setup_allowed = not bool(evaluate_pretool(run, source_control, {
+        **contract, "prompt_excerpt": f"/loop {source_url}",
+    }))
+    unrelated_source_setup_blocked = bool(evaluate_pretool(run, source_control, {
+        **contract, "prompt_excerpt": "/loop https://unrelated.example/",
+    }))
+    basename_collision_source_blocked = bool(evaluate_pretool(run, source_control, {
+        **contract, "prompt_excerpt": "/loop /tmp/path?key=opaque",
+    }))
     setup_without_operator_blocked = bool(evaluate_pretool(run, setup_control, {
         **contract, "prompt_excerpt": "继续当前 run 的 F-001",
     }))
@@ -2022,6 +2065,10 @@ def _selftest() -> int:
     url_setup_target = _lifecycle_target_name((
         ROOT / "tools" / "setup_run.py",
         ["url-target", "--target", "https://example.test:8443", "--date", "20260101"],
+    ))
+    routed_url_target = _lifecycle_target_name((
+        ROOT / "tools" / "loop_bootstrap.py",
+        ["--source", source_url, "--type", "auto"],
     ))
     unknown_option_target = _lifecycle_target_name((
         ROOT / "tools" / "setup_run.py",
@@ -3041,6 +3088,12 @@ def _selftest() -> int:
          micro_python_control_allowed),
         ("new-run setup command is lifecycle control before old-run fanout",
          setup_allowed_before_fanout),
+        ("prompt-named --source URL is local lifecycle control",
+         source_setup_allowed and not _is_target_action(source_control)),
+        ("--source URL absent from the operator prompt is blocked",
+         unrelated_source_setup_blocked),
+        ("--source basename collision is not operator authority",
+         basename_collision_source_blocked),
         ("prepared setup transaction blocks target work", prepared_target_blocked),
         ("prepared setup transaction blocks CronCreate", prepared_cron_blocked),
         ("prepared setup transaction remains readable", prepared_read_allowed),
@@ -3062,6 +3115,8 @@ def _selftest() -> int:
          classify_setup_target == "classified_20260101"),
         ("setup --target URL is consumed without replacing the run slug",
          url_setup_target == "url-target_20260101"),
+        ("loop bootstrap --source URL derives the exact target run",
+         routed_url_target == f"new-source-example_{datetime.now().strftime('%Y%m%d')}"),
         ("unknown lifecycle options fail closed instead of rebinding the slug",
          unknown_option_target == ""),
         ("loop bootstrap resume extracts the exact target run",

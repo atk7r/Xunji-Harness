@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/setup-source.v1.schema.json",
+  "title": "Xunji Setup Source v1",
+  "description": "Language-neutral candidate and provenance contract for deterministic run setup. It does not replace canonical run Markdown or mint operator authority. This JSON Schema is the structural validation layer; conforming consumers must also enforce the semantic invariants named in $comment.",
+  "$comment": "Mandatory semantic validation beyond JSON Schema: resolve each source_ref against the frozen primary or related snapshot and require value containment; normalize and validate hosts with IDNA rules; require primary_url, host, scheme, and port consistency; bind authority=operator only to the hook-supplied operator_directive.prompt_sha256; reject asset URL and host mismatches; verify snapshot and bundle hashes. tools/setup_source.py validate_manifest() is the current validator owner. A future non-Python validator must pass the shared conformance fixtures and differential tests before it may consume this contract authoritatively.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source_sha256",
+    "source",
+    "related_sources",
+    "operator_directive",
+    "target",
+    "assets",
+    "scope_candidates",
+    "authorization_claims",
+    "entry_points",
+    "signals",
+    "coverage_quality",
+    "unresolved",
+    "extractor"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.setup-source.v1"},
+    "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference", "sha256", "media_type", "snapshot"],
+      "properties": {
+        "kind": {
+          "enum": ["url", "recon-json", "json", "markdown", "html", "pdf", "docx", "text", "run"]
+        },
+        "reference": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+        "snapshot": {"type": "string", "pattern": "^sources/original/[A-Za-z0-9._-]+$"}
+      }
+    },
+    "related_sources": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "reference", "sha256", "media_type", "snapshot"],
+        "properties": {
+          "kind": {"enum": ["recon-report", "attachment"]},
+          "reference": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+          "snapshot": {"type": "string", "pattern": "^sources/original/[A-Za-z0-9._-]+$"}
+        }
+      }
+    },
+    "operator_directive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt_sha256", "provided_target"],
+      "properties": {
+        "prompt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "provided_target": {"type": "boolean"}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary_url", "host", "scheme", "port", "source_ref", "confidence"],
+      "properties": {
+        "primary_url": {"type": "string", "maxLength": 8192},
+        "host": {"type": "string", "maxLength": 253},
+        "scheme": {"enum": ["", "http", "https"]},
+        "port": {"type": ["integer", "null"], "minimum": 1, "maximum": 65535},
+        "source_ref": {"type": "string", "maxLength": 4096},
+        "confidence": {"enum": ["explicit", "derived", "ambiguous"]}
+      }
+    },
+    "assets": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["host", "url", "source_ref"],
+        "properties": {
+          "host": {"type": "string", "minLength": 1, "maxLength": 253},
+          "url": {"type": "string", "maxLength": 8192},
+          "source_ref": {"type": "string", "minLength": 1, "maxLength": 4096}
+        }
+      }
+    },
+    "scope_candidates": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/candidate"}
+    },
+    "authorization_claims": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value", "authority", "source_ref"],
+        "properties": {
+          "value": {"type": "string", "minLength": 1, "maxLength": 8192},
+          "authority": {"enum": ["operator", "source-data", "derived"]},
+          "source_ref": {"type": "string", "minLength": 1, "maxLength": 4096}
+        }
+      }
+    },
+    "entry_points": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/candidate"}
+    },
+    "signals": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/candidate"}
+    },
+    "coverage_quality": {"enum": ["full", "partial", "unknown"]},
+    "unresolved": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "reason", "source_ref"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1, "maxLength": 255},
+          "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "source_ref": {"type": "string", "maxLength": 4096}
+        }
+      }
+    },
+    "extractor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deterministic_version", "ai_backend", "prompt_version", "redaction_version", "redacted_sha256"],
+      "properties": {
+        "deterministic_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "ai_backend": {"type": ["string", "null"], "maxLength": 255},
+        "prompt_version": {"type": ["string", "null"], "maxLength": 255},
+        "redaction_version": {"type": ["string", "null"], "maxLength": 255},
+        "redacted_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source_ref"],
+      "properties": {
+        "value": {"type": "string", "minLength": 1, "maxLength": 8192},
+        "source_ref": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    }
+  }
+}

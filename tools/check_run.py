@@ -42,6 +42,10 @@ try:
     import runtime_receipts as _runtime_receipts
 except Exception:
     _runtime_receipts = None
+try:
+    import setup_source as _setup_source
+except Exception:
+    _setup_source = None
 from evidence_parse import parse_evidence, write_evidence_index  # 唯一权威证据解析器(已抽出到独立模块)
 
 try:
@@ -651,10 +655,30 @@ def check_setup_transaction_state(run_dir: Path) -> list[str]:
     except Exception as exc:
         errors.append(f"setup source manifest unreadable: {exc.__class__.__name__}")
         return errors
-    if not isinstance(source, dict) or source.get("schema") != "xunji.setup_source.v1":
+    if not isinstance(source, dict):
         errors.append("setup source manifest schema invalid")
     elif str(source.get("source_sha256") or "") != source_hash:
         errors.append("setup source/transaction hash mismatch")
+    elif source.get("schema") == "xunji.setup-source.v1":
+        if _setup_source is None:
+            errors.append("setup source validator unavailable")
+        else:
+            try:
+                _setup_source.verify_bundle(run_dir, source)
+            except Exception as exc:
+                code = getattr(exc, "code", exc.__class__.__name__)
+                errors.append(f"setup source bundle invalid: {code}")
+    elif source.get("schema") == "xunji.setup_source.v1":
+        # Read-only compatibility for formal runs created before the versioned
+        # provenance bundle existed. New setup never emits this shape.
+        if _setup_source is not None:
+            try:
+                _setup_source.validate_manifest(source, allow_legacy=True)
+            except Exception as exc:
+                code = getattr(exc, "code", exc.__class__.__name__)
+                errors.append(f"legacy setup source manifest invalid: {code}")
+    else:
+        errors.append("setup source manifest schema invalid")
     return errors
 
 
@@ -2613,9 +2637,28 @@ def _selftest() -> int:
     tx_receipt["status"] = "committed"
     tx_receipt_path.write_text(json.dumps(tx_receipt), encoding="utf-8")
     committed_tx_accepted = check_setup_transaction_state(tx_run) == []
+    canonical_run = tx_run.parent / "canonical_20260101"
+    (canonical_run / "state").mkdir(parents=True)
+    canonical_source, canonical_bytes = _setup_source.normalize_url("https://example.test/")
+    _setup_source.write_bundle(canonical_run, canonical_source, canonical_bytes)
+    (canonical_run / "state" / "setup_source.json").write_text(
+        json.dumps(canonical_source), encoding="utf-8"
+    )
+    (canonical_run / "state" / "setup_transaction.json").write_text(json.dumps({
+        "schema": "xunji.setup_transaction.v1",
+        "transaction_id": "c" * 32,
+        "run_name": canonical_run.name,
+        "source_sha256": canonical_source["source_sha256"],
+        "status": "committed",
+    }), encoding="utf-8")
+    canonical_tx_accepted = check_setup_transaction_state(canonical_run) == []
+    (canonical_run / "sources" / "original" / "target-url.txt").write_bytes(b"mutated")
+    canonical_mutation_rejected = bool(check_setup_transaction_state(canonical_run))
     checks = [
         ("prepared setup transaction is never closable", prepared_tx_rejected),
-        ("committed setup transaction passes identity check", committed_tx_accepted),
+        ("legacy committed setup transaction remains readable", committed_tx_accepted),
+        ("canonical source bundle passes closure identity check", canonical_tx_accepted),
+        ("canonical source mutation blocks closure", canonical_mutation_rejected),
         ("preamble not counted", len(recs) == 10),
         ("manual reviewer identity/verdict cannot satisfy gate",
          not has_completed_independent_review(valid_review_text, d)),

@@ -177,12 +177,13 @@ allowing state reads plus a current-list-bound Cron deletion. Pause is not closu
 tool events; never edit it or the turn/run-status JSON files directly.
 When no run exists, an EXECUTE prompt is held briefly in the hook-owned
 `.claude/xunji_pending_turns/` bootstrap area. `setup_run.py`,
-`loop_bootstrap.py --resume`, and a prompt-named `xunji_statusline.py --set-active`
+`loop_bootstrap.py --source/--resume`, and a prompt-named `xunji_statusline.py --set-active`
 all delegate activation to `setup_transaction.commit_activation_cas()`; it
 consumes/copies the contract before atomically changing `.claude/xunji_active_run`.
 With an existing run, the same paths copy its current contract to the target run.
 New setup validates its source before formal directory creation, prepares the
-complete run in hidden same-filesystem staging, writes source/prepared receipts,
+complete run in hidden same-filesystem staging, writes the frozen original,
+`sources/normalized.json`, `sources/validator_receipt.json`, and source/prepared receipts,
 then changes the hidden receipt to `prepared_not_active` before atomic rename and
 pointer CAS. The first visible formal directory is therefore always explainable;
 CAS failure leaves the old pointer intact, while pointer-success/receipt-failure
@@ -202,6 +203,13 @@ until the contract is bound into the run. PreToolUse writes a short-lived claim
 containing the exact target run, session, and prompt hash; the lifecycle tool must
 consume that claim and bind it to source hash, transaction id, and expected run.
 Multiple valid claims for one target fail closed.
+The source contract is `xunji.setup-source.v1`. Each candidate asset/scope/auth
+field has a resolvable provenance reference whose content contains the value;
+source language can only remain `source-data|derived`. Only a hook-bound top-level
+operator prompt hash can add `authority=operator`. `target.md` cites the bundle and
+remains the canonical human boundary. Initial URL routing parses and saves locally
+without fetching; Guanlan/recon routing ingests the full inventory with zero
+re-probe. From the next loop cycle onward use only `/loop runs/<normalized-dir>`.
 Target-action denials and later successful target actions are also recorded by
 hash. A denial is unresolved until a later successful event has the same tool and
 execution-action hash (for Bash, the command; descriptive metadata is ignored).

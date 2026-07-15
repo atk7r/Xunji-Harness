@@ -4,6 +4,7 @@
 
 用法:
   python3 tools/loop_bootstrap.py <slug> <recon.json>       # 新目标
+  python3 tools/loop_bootstrap.py --source <run|URL|file> --type auto|run|url|recon-json|file
   python3 tools/loop_bootstrap.py --resume runs/<dir>       # 续接已有 run
   python3 tools/loop_bootstrap.py --selftest                # 自检
 
@@ -28,6 +29,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_journal  # noqa: E402
 import setup_run  # noqa: E402
+import setup_source  # noqa: E402
 import setup_transaction  # noqa: E402
 import status_style  # noqa: E402
 import xunji_statusline  # noqa: E402
@@ -220,6 +222,55 @@ def _create_new_transaction(slug: str, recon_full: str) -> setup_transaction.Tra
     )
 
 
+def _create_source_transaction(route: setup_source.SourceRoute) -> setup_transaction.TransactionResult:
+    """Adapt one deterministic source route to the shared setup transaction."""
+    if route.kind == "url":
+        request = setup_run.resolve_setup_request(
+            route.slug, recon=None, target=route.value, date=None, classify=False
+        )
+    elif route.kind == "recon-json" and route.source_path is not None:
+        request = setup_run.resolve_setup_request(
+            route.slug, recon=str(route.source_path), target=None, date=None, classify=False
+        )
+    else:
+        raise setup_source.SetupSourceError(
+            "unsupported_route", f"route does not create a run: {route.kind}"
+        )
+    return setup_transaction.create_and_activate(
+        request["run_name"],
+        source_manifest=request["source_manifest"],
+        build=lambda run_dir, fault: setup_run.prepare_staging_run(
+            request, run_dir, fault, bootstrap=True
+        ),
+        validate_source=request.get("validate_source"),
+        root=ROOT,
+        runs_root=RUNS,
+        pointer=xunji_statusline.ACTIVE_RUN,
+    )
+
+
+def cmd_source(value: str, source_type: str = "auto") -> int:
+    """Route an explicit source without fetching it or starting target work."""
+    try:
+        route = setup_source.route_source(value, source_type=source_type, runs_root=RUNS)
+    except setup_source.SetupSourceError as exc:
+        print(f"[bootstrap:{exc.code}] {exc}", file=sys.stderr)
+        return 1
+    if route.kind == "run" and route.run_dir is not None:
+        return cmd_resume(str(route.run_dir))
+    try:
+        result = _create_source_transaction(route)
+    except (setup_source.SetupSourceError, setup_transaction.SetupTransactionError) as exc:
+        code = getattr(exc, "code", "source_setup_failed")
+        hint = ""
+        if code in {"run_exists", "prepared_not_active"}:
+            hint = "；可 resume 已有 run，或用 setup_run.py 选择 date/slug"
+        print(f"[bootstrap:{code}] {exc}{hint}", file=sys.stderr)
+        return 1
+    _print_launch_instructions(result.run_dir)
+    return 0
+
+
 def cmd_new(slug: str, recon_path: str) -> int:
     """New-run adapter; the shared transaction is the sole commit owner."""
     recon_full = str(Path(recon_path).resolve())
@@ -286,7 +337,8 @@ def _print_launch_instructions(run_dir: Path) -> None:
 # ---- selftest ----
 
 def _selftest() -> int:
-    global _create_new_transaction, _print_launch_instructions, _refresh_loop_state, _set_active_run
+    global _create_new_transaction, _create_source_transaction
+    global _print_launch_instructions, _refresh_loop_state, _set_active_run
 
     import json as _json, tempfile
 
@@ -322,10 +374,38 @@ def _selftest() -> int:
     recon.write_text(_json.dumps({
         "assets": [{"host": "selftest.example", "ownership": "core"}],
     }), encoding="utf-8")
+    unsupported_root = Path(tempfile.mkdtemp())
+    unsupported_source = unsupported_root / "ordinary.json"
+    unsupported_source.write_text(
+        _json.dumps({"target": "https://example.test/"}), encoding="utf-8"
+    )
+    shared_calls: list[str] = []
+    original_shared_create = setup_transaction.create_and_activate
+
+    def fake_shared_create(run_name: str, **_kwargs):
+        shared_calls.append(run_name)
+        return setup_transaction.TransactionResult(
+            p.resolve(), "e" * 32, "f" * 64, "committed"
+        )
+
+    try:
+        setup_transaction.create_and_activate = fake_shared_create
+        real_adapter_result = _create_new_transaction("adaptercheck", str(recon))
+    finally:
+        setup_transaction.create_and_activate = original_shared_create
+    checks.append((
+        "legacy new-run adapter returns the shared transaction result",
+        real_adapter_result.status == "committed"
+        and len(shared_calls) == 1
+        and shared_calls[0].startswith("adaptercheck_")
+        and shared_calls[0][-8:].isdigit()
+    ))
     active_hook_calls: list[Path] = []
     transaction_calls: list[tuple[str, str]] = []
+    source_transaction_calls: list[str] = []
     orig_set_active = _set_active_run
     orig_create_transaction = _create_new_transaction
+    orig_create_source_transaction = _create_source_transaction
     orig_refresh = _refresh_loop_state
     orig_print_launch = _print_launch_instructions
     orig_subprocess_run = subprocess.run
@@ -345,26 +425,42 @@ def _selftest() -> int:
             p.resolve(), "a" * 32, "b" * 64, "committed"
         )
 
+    def fake_create_source_transaction(route: setup_source.SourceRoute):
+        source_transaction_calls.append(route.kind)
+        return setup_transaction.TransactionResult(
+            p.resolve(), "c" * 32, "d" * 64, "committed"
+        )
+
     def fake_run(*_args, **_kwargs) -> _FakeCompleted:
         return _FakeCompleted()
 
     try:
         _set_active_run = fake_set_active
         _create_new_transaction = fake_create_transaction
+        _create_source_transaction = fake_create_source_transaction
         _refresh_loop_state = lambda _run_dir: True
         _print_launch_instructions = lambda _run_dir: None
         subprocess.run = fake_run
         rc_new = cmd_new("selftest", str(recon))
+        rc_source = cmd_source("https://example.test/path?key=opaque", "auto")
+        calls_before_unsupported = list(source_transaction_calls)
+        rc_unsupported = cmd_source(str(unsupported_source), "auto")
         rc_resume = cmd_resume(str(p))
     finally:
         _set_active_run = orig_set_active
         _create_new_transaction = orig_create_transaction
+        _create_source_transaction = orig_create_source_transaction
         _refresh_loop_state = orig_refresh
         _print_launch_instructions = orig_print_launch
         subprocess.run = orig_subprocess_run
 
     checks.append(("cmd_new delegates to shared setup transaction",
                    rc_new == 0 and transaction_calls == [("selftest", str(recon.resolve()))]))
+    checks.append(("--source URL delegates to deterministic router and shared transaction",
+                   rc_source == 0 and source_transaction_calls == ["url"]))
+    checks.append(("normalizer-required file fails before transaction or pointer work",
+                   rc_unsupported == 1
+                   and calls_before_unsupported == source_transaction_calls))
     checks.append(("cmd_new does not perform a second active-pointer commit",
                    active_hook_calls.count(p.resolve()) == 1))
     checks.append(("cmd_resume invokes shared active CAS",
@@ -396,6 +492,7 @@ def _selftest() -> int:
     print(f"loop_bootstrap selftest {'passed' if not bad else f'FAILED ({len(bad)})'}", file=sys.stderr)
     import shutil
     shutil.rmtree(p, ignore_errors=True)
+    shutil.rmtree(unsupported_root, ignore_errors=True)
     return 0 if not bad else 1
 
 
@@ -405,11 +502,21 @@ def main() -> int:
     ap.add_argument("recon", nargs="?", help="recon.json 路径（新 run 时必填）")
     ap.add_argument("--resume", dest="resume", action="store_true",
                     help="续接已有 run（slug_or_resume 为 runs/<dir> 路径）")
+    ap.add_argument("--source", help="统一输入: existing run、http/https URL 或本地文件")
+    ap.add_argument("--type", dest="source_type", default=None,
+                    choices=sorted(setup_source.SUPPORTED_TYPES),
+                    help="source 路由类型；auto 按 run → URL → 内容识别")
     ap.add_argument("--selftest", action="store_true", help="自检")
     args = ap.parse_args()
 
     if args.selftest:
         return _selftest()
+    if args.source:
+        if args.resume or args.slug_or_resume or args.recon:
+            ap.error("--source 不能与 legacy positional 或 --resume 混用")
+        return cmd_source(args.source, args.source_type or "auto")
+    if args.source_type is not None:
+        ap.error("--type 只能与 --source 一起使用")
     if args.resume:
         if not args.slug_or_resume:
             ap.error("--resume 需要 runs/<dir> 路径")

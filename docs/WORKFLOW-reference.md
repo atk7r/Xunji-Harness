@@ -23,13 +23,21 @@ runs/<slug>_<date>/
   evidence/         sensor proof artifacts: *.html, *.replay.json, render_<host>/, screenshots
   classify/         classify_hosts output: coverage.json + per-host bodies
   scripts/          PoC / helper scripts (author-and-handoff)
+  sources/          immutable setup input + normalized candidate + validator receipt
   chains.md · hints.md · alerts.md   conditional (created only when they apply)
 ```
 
 Keep the run **root** to the core `.md` files plus the auto-derived
 `evidence.json` / `coverage.json` / `graph.json`; broader derived projections belong under
 `state/`. Proof artifacts belong under
-`evidence/`, PoC under `scripts/`, coverage under `classify/`. To make the right
+`evidence/`, PoC under `scripts/`, coverage under `classify/`. Setup provenance
+belongs under `sources/`: `sources/original/<snapshot>`,
+`sources/normalized.json`, and `sources/validator_receipt.json` implement the
+versioned `xunji.setup-source.v1` contract.
+`target.md` cites the source hash and receipt but remains the canonical human
+boundary; source JSON cannot silently overwrite it. Any adjacent recon `report.md`
+that affects baseline reachability is a hashed `related_sources` snapshot rather
+than an invisible second input. To make the right
 place the easy place: `probe --save NAME --run runs/<dir>` drops the body **and** its
 `.replay.json` into `<run>/evidence/`; `render --run runs/<dir>` defaults its output
 to `<run>/evidence/render_<host>/`. A render also drops `network.json` (every request
@@ -520,7 +528,8 @@ Run selection is also hook/tool-owned. `tools/setup_transaction.py` is the only
 active-pointer writer: setup, resume, explicit prompt-named set-active, and prepared
 recovery all call its compare-and-swap commit primitive. New setup validates source
 before formal directory creation, builds a complete run in hidden same-filesystem
-staging, writes `state/setup_source.json` plus a prepared
+staging, writes `state/setup_source.json`, the matching versioned bundle under
+`sources/`, plus a prepared
 `state/setup_transaction.json`, then atomically renames and attempts pointer CAS.
 CAS failure preserves the old pointer and an auditable `prepared_not_active` run;
 pointer-success/receipt-failure is recovered idempotently from the pointer, source
@@ -534,6 +543,16 @@ claim prevents cross-session pending selection; concurrent claims fail closed. T
 transaction binds the consumed hook claim to source hash, transaction id, and exact
 expected run; CLI/source adapters never accept claim contents, claim paths, or
 operator-authority fields.
+The validator resolves every candidate asset/scope/auth `source_ref` against the
+frozen snapshot and checks that the referenced content contains the claimed value.
+Only the hook-bound top-level prompt hash can mint `authority=operator`; source,
+attachment, target, tool, and reviewer prose remain untrusted data.
+The JSON Schema is the structural layer, not a complete validator. Every runtime
+must also enforce source-reference value containment, IDNA host rules,
+URL/host/scheme/port consistency, operator-prompt binding, asset URL/host
+consistency, and snapshot/bundle hashes. `tools/setup_source.py::validate_manifest`
+owns those semantics today; a replacement runtime must pass the shared fixtures
+and Python differential tests before it can become authoritative.
 Stop hooks block the first invalid output
 and treat Claude Code's `stop_hook_active` retry as idempotent; retry never marks a
 run complete or changes a front.

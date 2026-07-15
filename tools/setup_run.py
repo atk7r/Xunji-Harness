@@ -48,6 +48,7 @@ REQUIRED = ["target.md", "surface.md", "frontier.md", "hypotheses.md", "evidence
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import loop_journal  # noqa: E402
+import setup_source  # noqa: E402
 import setup_transaction  # noqa: E402
 
 
@@ -103,6 +104,33 @@ def record_target(run_dir: Path, value: str) -> None:
     txt = t.read_text(encoding="utf-8", errors="replace")
     new = re.sub(r"(- Target:).*", lambda m: f"{m.group(1)} {value}", txt, count=1)
     t.write_text(new, encoding="utf-8")
+
+
+def record_setup_source(run_dir: Path, manifest: dict) -> None:
+    """Link canonical target.md to the frozen source/validator receipts."""
+    target = run_dir / "target.md"
+    text = target.read_text(encoding="utf-8", errors="replace")
+    marker = "## Setup Source"
+    related = ", ".join(
+        str(item.get("snapshot") or "")
+        for item in manifest.get("related_sources", []) if isinstance(item, dict)
+    ) or "none"
+    block = (
+        f"{marker}\n\n"
+        f"- Schema: {manifest.get('schema', '')}\n"
+        f"- Kind: {manifest.get('source', {}).get('kind', '')}\n"
+        f"- Source SHA-256: {manifest.get('source_sha256', '')}\n"
+        f"- Snapshot: {manifest.get('source', {}).get('snapshot', '')}\n"
+        f"- Related snapshots: {related}\n"
+        f"- Normalized candidate: {setup_source.NORMALIZED_REL.as_posix()}\n"
+        f"- Validator receipt: {setup_source.VALIDATOR_REL.as_posix()}\n"
+        "- Authority: target.md remains canonical; source claims are data until operator-bound.\n"
+    )
+    if marker in text:
+        text = text.split(marker, 1)[0].rstrip() + "\n\n" + block
+    else:
+        text = text.rstrip() + "\n\n" + block
+    target.write_text(text, encoding="utf-8")
 
 
 def record_scope(run_dir: Path, recon_path: Path) -> str:
@@ -465,7 +493,11 @@ def resolve_setup_request(
     }
     if target:
         target_url = _validated_target_url(target)
-        digest = hashlib.sha256(target_url.encode("utf-8")).hexdigest()
+        try:
+            manifest, source_bytes = setup_source.normalize_url(target_url)
+        except setup_source.SetupSourceError as exc:
+            raise setup_transaction.SetupTransactionError(exc.code, str(exc)) from exc
+        digest = manifest["source_sha256"]
         try:
             from harness.privacy import redact_url
 
@@ -476,24 +508,29 @@ def resolve_setup_request(
             "kind": "target_url",
             "target": target_url,
             "source_sha256": digest,
-            "source_manifest": {
-                "schema": setup_transaction.SOURCE_SCHEMA,
-                "kind": "target_url",
-                "source_sha256": digest,
-                "display": display,
-            },
+            "source_manifest": manifest,
+            "source_bytes": source_bytes,
+            "related_source_bytes": {},
+            "display": display,
             "validate_source": None,
         })
         return request
 
     recon_path = Path(str(recon)).expanduser()
+    if recon_path.is_symlink():
+        raise setup_transaction.SetupTransactionError(
+            "source_symlink_forbidden", f"recon source must not be a symbolic link: {recon_path}"
+        )
     if not recon_path.is_absolute():
         recon_path = (Path.cwd() / recon_path).resolve()
     try:
-        recon_bytes = recon_path.read_bytes()
-    except OSError as exc:
+        recon_bytes = setup_source.read_source_bytes(recon_path)
+    except (OSError, setup_source.SetupSourceError) as exc:
+        code = getattr(exc, "code", "missing_recon")
+        if code == "missing_source":
+            code = "missing_recon"
         raise setup_transaction.SetupTransactionError(
-            "missing_recon", f"recon cannot be read: {recon_path}: {exc}"
+            code, f"recon cannot be read: {recon_path}: {exc}"
         ) from exc
     try:
         recon_data = json.loads(recon_bytes.decode("utf-8"))
@@ -509,10 +546,11 @@ def resolve_setup_request(
     source_hash = hashlib.sha256(recon_bytes).hexdigest()
     report_path = recon_path.parent / "report.md"
     try:
-        report_bytes = report_path.read_bytes() if report_path.exists() else None
-    except OSError as exc:
+        report_bytes = setup_source.read_source_bytes(report_path) if report_path.exists() else None
+    except (OSError, setup_source.SetupSourceError) as exc:
+        code = getattr(exc, "code", "invalid_recon_report")
         raise setup_transaction.SetupTransactionError(
-            "invalid_recon_report", f"adjacent report cannot be read: {exc}"
+            code, f"adjacent report cannot be read: {exc}"
         ) from exc
     report_text = report_bytes.decode("utf-8", "replace") if report_bytes is not None else None
     report_hash = hashlib.sha256(report_bytes).hexdigest() if report_bytes is not None else ""
@@ -527,14 +565,22 @@ def resolve_setup_request(
         except OSError as exc:
             raise RuntimeError(f"source disappeared during setup: {exc}") from exc
 
-    manifest = {
-        "schema": setup_transaction.SOURCE_SCHEMA,
-        "kind": "recon_json",
-        "source_sha256": source_hash,
-        "reference": str(recon_path),
-    }
-    if report_hash:
-        manifest["adjacent_report_sha256"] = report_hash
+    try:
+        manifest = setup_source.normalize_recon(recon_path, recon_bytes, recon_data)
+    except setup_source.SetupSourceError as exc:
+        raise setup_transaction.SetupTransactionError(exc.code, str(exc)) from exc
+    related_source_bytes: dict[str, bytes] = {}
+    if report_bytes is not None:
+        related_snapshot = "sources/original/recon-report.md"
+        setup_source.add_related_source(
+            manifest,
+            kind="recon-report",
+            reference=str(report_path),
+            snapshot=related_snapshot,
+            media_type="text/markdown; charset=utf-8",
+            raw=report_bytes,
+        )
+        related_source_bytes[related_snapshot] = report_bytes
     request.update({
         "kind": "recon_json",
         "recon_path": recon_path,
@@ -542,6 +588,8 @@ def resolve_setup_request(
         "report_text": report_text,
         "source_sha256": source_hash,
         "source_manifest": manifest,
+        "source_bytes": recon_bytes,
+        "related_source_bytes": related_source_bytes,
         "validate_source": validate_source,
     })
     return request
@@ -596,6 +644,12 @@ def prepare_staging_run(
         run_dir, "phase_start", note="prepare authorized run workbench",
         data={"phase": "Setup"},
     )
+    setup_source.write_bundle(
+        run_dir,
+        request["source_manifest"],
+        request["source_bytes"],
+        request.get("related_source_bytes"),
+    )
 
     if request["kind"] == "recon_json":
         if fault:
@@ -639,6 +693,8 @@ def prepare_staging_run(
         if fault:
             fault("coverage")
         _derive_coverage_from_target(run_dir)
+
+    record_setup_source(run_dir, request["source_manifest"])
 
     if not _coverage_ready(run_dir):
         raise RuntimeError("coverage preparation produced no valid asset")
@@ -808,6 +864,14 @@ def _selftest() -> int:
     main_receipt = json.loads(
         (main_run / setup_transaction.RECEIPT_REL).read_text(encoding="utf-8")
     ) if (main_run / setup_transaction.RECEIPT_REL).exists() else {}
+    main_target = (
+        (main_run / "target.md").read_text(encoding="utf-8", errors="replace")
+        if (main_run / "target.md").exists() else ""
+    )
+    try:
+        source_bundle_verified = bool(setup_source.verify_bundle(main_run, main_source))
+    except setup_source.SetupSourceError:
+        source_bundle_verified = False
     checks += [
         ("full setup main succeeds in isolated root", main_rc == 0),
         ("full setup main is stdout-silent on success", main_output == ""),
@@ -818,6 +882,16 @@ def _selftest() -> int:
         ("full setup freezes a source manifest",
          main_source.get("schema") == setup_transaction.SOURCE_SCHEMA
          and len(str(main_source.get("source_sha256") or "")) == 64),
+        ("full setup freezes and verifies the separate provenance bundle",
+         source_bundle_verified
+         and (main_run / setup_source.NORMALIZED_REL).exists()
+         and (main_run / setup_source.VALIDATOR_REL).exists()
+         and (main_run / "sources" / "original" / "target-url.txt").exists()),
+        ("target.md cites source hash and validator while remaining canonical",
+         "## Setup Source" in main_target
+         and str(main_source.get("source_sha256") or "") in main_target
+         and setup_source.VALIDATOR_REL.as_posix() in main_target
+         and "target.md remains canonical" in main_target),
         ("full setup commits a transaction receipt",
          main_receipt.get("schema") == setup_transaction.RECEIPT_SCHEMA
          and main_receipt.get("status") == "committed"),
@@ -840,6 +914,17 @@ def _selftest() -> int:
     bad_json.write_text("{", encoding="utf-8")
     unknown_json = d / "unknown-recon.json"
     unknown_json.write_text("{}", encoding="utf-8")
+    oversized_recon = d / "oversized-recon.json"
+    with oversized_recon.open("wb") as handle:
+        handle.truncate(setup_source.MAX_SOURCE_BYTES + 1)
+    symlink_recon = d / "symlink-recon.json"
+    try:
+        symlink_recon.symlink_to(unknown_json)
+        symlink_request_rejected = request_error(
+            "source_symlink_forbidden", recon=str(symlink_recon), target=None
+        )
+    except OSError:
+        symlink_request_rejected = True
     checks += [
         ("missing recon fails before staging",
          request_error("missing_recon", recon=str(d / "missing.json"), target=None)),
@@ -847,6 +932,9 @@ def _selftest() -> int:
          request_error("invalid_recon_json", recon=str(bad_json), target=None)),
         ("unknown recon schema fails before staging",
          request_error("unknown_recon_schema", recon=str(unknown_json), target=None)),
+        ("oversized recon fails before staging",
+         request_error("source_too_large", recon=str(oversized_recon), target=None)),
+        ("symlink recon fails before staging", symlink_request_rejected),
         ("invalid URL fails before staging",
          request_error("invalid_target_url", recon=None, target="not a url")),
         ("URL userinfo fails before staging",
@@ -938,8 +1026,21 @@ def _selftest() -> int:
     recon = {"target": "t", "assets": [{"host": "a.example", "category": "c", "reachability": "confirmed", "ownership": "core"}]}
     rp = d / "recon.json"
     rp.write_text(json.dumps(recon), encoding="utf-8")
+    adjacent_report = d / "report.md"
+    adjacent_report.write_text(
+        "# Recon\n## 已确认可达资产\n| a.example | 200 | test |\n", encoding="utf-8"
+    )
     frozen_request = resolve_setup_request(
         "frozen", recon=str(rp), target=None, date="20260101", classify=False
+    )
+    adjacent_report.write_text("# mutated report\n", encoding="utf-8")
+    try:
+        frozen_request["validate_source"]()
+        related_mutation_rejected = False
+    except RuntimeError:
+        related_mutation_rejected = True
+    adjacent_report.write_text(
+        "# Recon\n## 已确认可达资产\n| a.example | 200 | test |\n", encoding="utf-8"
     )
     rp.write_text(json.dumps({**recon, "mutated": True}), encoding="utf-8")
     try:
@@ -948,6 +1049,14 @@ def _selftest() -> int:
     except RuntimeError:
         source_mutation_rejected = True
     rp.write_text(json.dumps(recon), encoding="utf-8")
+    related_stage = d / "related-stage"
+    prepare_staging_run(frozen_request, related_stage)
+    related_bundle_verified = bool(setup_source.verify_bundle(
+        related_stage,
+        json.loads((related_stage / setup_transaction.SOURCE_REL).read_text(encoding="utf-8"))
+        if (related_stage / setup_transaction.SOURCE_REL).exists()
+        else frozen_request["source_manifest"],
+    )) if (related_stage / setup_source.NORMALIZED_REL).exists() else False
     record_recon(rd, str(rp))
     info = ingest(rp, rd)
     sinfo = record_scope(rd, rp)
@@ -962,6 +1071,13 @@ def _selftest() -> int:
         ("scope 派生填进 In-scope assets", "*.a.example" in tgt),
         ("record_scope 报派生计数", "in-模式" in sinfo),
         ("recon source mutation is rejected before publish", source_mutation_rejected),
+        ("adjacent report mutation is rejected before publish", related_mutation_rejected),
+        ("report-derived coverage freezes its related source snapshot",
+         related_bundle_verified
+         and (related_stage / "sources/original/recon-report.md").read_text(encoding="utf-8")
+         == adjacent_report.read_text(encoding="utf-8")
+         and frozen_request["source_manifest"]["related_sources"][0]["kind"]
+         == "recon-report"),
     ]
     # adapt_coverage: Guanlan 产物 → coverage.json(零重探)
     adapt_coverage(rp, rd)
