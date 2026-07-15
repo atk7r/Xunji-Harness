@@ -496,6 +496,10 @@ def derive(run_dir: Path) -> dict:
             "asset": name,
             "tokens": sorted(_host_tokens(name)),
             "scope_status": scope_status,
+            "scope_authority": str(a.get("scope_authority") or ""),
+            "scope_admission_id": str(a.get("scope_admission_id") or ""),
+            "scope_prompt_sha256": str(a.get("scope_prompt_sha256") or ""),
+            "source": str(a.get("source") or cov.get("source") or ""),
             "applicable": sorted(_applicable_groups(a)) if reachability is not False else [],
             "tested": [],
             "fronts": [],
@@ -768,7 +772,9 @@ def write_outputs(run_dir: Path) -> dict:
         "summary": data.get("summary"),
         "assets": [{
             key: row.get(key) for key in (
-                "asset_id", "asset", "scope_status", "reachability", "examined", "flags", "fronts",
+                "asset_id", "asset", "scope_status", "scope_authority",
+                "scope_admission_id", "scope_prompt_sha256", "source",
+                "reachability", "examined", "flags", "fronts",
                 "assignments", "assignment_statuses", "tested", "inventory_verdict",
                 "disposition", "accounted", "closure_ready",
             )
@@ -887,7 +893,9 @@ def _selftest() -> int:
     run.mkdir()
     (run / "coverage.json").write_text(json.dumps({"assets": [
         {"host": "a.example", "scope_status": "in", "reachable": True, "flags": ["LOGIN"]},
-        {"host": "b.example", "scope_status": "review", "reachable": True, "flags": ["SURFACE:API"]},
+        {"host": "b.example", "scope_status": "review", "scope_authority": "",
+         "scope_admission_id": "", "scope_prompt_sha256": "",
+         "source": "setup-source-candidate", "reachable": True, "flags": ["SURFACE:API"]},
         {"host": "c.example", "reachable": True, "flags": ["SURFACE:URL_FETCH"]},
         {"host": "profile.example", "reachable": True, "title": "User profile"},
         {"host": "portal.example", "reachable": True, "title": "Admin API docs"},
@@ -1045,6 +1053,10 @@ def _selftest() -> int:
         ("scope admission status survives canonical coverage derivation",
          by_asset["a.example"]["scope_status"] == "in"
          and by_asset["b.example"]["scope_status"] == "review"),
+        ("scope authority and source metadata survive canonical derivation",
+         by_asset["b.example"]["source"] == "setup-source-candidate"
+         and "scope_admission_id" in by_asset["b.example"]
+         and "scope_prompt_sha256" in by_asset["b.example"]),
         ("all in-scope assets stay in ledger with unreachable explicitly accounted",
          by_asset["d.example"]["disposition"] == "unreachable-baseline"
          and all(v == "not_applicable" for v in by_asset["d.example"]["cells"].values())),

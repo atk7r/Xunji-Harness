@@ -567,8 +567,20 @@ default. `--ai external` needs current-prompt consent and provider/model identit
 text remain deferred until their selector/page/offset provenance fixtures pass.
 The derived asset ledger must retain coverage `scope_status`. Target-facing tools
 fail closed for `review|out|unknown`; only `in` and pre-contract legacy rows keep
-their prior behavior. Until the operator-bound zero-probe admission transition is
-implemented, review rows are inspect-only and must not be hand-edited into `in`.
+their prior behavior. Setup-source candidate `in` additionally requires a valid
+committed `xunji.scope_admission.v1` receipt、current setup-source hash and scope
+projection hash. Candidate identity is re-derived from the validator-bound frozen
+setup bundle, so changing or removing a mutable coverage/asset-ledger `source`
+label cannot bypass the receipt gate. The only
+promotion path is a new operator turn whose first non-empty line is
+`/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>`,
+followed by the exact matching `tools/scope_admission.py` call. The hook owns the
+single-use claim. The turn is local-only/zero-probe; `out`, `unknown`, wildcard,
+inactive-run, target, Agent, Cron, replay, and direct ledger edits fail closed.
+Scope commit shares the activation lock with the sole pointer owner, so the
+active-run identity cannot change between the check and the receipt/ledger commit.
+If a crash leaves a prepared admission, it remains non-executable; a new exact
+operator claim for the same assets may finalize the unchanged prepared projection.
 Stop hooks block the first invalid output
 and treat Claude Code's `stop_hook_active` retry as idempotent; retry never marks a
 run complete or changes a front.

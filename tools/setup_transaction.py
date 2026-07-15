@@ -165,7 +165,7 @@ def _invoke_fault(fault: FaultInjector | None, stage: str) -> None:
 
 
 @contextlib.contextmanager
-def _exclusive_directory_lock(
+def exclusive_directory_lock(
     path: Path,
     *,
     timeout: float = 10.0,
@@ -487,7 +487,7 @@ def commit_activation_cas(
     transaction_id = transaction_id or str(receipt.get("transaction_id") or "")
     source_hash = source_hash or str(receipt.get("source_sha256") or "")
     lock = pointer.parent / ACTIVATION_LOCK_NAME
-    with _exclusive_directory_lock(lock):
+    with exclusive_directory_lock(lock):
         current_snapshot = pointer_snapshot(pointer)
         current_target = _pointer_target(
             current_snapshot, root=root, runs_root=runs_root
@@ -589,7 +589,7 @@ def clear_activation_cas(
     pointer: Path = ACTIVE_POINTER,
 ) -> bool:
     """Clear the pointer under the same activation lock; never clear then restore."""
-    with _exclusive_directory_lock(pointer.parent / ACTIVATION_LOCK_NAME):
+    with exclusive_directory_lock(pointer.parent / ACTIVATION_LOCK_NAME):
         current = pointer_snapshot(pointer)
         if not _same_snapshot(current, expected):
             raise SetupTransactionError(
@@ -616,7 +616,7 @@ def _recover_existing(
     # Lock order is always setup -> activation.  Recovery must not inspect the
     # canonical pointer under only the setup lock while set-active/resume can
     # concurrently commit under the activation lock.
-    with _exclusive_directory_lock(pointer.parent / ACTIVATION_LOCK_NAME):
+    with exclusive_directory_lock(pointer.parent / ACTIVATION_LOCK_NAME):
         current = pointer_snapshot(pointer)
         if _pointer_target(
             current, root=root, runs_root=runs_root
@@ -672,7 +672,7 @@ def create_and_activate(
     staging_dir = staging_parent / f"{run_name}.{txid}"
     renamed = False
 
-    with _exclusive_directory_lock(setup_lock):
+    with exclusive_directory_lock(setup_lock):
         if final_dir.exists():
             recovered = _recover_existing(
                 final_dir,
@@ -831,7 +831,7 @@ def _selftest() -> int:
         try:
             globals()["_atomic_json"] = fail_owner_json
             try:
-                with _exclusive_directory_lock(owner_failure_lock):
+                with exclusive_directory_lock(owner_failure_lock):
                     pass
                 owner_failure_reported = False
             except OSError:

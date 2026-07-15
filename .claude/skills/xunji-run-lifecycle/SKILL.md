@@ -64,8 +64,11 @@ Classify the operator message before touching run state:
   use `/loop runs/<dir>`, read `docs/templates/loop_prompt.md`, and bind `{{RUN_DIR}}`
   to that path. Do not require or regenerate a per-run `loop_prompt.md`.
   File-derived `scope_status=review|out|unknown` assets remain non-executable at
-  the target-tool gate; do not hand-edit coverage to bypass the pending operator
-  scope admission.
+  the target-tool gate. A later exact first-line `/xunji-scope-admit --run
+  runs/<name> --assets <host[,host...]> --reason <text>` turn may admit only named
+  setup-source `review` rows through the hook-owned one-use claim and committed
+  `xunji.scope_admission.v1` receipt. That turn is local-only and zero-probe; do
+  not hand-edit coverage.
 
 When the message shape is ambiguous, use Claude Code's language understanding and
 the run files to choose chat/setup/resume/hint. You may explain the chosen route

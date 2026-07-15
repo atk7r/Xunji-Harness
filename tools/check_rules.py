@@ -83,10 +83,13 @@ REQUIRED_FILES = [
     Path("tools/setup_normalizer.py"),
     Path("tools/setup_normalizer_bench.py"),
     Path("tools/setup_source.py"),
+    Path("tools/scope_admission.py"),
     Path("contracts/setup-source.v1.schema.json"),
     Path("contracts/setup-normalizer-candidate.v1.schema.json"),
+    Path("contracts/scope-admission.v1.schema.json"),
     Path("tools/harness/fixtures/setup-source.json"),
     Path("tools/harness/fixtures/setup-normalizer.json"),
+    Path("tools/harness/fixtures/scope-admission.json"),
     Path("bench/setup-normalizer-pilot/cases.json"),
     Path("tools/harness/fixtures/setup-transaction.json"),
     Path("tools/harness/maintenance_authority.py"),
@@ -108,6 +111,7 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "xunji.setup-source.v1",
         "loop_bootstrap.py --source",
         "/xunji-maintenance",
+        "/xunji-scope-admit",
     ],
     Path("docs/WORKFLOW.md"): [
         "/xunji-maintenance",
@@ -115,6 +119,7 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "xunji.setup-source.v1",
         "sources/normalized.json",
         "setup-normalizer-candidate.v1",
+        "/xunji-scope-admit",
     ],
     Path("docs/WORKFLOW-reference.md"): [
         "tools/harness/privacy.py",
@@ -124,6 +129,7 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "sources/validator_receipt.json",
         "setup-normalizer-candidate.v1",
         "/xunji-maintenance",
+        "xunji.scope_admission.v1",
     ],
     Path("docs/ARCHITECTURE.md"): [
         "## 4. 当前架构",
@@ -141,6 +147,8 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "prepared_not_active",
         "commit_activation_cas()",
         "/xunji-maintenance",
+        "tools/scope_admission.py",
+        "xunji.scope_admission.v1",
     ],
     Path("contracts/setup-source.v1.schema.json"): [
         "structural validation layer",
@@ -153,6 +161,12 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "request_sha256",
         "source_sha256",
         "target_token",
+    ],
+    Path("contracts/scope-admission.v1.schema.json"): [
+        "xunji.scope_admission.v1",
+        "projection_after_sha256",
+        "zero_probe",
+        "prompt_sha256",
     ],
 }
 

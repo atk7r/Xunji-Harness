@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import run_model  # noqa: E402
 import runtime_receipts  # noqa: E402
+import scope_admission  # noqa: E402
 import setup_normalizer  # noqa: E402
 import setup_source  # noqa: E402
 from harness.command_shape import (  # noqa: E402
@@ -71,6 +72,7 @@ CONTROL_SCRIPTS = {
         "workers.py",
         "xunji_statusline.py",
         "run_model.py",
+        "scope_admission.py",
     )
 }
 LOCAL_VERIFICATION_SCRIPTS = {
@@ -167,8 +169,9 @@ PROTECTED_RUNTIME_RE = re.compile(
     r"asset_ledger\.json|\.runtime_events\.lock|"
     r"turn_contract\.json|run_status\.json|setup_source\.json|setup_transaction\.json|"
     r"sources[/\\](?:normalized\.json|validator_receipt\.json|original[/\\][^\s;|&]+)|"
-    r"\.xunji_(?:activation|setup)\.lock|\.xunji_staging|"
-    r"assignments\.json|xunji_active_run|xunji_pending_turns|xunji_transition_claims|"
+    r"\.xunji_(?:activation|setup|scope_admission)\.lock|\.xunji_staging|"
+    r"assignments\.json|scope_admissions|xunji_active_run|xunji_pending_turns|"
+    r"xunji_transition_claims|xunji_scope_admission_claims|"
     r"review[/\\]receipts[/\\][0-9a-f]{64}\.json)"
     r"(?=[.\/\\\"'\s;|&}]|$)",
     re.I,
@@ -262,13 +265,24 @@ def classify_prompt(prompt: str, *, active_run: bool = True) -> str:
 def _contract_from_event(event: dict, *, run_name: str = "") -> dict:
     prompt = str(event.get("prompt") or "")
     maintenance, maintenance_error = maintenance_authority.parse_directive(prompt)
+    scope_request, scope_error = scope_admission.parse_operator_directive(prompt)
     if maintenance and not str(event.get("session_id") or ""):
         maintenance = None
         maintenance_error = "maintenance authority requires a non-empty hook session id"
-    mode = MAINTENANCE if maintenance else classify_prompt(prompt, active_run=True)
+    if scope_request and not str(event.get("session_id") or ""):
+        scope_request = None
+        scope_error = "scope admission authority requires a non-empty hook session id"
+    if maintenance and scope_request:
+        scope_request = None
+        scope_error = "maintenance and scope admission directives cannot share one turn"
+    mode = MAINTENANCE if maintenance else (
+        EXECUTE if scope_request else classify_prompt(prompt, active_run=True)
+    )
     if maintenance_error:
         # A malformed top-level maintenance command never falls through into a
         # broad EXECUTE turn merely because the prompt also contains "fix".
+        mode = EXPLAIN
+    if scope_error:
         mode = EXPLAIN
     now = time.time()
     contract = {
@@ -298,6 +312,13 @@ def _contract_from_event(event: dict, *, run_name: str = "") -> dict:
             maintenance.get("reason_sha256") or "")
     if maintenance_error:
         contract["maintenance_parse_error"] = maintenance_error
+    if scope_request:
+        contract["scope_admission_run"] = str(scope_request.get("run_name") or "")
+        contract["scope_admission_assets"] = list(scope_request.get("assets") or [])
+        contract["scope_admission_reason_sha256"] = str(
+            scope_request.get("reason_sha256") or "")
+    if scope_error:
+        contract["scope_admission_parse_error"] = scope_error
     return contract
 
 
@@ -374,6 +395,15 @@ def _previous_contract(run_dir: Path) -> dict:
 def write_contract(run_dir: Path, event: dict) -> dict:
     previous = _previous_contract(run_dir)
     contract = _contract_from_event(event, run_name=run_dir.name)
+    requested_scope_run = str(contract.get("scope_admission_run") or "")
+    if requested_scope_run and requested_scope_run != run_dir.name:
+        contract.pop("scope_admission_run", None)
+        contract.pop("scope_admission_assets", None)
+        contract.pop("scope_admission_reason_sha256", None)
+        contract["scope_admission_parse_error"] = (
+            "scope admission run must equal the exact active run"
+        )
+        contract["mode"] = EXPLAIN
     signature = _coordination_signature(run_dir)
     previous_since = float(previous.get("fanout_epoch_started_at") or 0.0)
     if previous.get("coordination_signature") == signature and previous_since > 0:
@@ -1214,7 +1244,7 @@ def _coverage_hostnames(rows: list[dict]) -> set[str]:
 
 
 def _unapproved_scope_destinations(
-    rows: list[dict], destinations: set[str],
+    run_dir: Path, rows: list[dict], destinations: set[str],
 ) -> dict[str, list[str]]:
     """Return ledger-known destinations that are not admitted for target effects.
 
@@ -1224,6 +1254,7 @@ def _unapproved_scope_destinations(
     Conflicting duplicate rows fail closed.
     """
     status_by_host: dict[str, set[str]] = {}
+    candidate_receipt_errors: set[str] = set()
     for row in rows:
         status = str(row.get("scope_status") or "legacy").strip().lower()
         for asset in _normalized_assets([row.get("asset")]):
@@ -1234,11 +1265,18 @@ def _unapproved_scope_destinations(
             host = host.strip().lower().rstrip(".")
             if host:
                 status_by_host.setdefault(host, set()).add(status)
+                if status == "in":
+                    valid, _note = scope_admission.verify_admitted_host(
+                        run_dir, rows, host,
+                    )
+                    if not valid:
+                        candidate_receipt_errors.add(host)
     return {
-        host: sorted(statuses)
+        host: sorted(statuses | ({"invalid-admission-receipt"}
+                                 if host in candidate_receipt_errors else set()))
         for host in sorted(destinations)
         if (statuses := status_by_host.get(host))
-        and statuses != {"in"}
+        and (statuses != {"in"} or host in candidate_receipt_errors)
         and statuses != {"legacy"}
     }
 
@@ -1353,7 +1391,7 @@ def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
         if not rows:
             return "资产覆盖硬门：proxy-aware 目标工具执行前必须先建立 coverage/asset ledger。"
         destinations = _event_destinations(event)
-        unapproved = _unapproved_scope_destinations(rows, destinations)
+        unapproved = _unapproved_scope_destinations(run_dir, rows, destinations)
         if unapproved:
             detail = ", ".join(
                 f"{host}={'/'.join(statuses)}"
@@ -1432,6 +1470,48 @@ def _setup_transaction_reason(run_dir: Path) -> str:
     return ""
 
 
+def _scope_admission_invocation(
+    invocation: tuple[Path, list[str]] | None,
+) -> dict | None:
+    if not invocation or invocation[0].name != "scope_admission.py":
+        return None
+    try:
+        return scope_admission.parse_invocation(invocation[1])
+    except scope_admission.ScopeAdmissionError:
+        return None
+
+
+def _scope_admission_pretool_reason(
+    run_dir: Path, event: dict, contract: dict,
+) -> str:
+    """Make the admission turn local-only and bind one exact controlled write."""
+    tool = str(event.get("tool_name") or "")
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    command = str(tool_input.get("command") or "")
+    tool_env = tool_input.get("env") if isinstance(tool_input.get("env"), dict) else {}
+    parse_error = str(contract.get("scope_admission_parse_error") or "")
+    if parse_error:
+        if tool in {"Read", "Grep", "Glob"}:
+            return ""
+        return "资产 scope 准入授权格式无效：" + parse_error
+    if not contract.get("scope_admission_run"):
+        return ""
+    if tool in {"Read", "Grep", "Glob"}:
+        return ""
+    invocation = _control_invocation(command) if tool == "Bash" and not tool_env else None
+    parsed = _scope_admission_invocation(invocation)
+    expected_assets = list(contract.get("scope_admission_assets") or [])
+    if parsed and parsed.get("run_name") == run_dir.name \
+            and parsed.get("run_name") == contract.get("scope_admission_run") \
+            and parsed.get("assets") == expected_assets:
+        return ""
+    return (
+        "资产 scope 准入回合是 zero-probe local transition：只允许读取和一次与当前"
+        " operator 首行完全匹配的 scope_admission.py；禁止 target/network、Agent、Cron、"
+        "其他控制面写入或资产集合扩张。"
+    )
+
+
 def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
     tool = str(event.get("tool_name") or "")
     text = _tool_text(event)
@@ -1448,6 +1528,9 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
 
     if mode == MAINTENANCE or contract.get("maintenance_parse_error"):
         return _maintenance_pretool_reason(event, contract)
+
+    if contract.get("scope_admission_run") or contract.get("scope_admission_parse_error"):
+        return _scope_admission_pretool_reason(run_dir, event, contract)
 
     critical_reason = _critical_maintenance_reason(event)
     if critical_reason:
@@ -1721,6 +1804,19 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
 
 def _context_message(contract: dict, run_dir: Path) -> str:
     mode = contract.get("mode")
+    if contract.get("scope_admission_parse_error"):
+        return (
+            "[Xunji scope admission: INVALID] 未授予任何资产准入权限；"
+            + str(contract.get("scope_admission_parse_error") or "")
+        )
+    if contract.get("scope_admission_run"):
+        assets = ", ".join(str(item) for item in (
+            contract.get("scope_admission_assets") or []))
+        return (
+            "[Xunji scope admission: ZERO_PROBE] 当前 operator 首行只授权 active run 的"
+            f" exact assets: {assets}。调用受控 scope_admission.py 完成本地 receipt/ledger "
+            "transition；本回合禁止 target/network、Agent、Cron，后续新 /loop 回合才可探测。"
+        )
     if contract.get("maintenance_parse_error"):
         return (
             "[Xunji maintenance authority: INVALID] 未授予任何维护权限；"
@@ -1787,6 +1883,10 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             invocation = _control_invocation(command) if tool == "Bash" else None
             args = invocation[1] if invocation else []
             script_name = invocation[0].name if invocation else ""
+            if script_name == "scope_admission.py":
+                return _deny(
+                    "scope admission requires the exact active run and a current hook-bound operator directive."
+                )
             normalizer_prepare = bool(
                 invocation
                 and script_name == "loop_bootstrap.py"
@@ -1877,6 +1977,17 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             if maintenance_action:
                 _record_maintenance_denial(run_dir, event, contract, reason)
             return _deny(reason)
+        command = str((event.get("tool_input") or {}).get("command") or "") \
+            if isinstance(event.get("tool_input"), dict) else ""
+        invocation = _control_invocation(command) \
+            if str(event.get("tool_name") or "") == "Bash" else None
+        if _scope_admission_invocation(invocation):
+            try:
+                scope_admission.write_hook_claim(run_dir, contract)
+            except scope_admission.ScopeAdmissionError:
+                return _deny(
+                    "无法原子写入当前 session 的 exact scope admission claim；拒绝 fail-open。"
+                )
         return None
     if hook in {"PostToolUse", "PostToolUseFailure", "SubagentStart", "SubagentStop"}:
         tool_name = str(event.get("tool_name") or "")
@@ -1886,13 +1997,16 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
         session_id = str(event.get("session_id") or "")
         contract = load_contract(run_dir, session_id=session_id) if session_id else {}
         maintenance_action = _maintenance_action(event, contract=contract)
+        invocation = _control_invocation(command) if tool_name == "Bash" else None
+        scope_admission_action = bool(_scope_admission_invocation(invocation))
         if hook in {"SubagentStart", "SubagentStop"} or tool_name in {
             "Agent", "CronCreate", "CronDelete", "CronList",
         } or (tool_name == "Bash" and "peer_review.py" in command) \
-                or target_action or maintenance_action:
+                or target_action or maintenance_action or scope_admission_action:
             receipt_event = dict(event)
             receipt_event["xunji_target_action"] = target_action
             receipt_event["xunji_maintenance_action"] = maintenance_action
+            receipt_event["xunji_scope_admission_action"] = scope_admission_action
             receipt_event["xunji_maintenance_paths"] = (
                 _maintenance_receipt_paths(event, contract) if maintenance_action else [])
             runtime_receipts.append_hook_event(run_dir, receipt_event)
@@ -1944,6 +2058,17 @@ def _selftest() -> int:
     negated_direct_cn = _contract_from_event({"prompt": "不要允许直连，继续使用代理"})
     negated_direct_en = _contract_from_event({"prompt": "do not allow direct egress"})
     explicit_direct = _contract_from_event({"prompt": "明确允许本回合直连"})
+    scope_prompt = (
+        "/xunji-scope-admit --run runs/pilot_20260715 "
+        "--assets one.example.test,two.example.test --reason operator-confirmed-scope"
+    )
+    scope_contract = _contract_from_event({
+        "prompt": scope_prompt, "session_id": "scope-session",
+    })
+    malformed_scope_contract = _contract_from_event({
+        "prompt": "/xunji-scope-admit --run runs/pilot_20260715 --assets '*' --reason bad",
+        "session_id": "scope-session",
+    })
     contract = {
         "mode": EXECUTE,
         "session_id": "s",
@@ -1953,6 +2078,12 @@ def _selftest() -> int:
         "updated_at": time.time(),
     }
     target_event = {"tool_name": "Bash", "tool_input": {"command": "python tools/probe.py https://example.test"}}
+    scope_turn_target_blocked = "zero-probe local transition" in evaluate_pretool(
+        run, target_event, scope_contract)
+    malformed_scope_write_blocked = bool(evaluate_pretool(
+        run, {"tool_name": "Write", "tool_input": {"file_path": str(run / "frontier.md")}},
+        malformed_scope_contract,
+    ))
     with mock.patch.object(run_model, "summary", side_effect=RuntimeError("broken state")):
         summary_failure_signature = _coordination_signature(run)
         summary_failure_reason = evaluate_pretool(run, target_event, contract)
@@ -2640,6 +2771,12 @@ def _selftest() -> int:
     out_scope_target_blocked = "scope 准入硬门" in evaluate_pretool(
         proxy_run, guarded_probe, proxy_contract)
     scoped_proxy_coverage["assets"][0]["scope_status"] = "in"
+    scoped_proxy_coverage["assets"][0]["source"] = "setup-source-candidate"
+    (proxy_run / "coverage.json").write_text(
+        json.dumps(scoped_proxy_coverage), encoding="utf-8")
+    forged_candidate_in_scope_blocked = "invalid-admission-receipt" in evaluate_pretool(
+        proxy_run, guarded_probe, proxy_contract)
+    scoped_proxy_coverage["assets"][0].pop("source", None)
     (proxy_run / "coverage.json").write_text(
         json.dumps(scoped_proxy_coverage), encoding="utf-8")
     explicit_in_scope_target_allowed = evaluate_pretool(
@@ -3181,6 +3318,16 @@ def _selftest() -> int:
          and not negated_direct_en["direct_egress_approved"]),
         ("explicit direct-egress phrase grants current-turn approval",
          explicit_direct["direct_egress_approved"]),
+        ("exact scope directive binds run/assets and execute mode",
+         scope_contract.get("mode") == EXECUTE
+         and scope_contract.get("scope_admission_run") == "pilot_20260715"
+         and scope_contract.get("scope_admission_assets")
+         == ["one.example.test", "two.example.test"]),
+        ("scope admission turn is zero-probe and blocks target actions",
+         scope_turn_target_blocked),
+        ("malformed scope directive permits no write authority",
+         malformed_scope_contract.get("mode") == EXPLAIN
+         and malformed_scope_write_blocked),
         ("target action blocked before real fanout", before_fanout),
         ("run-model failure produces a deterministic fail-closed contract state",
          bool(summary_failure_signature)
@@ -3195,6 +3342,8 @@ def _selftest() -> int:
         ("source/AI review-scope asset cannot become a target capability",
          review_scope_target_blocked),
         ("explicit out-of-scope asset stays blocked", out_scope_target_blocked),
+        ("candidate in-scope hand edit without committed operator receipt stays blocked",
+         forged_candidate_in_scope_blocked),
         ("explicit in-scope ledger asset remains executable",
          explicit_in_scope_target_allowed),
         ("proxy-aware tool rejects destinations absent from the asset ledger",

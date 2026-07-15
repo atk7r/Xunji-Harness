@@ -1,0 +1,16 @@
+{
+  "schema": "xunji.scope-admission-conformance.v1",
+  "directive": "/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>",
+  "receipt_schema": "xunji.scope_admission.v1",
+  "hard_gates": {
+    "operator_first_line_only": true,
+    "exact_active_run_only": true,
+    "exact_review_assets_only": true,
+    "hook_owned_claim_required": true,
+    "zero_target_requests": true,
+    "prepared_receipt_non_executable": true,
+    "committed_projection_hash_required": true,
+    "claim_replay_denied": true
+  },
+  "forbidden_promotions": ["out", "unknown", "legacy", "conflicting-duplicate"]
+}

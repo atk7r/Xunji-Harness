@@ -61,8 +61,11 @@
   only `/loop runs/<normalized-run-dir>`, never the original URL/file. When unsure,
   preserve chat/setup/resume semantics and ask only for missing run/target boundary
   data; never infer loop. File-derived `scope_status=review|out|unknown` assets are
-  setup data, not target authority: target tools remain blocked until an exact operator
-  zero-probe admission transition records approval; never edit coverage by hand.
+  setup data, not target authority. Only a new operator turn whose first line is
+  `/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>`
+  can admit exact `review` rows through `tools/scope_admission.py`, a one-use hook
+  claim, committed receipt, and projection hash. The admission turn is zero-probe
+  and forbids target/network, Agent, and Cron; never edit coverage by hand.
 - **OSINT = the upstream tool Guanlan** (collect · dedup · fold wildcard DNS ·
   liveness · ownership). Xunji **consumes the clean inventory and attacks it — it does
   NOT re-do OSINT.** `setup_run <slug> <recon.json>` builds `coverage.json` with zero

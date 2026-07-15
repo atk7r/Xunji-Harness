@@ -220,6 +220,12 @@ before the shared transaction commits. HTML/PDF/DOCX/plain text and an unregiste
 `scope_status=review`; `coverage_matrix.py` preserves that status and the target
 tool gate rejects `review|out|unknown`. Setup success therefore does not itself
 authorize target effects, and no source/front/Agent/model text may promote the row.
+An operator may admit exact setup-source `review` rows only in a new turn whose
+first non-empty line is `/xunji-scope-admit --run runs/<name> --assets
+<host[,host...]> --reason <text>`. The matching `tools/scope_admission.py` call
+consumes a hook-owned one-use claim and commits `xunji.scope_admission.v1` plus a
+scope projection hash. The admission turn is local-only and zero-probe; wildcard,
+`out`/`unknown`, inactive-run, Agent, Cron, target, and hand-edit paths fail closed.
 Target-action denials and later successful target actions are also recorded by
 hash. A denial is unresolved until a later successful event has the same tool and
 execution-action hash (for Bash, the command; descriptive metadata is ignored).

@@ -86,9 +86,13 @@ hash. File-derived coverage starts with `scope_status=review` and reachability
 unknown. Source scope/authorization fields remain candidates and cannot become
 operator authority. `coverage_matrix.py` preserves that status and the turn
 contract rejects target effects for `review|out|unknown`; a front, Agent, source,
-or model selection cannot promote it. Until the exact operator zero-probe
-admission transition is installed, inspect the run locally and report the pending
-scope decision instead of probing or editing the protected ledger by hand.
+or model selection cannot promote it. Admission requires a new operator turn whose
+first non-empty line is exactly `/xunji-scope-admit --run runs/<name> --assets
+<host[,host...]> --reason <text>`. Run only the matching
+`tools/scope_admission.py` command in that local, zero-probe turn. The hook-owned
+one-use claim, committed receipt, and scope projection hash are mandatory;
+probing, Agent, Cron, wildcard assets, `out`/`unknown` promotion, and hand-edits
+remain denied.
 
 `setup_run.py` prepares the workbench. It does not pick fronts, decide findings,
 or attack the target. `tools/setup_transaction.py` is the sole commit owner:

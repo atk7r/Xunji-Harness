@@ -187,6 +187,11 @@ Output:
 - **Keep candidate scope non-executable**: file-derived coverage starts as
   `scope_status=review`; the asset ledger preserves it and target tools reject
   `review|out|unknown`. Creating or activating the run is not scope admission.
+  Admission is a separate operator first-line directive:
+  `/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>`.
+  Only the exact matching `tools/scope_admission.py` control command may run in
+  that zero-probe turn; a committed receipt/projection hash is required before a
+  candidate `in` row becomes executable.
 - **Switch only after setup completes**: setup inherits the current operator turn
   contract and then atomically updates the active-run pointer. An old run's Agent
   Board does not govern this lifecycle command. Never clear/edit the pointer to

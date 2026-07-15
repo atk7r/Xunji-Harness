@@ -61,6 +61,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("setup_source", ["tools/setup_source.py"], "versioned setup source provenance + deterministic router"),
     ("setup_normalizer", ["tools/setup_normalizer.py", "--selftest"], "reference-only Markdown/JSON AI candidate normalizer"),
     ("setup_normalizer_bench", ["tools/setup_normalizer_bench.py", "--selftest"], "setup normalizer A/B quality and hard gates"),
+    ("scope_admission", ["tools/scope_admission.py", "--selftest"], "operator-bound zero-probe candidate asset admission"),
     ("setup_run",      ["tools/setup_run.py", "--selftest"],      "run scaffolding"),
     ("ingest_recon",    ["tools/ingest_recon.py", "--selftest"],   "Guanlan recon adapter"),
     ("bench",          ["tools/bench.py", "--selftest"],          "R-1 self-eval scorer"),

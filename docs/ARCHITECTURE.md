@@ -233,8 +233,14 @@ request 或 candidate mutation 都阻止 publish/closure。文件派生资产初
 补充资产仍须引用冻结 source token，不能提升 scope/authorization/turn/tool 权限。
 `coverage_matrix.py` 必须把 scope status 传到 asset ledger，`turn_contract.py` 对
 `review|out|unknown` 的 target effect fail closed；Setup/active pointer 成功不等于 scope
-准入。在独立的 operator-bound 零探测准入 transition 落地前，这些行只能本地检查，不能
-由编辑 coverage、front/Agent prose 或模型候选绕过。
+准入。独立的 operator-bound 零探测 transition 只接受顶层 prompt 首条 exact
+`/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>`；hook
+为匹配的 `scope_admission.py` 写一次性 claim，tool 只把指定 setup-source `review` 行更新
+为 `in` 并提交绑定 setup-source hash 的 `xunji.scope_admission.v1`
+receipt/projection hash。prepared/缺失/错 hash
+receipt、`out|unknown`、wildcard、inactive run、重放和手改都保持不可执行。
+Target gate 从 validator-bound 冻结 setup bundle 重新识别 file candidate；可变 ledger 的
+`source` 标签即使被删除或改名，也不能把 candidate 伪装成普通 `in` 资产。
 
 ### 4.4 每轮自治循环
 
@@ -458,6 +464,7 @@ CCB Agent Runtime
 | `tools/harness/maintenance_authority.py` + `safety_critical_paths.json` | 顶层维护指令解析、exact scope 与普通 `/loop` protected-path floor | `turn_contract.py`、settings write receipts、output truth gate、manifest drift check、独立复审 |
 | `tools/setup_source.py` | setup source 路由、provenance normalization、bundle validator；不拥有 fetch/authority/pointer | schema/fixture、setup adapters/transaction、privacy、target.md、独立复审 |
 | `tools/setup_normalizer.py` | Markdown/普通 JSON token/ref inventory、external surrogate 与 reference-only candidate 晋级；不拥有 model transport/target/pointer | candidate schema、privacy、setup source/transaction、benchmark、独立复审 |
+| `tools/scope_admission.py` | hook-claim 绑定的 exact setup-source `review` 资产零探测准入与 receipt/projection commit；不拥有 target/pointer/Cron | turn contract、coverage/asset ledger、receipt schema/fixture、独立复审 |
 | `tools/setup_transaction.py` | staging、setup receipt、pointer lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
 | `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
 | `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
@@ -568,25 +575,27 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 16. AI normalizer 只能选择机械 inventory 中的 token/ref ID；external request 先硬脱敏且
     不含原始路径，唯一 target 由 deterministic label 决定，model 不能解决 target 歧义或
     生成值。Request/candidate/source 三者必须 hash 绑定后才可进入 setup transaction。
+17. 文件候选资产的 scope 晋级只能来自 operator 首行 exact directive + hook one-use claim；
+    `scope_admission.py` 只接纳 active run 中指定的 `review` 行，并以 committed receipt 与
+    projection hash 证明。准入回合 zero-probe，source/AI/Agent/front/手改不能铸造权限。
 
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-15
-- Scope: P1-3/P1-4 Markdown/ordinary-JSON normalizer pilot — reference-only candidate
-  schema、`setup_normalizer.py`、model-egress surrogate、normalizer artifact receipts、
-  setup/bootstrap/turn/privacy integration、scope-status execution gate、fixtures/benchmark
-  与 primary-driver docs。
-- Architecture impact: yes — 在既有 `xunji.setup-source.v1` 前增加受限 candidate 层；
-  AI 只选机械 token/ref ID，source/request/candidate hash 绑定后仍由现有 validator、setup
-  transaction 与 pointer owner 晋级。`--ai off` 为默认，external 需 operator 明示并硬脱敏；
-  local/HTML/PDF/DOCX/plain text 保持 transitional fail-closed，不描述为已实现。
-- Verification: focused normalizer/source/setup/transaction/bootstrap/turn/privacy/coverage/rule/bench checks、
-  py_compile 与 diff-format checks 必须 PASS；最终候选完整 `selftest_all.py` 结果与原始
-  machine log hash 随 fingerprint 写入本轮 review record。
-- Independent review: Codex 作者不计自审票；本 checkpoint 只在最终 safety-adjacent diff
-  fingerprint 已由 arkcli panel + Claude Code fresh-context 按作者矩阵复审，且原始结果、
-  driver disposition、后端限制与 fingerprint 一并保存在
-  `review/records/2026-07-15-p1-setup-normalizer-review.md` 时才满足提交门。
+- Scope: P1 operator-bound zero-probe candidate asset admission — exact first-line
+  directive、hook one-use claim、`scope_admission.py`、receipt/projection verification、
+  coverage/asset-ledger/target gate integration、schema/fixture/selftests 与 primary docs。
+- Architecture impact: yes — 补齐 setup-source candidate 从 `review` 到 executable `in` 的
+  唯一 authority transition。operator prompt 只授权 active run 的 exact host/IP；hook owns
+  claim，scope tool owns local ledger/receipt commit，target gate verifies committed projection。
+  scope commit 与 pointer owner 共用 activation lock，避免 active-check 后切 run；该
+  transition 不拥有 target action、pointer、Cron，也不提升 `out|unknown|legacy`。
+- Verification: focused scope-admission/turn/coverage/authority/rule/hook checks、py_compile 与
+  diff-format checks PASS；完整 `selftest_all.py` 为 67 passed / 0 failed（90.3s），原始日志
+  SHA-256 `da766ece5e69bbf015c487260766de23d657ac6386eb0c02f084c2718da3aa34`。
+- Independent review: Codex 作者不计自审票；最终 safety-critical fingerprint 必须经
+  arkcli panel + Claude Code fresh-context 复审，原始结果、driver disposition 与后端限制
+  绑定保存在 `review/records/2026-07-15-p1-scope-admission-review.md` 才满足提交门。
 
 ## 13. 外部设计来源与采用边界
 
