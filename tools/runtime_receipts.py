@@ -237,6 +237,11 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
         "decision": str(event.get("xunji_decision") or ""),
         "decision_reason": _excerpt(event.get("xunji_reason") or ""),
         "target_action": bool(event.get("xunji_target_action")),
+        "maintenance_action": bool(event.get("xunji_maintenance_action")),
+        "maintenance_paths": sorted({
+            str(path) for path in (event.get("xunji_maintenance_paths") or [])
+            if str(path).strip()
+        }),
         "assignment": assignment,
         "front": front,
         "assignment_assets": _assignment_assets(input_text),
@@ -542,6 +547,26 @@ def denied_tool_events(
     ]
 
 
+def failed_tool_events(
+    run_dir: str | Path,
+    *,
+    session_id: str = "",
+    since: float = 0.0,
+) -> list[dict]:
+    """Return transcript-backed tool failures emitted after an allowed action."""
+    events, errors = validate_chain(run_dir)
+    if errors:
+        return []
+    return [
+        event for event in events
+        if event.get("hook_event_name") == "PostToolUseFailure"
+        and event.get("success") is False
+        and (not session_id or str(event.get("session_id") or "") == session_id)
+        and (not since or float(event.get("ts") or 0.0) >= since)
+        and _transcript_has(event)
+    ]
+
+
 def unresolved_target_denials(
     run_dir: str | Path,
     *,
@@ -567,6 +592,49 @@ def unresolved_target_denials(
         )
         if not resolved:
             unresolved.append(denial)
+    return unresolved
+
+
+def unresolved_maintenance_blockers(
+    run_dir: str | Path,
+    *,
+    session_id: str = "",
+    since: float = 0.0,
+) -> list[dict]:
+    """Return denied/failed maintenance actions without an identical success."""
+    _, chain_errors = validate_chain(run_dir)
+    if chain_errors:
+        raise RuntimeError(
+            "maintenance receipt chain is invalid: " + "; ".join(chain_errors[:3])
+        )
+    blocked = [
+        event for event in denied_tool_events(
+            run_dir, session_id=session_id, since=since)
+        if event.get("maintenance_action") is True
+    ]
+    blocked.extend(
+        event for event in failed_tool_events(
+            run_dir, session_id=session_id, since=since)
+        if event.get("maintenance_action") is True
+    )
+    blocked.sort(key=lambda event: (
+        float(event.get("ts") or 0.0), int(event.get("seq") or 0)))
+    successful = [
+        event for event in valid_tool_events(
+            run_dir, session_id=session_id, since=since)
+        if event.get("maintenance_action") is True
+    ]
+    unresolved: list[dict] = []
+    for blocker in blocked:
+        blocker_ts = float(blocker.get("ts") or 0.0)
+        resolved = any(
+            float(event.get("ts") or 0.0) > blocker_ts
+            and event.get("tool_name") == blocker.get("tool_name")
+            and event.get("action_sha256") == blocker.get("action_sha256")
+            for event in successful
+        )
+        if not resolved:
+            unresolved.append(blocker)
     return unresolved
 
 
@@ -955,6 +1023,7 @@ def _selftest() -> int:
         "tool-list-active", "tool-delete-1", "tool-list-2", "tool-review-1",
         "tool-completion-bad", "tool-completion-good", "tool-target-denied",
         "tool-target-failed", "tool-target-other", "tool-target-success",
+        "tool-maintenance-denied", "tool-maintenance-failed", "tool-maintenance-success",
     )
     _write_transcript(transcript, *ids)
 
@@ -1068,6 +1137,36 @@ def _selftest() -> int:
     successful_target["xunji_target_action"] = True
     append_hook_event(run, successful_target)
     unresolved_after_success = unresolved_target_denials(run, session_id="s1")
+    append_hook_event(run, {
+        "hook_event_name": "PreToolUseDenied", "session_id": "s1",
+        "transcript_path": str(transcript), "tool_name": "Edit",
+        "tool_use_id": ids[14],
+        "tool_input": {"file_path": "tools/turn_contract.py", "old_string": "a", "new_string": "b"},
+        "xunji_decision": "deny", "xunji_reason": "maintenance authority required",
+        "xunji_maintenance_action": True,
+        "xunji_maintenance_paths": ["tools/turn_contract.py"],
+    })
+    unresolved_maintenance_before = unresolved_maintenance_blockers(run, session_id="s1")
+    maintenance_paths_preserved = bool(
+        unresolved_maintenance_before
+        and unresolved_maintenance_before[0].get("maintenance_paths")
+        == ["tools/turn_contract.py"]
+    )
+    failed_maintenance = event("Edit", ids[15], {
+        "file_path": "tools/turn_contract.py", "old_string": "a", "new_string": "b",
+    }, {"error": "controlled failure"})
+    failed_maintenance["hook_event_name"] = "PostToolUseFailure"
+    failed_maintenance["xunji_maintenance_action"] = True
+    append_hook_event(run, failed_maintenance)
+    unresolved_maintenance_after_failure = unresolved_maintenance_blockers(
+        run, session_id="s1")
+    successful_maintenance = event("Edit", ids[16], {
+        "file_path": "tools/turn_contract.py", "old_string": "a", "new_string": "b",
+    }, {"updated": True})
+    successful_maintenance["xunji_maintenance_action"] = True
+    append_hook_event(run, successful_maintenance)
+    unresolved_maintenance_after_success = unresolved_maintenance_blockers(
+        run, session_id="s1")
     events, chain_errors = validate_chain(run)
     tampered = run.parent / "tampered"
     (tampered / "state").mkdir(parents=True)
@@ -1077,6 +1176,11 @@ def _selftest() -> int:
     tampered_lines[0] = json.dumps(tampered_first, ensure_ascii=False, sort_keys=True)
     _event_path(tampered).write_text("\n".join(tampered_lines) + "\n", encoding="utf-8")
     tampered_fanout = agent_fanout(tampered)
+    try:
+        unresolved_maintenance_blockers(tampered, session_id="s1")
+        tampered_maintenance_failed_closed = False
+    except RuntimeError:
+        tampered_maintenance_failed_closed = True
 
     async_run = run.parent / "async-run"
     (async_run / "state").mkdir(parents=True)
@@ -1224,7 +1328,7 @@ def _selftest() -> int:
     asset_projection_error = json.loads(
         _projection_error_path(asset_error_run).read_text(encoding="utf-8"))
     checks = [
-        ("hash chain validates", not chain_errors and len(events) == 14),
+        ("hash chain validates", not chain_errors and len(events) == 17),
         ("two real Agent receipts satisfy fanout", agent_fanout(run)["satisfied"]),
         ("done Agent remains unmerged", not disposition_before["disposition_satisfied"]),
         ("anchored merged/blocked dispositions satisfy", disposition_after["disposition_satisfied"]),
@@ -1246,6 +1350,8 @@ def _selftest() -> int:
         ("bare PASS cannot satisfy completion review", not weak_completion),
         ("structured evidence-bound completion receipt passes", structured_completion),
         ("tampered receipt chain cannot satisfy Agent fanout", not tampered_fanout["satisfied"]),
+        ("tampered receipt chain fails closed for maintenance truth",
+         tampered_maintenance_failed_closed),
         ("async launch receipts satisfy fanout without pretending return",
          async_running_fanout["satisfied"]
          and set(async_running_fanout["running"]) == {"A-async-001", "A-async-002"}
@@ -1278,6 +1384,16 @@ def _selftest() -> int:
         ("failed identical retry does not resolve denial", len(unresolved_after_failure) == 1),
         ("different successful command does not resolve denial", len(unresolved_after_other) == 1),
         ("successful same command resolves despite description drift", not unresolved_after_success),
+        ("maintenance denial remains unresolved without success",
+         len(unresolved_maintenance_before) == 1),
+        ("maintenance denial preserves exact authorized-path evidence",
+         maintenance_paths_preserved),
+        ("failed maintenance retry is itself an unresolved blocker",
+         len(unresolved_maintenance_after_failure) == 2
+         and unresolved_maintenance_after_failure[-1].get("hook_event_name")
+         == "PostToolUseFailure"),
+        ("successful identical maintenance action resolves denial",
+         not unresolved_maintenance_after_success),
         ("Bash environment participates in action hash", _action_hash(
             "Bash", {"command": "probe", "env": {"TOKEN": "one"}}) != _action_hash(
             "Bash", {"command": "probe", "env": {"TOKEN": "two"}})),

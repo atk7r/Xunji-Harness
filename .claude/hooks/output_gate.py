@@ -116,8 +116,6 @@ _DENIED_ONLY_RE = re.compile(
     r"未执行目标动作；不存在该动作的实测结果。\n"
     r"下一行动: (?:F-\d{3}|frontier\.md) 修复 PreToolUse 前置条件后重试同一动作\Z"
 )
-
-
 def _active_run_declared(pointer: Path | None = None) -> bool:
     """Conservatively detect an operator-selected run if lookup itself failed."""
     marker = pointer or Path(os.environ.get(
@@ -157,6 +155,42 @@ def _denied_result_claim_reason(
         "XUNJI_EXECUTION_STATUS=DENIED\n"
         "未执行目标动作；不存在该动作的实测结果。\n"
         f"下一行动: {anchor} 修复 PreToolUse 前置条件后重试同一动作"
+    )
+
+
+def _maintenance_blocked_text(blocked: list[dict]) -> str:
+    latest = blocked[-1] if blocked else {}
+    paths = sorted({
+        str(path) for path in (latest.get("maintenance_paths") or [])
+        if str(path).strip()
+    })
+    scope = ",".join(paths) if paths else "<exact-path>"
+    raw_reason = str(latest.get("decision_reason") or "")
+    if not raw_reason and latest.get("hook_event_name") == "PostToolUseFailure":
+        raw_reason = "tool failure: " + str(latest.get("response_excerpt") or "")
+    reason = re.sub(r"\s+", " ", _strip_invisible(raw_reason)).strip() \
+        or "maintenance authority or successful tool result required"
+    return (
+        "XUNJI_MAINTENANCE_STATUS=BLOCKED\n"
+        "未取得框架维护动作的成功回执；不得声称修改完成。\n"
+        f"阻塞原因: {reason}\n"
+        f"所需授权: /xunji-maintenance --scope {scope} --reason <reason>\n"
+        "下一行动: 修复前置条件，并在新回合取得上述 exact-path 授权后重试同一动作"
+    )
+
+
+def _maintenance_blocked_claim_reason(msg: str, blocked: list[dict]) -> str:
+    """A denied/failed maintenance action cannot be narrated as successful."""
+    if not blocked:
+        return ""
+    clean = _strip_invisible(msg).strip()
+    required = _maintenance_blocked_text(blocked)
+    if clean == required:
+        return ""
+    return (
+        "[未执行维护真实性硬拦] 本回合仍有未被同工具、同执行动作成功回执消解的"
+        "安全关键框架维护拒绝。禁止声称已修改、已还原或已修复；继续取得精确授权后"
+        "重试同一动作，或仅输出以下五行：\n" + required
     )
 
 
@@ -438,7 +472,7 @@ def main() -> None:
                 turn_mode = str(contract.get("mode") or "EXECUTE")
             except Exception:
                 turn_mode = "EXECUTE"
-        protocol_exempt = turn_mode in {"EXPLAIN_ONLY", "PAUSED_BY_OPERATOR"}
+        protocol_exempt = turn_mode in {"EXPLAIN_ONLY", "PAUSED_BY_OPERATOR", "MAINTENANCE"}
 
         # ---- Drift detection ----
         hits = [] if protocol_exempt else detect_drift(msg)
@@ -472,6 +506,17 @@ def main() -> None:
             prev_state = SessionStateManager.load(run_dir)
             if _runtime_receipts is None:
                 raise RuntimeError("runtime_receipts unavailable")
+            unresolved_maintenance = _runtime_receipts.unresolved_maintenance_blockers(
+                run_dir,
+                session_id=str(event.get("session_id") or ""),
+                since=float(contract.get("updated_at") or 0.0),
+            )
+            maintenance_claim = _maintenance_blocked_claim_reason(
+                msg, unresolved_maintenance)
+            if maintenance_claim:
+                _emit_gate_violation(
+                    maintenance_claim, stop_hook_active=stop_active)
+                sys.exit(0)
             unresolved = _runtime_receipts.unresolved_target_denials(
                 run_dir,
                 session_id=str(event.get("session_id") or ""),
@@ -548,7 +593,13 @@ def main() -> None:
 
         sys.exit(0)
     except Exception as exc:
-        if (run_dir is not None or _active_run_declared()) and turn_mode not in {
+        if (run_dir is not None or _active_run_declared()) and turn_mode == "MAINTENANCE":
+            _emit_gate_violation(
+                "[维护输出 fail-closed] active run 的维护真实性检查内部异常："
+                + type(exc).__name__ + "。不得声称维护已完成；先修复 hook/selftest。",
+                stop_hook_active=stop_active,
+            )
+        elif (run_dir is not None or _active_run_declared()) and turn_mode not in {
             "EXPLAIN_ONLY", "PAUSED_BY_OPERATOR"
         }:
             _emit_gate_violation(
@@ -591,6 +642,35 @@ def _selftest() -> int:
             "未执行目标动作；不存在该动作的实测结果。\n"
             "下一行动: F-001 修复 PreToolUse 前置条件后重试同一动作",
             denied_receipt))))
+    maintenance_receipt = [{
+        "tool_name": "Edit",
+        "maintenance_action": True,
+        "maintenance_paths": ["tools/turn_contract.py"],
+        "decision_reason": (
+            "普通 /loop 不授权修改安全关键框架路径；需要操作者在新回合首条非空指令使用"
+        ),
+    }]
+    maintenance_text = _maintenance_blocked_text(maintenance_receipt)
+    checks.append(("maintenance denial cannot be narrated as a successful repair", bool(
+        _maintenance_blocked_claim_reason("已修复并还原 turn_contract。", maintenance_receipt))))
+    checks.append(("maintenance denial envelope preserves exact path and original reason",
+                   "--scope tools/turn_contract.py" in maintenance_text
+                   and "普通 /loop 不授权修改" in maintenance_text))
+    checks.append(("exact dynamic maintenance denial envelope is allowed", not bool(
+        _maintenance_blocked_claim_reason(maintenance_text, maintenance_receipt))))
+    maintenance_failure = [{
+        "hook_event_name": "PostToolUseFailure",
+        "tool_name": "Edit",
+        "maintenance_action": True,
+        "maintenance_paths": ["tools/turn_contract.py"],
+        "response_excerpt": '{"error":"old_string not found"}',
+    }]
+    failure_text = _maintenance_blocked_text(maintenance_failure)
+    checks.append(("maintenance tool failure cannot be narrated as success", bool(
+        _maintenance_blocked_claim_reason("Edit succeeded.", maintenance_failure))))
+    checks.append(("maintenance failure envelope preserves the tool error",
+                   "old_string not found" in failure_text
+                   and "XUNJI_MAINTENANCE_STATUS=BLOCKED" in failure_text))
     pointer = Path(tempfile.mkdtemp()) / "active-run"
     checks.append(("missing active-run pointer is not declared", not _active_run_declared(pointer)))
     pointer.write_text("runs/example\n", encoding="utf-8")

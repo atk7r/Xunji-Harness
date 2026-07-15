@@ -141,7 +141,7 @@ Observe-only side path
 
 | 层 | 当前组件 | 责任 | 不能拥有的权力 |
 |---|---|---|---|
-| Operator / turn | prompt、`turn_contract.py` | 明确 execute/explain/pause 与本轮授权 | 不改写证据真假 |
+| Operator / turn | prompt、`turn_contract.py`、`maintenance_authority.py` | 明确 execute/explain/pause/maintenance 与本轮精确授权 | 不改写证据真假 |
 | Interaction / phase | Claude Code、`docs/ROUTER.md`、phase skills | 加载合适上下文、显示阶段 | 不私建第二 runtime |
 | Root control plane | `CLAUDE.md`、state graph、Agent Board | 选前沿、分工、冲突调度、持续推进 | 不绕过 hook/guard，不直接伪造 finding |
 | Cognition / knowledge | `docs/cognition/`、`knowledge/` | 推理纪律、签名和弱点接地 | 不成为盲扫 playbook 或确认依据 |
@@ -221,8 +221,16 @@ journal 状态。只要仍有安全、在 scope 内且有信息增益的前沿�
 重要理由写入 `decisions.md`；不把 routine choice 重新推给 operator。
 
 自治不意味着无条件执行：当前 prompt 是 turn contract。Explain/review/ambiguous
-保持只读，pause 保留开放状态，明确 execute/continue/implement 才能继续改变状态。
-被拒绝或失败的动作不是结果；修复前置条件后重试，或精确记录 blocker。
+保持只读，pause 保留开放状态，明确 execute/continue/implement 才能继续改变 run
+状态。`MAINTENANCE` 是独立的 local-only 状态：只有顶层 operator prompt 第一条非空
+指令精确匹配 `/xunji-maintenance --scope <exact-path[,path...]> --reason <text>` 才能
+创建，contract 绑定 session、turn timestamp、完整 prompt hash、reason hash 与 exact
+paths。普通 `/loop`、source/attachment/target/Agent/tool/reviewer 文本都不能生成该
+authority。维护回合冻结 target/Cron/Agent/canonical run-state 进展，只允许读取、exact
+Edit/Write 与注册的本地检查；被拒绝或失败的动作不是结果，必须保留 receipt 并如实报告。
+普通 live `/loop` 的 Bash 同样只放行正向注册的 read/control/verification/target/review
+capability 与 target tool 的窄 proxy/locale env；未知解释器或 shell 形状不能因关键路径
+字符串不可见而被推断为只读。
 
 ### 4.5 Agent 协作与 Single Synthesizer
 
@@ -255,6 +263,11 @@ WAF/block page、scanner 标签和模型判断都不能单独确认。确认需�
 Xunji 管的是自动执行的效果和执行者，而不是禁止技术思考或利用代码编写。
 
 - Hook 是 live Claude runtime 的 authority/effect 执法边界。
+- 普通 `/loop` 不得修改自己依赖的 Hook、guard/privacy/proxy、turn contract、trusted
+  capability/review/lifecycle 入口和传递依赖。`tools/harness/maintenance_authority.py`
+  内置 fail-closed floor，`safety_critical_paths.json` 是同步 manifest；缺失/损坏 manifest
+  不能缩小 floor。维护 scope 可以同时精确列出相邻 tests/docs，但至少包含一个 critical
+  file，且不能包含目录、glob、绝对路径、`runs/`、active pointer/claim 或 guard state。
 - URL-bearing Bash 先分成三个通道：真实 target network、精确 local lifecycle metadata、
   model/reviewer egress。`command_shape.py` 只承认无 compound、redirect、substitution、
   未知选项的单一 argv；本地 Setup URL 记录不伪装成网络工具。
@@ -320,6 +333,29 @@ freeze scope + diff/evidence fingerprint
 Reviewer 输出不能直接写 finding、closure 或 canonical truth。作者也不能通过改写
 review 文本把自己的自审变成独立票。
 
+### 5.4 Live run 到 framework maintenance
+
+```text
+ordinary /loop attempts protected write
+  -> PreToolUse denies + records exact path/reason/action hash
+  -> output truth gate forbids success/revert claims
+  -> operator starts a new exact /xunji-maintenance turn
+  -> UserPromptSubmit binds session/turn/prompt/reason/path authority
+  -> local exact Edit/Write + registered verification only
+  -> final diff fingerprint + author-appropriate independent review
+  -> driver disposition + commit gate
+  -> a later explicit execute/resume turn may reactivate run work
+```
+
+Maintenance permission is not target authority, review evidence, or commit approval. Hook
+`PostToolUse`/`PostToolUseFailure` watches direct write tools as well as Bash so denied and
+failed actions remain blocked until an identical successful action receipt exists; an invalid
+receipt chain fails closed instead of becoming proof by absence. The derived `run_status` may
+show `maintenance`, but canonical fronts/evidence and closure signals do not advance.
+Maintenance Bash rejects tool-level environment overrides and treats every Git/patch invocation
+outside the audited read grammar as repository mutation; diff/show/log must disable external
+diff and textconv explicitly.
+
 ## 6. 过渡架构
 
 当前生产事实仍是 Claude Code 主驾驶、Python 工具/Hook/guard 和 canonical
@@ -384,6 +420,7 @@ CCB Agent Runtime
 | `.claude/skills/` | Claude 主驾驶按需方法/流程 | `docs/ROUTER.md`、相关 Tool/Hook/test |
 | `.agents/skills/` | Codex 辅助维护/复审知识 | 仅 Codex-side 或明确镜像共享变化 |
 | `.claude/hooks/` | Claude live runtime 的强制 authority/effect/lifecycle gates | safety skill、hook tests、独立复审 |
+| `tools/harness/maintenance_authority.py` + `safety_critical_paths.json` | 顶层维护指令解析、exact scope 与普通 `/loop` protected-path floor | `turn_contract.py`、settings write receipts、output truth gate、manifest drift check、独立复审 |
 | `tools/setup_transaction.py` | staging、setup receipt、pointer lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
 | `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
 | `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
@@ -483,27 +520,29 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 10. Closure 是多信号机械状态；失败、deny、timeout、session length 和报告存在都不等于完成。
 11. 并行 breadth 不放松 authority、request budget、evidence 或 merge/closure 门。
 12. CCB 迁移通过 versioned contract + differential tests 演进，不建第二 runtime 真值。
+13. 普通 live `/loop` 不能修改自己的 enforcement/trusted-entrypoint 依赖；只有顶层
+    `/xunji-maintenance` exact-path contract 能授权本地修复，且维护回合不并行 target、
+    Agent、Cron 或 canonical run-state 进展。
+14. Live Bash 是正向 capability allowlist，不用路径字符串黑名单证明任意解释器只读；
+    tool-level/inline env 只能使用目标工具明确登记的 proxy/locale 键。
 
 ## 12. Maintenance Checkpoint
 
-- Date: 2026-07-14
-- Scope: P0-2 setup transaction — `tools/setup_transaction.py`、`tools/setup_run.py`、
-  `tools/loop_bootstrap.py`、`tools/xunji_statusline.py`、`tools/turn_contract.py`、
-  `tools/check_rules.py`、setup-transaction fixture、自测注册与 lifecycle 规范。
-- Architecture impact: yes — 用同盘 staging + prepared receipt + atomic rename + 单一 pointer
-  CAS writer 取代 setup/bootstrap/statusline 多提交人；新增 `prepared_not_active` 与 pointer 后
-  receipt 幂等恢复语义，把 hook claim 绑定到 source/transaction/run identity；CAS snapshot 改为
-  必填，legacy resume 改为显式兼容路径，并由规则检查禁止 transaction owner 外直接写 pointer。
-- Verification: focused selftests、`check_rules.py`、`git diff --cached --check` PASS；完整
-  `selftest_all.py` 为 62 passed / 0 failed（86.8s）；Claude Code 按操作者要求作为主驾驶实际
-  执行 transaction/rules/full-suite/diff-check，四项 exit 0 且无 permission denial。
-- Independent review: Codex 作者不计自审票；arkcli 首轮对 `26d692ddb03716c7` 提出的
-  optional CAS snapshot 与 sole-writer 证据缺口已按 code/test 修复。最终 code bundle
-  `d07f126b6c88bacfc6224a0fd3899d1fc12bb7eb` 的结果为 partial WARN：唯一 finding 是
-  Kimi timeout backend error，blind-spot 列表为空，未输出新的 code finding；retry history
-  仍记录 GLM parse failure。操作者明确要求 Claude 用于主驾驶实跑而非 reviewer；缺失 Claude
-  review 与 arkcli 后端不完整均写入 `review/records/2026-07-14-p0-setup-transaction-review.md`，
-  不得表述为满矩阵 PASS。
+- Date: 2026-07-15
+- Scope: P0-3 live framework-maintenance authority — `maintenance_authority.py` +
+  safety-critical manifest、`turn_contract.py`、write-tool runtime receipts、`output_gate.py`、
+  `.claude/settings.json`、selftest/rule registration 与 Claude primary-driver lifecycle/safety docs。
+- Architecture impact: yes — 在 EXECUTE/EXPLAIN/PAUSE 之外加入顶层 operator-only、
+  session/turn/prompt/reason/exact-path 绑定的 `MAINTENANCE` mode；普通 `/loop` 不再能修改
+  enforcement/trusted entrypoints，维护回合冻结 target/Agent/Cron/run-state 并由 write-tool
+  receipt + Stop truth gate 防止把 denied/failed action 叙述成成功。
+- Verification: focused maintenance parser、turn contract、runtime receipt、output gate、hook、
+  rule 与 py_compile/diff-format checks PASS；最终候选的完整 `selftest_all.py` 为
+  63 passed / 0 failed，原始机器日志 hash 随 fingerprint 保存在本轮 review record。
+- Independent review: Codex 作者不计自审票；本 checkpoint 只在最终 framework diff 的
+  fingerprint 已由 arkcli panel + Claude Code fresh-context 按作者矩阵复审，且原始结果、
+  driver disposition、后端限制与该 fingerprint 一并保存在
+  `review/records/2026-07-15-p0-live-maintenance-authority-review.md` 时才满足提交门。
 
 ## 13. 外部设计来源与采用边界
 

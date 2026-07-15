@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import sys
 from pathlib import Path
@@ -80,6 +81,8 @@ REQUIRED_FILES = [
     Path("docs/cognition/README.md"),
     Path("tools/setup_transaction.py"),
     Path("tools/harness/fixtures/setup-transaction.json"),
+    Path("tools/harness/maintenance_authority.py"),
+    Path("tools/harness/safety_critical_paths.json"),
 ]
 
 REQUIRED_TEXT: dict[Path, list[str]] = {
@@ -94,11 +97,17 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "tools/harness/privacy.py",
         "tools/harness/command_shape.py",
         "tools/setup_transaction.py",
+        "/xunji-maintenance",
+    ],
+    Path("docs/WORKFLOW.md"): [
+        "/xunji-maintenance",
+        "tools/harness/maintenance_authority.py",
     ],
     Path("docs/WORKFLOW-reference.md"): [
         "tools/harness/privacy.py",
         "tools/harness/command_shape.py",
         "tools/setup_transaction.py",
+        "/xunji-maintenance",
     ],
     Path("docs/ARCHITECTURE.md"): [
         "## 4. 当前架构",
@@ -111,6 +120,7 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "tools/setup_transaction.py",
         "prepared_not_active",
         "commit_activation_cas()",
+        "/xunji-maintenance",
     ],
 }
 
@@ -253,6 +263,58 @@ def check_maintenance_checkpoint(text: str) -> list[str]:
     return errors
 
 
+def check_safety_critical_manifest(root: Path = ROOT) -> list[str]:
+    """Keep the file manifest synchronized with the compiled fail-closed floor."""
+    try:
+        sys.path.insert(0, str(root / "tools"))
+        from harness import maintenance_authority  # type: ignore
+        import turn_contract  # type: ignore
+        manifest = json.loads((
+            root / "tools/harness/safety_critical_paths.json"
+        ).read_text(encoding="utf-8", errors="strict"))
+    except Exception as exc:
+        return [f"safety-critical manifest cannot be validated: {type(exc).__name__}"]
+    if not isinstance(manifest, dict) or manifest.get("schema") != maintenance_authority.SCHEMA:
+        return ["safety-critical manifest has the wrong schema"]
+    exact = manifest.get("exact")
+    prefixes = manifest.get("prefixes")
+    if not isinstance(exact, list) or not all(isinstance(item, str) for item in exact):
+        return ["safety-critical manifest exact list is invalid"]
+    if not isinstance(prefixes, list) or not all(isinstance(item, str) for item in prefixes):
+        return ["safety-critical manifest prefixes list is invalid"]
+    errors: list[str] = []
+    if len(exact) != len(set(exact)) or len(prefixes) != len(set(prefixes)):
+        errors.append("safety-critical manifest contains duplicate paths")
+    if set(exact) != set(maintenance_authority.DEFAULT_EXACT):
+        errors.append("safety-critical manifest exact paths drift from compiled fail-closed floor")
+    if set(prefixes) != set(maintenance_authority.DEFAULT_PREFIXES):
+        errors.append("safety-critical manifest prefixes drift from compiled fail-closed floor")
+    critical_exact = set(exact)
+    critical_prefixes = set(prefixes)
+    trusted_entrypoints = (
+        set(turn_contract.CONTROL_SCRIPTS)
+        | set(turn_contract.LOCAL_VERIFICATION_SCRIPTS)
+        | set(turn_contract.PROXY_AWARE_TARGET_TOOLS)
+        | {(root / "tools/peer_review.py").resolve()}
+    )
+    missing_trusted: list[str] = []
+    for entrypoint in trusted_entrypoints:
+        try:
+            relative = entrypoint.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            missing_trusted.append(str(entrypoint))
+            continue
+        if relative not in critical_exact and not any(
+                relative.startswith(prefix + "/") for prefix in critical_prefixes):
+            missing_trusted.append(relative)
+    if missing_trusted:
+        errors.append(
+            "trusted executable paths are absent from safety-critical manifest: "
+            + ", ".join(sorted(missing_trusted))
+        )
+    return errors
+
+
 def relative(path: Path) -> Path:
     return path.relative_to(ROOT)
 
@@ -331,6 +393,7 @@ def main() -> int:
     if architecture_doc.exists():
         errors.extend(check_maintenance_checkpoint(
             architecture_doc.read_text(encoding="utf-8", errors="replace")))
+    errors.extend(check_safety_critical_manifest())
 
     if errors:
         print("rule check failed")

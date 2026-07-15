@@ -83,7 +83,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Agent|CronCreate|CronDelete|CronList|WebFetch",
+        "matcher": "Agent|CronCreate|CronDelete|CronList|WebFetch|Write|Edit|Update|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
@@ -107,7 +107,7 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "Agent|CronCreate|CronDelete|CronList|Bash|WebFetch",
+        "matcher": "Agent|CronCreate|CronDelete|CronList|Bash|WebFetch|Write|Edit|Update|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
