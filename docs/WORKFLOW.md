@@ -209,7 +209,17 @@ source language can only remain `source-data|derived`. Only a hook-bound top-lev
 operator prompt hash can add `authority=operator`. `target.md` cites the bundle and
 remains the canonical human boundary. Initial URL routing parses and saves locally
 without fetching; Guanlan/recon routing ingests the full inventory with zero
-re-probe. From the next loop cycle onward use only `/loop runs/<normalized-dir>`.
+re-probe. Markdown/ordinary JSON use the `setup-normalizer-candidate.v1` pilot:
+`--ai off` is deterministic and default; an operator-explicit `--ai external`
+first emits a hard-redacted, path-free token/reference request, and the model may
+return identifiers only. The mechanically unique target label cannot be replaced
+by AI. The request/candidate artifacts and hashes are frozen under `sources/`
+before the shared transaction commits. HTML/PDF/DOCX/plain text and an unregistered
+`--ai local` backend fail closed. From the next loop cycle onward use only
+`/loop runs/<normalized-dir>`. File-derived coverage remains
+`scope_status=review`; `coverage_matrix.py` preserves that status and the target
+tool gate rejects `review|out|unknown`. Setup success therefore does not itself
+authorize target effects, and no source/front/Agent/model text may promote the row.
 Target-action denials and later successful target actions are also recorded by
 hash. A denial is unresolved until a later successful event has the same tool and
 execution-action hash (for Bash, the command; descriptive metadata is ignored).

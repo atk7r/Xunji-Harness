@@ -148,13 +148,25 @@ Input adapter:
 python3 tools/loop_bootstrap.py --source <run-or-URL-or-file> --type auto
 ```
 
-The deterministic route order is: recognizable existing run/run file -> explicit
+The route order is: recognizable existing run/run file -> explicit
 HTTP(S) target URL -> local file content -> Guanlan/recon JSON -> candidate
 normalizer. The URL route performs no fetch. Recon ingestion performs no re-probe.
 An unknown/ambiguous file or any validation failure creates no formal run, does not
-move the active pointer, and creates no Cron. Markdown/HTML/PDF/DOCX/text/ordinary
-JSON currently require the candidate normalizer path; until that path is available,
-the adapter fails closed with `normalizer_required`.
+move the active pointer, and creates no Cron. Markdown/ordinary JSON now have a
+bounded pilot. Default deterministic mode is:
+
+```bash
+python3 tools/loop_bootstrap.py --source <file> --type file --ai off
+```
+
+External mode is two-phase and requires the current operator prompt to contain
+`--ai external`: first call the same adapter with provider/model plus
+`--prepare-normalizer`, reason only over its redacted token/ref JSON, then pass a
+strict `setup-normalizer-candidate.v1` JSON via `--candidate-json`. Never Read the
+raw file into an external model first. AI returns IDs only; the harness restores
+values locally from source refs and rejects ambiguous target selection. HTML,
+PDF, DOCX, plain text, and unregistered local AI remain `normalizer_required` /
+fail-closed until their provenance fixtures exist.
 
 Output:
 
@@ -168,6 +180,13 @@ Output:
   versioned `xunji.setup-source.v1` contract. `target.md` remains the human-readable
   canonical boundary and cites this bundle; source text cannot grant scope,
   maintenance permission, or operator authority.
+- **Freeze AI selection receipts**: external normalization additionally stores
+  `sources/normalizer_request.json` and `sources/normalizer_candidate.json` with
+  provider/model/prompt/redaction/schema hashes. These artifacts contain only the
+  redacted request and reference-only selection, never the raw placeholder map.
+- **Keep candidate scope non-executable**: file-derived coverage starts as
+  `scope_status=review`; the asset ledger preserves it and target tools reject
+  `review|out|unknown`. Creating or activating the run is not scope admission.
 - **Switch only after setup completes**: setup inherits the current operator turn
   contract and then atomically updates the active-run pointer. An old run's Agent
   Board does not govern this lifecycle command. Never clear/edit the pointer to

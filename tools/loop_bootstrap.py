@@ -28,6 +28,7 @@ PYTHON_CMD = sys.executable or "python3"
 sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_journal  # noqa: E402
+import setup_normalizer  # noqa: E402
 import setup_run  # noqa: E402
 import setup_source  # noqa: E402
 import setup_transaction  # noqa: E402
@@ -222,7 +223,14 @@ def _create_new_transaction(slug: str, recon_full: str) -> setup_transaction.Tra
     )
 
 
-def _create_source_transaction(route: setup_source.SourceRoute) -> setup_transaction.TransactionResult:
+def _create_source_transaction(
+    route: setup_source.SourceRoute,
+    *,
+    ai_mode: str = "off",
+    candidate_json: str | None = None,
+    provider: str = "",
+    model: str = "",
+) -> setup_transaction.TransactionResult:
     """Adapt one deterministic source route to the shared setup transaction."""
     if route.kind == "url":
         request = setup_run.resolve_setup_request(
@@ -231,6 +239,14 @@ def _create_source_transaction(route: setup_source.SourceRoute) -> setup_transac
     elif route.kind == "recon-json" and route.source_path is not None:
         request = setup_run.resolve_setup_request(
             route.slug, recon=str(route.source_path), target=None, date=None, classify=False
+        )
+    elif route.kind in {"json", "markdown"} and route.source_path is not None:
+        request = setup_run.resolve_normalized_request(
+            route.source_path,
+            ai_mode=ai_mode,
+            candidate_json=candidate_json,
+            provider=provider,
+            model=model,
         )
     else:
         raise setup_source.SetupSourceError(
@@ -249,7 +265,16 @@ def _create_source_transaction(route: setup_source.SourceRoute) -> setup_transac
     )
 
 
-def cmd_source(value: str, source_type: str = "auto") -> int:
+def cmd_source(
+    value: str,
+    source_type: str = "auto",
+    *,
+    ai_mode: str = "off",
+    candidate_json: str | None = None,
+    provider: str = "",
+    model: str = "",
+    prepare_normalizer: bool = False,
+) -> int:
     """Route an explicit source without fetching it or starting target work."""
     try:
         route = setup_source.route_source(value, source_type=source_type, runs_root=RUNS)
@@ -257,9 +282,49 @@ def cmd_source(value: str, source_type: str = "auto") -> int:
         print(f"[bootstrap:{exc.code}] {exc}", file=sys.stderr)
         return 1
     if route.kind == "run" and route.run_dir is not None:
+        if ai_mode != "off" or candidate_json or provider or model or prepare_normalizer:
+            print("[bootstrap:ai_not_applicable] existing-run resume does not accept normalizer flags", file=sys.stderr)
+            return 1
         return cmd_resume(str(route.run_dir))
+    if route.kind not in {"json", "markdown"} and (
+        ai_mode != "off" or candidate_json or provider or model or prepare_normalizer
+    ):
+        print("[bootstrap:ai_not_applicable] AI flags apply only to Markdown/ordinary-JSON candidate routes", file=sys.stderr)
+        return 1
+    if prepare_normalizer:
+        if ai_mode != "external" or candidate_json is not None:
+            print("[bootstrap:invalid_normalizer_prepare] prepare requires --ai external and no candidate", file=sys.stderr)
+            return 1
+        try:
+            request, _ = setup_normalizer.prepare_request(
+                route.source_path,
+                ai_mode=ai_mode,
+                provider=provider,
+                model=model,
+            )
+        except setup_source.SetupSourceError as exc:
+            print(f"[bootstrap:{exc.code}] {exc}", file=sys.stderr)
+            return 1
+        print(_json_mod.dumps({
+            "request": request,
+            "candidate_template": setup_normalizer.candidate_template(request),
+        }, ensure_ascii=False, sort_keys=True))
+        return 0
+    if ai_mode == "external" and candidate_json is None:
+        print(
+            "[bootstrap:ai_candidate_required] external mode requires a candidate; "
+            "first rerun with --prepare-normalizer, then submit token IDs with --candidate-json",
+            file=sys.stderr,
+        )
+        return 1
     try:
-        result = _create_source_transaction(route)
+        result = _create_source_transaction(
+            route,
+            ai_mode=ai_mode,
+            candidate_json=candidate_json,
+            provider=provider,
+            model=model,
+        )
     except (setup_source.SetupSourceError, setup_transaction.SetupTransactionError) as exc:
         code = getattr(exc, "code", "source_setup_failed")
         hint = ""
@@ -340,7 +405,7 @@ def _selftest() -> int:
     global _create_new_transaction, _create_source_transaction
     global _print_launch_instructions, _refresh_loop_state, _set_active_run
 
-    import json as _json, tempfile
+    import contextlib, io, json as _json, tempfile
 
     checks: list[tuple[str, bool]] = []
     tmp_root = RUNS
@@ -425,7 +490,7 @@ def _selftest() -> int:
             p.resolve(), "a" * 32, "b" * 64, "committed"
         )
 
-    def fake_create_source_transaction(route: setup_source.SourceRoute):
+    def fake_create_source_transaction(route: setup_source.SourceRoute, **_kwargs):
         source_transaction_calls.append(route.kind)
         return setup_transaction.TransactionResult(
             p.resolve(), "c" * 32, "d" * 64, "committed"
@@ -443,8 +508,19 @@ def _selftest() -> int:
         subprocess.run = fake_run
         rc_new = cmd_new("selftest", str(recon))
         rc_source = cmd_source("https://example.test/path?key=opaque", "auto")
-        calls_before_unsupported = list(source_transaction_calls)
-        rc_unsupported = cmd_source(str(unsupported_source), "auto")
+        rc_normalized_off = cmd_source(str(unsupported_source), "auto")
+        calls_before_prepare = list(source_transaction_calls)
+        prepare_out = io.StringIO()
+        with contextlib.redirect_stdout(prepare_out):
+            rc_prepare = cmd_source(
+                str(unsupported_source), "auto", ai_mode="external",
+                provider="claude-code", model="fixture-model",
+                prepare_normalizer=True,
+            )
+        rc_missing_candidate = cmd_source(
+            str(unsupported_source), "auto", ai_mode="external",
+            provider="claude-code", model="fixture-model",
+        )
         rc_resume = cmd_resume(str(p))
     finally:
         _set_active_run = orig_set_active
@@ -457,10 +533,15 @@ def _selftest() -> int:
     checks.append(("cmd_new delegates to shared setup transaction",
                    rc_new == 0 and transaction_calls == [("selftest", str(recon.resolve()))]))
     checks.append(("--source URL delegates to deterministic router and shared transaction",
-                   rc_source == 0 and source_transaction_calls == ["url"]))
-    checks.append(("normalizer-required file fails before transaction or pointer work",
-                   rc_unsupported == 1
-                   and calls_before_unsupported == source_transaction_calls))
+                   rc_source == 0 and source_transaction_calls[:1] == ["url"]))
+    checks.append(("ordinary JSON --ai off delegates through the shared transaction",
+                   rc_normalized_off == 0 and source_transaction_calls == ["url", "json"]))
+    checks.append(("external prepare emits only a redacted request without transaction work",
+                   rc_prepare == 0
+                   and 'setup-normalizer-request.v1' in prepare_out.getvalue()
+                   and calls_before_prepare == source_transaction_calls))
+    checks.append(("external mode without candidate fails before transaction work",
+                   rc_missing_candidate == 1 and calls_before_prepare == source_transaction_calls))
     checks.append(("cmd_new does not perform a second active-pointer commit",
                    active_hook_calls.count(p.resolve()) == 1))
     checks.append(("cmd_resume invokes shared active CAS",
@@ -506,6 +587,14 @@ def main() -> int:
     ap.add_argument("--type", dest="source_type", default=None,
                     choices=sorted(setup_source.SUPPORTED_TYPES),
                     help="source 路由类型；auto 按 run → URL → 内容识别")
+    ap.add_argument("--ai", choices=sorted(setup_normalizer.AI_MODES), default="off",
+                    help="candidate normalizer: off(默认) / local(需登记) / external(硬脱敏)")
+    ap.add_argument("--ai-provider", default="", help="external normalizer provider identity")
+    ap.add_argument("--ai-model", default="", help="external normalizer model identity")
+    ap.add_argument("--candidate-json", default=None,
+                    help="reference-only setup-normalizer-candidate.v1 JSON")
+    ap.add_argument("--prepare-normalizer", action="store_true",
+                    help="输出硬脱敏 request + candidate template，不创建 run/切 pointer")
     ap.add_argument("--selftest", action="store_true", help="自检")
     args = ap.parse_args()
 
@@ -514,9 +603,20 @@ def main() -> int:
     if args.source:
         if args.resume or args.slug_or_resume or args.recon:
             ap.error("--source 不能与 legacy positional 或 --resume 混用")
-        return cmd_source(args.source, args.source_type or "auto")
+        return cmd_source(
+            args.source,
+            args.source_type or "auto",
+            ai_mode=args.ai,
+            candidate_json=args.candidate_json,
+            provider=args.ai_provider,
+            model=args.ai_model,
+            prepare_normalizer=args.prepare_normalizer,
+        )
     if args.source_type is not None:
         ap.error("--type 只能与 --source 一起使用")
+    if args.ai != "off" or args.ai_provider or args.ai_model or args.candidate_json \
+            or args.prepare_normalizer:
+        ap.error("normalizer flags 只能与 --source 一起使用")
     if args.resume:
         if not args.slug_or_resume:
             ap.error("--resume 需要 runs/<dir> 路径")

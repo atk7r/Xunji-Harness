@@ -105,3 +105,8 @@ time-to-first-evidence 上升时返回 1, 可当 A/B 回归门。
   closure、Ultra-native Agent Board collaboration、JS/API hidden routes、client-side signature
   hints、permission/state matrix、threat-hypothesis-to-evidence, and mentor-pivot canaries。
   它们只用于离线评估, 不含真实交战发现物。
+- `setup-normalizer-pilot/cases.json` —— Markdown/普通 JSON setup candidate 的离线
+  A/B 与安全硬门。`--ai off` 是 deterministic baseline；reference-candidate 是只在已脱敏
+  request ID 上选择的 oracle，用来证明 contract 有增加召回的能力，不冒充 live provider
+  质量。运行 `python3 tools/setup_normalizer_bench.py --json` 查看字段 precision/recall、
+  hallucination、无来源字段、target 错选、source instruction 晋级与 model-egress leak。

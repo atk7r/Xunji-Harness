@@ -11,7 +11,9 @@
     {"name": "IPv6 URL", "type": "url", "input": "https://[2001:db8::1]:8443/a", "expect": "url"},
     {"name": "IDN URL", "type": "url", "input": "https://例子.test/a", "expect": "url"},
     {"name": "recon by content", "type": "auto", "input_kind": "recon-json", "expect": "recon-json"},
-    {"name": "recon explicit", "type": "recon-json", "input_kind": "recon-json", "expect": "recon-json"}
+    {"name": "recon explicit", "type": "recon-json", "input_kind": "recon-json", "expect": "recon-json"},
+    {"name": "ordinary JSON candidate route", "type": "auto", "input_kind": "ordinary-json", "expect": "json"},
+    {"name": "Markdown candidate route by content", "type": "auto", "input_kind": "markdown", "expect": "markdown"}
   ],
   "deny_cases": [
     {"name": "userinfo URL", "type": "url", "input": "https://user:secret@example.test/", "error": "url_userinfo_forbidden"},
@@ -19,8 +21,6 @@
     {"name": "missing host", "type": "url", "input": "https:///path", "error": "invalid_url"},
     {"name": "unsupported scheme", "type": "url", "input": "file:///tmp/report", "error": "invalid_url"},
     {"name": "unknown explicit type", "type": "intel-url", "input": "https://example.test/", "error": "invalid_source_type"},
-    {"name": "ordinary JSON is not deterministic recon", "type": "auto", "input_kind": "ordinary-json", "error": "normalizer_required"},
-    {"name": "markdown requires candidate normalizer", "type": "auto", "input_kind": "markdown", "error": "normalizer_required"},
     {"name": "oversized source", "type": "auto", "input_kind": "oversized", "error": "source_too_large"},
     {"name": "missing path", "type": "auto", "input_kind": "missing", "error": "missing_source"}
   ],

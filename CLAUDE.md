@@ -52,12 +52,17 @@
   `/loop` token enters loop mode. `/loop <source>` is adapted through
   `tools/loop_bootstrap.py --source <input> --type auto`: existing run/run file
   resumes, an explicit HTTP(S) URL is parsed and saved locally without fetching,
-  and Guanlan/recon JSON is ingested with zero re-probe. Other files must pass the
-  candidate normalizer and validator before setup; an unsupported or ambiguous
-  source fails without creating/activating a run. From the next cycle onward use
+  and Guanlan/recon JSON is ingested with zero re-probe. Markdown/ordinary JSON
+  use the reference-only `setup-normalizer-candidate.v1` pilot: default `--ai off`;
+  operator-explicit external mode first exposes only a hard-redacted, path-free
+  token/ref surrogate and AI returns IDs, never values. Do not Read raw source into
+  external model context. Unsupported, ambiguous, forged, mutated, or unregistered
+  local-AI input fails without creating/activating a run. From the next cycle use
   only `/loop runs/<normalized-run-dir>`, never the original URL/file. When unsure,
   preserve chat/setup/resume semantics and ask only for missing run/target boundary
-  data; never infer loop.
+  data; never infer loop. File-derived `scope_status=review|out|unknown` assets are
+  setup data, not target authority: target tools remain blocked until an exact operator
+  zero-probe admission transition records approval; never edit coverage by hand.
 - **OSINT = the upstream tool Guanlan** (collect · dedup · fold wildcard DNS ·
   liveness · ownership). Xunji **consumes the clean inventory and attacks it — it does
   NOT re-do OSINT.** `setup_run <slug> <recon.json>` builds `coverage.json` with zero
@@ -78,6 +83,7 @@
   date, URL/recon schema, and source hash before creating a formal run; build all
   canonical files, coverage, asset ledger, initial loop state, the versioned
   `xunji.setup-source.v1` manifest plus original/normalized/validator artifacts,
+  and any redacted normalizer request/reference-only candidate artifacts,
   and a prepared receipt under same-filesystem hidden staging; then atomic-rename
   and compare-and-swap the active pointer. Any ingest/coverage/ledger/journal/state
   failure is fatal, not a warning that still activates an incomplete run.

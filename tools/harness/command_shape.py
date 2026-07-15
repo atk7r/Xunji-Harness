@@ -119,12 +119,48 @@ def _option_value(args: tuple[str, ...], index: int, name: str) -> tuple[str, in
     return None
 
 
+def _normalizer_candidate_shape(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if set(value) != {
+        "schema", "request_sha256", "source_sha256", "redacted_sha256",
+        "target_token", "asset_tokens", "entry_tokens", "scope_refs",
+        "authorization_refs", "signal_refs", "unresolved",
+    } or value.get("schema") != "setup-normalizer-candidate.v1":
+        return False
+    if any(not re.fullmatch(r"[0-9a-f]{64}", str(value.get(key) or ""))
+           for key in ("request_sha256", "source_sha256", "redacted_sha256")):
+        return False
+    target = value.get("target_token")
+    if target is not None and not re.fullmatch(r"T-[0-9]{4,6}", str(target)):
+        return False
+    for key, prefix in (
+        ("asset_tokens", "T"), ("entry_tokens", "T"),
+        ("scope_refs", "R"), ("authorization_refs", "R"), ("signal_refs", "R"),
+    ):
+        items = value.get(key)
+        if not isinstance(items, list) or len(items) > 10000 \
+                or len(set(map(str, items))) != len(items) \
+                or any(not re.fullmatch(rf"{prefix}-[0-9]{{4,6}}", str(item)) for item in items):
+            return False
+    unresolved = value.get("unresolved")
+    if not isinstance(unresolved, list) or len(unresolved) > 1000:
+        return False
+    return all(
+        isinstance(item, dict) and set(item) == {"field", "reason", "ref_id"}
+        and 1 <= len(str(item.get("field") or "")) <= 255
+        and 1 <= len(str(item.get("reason") or "")) <= 1024
+        and bool(re.fullmatch(r"(?:T|R)-[0-9]{4,6}", str(item.get("ref_id") or "")))
+        for item in unresolved
+    )
+
+
 def local_setup_metadata_invocation(
     command: str,
     *,
     root: Path = ROOT,
 ) -> PythonControlInvocation | None:
-    """Recognize the local-only ``setup_run --target URL`` argv contract.
+    """Recognize exact local-only setup URL/source-normalizer argv contracts.
 
     ``--classify`` is intentionally excluded because it performs active egress.
     A recon positional is also excluded: this exemption exists only for the
@@ -142,6 +178,12 @@ def local_setup_metadata_invocation(
         source = ""
         source_type = "auto"
         type_seen = False
+        ai_mode = "off"
+        ai_seen = False
+        provider = ""
+        model = ""
+        candidate_json = ""
+        prepare = False
         index = 0
         while index < len(args):
             token = args[index]
@@ -154,11 +196,60 @@ def local_setup_metadata_invocation(
                 type_seen = True
                 index += 2
                 continue
+            if token == "--ai" and not ai_seen and index + 1 < len(args):
+                ai_mode = args[index + 1]
+                ai_seen = True
+                index += 2
+                continue
+            if token == "--ai-provider" and not provider and index + 1 < len(args):
+                provider = args[index + 1]
+                index += 2
+                continue
+            if token == "--ai-model" and not model and index + 1 < len(args):
+                model = args[index + 1]
+                index += 2
+                continue
+            if token == "--candidate-json" and not candidate_json and index + 1 < len(args):
+                candidate_json = args[index + 1]
+                index += 2
+                continue
+            if token == "--prepare-normalizer" and not prepare:
+                prepare = True
+                index += 1
+                continue
             return None
-        if not source or source_type not in {"auto", "url"}:
+        if not source or source_type not in {"auto", "url", "file"}:
             return None
-        if len(source.encode("utf-8")) > 8192 or re.search(r"[\x00-\x20\x7f]", source):
+        if len(source.encode("utf-8")) > 8192 or re.search(r"[\x00-\x1f\x7f]", source):
             return None
+        is_url = bool(re.match(r"(?i)^https?://", source))
+        if ai_mode == "off":
+            if provider or model or candidate_json or prepare:
+                return None
+        elif ai_mode == "external":
+            if is_url or source_type == "url" or not provider or not model:
+                return None
+            if len(provider) > 255 or len(model) > 255 \
+                    or re.search(r"[\x00-\x20\x7f]", provider + model):
+                return None
+            if prepare == bool(candidate_json):
+                return None
+            if candidate_json:
+                if len(candidate_json.encode("utf-8")) > 256 * 1024:
+                    return None
+                try:
+                    candidate = json.loads(candidate_json)
+                except json.JSONDecodeError:
+                    return None
+                if not _normalizer_candidate_shape(candidate):
+                    return None
+        else:
+            # Local AI remains unavailable until a trusted backend registry exists.
+            return None
+        if not is_url:
+            if source_type == "url" or not source.strip():
+                return None
+            return invocation
         try:
             parsed = urlsplit(source)
             if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:

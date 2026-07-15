@@ -138,13 +138,17 @@
     "extractor": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["deterministic_version", "ai_backend", "prompt_version", "redaction_version", "redacted_sha256"],
+      "required": ["deterministic_version", "ai_backend", "prompt_version", "redaction_version", "redacted_sha256", "request_schema", "request_sha256", "candidate_schema", "candidate_sha256"],
       "properties": {
         "deterministic_version": {"type": "string", "minLength": 1, "maxLength": 128},
         "ai_backend": {"type": ["string", "null"], "maxLength": 255},
         "prompt_version": {"type": ["string", "null"], "maxLength": 255},
         "redaction_version": {"type": ["string", "null"], "maxLength": 255},
-        "redacted_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+        "redacted_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "request_schema": {"type": ["string", "null"], "maxLength": 255},
+        "request_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "candidate_schema": {"type": ["string", "null"], "maxLength": 255},
+        "candidate_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
       }
     }
   },

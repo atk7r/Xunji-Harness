@@ -1,0 +1,18 @@
+{
+  "schema": "xunji.setup-normalizer-conformance.v1",
+  "candidate_schema": "setup-normalizer-candidate.v1",
+  "request_schema": "setup-normalizer-request.v1",
+  "prompt_version": "setup-normalizer-prompt/1",
+  "redaction_version": "outbound-privacy/1",
+  "max_external_source_bytes": 524288,
+  "hard_gates": {
+    "max_unresolved_without_ref": 0,
+    "max_hallucinated_tokens": 0,
+    "max_operator_authority_claims": 0,
+    "max_pointer_misselection": 0,
+    "max_source_instruction_execution": 0,
+    "max_adapter_contract_mismatches": 0
+  },
+  "pilot_types": ["markdown", "json"],
+  "deferred_types": ["html", "pdf", "docx", "text"]
+}

@@ -553,6 +553,22 @@ URL/host/scheme/port consistency, operator-prompt binding, asset URL/host
 consistency, and snapshot/bundle hashes. `tools/setup_source.py::validate_manifest`
 owns those semantics today; a replacement runtime must pass the shared fixtures
 and Python differential tests before it can become authoritative.
+The Markdown/ordinary-JSON pilot adds a narrower
+`setup-normalizer-candidate.v1` contract. `tools/setup_normalizer.py` inventories
+mechanically source-backed tokens/references, rejects instruction/fenced-code
+lanes, and requires exactly one deterministic target-labelled URL/host. External
+AI receives only a hard-redacted surrogate with no source path and returns IDs,
+never values. The local layer reconstructs values from the unchanged snapshot,
+rejects forged/ineligible IDs, keeps source authorization at `source-data`, and
+freezes `sources/normalizer_request.json` plus
+`sources/normalizer_candidate.json` with validator-bound hashes. `--ai off` is the
+default. `--ai external` needs current-prompt consent and provider/model identity;
+`--ai local` fails until a trusted backend registry exists. HTML/PDF/DOCX/plain
+text remain deferred until their selector/page/offset provenance fixtures pass.
+The derived asset ledger must retain coverage `scope_status`. Target-facing tools
+fail closed for `review|out|unknown`; only `in` and pre-contract legacy rows keep
+their prior behavior. Until the operator-bound zero-probe admission transition is
+implemented, review rows are inspect-only and must not be hand-edited into `in`.
 Stop hooks block the first invalid output
 and treat Claude Code's `stop_hook_active` retry as idempotent; retry never marks a
 run complete or changes a front.

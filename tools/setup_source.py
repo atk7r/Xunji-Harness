@@ -31,6 +31,8 @@ CONTRACT_PATH = ROOT / "contracts" / "setup-source.v1.schema.json"
 FIXTURE_PATH = ROOT / "tools" / "harness" / "fixtures" / "setup-source.json"
 NORMALIZED_REL = Path("sources/normalized.json")
 VALIDATOR_REL = Path("sources/validator_receipt.json")
+NORMALIZER_REQUEST_REL = Path("sources/normalizer_request.json")
+NORMALIZER_CANDIDATE_REL = Path("sources/normalizer_candidate.json")
 ORIGINAL_PREFIX = Path("sources/original")
 VALIDATOR_VERSION = "setup-source-validator/1"
 DETERMINISTIC_VERSION = "setup-source-deterministic/1"
@@ -198,6 +200,11 @@ def _asset_from_value(value: object) -> tuple[str, str]:
     return _idna_host(raw), ""
 
 
+def parse_asset_value(value: object) -> tuple[str, str]:
+    """Public canonical host/URL parser for setup-source adapters."""
+    return _asset_from_value(value)
+
+
 def valid_recon_data(value: object) -> bool:
     if not isinstance(value, dict) or not isinstance(value.get("assets"), list) \
             or not value.get("assets") or len(value["assets"]) > 100000:
@@ -242,8 +249,17 @@ def _base_manifest(*, source: dict, provided_target: bool) -> dict:
             "prompt_version": None,
             "redaction_version": None,
             "redacted_sha256": None,
+            "request_schema": None,
+            "request_sha256": None,
+            "candidate_schema": None,
+            "candidate_sha256": None,
         },
     }
+
+
+def make_base_manifest(*, source: dict, provided_target: bool) -> dict:
+    """Return the canonical empty v1 manifest shape for a source adapter."""
+    return _base_manifest(source=source, provided_target=provided_target)
 
 
 def normalize_url(value: str) -> tuple[dict, bytes]:
@@ -819,7 +835,11 @@ def validate_manifest(
         raise SetupSourceError("invalid_source_manifest", "extractor must be an object")
     _require_keys(
         extractor,
-        {"deterministic_version", "ai_backend", "prompt_version", "redaction_version", "redacted_sha256"},
+        {
+            "deterministic_version", "ai_backend", "prompt_version",
+            "redaction_version", "redacted_sha256", "request_schema",
+            "request_sha256", "candidate_schema", "candidate_sha256",
+        },
         where="extractor",
     )
     if not str(extractor["deterministic_version"] or ""):
@@ -827,15 +847,28 @@ def validate_manifest(
     _bounded_text(
         extractor["deterministic_version"], where="extractor.deterministic_version", maximum=128
     )
-    for key in ("ai_backend", "prompt_version", "redaction_version"):
+    for key in (
+        "ai_backend", "prompt_version", "redaction_version", "request_schema",
+        "candidate_schema",
+    ):
         if extractor[key] is not None:
             _bounded_text(extractor[key], where=f"extractor.{key}", maximum=255)
-    if extractor["redacted_sha256"] is not None:
-        redacted_hash = _bounded_text(
-            extractor["redacted_sha256"], where="extractor.redacted_sha256", maximum=64
-        )
-        if not _SHA256_RE.fullmatch(redacted_hash):
-            raise SetupSourceError("invalid_source_manifest", "redacted hash is invalid")
+    for key in ("redacted_sha256", "request_sha256", "candidate_sha256"):
+        if extractor[key] is not None:
+            digest_value = _bounded_text(
+                extractor[key], where=f"extractor.{key}", maximum=64
+            )
+            if not _SHA256_RE.fullmatch(digest_value):
+                raise SetupSourceError("invalid_source_manifest", f"extractor {key} is invalid")
+    ai_fields = (
+        "ai_backend", "prompt_version", "redaction_version", "redacted_sha256",
+        "request_schema", "request_sha256", "candidate_schema", "candidate_sha256",
+    )
+    populated_ai = [key for key in ai_fields if extractor[key] is not None]
+    if populated_ai and len(populated_ai) != len(ai_fields):
+        raise SetupSourceError("invalid_source_manifest", "AI extractor metadata must be all-or-none")
+    if not populated_ai and extractor["ai_backend"] is not None:
+        raise SetupSourceError("invalid_source_manifest", "AI backend metadata is incomplete")
     return manifest
 
 
@@ -844,6 +877,7 @@ def write_bundle(
     manifest: dict,
     snapshot_bytes: bytes,
     related_snapshots: dict[str, bytes] | None = None,
+    normalizer_artifacts: dict[str, bytes] | None = None,
 ) -> dict:
     validate_manifest(manifest, snapshot_bytes=snapshot_bytes)
     snapshot_rel = Path(str(manifest["source"]["snapshot"]))
@@ -862,6 +896,43 @@ def write_bundle(
             "normalized_source_too_large", "normalized candidate exceeds deterministic limit"
         )
     normalized.write_bytes(normalized_bytes)
+    extractor = manifest["extractor"]
+    normalizer_receipt: dict[str, object] = {}
+    normalizer_specs = (
+        (NORMALIZER_REQUEST_REL, "request_schema", "request_sha256"),
+        (NORMALIZER_CANDIDATE_REL, "candidate_schema", "candidate_sha256"),
+    )
+    if extractor["ai_backend"] is not None:
+        supplied = dict(normalizer_artifacts or {})
+        for rel, schema_key, hash_key in normalizer_specs:
+            raw = supplied.get(rel.as_posix())
+            path = run_dir / rel
+            if raw is None and path.is_file():
+                raw = path.read_bytes()
+            if raw is None or _sha256(raw) != extractor[hash_key]:
+                raise SetupSourceError(
+                    "normalizer_artifact_mismatch",
+                    f"normalizer artifact is missing or mismatched: {rel.as_posix()}",
+                )
+            try:
+                value = json.loads(raw.decode("utf-8", "strict"))
+            except (UnicodeError, json.JSONDecodeError) as exc:
+                raise SetupSourceError(
+                    "normalizer_artifact_invalid", f"normalizer artifact is invalid: {rel.as_posix()}"
+                ) from exc
+            if not isinstance(value, dict) or value.get("schema") != extractor[schema_key]:
+                raise SetupSourceError(
+                    "normalizer_artifact_mismatch", f"normalizer artifact schema mismatch: {rel.as_posix()}"
+                )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+            normalizer_receipt[rel.as_posix()] = {
+                "schema": extractor[schema_key], "sha256": extractor[hash_key],
+            }
+    elif normalizer_artifacts:
+        raise SetupSourceError(
+            "unexpected_normalizer_artifact", "deterministic setup must not carry AI artifacts"
+        )
     provided_related = dict(related_snapshots or {})
     related_receipts: list[dict] = []
     for descriptor in manifest["related_sources"]:
@@ -895,6 +966,7 @@ def write_bundle(
         "normalized": NORMALIZED_REL.as_posix(),
         "normalized_sha256": _sha256(normalized.read_bytes()),
         "related_sources": related_receipts,
+        "normalizer": normalizer_receipt,
         "validator_version": VALIDATOR_VERSION,
         "operator_bound": bool(manifest["operator_directive"]["prompt_sha256"]),
         "valid": True,
@@ -949,6 +1021,28 @@ def verify_bundle(run_dir: Path, manifest: dict | None = None, *, allow_legacy: 
                 "related_source_hash_mismatch", f"related snapshot hash mismatch: {related_rel}"
             )
         related_receipts.append({"snapshot": related_rel, "sha256": descriptor["sha256"]})
+    normalizer_receipt: dict[str, object] = {}
+    extractor = manifest["extractor"]
+    if extractor["ai_backend"] is not None:
+        for rel, schema_key, hash_key in (
+            (NORMALIZER_REQUEST_REL, "request_schema", "request_sha256"),
+            (NORMALIZER_CANDIDATE_REL, "candidate_schema", "candidate_sha256"),
+        ):
+            try:
+                raw = (run_dir / rel).read_bytes()
+                value = json.loads(raw.decode("utf-8", "strict"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise SetupSourceError(
+                    "normalizer_artifact_invalid", f"normalizer artifact is unreadable: {rel.as_posix()}"
+                ) from exc
+            if _sha256(raw) != extractor[hash_key] or not isinstance(value, dict) \
+                    or value.get("schema") != extractor[schema_key]:
+                raise SetupSourceError(
+                    "normalizer_artifact_mismatch", f"normalizer artifact mismatch: {rel.as_posix()}"
+                )
+            normalizer_receipt[rel.as_posix()] = {
+                "schema": extractor[schema_key], "sha256": extractor[hash_key],
+            }
     expected_receipt = {
         "schema": VALIDATION_SCHEMA,
         "source_schema": SCHEMA,
@@ -958,6 +1052,7 @@ def verify_bundle(run_dir: Path, manifest: dict | None = None, *, allow_legacy: 
         "normalized": NORMALIZED_REL.as_posix(),
         "normalized_sha256": _sha256(normalized_bytes),
         "related_sources": related_receipts,
+        "normalizer": normalizer_receipt,
         "validator_version": VALIDATOR_VERSION,
         "operator_bound": bool(manifest["operator_directive"]["prompt_sha256"]),
         "valid": True,
@@ -1038,10 +1133,17 @@ def _sniff_file(path: Path, raw: bytes, requested_type: str) -> str:
             raise SetupSourceError("invalid_json", f"JSON source is invalid: {exc}") from exc
         if valid_recon_data(data):
             return "recon-json"
-        raise SetupSourceError("normalizer_required", "ordinary JSON requires candidate normalization")
+        return "json"
     media, _ = mimetypes.guess_type(path.name)
-    if media in {"text/markdown", "text/html", "text/plain"} or raw:
-        raise SetupSourceError("normalizer_required", "file input requires candidate normalization")
+    if media == "text/html" or re.search(br"(?is)^\s*<!doctype\s+html|^\s*<html\b", raw[:4096]):
+        raise SetupSourceError("normalizer_required", "HTML input requires selector-aware candidate normalization")
+    if media == "text/markdown" or re.search(
+        br"(?m)^\s*(?:#{1,6}\s+|---\s*$|[-*+]\s+(?:Target|Asset|Scope|Authorization)\s*[:\xef\xbc\x9a])",
+        raw[:65536],
+    ):
+        return "markdown"
+    if media == "text/plain" or raw:
+        raise SetupSourceError("normalizer_required", "plain-text input is deferred until offset-provenance benchmarks exist")
     raise SetupSourceError("unrecognized_source", "source type cannot be identified")
 
 
@@ -1084,6 +1186,8 @@ def route_source(
         )
         host, _ = _asset_from_value(first_value)
         return SourceRoute("recon-json", raw_value, slug=_slug(host), source_path=resolved)
+    if kind in {"json", "markdown"}:
+        return SourceRoute(kind, raw_value, source_path=resolved)
     raise SetupSourceError("unrecognized_source", "source type cannot be identified")
 
 

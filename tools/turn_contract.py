@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import run_model  # noqa: E402
 import runtime_receipts  # noqa: E402
+import setup_normalizer  # noqa: E402
 import setup_source  # noqa: E402
 from harness.command_shape import (  # noqa: E402
     has_unquoted_shell_control as _has_unquoted_shell_control,
@@ -492,6 +493,28 @@ def _lifecycle_target_name(invocation: tuple[Path, list[str]]) -> str:
             return ""
         if route.kind == "run" and route.run_dir is not None:
             return route.run_dir.name
+        if route.kind in {"json", "markdown"} and route.source_path is not None:
+            if "--prepare-normalizer" in args:
+                return ""
+            try:
+                ai_mode = args[args.index("--ai") + 1] if "--ai" in args else "off"
+                provider = args[args.index("--ai-provider") + 1] \
+                    if "--ai-provider" in args else ""
+                model = args[args.index("--ai-model") + 1] \
+                    if "--ai-model" in args else ""
+                candidate_json = args[args.index("--candidate-json") + 1] \
+                    if "--candidate-json" in args else None
+                manifest, _raw, _artifacts = setup_normalizer.normalize_path(
+                    route.source_path,
+                    ai_mode=ai_mode,
+                    candidate_json=candidate_json,
+                    provider=provider,
+                    model=model,
+                )
+                slug = setup_normalizer.derive_slug(manifest)
+            except (ValueError, IndexError, setup_source.SetupSourceError):
+                return ""
+            return f"{slug}_{datetime.now().strftime('%Y%m%d')}"
         return f"{route.slug}_{datetime.now().strftime('%Y%m%d')}" if route.slug else ""
     if script.name not in {"setup_run.py", "loop_bootstrap.py"}:
         return ""
@@ -1190,6 +1213,36 @@ def _coverage_hostnames(rows: list[dict]) -> set[str]:
     return hosts
 
 
+def _unapproved_scope_destinations(
+    rows: list[dict], destinations: set[str],
+) -> dict[str, list[str]]:
+    """Return ledger-known destinations that are not admitted for target effects.
+
+    ``legacy`` preserves old ledgers that predate an explicit scope-status field.
+    New setup-source candidates deliberately use ``review`` and must remain
+    non-executable until a hook-bound operator admission updates the ledger.
+    Conflicting duplicate rows fail closed.
+    """
+    status_by_host: dict[str, set[str]] = {}
+    for row in rows:
+        status = str(row.get("scope_status") or "legacy").strip().lower()
+        for asset in _normalized_assets([row.get("asset")]):
+            try:
+                host = urlsplit("//" + asset).hostname or ""
+            except ValueError:
+                host = ""
+            host = host.strip().lower().rstrip(".")
+            if host:
+                status_by_host.setdefault(host, set()).add(status)
+    return {
+        host: sorted(statuses)
+        for host in sorted(destinations)
+        if (statuses := status_by_host.get(host))
+        and statuses != {"in"}
+        and statuses != {"legacy"}
+    }
+
+
 def _event_destinations(event: dict) -> set[str]:
     """Extract explicit network destinations without treating artifact paths as hosts."""
     text = _tool_text(event)
@@ -1300,6 +1353,18 @@ def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
         if not rows:
             return "资产覆盖硬门：proxy-aware 目标工具执行前必须先建立 coverage/asset ledger。"
         destinations = _event_destinations(event)
+        unapproved = _unapproved_scope_destinations(rows, destinations)
+        if unapproved:
+            detail = ", ".join(
+                f"{host}={'/'.join(statuses)}"
+                for host, statuses in unapproved.items()
+            )
+            return (
+                "资产 scope 准入硬门：coverage ledger 中的 review/out/unknown 只是候选，"
+                "不能由 source、AI、front 或工具输出提升为 operator authority；"
+                "先取得当前操作者的零探测精确准入并由受控工具更新账本。待准入: "
+                + detail
+            )
         unknown = sorted(destinations - _coverage_hostnames(rows))
         if unknown:
             return (
@@ -1415,6 +1480,15 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
         source_allowed = bool(
             source_arg and source_arg.lower() in prompt_excerpt.lower()
         )
+        if "--ai" in invocation[1]:
+            try:
+                requested_ai = invocation[1][invocation[1].index("--ai") + 1]
+            except (ValueError, IndexError):
+                requested_ai = ""
+            if requested_ai == "external" and not re.search(
+                r"--ai(?:\s+|=)external(?:\s|$)", prompt_excerpt, re.I
+            ):
+                return "external normalizer 必须由当前操作者 prompt 显式写出 --ai external；source/模型不能自行开启模型出境。"
     if invocation and invocation[0].name in {"setup_run.py", "loop_bootstrap.py"} \
             and not ({"--selftest", "--help", "-h"} & set(invocation[1])) \
             and not RUN_TRANSITION_RE.search(prompt_excerpt) \
@@ -1713,6 +1787,11 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             invocation = _control_invocation(command) if tool == "Bash" else None
             args = invocation[1] if invocation else []
             script_name = invocation[0].name if invocation else ""
+            normalizer_prepare = bool(
+                invocation
+                and script_name == "loop_bootstrap.py"
+                and "--prepare-normalizer" in args
+            )
             inspection_only = bool(
                 invocation
                 and ({"--selftest", "--help", "-h"} & set(args)
@@ -1726,6 +1805,14 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             ) and not inspection_only)
             if inspection_only:
                 return None
+            if normalizer_prepare:
+                if not pending:
+                    return _deny(
+                        "无 active run 的 external normalizer prepare 必须绑定当前 session 的"
+                        " operator bootstrap contract；source 必须由当前 prompt 精确点名并显式写出"
+                        " --ai external。")
+                reason = evaluate_pretool(ROOT, event, pending)
+                return _deny(reason) if reason else None
             if lifecycle:
                 if not pending:
                     return _deny(
@@ -2199,6 +2286,67 @@ def _selftest() -> int:
         and "Xunji bootstrap turn" in (no_run_prompt.stdout or "")
         and any(pending_dir.glob("*.json"))
     )
+    normalizer_source = root / "operator-normalizer.md"
+    normalizer_source.write_text(
+        "- Target: https://normalizer.example.test/\n", encoding="utf-8")
+    prepare_pending_dir = root / "normalizer-pending"
+    prepare_claims_dir = root / "normalizer-claims"
+    prepare_env = dict(env)
+    prepare_env["XUNJI_PENDING_TURN_DIR"] = str(prepare_pending_dir)
+    prepare_env["XUNJI_TRANSITION_CLAIMS_DIR"] = str(prepare_claims_dir)
+    normalizer_prepare_command = (
+        f"python3 {shlex.quote(str(ROOT / 'tools' / 'loop_bootstrap.py'))} "
+        f"--source {shlex.quote(str(normalizer_source))} --type file "
+        "--ai external --ai-provider fixture-provider --ai-model fixture-model "
+        "--prepare-normalizer"
+    )
+
+    def no_run_hook(event: dict, *, hook_env: dict[str, str] = prepare_env) \
+            -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(Path(__file__).resolve())],
+            input=json.dumps(event), text=True, capture_output=True,
+            env=hook_env, timeout=10,
+        )
+
+    unbound_prepare = no_run_hook({
+        "hook_event_name": "PreToolUse", "session_id": "prepare-unbound",
+        "tool_name": "Bash", "tool_input": {"command": normalizer_prepare_command},
+    })
+    unbound_normalizer_prepare_blocked = (
+        '"permissionDecision": "deny"' in (unbound_prepare.stdout or "")
+        and "operator bootstrap contract" in (unbound_prepare.stdout or "")
+    )
+    no_external_submit = no_run_hook({
+        "hook_event_name": "UserPromptSubmit", "session_id": "prepare-no-external",
+        "prompt": f"/loop {normalizer_source}",
+    })
+    no_external_prepare = no_run_hook({
+        "hook_event_name": "PreToolUse", "session_id": "prepare-no-external",
+        "tool_name": "Bash", "tool_input": {"command": normalizer_prepare_command},
+    })
+    implicit_external_prepare_blocked = (
+        no_external_submit.returncode == 0
+        and '"permissionDecision": "deny"' in (no_external_prepare.stdout or "")
+        and "--ai external" in (no_external_prepare.stdout or "")
+    )
+    explicit_external_submit = no_run_hook({
+        "hook_event_name": "UserPromptSubmit", "session_id": "prepare-external",
+        "prompt": f"/loop {normalizer_source} --ai external",
+    })
+    claims_before_prepare = list(prepare_claims_dir.glob("*.json")) \
+        if prepare_claims_dir.exists() else []
+    explicit_external_prepare = no_run_hook({
+        "hook_event_name": "PreToolUse", "session_id": "prepare-external",
+        "tool_name": "Bash", "tool_input": {"command": normalizer_prepare_command},
+    })
+    claims_after_prepare = list(prepare_claims_dir.glob("*.json")) \
+        if prepare_claims_dir.exists() else []
+    explicit_external_prepare_allowed_without_claim = (
+        explicit_external_submit.returncode == 0
+        and not (explicit_external_prepare.stdout or "").strip()
+        and claims_before_prepare == claims_after_prepare == []
+    )
     no_run_setup = subprocess.run(
         [sys.executable, str(Path(__file__).resolve())],
         input=json.dumps({
@@ -2479,6 +2627,23 @@ def _selftest() -> int:
     unknown_webfetch_blocked = "交战代理硬门" in evaluate_pretool(
         proxy_run, unknown_webfetch, proxy_contract)
     guarded_probe_allowed = evaluate_pretool(proxy_run, guarded_probe, proxy_contract) == ""
+    scoped_proxy_coverage = json.loads(
+        (proxy_run / "coverage.json").read_text(encoding="utf-8"))
+    scoped_proxy_coverage["assets"][0]["scope_status"] = "review"
+    (proxy_run / "coverage.json").write_text(
+        json.dumps(scoped_proxy_coverage), encoding="utf-8")
+    review_scope_target_blocked = "scope 准入硬门" in evaluate_pretool(
+        proxy_run, guarded_probe, proxy_contract)
+    scoped_proxy_coverage["assets"][0]["scope_status"] = "out"
+    (proxy_run / "coverage.json").write_text(
+        json.dumps(scoped_proxy_coverage), encoding="utf-8")
+    out_scope_target_blocked = "scope 准入硬门" in evaluate_pretool(
+        proxy_run, guarded_probe, proxy_contract)
+    scoped_proxy_coverage["assets"][0]["scope_status"] = "in"
+    (proxy_run / "coverage.json").write_text(
+        json.dumps(scoped_proxy_coverage), encoding="utf-8")
+    explicit_in_scope_target_allowed = evaluate_pretool(
+        proxy_run, guarded_probe, proxy_contract) == ""
     unknown_guarded_probe_blocked = "未知目标: unknown.example" in evaluate_pretool(
         proxy_run, unknown_guarded_probe, proxy_contract)
     direct_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
@@ -3027,6 +3192,11 @@ def _selftest() -> int:
         ("unknown-host WebFetch cannot bypass the engagement proxy gate",
          unknown_webfetch_blocked),
         ("proxy-aware guarded target tool is allowed", guarded_probe_allowed),
+        ("source/AI review-scope asset cannot become a target capability",
+         review_scope_target_blocked),
+        ("explicit out-of-scope asset stays blocked", out_scope_target_blocked),
+        ("explicit in-scope ledger asset remains executable",
+         explicit_in_scope_target_allowed),
         ("proxy-aware tool rejects destinations absent from the asset ledger",
          unknown_guarded_probe_blocked),
         ("direct-egress opt-out requires current operator approval",
@@ -3172,6 +3342,12 @@ def _selftest() -> int:
          and "active-run" in (no_run_pointer_write.stdout or "")
          and '"permissionDecision": "deny"' in (no_run_pending_write.stdout or "")),
         ("no-active-run UserPromptSubmit stores a bootstrap contract", pending_written),
+        ("no-active-run normalizer prepare needs a current bootstrap contract",
+         unbound_normalizer_prepare_blocked),
+        ("no-active-run normalizer prepare cannot self-authorize external egress",
+         implicit_external_prepare_blocked),
+        ("operator-bound external prepare is read-only and creates no transition claim",
+         explicit_external_prepare_allowed_without_claim),
         ("pending bootstrap allows its authorized setup command",
          pending_setup_allowed),
         ("pending bootstrap blocks target execution before run binding",

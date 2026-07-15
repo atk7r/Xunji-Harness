@@ -75,6 +75,8 @@ DEFAULT_EXACT = {
     "tools/selftest_all.py",
     "tools/session_handoff.py",
     "tools/setup_run.py",
+    "tools/setup_normalizer.py",
+    "tools/setup_normalizer_bench.py",
     "tools/setup_source.py",
     "tools/setup_transaction.py",
     "tools/state_project.py",

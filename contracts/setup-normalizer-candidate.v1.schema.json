@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/setup-normalizer-candidate.v1.schema.json",
+  "title": "Xunji Setup Normalizer Candidate v1",
+  "description": "Reference-only AI candidate for setup-source normalization. The model selects bounded token/reference identifiers; the local validator reconstructs every value from the frozen source and remains the sole promotion authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request_sha256",
+    "source_sha256",
+    "redacted_sha256",
+    "target_token",
+    "asset_tokens",
+    "entry_tokens",
+    "scope_refs",
+    "authorization_refs",
+    "signal_refs",
+    "unresolved"
+  ],
+  "properties": {
+    "schema": {"const": "setup-normalizer-candidate.v1"},
+    "request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "redacted_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "target_token": {
+      "type": ["string", "null"],
+      "pattern": "^T-[0-9]{4,6}$"
+    },
+    "asset_tokens": {"$ref": "#/$defs/token_ids"},
+    "entry_tokens": {"$ref": "#/$defs/token_ids"},
+    "scope_refs": {"$ref": "#/$defs/ref_ids"},
+    "authorization_refs": {"$ref": "#/$defs/ref_ids"},
+    "signal_refs": {"$ref": "#/$defs/ref_ids"},
+    "unresolved": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "reason", "ref_id"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1, "maxLength": 255},
+          "reason": {"type": "string", "minLength": 1, "maxLength": 1024},
+          "ref_id": {
+            "type": "string",
+            "pattern": "^(?:T|R)-[0-9]{4,6}$"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "token_ids": {
+      "type": "array",
+      "maxItems": 10000,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^T-[0-9]{4,6}$"}
+    },
+    "ref_ids": {
+      "type": "array",
+      "maxItems": 10000,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^R-[0-9]{4,6}$"}
+    }
+  }
+}

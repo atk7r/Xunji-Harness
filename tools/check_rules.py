@@ -80,9 +80,14 @@ REQUIRED_FILES = [
     Path("docs/WORKFLOW-reference.md"),
     Path("docs/cognition/README.md"),
     Path("tools/setup_transaction.py"),
+    Path("tools/setup_normalizer.py"),
+    Path("tools/setup_normalizer_bench.py"),
     Path("tools/setup_source.py"),
     Path("contracts/setup-source.v1.schema.json"),
+    Path("contracts/setup-normalizer-candidate.v1.schema.json"),
     Path("tools/harness/fixtures/setup-source.json"),
+    Path("tools/harness/fixtures/setup-normalizer.json"),
+    Path("bench/setup-normalizer-pilot/cases.json"),
     Path("tools/harness/fixtures/setup-transaction.json"),
     Path("tools/harness/maintenance_authority.py"),
     Path("tools/harness/safety_critical_paths.json"),
@@ -109,6 +114,7 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "tools/harness/maintenance_authority.py",
         "xunji.setup-source.v1",
         "sources/normalized.json",
+        "setup-normalizer-candidate.v1",
     ],
     Path("docs/WORKFLOW-reference.md"): [
         "tools/harness/privacy.py",
@@ -116,6 +122,7 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "tools/setup_transaction.py",
         "xunji.setup-source.v1",
         "sources/validator_receipt.json",
+        "setup-normalizer-candidate.v1",
         "/xunji-maintenance",
     ],
     Path("docs/ARCHITECTURE.md"): [
@@ -128,6 +135,7 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "## 12. Maintenance Checkpoint",
         "tools/setup_transaction.py",
         "tools/setup_source.py",
+        "tools/setup_normalizer.py",
         "xunji.setup-source.v1",
         "contracts/",
         "prepared_not_active",
@@ -139,6 +147,12 @@ REQUIRED_TEXT: dict[Path, list[str]] = {
         "source_ref",
         "prompt_sha256",
         "differential tests",
+    ],
+    Path("contracts/setup-normalizer-candidate.v1.schema.json"): [
+        "setup-normalizer-candidate.v1",
+        "request_sha256",
+        "source_sha256",
+        "target_token",
     ],
 }
 

@@ -55,10 +55,17 @@ Classify the operator message before touching run state:
 - For `/loop <source>`, invoke the exact local adapter
   `python3 tools/loop_bootstrap.py --source <source> --type auto`. It deterministically
   resumes existing runs, parses/saves explicit HTTP(S) targets without fetching,
-  and ingests recognized recon JSON with zero re-probe; other files must pass the
-  candidate normalizer and validator or fail without state changes. After setup,
+  and ingests recognized recon JSON with zero re-probe. Markdown/ordinary JSON
+  default to `--ai off`; if the operator explicitly wrote `--ai external`, follow
+  `xunji-setup-ingest`'s prepare/candidate sequence and reason only over the
+  path-free hard-redacted token/ref request. Never Read raw source into external
+  context first. AI returns IDs only and cannot resolve an ambiguous target.
+  Other files or an unavailable local backend fail without state changes. After setup,
   use `/loop runs/<dir>`, read `docs/templates/loop_prompt.md`, and bind `{{RUN_DIR}}`
   to that path. Do not require or regenerate a per-run `loop_prompt.md`.
+  File-derived `scope_status=review|out|unknown` assets remain non-executable at
+  the target-tool gate; do not hand-edit coverage to bypass the pending operator
+  scope admission.
 
 When the message shape is ambiguous, use Claude Code's language understanding and
 the run files to choose chat/setup/resume/hint. You may explain the chosen route

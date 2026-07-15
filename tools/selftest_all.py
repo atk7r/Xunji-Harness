@@ -59,6 +59,8 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("replay",         ["tools/replay.py", "--selftest"],         "evidence replay"),
     ("setup_transaction", ["tools/setup_transaction.py", "--selftest"], "atomic setup + active-pointer CAS/recovery"),
     ("setup_source", ["tools/setup_source.py"], "versioned setup source provenance + deterministic router"),
+    ("setup_normalizer", ["tools/setup_normalizer.py", "--selftest"], "reference-only Markdown/JSON AI candidate normalizer"),
+    ("setup_normalizer_bench", ["tools/setup_normalizer_bench.py", "--selftest"], "setup normalizer A/B quality and hard gates"),
     ("setup_run",      ["tools/setup_run.py", "--selftest"],      "run scaffolding"),
     ("ingest_recon",    ["tools/ingest_recon.py", "--selftest"],   "Guanlan recon adapter"),
     ("bench",          ["tools/bench.py", "--selftest"],          "R-1 self-eval scorer"),

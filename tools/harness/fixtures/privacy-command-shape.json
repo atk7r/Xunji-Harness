@@ -23,6 +23,48 @@
       "privacy": "allow"
     },
     {
+      "name": "exact loop Markdown deterministic normalizer",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source '/tmp/setup source.md' --type file --ai off",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "exact loop external normalizer prepare",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --type file --ai external --ai-provider claude-code --ai-model model-v1 --prepare-normalizer",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "exact loop external reference candidate",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --type file --ai external --ai-provider claude-code --ai-model model-v1 --candidate-json '{\"schema\":\"setup-normalizer-candidate.v1\",\"request_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"redacted_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"target_token\":\"T-0001\",\"asset_tokens\":[],\"entry_tokens\":[],\"scope_refs\":[],\"authorization_refs\":[],\"signal_refs\":[],\"unresolved\":[]}'",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "external normalizer missing provider identity",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --ai external --ai-model model-v1 --prepare-normalizer",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "allow"
+    },
+    {
+      "name": "candidate is forbidden with AI off",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --ai off --candidate-json '{}' ",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "allow"
+    },
+    {
+      "name": "unregistered local AI mode is not exempted",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --ai local",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "allow"
+    },
+    {
       "name": "loop source unknown option",
       "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --future yes",
       "shell_control": false,

@@ -487,10 +487,15 @@ def derive(run_dir: Path) -> dict:
     for a in assets:
         name = _asset_display(a)
         reachability = a.get("reachable")
+        raw_scope_status = str(a.get("scope_status") or "").strip().lower()
+        scope_status = raw_scope_status if raw_scope_status in {
+            "in", "out", "review", "unknown",
+        } else "legacy"
         rows.append({
             "asset_id": str(a.get("asset_id") or _asset_id(name)),
             "asset": name,
             "tokens": sorted(_host_tokens(name)),
+            "scope_status": scope_status,
             "applicable": sorted(_applicable_groups(a)) if reachability is not False else [],
             "tested": [],
             "fronts": [],
@@ -763,7 +768,7 @@ def write_outputs(run_dir: Path) -> dict:
         "summary": data.get("summary"),
         "assets": [{
             key: row.get(key) for key in (
-                "asset_id", "asset", "reachability", "examined", "flags", "fronts",
+                "asset_id", "asset", "scope_status", "reachability", "examined", "flags", "fronts",
                 "assignments", "assignment_statuses", "tested", "inventory_verdict",
                 "disposition", "accounted", "closure_ready",
             )
@@ -881,8 +886,8 @@ def _selftest() -> int:
     run = d / "run"
     run.mkdir()
     (run / "coverage.json").write_text(json.dumps({"assets": [
-        {"host": "a.example", "reachable": True, "flags": ["LOGIN"]},
-        {"host": "b.example", "reachable": True, "flags": ["SURFACE:API"]},
+        {"host": "a.example", "scope_status": "in", "reachable": True, "flags": ["LOGIN"]},
+        {"host": "b.example", "scope_status": "review", "reachable": True, "flags": ["SURFACE:API"]},
         {"host": "c.example", "reachable": True, "flags": ["SURFACE:URL_FETCH"]},
         {"host": "profile.example", "reachable": True, "title": "User profile"},
         {"host": "portal.example", "reachable": True, "title": "Admin API docs"},
@@ -1037,6 +1042,9 @@ def _selftest() -> int:
     bad_by_asset = {r["asset"]: r for r in bad_cov_data["rows"]}
     waiver_by_asset = {r["asset"]: r for r in waiver_data["rows"]}
     checks = [
+        ("scope admission status survives canonical coverage derivation",
+         by_asset["a.example"]["scope_status"] == "in"
+         and by_asset["b.example"]["scope_status"] == "review"),
         ("all in-scope assets stay in ledger with unreachable explicitly accounted",
          by_asset["d.example"]["disposition"] == "unreachable-baseline"
          and all(v == "not_applicable" for v in by_asset["d.example"]["cells"].values())),

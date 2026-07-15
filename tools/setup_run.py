@@ -48,6 +48,7 @@ REQUIRED = ["target.md", "surface.md", "frontier.md", "hypotheses.md", "evidence
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import loop_journal  # noqa: E402
+import setup_normalizer  # noqa: E402
 import setup_source  # noqa: E402
 import setup_transaction  # noqa: E402
 
@@ -399,6 +400,85 @@ def _derive_coverage_from_target(run_dir: Path) -> str:
     return f"coverage.json (骨架: {host}, reachable 待判定)"
 
 
+def _derive_coverage_from_manifest(run_dir: Path, manifest: dict) -> str:
+    """Build a no-probe candidate ledger from a mechanically validated source.
+
+    File-derived assets remain ``scope_status=review``.  Source prose cannot turn
+    them into in-scope authority; target.md and the next operator turn remain the
+    canonical review boundary.
+    """
+    rows: list[dict] = []
+    for asset in manifest.get("assets", []):
+        if not isinstance(asset, dict) or not asset.get("host"):
+            continue
+        host = str(asset["host"])
+        url = str(asset.get("url") or "")
+        scheme = ""
+        port = None
+        if url:
+            parsed = setup_source.parse_target_url(url)
+            scheme = parsed["scheme"]
+            port = parsed["port"]
+        rows.append({
+            "asset_id": "ASSET-" + hashlib.sha1(host.lower().encode("utf-8")).hexdigest()[:12].upper(),
+            "host": host,
+            "scheme": scheme,
+            "port": port,
+            "scope_status": "review",
+            "reachable": "unknown",
+            "examined": False,
+            "stack": "",
+            "flags": [],
+            "source": "setup-source-candidate",
+            "source_ref": str(asset.get("source_ref") or ""),
+            "verdict": None,
+        })
+    coverage = {
+        "source_total": len(rows),
+        "excluded": 0,
+        "excluded_assets": [],
+        "total": len(rows),
+        "examined": 0,
+        "reachable": 0,
+        "planned": len(rows),
+        "partial": True,
+        "assets": rows,
+        "source": "setup-source-candidate(no re-probe; scope review required)",
+    }
+    out = run_dir / "classify"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "coverage.json").write_text(
+        json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return f"coverage.json ({len(rows)} candidate assets, zero re-probe, scope=review)"
+
+
+def _render_normalized_surface(manifest: dict) -> str:
+    lines = [
+        "# Surface — normalized setup candidate",
+        "",
+        "> Values below passed source_ref validation but remain source-derived data.",
+        "> Scope, authorization, reachability, findings, certainty, and severity are not promoted here.",
+        "",
+        "| host | url | source_ref |",
+        "|---|---|---|",
+    ]
+    for asset in manifest.get("assets", []):
+        if isinstance(asset, dict):
+            lines.append(
+                f"| {asset.get('host', '')} | {asset.get('url', '')} | `{asset.get('source_ref', '')}` |"
+            )
+    unresolved = manifest.get("unresolved") if isinstance(manifest.get("unresolved"), list) else []
+    if unresolved:
+        lines.extend(("", "## Unresolved source candidates", ""))
+        for item in unresolved:
+            if isinstance(item, dict):
+                lines.append(
+                    f"- {item.get('field', '')}: {item.get('reason', '')} (`{item.get('source_ref', '')}`)"
+                )
+    return "\n".join(lines) + "\n"
+
+
 def _validated_date(raw: str | None) -> str:
     value = raw or _today()
     if not re.fullmatch(r"[0-9]{8}", value):
@@ -595,6 +675,59 @@ def resolve_setup_request(
     return request
 
 
+def resolve_normalized_request(
+    source_path: str | Path,
+    *,
+    ai_mode: str,
+    candidate_json: str | bytes | None,
+    provider: str = "",
+    model: str = "",
+    date: str | None = None,
+) -> dict:
+    """Resolve a Markdown/ordinary-JSON candidate before formal run creation."""
+    path = Path(source_path).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve(strict=False)
+    try:
+        manifest, source_bytes, normalizer_artifacts = setup_normalizer.normalize_path(
+            path,
+            ai_mode=ai_mode,
+            candidate_json=candidate_json,
+            provider=provider,
+            model=model,
+        )
+    except setup_source.SetupSourceError as exc:
+        raise setup_transaction.SetupTransactionError(exc.code, str(exc)) from exc
+    source_hash = str(manifest["source_sha256"])
+    safe_date = _validated_date(date)
+    slug = _validated_slug(setup_normalizer.derive_slug(manifest))
+
+    def validate_source() -> None:
+        try:
+            current = setup_source.read_source_bytes(path)
+        except setup_source.SetupSourceError as exc:
+            raise RuntimeError(f"normalized source disappeared during setup: {exc}") from exc
+        if hashlib.sha256(current).hexdigest() != source_hash:
+            raise RuntimeError("normalized source changed during setup")
+
+    target = manifest["target"]["primary_url"] or manifest["target"]["host"]
+    return {
+        "kind": "normalized_source",
+        "slug": slug,
+        "date": safe_date,
+        "run_name": f"{slug}_{safe_date}",
+        "classify": False,
+        "source_path": path,
+        "target": target,
+        "source_sha256": source_hash,
+        "source_manifest": manifest,
+        "source_bytes": source_bytes,
+        "related_source_bytes": {},
+        "normalizer_artifacts": normalizer_artifacts,
+        "validate_source": validate_source,
+    }
+
+
 def _record_scope_data(run_dir: Path, recon: dict) -> str:
     import scope as _scope
 
@@ -649,6 +782,7 @@ def prepare_staging_run(
         request["source_manifest"],
         request["source_bytes"],
         request.get("related_source_bytes"),
+        request.get("normalizer_artifacts"),
     )
 
     if request["kind"] == "recon_json":
@@ -687,12 +821,22 @@ def prepare_staging_run(
                 raise RuntimeError(detail)
             _merge_egress_recheck(run_dir)
         knowledge_match(run_dir)
-    else:
+    elif request["kind"] == "target_url":
         record_recon(run_dir, "none")
         record_target(run_dir, request["target"])
         if fault:
             fault("coverage")
         _derive_coverage_from_target(run_dir)
+    else:
+        record_recon(run_dir, request["source_manifest"]["source"]["snapshot"])
+        record_target(run_dir, request["target"])
+        (run_dir / "surface_recon.md").write_text(
+            _render_normalized_surface(request["source_manifest"]), encoding="utf-8"
+        )
+        if fault:
+            fault("coverage")
+        _derive_coverage_from_manifest(run_dir, request["source_manifest"])
+        knowledge_match(run_dir)
 
     record_setup_source(run_dir, request["source_manifest"])
 
@@ -902,6 +1046,126 @@ def _selftest() -> int:
         ("full setup leaves no visible staging directory",
          not (main_root / "runs" / setup_transaction.STAGING_NAME).exists()),
     ]
+
+    normalized_source = d / "normalized.md"
+    normalized_source.write_text(
+        "- Target: https://normalizer.example.test/login?token=private-value\n"
+        "- Asset: api.normalizer.example.test\n"
+        "Unlabelled mirror https://mirror.normalizer.example.test/status\n",
+        encoding="utf-8",
+    )
+    normalizer_request, normalizer_inventory = setup_normalizer.prepare_request(
+        normalized_source,
+        ai_mode="external",
+        provider="fixture-provider",
+        model="fixture-model",
+    )
+    normalizer_candidate = setup_normalizer.candidate_template(normalizer_request)
+    normalizer_candidate["target_token"] = next(
+        item.id for item in normalizer_inventory.tokens if "target" in item.roles
+    )
+    normalizer_candidate["asset_tokens"] = [
+        next(item.id for item in normalizer_inventory.tokens if item.value.startswith("https://mirror."))
+    ]
+    normalized_request = resolve_normalized_request(
+        normalized_source,
+        ai_mode="external",
+        candidate_json=json.dumps(normalizer_candidate),
+        provider="fixture-provider",
+        model="fixture-model",
+        date="20260103",
+    )
+    normalized_root = d / "normalized-root"
+    normalized_runs = normalized_root / "runs"
+    normalized_runs.mkdir(parents=True)
+    normalized_result = setup_transaction.create_and_activate(
+        normalized_request["run_name"],
+        source_manifest=normalized_request["source_manifest"],
+        build=lambda run_dir, fault: prepare_staging_run(
+            normalized_request, run_dir, fault, bootstrap=True
+        ),
+        validate_source=normalized_request["validate_source"],
+        root=normalized_root,
+        runs_root=normalized_runs,
+        pointer=normalized_root / ".claude" / "xunji_active_run",
+    )
+    normalized_run = normalized_result.run_dir
+    normalized_manifest = json.loads(
+        (normalized_run / setup_transaction.SOURCE_REL).read_text(encoding="utf-8")
+    )
+    normalized_coverage = json.loads(
+        (normalized_run / "classify" / "coverage.json").read_text(encoding="utf-8")
+    )
+    normalized_target = (normalized_run / "target.md").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    try:
+        normalized_verified = bool(setup_source.verify_bundle(normalized_run, normalized_manifest))
+    except setup_source.SetupSourceError:
+        normalized_verified = False
+    stored_request = (normalized_run / setup_source.NORMALIZER_REQUEST_REL).read_text(
+        encoding="utf-8", errors="strict"
+    )
+    checks += [
+        ("external normalized source commits through the shared transaction",
+         normalized_result.status == "committed" and normalized_manifest["source"]["kind"] == "markdown"),
+        ("external normalizer request/candidate artifacts are frozen and verified",
+         normalized_verified
+         and (normalized_run / setup_source.NORMALIZER_REQUEST_REL).exists()
+         and (normalized_run / setup_source.NORMALIZER_CANDIDATE_REL).exists()),
+        ("stored external request contains no raw query secret or source path",
+         "private-value" not in stored_request and str(normalized_source) not in stored_request),
+        ("candidate inventory supplements source-backed assets without probing",
+         {item["host"] for item in normalized_coverage["assets"]} >= {
+             "normalizer.example.test", "api.normalizer.example.test",
+             "mirror.normalizer.example.test",
+         }
+         and all(item["scope_status"] == "review" for item in normalized_coverage["assets"])),
+        ("file-derived target is canonical but source claims remain data",
+         "https://normalizer.example.test/login?token=private-value" in normalized_target
+         and normalized_manifest["operator_directive"]["provided_target"] is False
+         and all(item["authority"] != "operator" for item in normalized_manifest["authorization_claims"])),
+    ]
+    (normalized_run / setup_source.NORMALIZER_CANDIDATE_REL).write_text("{}", encoding="utf-8")
+    try:
+        setup_source.verify_bundle(normalized_run, normalized_manifest)
+        normalizer_mutation_rejected = False
+    except setup_source.SetupSourceError as exc:
+        normalizer_mutation_rejected = exc.code in {
+            "normalizer_artifact_mismatch", "normalizer_artifact_invalid",
+        }
+    checks.append(("normalizer artifact mutation blocks bundle verification", normalizer_mutation_rejected))
+
+    mutation_source = d / "mutation.md"
+    mutation_source.write_text("- Target: https://mutation.example.test/\n", encoding="utf-8")
+    mutation_request = resolve_normalized_request(
+        mutation_source, ai_mode="off", candidate_json=None, date="20260104"
+    )
+    mutation_source.write_text("- Target: https://changed.example.test/\n", encoding="utf-8")
+    mutation_root = d / "mutation-root"
+    mutation_runs = mutation_root / "runs"
+    mutation_runs.mkdir(parents=True)
+    try:
+        setup_transaction.create_and_activate(
+            mutation_request["run_name"],
+            source_manifest=mutation_request["source_manifest"],
+            build=lambda run_dir, fault: prepare_staging_run(
+                mutation_request, run_dir, fault, bootstrap=True
+            ),
+            validate_source=mutation_request["validate_source"],
+            root=mutation_root,
+            runs_root=mutation_runs,
+            pointer=mutation_root / ".claude" / "xunji_active_run",
+        )
+        normalized_mutation_rejected = False
+    except setup_transaction.SetupTransactionError:
+        normalized_mutation_rejected = True
+    checks.append((
+        "normalized source TOCTOU fails without formal run or pointer",
+        normalized_mutation_rejected
+        and not (mutation_runs / mutation_request["run_name"]).exists()
+        and not (mutation_root / ".claude" / "xunji_active_run").exists(),
+    ))
 
     def request_error(code: str, **kwargs) -> bool:
         try:
