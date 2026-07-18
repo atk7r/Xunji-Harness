@@ -45,6 +45,10 @@ TERMINAL_ASSIGNMENT_STATUSES = {
 }
 _RECEIPT_URL_RE = re.compile(r"(?i)(?:https?|wss?)://[^\s\"'<>]+")
 ROOT_ACTION_CLAIM_EVENT = "RootActionClaim"
+AGENT_TOOL_CALL_CLAIM_EVENT = "AgentToolCallClaim"
+DEFAULT_AGENT_TOOL_CALL_LIMIT = 6
+MIN_AGENT_TOOL_CALL_LIMIT = 5
+MAX_AGENT_TOOL_CALL_LIMIT = 64
 _ROOT_ACTION_CALLER_BINDING_FIELDS = {
     "plan_id", "plan_digest", "cycle_id", "lane_id", "capability_id",
     "effect", "session_id", "prompt_sha256",
@@ -69,6 +73,10 @@ _AGENT_BINDING_METADATA_DEFAULTS = {
     "agent_binding_batch_sha256": "",
     "agent_binding_ordinal": -1,
     "agent_binding_batch_size": 0,
+    # Added after the original lifecycle receipt contract.  Zero is the
+    # compatibility sentinel for an old immutable receipt, never an executable
+    # plan-bound budget.
+    "assignment_tool_call_limit": 0,
 }
 _ASSIGNMENT_ROLE_ALIASES = {
     "surface-agent": "surface", "surface": "surface",
@@ -312,6 +320,22 @@ def _assignment_result_digest(text: str) -> str:
     return match.group(1).lower() if match else ""
 
 
+def assignment_tool_call_limit(row: object) -> int:
+    """Return the effective bounded call budget for one typed assignment.
+
+    Early v1 rows predate this additive field.  They retain the fail-closed
+    default rather than becoming unlaunchable or receiving an unbounded budget.
+    Every newly generated row materializes the value explicitly.
+    """
+    if not isinstance(row, dict) or row.get("schema") != "xunji.assignment.v1":
+        return 0
+    raw = row.get("tool_call_limit", DEFAULT_AGENT_TOOL_CALL_LIMIT)
+    if isinstance(raw, bool) or not isinstance(raw, int) \
+            or not MIN_AGENT_TOOL_CALL_LIMIT <= raw <= MAX_AGENT_TOOL_CALL_LIMIT:
+        return 0
+    return raw
+
+
 def assignment_launch_prompt(row: dict) -> str:
     """Reconstruct the only prompt that may exercise a plan-bound assignment.
 
@@ -322,6 +346,8 @@ def assignment_launch_prompt(row: dict) -> str:
     if not isinstance(row, dict):
         return ""
     if row.get("schema") != "xunji.assignment.v1":
+        return ""
+    if not assignment_tool_call_limit(row):
         return ""
     assignment = str(row.get("agent") or "")
     front = str(row.get("front") or "")
@@ -629,8 +655,20 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
         "shape_category": str(event.get("xunji_shape_category") or ""),
         "control_script": str(event.get("xunji_control_script") or ""),
         "retryable_same_turn": bool(event.get("xunji_retryable_same_turn")),
+        "target_retry_action_sha256s": [
+            str(value) for value in (
+                event.get("xunji_target_retry_action_sha256s") or [])
+            if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+        ],
         "capability_id": str(event.get("xunji_capability_id") or ""),
         "capability_effect": str(event.get("xunji_capability_effect") or ""),
+        "capability_effects": [
+            str(value) for value in (event.get("xunji_capability_effects") or [])
+            if value in {
+                "local_read", "local_verify", "control", "target",
+                "model_egress", "repo_mutation",
+            }
+        ],
         "capability_recorder": str(event.get("xunji_capability_recorder") or ""),
         "root_action_binding": (
             dict(event.get("xunji_root_action_binding"))
@@ -668,7 +706,14 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
             agent_binding.get("launch_prompt_sha256") if agent_binding else ""),
         "subagent_type": str(
             agent_binding.get("subagent_type") if agent_binding else ""),
-        "input_excerpt": _excerpt(event.get("tool_input") or {}),
+        "assignment_tool_call_limit": int(
+            agent_binding.get("assignment_tool_call_limit")
+            if agent_binding
+            and isinstance(agent_binding.get("assignment_tool_call_limit"), int)
+            and not isinstance(agent_binding.get("assignment_tool_call_limit"), bool)
+            else 0),
+        "input_excerpt": "" if hook == AGENT_TOOL_CALL_CLAIM_EVENT else _excerpt(
+            event.get("tool_input") or {}),
         "input_sha256": _hash(binding_input),
         "action_sha256": _action_hash(tool, binding_input),
         "response_sha256": _hash(response_hash_value or {}),
@@ -1273,6 +1318,10 @@ def _validated_agent_binding(
         raise RuntimeError("SubagentStart assignment asset binding is incomplete")
     expected_lane = str(row.get("lane_id") or "")
     expected_plan = str(row.get("plan_digest") or "")
+    effective_tool_call_limit = assignment_tool_call_limit(row)
+    if (expected_lane or expected_plan) and not effective_tool_call_limit:
+        raise RuntimeError(
+            "plan-bound Agent assignment tool-call budget is invalid")
     if expected_lane or expected_plan:
         if not expected_lane or not expected_plan \
                 or binding.get("assignment_lane") != expected_lane \
@@ -1333,7 +1382,11 @@ def _validated_agent_binding(
         if not expected_prompt or actual_hash != expected_hash:
             raise RuntimeError(
                 "Agent assignment launch prompt is not byte-exact")
-    return binding
+    return {
+        **binding,
+        **({"assignment_tool_call_limit": effective_tool_call_limit}
+           if expected_lane or expected_plan else {}),
+    }
 
 
 def _validate_parent_agent_prompt(run_dir: Path, event: dict) -> dict:
@@ -1363,7 +1416,7 @@ def _lifecycle_binding_from_record(record: dict) -> dict:
     front = str(record.get("front") or "")
     if not tool_use_id or not assignment or not front:
         return {}
-    return {
+    binding = {
         "tool_use_id": tool_use_id,
         "assignment": assignment,
         "front": front,
@@ -1397,6 +1450,10 @@ def _lifecycle_binding_from_record(record: dict) -> dict:
             if isinstance(record.get("agent_binding_batch_size"), int)
             and not isinstance(record.get("agent_binding_batch_size"), bool) else 0),
     }
+    limit = record.get("assignment_tool_call_limit")
+    if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0:
+        binding["assignment_tool_call_limit"] = limit
+    return binding
 
 
 _AGENT_BINDING_SEMANTIC_RE = re.compile(
@@ -1779,14 +1836,17 @@ def _prepare_agent_lifecycle_binding(
     allocated_tool_ids = {
         str(item.get("tool_use_id") or "") for item in prior_starts
     }
-    # A failed parent Agent call is a terminal, non-launching invocation.  It
-    # can never receive a later SubagentStart and must not remain in the pool
-    # when a subsequent real Agent starts in the same parent transcript.
+    # A denied or failed parent Agent call is a terminal, non-launching
+    # invocation.  It can never receive a later SubagentStart and must not
+    # remain in the pool when a subsequent real Agent starts in the same parent
+    # transcript.  In particular, SubagentStart may race the successful
+    # parent's PostToolUse after an exact-prompt canary was denied.
     retired_tool_ids = {
         str(item.get("tool_use_id") or "")
         for item in events
         if str(item.get("session_id") or "") == session_id
-        and item.get("hook_event_name") == "PostToolUseFailure"
+        and item.get("hook_event_name") in {
+            "PreToolUseDenied", "PostToolUseFailure"}
         and item.get("tool_name") == "Agent"
     }
     unavailable_tool_ids = allocated_tool_ids | retired_tool_ids
@@ -2807,6 +2867,236 @@ def _append_runtime_record_locked(run: Path, record: dict,
     return saved
 
 
+def _agent_tool_call_claim_record_error(record: object) -> str:
+    if not isinstance(record, dict) \
+            or record.get("hook_event_name") != AGENT_TOOL_CALL_CLAIM_EVENT:
+        return "event-name"
+    ordinal = record.get("agent_tool_call_ordinal")
+    limit = record.get("agent_tool_call_limit")
+    admitted = record.get("agent_tool_call_admitted")
+    if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 1:
+        return "ordinal"
+    if isinstance(limit, bool) or not isinstance(limit, int) \
+            or not MIN_AGENT_TOOL_CALL_LIMIT <= limit <= MAX_AGENT_TOOL_CALL_LIMIT:
+        return "limit"
+    if not isinstance(admitted, bool) or admitted is not (ordinal <= limit):
+        return "admission"
+    if record.get("success") is not False \
+            or not str(record.get("session_id") or "") \
+            or not str(record.get("agent_id") or "") \
+            or not str(record.get("tool_name") or "") \
+            or not str(record.get("tool_use_id") or "") \
+            or not str(record.get("agent_parent_tool_use_id") or ""):
+        return "identity"
+    if not str(record.get("assignment") or "").startswith("A-") \
+            or not str(record.get("front") or "").startswith("F-") \
+            or not str(record.get("assignment_lane") or "").startswith("L-") \
+            or not re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(record.get("assignment_plan_digest") or "")):
+        return "assignment-binding"
+    if record.get("completion_review") is True \
+            or record.get("assignment_tool_call_limit") != limit:
+        return "budget-binding"
+    if not re.fullmatch(r"[0-9a-f]{64}", str(record.get("input_sha256") or "")) \
+            or not re.fullmatch(
+                r"[0-9a-f]{64}", str(record.get("action_sha256") or "")):
+        return "action-binding"
+    return ""
+
+
+def _agent_tool_call_claim_integrity_errors_from(
+    events: list[dict],
+) -> list[str]:
+    """Validate each child-call reservation against one earlier live Start."""
+    errors: list[str] = []
+    starts: dict[tuple[str, str, str], list[dict]] = {}
+    stops: dict[tuple[str, str, str], list[dict]] = {}
+    claims: dict[tuple[str, str, str], list[dict]] = {}
+    for item in events:
+        key = (
+            str(item.get("session_id") or ""),
+            str(item.get("agent_id") or ""),
+            str(item.get("transcript_path") or ""),
+        )
+        hook = str(item.get("hook_event_name") or "")
+        if hook == "SubagentStart":
+            starts.setdefault(key, []).append(item)
+        elif hook == "SubagentStop":
+            stops.setdefault(key, []).append(item)
+        elif hook == AGENT_TOOL_CALL_CLAIM_EVENT:
+            claims.setdefault(key, []).append(item)
+
+    binding_fields = (
+        ("assignment", "assignment"),
+        ("front", "front"),
+        ("assignment_lane", "assignment_lane"),
+        ("assignment_plan_digest", "assignment_plan_digest"),
+        ("launch_prompt_sha256", "launch_prompt_sha256"),
+        ("subagent_type", "subagent_type"),
+    )
+    for key, rows in claims.items():
+        start_rows = starts.get(key, [])
+        if len(start_rows) != 1:
+            errors.append(
+                "Agent tool-call claims lack one exact same-session Start: "
+                + "/".join(key[:2]))
+            continue
+        start = start_rows[0]
+        start_seq = int(start.get("seq") or 0)
+        stop_seqs = [
+            int(item.get("seq") or 0) for item in stops.get(key, [])
+        ]
+        expected_limit = start.get("assignment_tool_call_limit")
+        seen_ids: set[str] = set()
+        for expected_ordinal, row in enumerate(
+                sorted(rows, key=lambda item: int(item.get("seq") or 0)), 1):
+            label = f"Agent tool-call claim {key[0]}/{key[1]}/{expected_ordinal}"
+            detail = _agent_tool_call_claim_record_error(row)
+            if detail:
+                errors.append(f"{label} is invalid: {detail}")
+                continue
+            row_seq = int(row.get("seq") or 0)
+            if row_seq <= start_seq or any(
+                    stop_seq and stop_seq < row_seq for stop_seq in stop_seqs):
+                errors.append(f"{label} is outside the live Start/Stop interval")
+            if row.get("agent_tool_call_ordinal") != expected_ordinal:
+                errors.append(f"{label} has a non-contiguous ordinal")
+            child_tool_id = str(row.get("tool_use_id") or "")
+            if child_tool_id in seen_ids:
+                errors.append(f"{label} reuses a child tool-use id")
+            seen_ids.add(child_tool_id)
+            if row.get("agent_parent_tool_use_id") != start.get("tool_use_id") \
+                    or row.get("agent_tool_call_limit") != expected_limit \
+                    or any(row.get(claim_field) != start.get(start_field)
+                           for claim_field, start_field in binding_fields):
+                errors.append(f"{label} differs from its frozen Start binding")
+            if not _transcript_has(row, events):
+                errors.append(f"{label} lacks its exact child transcript tool-use")
+    return errors
+
+
+def claim_agent_tool_call(run_dir: str | Path, event: dict) -> dict:
+    """Atomically reserve one attempted tool call for a live plan-bound child.
+
+    The reservation crosses the append/fsync barrier before any other policy
+    decision.  A later denial therefore still consumes the attempt.  Exact hook
+    replay is idempotent; reuse of a child tool-use id with different semantics
+    fails closed.
+    """
+    if not isinstance(event, dict) \
+            or str(event.get("hook_event_name") or "") != "PreToolUse":
+        raise RuntimeError("AGENT_TOOL_CALL_EVENT_INVALID")
+    session_id = str(event.get("session_id") or "")
+    agent_id = str(event.get("agent_id") or "")
+    transcript_path = str(event.get("transcript_path") or "")
+    child_tool_use_id = str(event.get("tool_use_id") or "")
+    if not session_id or not agent_id or not transcript_path \
+            or not child_tool_use_id or not str(event.get("tool_name") or ""):
+        raise RuntimeError("AGENT_TOOL_CALL_IDENTITY_INVALID")
+    run = Path(run_dir).resolve()
+    with _locked(run):
+        events, chain_errors = validate_chain(run)
+        if chain_errors:
+            raise RuntimeError(
+                "AGENT_TOOL_CALL_CHAIN_INVALID: " + chain_errors[0])
+        claim_errors = _agent_tool_call_claim_integrity_errors_from(events)
+        if claim_errors:
+            raise RuntimeError(
+                "AGENT_TOOL_CALL_CLAIMS_INVALID: " + claim_errors[0])
+        key_matches = [
+            item for item in events
+            if item.get("hook_event_name") == "SubagentStart"
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("agent_id") or "") == agent_id
+            and str(item.get("transcript_path") or "") == transcript_path
+        ]
+        if len(key_matches) != 1:
+            raise RuntimeError("AGENT_TOOL_CALL_START_NOT_UNIQUE")
+        start = key_matches[0]
+        if start.get("completion_review") is True \
+                or not str(start.get("assignment_lane") or "") \
+                or not str(start.get("assignment_plan_digest") or ""):
+            raise RuntimeError("AGENT_TOOL_CALL_START_NOT_PLAN_BOUND")
+        if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("agent_id") or "") == agent_id
+            and str(item.get("transcript_path") or "") == transcript_path
+            for item in events
+        ):
+            raise RuntimeError("AGENT_TOOL_CALL_AFTER_STOP")
+        limit = start.get("assignment_tool_call_limit")
+        if isinstance(limit, bool) or not isinstance(limit, int) \
+                or not MIN_AGENT_TOOL_CALL_LIMIT <= limit <= MAX_AGENT_TOOL_CALL_LIMIT:
+            raise RuntimeError("AGENT_TOOL_CALL_BUDGET_INVALID")
+
+        claim_event = dict(event)
+        claim_event["hook_event_name"] = AGENT_TOOL_CALL_CLAIM_EVENT
+        record = normalize_hook_event(run, claim_event)
+        record.update({
+            "success": False,
+            "assignment": str(start.get("assignment") or ""),
+            "front": str(start.get("front") or ""),
+            "assignment_assets": [
+                str(item) for item in start.get("assignment_assets", [])],
+            "assignment_lane": str(start.get("assignment_lane") or ""),
+            "assignment_plan_digest": str(
+                start.get("assignment_plan_digest") or ""),
+            "assignment_result_digest": str(
+                start.get("assignment_result_digest") or ""),
+            "launch_prompt_sha256": str(
+                start.get("launch_prompt_sha256") or ""),
+            "subagent_type": str(start.get("subagent_type") or ""),
+            "completion_review": False,
+            "assignment_tool_call_limit": limit,
+            "agent_parent_tool_use_id": str(start.get("tool_use_id") or ""),
+        })
+        prior = [
+            item for item in events
+            if item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("agent_id") or "") == agent_id
+            and str(item.get("transcript_path") or "") == transcript_path
+        ]
+        same_id = [
+            item for item in prior
+            if str(item.get("tool_use_id") or "") == child_tool_use_id
+        ]
+        if same_id:
+            semantic_fields = (
+                "tool_name", "input_sha256", "action_sha256",
+                "assignment", "front", "assignment_assets",
+                "assignment_lane", "assignment_plan_digest",
+                "assignment_result_digest", "launch_prompt_sha256",
+                "subagent_type", "assignment_tool_call_limit",
+                "agent_parent_tool_use_id",
+            )
+            if len(same_id) == 1 and all(
+                    same_id[0].get(field) == record.get(field)
+                    for field in semantic_fields):
+                return same_id[0]
+            raise RuntimeError("AGENT_TOOL_CALL_IDENTITY_CONFLICT")
+
+        ordinal = len(prior) + 1
+        record.update({
+            "agent_tool_call_limit": limit,
+            "agent_tool_call_ordinal": ordinal,
+            "agent_tool_call_admitted": ordinal <= limit,
+        })
+        preview = dict(record)
+        preview["seq"] = len(events) + 1
+        preview["previous_hash"] = str(events[-1].get("receipt_hash") or "") \
+            if events else ""
+        preview["receipt_hash"] = _hash(preview)
+        detail = _agent_tool_call_claim_record_error(preview)
+        if detail:
+            raise RuntimeError("AGENT_TOOL_CALL_RECORD_INVALID: " + detail)
+        if not _transcript_has(preview, [*events, preview]):
+            raise RuntimeError("AGENT_TOOL_CALL_TRANSCRIPT_UNAVAILABLE")
+        return _append_runtime_record_locked(run, record, events)
+
+
 def claim_root_action(run_dir: str | Path, event: dict,
                       binding: dict) -> dict:
     """Atomically reserve one exact Root action for a ROOT_DIRECT plan cycle.
@@ -2937,6 +3227,17 @@ def _agent_event_semantics_match(existing: dict, candidate: dict) -> bool:
     return existing_semantics == candidate_semantics
 
 
+def _agent_event_semantic_conflict_fields(
+    existing: dict, candidate: dict,
+) -> list[str]:
+    existing_semantics = _agent_event_semantics(existing)
+    candidate_semantics = _agent_event_semantics(candidate)
+    return sorted(
+        key for key in set(existing_semantics) | set(candidate_semantics)
+        if existing_semantics.get(key) != candidate_semantics.get(key)
+    )
+
+
 def _exact_agent_event_replay(events: list[dict], candidate: dict) -> dict | None:
     """Return one identical Agent terminal delivery or reject identity reuse."""
     hook = str(candidate.get("hook_event_name") or "")
@@ -2971,14 +3272,19 @@ def _exact_agent_event_replay(events: list[dict], candidate: dict) -> dict | Non
         return None
     if len(matches) == 1 and _agent_event_semantics_match(matches[0], candidate):
         return matches[0]
+    differing = sorted({
+        field
+        for item in matches
+        for field in _agent_event_semantic_conflict_fields(item, candidate)
+    })
     raise RuntimeError(
         f"AGENT_EVENT_REPLAY_CONFLICT: {label} is already bound to a "
-        "different Agent hook payload"
+        "different Agent hook payload; fields=" + ",".join(differing)
     )
 
 
 def _agent_event_integrity_errors_from(events: list[dict]) -> list[str]:
-    errors: list[str] = []
+    errors: list[str] = _agent_tool_call_claim_integrity_errors_from(events)
     by_tool: dict[tuple[str, str], list[dict]] = {}
     by_lifecycle: dict[tuple[str, str, str], list[dict]] = {}
     by_binding: dict[tuple[str, str, str], set[tuple[str, str]]] = {}
@@ -3132,7 +3438,7 @@ def _agent_event_integrity_errors_from(events: list[dict]) -> list[str]:
                 "evidence_index_hash", "completion_bundle_hash",
                 "completion_plan_digest",
                 "assignment_assets", "launch_prompt_sha256", "subagent_type",
-                "completion_review",
+                "completion_review", "assignment_tool_call_limit",
             )
             if str(start.get("tool_use_id") or "") and any(
                     start.get(field) != launch.get(field) for field in bound_fields):
@@ -3148,7 +3454,7 @@ def _agent_event_integrity_errors_from(events: list[dict]) -> list[str]:
                 "evidence_index_hash", "completion_bundle_hash",
                 "completion_plan_digest",
                 "assignment_assets", "launch_prompt_sha256", "subagent_type",
-                "completion_review",
+                "completion_review", "assignment_tool_call_limit",
                 *( (
                     "agent_binding_strategy", "agent_binding_batch_sha256",
                     "agent_binding_ordinal", "agent_binding_batch_size",
@@ -4084,12 +4390,149 @@ def _file_contains_token(path: Path, token: str) -> bool:
         return False
 
 
-def _transcript_has(record: dict) -> bool:
+_TRANSCRIPT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
+def _child_transcript_path(record: dict) -> Path | None:
+    """Derive Claude's exact child transcript without accepting a path hint.
+
+    Claude Code reports the parent transcript path on child hook events.  Child
+    tool uses live in one deterministic sidechain file.  Never glob siblings or
+    fall back to the parent: either would let copied tool IDs satisfy the wrong
+    child's receipt.
+    """
+    session_id = str(record.get("session_id") or "")
+    agent_id = str(record.get("agent_id") or "")
+    if not _TRANSCRIPT_ID_RE.fullmatch(session_id) \
+            or not _TRANSCRIPT_ID_RE.fullmatch(agent_id):
+        return None
+    parent = Path(str(record.get("transcript_path") or ""))
+    if not parent.is_absolute() or parent.name != f"{session_id}.jsonl" \
+            or not parent.is_file() or parent.is_symlink():
+        return None
+    session_dir = parent.with_suffix("")
+    child_dir = session_dir / "subagents"
+    child = child_dir / f"agent-{agent_id}.jsonl"
+    if session_dir.is_symlink() or child_dir.is_symlink() or child.is_symlink() \
+            or not session_dir.is_dir() or not child_dir.is_dir() \
+            or not child.is_file():
+        return None
+    try:
+        parent_root = parent.parent.resolve(strict=True)
+        session_root = session_dir.resolve(strict=True)
+        child_root = child_dir.resolve(strict=True)
+        resolved = child.resolve(strict=True)
+    except OSError:
+        return None
+    if session_root.parent != parent_root or child_root.parent != session_root \
+            or resolved.parent != child_root:
+        return None
+    return resolved
+
+
+def _child_transcript_has_tool_use(path: Path, record: dict) -> bool:
+    """Require one structured tool-use in the exact Claude child envelope."""
+    tool_use_id = str(record.get("tool_use_id") or "")
+    session_id = str(record.get("session_id") or "")
+    agent_id = str(record.get("agent_id") or "")
+    if not tool_use_id:
+        return False
+
+    def tool_use_ids(value: object) -> list[str]:
+        found: list[str] = []
+        if isinstance(value, dict):
+            kind = str(value.get("type") or "").replace("_", "").lower()
+            if kind == "tooluse":
+                candidate = str(
+                    value.get("id") or value.get("tool_use_id")
+                    or value.get("toolUseId") or "")
+                if candidate:
+                    found.append(candidate)
+            for child in value.values():
+                found.extend(tool_use_ids(child))
+        elif isinstance(value, list):
+            for child in value:
+                found.extend(tool_use_ids(child))
+        return found
+
+    found = False
+    try:
+        handle = path.open("rb")
+    except OSError:
+        return False
+    with handle:
+        while True:
+            raw = handle.readline(MAX_AGENT_RESULT_BYTES + 1)
+            if not raw:
+                break
+            if len(raw) > MAX_AGENT_RESULT_BYTES:
+                return False
+            try:
+                decoded = json.loads(raw.decode("utf-8", errors="strict"))
+            except Exception:
+                return False
+            if tool_use_id not in tool_use_ids(decoded):
+                continue
+            exact_envelope = (
+                isinstance(decoded, dict)
+                and decoded.get("isSidechain") is True
+                and str(decoded.get("sessionId") or "") == session_id
+                and str(decoded.get("agentId") or "") == agent_id
+            )
+            if not exact_envelope:
+                return False
+            found = True
+    return found
+
+
+def _child_receipt_has_causal_owner(record: dict, events: list[dict]) -> bool:
+    """Bind a child tool receipt to one earlier Start or async Agent return."""
+    session_id = str(record.get("session_id") or "")
+    agent_id = str(record.get("agent_id") or "")
+    transcript_path = str(record.get("transcript_path") or "")
+    seq = record.get("seq")
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 1:
+        return False
+    owner_tool_ids: set[str] = set()
+    for event in events:
+        event_seq = event.get("seq")
+        if isinstance(event_seq, bool) or not isinstance(event_seq, int) \
+                or event_seq >= seq \
+                or str(event.get("session_id") or "") != session_id \
+                or str(event.get("transcript_path") or "") != transcript_path:
+            continue
+        if event.get("hook_event_name") == "SubagentStart" \
+                and str(event.get("agent_id") or "") == agent_id:
+            owner_tool_ids.add(str(event.get("tool_use_id") or ""))
+        elif event.get("hook_event_name") == "PostToolUse" \
+                and event.get("tool_name") == "Agent" \
+                and str(event.get("launched_agent_id") or "") == agent_id:
+            owner_tool_ids.add(str(event.get("tool_use_id") or ""))
+    owner_tool_ids.discard("")
+    if len(owner_tool_ids) != 1:
+        return False
+    parent = Path(transcript_path)
+    try:
+        parent_tool_ids = {
+            str(item.get("tool_use_id") or "")
+            for item in _transcript_agent_tool_uses(parent)
+        }
+    except RuntimeError:
+        return False
+    return next(iter(owner_tool_ids)) in parent_tool_ids
+
+
+def _transcript_has(record: dict, events: list[dict] | None = None) -> bool:
     tool_use_id = str(record.get("tool_use_id") or "")
     transcript = Path(str(record.get("transcript_path") or ""))
     if not tool_use_id or not transcript.is_file():
         return False
-    return _file_contains_token(transcript, tool_use_id)
+    if not str(record.get("agent_id") or ""):
+        return _file_contains_token(transcript, tool_use_id)
+    if events is None or not _child_receipt_has_causal_owner(record, events):
+        return False
+    child = _child_transcript_path(record)
+    return bool(child and _child_transcript_has_tool_use(child, record))
 
 
 def valid_tool_events(
@@ -4109,7 +4552,7 @@ def valid_tool_events(
         and (tool_name is None or event.get("tool_name") == tool_name)
         and (not session_id or str(event.get("session_id") or "") == session_id)
         and (not since or float(event.get("ts") or 0.0) >= since)
-        and _transcript_has(event)
+        and _transcript_has(event, events)
     ]
 
 
@@ -4165,7 +4608,7 @@ def denied_tool_events(
         and (not target_only or event.get("target_action") is True)
         and (not session_id or str(event.get("session_id") or "") == session_id)
         and (not since or float(event.get("ts") or 0.0) >= since)
-        and _transcript_has(event)
+        and _transcript_has(event, events)
     ]
 
 
@@ -4185,7 +4628,7 @@ def failed_tool_events(
         and event.get("success") is False
         and (not session_id or str(event.get("session_id") or "") == session_id)
         and (not since or float(event.get("ts") or 0.0) >= since)
-        and _transcript_has(event)
+        and _transcript_has(event, events)
     ]
 
 
@@ -4195,7 +4638,7 @@ def unresolved_target_denials(
     session_id: str = "",
     since: float = 0.0,
 ) -> list[dict]:
-    """Return target denials without a later successful identical tool input."""
+    """Return target denials without their exact later successful retry."""
     denied = denied_tool_events(
         run_dir, session_id=session_id, since=since, target_only=True)
     successful = [
@@ -4206,14 +4649,54 @@ def unresolved_target_denials(
     unresolved: list[dict] = []
     for denial in denied:
         denial_ts = float(denial.get("ts") or 0.0)
+        retry_hashes = [
+            str(value) for value in (
+                denial.get("target_retry_action_sha256s") or [])
+            if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+        ]
+        if retry_hashes:
+            remaining = list(retry_hashes)
+            for event in sorted(
+                    successful,
+                    key=lambda item: (
+                        float(item.get("ts") or 0.0),
+                        int(item.get("seq") or 0),
+                    )):
+                if float(event.get("ts") or 0.0) <= denial_ts \
+                        or event.get("tool_name") != "Bash":
+                    continue
+                action_hash = str(event.get("action_sha256") or "")
+                if action_hash in remaining:
+                    remaining.remove(action_hash)
+            resolved = not remaining
+        else:
+            resolved = any(
+                float(event.get("ts") or 0.0) > denial_ts
+                and event.get("tool_name") == denial.get("tool_name")
+                and event.get("action_sha256") == denial.get("action_sha256")
+                for event in successful
+            )
+        if not resolved:
+            unresolved.append(denial)
+    return unresolved
+
+
+def _unresolved_maintenance_events(
+    blocked: list[dict], successful: list[dict]
+) -> list[dict]:
+    blocked.sort(key=lambda event: (
+        float(event.get("ts") or 0.0), int(event.get("seq") or 0)))
+    unresolved: list[dict] = []
+    for blocker in blocked:
+        blocker_ts = float(blocker.get("ts") or 0.0)
         resolved = any(
-            float(event.get("ts") or 0.0) > denial_ts
-            and event.get("tool_name") == denial.get("tool_name")
-            and event.get("action_sha256") == denial.get("action_sha256")
+            float(event.get("ts") or 0.0) > blocker_ts
+            and event.get("tool_name") == blocker.get("tool_name")
+            and event.get("action_sha256") == blocker.get("action_sha256")
             for event in successful
         )
         if not resolved:
-            unresolved.append(denial)
+            unresolved.append(blocker)
     return unresolved
 
 
@@ -4223,7 +4706,7 @@ def unresolved_maintenance_blockers(
     session_id: str = "",
     since: float = 0.0,
 ) -> list[dict]:
-    """Return denied/failed maintenance actions without an identical success."""
+    """Return transcript-backed maintenance debt for final-output truth."""
     _, chain_errors = validate_chain(run_dir)
     if chain_errors:
         raise RuntimeError(
@@ -4239,25 +4722,59 @@ def unresolved_maintenance_blockers(
             run_dir, session_id=session_id, since=since)
         if event.get("maintenance_action") is True
     )
-    blocked.sort(key=lambda event: (
-        float(event.get("ts") or 0.0), int(event.get("seq") or 0)))
     successful = [
         event for event in valid_tool_events(
             run_dir, session_id=session_id, since=since)
         if event.get("maintenance_action") is True
     ]
-    unresolved: list[dict] = []
-    for blocker in blocked:
-        blocker_ts = float(blocker.get("ts") or 0.0)
-        resolved = any(
-            float(event.get("ts") or 0.0) > blocker_ts
-            and event.get("tool_name") == blocker.get("tool_name")
-            and event.get("action_sha256") == blocker.get("action_sha256")
-            for event in successful
+    return _unresolved_maintenance_events(blocked, successful)
+
+
+def unresolved_durable_maintenance_blockers(
+    run_dir: str | Path,
+    *,
+    session_id: str = "",
+    since: float = 0.0,
+) -> list[dict]:
+    """Return hook-journal maintenance debt for same-turn PreTool freezing.
+
+    Claude may not flush a just-denied tool ID to its transcript before asking
+    for the next tool.  The append-only hook journal is already durable at that
+    point and may govern progression, while final-output truth continues to use
+    ``unresolved_maintenance_blockers`` and its transcript evidence.
+    """
+    events, chain_errors = validate_chain(run_dir)
+    if chain_errors:
+        raise RuntimeError(
+            "maintenance receipt chain is invalid: " + "; ".join(chain_errors[:3])
         )
-        if not resolved:
-            unresolved.append(blocker)
-    return unresolved
+
+    def in_window(event: dict) -> bool:
+        return (
+            (not session_id
+             or str(event.get("session_id") or "") == session_id)
+            and (not since or float(event.get("ts") or 0.0) >= since)
+        )
+
+    blocked = [
+        event for event in events
+        if in_window(event)
+        and event.get("maintenance_action") is True
+        and (
+            event.get("hook_event_name") == "PreToolUseDenied"
+            and event.get("decision") == "deny"
+            or event.get("hook_event_name") == "PostToolUseFailure"
+            and event.get("success") is False
+        )
+    ]
+    successful = [
+        event for event in events
+        if in_window(event)
+        and event.get("maintenance_action") is True
+        and event.get("hook_event_name") == "PostToolUse"
+        and event.get("success") is True
+    ]
+    return _unresolved_maintenance_events(blocked, successful)
 
 
 def _launch_from_record(event: dict) -> tuple[str, bool, str]:
@@ -4386,6 +4903,9 @@ def agent_attempts(
             "launch_prompt_sha256": str(
                 event.get("launch_prompt_sha256") or ""),
             "subagent_type": str(event.get("subagent_type") or ""),
+            "tool_call_limit": int(
+                start_event.get("assignment_tool_call_limit")
+                or event.get("assignment_tool_call_limit") or 0),
             "assets": [str(item) for item in event.get("assignment_assets", [])],
             "agent_id": effective_agent_id,
             "actor_agent_id": str(event.get("agent_id") or ""),
@@ -4432,6 +4952,8 @@ def agent_attempts(
             "launch_prompt_sha256": str(
                 start.get("launch_prompt_sha256") or ""),
             "subagent_type": str(start.get("subagent_type") or ""),
+            "tool_call_limit": int(
+                start.get("assignment_tool_call_limit") or 0),
             "assets": [str(item) for item in start.get("assignment_assets", [])],
             "agent_id": agent_id,
             "actor_agent_id": "",
@@ -5348,6 +5870,7 @@ def _selftest() -> int:
         "tool-completion-bad", "tool-completion-good", "tool-target-denied",
         "tool-target-failed", "tool-target-other", "tool-target-success",
         "tool-maintenance-denied", "tool-maintenance-failed", "tool-maintenance-success",
+        "tool-target-chain-denied", "tool-target-chain-success",
     )
     _write_transcript(transcript, *ids)
 
@@ -5396,6 +5919,7 @@ def _selftest() -> int:
             "status": "assigned",
             "reasoning_style": "personalized-rdt",
             "loop_budget": 1,
+            "tool_call_limit": 6,
             "operator_profile": "selftest",
             "context": f"context/{agent}.md",
             "agent_file": f"agents/{agent}.md",
@@ -6181,6 +6705,35 @@ def _selftest() -> int:
     successful_target["xunji_target_action"] = True
     append_hook_event(run, successful_target)
     unresolved_after_success = unresolved_target_denials(run, session_id="s1")
+    chain_target_command = (
+        "python3 tools/probe.py GET https://chain.example.test")
+    append_hook_event(run, {
+        "hook_event_name": "PreToolUseDenied", "session_id": "s1",
+        "transcript_path": str(transcript), "tool_name": "Bash",
+        "tool_use_id": "tool-target-chain-denied",
+        "tool_input": {
+            "command": chain_target_command + " && python3 tools/workers.py status run",
+        },
+        "xunji_decision": "deny", "xunji_reason": "registered-chain",
+        "xunji_target_action": True,
+        "xunji_target_retry_action_sha256s": [
+            _action_hash("Bash", {"command": chain_target_command}),
+        ],
+    })
+    unresolved_chain_before_retry = unresolved_target_denials(
+        run, session_id="s1")
+    chain_target_success = event(
+        "Bash", "tool-target-chain-success",
+        {
+            "command": chain_target_command,
+            "description": "presentation metadata is not action identity",
+        },
+        {"stdout": "controlled chain-segment success"},
+    )
+    chain_target_success["xunji_target_action"] = True
+    append_hook_event(run, chain_target_success)
+    unresolved_chain_after_retry = unresolved_target_denials(
+        run, session_id="s1")
     append_hook_event(run, {
         "hook_event_name": "PreToolUseDenied", "session_id": "s1",
         "transcript_path": str(transcript), "tool_name": "Edit",
@@ -6211,6 +6764,34 @@ def _selftest() -> int:
     append_hook_event(run, successful_maintenance)
     unresolved_maintenance_after_success = unresolved_maintenance_blockers(
         run, session_id="s1")
+    not_flushed_run = run.parent / "not-flushed-maintenance-run"
+    (not_flushed_run / "state").mkdir(parents=True)
+    not_flushed_transcript = run.parent / "not-flushed-transcript.jsonl"
+    not_flushed_transcript.write_text("", encoding="utf-8")
+    not_flushed_command = "python3 tools/work_plan.py status not-flushed-run"
+    append_hook_event(not_flushed_run, {
+        "hook_event_name": "PreToolUseDenied", "session_id": "lag-session",
+        "transcript_path": str(not_flushed_transcript), "tool_name": "Bash",
+        "tool_use_id": "lag-maintenance-denied",
+        "tool_input": {"command": not_flushed_command},
+        "xunji_decision": "deny", "xunji_reason": "not flushed yet",
+        "xunji_maintenance_action": True,
+    })
+    not_flushed_final_truth = unresolved_maintenance_blockers(
+        not_flushed_run, session_id="lag-session")
+    not_flushed_progression_truth = unresolved_durable_maintenance_blockers(
+        not_flushed_run, session_id="lag-session")
+    append_hook_event(not_flushed_run, {
+        "hook_event_name": "PostToolUse", "session_id": "lag-session",
+        "transcript_path": str(not_flushed_transcript), "tool_name": "Bash",
+        "tool_use_id": "lag-maintenance-success",
+        "tool_input": {"command": not_flushed_command},
+        "tool_response": {"stdout": "ok"},
+        "xunji_maintenance_action": True,
+    })
+    not_flushed_progression_after_success = (
+        unresolved_durable_maintenance_blockers(
+            not_flushed_run, session_id="lag-session"))
     events, chain_errors = validate_chain(run)
     tampered = run.parent / "tampered"
     (tampered / "state").mkdir(parents=True)
@@ -6228,9 +6809,51 @@ def _selftest() -> int:
 
     async_run = run.parent / "async-run"
     (async_run / "state").mkdir(parents=True)
-    async_transcript = run.parent / "async-transcript.jsonl"
-    _write_transcript(async_transcript, "async-launch-1", "async-launch-2", "child-action-1",
-                      "child-agent-1", "child-agent-2")
+    async_transcript = run.parent / "async-session.jsonl"
+    async_parent_events = []
+    for tool_id, assignment, front, asset in (
+        ("async-launch-1", "A-async-001", "F-001", "a.example"),
+        ("async-launch-2", "A-async-002", "F-002", "b.example"),
+    ):
+        async_parent_events.append(json.dumps({
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": tool_id, "name": "Agent",
+                "input": {"prompt": (
+                    f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front} "
+                    f"XUNJI_ASSETS={asset}"
+                )},
+            }]},
+        }))
+    async_transcript.write_text(
+        "\n".join(async_parent_events) + "\n", encoding="utf-8")
+    async_child_dir = async_transcript.with_suffix("") / "subagents"
+    async_child_dir.mkdir(parents=True)
+    child_target_command = "python3 tools/probe.py GET https://a.example"
+    child_maintenance_command = "python3 tools/work_plan.py status async-run"
+
+    def child_tool_event(tool_id: str, command: str) -> str:
+        return json.dumps({
+            "isSidechain": True,
+            "sessionId": "async-session",
+            "agentId": "child-agent-1",
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": tool_id, "name": "Bash",
+                "input": {"command": command},
+            }]},
+        })
+
+    child_one_transcript = async_child_dir / "agent-child-agent-1.jsonl"
+    child_one_transcript.write_text("\n".join([
+        child_tool_event("child-action-denied", child_target_command),
+        child_tool_event("child-action-1", child_target_command),
+        child_tool_event("child-maintenance-denied", child_maintenance_command),
+        child_tool_event("child-maintenance-success", child_maintenance_command),
+        child_tool_event("sibling-only-tool", "python3 tools/workers.py status async-run"),
+    ]) + "\n", encoding="utf-8")
+    (async_child_dir / "agent-child-agent-2.jsonl").write_text(
+        child_tool_event("child-two-unrelated", "python3 tools/workers.py status async-run")
+        .replace('"agentId": "child-agent-1"', '"agentId": "child-agent-2"')
+        + "\n", encoding="utf-8")
     (async_run / "frontier.md").write_text(
         "# Frontier\n## Open Fronts\n### F-001\n- Status: open\n"
         "### F-002\n- Status: open\n", encoding="utf-8")
@@ -6292,13 +6915,73 @@ def _selftest() -> int:
     async_running_disposition = agent_disposition(async_run)
     async_state = json.loads((async_run / "state" / "assignments.json").read_text(encoding="utf-8"))
     append_hook_event(async_run, {
+        "hook_event_name": "PreToolUseDenied", "session_id": "async-session",
+        "transcript_path": str(async_transcript), "tool_name": "Bash",
+        "tool_use_id": "child-action-denied", "agent_id": "child-agent-1",
+        "tool_input": {"command": child_target_command},
+        "xunji_decision": "deny", "xunji_reason": "target fixture denial",
+        "xunji_target_action": True,
+    })
+    child_target_before_retry = unresolved_target_denials(
+        async_run, session_id="async-session")
+    append_hook_event(async_run, {
         "hook_event_name": "PostToolUse", "session_id": "async-session",
         "transcript_path": str(async_transcript), "tool_name": "Bash",
         "tool_use_id": "child-action-1", "agent_id": "child-agent-1",
-        "tool_input": {"command": "python3 tools/probe.py GET https://a.example"},
+        "tool_input": {"command": child_target_command},
         "tool_response": {"stdout": "ok"}, "xunji_target_action": True,
     })
+    child_target_after_retry = unresolved_target_denials(
+        async_run, session_id="async-session")
     async_activity = agent_asset_activity(async_run, "A-async-001")
+    append_hook_event(async_run, {
+        "hook_event_name": "PreToolUseDenied", "session_id": "async-session",
+        "transcript_path": str(async_transcript), "tool_name": "Bash",
+        "tool_use_id": "child-maintenance-denied", "agent_id": "child-agent-1",
+        "tool_input": {"command": child_maintenance_command},
+        "xunji_decision": "deny", "xunji_reason": "maintenance fixture denial",
+        "xunji_maintenance_action": True,
+        "xunji_maintenance_paths": ["tools/work_plan.py"],
+    })
+    child_maintenance_before_retry = unresolved_maintenance_blockers(
+        async_run, session_id="async-session")
+    append_hook_event(async_run, {
+        "hook_event_name": "PostToolUse", "session_id": "async-session",
+        "transcript_path": str(async_transcript), "tool_name": "Bash",
+        "tool_use_id": "child-maintenance-success", "agent_id": "child-agent-1",
+        "tool_input": {"command": child_maintenance_command},
+        "tool_response": {"stdout": "ok"},
+        "xunji_maintenance_action": True,
+        "xunji_maintenance_paths": ["tools/work_plan.py"],
+    })
+    child_maintenance_after_retry = unresolved_maintenance_blockers(
+        async_run, session_id="async-session")
+    append_hook_event(async_run, {
+        "hook_event_name": "PreToolUseDenied", "session_id": "async-session",
+        "transcript_path": str(async_transcript), "tool_name": "Bash",
+        "tool_use_id": "sibling-only-tool", "agent_id": "child-agent-2",
+        "tool_input": {"command": "python3 tools/workers.py status async-run"},
+        "xunji_decision": "deny", "xunji_reason": "sibling copy fixture",
+        "xunji_maintenance_action": True,
+    })
+    sibling_token_not_accepted = not any(
+        event.get("tool_use_id") == "sibling-only-tool"
+        for event in denied_tool_events(async_run, session_id="async-session")
+    )
+    traversal_child_path_rejected = _child_transcript_path({
+        "session_id": "async-session", "agent_id": "../child-agent-1",
+        "transcript_path": str(async_transcript),
+    }) is None
+    mismatched_session_path_rejected = _child_transcript_path({
+        "session_id": "different-session", "agent_id": "child-agent-1",
+        "transcript_path": str(async_transcript),
+    }) is None
+    symlink_child = async_child_dir / "agent-symlink-child.jsonl"
+    symlink_child.symlink_to(child_one_transcript)
+    symlink_child_path_rejected = _child_transcript_path({
+        "session_id": "async-session", "agent_id": "symlink-child",
+        "transcript_path": str(async_transcript),
+    }) is None
     async_stop_event = {
         "hook_event_name": "SubagentStop", "session_id": "async-session",
         "transcript_path": str(async_transcript), "agent_id": "child-agent-1",
@@ -6891,6 +7574,110 @@ def _selftest() -> int:
             "across transcript batches" in str(exc)
             and not load_events(cross_batch_run)
         )
+
+    denied_race_run = run.parent / "denied-agent-start-race-run"
+    _denied_race_contract, denied_race_plan = seed_current_plan(
+        denied_race_run, stage="S1", execution_count=2)
+    denied_race_rows = {
+        "prior-tool-a": workers.create_agent_assignment(
+            denied_race_run, role="verify", front="F-001", assets=[],
+            agent="A-denied-race-a",
+            lane_id=str(denied_race_plan["lanes"][0]["id"])),
+        "current-tool-b": workers.create_agent_assignment(
+            denied_race_run, role="verify", front="F-002", assets=[],
+            agent="A-denied-race-b",
+            lane_id=str(denied_race_plan["lanes"][2]["id"])),
+    }
+    denied_race_prompts = {
+        tool_id: assignment_launch_prompt(row)
+        for tool_id, row in denied_race_rows.items()
+    }
+    assert all(denied_race_prompts.values())
+    denied_race_transcript = run.parent / "denied-agent-start-race.jsonl"
+    denied_canary_prompt = (
+        denied_race_prompts["prior-tool-a"] + " XUNJI_CANARY_APPEND=1")
+    denied_race_tools = (
+        ("denied-canary", denied_canary_prompt),
+        ("prior-tool-a", denied_race_prompts["prior-tool-a"]),
+        ("current-tool-b", denied_race_prompts["current-tool-b"]),
+    )
+    denied_race_transcript.write_text("\n".join(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": tool_id, "name": "Agent",
+            "input": {
+                "prompt": prompt, "subagent_type": "xunji-hunter"},
+        }]},
+    }) for tool_id, prompt in denied_race_tools) + "\n", encoding="utf-8")
+    denied_race_child = run.parent / "denied-agent-start-race-child.jsonl"
+    denied_race_child.write_text(json.dumps({
+        "message": {"role": "user", "content":
+                    denied_race_prompts["prior-tool-a"]},
+    }) + "\n", encoding="utf-8")
+    denied_race_receipt = append_hook_event(denied_race_run, {
+        "hook_event_name": "PreToolUseDenied",
+        "session_id": "denied-race-session",
+        "transcript_path": str(denied_race_transcript),
+        "tool_name": "Agent", "tool_use_id": "denied-canary",
+        "tool_input": {
+            "prompt": denied_canary_prompt,
+            "subagent_type": "xunji-hunter",
+        },
+        "xunji_decision": "deny",
+        "xunji_decision_code": "XUNJI_E_DELEGATION_REQUIRED",
+        "xunji_decision_class": "delegation",
+    })
+    denied_race_prior_start = append_hook_event(denied_race_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": "denied-race-session",
+        "transcript_path": str(denied_race_transcript),
+        "agent_transcript_path": str(denied_race_child),
+        "agent_id": "denied-race-prior-child",
+        "agent_type": "xunji-hunter",
+    })
+    denied_race_before_current = load_events(denied_race_run)
+    # The current parent's PostToolUse has not arrived.  Its transcript
+    # candidate is nevertheless unique once the denied canary and prior Start
+    # are retired from allocation.
+    denied_race_current_start = append_hook_event(denied_race_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": "denied-race-session",
+        "transcript_path": str(denied_race_transcript),
+        "agent_id": "denied-race-current-child",
+        "agent_type": "xunji-hunter",
+    })
+    cross_session_history = [dict(item) for item in denied_race_before_current]
+    for item in cross_session_history:
+        if item.get("hook_event_name") == "PreToolUseDenied":
+            item["session_id"] = "different-denial-session"
+    denied_parent_retirement_is_session_scoped = False
+    try:
+        _prepare_agent_lifecycle_binding(
+            denied_race_run,
+            {
+                "hook_event_name": "SubagentStart",
+                "session_id": "denied-race-session",
+                "transcript_path": str(denied_race_transcript),
+                "agent_id": "denied-race-cross-session-child",
+                "agent_type": "xunji-hunter",
+            },
+            cross_session_history,
+        )
+    except RuntimeError as exc:
+        denied_parent_retirement_is_session_scoped = (
+            "across transcript batches" in str(exc))
+    denied_parent_never_competes_with_later_start = (
+        denied_race_receipt.get("tool_use_id") == "denied-canary"
+        and denied_race_prior_start.get("tool_use_id") == "prior-tool-a"
+        and not any(
+            item.get("hook_event_name") == "PostToolUse"
+            and item.get("tool_name") == "Agent"
+            and item.get("tool_use_id") == "current-tool-b"
+            for item in denied_race_before_current)
+        and denied_race_current_start.get("tool_use_id") == "current-tool-b"
+        and denied_race_current_start.get("agent_binding_strategy")
+            == "unique_transcript_candidate"
+        and not agent_event_integrity_errors(denied_race_run)
+    )
 
     child_transcript_run = run.parent / "child-transcript-result-run"
     (child_transcript_run / "state").mkdir(parents=True)
@@ -8951,6 +9738,138 @@ def _selftest() -> int:
         append_hook_event(replan_run, terminal)
     replan_receipts = [root_action_receipt(replan_run, item) for item in replan_plans]
 
+    # A plan-bound child reserves every attempted call in the runtime journal
+    # before any later policy gate can admit or deny the tool.  The fixture uses
+    # Claude's exact parent/sidechain transcript layout so attribution is not a
+    # synthetic agent-id-only shortcut.
+    budget_run = run.parent / "agent-tool-call-budget-run"
+    (budget_run / "state").mkdir(parents=True)
+    budget_session = "budget-session"
+    budget_agent = "budget-child"
+    budget_parent_tool = "budget-parent-agent-tool"
+    budget_transcript = budget_run.parent / f"{budget_session}.jsonl"
+    budget_prompt = (
+        "XUNJI_ASSIGNMENT=A-budget-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none "
+        "XUNJI_LANE=L-BUDGET XUNJI_PLAN=" + "b" * 64)
+    budget_transcript.write_text(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "name": "Agent", "id": budget_parent_tool,
+            "input": {"prompt": budget_prompt,
+                      "subagent_type": "xunji-hunter"},
+        }]},
+    }) + "\n", encoding="utf-8")
+    budget_child_dir = budget_transcript.with_suffix("") / "subagents"
+    budget_child_dir.mkdir(parents=True)
+    budget_child_transcript = budget_child_dir / f"agent-{budget_agent}.jsonl"
+    budget_child_ids = [f"budget-child-tool-{index}" for index in range(1, 10)]
+    budget_child_transcript.write_text("\n".join(json.dumps({
+        "isSidechain": True,
+        "sessionId": budget_session,
+        "agentId": budget_agent,
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "name": "Read", "id": tool_id,
+            "input": {"file_path": f"/tmp/budget-{index}.txt"},
+        }]},
+    }) for index, tool_id in enumerate(budget_child_ids, 1)) + "\n",
+        encoding="utf-8")
+    budget_binding = {
+        "tool_use_id": budget_parent_tool,
+        "assignment": "A-budget-001",
+        "front": "F-001",
+        "assignment_assets": [],
+        "assignment_lane": "L-BUDGET",
+        "assignment_plan_digest": "b" * 64,
+        "assignment_result_digest": "",
+        "evidence_index_hash": "",
+        "completion_bundle_hash": "",
+        "completion_plan_digest": "",
+        "launch_prompt_sha256": _launch_prompt_sha256(budget_prompt),
+        "subagent_type": "xunji-hunter",
+        "completion_review": False,
+        "assignment_tool_call_limit": 6,
+        "agent_binding_strategy": "exact_child_binding",
+        "agent_binding_batch_sha256": "c" * 64,
+        "agent_binding_ordinal": 0,
+        "agent_binding_batch_size": 1,
+    }
+    budget_start = normalize_hook_event(budget_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": budget_session,
+        "transcript_path": str(budget_transcript),
+        "tool_name": "Agent",
+        "tool_use_id": budget_parent_tool,
+        "agent_id": budget_agent,
+        "agent_type": "xunji-hunter",
+        "xunji_agent_lifecycle_binding": budget_binding,
+    })
+    with _locked(budget_run):
+        _append_runtime_record_locked(budget_run, budget_start, [])
+
+    def budget_pretool(index: int, *, path_suffix: str = "") -> dict:
+        return {
+            "hook_event_name": "PreToolUse",
+            "session_id": budget_session,
+            "transcript_path": str(budget_transcript),
+            "tool_name": "Read",
+            "tool_use_id": budget_child_ids[index - 1],
+            "agent_id": budget_agent,
+            "tool_input": {
+                "file_path": f"/tmp/budget-{index}{path_suffix}.txt"},
+        }
+
+    budget_first_five = [
+        claim_agent_tool_call(budget_run, budget_pretool(index))
+        for index in range(1, 6)
+    ]
+    budget_replay_count_before = len(load_events(budget_run))
+    budget_replay = claim_agent_tool_call(budget_run, budget_pretool(5))
+    budget_replay_count_after = len(load_events(budget_run))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        budget_boundary = list(pool.map(
+            lambda index: claim_agent_tool_call(
+                budget_run, budget_pretool(index)),
+            (6, 7),
+        ))
+    budget_eighth = claim_agent_tool_call(budget_run, budget_pretool(8))
+    budget_identity_conflict = False
+    try:
+        claim_agent_tool_call(
+            budget_run, budget_pretool(1, path_suffix="-conflict"))
+    except RuntimeError as exc:
+        budget_identity_conflict = "IDENTITY_CONFLICT" in str(exc)
+    budget_events_before_stop = load_events(budget_run)
+    budget_claim_rows = [
+        item for item in budget_events_before_stop
+        if item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT
+    ]
+    budget_tampered_events = json.loads(json.dumps(budget_events_before_stop))
+    next(item for item in budget_tampered_events
+         if item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT)[
+             "agent_tool_call_ordinal"] = 2
+    budget_tamper_detected = bool(
+        _agent_tool_call_claim_integrity_errors_from(budget_tampered_events))
+    budget_stop = normalize_hook_event(budget_run, {
+        "hook_event_name": "SubagentStop",
+        "session_id": budget_session,
+        "transcript_path": str(budget_transcript),
+        "tool_name": "Agent",
+        "tool_use_id": budget_parent_tool,
+        "agent_id": budget_agent,
+        "agent_type": "xunji-hunter",
+        "xunji_agent_lifecycle_binding": budget_binding,
+    })
+    with _locked(budget_run):
+        budget_events, budget_chain_errors = validate_chain(budget_run)
+        if budget_chain_errors:
+            raise RuntimeError(budget_chain_errors[0])
+        _append_runtime_record_locked(budget_run, budget_stop, budget_events)
+    budget_after_stop_rejected = False
+    try:
+        claim_agent_tool_call(budget_run, budget_pretool(9))
+    except RuntimeError as exc:
+        budget_after_stop_rejected = "AFTER_STOP" in str(exc)
+
     # Tampering any claimed/terminal field without rebuilding the append-only
     # chain invalidates the projection before a derived receipt can be emitted.
     tampered_root_lines = _event_path(root_run).read_text(
@@ -8963,7 +9882,7 @@ def _selftest() -> int:
         "\n".join(tampered_root_lines) + "\n", encoding="utf-8")
     tampered_root_projection = root_action_receipt(root_run, root_success_plan)
     checks = [
-        ("hash chain validates", not chain_errors and len(events) == 17),
+        ("hash chain validates", not chain_errors and len(events) == len(ids)),
         ("new runtime journal append flushes and fsyncs file plus parent directory",
          runtime_new_append_durable),
         ("existing nonempty runtime journal append does not repeat directory fsync",
@@ -8983,6 +9902,26 @@ def _selftest() -> int:
         ("unknown future assignment ledger schema fails closed",
          assignment_state_errors({"schema": 999, "assignments": []})
          == ["assignments state has an unsupported ledger schema"]),
+        ("Agent tool-call claims are durable, contiguous, and exact-replay idempotent",
+         [item.get("agent_tool_call_ordinal") for item in budget_first_five]
+             == [1, 2, 3, 4, 5]
+         and budget_replay.get("receipt_hash")
+             == budget_first_five[-1].get("receipt_hash")
+         and budget_replay_count_before == budget_replay_count_after
+         and [item.get("agent_tool_call_ordinal") for item in budget_claim_rows]
+             == list(range(1, 9))),
+        ("concurrent boundary calls linearize to one admitted sixth and one denied seventh",
+         {item.get("agent_tool_call_ordinal") for item in budget_boundary} == {6, 7}
+         and sum(item.get("agent_tool_call_admitted") is True
+                 for item in budget_boundary) == 1
+         and budget_eighth.get("agent_tool_call_ordinal") == 8
+         and budget_eighth.get("agent_tool_call_admitted") is False),
+        ("Agent tool-call identity conflict and post-Stop calls fail closed",
+         budget_identity_conflict and budget_after_stop_rejected),
+        ("Agent tool-call receipt tamper enters integrity debt",
+         budget_tamper_detected
+         and not _agent_tool_call_claim_integrity_errors_from(
+             budget_events_before_stop)),
         ("Agent tool-use replay identity is scoped by session",
          agent_identity_is_session_scoped),
         ("two real Agent receipts satisfy fanout", agent_fanout(run)["satisfied"]),
@@ -9056,6 +9995,23 @@ def _selftest() -> int:
              for item in async_state["assignments"])),
         ("child target receipt is attributed to its assigned asset",
          async_activity.get("a.example") == 1),
+        ("exact child transcript backs target debt and its identical retry",
+         len(child_target_before_retry) == 1
+         and child_target_before_retry[0].get("agent_id") == "child-agent-1"
+         and child_target_before_retry[0].get("tool_use_id") == "child-action-denied"
+         and not child_target_after_retry),
+        ("exact child transcript backs maintenance debt and its identical retry",
+         len(child_maintenance_before_retry) == 1
+         and child_maintenance_before_retry[0].get("agent_id") == "child-agent-1"
+         and child_maintenance_before_retry[0].get("tool_use_id")
+         == "child-maintenance-denied"
+         and not child_maintenance_after_retry),
+        ("child receipt truth never scans a sibling transcript",
+         sibling_token_not_accepted),
+        ("child transcript derivation rejects traversal, session drift, and symlinks",
+         traversal_child_path_rejected
+         and mismatched_session_path_rejected
+         and symlink_child_path_rejected),
         ("SubagentStop alone creates a disposition obligation",
          not async_after_stop["disposition_satisfied"]
          and any("A-async-001" in item for item in async_after_stop["pending"])),
@@ -9262,6 +10218,10 @@ def _selftest() -> int:
          parallel_allocations.get("parallel-child-b") == "parallel-tool-b"),
         ("Start without exact identity rejects unconfirmed cross-batch candidates",
          cross_batch_rejected),
+        ("denied Agent canary cannot compete with a racing later Start",
+         denied_parent_never_competes_with_later_start),
+        ("another session's Agent denial cannot retire this session's candidate",
+         denied_parent_retirement_is_session_scoped),
         ("Post -> Start -> Stop freezes one child attempt and Stop result",
          len(post_first_attempts) == 1
          and post_first_attempts[0].get("state") == "returned"
@@ -9361,6 +10321,15 @@ def _selftest() -> int:
         ("failed identical retry does not resolve denial", len(unresolved_after_failure) == 1),
         ("different successful command does not resolve denial", len(unresolved_after_other) == 1),
         ("successful same command resolves despite description drift", not unresolved_after_success),
+        ("target chain denial freezes its exact retry action hash",
+         any(
+             event.get("tool_use_id") == "tool-target-chain-denied"
+             and event.get("target_retry_action_sha256s") == [
+                 _action_hash("Bash", {"command": chain_target_command})]
+             for event in unresolved_chain_before_retry
+         )),
+        ("successful exact target segment resolves registered-chain debt",
+         not unresolved_chain_after_retry),
         ("maintenance denial remains unresolved without success",
          len(unresolved_maintenance_before) == 1),
         ("maintenance denial preserves exact authorized-path evidence",
@@ -9371,6 +10340,13 @@ def _selftest() -> int:
          == "PostToolUseFailure"),
         ("successful identical maintenance action resolves denial",
          not unresolved_maintenance_after_success),
+        ("durable hook truth freezes progression before transcript flush",
+         not not_flushed_final_truth
+         and len(not_flushed_progression_truth) == 1
+         and not_flushed_progression_truth[0].get("tool_use_id")
+         == "lag-maintenance-denied"),
+        ("durable identical success clears pre-flush maintenance debt",
+         not not_flushed_progression_after_success),
         ("Bash environment participates in action hash", _action_hash(
             "Bash", {"command": "probe", "env": {"TOKEN": "one"}}) != _action_hash(
             "Bash", {"command": "probe", "env": {"TOKEN": "two"}})),

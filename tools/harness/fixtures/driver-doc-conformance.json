@@ -6,12 +6,23 @@
       "required": [
         "Reviewer supplies a candidate disposition only; Root/Single",
         "Synthesizer alone makes the final evidence-gated confirmation and front closure.",
-        "exact `subagent_type=xunji-reviewer`",
-        "That legacy heading is retained"
+        "references are the sole Claude-primary exact-command",
+        "It requires real same-session",
+        "heading is retained for storage compatibility",
+        "Assignment-free global completion Reviewer",
+        "client-reserved `/loop` expansion",
+        "Setup-only then stops",
+        "`loop_requested=false` contract performs no Cron action",
+        "current-turn durable hook journal records `maintenance_action=true`",
+        "execution of the selected typed lane"
       ],
       "forbidden": [
         "closing is the Reviewer's job",
-        "fresh-context codex agent to review the COMPLETE run"
+        "fresh-context codex agent to review the COMPLETE run",
+        "tools/peer_review.py ... --into-run",
+        "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=",
+        "XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=",
+        "committed/recovered activation, fresh CronList, CronCreate"
       ]
     },
     {
@@ -19,62 +30,148 @@
       "required": [
         "supplies a candidate disposition only; Root/Single Synthesizer",
         "alone makes the final evidence-gated confirmation and front closure.",
+        "`EXECUTE` cycle with `loop_requested=false`",
         ".claude/skills/web-research/SKILL.md",
-        "legacy sync skill owns no"
+        "legacy sync skill owns no",
+        "Assignment-free global completion\n  Reviewer",
+        "Once current-turn maintenance debt exists",
+        "`run_gate` yields before",
+        "typed lane/runtime receipts still govern execution"
       ],
       "forbidden": [
         "that is the Reviewer's job",
-        "then local knowledge/xday lookup"
+        "then local knowledge/xday lookup",
+        "python3 tools/saturation.py runs/<dir>",
+        "python3 tools/js_inventory.py runs/<dir>"
+      ]
+    },
+    {
+      "path": "docs/cognition/README.md",
+      "required": [
+        "a live run uses built-in Read/Grep/Glob",
+        "helper matcher CLIs remain offline developer tools",
+        "separate, explicitly authorized repository-maintenance turn"
+      ],
+      "forbidden": [
+        "retrieve the entry via `knowledge_match --body`",
+        "`tools/knowledge_seed.py <id>"
       ]
     },
     {
       "path": "docs/WORKFLOW-reference.md",
       "required": [
-        "XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=<exact-assets-or-none> XUNJI_LANE=L-... XUNJI_PLAN=<64hex> XUNJI_RESULT_DIGEST=<64hex> XUNJI_COMPLETION_REVIEW",
-        "The final digest binds the frozen target result",
         "Reviewer returns a candidate disposition only; Root/Single",
         "Synthesizer alone confirms or closes a front after the evidence gate.",
-        "Each returned assignment is one binary Agent",
+        "Operational plan/delegate and launch/return/settlement command",
         "This completion challenge and the independent content-addressed",
-        ".claude/skills/xunji-reviewops/references/peer-review-panel.md",
-        "Codex-authored work uses `--driver codex`",
-        "fallback may emit a receipt"
+        "#### Assignment-free global completion Reviewer",
+        "peer-review-panel reference",
+        "sole Claude-primary owner for exact CLI",
+        "Backend failure or no successful allowed",
+        "PreToolUse enforces the same maintenance truth",
+        "`run_gate` yields to that fixed output",
+        "An Agent final response may include `## New Threat Hypotheses`"
       ],
       "forbidden": [
-        "unavailable matrix is a"
+        "unavailable matrix is a",
+        "python3 tools/peer_review.py runs/<dir> --into-run",
+        "Codex-authored work uses `--driver codex`",
+        "Agents may write `## New Threat Hypotheses`"
       ]
     },
     {
       "path": ".claude/skills/xunji-agent-board/SKILL.md",
       "required": [
+        "Complex serial work still uses one real Hunter Agent",
+        "`delegate` never spawns",
+        "exact `subagent_type` plus exact",
+        "same-session `SubagentStop` plus the owner reference's",
+        "durable `state=done` return checkpoint",
+        "supplies a candidate disposition only",
+        "typed cycle_end",
+        "python3 tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model",
+        "references/plan-and-delegate.md",
+        "references/launch-return-settlement.md",
+        "Assignment-free global completion Reviewer",
+        "Never discover",
+        "`maintenance_action=true` denial freezes",
+        "## Non-Negotiable Agent-Mode Cycle",
+        "Every Agent execution lane has exactly one dependent Reviewer"
+      ],
+      "forbidden": [
+        "python3 tools/workers.py assign runs/<dir>",
+        "--lane '{\"id\"",
+        "XUNJI_ASSIGNMENT=A-...",
+        "python3 tools/workers.py review-disposition runs/<dir>",
+        "python3 tools/workers.py finish runs/<dir>",
+        "python3 tools/context_pack.py --selftest",
+        "tmp-YYYYMMDD",
+        "openmythos-inspired",
+        "python3 tools/js_inventory.py runs/<dir>"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
+      "required": [
         "python3 tools/work_plan.py commit runs/<dir>",
         "python3 tools/workers.py delegate runs/<dir>",
+        "python3 tools/workers.py cancel-unlaunched runs/<dir>",
+        "digest proves only that some input",
+        "do not replan to manufacture `current=true`",
+        "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED",
+        "Cancellation is auditable settlement",
+        "NO_STRONG_CANDIDATE",
+        "do not commit, invent lanes",
+        "no unassigned lane has satisfied runtime dependencies"
+      ],
+      "forbidden": [
+        "python3 tools/workers.py assign runs/<dir>",
+        "XUNJI_COMPLETION_VERDICT=PASS",
+        "python3 tools/saturation.py runs/<dir>",
+        "--lane '{\"id\""
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
+      "required": [
+        "exact `subagent_type` plus exact `launch_prompt`",
+        "XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2",
         "XUNJI_LANE=L-...",
         "XUNJI_PLAN=<64hex>",
         "XUNJI_RESULT_DIGEST=<64hex>",
         "xunji-hunter",
         "xunji-reviewer",
+        "python3 tools/workers.py status runs/<dir>",
         "python3 tools/workers.py review-disposition runs/<dir>",
         "python3 tools/workers.py finish runs/<dir>",
-        "python3 tools/workers.py cancel-unlaunched runs/<dir>",
         "python3 tools/loop_journal.py runs/<dir> end",
-        "typed `cycle_end`",
-        "Complex serial work still uses one real Hunter Agent",
-        "launch the next in a later assistant message",
-        "exact `subagent_type` plus exact `launch_prompt`",
-        "The global completion challenge is a separate assignment-free Reviewer envelope"
+        "The global completion challenge is a separate assignment-free Reviewer envelope",
+        "Assignment-free global completion Reviewer",
+        "`status=reconciled` alone is not return proof",
+        "Root never writes `done`",
+        "`Reason: <exact barrier>; Front: F-xxx`",
+        "XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED",
+        "PreToolUse atomically\nappends one idempotent call claim"
       ],
       "forbidden": [
-        "python3 tools/workers.py assign runs/<dir>",
-        "that is serial Root work",
-        "consume stable first-observed transcript order"
+        "python3 tools/work_plan.py commit runs/<dir>",
+        "python3 tools/workers.py delegate runs/<dir>",
+        "Use the plan status command owned by `plan-and-delegate.md` before typed cycle end.",
+        "XUNJI_COMPLETION_VERDICT=PASS",
+        "--status accept-candidate",
+        "--status merged"
       ]
     },
     {
       "path": ".claude/agents/xunji-hunter.md",
       "required": [
         "Always finish the lane with a final assistant response",
-        "return the best attributable candidate/refutation/blocker"
+        "return the best attributable candidate/refutation/blocker",
+        "that run's `state/assignments.json`",
+        "never use `--help`, guessed path discovery",
+        "typed assignment `tool_call_limit`",
+        "Runtime atomically claims each PreToolUse before other gates",
+        "near-cap/final-call Hook notice"
       ],
       "forbidden": [
         "maxTurns:"
@@ -86,20 +183,130 @@
         "Always finish with a final assistant response",
         "`blocked` or `retry`",
         "Accept exactly one of these mutually exclusive envelopes:",
-        "it creates no assignment row, result snapshot"
+        "it creates no assignment row, result snapshot",
+        "that run's `state/assignments.json`",
+        "`run=<name>` binding and never guesses a run",
+        "never use `--help`, guessed path discovery",
+        "typed assignment `tool_call_limit`",
+        "Runtime atomically claims each PreToolUse before other gates",
+        "near-cap/final-call Hook notice"
       ],
       "forbidden": [
         "maxTurns:"
       ]
     },
     {
+      "path": "docs/templates/agents/web-hunter.md",
+      "required": [
+        "Do not edit the assignment, context pack, generated `agents/A-*.md` scaffold,\n  or canonical run files; return lane material only in the final response."
+      ],
+      "forbidden": [
+        "Do not edit canonical run files except your own `agents/A-*.md`"
+      ]
+    },
+    {
       "path": ".claude/skills/xunji-run-lifecycle/SKILL.md",
       "required": [
-        "copy both `subagent_type` and",
-        "assignment-free formatter output",
-        "does not replace the independent `peer_review.py`"
+        "python3 tools/loop_bootstrap.py --source '<source>' --type auto",
+        "observed in Claude Code 2.1.201",
+        "`loop_requested=false`",
+        "prepared_not_active",
+        "`EXPLAIN_ONLY resume_barrier`",
+        "python3 tools/session_handoff.py write runs/<dir>",
+        "python3 tools/session_handoff.py pickup runs/<dir>",
+        "python3 tools/check_run.py runs/<dir>",
+        "python3 tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift",
+        "is a live `target` effect",
+        "if false, perform no Cron action",
+        "A denied or failed\naction is not a result",
+        "the eligible atomic `ROOT_DIRECT` path",
+        "`docs/WORKFLOW-reference.md` \"Assignment-free global completion Reviewer\""
       ],
-      "forbidden": []
+      "forbidden": [
+        "python3 tools/work_plan.py commit runs/<dir>",
+        "python3 tools/workers.py delegate runs/<dir>",
+        "python3 tools/check_run.py runs/<dir> --replay-verify",
+        "python3 tools/setup_transaction.py --selftest",
+        "assignment-free formatter output",
+        "python3 tools/peer_review.py runs/<dir> --into-run",
+        "xunji_statusline"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-local-maintenance/SKILL.md",
+      "required": [
+        "load `xunji-sentinel-guard-review`",
+        "tools/setup_transaction.py",
+        "mandatory full aggregate",
+        "fresh independent-review gate"
+      ],
+      "forbidden": [
+        "when feasible"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-sentinel-guard-review/SKILL.md",
+      "required": [
+        "tools/harness/privacy.py",
+        "tools/harness/command_shape.py",
+        "tools/setup_transaction.py",
+        "python3 tools/selftest_all.py",
+        "fresh independent review"
+      ],
+      "forbidden": [
+        "When feasible"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-knowledge-flywheel/SKILL.md",
+      "required": [
+        "Live Run: Bounded Read Only",
+        "built-in Read, Grep, and Glob tools",
+        "are offline helper CLIs, not",
+        "a gate denial is not a lookup result",
+        "separate, explicitly authorized repository",
+        "python3 tools/selftest_all.py --only check_knowledge,knowledge_match,xday_match"
+      ],
+      "forbidden": [
+        "python tools/knowledge_match.py --body",
+        "python tools/xday_match.py --body",
+        "python tools/knowledge_seed.py",
+        "python3 tools/knowledge_match.py --selftest",
+        "python3 tools/xday_match.py --selftest",
+        "preload entries -> run every"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
+      "required": [
+        "python3 tools/probe.py GET",
+        "python3 tools/probe.py DIFF",
+        "python3 tools/replay.py runs/<dir>",
+        "python3 tools/check_run.py runs/<dir> --replay-verify",
+        "Use the replay-verification command above only when"
+      ],
+      "forbidden": [
+        "python tools/",
+        "Before final report or `GHOST_COMPLETE`:\n\n```bash"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-setup-ingest/SKILL.md",
+      "required": [
+        "single operator-facing adapter",
+        "internal/source-specific adapter",
+        "does not duplicate that argv",
+        "python3 tools/loop_bootstrap.py --source '<file>' --type file --ai external --ai-provider <provider> --ai-model <model> --prepare-normalizer",
+        "python3 tools/loop_bootstrap.py --source '<same-file>' --type file --ai external --ai-provider <same-provider> --ai-model <same-model> --candidate-json '<setup-normalizer-candidate.v1>'",
+        "python3 tools/setup_source.py --selftest"
+      ],
+      "forbidden": [
+        "python3 tools/setup_source.py\n"
+        ,"python tools/"
+        ,"python3 tools/setup_run.py <slug> <recon.json> --classify"
+        ,"python3 tools/loop_bootstrap.py --source <run-or-URL-or-file> --type auto"
+        ,"python3 tools/loop_bootstrap.py --source <file> --type file --ai external"
+      ]
     },
     {
       "path": ".claude/skills/web-research/SKILL.md",
@@ -219,60 +426,97 @@
     {
       "path": ".claude/hooks/run_gate.py",
       "required": [
-        "exact subagent_type=xunji-reviewer",
+        "assignment-free global completion owner",
+        "formatter 产出的完整 contract",
         "该挑战不替代 peer_review ReviewReceipt"
       ],
       "forbidden": [
-        "spawn fresh-context codex agent 审查完整 run"
+        "spawn fresh-context codex agent 审查完整 run",
+        "exact subagent_type=xunji-reviewer"
       ]
     },
     {
       "path": "docs/templates/worker.md",
       "required": [
-        "First decide execution ownership",
-        "Complex serial work uses one real Agent",
-        "python3 tools/workers.py delegate runs/<dir>"
+        "not a live Agent prompt and grants no authority",
+        ".claude/skills/xunji-agent-board/SKILL.md",
+        "legacy `--new` / `workers/W-*.md` artifacts as non-authorizing history"
       ],
       "forbidden": [
-        "Only when breadth genuinely beats depth",
-        "that is serial Root work",
-        "python3 tools/workers.py assign runs/<dir>"
+        "python3 tools/workers.py delegate runs/<dir>",
+        "XUNJI_ASSIGNMENT=A-...",
+        "authorized — do not question authorization",
+        "## Worker prompt"
       ]
     },
     {
       "path": "docs/templates/loop_prompt.md",
       "required": [
+        "Each displayed command line in this template or an owner reference is one separate",
+        "retry every intended line\nseparately and unchanged in the same operator turn",
+        "`docs/WORKFLOW.md` owns\ntarget-chain receipt/debt semantics",
+        "ordered board-debt/conflict checks",
         "{{PYTHON}} tools/anti_drift.py --semantic-status \"{{RUN_DIR}}\"",
-        "{{PYTHON}} tools/scan.py --run \"{{RUN_DIR}}\" sqlmap \"https://target/path?id=1\"",
-        "{{PYTHON}} tools/scan.py --run \"{{RUN_DIR}}\" nuclei \"https://target/\"",
+        "does not duplicate the target-tool catalog",
+        "`loop_requested=false`: run one material cycle",
         "Before any journal `start`, phase marker, task, work plan, Agent, or target action",
-        "Do not call `loop_journal.py ... start` or",
-        "`loop_journal.py ... end` for this already-completed run",
-        "Return directly with `BLOCKED: run already complete` after the Cron check/cleanup",
-        "Launch only one previously unbound Agent per assistant message",
-        "tools/workers.py cancel-unlaunched",
-        "copy both exact `subagent_type` and exact `launch_prompt`",
-        "exact assignment-free formatter"
+        "If it does and `loop_requested=true`",
+        "If `loop_requested=false`, perform no Cron",
+        "do not create/reschedule a Cron or call",
+        "Return directly with `BLOCKED: run already complete` after the applicable guard",
+        "references/plan-and-delegate.md",
+        "references/launch-return-settlement.md",
+        "single command owned there",
+        "assignment-free completion formatter",
+        "Assignment-free global completion Reviewer",
+        "{{PYTHON}} tools/rerun_deferred.py --run \"{{RUN_DIR}}\"",
+        "`--replay-verify` is a live `target` effect",
+        "current top-level operator prompt explicitly authorizes live replay",
+        "use workers\nassignments and real Agent launches only when the committed mode requires Agents"
       ],
       "forbidden": [
         ".claude/drift_block.json",
         "frontier_stale",
+        "{{PYTHON}} tools/saturation.py \"{{RUN_DIR}}\"",
+        "{{PYTHON}} tools/deferred_queue.py --run \"{{RUN_DIR}}\"",
+        "{{PYTHON}} tools/check_run.py \"{{RUN_DIR}}\" --replay-verify",
+        "python3 tools/loop_bootstrap.py --source '<source>' --type auto",
+        "{{PYTHON}} tools/work_plan.py commit",
+        "{{PYTHON}} tools/workers.py delegate",
+        "{{PYTHON}} tools/workers.py cancel-unlaunched",
+        "{{PYTHON}} tools/workers.py review-disposition",
+        "{{PYTHON}} tools/workers.py finish",
+        "{{PYTHON}} tools/loop_journal.py \"{{RUN_DIR}}\" end",
+        "{{PYTHON}} tools/peer_review.py \"{{RUN_DIR}}\" --into-run",
+        "XUNJI_COMPLETION_VERDICT=PASS",
         "{{PYTHON}} tools/scan.py sqlmap",
         "{{PYTHON}} tools/scan.py nuclei",
-        "Append the normal `end` journal event"
+        "Append the normal `end` journal event",
+        "board-debt/conflict aggregate",
+        "pre-end lifecycle aggregate",
+        "plan status command owned",
+        "workers assignments, real Agent tool\nlaunches"
       ]
     },
     {
       "path": "docs/ROUTER.md",
       "required": [
         "python3 tools/workers.py <subcommand> runs/<dir>",
+        "python3 tools/classify_hosts.py <recon.json> --out runs/<dir>/classify --egress-recheck",
         "exact Claude binary launch contract (`subagent_type` plus",
+        "Client-reserved scheduler expansion is not authority",
         ".claude/skills/web-research/SKILL.md",
         ".claude/skills/xunji-reviewops/SKILL.md",
-        "references/peer-review-panel.md"
+        "references/peer-review-panel.md",
+        "setup-only stops after activation",
+        "`loop_requested=false` performs no Cron"
       ],
       "forbidden": [
-        "python3 tools/workers.py runs/<dir>"
+        "python3 tools/workers.py runs/<dir>",
+        "python3 tools/setup_run.py <slug> <recon.json>",
+        "python3 tools/check_knowledge.py",
+        "`--hosts <file>`",
+        "After committed/recovered setup, run fresh CronList, CronCreate"
       ]
     },
     {
@@ -283,6 +527,7 @@
         "Claude Code primary-driver E2E",
         "`web-research` 是公共检索顺序与 lead",
         "`xunji-web-research-sync` 与 `xunji-peer-review-panel` 仅保留为兼容路由"
+        ,"`loop_requested=false` 单周期 EXECUTE"
       ],
       "forbidden": []
     }
@@ -299,7 +544,7 @@
     },
     {
       "name": "agent board work-plan commit",
-      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
       "marker": "python3 tools/work_plan.py commit runs/<dir>",
       "script": "tools/work_plan.py",
       "argv": [
@@ -324,29 +569,20 @@
       "expected_effect": "control"
     },
     {
-      "name": "loop prompt sqlmap scan",
+      "name": "loop prompt deferred rerun",
       "document": "docs/templates/loop_prompt.md",
-      "marker": "{{PYTHON}} tools/scan.py --run \"{{RUN_DIR}}\" sqlmap \"https://target/path?id=1\"",
-      "script": "tools/scan.py",
-      "argv": ["--run", "runs/demo_20260101", "sqlmap", "https://target/path?id=1"],
-      "expected_id": "target.scan",
-      "expected_effect": "target"
-    },
-    {
-      "name": "loop prompt nuclei scan",
-      "document": "docs/templates/loop_prompt.md",
-      "marker": "{{PYTHON}} tools/scan.py --run \"{{RUN_DIR}}\" nuclei \"https://target/\"",
-      "script": "tools/scan.py",
-      "argv": ["--run", "runs/demo_20260101", "nuclei", "https://target/"],
-      "expected_id": "target.scan",
+      "marker": "{{PYTHON}} tools/rerun_deferred.py --run \"{{RUN_DIR}}\"",
+      "script": "tools/rerun_deferred.py",
+      "argv": ["--run", "runs/demo_20260101"],
+      "expected_id": "target.rerun-deferred",
       "expected_effect": "target"
     },
     {
       "name": "agent board delegate",
-      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
       "marker": "python3 tools/workers.py delegate runs/<dir>",
       "script": "tools/workers.py",
-      "argv": ["delegate", "runs/demo_20260101", "--runtime-slots", "1", "--request-budget", "0", "--model-egress-budget", "0", "--merge-capacity", "40", "--limit", "1"],
+      "argv": ["delegate", "runs/demo_20260101", "--runtime-slots", "1", "--request-budget", "0", "--model-egress-budget", "0", "--merge-capacity", "40", "--limit", "1", "--tool-call-limit", "6"],
       "expected_id": "control.workers",
       "expected_effect": "control"
     },
@@ -362,8 +598,17 @@
       "expected_effect": "local_read"
     },
     {
+      "name": "router classified-host egress recheck",
+      "document": "docs/ROUTER.md",
+      "marker": "python3 tools/classify_hosts.py <recon.json> --out runs/<dir>/classify --egress-recheck",
+      "script": "tools/classify_hosts.py",
+      "argv": ["recon.json", "--out", "runs/demo_20260101/classify", "--egress-recheck"],
+      "expected_id": "target.classify-hosts",
+      "expected_effect": "target"
+    },
+    {
       "name": "runtime receipt projection recovery",
-      "document": "docs/WORKFLOW.md",
+      "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
       "marker": "python3 tools/runtime_receipts.py runs/<dir> --reproject",
       "script": "tools/runtime_receipts.py",
       "argv": [
@@ -375,7 +620,7 @@
     },
     {
       "name": "agent board review disposition",
-      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
       "marker": "python3 tools/workers.py review-disposition runs/<dir>",
       "script": "tools/workers.py",
       "argv": ["review-disposition", "runs/demo_20260101", "A-target", "A-reviewer", "--status", "accept-candidate", "--note", "exact digest reviewed"],
@@ -384,7 +629,7 @@
     },
     {
       "name": "agent board unlaunched cancellation",
-      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
       "marker": "python3 tools/workers.py cancel-unlaunched runs/<dir>",
       "script": "tools/workers.py",
       "argv": ["cancel-unlaunched", "runs/demo_20260101", "A-target", "--reason", "canonical inputs changed before launch"],
@@ -393,7 +638,7 @@
     },
     {
       "name": "agent board Root disposition",
-      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
       "marker": "python3 tools/workers.py finish runs/<dir>",
       "script": "tools/workers.py",
       "argv": ["finish", "runs/demo_20260101", "A-target", "--status", "merged", "--note", "Evidence: E-001; Front: F-001; reviewed candidate"],
@@ -402,18 +647,135 @@
     },
     {
       "name": "agent board typed cycle end",
-      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
       "marker": "python3 tools/loop_journal.py runs/<dir> end",
       "script": "tools/loop_journal.py",
       "argv": ["runs/demo_20260101", "end", "--next-action", "运行 check_run 验证当前计划", "--note", "plan cycle disposition complete"],
       "expected_id": "control.loop-journal",
       "expected_effect": "control"
+    },
+    {
+      "name": "lifecycle operator bootstrap",
+      "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+      "marker": "python3 tools/loop_bootstrap.py --source '<source>' --type auto",
+      "script": "tools/loop_bootstrap.py",
+      "argv": ["--source", "runs/demo_20260101", "--type", "auto"],
+      "expected_id": "control.loop-bootstrap",
+      "expected_effect": "control"
+    },
+    {
+      "name": "lifecycle focused developer checks",
+      "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+      "marker": "python3 tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift",
+      "script": "tools/selftest_all.py",
+      "argv": ["--only", "setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift"],
+      "expected_id": "verify.tools.selftest-all",
+      "expected_effect": "local_verify"
+    },
+    {
+      "name": "setup external normalizer prepare",
+      "document": ".claude/skills/xunji-setup-ingest/SKILL.md",
+      "marker": "python3 tools/loop_bootstrap.py --source '<file>' --type file --ai external --ai-provider <provider> --ai-model <model> --prepare-normalizer",
+      "script": "tools/loop_bootstrap.py",
+      "argv": ["--source", "source.md", "--type", "file", "--ai", "external", "--ai-provider", "deepseek", "--ai-model", "deepseek-v4-pro", "--prepare-normalizer"],
+      "expected_id": "read.loop-bootstrap-prepare",
+      "expected_effect": "local_read"
+    },
+    {
+      "name": "setup external normalizer candidate commit",
+      "document": ".claude/skills/xunji-setup-ingest/SKILL.md",
+      "marker": "python3 tools/loop_bootstrap.py --source '<same-file>' --type file --ai external --ai-provider <same-provider> --ai-model <same-model> --candidate-json '<setup-normalizer-candidate.v1>'",
+      "script": "tools/loop_bootstrap.py",
+      "argv": ["--source", "source.md", "--type", "file", "--ai", "external", "--ai-provider", "deepseek", "--ai-model", "deepseek-v4-pro", "--candidate-json", "{\"schema\":\"setup-normalizer-candidate.v1\"}"],
+      "expected_id": "control.loop-bootstrap",
+      "expected_effect": "control"
+    },
+    {
+      "name": "lifecycle handoff write",
+      "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+      "marker": "python3 tools/session_handoff.py write runs/<dir>",
+      "script": "tools/session_handoff.py",
+      "argv": ["write", "runs/demo_20260101"],
+      "expected_id": "control.session-handoff",
+      "expected_effect": "control"
+    },
+    {
+      "name": "lifecycle handoff pickup",
+      "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+      "marker": "python3 tools/session_handoff.py pickup runs/<dir>",
+      "script": "tools/session_handoff.py",
+      "argv": ["pickup", "runs/demo_20260101"],
+      "expected_id": "read.session-handoff",
+      "expected_effect": "local_read"
+    },
+    {
+      "name": "lifecycle offline structural check",
+      "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+      "marker": "python3 tools/check_run.py runs/<dir>",
+      "script": "tools/check_run.py",
+      "argv": ["runs/demo_20260101"],
+      "expected_id": "verify.check-run",
+      "expected_effect": "local_verify"
+    },
+    {
+      "name": "evidence owner explicitly authorized replay check",
+      "document": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
+      "marker": "python3 tools/check_run.py runs/<dir> --replay-verify",
+      "script": "tools/check_run.py",
+      "argv": ["runs/demo_20260101", "--replay-verify"],
+      "expected_id": "target.check-run-replay",
+      "expected_effect": "target"
+    },
+    {
+      "name": "evidence owner saved GET proof",
+      "document": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
+      "marker": "python3 tools/probe.py GET \"<url>\" --save <name> --run runs/<dir>",
+      "script": "tools/probe.py",
+      "argv": ["GET", "https://target.invalid/path", "--save", "proof", "--run", "runs/demo_20260101"],
+      "expected_id": "target.probe",
+      "expected_effect": "target"
+    },
+    {
+      "name": "evidence owner saved DIFF proof",
+      "document": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
+      "marker": "python3 tools/probe.py DIFF \"<baseline-url>\" \"<mutant-url>\" --save <name> --run runs/<dir>",
+      "script": "tools/probe.py",
+      "argv": ["DIFF", "https://target.invalid/base", "https://target.invalid/mutant", "--save", "proof-diff", "--run", "runs/demo_20260101"],
+      "expected_id": "target.probe",
+      "expected_effect": "target"
+    },
+    {
+      "name": "evidence owner guarded replay",
+      "document": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
+      "marker": "python3 tools/replay.py runs/<dir>",
+      "script": "tools/replay.py",
+      "argv": ["runs/demo_20260101"],
+      "expected_id": "target.replay",
+      "expected_effect": "target"
+    },
+    {
+      "name": "knowledge owner focused developer checks",
+      "document": ".claude/skills/xunji-knowledge-flywheel/SKILL.md",
+      "marker": "python3 tools/selftest_all.py --only check_knowledge,knowledge_match,xday_match",
+      "script": "tools/selftest_all.py",
+      "argv": ["--only", "check_knowledge,knowledge_match,xday_match"],
+      "expected_id": "verify.tools.selftest-all",
+      "expected_effect": "local_verify"
+    },
+    {
+      "name": "agent board focused developer checks",
+      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "marker": "python3 tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model",
+      "script": "tools/selftest_all.py",
+      "argv": ["--only", "work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model"],
+      "expected_id": "verify.tools.selftest-all",
+      "expected_effect": "local_verify"
     }
   ],
   "prompt_cases": [
     {
       "name": "plan-bound Hunter exact binary launch contract",
-      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
       "marker": "exact `subagent_type` plus exact `launch_prompt`",
       "tool_input": {
         "prompt": "XUNJI_ASSIGNMENT=A-hunter-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=app.example XUNJI_LANE=L-F001-HUNTER XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -441,8 +803,8 @@
     },
     {
       "name": "plan-bound Reviewer exact launch package",
-      "document": "docs/WORKFLOW-reference.md",
-      "marker": "XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=<exact-assets-or-none> XUNJI_LANE=L-... XUNJI_PLAN=<64hex> XUNJI_RESULT_DIGEST=<64hex> XUNJI_COMPLETION_REVIEW",
+      "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
+      "marker": "XUNJI_RESULT_DIGEST=<64hex>",
       "tool_input": {
         "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
         "subagent_type": "xunji-reviewer"
@@ -767,7 +1129,7 @@
         "### 0. Completion Guard, Then Journal Start",
         "Before any journal `start`, phase marker, task, work plan, Agent, or target action",
         "Only when no valid completion marker is present",
-        "{{PYTHON}} tools/loop_journal.py \"{{RUN_DIR}}\" start --note \"显式 /loop 迭代开始\""
+        "{{PYTHON}} tools/loop_journal.py \"{{RUN_DIR}}\" start --note \"绑定的执行周期开始\""
       ]
     }
   ]

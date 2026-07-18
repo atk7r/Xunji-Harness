@@ -91,6 +91,7 @@
     },
     "reasoning_style": {"const": "personalized-rdt"},
     "loop_budget": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "tool_call_limit": {"type": "integer", "minimum": 5, "maximum": 64},
     "operator_profile": {"type": "string", "minLength": 1, "maxLength": 4096},
     "context": {"type": "string", "minLength": 1, "maxLength": 4096},
     "agent_file": {"type": "string", "minLength": 1, "maxLength": 4096},

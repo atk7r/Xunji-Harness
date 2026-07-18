@@ -47,10 +47,12 @@ import agent_settlement  # noqa: E402
 from evidence_parse import current_evidence_index_hash  # noqa: E402
 from harness import capability_registry  # noqa: E402
 from harness.command_shape import (  # noqa: E402
+    PythonControlInvocation,
     PythonControlShapeIssue,
     diagnose_python_control_shape,
     has_unquoted_shell_control as _has_unquoted_shell_control,
     parse_exact_python_command,
+    split_literal_and_chain,
     trusted_python_token,
 )
 from harness import maintenance_authority, privacy  # noqa: E402
@@ -129,6 +131,10 @@ E_WORK_PLAN_STALE = "XUNJI_E_WORK_PLAN_STALE"
 E_DELEGATION_REQUIRED = "XUNJI_E_DELEGATION_REQUIRED"
 E_ROOT_COORDINATOR_ONLY = "XUNJI_E_ROOT_COORDINATOR_ONLY"
 E_CAPABILITY_POLICY = "XUNJI_E_CAPABILITY_POLICY"
+E_MAINTENANCE_BLOCKED = "XUNJI_E_MAINTENANCE_BLOCKED"
+E_AGENT_TOOL_CALL_LIMIT_EXCEEDED = "XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED"
+E_AGENT_TOOL_CALL_IDENTITY_CONFLICT = "XUNJI_E_AGENT_TOOL_CALL_IDENTITY_CONFLICT"
+E_AGENT_TOOL_CALL_BUDGET_INVALID = "XUNJI_E_AGENT_TOOL_CALL_BUDGET_INVALID"
 E_RUNTIME_RECEIPT_HOOK_FAILED = "XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED"
 ERROR_CODE_RE = re.compile(r"^\[([A-Z0-9_]+)\]")
 ENV_ASSIGNMENT_TOKEN_RE = re.compile(
@@ -2221,6 +2227,15 @@ def _deny(reason: str) -> dict:
     }
 
 
+def _pretool_context(message: str) -> dict:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": message,
+        }
+    }
+
+
 _EDIT_EFFECT_TOOLS = {"Write", "Edit", "Update", "MultiEdit", "NotebookEdit"}
 _RUN_PROTECTED_STATE_FILES = {
     "runtime_events.jsonl", "runtime_projection_error.json",
@@ -2498,6 +2513,11 @@ def _capability_data_critical_paths(
 ) -> list[str]:
     """Return protected paths named by capability data, excluding its executable."""
     _spec, _script, args, _env = capability
+    return _argv_data_critical_paths(args)
+
+
+def _argv_data_critical_paths(args: list[str] | tuple[str, ...]) -> list[str]:
+    """Return protected paths named by argv data, excluding the executable."""
     return maintenance_authority.critical_paths_for_event({
         "tool_name": "Bash",
         "tool_input": {"command": shlex.join(args)},
@@ -2901,6 +2921,64 @@ def _record_maintenance_denial(
     _atomic_json(contract_path(run_dir), value)
 
 
+def _maintenance_progression_reason(
+    run_dir: Path,
+    event: dict,
+    contract: dict,
+) -> str:
+    """Freeze run progression after a current-turn maintenance blocker.
+
+    Stop output is not an enforcement boundary: a model may attempt another tool
+    before emitting its final response.  Current-turn maintenance debt therefore
+    admits only deterministic inspection or an exact retry of the blocked action.
+    A later operator prompt has a newer contract timestamp and starts a new
+    authority decision instead of inheriting this freeze.
+    """
+    if not contract:
+        return ""
+    session_id = str(contract.get("session_id") or "")
+    try:
+        since = float(contract.get("updated_at") or 0.0)
+    except (TypeError, ValueError):
+        since = 0.0
+    if not session_id or since <= 0:
+        return ""
+    try:
+        blockers = runtime_receipts.unresolved_durable_maintenance_blockers(
+            run_dir, session_id=session_id, since=since)
+    except Exception:
+        blockers = [{"maintenance_paths": [], "tool_name": ""}]
+    if not blockers:
+        return ""
+
+    tool = str(event.get("tool_name") or "")
+    tool_input = event.get("tool_input") \
+        if isinstance(event.get("tool_input"), dict) else {}
+    action_hash = runtime_receipts._action_hash(tool, tool_input)
+    if any(
+        tool == str(blocker.get("tool_name") or "")
+        and action_hash == str(blocker.get("action_sha256") or "")
+        for blocker in blockers
+    ):
+        return ""
+    if tool in {"Read", "Grep", "Glob", "TaskGet", "TaskList", "TaskUpdate"}:
+        return ""
+
+    paths = sorted({
+        str(path)
+        for blocker in blockers
+        for path in (blocker.get("maintenance_paths") or [])
+        if str(path).strip()
+    })
+    scope = ",".join(paths) if paths else "receipt-chain"
+    return (
+        f"[{E_MAINTENANCE_BLOCKED}] 当前 operator 回合已有未消解的框架维护拒绝"
+        f"（scope={scope}）；禁止继续 Agent、control、target 或 canonical 写入。"
+        "只可用 Read/Grep/Glob 核验、更新已有 Task 为 blocked，或精确重试同一动作；"
+        "否则输出 receipt-backed MAINTENANCE_BLOCKED，等待新的 operator authority。"
+    )
+
+
 def _safe_sed(tokens: list[str]) -> bool:
     scripts: list[str] = []
     index = 1
@@ -3046,6 +3124,9 @@ def _registered_capability_shape_issue(
     lifecycle name for receipt compatibility.  The diagnostic boundary covers
     every registered Python script in two non-authorizing cases:
 
+    * a literal ``&&`` chain whose executable segments are exact registered
+      capabilities (with optional display-only ``echo`` segments), excluding
+      repository mutation and safety-critical data paths;
     * an observational ``2>&1``/``head``/``tail`` wrapper; and
     * one clean exact invocation whose argv matches no registered capability.
 
@@ -3056,9 +3137,28 @@ def _registered_capability_shape_issue(
     if str(event.get("tool_name") or "") != "Bash":
         return None
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
-    if isinstance(tool_input.get("env"), dict) and tool_input.get("env"):
-        return None
     command = str(tool_input.get("command") or "")
+    chain = _registered_capability_chain(event)
+    if chain is not None:
+        first_invocation = chain[0][1]
+        return PythonControlShapeIssue(
+            code=E_LIFECYCLE_EXACT_ARGV_REQUIRED,
+            category="registered-chain",
+            script=first_invocation.script,
+            args=first_invocation.args,
+        )
+    invalid_chain = _registered_capability_chain_details(
+        event, allow_invalid=True)
+    if invalid_chain is not None and invalid_chain[1]:
+        capabilities, invalid_invocations = invalid_chain
+        first_invocation = (
+            capabilities[0][1] if capabilities else invalid_invocations[0])
+        return PythonControlShapeIssue(
+            code=E_LIFECYCLE_EXACT_ARGV_REQUIRED,
+            category="registered-chain-invalid-argv",
+            script=first_invocation.script,
+            args=first_invocation.args,
+        )
     issue = diagnose_python_control_shape(
         command,
         root=ROOT,
@@ -3093,10 +3193,94 @@ def _registered_capability_shape_issue(
     )
 
 
+def _registered_capability_chain(
+    event: dict,
+) -> tuple[tuple[
+    capability_registry.CapabilitySpec, PythonControlInvocation, str,
+], ...] | None:
+    """Resolve a diagnostic-only chain without granting any segment authority."""
+    details = _registered_capability_chain_details(event, allow_invalid=False)
+    return details[0] if details is not None else None
+
+
+def _registered_capability_chain_details(
+    event: dict, *, allow_invalid: bool,
+) -> tuple[
+    tuple[tuple[
+        capability_registry.CapabilitySpec, PythonControlInvocation, str,
+    ], ...],
+    tuple[PythonControlInvocation, ...],
+] | None:
+    """Parse known-script chain segments for non-authorizing diagnostics."""
+    if str(event.get("tool_name") or "") != "Bash":
+        return None
+    tool_input = event.get("tool_input") \
+        if isinstance(event.get("tool_input"), dict) else {}
+    raw_env = tool_input.get("env") if "env" in tool_input else None
+    if raw_env is not None and raw_env != {}:
+        return None
+    segments = split_literal_and_chain(str(tool_input.get("command") or ""))
+    if segments is None:
+        return None
+    capabilities: list[tuple[
+        capability_registry.CapabilitySpec, PythonControlInvocation, str,
+    ]] = []
+    invalid_invocations: list[PythonControlInvocation] = []
+    for segment in segments:
+        try:
+            display_tokens = shlex.split(segment, comments=False, posix=True)
+        except ValueError:
+            return None
+        if display_tokens and display_tokens[0] == "echo":
+            continue
+        invocation = parse_exact_python_command(
+            segment,
+            root=ROOT,
+            allowed_scripts=REGISTERED_CAPABILITY_SCRIPTS,
+            allow_environment=True,
+        )
+        if invocation is None or invocation.environment:
+            return None
+        if _argv_data_critical_paths(invocation.args):
+            return None
+        spec = capability_registry.match(
+            invocation.script, invocation.args, root=ROOT)
+        if spec is None:
+            if not allow_invalid:
+                return None
+            invalid_invocations.append(invocation)
+            continue
+        if spec.effect == "repo_mutation":
+            return None
+        capabilities.append((spec, invocation, segment))
+    if not capabilities and not invalid_invocations:
+        return None
+    return tuple(capabilities), tuple(invalid_invocations)
+
+
 def _lifecycle_shape_reason(event: dict) -> str:
     issue = _registered_capability_shape_issue(event)
     if issue is None:
         return ""
+    if issue.category == "registered-chain":
+        return (
+            f"[{E_LIFECYCLE_EXACT_ARGV_REQUIRED}] 多个已注册 capability 被合并成"
+            "一个 compound Bash。PreToolUse 已拒绝整条命令且未执行任何 segment，也未"
+            "授予 capability authority，也未把 executable path 记为 maintenance。保持原"
+            "顺序，把每个 registered Python "
+            "argv 分别作为一次 Bash tool call 原样重试；不要使用 &&、;、||、pipe、"
+            "redirection、换行或 separator echo。此拒绝属于 command-shape，可在同一 "
+            "operator 回合修正。"
+        )
+    if issue.category == "registered-chain-invalid-argv":
+        return (
+            f"[{E_LIFECYCLE_EXACT_ARGV_REQUIRED}] 多个已登记 Python 入口被合并成"
+            "一个 compound Bash，且至少一个 segment 的 argv 未匹配 typed capability。"
+            "PreToolUse 已拒绝整条命令、未执行任何 segment，也未把 executable path 记为"
+            "maintenance。回到各脚本 owner 文档补齐 invalid argv，再把每个完整 registered "
+            "Python argv 分别作为一次 Bash tool call；不要使用 shell chain/wrapper。"
+            "此拒绝可在同一 operator 回合修正。"
+        )
     if issue.category.startswith("invalid-argv"):
         retry_hint = _python_control_hint(
             issue.script, ["<按对应 owner 文档填写完整参数>"],
@@ -3140,6 +3324,10 @@ def _decision_metadata(reason: str, event: dict) -> dict:
         E_DELEGATION_REQUIRED: "delegation",
         E_ROOT_COORDINATOR_ONLY: "delegation",
         E_CAPABILITY_POLICY: "capability_policy",
+        E_MAINTENANCE_BLOCKED: "maintenance",
+        E_AGENT_TOOL_CALL_LIMIT_EXCEEDED: "agent_tool_budget",
+        E_AGENT_TOOL_CALL_IDENTITY_CONFLICT: "agent_tool_budget",
+        E_AGENT_TOOL_CALL_BUDGET_INVALID: "agent_tool_budget",
     }
     metadata = {
         "xunji_decision_code": code,
@@ -3157,6 +3345,24 @@ def _decision_metadata(reason: str, event: dict) -> dict:
             "xunji_control_script": script,
             "xunji_retryable_same_turn": issue.retryable_same_turn,
         })
+        if issue.category.startswith("registered-chain"):
+            details = _registered_capability_chain_details(
+                event, allow_invalid=True)
+            chain = details[0] if details is not None else ()
+            effect_order = (
+                "target", "model_egress", "control",
+                "local_verify", "local_read",
+            )
+            effects = {spec.effect for spec, _invocation, _segment in chain}
+            ordered_effects = [effect for effect in effect_order if effect in effects]
+            if ordered_effects:
+                metadata["xunji_capability_effect"] = ordered_effects[0]
+                metadata["xunji_capability_effects"] = ordered_effects
+            metadata["xunji_target_retry_action_sha256s"] = [
+                runtime_receipts._action_hash("Bash", {"command": segment})
+                for spec, _invocation, segment in chain
+                if spec.effect == "target"
+            ]
     return metadata
 
 
@@ -3669,6 +3875,70 @@ def _assignment_exists(run_dir: Path, assignment: str, front: str) -> bool:
     return bool(_assignment_record(run_dir, assignment, front))
 
 
+def _claim_plan_bound_child_tool_call(run_dir: Path, event: dict) -> str:
+    """Reserve a live plan-bound child's attempted call before all policy gates."""
+    agent_id = str(event.get("agent_id") or "").strip()
+    if not agent_id:
+        return ""
+    session_id = str(event.get("session_id") or "").strip()
+    actor = runtime_receipts.agent_actor(
+        run_dir, agent_id, session_id=session_id)
+    if not actor or actor.get("kind") != "assignment" \
+            or actor.get("state") != "running" \
+            or not str(actor.get("lane_id") or "") \
+            or not str(actor.get("plan_digest") or ""):
+        # Existing gates own unbound, completion-review, and post-Stop actors.
+        return ""
+    try:
+        claim = runtime_receipts.claim_agent_tool_call(run_dir, event)
+    except Exception as exc:
+        detail = str(exc)
+        code = E_AGENT_TOOL_CALL_IDENTITY_CONFLICT \
+            if "IDENTITY_CONFLICT" in detail \
+            else E_AGENT_TOOL_CALL_BUDGET_INVALID
+        return (
+            f"[{code}] plan-bound 子 Agent 的 PreToolUse 调用预算无法原子绑定："
+            f"{detail.split(':', 1)[0]}。本次工具未执行；返回 blocker，不得绕过或重试新形状。"
+        )
+    ordinal = int(claim.get("agent_tool_call_ordinal") or 0)
+    limit = int(claim.get("agent_tool_call_limit") or 0)
+    event["_xunji_agent_tool_call_claim"] = {
+        "ordinal": ordinal,
+        "limit": limit,
+        "admitted": bool(claim.get("agent_tool_call_admitted")),
+        "receipt_hash": str(claim.get("receipt_hash") or ""),
+    }
+    if claim.get("agent_tool_call_admitted") is not True:
+        return (
+            f"[{E_AGENT_TOOL_CALL_LIMIT_EXCEEDED}] plan-bound 子 Agent 第 "
+            f"{ordinal} 次工具调用超过 assignment 冻结上限 {limit}；claim 已耐久记录，"
+            "工具未执行。立即用已有材料返回 candidate/refutation/blocker；不得继续调用工具。"
+        )
+    return ""
+
+
+def _plan_bound_child_budget_context(event: dict) -> dict | None:
+    claim = event.get("_xunji_agent_tool_call_claim") \
+        if isinstance(event.get("_xunji_agent_tool_call_claim"), dict) else {}
+    ordinal = int(claim.get("ordinal") or 0)
+    limit = int(claim.get("limit") or 0)
+    if not ordinal or not limit or claim.get("admitted") is not True \
+            or ordinal < limit - 1:
+        return None
+    remaining = max(0, limit - ordinal)
+    if remaining == 1:
+        message = (
+            f"[Xunji Agent budget {ordinal}/{limit}] 当前调用完成后只剩 1 次额度；"
+            "不要再探测。读取本次结果后直接返回已有证据支持的 candidate/refutation/blocker。"
+        )
+    else:
+        message = (
+            f"[Xunji Agent budget {ordinal}/{limit}] 这是最后一次允许的工具调用；"
+            "读取结果后必须直接给出 final response，下一次调用将被硬门拒绝。"
+        )
+    return _pretool_context(message)
+
+
 def _normalized_assets(values: object) -> list[str]:
     out: list[str] = []
     for raw in values if isinstance(values, list) else []:
@@ -3926,6 +4196,15 @@ def _is_target_action(event: dict) -> bool:
 
 def _denial_is_target_action(event: dict, reason: str) -> bool:
     """Separate target-result denials from local control-plane policy denials."""
+    if E_LIFECYCLE_EXACT_ARGV_REQUIRED in reason:
+        details = _registered_capability_chain_details(
+            event, allow_invalid=True)
+        if details is not None:
+            chain = details[0]
+            return any(
+                spec.effect == "target"
+                for spec, _invocation, _segment in chain
+            )
     local_policy_markers = (
         "active-run 指针",
         "清除 active-run 指针必须由当前操作者 prompt 明确授权",
@@ -4040,9 +4319,19 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
         )
     ).strip().lower() in {"0", "false", "no", "off"}
 
-    protected_reason = _protected_control_reason(event, run_dir)
+    # Exact registered capabilities already passed script identity and typed argv
+    # validation.  Do not rescan their quoted data (for example a disposition
+    # note naming ``assignments.json``) as if it were an opaque shell write.
+    # Unknown or invalid commands still take the fail-closed text heuristic.
+    protected_reason = "" if registered_capability is not None \
+        else _protected_control_reason(event, run_dir)
     if protected_reason:
         return protected_reason
+
+    maintenance_progression_reason = _maintenance_progression_reason(
+        run_dir, event, contract)
+    if maintenance_progression_reason:
+        return maintenance_progression_reason
 
     if mode == MAINTENANCE or contract.get("maintenance_parse_error"):
         return _maintenance_pretool_reason(event, contract)
@@ -4275,21 +4564,29 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             return completion_reason
         assignment, front = runtime_receipts._assignment_fields(prompt)
         if not assignment or not front:
-            return "Agent Board 强制：Agent prompt 必须包含 XUNJI_ASSIGNMENT=A-... 和 XUNJI_FRONT=F-...。"
+            return (
+                f"[{E_DELEGATION_REQUIRED}] Agent Board 强制：Agent prompt 必须包含 "
+                "XUNJI_ASSIGNMENT=A-... 和 XUNJI_FRONT=F-...。"
+            )
         rec = _assignment_record(run_dir, assignment, front)
         if not rec:
-            return "Agent Board 强制：Agent token 未绑定 workers.py 生成的 assignment/front。"
+            return (
+                f"[{E_DELEGATION_REQUIRED}] Agent Board 强制：Agent token 未绑定 "
+                "workers.py 生成的 assignment/front。"
+            )
         status = str(rec.get("status") or "").strip().lower()
         if status not in {"assigned", "starting"}:
             return (
-                f"Agent Board attempt 唯一性：{assignment} status={status or '(missing)'}，"
+                f"[{E_DELEGATION_REQUIRED}] Agent Board attempt 唯一性：{assignment} "
+                f"status={status or '(missing)'}，"
                 "只有 assigned/starting assignment 可启动；重试或续派必须创建新 assignment。"
             )
         expected_assets = _normalized_assets(rec.get("assets"))
         prompt_assets = runtime_receipts._assignment_assets(prompt)
         if prompt_assets != expected_assets:
             return (
-                "Agent Board 资产绑定：prompt 必须包含与 assignment 完全一致的 "
+                f"[{E_DELEGATION_REQUIRED}] Agent Board 资产绑定：prompt 必须包含与 "
+                "assignment 完全一致的 "
                 f"XUNJI_ASSETS={','.join(expected_assets) if expected_assets else 'none'}。"
             )
         expected_lane = str(rec.get("lane_id") or "")
@@ -4300,21 +4597,30 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             if not expected_agent_type or str(
                     raw_input.get("subagent_type") or "") != expected_agent_type:
                 return (
-                    "Agent Board Agent-type 绑定：subagent_type 必须与 assignment "
+                    f"[{E_DELEGATION_REQUIRED}] Agent Board Agent-type 绑定："
+                    "subagent_type 必须与 assignment "
                     f"role 精确一致，expected={expected_agent_type or '(invalid role)'}。")
         if expected_lane and runtime_receipts._assignment_lane(prompt) != expected_lane:
-            return "Agent Board lane 绑定：prompt 的 XUNJI_LANE 必须与 assignment 完全一致。"
+            return (
+                f"[{E_DELEGATION_REQUIRED}] Agent Board lane 绑定：prompt 的 "
+                "XUNJI_LANE 必须与 assignment 完全一致。"
+            )
         if expected_plan and runtime_receipts._assignment_plan(prompt) != expected_plan:
-            return "Agent Board plan 绑定：prompt 的 XUNJI_PLAN 必须与 assignment 完全一致。"
+            return (
+                f"[{E_DELEGATION_REQUIRED}] Agent Board plan 绑定：prompt 的 "
+                "XUNJI_PLAN 必须与 assignment 完全一致。"
+            )
         if expected_result and runtime_receipts._assignment_result_digest(prompt) != expected_result:
             return (
-                "Agent Board Reviewer 绑定：prompt 的 XUNJI_RESULT_DIGEST 必须与冻结 "
+                f"[{E_DELEGATION_REQUIRED}] Agent Board Reviewer 绑定：prompt 的 "
+                "XUNJI_RESULT_DIGEST 必须与冻结 "
                 "merge draft 完全一致。")
         expected_prompt = runtime_receipts.assignment_launch_prompt(rec)
         if (expected_lane or expected_plan) and (
                 not expected_prompt or prompt != expected_prompt):
             return (
-                "Agent Board 完整 prompt 绑定：tool_input.prompt 必须与 workers.py "
+                f"[{E_DELEGATION_REQUIRED}] Agent Board 完整 prompt 绑定："
+                "tool_input.prompt 必须与 workers.py "
                 "生成值逐字节一致；任何前后缀、附加上下文、重排或空白变化都拒绝。")
         return ""
     if not state.get("fanout_required") or contract.get("fanout_override"):
@@ -4659,7 +4965,8 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
     if hook == "PreToolUse":
         session_id = str(event.get("session_id") or "")
         contract = load_contract(run_dir, session_id=session_id) if session_id else {}
-        reason = evaluate_pretool(run_dir, event, contract)
+        budget_reason = _claim_plan_bound_child_tool_call(run_dir, event)
+        reason = budget_reason or evaluate_pretool(run_dir, event, contract)
         if reason:
             decision_metadata = _decision_metadata(reason, event)
             shape_denial = decision_metadata.get("xunji_decision_code") \
@@ -4748,7 +5055,7 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
                             f"[{E_DELEGATION_REQUIRED}] ROOT_DIRECT claim 无法原子冻结或"
                             f"与既有动作冲突：{exc}"
                         )
-        return None
+        return _plan_bound_child_budget_context(event)
     if hook in {"PostToolUse", "PostToolUseFailure", "SubagentStart", "SubagentStop"}:
         tool_name = str(event.get("tool_name") or "")
         command = str((event.get("tool_input") or {}).get("command") or "") \
@@ -4907,6 +5214,12 @@ def _selftest() -> int:
         "command": (
             f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
             '--status blocked --note "Reason: shared barrier; Front: F-001"'
+        )}}
+    workers_protected_name_note_control = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'workers.py'} review-disposition {run} "
+            "A-web-001 A-review-001 --status accept-candidate "
+            '--note "Reviewed assignments.json and runtime_events.jsonl bindings"'
         )}}
     workers_quoted_punctuation_control = {"tool_name": "Bash", "tool_input": {
         "command": (
@@ -5277,6 +5590,110 @@ def _selftest() -> int:
     registry_check_model = registered_event(
         "tools/check_run.py", str(run), "--auto-peer-review",
         "--review-driver", "codex")
+
+    def compound_event(*commands: str) -> dict:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": " && ".join(commands)},
+        }
+
+    registered_chain_events = [
+        compound_event(*(
+            registered_event("tools/workers.py", action, str(run))[
+                "tool_input"]["command"]
+            for action in ("merge-check", "conflicts", "synthesize")
+        ), registered_event(
+            "tools/work_plan.py", "status", str(run),
+        )["tool_input"]["command"]),
+        compound_event(*(
+            registered_event(script, str(run), option)["tool_input"]["command"]
+            for script, option in (
+                ("tools/loop_state.py", "--write"),
+                ("tools/progress_ledger.py", "--write"),
+                ("tools/run_controller.py", "--shadow"),
+            )
+        )),
+        compound_event(
+            registered_event(
+                "tools/workers.py", "status", str(run),
+            )["tool_input"]["command"],
+            "echo '---'",
+            registered_event(
+                "tools/workers.py", "agent-check", str(run),
+            )["tool_input"]["command"],
+        ),
+    ]
+    registered_chain_prefix = str(
+        registry_owner_reads[0]["tool_input"]["command"])
+    registered_chain_suffix = str(
+        registry_owner_reads[1]["tool_input"]["command"])
+    effectful_registered_chain_events = [
+        compound_event(
+            str(registry_probe["tool_input"]["command"]),
+            registered_chain_suffix,
+        ),
+        compound_event(
+            str(registry_check_model["tool_input"]["command"]),
+            registered_chain_suffix,
+        ),
+        compound_event(
+            str(registry_probe["tool_input"]["command"]),
+            str(registry_check_model["tool_input"]["command"]),
+        ),
+    ]
+    reverse_duplicate_effect_chain = compound_event(
+        str(registry_check_model["tool_input"]["command"]),
+        str(registry_probe["tool_input"]["command"]),
+        str(registry_probe["tool_input"]["command"]),
+    )
+    invalid_registered_chain_events = [
+        compound_event(
+            registered_chain_prefix + " --future",
+            registered_chain_suffix,
+        ),
+        compound_event(
+            str(registry_probe["tool_input"]["command"]),
+            registered_chain_prefix + " --future",
+        ),
+    ]
+    critical_data_invalid_chain = compound_event(
+        registered_chain_prefix + " --future tools/turn_contract.py",
+        registered_chain_suffix,
+    )
+    unsafe_registered_chains = [
+        critical_data_invalid_chain,
+        compound_event(
+            registered_chain_prefix,
+            "git add tools/turn_contract.py",
+        ),
+        compound_event(
+            registered_chain_prefix,
+            "sed -i '' tools/turn_contract.py",
+        ),
+        compound_event(
+            registered_chain_prefix,
+            f"{shlex.quote(str(Path(sys.executable).resolve()))} -c 'print(1)' "
+            "tools/turn_contract.py",
+        ),
+        {"tool_name": "Bash", "tool_input": {
+            "command": registered_chain_prefix + " > tools/turn_contract.py",
+        }},
+        compound_event(
+            "LANG=C " + registered_chain_prefix,
+            registered_chain_suffix,
+        ),
+        {"tool_name": "Bash", "tool_input": {
+            "command": registered_chain_prefix + " && " + registered_chain_suffix,
+            "env": {"LANG": "C"},
+        }},
+        *(
+            {"tool_name": "Bash", "tool_input": {
+                "command": registered_chain_prefix + " && " + registered_chain_suffix,
+                "env": malformed_env,
+            }}
+            for malformed_env in ("LANG=C", ["LANG=C"], 1)
+        ),
+    ]
     registry_anti_status = registered_event(
         "tools/anti_drift.py", "--semantic-status", str(run))
     registry_reason_pass = registered_event(
@@ -5613,6 +6030,10 @@ def _selftest() -> int:
     workers_quoted_note_allowed = (
         evaluate_pretool(run, workers_quoted_note_control, contract) == ""
         and _control_invocation(workers_quoted_note_control["tool_input"]["command"]) is not None)
+    workers_protected_name_note_allowed = (
+        evaluate_pretool(run, workers_protected_name_note_control, contract) == ""
+        and _control_invocation(
+            workers_protected_name_note_control["tool_input"]["command"]) is not None)
     quoted_punctuation_allowed = (
         evaluate_pretool(run, workers_quoted_punctuation_control, contract) == ""
         and _control_invocation(
@@ -5854,6 +6275,124 @@ def _selftest() -> int:
             owner_output_filter_reason, wrapped_owner_output_filter,
         ).get("xunji_shape_category") == "output-filter"
     )
+    registered_chain_reasons = [
+        evaluate_pretool(run, event, contract)
+        for event in registered_chain_events
+    ]
+    registered_chains_are_retryable_nonmaintenance_denials = all(
+        E_LIFECYCLE_EXACT_ARGV_REQUIRED in reason
+        and _decision_metadata(reason, event).get("xunji_decision_class")
+        == "command_shape"
+        and _decision_metadata(reason, event).get("xunji_shape_category")
+        == "registered-chain"
+        and _decision_metadata(reason, event).get("xunji_retryable_same_turn")
+        is True
+        and "/xunji-maintenance" not in reason
+        and not _denial_is_target_action(event, reason)
+        for event, reason in zip(registered_chain_events, registered_chain_reasons)
+    )
+    registered_chain_segments_retry_individually = all(
+        evaluate_pretool(
+            run,
+            {"tool_name": "Bash", "tool_input": {"command": segment}},
+            contract,
+        ) == ""
+        for event in registered_chain_events
+        for segment in (split_literal_and_chain(
+            str(event["tool_input"]["command"])) or ())
+        if shlex.split(segment, comments=False, posix=True)[0] != "echo"
+    )
+    effectful_registered_chain_reasons = [
+        evaluate_pretool(run, event, contract)
+        for event in effectful_registered_chain_events
+    ]
+    effectful_registered_chains_keep_typed_denial = bool(
+        len(effectful_registered_chain_reasons) == 3
+        and all(
+            E_LIFECYCLE_EXACT_ARGV_REQUIRED in reason
+            and _decision_metadata(reason, event).get("xunji_shape_category")
+            == "registered-chain"
+            and "/xunji-maintenance" not in reason
+            for event, reason in zip(
+                effectful_registered_chain_events,
+                effectful_registered_chain_reasons,
+            )
+        )
+        and _decision_metadata(
+            effectful_registered_chain_reasons[0],
+            effectful_registered_chain_events[0],
+        ).get("xunji_capability_effect") == "target"
+        and _denial_is_target_action(
+            effectful_registered_chain_events[0],
+            effectful_registered_chain_reasons[0],
+        )
+        and _decision_metadata(
+            effectful_registered_chain_reasons[1],
+            effectful_registered_chain_events[1],
+        ).get("xunji_capability_effect") == "model_egress"
+        and not _denial_is_target_action(
+            effectful_registered_chain_events[1],
+            effectful_registered_chain_reasons[1],
+        )
+        and _decision_metadata(
+            effectful_registered_chain_reasons[2],
+            effectful_registered_chain_events[2],
+        ).get("xunji_capability_effects") == ["target", "model_egress"]
+        and _denial_is_target_action(
+            effectful_registered_chain_events[2],
+            effectful_registered_chain_reasons[2],
+        )
+    )
+    reverse_duplicate_effect_reason = evaluate_pretool(
+        run, reverse_duplicate_effect_chain, contract)
+    reverse_duplicate_effect_metadata = _decision_metadata(
+        reverse_duplicate_effect_reason, reverse_duplicate_effect_chain)
+    effect_set_is_stable_and_target_segments_are_distinct = bool(
+        reverse_duplicate_effect_metadata.get("xunji_capability_effect")
+        == "target"
+        and reverse_duplicate_effect_metadata.get("xunji_capability_effects")
+        == ["target", "model_egress"]
+        and len(reverse_duplicate_effect_metadata.get(
+            "xunji_target_retry_action_sha256s") or []) == 2
+        and len(set(reverse_duplicate_effect_metadata.get(
+            "xunji_target_retry_action_sha256s") or [])) == 1
+    )
+    invalid_registered_chain_reasons = [
+        evaluate_pretool(run, event, contract)
+        for event in invalid_registered_chain_events
+    ]
+    invalid_registered_chains_are_nonmaintenance_shape = bool(
+        len(invalid_registered_chain_reasons) == 2
+        and all(
+            E_LIFECYCLE_EXACT_ARGV_REQUIRED in reason
+            and _decision_metadata(reason, event).get("xunji_shape_category")
+            == "registered-chain-invalid-argv"
+            and "/xunji-maintenance" not in reason
+            for event, reason in zip(
+                invalid_registered_chain_events,
+                invalid_registered_chain_reasons,
+            )
+        )
+        and not _denial_is_target_action(
+            invalid_registered_chain_events[0],
+            invalid_registered_chain_reasons[0],
+        )
+        and _denial_is_target_action(
+            invalid_registered_chain_events[1],
+            invalid_registered_chain_reasons[1],
+        )
+    )
+    unsafe_registered_chain_reasons = [
+        evaluate_pretool(run, event, contract)
+        for event in unsafe_registered_chains
+    ]
+    opaque_or_mutating_chains_stay_fail_closed = all(
+        E_LIFECYCLE_EXACT_ARGV_REQUIRED not in reason
+        and _registered_capability_shape_issue(event) is None
+        and bool(reason)
+        for event, reason in zip(
+            unsafe_registered_chains, unsafe_registered_chain_reasons)
+    )
     unknown_owner_wrapper_reason = evaluate_pretool(
         run, wrapped_unknown_owner_argv, contract)
     owner_file_redirect_reason = evaluate_pretool(
@@ -5927,6 +6466,219 @@ def _selftest() -> int:
         and owner_shape_receipt.get("target_action") is False
         and owner_shape_receipt.get("retryable_same_turn") is True
         and not load_contract(shape_receipt_run).get("maintenance_blocked")
+    )
+    chain_receipt_run = root / "registered-chain-receipt-run"
+    (chain_receipt_run / "state").mkdir(parents=True)
+    chain_receipt_transcript = root / "registered-chain-transcript.jsonl"
+    chain_receipt_transcript.write_text(
+        "\n".join(
+            f"registered-chain-denial-{index}"
+            for index in range(1, len(registered_chain_events) + 1)
+        ) + "\n" + "\n".join(
+            f"effectful-chain-denial-{index}"
+            for index in range(1, len(effectful_registered_chain_events) + 1)
+        ) + "\n" + "\n".join(
+            f"invalid-chain-denial-{index}"
+            for index in range(1, len(invalid_registered_chain_events) + 1)
+        ) + "\neffectful-chain-target-retry\n",
+        encoding="utf-8",
+    )
+    chain_receipt_contract = {
+        **contract,
+        "origin_run": chain_receipt_run.name,
+        "bound_run": chain_receipt_run.name,
+        "session_id": "registered-chain-session",
+        "updated_at": time.time(),
+    }
+    _atomic_json(contract_path(chain_receipt_run), chain_receipt_contract)
+    chain_hook_results = [
+        handle_event({
+            "hook_event_name": "PreToolUse",
+            "session_id": "registered-chain-session",
+            "transcript_path": str(chain_receipt_transcript),
+            "tool_name": "Bash",
+            "tool_use_id": f"registered-chain-denial-{index}",
+            "tool_input": event["tool_input"],
+        }, chain_receipt_run)
+        for index, event in enumerate(registered_chain_events, start=1)
+    ]
+    chain_receipts = [
+        receipt for receipt in runtime_receipts.load_events(chain_receipt_run)
+        if str(receipt.get("tool_use_id") or "").startswith(
+            "registered-chain-denial-")
+    ]
+    registered_chain_receipts_do_not_mint_debt = bool(
+        all(chain_hook_results)
+        and len(chain_receipts) == len(registered_chain_events)
+        and all(
+            receipt.get("decision_code") == E_LIFECYCLE_EXACT_ARGV_REQUIRED
+            and receipt.get("decision_class") == "command_shape"
+            and receipt.get("shape_category") == "registered-chain"
+            and receipt.get("maintenance_action") is False
+            and receipt.get("maintenance_paths") == []
+            and receipt.get("target_action") is False
+            and receipt.get("retryable_same_turn") is True
+            for receipt in chain_receipts
+        )
+        and not load_contract(chain_receipt_run).get("maintenance_blocked")
+        and not runtime_receipts.unresolved_maintenance_blockers(
+            chain_receipt_run)
+    )
+    effectful_chain_hook_results = [
+        handle_event({
+            "hook_event_name": "PreToolUse",
+            "session_id": "registered-chain-session",
+            "transcript_path": str(chain_receipt_transcript),
+            "tool_name": "Bash",
+            "tool_use_id": f"effectful-chain-denial-{index}",
+            "tool_input": event["tool_input"],
+        }, chain_receipt_run)
+        for index, event in enumerate(
+            effectful_registered_chain_events, start=1)
+    ]
+    effectful_chain_receipts = [
+        receipt for receipt in runtime_receipts.load_events(chain_receipt_run)
+        if str(receipt.get("tool_use_id") or "").startswith(
+            "effectful-chain-denial-")
+    ]
+    effectful_chain_receipts_preserve_effect_without_maintenance = bool(
+        all(effectful_chain_hook_results)
+        and len(effectful_chain_receipts) == 3
+        and [
+            receipt.get("capability_effect")
+            for receipt in effectful_chain_receipts
+        ] == ["target", "model_egress", "target"]
+        and [
+            receipt.get("target_action")
+            for receipt in effectful_chain_receipts
+        ] == [True, False, True]
+        and effectful_chain_receipts[2].get("capability_effects")
+        == ["target", "model_egress"]
+        and all(
+            len(receipt.get("target_retry_action_sha256s") or []) == 1
+            for receipt in (
+                effectful_chain_receipts[0], effectful_chain_receipts[2],
+            )
+        )
+        and effectful_chain_receipts[1].get(
+            "target_retry_action_sha256s") == []
+        and all(
+            receipt.get("decision_code") == E_LIFECYCLE_EXACT_ARGV_REQUIRED
+            and receipt.get("shape_category") == "registered-chain"
+            and receipt.get("maintenance_action") is False
+            and receipt.get("maintenance_paths") == []
+            for receipt in effectful_chain_receipts
+        )
+        and not load_contract(chain_receipt_run).get("maintenance_blocked")
+        and not runtime_receipts.unresolved_maintenance_blockers(
+            chain_receipt_run)
+    )
+    invalid_chain_hook_results = [
+        handle_event({
+            "hook_event_name": "PreToolUse",
+            "session_id": "registered-chain-session",
+            "transcript_path": str(chain_receipt_transcript),
+            "tool_name": "Bash",
+            "tool_use_id": f"invalid-chain-denial-{index}",
+            "tool_input": event["tool_input"],
+        }, chain_receipt_run)
+        for index, event in enumerate(
+            invalid_registered_chain_events, start=1)
+    ]
+    invalid_chain_receipts = [
+        receipt for receipt in runtime_receipts.load_events(chain_receipt_run)
+        if str(receipt.get("tool_use_id") or "").startswith(
+            "invalid-chain-denial-")
+    ]
+    invalid_chain_receipts_are_nonmaintenance = bool(
+        all(invalid_chain_hook_results)
+        and len(invalid_chain_receipts) == 2
+        and [
+            receipt.get("target_action")
+            for receipt in invalid_chain_receipts
+        ] == [False, True]
+        and [
+            len(receipt.get("target_retry_action_sha256s") or [])
+            for receipt in invalid_chain_receipts
+        ] == [0, 1]
+        and all(
+            receipt.get("shape_category")
+            == "registered-chain-invalid-argv"
+            and receipt.get("maintenance_action") is False
+            and receipt.get("maintenance_paths") == []
+            for receipt in invalid_chain_receipts
+        )
+        and not runtime_receipts.unresolved_maintenance_blockers(
+            chain_receipt_run)
+    )
+    unsafe_chain_receipt_classifications: list[bool] = []
+    for index, event in enumerate(unsafe_registered_chains, start=1):
+        unsafe_run = root / f"unsafe-chain-receipt-{index}"
+        (unsafe_run / "state").mkdir(parents=True)
+        unsafe_session = f"unsafe-chain-session-{index}"
+        unsafe_contract = {
+            **contract,
+            "origin_run": unsafe_run.name,
+            "bound_run": unsafe_run.name,
+            "session_id": unsafe_session,
+            "updated_at": time.time(),
+        }
+        _atomic_json(contract_path(unsafe_run), unsafe_contract)
+        unsafe_transcript = root / f"unsafe-chain-transcript-{index}.jsonl"
+        unsafe_tool_id = f"unsafe-chain-denial-{index}"
+        unsafe_transcript.write_text(unsafe_tool_id + "\n", encoding="utf-8")
+        unsafe_hook_result = handle_event({
+            "hook_event_name": "PreToolUse",
+            "session_id": unsafe_session,
+            "transcript_path": str(unsafe_transcript),
+            "tool_name": "Bash",
+            "tool_use_id": unsafe_tool_id,
+            "tool_input": event["tool_input"],
+        }, unsafe_run)
+        unsafe_events = runtime_receipts.load_events(unsafe_run)
+        unsafe_receipt = unsafe_events[-1] if unsafe_events else {}
+        unsafe_chain_receipt_classifications.append(bool(
+            unsafe_hook_result
+            and unsafe_receipt.get("decision_code")
+            != E_LIFECYCLE_EXACT_ARGV_REQUIRED
+            and unsafe_receipt.get("maintenance_action") is True
+            and unsafe_receipt.get("target_action") is False
+            and runtime_receipts.unresolved_maintenance_blockers(unsafe_run)
+        ))
+    unsafe_chain_receipts_preserve_conservative_maintenance = bool(
+        unsafe_chain_receipt_classifications
+        and all(unsafe_chain_receipt_classifications)
+    )
+    unresolved_effectful_chain_before_retry = (
+        runtime_receipts.unresolved_target_denials(
+            chain_receipt_run,
+            session_id="registered-chain-session",
+        )
+    )
+    target_retry_command = str(registry_probe["tool_input"]["command"])
+    runtime_receipts.append_hook_event(chain_receipt_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": "registered-chain-session",
+        "transcript_path": str(chain_receipt_transcript),
+        "tool_name": "Bash",
+        "tool_use_id": "effectful-chain-target-retry",
+        "tool_input": {
+            "command": target_retry_command,
+            "description": "presentation-only retry metadata",
+        },
+        "tool_response": {"stdout": "controlled target retry success"},
+        "xunji_target_action": True,
+        "xunji_capability_effect": "target",
+    })
+    unresolved_effectful_chain_after_retry = (
+        runtime_receipts.unresolved_target_denials(
+            chain_receipt_run,
+            session_id="registered-chain-session",
+        )
+    )
+    effectful_chain_target_debt_resolves_by_exact_segment = bool(
+        len(unresolved_effectful_chain_before_retry) == 3
+        and not unresolved_effectful_chain_after_retry
     )
     invalid_argv_receipt_run = root / "invalid-argv-receipt-run"
     (invalid_argv_receipt_run / "state").mkdir(parents=True)
@@ -6588,6 +7340,57 @@ def _selftest() -> int:
             lifecycle_contract,
         )
         for candidate in altered_plan_prompts
+    )
+    canary_receipt_run = root / "canary-delegation-receipt-run"
+    (canary_receipt_run / "state").mkdir(parents=True)
+    (canary_receipt_run / "agents").mkdir()
+    (canary_receipt_run / "context").mkdir()
+    for name in ("target.md", "frontier.md"):
+        (canary_receipt_run / name).write_text(
+            (lifecycle_run / name).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    canary_row = json.loads(json.dumps(
+        json.loads((lifecycle_run / "state" / "assignments.json").read_text(
+            encoding="utf-8"))["assignments"][0]
+    ))
+    canary_row["context"] = f"context/{lifecycle_assignment}.md"
+    canary_row["agent_file"] = f"agents/{lifecycle_assignment}.md"
+    (canary_receipt_run / canary_row["context"]).write_text(
+        "# Frozen context\n", encoding="utf-8")
+    (canary_receipt_run / canary_row["agent_file"]).write_text(
+        "# Agent\n", encoding="utf-8")
+    (canary_receipt_run / "state" / "assignments.json").write_text(
+        json.dumps({"schema": 3, "assignments": [canary_row]}),
+        encoding="utf-8",
+    )
+    canary_transcript = root / "canary-delegation-transcript.jsonl"
+    canary_transcript.write_text("canary-delegation\n", encoding="utf-8")
+    write_contract(canary_receipt_run, {
+        "prompt": f"继续执行 runs/{canary_receipt_run.name}",
+        "session_id": "canary-delegation-session",
+        "transcript_path": str(canary_transcript),
+    })
+    canary_prompt = runtime_receipts.assignment_launch_prompt(canary_row)
+    canary_denial = handle_event({
+        "hook_event_name": "PreToolUse",
+        "session_id": "canary-delegation-session",
+        "transcript_path": str(canary_transcript),
+        "tool_name": "Agent",
+        "tool_use_id": "canary-appended-prompt",
+        "tool_input": {
+            "prompt": canary_prompt + " XUNJI_CANARY_APPEND=1",
+            "subagent_type": planned_type,
+        },
+    }, canary_receipt_run)
+    canary_receipts = runtime_receipts.load_events(canary_receipt_run)
+    canary_receipt = canary_receipts[-1] if canary_receipts else {}
+    canary_denial_persists_delegation_code = bool(
+        canary_denial
+        and canary_receipt.get("hook_event_name") == "PreToolUseDenied"
+        and canary_receipt.get("decision_code") == E_DELEGATION_REQUIRED
+        and canary_receipt.get("decision_class") == "delegation"
+        and canary_receipt.get("maintenance_action") is False
     )
     description_only_plan_prompt_blocked = E_DELEGATION_REQUIRED in evaluate_pretool(
         lifecycle_run,
@@ -9063,7 +9866,7 @@ def _selftest() -> int:
     live_pointer.write_text(str(live_run.resolve()) + "\n", encoding="utf-8")
     live_transcript = root / "live-maintenance-transcript.jsonl"
     live_transcript.write_text(
-        "live-authorized-edit\nlive-outside-edit\nlive-critical-deny\n",
+        "live-authorized-edit\nlive-outside-edit\n",
         encoding="utf-8",
     )
     write_contract(live_run, {
@@ -9134,6 +9937,48 @@ def _selftest() -> int:
         live_run, session_id="live-maintenance-session",
         since=float(live_execute_contract.get("updated_at") or 0.0),
     )
+    live_durable_denials = (
+        runtime_receipts.unresolved_durable_maintenance_blockers(
+            live_run, session_id="live-maintenance-session",
+            since=float(live_execute_contract.get("updated_at") or 0.0),
+        )
+    )
+    live_read_after_blocker = live_hook({
+        "hook_event_name": "PreToolUse",
+        "session_id": "live-maintenance-session",
+        "transcript_path": str(live_transcript),
+        "tool_name": "Read", "tool_use_id": "live-blocked-read",
+        "tool_input": {"file_path": str(live_run / "frontier.md")},
+    })
+    live_task_update_after_blocker = live_hook({
+        "hook_event_name": "PreToolUse",
+        "session_id": "live-maintenance-session",
+        "transcript_path": str(live_transcript),
+        "tool_name": "TaskUpdate", "tool_use_id": "live-blocked-task-update",
+        "tool_input": {"taskId": "1", "status": "completed"},
+    })
+    live_control_after_blocker = live_hook({
+        "hook_event_name": "PreToolUse",
+        "session_id": "live-maintenance-session",
+        "transcript_path": str(live_transcript),
+        "tool_name": "Bash", "tool_use_id": "live-blocked-control",
+        "tool_input": {
+            "command": (
+                f"{sys.executable} {ROOT / 'tools' / 'workers.py'} "
+                f"status {live_run}"
+            ),
+        },
+    })
+    live_agent_after_blocker = live_hook({
+        "hook_event_name": "PreToolUse",
+        "session_id": "live-maintenance-session",
+        "transcript_path": str(live_transcript),
+        "tool_name": "Agent", "tool_use_id": "live-blocked-agent",
+        "tool_input": {
+            "prompt": "XUNJI_ASSIGNMENT=A-fake XUNJI_FRONT=F-001",
+            "subagent_type": "xunji-hunter",
+        },
+    })
 
     def wired(event_name: str) -> bool:
         return any(
@@ -9298,7 +10143,110 @@ def _selftest() -> int:
     ordinary_failure_code, ordinary_failure_diagnostic = (
         _runtime_hook_failure_diagnostic(
             {"hook_event_name": "UserPromptSubmit"}, RuntimeError("opaque")))
+    budget_actor_fixture = {
+        "kind": "assignment",
+        "state": "running",
+        "lane_id": "L-BUDGET",
+        "plan_digest": "b" * 64,
+    }
+
+    def budget_event_fixture(tool_id: str) -> dict:
+        return {
+            "hook_event_name": "PreToolUse",
+            "session_id": "budget-session",
+            "transcript_path": str(root / "budget-session.jsonl"),
+            "agent_id": "budget-child",
+            "tool_name": "Read",
+            "tool_use_id": tool_id,
+            "tool_input": {"file_path": "/tmp/budget-fixture"},
+        }
+
+    budget_near_event = budget_event_fixture("budget-near")
+    # Nested Agent is guaranteed to hit a later policy denial; its attempted
+    # call still consumes the already-frozen plan-bound budget.
+    budget_near_event["tool_name"] = "Agent"
+    budget_near_event["tool_input"] = {"prompt": "not-authorizing"}
+    with mock.patch.object(
+            runtime_receipts, "agent_actor",
+            return_value=budget_actor_fixture), \
+            mock.patch.object(
+                runtime_receipts, "claim_agent_tool_call",
+                return_value={
+                    "agent_tool_call_ordinal": 5,
+                    "agent_tool_call_limit": 6,
+                    "agent_tool_call_admitted": True,
+                    "receipt_hash": "a" * 64,
+                }) as near_claim:
+        budget_near_reason = _claim_plan_bound_child_tool_call(
+            run, budget_near_event)
+        budget_near_context = _plan_bound_child_budget_context(
+            budget_near_event)
+        # This later policy denial cannot refund the already-completed claim.
+        budget_later_policy_denial = evaluate_pretool(
+            run, budget_near_event, {})
+        budget_policy_denial_still_counted = bool(
+            near_claim.call_count == 1
+            and budget_near_event.get("_xunji_agent_tool_call_claim", {}).get(
+                "ordinal") == 5
+            and budget_later_policy_denial)
+
+    budget_last_event = budget_event_fixture("budget-last")
+    with mock.patch.object(
+            runtime_receipts, "agent_actor",
+            return_value=budget_actor_fixture), \
+            mock.patch.object(
+                runtime_receipts, "claim_agent_tool_call",
+                return_value={
+                    "agent_tool_call_ordinal": 6,
+                    "agent_tool_call_limit": 6,
+                    "agent_tool_call_admitted": True,
+                    "receipt_hash": "b" * 64,
+                }):
+        budget_last_reason = _claim_plan_bound_child_tool_call(
+            run, budget_last_event)
+        budget_last_context = _plan_bound_child_budget_context(
+            budget_last_event)
+
+    budget_over_event = budget_event_fixture("budget-over")
+    with mock.patch.object(
+            runtime_receipts, "agent_actor",
+            return_value=budget_actor_fixture), \
+            mock.patch.object(
+                runtime_receipts, "claim_agent_tool_call",
+                return_value={
+                    "agent_tool_call_ordinal": 7,
+                    "agent_tool_call_limit": 6,
+                    "agent_tool_call_admitted": False,
+                    "receipt_hash": "c" * 64,
+                }):
+        budget_over_reason = _claim_plan_bound_child_tool_call(
+            run, budget_over_event)
+
+    budget_conflict_event = budget_event_fixture("budget-conflict")
+    with mock.patch.object(
+            runtime_receipts, "agent_actor",
+            return_value=budget_actor_fixture), \
+            mock.patch.object(
+                runtime_receipts, "claim_agent_tool_call",
+                side_effect=RuntimeError("AGENT_TOOL_CALL_IDENTITY_CONFLICT")):
+        budget_conflict_reason = _claim_plan_bound_child_tool_call(
+            run, budget_conflict_event)
+
     checks = [
+        ("plan-bound child attempts are claimed before a later policy denial",
+         budget_near_reason == "" and budget_policy_denial_still_counted),
+        ("near-cap and final-call PreToolUse context instruct an immediate return",
+         isinstance(budget_near_context, dict)
+         and "只剩 1 次额度" in json.dumps(budget_near_context, ensure_ascii=False)
+         and budget_last_reason == ""
+         and isinstance(budget_last_context, dict)
+         and "最后一次允许" in json.dumps(budget_last_context, ensure_ascii=False)),
+        ("the seventh child call has one stable hard-limit denial code",
+         E_AGENT_TOOL_CALL_LIMIT_EXCEEDED in budget_over_reason
+         and _decision_metadata(budget_over_reason, budget_over_event).get(
+             "xunji_decision_class") == "agent_tool_budget"),
+        ("child tool-use identity conflicts fail closed with a stable code",
+         E_AGENT_TOOL_CALL_IDENTITY_CONFLICT in budget_conflict_reason),
         ("explain overrides action words", explain == EXPLAIN),
         ("history/audit prompt without execute verb is read-only", history_only == EXPLAIN),
         ("ambiguous active-run prompt defaults read-only", ambiguous == EXPLAIN),
@@ -9410,8 +10358,20 @@ def _selftest() -> int:
         ("new execute turn revokes maintenance scope and records critical denial",
          live_execute_submit.returncode == 0
          and '"permissionDecision": "deny"' in (live_critical_denial.stdout or "")
-         and len(live_denials) == 1
-         and live_denials[0].get("maintenance_paths") == ["tools/turn_contract.py"]),
+         and not live_denials
+         and len(live_durable_denials) == 1
+         and live_durable_denials[0].get("maintenance_paths")
+         == ["tools/turn_contract.py"]),
+        ("current-turn maintenance blocker allows deterministic inspection only",
+         live_read_after_blocker.returncode == 0
+         and not (live_read_after_blocker.stdout or "").strip()
+         and live_task_update_after_blocker.returncode == 0
+         and not (live_task_update_after_blocker.stdout or "").strip()),
+        ("current-turn maintenance blocker freezes later control and Agent progression",
+         E_MAINTENANCE_BLOCKED in (live_control_after_blocker.stdout or "")
+         and E_MAINTENANCE_BLOCKED in (live_agent_after_blocker.stdout or "")
+         and not live_denials
+         and len(live_durable_denials) == 1),
         ("negated direct-egress phrases never grant approval",
          not negated_direct_cn["direct_egress_approved"]
          and not negated_direct_en["direct_egress_approved"]),
@@ -9496,6 +10456,8 @@ def _selftest() -> int:
          workers_asset_control_allowed),
         ("quoted disposition punctuation remains valid control data",
          workers_quoted_note_allowed),
+        ("registered owner notes may name protected records as inert data",
+         workers_protected_name_note_allowed),
         ("all quoted shell punctuation remains inert control data",
          quoted_punctuation_allowed),
         ("single-quoted substitutions remain literal control data",
@@ -9574,6 +10536,28 @@ def _selftest() -> int:
          and owner_output_filter_is_shape_denial),
         ("owner status shape receipt is structured and non-maintenance",
          owner_shape_receipt_is_nonmaintenance),
+        ("registered capability chains are denied without maintenance truth",
+         registered_chains_are_retryable_nonmaintenance_denials),
+        ("every denied registered-chain segment remains an exact individual retry",
+         registered_chain_segments_retry_individually),
+        ("target and model registered chains retain typed non-maintenance denials",
+         effectful_registered_chains_keep_typed_denial),
+        ("chain effect set is risk ordered while duplicate target identities remain",
+         effect_set_is_stable_and_target_segments_are_distinct),
+        ("invalid-argv registered chains are retryable nonmaintenance shape denials",
+         invalid_registered_chains_are_nonmaintenance_shape),
+        ("registered chain denial receipts create no maintenance blocker",
+         registered_chain_receipts_do_not_mint_debt),
+        ("effectful registered-chain receipts preserve effect without maintenance",
+         effectful_chain_receipts_preserve_effect_without_maintenance),
+        ("invalid registered-chain receipts cannot mint maintenance debt",
+         invalid_chain_receipts_are_nonmaintenance),
+        ("env, critical-data, and repository chains retain maintenance debt",
+         unsafe_chain_receipts_preserve_conservative_maintenance),
+        ("exact target segment retry resolves registered-chain target debt",
+         effectful_chain_target_debt_resolves_by_exact_segment),
+        ("opaque or mutating chain segments retain the normal fail-closed path",
+         opaque_or_mutating_chains_stay_fail_closed),
         ("invalid owner argv is retryable while true file redirects stay maintenance-class",
          unknown_and_write_wrappers_stay_fail_closed),
         ("real incomplete work-plan argv and valid control failure receipts stay non-maintenance",
@@ -9722,6 +10706,8 @@ def _selftest() -> int:
          planned_agent_allowed),
         ("plan-bound Agent prompt rejects suffix, prefix, whitespace, and reorder drift",
          altered_plan_prompts_blocked),
+        ("appended-prompt canary persists the stable delegation denial code",
+         canary_denial_persists_delegation_code),
         ("Agent description cannot replace an exact tool_input.prompt",
          description_only_plan_prompt_blocked),
         ("plan-bound Agent rejects a mismatched plan digest",

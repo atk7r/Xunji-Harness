@@ -1,6 +1,6 @@
 ---
 name: xunji-sentinel-guard-review
-description: Claude-driver safety boundary review for Xunji. Use when editing or reviewing `.claude/hooks/`, `tools/harness/guard.py`, `sentinel/`, safety rules, runtime boundary behavior, L1-L4 sentinel decisions, hard deny/ask/notify semantics, or safety-critical diffs that require selftests plus independent review.
+description: Claude-driver safety boundary review for Xunji. Use when editing or reviewing `.claude/hooks/`, `tools/harness/privacy.py`, `tools/harness/command_shape.py`, `tools/setup_transaction.py`, `tools/harness/guard.py`, `sentinel/`, safety rules, runtime boundary behavior, L1-L4 sentinel decisions, hard deny/ask/notify semantics, or safety-critical diffs that require selftests plus independent review.
 ---
 
 # Xunji Sentinel Guard Review
@@ -10,8 +10,8 @@ playbook; it protects the run boundary.
 
 ## Overlap Routing
 
-- Use this skill for behavior changes to hooks, guard, sentinel, safety rules, or
-  L1-L4 semantics.
+- Use this skill for behavior changes to hooks, privacy/command-shape/guard,
+  sentinel, safety rules, or L1-L4 semantics.
 - Use `xunji-local-maintenance` for ordinary docs/tools/skills edits outside the
   safety boundary.
 - Use `xunji-reviewops` to record and adjudicate the independent review findings.
@@ -24,6 +24,10 @@ playbook; it protects the run boundary.
   irreversible harm classes.
 - `tools/harness/guard.py` enforces runtime request/body/rate/session safety for
   active tools.
+- `tools/harness/privacy.py` and `tools/harness/command_shape.py` own privacy and
+  exact-command parsing boundaries used by hooks and registered capabilities.
+- `tools/setup_transaction.py` alone owns setup staging, activation, and active-run
+  pointer compare-and-swap.
 - `sentinel/` is behavior monitoring and autonomy classification; current design
   is observe-first unless explicitly changed.
 - Skills and docs do not waive hook, guard, or sentinel requirements.
@@ -36,6 +40,9 @@ Read the exact touched component:
 - `.claude/hooks/run_gate.py`
 - `.claude/hooks/output_gate.py`
 - `.claude/hooks/safety_rules.json`
+- `tools/harness/privacy.py`
+- `tools/harness/command_shape.py`
+- `tools/setup_transaction.py`
 - `tools/harness/guard.py`
 - `sentinel/README.md`
 - `sentinel/TUNING.md`
@@ -46,30 +53,27 @@ scope classification, rate/body/session boundaries, or just text/tests.
 
 ## Required Checks
 
-Run the narrow tests for touched layers:
+Run the relevant registered aggregate for touched layers:
 
 ```bash
-python tools/check_hook.py
-python .claude/hooks/safety_gate.py --selftest
-python .claude/hooks/run_gate.py --selftest
-python .claude/hooks/output_gate.py --selftest
-python tools/harness/guard.py
-python sentinel/replay.py
-python sentinel/verify_layers.py
+python3 tools/selftest_all.py --only check_hook,safety_gate,run_gate,output_gate,sentinel_replay,verify_layers,guard_smoke
 ```
 
-When feasible, run the aggregate:
+Then run the mandatory full aggregate:
 
 ```bash
-python tools/selftest_all.py
+python3 tools/selftest_all.py
 ```
 
-If only a subset is run, record exactly why.
+Do not hand off or commit while the full aggregate is unrun or failing; record an
+external blocker instead of weakening this gate.
 
 ## Review Gate
 
-Any behavior change under `.claude/hooks/`, `tools/harness/guard.py`, or
-`sentinel/` needs independent review per `docs/WORKFLOW-reference.md`. A reviewer
+Any behavior change under `.claude/hooks/`, `tools/harness/privacy.py`,
+`tools/harness/command_shape.py`, `tools/setup_transaction.py`,
+`tools/harness/guard.py`, or `sentinel/` needs fresh independent review per
+`docs/WORKFLOW-reference.md`. A reviewer
 must check false positives, missed hard blocks, scope drift, over-clamping,
 fail-open/fail-closed behavior, and whether the change weakens the live boundary.
 

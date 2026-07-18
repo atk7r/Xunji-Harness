@@ -1,35 +1,34 @@
 # Xunji Loop Protocol: {{RUN_DIR}}
 
-This is the fixed Claude Code `/loop` protocol. Do not copy/paste it through
-`loop_bootstrap.py`. When the operator enters `/loop runs/<dir>`, bind
-`{{RUN_DIR}}` to that run path and `{{PYTHON}}` to the active Python command for
-this repository.
+This is the fixed run-bound execute-cycle protocol, not the client-entry owner.
+`xunji-run-lifecycle` owns the one exact bootstrap shape and the literal `/loop`
+versus natural-language one-cycle route. Bind `{{RUN_DIR}}` and `{{PYTHON}}` only
+after the current turn contract and active selection identify the same run.
 
-This fixed protocol applies once a run is bound. For a first `/loop <source>`
-turn, stay in the same top-level operator turn and execute exactly one argv-only
-bootstrap command: `python3 tools/loop_bootstrap.py --source '<source>' --type auto`.
-Use the current registered Python executable (a bare name is valid only when it
-resolves to that same executable) and shell-quote the source as one literal argv
-token. Do not use `tool_input.env`, inline environment assignments, unquoted URL
-query/glob characters, brace/tilde/EQUALS/parameter/command expansion, redirects,
-chains, comments, newlines, `2>&1`, a pipe, `head`/`tail`, or another shell wrapper.
-After the transaction binds the new run, perform a fresh CronList and a
-CronCreate whose prompt names that new run, then create/update the iteration task
-list before any Agent or target action. A premature CronCreate denial is a
-fail-closed recovery signal, not the recommended bootstrap step. Never clear the
-old pointer or schedule the old run to get past the gate.
+When `loop_requested=true`, the delivered literal entry may continue through the
+registered recurring-Cron sequence. When a client-reserved `/loop` forces the
+owner's natural-language fallback, `loop_requested=false`: run one material cycle,
+skip recurring-Cron creation, and never describe that fallback as scheduled loop
+authority. A scheduler expansion to `cron_manager.py` is not a Xunji transition.
 
 `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` is a non-authorizing command-shape denial.
 Remove any observational wrapper; for `invalid-argv`, return to the corresponding
 owner document and supply every required registered argument. Retry in the same
 operator turn. Inspect source or manifests with Read/Grep/Glob, never `python -c`.
+Each displayed command line in this template or an owner reference is one separate
+Bash tool call; a fenced block expresses order, not a shell script. Never join
+registered calls or a display-only `echo` with `&&`, `;`, `||`, pipes, redirection,
+or newlines. A compound denial executed none of them, so retry every intended line
+separately and unchanged in the same operator turn; `docs/WORKFLOW.md` owns
+target-chain receipt/debt semantics.
 Do not wait for a bare “继续”: a new prompt revokes the previous source transition
 authority and may return `XUNJI_E_RUN_TRANSITION_AUTHORITY_MISSING`.
 
 You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.
-Run one **material** autonomous iteration: state pass, required Agent execution,
-merge/verification, canonical writes, and refreshed gates. Planning, one request,
-one file edit, or satisfying a hook format is not an iteration result. Until the
+Run one **material** autonomous iteration: state pass, the selected typed execution
+lane (a real Agent when the plan requires one), merge/verification, canonical
+writes, and refreshed gates. Planning, one request, one file edit, or satisfying a
+hook format is not an iteration result. Until the
 run has a valid completion marker, an `EXECUTE` turn ends with exactly one final
 Coda line: `下一行动: <object + concrete
 action>`. Empty/template values, generic "continue", multiple Coda lines, and an
@@ -55,8 +54,9 @@ phase you did not enter.
 {{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-end --phase "<Setup|Root Orchestrator|Hunter|Reviewer|Report>" --note "<阶段结果和下一阶段>"
 ```
 
-Setup-only does not enter this protocol. A first-source `/loop` may run its setup
-adapter in the same authorized turn; the fixed protocol begins after that adapter
+Setup-only does not enter this protocol. A first-source literal route or its
+client-safe one-cycle fallback may run the setup adapter in the same authorized
+turn; the fixed protocol begins after that adapter
 binds the run and normally enters Root Orchestrator first, then Hunter
 when taking a proof/verification/Agent action, Reviewer when checking merge /
 evidence / closure gates, and Report only when drafting or finalizing report
@@ -68,30 +68,31 @@ material. Record Setup only when the first-source adapter actually entered it.
 
 Before any journal `start`, phase marker, task, work plan, Agent, or target action,
 check whether this run already has a valid `GHOST_COMPLETE` or `NORMAL_COMPLETE`
-marker. If it does, perform a fresh CronList, delete only a scheduled `/loop` job
-whose prompt names this exact run if one exists, then CronList again to verify it is
-gone. Do not create or reschedule a Cron. Do not call `loop_journal.py ... start` or
-`loop_journal.py ... end` for this already-completed run: its existing typed
-`cycle_end` remains terminal, so a new empty cycle or repeated end is invalid.
-Return directly with `BLOCKED: run already complete` after the Cron check/cleanup;
+marker. If it does and `loop_requested=true`, perform a fresh CronList, delete only
+a scheduled `/loop` job whose prompt names this exact run if one exists, then
+CronList again to verify it is gone. If `loop_requested=false`, perform no Cron
+operation. In either mode, do not create/reschedule a Cron or call
+`loop_journal.py ... start|end`: the existing typed cycle end remains terminal.
+Return directly with `BLOCKED: run already complete` after the applicable guard;
 do not create tasks, plans, receipts, phases, or canonical writes.
 
-Only when no valid completion marker is present, record that this explicit `/loop`
-iteration has begun. This journal is a derived interruption aid, not evidence:
+Only when no valid completion marker is present, record that this bound execute
+cycle has begun. This journal is a derived interruption aid, not evidence:
 
 ```bash
 {{PYTHON}} tools/xunji_statusline.py --set-active "{{RUN_DIR}}"
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" start --note "显式 /loop 迭代开始"
+{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" start --note "绑定的执行周期开始"
 ```
 
-After run/Cron binding, use Claude Code TaskCreate/TaskUpdate for this `/loop`
-iteration before choosing the next Agent or target action (TodoWrite is accepted
+After run binding, use Claude Code TaskCreate/TaskUpdate for this execute cycle
+before choosing the next Agent or target action (TodoWrite is accepted
 only as a compatibility surface). The task list must cover the concrete
 assets/vectors/Agent lanes/evidence writes/gates for this single iteration.
-Update it as work finishes. A task list is planning proof, not Agent execution:
-continue through graph/front decomposition, workers assignments, real Agent tool
-launches, adjudication, and synthesis. Do not impose this rule on normal chat
-outside `/loop`.
+Update it as work finishes. A task list is planning proof, not execution proof:
+continue through graph/front decomposition and the selected typed lane; use workers
+assignments and real Agent launches only when the committed mode requires Agents,
+then adjudicate and synthesize. Do not impose this rule on normal chat outside an
+execute cycle.
 
 The Task receipt is also not `xunji.work-plan.v1`. Root must declare one derived,
 reversible goal view in the work plan: S1 information collection, S2 testing and
@@ -118,11 +119,8 @@ confirmation is sufficient. Never touch or no-op edit a canonical file to manufa
 freshness; operational liveness comes from journal/runtime receipts instead.
 
 ### 2. Closed-Loop State Pass
-Enter the Root Orchestrator phase before reading state or choosing work:
-
-```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-start --phase "Root Orchestrator" --note "刷新运行状态并选择下一条前线/控制面动作"
-```
+Enter Root Orchestrator with the generic phase-start contract before reading state
+or choosing work.
 
 Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent evidence.md, hints.md if present, state/assignments.json, state/conflicts.json, and state/loop_state.md.
 
@@ -132,7 +130,6 @@ Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent 
 {{PYTHON}} tools/workers.py status "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py lifecycle-check "{{RUN_DIR}}"
 {{PYTHON}} tools/workers.py conflicts "{{RUN_DIR}}"
-{{PYTHON}} tools/saturation.py "{{RUN_DIR}}"
 {{PYTHON}} tools/coverage_matrix.py "{{RUN_DIR}}" --write --sync-coverage
 {{PYTHON}} tools/loop_state.py "{{RUN_DIR}}" --write
 {{PYTHON}} tools/progress_ledger.py "{{RUN_DIR}}" --write
@@ -149,27 +146,14 @@ comes separately from journal/runtime receipts. The receipt grants no authority,
 evidence status, or closure.
 
 Draft effect lanes and commit the current-turn work plan while Root Orchestrator
-still owns planning:
+still owns planning. Load `xunji-agent-board` and read
+`references/plan-and-delegate.md` completely; use its single exact suggest/plan,
+commit/status, and ready-lane delegate shapes with the tool-produced lane JSON.
+This template does not carry a second plan argv. If a prior plan exists, follow
+the owner's material replan and prior typed-`cycle_end` rules.
 
-```bash
-{{PYTHON}} tools/workers.py suggest "{{RUN_DIR}}"
-{{PYTHON}} tools/workers.py plan "{{RUN_DIR}}" --limit 2
-{{PYTHON}} tools/work_plan.py commit "{{RUN_DIR}}" --stage S2 --objective "review one bounded front" --mode SERIAL_AGENT --reason "one dependency chain" --exit-gate "frozen result reviewed and Root-disposed" --lane '{"id":"L-F001-HUNTER","role":"web-hunter","front":"F-001","effect":"local_read","assets":[],"dependencies":[],"expected_evidence":"attributable candidate or refutation","expected_information_gain":"high","stop_condition":"candidate or refutation returned","request_cost":0,"request_budget":0,"merge_cost":20,"atomic":false}' --lane '{"id":"L-F001-REVIEW","role":"review","front":"F-001","effect":"local_verify","assets":[],"dependencies":["L-F001-HUNTER"],"expected_evidence":"digest-bound review disposition","expected_information_gain":"medium","stop_condition":"exact frozen result challenged","request_cost":0,"request_budget":0,"merge_cost":10,"atomic":false}'
-{{PYTHON}} tools/work_plan.py status "{{RUN_DIR}}"
-```
-
-The commit line is a SERIAL/local example. Use the exact lane JSON emitted by
-`workers.py plan`, choose the ready S1/S2/S3 goal and SERIAL/PARALLEL mode from
-dependencies, effect overlap, runtime slots, request/model-egress budgets, and
-merge capacity, and repeat `--lane` in the same argv for every lane. Do not copy
-the example IDs onto a different run. If a prior plan exists, add a material
-`--replan-reason`; a stage change also requires that plan's typed `cycle_end`.
-
-After choosing the target front/control-plane move, append:
-
-```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-end --phase "Root Orchestrator" --note "已选择目标=<F-XXX/控制面动作>; 下一阶段=<Hunter|Reviewer|Report|BLOCKED>"
-```
+After choosing the target front/control-plane move, close Root Orchestrator with
+the generic phase-end contract and name the next entered phase.
 
 If closure is near, the same barrier keeps failing, 3 cycles produced no new evidence, or a hint asks for metacog, append one compact `Divergence trigger:` block and assign a verify/review/surface Agent when useful: Trigger / Blind spot hypothesis / Assigned role / Proposed action / Target object / Expected signal / Safety class / Why current trajectory likely missed it.
 
@@ -183,9 +167,8 @@ enter Hunter before the action and end Hunter after the action result has been
 recorded into the run files. If the selected move is only review/report/control,
 skip Hunter and enter the appropriate phase instead.
 
-```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-start --phase "Hunter" --note "执行已选择的证明/验证/Agent 动作"
-```
+Enter Hunter with the generic phase-start contract only when the chosen move needs
+proof, verification, probing, or Agent execution.
 
 Guard-routed tools only.
 
@@ -196,76 +179,40 @@ names/content, and target writes. Use neutral unique
 use the guarded explicit auth exception; a privacy-redacted replay is not a
 successful verification.
 
-```bash
-{{PYTHON}} tools/workers.py delegate "{{RUN_DIR}}" --runtime-slots 1 --request-budget 0 --model-egress-budget 0 --merge-capacity 40 --limit 1
-```
+Use the one delegate argv owned by `references/plan-and-delegate.md`; budget values
+must match the ready lane's effects.
 
-The selected Hunter Agent, and only a lane whose committed effect/assets allow
-it, may use registered guarded target capabilities such as these exact shapes:
+The selected Hunter Agent may use only registered guarded target capabilities
+allowed by its committed effect/assets. Load `xunji-evidence-replay-gate` for the
+canonical save-proof shapes; scanner variants stay behind their registered tool
+contract. This always-loaded protocol does not duplicate the target-tool catalog.
 
-```bash
-{{PYTHON}} tools/probe.py GET "https://target/path" --save NAME --run "{{RUN_DIR}}"
-{{PYTHON}} tools/probe.py GET "https://target/large-doc" --save NAME --run "{{RUN_DIR}}" --save-chunks
-{{PYTHON}} tools/probe.py GET "https://target/path" -H "K: V" --save NAME --run "{{RUN_DIR}}"
-{{PYTHON}} tools/probe.py POST "https://target/path" --data '{"k":"v"}' -H "Content-Type: application/json" --save NAME --run "{{RUN_DIR}}"
-{{PYTHON}} tools/probe.py POST "https://target/path" --preflight-get "https://target/form" --extract-csrf 'name="__RequestVerificationToken" value="([^"]+)"' --cookie-jar "{{RUN_DIR}}/state/probe-cookies.json" --preflight-save FORM --data 'field=value' --save NAME --run "{{RUN_DIR}}"
-{{PYTHON}} tools/scan.py --run "{{RUN_DIR}}" sqlmap "https://target/path?id=1"
-{{PYTHON}} tools/scan.py --run "{{RUN_DIR}}" nuclei "https://target/"
-```
+Before invoking an Agent, read
+`references/launch-return-settlement.md` completely and use the exact
+`subagent_type` plus exact `launch_prompt` returned by delegate. That reference
+owns type mapping, one-unbound-launch-per-message, real return, Reviewer binding,
+and settlement details; this template does not restate the binary envelope.
 
-`workers.py delegate` only creates the ready assignment, context pack, and exact
-binary launch contract. It does not spawn an Agent. For every returned assignment,
-Claude must copy both exact `subagent_type` and exact `launch_prompt` into the real
-Agent tool call. Role `review` requires `xunji-reviewer`; canonical execution roles
-`surface|web-auth|web-hunter|code-audit|exploit|verify|report` require
-`xunji-hunter`. Missing/null/blank, `general-purpose`, role-swapped, case-shifted,
-or whitespace-padded types fail closed. The parent request and actual same-session
-Start/Stop types must agree.
-The hook-observed return freezes the content-addressed response snapshot and
-merge draft. A launch acknowledgement, Agent file, heartbeat, Task receipt, or
-`done` prose is not a return or merge.
-
-Launch only one previously unbound Agent per assistant message. Start hooks may
-not carry the parent tool id/prompt, so two candidates in one message are ambiguous
-and fail closed; arrival order is never identity. For real parallelism, call Agent A,
-then in the next assistant message call Agent B while A remains running.
-
-Before consuming an existing plan, require its matching committed v2 work-plan
-transaction, immutable receipt-hash archive, and intact prior-receipt chain. Do
-not commit over a missing/prepared/unreadable/unarchived transaction. Only a
-genuine pre-transaction plan with an exact typed journal and already frozen snapshot may use
-`{{PYTHON}} tools/work_plan.py migrate-legacy "{{RUN_DIR}}"`; this is an explicit
-control action, never `ROOT_DIRECT`; the same command may visibly upgrade only an
-exact committed native v1 receipt, retaining both archived receipts. Assignment
-creation, runtime projection, heartbeat, review, and Root finish share one lock.
-Exact Agent hook replay is idempotent; conflicting reuse or duplicate attempts
-fail closed. A `SubagentStop` closes only one same-session unique launch;
-cross-session, unmatched, or ambiguous Stops remain lifecycle debt.
+Before consuming an existing plan, apply the transaction/lineage and legacy
+migration rules in `references/plan-and-delegate.md`; do not reconstruct its
+control argv here. Exact Agent hook replay is idempotent, and only one matching
+same-session Stop settles a launch; the launch/return reference owns recovery.
 
 If `chains.md` or `hints.md` changes after delegation, do not launch a stale
 assignment. A returned/failed lane may proceed only to its unique exact
 `XUNJI_COMPLETION_REVIEW` Reviewer. A non-Reviewer with no launch/runtime/result/review
-fact may be retired with:
-
-```bash
-{{PYTHON}} tools/workers.py cancel-unlaunched "{{RUN_DIR}}" A-<assignment> --reason "canonical inputs changed before launch"
-```
-
-Root must then commit a material replan. Cancellation is not a result, merge, review,
-evidence item, or `cycle_end`.
+fact may be retired only through the exact cancellation command owned by
+`references/plan-and-delegate.md`, followed by a material replan. Cancellation is
+not a result, merge, review, evidence item, or `cycle_end`.
 
 Choose concurrency from effect/dependency/resource compatibility first. If
 `state/loop_state.json` says `gates.fanout_required=true`, the historical `>=4`
 diverse-front breadth fallback additionally requires the current coordination
 epoch to have two disjoint Agent lanes. Bare continue/resume keeps existing
-attempts; do not spawn duplicates unless front topology or asset debt changed. Every
-target-facing assignment uses explicit `--asset` members and its Agent prompt carries
-the exact `XUNJI_ASSIGNMENT=A-...`, `XUNJI_FRONT=F-...`,
-`XUNJI_ASSETS=h1,h2`, `XUNJI_LANE=L-...`, and `XUNJI_PLAN=<64hex>` package.
-Async PostToolUse is launch only; SubagentStop is return. Running children are not
-blocked by Root's global disposition debt and cannot spawn nested Agents. Planning
-files, heartbeat, and model-written budget reasons do not prove execution. Agents
-produce candidates/refutations only; the Single Synthesizer promotes findings.
+attempts; do not spawn duplicates unless front topology or asset debt changed.
+Prompt/type/asset binding and launch/return semantics stay in the Agent Board
+owner. Agents produce candidates/refutations only; the Single Synthesizer promotes
+findings.
 
 `ROOT_DIRECT` is one dependency-free atomic lane with at most one request and one
 exact registry `capability_id`. Only capabilities explicitly marked
@@ -276,13 +223,10 @@ receipt. Missing terminal, a second action, stale binding or mutation retains de
 The typed succeeded/failed outcome proves only the mechanical action, never
 evidence, review, finding promotion, exit-gate satisfaction or closure.
 
-Do not run `workers.py finish` before the dependent Reviewer returns. After
-`review-disposition` and Root's canonical adjudication, use `--status merged` with
-`--note "Evidence: E-xxx; Front: F-xxx; <disposition>"`, or a non-success terminal
-status with `--note "Reason: <why>; Front: F-xxx"`. `done` without this anchored
-disposition is deliberately blocked at Stop. `merged` additionally requires every
-assigned host to have that Agent's successful target-action receipt and an exact-host
-canonical E-entry; zero-tool and partial packages fail.
+Do not settle Root disposition before the dependent Reviewer returns. Use only the
+evidence-backed statuses and anchored notes defined by
+`references/launch-return-settlement.md`; `done` is never a substitute for Root
+adjudication.
 
 Timeout / host-backoff → deferred (Type A). Save artifact before raising certainty. A sensor result or Agent note is not a finding until the evidence gate is applied.
 
@@ -299,99 +243,64 @@ Before the chosen probe/agent/review action, append:
 {{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" action --note "即将执行 <工具/动作>"
 ```
 
-After the chosen proof/verification/Agent result is written to the appropriate
-run files, append:
-
-```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-end --phase "Hunter" --note "结果已写入运行文件; 下一阶段=Reviewer"
-```
+After the chosen proof/verification/Agent result is written to the run files,
+close Hunter with the generic phase-end contract and enter Reviewer if needed.
 
 ### 4. Gates
-Enter Reviewer before merge, evidence, and closure-gate checks:
+Enter Reviewer with the generic phase-start contract before merge, evidence, and
+closure-gate checks.
 
-```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-start --phase "Reviewer" --note "运行合并/证据/收口闸门检查"
-{{PYTHON}} tools/workers.py delegate "{{RUN_DIR}}" --runtime-slots 1 --request-budget 0 --model-egress-budget 0 --merge-capacity 40 --limit 1
-```
+Use the same delegate owner again only after the Hunter's real return. Then follow
+`references/launch-return-settlement.md` for the exact digest-bound Reviewer,
+review disposition, and evidence-backed Root terminal status. Root remains the
+Single Synthesizer and must write the canonical E/F/D decision before any merge.
 
-The second `delegate` is ready only after the Hunter's real return. Claude must
-call the indicated `xunji-reviewer` Agent with the exact launch prompt, including
-`XUNJI_RESULT_DIGEST=<64hex>`. After the real Reviewer return, bind its disposition
-to the frozen target result, then record Root's evidence-backed disposition:
+Before promotion, report, or closure, run the ordered board-debt/conflict checks
+owned by `references/launch-return-settlement.md`, then the routine offline
+structural check owned by `xunji-run-lifecycle`. This template does not copy those
+commands.
 
-```bash
-{{PYTHON}} tools/workers.py review-disposition "{{RUN_DIR}}" A-<target> A-<reviewer> --status accept-candidate --note "exact digest and controls reviewed"
-{{PYTHON}} tools/workers.py finish "{{RUN_DIR}}" A-<target> --status merged --note "Evidence: E-001; Front: F-001; Root accepted reviewed candidate"
-```
+`--replay-verify` is a live `target` effect, not an offline closure check. Run it
+only when the current top-level operator prompt explicitly authorizes live replay
+and the evidence owner says a replay is required. Load
+`xunji-evidence-replay-gate` and use the single exact replay-verification command
+owned there; do not reconstruct it in this template.
 
-The shown statuses are examples, not permission to accept unsupported material.
-Use `needs-control`/`retry`/`refute`/other supported review disposition and the
-matching Root status when evidence requires it. `review-disposition` marks the
-Reviewer lane reviewed; Root remains the Single Synthesizer and must write the
-canonical E/F/D decision before claiming `merged`.
-
-Before promotion, report, or closure:
-
-```bash
-{{PYTHON}} tools/workers.py agent-check "{{RUN_DIR}}"
-{{PYTHON}} tools/workers.py lifecycle-check "{{RUN_DIR}}"
-{{PYTHON}} tools/workers.py merge-check "{{RUN_DIR}}"
-{{PYTHON}} tools/workers.py synthesize "{{RUN_DIR}}"
-{{PYTHON}} tools/check_run.py "{{RUN_DIR}}"
-```
-
-Only when the controller and run files show a closure-review candidate:
-
-```bash
-{{PYTHON}} tools/check_run.py "{{RUN_DIR}}" --replay-verify
-{{PYTHON}} tools/peer_review.py "{{RUN_DIR}}" --into-run
-{{PYTHON}} tools/check_run.py "{{RUN_DIR}}"
-```
+When the controller and run files show a closure-review candidate, load
+`xunji-reviewops` and its backend reference, obtain the required independent
+review through the single command owned there, then rerun the lifecycle owner's
+offline check.
 
 Closure still requires: no hard `check_run` gates, a current content-addressed
 ReviewReceipt, independent review ledger resolved, retrospective.md with real Self
-and Framework/tooling sections, and no unresolved PR items. Invoke the completion
-Agent with exact `subagent_type=xunji-reviewer` and exact assignment-free formatter
-output `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
-COMPLETION_BUNDLE=<current completion bundle sha256> run=<run.name>
-CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.
-Do not add assignment/front/assets/lane/plan/result-digest fields; require a real
-same-session Start and Stop. This pseudo completion receipt creates no assignment
-or merge projection and does not replace the independent peer-review ReviewReceipt.
-`## CodexCompletionReview` is only the compatible storage heading. Require the last
-non-empty response line to exactly equal
-`XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=<same 40hex>
-COMPLETION_BUNDLE=<same 64hex> run=<same run.name>
-CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS`,
-then record its substantive section before writing a completion marker. In that same
-turn, CronList, delete only the listed job for this run, CronList again, and record
-`cron_cancelled=<job-id|none>` in the journal end event.
+and Framework/tooling sections, and no unresolved PR items. Load the exact
+assignment-free completion formatter and verdict contract from
+`docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer". It
+still requires real same-session
+Reviewer Start/Stop, creates no assignment/merge projection, and does not replace
+the independent ReviewReceipt. For recurring mode, cancel only this run's listed
+job and record `cron_cancelled=<job-id|none>`; a one-cycle fallback has no invented
+Cron to cancel.
 
-After reviewer disposition is recorded in `review.md`, `decisions.md`, or the
-relevant run file, append:
+After reviewer disposition is recorded in the relevant run file, close Reviewer
+with the generic phase-end contract and name the actual next phase.
+
+If this iteration drafts, updates, or finalizes report material, wrap that work
+with the generic Report phase-start/phase-end contract.
+
+Every 10 cycles or when `loop_state` shows stale deferred work, and only while the
+current run contract permits this target effect:
 
 ```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-end --phase "Reviewer" --note "复审处理已记录; 下一阶段=<Report|Root Orchestrator|BLOCKED>"
+{{PYTHON}} tools/rerun_deferred.py --run "{{RUN_DIR}}"
 ```
 
-If this iteration drafts, updates, or finalizes report material, wrap that work:
+This registered sensor writes a rerun result; it does not auto-create canonical
+fronts. Root must inspect and adjudicate any newly reachable asset. A denial or
+failed rerun is not a refreshed queue.
 
-```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-start --phase "Report" --note "起草/更新/定稿报告材料"
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-end --phase "Report" --note "报告材料已记录并检查"
-```
-
-Every 10 cycles or when `loop_state` shows stale deferred work:
-
-```bash
-{{PYTHON}} tools/deferred_queue.py --run "{{RUN_DIR}}"
-```
-
-On stage transition or drift recovery:
-
-```bash
-{{PYTHON}} tools/session_handoff.py write "{{RUN_DIR}}"
-```
+On stage transition or drift recovery, load `xunji-run-lifecycle` and use its one
+owned handoff-write command.
 
 ### 5. Update
 Record the action result in the run files before ending the turn. Then refresh:
@@ -415,28 +324,18 @@ record a newer receipt after adjudicating that change; never use mtime/touch as 
 substitute.
 
 ### 6. Iteration End
-End only after the material floor above is met. Before ending normally, append:
+End only after the material floor above is met. Run the pre-end ordered checks
+owned by `references/launch-return-settlement.md`.
 
-```bash
-{{PYTHON}} tools/workers.py lifecycle-check "{{RUN_DIR}}"
-{{PYTHON}} tools/work_plan.py status "{{RUN_DIR}}"
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" end \
-  --next-action "<与本轮最终 `下一行动:` 完全相同的文本>" \
-  --note "plan cycle disposition complete"
-```
-
-For a plan-bound cycle, `end` derives the typed `cycle_end` from every declared
-lane, immutable result digest, Reviewer receipt, and Root disposition. It must
-first validate the current plan's committed v2 transaction/archive lineage and
-fail closed on missing/pending debt. The CLI-supplied `next_action` is the only
-caller field and must be projected exactly after `下一行动:` in the final response;
-never replace the receipt with a hand-written journal row or a Coda. A later
-same-stage replan or stage transition references this content-addressed prior
-plan/cycle.
+For a plan-bound cycle, use the single exact typed-cycle command and next-action
+projection contract owned by `references/launch-return-settlement.md`. It validates
+the plan transaction/archive lineage and all return/review/Root debt; never replace
+the receipt with a hand-written journal row or Coda.
 
 If this iteration wrote `GHOST_COMPLETE` or `NORMAL_COMPLETE`, the `end` note
-must instead include `cron_cancelled=<job-id|none>` after cancelling the active
-scheduled `/loop` job if one exists.
+must include `cron_cancelled=<job-id|none>`. Only `loop_requested=true` performs
+CronList/delete/verification; `loop_requested=false` records `none` without a Cron
+operation or recurring-loop claim.
 
 If the loop is interrupted before Markdown files are consistent, append an
 `interrupt` event with the last completed step before handing back or restarting:

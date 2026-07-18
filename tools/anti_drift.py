@@ -139,9 +139,8 @@ def is_normal_mode() -> bool:
 # Tier-3 (BOTTOM — "约束速查"): constraints, format rules, gating. Placed last so they sit in the
 #   recency zone as a final check before the model produces output.
 BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
-    "自主驱动: safe 前沿还在就别停下问(会话长/已解决障碍/选下一类 都不是停止理由)",
+    "回合优先级: 当前回合有 receipt-backed TARGET_DENIED/MAINTENANCE_BLOCKED 时, 停止普通 plan/Agent/Reason-pass/Coda, 只输出 output_gate exact envelope; 否则 safe 前沿还在就自主推进, 未完成时只用唯一「下一行动」收尾(普通 BLOCKED 无效)",
     "Reason pass: 每轮重读整个 frontier.md(所有 open+deferred)并结合 evidence/coverage/graph 裁定后写 v1 receipt; 内容未变可只读确认, 禁止 freshness touch/edit",
-    "回合协议: active run 未完成时结尾必须且只能有一个「下一行动: <一个对象+一个具体动作>」; 空值/占位/泛泛继续/多动作/多F-id/错误F-id/BLOCKED都会被 Stop hook 硬拦",
     "联网检索走唯一 owner: 每次公共 WebSearch 前按 .claude/skills/web-research/SKILL.md 先执行已注册的 python3 tools/timestamp_gate.py --search-hint --kind vuln 并遵守输出; 非 CVE/CNVD 用 --kind generic; active run 不用 WebFetch",
     "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮走 web-research 的 time gate → xunji-knowledge-flywheel → 公共 WebSearch → structured lead; Root 记录后再关闭或定级",
     "操作者约束持久化: 收到 directive/constraint 后先更新 hints.md(HINT-xxx, Kind=directive/constraint, Status=pending) 再继续; 每轮 Reason pass 无条件 Read hints.md —— constraint 是全 run 级原则非当前前沿上下文, 跨轮有效直到操作者显式解除",
@@ -150,13 +149,13 @@ BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
 BINDING_RULES_TIER3 = [   # BOTTOM: 约束速查 — placed at recency position
     "消费 Guanlan、跳过不可达; 不重做 OSINT / 不建 egress·relay·重探",
     "前沿只重排不关闭(关闭是 Reviewer 的事); BLOCKED 先判 A类(可打破) vs B类(关闭/延迟)",
-    "证据门: 负面/环境结论也存盘产物; 先验证再给 ≥0.8; 单一来源/样例模板=≤0.5 · scripts≠证据(replay才有效)",
-    "阶段检查点: Driver/Hunter/Reviewer 每批产出后自动触发 peer_review --into-run, codex BLOCKER 先修再继续",
+    "证据门: 负面/环境结论也存盘产物; 先验证再给 ≥0.8; 单一来源/样例模板=≤0.5; scripts/散文不替代产物+control/replication",
+    "复审路由: 当前证据 fingerprint 触发独立复审时加载 xunji-reviewops; Agent Reviewer/手填 review.md 不替代 ReviewReceipt",
     "任何代码/文档修改必须经过 codex 复审; codex 必须走专用代理(CODEX_PROXY)",
     "不过度工程(画蛇添足); 能进代码闸门的别写 prose · 中文回答",
     "联网搜索 tripwire: WebSearch/CVE 引用输出前必须已跑 timestamp_gate 并逐条执行 search_hint; active run WebFetch 被代理门拒绝; 未跑 = 不得引用, 跳过 = 协议错误",
     "爆破预算: 同一端点连续爆破 25+ 次无果 → 强制断言 Type B, 转向逻辑漏洞/未授权API(IDOR/路径穿越/配置错误), 不要继续试更多密码(retrospective #4: 500+ 次猜测 0 成功)",
-    "攻击录证: certainty≥0.8 的关键攻击行为必须用 probe.py --save 留 .replay.json 录像; 裸 Python script 攻击后必须补跑 `from harness.guard import RequestRecorder; RequestRecorder(run_dir).record(...)` 录证 —— codex 复审只看 .replay.json, 不认散文描述(retrospective #11)",
+    "攻击录证: certainty≥0.8 的关键主动行为必须通过已注册 recorder/probe 留 request receipt 和产物; 不重构未注册 Python 录证片段, 不把散文当证据",
 ]
 
 # Output drift patterns — driver response containing any of these = protocol violation.
@@ -826,7 +825,7 @@ def _overdue_steps(run_dir: Path) -> list[str]:
             ev_mt = evf.stat().st_mtime if evf.exists() else 0
             rv_mt = rvf.stat().st_mtime if rvf.exists() else 0
             if n_conf and (not has_review or ev_mt > rv_mt):
-                flags.append("codex 检查点 due: ≥0.8 确认且评审未覆盖最新证据 → 跑 peer_review --into-run")
+                flags.append("独立复审 due: ≥0.8 确认且评审未覆盖最新证据 → 加载 xunji-reviewops 并刷新 fingerprint-bound ReviewReceipt")
         except Exception:
             pass
         # closure readiness: report final but review/retrospective missing
@@ -836,7 +835,7 @@ def _overdue_steps(run_dir: Path) -> list[str]:
                     if (run_dir / "review.md").exists() else ""
                 import re as _re
                 if not _re.search(r"Independent Review|独立复审", rv):
-                    flags.append("收口: report 已终版但缺独立复审 → 跑 codex/peer_review")
+                    flags.append("收口: report 已终版但缺独立复审 → 加载 xunji-reviewops；Agent Reviewer/手填 review.md 不满足")
                 retro = run_dir / "retrospective.md"
                 if not retro.exists():
                     flags.append("收口: 缺 retrospective.md(强制复盘)")
@@ -866,7 +865,7 @@ def build_anchor(
         lines.append("  · 网络自立: 不可达→先换路径/备选方案再判定; 不建egress·relay(保持边界内)")
         lines.append("  · 决策自立: 不问操作者任何问题, 所有选择自主做出, 记录在 decisions.md")
         lines.append("  · 不因Type B放弃: WAF/限流/超时阻挡→换方法绕过, 不关闭前沿")
-        lines.append("  · 收口自立: 完成所有前沿后, 跑 check_run→peer_review→retrospective→标记 FINAL")
+        lines.append("  · 收口自立: 完成所有前沿后, 按 lifecycle/reviewops owner 跑离线硬门、独立复审、复盘，再按 typed completion contract 收口")
         lines.append("")
 
     lines.append("[ANTI-DRIFT ANCHOR — 每回合自检, 漂移=没按下面走]")
@@ -926,7 +925,7 @@ def build_anchor(
     if run is not None:
         agent_needed, n_open, _bg = _check_agent_board_needed(run)
         if agent_needed:
-            lines.append("  · Agent Board 强制: active(open/probing/working/type-A) fronts ≥ 4 且无共享 barrier → 本轮必须 spawn ≥ 2 个 subagent (通过 workers.py assign), 禁止 Root 全串行。")
+            lines.append("  · Agent Board 强制: 无 fixed Stop debt 且 active(open/probing/working/type-A) fronts ≥ 4、无共享 barrier → 加载 xunji-agent-board，提交 ≥2 条 ready disjoint lanes 并 delegate；按 owner 的 exact contract 分消息错峰真实 launch，禁止 Root 全串行。")
         # 操作者约束持久化检查: hints.md 有 pending constraint → 提示吸收
         hp = run / "hints.md"
         if hp.exists():
@@ -993,7 +992,7 @@ def build_anchor(
         lines.append("【输出前自检 —— 生成回复前必须逐条确认】")
         if "protocol_violation" in drift_flags:
             lines.append("  □ 最后一个非空行是否【唯一】的「下一行动: <对象+具体动作>」？")
-            lines.append("    → 不含空值/占位/泛泛继续/多动作/多F-id/错误F-id；未完成 run 不得用 BLOCKED 逃避")
+            lines.append("    → 无 receipt-backed fixed Stop debt 时，不含空值/占位/泛泛继续/多动作/多F-id/错误F-id；未完成 run 的普通 Coda 不得用 BLOCKED 逃避")
         if "option_list" in drift_flags:
             lines.append("  □ 是否产生了编号选项列表(1.xxx / 2.xxx)把决策抛回给用户？")
             lines.append("    → 如有, 删掉选项, 自主选一个方向, 写成「下一行动:」。")
@@ -1022,6 +1021,15 @@ def _selftest() -> int:
     checks.append(("anchor non-empty", bool(a.strip())))
     checks.append(("anchor carries binding rules", "本轮必做" in a and "约束速查" in a))
     checks.append(("anchor is compact (<3KB)", len(a) < 3072))
+    checks.append(("anchor routes owners without stale executable protocols",
+                   "workers.py assign" not in a
+                   and "peer_review --into-run" not in a
+                   and "replay才有效" not in a
+                   and "from harness.guard import RequestRecorder" not in a))
+    checks.append(("fixed Stop debt deterministically precedes autonomy and Coda",
+                   "TARGET_DENIED/MAINTENANCE_BLOCKED" in a
+                   and "停止普通 plan/Agent/Reason-pass/Coda" in a
+                   and "BLOCKED都会被" not in a))
     # drift patterns list
     checks.append(("drift patterns non-empty", len(DRIFT_PATTERNS) >= 5))
     # find_active_run: explicit pointer is the only run authority.
@@ -1368,7 +1376,10 @@ def _selftest() -> int:
     # Case 5: verify build_anchor injects the reminder
     test_pointer.write_text(str(ab_dir), encoding="utf-8")
     anchor_ab = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
-    checks.append(("agent board: anchor injects reminder", "Agent Board 强制" in anchor_ab))
+    checks.append(("agent board: anchor injects typed owner reminder",
+                   "Agent Board 强制" in anchor_ab
+                   and "xunji-agent-board" in anchor_ab
+                   and "workers.py assign" not in anchor_ab))
 
     # Case 6: missing frontier.md -> not needed
     no_frontier = _tmp_runs / "no_frontier_run"

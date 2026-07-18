@@ -34,21 +34,19 @@ Routing invariant:
 - Setup: affirmative target/recon/URL/markdown create/preparation only; do not start loop.
 - Resume: affirmative resume request reads run files and handoff; do not start loop.
 - Hint: write/update `hints.md` before the next lifecycle decision.
-- Loop: only when the first non-empty top-level line begins exact `/loop(?:\s|$)`.
-  Indented/fenced code, blockquotes, inline quotes, questions, analysis requests,
-  and lifecycle denials are data/read-only; conflicting `/loop` plus denial fails
-  closed. Its first source is routed
-  by the exact argv-only command
-  `python3 tools/loop_bootstrap.py --source <input> --type auto`. In the same
-  authorized turn it continues through run binding, fresh CronList/CronCreate,
-  iteration tasks, graph/front decomposition, and real Agent launches. Every later
-  cycle uses `/loop runs/<normalized-run-dir>` and the fixed protocol in
-  `docs/templates/loop_prompt.md`. No generated per-run prompt is required.
+- Execute cycle: load `xunji-run-lifecycle`. A literal first-line `/loop` has Xunji
+  semantics only when the client forwards it unchanged to `UserPromptSubmit`.
+  Client-reserved scheduler expansion is not authority. The lifecycle owner routes
+  that case to an affirmative, uniquely named run/source for one execute cycle with
+  `loop_requested=false`; it must not claim recurring-Cron semantics. Once bound,
+  use the fixed protocol in `docs/templates/loop_prompt.md` and always name the
+  normalized run path, not the original source.
 - Affirmative natural-language setup grants source authority only when it names one
   unique URL. Multiple URLs are ambiguous data; do not choose among them or bootstrap
   until the operator explicitly identifies the lifecycle source.
 
-Natural language never starts loop by itself. `/loop` is the loop boundary.
+Natural language never claims recurring loop mode by itself; it may authorize the
+single setup/resume/execute lifecycle operation classified by the turn contract.
 
 ## Capability Skills (invoke when the task fits)
 
@@ -158,11 +156,8 @@ When starting a new target run.
 Load: `docs/WORKFLOW.md` · `docs/WORKFLOW-reference.md` (templates — when writing run
 files) · `docs/templates/run/`.
 
-Input adapter:
-
-```bash
-python3 tools/loop_bootstrap.py --source '<run-or-URL-or-file>' --type auto
-```
+Input adapter: load `xunji-run-lifecycle` and use its one exact operator-facing
+bootstrap shape. This Router does not duplicate that argv.
 
 This is an exact command-shape contract. Use the current registered Python
 executable (a bare name only when it resolves to that identity) and quote source as
@@ -183,15 +178,10 @@ The route order is: recognizable existing run/run file -> explicit
 HTTP(S) target URL -> local file content -> Guanlan/recon JSON -> candidate
 normalizer. The URL route performs no fetch. Recon ingestion performs no re-probe.
 An unknown/ambiguous file or any validation failure creates no formal run, does not
-move the active pointer, and creates no Cron. Markdown/ordinary JSON now have a
-bounded pilot. Default deterministic mode is:
-
-```bash
-python3 tools/loop_bootstrap.py --source <file> --type file --ai off
-```
-
-External mode is two-phase and requires the current operator prompt to contain
-`--ai external`: first call the same adapter with provider/model plus
+move the active pointer, and creates no Cron. Markdown/ordinary JSON use the bounded
+pilot and default to deterministic `--ai off`; load `xunji-setup-ingest` for the
+single exact external-normalizer shapes. External mode is two-phase and requires
+the current operator prompt to contain `--ai external`: first call the same adapter with provider/model plus
 `--prepare-normalizer`, reason only over its redacted token/ref JSON, then pass a
 strict `setup-normalizer-candidate.v1` JSON via `--candidate-json`. Never Read the
 raw file into an external model first. AI returns IDs only; the harness restores
@@ -201,11 +191,12 @@ fail-closed until their provenance fixtures exist.
 
 Output:
 
-- **Create the run dir in ONE shot**: `python3 tools/setup_run.py <slug> <recon.json>`
-  or `python3 tools/setup_run.py <slug> --target <http-or-https-url>` —
-  builds the skeleton + `evidence/`/`scripts/` subdirs, folds the FULL asset table via
-  ingest_recon into `surface_recon.md`, records the recon path in `target.md`, **and
-  builds `coverage.json` directly from the Guanlan recon (zero re-probe)**.
+- **Create the run in ONE transaction through the bootstrap route above.** Its
+  internal source-specific setup adapter builds the skeleton +
+  `evidence/`/`scripts/` subdirs, folds the FULL asset table via ingest_recon into
+  `surface_recon.md`, records the recon path in `target.md`, **and builds
+  `coverage.json` directly from the Guanlan recon (zero re-probe)**. Do not invoke
+  that internal adapter as a second operator route.
 - **Freeze setup provenance**: the run stores the original snapshot,
   `sources/normalized.json`, and `sources/validator_receipt.json` under the
   versioned `xunji.setup-source.v1` contract. `target.md` remains the human-readable
@@ -236,8 +227,10 @@ Output:
   stays `EXPLAIN_ONLY` until the first new prompt. Recovery must revalidate the
   receipt, required
   files, coverage, complete source bundle, and immutable claim binding; pointer +
-  status alone are insufficient. After committed/recovered setup, run fresh CronList, CronCreate
-  naming the new run, and TaskCreate/TaskUpdate before any Agent/target action.
+  status alone are insufficient. After committed/recovered setup, follow the bound
+  turn contract: setup-only stops after activation; `loop_requested=true` runs fresh
+  CronList/CronCreate naming the new run; `loop_requested=false` performs no Cron
+  action. An execute cycle records TaskCreate/TaskUpdate before any Agent/target action.
   Stable recovery codes distinguish missing setup/list/run-name/create/plan state;
   a denied action is not permission to schedule the old run.
 - **Bind one exact lifecycle effect**: the argv layer validates adapter operation and
@@ -292,11 +285,10 @@ updated `decisions.md`.
   evidence supports it is the over-digging failure the Reviewer budget exists to catch —
   not progress. A scan is sensor input to this gate, never the front-selection decision.
 - Once an observation **grounds a product fingerprint** (or `classify_hosts` tagged the
-  asset `kb:<id>`), retrieve that stack before crafting the next check —
-  `python3 tools/knowledge_match.py --body` (weak-point anchors + CVE leads) +
-  `python3 tools/xday_match.py --body` (stored local exploit; the variant-analysis
-  read-side, cognition "Grounding and Variant Analysis"). Consult on the hit, adapt
-  per-target; **never pre-load the base as a checklist**.
+  asset `kb:<id>`), load `xunji-knowledge-flywheel` before crafting the next check.
+  In a live run it uses bounded built-in Read/Grep/Glob over the matching local
+  entry; helper CLIs and knowledge writeback are not live-run capabilities. Consult
+  on the hit and adapt per target; **never pre-load the base as a checklist**.
 
 ### Hunter
 
@@ -337,11 +329,12 @@ Load: `frontier.md` · `hypotheses.md` · `evidence.md` · `false_positive.md` �
 Output: `review.md` · reopened/downgraded fronts if needed · next autonomous front.
 
 **Before any closure / "explored enough" claim, the Reviewer MUST obtain a real
-independent review.** Run `tools/peer_review.py runs/<dir> --into-run` in the
-foreground and resolve its PR ledger. `check_run.py` requires the generated
-content-addressed receipt, current evidence/bundle hashes, and a transcript-observed
-invocation. A heading, manual/fresh-context self-fill, copied output, or backend
-failure cannot satisfy the gate; unavailable independent review leaves closure open.
+independent review.** Load `xunji-reviewops` and its peer-review-panel reference;
+that owner supplies the one foreground command, backend matrix, and fallback
+semantics. `check_run.py` still requires the generated content-addressed receipt,
+current evidence/bundle hashes, transcript observation, and resolved PR ledger. A
+heading, manual/fresh-context self-fill, copied output, or backend failure cannot
+satisfy the gate; unavailable independent review leaves closure open.
 
 ### Report
 
@@ -370,10 +363,10 @@ fields, not that the findings are certified.
 
 Project-discipline and run-structure checks in `tools/`:
 
-- `python3 tools/check_run.py runs/<dir>` — the run carries all required files and markers
-  (run at Reviewer and before Report). `--replay-verify` at closure re-checks
-  `.replay.json` evidence against the live target (idempotent GET only, guard-routed,
-  In-scope only; `DIVERGED` = re-adjudicate).
+- `python3 tools/check_run.py runs/<dir>` — the offline structural check used at
+  Reviewer and before Report. Live replay is never a routine closure step; only a
+  current top-level operator authorization may route to the exact command and
+  dispositions owned by `xunji-evidence-replay-gate`.
 - `python3 tools/check_rules.py` — repo ARCHITECTURE-drift guard (no legacy
   orchestrator/playbook dirs or refs; required doctrine files present). Does NOT police
   weapons: exp/poc/scanner code is method and free to live in the repo (`poc_library/`,
@@ -390,30 +383,15 @@ Project-discipline and run-structure checks in `tools/`:
   resolution, request budget by agent, time-to-first-evidence, false-positive
   suppression). Measures the Root/Agents, never drives. Fixtures in `bench/` (benign
   known-vuln targets only, never real engagements). Use it to A/B a framework change.
-- `python3 tools/check_knowledge.py` — the grounding base keeps its structure and stays
-  grounding (no payload/exploit/step fields; every anchor carries a reference + source).
-  Run after editing `knowledge/`.
-- `python3 tools/knowledge_match.py --body <saved-resp>` (or `--id <id>` from a `kb:<id>`
-  classify tag) — the fingerprint flywheel's **retrieval end**: matches target content
-  against the grounding base's `signatures:` and surfaces the entry's Recognition +
-  Weak-Point Anchors (class + mechanism + CVE) to drive the next per-target check.
-  **Public grounding tier only** (never `weaponized/`); recognition + anchors, never
-  payloads. Consult on a fingerprint hit — not a blind pre-load.
-- `python3 tools/xday_match.py --body <saved-resp>` (or `--id <id>`) — the **xday retrieval
-  end** (mirror of `knowledge_match`): same signature match but reads the **local,
-  gitignored** weaponized/xday tiers (`knowledge/weaponized/` + `poc_library/xday/`) and
-  surfaces the stored exploit path + chain. For xday there is no public payload to research
-  online — the local copy is the only source (public vulns: use `knowledge_match` anchors
-  + craft from the internet). Match-gated (live `--body` hit or explicit `--id`); `--list`
-  inventories without dumping payloads. Local-only; the stores never ship.
-- `python3 tools/knowledge_seed.py <id> --product … [--from-body <saved>]` — the flywheel's
-  **write-back end**: scaffolds a compliant `knowledge/<id>.md` grounding **seed**
-  (recognition + anchor TODOs) when recognition **missed** a clearly-fingerprinted product,
-  so the next run recognizes it. `--from-body` suggests candidate `signatures:` (you
-  confirm); fill the TODOs, `check_knowledge` validates. Public grounding tier only — never
-  payloads. Seed on a recognition miss, not a blind mass-import.
-- `python3 tools/setup_run.py <slug> <recon.json>` or
-  `python3 tools/setup_run.py <slug> --target <http-or-https-url>` — Setup-phase ONE-SHOT: build the run
+- `xunji-knowledge-flywheel` — the live retrieval and deferred-writeback owner.
+  It match-gates built-in Read/Grep/Glob to one grounded public entry and, when
+  applicable, one matching local weaponized/xday entry. Its helper CLIs are offline
+  developer tools; a live miss is recorded for a separate repository-maintenance
+  turn rather than mutating `knowledge/` from the engagement. After editing the
+  knowledge base, use the one registered focused aggregate documented by that skill.
+- `tools/setup_run.py` — source-specific Setup adapter behind the operator-facing
+  `loop_bootstrap.py --source ... --type auto`; do not ask Root to choose between
+  two setup routes. The adapter builds the run
   dir from templates (+ `evidence/`/`scripts/` subdirs), fold recon via ingest_recon into
   `surface_recon.md`, record the recon path in `target.md`, derive a default
   `In-scope`/`Out-of-scope` into `target.md` from recon `ownership` (`tools/scope.py`;
@@ -423,19 +401,20 @@ Project-discipline and run-structure checks in `tools/`:
   `reachable=True` only for Guanlan-confirmed ∩ in-scope → the gate demands verdicts for
   the genuinely-reachable subset. `--classify` is opt-in during new-run setup
   (re-probe from your own egress only when you need your-vantage liveness, e.g.
-  after the proxy is up), not an existing-run refresh mode. **Start every run
-  with this**; never hand-curate surface.md (selection bias → blind spots). Builds the
+  after the proxy is up), not an existing-run refresh mode. Start through
+  `loop_bootstrap`; never hand-curate surface.md (selection bias → blind spots). Builds the
   workbench; makes no front choices.
 - `python3 tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
   `surface.md`-ready asset table, entry points, and a reachability matrix (recon-view vs
   your-egress-view). Setup helper; structures intel, makes no front choices.
-- `python3 tools/classify_hosts.py <recon.json>` — **OPT-IN** per-host classification by
+- `python3 tools/classify_hosts.py <recon.json> --out runs/<dir>/classify --egress-recheck`
+  — **OPT-IN** per-host classification by
   LIVE re-probe (stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags). **Not the default
   coverage builder** — setup_run's Guanlan adapter already produces `coverage.json` with
   zero re-probe; bulk-running this = re-OSINT. Use it ONLY for a deliberate
-  **your-own-egress liveness/fingerprint recheck** (e.g. proxy now up). `--hosts <file>`
-  for a plain host list with no recon; skips recon out-of-scope by default; `--all` probes
-  everything; scope via `tools/scope.py`.
+  **your-own-egress liveness/fingerprint recheck** (e.g. proxy now up). The registered
+  live shape is exactly the command above; legacy `--hosts`/`--all` modes are not
+  live capabilities and must not be inferred from helper CLI options.
 - `python3 tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl. webpack
   chunks) and assert completeness. **Run before claiming endpoint enumeration is complete**
   — grepping endpoints from a partial JS set is how a real engagement missed an
@@ -453,18 +432,13 @@ Project-discipline and run-structure checks in `tools/`:
   re-read. Advisory only — never selects the next front (that stays the Root). See
   `docs/WORKFLOW-reference.md` "State Graph".
 - `python3 tools/workers.py <subcommand> runs/<dir>` — work-plan-bound Agent Board
-  control and inspection. `plan` proposes effect-typed lanes; after
-  `work_plan.py commit`, `delegate` atomically creates the ready assignment,
-  context pack, and exact Claude binary launch contract (`subagent_type` plus
-  byte-exact `launch_prompt`) but does not spawn. Role `review` maps only to
-  `xunji-reviewer`; all canonical execution roles map only to `xunji-hunter`.
-  Parent requested type and actual same-session Start/Stop type must agree. A real Hunter
-  Stop unlocks its dependent Reviewer; `review-disposition` binds the frozen
-  result and `finish` records Root's later canonical disposition. `status`,
-  `agent-check`, `conflicts`, and `synthesize` inspect the ledger. Legacy `assign`
-  and `--new` worker files remain compatibility surfaces, not the current
-  orchestration proof. The board never writes canonical findings or bypasses the
-  Single Synthesizer.
+  control and inspection. Load `xunji-agent-board`; its plan/delegate reference is
+  the sole exact plan/assignment owner, and its launch/settlement reference owns the
+  exact Claude binary launch contract (`subagent_type` plus byte-exact
+  `launch_prompt`), return, Reviewer, and Root disposition sequence. `delegate`
+  returns contracts but does not spawn. Legacy `assign` and `--new` remain
+  non-authorizing compatibility surfaces. The board never writes canonical findings
+  or bypasses the Single Synthesizer.
 - `python3 tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash
   chain for actual Agent/Cron/iteration-plan/foreground-review events. Plan
   receipts cover TaskCreate/TaskUpdate/TodoWrite and remain derived rather than
@@ -476,8 +450,8 @@ Project-discipline and run-structure checks in `tools/`:
   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
   canonical and projection must not be hand-edited back into facts.
 - `python3 tools/loop_journal.py runs/<dir> status` — reads
-  `state/loop_journal.jsonl`, the derived interruption journal for explicit `/loop`
-  cycles. Use `start|plan|action|write-result|interrupt|end` inside a loop turn,
+  `state/loop_journal.jsonl`, the derived interruption journal for bound execute
+  cycles. Use `start|plan|action|write-result|interrupt|end` inside an execute turn,
   and `phase-start|phase-end --phase "<Phase>"` when entering/leaving Router phases.
   It is not evidence and never replaces `decisions.md`.
 - `python3 tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle

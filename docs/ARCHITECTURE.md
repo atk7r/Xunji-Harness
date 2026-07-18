@@ -181,7 +181,7 @@ review record 和对应设计 owner 为事实源；两种工作不可混成一�
 ### 4.3 Run 生命周期
 
 ```text
-affirmative setup/resume intent | first-line exact /loop
+affirmative setup/resume intent | first-line exact /loop | named-run one-cycle fallback
   -> bind turn authority
   -> exact argv-only lifecycle adapter (no shell wrapper)
   -> route existing-run | URL | local file by deterministic content rules
@@ -191,11 +191,12 @@ affirmative setup/resume intent | first-line exact /loop
   -> freeze setup_source + prepared transaction receipt
   -> atomic rename to runs/<dir>
   -> commit active-run transition through one compare-and-swap writer
-     |-> natural-language setup/resume only: stop after activation
+     |-> setup/resume-only intent: stop after activation
      |-> first-source exact /loop: fresh CronList -> CronCreate naming bound run
      |      -> TaskCreate/TaskUpdate iteration plan
      |-> existing-run exact /loop: current-turn iteration plan (no new Cron required)
-  -> explicit /loop only: Setup -> Root -> Hunter -> Reviewer -> Report
+     |-> named-run execute fallback: loop_requested=false -> iteration plan, no Cron
+  -> execute cycle only: Setup -> Root -> Hunter -> Reviewer -> Report
   -> check_run + zero open fronts + independent review
   -> terminal journal/completion evidence
 ```
@@ -266,12 +267,16 @@ transition。退出/恢复不删除 run、evidence、journal 或 setup receipt�
 renderer 只读 pointer + 阶段派生状态，不读取 selection receipt 或 turn contract，也不校验
 session/transcript。Session-bound display 是独立 target，不是本轮 current runtime。
 
-首次 `/loop <source>` 由 `tools/loop_bootstrap.py --source ... --type auto` 适配，并在同一
-顶层 operator 回合继续到 run activation、fresh CronList/CronCreate、iteration plan、图谱/
-front 拆解和真实 Agent launch；不得停下来等待裸“继续”。source authority 以完整 source
-SHA-256 绑定，持久化 prompt 展示和 runtime excerpt 脱敏敏感 query，不能用相同 basename
-或不同 query 复用。只有首个非空顶层行以 exact `/loop(?:\s|$)` 开头才是显式 loop，并只
-选择其首个 source token；缩进代码、fenced code、引用日志与行内引用都是 data。自然语言
+当客户端把 literal `/loop <source>` 原样交给 `UserPromptSubmit` 时，它由
+`tools/loop_bootstrap.py --source ... --type auto` 适配，并在同一顶层 operator 回合继续到
+run activation、fresh CronList/CronCreate、iteration plan、图谱/front 拆解和真实 Agent
+launch；不得停下来等待裸“继续”。source authority 以完整 source SHA-256 绑定，持久化
+prompt 展示和 runtime excerpt 脱敏敏感 query，不能用相同 basename 或不同 query 复用。
+只有原样送达、首个非空顶层行以 exact `/loop(?:\s|$)` 开头才是显式 recurring loop，并只
+选择其首个 source token；缩进代码、fenced code、引用日志与行内引用都是 data。若客户端
+保留 `/loop` 并在 hook 前展开为自身 scheduler，该展开没有 Xunji authority；current driver
+改用 turn contract 已支持的肯定、唯一命名 source/run 自然语言入口完成单次
+`EXECUTE` setup/resume cycle，`loop_requested=false` 且不创建 recurring Cron。自然语言
 setup 必须是肯定的 create/setup intent 且只有恰好一个唯一 URL 才生成 source authority；
 多个 URL、否定、疑问、分析/评审请求都 fail closed/read-only。即使首行写了 `/loop`，同行
 或正文又明确否定 lifecycle，也按冲突意图 fail closed。任意新的非内部顶层 prompt 都按
@@ -292,8 +297,9 @@ Markdown/普通 JSON pilot 由 `tools/setup_normalizer.py` 处理，HTML/PDF/DOC
 boundary；会影响 baseline reachable/low-quality 的相邻 recon report 作为带独立 hash 的
 `related_sources` snapshot 冻结，不能成为隐形第二输入。机械 validator 校验 hash、路径、URL/host/port、重复资产和 `source_ref` 值级
 对应关系；只有 hook 绑定的顶层 prompt hash 能加入 `authority=operator`，source/附件/
-target/tool/reviewer 文本只能是 data。从第二轮起 lifecycle/Cron 只携带规范化的
-`/loop runs/<dir>`，避免重新抽取漂移。新的顶层 prompt 会先撤销同 session 未消费的
+target/tool/reviewer 文本只能是 data。从第二轮起，已建立的 recurring Cron payload 只携带
+规范化的 `/loop runs/<dir>`；client-reserved 情况下手动入口只命名同一规范化 run 并执行
+`loop_requested=false` 单周期，二者都避免重新抽取原始 source 漂移。新的顶层 prompt 会先撤销同 session 未消费的
 pending contract/transition claim；因此命令形状修复必须在原 operator turn 重试，不能从
 历史 prompt 继承转换权限。未知 schema major fail closed；旧下划线 schema
 只用于 existing-run 只读兼容，迁移器必须取得与旧 hash 一致的原始/关联 snapshot，
@@ -351,6 +357,8 @@ Synthesizer。
 paths。普通 `/loop`、source/attachment/target/Agent/tool/reviewer 文本都不能生成该
 authority。维护回合冻结 target/Cron/Agent/canonical run-state 进展，只允许读取、exact
 Edit/Write 与注册的本地检查；被拒绝或失败的动作不是结果，必须保留 receipt 并如实报告。
+同回合 PreToolUse 推进使用已 fsync 的 hook journal，避免 Claude transcript 尚未刷盘时
+继续 Task/control/Agent；最终 Stop truth 仍要求 transcript-backed receipt。两者不能互换。
 普通 live `/loop` 的 Bash 同样只放行正向注册的 read/control/verification/target/review
 capability 与 target tool 的窄 proxy/locale env；未知解释器或 shell 形状不能因关键路径
 字符串不可见而被推断为只读。
@@ -385,6 +393,10 @@ Plan-bound assignment row 是 Agent 启动身份的 durable owner。
 parent Post/Failure、Stop 与 replay 独立重验同一 prompt SHA-256 和 requested/actual type，并把
 `launch_prompt_sha256` 写入 plan-bound Agent attempt receipt。字段 token 都匹配但 prompt 有
 任何前后缀、附加上下文、空白或顺序变化时仍 fail closed。
+Hunter/Reviewer 收到该最小二元 launch 后，不从 prompt 追加路径：Claude-primary Agent
+definition 要求先用内建 Read 读取 active-run pointer 与该 run 的 typed assignment row，再只读
+row 指定的 `agent_file`/`context`。Context 读取前不使用 Bash；之后只执行 context/owner 给出的
+完整注册 argv，禁止 `--help`、路径猜测、wrapper、chain、`which` 或 `python -c`。
 
 Current plan 消费还要求 matching committed v2 work-plan transaction、receipt-hash 命名的
 不可变 archive、完整 `prior_transaction_receipt_hash` lineage，并重新验证 typed journal、
@@ -394,22 +406,49 @@ fail closed，`commit` 不能覆盖洗白。真正的 pre-transaction plan 只�
 `provenance=legacy_migration` 与可重算 source digest；exact committed native v1 也只能由该
 入口升级为 `native_v1_upgrade`，旧新 receipts 都保留在 archive 链中。该 capability 不属于
 ROOT_DIRECT，且不能补造缺失 snapshot。
+`workers.py plan` 成功打印的每个 exact `lane-json` 是 live plan 的唯一 lane 输入；非零
+`NO_STRONG_CANDIDATE` 禁止 commit、手写 lane 或复制文档示例，Root 必须先修正 canonical
+frontier/coverage mapping、重跑 state pass 与 planner。文档只保留参数 grammar，不提供可被
+误认成当前决策的 concrete lane/status/budget 默认值。
 `chains.md` 与 `hints.md` 是带显式 absence 的条件输入，create/modify/delete 都使 current plan
 stale。已返回/失败 execution 只能让唯一的 exact digest-bound completion Reviewer 结算；真正
 assigned-but-never-launched 的非 Reviewer 只能通过 typed `cancel-unlaunched` 事务退休。prepared
 cancellation 先成为 runtime/replan barrier，再耐久删除 launch artifacts 与 assignment row，
 最后发布 immutable tombstone；它不生成 result/review/merge/evidence/cycle_end，必须 material
 replan。
+`state/conflicts.json` 是参与 plan fingerprint 的语义投影；`workers.py conflicts` 在
+`schema/conflict_types/conflicts` 未变化时保留原文件字节与 `generated_at`，只有真实冲突语义
+变化才原子重写并使 current plan stale。重复 owner 检查不得靠刷新投影时间戳制造假 replan。
+该 snapshot→strict-read→compare→replace 全程位于 assignment 跨进程锁内；重复 key 或损坏
+投影带诊断重建，future schema/unknown field fail closed，symlink/non-regular 投影重建为 run 内
+regular file。`work_plan` 对直接注入的 canonical-input symlink 同样 fail closed；`synthesize`
+与 `check_run` 不能以宽松 JSON 把未知投影解释成零冲突。
 所有 assignment RMW 共用同一跨进程锁，runtime journal 锁与 assignment 锁不嵌套；Agent
 hook exact replay 幂等，冲突 identity 或重复 projected attempt 保留 lifecycle debt；
 `SubagentStop` 只允许关闭同 `session_id` 的唯一 launch，跨 session、未匹配或多匹配 Stop
 不能改变 attempt/assignment 终态。Start 没有 parent tool/prompt identity 时只接受唯一完整
 unbound candidate；同一 assistant message 的多个候选不再按到达顺序猜测，真实并行必须跨
-assistant messages stagger launch。
+assistant messages stagger launch。父 Agent 的 `PreToolUseDenied` / `PostToolUseFailure` receipt
+会永久退休该 tool-use 的 Start 分配资格，避免后续成功 launch 的 `PostToolUse` 与 child Start
+竞态时让已拒绝 canary 重新参与候选歧义。
+Child tool hook 的 `transcript_path` 指向父 session transcript，但工具调用只存在于 Claude 的
+exact `<session>/subagents/agent-<agent_id>.jsonl` sidechain。Runtime receipt 因此只从安全的
+session/agent token 派生该单一路径，不 glob、不回退父/兄弟 transcript，并要求结构化
+session/agent/sidechain envelope 与 prior unique Start 或 async Agent launch 因果 owner；路径
+漂移、symlink、身份冲突或 malformed JSON 均不能满足 target/maintenance truth。
 当前 Claude Code 的 per-Agent `maxTurns` 终止路径可能只发内部 task notification 而漏掉
 `SubagentStop`；因此 Hunter/Reviewer 定义不设置该硬 cap，改由 lane stop condition、loop/
 request/model budget 与 guard 约束。task notification 仅是状态/控制输入，不能冻结结果或解除
 dependency；child transcript 以 `tool_use` 加未消费 tool result 截止时也不是 final envelope。
+Plan-bound assignment 的 typed `tool_call_limit` 由 `workers.py` 物化，旧 v1 row 缺字段时按
+fail-closed 默认值 6 解释；显式值只允许 5–64。`SubagentStart` 把有效值连同 assignment/lane/
+plan/prompt/type 冻结进 runtime receipt，之后不再读取可变 assignment 来决定本 attempt 的上限。
+每次 child PreToolUse 先在现有 hash-chain journal 与 runtime lock 下 append/fsync 一个
+`AgentToolCallClaim`，再进入 effect/path/safety/shape gate；四次 binding Read 和所有 denial 因此
+都计数，RDT loop budget 不能抬高它。相同 child tool-use + 相同语义 exact replay 不重复占位，
+同 ID 异义、跨 session/sibling、Stop 后调用和不连续/tampered ordinal 均 fail closed；超过上限的
+claim 标为未准入并以 `XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED` 在工具执行前拒绝。临近上限的
+PreToolUse 只注入短 return 提示，不替代 hard gate 或 runtime receipt。
 Agent lifecycle hook 的内部 receipt 异常以 `XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED` 非零退出并
 保持显式 debt，不再以 rc=0/空输出静默吞掉。
 `SubagentStop` result 在 journal append 前先完成 file fsync、`state/merge_results/<assignment>`
@@ -482,6 +521,16 @@ Xunji 管的是自动执行的效果和执行者，而不是禁止技术思考�
   data。可信解释器对已登记脚本发起的干净单命令若 argv 未匹配任何 capability，或末尾只
   带 `2>&1`/单段 `head`/`tail` 观察包装，返回兼容 diagnostic
   `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED`，并以 `invalid-argv`/观察包装 category 区分。
+  `turn_contract.py` 还可把 literal `&&` compound 识别为 `registered-chain` diagnostic，
+  但仅限每个 executable segment 都能独立匹配 typed capability、无 env/critical-path data，
+  且附加段只是静态展示 `echo`；整个 compound 仍被拒绝且不拆分执行，不生成 maintenance
+  truth。`capability_effect` 保存固定风险优先级下的 primary effect；
+  `capability_effects` 保存按 `target > model_egress > control > local_verify > local_read`
+  稳定排序的 distinct effect set，不表达 segment 顺序或次数。target segment 的顺序、重复与
+  消债身份由 `target_retry_action_sha256s` 冻结，只有后续每条精确成功才消债。
+  已登记 Python 入口中的纯 invalid argv 使用 `registered-chain-invalid-argv` nonmaintenance
+  diagnostic；任一 repo-mutation、未知入口、env、重定向、pipe、expansion、newline、
+  Git/patch、`python -c` 继续走原 fail-closed 路径。
   该 diagnostic 从不执行命令、剥包装后授权或返回 trusted invocation；它只证明
   PreToolUse 已阻止这次近失配，所以 recovery 是同一 operator 回合按 owner 文档补齐 clean
   argv，而不是伪造一次需要新 operator authority 的维护动作。未知脚本/解释器、inline 或
@@ -493,6 +542,9 @@ Xunji 管的是自动执行的效果和执行者，而不是禁止技术思考�
   进入 maintenance truth gate。Git/patch effect 只从 direct、`env`、明确 shell `-c`、
   `command`/`exec` 的 executable position 解析；quoted argument 中出现 `git`/`patch` 文本
   不能铸造 repo-mutation truth。
+  当前回合 progression 直接从 hash-chain-valid、已 fsync 的 Hook journal 结算 maintenance
+  denial/failure 与 exact success，不能因 transcript flush lag fail open；output/closure 对外真值
+  继续只消费 exact transcript-backed event。
 - 当前 exact-command 证明以 Claude Code 启动器和本机 shell 配置可信为平台前提；它会拒绝
   target/tool 提供的 env、PATH 漂移和伪 executable identity，但不声称能从 shell command
   string 证明操作者本机预装的 alias/function 不会接管。消除这一剩余前提需要未来的结构化
@@ -689,7 +741,7 @@ CCB Agent Runtime
 | `tools/work_plan.py` + `contracts/work-plan.v1.schema.json` | Macro-Stage/work-plan/delegation 单一 commit owner、前向恢复事务、plan snapshots 与 stage transition | run_model、loop journal、workers、turn/run gates、fault fixtures |
 | `tools/workers.py` + assignment/merge/review schemas | lane planner、预算/effect scheduler、批量 assignment/context 事务、由 typed assignment row 返回 canonical type+prompt 二元 launch contract、Reviewer/Root disposition | runtime receipts、context pack、Agent templates、merge/conflict tests |
 | `tools/agent_settlement.py` + `contracts/assignment-cancellation.v1.schema.json` | stale-plan unlaunched assignment 的 typed cancellation、immutable tombstone、runtime/replan barrier 与 forward recovery | workers 单写者、runtime receipts、turn contract、fault/schema fixtures |
-| `tools/runtime_receipts.py` + Root/Agent receipt schemas | plan-bound type+prompt 唯一 formatter/hash 与 requested/actual type binding、assignment-free global completion formatter/lifecycle、hook-observed launch/return/failure、immutable result、ROOT_DIRECT claim/terminal projection | workers、turn contract、transcript、run model、loop journal、schema conformance |
+| `tools/runtime_receipts.py` + Root/Agent receipt schemas | plan-bound type+prompt/typed tool-call budget 的唯一 formatter、Start 冻结与 child PreToolUse claim，assignment-free global completion formatter/lifecycle、exact child-sidechain transcript truth、hook-observed launch/return/failure、immutable result、ROOT_DIRECT claim/terminal projection | workers、turn contract、parent/child transcript、run model、loop journal、schema conformance |
 | `tools/run_model.py` + `tools/loop_journal.py` + cycle schema | receipt-derived plan debt/readiness 与 append-only typed cycle/stage sequence | work plan、run/check gates、exact rederive/fallback/tamper fixtures |
 | `docs/WORKFLOW*.md` | live run 核心/按需参考流程 | templates、check_run、skills |
 | `docs/cognition/` | 判断纪律与 evidence confidence | 不把攻击 playbook 写进 cognition |
@@ -712,6 +764,29 @@ Claude skill 树内部也只允许一个 owner：`web-research` 是公共检索�
 `xunji-web-research-sync` 与 `xunji-peer-review-panel` 仅保留为兼容路由，不得复制
 命令、矩阵或晋级规则。`driver-doc-conformance` fixture 对 owner 必含和 alias 禁含
 同时校验，防止薄路由重新长成第二套协议。
+
+同一按需加载原则也适用于 run/Agent 链：`xunji-run-lifecycle` 只拥有 entry、activation
+recovery、handoff、routine check、pause 与 closure 的顺序，不复制 setup、Agent、evidence
+或 review 的精确协议；`xunji-agent-board` 的常用入口只保留执行归属与不可跳过的小周期，
+plan/delegate 和 launch/return/settlement 分别由两个 reference 承载可复制命令并继续以
+Python validator/receipt 为最终 owner；每轮 `loop_prompt` 只保留阶段顺序和加载时机，不再
+复制 plan/delegate/review/finish/cycle-end/independent-review exact argv 或 completion envelope。
+该 loop prompt 也是多行命令展示的唯一调用规则 owner：每行是一次独立 Bash tool call，
+code fence 只表达顺序；owner reference 不再重复或暗示 compound aggregate。
+公共/本地知识在 live run 中通过 grounded ID/签名
+使用内建 Read/Grep/Glob 做最小只读加载；未注册的 matcher helper 不进入 live capability，
+知识写回留给独立 repository-maintenance turn。fixture 同时验证主 skill 禁含重复命令、
+reference 的 typed argv/effect，以及 live replay 仍被分类为显式授权的 `target` effect。
+生成的 Agent 文件和 context pack 只是 lane/context 展示面：Agent 文件不得复制
+`delegate` 的 byte-exact launch prompt 或替 Root 编造 `finish` argv，context pack 的知识提示
+必须服从 knowledge owner 的 live-read/maintenance 分界；生成器 selftest 防止这些派生提示
+重新长成第二份可漂移协议。`.claude/agents/xunji-hunter.md` 与 `xunji-reviewer.md` 只补充
+plan-bound Read bootstrap、local tool discipline、硬调用预算和返回形状，不复制 Root CLI。
+当前 Claude Code 客户端若把 `/loop` 保留为内建 scheduler（2.1.201 已观察到），字面命令
+可能在 `UserPromptSubmit` 前被消费；该展开不产生 Xunji authority。lifecycle owner 在这种
+客户端只路由到 turn-contract 已支持的命名 source/run 单周期 `EXECUTE`，其
+`loop_requested=false`，不得创建或声称 recurring-Cron 语义。Hook 对真正原样送达的 exact
+`/loop` 契约不变；未来若更名入口，需要另阶段修改 contract/fixtures，而非提示词假装完成。
 
 ## 9. 规则进入与架构决策
 
@@ -794,9 +869,10 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 10. Closure 是多信号机械状态；失败、deny、timeout、session length 和报告存在都不等于完成。
 11. 并行 breadth 不放松 authority、request budget、evidence 或 merge/closure 门。
 12. CCB 迁移通过 versioned contract + differential tests 演进，不建第二 runtime 真值。
-13. 普通 live `/loop` 不能修改自己的 enforcement/trusted-entrypoint 依赖；只有顶层
+13. 普通 live execute cycle 不能修改自己的 enforcement/trusted-entrypoint 依赖；只有顶层
     `/xunji-maintenance` exact-path contract 能授权本地修复，且维护回合不并行 target、
-    Agent、Cron 或 canonical run-state 进展。
+    Agent、Cron 或 canonical run-state 进展；同回合推进消费 durable Hook truth，Stop/结论
+    仍消费 transcript-backed truth。
 14. Live Bash 是正向 capability allowlist，不用路径字符串黑名单证明任意解释器只读；
     tool-level/inline env 只能使用目标工具明确登记的 proxy/locale 键。
 15. Setup source 是带来源的候选输入，不是新 canonical authority：每个晋级字段必须能
@@ -808,10 +884,12 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 17. 文件候选资产的 scope 晋级只能来自 operator 首行 exact directive + hook one-use claim；
     `scope_admission.py` 只接纳 active run 中指定的 `review` 行，并以 committed receipt 与
     projection hash 证明。准入回合 zero-probe，source/AI/Agent/front/手改不能铸造权限。
-18. 显式 `/loop <source>` 的执行顺序是 exact bootstrap → transaction-bound activation →
+18. 原样送达的显式 `/loop <source>` 顺序是 exact bootstrap → transaction-bound activation →
     fresh CronList/CronCreate → iteration-plan receipt → graph/front/real Agent；shape deny 只能
-    同 operator turn clean retry。每个新的非内部 operator prompt 都撤销同 session 的未消费
-    source authority，不受 active pointer 是否已出现影响；自然语言多 URL 也不能铸造 source
+    同 operator turn clean retry。客户端保留字导致的 scheduler 展开不是该入口；肯定且唯一
+    命名 source/run 的自然语言 fallback 只产生 `loop_requested=false` 单周期 EXECUTE，不创建
+    recurring Cron。每个新的非内部 operator prompt 都撤销同 session 的未消费 source
+    authority，不受 active pointer 是否已出现影响；自然语言多 URL 也不能铸造 source
     authority。后续 scope 限制不会因 `settings` 等词中的动词子串撤销 exact `/loop`；只有带
     完整 lifecycle 动词并明确指向 run/运行的否定才撤销该 authority。任务清单不替代 Agent。
 19. Lifecycle authority 同时绑定 exact argv 语义与 one-use effect：未引用 shell expansion、
@@ -829,6 +907,8 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     assignment row 的唯一 formatter 输出，requested type 必须等于 role 的唯一映射并与真实
     Start/Stop type 一致；attempt receipt 保存 prompt SHA-256 与 type。字段级 token 匹配、
     description、副本、追加上下文或类型 alias/空白不能授权。
+    Child tool receipt 只能由 exact session/agent sidechain transcript 与唯一 prior causal owner
+    共同证明；父或兄弟 transcript 的 token 命中、路径猜测和 symlink 均不算。
 22. ROOT_DIRECT 只接受 registry 明确 eligible 的 exact local capability，并只允许一条
     claim→terminal 链；typed succeeded/failed receipt 证明机械动作而非证据、finding、review、
     exit gate 或 closure。
@@ -844,45 +924,52 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-18
-- Scope: Claude Code 主驾驶的 Phase 1 prompt/skill 收敛。`web-research` 成为公共
-  WebSearch 顺序与 structured lead 的唯一 owner；`xunji-reviewops` 保留裁决责任，
-  `references/peer-review-panel.md` 独占 backend/作者矩阵/CLI/egress 细节；两个旧 skill
-  名只保留薄兼容 alias。同步 `ROUTER`、`WORKFLOW*`、anti-drift 生成提示、
-  `timestamp_gate` search hint、deprecated review route 与 driver-doc conformance fixture。
-- Architecture impact: yes — Claude skill 树从重复协议改为 canonical owner + on-demand
-  reference + compatibility alias。Web 研究提示现在与现行 runtime 一致：active run 只用
-  公共 WebSearch，WebFetch 继续由既有代理门拒绝；Agent 只返回 lead，Root/Single
-  Synthesizer 保持 canonical 写入权。复审文档对齐现行 `peer_review.py`：Claude 主驾驶
-  无 Codex/arkcli 时可记录较弱的同族 fallback；Codex-authored diff 下 Claude Code CLI
-  通过 `--driver codex` 是独立 reviewer。上述都是 owner/路由与既有实现对齐，不新增
-  capability、authority、receipt、closure 例外或第二安全 runtime。
-- State/ownership impact: canonical run、active pointer、turn authority、Hook/guard、evidence
-  schema 与 reviewer disposition owner 均未改变。兼容 alias 不拥有命令或规则；fixture
-  同时约束 canonical 必含与 alias 禁含，防止重复协议回生。旧名删除留待兼容期之后，
-  本阶段不把 transitional alias 写成已删除。
-- Prompt-size result: web 两入口由 225 行降为 98 行；ReviewOps/panel 两入口由 333 行
-  收敛为 124 行常用入口，108 行 backend 细节只在需要调用 review 时按需加载。
-- Verification: `check_rules.py`、`check_hook.py`、`check_templates.py`、
-  `check_runtime_boundary.py`、`timestamp_gate.py --selftest`、`anti_drift.py --selftest`、
-  `peer_review.py --selftest`（79 项）及 focused aggregate 均通过；`git diff --check`
-  通过。冻结隔离 candidate 使用项目 Python 通过 `tools/selftest_all.py` 69/69
-  （104.0s），其中 probe 按操作者授权真实绑定本机 loopback。
-- Claude Code primary-driver E2E: Claude Code 2.1.201 通过本机 DeepSeek
-  `deepseek-v4-pro[1m]`、effort `high`，分别从两个旧 slash skill 名启动 fresh session。
-  Web session `cbe7e0c3-ab78-4adb-a7f8-0a0c0a2dbaaf` 实跑 time gate、一次公共
-  WebSearch、alias→owner 路由、capability 与 WebFetch deny 核验；review session
-  `b281ff84-b1fb-4f6a-872f-15c5b3914f87` 实跑 79 项 panel selftest、focused aggregate
-  与 template conformance，未调用 arkcli。无效 argv/系统 Python 3.9 的尝试均被拒绝或
-  中止后以正确项目 Python/clean argv 重跑，未计入 PASS。transcript hash 与恢复记录见
-  `review/records/2026-07-18-claude-primary-skill-consolidation-e2e.md`。
-- Independent review: 操作者明确要求不使用 arkcli。最终 staged framework fingerprint
-  由 fresh Claude Code/DeepSeek session 以 Codex-authored diff 身份只读复审；当前 verdict、
-  findings、处置、fingerprint 与 transcript hash 记录在
-  `review/records/2026-07-18-claude-primary-skill-consolidation-review.md`。只有该记录对最终
-  fingerprint 给出 PASS/WARN 且无未处置 blocker 时才允许提交。
-- Exclusions: `.agents/skills/`、`AGENTS.md`、Codex 行为、CCB/TypeScript 迁移、target
-  methodology 与 pre-existing `tools/xunji_statusline.py`/项目简介/现场 artifact 改动均不在
-  本阶段 candidate、复审或提交范围；不会借本 checkpoint 宣称其完成。
+- Scope: Claude Code 主驾驶 Phase 2 Agent runtime 垂直切片。`workers.py` 物化
+  plan-bound assignment 的 typed `tool_call_limit`（默认 6），context/Agent boundary 只展示
+  冻结值；`SubagentStart` 冻结该 attempt 的 cap，child PreToolUse 先写 append-only
+  `AgentToolCallClaim` 再进入其余 gate。同步 assignment schema、capability argv、work-plan/
+  assignment/launch/return/review/Root settlement/cycle-end owner、Hook projector、检查器与
+  conformance fixture。
+- Architecture impact: yes — plan-bound child 工具调用从 prompt 自觉升级为 deterministic
+  runtime boundary。每次 attempted call（包括后续被其他 gate 拒绝的调用）都在同一 runtime
+  lock/hash chain 下原子分配 ordinal 并 fsync；exact replay 幂等、同 ID 异义/跨 session/
+  sibling/Stop 后调用 fail closed，首次 over-limit claim 在执行前以稳定错误码拒绝。RDT
+  reasoning loop budget 不能抬高 cap。该边界不扩展 target/maintenance authority，也不把
+  assignment-free global completion Reviewer 偷换成 plan-bound assignment。
+- State/ownership impact: `contracts/assignment.v1.schema.json` 的字段保持 optional，旧 row
+  缺值按兼容默认 6 解释；新 assignment 显式写 5–64。Start receipt 而非可变 assignment 是
+  attempt 执行期 cap 真值；runtime journal 是唯一计数器，不新增可变 counter 文件。Agent
+  final response 仍只冻结成 merge draft，Root/Single Synthesizer 保持 canonical 单写者。
+  同 session 父 Agent 的 `PreToolUseDenied`/`PostToolUseFailure` tool ID 永久退出 Start 分配，
+  修复 denied canary 与后续成功 launch 的 async Post/Start 竞态。
+- Prompt/skill result: Agent Board 的 plan/delegate 与 launch/return/settlement 拆成两个按需
+  reference；主 skill 只保留 owner 路由和不可跳过的 Agent-mode 小周期。live Hunter/
+  Reviewer 用 Read 绑定 typed assignment/context、禁止写 canonical/生成 Agent 文件；
+  ROOT_DIRECT 明确走独立 eligible atomic lane，不再被无条件套入 Hunter→Reviewer。
+  Global completion 精确路由到 `docs/WORKFLOW-reference.md` 的唯一章节；blocked settlement
+  固定 literal `Reason: <barrier>; Front: F-xxx` grammar。
+- Verification: 更新后隔离 candidate
+  `7cf3330d3e5c2e122dd8ebface14bc492e653bdd` / tree
+  `94fdc7a286860ffaccea5d719434d808be409541` 通过 `tools/selftest_all.py` 69/69
+  （107.9s），其中 probe 按操作者授权真实绑定本机 loopback；focused template/context/
+  work-plan/workers/runtime/turn-contract aggregate 6/6，`git diff --check` 通过。
+- Claude Code primary-driver E2E: Claude Code 2.1.201 使用本机 DeepSeek
+  `deepseek-v4-pro[1m]`、effort `high`，未用 arkcli/ultra/MCP/target/network。普通 session
+  `0e28ee7c-6329-41a6-bd86-aa5ee551dca8` 完成 canary→四条真实 Agent lane→两次 review→
+  Root blocked settlement→typed cycle_end，外层 receipt validator 为 `normal:PASS`。故障注入
+  session `6dabe0a6-f9ad-4df9-b90d-1ea696ce7384` 冻结 caps `[6,64,64,64]`，精确证明首个
+  Hunter ordinals 1–6 admitted、7 denied、无第七次 Post，且后三条 lane 不受污染，validator
+  为 `hard-cap:PASS`。全部失败/恢复尝试、hash 与 receipt 见
+  `review/records/2026-07-18-agent-runtime-e2e/README.md`。
+- Independent review: 操作者明确要求不使用 arkcli。提交前由 fresh Claude Code/DeepSeek
+  以 Codex-authored diff 身份对最终 staged framework fingerprint 只读复审；verdict、findings、
+  处置、fingerprint 与 transcript hash 写入
+  `review/records/2026-07-18-claude-primary-agent-runtime-review.md`。无当前 fingerprint 的
+  PASS/WARN 或存在未处置 blocker 时禁止提交。
+- Exclusions: `.agents/skills/`、`AGENTS.md`、Codex 行为、statusline、assignment-free
+  completion 的 numeric cap、公共角色模板组合/SHA-256 防漂移、CCB/TypeScript、target
+  methodology、项目简介与现场 artifact 均不在本阶段 candidate/复审/提交范围；后续阶段
+  不得把本 checkpoint 误读为这些目标已完成。
 
 ## 13. 外部设计来源与采用边界
 

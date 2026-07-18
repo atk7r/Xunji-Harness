@@ -1,45 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""workers.py — Agent Board / 并行 fan-out 的脚手架 + 合并状态台账(不是编排器)。
+"""Typed Agent Board ledger and compatibility worker reader.
 
-driver 在合适时把若干【互不阻塞、打不同资产】的 front 分给数个 fresh-context 子 agent
-并行打(见 docs/templates/worker.md)。每个 worker 只写自己的 workers/W-<id>.md(候选发现),
-driver 是唯一整合者: 把候选过【证据门】后并入 evidence.md。本工具只做两件事——
-
-  --new <F-id>   在 runs/<dir>/workers/ 下开一个新的 W-<编号>.md 脚手架(分配下一个编号)
-  (默认/--list)  列出所有 worker 文件: Status / 候选数 / 是否 done 但未 merge
-  suggest         读取 frontier.md / coverage.json, 给出 fan-out 候选(建议, 非事实)
-  plan            生成 worker 分配草案, 由 driver 确认/复制给子 agent
-  delegate        为当前 plan 的 ready lanes 创建 assignment/context/精确 launch prompt;
-                  实际 Agent tool call 仍由 Claude Code 主驾驶执行
-  assign          生成 agents/A-*.md + context/*.md + state/assignments.json
-  status          列出 assigned / working / done / merged / blocked
-  heartbeat       记录 Agent 已启动/仍在运行/中间状态
-  finish          记录 Agent 终态(done/blocked/failed/abandoned/merged)
-  review-disposition
-                  将真实返回的 Reviewer 绑定到 frozen result digest 并记录 disposition
-  lifecycle-check 检查未终态或心跳过期 Agent; --closure 时作为硬门
-  agent-check     检查 Agent 产物纪律: 不越权 finding/closure, 有循环结构/安全约束/证据指针
-  merge-check     检查 worker candidates + Agent discipline 是否缺 Control/Replicated、重复、冲突、未合并
-  conflicts       将 agent supports/refutes 冲突投影到 state/conflicts.json
-  synthesize      生成 Root Synthesizer 合并草案(建议, 不写 canonical evidence)
-
-它【不】spawn worker(那是 driver 用 Agent 工具做)、【不】自动写 canonical evidence。
-就像 coverage.json 是检视台账, 这是并行工作的台账。check_run.py 复用它报"done 未 merge"。
-
-  python3 tools/workers.py runs/<dir>
-  python3 tools/workers.py runs/<dir> --new F-005
-  python3 tools/workers.py suggest runs/<dir>
-  python3 tools/workers.py plan runs/<dir> --limit 3
-  python3 tools/workers.py delegate runs/<dir> --runtime-slots 2 --limit 2
-  python3 tools/workers.py assign runs/<dir> --role web-auth --front F-001
-  python3 tools/workers.py review-disposition runs/<dir> A-web-hunter-001 A-review-001 \
-    --status accept-candidate --note "frozen result is attributable"
-  python3 tools/workers.py status runs/<dir>
-  python3 tools/workers.py agent-check runs/<dir>
-  python3 tools/workers.py merge-check runs/<dir>
-  python3 tools/workers.py conflicts runs/<dir>
-  python3 tools/workers.py synthesize runs/<dir>
+Current plan/delegate/launch/settlement commands are documented only by the
+Claude-primary ``xunji-agent-board`` references. This module validates and
+projects those contracts; it never spawns Agents or writes canonical evidence.
+Legacy ``--new`` and ``workers/W-*.md`` remain non-authorizing compatibility
+surfaces.
 """
 from __future__ import annotations
 
@@ -170,6 +137,9 @@ ROLE_ALIASES = {
     "single-synthesizer": "synthesizer",
 }
 CANONICAL_AGENT_ROLES = frozenset(ROLE_ALIASES.values())
+DEFAULT_AGENT_TOOL_CALL_LIMIT = 6
+MIN_AGENT_TOOL_CALL_LIMIT = 5
+MAX_AGENT_TOOL_CALL_LIMIT = 64
 
 TARGET_ARTIFACT_OPSEC_RE = re.compile(
     r"\b(?:xunji|agent|worker|exploit|webshell|poc|vuln|rce|sqli|xss|idor|ssrf|lfi|"
@@ -216,7 +186,7 @@ AGENT_SCAFFOLD = """# Agent {agent}
 - Created: {created}
 - Budget used: 0 requests / 0 bytes
 - Reasoning style: personalized-rdt
-- Loop budget: {loop_budget} recurrent step(s)
+- Reasoning-loop budget: {loop_budget} recurrent step(s); this does not authorize tool calls
 - Operator profile: {profile_source}
 
 ## Safety / Guard Invariants
@@ -237,8 +207,8 @@ AGENT_SCAFFOLD = """# Agent {agent}
   and run cleanup only after an explicit `yes`.
 - Produce candidates/refutations only; the Single Synthesizer owns promotion.
 - Do not add `Closure:` or `Report conclusion:` fields.
-- The Agent launch prompt must include exactly:
-  `XUNJI_ASSIGNMENT={agent} XUNJI_FRONT={front} XUNJI_ASSETS={asset_token} XUNJI_LANE={lane_id} XUNJI_PLAN={plan_digest}{result_digest_token}`.
+- Treat the assignment/context as frozen data. Root launches only the exact
+  `subagent_type` and `launch_prompt` returned by `workers.py delegate`.
 - Cover every assigned asset. A barrier (login/302/captcha/WAF) is an outcome to
   investigate and record, not permission to silently drop that asset.
 
@@ -246,11 +216,9 @@ AGENT_SCAFFOLD = """# Agent {agent}
 
 - Read the context pack.
 - State the narrow hypothesis lane.
-- When the Agent tool actually starts this task, Root records:
-  `python3 tools/workers.py heartbeat <run> {agent} --status running --note "started"`.
-- During long work, Root records a heartbeat after material progress or every
-  major loop. At coda, Root records:
-  `python3 tools/workers.py finish <run> {agent} --status done --note "<summary>"`.
+- Return one attributable candidate, refutation, or blocker. Hooks and
+  `runtime_receipts.py` own runtime receipts; Root owns review disposition,
+  canonical adjudication, and terminal settlement.
 
 ## Operator Profile / RDT Controls
 
@@ -1862,7 +1830,8 @@ def _format_rdt_controls(profile: dict) -> str:
 def create_agent_assignment(run_dir: Path, *, role: str, front: str,
                             scope: str = "", agent: str | None = None,
                             assets: list[str] | None = None,
-                            lane_id: str = "") -> dict:
+                            lane_id: str = "",
+                            tool_call_limit: int = DEFAULT_AGENT_TOOL_CALL_LIMIT) -> dict:
     """Create one assignment under the same lock/recovery gate as delegation."""
     with _assignment_mutation_lock(run_dir):
         _recover_prepared_delegate_transaction(run_dir)
@@ -1870,6 +1839,7 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
         return _create_agent_assignment_locked(
             run_dir, role=role, front=front, scope=scope, agent=agent,
             assets=assets, lane_id=lane_id,
+            tool_call_limit=tool_call_limit,
         )
 
 
@@ -1877,6 +1847,7 @@ def _create_agent_assignment_locked(run_dir: Path, *, role: str, front: str,
                                     scope: str = "", agent: str | None = None,
                                     assets: list[str] | None = None,
                                     lane_id: str = "",
+                                    tool_call_limit: int = DEFAULT_AGENT_TOOL_CALL_LIMIT,
                                     before_artifact_write=None,
                                     stale_settlement_plan: dict | None = None) -> dict:
     role = _role(role)
@@ -1885,6 +1856,11 @@ def _create_agent_assignment_locked(run_dir: Path, *, role: str, front: str,
             f"unknown Agent role {role!r}; use one of {sorted(CANONICAL_AGENT_ROLES)}")
     if role == "synthesizer":
         raise ValueError("synthesizer is the Root-owned singleton and cannot be assigned")
+    if isinstance(tool_call_limit, bool) or not isinstance(tool_call_limit, int) \
+            or not MIN_AGENT_TOOL_CALL_LIMIT <= tool_call_limit <= MAX_AGENT_TOOL_CALL_LIMIT:
+        raise ValueError(
+            "tool_call_limit must be an integer in "
+            f"[{MIN_AGENT_TOOL_CALL_LIMIT},{MAX_AGENT_TOOL_CALL_LIMIT}]")
     requested_assets: list[str] = []
     for raw in assets or []:
         for part in re.split(r"[,;，、]+", raw):
@@ -1974,6 +1950,7 @@ def _create_agent_assignment_locked(run_dir: Path, *, role: str, front: str,
             lane_id=str(lane.get("id") or ""),
             plan_digest=str(plan.get("plan_digest") or ""),
             assignment_attempt=assignment_attempt,
+            tool_call_limit=tool_call_limit,
         )
     else:
         ctx_text = f"# Context Pack {front} / {role}\n\n(context_pack unavailable)\n"
@@ -2006,17 +1983,12 @@ def _create_agent_assignment_locked(run_dir: Path, *, role: str, front: str,
     created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     scope_text = scope or "run target scope"
     assets_text = ", ".join(asset_names) if asset_names else "none (non-target lane)"
-    asset_token = ",".join(asset_names) if asset_names else "none"
     rdt_profile = _agent_rdt_profile(run_dir, role, front)
     _atomic_write(agent_path, AGENT_SCAFFOLD.format(
         agent=agent_id,
         role=role,
         front=front,
         assets=assets_text,
-        asset_token=asset_token,
-        result_digest_token=(
-            f" XUNJI_RESULT_DIGEST={review_result_digest}"
-            if review_result_digest else ""),
         effect=effect or "legacy-untyped",
         lane_id=str(lane.get("id") or "legacy-unbound"),
         plan_id=str(plan.get("plan_id") or "legacy-unbound"),
@@ -2051,6 +2023,7 @@ def _create_agent_assignment_locked(run_dir: Path, *, role: str, front: str,
         "status": "assigned",
         "reasoning_style": "personalized-rdt",
         "loop_budget": rdt_profile["loop_budget"],
+        "tool_call_limit": tool_call_limit,
         "operator_profile": rdt_profile["source"],
         "context": display_path(ctx_path),
         "agent_file": display_path(agent_path),
@@ -2593,14 +2566,28 @@ def agent_lifecycle_issues(run_dir: Path, *, closure: bool = False,
         if parsed is not None:
             age = max(0, int(now - parsed))
         if status in NONTERMINAL_AGENT_STATUSES:
+            plan_bound = bool(
+                str(row.get("plan_digest") or "")
+                and str(row.get("lane_id") or "")
+            )
+            if plan_bound:
+                disposition_guidance = (
+                    "plan-bound 状态只能由真实 launch/return 投影推进；不得由 Root "
+                    "finish 为 done。等待匹配 SubagentStop 投影 done 后，执行 Reviewer "
+                    "disposition 与 Root settlement；未启动且 inputs stale 才走 "
+                    "cancel-unlaunched。"
+                )
+            else:
+                disposition_guidance = (
+                    "收口前必须 finish 为 done/merged/blocked/failed/abandoned 并写明处置。"
+                )
             issues.append({
                 "severity": "error" if closure else "warn",
                 "agent": agent,
                 "kind": "agent-not-terminal",
                 "detail": (
                     f"{agent} status={status} front={row.get('front')} last_seen={last_seen or '(missing)'} "
-                    f"note={row.get('last_note') or '-'} —— 收口前必须 finish 为 done/merged/blocked/"
-                    "failed/abandoned 并写明处置。"),
+                    f"note={row.get('last_note') or '-'} —— {disposition_guidance}"),
             })
         if status in {"running", "working", "starting"} and age is not None and age > stale_after_seconds:
             issues.append({
@@ -2833,7 +2820,94 @@ def agent_discipline_issues(run_dir: Path) -> list[dict]:
     return issues
 
 
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"CONFLICT_PROJECTION_DUPLICATE_KEY:{key}")
+        value[key] = item
+    return value
+
+
+def _valid_conflict_timestamp(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return parsed.strftime("%Y-%m-%dT%H:%M:%SZ") == value
+
+
+def _conflict_projection_timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _load_conflict_projection(path: Path) -> dict | None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        print(
+            f"[agent-board] WARN rebuilding unreadable conflicts projection: "
+            f"{type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return None
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        print(
+            "[agent-board] WARN rebuilding non-regular conflicts projection",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8", errors="strict"),
+            object_pairs_hook=_strict_json_object,
+        )
+    except Exception as exc:
+        print(
+            f"[agent-board] WARN rebuilding invalid conflicts projection: "
+            f"{type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return None
+    if not isinstance(value, dict):
+        print(
+            "[agent-board] WARN rebuilding non-object conflicts projection",
+            file=sys.stderr,
+        )
+        return None
+    schema = value.get("schema")
+    if isinstance(schema, int) and not isinstance(schema, bool) and schema != 1:
+        raise ValueError(f"CONFLICT_PROJECTION_SCHEMA_UNSUPPORTED:{schema}")
+    expected = {"schema", "generated_at", "conflict_types", "conflicts"}
+    extra = sorted(set(value) - expected)
+    if extra:
+        raise ValueError(
+            "CONFLICT_PROJECTION_UNKNOWN_FIELDS:" + ",".join(extra))
+    if set(value) != expected or schema != 1 or isinstance(schema, bool) \
+            or not _valid_conflict_timestamp(value.get("generated_at")) \
+            or not isinstance(value.get("conflict_types"), list) \
+            or not all(isinstance(item, str) for item in value["conflict_types"]) \
+            or not isinstance(value.get("conflicts"), list) \
+            or not all(isinstance(item, dict) for item in value["conflicts"]):
+        print(
+            "[agent-board] WARN rebuilding malformed conflicts projection",
+            file=sys.stderr,
+        )
+        return None
+    return value
+
+
 def build_conflicts(run_dir: Path) -> dict:
+    """Linearly rebuild the derived conflict projection from Agent state."""
+    with _assignment_mutation_lock(run_dir):
+        return _build_conflicts_locked(run_dir)
+
+
+def _build_conflicts_locked(run_dir: Path) -> dict:
     agents = _agent_blocks(run_dir)
     conflicts = []
     by_front: dict[str, list[dict]] = {}
@@ -2892,26 +2966,37 @@ def build_conflicts(run_dir: Path) -> dict:
                         "agents": [a["agent"] for a in same],
                         "required_agent": "verification-agent",
                     })
-    data = {
+    conflict_types = [
+        "direct contradiction",
+        "duplicate",
+        "confidence mismatch",
+        "artifact mismatch",
+        "scope mismatch",
+    ]
+    semantic = {
         "schema": 1,
-        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "conflict_types": [
-            "direct contradiction",
-            "duplicate",
-            "confidence mismatch",
-            "artifact mismatch",
-            "scope mismatch",
-        ],
+        "conflict_types": conflict_types,
         "conflicts": conflicts,
     }
-    _atomic_write(state_dir(run_dir) / "conflicts.json", json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    path = state_dir(run_dir) / "conflicts.json"
+    existing = _load_conflict_projection(path)
+    if existing is not None \
+            and all(existing.get(key) == value for key, value in semantic.items()):
+        return existing
+    data = {
+        "schema": semantic["schema"],
+        "generated_at": _conflict_projection_timestamp(),
+        "conflict_types": semantic["conflict_types"],
+        "conflicts": semantic["conflicts"],
+    }
+    _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
     return data
 
 
 def synthesize_draft(run_dir: Path) -> dict:
     assignments = load_assignments(run_dir).get("assignments", [])
     agents = _agent_blocks(run_dir)
-    conflicts = _load_json(state_dir(run_dir) / "conflicts.json", {}).get("conflicts", [])
+    conflicts = build_conflicts(run_dir).get("conflicts", [])
     done = [a for a in agents if a.get("status") in {"done", "merged"}]
     candidates = [a for a in done if not _blankish(a.get("supports"))]
     needs_control = [a["agent"] for a in candidates
@@ -2993,7 +3078,11 @@ def print_suggest(run_dir: Path, limit: int | None = None) -> int:
 def print_plan(run_dir: Path, limit: int) -> int:
     rows = [r for r in suggest(run_dir) if r["score"] >= 3]
     if not rows:
-        print("[workers plan] 无 strong candidate。先串行推进或补 coverage/frontier 资产映射。")
+        print(
+            "[workers plan] NO_STRONG_CANDIDATE: do not commit or copy a "
+            "documentation example; update canonical frontier/coverage mapping, "
+            "rerun the state pass, then rerun this planner."
+        )
         return 1
     selected = rows[:min(limit, 2)]
     lanes = lane_suggestions(run_dir, limit=limit)
@@ -3037,7 +3126,9 @@ def print_assign(run_dir: Path, role: str, front: str, scope: str = "",
         return 1
     print(f"[agent-board] assigned {rec['agent']} role={rec['role']} front={rec['front']} "
           f"lane={rec.get('lane_id') or '-'} effect={rec.get('effect') or '-'} "
-          f"assets={','.join(rec.get('assets') or []) or '-'} loop_budget={rec.get('loop_budget')}")
+          f"assets={','.join(rec.get('assets') or []) or '-'} "
+          f"loop_budget={rec.get('loop_budget')} "
+          f"tool_call_limit={rec.get('tool_call_limit')}")
     print(f"  agent:  {rec['agent_file']}")
     print(f"  context:{rec['context']}")
     print(f"  state:  {display_path(_assignments_path(run_dir))}")
@@ -3095,6 +3186,7 @@ def delegate_ready_lanes(
     model_egress_budget: int = 1,
     merge_capacity: int = 100,
     limit: int = 2,
+    tool_call_limit: int = DEFAULT_AGENT_TOOL_CALL_LIMIT,
     fault=None,
 ) -> dict:
     """Create exact assignments for the next ready plan wave.
@@ -3116,6 +3208,7 @@ def delegate_ready_lanes(
             model_egress_budget=model_egress_budget,
             merge_capacity=merge_capacity,
             limit=limit,
+            tool_call_limit=tool_call_limit,
             fault=fault,
         )
 
@@ -3128,6 +3221,7 @@ def _delegate_ready_lanes_locked(
     model_egress_budget: int,
     merge_capacity: int,
     limit: int,
+    tool_call_limit: int,
     fault=None,
 ) -> dict:
     if _work_plan is None:
@@ -3214,6 +3308,7 @@ def _delegate_ready_lanes_locked(
                 front=str(lane.get("front") or ""),
                 assets=[str(asset) for asset in lane.get("assets", [])],
                 lane_id=str(lane.get("id") or ""),
+                tool_call_limit=tool_call_limit,
                 before_artifact_write=record_artifact_intent,
                 stale_settlement_plan=plan if settlement_only else None,
             )
@@ -3232,6 +3327,7 @@ def _delegate_ready_lanes_locked(
                 "lane_id": rec["lane_id"],
                 "role": rec["role"],
                 "effect": rec["effect"],
+                "tool_call_limit": rec["tool_call_limit"],
                 "context": rec["context"],
                 "subagent_type": subagent_type,
                 "launch_prompt": prompt,
@@ -3264,6 +3360,7 @@ def _delegate_ready_lanes_locked(
         "request_budget": request_budget,
         "model_egress_budget": model_egress_budget,
         "merge_capacity": merge_capacity,
+        "tool_call_limit": tool_call_limit,
         "assignments": created,
         "next_action": (
             "Claude primary driver calls Agent once per assignment using both "
@@ -3275,6 +3372,7 @@ def print_delegate(
     run_dir: Path,
     *, runtime_slots: int, request_budget: int,
     model_egress_budget: int, merge_capacity: int, limit: int,
+    tool_call_limit: int,
 ) -> int:
     try:
         batch = delegate_ready_lanes(
@@ -3284,6 +3382,7 @@ def print_delegate(
             model_egress_budget=model_egress_budget,
             merge_capacity=merge_capacity,
             limit=limit,
+            tool_call_limit=tool_call_limit,
         )
     except (ValueError, _work_plan.PlanError if _work_plan is not None else ValueError) as exc:
         print(f"[workers delegate] ERROR {exc}", file=sys.stderr)
@@ -3295,7 +3394,7 @@ def print_delegate(
 def print_status(run_dir: Path) -> int:
     rows = agent_status_rows(run_dir)
     if not rows:
-        print("[agent-board] no assignments yet. Use `workers.py assign runs/<dir> --role web-auth --front F-001`.")
+        print("[agent-board] no assignments yet. Load xunji-agent-board, commit the current typed plan, then delegate ready lanes.")
         return 0
     print(f"[agent-board] {len(rows)} assignment(s)")
     for r in rows:
@@ -3375,8 +3474,6 @@ def print_conflicts(run_dir: Path) -> int:
 
 
 def print_synthesize(run_dir: Path) -> int:
-    if not (state_dir(run_dir) / "conflicts.json").exists():
-        build_conflicts(run_dir)
     draft = synthesize_draft(run_dir)
     print(f"[agent-board] synthesis draft -> {display_path(state_dir(run_dir) / 'synthesis.json')}")
     print(json.dumps(draft["summary"], ensure_ascii=False, indent=2))
@@ -3706,6 +3803,7 @@ def print_merge_constraints(run_dir: Path) -> int:
 
 def _selftest() -> int:
     from concurrent.futures import ThreadPoolExecutor
+    import threading
     from unittest import mock
 
     d = Path(tempfile.mkdtemp())
@@ -3782,7 +3880,8 @@ def _selftest() -> int:
         encoding="utf-8")
     missing_issues = merge_check(with_missing)
     plan_limited_rows = [r for r in suggest(run) if r["score"] >= 3]
-    with contextlib.redirect_stdout(io.StringIO()):
+    driver_output = io.StringIO()
+    with contextlib.redirect_stdout(driver_output):
         no_strong_exit = print_plan(no_strong, 3)
         clean_exit = print_merge_check(empty_run)
         legacy_list_exit = main([str(run)])
@@ -3790,6 +3889,7 @@ def _selftest() -> int:
         assign_cli_exit = main(["assign", str(run), "--role", "review", "--front", "F-001",
                                 "--asset", "a.example"])
         status_cli_exit = main(["status", str(run)])
+        empty_status_cli_exit = print_status(empty_run)
     agent_check_empty_exit = main(["agent-check", str(empty_run)])
     agent_clean = d / "agent_clean"
     agent_clean.mkdir()
@@ -3935,6 +4035,31 @@ def _selftest() -> int:
         "# Decisions\n## D-001\n- Result: framework barrier\n", encoding="utf-8")
     disposition_rec = create_agent_assignment(
         disposition_run, role="review", front="F-001")
+    disposition_path = _assignments_path(disposition_run)
+    disposition_bytes_before_invalid = disposition_path.read_bytes()
+    missing_reason_rejected = False
+    try:
+        update_agent_lifecycle(
+            disposition_run, disposition_rec["agent"], status="blocked",
+            note="Front: F-001; framework barrier", terminal=True)
+    except ValueError as exc:
+        missing_reason_rejected = (
+            str(exc) == "invalid disposition note; blocked 缺 Reason:"
+        )
+    missing_reason_preserves_state = (
+        disposition_path.read_bytes() == disposition_bytes_before_invalid)
+    missing_front_rejected = False
+    try:
+        update_agent_lifecycle(
+            disposition_run, disposition_rec["agent"], status="blocked",
+            note="Reason: framework barrier", terminal=True)
+    except ValueError as exc:
+        missing_front_rejected = (
+            str(exc) == "invalid disposition note; blocked 缺 Front: F-xxx"
+        )
+    malformed_finish_preserves_state = (
+        missing_reason_preserves_state
+        and disposition_path.read_bytes() == disposition_bytes_before_invalid)
     invalid_disposition_rejected = False
     try:
         update_agent_lifecycle(
@@ -4006,24 +4131,41 @@ def _selftest() -> int:
         rec = create_agent_assignment(
             gate_run, role="web-hunter", front="F-001", assets=assets_for_agent)
         subagent_type = "xunji-hunter"
-        transcript_path = gate_run / "transcript.jsonl"
+        transcript_path = gate_run / f"{name}.jsonl"
         child_id = "child-" + name
-        transcript_ids = ["launch-" + name, child_id] + [
-            "action-" + host for host in assets_for_agent]
-        transcript_path.write_text("\n".join(json.dumps({
-            "message": {"content": [{
-                "type": "tool_result", "tool_use_id": tool_id,
-                "content": {"result": f"full runtime result for {tool_id}"},
+        launch_prompt = (
+            f"XUNJI_ASSIGNMENT={rec['agent']} XUNJI_FRONT=F-001 "
+            f"XUNJI_ASSETS={','.join(assets_for_agent)}")
+        transcript_path.write_text(json.dumps({
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": "launch-" + name, "name": "Agent",
+                "input": {
+                    "prompt": launch_prompt,
+                    "subagent_type": subagent_type,
+                },
             }]},
-        }) for tool_id in transcript_ids), encoding="utf-8")
+        }) + "\n", encoding="utf-8")
+        child_dir = transcript_path.with_suffix("") / "subagents"
+        child_dir.mkdir(parents=True)
+        (child_dir / f"agent-{child_id}.jsonl").write_text(
+            "\n".join(json.dumps({
+                "isSidechain": True,
+                "sessionId": name,
+                "agentId": child_id,
+                "message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": "action-" + host, "name": "Bash",
+                    "input": {
+                        "command": f"python3 tools/probe.py GET https://{host}"},
+                }]},
+            }) for host in assets_for_agent) + "\n",
+            encoding="utf-8",
+        )
         _runtime_receipts.append_hook_event(gate_run, {
             "hook_event_name": "PostToolUse", "session_id": name,
             "transcript_path": str(transcript_path), "tool_name": "Agent",
             "tool_use_id": "launch-" + name,
             "tool_input": {
-                "prompt": (
-                    f"XUNJI_ASSIGNMENT={rec['agent']} XUNJI_FRONT=F-001 "
-                    f"XUNJI_ASSETS={','.join(assets_for_agent)}"),
+                "prompt": launch_prompt,
                 "subagent_type": subagent_type,
             },
             "tool_response": {"agentId": child_id, "isAsync": True,
@@ -5120,6 +5262,8 @@ def _selftest() -> int:
         planned_run, planned_hunter["agent"], status="working",
         note="authentic runtime attempt made material progress",
     )))
+    planned_running_issues = agent_lifecycle_issues(
+        planned_run, closure=True)
     _runtime_receipts.append_hook_event(planned_run, {
         "hook_event_name": "SubagentStop", "session_id": "planned-session",
         "transcript_path": str(planned_transcript),
@@ -5317,6 +5461,225 @@ def _selftest() -> int:
     agent_issues = agent_discipline_issues(run)
     context_exists = (ROOT / a1["context"]).exists() if not Path(a1["context"]).is_absolute() else Path(a1["context"]).exists()
 
+    conflict_projection_run = d / "conflict-projection"
+    (conflict_projection_run / "agents").mkdir(parents=True)
+    first_conflict_projection = build_conflicts(conflict_projection_run)
+    conflict_projection_path = (
+        conflict_projection_run / "state" / "conflicts.json")
+    first_conflict_bytes = conflict_projection_path.read_bytes()
+    first_conflict_fingerprint = _work_plan.input_fingerprint(
+        conflict_projection_run)[0]
+    with mock.patch.object(
+            sys.modules[__name__], "_conflict_projection_timestamp",
+            return_value="2099-12-31T23:59:59Z"):
+        repeated_conflict_projection = build_conflicts(conflict_projection_run)
+    repeated_conflict_bytes = conflict_projection_path.read_bytes()
+    repeated_conflict_fingerprint = _work_plan.input_fingerprint(
+        conflict_projection_run)[0]
+    conflict_projection_is_idempotent = bool(
+        first_conflict_projection == repeated_conflict_projection
+        and first_conflict_bytes == repeated_conflict_bytes
+        and first_conflict_fingerprint == repeated_conflict_fingerprint
+    )
+    (conflict_projection_run / "agents" / "A-support.md").write_text(
+        "# Agent A\n- Role: web-hunter\n- Assigned front: F-001\n"
+        "- Status: done\n- Supports: candidate\n- Refutes:\n",
+        encoding="utf-8",
+    )
+    (conflict_projection_run / "agents" / "A-refute.md").write_text(
+        "# Agent B\n- Role: verify\n- Assigned front: F-001\n"
+        "- Status: done\n- Supports:\n- Refutes: candidate\n",
+        encoding="utf-8",
+    )
+    changed_conflict_projection = build_conflicts(conflict_projection_run)
+    changed_conflict_fingerprint = _work_plan.input_fingerprint(
+        conflict_projection_run)[0]
+    semantic_conflict_change_stales_fingerprint = bool(
+        any(
+            item.get("type") == "direct contradiction"
+            for item in changed_conflict_projection.get("conflicts", [])
+        )
+        and conflict_projection_path.read_bytes() != first_conflict_bytes
+        and changed_conflict_fingerprint != first_conflict_fingerprint
+    )
+
+    concurrent_conflict_run = d / "concurrent-conflict-projection"
+    concurrent_conflict_path = (
+        concurrent_conflict_run / "state" / "conflicts.json")
+    lock_attempt_count = 0
+    lock_attempt_count_guard = threading.Lock()
+    second_lock_attempted = threading.Event()
+    first_write_started = threading.Event()
+    second_write_started = threading.Event()
+    release_writes = threading.Event()
+    write_count_lock = threading.Lock()
+    conflict_write_count = 0
+    original_atomic_write = _atomic_write
+    original_assignment_lock = _assignment_mutation_lock
+
+    @contextlib.contextmanager
+    def observed_assignment_lock(run_dir: Path):
+        nonlocal lock_attempt_count
+        with lock_attempt_count_guard:
+            lock_attempt_count += 1
+            if lock_attempt_count == 2:
+                second_lock_attempted.set()
+        with original_assignment_lock(run_dir):
+            yield
+
+    def delayed_conflict_write(path: Path, text: str) -> None:
+        nonlocal conflict_write_count
+        if path == concurrent_conflict_path:
+            with write_count_lock:
+                conflict_write_count += 1
+                count = conflict_write_count
+            (first_write_started if count == 1 else second_write_started).set()
+            if not release_writes.wait(timeout=2.0):
+                raise RuntimeError("conflict projection concurrency fixture timed out")
+        original_atomic_write(path, text)
+
+    def second_conflict_build() -> dict:
+        return build_conflicts(concurrent_conflict_run)
+
+    with mock.patch.object(
+            sys.modules[__name__], "_assignment_mutation_lock",
+            side_effect=observed_assignment_lock), mock.patch.object(
+                sys.modules[__name__], "_atomic_write",
+                side_effect=delayed_conflict_write):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first_future = pool.submit(build_conflicts, concurrent_conflict_run)
+            first_write_observed = first_write_started.wait(timeout=1.0)
+            second_future = pool.submit(second_conflict_build)
+            second_attempt_observed = second_lock_attempted.wait(timeout=1.0)
+            second_reached_publish_before_release = second_write_started.wait(
+                timeout=1.0)
+            release_writes.set()
+            concurrent_results = [
+                first_future.result(timeout=2.0),
+                second_future.result(timeout=2.0),
+            ]
+    concurrent_conflict_projection_is_linear = bool(
+        first_write_observed and second_attempt_observed
+        and not second_reached_publish_before_release
+        and conflict_write_count == 1
+        and concurrent_results[0] == concurrent_results[1]
+        and concurrent_conflict_path.is_file()
+    )
+
+    duplicate_conflict_run = d / "duplicate-conflict-projection"
+    duplicate_conflict_path = duplicate_conflict_run / "state" / "conflicts.json"
+    duplicate_conflict_path.parent.mkdir(parents=True)
+    duplicate_conflict_path.write_text(
+        '{"schema":999,"schema":1,"generated_at":"2026-07-18T00:00:00Z",'
+        '"conflict_types":[],"conflicts":[]}\n',
+        encoding="utf-8",
+    )
+    duplicate_diagnostic = io.StringIO()
+    with contextlib.redirect_stderr(duplicate_diagnostic):
+        rebuilt_duplicate_projection = build_conflicts(duplicate_conflict_run)
+    duplicate_keys_rebuild_with_diagnostic = bool(
+        "WARN rebuilding invalid conflicts projection"
+        in duplicate_diagnostic.getvalue()
+        and rebuilt_duplicate_projection.get("schema") == 1
+        and duplicate_conflict_path.read_text(
+            encoding="utf-8").count('"schema"') == 1
+    )
+
+    malformed_time_run = d / "malformed-time-conflict-projection"
+    malformed_time_path = malformed_time_run / "state" / "conflicts.json"
+    malformed_time_path.parent.mkdir(parents=True)
+    malformed_time_path.write_text(json.dumps({
+        "schema": 1,
+        "generated_at": "9999-99-99T99:99:99Z",
+        "conflict_types": [],
+        "conflicts": [],
+    }), encoding="utf-8")
+    malformed_time_diagnostic = io.StringIO()
+    with contextlib.redirect_stderr(malformed_time_diagnostic):
+        rebuilt_malformed_time = build_conflicts(malformed_time_run)
+    malformed_timestamp_rebuilds_with_diagnostic = bool(
+        "WARN rebuilding malformed conflicts projection"
+        in malformed_time_diagnostic.getvalue()
+        and _valid_conflict_timestamp(rebuilt_malformed_time.get("generated_at"))
+    )
+
+    future_conflict_run = d / "future-conflict-projection"
+    future_conflict_path = future_conflict_run / "state" / "conflicts.json"
+    future_conflict_path.parent.mkdir(parents=True)
+    future_payload = json.dumps({
+        "schema": 2,
+        "generated_at": "2026-07-18T00:00:00Z",
+        "conflict_types": [],
+        "conflicts": [],
+    })
+    future_conflict_path.write_text(future_payload, encoding="utf-8")
+    try:
+        build_conflicts(future_conflict_run)
+        future_conflict_schema_fails_closed = False
+    except ValueError as exc:
+        future_conflict_schema_fails_closed = bool(
+            str(exc) == "CONFLICT_PROJECTION_SCHEMA_UNSUPPORTED:2"
+            and future_conflict_path.read_text(encoding="utf-8") == future_payload
+        )
+
+    unknown_field_run = d / "unknown-field-conflict-projection"
+    unknown_field_path = unknown_field_run / "state" / "conflicts.json"
+    unknown_field_path.parent.mkdir(parents=True)
+    unknown_payload = json.dumps({
+        "schema": 1,
+        "generated_at": "2026-07-18T00:00:00Z",
+        "conflict_types": [],
+        "conflicts": [],
+        "future": True,
+    })
+    unknown_field_path.write_text(unknown_payload, encoding="utf-8")
+    try:
+        build_conflicts(unknown_field_run)
+        unknown_conflict_field_fails_closed = False
+    except ValueError as exc:
+        unknown_conflict_field_fails_closed = bool(
+            str(exc) == "CONFLICT_PROJECTION_UNKNOWN_FIELDS:future"
+            and unknown_field_path.read_text(encoding="utf-8") == unknown_payload
+        )
+
+    symlink_conflict_run = d / "symlink-conflict-projection"
+    (symlink_conflict_run / "agents").mkdir(parents=True)
+    symlink_conflict_path = symlink_conflict_run / "state" / "conflicts.json"
+    initial_symlink_projection = build_conflicts(symlink_conflict_run)
+    outside_conflict_path = d / "outside-conflicts.json"
+    outside_conflict_path.write_bytes(symlink_conflict_path.read_bytes())
+    symlink_conflict_path.unlink()
+    symlink_conflict_path.symlink_to(outside_conflict_path)
+    symlink_diagnostic = io.StringIO()
+    with contextlib.redirect_stderr(symlink_diagnostic):
+        rebuilt_symlink_projection = build_conflicts(symlink_conflict_run)
+    _symlink_digest, symlink_rows = _work_plan.input_fingerprint(
+        symlink_conflict_run)
+    conflict_symlink_rebuilt_and_bound = bool(
+        "WARN rebuilding non-regular conflicts projection"
+        in symlink_diagnostic.getvalue()
+        and rebuilt_symlink_projection == initial_symlink_projection
+        and not symlink_conflict_path.is_symlink()
+        and stat.S_ISREG(symlink_conflict_path.lstat().st_mode)
+        and any(
+            row.get("path") == "state/conflicts.json"
+            for row in symlink_rows
+        )
+    )
+
+    strict_synthesize_rejects_future_projection = False
+    try:
+        synthesize_draft(future_conflict_run)
+    except ValueError as exc:
+        strict_synthesize_rejects_future_projection = (
+            str(exc) == "CONFLICT_PROJECTION_SCHEMA_UNSUPPORTED:2")
+    strict_synthesize_rejects_unknown_projection = False
+    try:
+        synthesize_draft(unknown_field_run)
+    except ValueError as exc:
+        strict_synthesize_rejects_unknown_projection = (
+            str(exc) == "CONFLICT_PROJECTION_UNKNOWN_FIELDS:future")
+
     assignment_schema = json.loads((
         ROOT / "contracts" / "assignment.v1.schema.json"
     ).read_text(encoding="utf-8", errors="strict"))
@@ -5352,6 +5715,10 @@ def _selftest() -> int:
     assignment_missing.pop("plan_digest")
     assignment_bool_number = cloned(assigned_schema_row)
     assignment_bool_number["assignment_attempt"] = True
+    assignment_bool_tool_limit = cloned(assigned_schema_row)
+    assignment_bool_tool_limit["tool_call_limit"] = True
+    assignment_small_tool_limit = cloned(assigned_schema_row)
+    assignment_small_tool_limit["tool_call_limit"] = 4
     assignment_bad_timestamp = cloned(assigned_schema_row)
     assignment_bad_timestamp["created_at"] = "not-a-timestamp"
     assignment_with_stale_attempt = cloned(assigned_schema_row)
@@ -5422,7 +5789,10 @@ def _selftest() -> int:
         ("empty run suggest returns []", suggest(empty_run) == []),
         ("asset suggestions live in workers not graph",
          any(r["asset"] == "e.example" and r["role"] == "web-auth" for r in asset_rows)),
-        ("plan with no strong candidate exits 1", no_strong_exit == 1),
+        ("plan with no strong candidate exits 1 and forbids example fallback",
+         no_strong_exit == 1
+         and "NO_STRONG_CANDIDATE" in driver_output.getvalue()
+         and "do not commit or copy" in driver_output.getvalue()),
         ("merge-check clean path exits 0", clean_exit == 0),
         ("created worker scans assigned front", clean_rows and clean_rows[0]["front"] == "F-123"),
         ("field parser does not cross newline on empty value", _field("- Barrier class:\n- Same barrier failures: 1", "Barrier class") == ""),
@@ -5539,6 +5909,10 @@ def _selftest() -> int:
         ("assignment contract rejects bool-as-integer and invalid timestamps",
          bool(assignment_schema_errors(assignment_bool_number))
          and bool(assignment_schema_errors(assignment_bad_timestamp))),
+        ("new assignments materialize a bounded typed child tool-call limit",
+         assigned_schema_row.get("tool_call_limit") == DEFAULT_AGENT_TOOL_CALL_LIMIT
+         and bool(assignment_schema_errors(assignment_bool_tool_limit))
+         and bool(assignment_schema_errors(assignment_small_tool_limit))),
         ("assignment contract enforces assignment/review/root state fields",
          bool(assignment_schema_errors(assignment_with_stale_attempt))
          and bool(assignment_schema_errors(merged_without_review_binding))
@@ -5565,6 +5939,12 @@ def _selftest() -> int:
          unknown_role_rejected),
         ("invalid disposition note is rejected before state mutation",
          invalid_disposition_rejected),
+        ("blocked disposition requires the literal Reason label",
+         missing_reason_rejected),
+        ("blocked disposition requires the literal canonical Front label",
+         missing_front_rejected),
+        ("malformed finish attempts preserve assignment bytes",
+         malformed_finish_preserves_state),
         ("terminal disposition rewrite requires explicit amendment",
          silent_terminal_rewrite_rejected),
         ("explicit disposition amendment preserves prior audit state",
@@ -5599,6 +5979,8 @@ def _selftest() -> int:
         ("plan-bound context path is attempt-unique and freezes exact bindings",
          ".attempt-001.md" in str(planned_hunter.get("context") or "")
          and f"Plan digest: {planned_plan['plan_digest']}" in planned_reviewer_context.read_text(
+             encoding="utf-8")
+         and "Hard tool-call limit: 6" in planned_reviewer_context.read_text(
              encoding="utf-8")
          and planned_hunter["agent"] in planned_reviewer_context.read_text(encoding="utf-8")),
         ("Hunter return creates a plan/lane/result-bound merge draft",
@@ -5639,6 +6021,12 @@ def _selftest() -> int:
         ("Single Synthesizer cannot be fanned out as an Agent role",
          synthesizer_assignment_rejected),
         ("status command exits 0", status_cli_exit == 0),
+        ("empty status command exits 0", empty_status_cli_exit == 0),
+        ("driver-facing legacy/status output routes to typed Agent Board",
+         "workers.py assign" not in driver_output.getvalue()
+         and "general-purpose" not in driver_output.getvalue()
+         and "commit the current typed plan" in driver_output.getvalue()
+         and "legacy-only, non-authorizing" in driver_output.getvalue()),
         ("agent-check empty run exits 0", agent_check_empty_exit == 0),
         ("agent-check clean scaffold has no issues", agent_clean_issues == []),
         ("agent scaffold includes personalized RDT controls",
@@ -5649,6 +6037,12 @@ def _selftest() -> int:
          and "cleanup" in agent_clean_text.lower()
          and "outbound" in agent_clean_text.lower()
          and agent_clean_rec.get("reasoning_style") == "personalized-rdt"),
+        ("agent scaffold routes launch and settlement without duplicating argv",
+         "XUNJI_ASSIGNMENT=" not in agent_clean_text
+         and "workers.py finish" not in agent_clean_text
+         and "workers.py delegate" in agent_clean_text
+         and "runtime_receipts.py` own runtime receipts" in agent_clean_text
+         and "Root owns runtime receipts" not in agent_clean_text),
         ("merge-threats writes Root-owned hypothesis",
          threat_merge["new"] == 1
          and "Threat hypothesis: signed client param can be replayed across users" in threat_hyp_text
@@ -5684,6 +6078,13 @@ def _selftest() -> int:
         ("lifecycle: heartbeat records running state",
          lifecycle_running_state["assignments"][0].get("status") == "running"
          and lifecycle_running_state["assignments"][0].get("last_note") == "started"),
+        ("lifecycle: plan-bound running guidance never tells Root to write done",
+         any(
+             issue.get("kind") == "agent-not-terminal"
+             and "不得由 Root finish 为 done" in str(issue.get("detail") or "")
+             and "SubagentStop" in str(issue.get("detail") or "")
+             for issue in planned_running_issues
+         )),
         ("lifecycle: done remains an adjudication blocker and patches agent file",
          any(i["kind"] == "agent-done-unadjudicated" for i in lifecycle_closed)
          and "Status: done" in lifecycle_text and "returned coda" in lifecycle_text),
@@ -5712,6 +6113,26 @@ def _selftest() -> int:
         ("conflicts detects same-polarity artifact mismatch",
          any(c.get("type") == "artifact mismatch" and c.get("front") == "F-002"
              for c in conflict_doc["conflicts"])),
+        ("unchanged conflict projection preserves bytes and work-plan fingerprint",
+         conflict_projection_is_idempotent),
+        ("semantic conflict change updates the work-plan fingerprint",
+         semantic_conflict_change_stales_fingerprint),
+        ("concurrent conflict projection compare/write is linear",
+         concurrent_conflict_projection_is_linear),
+        ("duplicate conflict keys rebuild with an explicit diagnostic",
+         duplicate_keys_rebuild_with_diagnostic),
+        ("invalid conflict timestamps rebuild with an explicit diagnostic",
+         malformed_timestamp_rebuilds_with_diagnostic),
+        ("future conflict schema fails closed without downgrade",
+         future_conflict_schema_fails_closed),
+        ("unknown conflict fields fail closed without loss",
+         unknown_conflict_field_fails_closed),
+        ("conflict symlink is rebuilt in-run and bound by work-plan fingerprint",
+         conflict_symlink_rebuilt_and_bound),
+        ("synthesis rejects future conflict projection schema",
+         strict_synthesize_rejects_future_projection),
+        ("synthesis rejects unknown conflict projection fields",
+         strict_synthesize_rejects_unknown_projection),
         ("synthesis draft is advisory not canonical", synth_doc.get("canonical") == "markdown remains source of truth"),
         ("synthesis treats placeholder control as missing", a3["agent"] in synth_doc["needs_control"]),
         ("synthesis carries unresolved conflicts", synth_doc["summary"]["unresolved_conflicts"] >= 1),
@@ -5741,6 +6162,9 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("--model-egress-budget", type=int, default=1)
             ap.add_argument("--merge-capacity", type=int, default=100)
             ap.add_argument("--limit", type=int, default=2)
+            ap.add_argument(
+                "--tool-call-limit", type=int,
+                default=DEFAULT_AGENT_TOOL_CALL_LIMIT)
         elif cmd == "assign":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("--role", required=True)
@@ -5803,6 +6227,7 @@ def main(argv: list[str] | None = None) -> int:
                 model_egress_budget=args.model_egress_budget,
                 merge_capacity=args.merge_capacity,
                 limit=args.limit,
+                tool_call_limit=args.tool_call_limit,
             )
         if cmd == "cancel-unlaunched":
             return print_cancel_unlaunched(
@@ -5851,8 +6276,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.new:
         path = create_worker(run_dir, args.new)
         print(f"[workers] 新建 {display_path(path)} → 指派 front {args.new}")
-        print("  driver: 用 Agent 工具 spawn 一个 general-purpose 子 agent, 喂 docs/templates/worker.md "
-              "的 prompt(填 target + 该 front), 让它把候选写进这个文件。")
+        print("  legacy-only, non-authorizing scaffold. Current execution must load "
+              "xunji-agent-board, commit a typed plan, and delegate a ready lane; "
+              "do not launch this compatibility artifact directly.")
         return 0
 
     return print_list(run_dir)

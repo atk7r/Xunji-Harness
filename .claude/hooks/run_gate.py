@@ -400,12 +400,12 @@ def _check_evidence_severity(run_dir: Path) -> tuple[str | None, str]:
                 f"无利用机制 → 最高 MEDIUM。"
             )
 
-        # CodexReview: HIGH/CRITICAL 条目必须经过 codex 复审
+        # CodexReview is a legacy storage field; the review owner selects the backend.
         if "- CodexReview:" not in result_text:
             blocks.append(
                 f"{eid}: Severity={sev_line.strip()} 但缺少 CodexReview 字段。"
-                f"HIGH/CRITICAL 定级前必须经 codex agent 独立复审。"
-                f"请 spawn codex agent 审查本条目, 将输出写入 CodexReview 字段。"
+                f"HIGH/CRITICAL 定级前请加载 xunji-reviewops，按其当前 fresh-context route 审查本条目，"
+                f"并将有界裁决写入 legacy CodexReview 字段；字段名不代表 backend。"
             )
 
         # CodexCriticalReview: CRITICAL 条目在 NORMAL 模式必须经过暂停前复审
@@ -413,9 +413,9 @@ def _check_evidence_severity(run_dir: Path) -> tuple[str | None, str]:
         if is_critical and _is_normal_mode() and "- CodexCriticalReview:" not in result_text:
             blocks.append(
                 f"{eid}: Severity=CRITICAL 但缺少 CodexCriticalReview 字段。"
-                f"NORMAL 模式暂停 #1 前必须经 codex agent 独立复审 CRITICAL 定级。"
-                f"请 spawn fresh-context codex agent 审查本条目, "
-                f"将其裁决写入 CodexCriticalReview 字段。"
+                f"NORMAL 模式暂停 #1 前请加载 xunji-reviewops，按其 current fresh-context route "
+                f"独立复审 CRITICAL 定级，并将裁决写入 legacy CodexCriticalReview 字段；"
+                f"字段名不代表 backend。"
             )
 
     # 组装输出: blocks 阻止, warns 仅提示
@@ -615,13 +615,15 @@ def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str
             problems.append(
                 "本轮 Agent 结果尚未逐条 merge/adjudicate: "
                 + "; ".join(disposition.get("pending", [])[:5])
-                + "；done/展示摘要不算落实，必须用 workers.py finish 写 canonical E/F/D/Reason 锚点")
+                + "；done/展示摘要不算落实。加载 xunji-agent-board，完成 digest-bound Reviewer "
+                  "return/disposition 后再由 Root 按 owner 的 exact settlement 写 canonical E/F/D/Reason 锚点")
 
     if problems:
         return "block", (
             f"open fronts={open_count} 且 barrier 多样, Agent Board 不能全串行。"
             + "；".join(problems)
-            + "。请用 workers.py assign 分配 >=2 条不重叠 front lane，并真实调用 Agent；"
+            + "。请加载 xunji-agent-board，提交 >=2 条 ready disjoint lanes 并 delegate，"
+              "再按 owner 的 exact contract 分消息错峰真实调用 Agent；"
               "只有操作者当前 prompt 明确 `允许串行` 才可形成一次性 override。"
         )
 
@@ -783,8 +785,8 @@ def build_message(run_dir: Path, check_out: str) -> str:
             "收口不是在聊天里宣布'测完了', 而是 run 文件过闸门。"
             "同一回合内读取下面的硬门、修 run 文件/工具问题、重跑 check_run, 直到通过或确认外部 Type A 阻断。"
             "先处理下面的硬门再收尾"
-            "(覆盖台账缺建→跑 ingest_recon+classify_hosts; 假证据→补真产物或降级; "
-            "缺独立复审→派 fresh-context reviewer):\n\n" + tail)
+            "(覆盖台账缺建→按 setup/coverage owner 修 baseline/ledger，只有当前显式授权才做 exact egress recheck; "
+            "假证据→补真产物或降级; 缺独立复审→加载 xunji-reviewops，Agent Reviewer/手填 review.md 不满足):\n\n" + tail)
 
 
 def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -> str:
@@ -826,15 +828,16 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str,
     if not _has_completed_independent_review(review_text, run_dir):
         return (
             "[Normal 收口] report 已终版但缺独立复审。"
-            "请运行 peer_review 独立复审并处理全部 finding → "
+            "请加载 xunji-reviewops，取得当前 fingerprint-bound ReviewReceipt 并处理全部 finding → "
             "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
         )
     if not _has_codex_completion_review(decisions_text, run_dir):
         return (
             "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
-            "NORMAL 模式暂停 #2 前必须用 exact subagent_type=xunji-reviewer 和 "
-            "runtime_receipts.completion_review_prompt() 的 assignment-free prompt "
-            "完成真实 Start/Stop 全局复审。请将其裁决写入 decisions.md 的 "
+            "NORMAL 模式暂停 #2 前请加载 xunji-agent-board 与 "
+            "docs/WORKFLOW-reference.md 的 assignment-free global completion owner，"
+            "使用 formatter 产出的完整 contract 完成真实 same-session Reviewer Start/Stop。"
+            "请将其裁决写入 decisions.md 的 "
             "CodexCompletionReview 兼容字段；该挑战不替代 peer_review ReviewReceipt。"
         )
     return ""
@@ -1098,11 +1101,24 @@ def _selftest() -> int:
     normal_decisions = (
         "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
         "- Summary: report coverage, severity support, and reachable assets were independently checked.\n")
+    missing_review_message = _normal_closure_prerequisite("# Review\n", "# Decisions\n")
     checks.append(("normal closure: missing independent review hard-blocks",
-                   "缺独立复审" in _normal_closure_prerequisite("# Review\n", "# Decisions\n")))
+                   "缺独立复审" in missing_review_message
+                   and "xunji-reviewops" in missing_review_message
+                   and "请运行 peer_review" not in missing_review_message))
+    generic_closure_message = build_message(normal_run, "fixture hard gate")
+    checks.append(("generic closure remediation does not prescribe live classify",
+                   "classify_hosts" not in generic_closure_message
+                   and "fresh-context reviewer" not in generic_closure_message
+                   and "setup/coverage owner" in generic_closure_message))
+    missing_completion_message = _normal_closure_prerequisite(
+        valid_normal_review, "# Decisions\n", normal_run)
     checks.append(("normal closure: missing completion review hard-blocks",
-                   "CodexCompletionReview" in _normal_closure_prerequisite(
-                       valid_normal_review, "# Decisions\n", normal_run)))
+                   "CodexCompletionReview" in missing_completion_message))
+    checks.append(("completion remediation routes canonical formatter owner",
+                   "assignment-free global completion owner" in missing_completion_message
+                   and "formatter 产出的完整 contract" in missing_completion_message
+                   and "subagent_type=" not in missing_completion_message))
     checks.append(("normal closure: both prerequisites pass",
                    _normal_closure_prerequisite(
                        valid_normal_review, normal_decisions, normal_run) == ""))
@@ -1475,6 +1491,10 @@ def _selftest() -> int:
         sev_mode1, sev_msg1 = _check_evidence_severity(ev1)
         checks.append(("CodexCriticalReview: CRITICAL missing field -> block", sev_mode1 == "block"))
         checks.append(("CodexCriticalReview: block message mentions field", "CodexCriticalReview" in (sev_msg1 or "")))
+        checks.append(("severity remediation routes ReviewOps without stale codex spawn",
+                       "xunji-reviewops" in (sev_msg1 or "")
+                       and "spawn" not in (sev_msg1 or "").lower()
+                       and "字段名不代表 backend" in (sev_msg1 or "")))
 
         # Test 2: CRITICAL with both CodexReview and CodexCriticalReview → pass
         ev2 = Path(_tm4.mkdtemp())
@@ -1720,8 +1740,12 @@ def _selftest() -> int:
     (ab_run6 / "state" / "assignments.json").write_text(
         json.dumps({"schema": 1, "assignments": [{"agent": "A-web-hunter-001", "front": "F-001", "status": "assigned"}]}),
         encoding="utf-8")
-    mode6, _ = _check_agent_board(ab_run6)
+    mode6, msg6 = _check_agent_board(ab_run6)
     checks.append(("agent board gate: diverse with one assignment -> block", mode6 == "block"))
+    checks.append(("agent board remediation routes typed owner without legacy assign",
+                   "xunji-agent-board" in msg6
+                   and "workers.py assign" not in msg6
+                   and "delegate" in msg6))
 
     # Case 7: editable heartbeat fields alone do not pass; real Agent receipts do.
     ab_run7 = ab_test / "diverse_with_two_started_lanes"

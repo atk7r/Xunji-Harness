@@ -45,14 +45,14 @@ OPEN_STATUS_TOKENS = {"open", "probing", "working", "blocked_type_a"}
 CLOSED_STATUS_TOKENS = {"closed", "closing", "final", "done", "complete", "completed", "blocked_type_b"}
 ACTION_TEXT_CN = {
     "Resolve Agent Board conflicts before promotion or closure.": "先解决 Agent Board 冲突，再考虑提升证据或收口。",
-    "Run workers.py suggest/plan and assign at least two disjoint Agent lanes.": "运行 workers.py suggest/plan，并分派至少两条不重叠 Agent 线路。",
+    "Load Agent Board, commit the current typed plan, then delegate at least two ready disjoint lanes.": "加载 Agent Board，提交当前 typed plan，再 delegate 至少两条已就绪的不重叠线路。",
     "Reopen or re-adjudicate fronts that are closed but unlocked by confirmed evidence.": "重开或重新裁定那些已关闭但被确认型证据重新解锁的前线。",
     "Activate deferred fronts unlocked by confirmed evidence.": "激活被确认型证据解锁的延后前线。",
     "Expand or justify low-saturation fronts before any explored-enough claim.": "在声称探索充分前，扩展低饱和前线或写明不继续的理由。",
     "Map unassigned assets and update per-asset evidence for coverage debt; front prose is not tested coverage.": "先映射未分配资产，再逐资产补证据；front 文字本身不算测试覆盖。",
     "Fix unclassified front statuses before closure review.": "先修正未分类前线状态，再进入收口复核。",
     "Coda convergence: record a trajectory review, pivot/continue rationale, or review/surface Agent assignment; this is not a closure signal by itself.": "Coda 已收敛：记录轨迹复盘、换路/继续理由，或分派复审/面扩 Agent；这本身不是收口信号。",
-    "Closure review candidate: run hard closure gates, replay verification, independent review, and retrospective before any pause.": "收口复核候选：暂停前必须跑硬收口闸门、replay 核实、独立复审和复盘。",
+    "Closure review candidate: run offline hard gates, independent review, and retrospective before any pause; live replay needs current explicit authorization.": "收口复核候选：暂停前跑离线硬门、独立复审和复盘；live replay 需要当前顶层明确授权。",
     "No open front visible, but closure blockers remain; reopen or justify missing work before closure.": "当前看不到开放前线，但仍有收口阻断项；收口前必须重开或解释缺失工作。",
     "No open front visible; run review/closure checks or reopen missing work.": "当前看不到开放前线；运行复审/收口检查，或重开缺失工作。",
     "Choose the next front from actionable/open fronts and record a Root graph pass.": "从可行动/开放前线中选择下一条，并记录 Root graph pass。",
@@ -403,11 +403,9 @@ def _gates(fronts: dict, agents: dict, progress: dict, coverage: dict) -> dict:
         "closure_blockers": closure_blockers,
         "near_closure": near_closure,
         "closure_commands": [
-            f"{PYTHON_CMD} tools/workers.py agent-check <run>",
-            f"{PYTHON_CMD} tools/workers.py merge-check <run>",
-            f"{PYTHON_CMD} tools/check_run.py <run>",
-            f"{PYTHON_CMD} tools/check_run.py <run> --replay-verify",
-            f"{PYTHON_CMD} tools/peer_review.py <run> --into-run",
+            "load xunji-agent-board for Agent and merge debt checks",
+            "run the lifecycle owner's offline run-state check",
+            "load xunji-reviewops for the required independent review",
         ] if near_closure else [],
     }
 
@@ -434,7 +432,7 @@ def _next_actions(fronts: dict, agents: dict, progress: dict, gates: dict) -> li
     if gates["needs_conflict_resolution"]:
         actions.append("Resolve Agent Board conflicts before promotion or closure.")
     if gates["fanout_required"]:
-        actions.append("Run workers.py suggest/plan and assign at least two disjoint Agent lanes.")
+        actions.append("Load Agent Board, commit the current typed plan, then delegate at least two ready disjoint lanes.")
     if fronts["closed_but_unlocked"]:
         actions.append("Reopen or re-adjudicate fronts that are closed but unlocked by confirmed evidence.")
     if fronts["unlocked_deferred"]:
@@ -1086,6 +1084,9 @@ def _selftest() -> int:
          and complete_state["gates"]["completion_markers"] == ["GHOST_COMPLETE"]
          and complete_state["next_actions"] == [
              "Run is marked complete; do not schedule another /loop iteration."]),
+        ("generic generated state never prescribes replay or legacy assign",
+         "--replay-verify" not in render_markdown(report_phase_state)
+         and "workers.py assign" not in render_markdown(first)),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:

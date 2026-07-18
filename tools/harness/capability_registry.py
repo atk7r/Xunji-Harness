@@ -701,6 +701,7 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
                 "--model-egress-budget": None,
                 "--merge-capacity": None,
                 "--limit": None,
+                "--tool-call-limit": None,
             },
             flags=set(), positionals=1,
         )
@@ -712,6 +713,7 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
             "--model-egress-budget": (0, 1000),
             "--merge-capacity": (0, 10000),
             "--limit": (1, 16),
+            "--tool-call-limit": (5, 64),
         }
         return all(
             all(re.fullmatch(r"[0-9]+", raw) is not None
@@ -1131,9 +1133,13 @@ def selftest() -> int:
                 "delegate", "runs/demo_20260101", "--runtime-slots", "2",
                 "--request-budget", "10", "--model-egress-budget", "1",
                 "--merge-capacity", "100", "--limit", "2",
+                "--tool-call-limit", "6",
             ])
             and match(ROOT / "tools/workers.py", [
                 "delegate", "runs/demo_20260101", "--runtime-slots", "0",
+            ]) is None
+            and match(ROOT / "tools/workers.py", [
+                "delegate", "runs/demo_20260101", "--tool-call-limit", "0",
             ]) is None
             and match(ROOT / "tools/workers.py", [
                 "delegate", "runs/demo_20260101", "--future", "1",

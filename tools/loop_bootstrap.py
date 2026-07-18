@@ -8,7 +8,7 @@
   python3 tools/loop_bootstrap.py --resume runs/<dir>       # 续接已有 run
   python3 tools/loop_bootstrap.py --selftest                # 自检
 
-输出: 状态准备结果和 Claude Code `/loop runs/<dir>` 启动指令。
+输出: 状态准备结果和当前 Claude Code 可直接交给 UserPromptSubmit 的单周期启动指令。
 固定 loop 协议在 docs/templates/loop_prompt.md；不生成 per-run prompt。
 """
 
@@ -101,9 +101,9 @@ def _validate_run(run_dir: Path) -> bool:
         return False
 
 
-def _loop_command(run_dir: Path) -> str:
-    """The explicit Claude Code entry command. The fixed template stays in docs."""
-    return f"/loop {run_dir}"
+def _driver_entry(run_dir: Path) -> str:
+    """Client-safe one-cycle entry; lifecycle owns optional literal /loop semantics."""
+    return f"继续执行 runs/{run_dir.name}"
 
 
 def _write_initial_state(run_dir: Path) -> None:
@@ -346,7 +346,7 @@ def cmd_source(
         code = getattr(exc, "code", "source_setup_failed")
         hint = ""
         if code in {"run_exists", "prepared_not_active"}:
-            hint = "；可 resume 已有 run，或用 setup_run.py 选择 date/slug"
+            hint = "；按 xunji-run-lifecycle 的命名 run 路径 resume/recover，勿改走内部 setup adapter"
         print(f"[bootstrap:{code}] {exc}{hint}", file=sys.stderr)
         return 1
     _print_launch_instructions(result.run_dir)
@@ -385,7 +385,7 @@ def cmd_resume(run_path: str) -> int:
     # 写 handoff
     subprocess.run([PYTHON_CMD, str(ROOT / "tools" / "session_handoff.py"),
                     "write", str(run_dir)], timeout=30)
-    _journal(run_dir, "resume_prepare", "resume state prepared; loop not started until explicit /loop")
+    _journal(run_dir, "resume_prepare", "resume state prepared; execute cycle awaits an explicit named-run prompt")
     if not _refresh_loop_state(run_dir):
         return 1
     if not _set_active_run(run_dir):
@@ -399,10 +399,10 @@ def _print_launch_instructions(run_dir: Path) -> None:
     """打印操作者启动和监控指令。"""
     _print_status_summary(run_dir)
     print()
-    print(_pretty_block("Claude Code 启动入口", [
-        status_style.field("启动命令", _loop_command(run_dir), "green", enabled=status_style.color_enabled()),
+    print(_pretty_block("Claude Code 单周期入口", [
+        status_style.field("启动命令", _driver_entry(run_dir), "green", enabled=status_style.color_enabled()),
         status_style.field("固定协议", LOOP_TEMPLATE, "gray", enabled=status_style.color_enabled()),
-        status_style.field("提示", "不生成 per-run loop_prompt.md；Claude Code 在 /loop 中读取固定协议和 run 文件。", "blue", enabled=status_style.color_enabled()),
+        status_style.field("提示", "不生成 per-run loop_prompt.md；lifecycle owner 读取固定协议和 run 文件。该入口不声称 recurring Cron。", "blue", enabled=status_style.color_enabled()),
     ]))
     print(_pretty_block("常用监控命令", [
         status_style.field("日志", f"{PYTHON_CMD} tools/loop_journal.py {run_dir} status", "cyan", enabled=status_style.color_enabled()),
@@ -434,7 +434,7 @@ def _selftest() -> int:
     (p / "frontier.md").write_text("# f\n## Open Fronts\n### F-001\n- Status: open\n", encoding="utf-8")
 
     checks.append(("template exists", LOOP_TEMPLATE.exists()))
-    checks.append(("loop command names run", _loop_command(p) == f"/loop {p}"))
+    checks.append(("client-safe entry names normalized run", _driver_entry(p) == f"继续执行 runs/{p.name}"))
     checks.append(("no per-run prompt before refresh", not (p / "loop_prompt.md").exists()))
     original_active_pointer = xunji_statusline.ACTIVE_RUN
     isolated_active_pointer = p / ".active-run"
@@ -584,7 +584,7 @@ def _selftest() -> int:
         turn_contract.write_contract(p, {
             "session_id": resume_session,
             "transcript_path": resume_transcript,
-            "prompt": f"/loop runs/{p.name}",
+            "prompt": f"继续执行 runs/{p.name}",
         })
         rendered_resume = xunji_statusline.render_statusline({
             "session_id": resume_session,

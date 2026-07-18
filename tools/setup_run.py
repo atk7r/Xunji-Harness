@@ -891,7 +891,7 @@ def prepare_staging_run(
     loop_journal.append_event(
         run_dir,
         "phase_end",
-        note=f"run prepared; next phase=Root Orchestrator (/loop runs/{request['run_name']})",
+        note=f"run prepared; next phase=Root Orchestrator (继续执行 runs/{request['run_name']})",
         data={"phase": "Setup"},
     )
     state = {

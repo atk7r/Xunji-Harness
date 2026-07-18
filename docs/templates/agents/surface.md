@@ -41,10 +41,10 @@ Convert recon, coverage, fingerprints, and threat roles into attack-surface cand
 - Target-side temp artifacts must use neutral `tmp/diag/proof-YYYYMMDD-<hex>`
   names only; never include project/run/Agent/vuln/tool labels.
 - Target-side cleanup/delete/overwrite requires an explicit operator `yes`.
-- Root's Agent-tool prompt carries this file's exact `XUNJI_ASSIGNMENT`,
-  `XUNJI_FRONT`, and `XUNJI_ASSETS` package; the hook records launch/return attempts.
-  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
-  Include a concise coda summary so Root can close the lifecycle entry.
+- Root supplies the hook-bound launch envelope and plan/result bindings; do not
+  reconstruct or invoke lifecycle commands. Return one concise candidate,
+  refutation, or blocker with artifact/control pointers. Hooks freeze result bytes;
+  Root alone reviews and terminally settles the assignment.
 
 ## Evidence Maturity Rule
 

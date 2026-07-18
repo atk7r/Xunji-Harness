@@ -833,8 +833,8 @@ def check_coverage_health(run_dir: Path) -> list[str]:
     if recon and not cov_present:
         warns.append(
             f"覆盖台账缺建: target.md 引用了 recon 情报({recon[:60]}) 却无 coverage.json "
-            "—— 资产清单疑似手工誊录的子集(driver 选择偏见 = run 的盲区)。用 "
-            "`python tools/setup_run.py <slug> <recon.json>` 从 Guanlan 产物【零重探】折 coverage "
+            "—— 资产清单疑似手工誊录的子集(driver 选择偏见 = run 的盲区)。按 "
+            "xunji-setup-ingest/coverage owner 从 Guanlan 原始产物【零重探】恢复 baseline/ledger "
             "(Guanlan 已做去重/通配折叠/存活/归属, 别再 classify_hosts 全量重探 = re-OSINT); "
             "防 lump 护栏没有它就失明, 漏挖不会被发现。")
     # ③ 台账完整性(coverage 是 recon 的子集; 仅 recon 可解析为 JSON 时生效)
@@ -1308,7 +1308,7 @@ def check_graph_consistency(run_dir: Path) -> list[str]:
     for u in view.get("unlocked_deferred", []):
         warns.append(
             f"状态图: 前沿 {u['front']} 已被已确认 Fact {u['by']} 解锁, 却仍在 Deferred —— "
-            "前置已证应回头激活它, 别让它躺着(典型漏挖)。跑 `python tools/graph.py` 看全图。")
+            "前置已证应回头激活它, 别让它躺着(典型漏挖)。按 lifecycle owner 刷新并读取全图投影。")
     for u in view.get("closed_but_unlocked", []):
         warns.append(
             f"状态图矛盾: 前沿 {u['front']} 已 Closed, 却被已确认 Fact {u['by']} 解锁 —— "
@@ -1659,7 +1659,7 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
     if confirmed_n and decisions_n >= 4 and not has_fresh_independent_review:
         errors.append(
             f"peer_review overdue: {confirmed_n} confirmed entries {review_gap} for >3 cycles "
-            "— run tools/peer_review.py --into-run")
+            "— load xunji-reviewops and refresh the fingerprint-bound ReviewReceipt")
 
     if decisions_n >= 5 and not has_fresh_independent_review:
         errors.append(f"Reviewer cycle overdue: {decisions_n} decisions {review_gap}")
@@ -1750,7 +1750,7 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:
             errors.append(
                 "复审硬门(evidence_index 已变): review.md 最新 ReviewReceipt 的 EvidenceIndexHash "
                 f"{seen} 与当前 {current_hash} 不一致 —— 证据/产物变更后旧 Codex/peer_review "
-                "裁决失效, 需重新跑 `python tools/peer_review.py --into-run runs/<dir>`。"
+                "裁决失效, 需加载 xunji-reviewops 刷新当前 fingerprint-bound ReviewReceipt。"
                 "更早的历史 receipt 保留审计价值，不再反向污染最新裁决。")
 
     finding_blocks = list(re.finditer(
@@ -2183,10 +2183,19 @@ def check_retrospective(run_dir: Path) -> list[str]:
 
 def _conflict_state(run_dir: Path) -> tuple[list[dict], str | None]:
     path = run_dir / "state" / "conflicts.json"
-    if not path.exists():
-        return [], None
     try:
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        path.lstat()
+    except FileNotFoundError:
+        return [], None
+    except OSError as exc:
+        return [], f"{path}: {exc}"
+    try:
+        if _workers is not None and hasattr(_workers, "_load_conflict_projection"):
+            data = _workers._load_conflict_projection(path)
+            if data is None:
+                return [], f"{path}: invalid or non-regular conflict projection"
+        else:
+            return [], f"{path}: conflict projection validator unavailable"
     except Exception as e:
         return [], f"{path}: {e}"
     conflicts = data.get("conflicts", []) if isinstance(data, dict) else []
@@ -2230,16 +2239,17 @@ def check_conflict_gate(run_dir: Path) -> tuple[list[str], list[str]]:
     conflicts, read_error = _conflict_state(run_dir)
     if read_error:
         return [], [f"冲突门: 无法解析 state/conflicts.json ({read_error}) —— "
-                    "该文件只是投影缓存, 不覆盖 canonical Markdown; 请重新运行 "
-                    "`python tools/workers.py conflicts runs/<dir>` 生成干净投影。"]
+                    "该文件只是投影缓存, 不覆盖 canonical Markdown; 加载 xunji-agent-board "
+                    "并用其 owned projection command 生成干净投影。"]
     if not conflicts:
         return [], []
     fronts = sorted({str(c.get("front") or "?") for c in conflicts})
     kinds = sorted({str(c.get("type") or "?") for c in conflicts})
     msg = (f"冲突门: state/conflicts.json 仍有 {len(conflicts)} 个 unresolved conflict "
            f"(fronts={', '.join(fronts[:6])}; types={', '.join(kinds[:6])}) —— "
-           "收口前应派 verification-agent 做 control/replay/replication, 或由 Root Synthesizer "
-           "写明降级/去重/已解决。")
+           "收口前加载 xunji-agent-board，提交 typed verification/control lane 或由 Root "
+           "Synthesizer 以 evidence-bound control/replication 写明降级、去重或已解决；live replay "
+           "仍需当前顶层 prompt 明确授权。")
     high = _confirmed_high_severity_ids(run_dir)
     if high:
         return [msg + f" 当前存在 HIGH/CRITICAL confirmed finding: {', '.join(high)}。"], []
@@ -2419,8 +2429,9 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     if recon and not coverage_present(run_dir):
         errors.append(
             "收口硬门(覆盖台账): target.md 引用了 recon 情报却无 coverage.json —— 资产清单"
-            "疑似手工誊录的子集, 漏挖无法被发现。先跑 ingest_recon + classify_hosts 把【全量】"
-            "资产折成结构化台账并逐个深挖独立应用候选, 再收口; 不能在台账缺建时出终版报告。")
+            "疑似手工誊录的子集, 漏挖无法被发现。加载 xunji-setup-ingest，按 zero-reprobe "
+            "baseline/coverage owner 从 Guanlan 原始产物恢复全量结构化台账；仅当前明确授权时"
+            "才做 exact own-egress recheck。台账缺建时不得出终版报告。")
 
     # 硬门(漏报一致性): evidence 里【已确认(certainty>=0.8)且非排除性、未降级】的正向发现,
     # 必须进 report 的确认发现/证据清单 —— 否则是漏报。hamastar 实测: E-017 满分 CRITICAL 越权
@@ -2539,8 +2550,9 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
     if not has_completed_independent_review(rv, run_dir):
         errors.append(
             "收口硬门(P0-1): report 含强收口断言, 但 review.md 无【独立复审 / Independent "
-            "Review】记录。自评治不了自评偏见; 收口前【必须】派独立 Reviewer 子代理(常驻授权, "
-            "见 review/independent-reviewer.md)并落 review.md。撤回收口措辞或补复审后再过。")
+            "Review】记录。自评治不了自评偏见; 收口前【必须】加载 xunji-reviewops，取得当前 "
+            "fingerprint-bound ReviewReceipt。Agent Reviewer 或手填 review.md 都不满足。"
+            "撤回收口措辞或补复审后再过。")
     errors.extend(check_codex_completion_review(run_dir))
     ledger_errors, ledger_warns = check_peer_review_ledger(run_dir)
     errors.extend(ledger_errors)
@@ -2569,7 +2581,8 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
         warns.append(
             "report 含强收口断言(如'无攻击面/探尽/打不动'), 但本 run 无逐资产按内容分类记录"
             "(classify_hosts.py 的 classify.txt) —— 资产可能只按 server 头/recon lump, "
-            "未逐个看内容。收口前请跑 `python tools/classify_hosts.py`。")
+            "未逐个看内容。先补 evidence-bound 逐资产 verdict；只有当前顶层 prompt 明确授权 "
+            "own-egress live recheck 时，才按 setup/classification owner 的 exact shape 执行。")
 
     fr = run_dir / "frontier.md"
     if fr.exists():
@@ -3614,6 +3627,8 @@ def _selftest() -> int:
         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
     (d_conf / "state" / "conflicts.json").write_text(json.dumps({
         "schema": 1,
+        "generated_at": "2026-07-18T00:00:00Z",
+        "conflict_types": ["direct contradiction"],
         "conflicts": [{"type": "direct contradiction", "front": "F-001", "status": "unresolved"}],
     }), encoding="utf-8")
     (d_conf / "evidence.md").write_text(
@@ -3633,11 +3648,38 @@ def _selftest() -> int:
     conf_crit_err, _ = check_closure_discipline(d_conf)
     (d_conf / "state" / "conflicts.json").write_text(json.dumps({
         "schema": 1,
+        "generated_at": "2026-07-18T00:00:00Z",
+        "conflict_types": ["direct contradiction"],
         "conflicts": [{"type": "direct contradiction", "front": "F-001", "status": "resolved"}],
     }), encoding="utf-8")
     conf_none_err, conf_none_warn = check_conflict_gate(d_conf)
     (d_conf / "state" / "conflicts.json").write_text("{not json", encoding="utf-8")
     conf_bad_err, conf_bad_warn = check_conflict_gate(d_conf)
+    (d_conf / "state" / "conflicts.json").write_text(json.dumps({
+        "schema": 2,
+        "generated_at": "2026-07-18T00:00:00Z",
+        "conflict_types": [],
+        "conflicts": [],
+    }), encoding="utf-8")
+    conf_future_err, conf_future_warn = check_conflict_gate(d_conf)
+    (d_conf / "state" / "conflicts.json").write_text(
+        '{"schema":1,"schema":2,"generated_at":"2026-07-18T00:00:00Z",'
+        '"conflict_types":[],"conflicts":[]}\n',
+        encoding="utf-8",
+    )
+    conf_duplicate_err, conf_duplicate_warn = check_conflict_gate(d_conf)
+    (d_conf / "state" / "conflicts.json").write_text(json.dumps({
+        "schema": 1,
+        "generated_at": "2026-07-18T00:00:00Z",
+        "conflict_types": [],
+        "conflicts": [],
+    }), encoding="utf-8")
+    saved_workers = _workers
+    globals()["_workers"] = None
+    try:
+        conf_validator_err, conf_validator_warn = check_conflict_gate(d_conf)
+    finally:
+        globals()["_workers"] = saved_workers
     checks += [
         ("conflict gate: unresolved conflict before closure -> warning",
          any("冲突门" in w for w in conf_med_warn)),
@@ -3652,6 +3694,15 @@ def _selftest() -> int:
          conf_none_err == [] and conf_none_warn == []),
         ("conflict gate: bad conflicts.json -> projection warning, not hard fail",
          conf_bad_err == [] and any("无法解析 state/conflicts.json" in w for w in conf_bad_warn)),
+        ("conflict gate: future schema is non-clean",
+         conf_future_err == []
+         and any("无法解析 state/conflicts.json" in w for w in conf_future_warn)),
+        ("conflict gate: duplicate keys are non-clean",
+         conf_duplicate_err == []
+         and any("无法解析 state/conflicts.json" in w for w in conf_duplicate_warn)),
+        ("conflict gate: unavailable strict validator fails closed",
+         conf_validator_err == []
+         and any("validator unavailable" in w for w in conf_validator_warn)),
     ]
 
     # --- intermediate gates: fresh review, live coverage, same-barrier status filtering ---

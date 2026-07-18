@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).with_name("fixtures") / "privacy-command-shape.json"
 _PYTHON_RE = re.compile(r"python(?:3(?:\.\d+){0,2})?", re.IGNORECASE)
 _ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.DOTALL)
+_MAX_DIAGNOSTIC_CHAIN_BYTES = 128 * 1024
+_MAX_DIAGNOSTIC_CHAIN_SEGMENTS = 64
 
 
 @dataclass(frozen=True)
@@ -144,6 +146,49 @@ def has_unquoted_shell_control(command: str, *, reject_comments: bool = True) ->
     return _first_unquoted_shell_control(
         command, reject_comments=reject_comments,
     ) is not None
+
+
+def split_literal_and_chain(command: str) -> tuple[str, ...] | None:
+    """Split one diagnostic-only literal ``&&`` chain into exact segments.
+
+    This helper grants no execution authority.  It recognizes only two or more
+    non-empty segments separated by an unquoted literal ``&&``.  Every other
+    shell control (including ``;``, ``||``, pipes, redirection, expansion,
+    comments, and newlines) remains opaque so callers can preserve their normal
+    fail-closed policy.
+    """
+    raw_command = str(command or "")
+    if len(raw_command.encode("utf-8", "replace")) > _MAX_DIAGNOSTIC_CHAIN_BYTES:
+        return None
+    if "\n" in raw_command or "\r" in raw_command:
+        return None
+    remaining = raw_command.strip()
+    if not remaining:
+        return None
+    segments: list[str] = []
+    while True:
+        control = _first_unquoted_shell_control(remaining)
+        if control is None:
+            segment = remaining.strip()
+            if not segment:
+                return None
+            segments.append(segment)
+            if len(segments) > _MAX_DIAGNOSTIC_CHAIN_SEGMENTS:
+                return None
+            break
+        offset, category = control
+        if category != "shell-chain" or remaining[offset:offset + 2] != "&&":
+            return None
+        segment = remaining[:offset].strip()
+        if not segment:
+            return None
+        segments.append(segment)
+        if len(segments) > _MAX_DIAGNOSTIC_CHAIN_SEGMENTS:
+            return None
+        remaining = remaining[offset + 2:].strip()
+        if not remaining:
+            return None
+    return tuple(segments) if len(segments) >= 2 else None
 
 
 def _resolve_script_token(
@@ -594,6 +639,56 @@ def selftest() -> int:
              root=ROOT,
              allowed_scripts={(ROOT / "tools" / "workers.py").resolve()},
          ) is None),
+        ("literal && chain splits only for diagnostic classification",
+         (lambda first, second: split_literal_and_chain(
+             f"{first} && {second}"
+         ) == (first, second))(
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "list runs/demo_20260101",
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "status runs/demo_20260101",
+         )),
+        ("literal && diagnostic permits a static echo segment",
+         (lambda first, second: split_literal_and_chain(
+             f"{first} && echo '---' && {second}"
+         ) == (first, "echo '---'", second))(
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "list runs/demo_20260101",
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "status runs/demo_20260101",
+         )),
+        ("non-literal or effectful shell chains stay opaque",
+         (lambda command: all(split_literal_and_chain(candidate) is None for candidate in (
+             command,
+             command + " &&",
+             command + " ; echo unsafe",
+             command + " || echo unsafe",
+             command + " | head -1",
+             command + " > /tmp/forged",
+             command + " && echo $(id)",
+             command + " &&\necho unsafe",
+         )))(
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "list runs/demo_20260101"
+         )),
+        ("diagnostic chain count and byte budgets fail closed",
+         (lambda command: bool(
+             split_literal_and_chain(
+                 " && ".join([command] * (_MAX_DIAGNOSTIC_CHAIN_SEGMENTS + 1))
+             ) is None
+             and split_literal_and_chain(
+                 command + " && echo " + "x" * _MAX_DIAGNOSTIC_CHAIN_BYTES
+             ) is None
+         ))(
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "list runs/demo_20260101"
+         )),
         ("current absolute Python identity is trusted",
          trusted_python_token(sys.executable)),
         ("current canonical Python identity is trusted",

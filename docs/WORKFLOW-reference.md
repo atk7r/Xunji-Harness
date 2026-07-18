@@ -288,29 +288,17 @@ on a missing artifact.
 
 **Replay-verify the evidence (close the trust loop).** A saved `*.html` proves a
 response existed; a `.replay.json` (written automatically by `probe --save`) proves
-*what request produced it*, so the claim can be re-checked against the live target
-instead of taken on faith. At closure run `python3 tools/check_run.py runs/<dir>
---replay-verify`: it replays each `.replay.json` through the guard (idempotent `GET`
-only — `POST`/`PUT` need `--force`, `DELETE` is never replayed; host must be in
-`target.md` In-scope). A `DIVERGED` verdict (status changed) means the evidence no
-longer matches reality — the target was fixed/changed, or the finding was shaky —
-and the driver must re-adjudicate before reporting it. `UNREACHABLE` is not a failure
-(can't-reach ≠ false). Replay stays **opt-in** (live traffic, slow) — *not* running
-`SKIPPED-PRIVACY-REDACTED` means the recorder correctly removed reusable
-Cookie/token/PII. It must never send placeholders or count that result as a
-verification. Re-acquire the intended session, perform a fresh guarded
-replication, cite the new artifact/control, and add a per-entry `- Replay:` note.
-At a final report an unaddressed privacy-redacted replay supporting a confirmed
-finding is a hard closure error, just like an ignored load-bearing divergence.
+*what request produced it*. Replay is live target traffic, never a routine closure
+check: load `xunji-evidence-replay-gate` and use its exact command only when the
+current top-level operator prompt explicitly authorizes live replay for this run.
+That skill is the sole Claude-primary replay command and disposition owner.
 
-`--replay-verify` never fails a run, and the gate never forces you to run it. But once
-you **do** run it at a **final** report, a `DIVERGED` you leave **unaddressed** hard-fails
-the closure gate: re-adjudicate each one — downgrade the finding, or add a `- Replay:`
-field to that `E-` entry saying why it still stands (a target legitimately changing is
-fine to keep *with* that note; one `- Replay:` per diverged finding). The gate never
-auto-rejects a finding and never forces a replay — it only stops you from running
-replay and then ignoring a divergence. Standalone `python3 tools/replay.py runs/<dir>`
-replays outside the gate (no closure hard-fail).
+When an authorized replay has run, `DIVERGED` requires re-adjudication before
+reporting; `UNREACHABLE` is not proof of absence. Privacy-redacted requests must not
+send placeholders or count as verification; acquire a fresh guarded replication
+instead. An unaddressed load-bearing divergence or privacy-redacted replay remains a
+hard final-report blocker. The gate never auto-rejects a finding and never turns a
+prior or inferred authorization into current replay authority.
 
 ### false_positive.md — make the hunter phase explicit
 
@@ -650,8 +638,18 @@ Stop hooks select exactly one `xunji.stop-output.v1` variant: `NORMAL_CODA`,
 receipt-backed `TARGET_DENIED`, or receipt-backed `MAINTENANCE_BLOCKED`. Their
 fields are mutually exclusive. The two fixed-envelope variants reject free-form
 success prose; none grants authority or substitutes for a plan-bound `cycle_end`.
+After same-session/turn receipt validation, `run_gate` yields to that fixed output
+before ordinary drift, Agent, or closure checks; paused-mode Cron quiescence still
+precedes the yield.
 The first invalid output is blocked, and Claude Code's `stop_hook_active` retry is
 idempotent; retry never marks a run complete or changes a front.
+PreToolUse enforces the same maintenance truth before Stop: after a current-turn
+`maintenance_action=true` denial/failure, only Read/Grep/Glob, an existing Task
+update, or an identical action retry is admitted. Agent, control, target, and
+canonical writes remain frozen until an identical success resolves the receipt or
+a newer operator prompt establishes new authority. Later unrelated success cannot
+wash the blocker out of the turn. The progression check reads the append-only hook
+journal immediately; Stop truth still requires the matching transcript evidence.
 
 ## Work plan and reversible Macro-Stage
 
@@ -672,57 +670,20 @@ typed `cycle_end`. `work_plan.py` alone writes the typed stage/replan sequence.
 The current owner is the Python/Hook control path. This stage does not add a
 parallel plan, assignment, or merge runtime.
 
-`state/work_plan.json` is consumable only when its matching
-`state/work_plan_transaction.json` is committed as v2 and the current receipt,
-its immutable `state/work_plan_transactions/<receipt_hash>.json` archive, complete
-`prior_transaction_receipt_hash` lineage, typed journal sequence,
-content-addressed snapshot, current plan, turn binding, and input digest all
-revalidate. A missing, prepared, unreadable, unarchived, broken-lineage, or
-mismatched transaction fails closed; `commit` cannot overwrite that state to
-manufacture provenance. A genuine pre-transaction plan has one explicit recovery
-path:
+The sole Claude-primary operational owner for current plan/delegate argv,
+transaction recovery, and stale-unlaunched cancellation is
+`.claude/skills/xunji-agent-board/references/plan-and-delegate.md`. The sole owner
+for binary launch/return, Reviewer/Root settlement, and typed cycle end is its
+`launch-return-settlement.md` sibling. Read those references completely at the
+corresponding action; this deep reference does not copy their executable examples.
 
-```bash
-python3 tools/work_plan.py migrate-legacy runs/<dir>
-```
-
-This exact active-run control capability is not `ROOT_DIRECT`. It succeeds only
-when the current turn/input, one unambiguous typed plan+delegation journal sequence,
-active plan digest, stage-exit state, and an already frozen snapshot agree, then
-records a self-hashed committed transaction with `provenance=legacy_migration`
-and a recomputable migration-source digest. The same command upgrades only an
-exact committed native v1 receipt to `provenance=native_v1_upgrade`; both the old
-and new receipts remain archived and chained. It never creates a missing snapshot,
-and there is no implicit legacy acceptance.
-
-The exact lifecycle is:
-
-```text
-work_plan commit
-  -> workers delegate: ready assignment + context pack + exact launch prompt
-  -> PreToolUse compares the complete raw prompt byte-for-byte
-  -> Claude invokes the real Hunter Agent; lifecycle hooks bind its exact hash
-  -> hook return: content-addressed response snapshot + merge-draft.v1
-  -> workers delegate: dependent Reviewer prompt + exact XUNJI_RESULT_DIGEST
-  -> Claude invokes the real Reviewer Agent
-  -> workers review-disposition: digest-bound review receipt
-  -> Root canonical adjudication + workers finish
-  -> loop_journal end --next-action "<exact final Coda action>": derived typed cycle_end
-```
-
-`workers.py delegate` never spawns. Each returned assignment is one binary Agent
-launch contract: copy its exact `subagent_type` and its byte-exact `launch_prompt`.
-Role `review` maps only to `xunji-reviewer`; canonical execution roles
-`surface|web-auth|web-hunter|code-audit|exploit|verify|report` map only to
-`xunji-hunter`. Missing/null/blank, `general-purpose`, aliases, case/whitespace
-variants, and role swaps fail closed. The parent requested type and actual
-same-session Start/Stop type must agree. A launch acknowledgement, Task receipt,
-heartbeat, Agent prose, `done`, or an unbound Reviewer PASS cannot skip a link.
-The delegate output is the entire authoritative `tool_input.prompt`, not a set of
-independently matchable fields. Consumers perform no trim/normalization: any
-prefix, suffix, newline, extra context, token reorder, whitespace drift, or
-description-only reconstruction fails closed. Reviewer result digest and
-`XUNJI_COMPLETION_REVIEW` marker are part of the same exact string.
+The semantic invariant retained here is that a plan is consumable only when its
+committed v2 transaction, immutable receipt-hash archive, complete prior-receipt
+lineage, typed journal, content-addressed snapshot, current turn/input binding,
+and active digest all revalidate. Missing, prepared, unreadable, unarchived,
+broken-lineage, or mismatched provenance fails closed. Legacy migration accepts
+only an unambiguous pre-transaction/native-v1 state with an already frozen
+snapshot; it cannot mint history or become `ROOT_DIRECT`.
 Every writer of `state/assignments.json`—delegate/create, runtime projection,
 heartbeat, review disposition, and Root finish—uses the same cross-process
 assignment lock. Runtime journal collection is snapshotted before that lock and
@@ -736,7 +697,9 @@ tool-use, so child hooks retain their exact lane before the later
 runtime lock. Exact hook prompt/tool identity or an already frozen async child id is
 preferred. When a Start payload carries neither prompt nor parent tool id, it may bind
 only if the remaining parent transcript contains exactly one complete, unconsumed
-Agent identity. Two or more candidates in one assistant message are ambiguous and fail
+Agent identity. A durable parent-Agent `PreToolUseDenied` or `PostToolUseFailure`
+permanently retires that tool-use from Start allocation, including when the next
+successful parent `PostToolUse` races its child Start. Two or more candidates in one assistant message are ambiguous and fail
 before append; arrival order and a transcript ordinal are not causal identity. Safe
 parallel launch is staggered: launch one Agent, then launch the next in a later assistant
 message while the first remains running. Unconfirmed candidates spanning messages, a
@@ -755,9 +718,9 @@ existing `merge_results` and assignment names are confirmed top-down in their ow
 directories, and the assignment directory crosses the final file-entry fsync. A crash
 at any barrier leaves no Stop receipt; an exact retry re-confirms the entire chain and
 then appends exactly once. Projection is
-replayable: after process death between the
-fsynced runtime journal and derived assignment/merge writes, run
-`python3 tools/runtime_receipts.py runs/<dir> --reproject`.
+replayable: after process death between the fsynced runtime journal and derived
+assignment/merge writes, use the exact projection-recovery command owned by
+`xunji-agent-board/references/launch-return-settlement.md`.
 `state/runtime_projection_cursor.json` is an exact-schema ordering watermark. Every
 successful projection durably advances `success_generation`, including a repeat of the
 same event sequence/hash. A projection failure freezes the generation observed when its
@@ -773,41 +736,21 @@ not proof that every derived assignment or merge write is power-loss durable.
 `SubagentStop` must map to exactly one launch with the same `session_id` and
 runtime agent id. Cross-session, unmatched, or ambiguous Stops cannot close an
 attempt or assignment and remain explicit lifecycle debt.
-For example, after committing the lane JSON printed by `workers.py plan`:
-
-```bash
-python3 tools/work_plan.py status runs/<dir>
-python3 tools/workers.py delegate runs/<dir> --runtime-slots 1 --request-budget 0 --model-egress-budget 0 --merge-capacity 40 --limit 1
-python3 tools/workers.py review-disposition runs/<dir> A-<target> A-<reviewer> --status accept-candidate --note "exact digest and controls reviewed"
-python3 tools/workers.py finish runs/<dir> A-<target> --status merged --note "Evidence: E-001; Front: F-001; Root accepted reviewed candidate"
-python3 tools/loop_journal.py runs/<dir> end \
-  --next-action "运行 check_run 验证当前计划" \
-  --note "plan cycle disposition complete"
-```
-
-The status values above are examples, not permission to accept unsupported
-material. A plan-bound `end` re-derives the exact receipt chain and fails closed
-on any missing lane, frozen result, review disposition, or Root disposition.
+Plan-bound settlement and typed cycle-end command shapes live only in
+`xunji-agent-board/references/launch-return-settlement.md`. A plan-bound end
+re-derives the exact receipt chain and fails closed on any missing lane, frozen
+result, review disposition, or Root disposition; status vocabulary never grants
+permission to accept unsupported material.
 
 If canonical `chains.md` or `hints.md` changes after an execution assignment was
 created, the plan becomes stale. A unique returned/failed execution may still admit its
-exact dependent `local_verify` Reviewer, but only with `XUNJI_COMPLETION_REVIEW`, the
-frozen result digest, and `reviews_assignments=[<that exact assignment>]`. An assigned
-non-Reviewer that provably never launched may instead be retired through the typed
-control path:
-
-```bash
-python3 tools/workers.py cancel-unlaunched runs/<dir> A-<assignment> \
-  --reason "canonical inputs changed before launch"
-```
-
-This command is available only when input staleness is the sole plan failure and no
-transcript/runtime/result/review fact exists. A durable prepared transaction becomes a
-launch/replan barrier; generated launch artifacts and the assignment row are durably
-removed before the immutable `cancelled-unlaunched` receipt is published. Cancellation
-is not a result, review, merge, evidence item, or `cycle_end`; Root must commit a material
-replan. Exact older hook facts may replay, while any new Start/Stop/Post/Failure for the
-cancelled assignment fails closed.
+exact dependent `local_verify` Reviewer, but only with the frozen result digest and
+the exact reviewed assignment. A non-Reviewer may be cancelled only when it provably
+never launched and input staleness is the sole plan failure. The exact typed command
+and recovery sequence live in
+`xunji-agent-board/references/plan-and-delegate.md`. Cancellation is not a result,
+review, merge, evidence item, or cycle end; Root must commit a material replan, and
+any new runtime fact for the cancelled assignment fails closed.
 
 `ROOT_DIRECT` admits only one dependency-free atomic lane with at most one request
 and requires one exact registry `capability_id`. The registry defaults closed; the
@@ -827,8 +770,11 @@ vote, finding promotion, exit-gate satisfaction or closure proof.
 
 The run directory is a blackboard. Collaboration is now Root Orchestrator +
 specialized Subagents + Single Synthesizer, not an exceptional "fan-out" mode.
-Full role prompts live in `docs/templates/agents/`; the legacy worker template remains
-only for older runs.
+`docs/templates/agents/` owns per-assignment scaffolds;
+`.claude/agents/xunji-{hunter,reviewer}.md` owns the live Claude Agent execution
+boundary. The legacy worker template remains only for older runs. Operational plan/delegate and launch/return/settlement command shapes live only in the two
+`xunji-agent-board/references/` owners; this section keeps board semantics, not
+another executable protocol.
 
 - **Effect scheduler first**: choose SERIAL/PARALLEL from lane dependencies,
   effect overlap, runtime slots, request budget, model-egress budget, and merge
@@ -843,15 +789,11 @@ only for older runs.
   concrete barrier, the current coordination epoch uses at least two disjoint
   assignments and two actual Agent launches. Bare continue/resume preserves the epoch;
   a material active-front or asset-debt change resets it. Every plan-bound Hunter and
-  Reviewer prompt carries the exact assignment-row assets (or `none`) in its base
-  package. The complete Reviewer shape is
-  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=<exact-assets-or-none> XUNJI_LANE=L-... XUNJI_PLAN=<64hex> XUNJI_RESULT_DIGEST=<64hex> XUNJI_COMPLETION_REVIEW`.
-  The final digest binds the frozen target result; the completion marker is part
-  of the same immutable launch contract. This displayed shape is one complete
-  generated string; matching its fields after adding or reordering text is not
-  valid. This plan-bound marker does not turn the lane into the assignment-free
-  global completion challenge. Missing or mismatching any field or any
-  complete-string byte fails closed.
+  Reviewer prompt carries the exact assignment-row assets in its immutable base
+  package; the Reviewer additionally binds the frozen target-result digest and
+  completion-review marker. The byte-exact generated envelope is owned by
+  `xunji-agent-board/references/launch-return-settlement.md`; reconstructed,
+  reordered, partial, or mismatching bytes fail closed.
   Each target-facing assignment also has explicit `--asset` members.
   `PostToolUse(status=async_launched)` proves launch only; matching `SubagentStop`
   proves return. `heartbeat`, Agent files, finish prose, and model-claimed budget
@@ -862,9 +804,9 @@ only for older runs.
   prompt explicitly grants a one-turn serial override. WAF/auth/host pressure should
   become a recorded shared barrier, not a prose bypass.
 - **Stigmergy**: Agents coordinate **only through the run dir** — they never message
-  each other. The Root assigns each a front/role/asset package in
-  `state/assignments.json`; each
-  Agent writes only its own `agents/A-*.md` and context pack.
+  each other. Root/tooling creates the assignment and context pack. The Agent reads
+  only that frozen package and returns final candidate bytes; runtime freezes those
+  bytes into its merge draft. Agents do not write canonical state.
 - **Actor-scoped lifecycle**: Root alone owns global fan-out and disposition. A running
   child Agent may continue its exact asset package even while another returned Agent
   awaits synthesis; it cannot spawn nested Agents or escape to another asset. After
@@ -876,6 +818,13 @@ only for older runs.
   requires every assigned asset to have a successful
   target-action receipt by that Agent plus an exact-host canonical E-entry.
   Blocked/failed/abandoned attempts leave unfinished assets in coverage debt.
+- **Plan-bound call budget**: every new typed assignment materializes
+  `tool_call_limit` (5–64; default 6). `SubagentStart` freezes it, and each child
+  PreToolUse first appends/fsyncs an idempotent `AgentToolCallClaim`; later denials
+  still count. The first over-limit claim is denied before tool execution with
+  `XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED`. RDT reasoning-loop budget never raises
+  this runtime boundary. Assignment-free global completion review is outside this
+  plan-bound counter and remains governed by its separate exact envelope below.
 - **Single Synthesizer = sole integrator.** Agents produce **candidates, not Facts**.
   At merge the Synthesizer runs every candidate through the **evidence gate**
   (proposed `>= 0.8` without `Control:`/`Replicated:` is downgraded), allocates the
@@ -893,10 +842,11 @@ only for older runs.
   conflict/synthesis views. It is **not** an Agent runtime: `delegate` never spawns,
   and workers never writes canonical findings. Same guardrail as the graph: tooling
   assists, Claude calls the Agent, and Root adjudicates.
-- Agents may write `## New Threat Hypotheses` exactly as candidate material.
-  Root/Synthesizer reviews and merges useful entries with
-  `tools/workers.py merge-threats`; canonical tracking stays in `hypotheses.md`,
-  never a mandatory `threat_model.md`.
+- An Agent final response may include `## New Threat Hypotheses` as candidate
+  material. Root/Synthesizer reviews the frozen merge draft before writing useful
+  candidates to canonical `hypotheses.md`. `tools/workers.py merge-threats` remains
+  a compatibility path for legacy/manual Agent-file material, not the live frozen
+  return path. Canonical tracking never requires a `threat_model.md`.
 - `state/operator_profile.json` is optional per-run personalization for Agent
   reasoning shape: loop budgets, role focus, evidence/review style, and
   retrospective lessons. `context_pack.py` injects it into context packs and
@@ -951,9 +901,9 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
 `retrospective.md` `Status:` / `Verdict:` final/complete values.
 
 - **HARD FAIL** if `review.md` has no current content-addressed `ReviewReceipt`
-  generated by a transcript-observed foreground `peer_review.py ... --into-run`
-  invocation whose output contains the matching `XUNJI_REVIEW_RECEIPT` and
-  `XUNJI_REVIEW_BUNDLE` markers. The receipt's evidence-index and bundle hashes must still match, and
+  generated by the transcript-observed foreground invocation owned by
+  `xunji-reviewops`. Its receipt/bundle markers, evidence-index, and bundle hashes
+  must still match, and
   every BLOCKER ledger item must be resolved. A heading, prose mention, copied model
   output, manual Reviewer/Verdict, or untouched choices do not count.
 - **HARD FAIL** on any `>= 0.8` evidence entry that references no existing saved
@@ -964,34 +914,24 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
 
 ### Run-closure detail (core "Closure Discipline" points that load here)
 
-**Independent review before closure — procedure.** Self-review doesn't fix self-review
-bias. Freeze the current bundle and run
-`python3 tools/peer_review.py runs/<dir> --into-run` in the foreground. For a
-Claude-driven run or Codex-authored maintenance diff, load
-`.claude/skills/xunji-reviewops/references/peer-review-panel.md` for the current
-author matrix and fallback semantics; Codex-authored work uses `--driver codex`.
-`peer_review.py` appends a globally unique PR ledger and a content-addressed receipt.
-Resolve each item, then rerun peer review whenever evidence changes. Older receipts
-remain audit history but cannot validate current evidence. If no Codex/arkcli backend
-is available for Claude-driven work, a successful fresh-context Claude same-family
-fallback may emit a receipt with the weaker-independence limitation recorded; it is
-still candidate review, not driver adjudication. Backend failure, absent egress
-consent, or no successful backend leaves closure incomplete; manual-driver prose never
-replaces the vote. Normal-mode Stop separately requires a structured completion-review
-section plus its actual current-evidence Agent receipt.
+**Independent review before closure — procedure.** Self-review does not fix
+self-review bias. Load `xunji-reviewops` and read its peer-review-panel reference
+completely; that reference is the sole Claude-primary owner for exact CLI, author
+matrix, backend order, egress, fallback, and resolution commands. Freeze the current
+bundle, obtain a foreground content-addressed ReviewReceipt, resolve every ledger
+item, and refresh it whenever evidence changes. Older receipts remain audit history
+but cannot validate current evidence. Backend failure or no successful allowed
+backend leaves closure incomplete; manual-driver prose never replaces the vote.
+Normal-mode Stop separately requires the structured global completion review and
+its current-evidence Agent receipt.
 
 Claude Code is primary and Codex is auxiliary: Codex commonly appears here as a
 heterogeneous review backend, but it can also provide advice or delegated help when
 useful. It does not create a separate runtime; the canonical run directory, evidence
 gate, guard/hook boundary, and review requirements still apply.
 
-**Codex proxy is mandatory for the codex backend.** Codex CLI calls OpenAI API through its
-own dedicated proxy channel (`tools/harness/codex_proxy.py`, configured via `CODEX_PROXY`
-env or `tools/harness/codex_proxy.conf`), isolated from the engagement proxy
-(`XUNJI_PROXY`) and the model-API direct channel. Without it, codex is unreachable and
-peer_review retries transient/empty-output failures, then falls through to the arkcli
-panel; Claude fallback is recorded as same-family unless the active driver matrix
-allows it. See `review/independent-reviewer.md` "Codex 代理（必须）".
+Backend/proxy/fallback details live only in the peer-review-panel reference and
+`review/independent-reviewer.md`; this closure document does not copy them.
 
 **Mandatory retrospective before closure — procedure.** Every pentest closes with an honest
 `retrospective.md` (scaffolded from `docs/templates/run/retrospective.md`): what *I* (the
@@ -1005,6 +945,8 @@ fixed item also needs non-empty `Fixed by` + `Verification`; an open/deferred
 item needs `Residual risk`. One status line for the whole section does not close
 multiple lessons. Retrospective `Status:` / `Verdict:` values such as `FINAL`
 activate closure gates, but they are not completion actions.
+
+#### Assignment-free global completion Reviewer
 
 **Completion marker and scheduled-loop disposition.** `GHOST_COMPLETE` /
 `NORMAL_COMPLETE` belongs only in `decisions.md` and only after closure gates pass.
@@ -1025,11 +967,12 @@ CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review
 parent-only Post, async acknowledgement, a duplicate verdict, an explicit
 FAIL/WARN/false check, or a bare PASS/WARN token is rejected. This completion challenge and the independent content-addressed
 `peer_review.py --into-run` ReviewReceipt/ledger gate cannot satisfy each other.
-In the same turn, run `CronList`, delete only the observed job ID for this run,
-run `CronList` again, then append a loop journal `end --next-action "<exact final
-Coda action>"` record (`cycle_end`) with `cron_cancelled=<job-id|none>` in the
-note. `check_run.py` HARD-fails a completion marker without those runtime receipts
-and the auditable end-of-cycle disposition.
+In the same turn, only `loop_requested=true` runs `CronList`, deletes the observed
+current-run job if present, and lists again; `loop_requested=false` performs no
+Cron action. Then append a loop journal `end --next-action "<exact final Coda
+action>"` record (`cycle_end`) with `cron_cancelled=<job-id|none>` in the note.
+`check_run.py` HARD-fails a completion marker without the applicable runtime
+receipts and the auditable end-of-cycle disposition.
 
 **Operator pause is not closure.** A stop/pause prompt writes
 `PAUSED_BY_OPERATOR`, keeps open/probing/Type-A fronts unchanged, forbids target
@@ -1047,6 +990,8 @@ framework code** — the machinery that decides what is allowed or destructive:
 - `.claude/hooks/` (safety_gate + rules — the hard block)
 - `tools/harness/privacy.py` and `tools/harness/command_shape.py` (outbound/model-egress
   redaction plus the exact-command classifier imported by the hard block)
+- `tools/setup_transaction.py` (hidden setup staging, activation receipts, and
+  active-run pointer compare-and-swap)
 - `tools/harness/guard.py` (rate / volume / auth / body / circuit breakers)
 - `sentinel/` (behavior classification + autonomy decision + circuit breaker)
 
@@ -1077,9 +1022,10 @@ filesystem effect from raw JSON text.
 
 **Before declaring a behavior change to any of the above "done", first run the
 whole regression battery in one shot — `python3 tools/selftest_all.py` (every
-tool / hook / sentinel selftest; green is the floor, not the goal) — then spawn an
-independent `general-purpose` reviewer** (fresh context, per
-`review/independent-reviewer.md`, pointed at the changed files + commits) and
+tool / hook / sentinel selftest; green is the floor, not the goal) — then use the
+fresh-context reviewer selected by `xunji-reviewops` and
+`references/peer-review-panel.md`** (for a Codex-authored candidate, use author
+driver `codex`; point the reviewer at the changed files + commits) and
 **record its findings + your disposition of each in `review/records/<date>-<topic>.md`.**
 This is evidence-backed, not precautionary: an independent pass on the session
 circuit breaker caught a real bug (retry undercount) and a latent invariant break

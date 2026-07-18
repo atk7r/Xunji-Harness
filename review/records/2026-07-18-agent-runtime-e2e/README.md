@@ -2,8 +2,12 @@
 
 - Date: 2026-07-18
 - Scope: current Python harness and Claude Code primary-driver Agent lifecycle
-- Driver: Claude Code 2.1.201, DeepSeek `deepseek-v4-pro[1m]`, effort `max`
-- Main-repository base: `1a2170eb6e1a6d7a31d37d8ef8310db9ba7b4bbb`
+- Driver: Claude Code 2.1.201, DeepSeek `deepseek-v4-pro[1m]`; the final
+  Phase 2 runs used effort `high`. No `ultra` run was used.
+- Historical base: `1a2170eb6e1a6d7a31d37d8ef8310db9ba7b4bbb`
+- Phase 2 base: `9b9f51e`; frozen v11 candidate
+  `7cf3330d3e5c2e122dd8ebface14bc492e653bdd`, tree
+  `94fdc7a286860ffaccea5d719434d808be409541`
 - Target: reserved `.invalid` fixture only; no target action was authorized or executed
 - Privacy: no secret, bulk transcript, or target artifact is stored in this record
 
@@ -85,3 +89,88 @@ kept as evidence; the initial Reviewer disagreement is not rewritten as a pass.
 This E2E record is primary-driver execution evidence. The independent
 fresh-context Claude review required for the Codex-authored maintenance diff is
 recorded separately and remains a commit gate.
+
+## Phase 2: plan-bound Agent runtime and tool-call cap
+
+This continuation validates the Claude-primary typed work-plan, assignment,
+launch, return, review, Root settlement, and per-assignment child-tool boundary.
+It does not claim engagement closure and does not cover statusline, `.agents`,
+CCB/TypeScript, a live target, or assignment-free global-completion budgeting.
+
+The final candidate materializes a default plan-bound `tool_call_limit=6`, freezes
+the assignment value at `SubagentStart`, and appends/fsyncs one idempotent
+`AgentToolCallClaim` before every later policy gate. Denied attempts count. The
+first over-limit claim is recorded but cannot execute. Root/global-completion work
+does not borrow this plan-bound counter.
+
+### Failure and recovery ledger
+
+No failed or interrupted attempt below is counted as PASS merely because Claude
+later described it as successful.
+
+| Run | Session | Disposition | Developer finding |
+|---|---|---|---|
+| normal v7 | `d8a1f5e9-1c05-46b5-964f-0aac825a0a56` | Product PASS; outer harness initially rc=2 | Transcript path encoding in the test runner was wrong; receipt chain itself was valid. |
+| hard-cap v7 / v7b / v7c | `963c18ac…` / `3d30ac3a…` / `362592f8…` | FAIL / terminated | Removed stale fixture assumptions, premature `cycle_end`, and an invalid expectation that later assignments must reuse cap 6. |
+| hard-cap v7d | `16ffe8e5-00d8-4d1b-ab5b-941d8492bc58` | FAIL | The seventh call was denied correctly, but blocked settlement lacked literal `Reason:` and a later Reviewer naturally exceeded disposable cap 8. Both were retained as defects, not hidden. |
+| normal v8 | `3bbd184f-1095-46ac-9ac6-1c7ed776b706` | FAIL / terminated | A denied canary remained eligible during a later async parent-Post/child-Start race. Same-session denied/failed parent tool IDs now retire permanently from Start allocation. |
+| normal v10 | `6a19875e-2106-4947-a6ad-9b2866f4fc04` | PASS after test-only validator correction | The canonical value was correctly at `cycle_end.data.next_action`; the runner incorrectly read the event top level. Product source was unchanged. |
+| hard-cap v10 | `825727d3-fe03-40a8-867f-1b8eb9123c3c` | FAIL / terminated | Core seventh-call denial passed, but a normal Reviewer naturally exceeded disposable cap 16, creating extra denials. |
+| hard-cap v10b | `4cd880a0-3af7-47a9-98a0-862bbc98d240` | FAIL / terminated | Claude reused cap 6 for the first Reviewer despite the intended later-lane cap 64. The test prompt was made mutually exclusive and output-checked. |
+| hard-cap v11 | `af0b8511-229f-445a-9635-9dcab783f2d6` | FAIL / terminated | Core denial and later cap 64 passed, but Claude edited `decisions.md` after plan commit, caused a real stale-plan failure, then recovered. The clean-run prompt now treats the seeded graph pass as final test input. |
+| normal v11 | `0e28ee7c-6329-41a6-bd86-aa5ee551dca8` | PASS | Final ordinary four-lane vertical slice. |
+| hard-cap v11b | `6dabe0a6-f9ad-4df9-b90d-1ea696ce7384` | PASS | Final deliberate seventh-call fault injection plus unaffected downstream settlement. |
+
+### Final ordinary-run evidence
+
+- Claude return code 0; `UserPromptSubmit` transcript line 11 preceded first tool
+  line 15; outer result was `RECEIPT_VALIDATION=normal:PASS`.
+- Assignment/Start caps were `[6, 6, 6, 6]`; statuses were
+  `blocked, reviewed, blocked, reviewed`.
+- Parent Post / Start / Stop were 33/34/43, 50/51/62, 71/72/84, and
+  90/91/100. Child claims were 4, 6, 6, and 6, all admitted.
+- The sole denial was seq 32 `XUNJI_E_DELEGATION_REQUIRED` for the mutated
+  canary. Its tool ID had no Start/Post. `PostToolUseFailure` count was zero.
+- Typed plan `WP-2-84bd69b6` ended with cycle hash
+  `a50f927464a994068cc034fe4a98e8df7d869cb011653a6a90949924597adccc`
+  and `data.next_action=运行 check_run 验证当前计划`.
+- Claude reported 165 Root turns, $6.275644, and 623018 ms foreground duration.
+  Stream/transcript SHA-256 values are
+  `bcbd1877fe8270356c9f6368d4d9ea4d7da8bdc1002b4cdc4a9d87cf3038fdfd`
+  and `a9d3d40d56855d51897c83dccef8d6a7b45a2fda1af5b1dba724e2f2b3f49ee3`.
+
+### Final hard-cap evidence
+
+- Claude return code 0; `UserPromptSubmit` transcript line 11 preceded first tool
+  line 16; outer result was `RECEIPT_VALIDATION=hard-cap:PASS`.
+- Assignment/Start caps were `[6, 64, 64, 64]`; statuses were
+  `blocked, reviewed, blocked, reviewed`. The wider later caps are disposable
+  fault-isolation values, not a change to the product default.
+- The first Hunter's claims were ordinals 1–6 admitted and ordinal 7 denied.
+  Seq 21 recorded `XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED`; the denied tool ID
+  `call_00_bCZrRwn8BTOeluYjBTj72375` had no `PostToolUse`.
+- Parent Start/Stop were 13/22, 27/59, 67/81, and 84/103. Later claim counts were
+  31, 13, and 18; every one was admitted. No other denial or
+  `PostToolUseFailure` occurred.
+- Typed plan `WP-2-fc6045e3` ended with cycle hash
+  `1f90caa5aedd87d8c2705f54ae759575947dcd06cc726aeb4cdd3da492012d37`.
+- Claude reported 13 Root turns and $4.472211; asynchronous child work is not
+  represented by the 42181 ms Root foreground duration. Stream/transcript hashes
+  are `e3a02a74f235db755bc9cc4ba282efaf2a78d3795694d657d22c4a6814c9acbb`
+  and `5e5fe0308ecbaa64a423033728c7dcdafff445143c63ee7e54b3dc206197bc24`.
+
+### Frozen-candidate checks and test-scaffold boundary
+
+- Final v11 source: 46 selected Claude-primary/shared-runtime files; `.agents`,
+  statusline, project-introduction deletion, target artifacts, and CCB/TypeScript
+  work were excluded.
+- `tools/selftest_all.py`: 69 passed, 0 failed in 107.9s with the authorized real
+  loopback probe. Focused template/context/work-plan/workers/runtime/turn-contract
+  aggregate: 6 passed, 0 failed. `git diff --check` passed.
+- Runner SHA-256:
+  `81f74149ff5389c17734c22a8c08c765c5c06d7114c0c3cbd730d06a9a3cd2e7`;
+  ordinary/hard-cap prompt hashes:
+  `d85dfa22159ee9f9410265628bed26b9f3adf8fa7b260e1a80bdee4b3a35c863` /
+  `38c28bc4d88f064adc606e5d70237d8cb2148ca60c36b9011a704f6c211a94f7`.
+- The runner, prompts, run directories, transcripts, and disposable Hunter fault
+  injection are test scaffolding only and are not part of the framework commit.

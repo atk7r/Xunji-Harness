@@ -232,27 +232,28 @@ def input_fingerprint(run_dir: str | Path) -> tuple[str, list[dict]]:
         for path in sorted(run.glob("**/coverage.json"))
     )
     for path, logical_path, conditional in candidates:
-        if conditional:
-            try:
-                metadata = path.lstat()
-            except FileNotFoundError:
+        invalid_code = (
+            "WORK_PLAN_CONDITIONAL_INPUT_INVALID"
+            if conditional else "WORK_PLAN_INPUT_INVALID"
+        )
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            if conditional:
                 rows.append({"path": logical_path, "present": False})
-                continue
-            except OSError as exc:
-                raise PlanError(
-                    f"WORK_PLAN_CONDITIONAL_INPUT_INVALID:{logical_path}") from exc
-            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-                raise PlanError(
-                    f"WORK_PLAN_CONDITIONAL_INPUT_INVALID:{logical_path}")
+            continue
+        except OSError as exc:
+            raise PlanError(f"{invalid_code}:{logical_path}") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise PlanError(f"{invalid_code}:{logical_path}")
         try:
             resolved = path.resolve()
             relative = resolved.relative_to(run).as_posix()
-        except (OSError, RuntimeError, ValueError):
-            if conditional:
-                raise PlanError(
-                    f"WORK_PLAN_CONDITIONAL_INPUT_INVALID:{logical_path}")
-            continue
-        if resolved in seen or not resolved.is_file():
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise PlanError(f"{invalid_code}:{logical_path}") from exc
+        if not resolved.is_file():
+            raise PlanError(f"{invalid_code}:{logical_path}")
+        if resolved in seen:
             continue
         seen.add(resolved)
         data = resolved.read_bytes()
@@ -2439,6 +2440,25 @@ def _selftest() -> int:
     checks.append((
         "conditional symlink cannot disappear from the input digest",
         symlink_error == "WORK_PLAN_CONDITIONAL_INPUT_INVALID:hints.md",
+    ))
+    conflict_symlink_run, _ = make_run("conflict-symlink-fail-closed")
+    escaping_conflicts = conflict_symlink_run.parent / "outside-conflicts.json"
+    escaping_conflicts.write_text(
+        '{"schema":1,"generated_at":"2026-07-18T00:00:00Z",'
+        '"conflict_types":[],"conflicts":[]}\n',
+        encoding="utf-8",
+    )
+    (conflict_symlink_run / "state" / "conflicts.json").symlink_to(
+        escaping_conflicts)
+    conflict_symlink_error = ""
+    try:
+        input_fingerprint(conflict_symlink_run)
+    except PlanError as exc:
+        conflict_symlink_error = str(exc)
+    checks.append((
+        "conflict projection symlink cannot escape the plan input digest",
+        conflict_symlink_error
+        == "WORK_PLAN_INPUT_INVALID:state/conflicts.json",
     ))
     for conditional_name in sorted(CONDITIONAL_CANONICAL_INPUTS):
         for operation in ("create", "modify", "delete"):

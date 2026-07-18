@@ -22,8 +22,10 @@ evidence grounded in saved target responses and safe replays, not prose.
   retain URL userinfo or returned token/PII values verbatim in the replay JSON.
 - **Agent-originated entries MUST carry `Maturity: candidate`.** An agent's
   certainty claim without a `.replay.json` artifact is NOT canonical evidence
-  certainty. The Synthesizer must independently re-verify it: use replay when the
-  request is replayable (`IDENTICAL` or content-checked `CONSISTENT`), or for an
+  certainty. Under current target authority the Synthesizer must independently
+  re-verify it: use replay only when the current top-level operator prompt explicitly
+  authorizes replay and the request is replayable (`IDENTICAL` or content-checked
+  `CONSISTENT`), or for an
   authenticated privacy-redacted request perform a fresh guarded replication
   with a second saved artifact and explicit Control/Replicated evidence.
   When the driver writes an evidence entry based on agent output that has not been
@@ -35,8 +37,8 @@ evidence grounded in saved target responses and safe replays, not prose.
 Prefer guard-routed probe artifacts:
 
 ```bash
-python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
-python tools/probe.py DIFF "<baseline-url>" "<mutant-url>" --save <name> --run runs/<dir>
+python3 tools/probe.py GET "<url>" --save <name> --run runs/<dir>
+python3 tools/probe.py DIFF "<baseline-url>" "<mutant-url>" --save <name> --run runs/<dir>
 ```
 
 This places the response and the `.replay.json` under `runs/<dir>/evidence/`.
@@ -51,8 +53,8 @@ files are tolerated by parsers but become layout-drift warnings.
 Use replay only as a verification aid; it does not auto-decide truth:
 
 ```bash
-python tools/replay.py runs/<dir>
-python tools/check_run.py runs/<dir> --replay-verify
+python3 tools/replay.py runs/<dir>
+python3 tools/check_run.py runs/<dir> --replay-verify
 ```
 
 Replay rules:
@@ -73,12 +75,9 @@ Replay rules:
 
 ## Closure Gate
 
-Before final report or `GHOST_COMPLETE`:
-
-```bash
-python tools/check_run.py runs/<dir>
-python tools/check_run.py runs/<dir> --replay-verify
-```
+Before final report or `GHOST_COMPLETE`, run the routine offline structural check
+through `xunji-run-lifecycle`. Use the replay-verification command above only when
+the current top-level operator prompt authorizes that live target effect.
 
 Resolve every hard error. Treat replay warnings as evidence-quality work, not
 cosmetic cleanup. If a replay diverged after a final report cites that finding,

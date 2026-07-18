@@ -47,14 +47,13 @@ ACTION_CN = {
     "add_negative_evidence_or_reactivate_high_threat_deferred_front": "给高威胁延后前线补负向证据，或重新激活",
     "link_or_action_open_threat_hypotheses": "给开放威胁假设补 Linked IS/C/E 或下一步动作",
     "continue_driver_on_actionable_open_front": "继续推进可行动开放前线",
-    "run_closure_gates_replay_peer_review_and_retrospective": "跑收口硬门、replay、独立复审和复盘",
+    "run_closure_gates_peer_review_and_retrospective": "跑离线收口硬门、独立复审和复盘；live replay 仅按当前显式授权路由",
     "create_or_reopen_a_front_before_claiming_closure": "先创建或重开前线，不能直接宣称结束",
     "do_not_schedule_another_loop_iteration": "不要再排下一轮 /loop",
 }
 REQUIRE_CN = {
     "zero open fronts or evidence-backed deferred/closed rationale": "开放前线归零，或每个延后/关闭都有证据支撑的理由",
-    "python tools/check_run.py <run>": "运行结构检查：python tools/check_run.py <run>",
-    "python tools/check_run.py <run> --replay-verify": "运行 replay 核实：python tools/check_run.py <run> --replay-verify",
+    "offline check_run completed": "完成 lifecycle owner 所列的离线 run 结构检查",
     "independent review resolved": "独立复审已完成且问题已处理",
     "retrospective.md completed": "retrospective.md 已真实填写",
     "GHOST_COMPLETE only after hard gates pass": "只有硬门全部通过后才允许写 GHOST_COMPLETE",
@@ -157,7 +156,7 @@ def _next_required_action(state: str, loop_data: dict, blockers: list[str]) -> s
     if fronts.get("open_count", 0):
         return "continue_driver_on_actionable_open_front"
     if progress.get("confirmed_evidence") or state == "CLOSURE_CANDIDATE":
-        return "run_closure_gates_replay_peer_review_and_retrospective"
+        return "run_closure_gates_peer_review_and_retrospective"
     return "create_or_reopen_a_front_before_claiming_closure"
 
 
@@ -202,8 +201,7 @@ def derive(run_dir: Path, *, loop_data: dict | None = None, ledger_data: dict | 
         },
         "stop_requires": [
             "zero open fronts or evidence-backed deferred/closed rationale",
-            "python tools/check_run.py <run>",
-            "python tools/check_run.py <run> --replay-verify",
+            "offline check_run completed",
             "independent review resolved",
             "retrospective.md completed",
             "GHOST_COMPLETE only after hard gates pass",
@@ -324,7 +322,8 @@ def _selftest() -> int:
         ("closed run is only closure candidate, not stop",
          closed_ctl["state"] == "CLOSURE_CANDIDATE"
          and closed_ctl["signals"]["closure_review_candidate"]
-         and not closed_ctl["can_stop"]),
+         and not closed_ctl["can_stop"]
+         and all("replay" not in item.lower() for item in closed_ctl["stop_requires"])),
         ("completion marker allows loop stop without treating candidate as enough",
          complete_ctl["state"] == "LOOP_COMPLETE"
          and complete_ctl["can_stop"]
@@ -334,6 +333,9 @@ def _selftest() -> int:
          "不要再排下一轮 /loop" in render_markdown(complete_ctl)),
         ("markdown render contains Chinese stop blockers", "Xunji 控制面建议" in render_markdown(controller)
          and "Stop Blockers" in render_markdown(controller)),
+        ("generic controller output never prescribes live replay or bare python",
+         "--replay-verify" not in render_markdown(closed_ctl)
+         and "python tools/" not in render_markdown(closed_ctl)),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:

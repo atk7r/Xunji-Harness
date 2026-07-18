@@ -81,6 +81,14 @@ def _driver_doc_errors(
             if marker in text:
                 errors.append(f"{rel} retains forbidden driver marker: {marker}")
 
+    for path in sorted((root / "docs" / "templates" / "agents").glob("*.md")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        rel = path.relative_to(root).as_posix()
+        if "workers.py heartbeat/finish" in text or "workers.py finish" in text:
+            errors.append(f"{rel} retains stale Agent lifecycle command")
+        if "Root alone reviews and terminally settles the assignment" not in text:
+            errors.append(f"{rel} missing Root-owned settlement boundary")
+
     prompt_cases = fixture.get("prompt_cases")
     valid_prompt_cases: list[dict] = []
     prompt_fields = {

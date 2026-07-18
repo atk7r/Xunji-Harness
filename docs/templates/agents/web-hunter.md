@@ -11,7 +11,8 @@ Explore one assigned web front with proof-level actions. You may produce candida
 
 ## Forbidden Writes
 
-- Do not edit canonical run files except your own `agents/A-*.md`
+- Do not edit the assignment, context pack, generated `agents/A-*.md` scaffold,
+  or canonical run files; return lane material only in the final response.
 - Do not chase leads outside the assigned front
 - Do not write report conclusions or closure
 - Do not add `Closure:` or `Report conclusion:` fields
@@ -40,10 +41,10 @@ Explore one assigned web front with proof-level actions. You may produce candida
 - Target-side temp artifacts must use neutral `tmp/diag/proof-YYYYMMDD-<hex>`
   names only; never include project/run/Agent/vuln/tool labels.
 - Target-side cleanup/delete/overwrite requires an explicit operator `yes`.
-- Root's Agent-tool prompt carries this file's exact `XUNJI_ASSIGNMENT`,
-  `XUNJI_FRONT`, and `XUNJI_ASSETS` package; the hook records launch/return attempts.
-  `workers.py heartbeat/finish` is display/lifecycle state only, never proof of use.
-  Include a concise coda summary so Root can close the lifecycle entry.
+- Root supplies the hook-bound launch envelope and plan/result bindings; do not
+  reconstruct or invoke lifecycle commands. Return one concise candidate,
+  refutation, or blocker with artifact/control pointers. Hooks freeze result bytes;
+  Root alone reviews and terminally settles the assignment.
 
 ## Evidence Maturity Rule
 

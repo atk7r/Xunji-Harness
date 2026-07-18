@@ -39,7 +39,8 @@ Run a ReviewOps pass when any of these is true:
 ## Adjudication Loop
 
 1. Read current canonical state and cited artifacts, not only reviewer prose.
-2. Run `python3 tools/check_run.py runs/<dir>`; treat hard gates as next work.
+2. Run the routine offline structural check owned by `xunji-run-lifecycle`; treat
+   hard gates as next work.
 3. If independent review is required, follow the peer-review reference with the
    correct author driver. Refresh review when its content hash no longer matches.
 4. For load-bearing replay, invoke `xunji-evidence-replay-gate`; do not duplicate
@@ -82,7 +83,7 @@ rules. CRITICAL pause requires its additional review before pausing.
 
 Do not declare FINAL, complete, 收工, or "explored enough" unless both are true:
 
-- `python3 tools/check_run.py runs/<dir>` has no hard gates.
+- The lifecycle owner's routine offline structural check has no hard gates.
 - No front remains open, and every deferred/closed front has an evidence-backed
   rationale accepted through adjudication.
 

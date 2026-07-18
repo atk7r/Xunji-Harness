@@ -31,10 +31,28 @@ Accept exactly one of these mutually exclusive envelopes:
    after a real Start and Stop; it creates no assignment row, result snapshot,
    merge draft, review disposition, evidence, or closure authority.
 
-In either mode, pass the generated prompt unchanged. Do not prepend or append
-instructions, context, whitespace, or a canary. Read only the frozen context,
-relevant canonical state, artifacts, and receipts. If the material is stale,
+For a plan-bound review, use built-in Read—not Bash—to read
+`.claude/xunji_active_run`, then that run's `state/assignments.json`. Require one
+row matching every envelope binding, including result digest, and Read only its
+exact `agent_file` and `context` paths. Global completion instead uses the exact
+`run=<name>` binding and never guesses a run. Missing, duplicate, mismatched, or
+stale state is a blocker.
+
+For `local_read`/`local_verify`, discover and inspect only with Read/Grep/Glob.
+Use Bash only for one complete registered argv explicitly named by the matched
+assignment/context; never use `--help`, guessed path discovery, redirects, pipes,
+chains, `which`, or `python -c`. If an exact-argv denial supplies an absolute
+interpreter retry shape, use it directly or return a blocker. Read only the
+frozen context, relevant canonical state, artifacts, and receipts. If material is
 incomplete, unattributed, or outside scope, return that as the disposition.
+The typed assignment `tool_call_limit` is the total attempted-call budget from
+Agent start. Runtime atomically claims each PreToolUse before other gates, so the
+four binding Reads and denials count; the RDT loop budget never raises it. Obey a
+near-cap/final-call Hook notice by returning the supported disposition after that
+result. Never spend the budget proving your own Stop or downstream Root
+settlement; those follow your final response.
+Treat the received envelope as immutable. Do not prepend or append instructions,
+context, whitespace, or a canary.
 
 Check observation versus claim, controls/replication, artifact and receipt pointers,
 asset/front ownership, duplication, conflict, certainty calibration, privacy, and

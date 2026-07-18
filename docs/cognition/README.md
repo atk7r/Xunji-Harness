@@ -48,19 +48,19 @@ hypothesis in an observed fact, not in speculation.
 - The grounding base **is** where those weak-point anchors live — consult it on a
   fingerprint hit, don't re-derive a known stack from memory. After an observation
   grounds a product (you recognized the stack while attacking it, or `classify_hosts`
-  tagged it `kb:<id>`), retrieve the entry via `knowledge_match --body` (Recognition +
-  Weak-Point Anchors — class + mechanism + CVE — to aim the next per-target check) and
-  `xday_match --body` (any stored **local** exploit; xday has no public payload to
-  research, so the local copy is the only source — for a public vuln, take the anchor and
-  craft from internet research). Command mechanics: ROUTER "Verification Tools". Consult
-  **after** a live recognition match and adapt to the target — never pre-load the base and
-  walk it as a checklist (the blind scanner the project rejects).
-- The flywheel has a **write-back end**, not just a read end: when recognition
-  **misses** on a clearly-fingerprinted product (`knowledge_match --body` returns
-  nothing), that gap is the base's blind spot. Seed a grounding entry —
-  `tools/knowledge_seed.py <id> --product … --from-body <saved>` — so the next run
-  recognizes it. A read-only flywheel stops compounding; capture on the miss, fill
-  and adapt per-target (still grounding, never a payload dump).
+  tagged it `kb:<id>`), a live run uses built-in Read/Grep/Glob over the saved
+  artifact and the one matching public `knowledge/*.md` entry. Read at most one
+  matching local weaponized/xday entry only when the current privacy/model-egress
+  boundary permits it. The helper matcher CLIs remain offline developer tools, not
+  live capabilities. Consult **after** a recognition match and adapt to the target —
+  never pre-load the base and walk it as a checklist (the blind scanner the project
+  rejects).
+- The flywheel has a **write-back end**, not just a read end. A clearly
+  fingerprinted miss is the base's blind spot, but the engagement turn records the
+  artifact, proposed ID, and deferred gap only. Curate or seed the entry in a
+  separate, explicitly authorized repository-maintenance turn so the next run can
+  recognize it. Capture on the miss and fill later; never turn live writeback into
+  target evidence or a payload dump.
 - **Anchor every hypothesis on the precise vuln-class term**, not a vague description
   ("SQLi" not "fuzz the param", "IDOR" not "broken access", "path traversal" not "read a
   file"): the exact class name localizes the model's knowledge and retrieves the right

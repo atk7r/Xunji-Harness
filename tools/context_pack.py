@@ -225,7 +225,8 @@ def render_operator_profile_lines(run_dir: Path, *, role: str, front_text: str =
     lines += [
         f"- Source: {rdt['source']}",
         f"- RDT style: {rdt['style']} (reasoning pattern only; no OpenMythos runtime dependency)",
-        f"- Recommended loop budget: {rdt['loop_budget']} recurrent step(s)",
+        f"- Recommended reasoning-loop budget: {rdt['loop_budget']} recurrent step(s); "
+        "this does not authorize additional tool calls",
         f"- Role focus: {rdt['role_focus']}",
         f"- Front profile: {rdt['front_profile']}",
         f"- Decision style: {rdt['decision_style']} (fallback_seconds={rdt['fallback_seconds']})",
@@ -328,10 +329,15 @@ def _knowledge_xday_summary(kb_ids: list[str], *, kb_dir: Path | None = None,
                             xday_dir: Path | None = None,
                             weap_dir: Path | None = None) -> list[str]:
     lines: list[str] = []
+    fallback = (
+        "use built-in Read/Grep/Glob against the saved artifact and "
+        "`knowledge/*.md`; return an explicit knowledge gap when no grounded "
+        "match exists; writeback is a separate maintenance turn"
+    )
     if not kb_ids:
-        return ["- (no `kb:<id>` fingerprint matched this front; run `knowledge_match.py --body <saved>` when a saved response fingerprints a product)"]
+        return [f"- (no `kb:<id>` hint matched this front; {fallback}.)"]
     if _knowledge_match is None:
-        return ["- (knowledge_match unavailable)"]
+        return [f"- (offline matcher module unavailable; {fallback}.)"]
     kb_root = kb_dir or _knowledge_match.KB
     entries = {e.id: e for e in _knowledge_match.load_entries(kb_root)}
     stores = {}
@@ -345,7 +351,7 @@ def _knowledge_xday_summary(kb_ids: list[str], *, kb_dir: Path | None = None,
             lines.append(f"- knowledge `{kid}`: {e.product} ({e.maturity}); path={_rel(e.path)}; signatures={sigs}")
         else:
             lines.append(f"- knowledge `{kid}`: id referenced by front/coverage but no public grounding entry found")
-        local = stores.get(kid, [])
+        local = stores.get(kid, []) if e else []
         if local:
             for store in local[:3]:
                 if store.get("kind") == "poc":
@@ -353,8 +359,10 @@ def _knowledge_xday_summary(kb_ids: list[str], *, kb_dir: Path | None = None,
                     lines.append(f"  - local xday pointer: {_rel(store['path'])}/ files={files}")
                 else:
                     lines.append(f"  - local weaponized note pointer: {_rel(store['path'])}")
-        else:
+        elif e:
             lines.append("  - local xday: none indexed for this knowledge id")
+        else:
+            lines.append("  - local xday: withheld until a public grounding entry matches")
     return lines
 
 
@@ -456,6 +464,7 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
                assets: list[str] | None = None, effect: str = "",
                lane_id: str = "", plan_digest: str = "",
                assignment_attempt: int = 0,
+               tool_call_limit: int = 0,
                kb_dir: Path | None = None, xday_dir: Path | None = None,
                weap_dir: Path | None = None) -> str:
     front_text = _front_block(run_dir, front)
@@ -486,6 +495,8 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
         f"- Effect: {effect or '(unbound)'}",
         f"- Lane: {lane_id or '(unbound)'}",
         f"- Plan digest: {plan_digest or '(unbound)'}",
+        f"- Hard tool-call limit: {tool_call_limit if tool_call_limit > 0 else '(unbound)'}"
+        " total attempted child calls; PreToolUse enforces it and denials count.",
         f"- Role: {role}",
         "- Canonical source: markdown run files; this pack is a read-only slice.",
         "- Maturity rule: subagent output is phenomenon/candidate only; Root Synthesizer owns findings.",
@@ -583,6 +594,7 @@ def build_from_agent(run_dir: Path, agent_id: str) -> str:
         lane_id=str(a.get("lane_id") or ""),
         plan_digest=str(a.get("plan_digest") or ""),
         assignment_attempt=int(a.get("assignment_attempt") or 0),
+        tool_call_limit=int(a.get("tool_call_limit") or 0),
     )
 
 
@@ -607,6 +619,9 @@ def _selftest() -> int:
         "## Weak-Point Anchors\n- Anchor: auth boundary review.\n",
         encoding="utf-8")
     (weap / "foobar-cms.md").write_text("---\nid: foobar-cms\n---\nlocal note\n", encoding="utf-8")
+    (weap / "missing-public.md").write_text(
+        "---\nid: missing-public\n---\nmust stay hidden without public grounding\n",
+        encoding="utf-8")
     xp = xday / "foobar-cms"
     xp.mkdir()
     (xp / "README.md").write_text("| link | `knowledge/foobar-cms.md` |\n", encoding="utf-8")
@@ -665,6 +680,17 @@ def _selftest() -> int:
     malformed_rdt = resolve_rdt_profile(
         malformed, role="web-auth",
         front_text=(malformed / "frontier.md").read_text(encoding="utf-8"))
+    no_kb_summary = "\n".join(_knowledge_xday_summary([]))
+    missing_public_summary = "\n".join(_knowledge_xday_summary(
+        ["missing-public"], kb_dir=kb, xday_dir=xday, weap_dir=weap))
+    global _knowledge_match
+    saved_knowledge_match = _knowledge_match
+    try:
+        _knowledge_match = None
+        matcher_unavailable_summary = "\n".join(_knowledge_xday_summary(
+            ["foobar-cms"], kb_dir=kb, xday_dir=xday, weap_dir=weap))
+    finally:
+        _knowledge_match = saved_knowledge_match
     complete_role_template = _read(
         _role_template_path("web-auth"),
     ).strip()
@@ -672,16 +698,33 @@ def _selftest() -> int:
         ("pack names front and role", "Context Pack F-001 / web-auth" in pack),
         ("pack includes matched coverage", "app.example" in pack and "kb:foobar-cms" in pack),
         ("pack includes knowledge pointer", "knowledge `foobar-cms`" in pack and "FooBar CMS" in pack),
+        ("no-kb route uses built-in live lookup and defers writeback",
+         "Read/Grep/Glob" in no_kb_summary
+         and "separate maintenance turn" in no_kb_summary
+         and "knowledge_match.py" not in no_kb_summary),
+        ("local xday pointer requires a matching public grounding entry",
+         "withheld until a public grounding entry matches" in missing_public_summary
+         and "local xday pointer" not in missing_public_summary
+         and "missing-public.md" not in missing_public_summary),
+        ("matcher import failure keeps the built-in live fallback",
+         "offline matcher module unavailable" in matcher_unavailable_summary
+         and "Read/Grep/Glob" in matcher_unavailable_summary
+         and "separate maintenance turn" in matcher_unavailable_summary),
         ("pack includes xday pointer without dumping note body", "local xday pointer" in pack and "local note" not in pack),
         ("pack includes evidence block", "E-001" in pack),
         ("pack includes relevant threat hypothesis", "Relevant Hypotheses / Threat Hypotheses" in pack
          and "hidden admin API may expose cross-role data" in pack
          and "Linked IS/C/E: IS-001" in pack),
         ("pack includes personalized operator profile", "Operator Profile / Personalized RDT" in pack
-         and "Recommended loop budget: 7" in pack and "custom_auth_depth" in pack
+         and "Recommended reasoning-loop budget: 7" in pack and "custom_auth_depth" in pack
          and "custom lesson" in pack),
         ("pack embeds the complete role template without front truncation",
          complete_role_template and complete_role_template in pack),
+        ("embedded role template cannot reintroduce Agent lifecycle commands",
+         "workers.py heartbeat/finish" not in complete_role_template
+         and "workers.py finish" not in complete_role_template
+         and "Root alone reviews and terminally settles" in complete_role_template
+         and "workers.py heartbeat/finish" not in pack),
         ("malformed numeric profile values fall back safely",
          malformed_rdt["loop_budget"] == 6
          and malformed_rdt["fallback_seconds"] == DEFAULT_OPERATOR_PROFILE["fallback_seconds"]
