@@ -60,12 +60,12 @@ local home/configured identity values and dated framework-run identifiers.
 observe
   -> update state graph
   -> decompose fronts
-  -> plan / assign agents
-  -> agents produce candidates
-  -> merge-check / conflict-check
-  -> verify / falsify
-  -> synthesize findings
-  -> review / report / closure
+  -> commit work plan
+  -> delegate effect lanes / Claude calls Agents
+  -> freeze returned result + merge draft
+  -> digest-bound Reviewer disposition
+  -> Root disposition / synthesis
+  -> typed cycle_end / report / closure
 ```
 
 Creative in discovery; precise in the written state. **Do not ask the user what to
@@ -74,12 +74,65 @@ assign the right Agent lane when useful, and record why in `decisions.md`.
 
 ### Root-level state graph pass (every cycle, cheap)
 
-When the operator explicitly enters `/loop runs/<dir>`, maintain a Claude Code
-TaskCreate/TaskUpdate list for that loop iteration before selecting the next
-action. Track the assets/vectors/Agent lanes/evidence writes/gates you intend to
-complete this iteration, then update the list as items finish. This is a `/loop`
-discipline rule, not a requirement for normal chat, review-only questions, or
-one-off repository maintenance outside the live loop.
+For every explicit `/loop`, including a first source turn after run/Cron binding,
+maintain a Claude Code TaskCreate/TaskUpdate list before the next Agent or target
+action. TodoWrite is a compatibility surface. Track the assets/vectors/Agent
+lanes/evidence writes/gates for this iteration, then update the list as items
+finish. The task receipt is planning proof only; canonical front/evidence files
+and real Agent launches still govern execution. The hook enforces only the
+current-turn receipt and chronology; it does not parse task prose as authority or
+mechanically certify those five content categories. This gate does not apply to
+natural-language setup-only chat, review-only questions, or one-off repository
+maintenance outside the live loop.
+
+### Macro-Stage and work plan (current implementation)
+
+`S1` / `S2` / `S3` are reversible derived goal views, not additional Router
+phases and not canonical truth. Root declares one in `xunji.work-plan.v1`, while
+`run_model.py` derives whether it is ready from the canonical run:
+
+- S1 needs meaningful target/scope.
+- S2 needs S1 plus coverage and a valid frontier schema.
+- S3 needs S2 plus no open or Type-A/deferred front and no plan-bound Agent
+  merge/review debt.
+
+A material premise change can move the declared goal backward. The new
+`work_plan.py commit` must include `--replan-reason`; a stage change also requires
+the prior plan to be debt-free and have a typed `cycle_end`. The transition is
+append-only and derived; it does not rewrite canonical front/evidence history.
+
+TaskCreate/TaskUpdate remains iteration-planning proof only. The executable plan
+chain is:
+
+```text
+work_plan commit
+  -> workers delegate creates assignment + context + exact launch prompt
+  -> PreToolUse compares the complete Hunter tool_input.prompt byte-for-byte
+  -> Claude performs the real Hunter Agent call; lifecycle hooks revalidate its hash
+  -> hooks freeze a content-addressed response snapshot + merge draft
+  -> workers delegate creates the dependent Reviewer prompt with exact result digest
+  -> Claude performs the real Reviewer Agent call
+  -> workers review-disposition
+  -> Root/Single Synthesizer writes canonical disposition + workers finish
+  -> loop_journal end --next-action "<exact final Coda action>" derives the typed cycle_end
+```
+
+`delegate` never spawns an Agent and neither Task prose nor `done` clears plan
+debt. Each current plan also requires a committed v2 transaction, its immutable
+`state/work_plan_transactions/<receipt_hash>.json` archive, and an intact prior
+receipt chain. An exact native v1 receipt may be explicitly upgraded; an
+unreceipted plan may be migrated only from its already frozen snapshot and typed
+journal. Neither path admits `ROOT_DIRECT`, and neither may synthesize a missing
+anchor. Agent return is equally causal: `SubagentStop` settles only one same-session
+unique launch. The current owner is the Python/Hook control contract; this stage
+does not add a parallel plan, assignment, or merge runtime.
+
+The generated launch prompt is one canonical UTF-8 string, not a bag of tokens.
+`tool_input.prompt` must equal it without trimming or normalization. A prefix,
+suffix, newline, added context, token reordering, whitespace change, or a copy in
+`description` is denied even when every token value remains correct. Hunter and
+Reviewer prompts follow the same rule; the Reviewer result digest and completion
+marker are part of that exact string.
 
 ### Live framework-maintenance turn
 
@@ -132,16 +185,16 @@ the operator. (Sentinel stays observe-only — this is self-awareness and audit,
 gate that stops you.) Run:
 
 ```bash
-python tools/graph.py runs/<dir>
-python tools/workers.py status runs/<dir>
-python tools/workers.py lifecycle-check runs/<dir>
-python tools/workers.py conflicts runs/<dir>
-python tools/saturation.py runs/<dir>
-python tools/coverage_matrix.py runs/<dir> --write --sync-coverage
-python tools/loop_journal.py runs/<dir> status
-python tools/loop_state.py runs/<dir> --write
-python tools/progress_ledger.py runs/<dir> --write
-python tools/run_controller.py runs/<dir> --shadow
+python3 tools/graph.py runs/<dir>
+python3 tools/workers.py status runs/<dir>
+python3 tools/workers.py lifecycle-check runs/<dir>
+python3 tools/workers.py conflicts runs/<dir>
+python3 tools/saturation.py runs/<dir>
+python3 tools/coverage_matrix.py runs/<dir> --write --sync-coverage
+python3 tools/loop_journal.py runs/<dir> status
+python3 tools/loop_state.py runs/<dir> --write
+python3 tools/progress_ledger.py runs/<dir> --write
+python3 tools/run_controller.py runs/<dir> --shadow
 ```
 `graph.py` 运行后自动写入 `state/workflow_checkpoint.json`（轻量阶段快照：phase / open/deferred/blocked/closed fronts / confirmed evidence），用于跨会话恢复和阶段追踪。
 `loop_state.py` writes `state/loop_state.{json,md}` as the closed-loop progress
@@ -165,44 +218,126 @@ Waivers render as `~` in `state/coverage_matrix.md` and do not count as tested
 evidence or close a front by themselves.
 
 `loop_journal.py` reads/writes `state/loop_journal.jsonl`, an append-only derived
-journal for interruption recovery. It records explicit `/loop` cycle start, plan,
-action, write-result, interrupt, and end events. It is not evidence and does not
-replace `decisions.md` or `session_handoff.md`.
+journal for interruption recovery. In addition to legacy cycle/action markers,
+the typed subset records `stage_plan`, `replan`, `stage_exit`,
+`delegation_committed`, and plan-bound `cycle_end`. The CLI command
+`loop_journal.py runs/<dir> end --next-action "<exact final Coda action>"` is the
+sole producer of plan-bound `cycle_end`: it first validates the current work plan
+against the committed v2 work-plan transaction, immutable archive, and
+transaction lineage, then derives exhaustive lane/result/review/Root dispositions
+from current receipts. Caller prose supplies only the exact `next_action`, never
+disposition data. `output_gate.py` requires the final `下一行动:` text to equal that
+current ended plan's validated structured value, independently rechecks its v2
+transaction archive/lineage, and reapplies the normal concrete single-action and
+active-front rules. An older ended plan cannot shadow a newer active plan;
+compatibility free-text parsing applies while the current plan has no structured
+end. The command fails closed on plan provenance or lifecycle debt. The journal is
+admitted only after the appended bytes are flushed and file-fsynced under the
+journal lock; a new or zero-byte retry file also requires parent-directory fsync.
+Any write or durability-barrier failure rolls the uncommitted tail back to the
+previous byte length and returns an error, so retry neither skips nor duplicates
+the successor event. The journal is
+not evidence and does not replace
+`decisions.md` or `session_handoff.md`.
+
+Reason-pass freshness is semantic, not time-based. Inspect the current projection
+with `python3 tools/anti_drift.py --semantic-status runs/<dir>`. After Root rereads
+and adjudicates the whole canonical graph, append the v1 receipt with
+`python3 tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N
+--chosen-front F-001 --reason "<whole-graph rationale>"`. It hash-binds frontier,
+evidence, coverage, decisions, and the derived graph. Old/new mtimes, `touch`, or
+a no-op edit cannot prove freshness. Operational liveness is separately derived
+from explicit journal/runtime/Agent records. The receipt is an audit claim only;
+it grants no authority, evidence maturity, or closure.
 
 `turn_contract.py` treats the current operator prompt as a transaction boundary.
 For an active run, `EXECUTE` may advance work, `EXPLAIN_ONLY` is read-only and has
 no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while only
 allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
-`state/runtime_events.jsonl` is a hook-owned hash chain for actual Agent/Cron/review
-tool events; never edit it or the turn/run-status JSON files directly.
+Only a first non-empty top-level exact `/loop(?:\s|$)` directive enters loop mode.
+Indented/fenced code, blockquotes, inline quotes, questions, analysis/review requests,
+and lifecycle denials stay data/read-only; a conflicting `/loop` plus denial fails
+closed. Natural-language setup requires affirmative create/setup intent and one unique
+URL.
+Lifecycle Bash is exactly one argv-only adapter invocation. It rejects
+`tool_input.env`, inline env assignments, untrusted Python identity, unquoted
+pathname/query globs, brace/tilde/zsh-EQUALS/parameter/command expansion, redirects,
+chains, comments, newlines, and line continuations. Quote the source as one literal
+argv token. Output wrappers are diagnostic denials only and never mint a claim.
+`state/runtime_events.jsonl` is a hook-owned hash chain for actual
+Agent/Cron/iteration-plan/foreground-review tool events; never edit it or the
+turn/run-status JSON files directly. TaskCreate/TaskUpdate/TodoWrite plan receipts
+are session- and transcript-bound and redact sensitive URL query values; they do
+not become canonical fronts, evidence, or operator authority.
 When no run exists, an EXECUTE prompt is held briefly in the hook-owned
 `.claude/xunji_pending_turns/` bootstrap area. `setup_run.py`,
 `loop_bootstrap.py --source/--resume`, and a prompt-named `xunji_statusline.py --set-active`
 all delegate activation to `setup_transaction.commit_activation_cas()`; it
 consumes/copies the contract before atomically changing `.claude/xunji_active_run`.
+Claude Code's own session resume is separate from an operator-driven run switch:
+only `SessionStart.source=resume` may call
+`setup_transaction.restore_session_activation_cas()` and consume the exact hashed
+selection receipt saved for that session/transcript. Both ports have the same
+transaction owner; adapters and the statusline never write the pointer themselves.
+Every new non-internal top-level prompt first revokes the same session's unconsumed
+pending contract and transition claim, including when the active pointer changed
+between prompts. Replacing an active canonical contract also revokes the displaced
+contract session's live claim, while unrelated concurrent pending sessions remain
+isolated. Multiple URLs fail closed until the operator explicitly selects one.
 With an existing run, the same paths copy its current contract to the target run.
 New setup validates its source before formal directory creation, prepares the
 complete run in hidden same-filesystem staging, writes the frozen original,
 `sources/normalized.json`, `sources/validator_receipt.json`, and source/prepared receipts,
 then changes the hidden receipt to `prepared_not_active` before atomic rename and
 pointer CAS. The first visible formal directory is therefore always explainable;
-CAS failure leaves the old pointer intact, while pointer-success/receipt-failure
-is recovered idempotently from the same transaction identity. Setup always takes
-the setup lock before the activation lock, and recovery reads the pointer only
+CAS failure leaves the old pointer intact. Pointer-success/receipt-failure recovery
+is idempotent only after revalidating the receipt identity, required files, coverage,
+complete setup-source bundle, and immutable contract/claim binding; pointer + status
+alone never suffice. Setup always takes the setup lock before the activation lock,
+and recovery reads the pointer only
 under the activation lock. A missing `turn_contract` boundary denies activation
 instead of silently skipping identity binding. Existing pointer targets must stay
 under `runs/`; a present but malformed/mismatched setup receipt is not treated as
-a legacy missing receipt and blocks activation before pointer mutation. Direct pointer
-Write/Edit/removal is forbidden. Setup/resume and documented local
+a legacy missing receipt and blocks activation before pointer mutation. Direct
+pointer/selection-receipt Write/Edit/removal and hook-driven `--clear-active` are
+forbidden. The dedicated `SessionEnd` hook is the only automatic clear path. It
+supplies the ending session ID, transcript digest, and observed active-contract
+SHA-256 to the transaction owner, which rechecks contract ownership and pointer
+together under the activation lock, writes an `EXPLAIN_ONLY session_ended`
+barrier, saves
+`.claude/xunji_session_selections/<sha256(session_id)>.json`, retires claims, and
+then clears the pointer. A newer same-run contract, changed pointer, missing
+identity, unknown end reason, or conflicting receipt leaves the pointer intact.
+Only exact Claude `SessionStart.source=resume` may restore that run; it first
+writes an `EXPLAIN_ONLY resume_barrier`, then restores the pointer and consumes
+the receipt. `startup`, `clear`, `compact`, fork/new session IDs, wrong
+transcripts, and bare new-session prompts cannot restore or inherit it. The next
+real prompt must create fresh authority. Canonical run state, evidence, journals,
+and setup receipts remain unchanged.
+Setup/resume and documented local
 state/journal commands are lifecycle control, so an old run's Agent Board cannot
 mistake them for target work. Contract hooks never fall back to a recently modified
 run when the pointer is absent; they use the pending bootstrap transaction instead.
 While that transaction is pending, only reads and the current session's authorized
 setup/resume/set-active command are allowed; target actions and arbitrary writes wait
-until the contract is bound into the run. PreToolUse writes a short-lived claim
-containing the exact target run, session, and prompt hash; the lifecycle tool must
-consume that claim and bind it to source hash, transaction id, and expected run.
-Multiple valid claims for one target fail closed.
+until the contract is bound into the run. The argv layer first validates the exact
+operation and its options. PreToolUse then writes a short-lived claim binding the
+target run, session, prompt hash, canonical source-reference hash, and redacted
+operation/options effect. The transaction owner independently recomputes that effect
+from the frozen manifest/transaction profile or exact target, requires equality, then
+binds the claim to source hash, transaction id, and expected run. Its state machine is
+`active -> claimed -> pointer commit -> finalize/delete`; a newer top-level prompt
+tombstones `active|claimed`. A tombstone never authorizes a new effect, but a
+post-pointer recovery may finalize it when the durable immutable binding matches the
+committed pointer exactly. Pending/claim/target-contract authority writes require
+file fsync plus the artifact-directory and owner-directory barriers; claim/pending
+deletion and SessionStart
+selection consumption also fsync the directory when the path is already absent on
+retry. Recovery retires the old receipt-bound create/current activation binding before
+considering a fresh exact claim. Same-effect may settle; cross/multiple/tampered claims
+remain and fail closed, and same-prompt `claimed` never becomes `active` again. This
+does not claim full builder-tree or SessionEnd create/clear durability. Multiple live
+claims for one effect fail closed.
 The source contract is `xunji.setup-source.v1`. Each candidate asset/scope/auth
 field has a resolvable provenance reference whose content contains the value;
 source language can only remain `source-data|derived`. Only a hook-bound top-level
@@ -229,20 +364,52 @@ scope projection hash. The admission turn is local-only and zero-probe; wildcard
 Target-action denials and later successful target actions are also recorded by
 hash. A denial is unresolved until a later successful event has the same tool and
 execution-action hash (for Bash, the command; descriptive metadata is ignored).
+Unknown Bash remains target-capable for execution authorization and therefore
+fails closed, but a denied destination-free local command is not recorded as a
+target-result action. Registry `effect=target`, WebFetch, or an explicit parsed
+destination still creates target denial debt. This separation prevents a local
+command-shape/coordinator denial from masquerading as an unexecuted target result.
+Maintenance truth follows the same typed rule: maintenance mode (including a
+malformed maintenance attempt), a structured safety-critical path, or an explicit
+Git/patch repository-mutation shape may create `maintenance_action`. Denial prose
+and recovery text such as `/xunji-maintenance` are diagnostic data and cannot mint
+that effect. Destination-free generic shell-shape denials remain hard-denied but
+do not create maintenance debt.
 In every turn mode, `output_gate.py` rejects all free-form final text after an
 unresolved target-action denial; this prevents a model that ignored EXPLAIN or
 PAUSE restrictions from rephrasing an unexecuted action as a result. The only
-non-result fallback is the gate's fixed three-line
-`XUNJI_EXECUTION_STATUS=DENIED` envelope, and normal Agent/closure gates still
+  non-result fallback is the gate's fixed `XUNJI_EXECUTION_STATUS=DENIED` /
+  `XUNJI_STOP_TYPE=TARGET_DENIED` envelope, and normal Agent/closure gates still
 apply to it. The final anchor is an active `F-id`, or `frontier.md` if setup has not
 created an active front. A Stop hook blocks once; `stop_hook_active` re-entry must
 return successfully to avoid Claude Code's forced block-cap override. This ends a
-chat turn only and never changes canonical completion state.
+  chat turn only and never changes canonical completion state.
+Stop output has exactly three mutually exclusive `xunji.stop-output.v1` variants:
+ordinary `NORMAL_CODA`, receipt-backed `TARGET_DENIED`, and receipt-backed
+`MAINTENANCE_BLOCKED`. Fixed-envelope variants cannot be mixed with free-form
+success prose. The union closes only the current output attempt; it grants no
+authority and is not a typed `cycle_end` or completion marker.
+Direct Write/Edit/Update/MultiEdit/NotebookEdit requests are authorized against
+the complete recursively extracted set of path-like `tool_input` fields. Every
+member is checked in both lexical and symlink-resolved form; one missing, invalid,
+escaping, glob-bearing, or unauthorized member rejects the whole mutation, and
+`PreToolUseDenied`, `PostToolUse`, and `PostToolUseFailure` receipts bind that
+same normalized set. Run-root `sources/*` is protected
+setup-source state, not an ordinary editable artifact. Bash remains governed by
+its separate exact capability/command-shape contract.
 Claude Code may emit `<task-notification>` through `UserPromptSubmit` when an
 Agent finishes. `turn_contract.py` treats it as an internal lifecycle message:
 it may receive the existing mode context but cannot replace or refresh the
 operator-authored contract. Otherwise the notification timestamp would
 invalidate the Agent receipt that caused it.
+
+Each `workers.py delegate` assignment is a binary Agent launch contract: copy its
+exact `subagent_type` and byte-exact `launch_prompt` into the parent Agent tool
+input. Role `review` maps only to `xunji-reviewer`; canonical execution roles
+`surface|web-auth|web-hunter|code-audit|exploit|verify|report` map only to
+`xunji-hunter`. Missing/null/blank, `general-purpose`, alias, case, whitespace, or
+role-swapped types fail closed. `description` is presentation only. The requested
+parent type and actual same-session Start/Stop types must agree.
 
 Agent lifecycle is attempt-based. An async `Agent PostToolUse` with
 `status=async_launched` is a launch acknowledgement, not a returned result. Its
@@ -250,6 +417,66 @@ Agent lifecycle is attempt-based. An async `Agent PostToolUse` with
 post-return disposition obligation. Root's global fan-out/disposition debt never
 blocks a still-running child Agent from its own assignment. A child cannot spawn
 nested Agents or touch assets outside its package.
+For a synchronous Agent, transcript-bound `SubagentStart` supplies the provisional
+assignment identity needed by child hooks before the parent `PostToolUse(completed)`
+exists; `SubagentStop` still ends that authority. Start allocation and runtime-journal
+append share one lock. An exact parent tool id/prompt or async child id wins when the
+hook exposes one. Without one, a Start may consume only a unique complete unbound Agent
+identity; multiple candidates in the same assistant message fail closed instead of
+using arrival order. Launch parallel Agents in staggered assistant messages so each
+Start has a causal identity while earlier Agents remain running. Cross-batch,
+partial-child, repeated-binding, replay, malformed-transcript, or other ambiguity fails
+closed. The immutable result comes only from
+`SubagentStop.last_assistant_message` (or the exact child transcript). A synchronous
+parent Post without Stop is explicit unconfirmed lifecycle debt: it cannot mark an
+assignment done, write a merge draft, or supply candidate bytes. The child
+transcript must end in a real
+final assistant response; an assistant `tool_use` followed by an unmatched tool
+result is not a final envelope. Current Claude Code max-turn termination can emit
+an internal `<task-notification>` without `SubagentStop`, so the project Agent
+definitions deliberately omit per-Agent `maxTurns`. Lane stop conditions and
+typed loop/request/model budgets provide the bounded-work contract; the
+notification remains status/control data and cannot prove return or mint result
+bytes. A runtime-receipt exception in `SubagentStart`, `SubagentStop`, or Agent
+Post hooks exits nonzero with `XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED`; it is never
+silently converted to hook success. Before the Stop
+receipt can enter the runtime journal, the immutable result file is file-fsynced and
+the `state -> merge_results -> assignment -> file` directory-entry chain is confirmed
+top-down, with a final assignment-directory fsync. A crash at any of those barriers
+leaves no Stop receipt; exact retry repeats the full chain. If a hook process dies
+after the runtime journal fsync but before assignment/merge projection, recover idempotently with
+`python3 tools/runtime_receipts.py runs/<dir> --reproject`.
+For a plan-bound assignment, PreToolUse compares the raw complete prompt, while
+Start/Post/Failure/Stop and replay bind the SHA-256 of that same generated value.
+The projected `xunji.agent-receipt.v1` attempt persists `launch_prompt_sha256`;
+field-level token agreement alone cannot authorize or repair a launch.
+The exact read-only `python3 tools/runtime_receipts.py runs/<dir>` and this
+reprojection command are separate typed capabilities; only reproject is recorded
+control because it may rebuild derived assignment/merge/cursor state.
+Every successful projection advances the exact-schema
+`state/runtime_projection_cursor.json.success_generation`, even for the same seq/hash.
+A failure is ordered by the generation observed at attempt start and is stale only when
+a later covering success advanced that generation; a new same-snapshot failure after a
+success remains `state/runtime_projection_error.json` debt. Same-sequence hash conflicts
+fail closed. Clearing that diagnostic, including a retry that already sees it absent,
+requires the state-directory fsync before success is reported. The cursor is an
+ordering watermark, not proof that every derived
+assignment/merge file crossed a power-loss barrier.
+Assignment creation, runtime projection, heartbeat, review disposition, and Root
+finish all read-modify-write `state/assignments.json` under the same cross-process
+lock; runtime-event collection never nests that lock. An exact replay of an Agent
+hook returns the existing receipt without creating another attempt. Reusing the
+same runtime identity with conflicting content, or projecting multiple matching
+attempts, fails closed instead of choosing the newest row.
+
+When `chains.md` or `hints.md` changes, the committed plan becomes stale. A unique
+returned/failed execution may still launch only its exact digest-bound completion
+Reviewer. An assigned non-Reviewer with no transcript, runtime, result, merge, or review
+fact can be retired only by `workers.py cancel-unlaunched <run> <assignment> --reason
+<text>`. Its durable prepared transaction blocks launch and replan; artifacts and the
+assignment row disappear before the immutable cancellation receipt is published.
+Cancellation never counts as Agent result, Reviewer disposition, evidence, merge, or
+cycle completion, so Root must materially replan afterward.
 
 Coverage classification may mark root 401/403 pages as `AUTH_GATE` and pure
 default/stub pages as `STUB_PAGE`. These flags only suppress anti-lump
@@ -270,11 +497,16 @@ front, assigning severity, or writing final report text.
 Claude Code statusline uses `tools/xunji_statusline.py` from the project
 `.claude/settings.json`. It is a read-only, two-second display containing only
 `[Xunji-status] [<phase>] <run>`。Claude 未提供明确的 Xunji workspace，或该
-workspace 尚未选择 active run 时，statusline 输出为空。它只读取
-`.claude/xunji_active_run`、阶段派生状态和 `state/loop_journal.jsonl`；不会刷新
-状态、选择工作、写证据或执行阶段约束。active-run pointer 是本地运行态，只由
-`tools/setup_transaction.py` 的共享 CAS 原语更新；`setup_run.py`、
+workspace 尚未选择 active run 时，statusline 输出为空。当前 renderer 不检查 payload 的
+session/transcript，也不读取 turn contract；session-bound display 仍是独立 target，不是本轮
+current claim。它只读取 `.claude/xunji_active_run`、阶段派生状态和
+`state/loop_journal.jsonl`；不会读取 selection receipt、恢复状态、刷新状态、选择工作、写证据
+或执行阶段约束。active-run pointer 是本地运行态，
+只由 `tools/setup_transaction.py` 的 typed CAS ports 更新；`setup_run.py`、
 `loop_bootstrap.py`、set-active 和固定的 `/loop runs/<dir>` 协议只是适配入口。
+Claude Code 的 `SessionEnd` 保存精确 session 选择并清 pointer；只有同一 Claude session
+的 `SessionStart source=resume` 恢复显示选择，普通新会话保持为空。退出/恢复都不删除
+run，旧 session 也不得清掉或覆盖同一 run 上较新的 session 选择。
 Anti-drift 与 Stop hooks 只解析这个显式指针；文件新旧永远不是 run authority，
 因此无关 run 不能接收或逃逸另一个 run 的流程门。
 `Paused` / `Interrupted` 可作为 phase tag 显示；缓存健康、阻断和下一步等详细
@@ -286,8 +518,8 @@ clear Chinese phase marker and, once a run directory exists, record it in the
 loop journal:
 
 ```bash
-python tools/loop_journal.py runs/<dir> phase-start --phase "Root Orchestrator" --note "why this phase starts"
-python tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --note "result and next phase"
+python3 tools/loop_journal.py runs/<dir> phase-start --phase "Root Orchestrator" --note "why this phase starts"
+python3 tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --note "result and next phase"
 ```
 
 `setup_run.py` 的机械 Setup 是显示例外：仍写入 Setup 的 `phase_start` / `phase_end`
@@ -315,8 +547,10 @@ a query, not a full re-read of every block. Ask:
 
 Output: one line in `decisions.md` (`Root graph pass: reviewed N fronts / M agents /
 K conflicts; assigning A-xxx to F-00Y because Z`). It only re-prioritizes and assigns
-— it **never closes a front** (that is the Reviewer's job: heavier, every 3–5 cycles /
-at a closure gate, with the independent-reviewer hard gate).
+— it **never closes a front**. The heavier Reviewer pass runs every 3–5 cycles or at
+a closure gate and supplies a candidate disposition only; Root/Single Synthesizer
+alone makes the final evidence-gated confirmation and front closure. The independent-
+reviewer hard gate still applies.
 
 When a finding **confirms**, ask: does its proven output state satisfy another
 finding's precondition? If so that is a chain edge (chaining) — open a front and
@@ -359,16 +593,24 @@ into a conclusion.
 
 ## Serial vs Parallel
 
-The Agent Board is the default collaboration model. When the canonical front model
-reports at least four active fronts with no one shared concrete barrier, parallelism
-is mandatory for the current coordination epoch: prepare two disjoint assignments and
-actually invoke two Agent tools. A bare `continue` keeps the epoch and existing running
-or returned attempts; it does not force duplicate Agents. The epoch resets only when
-active-front topology or asset coverage debt materially changes. Manual lifecycle
-prose never satisfies it.
+The Agent Board is the default collaboration model. Choose `SERIAL_AGENT` or
+`PARALLEL_AGENTS` from effect-typed lane dependencies and overlap plus runtime
+slots, request budget, model-egress budget, and merge capacity. Independent
+`local_read`/`local_verify`/model-egress lanes may overlap within those budgets;
+target lanes must also have disjoint asset packages. Control/repository mutation
+remains Root single-writer work and is not an Agent lane.
 
-Stay **serial** when the mandatory threshold is not active, or the current operator
-prompt explicitly grants a one-turn serial override:
+The historical four-diverse-front rule is a mandatory breadth fallback, not the
+primary scheduler. When the canonical front model reports at least four active
+fronts with no one shared concrete barrier, the current coordination epoch still
+requires two disjoint plan-bound assignments and two real Agent calls. A bare
+`continue` keeps the epoch and existing running or returned attempts; it does not
+force duplicates. The epoch resets only when active-front topology or asset
+coverage debt materially changes. Manual lifecycle prose never satisfies it. A
+committed one-front plan still creates real assignment/review/merge debt.
+
+Stay **serial** when the effect scheduler produces one safe ready lane, or the
+current operator prompt explicitly grants a one-turn serial override:
 
 - There is one front, one asset, or one shared barrier, so another Agent would mostly
   duplicate traffic or context.
@@ -391,11 +633,14 @@ All Agents share the global guard state, request budget, host breakers, and run 
 Agent output is untrusted candidate material until the Single Synthesizer merges it
 through the evidence gate.
 
-Every target-facing `workers.py assign` requires a bounded asset package, for example
+Every target-facing assignment requires a bounded asset package, for example
 `--asset a.example --asset b.example`. Those hosts must exist in coverage and be named
-in the chosen front; non-terminal overlap is rejected except for verify/review roles.
-The Agent prompt must carry the exact package:
-`XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=a.example,b.example`.
+in the chosen front; overlapping active target-effect packages are rejected. The
+Agent prompt must carry the exact assignment/front/assets/lane/plan package.
+Reviewer prompts additionally bind `XUNJI_RESULT_DIGEST=<64hex>` for the exact
+frozen result; reviewing different bytes fails closed. "Exact" means complete
+string equality, including token order and whitespace; no extra task prose or
+context may surround the generated package.
 Before Stop, each returned assignment must be `merged` with a canonical E/F/D anchor,
 or `blocked/failed/abandoned` with `Reason:` and its canonical `Front:`. `merged` also
 requires every assigned host to have a transcript-backed successful target action by
@@ -408,6 +653,18 @@ existing adjudicated terminal state. Corrections require `finish --amend`, which
 preserves the prior disposition in the assignment audit history. Only anchors in the
 canonical `evidence.md`, `frontier.md`, or `decisions.md` ledgers count; artifact files
 under `evidence/` do not create canonical `E-xxx` entries by themselves.
+
+`ROOT_DIRECT` is limited to one dependency-free atomic lane with at most one request
+and one exact registry `capability_id`. Only the four explicitly
+`root_direct_eligible` local read/verify capabilities may currently be selected;
+target, control, model-egress and repository-mutation work still uses Agent or
+single-writer control paths. PreToolUse owns an atomic one-action claim, and only its
+matching transcript-backed PostToolUse/PostToolUseFailure can project the exact
+content-addressed Root-action receipt. Missing terminal, a second tool-use, a
+different capability with the same effect, a stale plan or a mutated receipt all
+retain debt. `succeeded` and `failed` are honest mechanical outcomes and can derive
+the plan's typed `cycle_end`; neither is evidence, Reviewer approval, finding
+promotion, exit-gate satisfaction or closure proof.
 
 When an observation **grounds a product fingerprint** — i.e. while attacking an asset you
 fetch it and recognize the stack (or an opt-in `classify_hosts` tagged it `kb:<id>`) —
@@ -431,7 +688,7 @@ saying which in `decisions.md`. Re-collecting existing data wastes the request
 budget, the scarce resource against a rate-limited / WAF target.
 
 When saved JS bundles, rendered `network.json`, or captured pages may hide API
-routes, run `python tools/js_inventory.py runs/<dir>` over those saved artifacts.
+routes, run `python3 tools/js_inventory.py runs/<dir>` over those saved artifacts.
 It is a read-only sensor: copy useful candidate input shapes into `surface.md` and
 use useful candidate threat hypotheses to update `hypotheses.md`; proof still goes
 through guarded actions and evidence entries.
@@ -604,7 +861,7 @@ assets were only header / recon-classified, never examined. Before any such clai
   name the signal that made each relevant; a negative/deferred record states the barrier
   or why the class did not apply; no fixed payload list (payloads stay local/operator-chosen);
   the gate wants evidence of *reasoning/attack attempt*, not exhaustive exploitation.
-  Run `python tools/coverage_matrix.py runs/<dir> --write --sync-coverage` before closure or Coda
+  Run `python3 tools/coverage_matrix.py runs/<dir> --write --sync-coverage` before closure or Coda
   trajectory-review checks to see the derived asset×vuln-family view. `□` means the
   category is signal-justified for that asset but no test record is visible; `·`
   means no current surface signal. Whole empty columns and sparse rows are review
@@ -664,12 +921,22 @@ assets were only header / recon-classified, never examined. Before any such clai
   such as `FINAL` all activate closure gates. They are not loop completion by
   themselves. Only `GHOST_COMPLETE` / `NORMAL_COMPLETE` in `decisions.md` are
   completion actions, and `check_run.py` accepts them only with a substantive
-  `## CodexCompletionReview` section containing Reviewer + Verdict + cross-check
-  detail and a real Agent receipt for
+  `## CodexCompletionReview` compatibility section containing Reviewer + Verdict +
+  cross-check detail and a real assignment-free `xunji-reviewer` Start/Stop receipt
+  for the exact formatter output
   `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current hash>
+  COMPLETION_BUNDLE=<current completion bundle sha256> run=<run.name>
   CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`, plus
-  a response containing `XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all
-  four checks; a prose keyword or bare PASS/WARN does not count.
+  a last non-empty response line exactly equal to
+  `XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=<same hash>
+  COMPLETION_BUNDLE=<same bundle> run=<same run.name>
+  CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS`.
+  That envelope must not contain assignment/front/assets/lane/plan/
+  result-digest fields and creates no assignment or merge projection. A parent
+  Post, async acknowledgement, duplicate verdict, explicit FAIL/WARN/false check,
+  prose keyword, or bare PASS/WARN does not count.
+  This completion challenge and the independent `peer_review.py --into-run`
+  ReviewReceipt/ledger gate are separate and cannot satisfy each other.
 
 - **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
   independent review resolved, retrospective written), write `GHOST_COMPLETE` at

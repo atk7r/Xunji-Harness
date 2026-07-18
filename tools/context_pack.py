@@ -272,7 +272,14 @@ def _assignment(run_dir: Path, agent_id: str) -> dict:
     return {}
 
 
-def _coverage_rows(run_dir: Path, front_text: str, limit: int = 6) -> list[dict]:
+def _normalized_asset(value: object) -> str:
+    raw = str(value or "").strip().lower().rstrip(".")
+    raw = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", raw).split("/", 1)[0]
+    return raw
+
+
+def _coverage_rows(run_dir: Path, front_text: str, limit: int = 6,
+                   exact_assets: list[str] | None = None) -> list[dict]:
     candidates = [run_dir / "coverage.json", *sorted(run_dir.glob("**/coverage.json"))]
     data: dict = {}
     for p in candidates:
@@ -280,12 +287,18 @@ def _coverage_rows(run_dir: Path, front_text: str, limit: int = 6) -> list[dict]
         if isinstance(data.get("assets"), list):
             break
     low = front_text.lower()
+    selected = {_normalized_asset(item) for item in (exact_assets or [])
+                if _normalized_asset(item)}
     rows: list[dict] = []
     for asset in data.get("assets", []) if isinstance(data.get("assets"), list) else []:
         if not isinstance(asset, dict):
             continue
         host = str(asset.get("host") or asset.get("asset") or asset.get("url") or "").strip()
-        if host and re.search(rf"(?<![A-Za-z0-9._-]){re.escape(host.lower())}(?![A-Za-z0-9._-])", low):
+        normalized = _normalized_asset(host)
+        if selected and normalized in selected:
+            rows.append(asset)
+        elif not selected and host and re.search(
+                rf"(?<![A-Za-z0-9._-]){re.escape(host.lower())}(?![A-Za-z0-9._-])", low):
             rows.append(asset)
     return rows[:limit]
 
@@ -440,17 +453,25 @@ def _load_cross_run_context(run_dir: Path, front_id: str) -> list[str]:
 
 
 def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
+               assets: list[str] | None = None, effect: str = "",
+               lane_id: str = "", plan_digest: str = "",
+               assignment_attempt: int = 0,
                kb_dir: Path | None = None, xday_dir: Path | None = None,
                weap_dir: Path | None = None) -> str:
     front_text = _front_block(run_dir, front)
-    cov = _coverage_rows(run_dir, front_text)
+    normalized_assets = [_normalized_asset(item) for item in (assets or [])
+                         if _normalized_asset(item)]
+    cov = _coverage_rows(run_dir, front_text, exact_assets=normalized_assets)
     kb_ids = _kb_ids(front_text, cov)
     target = _read(run_dir / "target.md", 5000)
     evidence_matches = _matching_blocks(_read(run_dir / "evidence.md"), "E", front)
     fp_matches = _matching_blocks(_read(run_dir / "false_positive.md"), "FP", front)
     decisions_tail = _recent_lines(_read(run_dir / "decisions.md", 6000), 18)
     role_template = _role_template_path(role)
-    role_text = _read(role_template, 5000)
+    # Role templates are trusted owner instructions, not a recency-oriented
+    # canonical tail slice.  Truncating from the front can silently remove the
+    # role boundary while leaving later operational sections looking intact.
+    role_text = _read(role_template)
     generated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     lines = [
@@ -459,7 +480,12 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
         f"- Generated: {generated}",
         f"- Run dir: {run_dir}",
         f"- Agent: {agent or '(unassigned)'}",
+        f"- Assignment attempt: {assignment_attempt or '(unbound)'}",
         f"- Assigned front: {front}",
+        f"- Assigned assets: {','.join(normalized_assets) if normalized_assets else 'none'}",
+        f"- Effect: {effect or '(unbound)'}",
+        f"- Lane: {lane_id or '(unbound)'}",
+        f"- Plan digest: {plan_digest or '(unbound)'}",
         f"- Role: {role}",
         "- Canonical source: markdown run files; this pack is a read-only slice.",
         "- Maturity rule: subagent output is phenomenon/candidate only; Root Synthesizer owns findings.",
@@ -547,7 +573,17 @@ def build_from_agent(run_dir: Path, agent_id: str) -> str:
     a = _assignment(run_dir, agent_id)
     if not a:
         raise SystemExit(f"agent assignment not found: {agent_id}")
-    return build_pack(run_dir, front=str(a.get("front") or ""), role=str(a.get("role") or ""), agent=agent_id)
+    return build_pack(
+        run_dir,
+        front=str(a.get("front") or ""),
+        role=str(a.get("role") or ""),
+        agent=agent_id,
+        assets=[str(item) for item in a.get("assets", []) if str(item).strip()],
+        effect=str(a.get("effect") or ""),
+        lane_id=str(a.get("lane_id") or ""),
+        plan_digest=str(a.get("plan_digest") or ""),
+        assignment_attempt=int(a.get("assignment_attempt") or 0),
+    )
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -629,6 +665,9 @@ def _selftest() -> int:
     malformed_rdt = resolve_rdt_profile(
         malformed, role="web-auth",
         front_text=(malformed / "frontier.md").read_text(encoding="utf-8"))
+    complete_role_template = _read(
+        _role_template_path("web-auth"),
+    ).strip()
     checks = [
         ("pack names front and role", "Context Pack F-001 / web-auth" in pack),
         ("pack includes matched coverage", "app.example" in pack and "kb:foobar-cms" in pack),
@@ -641,6 +680,8 @@ def _selftest() -> int:
         ("pack includes personalized operator profile", "Operator Profile / Personalized RDT" in pack
          and "Recommended loop budget: 7" in pack and "custom_auth_depth" in pack
          and "custom lesson" in pack),
+        ("pack embeds the complete role template without front truncation",
+         complete_role_template and complete_role_template in pack),
         ("malformed numeric profile values fall back safely",
          malformed_rdt["loop_budget"] == 6
          and malformed_rdt["fallback_seconds"] == DEFAULT_OPERATOR_PROFILE["fallback_seconds"]

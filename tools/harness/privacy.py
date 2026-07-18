@@ -991,6 +991,14 @@ def selftest() -> int:
          outbound_command_privacy_reason(
              "XUNJI_PROXY=socks5h://127.0.0.1:1080 python tools/probe.py GET https://target.test/"
          ) == ""),
+        ("local rg without a URL never enters outbound privacy",
+         outbound_command_privacy_reason(
+             "rg -n 'Xunji' runs/sample/frontier.md"
+         ) == ""),
+        ("local grep without a URL never enters outbound privacy",
+         outbound_command_privacy_reason(
+             "grep -n 'operator' runs/sample/target.md"
+         ) == ""),
         ("raw payload project marker denied",
          bool(outbound_command_privacy_reason("curl https://target.test/ -d marker=xunji-proof"))),
         ("raw cross-origin auth redirect denied",

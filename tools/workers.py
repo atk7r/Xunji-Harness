@@ -10,10 +10,14 @@ driver 是唯一整合者: 把候选过【证据门】后并入 evidence.md。�
   (默认/--list)  列出所有 worker 文件: Status / 候选数 / 是否 done 但未 merge
   suggest         读取 frontier.md / coverage.json, 给出 fan-out 候选(建议, 非事实)
   plan            生成 worker 分配草案, 由 driver 确认/复制给子 agent
+  delegate        为当前 plan 的 ready lanes 创建 assignment/context/精确 launch prompt;
+                  实际 Agent tool call 仍由 Claude Code 主驾驶执行
   assign          生成 agents/A-*.md + context/*.md + state/assignments.json
   status          列出 assigned / working / done / merged / blocked
   heartbeat       记录 Agent 已启动/仍在运行/中间状态
   finish          记录 Agent 终态(done/blocked/failed/abandoned/merged)
+  review-disposition
+                  将真实返回的 Reviewer 绑定到 frozen result digest 并记录 disposition
   lifecycle-check 检查未终态或心跳过期 Agent; --closure 时作为硬门
   agent-check     检查 Agent 产物纪律: 不越权 finding/closure, 有循环结构/安全约束/证据指针
   merge-check     检查 worker candidates + Agent discipline 是否缺 Control/Replicated、重复、冲突、未合并
@@ -23,25 +27,31 @@ driver 是唯一整合者: 把候选过【证据门】后并入 evidence.md。�
 它【不】spawn worker(那是 driver 用 Agent 工具做)、【不】自动写 canonical evidence。
 就像 coverage.json 是检视台账, 这是并行工作的台账。check_run.py 复用它报"done 未 merge"。
 
-  python tools/workers.py runs/<dir>
-  python tools/workers.py runs/<dir> --new F-005
-  python tools/workers.py suggest runs/<dir>
-  python tools/workers.py plan runs/<dir> --limit 3
-  python tools/workers.py assign runs/<dir> --role web-auth --front F-001
-  python tools/workers.py status runs/<dir>
-  python tools/workers.py agent-check runs/<dir>
-  python tools/workers.py merge-check runs/<dir>
-  python tools/workers.py conflicts runs/<dir>
-  python tools/workers.py synthesize runs/<dir>
+  python3 tools/workers.py runs/<dir>
+  python3 tools/workers.py runs/<dir> --new F-005
+  python3 tools/workers.py suggest runs/<dir>
+  python3 tools/workers.py plan runs/<dir> --limit 3
+  python3 tools/workers.py delegate runs/<dir> --runtime-slots 2 --limit 2
+  python3 tools/workers.py assign runs/<dir> --role web-auth --front F-001
+  python3 tools/workers.py review-disposition runs/<dir> A-web-hunter-001 A-review-001 \
+    --status accept-candidate --note "frozen result is attributable"
+  python3 tools/workers.py status runs/<dir>
+  python3 tools/workers.py agent-check runs/<dir>
+  python3 tools/workers.py merge-check runs/<dir>
+  python3 tools/workers.py conflicts runs/<dir>
+  python3 tools/workers.py synthesize runs/<dir>
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
+import fcntl
+import hashlib
 import io
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -56,13 +66,21 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {
-    "list", "new", "suggest", "plan", "assign", "status", "agent-check",
-    "heartbeat", "finish", "lifecycle-check", "merge-check", "conflicts",
+    "list", "new", "suggest", "plan", "delegate", "assign", "cancel-unlaunched",
+    "status", "agent-check",
+    "heartbeat", "finish", "review-disposition", "lifecycle-check",
+    "merge-check", "conflicts",
     "synthesize", "merge-constraints", "merge-threats",
 }
 HWS = r"[^\S\n]"
 NONTERMINAL_AGENT_STATUSES = {"assigned", "starting", "running", "working", "?"}
-TERMINAL_AGENT_STATUSES = {"done", "merged", "blocked", "failed", "abandoned"}
+TERMINAL_AGENT_STATUSES = {
+    "done", "merged", "reviewed", "blocked", "failed", "abandoned",
+}
+REVIEW_DISPOSITIONS = {
+    "accept-candidate", "needs-control", "duplicate", "refute",
+    "out-of-scope", "retry", "blocked",
+}
 STALE_HEARTBEAT_SECONDS = 30 * 60
 
 SATURATION_SCRIPT = ROOT / "tools" / "saturation.py"
@@ -83,6 +101,18 @@ try:
     import runtime_receipts as _runtime_receipts
 except Exception:
     _runtime_receipts = None
+try:
+    import work_plan as _work_plan
+except Exception:
+    _work_plan = None
+try:
+    import agent_settlement as _agent_settlement
+except Exception:
+    _agent_settlement = None
+try:
+    import loop_journal as _loop_journal
+except Exception:
+    _loop_journal = None
 
 SCAFFOLD = """# Worker {wid}
 
@@ -128,13 +158,16 @@ ROLE_ALIASES = {
     "exploit-construction-agent": "exploit",
     "verify": "verify",
     "verification": "verify",
+    "verifier": "verify",
     "verification-agent": "verify",
     "review": "review",
+    "reviewer": "review",
     "independent-review": "review",
     "independent-review-agent": "review",
     "report": "report",
     "report-agent": "report",
     "synthesizer": "synthesizer",
+    "single-synthesizer": "synthesizer",
 }
 CANONICAL_AGENT_ROLES = frozenset(ROLE_ALIASES.values())
 
@@ -172,6 +205,11 @@ AGENT_SCAFFOLD = """# Agent {agent}
 - Role: {role}
 - Assigned front: {front}
 - Assigned assets: {assets}
+- Effect: {effect}
+- Lane: {lane_id}
+- Work plan: {plan_id}
+- Plan digest: {plan_digest}
+- Assignment attempt: {assignment_attempt}
 - Scope: {scope}
 - Status: assigned
 - Context pack: {context_rel}
@@ -200,7 +238,7 @@ AGENT_SCAFFOLD = """# Agent {agent}
 - Produce candidates/refutations only; the Single Synthesizer owns promotion.
 - Do not add `Closure:` or `Report conclusion:` fields.
 - The Agent launch prompt must include exactly:
-  `XUNJI_ASSIGNMENT={agent} XUNJI_FRONT={front} XUNJI_ASSETS={asset_token}`.
+  `XUNJI_ASSIGNMENT={agent} XUNJI_FRONT={front} XUNJI_ASSETS={asset_token} XUNJI_LANE={lane_id} XUNJI_PLAN={plan_digest}{result_digest_token}`.
 - Cover every assigned asset. A barrier (login/302/captcha/WAF) is an outcome to
   investigate and record, not permission to silently drop that asset.
 
@@ -209,10 +247,10 @@ AGENT_SCAFFOLD = """# Agent {agent}
 - Read the context pack.
 - State the narrow hypothesis lane.
 - When the Agent tool actually starts this task, Root records:
-  `python tools/workers.py heartbeat <run> {agent} --status running --note "started"`.
+  `python3 tools/workers.py heartbeat <run> {agent} --status running --note "started"`.
 - During long work, Root records a heartbeat after material progress or every
   major loop. At coda, Root records:
-  `python tools/workers.py finish <run> {agent} --status done --note "<summary>"`.
+  `python3 tools/workers.py finish <run> {agent} --status done --note "<summary>"`.
 
 ## Operator Profile / RDT Controls
 
@@ -468,7 +506,8 @@ def _stable_asset_id(host: str) -> str:
 
 
 def _resolve_assignment_assets(run_dir: Path, front: str, requested: list[str] | None,
-                               role: str) -> tuple[list[str], dict[str, dict]]:
+                               role: str, *, effect: str = "") \
+        -> tuple[list[str], dict[str, dict]]:
     inventory = {_normalize_asset(_asset_name(asset)): asset for asset in _load_coverage(run_dir)
                  if _normalize_asset(_asset_name(asset))}
     target_roles = {"surface", "web-auth", "web-hunter", "exploit", "verify"}
@@ -478,7 +517,8 @@ def _resolve_assignment_assets(run_dir: Path, front: str, requested: list[str] |
             host = _normalize_asset(part)
             if host and host not in values:
                 values.append(host)
-    if inventory and role in target_roles and not values:
+    target_lane = effect == "target" or (not effect and role in target_roles)
+    if inventory and target_lane and not values:
         raise ValueError(
             "target-facing assignment requires explicit --asset HOST (repeatable); "
             "do not assign only a broad F-id")
@@ -493,6 +533,103 @@ def _resolve_assignment_assets(run_dir: Path, front: str, requested: list[str] |
             "asset(s) are not explicitly named in the selected frontier block: "
             + ", ".join(unlinked))
     return values, inventory
+
+
+def _transaction_bound_plan_without_input_freshness(
+    run_dir: Path, contract: dict,
+) -> dict:
+    """Reload one stale plan without weakening any non-input provenance gate."""
+    plan = _work_plan.transaction_bound_plan(run_dir)
+    validated = _work_plan.validate_plan(
+        plan, run_dir=run_dir, contract=contract, check_inputs=False)
+    if validated != plan:
+        raise ValueError("transaction-bound work plan changed during validation")
+    return plan
+
+
+def _current_plan_lane(run_dir: Path, *, lane_id: str, role: str,
+                       front: str, assets: list[str],
+                       stale_settlement_plan: dict | None = None) \
+        -> tuple[dict, dict]:
+    """Bind an assignment to one exact current work-plan lane.
+
+    Existing non-loop runs without a plan retain the legacy assignment surface.
+    Once ``state/work_plan.json`` exists, an unreadable/stale/mismatched plan is
+    never silently downgraded to legacy behavior.
+    """
+    plan_path = run_dir / "state" / "work_plan.json"
+    if not plan_path.exists():
+        return {}, {}
+    if _work_plan is None:
+        raise ValueError("work_plan unavailable; cannot bind assignment")
+    persisted_plan = _load_json(plan_path, {})
+    persisted_digest = str(persisted_plan.get("plan_digest") or "") \
+        if isinstance(persisted_plan, dict) else ""
+    if persisted_digest:
+        _plan_cycle_is_ended(run_dir, persisted_digest)
+    contract = _load_json(run_dir / "state" / "turn_contract.json", {})
+    try:
+        if stale_settlement_plan is None:
+            plan = _work_plan.current_plan(run_dir, contract)
+        else:
+            # This private override is accepted only while the normal scheduler
+            # fails for the one exact reason it is designed to settle.  Turn,
+            # stage, transaction, snapshot, archive and lineage validation are
+            # all repeated immediately before the assignment mutation.
+            try:
+                _work_plan.current_plan(run_dir, contract)
+            except _work_plan.PlanError as exc:
+                if str(exc) != "WORK_PLAN_INPUTS_STALE" \
+                        and not (_agent_settlement is not None
+                                 and _agent_settlement.cancellation_barrier(
+                                     run_dir, plan_digest=persisted_digest)):
+                    raise
+            else:
+                if _agent_settlement is None \
+                        or not _agent_settlement.cancellation_barrier(
+                            run_dir, plan_digest=persisted_digest):
+                    raise ValueError(
+                        "settlement override requires stale inputs or a cancellation")
+            plan = _transaction_bound_plan_without_input_freshness(
+                run_dir, contract)
+            if plan != stale_settlement_plan:
+                raise ValueError("stale settlement plan changed before assignment")
+    except Exception as exc:
+        raise ValueError(f"current work plan is invalid or stale: {exc}") from exc
+    if _plan_cycle_is_ended(run_dir, str(plan.get("plan_digest") or "")):
+        raise ValueError("ended plan cycle is immutable; commit a new plan instead")
+    if stale_settlement_plan is None and _agent_settlement is not None \
+            and _agent_settlement.cancellation_barrier(
+                run_dir, plan_digest=str(plan.get("plan_digest") or "")):
+        raise ValueError(
+            "WORK_PLAN_CANCELLED_LANE_REPLAN_REQUIRED: old plan cannot create assignments")
+    if str(plan.get("execution_mode") or "") == "ROOT_DIRECT":
+        raise ValueError("ROOT_DIRECT plan cannot create an Agent assignment")
+    candidates = [
+        item for item in plan.get("lanes", []) if isinstance(item, dict)
+        and (not lane_id or str(item.get("id") or "") == lane_id)
+        and _role(str(item.get("role") or "")) == role
+        and str(item.get("front") or "").upper() == front.upper()
+        and [_normalize_asset(value) for value in item.get("assets", [])]
+        == [_normalize_asset(value) for value in assets]
+    ]
+    if len(candidates) != 1:
+        raise ValueError(
+            "assignment must match exactly one current plan lane by lane/role/front/assets")
+    lane = candidates[0]
+    if _agent_settlement is not None and _agent_settlement.cancellation_barrier(
+            run_dir, plan_digest=str(plan.get("plan_digest") or "")) \
+            and not _agent_settlement.stale_settlement_reviewer_ready(
+                run_dir, plan, lane):
+        raise ValueError(
+            "WORK_PLAN_CANCELLED_LANE_REPLAN_REQUIRED: only authentic Reviewer settlement remains")
+    if not _work_plan.lane_dependencies_satisfied(run_dir, plan, lane):
+        raise ValueError("planned lane dependencies do not have matching returned attempts")
+    state = _work_plan.lane_runtime_state(run_dir, plan, str(lane.get("id") or ""))
+    if state != "unassigned":
+        raise ValueError(
+            f"planned lane already has assignment state={state}; replan for a new attempt")
+    return plan, lane
 
 
 def _coverage_snapshot(asset: dict) -> dict:
@@ -695,6 +832,181 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:
     return rows[:limit] if limit else rows
 
 
+def _lane_id(front: str, suffix: str) -> str:
+    """Return a deterministic work-plan lane id for one advisory front."""
+    token = re.sub(r"[^A-Za-z0-9._-]+", "-", front.strip().upper()).strip("-")
+    return f"L-{token or 'UNBOUND'}-{suffix}"
+
+
+def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
+    """Expand ranked fronts into effect-typed Root/Hunter/Reviewer lanes.
+
+    This remains an advisory planner: it does not commit ``work_plan.json``,
+    assign an Agent, or mint a lifecycle receipt.  The returned ``work_plan_lane``
+    value is deliberately shaped for ``tools/work_plan.py commit --lane`` while the
+    surrounding fields explain scheduler cost and overlap decisions.
+    """
+    ranked = [row for row in suggest(run_dir) if row["score"] >= 3]
+    # A fully reviewable front currently expands to six lanes.  Keep one work
+    # plan within the frozen 16-lane contract; later fronts are handled by a
+    # material replan after the first wave is merged.
+    selected = ranked[:max(0, min(limit if limit is not None else 2, 2))]
+    planned: list[dict] = []
+    for row in selected:
+        front = str(row["front"])
+        assets = list(dict.fromkeys(
+            (row.get("coverage_debt") or row.get("assets") or [])[:4]))
+        information_gain = "high" if int(row.get("score") or 0) >= 6 else "medium"
+        offline_id = _lane_id(front, "OFFLINE")
+        offline_review_id = _lane_id(front, "OFFLINE-REVIEW")
+        target_id = _lane_id(front, "TARGET")
+        target_review_id = _lane_id(front, "TARGET-REVIEW")
+        verify_id = _lane_id(front, "VERIFY")
+        verify_review_id = _lane_id(front, "VERIFY-REVIEW")
+
+        def add_lane(*, lane_id: str, role: str, effect: str,
+                     dependencies: list[str], expected_evidence: str,
+                     request_cost: int, request_budget: int,
+                     merge_cost: int, atomic: bool = False) -> None:
+            lane = {
+                "id": lane_id,
+                "role": role,
+                "front": front,
+                "effect": effect,
+                "assets": assets,
+                "dependencies": dependencies,
+                "expected_evidence": expected_evidence,
+                "expected_information_gain": information_gain,
+                "stop_condition": (
+                    "the declared signal is observed or one attributable control refutes it"),
+                "request_cost": request_cost,
+                "request_budget": request_budget,
+                "merge_cost": merge_cost,
+                "atomic": atomic,
+            }
+            planned.append({
+                "front_title": str(row.get("title") or front),
+                "effect_class": effect,
+                "overlap_key": {
+                    "run": str(run_dir.resolve()),
+                    "assets": assets,
+                    "front": front,
+                    "lane": lane_id,
+                    "effect": effect,
+                },
+                "work_plan_lane": lane,
+            })
+
+        add_lane(
+            lane_id=offline_id, role="web-hunter", effect="local_read",
+            dependencies=[],
+            expected_evidence="bounded source/artifact observations and explicit refutations",
+            request_cost=0, request_budget=0, merge_cost=10,
+        )
+        add_lane(
+            lane_id=offline_review_id, role="review", effect="local_verify",
+            dependencies=[offline_id],
+            expected_evidence="review disposition for the frozen offline merge draft",
+            request_cost=0, request_budget=0, merge_cost=5,
+        )
+        predecessor = offline_review_id
+        if assets:
+            add_lane(
+                lane_id=target_id, role="web-hunter", effect="target",
+                dependencies=[offline_review_id],
+                expected_evidence="one guarded target signal plus a named baseline/control",
+                request_cost=1, request_budget=3, merge_cost=20,
+            )
+            add_lane(
+                lane_id=target_review_id, role="review", effect="local_verify",
+                dependencies=[target_id],
+                expected_evidence="review disposition for the frozen target merge draft",
+                request_cost=0, request_budget=0, merge_cost=5,
+            )
+            predecessor = target_review_id
+        add_lane(
+            lane_id=verify_id, role="verify", effect="local_verify",
+            dependencies=[predecessor],
+            expected_evidence="artifact-bound verification or a precise refutation",
+            request_cost=0, request_budget=0, merge_cost=10,
+        )
+        add_lane(
+            lane_id=verify_review_id, role="review", effect="local_verify",
+            dependencies=[verify_id],
+            expected_evidence="review disposition for the frozen verification merge draft",
+            request_cost=0, request_budget=0, merge_cost=5,
+        )
+    return planned
+
+
+def lanes_can_overlap(left: dict, right: dict) -> bool:
+    """Apply the deterministic effect/asset overlap matrix to two planner rows."""
+    a = left.get("work_plan_lane") if "work_plan_lane" in left else left
+    b = right.get("work_plan_lane") if "work_plan_lane" in right else right
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    if a.get("dependencies") or b.get("dependencies"):
+        return False
+    effects = {str(a.get("effect") or ""), str(b.get("effect") or "")}
+    if effects & {"control", "repo_mutation"}:
+        return False
+    if "target" in effects:
+        if effects != {"target"}:
+            return True
+        return not bool(set(a.get("assets") or []) & set(b.get("assets") or []))
+    return effects <= {"local_read", "local_verify", "model_egress"}
+
+
+def scheduler_selection(lanes: list[dict], *, runtime_slots: int,
+                        request_budget: int, merge_capacity: int,
+                        model_egress_budget: int = 0) -> list[dict]:
+    """Return the exact ready lanes admitted by every shared capacity.
+
+    The selected rows, rather than only their count, are the scheduling result.
+    A costly earlier row may be skipped while a later independent row still
+    fits; callers must never reconstruct that decision with ``lanes[:width]``.
+    """
+    ready = [row for row in lanes
+             if not (row.get("work_plan_lane", row).get("dependencies") or [])]
+    budgeted: list[dict] = []
+    remaining_requests = max(0, request_budget)
+    remaining_model_egress = max(0, model_egress_budget)
+    remaining_merge = max(0, merge_capacity)
+    for row in ready:
+        if not all(lanes_can_overlap(row, other) for other in budgeted):
+            continue
+        lane = row.get("work_plan_lane", row)
+        target_cost = 0
+        model_cost = 0
+        if lane.get("effect") == "target":
+            target_cost = max(1, int(lane.get("request_cost") or 0))
+        elif lane.get("effect") == "model_egress":
+            model_cost = max(1, int(lane.get("request_cost") or 0))
+        merge_cost = max(0, int(lane.get("merge_cost") or 0))
+        if target_cost > remaining_requests \
+                or model_cost > remaining_model_egress \
+                or merge_cost > remaining_merge:
+            continue
+        remaining_requests -= target_cost
+        remaining_model_egress -= model_cost
+        remaining_merge -= merge_cost
+        budgeted.append(row)
+    return budgeted[:max(0, runtime_slots)]
+
+
+def scheduler_width(lanes: list[dict], *, runtime_slots: int,
+                    request_budget: int, merge_capacity: int,
+                    model_egress_budget: int = 0) -> int:
+    """Return the width of the exact capacity-bounded scheduler selection."""
+    return len(scheduler_selection(
+        lanes,
+        runtime_slots=runtime_slots,
+        request_budget=request_budget,
+        merge_capacity=merge_capacity,
+        model_egress_budget=model_egress_budget,
+    ))
+
+
 def _fanout_verdict(rows: list[dict]) -> tuple[str, list[str]]:
     strong = [r for r in rows if r["score"] >= 3]
     distinct_assets = {a for r in strong for a in r["assets"]}
@@ -790,24 +1102,690 @@ def _assignments_path(run_dir: Path) -> Path:
     return state_dir(run_dir) / "assignments.json"
 
 
-def load_assignments(run_dir: Path) -> dict:
-    data = _load_json(_assignments_path(run_dir), {})
-    if not isinstance(data, dict) or not isinstance(data.get("assignments"), list):
-        data = {"schema": 2, "assignments": []}
+DELEGATE_TRANSACTION_SCHEMA = "xunji.delegate-transaction.v1"
+DELEGATE_TRANSACTION_FIELDS = frozenset({
+    "schema", "transaction_id", "status", "plan_id", "plan_digest",
+    "lane_ids", "prepared_at", "committed_at", "rolled_back_at",
+    "rollback_reason", "previous_assignments_text",
+    "previous_assignments_sha256", "agent_files_before",
+    "context_files_before", "created_assignments", "created_agent_files",
+    "created_context_files", "receipt_digest",
+})
+
+
+def _delegate_transaction_path(run_dir: Path) -> Path:
+    return state_dir(run_dir) / "delegate_transaction.json"
+
+
+@contextlib.contextmanager
+def _assignment_mutation_lock(run_dir: Path):
+    """Serialize every assignment-ledger RMW with the runtime projector."""
+    if _runtime_receipts is not None \
+            and hasattr(_runtime_receipts, "assignment_mutation_lock"):
+        with _runtime_receipts.assignment_mutation_lock(run_dir):
+            yield
+        return
+    lock_path = state_dir(run_dir) / ".assignments.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _transaction_file_snapshot(directory: Path, *, agents: bool) -> list[str]:
+    if not directory.exists():
+        return []
+    names: list[str] = []
+    for path in directory.iterdir():
+        if not (path.is_file() or path.is_symlink()):
+            continue
+        if agents:
+            if not re.fullmatch(r"A-[A-Za-z0-9._-]+\.md", path.name):
+                continue
+        elif path.suffix != ".md":
+            continue
+        names.append(path.name)
+    return sorted(names)
+
+
+def _delegate_transaction_digest(receipt: dict) -> str:
+    payload = {key: value for key, value in receipt.items()
+               if key != "receipt_digest"}
+    return hashlib.sha256(json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _write_delegate_transaction(run_dir: Path, receipt: dict) -> dict:
+    saved = dict(receipt)
+    saved["receipt_digest"] = _delegate_transaction_digest(saved)
+    _atomic_write(
+        _delegate_transaction_path(run_dir),
+        json.dumps(saved, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+    return saved
+
+
+def _validate_delegate_transaction(receipt: object) -> dict:
+    if not isinstance(receipt, dict):
+        raise ValueError("delegate transaction receipt must be a JSON object")
+    if set(receipt) != DELEGATE_TRANSACTION_FIELDS:
+        raise ValueError("delegate transaction receipt has an unexpected shape")
+    if receipt.get("schema") != DELEGATE_TRANSACTION_SCHEMA:
+        raise ValueError("delegate transaction receipt has an unknown schema")
+    if receipt.get("status") not in {"prepared", "committed", "rolled_back"}:
+        raise ValueError("delegate transaction receipt has an invalid status")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("transaction_id") or "")):
+        raise ValueError("delegate transaction receipt has an invalid transaction_id")
+    if not isinstance(receipt.get("plan_id"), str) or not receipt["plan_id"]:
+        raise ValueError("delegate transaction receipt has an invalid plan_id")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("plan_digest") or "")):
+        raise ValueError("delegate transaction receipt has an invalid plan_digest")
+    lane_ids = receipt.get("lane_ids")
+    if (not isinstance(lane_ids, list) or not lane_ids
+            or any(not isinstance(value, str) or not value for value in lane_ids)
+            or len(set(lane_ids)) != len(lane_ids)):
+        raise ValueError("delegate transaction receipt has invalid lane_ids")
+    if not isinstance(receipt.get("prepared_at"), str) or not receipt["prepared_at"]:
+        raise ValueError("delegate transaction receipt has an invalid prepared_at")
+    status = receipt["status"]
+    committed_at = receipt.get("committed_at")
+    rolled_back_at = receipt.get("rolled_back_at")
+    rollback_reason = receipt.get("rollback_reason")
+    if status == "prepared":
+        if committed_at is not None or rolled_back_at is not None or rollback_reason != "":
+            raise ValueError("prepared delegate transaction has terminal fields")
+    elif status == "committed":
+        if (not isinstance(committed_at, str) or not committed_at
+                or rolled_back_at is not None or rollback_reason != ""):
+            raise ValueError("committed delegate transaction has invalid terminal fields")
+    elif (not isinstance(rolled_back_at, str) or not rolled_back_at
+          or committed_at is not None
+          or not isinstance(rollback_reason, str) or not rollback_reason):
+        raise ValueError("rolled-back delegate transaction has invalid terminal fields")
+    previous = receipt.get("previous_assignments_text")
+    previous_digest = receipt.get("previous_assignments_sha256")
+    if previous is None:
+        if previous_digest is not None:
+            raise ValueError("absent prior assignments cannot have a digest")
+    elif (not isinstance(previous, str)
+          or not re.fullmatch(r"[0-9a-f]{64}", str(previous_digest or ""))
+          or hashlib.sha256(previous.encode("utf-8")).hexdigest() != previous_digest):
+        raise ValueError("delegate transaction prior assignments snapshot is invalid")
+    for field, pattern in (
+        ("agent_files_before", r"A-[A-Za-z0-9._-]+\.md"),
+        ("context_files_before", r"[^/\\]+\.md"),
+        ("created_assignments", r"A-[A-Za-z0-9._-]+"),
+        ("created_agent_files", r"A-[A-Za-z0-9._-]+\.md"),
+        ("created_context_files", r"[^/\\]+\.md"),
+    ):
+        values = receipt.get(field)
+        if (not isinstance(values, list)
+                or any(not isinstance(value, str) or not re.fullmatch(pattern, value)
+                       for value in values)
+                or len(set(values)) != len(values)):
+            raise ValueError(f"delegate transaction receipt has invalid {field}")
+        if field.endswith("_before") and values != sorted(values):
+            raise ValueError(f"delegate transaction receipt has unsorted {field}")
+    if (set(receipt["agent_files_before"]) & set(receipt["created_agent_files"])
+            or set(receipt["context_files_before"])
+            & set(receipt["created_context_files"])):
+        raise ValueError("delegate transaction artifact intent overlaps prior files")
+    digest = receipt.get("receipt_digest")
+    if (not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or digest != _delegate_transaction_digest(receipt)):
+        raise ValueError("delegate transaction receipt digest mismatch")
+    return receipt
+
+
+def _load_delegate_transaction(run_dir: Path) -> dict | None:
+    path = _delegate_transaction_path(run_dir)
+    if not path.exists():
+        return None
     try:
+        raw = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except Exception as exc:
+        raise ValueError(f"delegate transaction receipt is unreadable: {exc}") from exc
+    return _validate_delegate_transaction(raw)
+
+
+def _remove_transaction_artifacts(
+    directory: Path, before: list[str], created: list[str], *, agents: bool,
+) -> None:
+    if not directory.exists():
+        return
+    preserved = set(before)
+    for name in created:
+        if name in preserved:
+            raise ValueError("delegate rollback refuses to remove a prior artifact")
+        path = directory / name
+        if not (path.is_file() or path.is_symlink()):
+            continue
+        if agents:
+            if not re.fullmatch(r"A-[A-Za-z0-9._-]+\.md", path.name):
+                continue
+        elif path.suffix != ".md":
+            continue
+        path.unlink()
+
+
+def _recover_prepared_delegate_transaction(
+    run_dir: Path, *, reason: str = "recovered interrupted prepared transaction",
+) -> dict | None:
+    """Restore the exact pre-batch state; safe to repeat after any crash point."""
+    receipt = _load_delegate_transaction(run_dir)
+    if receipt is None or receipt["status"] != "prepared":
+        return receipt
+    assignments_path = _assignments_path(run_dir)
+    previous = receipt["previous_assignments_text"]
+    if previous is None:
+        if assignments_path.exists():
+            if assignments_path.is_dir():
+                raise ValueError("cannot roll back delegate transaction over assignments directory")
+            assignments_path.unlink()
+    else:
+        _atomic_write(assignments_path, previous)
+    _remove_transaction_artifacts(
+        agents_dir(run_dir), receipt["agent_files_before"],
+        receipt["created_agent_files"], agents=True)
+    _remove_transaction_artifacts(
+        context_dir(run_dir), receipt["context_files_before"],
+        receipt["created_context_files"], agents=False)
+    receipt["status"] = "rolled_back"
+    receipt["rolled_back_at"] = datetime.now(timezone.utc).isoformat(
+        timespec="milliseconds").replace("+00:00", "Z")
+    receipt["rollback_reason"] = reason
+    return _write_delegate_transaction(run_dir, receipt)
+
+
+def _prepare_delegate_transaction(run_dir: Path, plan: dict,
+                                  lane_ids: list[str]) -> dict:
+    assignments_path = _assignments_path(run_dir)
+    previous = None
+    if assignments_path.exists():
+        previous = assignments_path.read_text(encoding="utf-8", errors="strict")
+    prepared_at = datetime.now(timezone.utc).isoformat(
+        timespec="milliseconds").replace("+00:00", "Z")
+    transaction_seed = {
+        "plan_digest": plan["plan_digest"], "lane_ids": lane_ids,
+        "prepared_at": prepared_at, "pid": os.getpid(),
+        "nonce": time.monotonic_ns(),
+    }
+    receipt = {
+        "schema": DELEGATE_TRANSACTION_SCHEMA,
+        "transaction_id": hashlib.sha256(json.dumps(
+            transaction_seed, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest(),
+        "status": "prepared",
+        "plan_id": plan["plan_id"],
+        "plan_digest": plan["plan_digest"],
+        "lane_ids": lane_ids,
+        "prepared_at": prepared_at,
+        "committed_at": None,
+        "rolled_back_at": None,
+        "rollback_reason": "",
+        "previous_assignments_text": previous,
+        "previous_assignments_sha256": (
+            hashlib.sha256(previous.encode("utf-8")).hexdigest()
+            if previous is not None else None
+        ),
+        "agent_files_before": _transaction_file_snapshot(
+            agents_dir(run_dir), agents=True),
+        "context_files_before": _transaction_file_snapshot(
+            context_dir(run_dir), agents=False),
+        "created_assignments": [],
+        "created_agent_files": [],
+        "created_context_files": [],
+        "receipt_digest": "",
+    }
+    return _write_delegate_transaction(run_dir, receipt)
+
+
+def load_assignments(run_dir: Path) -> dict:
+    path = _assignments_path(run_dir)
+    if not path.exists():
+        return {"schema": 3, "assignments": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except Exception as exc:
+        raise ValueError("assignments.json is unreadable") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("assignments"), list):
+        raise ValueError("assignments.json has no valid assignments list")
+    if any(not isinstance(row, dict) for row in data["assignments"]):
+        raise ValueError("assignments.json contains a non-object row")
+    try:
+        if isinstance(data.get("schema"), bool):
+            raise ValueError
         schema = int(data.get("schema", 1) or 1)
     except (TypeError, ValueError):
-        schema = 1
+        raise ValueError("assignments.json has an invalid ledger schema")
+    if schema not in {1, 2, 3}:
+        raise ValueError("assignments.json has an unsupported ledger schema")
     if schema < 2:
         for row in data["assignments"]:
             if not isinstance(row, dict):
                 continue
             row.setdefault("assets", [])
             row.setdefault("attempts", [])
-        data["schema"] = 2
+    if schema < 3:
+        for row in data["assignments"]:
+            if not isinstance(row, dict):
+                continue
+            row.setdefault("plan_id", "")
+            row.setdefault("plan_digest", "")
+            row.setdefault("lane_id", "")
+            row.setdefault("effect", "")
+            row.setdefault("assignment_attempt", 1)
+            row.setdefault("reviews_assignments", [])
+        data["schema"] = 3
     else:
         data["schema"] = schema
+    _validate_assignments_data(data, parent_run=run_dir.name)
     return data
+
+
+def _require_no_prepared_cancellation(run_dir: Path) -> None:
+    if _agent_settlement is None:
+        raise ValueError("agent_settlement unavailable; assignment mutation fails closed")
+    transaction = _agent_settlement.load_transaction(run_dir)
+    if transaction is not None and transaction.get("status") == "prepared":
+        raise ValueError(
+            "ASSIGNMENT_CANCELLATION_RECOVERY_REQUIRED: retry workers.py "
+            f"cancel-unlaunched for {transaction.get('assignment')}")
+
+
+@contextlib.contextmanager
+def _cancellation_mutation_locks(run_dir: Path):
+    """Freeze runtime append before taking the shared assignment writer lock."""
+    if _runtime_receipts is None or not hasattr(_runtime_receipts, "_locked"):
+        raise ValueError(
+            "runtime receipt lock unavailable; cancellation fails closed")
+    # runtime_receipts documents this exact lock order: event journal first,
+    # assignment projection second.  Reversing it would deadlock hook recovery.
+    with _runtime_receipts._locked(run_dir):
+        with _assignment_mutation_lock(run_dir):
+            yield
+
+
+def _resolved_assignment_artifact(run_dir: Path, row: dict, field: str) -> Path:
+    raw = str(row.get(field) or "")
+    if not raw:
+        raise ValueError(f"assignment {field} is missing")
+    path = Path(raw)
+    return (path if path.is_absolute() else ROOT / path).resolve(strict=False)
+
+
+def _transcript_prefix_binding(contract: dict) -> dict:
+    raw = str(contract.get("transcript_path") or "")
+    path = Path(raw)
+    if not raw or not path.is_absolute():
+        raise ValueError("ASSIGNMENT_CANCELLATION_TRANSCRIPT_PATH_INVALID")
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError("ASSIGNMENT_CANCELLATION_TRANSCRIPT_MISSING") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise ValueError("ASSIGNMENT_CANCELLATION_TRANSCRIPT_TYPE_INVALID")
+    payload = path.read_bytes()
+    return {
+        "session_id": str(contract.get("session_id") or ""),
+        "prompt_sha256": str(contract.get("prompt_sha256") or ""),
+        "contract_updated_at": float(contract.get("updated_at") or 0.0),
+        "transcript_path": str(path.resolve(strict=True)),
+        "transcript_length": len(payload),
+        "transcript_prefix_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _assert_no_transcript_launch_intent(tombstone: dict) -> None:
+    if _runtime_receipts is None \
+            or not hasattr(_runtime_receipts, "_transcript_agent_tool_uses") \
+            or not hasattr(_runtime_receipts, "_agent_invocation_binding"):
+        raise ValueError(
+            "runtime exact transcript parser unavailable; cancellation fails closed")
+    binding = tombstone.get("turn_binding") \
+        if isinstance(tombstone.get("turn_binding"), dict) else {}
+    path = Path(str(binding.get("transcript_path") or ""))
+    expected_length = int(binding.get("transcript_length") or 0)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("ASSIGNMENT_CANCELLATION_TRANSCRIPT_IDENTITY_CHANGED")
+    with path.open("rb") as handle:
+        prefix = handle.read(expected_length)
+    if len(prefix) != expected_length \
+            or hashlib.sha256(prefix).hexdigest() \
+            != binding.get("transcript_prefix_sha256"):
+        raise ValueError("ASSIGNMENT_CANCELLATION_TRANSCRIPT_PREFIX_CHANGED")
+    try:
+        candidates = _runtime_receipts._transcript_agent_tool_uses(path)
+    except Exception as exc:
+        raise ValueError("ASSIGNMENT_CANCELLATION_TRANSCRIPT_UNREADABLE") from exc
+    assignment = str(tombstone.get("assignment") or "")
+    plan_digest = str(tombstone.get("plan_digest") or "")
+    lane_id = str(tombstone.get("lane_id") or "")
+    for candidate in candidates:
+        parsed = _runtime_receipts._agent_invocation_binding(candidate)
+        if parsed.get("assignment") != assignment:
+            continue
+        # A malformed/incomplete prompt using the same assignment id is still
+        # an in-flight launch intent; exact plan/lane equality only strengthens
+        # the proof and never permits deletion.
+        exact = parsed.get("assignment_plan_digest") == plan_digest \
+            and parsed.get("assignment_lane") == lane_id
+        detail = "exact" if exact else "conflicting"
+        raise ValueError(
+            f"ASSIGNMENT_CANCELLATION_TRANSCRIPT_LAUNCH_EXISTS:{detail}")
+
+
+def _assert_no_assignment_runtime_records(
+    run_dir: Path, assignment: str,
+) -> None:
+    if _runtime_receipts is None:
+        raise ValueError("runtime_receipts unavailable; cancellation fails closed")
+    events, chain_errors = _runtime_receipts.validate_chain(run_dir)
+    if chain_errors:
+        raise ValueError(
+            "ASSIGNMENT_CANCELLATION_RUNTIME_CHAIN_INVALID:" + chain_errors[0])
+    integrity = _runtime_receipts.agent_event_integrity_errors(run_dir)
+    if integrity:
+        raise ValueError(
+            "ASSIGNMENT_CANCELLATION_RUNTIME_INTEGRITY_INVALID:" + integrity[0])
+    if any(str(event.get("assignment") or "") == assignment for event in events):
+        raise ValueError("ASSIGNMENT_CANCELLATION_RUNTIME_EVENT_EXISTS")
+    if any(str(item.get("assignment") or "") == assignment
+           for item in _runtime_receipts.agent_attempts(run_dir)):
+        raise ValueError("ASSIGNMENT_CANCELLATION_RUNTIME_ATTEMPT_EXISTS")
+    if (run_dir / "state" / "runtime_projection_error.json").exists():
+        raise ValueError("ASSIGNMENT_CANCELLATION_PROJECTION_ERROR_EXISTS")
+    draft = _runtime_receipts.merge_draft_path(run_dir, assignment)
+    if draft.exists():
+        raise ValueError("ASSIGNMENT_CANCELLATION_MERGE_DRAFT_EXISTS")
+    results = run_dir / "state" / "merge_results" / assignment
+    if results.exists():
+        if results.is_symlink() or not results.is_dir() or any(results.iterdir()):
+            raise ValueError("ASSIGNMENT_CANCELLATION_RESULT_EXISTS")
+    ledger = load_assignments(run_dir)
+    if any(
+        isinstance(item, dict) and assignment in [
+            str(value) for value in item.get("reviews_assignments", [])]
+        for item in ledger.get("assignments", [])
+    ):
+        raise ValueError("ASSIGNMENT_CANCELLATION_REVIEW_BINDING_EXISTS")
+
+
+def _assert_no_assignment_runtime_activity(
+    run_dir: Path, row: dict, plan: dict, lane: dict,
+) -> None:
+    assignment = str(row.get("agent") or "")
+    if _role(str(row.get("role") or "")) == "review" \
+            or _role(str(lane.get("role") or "")) == "review":
+        raise ValueError("ASSIGNMENT_CANCELLATION_REVIEWER_FORBIDDEN")
+    if str(row.get("status") or "").strip().lower() != "assigned" \
+            or row.get("attempts") != []:
+        raise ValueError("ASSIGNMENT_CANCELLATION_NOT_UNLAUNCHED")
+    if any(row.get(field) not in (None, "", [], {}) for field in (
+        "current_attempt", "runtime_agent_id", "review_result_digest",
+        "root_disposition_at", "root_disposition_review_receipt_hash",
+    )):
+        raise ValueError("ASSIGNMENT_CANCELLATION_RUNTIME_STATE_EXISTS")
+    _assert_no_assignment_runtime_records(run_dir, assignment)
+    projection = _run_model.plan_cycle_projection(run_dir, plan=plan)
+    states = [
+        item for item in projection.get("lane_states", [])
+        if isinstance(item, dict) and item.get("lane_id") == lane.get("id")
+    ]
+    if len(states) != 1 or states[0].get("assignment") != assignment \
+            or states[0].get("runtime_state") != "no-attempt" \
+            or states[0].get("complete") is not False:
+        raise ValueError("ASSIGNMENT_CANCELLATION_RUNTIME_PROJECTION_NOT_EMPTY")
+
+
+def _prepared_cancellation_previous_row(transaction: dict) -> tuple[dict, dict]:
+    try:
+        previous = json.loads(transaction["previous_assignments_text"])
+        following = json.loads(transaction["next_assignments_text"])
+    except Exception as exc:
+        raise ValueError("cancellation ledger snapshots are unreadable") from exc
+    _validate_assignments_data(previous)
+    _validate_assignments_data(following)
+    assignment = str(transaction.get("assignment") or "")
+    rows = [
+        item for item in previous.get("assignments", [])
+        if isinstance(item, dict) and item.get("agent") == assignment
+    ]
+    if len(rows) != 1 or any(
+        isinstance(item, dict) and item.get("agent") == assignment
+        for item in following.get("assignments", [])
+    ):
+        raise ValueError("cancellation ledger snapshots do not remove one exact row")
+    if hashlib.sha256(json.dumps(
+            rows[0], ensure_ascii=False, sort_keys=True,
+            separators=(",", ":")).encode("utf-8")).hexdigest() \
+            != transaction["tombstone"]["assignment_row_sha256"]:
+        raise ValueError("cancellation frozen assignment row diverged")
+    return rows[0], following
+
+
+def _apply_prepared_cancellation_locked(
+    run_dir: Path, transaction: dict, *, fault=None,
+) -> dict:
+    if transaction.get("status") == "committed":
+        return transaction
+    row, _following = _prepared_cancellation_previous_row(transaction)
+    tombstone = transaction["tombstone"]
+    plan = _work_plan.transaction_bound_plan(run_dir)
+    if str(plan.get("plan_digest") or "") != transaction.get("plan_digest"):
+        raise ValueError("ASSIGNMENT_CANCELLATION_PLAN_DIVERGED")
+    lane = _work_plan.lane_by_id(plan, str(transaction.get("lane_id") or ""))
+    current_path = _assignments_path(run_dir)
+    current_text = current_path.read_text(encoding="utf-8", errors="strict")
+    if current_text not in {
+        transaction["previous_assignments_text"],
+        transaction["next_assignments_text"],
+    }:
+        raise ValueError("ASSIGNMENT_CANCELLATION_LEDGER_DIVERGED")
+    _assert_no_transcript_launch_intent(tombstone)
+    _assert_no_assignment_runtime_records(
+        run_dir, str(transaction.get("assignment") or ""))
+    if current_text == transaction["previous_assignments_text"]:
+        _assert_no_assignment_runtime_activity(run_dir, row, plan, lane)
+    _agent_settlement.durable_unlink_artifact(
+        run_dir, tombstone["agent_artifact"], directory="agents",
+        pattern=r"A-[A-Za-z0-9._-]+\.md")
+    if fault is not None:
+        fault("after_agent_unlink")
+    _agent_settlement.durable_unlink_artifact(
+        run_dir, tombstone["context_artifact"], directory="context",
+        pattern=r"[^/\\]+\.md")
+    if fault is not None:
+        fault("after_context_unlink")
+    if current_text == transaction["previous_assignments_text"]:
+        _agent_settlement.durable_atomic_text(
+            current_path, transaction["next_assignments_text"])
+    if fault is not None:
+        fault("after_assignments_replace")
+    # Only after the assignment and its launch artifacts are durably absent may
+    # the immutable receipt assert the fact "cancelled-unlaunched".  Until this
+    # point the prepared transaction itself is the launch/replan barrier.
+    _agent_settlement.archive_cancellation(run_dir, tombstone)
+    if fault is not None:
+        fault("after_tombstone")
+    transaction = dict(transaction)
+    transaction["status"] = "committed"
+    transaction["committed_at"] = datetime.now(timezone.utc).isoformat(
+        timespec="milliseconds").replace("+00:00", "Z")
+    transaction = _agent_settlement.save_transaction(run_dir, transaction)
+    if fault is not None:
+        fault("after_committed")
+    return transaction
+
+
+def _recover_prepared_cancellation_locked(run_dir: Path, *, fault=None) -> dict | None:
+    if _agent_settlement is None:
+        raise ValueError("agent_settlement unavailable; cancellation fails closed")
+    transaction = _agent_settlement.load_transaction(run_dir)
+    if transaction is None or transaction.get("status") != "prepared":
+        return transaction
+    return _apply_prepared_cancellation_locked(run_dir, transaction, fault=fault)
+
+
+def cancel_unlaunched_assignment(
+    run_dir: Path, assignment: str, *, reason: str, fault=None,
+) -> dict:
+    """Cancel one exact committed assignment that has provably never launched."""
+    assignment = str(assignment or "").strip()
+    reason = str(reason or "").strip()
+    if not re.fullmatch(r"A-[A-Za-z0-9._-]+", assignment):
+        raise ValueError("ASSIGNMENT_CANCELLATION_ASSIGNMENT_INVALID")
+    if not reason or len(reason) > 4096:
+        raise ValueError("ASSIGNMENT_CANCELLATION_REASON_INVALID")
+    if fault is not None and not callable(fault):
+        raise TypeError("cancellation fault injector must be callable")
+    if _work_plan is None or _agent_settlement is None \
+            or _runtime_receipts is None or _run_model is None:
+        raise ValueError("cancellation contract dependencies unavailable")
+    with _cancellation_mutation_locks(run_dir):
+        _recover_prepared_delegate_transaction(run_dir)
+        _recover_prepared_cancellation_locked(run_dir)
+        existing = [
+            item for item in _agent_settlement.cancellation_receipts(run_dir)
+            if item.get("assignment") == assignment
+        ]
+        if len(existing) == 1:
+            return existing[0]
+        if len(existing) > 1:
+            raise ValueError("ASSIGNMENT_CANCELLATION_IDENTITY_AMBIGUOUS")
+        contract = _work_plan._load_turn_contract(run_dir)
+        try:
+            _work_plan.current_plan(run_dir, contract)
+        except _work_plan.PlanError as exc:
+            if str(exc) != "WORK_PLAN_INPUTS_STALE":
+                raise ValueError(
+                    f"ASSIGNMENT_CANCELLATION_PLAN_INVALID:{exc}") from exc
+        else:
+            raise ValueError("ASSIGNMENT_CANCELLATION_REQUIRES_STALE_INPUTS")
+        plan = _transaction_bound_plan_without_input_freshness(run_dir, contract)
+        data = load_assignments(run_dir)
+        rows = [
+            item for item in data.get("assignments", [])
+            if isinstance(item, dict) and item.get("agent") == assignment
+        ]
+        if len(rows) != 1:
+            raise ValueError("ASSIGNMENT_CANCELLATION_ASSIGNMENT_NOT_UNIQUE")
+        row = rows[0]
+        if str(row.get("plan_digest") or "") != str(plan.get("plan_digest") or ""):
+            raise ValueError("ASSIGNMENT_CANCELLATION_PLAN_BINDING_INVALID")
+        lane = _work_plan.lane_by_id(plan, str(row.get("lane_id") or ""))
+        if _role(str(lane.get("role") or "")) != _role(str(row.get("role") or "")) \
+                or str(lane.get("front") or "").upper() \
+                != str(row.get("front") or "").upper() \
+                or str(lane.get("effect") or "") != str(row.get("effect") or "") \
+                or [str(item) for item in lane.get("assets", [])] \
+                != [str(item) for item in row.get("assets", [])]:
+            raise ValueError("ASSIGNMENT_CANCELLATION_LANE_BINDING_INVALID")
+        delegate = _load_delegate_transaction(run_dir)
+        if delegate is None or delegate.get("status") != "committed" \
+                or delegate.get("plan_digest") != plan.get("plan_digest") \
+                or assignment not in delegate.get("created_assignments", []) \
+                or str(row.get("lane_id") or "") not in delegate.get("lane_ids", []):
+            raise ValueError("ASSIGNMENT_CANCELLATION_DELEGATE_RECEIPT_MISSING")
+        agent_path = _resolved_assignment_artifact(run_dir, row, "agent_file")
+        context_path = _resolved_assignment_artifact(run_dir, row, "context")
+        if agent_path.name not in delegate.get("created_agent_files", []) \
+                or context_path.name not in delegate.get("created_context_files", []):
+            raise ValueError("ASSIGNMENT_CANCELLATION_ARTIFACT_OWNERSHIP_INVALID")
+        _assert_no_assignment_runtime_activity(run_dir, row, plan, lane)
+        turn_binding = _transcript_prefix_binding(contract)
+        provisional = {
+            "assignment": assignment,
+            "plan_digest": plan["plan_digest"],
+            "lane_id": row["lane_id"],
+            "turn_binding": turn_binding,
+        }
+        _assert_no_transcript_launch_intent(provisional)
+        observed_digest = _work_plan.input_fingerprint(run_dir)[0]
+        if observed_digest == plan.get("inputs_digest"):
+            raise ValueError("ASSIGNMENT_CANCELLATION_INPUTS_NO_LONGER_STALE")
+        cancelled_at = datetime.now(timezone.utc).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        row_digest = hashlib.sha256(json.dumps(
+            row, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":")).encode("utf-8")).hexdigest()
+        tombstone = _agent_settlement.build_cancellation(
+            plan_id=plan["plan_id"], plan_digest=plan["plan_digest"],
+            plan_inputs_digest=plan["inputs_digest"],
+            observed_inputs_digest=observed_digest,
+            lane_id=str(row["lane_id"]), assignment=assignment,
+            assignment_attempt=int(row.get("assignment_attempt") or 0),
+            role=str(row.get("role") or ""), front=str(row.get("front") or ""),
+            effect=str(row.get("effect") or ""),
+            assets=[str(item) for item in row.get("assets", [])],
+            reason=reason, cancelled_at=cancelled_at, turn_binding=turn_binding,
+            assignment_row_sha256=row_digest,
+            delegate_transaction_id=delegate["transaction_id"],
+            delegate_receipt_digest=delegate["receipt_digest"],
+            agent_artifact=_agent_settlement.freeze_artifact(
+                run_dir, agent_path, directory="agents",
+                pattern=r"A-[A-Za-z0-9._-]+\.md"),
+            context_artifact=_agent_settlement.freeze_artifact(
+                run_dir, context_path, directory="context",
+                pattern=r"[^/\\]+\.md"),
+        )
+        assignments_path = _assignments_path(run_dir)
+        previous_text = assignments_path.read_text(
+            encoding="utf-8", errors="strict")
+        next_data = dict(data)
+        next_data["assignments"] = [
+            item for item in data["assignments"]
+            if not (isinstance(item, dict) and item.get("agent") == assignment)
+        ]
+        _validate_assignments_data(next_data, parent_run=run_dir.name)
+        next_text = json.dumps(
+            next_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        prepared_at = datetime.now(timezone.utc).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        transaction = _agent_settlement.build_transaction(
+            tombstone=tombstone,
+            previous_assignments_text=previous_text,
+            next_assignments_text=next_text,
+            prepared_at=prepared_at,
+        )
+        transaction = _agent_settlement.save_transaction(run_dir, transaction)
+        if fault is not None:
+            fault("after_prepared")
+        # The prepared receipt is now a turn-gate barrier.  Repeat both exact
+        # proofs at the serialized cut before publishing the immutable tombstone.
+        _assert_no_transcript_launch_intent(tombstone)
+        _assert_no_assignment_runtime_activity(run_dir, row, plan, lane)
+        transaction = _apply_prepared_cancellation_locked(
+            run_dir, transaction, fault=fault)
+        return transaction["tombstone"]
+
+
+def _validate_assignments_data(
+    data: object,
+    *,
+    parent_run: str = "",
+) -> None:
+    if _runtime_receipts is None \
+            or not hasattr(_runtime_receipts, "assignment_state_errors"):
+        rows = data.get("assignments", []) if isinstance(data, dict) else []
+        if any(
+            isinstance(row, dict) and any(str(row.get(field) or "") for field in (
+                "plan_id", "plan_digest", "lane_id",
+            ))
+            for row in rows if isinstance(rows, list)
+        ):
+            raise ValueError(
+                "runtime_receipts unavailable; cannot validate plan-bound assignments")
+        return
+    errors = _runtime_receipts.assignment_state_errors(
+        data, parent_run=parent_run)
+    if errors:
+        raise ValueError("assignments.json contract invalid: " + errors[0])
 
 
 def _next_agent_id(run_dir: Path, role: str) -> str:
@@ -817,6 +1795,11 @@ def _next_agent_id(run_dir: Path, role: str) -> str:
         m = re.match(rf"{re.escape(prefix)}(\d+)\.md$", p.name)
         if m:
             n = max(n, int(m.group(1)))
+    if _agent_settlement is not None:
+        for assignment in _agent_settlement.cancelled_assignment_ids(run_dir):
+            m = re.fullmatch(rf"{re.escape(prefix)}(\d+)", assignment)
+            if m:
+                n = max(n, int(m.group(1)))
     return f"{prefix}{n + 1:03d}"
 
 
@@ -878,14 +1861,68 @@ def _format_rdt_controls(profile: dict) -> str:
 
 def create_agent_assignment(run_dir: Path, *, role: str, front: str,
                             scope: str = "", agent: str | None = None,
-                            assets: list[str] | None = None) -> dict:
+                            assets: list[str] | None = None,
+                            lane_id: str = "") -> dict:
+    """Create one assignment under the same lock/recovery gate as delegation."""
+    with _assignment_mutation_lock(run_dir):
+        _recover_prepared_delegate_transaction(run_dir)
+        _require_no_prepared_cancellation(run_dir)
+        return _create_agent_assignment_locked(
+            run_dir, role=role, front=front, scope=scope, agent=agent,
+            assets=assets, lane_id=lane_id,
+        )
+
+
+def _create_agent_assignment_locked(run_dir: Path, *, role: str, front: str,
+                                    scope: str = "", agent: str | None = None,
+                                    assets: list[str] | None = None,
+                                    lane_id: str = "",
+                                    before_artifact_write=None,
+                                    stale_settlement_plan: dict | None = None) -> dict:
     role = _role(role)
     if role not in CANONICAL_AGENT_ROLES:
         raise ValueError(
             f"unknown Agent role {role!r}; use one of {sorted(CANONICAL_AGENT_ROLES)}")
-    asset_names, inventory = _resolve_assignment_assets(run_dir, front, assets, role)
+    if role == "synthesizer":
+        raise ValueError("synthesizer is the Root-owned singleton and cannot be assigned")
+    requested_assets: list[str] = []
+    for raw in assets or []:
+        for part in re.split(r"[,;，、]+", raw):
+            host = _normalize_asset(part)
+            if host and host not in requested_assets:
+                requested_assets.append(host)
+    plan, lane = _current_plan_lane(
+        run_dir, lane_id=lane_id, role=role, front=front,
+        assets=requested_assets,
+        stale_settlement_plan=stale_settlement_plan,
+    )
+    effect = str(lane.get("effect") or "")
+    if effect in {"control", "repo_mutation"}:
+        raise ValueError(
+            f"lane effect={effect} is Root single-writer work and cannot be assigned")
+    asset_names, inventory = _resolve_assignment_assets(
+        run_dir, front, requested_assets, role, effect=effect)
     data = load_assignments(run_dir)
-    if role not in {"verify", "review"}:
+    if lane:
+        overlaps: list[str] = []
+        for existing in data.get("assignments", []):
+            if not isinstance(existing, dict):
+                continue
+            status = _normalized_agent_status(str(existing.get("status") or ""))
+            if status in TERMINAL_AGENT_STATUSES:
+                continue
+            existing_effect = str(existing.get("effect") or "")
+            shared = sorted(
+                set(asset_names)
+                & set(_normalize_asset(a) for a in existing.get("assets", [])))
+            if effect == "target" and existing_effect == "target" and shared:
+                overlaps.extend(
+                    f"{host} ({existing.get('agent')})" for host in shared)
+        if overlaps:
+            raise ValueError(
+                "asset already has a non-terminal target-effect assignment; "
+                "target overlap is forbidden regardless of role: " + ", ".join(overlaps))
+    elif role not in {"verify", "review"}:
         overlaps: list[str] = []
         for existing in data.get("assignments", []):
             if not isinstance(existing, dict):
@@ -903,12 +1940,67 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
                 "asset already has a non-terminal assignment; overlap is reserved for verify/review roles: "
                 + ", ".join(overlaps))
     agent_id = agent or _next_agent_id(run_dir, role)
-    ctx_name = f"{front}.{_slug(role)}.md"
+    prior_attempts = [
+        int(item.get("assignment_attempt") or 0)
+        for item in data.get("assignments", []) if isinstance(item, dict)
+        and str(item.get("lane_id") or "") == str(lane.get("id") or "")
+    ] if lane else []
+    reviews_assignments: list[str] = []
+    review_result_digest = ""
+    if role == "review" and lane:
+        dependencies = {str(item) for item in lane.get("dependencies", [])}
+        reviews_assignments = sorted({
+            str(item.get("agent") or "") for item in data.get("assignments", [])
+            if isinstance(item, dict)
+            and str(item.get("plan_digest") or "") == str(plan.get("plan_digest") or "")
+            and str(item.get("lane_id") or "") in dependencies
+            and str(item.get("agent") or "")
+        })
+        if len(reviews_assignments) != 1:
+            raise ValueError(
+                "plan-bound Reviewer lane must depend on exactly one returned assignment")
+    assignment_attempt = max(prior_attempts or [0]) + 1
+    asset_digest = hashlib.sha256(json.dumps(
+        asset_names, ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()[:12]
+    ctx_name = (
+        f"{agent_id}.{front}.{asset_digest}.attempt-{assignment_attempt:03d}.md"
+    )
     ctx_path = context_dir(run_dir) / ctx_name
     if _context_pack is not None:
-        ctx_text = _context_pack.build_pack(run_dir, front=front, role=role, agent=agent_id)
+        ctx_text = _context_pack.build_pack(
+            run_dir, front=front, role=role, agent=agent_id,
+            assets=asset_names, effect=effect,
+            lane_id=str(lane.get("id") or ""),
+            plan_digest=str(plan.get("plan_digest") or ""),
+            assignment_attempt=assignment_attempt,
+        )
     else:
         ctx_text = f"# Context Pack {front} / {role}\n\n(context_pack unavailable)\n"
+    if reviews_assignments and _runtime_receipts is not None:
+        ctx_text = ctx_text.rstrip() + "\n\n## Frozen Merge Drafts\n\n"
+        for target_assignment in reviews_assignments:
+            draft_path = _runtime_receipts.merge_draft_path(run_dir, target_assignment)
+            try:
+                draft = json.loads(draft_path.read_text(
+                    encoding="utf-8", errors="strict"))
+            except Exception as exc:
+                raise ValueError(
+                    f"frozen merge draft missing for dependency {target_assignment}") from exc
+            digest = str(draft.get("result_digest") or "")
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise ValueError(
+                    f"frozen merge draft has invalid result digest for {target_assignment}")
+            review_result_digest = digest
+            ctx_text += (
+                f"- Assignment: {target_assignment}\n"
+                f"  - Draft: {display_path(draft_path)}\n"
+                f"  - Result digest: {draft.get('result_digest') or '(missing)'}\n"
+                f"  - Lane: {draft.get('lane_id') or '(missing)'}\n"
+            )
+    agent_path = agents_dir(run_dir) / f"{agent_id}.md"
+    if before_artifact_write is not None:
+        before_artifact_write(agent_id, agent_path, ctx_path)
     _atomic_write(ctx_path, ctx_text)
 
     created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -916,13 +2008,20 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
     assets_text = ", ".join(asset_names) if asset_names else "none (non-target lane)"
     asset_token = ",".join(asset_names) if asset_names else "none"
     rdt_profile = _agent_rdt_profile(run_dir, role, front)
-    agent_path = agents_dir(run_dir) / f"{agent_id}.md"
     _atomic_write(agent_path, AGENT_SCAFFOLD.format(
         agent=agent_id,
         role=role,
         front=front,
         assets=assets_text,
         asset_token=asset_token,
+        result_digest_token=(
+            f" XUNJI_RESULT_DIGEST={review_result_digest}"
+            if review_result_digest else ""),
+        effect=effect or "legacy-untyped",
+        lane_id=str(lane.get("id") or "legacy-unbound"),
+        plan_id=str(plan.get("plan_id") or "legacy-unbound"),
+        plan_digest=str(plan.get("plan_digest") or "legacy-unbound"),
+        assignment_attempt=assignment_attempt,
         asset_outcomes=_asset_outcomes_scaffold(asset_names),
         scope=scope_text,
         context_rel=display_path(ctx_path),
@@ -933,10 +2032,16 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
     ))
 
     rec = {
+        **({"schema": "xunji.assignment.v1"} if plan else {}),
         "agent": agent_id,
         "role": role,
         "front": front,
         "front_title": _front_title(run_dir, front),
+        "plan_id": str(plan.get("plan_id") or ""),
+        "plan_digest": str(plan.get("plan_digest") or ""),
+        "lane_id": str(lane.get("id") or ""),
+        "effect": effect,
+        "assignment_attempt": assignment_attempt,
         "assets": asset_names,
         "asset_ids": [_stable_asset_id(host) for host in asset_names],
         "coverage_before": {
@@ -952,10 +2057,14 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
         "created_at": created,
         "updated_at": created,
         "attempts": [],
+        "reviews_assignments": reviews_assignments,
+        **({"review_result_digest": review_result_digest}
+           if review_result_digest else {}),
         "coverage_merge_satisfied": False,
     }
     data["assignments"] = [a for a in data["assignments"] if a.get("agent") != agent_id]
     data["assignments"].append(rec)
+    _validate_assignments_data(data, parent_run=run_dir.name)
     _atomic_write(_assignments_path(run_dir), json.dumps(data, ensure_ascii=False, indent=2) + "\n")
     return rec
 
@@ -994,6 +2103,8 @@ def _normalized_agent_status(status: str) -> str:
         return "done"
     if status_l.startswith("merged"):
         return "merged"
+    if status_l.startswith("reviewed"):
+        return "reviewed"
     if status_l.startswith(("run", "active")):
         return "running"
     if status_l.startswith("start"):
@@ -1012,6 +2123,11 @@ def _normalized_agent_status(status: str) -> str:
 
 
 def agent_status_rows(run_dir: Path) -> list[dict]:
+    with _assignment_mutation_lock(run_dir):
+        return _agent_status_rows_locked(run_dir)
+
+
+def _agent_status_rows_locked(run_dir: Path) -> list[dict]:
     data = load_assignments(run_dir)
     rows = []
     changed = False
@@ -1023,7 +2139,10 @@ def agent_status_rows(run_dir: Path) -> list[dict]:
         row["file_status"] = _agent_status_from_file(ap)
         file_status_norm = _normalized_agent_status(row["file_status"])
         rec_status_norm = _normalized_agent_status(str(rec.get("status") or ""))
-        if file_status_norm == "done" and rec_status_norm in {"assigned", "working", "?"}:
+        plan_bound = bool(
+            str(rec.get("plan_digest") or "") and str(rec.get("lane_id") or ""))
+        if not plan_bound and file_status_norm == "done" \
+                and rec_status_norm in {"assigned", "working", "?"}:
             rec["status"] = "done"
             rec["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             row["status"] = "done"
@@ -1035,6 +2154,7 @@ def agent_status_rows(run_dir: Path) -> list[dict]:
             row["parse_error"] = True
         rows.append(row)
     if changed:
+        _validate_assignments_data(data, parent_run=run_dir.name)
         _atomic_write(_assignments_path(run_dir), json.dumps(data, ensure_ascii=False, indent=2) + "\n")
     return rows
 
@@ -1094,6 +2214,19 @@ def _validate_asset_merge(run_dir: Path, rec: dict) -> dict:
     assets = [_normalize_asset(item) for item in rec.get("assets", []) if _normalize_asset(item)]
     if not assets:
         return {"satisfied": True, "legacy_or_non_target": True, "assets": {}}
+    effect = str(rec.get("effect") or "")
+    plan_bound = bool(str(rec.get("plan_digest") or "") and str(rec.get("lane_id") or ""))
+    if plan_bound and effect in {"local_read", "local_verify", "model_egress"}:
+        return {
+            "satisfied": True,
+            "non_target_effect": effect,
+            "assets": {
+                host: {"target_actions_required": False} for host in assets
+            },
+        }
+    if plan_bound and effect != "target":
+        raise ValueError(
+            f"plan-bound merge has invalid/unassignable effect={effect or '(missing)'}")
     if _runtime_receipts is None:
         raise ValueError("runtime_receipts unavailable; cannot prove per-asset Agent activity")
     attempts = [item for item in _runtime_receipts.agent_attempts(run_dir)
@@ -1120,8 +2253,212 @@ def _validate_asset_merge(run_dir: Path, rec: dict) -> dict:
     }
 
 
+def _plan_cycle_is_ended(run_dir: Path, plan_digest: str) -> bool:
+    if not plan_digest:
+        return False
+    if not re.fullmatch(r"[0-9a-f]{64}", str(plan_digest)):
+        raise ValueError(
+            "plan-bound lifecycle mutation refused: invalid plan digest")
+    if _loop_journal is None \
+            or not hasattr(_loop_journal, "validate_cycle_events"):
+        raise ValueError(
+            "plan-bound lifecycle mutation refused: loop journal unavailable")
+    try:
+        state = _loop_journal.validate_cycle_events(
+            _loop_journal.load_events(run_dir))
+    except Exception as exc:
+        code = str(getattr(exc, "code", "") or exc.__class__.__name__)
+        raise ValueError(
+            "plan-bound lifecycle mutation refused: invalid loop journal "
+            f"({code})"
+        ) from exc
+    return str(plan_digest) in {
+        str(item) for item in state.get("ended_plan_digests", [])
+    }
+
+
+def _current_review_receipt(run_dir: Path, rec: dict) -> dict:
+    if str(rec.get("role") or "") == "review":
+        return {}
+    if not str(rec.get("plan_digest") or "") or not str(rec.get("lane_id") or ""):
+        return {"schema": "xunji.legacy-review-not-required"}
+    if _runtime_receipts is None or _run_model is None:
+        return {}
+    try:
+        projection = _run_model.plan_cycle_projection(run_dir)
+    except Exception:
+        return {}
+    state = next((
+        item for item in projection.get("lane_states", [])
+        if isinstance(item, dict)
+        and item.get("lane_id") == rec.get("lane_id")
+        and item.get("assignment") == rec.get("agent")
+    ), {})
+    expected_hash = str(state.get("review_receipt_hash") or "")
+    if not expected_hash:
+        return {}
+    path = _runtime_receipts.merge_draft_path(run_dir, str(rec.get("agent") or ""))
+    try:
+        draft = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except Exception:
+        return {}
+    receipt = draft.get("review_receipt") if isinstance(draft, dict) else None
+    if not (
+        draft.get("schema") == "xunji.merge-draft.v1"
+        and draft.get("review_status") == "complete"
+        and isinstance(receipt, dict)
+        and receipt.get("receipt_hash") == expected_hash
+    ):
+        return {}
+    return receipt
+
+
+def _review_receipt_complete(run_dir: Path, rec: dict) -> bool:
+    return bool(_current_review_receipt(run_dir, rec))
+
+
+def record_review_disposition(run_dir: Path, *, target: str, reviewer: str,
+                              disposition: str, note: str) -> dict:
+    with _assignment_mutation_lock(run_dir):
+        return _record_review_disposition_locked(
+            run_dir, target=target, reviewer=reviewer,
+            disposition=disposition, note=note,
+        )
+
+
+def _record_review_disposition_locked(run_dir: Path, *, target: str, reviewer: str,
+                                      disposition: str, note: str) -> dict:
+    """Record one returned Reviewer lane against a frozen merge draft."""
+    disposition = str(disposition or "").strip().lower()
+    if disposition not in REVIEW_DISPOSITIONS:
+        raise ValueError(
+            "invalid review disposition; use one of " + ", ".join(sorted(REVIEW_DISPOSITIONS)))
+    note = str(note or "").strip()
+    if not note or len(note) > 2048 or any(ord(char) < 32 and char not in "\t\n" for char in note):
+        raise ValueError("review disposition requires a bounded non-empty note")
+    if _runtime_receipts is None:
+        raise ValueError("runtime_receipts unavailable; cannot prove Reviewer return")
+    data = load_assignments(run_dir)
+    target_row = next((item for item in data.get("assignments", [])
+                       if isinstance(item, dict) and item.get("agent") == target), None)
+    reviewer_row = next((item for item in data.get("assignments", [])
+                         if isinstance(item, dict) and item.get("agent") == reviewer), None)
+    if not target_row or not reviewer_row:
+        raise ValueError("target and reviewer assignments must both exist")
+    plan_digest = str(target_row.get("plan_digest") or "")
+    if _plan_cycle_is_ended(run_dir, plan_digest):
+        raise ValueError("ended plan cycle is immutable; commit a new plan instead")
+    if str(reviewer_row.get("role") or "") != "review":
+        raise ValueError("reviewer assignment must use role=review")
+    if target not in [str(item) for item in reviewer_row.get("reviews_assignments", [])]:
+        raise ValueError("Reviewer lane is not bound to the target assignment")
+    if str(target_row.get("plan_digest") or "") != str(reviewer_row.get("plan_digest") or ""):
+        raise ValueError("Reviewer and target must share one exact plan digest")
+    attempts = [
+        item for item in _runtime_receipts.agent_attempts(run_dir)
+        if item.get("assignment") == reviewer and item.get("state") == "returned"
+        and item.get("lane_id") == reviewer_row.get("lane_id")
+        and item.get("plan_digest") == reviewer_row.get("plan_digest")
+    ]
+    if len(attempts) != 1:
+        raise ValueError("review disposition requires one exact returned Reviewer attempt")
+    attempt = attempts[0]
+    if not str(attempt.get("agent_id") or "") \
+            or not str(attempt.get("tool_use_id") or ""):
+        raise ValueError("review disposition requires a concrete Reviewer Agent/tool identity")
+    draft_path = _runtime_receipts.merge_draft_path(run_dir, target)
+    try:
+        draft = json.loads(draft_path.read_text(encoding="utf-8", errors="strict"))
+    except Exception as exc:
+        raise ValueError("target merge draft is missing or unreadable") from exc
+    if draft.get("schema") != "xunji.merge-draft.v1" \
+            or draft.get("assignment") != target \
+            or draft.get("plan_digest") != target_row.get("plan_digest"):
+        raise ValueError("target merge draft binding mismatch")
+    result = draft.get("result") if isinstance(draft.get("result"), dict) else {}
+    result_path = Path(str(result.get("path") or ""))
+    try:
+        current_digest = hashlib.sha256(result_path.read_bytes()).hexdigest()
+    except Exception as exc:
+        raise ValueError("frozen Agent result is unavailable") from exc
+    if not current_digest or current_digest != draft.get("result_digest"):
+        raise ValueError("Agent result changed after return; re-freeze and re-review")
+    if _run_model is None:
+        raise ValueError("run_model unavailable; cannot validate Reviewer frozen result")
+    projection = _run_model.plan_cycle_projection(run_dir)
+    reviewer_state = next((
+        item for item in projection.get("lane_states", [])
+        if isinstance(item, dict)
+        and item.get("lane_id") == reviewer_row.get("lane_id")
+        and item.get("assignment") == reviewer
+    ), {})
+    target_state = next((
+        item for item in projection.get("lane_states", [])
+        if isinstance(item, dict)
+        and item.get("lane_id") == target_row.get("lane_id")
+        and item.get("assignment") == target
+    ), {})
+    reviewer_result_digest = str(reviewer_state.get("result_digest") or "")
+    if reviewer_state.get("runtime_state") != "returned" \
+            or not re.fullmatch(r"[0-9a-f]{64}", reviewer_result_digest) \
+            or target_state.get("result_digest") != current_digest:
+        raise ValueError("Reviewer/target immutable runtime result binding is invalid")
+    stamp = _now_iso()
+    receipt = {
+        "schema": "xunji.review-disposition.v1",
+        "target_assignment": target,
+        "target_result_digest": current_digest,
+        "reviewer_assignment": reviewer,
+        "reviewer_agent_id": str(attempt.get("agent_id") or ""),
+        "reviewer_tool_use_id": str(attempt.get("tool_use_id") or ""),
+        "reviewer_result_digest": reviewer_result_digest,
+        "plan_digest": str(target_row.get("plan_digest") or ""),
+        "target_lane_id": str(target_row.get("lane_id") or ""),
+        "reviewer_lane_id": str(reviewer_row.get("lane_id") or ""),
+        "disposition": disposition,
+        "note": note,
+        "recorded_at": stamp,
+    }
+    receipt["receipt_hash"] = hashlib.sha256(json.dumps(
+        receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    draft["review_status"] = (
+        "action_required" if disposition in {"needs-control", "retry"} else "complete"
+    )
+    draft["review_receipt"] = receipt
+    draft["per_asset_outcomes"] = [
+        {"asset": str(item.get("asset") or ""), "disposition": disposition}
+        for item in draft.get("per_asset_outcomes", []) if isinstance(item, dict)
+    ]
+    draft["updated_at"] = stamp
+    _atomic_write(draft_path, json.dumps(draft, ensure_ascii=False, indent=2) + "\n")
+    reviewer_row["status"] = "reviewed"
+    reviewer_row["updated_at"] = stamp
+    reviewer_row["finished_at"] = stamp
+    reviewer_row["last_note"] = (
+        f"Review: {target} Disposition: {disposition} Result: {current_digest[:12]} Note: {note}"
+    )
+    _patch_agent_file_lifecycle(
+        _agent_file_from_rec(reviewer_row), status="reviewed",
+        note=reviewer_row["last_note"], stamp=stamp,
+    )
+    _validate_assignments_data(data, parent_run=run_dir.name)
+    _atomic_write(_assignments_path(run_dir), json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    return receipt
+
+
 def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str = "",
                            terminal: bool = False, amend: bool = False) -> dict:
+    with _assignment_mutation_lock(run_dir):
+        return _update_agent_lifecycle_locked(
+            run_dir, agent, status=status, note=note,
+            terminal=terminal, amend=amend,
+        )
+
+
+def _update_agent_lifecycle_locked(run_dir: Path, agent: str, *, status: str,
+                                   note: str = "", terminal: bool = False,
+                                   amend: bool = False) -> dict:
     data = load_assignments(run_dir)
     status_norm = _normalized_agent_status(status)
     allowed = TERMINAL_AGENT_STATUSES if terminal else NONTERMINAL_AGENT_STATUSES
@@ -1138,7 +2475,40 @@ def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str 
         if str(rec.get("agent") or "") != agent:
             continue
         previous_status = _normalized_agent_status(str(rec.get("status") or ""))
-        adjudicated = {"merged", "blocked", "failed", "abandoned"}
+        adjudicated = {"merged", "reviewed", "blocked", "failed", "abandoned"}
+        plan_bound = bool(
+            str(rec.get("plan_digest") or "") and str(rec.get("lane_id") or ""))
+        if _plan_cycle_is_ended(run_dir, str(rec.get("plan_digest") or "")):
+            if (
+                terminal and not amend and status_norm == previous_status
+                and note.strip() == str(rec.get("last_note") or "").strip()
+            ):
+                return rec
+            raise ValueError("ended plan cycle is immutable; commit a new plan instead")
+        if not terminal and plan_bound and status_norm in {"running", "working"}:
+            attempts = rec.get("attempts") if isinstance(rec.get("attempts"), list) else []
+            current_attempt = str(rec.get("current_attempt") or "")
+            runtime_attempt = next((
+                item for item in attempts
+                if isinstance(item, dict)
+                and str(item.get("attempt_id") or "") == current_attempt
+                and item.get("state") == "running"
+                and str(item.get("agent_id") or "")
+                == str(rec.get("runtime_agent_id") or "")
+            ), None)
+            if runtime_attempt is None:
+                raise ValueError(
+                    f"plan-bound heartbeat {status_norm} requires an authentic running attempt")
+        if terminal and status_norm == "reviewed":
+            raise ValueError(
+                "reviewed is written only by review-disposition after a returned Reviewer attempt")
+        if terminal and plan_bound and str(rec.get("role") or "") == "review":
+            raise ValueError(
+                "plan-bound Reviewer lifecycle is written only by review-disposition")
+        if terminal and plan_bound and status_norm == "done":
+            raise ValueError(
+                "plan-bound done is projected only from the authentic Agent return; "
+                "Root must record a reviewed disposition")
         if not terminal and previous_status in TERMINAL_AGENT_STATUSES:
             raise ValueError(
                 f"{agent} already has terminal status {previous_status}; "
@@ -1168,7 +2538,23 @@ def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str 
         elif amend:
             raise ValueError(f"{agent} has no terminal disposition to amend")
         merge_validation = None
+        review_receipt: dict = {}
+        if terminal and plan_bound and status_norm in {
+                "merged", "blocked", "failed", "abandoned"}:
+            review_receipt = _current_review_receipt(run_dir, rec)
+            if not review_receipt:
+                raise ValueError(
+                    f"{status_norm} requires a current returned Reviewer disposition")
         if terminal and status_norm == "merged":
+            if str(rec.get("plan_digest") or "") and str(rec.get("lane_id") or ""):
+                draft = json.loads(_runtime_receipts.merge_draft_path(
+                    run_dir, str(rec.get("agent") or ""),
+                ).read_text(encoding="utf-8", errors="strict"))
+                disposition = str((draft.get("review_receipt") or {}).get("disposition") or "")
+                if disposition != "accept-candidate":
+                    raise ValueError(
+                        "merged requires reviewer disposition=accept-candidate, got "
+                        f"{disposition or '(missing)'}")
             merge_validation = _validate_asset_merge(run_dir, rec)
         rec["status"] = status_norm
         rec["updated_at"] = stamp
@@ -1178,12 +2564,17 @@ def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str 
         rec["heartbeat_count"] = int(rec.get("heartbeat_count") or 0) + 1
         if terminal:
             rec["finished_at"] = stamp
+            if review_receipt:
+                rec["root_disposition_review_receipt_hash"] = str(
+                    review_receipt.get("receipt_hash") or "")
+                rec["root_disposition_at"] = stamp
             if status_norm == "merged":
                 rec["coverage_merge_satisfied"] = True
                 rec["coverage_merge"] = merge_validation
             else:
                 rec["coverage_merge_satisfied"] = False
         _patch_agent_file_lifecycle(_agent_file_from_rec(rec), status=status_norm, note=note, stamp=stamp)
+        _validate_assignments_data(data, parent_run=run_dir.name)
         _atomic_write(_assignments_path(run_dir), json.dumps(data, ensure_ascii=False, indent=2) + "\n")
         return rec
     raise KeyError(f"agent not found in state/assignments.json: {agent}")
@@ -1219,6 +2610,30 @@ def agent_lifecycle_issues(run_dir: Path, *, closure: bool = False,
                 "detail": (
                     f"{agent} status={status} 已 {age // 60} 分钟无 heartbeat —— Root 需要确认 Agent "
                     "是否仍在跑、卡住、或已有结果待合并。"),
+            })
+        attempts = row.get("attempts") if isinstance(row.get("attempts"), list) else []
+        returned = any(
+            isinstance(item, dict) and item.get("state") == "returned"
+            for item in attempts
+        )
+        if returned and str(row.get("role") or "") != "review" \
+                and str(row.get("plan_digest") or "") \
+                and str(row.get("lane_id") or "") \
+                and not _review_receipt_complete(run_dir, row):
+            issues.append({
+                "severity": "error" if closure else "warn",
+                "agent": agent,
+                "kind": "agent-review-pending",
+                "detail": (
+                    f"{agent} has a returned runtime attempt but no bound Reviewer "
+                    "disposition for its frozen merge draft."),
+            })
+        if status == "done":
+            issues.append({
+                "severity": "error" if closure else "warn",
+                "agent": agent,
+                "kind": "agent-done-unadjudicated",
+                "detail": f"{agent} returned but remains done; Root must merge/refute/block/fail it.",
             })
     return issues
 
@@ -1545,8 +2960,11 @@ def print_suggest(run_dir: Path, limit: int | None = None) -> int:
         print("[workers suggest] 无可建议 front: 缺 frontier.md 或没有 open/probing/deferred front。")
         return 0
     verdict, notes = _fanout_verdict(rows)
-    print(f"[workers suggest] {verdict} ({'; '.join(notes)})")
-    print("  note: advisory only; driver chooses. Workers produce candidates, never canonical Facts.")
+    planned = lane_suggestions(run_dir, limit=(limit if limit is not None else 2))
+    ready = [row for row in planned if not row["work_plan_lane"]["dependencies"]]
+    mode = "PARALLEL_AGENTS" if len(ready) >= 2 else "SERIAL_AGENT"
+    print(f"[workers suggest] {mode} advisory ({'; '.join(notes)}; legacy breadth={verdict})")
+    print("  note: advisory only; Root must commit xunji.work-plan.v1 before assignment.")
     print("  driver still weighs live rate limits, shared auth/WAF barriers, and prior worker hit rate.")
     for r in rows:
         rs = "; ".join(r["reasons"][:3]) or "no positive signal"
@@ -1554,6 +2972,16 @@ def print_suggest(run_dir: Path, limit: int | None = None) -> int:
         assets = ", ".join(r["assets"][:3]) or "?"
         print(f"  {r['front']:6} score={r['score']:>2} assets={assets:24} status={r['status']:12} "
               f"barrier={r['barrier']:18} {rs}{cs}")
+    if planned:
+        print("  effect-typed lane opportunities:")
+        for row in planned:
+            lane = row["work_plan_lane"]
+            print(
+                f"    {lane['id']} role={lane['role']} effect={lane['effect']} "
+                f"deps={','.join(lane['dependencies']) or '-'} "
+                f"request_cost={lane['request_cost']} information_gain="
+                f"{lane['expected_information_gain']} merge_cost={lane['merge_cost']}"
+            )
     asset_rows = asset_suggestions(run_dir)
     if asset_rows:
         print("  asset suggestions (advisory; create/front-map before assignment):")
@@ -1567,44 +2995,300 @@ def print_plan(run_dir: Path, limit: int) -> int:
     if not rows:
         print("[workers plan] 无 strong candidate。先串行推进或补 coverage/frontier 资产映射。")
         return 1
-    selected = rows[:limit]
+    selected = rows[:min(limit, 2)]
+    lanes = lane_suggestions(run_dir, limit=limit)
     verdict, notes = _fanout_verdict(rows)
     print(f"[workers plan] draft only: {verdict} ({'; '.join(notes)})")
     if len(selected) < len(rows):
         print(f"Selected {len(selected)} of {len(rows)} strong candidate(s) due to --limit={limit}.")
-    print("Driver must confirm before spawning; this tool does not create facts or run agents.\n")
-    start = int(next_id(run_dir).split("-", 1)[1])
-    for offset, r in enumerate(selected):
-        wid = f"W-{start + offset:02d}"
-        asset_pack = (r.get("coverage_debt") or r["assets"])[:4]
-        print(f"## {wid} -> {r['front']}")
-        print(f"- Front: {r['title']}")
-        print(f"- Assets: {', '.join(asset_pack) if asset_pack else 'not mapped; driver must map before assignment'}")
-        print(f"- Worker file: runs/<dir>/workers/{wid}.md")
-        if asset_pack:
-            flags = " ".join(f"--asset {asset}" for asset in asset_pack)
-            print(f"- Assignment command: python tools/workers.py assign runs/<dir> --role web-hunter "
-                  f"--front {r['front']} {flags}")
-        print("- Prompt seed:")
-        print(f"  You own exactly ONE front: {r['front']} ({r['title']}). "
-              "Write candidates only to your worker file; do not touch canonical run files.\n")
-    print("Create files with: " + " ; ".join(f"python tools/workers.py runs/<dir> --new {r['front']}" for r in selected))
+    print("Driver must commit a work plan before assignment; this tool creates no facts, Agents, or receipts.\n")
+    for row in lanes:
+        lane = row["work_plan_lane"]
+        print(f"## {lane['id']} -> {lane['front']} ({lane['role']})")
+        print(f"- effect_class: {row['effect_class']}")
+        print(f"- dependencies: {', '.join(lane['dependencies']) or 'none'}")
+        print(f"- assets: {', '.join(lane['assets']) or 'none'}")
+        print(f"- request_cost / budget: {lane['request_cost']} / {lane['request_budget']}")
+        print(f"- expected_information_gain: {lane['expected_information_gain']}")
+        print(f"- merge_cost: {lane['merge_cost']}")
+        print("- lane-json: " + json.dumps(lane, ensure_ascii=False, sort_keys=True))
+        print()
+    ready = [row for row in lanes if not row["work_plan_lane"]["dependencies"]]
+    width = scheduler_width(
+        lanes, runtime_slots=max(1, len(ready)), request_budget=sum(
+            row["work_plan_lane"]["request_budget"] for row in ready),
+        merge_capacity=sum(row["work_plan_lane"]["merge_cost"] for row in ready),
+        model_egress_budget=sum(
+            row["work_plan_lane"]["request_budget"] for row in ready
+            if row["work_plan_lane"]["effect"] == "model_egress"),
+    )
+    print(f"Scheduler advisory: ready={len(ready)} bounded_parallel_width={width}.")
     return 0
 
 
 def print_assign(run_dir: Path, role: str, front: str, scope: str = "",
-                 assets: list[str] | None = None) -> int:
+                 assets: list[str] | None = None, lane_id: str = "") -> int:
     try:
         rec = create_agent_assignment(
-            run_dir, role=role, front=front, scope=scope, assets=assets)
+            run_dir, role=role, front=front, scope=scope, assets=assets,
+            lane_id=lane_id)
     except Exception as exc:
         print(f"[agent-board assign] ERROR: {exc}", file=sys.stderr)
         return 1
     print(f"[agent-board] assigned {rec['agent']} role={rec['role']} front={rec['front']} "
+          f"lane={rec.get('lane_id') or '-'} effect={rec.get('effect') or '-'} "
           f"assets={','.join(rec.get('assets') or []) or '-'} loop_budget={rec.get('loop_budget')}")
     print(f"  agent:  {rec['agent_file']}")
     print(f"  context:{rec['context']}")
     print(f"  state:  {display_path(_assignments_path(run_dir))}")
+    return 0
+
+
+def print_cancel_unlaunched(run_dir: Path, assignment: str, reason: str) -> int:
+    try:
+        receipt = cancel_unlaunched_assignment(
+            run_dir, assignment, reason=reason)
+    except Exception as exc:
+        print(f"[workers cancel-unlaunched] ERROR {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def _plan_for_delegation(run_dir: Path, contract: dict) -> tuple[dict, bool]:
+    """Return a fresh plan, or the exact stale plan for settlement only."""
+    try:
+        plan = _work_plan.current_plan(run_dir, contract)
+    except _work_plan.PlanError as exc:
+        if str(exc) != "WORK_PLAN_INPUTS_STALE":
+            raise
+        plan = _transaction_bound_plan_without_input_freshness(run_dir, contract)
+        return plan, True
+    if _agent_settlement is not None and _agent_settlement.cancellation_barrier(
+            run_dir, plan_digest=str(plan.get("plan_digest") or "")):
+        return plan, True
+    return plan, False
+
+
+def _stale_settlement_reviewer_ready(
+    run_dir: Path, plan: dict, lane: dict,
+) -> bool:
+    """Admit only the unique Reviewer for one real returned/failed execution.
+
+    This is deliberately narrower than normal dependency readiness.  It cannot
+    launch a new execution lane, a Reviewer-of-Reviewer chain, or a second
+    Reviewer for the same target after canonical inputs have made the plan
+    stale.
+    """
+    return bool(
+        _agent_settlement is not None
+        and _agent_settlement.stale_settlement_reviewer_ready(
+            run_dir, plan, lane)
+    )
+
+
+def delegate_ready_lanes(
+    run_dir: Path,
+    *,
+    runtime_slots: int = 2,
+    request_budget: int = 10,
+    model_egress_budget: int = 1,
+    merge_capacity: int = 100,
+    limit: int = 2,
+    fault=None,
+) -> dict:
+    """Create exact assignments for the next ready plan wave.
+
+    The Claude primary driver still performs the actual Agent tool calls.  This
+    function transactionally narrows the hand-off to plan-bound assignments,
+    exact context packs, and launch prompts; the hooks then create launch/return
+    receipts from the real runtime events.
+    """
+    if fault is not None and not callable(fault):
+        raise TypeError("delegate fault injector must be callable")
+    with _assignment_mutation_lock(run_dir):
+        _recover_prepared_delegate_transaction(run_dir)
+        _require_no_prepared_cancellation(run_dir)
+        return _delegate_ready_lanes_locked(
+            run_dir,
+            runtime_slots=runtime_slots,
+            request_budget=request_budget,
+            model_egress_budget=model_egress_budget,
+            merge_capacity=merge_capacity,
+            limit=limit,
+            fault=fault,
+        )
+
+
+def _delegate_ready_lanes_locked(
+    run_dir: Path,
+    *,
+    runtime_slots: int,
+    request_budget: int,
+    model_egress_budget: int,
+    merge_capacity: int,
+    limit: int,
+    fault=None,
+) -> dict:
+    if _work_plan is None:
+        raise ValueError("work_plan unavailable; delegation fails closed")
+    contract = _work_plan._load_turn_contract(run_dir)
+    plan, settlement_only = _plan_for_delegation(run_dir, contract)
+    mode = str(plan.get("execution_mode") or "")
+    if mode == "ROOT_DIRECT":
+        raise ValueError("ROOT_DIRECT plan has no Agent delegation wave")
+    ready: list[dict] = []
+    for lane in plan.get("lanes", []):
+        if not isinstance(lane, dict):
+            continue
+        if str(lane.get("effect") or "") in {"control", "repo_mutation"}:
+            continue
+        if _work_plan.lane_runtime_state(run_dir, plan, str(lane.get("id") or "")) \
+                != "unassigned":
+            continue
+        if settlement_only \
+                and not _stale_settlement_reviewer_ready(run_dir, plan, lane):
+            continue
+        if not _work_plan.lane_dependencies_satisfied(run_dir, plan, lane):
+            continue
+        ready.append({"work_plan_lane": {**lane, "dependencies": []}})
+    if not ready:
+        if settlement_only:
+            raise ValueError(
+                "WORK_PLAN_STALE_SETTLEMENT_ONLY: no returned/failed execution "
+                "has an unassigned unique Reviewer")
+        raise ValueError("no unassigned lane has satisfied runtime dependencies")
+
+    running = 0
+    if _runtime_receipts is not None:
+        running = sum(
+            1 for item in _runtime_receipts.agent_attempts(run_dir)
+            if item.get("state") == "running")
+    available_slots = max(0, runtime_slots - running)
+    if mode == "SERIAL_AGENT":
+        available_slots = min(available_slots, 1)
+    selected = scheduler_selection(
+        ready,
+        runtime_slots=min(max(0, limit), available_slots),
+        request_budget=request_budget,
+        model_egress_budget=model_egress_budget,
+        merge_capacity=merge_capacity,
+    )
+    if not selected:
+        raise ValueError(
+            "ready lanes exceed runtime/request/model-egress/merge capacity")
+
+    selected_lane_ids = [
+        str(item["work_plan_lane"].get("id") or "") for item in selected
+    ]
+    transaction = _prepare_delegate_transaction(
+        run_dir, plan, selected_lane_ids)
+    created: list[dict] = []
+    try:
+        if fault is not None:
+            fault("after_prepared")
+        for item in selected:
+            lane = item["work_plan_lane"]
+
+            def record_artifact_intent(agent_id: str, agent_path: Path,
+                                       ctx_path: Path) -> None:
+                nonlocal transaction
+                agent_name = agent_path.name
+                context_name = ctx_path.name
+                if (agent_name in transaction["agent_files_before"]
+                        or context_name in transaction["context_files_before"]):
+                    raise ValueError(
+                        "delegate transaction refuses to overwrite a prior artifact")
+                if (agent_id in transaction["created_assignments"]
+                        or agent_name in transaction["created_agent_files"]
+                        or context_name in transaction["created_context_files"]):
+                    raise ValueError("delegate transaction artifact intent is duplicated")
+                transaction["created_assignments"].append(agent_id)
+                transaction["created_agent_files"].append(agent_name)
+                transaction["created_context_files"].append(context_name)
+                transaction = _write_delegate_transaction(run_dir, transaction)
+
+            rec = _create_agent_assignment_locked(
+                run_dir,
+                role=str(lane.get("role") or ""),
+                front=str(lane.get("front") or ""),
+                assets=[str(asset) for asset in lane.get("assets", [])],
+                lane_id=str(lane.get("id") or ""),
+                before_artifact_write=record_artifact_intent,
+                stale_settlement_plan=plan if settlement_only else None,
+            )
+            if _runtime_receipts is None \
+                    or not hasattr(_runtime_receipts, "assignment_launch_prompt"):
+                raise ValueError(
+                    "runtime exact launch-prompt builder unavailable; delegation fails closed")
+            prompt = _runtime_receipts.assignment_launch_prompt(rec)
+            subagent_type = _runtime_receipts.assignment_subagent_type(rec) \
+                if hasattr(_runtime_receipts, "assignment_subagent_type") else ""
+            if not prompt or not subagent_type:
+                raise ValueError(
+                    "plan-bound assignment cannot produce an exact Agent launch contract")
+            created.append({
+                "assignment": rec["agent"],
+                "lane_id": rec["lane_id"],
+                "role": rec["role"],
+                "effect": rec["effect"],
+                "context": rec["context"],
+                "subagent_type": subagent_type,
+                "launch_prompt": prompt,
+            })
+            if fault is not None:
+                fault(f"after_assignment_{len(created)}")
+        transaction["status"] = "committed"
+        transaction["committed_at"] = datetime.now(timezone.utc).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        transaction = _write_delegate_transaction(run_dir, transaction)
+    except Exception as exc:
+        try:
+            _recover_prepared_delegate_transaction(
+                run_dir, reason=f"delegate exception: {type(exc).__name__}")
+        except Exception as rollback_exc:
+            raise RuntimeError(
+                "delegation failed and its prepared transaction could not roll back"
+            ) from rollback_exc
+        raise
+    return {
+        "schema": "xunji.delegate-batch.v1",
+        "plan_id": plan["plan_id"],
+        "plan_digest": plan["plan_digest"],
+        "transaction_id": transaction["transaction_id"],
+        "execution_mode": mode,
+        "input_freshness": (
+            "stale-settlement-only" if settlement_only else "current"),
+        "runtime_slots": runtime_slots,
+        "running_before": running,
+        "request_budget": request_budget,
+        "model_egress_budget": model_egress_budget,
+        "merge_capacity": merge_capacity,
+        "assignments": created,
+        "next_action": (
+            "Claude primary driver calls Agent once per assignment using both "
+            "exact subagent_type and exact launch_prompt"),
+    }
+
+
+def print_delegate(
+    run_dir: Path,
+    *, runtime_slots: int, request_budget: int,
+    model_egress_budget: int, merge_capacity: int, limit: int,
+) -> int:
+    try:
+        batch = delegate_ready_lanes(
+            run_dir,
+            runtime_slots=runtime_slots,
+            request_budget=request_budget,
+            model_egress_budget=model_egress_budget,
+            merge_capacity=merge_capacity,
+            limit=limit,
+        )
+    except (ValueError, _work_plan.PlanError if _work_plan is not None else ValueError) as exc:
+        print(f"[workers delegate] ERROR {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(batch, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 
@@ -1657,6 +3341,23 @@ def print_finish(run_dir: Path, agent: str, status: str, note: str, amend: bool 
         return 1
     print(f"[agent-board finish] {rec['agent']} terminal={rec['status']} "
           f"finished_at={rec.get('finished_at')} note={rec.get('last_note', '-')}")
+    return 0
+
+
+def print_review_disposition(run_dir: Path, target: str, reviewer: str,
+                             disposition: str, note: str) -> int:
+    try:
+        receipt = record_review_disposition(
+            run_dir, target=target, reviewer=reviewer,
+            disposition=disposition, note=note,
+        )
+    except Exception as exc:
+        print(f"[agent-board review] ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(
+        f"[agent-board review] target={target} reviewer={reviewer} "
+        f"disposition={receipt['disposition']} receipt={receipt['receipt_hash'][:12]}"
+    )
     return 0
 
 
@@ -2004,6 +3705,9 @@ def print_merge_constraints(run_dir: Path) -> int:
 
 
 def _selftest() -> int:
+    from concurrent.futures import ThreadPoolExecutor
+    from unittest import mock
+
     d = Path(tempfile.mkdtemp())
     run = d / "run"
     run.mkdir()
@@ -2017,6 +3721,15 @@ def _selftest() -> int:
                          "status": "working"}],
     }), encoding="utf-8")
     migrated_assignments = load_assignments(legacy_assignment_run)
+    unknown_schema_run = d / "unknown-assignment-schema"
+    (unknown_schema_run / "state").mkdir(parents=True)
+    (unknown_schema_run / "state" / "assignments.json").write_text(
+        json.dumps({"schema": 999, "assignments": []}), encoding="utf-8")
+    try:
+        load_assignments(unknown_schema_run)
+        unknown_assignment_schema_rejected = False
+    except ValueError as exc:
+        unknown_assignment_schema_rejected = "unsupported ledger schema" in str(exc)
     (run / "coverage.json").write_text(json.dumps({"assets": [
         {"host": "a.example", "reachable": True, "flags": ["LOGIN"]},
         {"host": "b.example", "reachable": True, "flags": ["SURFACE:API"]},
@@ -2048,6 +3761,7 @@ def _selftest() -> int:
         "### CAND-1\n- Claim: IDOR in profile\n- Proposed certainty: 0.5\n- Control / Replicated: baseline differs\n",
         encoding="utf-8")
     rows = suggest(run)
+    planned_lanes = lane_suggestions(run, limit=1)
     asset_rows = asset_suggestions(run)
     issues = merge_check(run)
     clean_run = d / "clean"
@@ -2291,19 +4005,27 @@ def _selftest() -> int:
             encoding="utf-8")
         rec = create_agent_assignment(
             gate_run, role="web-hunter", front="F-001", assets=assets_for_agent)
+        subagent_type = "xunji-hunter"
         transcript_path = gate_run / "transcript.jsonl"
         child_id = "child-" + name
-        transcript_path.write_text(
-            "launch-" + name + "\n" + child_id + "\n"
-            + "\n".join("action-" + host for host in assets_for_agent) + "\n",
-            encoding="utf-8")
+        transcript_ids = ["launch-" + name, child_id] + [
+            "action-" + host for host in assets_for_agent]
+        transcript_path.write_text("\n".join(json.dumps({
+            "message": {"content": [{
+                "type": "tool_result", "tool_use_id": tool_id,
+                "content": {"result": f"full runtime result for {tool_id}"},
+            }]},
+        }) for tool_id in transcript_ids), encoding="utf-8")
         _runtime_receipts.append_hook_event(gate_run, {
             "hook_event_name": "PostToolUse", "session_id": name,
             "transcript_path": str(transcript_path), "tool_name": "Agent",
             "tool_use_id": "launch-" + name,
-            "tool_input": {"prompt": (
-                f"XUNJI_ASSIGNMENT={rec['agent']} XUNJI_FRONT=F-001 "
-                f"XUNJI_ASSETS={','.join(assets_for_agent)}")},
+            "tool_input": {
+                "prompt": (
+                    f"XUNJI_ASSIGNMENT={rec['agent']} XUNJI_FRONT=F-001 "
+                    f"XUNJI_ASSETS={','.join(assets_for_agent)}"),
+                "subagent_type": subagent_type,
+            },
             "tool_response": {"agentId": child_id, "isAsync": True,
                               "status": "async_launched"},
         })
@@ -2317,6 +4039,8 @@ def _selftest() -> int:
     _runtime_receipts.append_hook_event(zero_run, {
         "hook_event_name": "SubagentStop", "session_id": "zero-activity",
         "transcript_path": str(zero_transcript), "agent_id": zero_child,
+        "agent_type": "xunji-hunter",
+        "tool_response": {"content": "zero-activity Agent returned no target action"},
     })
     zero_activity_merge_blocked = False
     try:
@@ -2342,6 +4066,8 @@ def _selftest() -> int:
     _runtime_receipts.append_hook_event(partial_run, {
         "hook_event_name": "SubagentStop", "session_id": "partial-activity",
         "transcript_path": str(partial_transcript), "agent_id": partial_child,
+        "agent_type": "xunji-hunter",
+        "tool_response": {"content": "partial-activity Agent returned one asset result"},
     })
     partial_asset_merge_blocked = False
     try:
@@ -2368,6 +4094,8 @@ def _selftest() -> int:
     _runtime_receipts.append_hook_event(full_run, {
         "hook_event_name": "SubagentStop", "session_id": "full-activity",
         "transcript_path": str(full_transcript), "agent_id": full_child,
+        "agent_type": "xunji-hunter",
+        "tool_response": {"content": "full-activity Agent returned both asset results"},
     })
     full_merge = update_agent_lifecycle(
         full_run, full_rec["agent"], status="merged",
@@ -2377,6 +4105,1180 @@ def _selftest() -> int:
         and set((full_merge.get("coverage_merge") or {}).get("assets", {}))
         == {"alpha.example", "bravo.example"}
     )
+
+    # Delegate must consume the actual scheduler selection.  The first ready
+    # lane is over budget while the second fits; a width-only reconstruction
+    # would incorrectly assign L-EXPENSIVE.
+    budget_run = d / "delegate-budget-selection"
+    (budget_run / "state").mkdir(parents=True)
+    (budget_run / "target.md").write_text(
+        "# Target\n- Authorized scope: offline scheduler fixture\n",
+        encoding="utf-8",
+    )
+    (budget_run / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "inventory.example", "examined": False}],
+    }), encoding="utf-8")
+    (budget_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n### F-020 — expensive\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n\n"
+        "### F-021 — cheap\n- Status: open\n- Barrier class: none\n"
+        "- Current depth: shallow\n",
+        encoding="utf-8",
+    )
+    budget_contract = {
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+        "session_id": "budget-session", "prompt_sha256": "e" * 64,
+        "updated_at": time.time(), "fanout_override": False,
+    }
+    _atomic_write(
+        budget_run / "state" / "turn_contract.json",
+        json.dumps(budget_contract, ensure_ascii=False, indent=2) + "\n",
+    )
+    budget_lanes = [{
+        "id": "L-EXPENSIVE", "role": "web-hunter", "front": "F-020",
+        "effect": "local_read", "assets": [], "dependencies": [],
+        "expected_evidence": "bounded expensive result",
+        "expected_information_gain": "medium", "stop_condition": "one result",
+        "request_cost": 0, "request_budget": 0, "merge_cost": 20,
+        "atomic": False,
+    }, {
+        "id": "L-CHEAP", "role": "web-hunter", "front": "F-021",
+        "effect": "local_read", "assets": [], "dependencies": [],
+        "expected_evidence": "bounded cheap result",
+        "expected_information_gain": "medium", "stop_condition": "one result",
+        "request_cost": 0, "request_budget": 0, "merge_cost": 5,
+        "atomic": False,
+    }, {
+        "id": "L-EXPENSIVE-REVIEW", "role": "review", "front": "F-020",
+        "effect": "local_verify", "assets": [],
+        "dependencies": ["L-EXPENSIVE"],
+        "expected_evidence": "digest-bound expensive result review",
+        "expected_information_gain": "medium",
+        "stop_condition": "exact expensive result challenged",
+        "request_cost": 0, "request_budget": 0, "merge_cost": 5,
+        "atomic": False,
+    }, {
+        "id": "L-CHEAP-REVIEW", "role": "review", "front": "F-021",
+        "effect": "local_verify", "assets": [],
+        "dependencies": ["L-CHEAP"],
+        "expected_evidence": "digest-bound cheap result review",
+        "expected_information_gain": "medium",
+        "stop_condition": "exact cheap result challenged",
+        "request_cost": 0, "request_budget": 0, "merge_cost": 5,
+        "atomic": False,
+    }]
+    _work_plan.commit_plan(
+        budget_run, macro_stage="S2", objective="exercise exact scheduler selection",
+        mode="PARALLEL_AGENTS", reason="two independent local-read lanes",
+        exit_gate="both results reviewed", contract=budget_contract,
+        lanes=budget_lanes,
+    )
+    budget_batch = delegate_ready_lanes(
+        budget_run, runtime_slots=2, request_budget=0,
+        model_egress_budget=0, merge_capacity=5, limit=2,
+    )
+    delegate_uses_exact_budget_selection = (
+        [item.get("lane_id") for item in budget_batch.get("assignments", [])]
+        == ["L-CHEAP"]
+    )
+    (budget_run / "hints.md").write_text(
+        "# Hints\n\n- New operator steering after the first execution assignment.\n",
+        encoding="utf-8",
+    )
+    stale_plan_new_execution_blocked = False
+    try:
+        delegate_ready_lanes(
+            budget_run, runtime_slots=2, request_budget=10,
+            model_egress_budget=1, merge_capacity=100, limit=2,
+        )
+    except ValueError as exc:
+        stale_plan_new_execution_blocked = (
+            "WORK_PLAN_STALE_SETTLEMENT_ONLY" in str(exc))
+    target_over_budget = dict(
+        budget_lanes[0], id="L-TARGET-OVER", effect="target",
+        assets=["inventory.example"], request_cost=2, request_budget=2,
+        merge_cost=5,
+    )
+    model_over_budget = dict(
+        budget_lanes[0], id="L-MODEL-OVER", effect="model_egress",
+        request_cost=2, request_budget=2, merge_cost=5,
+    )
+    scheduler_skips_each_over_budget_effect = all(
+        [row["work_plan_lane"]["id"] for row in scheduler_selection(
+            [{"work_plan_lane": first},
+             {"work_plan_lane": budget_lanes[1]}],
+            runtime_slots=1, request_budget=requests,
+            model_egress_budget=model_egress, merge_capacity=merge,
+        )] == ["L-CHEAP"]
+        for first, requests, model_egress, merge in (
+            (budget_lanes[0], 0, 0, 5),
+            (target_over_budget, 1, 0, 5),
+            (model_over_budget, 0, 1, 5),
+        )
+    )
+
+    def build_delegate_transaction_run(name: str, token: str) -> Path:
+        transaction_run = d / name
+        (transaction_run / "state").mkdir(parents=True)
+        parent_transcript = transaction_run / "parent-transcript.jsonl"
+        parent_transcript.write_text("", encoding="utf-8")
+        (transaction_run / "target.md").write_text(
+            "# Target\n- Authorized scope: offline transaction fixture\n",
+            encoding="utf-8",
+        )
+        (transaction_run / "coverage.json").write_text(json.dumps({
+            "assets": [{"host": "transaction.example", "examined": False}],
+        }), encoding="utf-8")
+        (transaction_run / "frontier.md").write_text(
+            "# Frontier\n\n## Open Fronts\n\n"
+            "### F-030 — first local lane\n- Status: open\n"
+            "- Barrier class: none\n- Current depth: shallow\n\n"
+            "### F-031 — second local lane\n- Status: open\n"
+            "- Barrier class: none\n- Current depth: shallow\n",
+            encoding="utf-8",
+        )
+        contract = {
+            "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+            "session_id": f"transaction-{token}",
+            "prompt_sha256": token * 64,
+            "updated_at": time.time(), "fanout_override": False,
+            "transcript_path": str(parent_transcript.resolve()),
+        }
+        _atomic_write(
+            transaction_run / "state" / "turn_contract.json",
+            json.dumps(contract, ensure_ascii=False, indent=2) + "\n",
+        )
+        execution_lanes = [{
+            "id": "L-FIRST", "role": "web-hunter", "front": "F-030",
+            "effect": "local_read", "assets": [], "dependencies": [],
+            "expected_evidence": "first bounded local result",
+            "expected_information_gain": "medium",
+            "stop_condition": "one attributable local result",
+            "request_cost": 0, "request_budget": 0, "merge_cost": 5,
+            "atomic": False,
+        }, {
+            "id": "L-SECOND", "role": "web-hunter", "front": "F-031",
+            "effect": "local_read", "assets": [], "dependencies": [],
+            "expected_evidence": "second bounded local result",
+            "expected_information_gain": "medium",
+            "stop_condition": "one attributable local result",
+            "request_cost": 0, "request_budget": 0, "merge_cost": 5,
+            "atomic": False,
+        }]
+        reviewer_lanes = [{
+            "id": f"{lane['id']}-REVIEW", "role": "review",
+            "front": lane["front"], "effect": "local_verify", "assets": [],
+            "dependencies": [lane["id"]],
+            "expected_evidence": "digest-bound result review",
+            "expected_information_gain": "medium",
+            "stop_condition": "the exact result is dispositioned",
+            "request_cost": 0, "request_budget": 0, "merge_cost": 5,
+            "atomic": False,
+        } for lane in execution_lanes]
+        _work_plan.commit_plan(
+            transaction_run, macro_stage="S2",
+            objective="exercise recoverable atomic delegation",
+            mode="PARALLEL_AGENTS",
+            reason="two independent local-read lanes require one batch",
+            exit_gate="both exact results receive Reviewer dispositions",
+            contract=contract, lanes=execution_lanes + reviewer_lanes,
+        )
+        return transaction_run
+
+    transaction_run = build_delegate_transaction_run(
+        "delegate-transaction-rollback", "a")
+    injected_failure_seen = False
+
+    def fail_after_first_assignment(phase: str) -> None:
+        if phase == "after_assignment_1":
+            raise RuntimeError("injected delegate batch failure")
+
+    try:
+        delegate_ready_lanes(
+            transaction_run, runtime_slots=2, request_budget=0,
+            model_egress_budget=0, merge_capacity=10, limit=2,
+            fault=fail_after_first_assignment,
+        )
+    except RuntimeError as exc:
+        injected_failure_seen = "injected delegate batch failure" in str(exc)
+    rolled_back_transaction = _load_delegate_transaction(transaction_run) or {}
+    failed_batch_has_zero_partial_state = (
+        injected_failure_seen
+        and rolled_back_transaction.get("status") == "rolled_back"
+        and not _assignments_path(transaction_run).exists()
+        and _transaction_file_snapshot(agents_dir(transaction_run), agents=True) == []
+        and _transaction_file_snapshot(context_dir(transaction_run), agents=False) == []
+    )
+    transaction_retry_batch = delegate_ready_lanes(
+        transaction_run, runtime_slots=2, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=2,
+    )
+    committed_transaction = _load_delegate_transaction(transaction_run) or {}
+    retry_commits_complete_batch = (
+        [item.get("lane_id") for item in transaction_retry_batch["assignments"]]
+        == ["L-FIRST", "L-SECOND"]
+        and len(load_assignments(transaction_run)["assignments"]) == 2
+        and len(_transaction_file_snapshot(
+            agents_dir(transaction_run), agents=True)) == 2
+        and len(_transaction_file_snapshot(
+            context_dir(transaction_run), agents=False)) == 2
+        and committed_transaction.get("status") == "committed"
+        and committed_transaction.get("transaction_id")
+        == transaction_retry_batch.get("transaction_id")
+    )
+
+    crash_run = build_delegate_transaction_run(
+        "delegate-transaction-crash-recovery", "b")
+
+    def crash_after_first_assignment(phase: str) -> None:
+        if phase == "after_assignment_1":
+            raise KeyboardInterrupt("simulated process interruption")
+
+    simulated_crash_seen = False
+    try:
+        delegate_ready_lanes(
+            crash_run, runtime_slots=2, request_budget=0,
+            model_egress_budget=0, merge_capacity=10, limit=2,
+            fault=crash_after_first_assignment,
+        )
+    except KeyboardInterrupt:
+        simulated_crash_seen = True
+    prepared_after_crash = _load_delegate_transaction(crash_run) or {}
+    recovery_entry_rejected_invalid_assignment = False
+    try:
+        create_agent_assignment(
+            crash_run, role="unknown-role", front="F-030",
+            lane_id="L-FIRST",
+        )
+    except ValueError as exc:
+        recovery_entry_rejected_invalid_assignment = "unknown Agent role" in str(exc)
+    rolled_back_after_crash = _load_delegate_transaction(crash_run) or {}
+    crash_recovery_is_idempotent = (
+        simulated_crash_seen
+        and prepared_after_crash.get("status") == "prepared"
+        and recovery_entry_rejected_invalid_assignment
+        and rolled_back_after_crash.get("status") == "rolled_back"
+        and not _assignments_path(crash_run).exists()
+        and _transaction_file_snapshot(agents_dir(crash_run), agents=True) == []
+        and _transaction_file_snapshot(context_dir(crash_run), agents=False) == []
+    )
+    # A second entry sees an already rolled-back receipt and must remain a no-op
+    # before validating the newly requested assignment.
+    try:
+        create_agent_assignment(
+            crash_run, role="unknown-role", front="F-030",
+            lane_id="L-FIRST",
+        )
+    except ValueError:
+        pass
+    crash_retry_batch = delegate_ready_lanes(
+        crash_run, runtime_slots=2, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=2,
+    )
+    crash_retry_is_complete = (
+        [item.get("lane_id") for item in crash_retry_batch["assignments"]]
+        == ["L-FIRST", "L-SECOND"]
+        and len(load_assignments(crash_run)["assignments"]) == 2
+        and (_load_delegate_transaction(crash_run) or {}).get("status")
+        == "committed"
+    )
+
+    cancellation_run = build_delegate_transaction_run(
+        "delegate-stale-unlaunched-cancellation", "c")
+    cancellation_batch = delegate_ready_lanes(
+        cancellation_run, runtime_slots=2, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=2,
+    )
+    cancellation_old_prompts = {
+        item["assignment"]: item["launch_prompt"]
+        for item in cancellation_batch["assignments"]
+    }
+    (cancellation_run / "hints.md").write_text(
+        "# Hints\n\n- Steering changed before either Agent launch.\n",
+        encoding="utf-8",
+    )
+    cancellation_receipts = [
+        cancel_unlaunched_assignment(
+            cancellation_run, item["assignment"],
+            reason="canonical steering changed before launch",
+        )
+        for item in cancellation_batch["assignments"]
+    ]
+    cancellation_projection = _run_model.plan_cycle_projection(
+        cancellation_run,
+        plan=_work_plan.transaction_bound_plan(cancellation_run),
+    )
+    cancellation_rows_after_cancel = load_assignments(
+        cancellation_run)["assignments"]
+    cancellation_cycle_end_blocked = False
+    cancellation_cycle_end_code = ""
+    try:
+        _loop_journal.append_event(
+            cancellation_run, "cycle_end",
+            next_action="运行 check_run 验证当前计划",
+        )
+    except _loop_journal.JournalContractError as exc:
+        cancellation_cycle_end_code = exc.code
+        cancellation_cycle_end_blocked = (
+            exc.code == "CYCLE_EVENT_PLAN_DEBT_OPEN")
+    cancellation_schema = json.loads((
+        ROOT / "contracts" / "assignment-cancellation.v1.schema.json"
+    ).read_text(encoding="utf-8", errors="strict"))
+
+    def cancellation_schema_errors(value: object) -> list[str]:
+        if _runtime_receipts is None \
+                or not hasattr(_runtime_receipts, "_selftest_schema_errors"):
+            return ["runtime schema selftest validator unavailable"]
+        return _runtime_receipts._selftest_schema_errors(
+            value, cancellation_schema)
+
+    cancellation_unknown = json.loads(json.dumps(cancellation_receipts[0]))
+    cancellation_unknown["untrusted_extra"] = True
+    cancellation_archive = _agent_settlement.cancellation_archive_dir(
+        cancellation_run)
+    cancellation_temp = cancellation_run / "state" / (
+        "." + cancellation_receipts[0]["receipt_digest"]
+        + ".json.active-writer.tmp")
+    cancellation_temp.write_text("active writer temporary", encoding="utf-8")
+    cancellation_after_temp_cleanup = _agent_settlement.cancellation_receipts(
+        cancellation_run)
+    durability_mkdir_target = (
+        d / "cancellation-durability-mkdir" / "archive" / "receipt.json")
+    original_path_mkdir = Path.mkdir
+
+    def fail_exact_cancellation_parent_mkdir(
+        path: Path, mode: int = 0o777, parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
+        if Path(path) == durability_mkdir_target.parent:
+            raise OSError("simulated cancellation parent mkdir failure")
+        original_path_mkdir(
+            path, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    durability_mkdir_mapped = False
+    try:
+        with mock.patch.object(
+                Path, "mkdir", new=fail_exact_cancellation_parent_mkdir):
+            _agent_settlement.durable_atomic_text(
+                durability_mkdir_target, "must not publish\n")
+    except _agent_settlement.SettlementError as exc:
+        durability_mkdir_mapped = str(exc) \
+            == "ASSIGNMENT_CANCELLATION_DURABILITY_FAILED:OSError"
+
+    durability_parent_target = (
+        d / "cancellation-durability-parent" / "archive" / "receipt.json")
+    original_settlement_fsync_for_parent = _agent_settlement._fsync_directory
+    durability_parent_barrier_calls: list[Path] = []
+
+    def fail_new_parent_barrier(path: Path) -> None:
+        durability_parent_barrier_calls.append(Path(path))
+        if Path(path) == durability_parent_target.parent.parent:
+            raise OSError("simulated new parent entry fsync failure")
+        original_settlement_fsync_for_parent(path)
+
+    durability_parent_barrier_mapped = False
+    try:
+        with mock.patch.object(
+                _agent_settlement, "_fsync_directory",
+                side_effect=fail_new_parent_barrier):
+            _agent_settlement.durable_atomic_text(
+                durability_parent_target, "first attempt\n")
+    except _agent_settlement.SettlementError as exc:
+        durability_parent_barrier_mapped = str(exc) \
+            == "ASSIGNMENT_CANCELLATION_DURABILITY_FAILED:OSError"
+    _agent_settlement.durable_atomic_text(
+        durability_parent_target, "durable retry\n")
+    cancellation_parent_durability_failures_stable = bool(
+        durability_mkdir_mapped and not durability_mkdir_target.exists()
+        and durability_parent_barrier_mapped
+        and durability_parent_barrier_calls
+        and durability_parent_barrier_calls[0]
+            == durability_parent_target.parent.parent
+        and durability_parent_target.read_text(encoding="utf-8")
+            == "durable retry\n"
+    )
+    cancellation_lanes = json.loads(json.dumps(
+        _work_plan.transaction_bound_plan(cancellation_run)["lanes"]))
+    cancellation_replan = _work_plan.commit_plan(
+        cancellation_run, macro_stage="S2",
+        objective="rebind work after typed unlaunched cancellation",
+        mode="PARALLEL_AGENTS",
+        reason="old assignments were never launched and are tombstoned",
+        exit_gate="new exact results receive Reviewer dispositions",
+        lanes=cancellation_lanes,
+        replan_reason="canonical steering changed before the old Agent calls",
+        contract=_work_plan._load_turn_contract(cancellation_run),
+    )
+    cancellation_new_batch = delegate_ready_lanes(
+        cancellation_run, runtime_slots=2, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=2,
+    )
+    cancellation_new_ids = {
+        item["assignment"] for item in cancellation_new_batch["assignments"]
+    }
+    cancellation_old_ids = set(cancellation_old_prompts)
+
+    cancellation_crash_results: list[bool] = []
+    cancellation_crash_runtime_barriers: list[bool] = []
+    cancellation_crash_replan_barriers: list[bool] = []
+    for crash_index, (crash_stage, crash_token) in enumerate(zip((
+        "after_prepared", "after_tombstone", "after_agent_unlink",
+        "after_context_unlink", "after_assignments_replace", "after_committed",
+    ), "345678"), start=1):
+        cancellation_crash_run = build_delegate_transaction_run(
+            f"cancellation-crash-{crash_index}", crash_token)
+        crash_batch = delegate_ready_lanes(
+            cancellation_crash_run, runtime_slots=1, request_budget=0,
+            model_egress_budget=0, merge_capacity=10, limit=1,
+        )
+        crash_assignment = crash_batch["assignments"][0]["assignment"]
+        (cancellation_crash_run / "hints.md").write_text(
+            f"# Hints\n\n- Crash fixture {crash_stage}.\n", encoding="utf-8")
+
+        def cancellation_crash(phase: str, *, selected: str = crash_stage) -> None:
+            if phase == selected:
+                raise RuntimeError(f"simulated cancellation crash at {phase}")
+
+        crashed = False
+        try:
+            cancel_unlaunched_assignment(
+                cancellation_crash_run, crash_assignment,
+                reason="crash recovery fixture", fault=cancellation_crash)
+        except RuntimeError as exc:
+            crashed = "simulated cancellation crash" in str(exc)
+        exercise_race = crash_stage in {
+            "after_prepared", "after_agent_unlink", "after_assignments_replace",
+        }
+        if exercise_race:
+            crash_plan = _work_plan.transaction_bound_plan(
+                cancellation_crash_run)
+            replan_blocked = False
+            try:
+                _work_plan.commit_plan(
+                    cancellation_crash_run, macro_stage="S2",
+                    objective="must not replan across prepared cancellation",
+                    mode=str(crash_plan["execution_mode"]),
+                    reason="recovery fixture must remain serialized",
+                    exit_gate="prepared cancellation first reaches a terminal fact",
+                    lanes=json.loads(json.dumps(crash_plan["lanes"])),
+                    replan_reason="attempted during prepared cancellation",
+                    contract=_work_plan._load_turn_contract(
+                        cancellation_crash_run),
+                )
+            except _work_plan.PlanError as exc:
+                replan_blocked = str(exc) \
+                    == "WORK_PLAN_ASSIGNMENT_CANCELLATION_RECOVERY_REQUIRED"
+            cancellation_crash_replan_barriers.append(replan_blocked)
+            before_events = len(_runtime_receipts.validate_chain(
+                cancellation_crash_run)[0])
+            before_result_files = list((
+                cancellation_crash_run / "state" / "merge_results"
+                / crash_assignment).glob("*.json"))
+
+            def append_late_failure() -> bool:
+                try:
+                    _runtime_receipts.append_hook_event(
+                        cancellation_crash_run, {
+                            "hook_event_name": "PostToolUseFailure",
+                            "session_id": "transaction-v",
+                            "transcript_path": str(Path(
+                                _work_plan._load_turn_contract(
+                                    cancellation_crash_run)["transcript_path"])),
+                            "tool_name": "Agent",
+                            "tool_use_id": f"late-{crash_stage}",
+                            "tool_input": {
+                                "prompt": crash_batch["assignments"][0][
+                                    "launch_prompt"],
+                                "subagent_type": crash_batch["assignments"][0][
+                                    "subagent_type"],
+                            },
+                            "tool_response": {"error": "late launch failure"},
+                        })
+                except Exception as exc:
+                    return "ASSIGNMENT_CANCELLATION_RUNTIME_BARRIER" in str(exc)
+                return False
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                late_future = executor.submit(append_late_failure)
+                recovery_future = executor.submit(
+                    cancel_unlaunched_assignment,
+                    cancellation_crash_run, crash_assignment,
+                    reason="concurrent exact retry completes frozen cancellation",
+                )
+                late_blocked = late_future.result()
+                recovered = recovery_future.result()
+            after_events = len(_runtime_receipts.validate_chain(
+                cancellation_crash_run)[0])
+            after_result_files = list((
+                cancellation_crash_run / "state" / "merge_results"
+                / crash_assignment).glob("*.json"))
+            cancellation_crash_runtime_barriers.append(bool(
+                late_blocked and before_events == after_events
+                and before_result_files == after_result_files == []
+            ))
+        else:
+            recovered = cancel_unlaunched_assignment(
+                cancellation_crash_run, crash_assignment,
+                reason="exact retry completes frozen cancellation")
+        recovered_transaction = _agent_settlement.load_transaction(
+            cancellation_crash_run) or {}
+        cancellation_crash_results.append(bool(
+            crashed
+            and recovered.get("status") == "cancelled-unlaunched"
+            and recovered_transaction.get("status") == "committed"
+            and not load_assignments(cancellation_crash_run)["assignments"]
+            and not (agents_dir(cancellation_crash_run)
+                     / f"{crash_assignment}.md").exists()
+            and len(_agent_settlement.cancellation_receipts(
+                cancellation_crash_run)) == 1
+        ))
+
+    late_start_run = build_delegate_transaction_run(
+        "cancellation-late-start-after-prepare", "2")
+    late_start_batch = delegate_ready_lanes(
+        late_start_run, runtime_slots=1, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=1,
+    )
+    late_start_assignment = late_start_batch["assignments"][0]
+    (late_start_run / "hints.md").write_text(
+        "# Hints\n\n- Freeze cancellation before a late child Start.\n",
+        encoding="utf-8")
+
+    def stop_late_start_cancellation(phase: str) -> None:
+        if phase == "after_prepared":
+            raise RuntimeError("simulated cancellation crash before late Start")
+
+    late_start_prepared = False
+    try:
+        cancel_unlaunched_assignment(
+            late_start_run, late_start_assignment["assignment"],
+            reason="prepare a transcript TOCTOU fixture",
+            fault=stop_late_start_cancellation)
+    except RuntimeError as exc:
+        late_start_prepared = "before late Start" in str(exc)
+    late_start_contract = _work_plan._load_turn_contract(late_start_run)
+    late_start_transcript = Path(late_start_contract["transcript_path"])
+    late_start_tool_id = "late-start-tool-use"
+    late_start_transcript.write_text(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": late_start_tool_id,
+            "name": "Agent", "input": {
+                "prompt": late_start_assignment["launch_prompt"],
+                "subagent_type": late_start_assignment["subagent_type"],
+            },
+        }]},
+    }) + "\n", encoding="utf-8")
+    late_start_events_before = len(_runtime_receipts.validate_chain(
+        late_start_run)[0])
+    late_start_runtime_blocked = False
+    try:
+        _runtime_receipts.append_hook_event(late_start_run, {
+            "hook_event_name": "SubagentStart",
+            "session_id": late_start_contract["session_id"],
+            "transcript_path": str(late_start_transcript),
+            "agent_id": "late-child-after-cancellation",
+            "agent_type": late_start_assignment["subagent_type"],
+        })
+    except Exception as exc:
+        late_start_runtime_blocked = \
+            "ASSIGNMENT_CANCELLATION_RUNTIME_BARRIER" in str(exc)
+    late_start_recovery_blocked = False
+    try:
+        cancel_unlaunched_assignment(
+            late_start_run, late_start_assignment["assignment"],
+            reason="must retain prepared debt after transcript growth")
+    except ValueError as exc:
+        late_start_recovery_blocked = \
+            "ASSIGNMENT_CANCELLATION_TRANSCRIPT_LAUNCH_EXISTS" in str(exc)
+    late_start_transaction = _agent_settlement.load_transaction(
+        late_start_run) or {}
+    late_start_toctou_fail_closed = bool(
+        late_start_prepared and late_start_runtime_blocked
+        and late_start_recovery_blocked
+        and len(_runtime_receipts.validate_chain(late_start_run)[0])
+            == late_start_events_before
+        and late_start_transaction.get("status") == "prepared"
+        and any(
+            row.get("agent") == late_start_assignment["assignment"]
+            for row in load_assignments(late_start_run)["assignments"]
+        )
+    )
+
+    unlink_barrier_run = build_delegate_transaction_run(
+        "cancellation-unlink-barrier-retry", "9")
+    unlink_batch = delegate_ready_lanes(
+        unlink_barrier_run, runtime_slots=1, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=1,
+    )
+    unlink_assignment = unlink_batch["assignments"][0]["assignment"]
+    (unlink_barrier_run / "hints.md").write_text(
+        "# Hints\n\n- Exercise unlink directory durability retry.\n",
+        encoding="utf-8")
+    original_settlement_fsync = _agent_settlement._fsync_directory
+    unlink_barrier_failed = {"value": False}
+
+    def fail_first_agent_unlink_barrier(path: Path) -> None:
+        if Path(path).resolve() == agents_dir(unlink_barrier_run).resolve() \
+                and not unlink_barrier_failed["value"]:
+            unlink_barrier_failed["value"] = True
+            raise OSError("simulated agent unlink parent fsync failure")
+        original_settlement_fsync(path)
+
+    try:
+        with mock.patch.object(
+                _agent_settlement, "_fsync_directory",
+                side_effect=fail_first_agent_unlink_barrier):
+            cancel_unlaunched_assignment(
+                unlink_barrier_run, unlink_assignment,
+                reason="unlink barrier retry fixture")
+    except OSError:
+        pass
+    unlink_missing_before_retry = not (
+        agents_dir(unlink_barrier_run) / f"{unlink_assignment}.md").exists()
+    unlink_recovered = cancel_unlaunched_assignment(
+        unlink_barrier_run, unlink_assignment,
+        reason="retry repeats missing artifact directory barrier")
+    unlink_barrier_retry_complete = bool(
+        unlink_barrier_failed["value"] and unlink_missing_before_retry
+        and unlink_recovered.get("status") == "cancelled-unlaunched"
+        and (_agent_settlement.load_transaction(unlink_barrier_run) or {}).get(
+            "status") == "committed"
+    )
+
+    transcript_launch_run = build_delegate_transaction_run(
+        "cancellation-transcript-launch-intent", "0")
+    transcript_launch_batch = delegate_ready_lanes(
+        transcript_launch_run, runtime_slots=1, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=1,
+    )
+    transcript_launch = transcript_launch_batch["assignments"][0]
+    transcript_path = Path(_work_plan._load_turn_contract(
+        transcript_launch_run)["transcript_path"])
+    transcript_path.write_text(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": "already-authorized-agent",
+            "name": "Agent", "input": {
+                "prompt": transcript_launch["launch_prompt"],
+                "subagent_type": transcript_launch["subagent_type"],
+            },
+        }]},
+    }) + "\n", encoding="utf-8")
+    (transcript_launch_run / "hints.md").write_text(
+        "# Hints\n\n- Too late: Agent tool_use already exists.\n",
+        encoding="utf-8")
+    transcript_launch_cancel_blocked = False
+    try:
+        cancel_unlaunched_assignment(
+            transcript_launch_run, transcript_launch["assignment"],
+            reason="must reject a pre-authorized Agent tool_use")
+    except ValueError as exc:
+        transcript_launch_cancel_blocked = (
+            "TRANSCRIPT_LAUNCH_EXISTS" in str(exc))
+
+    runtime_launch_run = build_delegate_transaction_run(
+        "cancellation-runtime-event", "1")
+    runtime_launch_batch = delegate_ready_lanes(
+        runtime_launch_run, runtime_slots=1, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=1,
+    )
+    runtime_launch = runtime_launch_batch["assignments"][0]
+    runtime_transcript = Path(_work_plan._load_turn_contract(
+        runtime_launch_run)["transcript_path"])
+    runtime_tool_id = "runtime-failed-agent"
+    runtime_transcript.write_text(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": runtime_tool_id, "name": "Agent",
+            "input": {
+                "prompt": runtime_launch["launch_prompt"],
+                "subagent_type": runtime_launch["subagent_type"],
+            },
+        }, {
+            "type": "tool_result", "tool_use_id": runtime_tool_id,
+            "content": {"error": "launch failed"},
+        }]},
+    }) + "\n", encoding="utf-8")
+    _runtime_receipts.append_hook_event(runtime_launch_run, {
+        "hook_event_name": "PostToolUseFailure", "session_id": "transaction-v",
+        "transcript_path": str(runtime_transcript), "tool_name": "Agent",
+        "tool_use_id": runtime_tool_id,
+        "tool_input": {
+            "prompt": runtime_launch["launch_prompt"],
+            "subagent_type": runtime_launch["subagent_type"],
+        },
+        "tool_response": {"error": "launch failed"},
+    })
+    (runtime_launch_run / "hints.md").write_text(
+        "# Hints\n\n- Failed execution requires Reviewer settlement.\n",
+        encoding="utf-8")
+    runtime_event_cancel_blocked = False
+    try:
+        cancel_unlaunched_assignment(
+            runtime_launch_run, runtime_launch["assignment"],
+            reason="must not cancel failed execution")
+    except ValueError as exc:
+        runtime_event_cancel_blocked = any(token in str(exc) for token in (
+            "NOT_UNLAUNCHED", "RUNTIME_STATE_EXISTS", "RUNTIME_EVENT_EXISTS"))
+
+    def exact_replay_fixture(kind: str, *, tombstone: bool) -> bool:
+        replay_run = d / f"agent-exact-replay-{kind}-tombstone-{int(tombstone)}"
+        (replay_run / "state").mkdir(parents=True)
+        replay_run = replay_run.resolve()
+        (replay_run / "agents").mkdir()
+        (replay_run / "context").mkdir()
+        assignment = f"A-replay-{kind}-{int(tombstone)}"
+        plan_digest = hashlib.sha256(
+            f"replay-plan-{kind}-{tombstone}".encode()).hexdigest()
+        prompt = (
+            f"XUNJI_ASSIGNMENT={assignment}\n"
+            "XUNJI_FRONT=F-030\n"
+        )
+        subagent_type = "xunji-hunter"
+        transcript = replay_run / "parent-transcript.jsonl"
+        tool_id = f"tool-{kind}-{int(tombstone)}"
+        transcript.write_text(json.dumps({
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": tool_id, "name": "Agent",
+                "input": {
+                    "prompt": prompt,
+                    "subagent_type": subagent_type,
+                },
+            }]},
+        }) + "\n", encoding="utf-8")
+        session_id = f"replay-{kind}-{int(tombstone)}"
+        agent_id = f"child-{kind}-{int(tombstone)}"
+        start_event = {
+            "hook_event_name": "SubagentStart", "session_id": session_id,
+            "transcript_path": str(transcript), "agent_id": agent_id,
+            "agent_type": subagent_type,
+        }
+        if kind == "start":
+            target_event = start_event
+        elif kind == "stop":
+            _runtime_receipts.append_hook_event(replay_run, start_event)
+            target_event = {
+                "hook_event_name": "SubagentStop", "session_id": session_id,
+                "transcript_path": str(transcript), "agent_id": agent_id,
+                "agent_type": subagent_type,
+                "last_assistant_message": "exact stopped result",
+            }
+        elif kind == "async-post":
+            target_event = {
+                "hook_event_name": "PostToolUse", "session_id": session_id,
+                "transcript_path": str(transcript), "tool_name": "Agent",
+                "tool_use_id": tool_id, "tool_input": {
+                    "prompt": prompt,
+                    "subagent_type": subagent_type,
+                },
+                "tool_response": {
+                    "agentId": agent_id, "isAsync": True,
+                    "status": "async_launched"},
+            }
+        elif kind == "sync-post":
+            target_event = {
+                "hook_event_name": "PostToolUse", "session_id": session_id,
+                "transcript_path": str(transcript), "tool_name": "Agent",
+                "tool_use_id": tool_id, "tool_input": {
+                    "prompt": prompt,
+                    "subagent_type": subagent_type,
+                },
+                "tool_response": {"content": "exact sync completion"},
+            }
+        else:
+            target_event = {
+                "hook_event_name": "PostToolUseFailure",
+                "session_id": session_id, "transcript_path": str(transcript),
+                "tool_name": "Agent", "tool_use_id": tool_id,
+                "tool_input": {
+                    "prompt": prompt,
+                    "subagent_type": subagent_type,
+                },
+                "tool_response": {"error": "exact launch failure"},
+            }
+        original = _runtime_receipts.append_hook_event(
+            replay_run, target_event)
+        if tombstone:
+            agent_file = replay_run / "agents" / f"{assignment}.md"
+            context_file = replay_run / "context" / f"{assignment}.md"
+            agent_file.write_text("frozen replay agent\n", encoding="utf-8")
+            context_file.write_text("frozen replay context\n", encoding="utf-8")
+            transcript_payload = transcript.read_bytes()
+            cancelled_at = datetime.now(timezone.utc).isoformat(
+                timespec="milliseconds").replace("+00:00", "Z")
+            receipt = _agent_settlement.build_cancellation(
+                plan_id="WP-1-replay", plan_digest=plan_digest,
+                plan_inputs_digest="a" * 64,
+                observed_inputs_digest="b" * 64,
+                lane_id="L-REPLAY", assignment=assignment,
+                assignment_attempt=1, role="web-hunter", front="F-030",
+                effect="local_read", assets=[],
+                reason="exact replay precedence fixture",
+                cancelled_at=cancelled_at,
+                turn_binding={
+                    "session_id": session_id, "prompt_sha256": "c" * 64,
+                    "contract_updated_at": time.time(),
+                    "transcript_path": str(transcript.resolve()),
+                    "transcript_length": len(transcript_payload),
+                    "transcript_prefix_sha256": hashlib.sha256(
+                        transcript_payload).hexdigest(),
+                },
+                assignment_row_sha256="d" * 64,
+                delegate_transaction_id="e" * 64,
+                delegate_receipt_digest="f" * 64,
+                agent_artifact=_agent_settlement.freeze_artifact(
+                    replay_run, agent_file, directory="agents",
+                    pattern=r"A-[A-Za-z0-9._-]+\.md"),
+                context_artifact=_agent_settlement.freeze_artifact(
+                    replay_run, context_file, directory="context",
+                    pattern=r"[^/\\]+\.md"),
+            )
+            _agent_settlement.archive_cancellation(replay_run, receipt)
+        before_events = _runtime_receipts.validate_chain(replay_run)[0]
+        before_results = sorted(str(path) for path in (
+            replay_run / "state" / "merge_results").glob("**/*.json"))
+        replayed = _runtime_receipts.append_hook_event(
+            replay_run, json.loads(json.dumps(target_event)))
+        conflict = json.loads(json.dumps(target_event))
+        if kind == "start":
+            conflict["agent_type"] = "changed-agent-type"
+        elif kind == "stop":
+            conflict["last_assistant_message"] = "different stopped result"
+        elif kind == "async-post":
+            conflict["tool_response"]["status"] = "different-status"
+        elif kind == "sync-post":
+            conflict["tool_response"]["content"] = "different completion"
+        else:
+            conflict["tool_response"]["error"] = "different failure"
+        conflict_blocked = False
+        try:
+            _runtime_receipts.append_hook_event(replay_run, conflict)
+        except RuntimeError as exc:
+            conflict_blocked = "AGENT_EVENT_REPLAY_CONFLICT" in str(exc)
+        after_events = _runtime_receipts.validate_chain(replay_run)[0]
+        after_results = sorted(str(path) for path in (
+            replay_run / "state" / "merge_results").glob("**/*.json"))
+        return bool(
+            replayed.get("receipt_hash") == original.get("receipt_hash")
+            and conflict_blocked and after_events == before_events
+            and after_results == before_results
+        )
+
+    exact_replay_kinds = (
+        "start", "stop", "async-post", "sync-post", "failure",
+    )
+    exact_replay_without_tombstone = [
+        exact_replay_fixture(kind, tombstone=False)
+        for kind in exact_replay_kinds
+    ]
+    exact_replay_with_tombstone = [
+        exact_replay_fixture(kind, tombstone=True)
+        for kind in exact_replay_kinds
+    ]
+
+    failed_settlement_run = build_delegate_transaction_run(
+        "delegate-stale-failed-settlement", "f")
+    failed_execution_batch = delegate_ready_lanes(
+        failed_settlement_run, runtime_slots=1, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=1,
+    )
+    failed_execution = failed_execution_batch["assignments"][0]
+    failed_tool_id = "stale-failed-execution-tool"
+    failed_transcript = failed_settlement_run / "failed-transcript.jsonl"
+    failed_transcript.write_text(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": failed_tool_id, "name": "Agent",
+            "input": {
+                "prompt": failed_execution["launch_prompt"],
+                "subagent_type": failed_execution["subagent_type"],
+            },
+        }]},
+    }) + "\n", encoding="utf-8")
+    _runtime_receipts.append_hook_event(failed_settlement_run, {
+        "hook_event_name": "PostToolUseFailure",
+        "session_id": "transaction-f",
+        "transcript_path": str(failed_transcript),
+        "tool_name": "Agent",
+        "tool_use_id": failed_tool_id,
+        "tool_input": {
+            "prompt": failed_execution["launch_prompt"],
+            "subagent_type": failed_execution["subagent_type"],
+        },
+        "tool_response": {"error": "Agent launch failed before execution"},
+    })
+    (failed_settlement_run / "hints.md").write_text(
+        "# Hints\n\n- Replan only after the failed result is reviewed.\n",
+        encoding="utf-8",
+    )
+    failed_reviewer_batch = delegate_ready_lanes(
+        failed_settlement_run, runtime_slots=2, request_budget=0,
+        model_egress_budget=0, merge_capacity=100, limit=2,
+    )
+    stale_failed_execution_unlocks_only_reviewer = bool(
+        failed_reviewer_batch.get("input_freshness")
+            == "stale-settlement-only"
+        and [item.get("lane_id")
+             for item in failed_reviewer_batch.get("assignments", [])]
+            == ["L-FIRST-REVIEW"]
+        and failed_reviewer_batch["assignments"][0].get("role") == "review"
+    )
+
+    # Planner-generated vertical closure: planner -> committed plan -> delegated
+    # Hunter -> real async launch/return receipts -> delegated Reviewer -> real
+    # return -> typed review disposition -> Root merge -> next execution lane.
+    planned_run = d / "planned-agent-closure"
+    (planned_run / "state").mkdir(parents=True)
+    (planned_run / "target.md").write_text(
+        "# Target\n- Authorized scope: fixture.example\n",
+        encoding="utf-8",
+    )
+    (planned_run / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "fixture.example", "reachable": True,
+                    "examined": False}],
+    }), encoding="utf-8")
+    (planned_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n### F-010 — fixture.example source lane\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8",
+    )
+    (planned_run / "evidence.md").write_text(
+        "# Evidence\n\n## E-900\n- Front: F-010\n"
+        "- Claim: frozen offline result for fixture.example\n",
+        encoding="utf-8",
+    )
+    planned_contract = {
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+        "session_id": "planned-session", "prompt_sha256": "d" * 64,
+        "updated_at": time.time(), "fanout_override": False,
+    }
+    _atomic_write(
+        planned_run / "state" / "turn_contract.json",
+        json.dumps(planned_contract, ensure_ascii=False, indent=2) + "\n",
+    )
+    generated_plan_rows = lane_suggestions(planned_run, limit=1)
+    generated_plan_lanes = [row["work_plan_lane"] for row in generated_plan_rows]
+    planned_plan = _work_plan.commit_plan(
+        planned_run, macro_stage="S2", objective="exercise serial review closure",
+        mode="SERIAL_AGENT", reason="one Hunter then its dependent Reviewer",
+        exit_gate="review receipt precedes Root merge", contract=planned_contract,
+        lanes=generated_plan_lanes,
+    )
+    planned_hunter_batch = delegate_ready_lanes(
+        planned_run, runtime_slots=1, request_budget=10,
+        model_egress_budget=1, merge_capacity=100, limit=1,
+    )
+    planned_hunter = next(
+        item for item in load_assignments(planned_run)["assignments"]
+        if item.get("agent") == planned_hunter_batch["assignments"][0]["assignment"])
+    planned_hunter_prompt_reconstructs = (
+        planned_hunter_batch["assignments"][0]["launch_prompt"]
+        == _runtime_receipts.assignment_launch_prompt(planned_hunter)
+    )
+    reviewer_before_return_blocked = False
+    try:
+        delegate_ready_lanes(
+            planned_run, runtime_slots=1, request_budget=10,
+            model_egress_budget=1, merge_capacity=100, limit=1,
+        )
+    except ValueError as exc:
+        reviewer_before_return_blocked = "no unassigned lane" in str(exc)
+    planned_hunter_path = _agent_file_from_rec(planned_hunter)
+    assert planned_hunter_path is not None
+    planned_hunter_path.write_text(
+        planned_hunter_path.read_text(encoding="utf-8")
+        + "\n## Findings\n\n- Candidate: source result bound to E-900\n",
+        encoding="utf-8",
+    )
+    planned_transcript = planned_run / "planned-transcript.jsonl"
+    planned_transcript.write_text("\n".join([
+        json.dumps({"agent_id": "runtime-planned-hunter", "message": {"content": [{
+            "type": "tool_result", "tool_use_id": "planned-hunter-tool",
+            "content": {
+                "content": "HUNTER_FULL_RESPONSE\nCandidate bound to E-900\nControl retained",
+                "structured": {"front": "F-010", "outcome": "candidate"},
+            },
+        }]}}),
+        json.dumps({"agent_id": "runtime-planned-reviewer", "message": {"content": [{
+            "type": "tool_result", "tool_use_id": "planned-reviewer-tool",
+            "content": {
+                "content": "REVIEWER_FULL_RESPONSE\nCandidate binding verified",
+                "structured": {"disposition": "accept-candidate"},
+            },
+        }]}}),
+    ]), encoding="utf-8")
+    _runtime_receipts.append_hook_event(planned_run, {
+        "hook_event_name": "PostToolUse", "session_id": "planned-session",
+        "transcript_path": str(planned_transcript), "tool_name": "Agent",
+        "tool_use_id": "planned-hunter-tool",
+        "tool_input": {
+            "prompt": planned_hunter_batch["assignments"][0]["launch_prompt"],
+            "subagent_type": planned_hunter_batch["assignments"][0][
+                "subagent_type"],
+        },
+        "tool_response": {"agentId": "runtime-planned-hunter", "isAsync": True,
+                          "status": "async_launched"},
+    })
+    planned_working_row = json.loads(json.dumps(update_agent_lifecycle(
+        planned_run, planned_hunter["agent"], status="working",
+        note="authentic runtime attempt made material progress",
+    )))
+    _runtime_receipts.append_hook_event(planned_run, {
+        "hook_event_name": "SubagentStop", "session_id": "planned-session",
+        "transcript_path": str(planned_transcript),
+        "agent_id": "runtime-planned-hunter",
+        "agent_type": planned_hunter_batch["assignments"][0]["subagent_type"],
+        "last_assistant_message": (
+            "HUNTER_FULL_RESPONSE\nCandidate bound to E-900\nControl retained"),
+        "tool_response": {
+            "content": "HUNTER_FULL_RESPONSE\nCandidate bound to E-900\nControl retained",
+            "structured": {"front": "F-010", "outcome": "candidate"},
+        },
+    })
+    hunter_draft_path = _runtime_receipts.merge_draft_path(
+        planned_run, planned_hunter["agent"])
+    hunter_draft_after_return = json.loads(
+        hunter_draft_path.read_text(encoding="utf-8"))
+    hunter_snapshot_path = Path(hunter_draft_after_return["result"]["path"])
+    hunter_snapshot_bytes = hunter_snapshot_path.read_bytes()
+    hunter_snapshot_is_full_response = (
+        b"HUNTER_FULL_RESPONSE" in hunter_snapshot_bytes
+        and b"Control retained" in hunter_snapshot_bytes
+        and b"async_launched" not in hunter_snapshot_bytes
+        and hunter_draft_after_return["result"].get("source")
+            == "subagent_stop_response"
+    )
+    (planned_run / "hints.md").write_text(
+        "# Hints\n\n- Preserve the returned result but apply new steering next cycle.\n",
+        encoding="utf-8",
+    )
+    stale_direct_reviewer_assign_blocked = False
+    try:
+        create_agent_assignment(
+            planned_run, role="review", front="F-010",
+            lane_id=generated_plan_lanes[1]["id"],
+        )
+    except ValueError as exc:
+        stale_direct_reviewer_assign_blocked = (
+            "WORK_PLAN_INPUTS_STALE" in str(exc))
+    stale_premature_replan_blocked = False
+    try:
+        _work_plan.commit_plan(
+            planned_run, macro_stage="S2",
+            objective="incorrectly skip review after steering changed",
+            mode="SERIAL_AGENT",
+            reason="must not supersede a returned result awaiting review",
+            exit_gate="returned result is still reviewed",
+            lanes=generated_plan_lanes,
+            replan_reason="operator hint changed before Reviewer settlement",
+            contract=planned_contract,
+        )
+    except _work_plan.PlanError as exc:
+        stale_premature_replan_blocked = (
+            str(exc) == "WORK_PLAN_REPLAN_ASSIGNMENT_DEBT")
+    planned_reviewer_batch = delegate_ready_lanes(
+        planned_run, runtime_slots=1, request_budget=10,
+        model_egress_budget=1, merge_capacity=100, limit=1,
+    )
+    planned_reviewer = next(
+        item for item in load_assignments(planned_run)["assignments"]
+        if item.get("agent") == planned_reviewer_batch["assignments"][0]["assignment"])
+    planned_reviewer_prompt_reconstructs = (
+        planned_reviewer_batch["assignments"][0]["launch_prompt"]
+        == _runtime_receipts.assignment_launch_prompt(planned_reviewer)
+    )
+    planned_reviewer_context = Path(planned_reviewer["context"])
+    if not planned_reviewer_context.is_absolute():
+        planned_reviewer_context = ROOT / planned_reviewer_context
+    _runtime_receipts.append_hook_event(planned_run, {
+        "hook_event_name": "PostToolUse", "session_id": "planned-session",
+        "transcript_path": str(planned_transcript), "tool_name": "Agent",
+        "tool_use_id": "planned-reviewer-tool",
+        "tool_input": {
+            "prompt": planned_reviewer_batch["assignments"][0]["launch_prompt"],
+            "subagent_type": planned_reviewer_batch["assignments"][0][
+                "subagent_type"],
+        },
+        "tool_response": {"agentId": "runtime-planned-reviewer", "isAsync": True,
+                          "status": "async_launched"},
+    })
+    _runtime_receipts.append_hook_event(planned_run, {
+        "hook_event_name": "SubagentStop", "session_id": "planned-session",
+        "transcript_path": str(planned_transcript),
+        "agent_id": "runtime-planned-reviewer",
+        "agent_type": planned_reviewer_batch["assignments"][0][
+            "subagent_type"],
+        "tool_response": {
+            "content": "REVIEWER_FULL_RESPONSE\naccept-candidate after digest check",
+            "structured": {"disposition": "accept-candidate"},
+        },
+    })
+    reviewer_unreviewed_blocks_next = False
+    try:
+        delegate_ready_lanes(
+            planned_run, runtime_slots=1, request_budget=10,
+            model_egress_budget=1, merge_capacity=100, limit=1,
+        )
+    except ValueError as exc:
+        reviewer_unreviewed_blocks_next = (
+            "WORK_PLAN_STALE_SETTLEMENT_ONLY" in str(exc))
+    hunter_before_mutation = planned_hunter_path.read_text(encoding="utf-8")
+    planned_hunter_path.write_text(
+        hunter_before_mutation + "\npost-return mutation\n", encoding="utf-8")
+    hunter_snapshot_path.write_bytes(hunter_snapshot_bytes + b"\ntampered\n")
+    immutable_snapshot_tamper_rejected = False
+    try:
+        record_review_disposition(
+            planned_run, target=planned_hunter["agent"],
+            reviewer=planned_reviewer["agent"], disposition="accept-candidate",
+            note="frozen source candidate is attributable",
+        )
+    except ValueError as exc:
+        immutable_snapshot_tamper_rejected = "changed after return" in str(exc)
+    hunter_snapshot_path.write_bytes(hunter_snapshot_bytes)
+    planned_review_receipt = record_review_disposition(
+        planned_run, target=planned_hunter["agent"],
+        reviewer=planned_reviewer["agent"], disposition="accept-candidate",
+        note="frozen source candidate is attributable",
+    )
+    scaffold_mutation_does_not_change_frozen_result = bool(planned_review_receipt)
+    planned_hunter_path.write_text(hunter_before_mutation, encoding="utf-8")
+    planned_merge = update_agent_lifecycle(
+        planned_run, planned_hunter["agent"], status="merged",
+        note="Evidence: E-900 Front: F-010", terminal=True,
+    )
+    planned_disposition = _runtime_receipts.agent_disposition(planned_run)
+    stale_plan_next_execution_blocked = False
+    try:
+        delegate_ready_lanes(
+            planned_run, runtime_slots=1, request_budget=10,
+            model_egress_budget=1, merge_capacity=100, limit=1,
+        )
+    except ValueError as exc:
+        stale_plan_next_execution_blocked = (
+            "WORK_PLAN_STALE_SETTLEMENT_ONLY" in str(exc))
+    replanned_lanes = json.loads(json.dumps(generated_plan_lanes[2:]))
+    replanned_lanes[0]["dependencies"] = []
+    steering_replan = _work_plan.commit_plan(
+        planned_run, macro_stage="S2",
+        objective="apply new steering to the remaining execution lanes",
+        mode="SERIAL_AGENT",
+        reason="settled old result before rebinding remaining work",
+        exit_gate="newly bound execution and Reviewer chain is settled",
+        lanes=replanned_lanes,
+        replan_reason="operator hint changed after the prior Hunter returned",
+        contract=planned_contract,
+    )
+    planned_next_batch = delegate_ready_lanes(
+        planned_run, runtime_slots=1, request_budget=10,
+        model_egress_budget=1, merge_capacity=100, limit=1,
+    )
+    planned_draft = json.loads(hunter_draft_path.read_text(encoding="utf-8"))
+    synthesizer_assignment_rejected = False
+    try:
+        create_agent_assignment(
+            planned_run, role="synthesizer", front="F-010",
+            lane_id="L-OFFLINE-REVIEW",
+        )
+    except ValueError as exc:
+        synthesizer_assignment_rejected = "Root-owned singleton" in str(exc)
 
     a_web = create_agent_assignment(run, role="web", front="F-002", assets=["b.example"])
     a1 = create_agent_assignment(run, role="web-auth", front="F-001", assets=["a.example"])
@@ -2414,7 +5316,105 @@ def _selftest() -> int:
     synth_doc = synthesize_draft(run)
     agent_issues = agent_discipline_issues(run)
     context_exists = (ROOT / a1["context"]).exists() if not Path(a1["context"]).is_absolute() else Path(a1["context"]).exists()
+
+    assignment_schema = json.loads((
+        ROOT / "contracts" / "assignment.v1.schema.json"
+    ).read_text(encoding="utf-8", errors="strict"))
+    agent_receipt_schema = json.loads((
+        ROOT / "contracts" / "agent-receipt.v1.schema.json"
+    ).read_text(encoding="utf-8", errors="strict"))
+    schema_documents = {"agent-receipt.v1.schema.json": agent_receipt_schema}
+
+    def assignment_schema_errors(value: object) -> list[str]:
+        if _runtime_receipts is None \
+                or not hasattr(_runtime_receipts, "_selftest_schema_errors"):
+            return ["runtime schema selftest validator unavailable"]
+        return _runtime_receipts._selftest_schema_errors(
+            value, assignment_schema, documents=schema_documents)
+
+    plan_bound_assignment_rows = [
+        item for item in load_assignments(planned_run).get("assignments", [])
+        if isinstance(item, dict) and item.get("schema") == "xunji.assignment.v1"
+    ]
+    merged_schema_row = next(
+        item for item in plan_bound_assignment_rows if item.get("status") == "merged")
+    reviewed_schema_row = next(
+        item for item in plan_bound_assignment_rows if item.get("status") == "reviewed")
+    assigned_schema_row = next(
+        item for item in plan_bound_assignment_rows if item.get("status") == "assigned")
+
+    def cloned(value: object) -> object:
+        return json.loads(json.dumps(value))
+
+    assignment_unknown = cloned(assigned_schema_row)
+    assignment_unknown["untrusted_extra"] = True
+    assignment_missing = cloned(assigned_schema_row)
+    assignment_missing.pop("plan_digest")
+    assignment_bool_number = cloned(assigned_schema_row)
+    assignment_bool_number["assignment_attempt"] = True
+    assignment_bad_timestamp = cloned(assigned_schema_row)
+    assignment_bad_timestamp["created_at"] = "not-a-timestamp"
+    assignment_with_stale_attempt = cloned(assigned_schema_row)
+    assignment_with_stale_attempt["attempts"] = cloned(merged_schema_row["attempts"])
+    merged_without_review_binding = cloned(merged_schema_row)
+    merged_without_review_binding.pop("root_disposition_review_receipt_hash")
+    reviewer_without_result_binding = cloned(reviewed_schema_row)
+    reviewer_without_result_binding.pop("review_result_digest")
+    execution_with_reviewer_binding = cloned(assigned_schema_row)
+    execution_with_reviewer_binding["review_result_digest"] = "5" * 64
+    receipt_unknown_nested = cloned(merged_schema_row)
+    receipt_unknown_nested["attempts"][0]["untrusted_extra"] = True
+    receipt_bool_length_nested = cloned(merged_schema_row)
+    receipt_bool_length_nested["attempts"][0]["result_snapshot"]["length"] = True
+    hunter_with_reviewer_type = cloned(merged_schema_row)
+    hunter_with_reviewer_type["attempts"][0]["subagent_type"] = "xunji-reviewer"
+    reviewer_with_hunter_type = cloned(reviewed_schema_row)
+    reviewer_with_hunter_type["attempts"][0]["subagent_type"] = "xunji-hunter"
+
+    unlaunched_working_rejected = False
+    try:
+        update_agent_lifecycle(
+            planned_run,
+            planned_next_batch["assignments"][0]["assignment"],
+            status="working", note="no runtime attempt exists",
+        )
+    except ValueError as exc:
+        unlaunched_working_rejected = "authentic running attempt" in str(exc)
+
+    tampered_journal_path = planned_run / "state" / "loop_journal.jsonl"
+    assignments_before_journal_tamper = (
+        planned_run / "state" / "assignments.json").read_bytes()
+    with tampered_journal_path.open("a", encoding="utf-8") as handle:
+        handle.write("{malformed journal tail\n")
+    journal_tamper_assignment_rejected = False
+    journal_tamper_lifecycle_rejected = False
+    tampered_lane = generated_plan_lanes[-1]
+    try:
+        create_agent_assignment(
+            planned_run,
+            role=str(tampered_lane.get("role") or "review"),
+            front=str(tampered_lane.get("front") or "F-010"),
+            assets=[str(item) for item in tampered_lane.get("assets", [])],
+            lane_id=str(tampered_lane.get("id") or ""),
+        )
+    except ValueError as exc:
+        journal_tamper_assignment_rejected = str(exc).startswith(
+            "plan-bound lifecycle mutation refused: invalid loop journal")
+    try:
+        update_agent_lifecycle(
+            planned_run,
+            planned_next_batch["assignments"][0]["assignment"],
+            status="running", note="must not mutate across a corrupt journal",
+        )
+    except ValueError as exc:
+        journal_tamper_lifecycle_rejected = str(exc).startswith(
+            "plan-bound lifecycle mutation refused: invalid loop journal")
+    journal_tamper_preserved_assignments = (
+        planned_run / "state" / "assignments.json").read_bytes() \
+        == assignments_before_journal_tamper
     checks = [
+        ("unknown future assignment ledger schema fails closed",
+         unknown_assignment_schema_rejected),
         ("suggest returns open/probing before bad deferred", rows[0]["front"] in {"F-001", "F-002", "F-003"}),
         ("suggest excludes closed", all(r["front"] != "F-099" for r in rows)),
         ("fanout verdict recommends with 3 mapped fronts", _fanout_verdict(rows[:3])[0] == "fan-out recommended"),
@@ -2429,14 +5429,131 @@ def _selftest() -> int:
         ("empty Claim does not swallow next line", any(i["kind"] == "missing-claim" for i in missing_issues)),
         ("empty Control does not swallow following text", any(i["kind"] == "worker-missing-control" for i in missing_issues)),
         ("plan --limit uses full pool verdict source", _fanout_verdict(plan_limited_rows)[0] == "fan-out recommended"),
+        ("single-front lane plan reviews every execution lane before advancing",
+         [row["work_plan_lane"]["effect"] for row in planned_lanes]
+         == ["local_read", "local_verify", "target", "local_verify",
+             "local_verify", "local_verify"]
+         and [row["work_plan_lane"]["role"] for row in planned_lanes]
+         == ["web-hunter", "review", "web-hunter", "review", "verify", "review"]),
+        ("lane planner emits cost and information-gain fields",
+         all({"request_cost", "expected_information_gain", "merge_cost"}
+             <= set(row["work_plan_lane"]) for row in planned_lanes)),
+        ("lane dependencies serialize each execution-review pair",
+         planned_lanes[1]["work_plan_lane"]["dependencies"]
+         == [planned_lanes[0]["work_plan_lane"]["id"]]
+         and planned_lanes[2]["work_plan_lane"]["dependencies"]
+         == [planned_lanes[1]["work_plan_lane"]["id"]]
+         and planned_lanes[3]["work_plan_lane"]["dependencies"]
+         == [planned_lanes[2]["work_plan_lane"]["id"]]
+         and planned_lanes[-1]["work_plan_lane"]["dependencies"]
+         == [planned_lanes[-2]["work_plan_lane"]["id"]]),
+        ("scheduler width is bounded by runtime and merge capacity",
+         scheduler_width(lane_suggestions(run, limit=3), runtime_slots=2,
+                         request_budget=99, merge_capacity=10) == 1),
+        ("delegate assigns the later lane actually selected under budget",
+         delegate_uses_exact_budget_selection),
+        ("stale inputs cannot launch another unassigned execution lane",
+         stale_plan_new_execution_blocked),
+        ("scheduler skips over-budget merge, target, and model-egress rows",
+         scheduler_skips_each_over_budget_effect),
+        ("delegate batch failure rolls back assignments and generated artifacts",
+         failed_batch_has_zero_partial_state),
+        ("delegate batch retry commits both ready execution lanes",
+         retry_commits_complete_batch),
+        ("prepared delegate transaction recovers idempotently through assign entry",
+         crash_recovery_is_idempotent),
+        ("crash-recovered delegate retry commits the complete batch",
+         crash_retry_is_complete),
+        ("immutable cancellation receipts satisfy the versioned JSON schema",
+         len(cancellation_receipts) == 2
+         and all(not cancellation_schema_errors(item)
+                 for item in cancellation_receipts)
+         and bool(cancellation_schema_errors(cancellation_unknown))),
+        ("typed cancellation removes only unlaunched rows and keeps cycle debt open",
+         cancellation_rows_after_cancel == []
+         and cancellation_projection.get("assigned_debt") == []
+         and all(item.get("complete") is False
+                 for item in cancellation_projection.get("lane_states", []))
+         and cancellation_cycle_end_blocked),
+        ("material replan is required and canceled Agent ids are never reused",
+         cancellation_replan.get("plan_digest")
+            != cancellation_receipts[0].get("plan_digest")
+         and cancellation_new_ids
+         and cancellation_new_ids.isdisjoint(cancellation_old_ids)),
+        ("read-only archive scan never deletes a concurrent writer temp",
+         cancellation_temp.exists()
+         and len(cancellation_after_temp_cleanup) == 2),
+        ("parent creation durability faults map stably and retry in order",
+         cancellation_parent_durability_failures_stable),
+        ("every cancellation crash point forward-recovers one receipt",
+         all(cancellation_crash_results)
+         and len(cancellation_crash_results) == 6),
+        ("prepared cancellation blocks concurrent late Agent failures before snapshots",
+         all(cancellation_crash_runtime_barriers)
+         and len(cancellation_crash_runtime_barriers) == 3),
+        ("prepared cancellation blocks material replan until forward recovery",
+         all(cancellation_crash_replan_barriers)
+         and len(cancellation_crash_replan_barriers) == 3),
+        ("late transcript Start remains debt and cannot cross or erase cancellation",
+         late_start_toctou_fail_closed),
+        ("missing artifact retry repeats the unlink parent durability barrier",
+         unlink_barrier_retry_complete),
+        ("parent transcript Agent tool_use blocks unlaunched cancellation",
+         transcript_launch_cancel_blocked),
+        ("runtime failure/event cannot be relabeled as not-run cancellation",
+         runtime_event_cancel_blocked),
+        ("all Agent lifecycle identities replay exactly without a tombstone",
+         all(exact_replay_without_tombstone)
+         and len(exact_replay_without_tombstone) == 5),
+        ("older Agent facts replay exactly across a later cancellation tombstone",
+         all(exact_replay_with_tombstone)
+         and len(exact_replay_with_tombstone) == 5),
+        ("stale failed execution unlocks only its unique Reviewer",
+         stale_failed_execution_unlocks_only_reviewer),
+        ("same-asset target lanes cannot overlap",
+         not lanes_can_overlap(
+             {"effect": "target", "assets": ["a.example"], "dependencies": []},
+             {"effect": "target", "assets": ["a.example"], "dependencies": []})),
         ("merge-check catches missing control", any(i["kind"] == "worker-missing-control" for i in issues)),
         ("merge-check catches duplicate candidate", any(i["kind"] == "duplicate-candidate" for i in issues)),
         ("merge-check catches conflicting candidate certainty", any(i["kind"] == "conflicting-candidate" for i in issues)),
         ("merge-check catches done-but-unmerged", any(i["kind"] == "done-but-unmerged" for i in issues)),
-        ("schema-v1 assignment rows migrate explicitly to schema-v2 defaults",
-         migrated_assignments.get("schema") == 2
+        ("schema-v1 assignment rows migrate explicitly to schema-v3 defaults",
+         migrated_assignments.get("schema") == 3
          and migrated_assignments["assignments"][0].get("assets") == []
-         and migrated_assignments["assignments"][0].get("attempts") == []),
+         and migrated_assignments["assignments"][0].get("attempts") == []
+         and migrated_assignments["assignments"][0].get("lane_id") == ""),
+        ("real initial, returned, reviewed, merged, and next-lane assignments conform",
+         len(plan_bound_assignment_rows) >= 3
+         and all(not assignment_schema_errors(item)
+                 for item in plan_bound_assignment_rows)),
+        ("working heartbeat preserves and conforms with the authentic running attempt",
+         planned_working_row.get("status") == "working"
+         and len(planned_working_row.get("attempts", [])) == 1
+         and planned_working_row["attempts"][0].get("state") == "running"
+         and not assignment_schema_errors(planned_working_row)
+         and unlaunched_working_rejected),
+        ("assignment contract rejects unknown and missing fields",
+         bool(assignment_schema_errors(assignment_unknown))
+         and bool(assignment_schema_errors(assignment_missing))),
+        ("assignment contract rejects bool-as-integer and invalid timestamps",
+         bool(assignment_schema_errors(assignment_bool_number))
+         and bool(assignment_schema_errors(assignment_bad_timestamp))),
+        ("assignment contract enforces assignment/review/root state fields",
+         bool(assignment_schema_errors(assignment_with_stale_attempt))
+         and bool(assignment_schema_errors(merged_without_review_binding))
+         and bool(assignment_schema_errors(reviewer_without_result_binding))
+         and bool(assignment_schema_errors(execution_with_reviewer_binding))),
+        ("assignment attempts resolve exact nested receipt contract",
+         bool(assignment_schema_errors(receipt_unknown_nested))
+         and bool(assignment_schema_errors(receipt_bool_length_nested))),
+        ("assignment role freezes the exact nested Agent type",
+         bool(assignment_schema_errors(hunter_with_reviewer_type))
+         and bool(assignment_schema_errors(reviewer_with_hunter_type))),
+        ("corrupt loop journal fails closed before assignment/lifecycle mutation",
+         journal_tamper_assignment_rejected
+         and journal_tamper_lifecycle_rejected
+         and journal_tamper_preserved_assignments),
         ("legacy main list exits 0", legacy_list_exit == 0),
         ("legacy main --new exits 0", legacy_new_exit == 0),
         ("assign command exits 0", assign_cli_exit == 0),
@@ -2462,6 +5579,65 @@ def _selftest() -> int:
         ("partial asset package cannot be marked merged", partial_asset_merge_blocked),
         ("every asset action plus canonical E-entry satisfies merge gate",
          full_asset_merge_allowed),
+        ("planner output is committed unchanged before delegation",
+         generated_plan_lanes == planned_plan.get("lanes")
+         and planned_hunter_batch.get("schema") == "xunji.delegate-batch.v1"
+         and planned_hunter_batch["assignments"][0].get("lane_id")
+         == generated_plan_lanes[0]["id"]),
+        ("Hunter and Reviewer launch prompts reconstruct from persisted assignments",
+         planned_hunter_prompt_reconstructs
+         and planned_reviewer_prompt_reconstructs),
+        ("plan-bound Reviewer cannot delegate before Hunter runtime return",
+         reviewer_before_return_blocked),
+        ("stale settlement is available only through delegate, not direct assign",
+         stale_direct_reviewer_assign_blocked
+         and stale_premature_replan_blocked
+         and planned_reviewer_batch.get("input_freshness")
+            == "stale-settlement-only"
+         and planned_reviewer_batch["assignments"][0].get("lane_id")
+            == generated_plan_lanes[1]["id"]),
+        ("plan-bound context path is attempt-unique and freezes exact bindings",
+         ".attempt-001.md" in str(planned_hunter.get("context") or "")
+         and f"Plan digest: {planned_plan['plan_digest']}" in planned_reviewer_context.read_text(
+             encoding="utf-8")
+         and planned_hunter["agent"] in planned_reviewer_context.read_text(encoding="utf-8")),
+        ("Hunter return creates a plan/lane/result-bound merge draft",
+         planned_draft.get("schema") == "xunji.merge-draft.v1"
+         and planned_draft.get("lane_id") == generated_plan_lanes[0]["id"]
+         and planned_draft.get("result_digest")),
+        ("immutable result snapshot contains the full Agent response, not launch ack",
+         hunter_snapshot_is_full_response),
+        ("immutable result snapshot tamper invalidates Reviewer admission",
+         immutable_snapshot_tamper_rejected),
+        ("mutable Agent scaffold changes do not replace the frozen result",
+         scaffold_mutation_does_not_change_frozen_result),
+        ("Reviewer return without review disposition cannot delegate next execution",
+         reviewer_unreviewed_blocks_next),
+        ("returned Reviewer writes an exact review disposition receipt",
+         planned_review_receipt.get("schema") == "xunji.review-disposition.v1"
+         and planned_review_receipt.get("reviewer_assignment") == planned_reviewer["agent"]),
+        ("non-target planner lane merges without a fabricated target receipt",
+         planned_merge.get("coverage_merge_satisfied") is True
+         and (planned_merge.get("coverage_merge") or {}).get("non_target_effect")
+         == "local_read"
+         and set((planned_merge.get("coverage_merge") or {}).get("assets", {}))
+         == {"fixture.example"}
+         and _runtime_receipts.agent_asset_activity(
+             planned_run, planned_hunter["agent"]).get("fixture.example") == 0),
+        ("Root merge follows review and unlocks the next planner execution lane",
+         planned_merge.get("status") == "merged"
+         and planned_disposition.get("disposition_satisfied") is True
+         and stale_plan_next_execution_blocked
+         and steering_replan.get("inputs_digest")
+            == _work_plan.input_fingerprint(planned_run)[0]
+         and planned_next_batch.get("input_freshness") == "current"
+         and planned_next_batch.get("plan_digest")
+            == steering_replan.get("plan_digest")
+         and planned_next_batch["assignments"][0].get("lane_id")
+         == generated_plan_lanes[2]["id"]
+         and planned_next_batch["assignments"][0].get("effect") == "target"),
+        ("Single Synthesizer cannot be fanned out as an Agent role",
+         synthesizer_assignment_rejected),
         ("status command exits 0", status_cli_exit == 0),
         ("agent-check empty run exits 0", agent_check_empty_exit == 0),
         ("agent-check clean scaffold has no issues", agent_clean_issues == []),
@@ -2508,8 +5684,9 @@ def _selftest() -> int:
         ("lifecycle: heartbeat records running state",
          lifecycle_running_state["assignments"][0].get("status") == "running"
          and lifecycle_running_state["assignments"][0].get("last_note") == "started"),
-        ("lifecycle: finish clears closure blocker and patches agent file",
-         lifecycle_closed == [] and "Status: done" in lifecycle_text and "returned coda" in lifecycle_text),
+        ("lifecycle: done remains an adjudication blocker and patches agent file",
+         any(i["kind"] == "agent-done-unadjudicated" for i in lifecycle_closed)
+         and "Status: done" in lifecycle_text and "returned coda" in lifecycle_text),
         ("role alias web uses web-hunter template", "Missing role template" not in web_context.read_text(encoding="utf-8")),
         ("agent assignment writes context pack", context_exists),
         ("assignments.json records agent", any(a.get("agent") == a1["agent"] for a in load_assignments(run)["assignments"])),
@@ -2557,6 +5734,13 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "new":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("front")
+        elif cmd == "delegate":
+            ap.add_argument("run_dir", type=Path)
+            ap.add_argument("--runtime-slots", type=int, default=2)
+            ap.add_argument("--request-budget", type=int, default=10)
+            ap.add_argument("--model-egress-budget", type=int, default=1)
+            ap.add_argument("--merge-capacity", type=int, default=100)
+            ap.add_argument("--limit", type=int, default=2)
         elif cmd == "assign":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("--role", required=True)
@@ -2564,6 +5748,12 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("--scope", default="")
             ap.add_argument("--asset", action="append", default=[],
                             help="exact coverage asset assigned to this Agent; repeat for a bounded asset pack")
+            ap.add_argument("--lane", default="",
+                            help="exact L-* lane from the current xunji.work-plan.v1")
+        elif cmd == "cancel-unlaunched":
+            ap.add_argument("run_dir", type=Path)
+            ap.add_argument("assignment")
+            ap.add_argument("--reason", required=True)
         elif cmd == "heartbeat":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("agent")
@@ -2577,6 +5767,12 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("--note", default="")
             ap.add_argument("--amend", action="store_true",
                             help="replace an existing terminal disposition and preserve its history")
+        elif cmd == "review-disposition":
+            ap.add_argument("run_dir", type=Path)
+            ap.add_argument("target")
+            ap.add_argument("reviewer")
+            ap.add_argument("--status", required=True, choices=sorted(REVIEW_DISPOSITIONS))
+            ap.add_argument("--note", required=True)
         elif cmd == "lifecycle-check":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("--closure", action="store_true",
@@ -2597,11 +5793,27 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[workers] 新建 {display_path(path)} → 指派 front {args.front}")
             return 0
         if cmd == "assign":
-            return print_assign(run_dir, args.role, args.front, args.scope, args.asset)
+            return print_assign(
+                run_dir, args.role, args.front, args.scope, args.asset, args.lane)
+        if cmd == "delegate":
+            return print_delegate(
+                run_dir,
+                runtime_slots=args.runtime_slots,
+                request_budget=args.request_budget,
+                model_egress_budget=args.model_egress_budget,
+                merge_capacity=args.merge_capacity,
+                limit=args.limit,
+            )
+        if cmd == "cancel-unlaunched":
+            return print_cancel_unlaunched(
+                run_dir, args.assignment, args.reason)
         if cmd == "heartbeat":
             return print_heartbeat(run_dir, args.agent, args.status, args.note)
         if cmd == "finish":
             return print_finish(run_dir, args.agent, args.status, args.note, args.amend)
+        if cmd == "review-disposition":
+            return print_review_disposition(
+                run_dir, args.target, args.reviewer, args.status, args.note)
         if cmd == "lifecycle-check":
             return print_lifecycle_check(run_dir, closure=args.closure)
         if cmd == "status":

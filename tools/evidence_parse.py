@@ -11,8 +11,11 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 
 
@@ -47,25 +50,198 @@ def _artifact_tokens(text: str) -> list[str]:
     return out
 
 
+def _manifest_error(relative: str, reason: str) -> dict:
+    return {
+        "path": relative,
+        "exists": False,
+        "valid": False,
+        "kind": "invalid",
+        "error": reason,
+    }
+
+
+def _regular_file_manifest(path: Path, root: Path) -> dict:
+    """Read one non-symlink regular file and bind the stable bytes observed."""
+    before_lstat = os.lstat(path)
+    if stat.S_ISLNK(before_lstat.st_mode) \
+            or not stat.S_ISREG(before_lstat.st_mode):
+        raise OSError("not_regular")
+    resolved = path.resolve(strict=True)
+    if resolved != root and root not in resolved.parents:
+        raise OSError("escape")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) \
+                or (opened.st_dev, opened.st_ino) \
+                != (before_lstat.st_dev, before_lstat.st_ino):
+            raise OSError("identity_changed")
+        digest = hashlib.sha1()
+        total = 0
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+                after.st_ctime_ns) != (
+                opened.st_dev, opened.st_ino, opened.st_size,
+                opened.st_mtime_ns, opened.st_ctime_ns) or total != after.st_size:
+            raise OSError("content_changed")
+    finally:
+        os.close(fd)
+    return {
+        "path": path.relative_to(root).as_posix(),
+        "size": total,
+        "sha1": digest.hexdigest(),
+    }
+
+
+def content_path_manifest(run_dir: Path, relative: str) -> dict:
+    """Return a symlink-free content manifest for one run-relative file/dir.
+
+    Missing paths are valid, explicit state. Existing directories bind every
+    regular file by relative path, size, and digest; symlinks, escapes, and
+    special files fail closed instead of becoming an un-hashed directory shell.
+    """
+    try:
+        root = Path(run_dir).resolve(strict=True)
+    except Exception:
+        return _manifest_error(str(relative), "run_unavailable")
+    rel = Path(str(relative))
+    normalized = rel.as_posix()
+    if rel.is_absolute() or not normalized or normalized == "." \
+            or any(part in {"", ".", ".."} for part in rel.parts):
+        return _manifest_error(normalized, "relative_path_invalid")
+    path = root
+    try:
+        for index, part in enumerate(rel.parts):
+            path = path / part
+            try:
+                metadata = os.lstat(path)
+            except FileNotFoundError:
+                return {
+                    "path": normalized,
+                    "exists": False,
+                    "valid": True,
+                    "kind": "missing",
+                }
+            if stat.S_ISLNK(metadata.st_mode):
+                return _manifest_error(normalized, "symlink_forbidden")
+            if index < len(rel.parts) - 1 and not stat.S_ISDIR(metadata.st_mode):
+                return _manifest_error(normalized, "ancestor_not_directory")
+        resolved = path.resolve(strict=True)
+        if resolved != root and root not in resolved.parents:
+            return _manifest_error(normalized, "path_escape")
+        top = os.lstat(path)
+        if stat.S_ISREG(top.st_mode):
+            item = _regular_file_manifest(path, root)
+            return {
+                "path": normalized,
+                "exists": item["size"] > 0,
+                "valid": True,
+                "kind": "file" if item["size"] > 0 else "empty_file",
+                "size": item["size"],
+                "sha1": item["sha1"],
+            }
+        if not stat.S_ISDIR(top.st_mode):
+            return _manifest_error(normalized, "special_file_forbidden")
+        files: list[dict] = []
+
+        def visit(directory: Path) -> None:
+            with os.scandir(directory) as entries:
+                ordered = sorted(entries, key=lambda item: item.name)
+            observed_entries: list[tuple[str, int, int, int, int, int, int]] = []
+            for entry in ordered:
+                child = Path(entry.path)
+                metadata = entry.stat(follow_symlinks=False)
+                observed_entries.append((
+                    entry.name, metadata.st_dev, metadata.st_ino,
+                    stat.S_IFMT(metadata.st_mode),
+                    metadata.st_size, metadata.st_mtime_ns,
+                    metadata.st_ctime_ns,
+                ))
+                if stat.S_ISLNK(metadata.st_mode):
+                    raise OSError("nested_symlink")
+                if stat.S_ISDIR(metadata.st_mode):
+                    child_resolved = child.resolve(strict=True)
+                    if root not in child_resolved.parents:
+                        raise OSError("nested_escape")
+                    visit(child)
+                elif stat.S_ISREG(metadata.st_mode):
+                    files.append(_regular_file_manifest(child, root))
+                else:
+                    raise OSError("nested_special_file")
+            with os.scandir(directory) as current_entries:
+                current_snapshot = []
+                for entry in current_entries:
+                    metadata = entry.stat(follow_symlinks=False)
+                    current_snapshot.append((
+                        entry.name, metadata.st_dev, metadata.st_ino,
+                        stat.S_IFMT(metadata.st_mode),
+                        metadata.st_size, metadata.st_mtime_ns,
+                        metadata.st_ctime_ns,
+                    ))
+                current_snapshot.sort()
+            if observed_entries != current_snapshot:
+                raise OSError("directory_membership_changed")
+
+        visit(path)
+        files.sort(key=lambda item: item["path"])
+        total_size = sum(int(item["size"]) for item in files)
+        directory_sha1 = hashlib.sha1(json.dumps(
+            files, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        return {
+            "path": normalized,
+            "exists": any(int(item["size"]) > 0 for item in files),
+            "valid": True,
+            "kind": "directory",
+            "size": total_size,
+            "sha1": directory_sha1,
+            "files": files,
+        }
+    except (OSError, RuntimeError, ValueError):
+        return _manifest_error(normalized, "content_manifest_unstable")
+
+
+def _evidence_artifact_manifest(run_dir: Path, token: str) -> dict:
+    normalized = token.strip().strip("`\"'").rstrip(").,;:，。）")
+    candidates = [normalized] if normalized.startswith("evidence/") else [
+        normalized, f"evidence/{normalized}",
+    ]
+    invalid: list[dict] = []
+    for relative in candidates:
+        item = content_path_manifest(run_dir, relative)
+        if item.get("valid") and item.get("exists"):
+            return {"token": token, **item}
+        if not item.get("valid"):
+            invalid.append(item)
+    if invalid:
+        return {"token": token, **invalid[0]}
+    return {"token": token, "exists": False, "valid": True, "kind": "missing"}
+
+
+def evidence_artifact_manifest(run_dir: Path, token: str) -> dict:
+    """Public canonical artifact view shared by review and closure consumers."""
+    return _evidence_artifact_manifest(run_dir, token)
+
+
 def _resolve_artifact(tok: str, run_dir: Path) -> Path | None:
-    """Resolve an artifact token to an existing, non-empty file/dir under run_dir,
-    else None. A directory (e.g. render_sxss/) counts if it holds a non-empty file."""
-    root = run_dir.resolve()
-    tok = tok.strip().strip("`\"'").rstrip(").,;:，。）")
-    cands = [tok] if tok.startswith("evidence/") else [tok, f"evidence/{tok}"]
-    for rel in cands:
-        try:
-            p = (run_dir / rel).resolve()
-        except Exception:
-            continue
-        if p != root and root not in p.parents:
-            continue  # ignore anything escaping the run dir
-        if p.is_file() and p.stat().st_size > 0:
-            return p
-        if p.is_dir() and any(f.is_file() and f.stat().st_size > 0
-                              for f in p.rglob("*")):
-            return p
-    return None
+    """Resolve only a safe, non-empty, content-bound artifact."""
+    item = _evidence_artifact_manifest(run_dir, tok)
+    if not item.get("valid") or not item.get("exists"):
+        return None
+    try:
+        return Path(run_dir).resolve(strict=True) / str(item["path"])
+    except Exception:
+        return None
 
 
 # Artifacts are cited in an explicit `Artifacts:` field (one or more lines until the
@@ -97,9 +273,6 @@ _ROLE_FIELD_RE = re.compile(
 _FIELD_RE = re.compile(
     r"(?im)^\s*[-*]?\s*(Source|Trust)\s*[:：]\s*(.+?)(?=\n\s*[-*]\s*[A-Z][\w /()-]*[:：]|\n\s*\n|\n##|\Z)",
     re.S)
-
-_EVIDENCE_MEMO: dict = {}
-
 
 def _strip_certainty_notes(text: str) -> str:
     """Drop explanatory parentheticals from a Certainty field while preserving
@@ -157,13 +330,11 @@ def parse_evidence(run_dir: Path) -> list[dict]:
     """Single canonical parser: evidence.md -> structured records. Replaces the
     per-check ad-hoc `##`-split + regex (fragile, and the artifact gate used to pass
     a block if ANY one citation resolved, so a deleted file was silent — E-012).
-    Memoized by (path, mtime)."""
+    Artifact presence is re-read on every call so directory/file changes cannot
+    remain hidden behind an evidence.md-only mtime cache."""
     ev = run_dir / "evidence.md"
     if not ev.exists():
         return []
-    key = (str(ev.resolve()), ev.stat().st_mtime_ns)
-    if _EVIDENCE_MEMO.get("key") == key:
-        return _EVIDENCE_MEMO["records"]
     text = ev.read_text(encoding="utf-8", errors="replace")
     records: list[dict] = []
     for b in re.split(r"(?=^##\s)", text, flags=re.MULTILINE):
@@ -195,8 +366,16 @@ def parse_evidence(run_dir: Path) -> list[dict]:
         scope_txt, scoped = (fm.group(1), True) if fm else (b, False)
         arts: list[str] = []
         arts = _artifact_tokens(scope_txt)
-        present = [a for a in arts if _resolve_artifact(a, run_dir)]
-        missing = [a for a in arts if not _resolve_artifact(a, run_dir)]
+        artifact_manifests = [
+            _evidence_artifact_manifest(run_dir, item) for item in arts]
+        present = [
+            item for item, manifest in zip(arts, artifact_manifests)
+            if manifest.get("valid") and manifest.get("exists")
+        ]
+        missing = [
+            item for item, manifest in zip(arts, artifact_manifests)
+            if not manifest.get("valid") or not manifest.get("exists")
+        ]
         refutes = _field_ids(b, "Refutes", r"E-\d+[a-z]*")
         supports = _field_ids(b, "Supports", r"[EHF]-\d+")
         confirmed = any(c >= 0.8 for c in certs)
@@ -216,6 +395,7 @@ def parse_evidence(run_dir: Path) -> list[dict]:
             # 逐条目判而非全局计数, 避免别处/模板的 Replay 误清这条)。
             "has_replay_ack": bool(re.search(r"(?im)^\s*[-*]\s*Replay\s*[:：]", b)),
             "artifacts": arts, "artifacts_scoped": scoped,
+            "artifact_manifests": artifact_manifests,
             "artifacts_present": present, "artifacts_missing": missing,
             "supports": sorted(set(supports)), "refutes": sorted(set(refutes)),
             # refutes_any: block 是否含 Refutes 字段(不论 refute 的是 E/H/F)。漏报一致性门用它
@@ -224,7 +404,6 @@ def parse_evidence(run_dir: Path) -> list[dict]:
             "refutes_any": bool(re.search(r"(?im)^\s*[-*]?\s*Refutes\s*[:：]\s*\S", b)),
             "superseded": bool(re.search(r"superseded|降级|撤回|改判", b, re.I)),
         })
-    _EVIDENCE_MEMO.update(key=key, records=records)
     return records
 
 
@@ -245,3 +424,60 @@ def write_evidence_index(run_dir: Path, records: list[dict]) -> None:
             json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
+
+
+def _evidence_artifact_hash(run_dir: Path, token: str) -> dict:
+    return _evidence_artifact_manifest(run_dir, token)
+
+
+def canonical_evidence_index(run_dir: Path) -> dict:
+    """Build the one content-addressed fact view used by review and closure."""
+    entries = []
+    for record in parse_evidence(run_dir):
+        manifests = record.get("artifact_manifests")
+        if not isinstance(manifests, list) \
+                or len(manifests) != len(record.get("artifacts", [])):
+            manifests = [
+                _evidence_artifact_hash(run_dir, item)
+                for item in record.get("artifacts", [])
+            ]
+        entries.append({
+            "id": record.get("id"),
+            "head": record.get("head"),
+            "maturity": record.get("maturity"),
+            "certainties": record.get("certainties", []),
+            "confirmed": record.get("confirmed", False),
+            "has_control": record.get("has_control", False),
+            "supports": record.get("supports", []),
+            "refutes": record.get("refutes", []),
+            "refutes_any": record.get("refutes_any", False),
+            "artifacts": sorted(
+                (dict(item) for item in manifests if isinstance(item, dict)),
+                key=lambda item: (
+                    str(item.get("path", "")), str(item.get("token", ""))),
+            ),
+            "artifacts_missing": record.get("artifacts_missing", []),
+        })
+    entries.sort(key=lambda item: str(item.get("id", "")))
+    return {
+        "schema": "xunji.evidence_index.v1",
+        "evidence_manifest": content_path_manifest(run_dir, "evidence.md"),
+        "entries": entries,
+    }
+
+
+def evidence_index_hash(payload: dict) -> str:
+    """Hash a canonical index while ignoring reviewer-only presentation bytes."""
+    value = json.loads(json.dumps(payload, ensure_ascii=False))
+    value.pop("sha1", None)
+    for entry in value.get("entries", []):
+        for artifact in entry.get("artifacts", []):
+            for key in ("excerpt", "excerpt_truncated_chars", "diff_summary"):
+                artifact.pop(key, None)
+    return hashlib.sha1(json.dumps(
+        value, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def current_evidence_index_hash(run_dir: Path) -> str:
+    """Hash the canonical evidence projection used by review and closure gates."""
+    return evidence_index_hash(canonical_evidence_index(run_dir))

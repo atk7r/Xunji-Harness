@@ -1,0 +1,637 @@
+{
+  "schema": "xunji.driver-doc-conformance.v1",
+  "documents": [
+    {
+      "path": "CLAUDE.md",
+      "required": [
+        "Reviewer supplies a candidate disposition only; Root/Single",
+        "Synthesizer alone makes the final evidence-gated confirmation and front closure.",
+        "exact `subagent_type=xunji-reviewer`",
+        "That legacy heading is retained"
+      ],
+      "forbidden": [
+        "closing is the Reviewer's job",
+        "fresh-context codex agent to review the COMPLETE run"
+      ]
+    },
+    {
+      "path": "docs/WORKFLOW.md",
+      "required": [
+        "supplies a candidate disposition only; Root/Single Synthesizer",
+        "alone makes the final evidence-gated confirmation and front closure."
+      ],
+      "forbidden": [
+        "that is the Reviewer's job"
+      ]
+    },
+    {
+      "path": "docs/WORKFLOW-reference.md",
+      "required": [
+        "XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=<exact-assets-or-none> XUNJI_LANE=L-... XUNJI_PLAN=<64hex> XUNJI_RESULT_DIGEST=<64hex> XUNJI_COMPLETION_REVIEW",
+        "The final digest binds the frozen target result",
+        "Reviewer returns a candidate disposition only; Root/Single",
+        "Synthesizer alone confirms or closes a front after the evidence gate.",
+        "Each returned assignment is one binary Agent",
+        "This completion challenge and the independent content-addressed"
+      ],
+      "forbidden": []
+    },
+    {
+      "path": ".claude/skills/xunji-agent-board/SKILL.md",
+      "required": [
+        "python3 tools/work_plan.py commit runs/<dir>",
+        "python3 tools/workers.py delegate runs/<dir>",
+        "XUNJI_LANE=L-...",
+        "XUNJI_PLAN=<64hex>",
+        "XUNJI_RESULT_DIGEST=<64hex>",
+        "xunji-hunter",
+        "xunji-reviewer",
+        "python3 tools/workers.py review-disposition runs/<dir>",
+        "python3 tools/workers.py finish runs/<dir>",
+        "python3 tools/workers.py cancel-unlaunched runs/<dir>",
+        "python3 tools/loop_journal.py runs/<dir> end",
+        "typed `cycle_end`",
+        "Complex serial work still uses one real Hunter Agent",
+        "launch the next in a later assistant message",
+        "exact `subagent_type` plus exact `launch_prompt`",
+        "The global completion challenge is a separate assignment-free Reviewer envelope"
+      ],
+      "forbidden": [
+        "python3 tools/workers.py assign runs/<dir>",
+        "that is serial Root work",
+        "consume stable first-observed transcript order"
+      ]
+    },
+    {
+      "path": ".claude/agents/xunji-hunter.md",
+      "required": [
+        "Always finish the lane with a final assistant response",
+        "return the best attributable candidate/refutation/blocker"
+      ],
+      "forbidden": [
+        "maxTurns:"
+      ]
+    },
+    {
+      "path": ".claude/agents/xunji-reviewer.md",
+      "required": [
+        "Always finish with a final assistant response",
+        "`blocked` or `retry`",
+        "Accept exactly one of these mutually exclusive envelopes:",
+        "it creates no assignment row, result snapshot"
+      ],
+      "forbidden": [
+        "maxTurns:"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+      "required": [
+        "copy both `subagent_type` and",
+        "assignment-free formatter output",
+        "does not replace the independent `peer_review.py`"
+      ],
+      "forbidden": []
+    },
+    {
+      "path": ".claude/hooks/run_gate.py",
+      "required": [
+        "exact subagent_type=xunji-reviewer",
+        "该挑战不替代 peer_review ReviewReceipt"
+      ],
+      "forbidden": [
+        "spawn fresh-context codex agent 审查完整 run"
+      ]
+    },
+    {
+      "path": "docs/templates/worker.md",
+      "required": [
+        "First decide execution ownership",
+        "Complex serial work uses one real Agent",
+        "python3 tools/workers.py delegate runs/<dir>"
+      ],
+      "forbidden": [
+        "Only when breadth genuinely beats depth",
+        "that is serial Root work",
+        "python3 tools/workers.py assign runs/<dir>"
+      ]
+    },
+    {
+      "path": "docs/templates/loop_prompt.md",
+      "required": [
+        "{{PYTHON}} tools/anti_drift.py --semantic-status \"{{RUN_DIR}}\"",
+        "{{PYTHON}} tools/scan.py --run \"{{RUN_DIR}}\" sqlmap \"https://target/path?id=1\"",
+        "{{PYTHON}} tools/scan.py --run \"{{RUN_DIR}}\" nuclei \"https://target/\"",
+        "Before any journal `start`, phase marker, task, work plan, Agent, or target action",
+        "Do not call `loop_journal.py ... start` or",
+        "`loop_journal.py ... end` for this already-completed run",
+        "Return directly with `BLOCKED: run already complete` after the Cron check/cleanup",
+        "Launch only one previously unbound Agent per assistant message",
+        "tools/workers.py cancel-unlaunched",
+        "copy both exact `subagent_type` and exact `launch_prompt`",
+        "exact assignment-free formatter"
+      ],
+      "forbidden": [
+        ".claude/drift_block.json",
+        "frontier_stale",
+        "{{PYTHON}} tools/scan.py sqlmap",
+        "{{PYTHON}} tools/scan.py nuclei",
+        "Append the normal `end` journal event"
+      ]
+    },
+    {
+      "path": "docs/ROUTER.md",
+      "required": [
+        "python3 tools/workers.py <subcommand> runs/<dir>",
+        "exact Claude binary launch contract (`subagent_type` plus"
+      ],
+      "forbidden": [
+        "python3 tools/workers.py runs/<dir>"
+      ]
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "required": [
+        "assignment_subagent_type()` 从 canonical role 唯一得到类型",
+        "只投影 pseudo `XUNJI-COMPLETION` / `REVIEW` lifecycle receipt",
+        "Claude Code primary-driver E2E"
+      ],
+      "forbidden": []
+    }
+  ],
+  "capability_cases": [
+    {
+      "name": "agent board work-plan commit",
+      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "marker": "python3 tools/work_plan.py commit runs/<dir>",
+      "script": "tools/work_plan.py",
+      "argv": [
+        "commit",
+        "runs/demo_20260101",
+        "--stage",
+        "S2",
+        "--objective",
+        "review one bounded front",
+        "--mode",
+        "SERIAL_AGENT",
+        "--reason",
+        "one dependency chain",
+        "--exit-gate",
+        "frozen result reviewed and Root-disposed",
+        "--lane",
+        "{\"id\":\"L-F001-HUNTER\",\"role\":\"web-hunter\",\"front\":\"F-001\",\"effect\":\"local_read\",\"assets\":[],\"dependencies\":[],\"expected_evidence\":\"attributable candidate or refutation\",\"expected_information_gain\":\"high\",\"stop_condition\":\"candidate or refutation returned\",\"request_cost\":0,\"request_budget\":0,\"merge_cost\":20,\"atomic\":false}",
+        "--lane",
+        "{\"id\":\"L-F001-REVIEW\",\"role\":\"review\",\"front\":\"F-001\",\"effect\":\"local_verify\",\"assets\":[],\"dependencies\":[\"L-F001-HUNTER\"],\"expected_evidence\":\"digest-bound review disposition\",\"expected_information_gain\":\"medium\",\"stop_condition\":\"exact frozen result challenged\",\"request_cost\":0,\"request_budget\":0,\"merge_cost\":10,\"atomic\":false}"
+      ],
+      "expected_id": "control.work-plan",
+      "expected_effect": "control"
+    },
+    {
+      "name": "loop prompt sqlmap scan",
+      "document": "docs/templates/loop_prompt.md",
+      "marker": "{{PYTHON}} tools/scan.py --run \"{{RUN_DIR}}\" sqlmap \"https://target/path?id=1\"",
+      "script": "tools/scan.py",
+      "argv": ["--run", "runs/demo_20260101", "sqlmap", "https://target/path?id=1"],
+      "expected_id": "target.scan",
+      "expected_effect": "target"
+    },
+    {
+      "name": "loop prompt nuclei scan",
+      "document": "docs/templates/loop_prompt.md",
+      "marker": "{{PYTHON}} tools/scan.py --run \"{{RUN_DIR}}\" nuclei \"https://target/\"",
+      "script": "tools/scan.py",
+      "argv": ["--run", "runs/demo_20260101", "nuclei", "https://target/"],
+      "expected_id": "target.scan",
+      "expected_effect": "target"
+    },
+    {
+      "name": "agent board delegate",
+      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "marker": "python3 tools/workers.py delegate runs/<dir>",
+      "script": "tools/workers.py",
+      "argv": ["delegate", "runs/demo_20260101", "--runtime-slots", "1", "--request-budget", "0", "--model-egress-budget", "0", "--merge-capacity", "40", "--limit", "1"],
+      "expected_id": "control.workers",
+      "expected_effect": "control"
+    },
+    {
+      "name": "runtime receipt validation",
+      "document": "docs/ROUTER.md",
+      "marker": "python3 tools/runtime_receipts.py runs/<dir>",
+      "script": "tools/runtime_receipts.py",
+      "argv": [
+        "runs/demo_20260101"
+      ],
+      "expected_id": "read.runtime-receipts",
+      "expected_effect": "local_read"
+    },
+    {
+      "name": "runtime receipt projection recovery",
+      "document": "docs/WORKFLOW.md",
+      "marker": "python3 tools/runtime_receipts.py runs/<dir> --reproject",
+      "script": "tools/runtime_receipts.py",
+      "argv": [
+        "runs/demo_20260101",
+        "--reproject"
+      ],
+      "expected_id": "control.runtime-receipts-reproject",
+      "expected_effect": "control"
+    },
+    {
+      "name": "agent board review disposition",
+      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "marker": "python3 tools/workers.py review-disposition runs/<dir>",
+      "script": "tools/workers.py",
+      "argv": ["review-disposition", "runs/demo_20260101", "A-target", "A-reviewer", "--status", "accept-candidate", "--note", "exact digest reviewed"],
+      "expected_id": "control.workers",
+      "expected_effect": "control"
+    },
+    {
+      "name": "agent board unlaunched cancellation",
+      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "marker": "python3 tools/workers.py cancel-unlaunched runs/<dir>",
+      "script": "tools/workers.py",
+      "argv": ["cancel-unlaunched", "runs/demo_20260101", "A-target", "--reason", "canonical inputs changed before launch"],
+      "expected_id": "control.workers-cancel-unlaunched",
+      "expected_effect": "control"
+    },
+    {
+      "name": "agent board Root disposition",
+      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "marker": "python3 tools/workers.py finish runs/<dir>",
+      "script": "tools/workers.py",
+      "argv": ["finish", "runs/demo_20260101", "A-target", "--status", "merged", "--note", "Evidence: E-001; Front: F-001; reviewed candidate"],
+      "expected_id": "control.workers",
+      "expected_effect": "control"
+    },
+    {
+      "name": "agent board typed cycle end",
+      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "marker": "python3 tools/loop_journal.py runs/<dir> end",
+      "script": "tools/loop_journal.py",
+      "argv": ["runs/demo_20260101", "end", "--next-action", "运行 check_run 验证当前计划", "--note", "plan cycle disposition complete"],
+      "expected_id": "control.loop-journal",
+      "expected_effect": "control"
+    }
+  ],
+  "prompt_cases": [
+    {
+      "name": "plan-bound Hunter exact binary launch contract",
+      "document": ".claude/skills/xunji-agent-board/SKILL.md",
+      "marker": "exact `subagent_type` plus exact `launch_prompt`",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-hunter-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=app.example XUNJI_LANE=L-F001-HUNTER XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "subagent_type": "xunji-hunter"
+      },
+      "required_tokens": [
+        "XUNJI_ASSIGNMENT=",
+        "XUNJI_FRONT=",
+        "XUNJI_ASSETS=",
+        "XUNJI_LANE=",
+        "XUNJI_PLAN="
+      ],
+      "expected": {
+        "assignment": "A-hunter-001",
+        "front": "F-001",
+        "assets": ["app.example"],
+        "lane_id": "L-F001-HUNTER",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-hunter",
+      "expected_valid": true
+    },
+    {
+      "name": "plan-bound Reviewer exact launch package",
+      "document": "docs/WORKFLOW-reference.md",
+      "marker": "XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=<exact-assets-or-none> XUNJI_LANE=L-... XUNJI_PLAN=<64hex> XUNJI_RESULT_DIGEST=<64hex> XUNJI_COMPLETION_REVIEW",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "subagent_type": "xunji-reviewer"
+      },
+      "required_tokens": [
+        "XUNJI_ASSIGNMENT=",
+        "XUNJI_FRONT=",
+        "XUNJI_ASSETS=",
+        "XUNJI_LANE=",
+        "XUNJI_PLAN=",
+        "XUNJI_RESULT_DIGEST=",
+        "XUNJI_COMPLETION_REVIEW"
+      ],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": true
+    },
+    {
+      "name": "global completion exact Reviewer envelope",
+      "document": "docs/WORKFLOW-reference.md",
+      "marker": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1> COMPLETION_BUNDLE=<current completion bundle sha256> run=<run.name>",
+      "tool_input": {
+        "prompt": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=cccccccccccccccccccccccccccccccccccccccc COMPLETION_BUNDLE=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd run=demo_20260101 CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger",
+        "subagent_type": "xunji-reviewer"
+      },
+      "required_tokens": [
+        "XUNJI_COMPLETION_REVIEW",
+        "EVIDENCE_INDEX=",
+        "COMPLETION_BUNDLE=",
+        "run=",
+        "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"
+      ],
+      "expected": {
+        "assignment": "XUNJI-COMPLETION",
+        "front": "REVIEW",
+        "assets": [],
+        "lane_id": "",
+        "plan_digest": "",
+        "result_digest": "",
+        "completion_bundle_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "completion_review": true
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": true
+    },
+    {
+      "name": "Reviewer launch rejects missing subagent type",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "case-shifted, or whitespace-padded type is invalid.",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW"
+      },
+      "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "Reviewer launch rejects null subagent type",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "case-shifted, or whitespace-padded type is invalid.",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "subagent_type": null
+      },
+      "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "Reviewer launch rejects blank subagent type",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "case-shifted, or whitespace-padded type is invalid.",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "subagent_type": ""
+      },
+      "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "Reviewer launch rejects general-purpose type",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "case-shifted, or whitespace-padded type is invalid.",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "subagent_type": "general-purpose"
+      },
+      "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "Reviewer launch rejects role-swapped Hunter type",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "case-shifted, or whitespace-padded type is invalid.",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "subagent_type": "xunji-hunter"
+      },
+      "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "Reviewer launch rejects case-shifted type",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "case-shifted, or whitespace-padded type is invalid.",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "subagent_type": "XUNJI-REVIEWER"
+      },
+      "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "Reviewer launch rejects whitespace-padded type",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "case-shifted, or whitespace-padded type is invalid.",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "subagent_type": "xunji-reviewer "
+      },
+      "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "Reviewer launch rejects appended prompt context",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "Do not prepend or append",
+      "tool_input": {
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW XUNJI_CANARY_APPEND=1",
+        "subagent_type": "xunji-reviewer"
+      },
+      "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW", "XUNJI_CANARY_APPEND=1"],
+      "expected": {
+        "assignment": "A-review-001",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "L-F001-REVIEW",
+        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "completion_bundle_hash": "",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "global completion rejects Hunter type",
+      "document": "docs/WORKFLOW-reference.md",
+      "marker": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1> COMPLETION_BUNDLE=<current completion bundle sha256> run=<run.name>",
+      "tool_input": {
+        "prompt": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=cccccccccccccccccccccccccccccccccccccccc COMPLETION_BUNDLE=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd run=demo_20260101 CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger",
+        "subagent_type": "xunji-hunter"
+      },
+      "required_tokens": ["XUNJI_COMPLETION_REVIEW", "EVIDENCE_INDEX=", "run=", "CHECKS="],
+      "expected": {
+        "assignment": "XUNJI-COMPLETION",
+        "front": "REVIEW",
+        "assets": [],
+        "lane_id": "",
+        "plan_digest": "",
+        "result_digest": "",
+        "completion_bundle_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "completion_review": true
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    },
+    {
+      "name": "global completion rejects mixed assignment envelope",
+      "document": "docs/WORKFLOW-reference.md",
+      "marker": "contain no assignment/front/assets/lane/plan/result-digest field",
+      "tool_input": {
+        "prompt": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=cccccccccccccccccccccccccccccccccccccccc COMPLETION_BUNDLE=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd run=demo_20260101 CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger XUNJI_ASSIGNMENT=A-mixed XUNJI_FRONT=F-001",
+        "subagent_type": "xunji-reviewer"
+      },
+      "required_tokens": ["XUNJI_COMPLETION_REVIEW", "XUNJI_ASSIGNMENT=", "XUNJI_FRONT="],
+      "expected": {
+        "assignment": "A-mixed",
+        "front": "F-001",
+        "assets": [],
+        "lane_id": "",
+        "plan_digest": "",
+        "result_digest": "",
+        "completion_bundle_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "completion_review": false
+      },
+      "expected_subagent_type": "xunji-reviewer",
+      "expected_valid": false
+    }
+  ],
+  "result_cases": [
+    {
+      "name": "global completion exact final PASS envelope",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS",
+      "run": "demo_20260101",
+      "evidence_index_hash": "cccccccccccccccccccccccccccccccccccccccc",
+      "completion_bundle_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "response": "Substantive cross-checks completed.\nXUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=cccccccccccccccccccccccccccccccccccccccc COMPLETION_BUNDLE=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd run=demo_20260101 CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS",
+      "expected_valid": true
+    },
+    {
+      "name": "global completion rejects trailing prose",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "last non-empty line exactly",
+      "run": "demo_20260101",
+      "evidence_index_hash": "cccccccccccccccccccccccccccccccccccccccc",
+      "completion_bundle_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "response": "XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=cccccccccccccccccccccccccccccccccccccccc COMPLETION_BUNDLE=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd run=demo_20260101 CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS\ntrailing prose",
+      "expected_valid": false
+    },
+    {
+      "name": "global completion rejects explicit negative check",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "explicit FAIL/WARN/false check",
+      "run": "demo_20260101",
+      "evidence_index_hash": "cccccccccccccccccccccccccccccccccccccccc",
+      "completion_bundle_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "response": "report_parity:FAIL\nXUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=cccccccccccccccccccccccccccccccccccccccc COMPLETION_BUNDLE=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd run=demo_20260101 CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS",
+      "expected_valid": false
+    },
+    {
+      "name": "global completion rejects duplicate verdict",
+      "document": ".claude/agents/xunji-reviewer.md",
+      "marker": "duplicate verdict",
+      "run": "demo_20260101",
+      "evidence_index_hash": "cccccccccccccccccccccccccccccccccccccccc",
+      "completion_bundle_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "response": "XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=cccccccccccccccccccccccccccccccccccccccc COMPLETION_BUNDLE=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd run=demo_20260101 CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS\nXUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=cccccccccccccccccccccccccccccccccccccccc COMPLETION_BUNDLE=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd run=demo_20260101 CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS",
+      "expected_valid": false
+    }
+  ],
+  "order_cases": [
+    {
+      "name": "completed-run guard precedes journal start",
+      "document": "docs/templates/loop_prompt.md",
+      "markers": [
+        "### 0. Completion Guard, Then Journal Start",
+        "Before any journal `start`, phase marker, task, work plan, Agent, or target action",
+        "Only when no valid completion marker is present",
+        "{{PYTHON}} tools/loop_journal.py \"{{RUN_DIR}}\" start --note \"显式 /loop 迭代开始\""
+      ]
+    }
+  ]
+}

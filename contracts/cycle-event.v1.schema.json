@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/cycle-event.v1.schema.json",
+  "title": "Xunji Typed Cycle Event v1",
+  "description": "Strict shapes for stage_plan, replan, stage_exit, delegation_committed, and plan-bound cycle_end records in the append-only loop journal. Both plan-bound cycle_end variants require the exact next_action projected by the final Coda. Other historical journal events are outside this typed subset.",
+  "oneOf": [
+    {"$ref": "#/$defs/stagePlan"},
+    {"$ref": "#/$defs/replan"},
+    {"$ref": "#/$defs/stageExit"},
+    {"$ref": "#/$defs/delegationCommitted"},
+    {"$ref": "#/$defs/cycleEnd"}
+  ],
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "ts", "run_dir", "cycle", "event", "note", "data",
+        "previous_event_hash", "canonical", "event_hash"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.loop_journal.v1"},
+        "ts": {"type": "string", "minLength": 1, "maxLength": 128},
+        "run_dir": {"type": "string", "minLength": 1},
+        "cycle": {"type": "integer", "minimum": 1},
+        "event": {
+          "enum": [
+            "stage_plan", "replan", "stage_exit",
+            "delegation_committed", "cycle_end"
+          ]
+        },
+        "note": {"type": "string", "maxLength": 4096},
+        "data": {"type": "object"},
+        "previous_event_hash": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "canonical": {"type": "string", "minLength": 1},
+        "event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "stagePlan": {
+      "allOf": [
+        {"$ref": "#/$defs/envelope"},
+        {
+          "properties": {
+            "event": {"const": "stage_plan"},
+            "data": {"$ref": "#/$defs/stagePlanData"}
+          }
+        }
+      ]
+    },
+    "replan": {
+      "allOf": [
+        {"$ref": "#/$defs/envelope"},
+        {
+          "properties": {
+            "event": {"const": "replan"},
+            "data": {"$ref": "#/$defs/replanData"}
+          }
+        }
+      ]
+    },
+    "stageExit": {
+      "allOf": [
+        {"$ref": "#/$defs/envelope"},
+        {
+          "properties": {
+            "event": {"const": "stage_exit"},
+            "data": {"$ref": "#/$defs/stageExitData"}
+          }
+        }
+      ]
+    },
+    "delegationCommitted": {
+      "allOf": [
+        {"$ref": "#/$defs/envelope"},
+        {
+          "properties": {
+            "event": {"const": "delegation_committed"},
+            "data": {"$ref": "#/$defs/delegationData"}
+          }
+        }
+      ]
+    },
+    "cycleEnd": {
+      "allOf": [
+        {"$ref": "#/$defs/envelope"},
+        {
+          "properties": {
+            "event": {"const": "cycle_end"},
+            "data": {
+              "oneOf": [
+                {"type": "object", "additionalProperties": false, "maxProperties": 0},
+                {"$ref": "#/$defs/planCycleEndData"},
+                {"$ref": "#/$defs/rootDirectCycleEndData"}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "stagePlanData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["writer", "plan_id", "plan_digest", "inputs_digest", "macro_stage"],
+      "properties": {
+        "writer": {"const": "tools/work_plan.py"},
+        "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "inputs_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "macro_stage": {"enum": ["S1", "S2", "S3"]},
+        "prior_stage_exit_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "replanData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "writer", "plan_id", "plan_digest", "inputs_digest",
+        "macro_stage", "prior_plan_digest"
+      ],
+      "properties": {
+        "writer": {"const": "tools/work_plan.py"},
+        "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "inputs_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "macro_stage": {"enum": ["S1", "S2", "S3"]},
+        "prior_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "stageExitData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "writer", "plan_id", "from_plan_digest", "inputs_digest",
+        "from_stage", "next_stage", "transition_reason", "readiness_digest",
+        "merge_debt", "merge_debt_digest"
+      ],
+      "properties": {
+        "writer": {"const": "tools/work_plan.py"},
+        "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+        "from_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "inputs_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "from_stage": {"enum": ["S1", "S2", "S3"]},
+        "next_stage": {"enum": ["S1", "S2", "S3"]},
+        "transition_reason": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "readiness_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "merge_debt": {"$ref": "#/$defs/mergeDebt"},
+        "merge_debt_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "delegationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_digest", "lane_ids"],
+      "properties": {
+        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "lane_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"}
+        }
+      }
+    },
+    "planCycleEndData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id", "plan_digest", "lane_ids", "assignment_dispositions",
+        "merge_disposition_summary", "next_action"
+      ],
+      "properties": {
+        "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "lane_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"}
+        },
+        "assignment_dispositions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/assignmentDisposition"}
+        },
+        "merge_disposition_summary": {"$ref": "#/$defs/mergeDispositionSummary"},
+        "next_action": {"type": "string", "minLength": 4, "maxLength": 2048}
+      }
+    },
+    "rootDirectCycleEndData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id", "plan_digest", "execution_mode", "lane_ids",
+        "root_action_receipt", "next_action"
+      ],
+      "properties": {
+        "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "execution_mode": {"const": "ROOT_DIRECT"},
+        "lane_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"}
+        },
+        "root_action_receipt": {"$ref": "root-action-receipt.v1.schema.json"},
+        "next_action": {"type": "string", "minLength": 4, "maxLength": 2048}
+      }
+    },
+    "mergeDebt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["merge", "review"],
+      "properties": {
+        "merge": {
+          "type": "array", "maxItems": 256, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+        },
+        "review": {
+          "type": "array", "maxItems": 256, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+        }
+      }
+    },
+    "assignmentDisposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane_id", "assignment", "role", "runtime_state", "disposition",
+        "result_digest", "review_receipt_hash"
+      ],
+      "properties": {
+        "lane_id": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"},
+        "assignment": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$"},
+        "role": {"type": "string", "minLength": 1, "maxLength": 128},
+        "runtime_state": {"enum": ["returned", "failed"]},
+        "disposition": {
+          "enum": ["merged", "reviewed", "blocked", "failed", "abandoned"]
+        },
+        "result_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "review_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "mergeDispositionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "merged", "reviewed", "blocked",
+        "failed", "abandoned", "pending"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.merge-disposition-summary.v1"},
+        "merged": {"$ref": "#/$defs/assignmentIds"},
+        "reviewed": {"$ref": "#/$defs/assignmentIds"},
+        "blocked": {"$ref": "#/$defs/assignmentIds"},
+        "failed": {"$ref": "#/$defs/assignmentIds"},
+        "abandoned": {"$ref": "#/$defs/assignmentIds"},
+        "pending": {
+          "type": "array",
+          "maxItems": 0,
+          "items": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$"}
+        }
+      }
+    },
+    "assignmentIds": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$"}
+    }
+  }
+}

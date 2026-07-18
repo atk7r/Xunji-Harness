@@ -39,6 +39,14 @@ try:
 except Exception:
     _run_model = None
 try:
+    import loop_journal as _loop_journal
+except Exception:
+    _loop_journal = None
+try:
+    import work_plan as _work_plan
+except Exception:
+    _work_plan = None
+try:
     import runtime_receipts as _runtime_receipts
 except Exception:
     _runtime_receipts = None
@@ -46,7 +54,12 @@ try:
     import setup_source as _setup_source
 except Exception:
     _setup_source = None
-from evidence_parse import parse_evidence, write_evidence_index  # 唯一权威证据解析器(已抽出到独立模块)
+from evidence_parse import (  # 唯一权威证据解析器与 evidence-index hash owner
+    current_evidence_index_hash,
+    evidence_artifact_manifest,
+    parse_evidence,
+    write_evidence_index,
+)
 
 try:
     from saturation import check as check_saturation
@@ -140,67 +153,6 @@ MARKER_ALIASES = {
         "Shallow work smell:",
     ],
 }
-
-
-def _sha1_bytes(data: bytes) -> str:
-    return hashlib.sha1(data).hexdigest()
-
-
-def _sha1_file(path: Path) -> str:
-    h = hashlib.sha1()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def _evidence_artifact_hash(run_dir: Path, token: str) -> dict:
-    root = run_dir.resolve()
-    tok = token.strip().strip("`\"'").rstrip(").,;:，。）")
-    cands = [tok] if tok.startswith("evidence/") else [tok, f"evidence/{tok}"]
-    for rel in cands:
-        try:
-            p = (run_dir / rel).resolve()
-        except Exception:
-            continue
-        if p != root and root not in p.parents:
-            continue
-        if p.is_file() and p.stat().st_size > 0:
-            item = {"token": token, "path": p.relative_to(run_dir.resolve()).as_posix(),
-                    "exists": True, "size": p.stat().st_size, "sha1": _sha1_file(p)}
-            if p.suffix.lower() in {".html", ".json", ".txt", ".log", ".xml"}:
-                item["excerpt"] = p.read_text(encoding="utf-8", errors="replace")[:1200]
-            return item
-    return {"token": token, "exists": False}
-
-
-def current_evidence_index_hash(run_dir: Path) -> str:
-    entries = []
-    for rec in parse_evidence(run_dir):
-        entries.append({
-            "id": rec.get("id"),
-            "head": rec.get("head"),
-            "maturity": rec.get("maturity"),
-            "certainties": rec.get("certainties", []),
-            "confirmed": rec.get("confirmed", False),
-            "has_control": rec.get("has_control", False),
-            "supports": rec.get("supports", []),
-            "refutes": rec.get("refutes", []),
-            "refutes_any": rec.get("refutes_any", False),
-            "artifacts": sorted(
-                (_evidence_artifact_hash(run_dir, a) for a in rec.get("artifacts", [])),
-                key=lambda x: (str(x.get("path", "")), str(x.get("token", ""))),
-            ),
-            "artifacts_missing": rec.get("artifacts_missing", []),
-        })
-    entries.sort(key=lambda x: str(x.get("id", "")))
-    for entry in entries:
-        for artifact in entry.get("artifacts", []):
-            for key in ("excerpt", "excerpt_truncated_chars", "diff_summary"):
-                artifact.pop(key, None)
-    payload = {"schema": "xunji.evidence_index.v1", "entries": entries}
-    payload["sha1"] = _sha1_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
-    return payload["sha1"]
 
 
 def _marker_present(text: str, marker: str) -> bool:
@@ -425,6 +377,108 @@ def check_front_schema(run_dir: Path) -> list[str]:
     except Exception as exc:
         return [f"frontier 状态模型解析失败: {exc}"]
     return [f"frontier canonical schema: {error}" for error in errors]
+
+
+def check_macro_stage_control(run_dir: Path) -> list[str]:
+    """Mechanically validate work-plan freshness and stage-exit receipts.
+
+    This does not invent a second closure predicate.  It checks only the derived
+    plan/journal control plane; canonical closure remains owned by the existing
+    check_run gates below.
+    """
+    path = run_dir / "state" / "work_plan.json"
+    if _loop_journal is None:
+        return (["macro-stage control: loop_journal unavailable"]
+                if path.exists() else [])
+    events = _loop_journal.load_events(run_dir)
+    relevant = [
+        (index, item) for index, item in enumerate(events)
+        if str(item.get("event") or "")
+        in {"stage_plan", "replan", "stage_exit", "cycle_end"}
+    ]
+    if not path.exists():
+        return (["macro-stage control: journal has stage events but work_plan.json is missing"]
+                if relevant else [])
+    if _work_plan is None or _run_model is None:
+        return ["macro-stage control: work_plan/run_model unavailable"]
+    try:
+        value = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+        plan = _work_plan.validate_plan(value)
+    except Exception as exc:
+        return [f"macro-stage control: current work plan is invalid ({exc})"]
+    errors: list[str] = []
+    typed_errors = _loop_journal.typed_event_errors(events)
+    errors.extend(
+        f"macro-stage control: typed journal invalid ({item})"
+        for item in typed_errors
+    )
+    if not typed_errors:
+        typed_state = _loop_journal.validate_cycle_events(events)
+        if typed_state.get("pending_stage_exit_hash"):
+            errors.append(
+                "macro-stage control: stage_exit is pending its bound stage_plan")
+    current_plan_valid = True
+    try:
+        contract = json.loads((run_dir / "state" / "turn_contract.json").read_text(
+            encoding="utf-8", errors="strict"))
+        _work_plan.current_plan(run_dir, contract)
+    except Exception as exc:
+        current_plan_valid = False
+        errors.append(f"macro-stage control: work plan is stale/inconsistent ({exc})")
+    if not relevant:
+        errors.append("macro-stage control: work plan has no stage_plan/replan journal receipt")
+        return errors
+
+    plan_events = [(idx, item) for idx, item in relevant
+                   if item.get("event") in {"stage_plan", "replan"}]
+    latest_plan_event = plan_events[-1][1] if plan_events else {}
+    latest_data = latest_plan_event.get("data") \
+        if isinstance(latest_plan_event.get("data"), dict) else {}
+    if latest_data.get("plan_digest") != plan.get("plan_digest") \
+            or latest_data.get("plan_id") != plan.get("plan_id") \
+            or latest_data.get("macro_stage") != plan.get("macro_stage") \
+            or latest_data.get("inputs_digest") != plan.get("inputs_digest"):
+        errors.append(
+            "macro-stage control: latest stage_plan/replan does not bind current work plan")
+
+    for _, item in relevant:
+        event = str(item.get("event") or "")
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        if event == "cycle_end" and data \
+                and data.get("plan_digest") == plan.get("plan_digest"):
+            try:
+                derived = _loop_journal.derive_cycle_end_data(
+                    run_dir,
+                    plan_digest=str(data.get("plan_digest") or ""),
+                    next_action=str(data.get("next_action") or ""),
+                )
+            except Exception as exc:
+                errors.append(
+                    f"macro-stage control: cycle_end cannot be re-derived ({exc})")
+            else:
+                if data != derived:
+                    errors.append(
+                        "macro-stage control: cycle_end differs from exact current "
+                        "lane/runtime/review/merge projection")
+        if event != "stage_exit":
+            continue
+        debt = data.get("merge_debt") if isinstance(data.get("merge_debt"), dict) else {}
+        if debt.get("merge") or debt.get("review"):
+            errors.append("macro-stage control: stage_exit claims transition with Agent merge/review debt")
+    exits = [(idx, item) for idx, item in relevant if item.get("event") == "stage_exit"]
+    if current_plan_valid and not typed_errors and exits and plan_events:
+        latest_exit_idx, latest_exit = exits[-1]
+        following_plan = next(
+            ((idx, item) for idx, item in plan_events if idx > latest_exit_idx), None)
+        if following_plan and following_plan[0] == plan_events[-1][0]:
+            exit_data = latest_exit.get("data") \
+                if isinstance(latest_exit.get("data"), dict) else {}
+            projection = _run_model.stage_readiness(
+                run_dir, ignore_plan_digest=str(plan.get("plan_digest") or ""))
+            if exit_data.get("readiness_digest") != projection.get("canonical_digest"):
+                errors.append(
+                    "macro-stage control: latest stage_exit readiness digest is stale")
+    return list(dict.fromkeys(errors))
 
 
 def _report_evidence_ids(rtext: str) -> set[str]:
@@ -1560,7 +1614,7 @@ def has_codex_completion_review(decisions_text: str, run_dir: Path | None = None
     block = tail[:next_heading.start()] if next_heading else tail
     reviewer = re.search(r"(?im)^\s*[-*]\s*Reviewer\s*[:：]\s*(\S.+)$", block)
     verdict = re.search(
-        r"(?im)^\s*[-*]\s*Verdict\s*[:：]\s*\**(PASS|WARN|CONFIRMED)\b",
+        r"(?im)^\s*[-*]\s*Verdict\s*[:：]\s*\**(PASS)\b",
         block,
     )
     structured = bool(reviewer and verdict and len(re.sub(r"\s+", "", block)) >= 80)
@@ -1580,8 +1634,9 @@ def check_codex_completion_review(run_dir: Path) -> list[str]:
     return [
         "收口硬门(CodexCompletionReview): decisions.md 已有 completion marker, 但缺真实"
         "结构化 completion review。关键词/单行字段/待办散文不算；需要含 Reviewer + Verdict + "
-        "实质内容的 `## CodexCompletionReview` 小节，以及响应中绑定当前 evidence hash、"
-        "四项 CHECKS 和 `XUNJI_COMPLETION_VERDICT=PASS` 的 Agent runtime receipt。"
+        "实质内容且 Verdict=PASS 的 `## CodexCompletionReview` 小节，以及响应最后非空行"
+        "精确绑定当前 S3 plan、evidence hash、completion bundle、run 名和四项 :PASS "
+        "CHECKS 的 Agent runtime receipt。"
     ]
 
 
@@ -2590,6 +2645,47 @@ def _selftest() -> int:
     recs = parse_evidence(d)
     byid = {r["id"]: r for r in recs}
 
+    d_artifact_dir = Path(tempfile.mkdtemp())
+    artifact_dir = d_artifact_dir / "evidence" / "proof.html"
+    (artifact_dir / "nested").mkdir(parents=True)
+    artifact_a = artifact_dir / "a.txt"
+    artifact_b = artifact_dir / "nested" / "b.txt"
+    artifact_a.write_text("alpha", encoding="utf-8")
+    artifact_b.write_text("bravo", encoding="utf-8")
+    directory_baseline = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/proof.html")
+    artifact_a.write_text("alpha changed", encoding="utf-8")
+    directory_modified = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/proof.html")
+    artifact_created = artifact_dir / "created.txt"
+    artifact_created.write_text("created", encoding="utf-8")
+    directory_created = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/proof.html")
+    artifact_created.unlink()
+    directory_deleted = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/proof.html")
+    artifact_b.rename(artifact_dir / "nested" / "renamed.txt")
+    directory_renamed = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/proof.html")
+    top_symlink = d_artifact_dir / "evidence" / "top-link.html"
+    top_symlink.symlink_to(artifact_dir, target_is_directory=True)
+    top_symlink_manifest = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/top-link.html")
+    nested_symlink_dir = d_artifact_dir / "evidence" / "nested-link.html"
+    nested_symlink_dir.mkdir()
+    (nested_symlink_dir / "escape.txt").symlink_to(artifact_a)
+    nested_symlink_manifest = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/nested-link.html")
+    top_fifo = d_artifact_dir / "evidence" / "top-fifo.bin"
+    os.mkfifo(top_fifo)
+    top_fifo_manifest = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/top-fifo.bin")
+    nested_fifo_dir = d_artifact_dir / "evidence" / "nested-fifo.html"
+    nested_fifo_dir.mkdir()
+    os.mkfifo(nested_fifo_dir / "entry.bin")
+    nested_fifo_manifest = evidence_artifact_manifest(
+        d_artifact_dir, "evidence/nested-fifo.html")
+
     def _install_valid_review(run: Path) -> str:
         bundle = _peer_review_test.build_review_bundle(run, write=True)
         result = _peer_review_test.ReviewResult(
@@ -2722,6 +2818,23 @@ def _selftest() -> int:
          and not any(str(a).endswith(".html") and "*" in str(a) for a in byid["E-009"]["artifacts_missing"])),
         ("diff artifact parses for maintenance review",
          "reviewed.diff" in byid["E-010"]["artifacts_present"]),
+        ("directory artifact binds recursive baseline files",
+         directory_baseline.get("valid") is True
+         and directory_baseline.get("kind") == "directory"
+         and len(directory_baseline.get("files", [])) == 2),
+        ("directory artifact digest changes on content modification",
+         directory_modified.get("sha1") != directory_baseline.get("sha1")),
+        ("directory artifact digest changes on create and returns on delete",
+         directory_created.get("sha1") != directory_modified.get("sha1")
+         and directory_deleted.get("sha1") == directory_modified.get("sha1")),
+        ("directory artifact digest binds relative names across rename",
+         directory_renamed.get("sha1") != directory_deleted.get("sha1")),
+        ("top-level and nested artifact symlinks fail closed",
+         top_symlink_manifest.get("valid") is False
+         and nested_symlink_manifest.get("valid") is False),
+        ("top-level and nested artifact special files fail closed",
+         top_fifo_manifest.get("valid") is False
+         and nested_fifo_manifest.get("valid") is False),
         ("dangling citation detected", byid["E-002"]["artifacts_missing"] == ["ev_DELETED.html"]),
         ("prose filenames not cited", not any("jquery" in a or "webform" in a
                                               for a in byid["E-002"]["artifacts"])),
@@ -3104,25 +3217,65 @@ def _selftest() -> int:
     (d_cron / "state" / "loop_journal.jsonl").write_text(
         '{"event":"cycle_end","note":"closure complete; cron_cancelled=2218d35d"}\n', encoding="utf-8")
     cron_id = check_completion_cron_record(d_cron)
-    (d_cron / "decisions.md").write_text(
+    d_completion = Path(tempfile.mkdtemp())
+    from harness.selftest_plan import seed_current_plan
+    seed_current_plan(d_completion, stage="S3")
+    completion_transcript = d_completion / "completion-transcript.jsonl"
+    completion_transcript.write_text("tool-completion-review\n", encoding="utf-8")
+    if _runtime_receipts is not None:
+        completion_state = _runtime_receipts.completion_review_state(
+            d_completion, require_current_inputs=True)
+        completion_prompt = _runtime_receipts.completion_review_prompt(d_completion)
+        completion_result = _runtime_receipts.completion_review_result_envelope(
+            d_completion.name,
+            completion_state["evidence_index_hash"],
+            completion_state["completion_bundle_hash"],
+        )
+        with completion_transcript.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": "tool-completion-review",
+                    "name": "Agent", "input": {
+                        "prompt": completion_prompt,
+                        "subagent_type": "xunji-reviewer",
+                    },
+                }]},
+            }) + "\n")
+        _runtime_receipts.append_hook_event(d_completion, {
+            "hook_event_name": "PostToolUse", "session_id": "selftest-completion",
+            "transcript_path": str(completion_transcript), "tool_name": "Agent",
+            "tool_use_id": "tool-completion-review",
+            "tool_input": {
+                "prompt": completion_prompt,
+                "subagent_type": "xunji-reviewer",
+            },
+            "tool_response": {
+                "agentId": "completion-review-child", "isAsync": True,
+                "status": "async_launched",
+            },
+        })
+        _runtime_receipts.append_hook_event(d_completion, {
+            "hook_event_name": "SubagentStart",
+            "session_id": "selftest-completion",
+            "transcript_path": str(completion_transcript),
+            "agent_id": "completion-review-child",
+            "agent_type": "xunji-reviewer",
+        })
+        _runtime_receipts.append_hook_event(d_completion, {
+            "hook_event_name": "SubagentStop",
+            "session_id": "selftest-completion",
+            "transcript_path": str(completion_transcript),
+            "agent_id": "completion-review-child",
+            "agent_type": "xunji-reviewer",
+            "last_assistant_message": completion_result,
+        })
+    (d_completion / "decisions.md").write_text(
         "# Decisions\n\n- GHOST_COMPLETE\n\n## CodexCompletionReview\n"
         "- Reviewer: codex-fresh\n- Verdict: PASS\n"
-        "- Summary: report coverage, severity support, and reachable assets were independently checked.\n",
+        "- Summary: report coverage, severity support, reachable assets, and the review ledger "
+        "were independently checked against the frozen completion bundle.\n",
         encoding="utf-8")
-    completion_hash = current_evidence_index_hash(d_cron)
-    if _runtime_receipts is not None:
-        _runtime_receipts.append_hook_event(d_cron, {
-            "hook_event_name": "PostToolUse", "session_id": "selftest-completion",
-            "transcript_path": str(cron_transcript), "tool_name": "Agent",
-            "tool_use_id": "tool-completion-review",
-            "tool_input": {"prompt":
-                f"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={completion_hash} run={d_cron.name} "
-                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
-            "tool_response": {"result":
-                f"XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX={completion_hash} "
-                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
-        })
-    completion_review_ok = check_codex_completion_review(d_cron)
+    completion_review_ok = check_codex_completion_review(d_completion)
     d_lifecycle = Path(tempfile.mkdtemp())
     (d_lifecycle / "ev.html").write_text("x" * 10, encoding="utf-8")
     (d_lifecycle / "evidence.md").write_text(
@@ -3142,16 +3295,44 @@ def _selftest() -> int:
                                         note="merged into review", terminal=True)
         lifecycle_manual_done_err, _ = check_closure_discipline(d_lifecycle)
         life_transcript = d_lifecycle / "agent-transcript.jsonl"
-        life_transcript.write_text("tool-life-agent\n", encoding="utf-8")
+        life_prompt = f"XUNJI_ASSIGNMENT={life_rec['agent']} XUNJI_FRONT=F-001"
+        life_transcript.write_text(json.dumps({
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": "tool-life-agent", "name": "Agent",
+                "input": {
+                    "prompt": life_prompt,
+                    "subagent_type": "xunji-hunter",
+                },
+            }]},
+        }) + "\n", encoding="utf-8")
         if _runtime_receipts is not None:
             _runtime_receipts.append_hook_event(d_lifecycle, {
                 "hook_event_name": "PostToolUse", "session_id": "selftest-agent",
                 "transcript_path": str(life_transcript), "tool_name": "Agent",
                 "tool_use_id": "tool-life-agent",
-                "tool_input": {"prompt":
-                    f"XUNJI_ASSIGNMENT={life_rec['agent']} XUNJI_FRONT=F-001"},
-                "tool_response": {"result": "candidate complete"},
+                "tool_input": {
+                    "prompt": life_prompt,
+                    "subagent_type": "xunji-hunter",
+                },
+                "tool_response": {"agentId": "life-agent-child", "isAsync": True,
+                                  "status": "async_launched"},
             })
+            _runtime_receipts.append_hook_event(d_lifecycle, {
+                "hook_event_name": "SubagentStart", "session_id": "selftest-agent",
+                "transcript_path": str(life_transcript),
+                "agent_id": "life-agent-child", "agent_type": "xunji-hunter",
+            })
+            _runtime_receipts.append_hook_event(d_lifecycle, {
+                "hook_event_name": "SubagentStop", "session_id": "selftest-agent",
+                "transcript_path": str(life_transcript),
+                "agent_id": "life-agent-child", "agent_type": "xunji-hunter",
+                "last_assistant_message": "candidate complete",
+            })
+        life_returned = [
+            item for item in _runtime_receipts.agent_attempts(d_lifecycle)
+            if item.get("assignment") == life_rec["agent"]
+            and item.get("state") == "returned"
+        ] if _runtime_receipts is not None else []
         lifecycle_done_err, _ = check_closure_discipline(d_lifecycle)
         _workers.update_agent_lifecycle(
             d_lifecycle, life_rec["agent"], status="merged",
@@ -3201,6 +3382,9 @@ def _selftest() -> int:
          _workers is None or any("Agent 运行真实性" in e for e in lifecycle_manual_done_err)),
         ("real Agent receipt clears lifecycle authenticity error",
          _workers is None or not any("Agent 运行真实性" in e for e in lifecycle_done_err)),
+        ("real Agent fixture is Stop-bound and freezes returned bytes",
+         _runtime_receipts is None or (
+             len(life_returned) == 1 and life_returned[0].get("result_snapshot"))),
         ("real Agent receipt still requires post-return disposition",
          _workers is None or any("Agent 结果落实" in e for e in lifecycle_done_err)),
         ("anchored post-return merge clears disposition gate",
@@ -3801,6 +3985,192 @@ def _selftest() -> int:
         ("威胁假设软警: 关联 H 后消失", check_threat_hypotheses(d21) == []),
     ]
 
+    # Macro-stage control is a derived-plan/journal integrity check.  It neither
+    # reads Task completion nor replaces canonical closure predicates.
+    d_stage = Path(tempfile.mkdtemp())
+    (d_stage / "state").mkdir()
+    (d_stage / "target.md").write_text(
+        "# Target\n- Authorized scope: stage.example\n", encoding="utf-8")
+    (d_stage / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "stage.example", "examined": False}],
+    }), encoding="utf-8")
+    (d_stage / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n### F-001 — stage.example\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8",
+    )
+    stage_contract = {
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+        "session_id": "check-run-stage", "prompt_sha256": "d" * 64,
+        "updated_at": 1.0, "fanout_override": False,
+    }
+    (d_stage / "state" / "turn_contract.json").write_text(
+        json.dumps(stage_contract), encoding="utf-8")
+    def stage_lanes(tag: str) -> list[dict]:
+        execution = {
+            "id": f"L-{tag}-EXEC", "role": "web-hunter", "front": "F-001",
+            "effect": "local_read", "assets": [], "dependencies": [],
+            "expected_evidence": "bounded inventory",
+            "expected_information_gain": "medium",
+            "stop_condition": "inventory result returned", "request_cost": 0,
+            "request_budget": 0, "merge_cost": 1, "atomic": False,
+        }
+        reviewer = {
+            "id": f"L-{tag}-REVIEW", "role": "review", "front": "F-001",
+            "effect": "local_verify", "assets": [],
+            "dependencies": [execution["id"]],
+            "expected_evidence": "digest-bound review disposition",
+            "expected_information_gain": "medium",
+            "stop_condition": "exact result reviewed", "request_cost": 0,
+            "request_budget": 0, "merge_cost": 1, "atomic": False,
+        }
+        return [execution, reviewer]
+
+    stage_plan = _work_plan.commit_plan(
+        d_stage, macro_stage="S1", objective="inventory scope",
+        mode="SERIAL_AGENT", reason="execution then exact Reviewer",
+        exit_gate="inventory ready", lanes=stage_lanes("S1"), contract=stage_contract,
+    )
+
+    stage_target = _workers.create_agent_assignment(
+        d_stage, role="web-hunter", front="F-001", assets=[],
+        lane_id=stage_plan["lanes"][0]["id"])
+    stage_trace = d_stage / "state" / "stage-agent-transcript.jsonl"
+    stage_target_prompt = _runtime_receipts.assignment_launch_prompt(stage_target)
+    stage_target_type = _runtime_receipts.assignment_subagent_type(stage_target)
+    stage_target_prompt_ok = bool(stage_target_prompt)
+    stage_trace.write_text(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": "stage-target-tool", "name": "Agent",
+            "input": {
+                "prompt": stage_target_prompt,
+                "subagent_type": stage_target_type,
+            },
+        }]},
+    }) + "\n", encoding="utf-8")
+    _runtime_receipts.append_hook_event(d_stage, {
+        "hook_event_name": "PostToolUse", "session_id": "check-run-stage",
+        "transcript_path": str(stage_trace), "tool_name": "Agent",
+        "tool_use_id": "stage-target-tool",
+        "tool_input": {
+            "prompt": stage_target_prompt,
+            "subagent_type": stage_target_type,
+        },
+        "tool_response": {"agentId": "stage-target-child",
+                          "isAsync": True, "status": "async_launched"},
+    })
+    _runtime_receipts.append_hook_event(d_stage, {
+        "hook_event_name": "SubagentStart", "session_id": "check-run-stage",
+        "transcript_path": str(stage_trace), "agent_id": "stage-target-child",
+        "agent_type": stage_target_type,
+    })
+    _runtime_receipts.append_hook_event(d_stage, {
+        "hook_event_name": "SubagentStop", "session_id": "check-run-stage",
+        "transcript_path": str(stage_trace), "agent_id": "stage-target-child",
+        "agent_type": stage_target_type,
+        "last_assistant_message": "bounded inventory result",
+    })
+    stage_reviewer = _workers.create_agent_assignment(
+        d_stage, role="review", front="F-001", assets=[],
+        lane_id=stage_plan["lanes"][1]["id"])
+    stage_reviewer_prompt = _runtime_receipts.assignment_launch_prompt(
+        stage_reviewer)
+    stage_reviewer_type = _runtime_receipts.assignment_subagent_type(
+        stage_reviewer)
+    stage_reviewer_prompt_ok = bool(stage_reviewer_prompt)
+    with stage_trace.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": "stage-review-tool", "name": "Agent",
+                "input": {
+                    "prompt": stage_reviewer_prompt,
+                    "subagent_type": stage_reviewer_type,
+                },
+            }]},
+        }) + "\n")
+    _runtime_receipts.append_hook_event(d_stage, {
+        "hook_event_name": "PostToolUse", "session_id": "check-run-stage",
+        "transcript_path": str(stage_trace), "tool_name": "Agent",
+        "tool_use_id": "stage-review-tool",
+        "tool_input": {
+            "prompt": stage_reviewer_prompt,
+            "subagent_type": stage_reviewer_type,
+        },
+        "tool_response": {"agentId": "stage-review-child",
+                          "isAsync": True, "status": "async_launched"},
+    })
+    _runtime_receipts.append_hook_event(d_stage, {
+        "hook_event_name": "SubagentStart", "session_id": "check-run-stage",
+        "transcript_path": str(stage_trace), "agent_id": "stage-review-child",
+        "agent_type": stage_reviewer_type,
+    })
+    _runtime_receipts.append_hook_event(d_stage, {
+        "hook_event_name": "SubagentStop", "session_id": "check-run-stage",
+        "transcript_path": str(stage_trace), "agent_id": "stage-review-child",
+        "agent_type": stage_reviewer_type,
+        "last_assistant_message": "bounded inventory reviewed",
+    })
+    stage_returned_attempts = {
+        str(item.get("assignment") or ""): item
+        for item in _runtime_receipts.agent_attempts(d_stage)
+        if item.get("state") == "returned"
+    }
+    _workers.record_review_disposition(
+        d_stage, target=stage_target["agent"], reviewer=stage_reviewer["agent"],
+        disposition="accept-candidate", note="exact inventory result reviewed")
+    _workers.update_agent_lifecycle(
+        d_stage, stage_target["agent"], status="merged",
+        note="Front: F-001; bounded inventory accepted", terminal=True)
+    _loop_journal.append_event(
+        d_stage,
+        "cycle_end",
+        note="S1 receipts settled",
+        next_action="运行 check_run 验证当前计划",
+    )
+    _work_plan.commit_plan(
+        d_stage, macro_stage="S2", objective="exercise active front",
+        mode="SERIAL_AGENT", reason="execution then exact Reviewer",
+        exit_gate="front settled", lanes=stage_lanes("S2"), contract=stage_contract,
+        replan_reason="scope, coverage, and front schema are ready",
+    )
+    stage_control_ok = check_macro_stage_control(d_stage)
+    journal_path = d_stage / "state" / "loop_journal.jsonl"
+    journal_text = journal_path.read_text(encoding="utf-8")
+    journal_rows = [json.loads(line) for line in journal_text.splitlines() if line.strip()]
+    exit_row = next(item for item in journal_rows if item.get("event") == "stage_exit")
+    exit_index = journal_rows.index(exit_row)
+    journal_path.write_text("\n".join(json.dumps(
+        item, ensure_ascii=False, sort_keys=True) for item in journal_rows[:exit_index + 1])
+        + "\n", encoding="utf-8")
+    pending_exit = check_macro_stage_control(d_stage)
+    journal_path.write_text(journal_text, encoding="utf-8")
+    exit_row["data"]["merge_debt"] = {"merge": ["A-forged-done"], "review": []}
+    journal_path.write_text("\n".join(json.dumps(
+        item, ensure_ascii=False, sort_keys=True) for item in journal_rows) + "\n",
+        encoding="utf-8")
+    stage_forgery = check_macro_stage_control(d_stage)
+    (d_stage / "target.md").write_text(
+        "# Target\n- Authorized scope: stage.example and new.example\n", encoding="utf-8")
+    stage_stale = check_macro_stage_control(d_stage)
+    checks += [
+        ("macro-stage fixture derives exact Hunter and Reviewer launch prompts",
+         stage_target_prompt_ok and stage_reviewer_prompt_ok),
+        ("macro-stage fixture uses Stop-bound target and Reviewer returns",
+         stage_target["agent"] in stage_returned_attempts
+         and stage_reviewer["agent"] in stage_returned_attempts
+         and all(item.get("result_snapshot")
+                 for item in stage_returned_attempts.values())),
+        ("macro-stage journal/plan chain validates", stage_control_ok == []),
+        ("stranded stage_exit is a hard error",
+         any("pending its bound stage_plan" in item for item in pending_exit)),
+        ("forged nonzero stage-exit debt is a hard error",
+         any("merge_debt_digest" in item or "merge/review debt" in item
+             or "hash" in item.lower() or "journal" in item.lower()
+             for item in stage_forgery)),
+        ("canonical material change makes work plan stale",
+         any("stale/inconsistent" in item for item in stage_stale)),
+    ]
+
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -3885,6 +4255,7 @@ def main() -> int:
         errors.extend(check_file(path, markers))
     errors.extend(check_setup_transaction_state(run_dir))
     errors.extend(check_front_schema(run_dir))
+    errors.extend(check_macro_stage_control(run_dir))
 
     # Optional artifacts: only checked when the file is present.
     for name, markers in OPTIONAL_MARKERS.items():

@@ -26,6 +26,7 @@ review/review_bundle.json
 config.ini
 .claude/xunji_active_run
 .claude/xunji_active_run.*.tmp
+.claude/xunji_session_selections/
 .claude/xunji_pending_turns/
 .claude/xunji_transition_claims/
 .claude/xunji_scope_admission_claims/

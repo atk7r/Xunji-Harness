@@ -18,5 +18,31 @@
   ],
   "recovery_failure_cases": [
     {"stage": "before_recovered_receipt", "formal_run": "prepared_not_active", "pointer": "target"}
+  ],
+  "activation_attempt_cases": [
+    {"stage": "before_pointer_replace", "attempt": "pending", "pointer": "unchanged", "retry": "same-operation"},
+    {"stage": "after_pointer_before_receipt", "attempt": "pending", "pointer": "target", "retry": "recover"},
+    {"stage": "after_pointer_new_prompt_same_operation", "old_attempt": "recovered", "fresh_claim": "consumed"},
+    {"stage": "after_pointer_new_prompt_create", "old_attempt": "recovered", "fresh_claim": "consumed"},
+    {"stage": "prepared_create_after_pointer_new_prompt_same_effect", "old_claim": "retired", "fresh_claim": "consumed", "retry": "recovered"},
+    {"stage": "after_pointer_new_prompt_cross_operation", "result": "denied", "fresh_claim": "preserved"},
+    {"stage": "semantic_attempt_tamper", "result": "denied", "pointer": "unchanged"}
+  ],
+  "directory_durability_cases": [
+    {"failure": "open", "error": "pointer_durability_failed", "receipt": "prepared_not_active", "pointer": "target", "retry": "recovered"},
+    {"failure": "fsync", "error": "pointer_durability_failed", "attempt": "pending", "pointer": "target", "retry": "recovered"}
+  ],
+  "receipt_durability_cases": [
+    {"failure": "fsync", "error": "receipt_durability_failed", "formal_run": "absent", "pointer": "unchanged"},
+    {"failure": "post_pointer_terminal_fsync", "error": "receipt_durability_failed", "receipt": "committed", "claim": "claimed", "retry": "recovered", "direct_retry": "recovered"}
+  ],
+  "run_publish_durability_cases": [
+    {"failure": "fsync", "error": "run_publish_durability_failed", "formal_run": "prepared_not_active", "pointer": "unchanged", "retry": "committed"}
+  ],
+  "session_resume_durability_cases": [
+    {"failure": "selection_delete_fsync", "error": "session_selection_durability_failed", "pointer": "target", "selection": "absent", "retry": "recovered"}
+  ],
+  "allowed_production_omitted_callers": [
+    {"path": "tools/xunji_statusline.py", "function": "set_active_run"}
   ]
 }

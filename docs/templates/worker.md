@@ -1,17 +1,21 @@
 # Legacy Fan-out Worker (superseded by Agent Board)
 
-New runs should use `docs/templates/agents/` plus:
+New runs use `docs/templates/agents/` through the transactional lifecycle in
+`.claude/skills/xunji-agent-board/SKILL.md`:
 
 ```bash
-python tools/workers.py assign runs/<dir> --role <role> --front <F-id> --asset <host>
-python tools/workers.py status runs/<dir>
-python tools/workers.py lifecycle-check runs/<dir>
-python tools/workers.py agent-check runs/<dir>
-python tools/workers.py conflicts runs/<dir>
-python tools/workers.py synthesize runs/<dir>
+python3 tools/work_plan.py status runs/<dir>
+python3 tools/workers.py delegate runs/<dir> --runtime-slots 1 --request-budget 0 --model-egress-budget 0 --merge-capacity 40 --limit 1
+python3 tools/workers.py status runs/<dir>
+python3 tools/workers.py lifecycle-check runs/<dir>
+python3 tools/workers.py agent-check runs/<dir>
+python3 tools/workers.py conflicts runs/<dir>
+python3 tools/workers.py synthesize runs/<dir>
 ```
 
-This file remains only for older `workers/W-*.md` runs and for historical context.
+Commit the exact effect-typed execution and dependent Reviewer lanes before
+`delegate`; invoke the returned launch prompt as a real Claude Agent. This file
+remains only for older `workers/W-*.md` scratch layouts and historical context.
 The current model is Root Orchestrator + specialized Subagents + Single Synthesizer.
 
 The independent reviewer proved the pattern: a fresh-context sub-agent that
@@ -26,20 +30,25 @@ evidence gate.
 
 ## When Root assigns Agents
 
-Only when breadth genuinely beats depth and the fronts do not interfere. The old
-">= 3 independent fronts" rule is now a recommendation, not a hard threshold:
-the Root should consider front count, distinct assets, shared barriers,
-rate-limit pressure, and past worker hit rate.
+First decide execution ownership: only one dependency-free atomic registry-
+eligible action may use `ROOT_DIRECT`; every complex or multi-step lane uses a
+real Agent even for one front. Then choose `SERIAL_AGENT` or `PARALLEL_AGENTS`
+from dependencies, effect overlap, runtime slots, request/model-egress budgets,
+and merge capacity. Breadth determines whether multiple Agents should overlap,
+not whether real Agent execution is required. The old ">= 3 independent fronts"
+rule is now a recommendation, not a hard threshold.
 
 - **Recommended:** 3 or more independent fronts that are mutually non-blocking and
   hit **different assets / barriers** (so two workers cannot duplicate or trip
   each other). Early multi-asset recon across many hosts is the canonical case.
 - **Optional:** 2 strong fronts on different assets when the target is stable,
   rate limits are loose, and the lanes are clearly disjoint.
-- **Not** for deep work on one front (that is serial Root work), and not when
-  fronts share a barrier (one worker's finding should unblock the others first).
-  Run `python tools/workers.py suggest runs/<dir>` for an advisory ranking and
-  `python tools/workers.py plan runs/<dir>` for a copyable assignment draft.
+- Complex serial work uses one real Agent even for one front; a shared barrier
+  selects `SERIAL_AGENT`, not a Root-owned multi-step Hunter chain. Do not
+  parallelize fronts that share a barrier (one Agent's result should unblock the
+  next lane first).
+  Run `python3 tools/workers.py suggest runs/<dir>` for an advisory ranking and
+  `python3 tools/workers.py plan runs/<dir>` for a copyable assignment draft.
 
 ## Roles
 
@@ -71,10 +80,11 @@ rate-limit pressure, and past worker hit rate.
 - Target-side temp artifacts must use neutral `tmp/diag/proof-YYYYMMDD-<hex>`
   names only; never include project/run/Agent/vuln/tool labels.
 - Target-side cleanup/delete/overwrite requires an explicit operator `yes`.
-- The Agent-tool prompt must carry its assignment/front tokens so hooks can record
-  a transcript-backed execution receipt. `heartbeat`/`finish` remain lifecycle
-  display state only; they cannot prove the Agent ran. A non-terminal Agent blocks
-  closure.
+- The Agent-tool prompt must carry its exact assignment/front/assets/lane/plan
+  package so hooks can record a transcript-backed execution receipt; Reviewer
+  prompts also bind the frozen result digest. `heartbeat`/`finish` remain
+  lifecycle display/disposition state only; they cannot prove the Agent ran. A
+  non-terminal Agent blocks closure.
 
 ## The merge (legacy wording)
 
@@ -89,7 +99,7 @@ pollute the ledger. At merge the Single Synthesizer, for each candidate:
 
 `tools/check_run.py` warns while any worker file is `done` but unmerged — parallel
 work must not be silently dropped, and the gate must not be skipped.
-`python tools/workers.py merge-check runs/<dir>` lists missing controls,
+`python3 tools/workers.py merge-check runs/<dir>` lists missing controls,
 duplicates, conflicts, and done-but-unmerged workers before the Synthesizer allocates
 canonical `E-` ids.
 
@@ -115,9 +125,10 @@ Discipline:
 - All requests go through the tools under tools/ (probe/render/scan); they share one global rate
   limit, do not bypass it.
 - Your Agent-tool prompt includes the exact
-  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2` package so
-  the hook can prove this call ran. Root may mirror lifecycle with
-  `workers.py heartbeat/finish`; that prose is not runtime proof.
+  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2
+  XUNJI_LANE=L-... XUNJI_PLAN=<64hex>` package so the hook can prove this call
+  ran. Only the matching `SubagentStop` proves return; Root still owes a separate
+  Reviewer result, review disposition, and canonical merge decision.
 
 Write per the workers/W-<id>.md template: Assigned front / Status (working→done) / Candidate
 findings (each with proposed certainty + Control) / Leads for Root / Notes.

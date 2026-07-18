@@ -44,7 +44,8 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness.guard import (RateLimiter, cap_body, RateBudgetExceeded,  # noqa: E402
-                           HostHealth, HostBackoff)
+                           HostHealth, HostBackoff, SessionBudget)
+from harness import guard as guardmod  # noqa: E402
 from harness import privacy as privacymod  # noqa: E402
 from harness import proxy as proxymod  # noqa: E402  渗透流量走交战代理(模型调用不走)
 
@@ -162,16 +163,22 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
     _validate_browser_request("GET", url, {}, None,
                               allow_sensitive_auth=allow_sensitive_auth)
     host = urlparse(url).hostname or "unknown"
+    egress_route = guardmod.egress_route_id(PROXY)
     hh = HostHealth()
-    hh.check(host)            # 自熔断: host 在退避冷却期则抛 HostBackoff
+    lease = hh.check(host, egress_route=egress_route, acquire_half_open=False)
+    session_budget = SessionBudget()
+    session_budget.check()
     RateLimiter().gate(host)  # 禁高频: spacing enforced before navigation
 
     out_dir.mkdir(parents=True, exist_ok=True)
     requests: list[dict] = []
-    result: dict = {"url": url, "host": host, "provenance": provenance(),
+    result: dict = {"url": url, "host": host, "egress_route": egress_route,
+                    "provenance": provenance(),
                     "title": "", "status": None, "dom_html_len": 0,
                     "scripts": [], "forms": [], "visible_text": "",
                     "screenshot_path": None}
+    network_error: Exception | None = None
+    request_count = [0]
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -225,6 +232,7 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
         page = ctx.new_page()
 
         # observe (not intercept) network -> reveals backend API endpoints
+        page.on("request", lambda _request: request_count.__setitem__(0, request_count[0] + 1))
         page.on("requestfinished", lambda r: requests.append(
             {"method": r.method, "url": r.url,
              "type": r.resource_type,
@@ -314,15 +322,31 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
                 json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as e:
             result["error"] = str(e)
+            if not isinstance(e, privacymod.OutboundPrivacyError):
+                network_error = e
         finally:
             ctx.close()
             browser.close()
     # circuit breaker: a navigation that returned a status = healthy connection;
     # an exception (timeout/reset/refused) = transport failure for this host
-    if result.get("error") and result.get("status") is None:
-        hh.record_error(host)
-    else:
-        hh.record_ok(host)
+    # page.goto was attempted once; Playwright's request event supplies the
+    # exact larger fan-out count (redirects, documents, subresources, eval I/O).
+    actual_requests = max(request_count[0], 1)
+    budget_warning = session_budget.record(
+        int(result.get("html_bytes") or 0), count=actual_requests)
+    if budget_warning:
+        print(budget_warning, file=sys.stderr)
+    if network_error is not None and result.get("status") is None:
+        error_class = guardmod.classify_network_error(
+            network_error, egress_route=egress_route)
+        hh.record_error(host, egress_route=egress_route,
+                        error_class=error_class, lease=lease,
+                        request_count=actual_requests)
+        result.update(guardmod.host_error_policy(error_class))
+    elif not (result.get("error") and result.get("status") is None):
+        hh.record_ok(host, egress_route=egress_route,
+                     count=max(actual_requests, 1), lease=lease)
+    result["request_count"] = actual_requests
     return result
 
 
@@ -346,6 +370,12 @@ def _selftest() -> int:
     checks.append(("render accepts save_html", "save_html" in sig))
     checks.append(("provenance marks target content untrusted",
                    provenance()["source"] == "target-content" and provenance()["trust"] == "untrusted"))
+    checks.append(("browser route/error provenance is structured",
+                   guardmod.egress_route_id(None) == "direct"
+                   and guardmod.network_error_provenance(
+                       ConnectionResetError("reset"), egress_route="direct",
+                       host="x.example",
+                   )["error_class"] == "target_reset"))
     try:
         _validate_browser_request("POST", "https://x.example/api", {}, "marker=xunji-proof")
         checks.append(("browser privacy route blocks project marker", False))
@@ -471,10 +501,12 @@ def main() -> int:
                      screenshot=args.screenshot, wait_sec=args.wait_sec,
                      save_html=save_html,
                      allow_sensitive_auth=args.allow_sensitive_auth)
+    except guardmod.GuardStateError as e:
+        res = {"error": f"guard-state: {e}", "error_class": "guard_state"}
     except RateBudgetExceeded as e:
         res = {"error": f"rate-limited: {e}"}
     except HostBackoff as e:
-        res = {"error": f"host-backoff: {e}"}
+        res = {"error": f"host-backoff: {e}", **e.provenance()}
     except privacymod.OutboundPrivacyError as e:
         res = {"error": f"outbound-privacy: {e}"}
 
@@ -491,6 +523,11 @@ def main() -> int:
         "error": res.get("error"),
         # Extended fields for full consumers (backward compat)
         "host": res.get("host"),
+        "egress_route": res.get("egress_route"),
+        "error_class": res.get("error_class"),
+        "attribution": res.get("attribution"),
+        "breaker_scope": res.get("breaker_scope"),
+        "request_count": res.get("request_count"),
         "final_url": res.get("final_url"),
         "html_bytes": res.get("html_bytes"),
         "html_truncated": res.get("html_truncated"),

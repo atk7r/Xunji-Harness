@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/work-plan.v1.schema.json",
+  "title": "Xunji Work Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "plan_id",
+    "cycle_id",
+    "macro_stage",
+    "objective",
+    "inputs_digest",
+    "replan_reason",
+    "lanes",
+    "execution_mode",
+    "merge_owner",
+    "exit_gate",
+    "turn_binding",
+    "delegation_decision",
+    "committed_at",
+    "plan_digest"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.work-plan.v1"},
+    "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+    "cycle_id": {"type": "integer", "minimum": 1},
+    "macro_stage": {"enum": ["S1", "S2", "S3"]},
+    "objective": {"type": "string", "minLength": 1, "maxLength": 2048},
+    "inputs_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "replan_reason": {"type": "string", "maxLength": 2048},
+    "lanes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/lane"}
+    },
+    "execution_mode": {
+      "enum": ["ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS"]
+    },
+    "merge_owner": {"const": "Root/Single Synthesizer"},
+    "exit_gate": {"type": "string", "minLength": 1, "maxLength": 2048},
+    "turn_binding": {"$ref": "#/$defs/turnBinding"},
+    "delegation_decision": {"$ref": "#/$defs/delegationDecision"},
+    "committed_at": {"type": "number", "exclusiveMinimum": 0},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"execution_mode": {"const": "ROOT_DIRECT"}},
+        "required": ["execution_mode"]
+      },
+      "then": {
+        "properties": {
+          "lanes": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {"required": ["capability_id"]}
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "lanes": {
+            "items": {"not": {"required": ["capability_id"]}}
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "effect",
+        "assets",
+        "dependencies",
+        "expected_evidence",
+        "expected_information_gain",
+        "stop_condition",
+        "request_cost",
+        "request_budget",
+        "merge_cost",
+        "atomic"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"},
+        "role": {
+          "enum": [
+            "surface", "web-auth", "web-hunter", "code-audit",
+            "exploit", "verify", "review", "report"
+          ]
+        },
+        "front": {"type": "string", "pattern": "^F-[0-9]+$"},
+        "effect": {
+          "enum": [
+            "local_read",
+            "local_verify",
+            "control",
+            "target",
+            "model_egress",
+            "repo_mutation"
+          ]
+        },
+        "capability_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)*$"
+        },
+        "assets": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1, "maxLength": 512},
+          "uniqueItems": true
+        },
+        "dependencies": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"},
+          "uniqueItems": true
+        },
+        "expected_evidence": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "expected_information_gain": {"enum": ["low", "medium", "high"]},
+        "stop_condition": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "request_cost": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "request_budget": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "merge_cost": {"type": "integer", "minimum": 0, "maximum": 100},
+        "atomic": {"type": "boolean"}
+      }
+    },
+    "turnBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "prompt_sha256", "contract_updated_at"],
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "contract_updated_at": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "delegationDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "mode", "reason", "lane_ids", "committed_at"],
+      "properties": {
+        "schema": {"const": "xunji.delegation-decision.v1"},
+        "mode": {"enum": ["ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "lane_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"},
+          "uniqueItems": true
+        },
+        "committed_at": {"type": "number", "exclusiveMinimum": 0}
+      }
+    }
+  }
+}

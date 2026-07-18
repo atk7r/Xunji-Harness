@@ -47,9 +47,12 @@
 
 - For every authorized target, keep a run dir under `runs/` per `docs/WORKFLOW.md`.
 - **Entry boundary:** normal chat stays normal chat. A URL, markdown note, recon
-  path, or existing `runs/<dir>` mentioned in natural language prepares setup,
-  resume, or `hints.md`; it does **not** start autonomous loop. Only an explicit
-  `/loop` token enters loop mode. `/loop <source>` is adapted through
+  path, or existing `runs/<dir>` mentioned in an affirmative create/setup/resume
+  request prepares setup, resume, or `hints.md`; a question, analysis request,
+  denial, quoted log, or code example stays read-only. Only a first non-empty
+  top-level line beginning exact `/loop(?:\s|$)` enters loop mode; indented/fenced
+  code, blockquotes, and inline quotes cannot mint that authority, and a conflicting
+  `/loop` plus lifecycle denial fails closed. `/loop <source>` is adapted through
   `tools/loop_bootstrap.py --source <input> --type auto`: existing run/run file
   resumes, an explicit HTTP(S) URL is parsed and saved locally without fetching,
   and Guanlan/recon JSON is ingested with zero re-probe. Markdown/ordinary JSON
@@ -57,8 +60,15 @@
   operator-explicit external mode first exposes only a hard-redacted, path-free
   token/ref surrogate and AI returns IDs, never values. Do not Read raw source into
   external model context. Unsupported, ambiguous, forged, mutated, or unregistered
-  local-AI input fails without creating/activating a run. From the next cycle use
-  only `/loop runs/<normalized-run-dir>`, never the original URL/file. When unsure,
+  local-AI input fails without creating/activating a run. In an explicit first
+  `/loop`, only the first parsed source token carries source authority. Affirmative
+  natural-language setup may bind one unique URL; if the prompt contains multiple URLs,
+  do not guess among them or run bootstrap until the operator explicitly selects
+  the lifecycle source. In an explicit first `/loop <source>` turn, continue under
+  that same top-level authority through exact
+  bootstrap, run binding, fresh CronList/CronCreate, iteration task planning,
+  graph/front decomposition, and real Agent launches. From the next cycle use only
+  `/loop runs/<normalized-run-dir>`, never the original URL/file. When unsure,
   preserve chat/setup/resume semantics and ask only for missing run/target boundary
   data; never infer loop. File-derived `scope_status=review|out|unknown` assets are
   setup data, not target authority. Only a new operator turn whose first line is
@@ -110,8 +120,21 @@
   details.
 - Claude Code statusline is a read-only indicator for this project. It prints
   nothing without an explicit Xunji workspace and active run; otherwise it shows
-  only `[Xunji-status] [<phase>] <run>`. Detailed progress and health remain in
-  visible phase banners and `loop_journal.py` phase-start/phase-end records.
+  only `[Xunji-status] [<phase>] <run>`. The current renderer does not inspect a
+  session id, transcript, or turn contract. Session-bound rendering remains a
+  separate target change; do not describe it as current behavior. Detailed
+  progress and health remain in visible phase banners and `loop_journal.py`
+  phase-start/phase-end records. On
+  `SessionEnd`, `turn_contract.py` asks `setup_transaction.clear_activation_cas()`
+  to replace old turn authority with `EXPLAIN_ONLY`, save a hashed per-session
+  selection receipt, retire claims, and clear only the ending session's still-owned
+  pointer. Pointer, transcript, and exact contract digests are rechecked under the
+  activation lock. Only a later Claude `SessionStart.source=resume` for that exact
+  session/transcript may restore the pointer, through an `EXPLAIN_ONLY`
+  `resume_barrier`; `startup`, `clear`, `compact`, a fork/new session, and a bare
+  new-session “继续” never auto-restore. The next real UserPromptSubmit must mint
+  fresh authority. Cleanup/restore never deletes or closes the run, and any missing,
+  stale, corrupt, or competing identity fails closed.
 - **Target-facing privacy boundary:** Root and every Agent must keep generated
   project/run/Agent/operator identity and real personal data out of outbound URL
   paths/queries, headers, bodies, multipart names/content, and target writes. Use
@@ -172,16 +195,29 @@
 
 ```text
 observe -> update state graph -> decompose fronts
--> plan / assign agents -> agents produce candidates
--> merge-check / conflict-check -> verify / falsify
--> synthesize findings -> review / report / closure
+-> commit work plan -> delegate effect lanes -> Claude calls Agents
+-> freeze returned bytes + merge draft -> Reviewer challenges exact digest
+-> review disposition -> Root disposition / synthesis -> typed cycle_end
 ```
+
+- **Macro-Stage is a reversible derived goal view, not a sixth Router phase.** Root
+  declares `S1` (information collection), `S2` (testing + continuous review), or
+  `S3` (closure) in `xunji.work-plan.v1`; `run_model.py` derives readiness from
+  canonical scope, coverage, fronts, and typed Agent debt. `S2` requires the S1
+  scope baseline plus usable coverage/front schema. `S3` additionally requires no
+  open or Type-A/deferred front and no plan-bound merge/review debt. A changed
+  premise may move the goal view backward, but only through a new plan with
+  `--replan-reason`, a debt-free prior plan, and its typed `cycle_end`. The current
+  owner is the Python/Hook control contract and this stage does not add a parallel
+  runtime or migration path.
 
 - "Root-level state graph pass" = a cheap every-cycle read of the projected graph,
   all open/deferred fronts, newest evidence, hints, assignments, and conflicts: did
   new evidence unlock or refute a front? are Agents duplicating work? is a higher-value
-  front idle? **Re-prioritize and assign only — never close a front** (closing is the
-  Reviewer's job). See WORKFLOW "Root-level state graph pass".
+  front idle? **Re-prioritize and assign only — never close a front during this
+  cheap pass.** Reviewer supplies a candidate disposition only; Root/Single
+  Synthesizer alone makes the final evidence-gated confirmation and front closure.
+  See WORKFLOW "Root-level state graph pass".
 - **Shared Barrier Group recognition (GPT-5.6 Blackboard):** During the graph pass,
   group fronts by their `barrier class` value (e.g. "routing-layer GUID-based tenant
   routing"). Fronts that share an identical barrier class form a **Shared Barrier
@@ -229,7 +265,25 @@ observe -> update state graph -> decompose fronts
   environment-clean read grammar, exact control/verification, trusted
   target/review entrypoints, and the target tool's narrow proxy/locale env keys
   are executable. Unknown shell/interpreter shapes fail closed because string
-  scanning cannot prove they will not rewrite the framework.
+  scanning cannot prove they will not rewrite the framework. Denial prose or a
+  recovery hint cannot itself mint `maintenance_action`: only maintenance mode,
+  structured critical paths, or an explicit Git/patch repo-mutation shape creates
+  maintenance debt. Destination-free shell-shape denials remain denied but are
+  non-maintenance.
+  Lifecycle setup is stricter: `loop_bootstrap.py`/`setup_run.py` must be one exact
+  argv-only command using the current registered Python executable; a bare name is
+  accepted only when it resolves to that same identity. Lifecycle commands reject
+  `tool_input.env`, inline environment assignments, unquoted pathname/query glob,
+  brace, tilde, zsh EQUALS, parameter/command expansion, redirects, chains, comments,
+  newlines, and line continuations. Quote source/URL as one literal argv token;
+  quoted glob characters remain data. Do not append `2>&1`, pipes, `head`/`tail`, or
+  other wrappers. `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` is a command-shape denial,
+  not maintenance authority: remove any observational wrapper; when its category
+  is `invalid-argv`, return to the corresponding owner document and supply the
+  complete registered argv. Retry in the same operator turn. Inspect source and
+  manifests with Read/Grep/Glob, never `python -c`. A new bare “继续” prompt revokes
+  pending source authority and can return
+  `XUNJI_E_RUN_TRANSITION_AUTHORITY_MISSING`.
   A denied or failed maintenance action has no successful
   completion receipt; preserve its hook/tool reason and path receipt, retry the
   identical action after repairing prerequisites, or report the exact blocker.
@@ -238,24 +292,58 @@ observe -> update state graph -> decompose fronts
   explicitly creates or resumes a run, use `setup_run.py`, `loop_bootstrap.py`, or
   a prompt-named `xunji_statusline.py --set-active`. These paths inherit the same
   operator turn contract before atomically changing `.claude/xunji_active_run`.
-  All setup, resume, set-active, and prepared recovery paths call
-  `setup_transaction.commit_activation_cas()`; no adapter is a second pointer
-  writer. A rename-complete/CAS-failed run remains `prepared_not_active` with its
+  Operator-driven setup, resume, set-active, and prepared recovery paths call
+  `setup_transaction.commit_activation_cas()`; Claude resume-only session recovery
+  calls `restore_session_activation_cas()`. Both are typed ports of the same
+  `setup_transaction.py` pointer/selection owner; no adapter is a second writer.
+  A rename-complete/CAS-failed run remains `prepared_not_active` with its
   transaction receipt and the old pointer intact; it may be activated only by the
   same transaction identity or an explicit resume. If the pointer committed before
-  the final receipt write, recovery binds pointer + source hash + transaction id
-  and records `recovered` without creating a duplicate run.
-  Never Write/Edit/remove that pointer directly. If `/loop` tries CronCreate before
-  a requested new run exists, finish setup first, then run CronList and CronCreate
-  against the new run name; do not schedule the old run as a workaround.
+  the final receipt write, recovery revalidates the receipt, required run files,
+  coverage, complete source bundle, immutable claim binding, source hash, and
+  transaction id before recording `recovered`; pointer + status alone never suffice.
+  Never Write/Edit/remove that pointer or `.claude/xunji_session_selections/`
+  directly, and do not use `--clear-active` to escape a gate. The hook-owned,
+  session/transcript-attested `SessionEnd` CAS is the sole automatic clear path;
+  only the exact Claude resume event may consume its derived selection receipt.
+  A foreign/stale pointer is not inherited by an ordinary new-session prompt;
+  current-prompt exact run/source selection remains an explicit operator path.
+  The primary path is exact setup,
+  committed/recovered activation, fresh CronList, CronCreate naming the bound run,
+  then TaskCreate/TaskUpdate before Agent or target work. A premature CronCreate
+  denial is recovery, not the recommended bootstrap step; do not schedule the old
+  run as a workaround. Stable recovery codes are
+  `XUNJI_E_NEW_RUN_SETUP_REQUIRED`, `XUNJI_E_CRON_LIST_REQUIRED`,
+  `XUNJI_E_CRON_RUN_MISMATCH`, `XUNJI_E_CRON_CREATE_REQUIRED`, and
+  `XUNJI_E_ITERATION_PLAN_REQUIRED`.
   Turn contracts bind only the explicit pointer; they never guess from the most
   recently modified run. While a no-run bootstrap contract is pending, only
   read-only inspection and that prompt's exact setup/resume/set-active transition
-  are allowed; PreToolUse binds it to a target/session/prompt-hash claim before
-  execution. The transaction consumes that hook-owned claim and binds session id,
-  prompt hash, source hash, transaction id, and expected run; adapters/source data
-  cannot supply claim contents or `authority=operator`. Do not probe or write run
-  material before binding, and never guess between concurrent claims.
+  are allowed. The argv layer first validates the exact operation and its options;
+  PreToolUse then binds target, session, prompt hash, canonical source-reference
+  hash, and the redacted operation/options effect into a one-use claim. The commit
+  owner independently recomputes that effect from the frozen manifest/transaction
+  profile or exact target before binding source hash, transaction id, and expected
+  run. Claim state is `active -> claimed -> pointer commit -> finalize/delete`; a
+  newer top-level prompt tombstones `active|claimed`, and a tombstone can only be
+  finalized after an already-committed pointer when its durable immutable binding
+  matches exactly. Replacing an active contract also revokes the displaced session's
+  live claim. Authority contract/claim writes require file fsync plus the artifact
+  directory and its owner-directory fsync; deleting a claim/pending contract or
+  consuming a SessionStart selection
+  requires a directory fsync even when the path is already absent on retry. Recovery
+  retires the receipt-bound old claim before considering a fresh exact effect, and a
+  same-prompt `claimed` record is never downgraded to `active`. This durability claim
+  does not extend to the complete builder tree or SessionEnd pointer/selection creation.
+  Adapters/source data cannot supply claim contents or
+  `authority=operator`. Do not probe or write run material before binding, and never
+  guess between concurrent claims.
+- **Stop output is one exclusive typed union.** `output_gate.py` selects exactly
+  one of `NORMAL_CODA`, receipt-backed `TARGET_DENIED`, or receipt-backed
+  `MAINTENANCE_BLOCKED`. `NORMAL_CODA` projects the ordinary `NEXT_ACTION` /
+  `BLOCKED` Coda; the other two use their fixed envelopes and cannot be mixed with
+  free-form success prose. These turn-output records grant no authority and are
+  not the plan's typed `cycle_end`.
 - **Stop Coda is mechanically enforced only for `EXECUTE`.** While `.claude/xunji_active_run`
   points to a run without a valid completion marker, the last non-empty output
   line must be the only Coda line and must name one concrete object plus one
@@ -267,20 +355,82 @@ observe -> update state graph -> decompose fronts
   successful receipt; descriptive tool metadata does not count.
   Fix the prerequisite and retry the original action in the same turn. While the
   denial is unresolved, free-form final text is rejected; if execution truly
-  cannot continue, use only the exact three-line
-  `XUNJI_EXECUTION_STATUS=DENIED` envelope required by `output_gate.py`. Its Coda
+  cannot continue, use only the exact fixed
+  `XUNJI_EXECUTION_STATUS=DENIED` / `XUNJI_STOP_TYPE=TARGET_DENIED` envelope
+  required by `output_gate.py`. Its Coda
   uses a current `F-id`, or `frontier.md` while a new run has no active front yet.
   Stop hooks hard-block the first invalid attempt; a Claude Code
   `stop_hook_active` retry is idempotent and cannot change canonical run state.
 - Claude Code internal `<task-notification>` messages are lifecycle events, not
   operator prompts. They must never create, refresh, or change the current turn
   contract; Agent receipts from before the notification remain current-turn proof.
-- **TaskCreate discipline for `/loop`:** An explicit `/loop runs/<dir>` iteration
-  must maintain a Claude Code TaskCreate/TaskUpdate task list before selecting
-  the next action. Use it for the current iteration's assets, vectors, Agent
-  lanes, evidence writes, and gates; update items as they complete. This
-  requirement is scoped to `/loop` operation and closure-driving autonomous
-  cycles, not normal chat or one-off repository maintenance.
+- **TaskCreate discipline for `/loop`:** Every explicit `/loop`, including a first
+  source turn after run/Cron binding, must maintain a Claude Code
+  TaskCreate/TaskUpdate task list before the next Agent or target action. TodoWrite
+  is accepted as a compatibility surface. Use it for the current iteration's
+  assets, vectors, Agent lanes, evidence writes, and gates; update items as they
+  complete. A task receipt is planning proof, not Agent execution or canonical
+  evidence. The hook verifies only current-turn receipt existence and ordering;
+  task wording remains Root discipline and is not parsed into authority. This
+  requirement does not apply to natural-language setup-only chat,
+  review-only questions, or one-off repository maintenance.
+- **A Task receipt is not a work plan.** After the Root graph pass, inspect
+  `workers.py suggest` / `workers.py plan`, then commit one current-turn
+  `xunji.work-plan.v1` with `tools/work_plan.py commit`. Every delegated execution
+  lane has exactly one dependent Reviewer lane. `tools/workers.py delegate`
+  creates only the next ready assignments, context packs, exact `subagent_type`,
+  and exact `launch_prompt`; it does **not** spawn an Agent. The Agent tool input
+  is a binary launch contract: canonical roles `surface`, `web-auth`, `web-hunter`,
+  `code-audit`, `exploit`, `verify`, and `report` require exact
+  `subagent_type=xunji-hunter`; role `review` requires exact
+  `subagent_type=xunji-reviewer`. Missing/null/blank, `general-purpose`, aliases,
+  case changes, or surrounding whitespace fail closed. Claude must copy both
+  returned values unchanged and call one Agent per prompt; `description` supplies
+  no authority. The requested type in the parent tool input and the actual type
+  observed at Start/Stop must agree. Hook-observed Stop freezes a content-addressed response
+  snapshot and merge draft. The Reviewer launch must bind the exact
+  `XUNJI_RESULT_DIGEST`; then use `workers.py review-disposition` and finally
+  `workers.py finish` for Root's disposition. Only a debt-free
+  `loop_journal.py ... end --next-action "<exact final Coda action>"` can derive
+  the plan-bound typed `cycle_end`. The final `下一行动:` line must project that
+  required structured `next_action` exactly.
+  A current plan is valid only with its matching committed v2
+  `state/work_plan_transaction.json`, its immutable content-addressed copy under
+  `state/work_plan_transactions/<receipt_hash>.json`, and a valid
+  `prior_transaction_receipt_hash` lineage; missing, prepared, unreadable,
+  unarchived, broken-lineage, or mismatched provenance is a hard error and must
+  not be washed clean by committing over it.
+  For a genuine pre-transaction plan whose exact typed journal sequence and
+  snapshot still match the current turn, use the explicit one-time control command
+  `python3 tools/work_plan.py migrate-legacy runs/<dir>`. It records
+  `provenance=legacy_migration`; an exact committed native v1 receipt may use the
+  same command for a visible `native_v1_upgrade` whose archive retains both
+  receipts. The command is never `ROOT_DIRECT` and fails closed when the frozen
+  source, v1 request binding, or lineage cannot be reconstructed exactly.
+  All assignment creation, runtime projection, heartbeat, review, and Root finish
+  updates serialize through the same assignment lock. Exact Agent hook replay is
+  idempotent; a conflicting reuse of the same runtime identity or duplicate
+  projected attempt is debt, not a second successful return. `SubagentStop`
+  settles only one uniquely matching launch from the same Claude session; an
+  unmatched, cross-session, or multiply matching Stop remains lifecycle debt.
+- Direct edit-tool paths are classified after lexical normalization and
+  symlink-aware resolution against the workspace/run control roots. `//`,
+  `.`/`..`, nonexistent tails, and symlink aliases cannot bypass protected
+  source bundles, receipts, journals, plans, archives, pointers, or claims.
+  Authorization and receipts use the complete normalized path set recursively
+  extracted from every path-like field in `tool_input`, not one preferred
+  `file_path`; any missing, invalid, escaping, glob-bearing, or unauthorized path
+  rejects the whole mutation. Read-only tools remain readable; Bash continues to
+  use its exact capability/command-shape boundary.
+- **Reason-pass freshness is semantic, never temporal.** Inspect it with
+  `python3 tools/anti_drift.py --semantic-status runs/<dir>`. After rereading and
+  adjudicating the whole canonical graph, record the stable snapshot with
+  `python3 tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N
+  --chosen-front F-001 --reason "<whole-graph rationale>"`. The v1 hash-chain
+  binds frontier, evidence, coverage, decisions, and the derived graph. File age,
+  mtime, `touch`, or a no-op Edit cannot make it fresh; operational liveness is a
+  separate journal/runtime projection. A receipt is an audit claim, not evidence,
+  authority, or proof that the model actually read the files.
 - **Convergence Gate (Coda trajectory review):** After every cycle, the Root
   reads each Coda/progress output from the derived state graph. If the past 2
   consecutive cycles produced **zero new evidence entries, zero certainty
@@ -293,7 +443,7 @@ observe -> update state graph -> decompose fronts
   resolves them. Coverage-matrix improvement means a previously `□` cell became
   tested through a recorded front/evidence update; relabeling, adding unsupported
   applicability, or firing a class only to fill a cell does not count. Use
-  `python tools/coverage_matrix.py runs/<dir> --write` as the derived coverage
+  `python3 tools/coverage_matrix.py runs/<dir> --write` as the derived coverage
   view; do not treat it as an attack checklist.
 - Don't close a front because it's inconvenient / unfamiliar / initially blocked.
   Close or defer **only on one of**: evidence that confirms · rejects ·
@@ -321,31 +471,62 @@ observe -> update state graph -> decompose fronts
   Pivot to logic flaws, config errors, unauth APIs, IDOR, path traversal. The guard
   layer prints a pivot warning at 25 failures; ignore it at your own risk
   (retrospective #4: 500+ guesses, 0 success).
-- Default collaboration model: assign fresh-context Agents through the run dir when
-  breadth or independent expertise helps. Agents produce candidates/refutations, never
-  canonical findings. The Single Synthesizer merges through the evidence gate; parallel
-  breadth never relaxes confirmation.
-- **Agent Board is mandatory when open fronts >= 4 and barrier classes are diverse**
-  (no SharedBarrier group). The current **coordination epoch** must contain at least
-  two disjoint `workers.py assign` lanes and two real Claude `Agent` launches.
+- Default collaboration model: commit effect-typed lanes and assign fresh-context
+  Agents through the run dir whenever a multi-step lane, independent expertise, or
+  safe overlap warrants it. Scheduler choice comes first: dependency edges, effect
+  overlap, runtime slots, request/model-egress budgets, and merge capacity decide
+  `SERIAL_AGENT` versus `PARALLEL_AGENTS`. Agents produce candidates/refutations,
+  never canonical findings. The Single Synthesizer merges through the evidence gate;
+  parallel breadth never relaxes confirmation.
+- **The `>= 4` diverse-front gate is a mandatory breadth fallback, not the
+  scheduler.** Even one committed SERIAL/PARALLEL plan creates assignment,
+  return, review, and merge debt that Stop cannot erase. With four or more active
+  fronts and no SharedBarrier group, the current **coordination epoch** must still
+  contain at least two disjoint plan-bound lanes and two real Claude `Agent` launches.
   A bare continue/resume prompt preserves the epoch; do not create replacement Agents
   unless active-front topology or asset coverage debt materially changed. Every
   target-facing assignment carries repeatable `--asset HOST`, and each Agent prompt
   must carry the exact matching tokens
-  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2`.
+  `XUNJI_ASSIGNMENT=A-...`, `XUNJI_FRONT=F-...`, `XUNJI_ASSETS=h1,h2`,
+  `XUNJI_LANE=L-...`, and `XUNJI_PLAN=<64hex>`; Reviewer prompts also carry the exact
+  `XUNJI_RESULT_DIGEST=<64hex>` for the frozen target result.
   `Agent PostToolUse(status=async_launched)` proves launch only. The matching
   transcript-backed `SubagentStop` proves return; running Agents never owe disposition
   and remain free to execute their own bounded lane. Global fan-out/disposition applies
-  to Root, and child Agents cannot spawn nested Agents.
+  to Root, and child Agents cannot spawn nested Agents. When Start lacks an exact parent
+  tool/prompt identity, it may bind only one unique complete candidate; multiple Agent
+  calls in one assistant message fail closed. Stagger real parallel launch across
+  assistant messages while earlier Agents keep running.
+  A terminal Agent result is journal-eligible only after its content-addressed file
+  and the `state/merge_results/<assignment>/` directory chain cross their durability
+  barriers. A pre-journal crash leaves no Stop receipt; exact retry re-confirms the
+  full file/directory chain before appending one receipt.
   After return, `merged` requires a canonical E/F/D anchor **and**, for every assigned
   asset, a successful target-action receipt from that Agent plus a canonical E-entry.
   Zero-tool and partially completed packages cannot merge. `blocked/failed/abandoned`
   cites `Reason:` plus its canonical `Front:` but leaves unfinished asset coverage debt.
   `done` still means unmerged.
-- Stay serial only when fewer than four active fronts remain, all active fronts
-  share one concrete barrier class, or the operator's **current prompt** explicitly
-  allows serial execution. A note in `decisions.md`, a model-claimed token budget,
-  or an old override cannot bypass the gate.
+- If `chains.md`/`hints.md` stales a plan, a returned/failed execution can unlock only
+  its exact digest-bound completion Reviewer. A provably assigned-but-never-launched
+  non-Reviewer may be retired only through typed `workers.py cancel-unlaunched`, then
+  materially replanned. Cancellation is lifecycle settlement, never Agent result,
+  review, merge, evidence, finding, or `cycle_end`.
+- `ROOT_DIRECT` is a narrow, typed exception: one dependency-free atomic lane,
+  at most one request, and one exact `capability_id` whose registry entry explicitly
+  sets `root_direct_eligible`. The current allowlist is local-only
+  (`read.timestamp-gate`, `read.anti-drift-semantic-status`, `verify.check-run`,
+  `read.run-model`); target, control, model-egress, repository-mutation, generic
+  selftest and statusline capabilities remain ineligible. PreToolUse atomically
+  freezes one plan/lane/session/action claim; the matching transcript-backed
+  PostToolUse or PostToolUseFailure projects a content-addressed Root-action receipt.
+  No terminal or any second tool-use retains debt and requires replan. A successful
+  or failed typed receipt may settle the mechanical action and derive `cycle_end`,
+  but it is not Agent/Reviewer evidence, finding promotion, exit-gate satisfaction,
+  review independence, or closure authority.
+- Stay serial when the effect/dependency scheduler yields one safe lane, all active
+  fronts share one concrete barrier class, or the operator's **current prompt**
+  explicitly allows a one-turn serial override. A note in `decisions.md`, a
+  model-claimed token budget, or an old override cannot bypass the breadth fallback.
   See reference "Agent Board" + `docs/templates/agents/`.
 
 ## Dual Mind
@@ -426,7 +607,9 @@ observe -> update state graph -> decompose fronts
 
 ### Normal Mode Pause Gates
 
-Only two pauses; each requires a codex gate before the pause:
+Only two pauses. Pause 1 requires the independent Codex finding gate; Pause 2
+requires the transcript-backed Xunji Reviewer completion challenge. Neither
+replaces the content-addressed independent ReviewReceipt below.
 
 - **Pause 1 (CRITICAL found):** Triggered when a finding reaches `Severity: CRITICAL`
   with `Certainty >= 0.8`. BEFORE pausing — spawn a fresh-context codex agent to
@@ -444,21 +627,33 @@ Only two pauses; each requires a codex gate before the pause:
   content-addressed receipt, resolve every ledger item, and rerun after evidence changes. If the required backend matrix remains
   unavailable, the run remains open/paused with the limitation recorded.
 
-- **Pause 2 (Completion):** Triggered when all open fronts are adjudicated AND
-  `check_run` passes AND independent review is complete. BEFORE pausing — spawn a
-  fresh-context codex agent to review the COMPLETE run. The codex must confirm:
+- **Pause 2 (Completion):** Triggered when all open fronts are adjudicated, all
+  other `check_run` hard gates pass, and independent review is complete. BEFORE
+  pausing — invoke a fresh `xunji-reviewer` Agent to review the COMPLETE run. Use
+  exact `subagent_type=xunji-reviewer` and the exact assignment-free prompt from
+  `runtime_receipts.completion_review_prompt()`:
+  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
+  COMPLETION_BUNDLE=<current completion bundle sha256> run=<run.name>
+  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.
+  It must contain no assignment/front/assets/lane/plan/result-digest token and
+  must complete a real same-session Start→Stop lifecycle; parent Post/async
+  acknowledgement/prose alone does not count. The Reviewer must confirm:
   (a) no confirmed findings are missing from `report.md`, (b) no evidence entries
   have severity unsupported by their artifacts, (c) no reachable asset is
-  unaccounted-for in the frontier verdict. Record the codex verdict in
+  unaccounted-for in the frontier verdict, and (d) the review ledger has no
+  unresolved item. Record the Reviewer verdict in
   a substantive `## CodexCompletionReview` section with Reviewer, Verdict, and
-  concrete cross-check results in `decisions.md`. The Agent prompt must include
-  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
-  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.
-  Its response must echo `XUNJI_COMPLETION_VERDICT=PASS`, the same evidence hash,
-  and all four checks; bare PASS/WARN prose does not count. Only that current
+  concrete cross-check results in `decisions.md`. That legacy heading is retained
+  for storage compatibility; it does not identify the executor and cannot replace
+  the independent `peer_review.py` ReviewReceipt.
+  Its last non-empty response line must exactly equal
+  `XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX=<same 40hex>
+  COMPLETION_BUNDLE=<same 64hex> run=<same run.name>
+  CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review_ledger:PASS`;
+  any duplicate verdict or explicit FAIL/WARN/false check is invalid. Only that current
   transcript-backed receipt plus the structured section satisfies the gate.
 
-- If codex rejects the pause reason, the Root MUST continue — fix the issue
+- If the required reviewer rejects the pause reason, the Root MUST continue — fix the issue
   or downgrade the finding — and may NOT pause.
 
 ## Repository Discipline

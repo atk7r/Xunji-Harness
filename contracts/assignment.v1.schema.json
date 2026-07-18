@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/assignment.v1.schema.json",
+  "title": "Xunji Plan-bound Assignment v1",
+  "description": "The exact mutable state row produced for one work-plan Agent lane. Legacy unbound assignment rows do not claim this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "agent",
+    "role",
+    "front",
+    "front_title",
+    "plan_id",
+    "plan_digest",
+    "lane_id",
+    "effect",
+    "assignment_attempt",
+    "assets",
+    "asset_ids",
+    "coverage_before",
+    "scope",
+    "status",
+    "reasoning_style",
+    "loop_budget",
+    "operator_profile",
+    "context",
+    "agent_file",
+    "created_at",
+    "updated_at",
+    "attempts",
+    "reviews_assignments",
+    "coverage_merge_satisfied"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.assignment.v1"},
+    "agent": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$", "maxLength": 256},
+    "role": {
+      "enum": [
+        "surface",
+        "web-auth",
+        "web-hunter",
+        "code-audit",
+        "exploit",
+        "verify",
+        "review",
+        "report"
+      ]
+    },
+    "front": {"type": "string", "pattern": "^F-[0-9]+$", "maxLength": 64},
+    "front_title": {"type": "string", "minLength": 1, "maxLength": 2048},
+    "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "lane_id": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$", "maxLength": 256},
+    "effect": {
+      "enum": ["local_read", "local_verify", "target", "model_egress"]
+    },
+    "assignment_attempt": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "assets": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512},
+      "uniqueItems": true
+    },
+    "asset_ids": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {"type": "string", "pattern": "^ASSET-[0-9A-F]{12}$"},
+      "uniqueItems": true
+    },
+    "coverage_before": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {"type": "string", "minLength": 1, "maxLength": 512},
+      "additionalProperties": {"$ref": "#/$defs/coverageSnapshot"}
+    },
+    "scope": {"type": "string", "minLength": 1, "maxLength": 2048},
+    "status": {
+      "enum": [
+        "assigned",
+        "starting",
+        "running",
+        "working",
+        "done",
+        "merged",
+        "reviewed",
+        "blocked",
+        "failed",
+        "abandoned"
+      ]
+    },
+    "reasoning_style": {"const": "personalized-rdt"},
+    "loop_budget": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "operator_profile": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "context": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "agent_file": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "updated_at": {"$ref": "#/$defs/timestamp"},
+    "attempts": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {"$ref": "agent-receipt.v1.schema.json"}
+    },
+    "reviews_assignments": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$", "maxLength": 256},
+      "uniqueItems": true
+    },
+    "review_result_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "coverage_merge_satisfied": {"type": "boolean"},
+    "current_attempt": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "runtime_agent_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "last_note": {"type": "string", "maxLength": 8192},
+    "last_seen_at": {"$ref": "#/$defs/timestamp"},
+    "heartbeat_count": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "finished_at": {"$ref": "#/$defs/timestamp"},
+    "root_disposition_review_receipt_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "root_disposition_at": {"$ref": "#/$defs/timestamp"},
+    "disposition_history": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {"$ref": "#/$defs/dispositionHistory"}
+    },
+    "coverage_merge": {"$ref": "#/$defs/coverageMerge"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"role": {"const": "review"}}, "required": ["role"]},
+      "then": {
+        "required": ["review_result_digest"],
+        "properties": {
+          "effect": {"const": "local_verify"},
+          "reviews_assignments": {"minItems": 1, "maxItems": 1},
+          "attempts": {
+            "items": {
+              "properties": {
+                "subagent_type": {"const": "xunji-reviewer"}
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "reviews_assignments": {"maxItems": 0},
+          "attempts": {
+            "items": {
+              "properties": {
+                "subagent_type": {"const": "xunji-hunter"}
+              }
+            }
+          }
+        },
+        "not": {"required": ["review_result_digest"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": ["running", "working", "done", "merged", "reviewed", "blocked", "failed", "abandoned"]
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {"properties": {"attempts": {"minItems": 1}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": ["running", "working", "done", "merged", "reviewed"]
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {"required": ["current_attempt", "runtime_agent_id"]}
+    },
+    {
+      "if": {
+        "properties": {"status": {"enum": ["running", "working"]}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "attempts": {
+            "contains": {"properties": {"state": {"const": "running"}}},
+            "minContains": 1,
+            "maxContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"enum": ["done", "merged", "reviewed"]}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "attempts": {
+            "contains": {"properties": {"state": {"const": "returned"}}},
+            "minContains": 1,
+            "maxContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"enum": ["blocked", "failed", "abandoned"]}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "attempts": {
+            "contains": {
+              "properties": {"state": {"enum": ["returned", "failed"]}}
+            },
+            "minContains": 1,
+            "maxContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"enum": ["assigned", "starting"]}},
+        "required": ["status"]
+      },
+      "then": {"properties": {"attempts": {"maxItems": 0}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "reviewed"}}, "required": ["status"]},
+      "then": {
+        "required": ["finished_at"],
+        "properties": {"role": {"const": "review"}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"enum": ["merged", "blocked", "abandoned"]}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": [
+          "finished_at",
+          "root_disposition_review_receipt_hash",
+          "root_disposition_at"
+        ],
+        "not": {"properties": {"role": {"const": "review"}}, "required": ["role"]}
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "merged"}}, "required": ["status"]},
+      "then": {
+        "required": ["coverage_merge"],
+        "properties": {"coverage_merge_satisfied": {"const": true}}
+      },
+      "else": {"properties": {"coverage_merge_satisfied": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "failed"}}, "required": ["status"]},
+      "then": {
+        "oneOf": [
+          {
+            "not": {
+              "anyOf": [
+                {"required": ["finished_at"]},
+                {"required": ["root_disposition_review_receipt_hash"]},
+                {"required": ["root_disposition_at"]}
+              ]
+            }
+          },
+          {
+            "required": [
+              "finished_at",
+              "root_disposition_review_receipt_hash",
+              "root_disposition_at"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{3})?Z$",
+      "maxLength": 24
+    },
+    "coverageSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["examined", "verdict", "tested_groups"],
+      "properties": {
+        "examined": {"type": "boolean"},
+        "verdict": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "maxLength": 2048},
+            {"type": "boolean"}
+          ]
+        },
+        "tested_groups": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {"type": "string", "maxLength": 512},
+          "uniqueItems": true
+        }
+      }
+    },
+    "dispositionHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "note", "updated_at", "finished_at", "amended_at"],
+      "properties": {
+        "status": {"enum": ["merged", "blocked", "failed", "abandoned"]},
+        "note": {"type": "string", "maxLength": 8192},
+        "updated_at": {"$ref": "#/$defs/timestamp"},
+        "finished_at": {
+          "oneOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"const": ""}
+          ]
+        },
+        "amended_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "coverageMerge": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["satisfied", "legacy_or_non_target", "assets"],
+          "properties": {
+            "satisfied": {"const": true},
+            "legacy_or_non_target": {"const": true},
+            "assets": {"type": "object", "additionalProperties": false, "maxProperties": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["satisfied", "non_target_effect", "assets"],
+          "properties": {
+            "satisfied": {"const": true},
+            "non_target_effect": {"enum": ["local_read", "local_verify", "model_egress"]},
+            "assets": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["target_actions_required"],
+                "properties": {"target_actions_required": {"const": false}}
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["satisfied", "validated_at", "assets"],
+          "properties": {
+            "satisfied": {"const": true},
+            "validated_at": {"$ref": "#/$defs/timestamp"},
+            "assets": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["target_actions", "canonical_evidence"],
+                "properties": {
+                  "target_actions": {"type": "integer", "minimum": 1},
+                  "canonical_evidence": {"const": true}
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -6,13 +6,11 @@ verdict. Output is at most a 0.3-0.5 certainty lead; Hunter discipline still
 decides confirmed/rejected. The wrapper forces proof-only defaults and a rate cap;
 the PreToolUse hook is the second line that blocks dump/os-shell/intrusive flags.
 
-  python tools/scan.py sqlmap "https://t/x?id=1"      # injection PROOF only (no dump)
-  python tools/scan.py nuclei "https://t/"             # detection templates only
   python tools/scan.py --run runs/<dir> sqlmap "https://t/x?id=1"  # saves evidence
 
-This wrapper never adds --dump/--os-shell (sqlmap) or dos/intrusive tags
-(nuclei). If you hand it those, it refuses; if you bypass it and call the tool
-directly, the safety hook still blocks them.
+This wrapper exposes no scanner-native tail argv.  All proof-only flags are
+fixed internally; direct scanner invocation remains outside the capability and
+the safety hook still blocks it.
 """
 
 from __future__ import annotations
@@ -20,7 +18,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -30,6 +27,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness.guard import RateLimiter, HostHealth, HostBackoff  # noqa: E402
+from harness import guard as guardmod  # noqa: E402
 from harness import privacy as privacymod  # noqa: E402
 from harness import proxy as proxymod  # noqa: E402  扫描器流量走交战代理(模型调用不走)
 
@@ -47,9 +45,6 @@ NUCLEI_SAFE = ["-rate-limit", "30", "-concurrency", "5", "-timeout", "15",
                "-severity", "info,low,medium,high,critical",
                "-exclude-tags", "dos,intrusive,fuzz", "-header", f"User-Agent: {NEUTRAL_UA}"]
 
-FORBIDDEN_SQLMAP = ("--dump", "--os-shell", "--os-pwn", "--os-cmd", "--file-write",
-                    "--file-dest", "--sql-shell", "--priv-esc")
-FORBIDDEN_NUCLEI_TAGS = ("dos", "intrusive", "fuzz")
 FORBIDDEN_NUCLEI_TEMPLATE_FLAGS = ("-t", "-templates", "-template", "-ud", "-user-data")
 
 
@@ -69,6 +64,17 @@ def _privacy_input_error(tool: str, target: str, extra: list[str]) -> str:
     return ""
 
 
+def _valid_target(target: str) -> bool:
+    try:
+        parsed = urlparse(str(target or ""))
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme in {"http", "https"} and parsed.netloc and parsed.hostname
+        and not parsed.username and not parsed.password
+    )
+
+
 def _selftest() -> int:
     checks = [
         ("neutral fixed scanner UA", "xunji" not in NEUTRAL_UA.lower()),
@@ -76,10 +82,19 @@ def _selftest() -> int:
          bool(_privacy_input_error("sqlmap", "https://target.test/?marker=xunji-proof", []))),
         ("neutral scanner target allowed",
          _privacy_input_error("sqlmap", "https://target.test/?id=1", []) == ""),
+        ("scanner target must be one absolute credential-free HTTP URL",
+         _valid_target("https://target.test/?id=1")
+         and not _valid_target("targets.txt")
+         and not _valid_target("https://user:secret@target.test/")),
         ("custom nuclei template denied",
          bool(_privacy_input_error("nuclei", "https://target.test/", ["-t", "custom.yaml"]))),
         ("project marker in extra args denied",
          bool(_privacy_input_error("sqlmap", "https://target.test/", ["--prefix=xunji-proof"]))),
+        ("scanner egress route ID redacts proxy endpoint",
+         guardmod.egress_route_id("socks5h://user:secret@proxy.internal:1080").startswith(
+             "proxy:socks5h:")
+         and "secret" not in guardmod.egress_route_id(
+             "socks5h://user:secret@proxy.internal:1080")),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:
@@ -133,64 +148,64 @@ def _save_evidence(run_dir: str, name: str, tool: str, host: str,
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--proxy", default=None,
-                    help="交战代理(http://h:p / socks5h://h:p)；经中继扫描境内资产。未给则走 harness.proxy"
-                         "(XUNJI_PROXY / proxy.conf, 不读 HTTPS_PROXY=模型那条)。须置于 tool/target 之前")
     ap.add_argument("--run", default=None, dest="run_dir",
-                    help="run 目录如 runs/<target>; 给则将扫描输出落 evidence/<name>.scan.json + .scan.txt")
+                    help="活动 run 目录如 runs/<target>；扫描输出固定落 evidence/")
     ap.add_argument("--name", default=None,
                     help="证据名称(如 E-xxx_scan); 需 --run。默认用 <tool>_<host>")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("tool", nargs="?", choices=["sqlmap", "nuclei"])
     ap.add_argument("target", nargs="?")
-    ap.add_argument("extra", nargs=argparse.REMAINDER,
-                    help="extra args incl. -flags (vetted against the forbidden list)")
     args = ap.parse_args()
     if args.selftest:
         return _selftest()
-    if not args.tool or not args.target:
-        ap.error("tool and target are required (or use --selftest)")
+    if not args.run_dir or not args.tool or not args.target:
+        ap.error("--run, tool, and target are required (or use --selftest)")
+    if not _valid_target(args.target):
+        ap.error("target must be one absolute credential-free http(s) URL")
 
-    proxy = proxymod.resolve(args.proxy)   # 交战代理(XUNJI_PROXY/proxy.conf/--proxy); required 时没配 fail-closed
+    # The engagement proxy is a mandatory harness service.  It is resolved only
+    # from trusted environment/config; model-controlled --proxy argv is not part
+    # of this capability because it could redirect the entire scanner stream.
+    proxy = proxymod.resolve(None)
+    egress_route = guardmod.egress_route_id(proxy)
     host = urlparse(args.target).hostname or args.target
-    privacy_error = _privacy_input_error(args.tool, args.target, args.extra)
+    privacy_error = _privacy_input_error(args.tool, args.target, [])
     if privacy_error:
         print(f"[scan] refused: {privacy_error}", file=sys.stderr)
         return 5
     try:
         # 自熔断: 拒绝对已在退避冷却(连续失败/被目标限流)的 host 发起扫描器 —— 扫描器
         # 请求量大, 对正在封锁我的 host launch nuclei/sqlmap 只会加深封锁(本次教训)
-        HostHealth().check(host)
+        HostHealth().check(host, egress_route=egress_route, acquire_half_open=False)
+        guardmod.SessionBudget().check()
+    except guardmod.GuardStateError as e:
+        print(f"[scan] refused: guard-state: {e}", file=sys.stderr)
+        return 4
     except HostBackoff as e:
         print(f"[scan] refused: {e}", file=sys.stderr)
+        return 4
+    except guardmod.RateBudgetExceeded as e:
+        print(f"[scan] refused: session/rate budget: {e}", file=sys.stderr)
         return 4
     RateLimiter().gate(host)  # space the launch itself
 
     if args.tool == "sqlmap":
-        if any(f in " ".join(args.extra) for f in FORBIDDEN_SQLMAP):
-            print("[scan] refused: dump/os-shell/file-write exceed proof-only verification.",
-                  file=sys.stderr)
-            return 3
         if not shutil.which("sqlmap"):
             print("[scan] sqlmap not installed. Install it, then this wrapper enforces "
                   "proof-only flags (no --dump).", file=sys.stderr)
             return 127
         cmd = ["sqlmap", "-u", args.target, *[a for a in SQLMAP_SAFE if not a.startswith("--technique")],
-               SQLMAP_TECH, *args.extra]
+               SQLMAP_TECH]
         if proxy:
             cmd.append(f"--proxy={proxy}")
         return run(cmd, run_dir=args.run_dir, name=args.name, host=host, tool="sqlmap")
 
     # nuclei
-    if any(t in " ".join(args.extra) for t in FORBIDDEN_NUCLEI_TAGS):
-        print("[scan] refused: dos/intrusive/fuzz templates exceed proof-only verification.",
-              file=sys.stderr)
-        return 3
     if not shutil.which("nuclei"):
         print("[scan] nuclei not installed. Install it, then this wrapper enforces "
               "rate-limit + excludes dos/intrusive templates.", file=sys.stderr)
         return 127
-    cmd = ["nuclei", "-u", args.target, *NUCLEI_SAFE, *args.extra]
+    cmd = ["nuclei", "-u", args.target, *NUCLEI_SAFE]
     if proxy:
         cmd += ["-proxy", proxy]
     return run(cmd, run_dir=args.run_dir, name=args.name, host=host, tool="nuclei")

@@ -14,6 +14,12 @@ run_gate / check_run). FAIL-OPEN: any error prints the static rules and exits 0;
 injector must never break a turn. Process-state is DERIVED from the run files (reuse check_run),
 not self-reported — a drifted self-report would just re-encode the drift.
 
+Reason-pass freshness is content-based: a versioned, hash-chained receipt binds the Root's
+read/adjudication claim to a stable canonical digest snapshot. The receipt is derived audit state,
+not proof that a model actually read the files, and never grants authority, evidence promotion, or
+closure. Operational liveness is projected separately from journals/runtime/Agent receipts and is
+never inferred from canonical-file mtimes.
+
 Two modes (config.ini [mode] mode=):
   normal — full enforcement: drift block + evidence gates + auto-closure
   dev    — development: drift detection records but does not block, evidence gates + closure checks still run
@@ -21,14 +27,26 @@ Two modes (config.ini [mode] mode=):
 Usage:
     python tools/anti_drift.py            # print the anchor (UserPromptSubmit hook target)
     python tools/anti_drift.py --selftest # offline regression
+    python tools/anti_drift.py --semantic-status runs/<dir>
+    python tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N \
+        --chosen-front F-001 --reason "whole-graph adjudication"
 """
 from __future__ import annotations
 
+import argparse
+import contextlib
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback remains process-local
+    fcntl = None
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
@@ -43,6 +61,41 @@ CONFIG_INI = ROOT / "config.ini"
 CONFIG_EXAMPLE_INI = ROOT / "config.example.ini"
 ACTIVE_WINDOW_SEC = 6 * 3600   # a run that saw any file change in the last 6h = the one in flight
 SESSION_STATE_STALE_SEC = 50 * 60  # session_state.json stale threshold
+
+# Semantic anti-drift is intentionally separate from session/output liveness.
+# Reason-pass receipts are derived audit claims: canonical Markdown/coverage
+# remains the source of truth, and a receipt never grants authority or closure.
+REASON_PASS_SCHEMA = "xunji.reason-pass.v1"
+REASON_PASS_RECEIPTS = "reason_pass_receipts.jsonl"
+REASON_PASS_MAX_BYTES = 8 * 1024 * 1024
+REASON_PASS_MAX_RECORDS = 4096
+NO_SEMANTIC_PROGRESS_THRESHOLD = 3
+REASON_PASS_DIGEST_FIELDS = (
+    "frontier_digest",
+    "evidence_digest",
+    "coverage_digest",
+    "decision_digest",
+    "graph_digest",
+)
+TRAJECTORY_DIGEST_FIELDS = (
+    "frontier_digest",
+    "evidence_digest",
+    "coverage_digest",
+    "graph_digest",
+)
+_REASON_PASS_FIELDS = {
+    "schema",
+    "run_id",
+    "cycle_id",
+    *REASON_PASS_DIGEST_FIELDS,
+    "read_at",
+    "chosen_front",
+    "reason",
+    "previous_receipt_hash",
+    "receipt_hash",
+}
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_CYCLE_FRONT_RE = re.compile(r"^(?:F-[0-9]+[A-Za-z]*|NONE)$")
 
 _TOOLS_PATH = str(ROOT / "tools")
 if _TOOLS_PATH not in sys.path:
@@ -87,7 +140,7 @@ def is_normal_mode() -> bool:
 #   recency zone as a final check before the model produces output.
 BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
     "自主驱动: safe 前沿还在就别停下问(会话长/已解决障碍/选下一类 都不是停止理由)",
-    "Reason pass: 每轮先重读整个 frontier.md(所有 open+deferred 前沿)再选 — 防隧道视野",
+    "Reason pass: 每轮重读整个 frontier.md(所有 open+deferred)并结合 evidence/coverage/graph 裁定后写 v1 receipt; 内容未变可只读确认, 禁止 freshness touch/edit",
     "回合协议: active run 未完成时结尾必须且只能有一个「下一行动: <一个对象+一个具体动作>」; 空值/占位/泛泛继续/多动作/多F-id/错误F-id/BLOCKED都会被 Stop hook 硬拦",
     "联网检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 前必须先 python tools/timestamp_gate.py --search-hint --kind vuln 获取当前时间并逐条执行其输出的约束; 非 CVE/CNVD 检索用 --kind generic",
     "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮执行 timestamp_gate --kind vuln → knowledge/xday → WebSearch/WebFetch, 再决定关闭或定级",
@@ -124,6 +177,428 @@ def _valid_ts(value, now: float) -> float:
     if ts < 0 or ts > now + 60:
         return 0.0
     return ts
+
+
+def _json_bytes(value: object) -> bytes:
+    """Stable JSON encoding used by semantic digests and receipt hashes."""
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _sha256(value: object) -> str:
+    return hashlib.sha256(_json_bytes(value)).hexdigest()
+
+
+def _normalise_markdown(text: str) -> str:
+    """Ignore transport-only newline/trailing-space churn, not semantic prose."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return "\n".join(line.rstrip() for line in text.split("\n")).rstrip("\n") + "\n"
+
+
+def _markdown_value(path: Path) -> dict:
+    if not path.exists():
+        return {"present": False, "text": ""}
+    if not path.is_file():
+        raise ValueError(f"canonical path is not a file: {path}")
+    return {
+        "present": True,
+        "text": _normalise_markdown(path.read_text(encoding="utf-8", errors="replace")),
+    }
+
+
+def _coverage_value(run_dir: Path) -> list[dict]:
+    """Return semantic coverage inputs without consuming derived state caches."""
+    out: list[dict] = []
+    for rel in (Path("coverage.json"), Path("classify") / "coverage.json"):
+        path = run_dir / rel
+        if not path.exists():
+            continue
+        if not path.is_file():
+            raise ValueError(f"coverage path is not a file: {path}")
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            value: object = json.loads(raw)
+            out.append({"path": rel.as_posix(), "valid_json": True, "value": value})
+        except Exception:
+            # Malformed coverage still changes freshness deterministically.  The
+            # coverage/evidence gates remain responsible for rejecting it.
+            out.append({
+                "path": rel.as_posix(),
+                "valid_json": False,
+                "text": _normalise_markdown(raw),
+            })
+    return out
+
+
+def _graph_value(run_dir: Path) -> dict:
+    """Build the graph from canonical inputs; never trust a stale graph.json cache."""
+    try:
+        import graph as graph_model
+        value = graph_model.build_graph(run_dir)
+    except Exception as exc:
+        raise ValueError(f"cannot derive canonical graph: {type(exc).__name__}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("canonical graph builder returned a non-object")
+    return value
+
+
+def canonical_reason_pass_digests(run_dir: str | Path) -> dict[str, str]:
+    """Compute the five versioned Reason-pass digests without writing run files."""
+    run = Path(run_dir).resolve()
+    if not run.is_dir():
+        raise FileNotFoundError(f"run directory does not exist: {run}")
+    return {
+        "frontier_digest": _sha256(_markdown_value(run / "frontier.md")),
+        "evidence_digest": _sha256(_markdown_value(run / "evidence.md")),
+        "coverage_digest": _sha256(_coverage_value(run)),
+        "decision_digest": _sha256(_markdown_value(run / "decisions.md")),
+        "graph_digest": _sha256(_graph_value(run)),
+    }
+
+
+def _stable_reason_pass_digests(run_dir: Path) -> dict[str, str]:
+    """Reject a torn snapshot if canonical inputs change while being hashed."""
+    first = canonical_reason_pass_digests(run_dir)
+    second = canonical_reason_pass_digests(run_dir)
+    if first != second:
+        changed = sorted(k for k in first if first.get(k) != second.get(k))
+        raise RuntimeError(
+            "canonical Reason-pass inputs changed during snapshot: " + ", ".join(changed)
+        )
+    return second
+
+
+def _reason_pass_path(run_dir: Path) -> Path:
+    return run_dir / "state" / REASON_PASS_RECEIPTS
+
+
+@contextlib.contextmanager
+def _reason_pass_lock(run_dir: Path):
+    path = run_dir / "state" / ".reason_pass.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _receipt_hash(receipt: dict) -> str:
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_hash", None)
+    return _sha256(unsigned)
+
+
+def validate_reason_pass_receipt(
+    receipt: object,
+    *,
+    run_id: str = "",
+    now: float | None = None,
+) -> list[str]:
+    """Validate one v1 receipt structurally and cryptographically.
+
+    Unknown schemas and fields fail closed.  This validates the receipt claim,
+    not the historical truth of what the model read; current canonical equality
+    is checked separately by :func:`semantic_freshness`.
+    """
+    if not isinstance(receipt, dict):
+        return ["receipt is not an object"]
+    if receipt.get("schema") != REASON_PASS_SCHEMA:
+        return [f"unknown reason-pass schema: {receipt.get('schema')!r}"]
+    errors: list[str] = []
+    keys = set(receipt)
+    missing = sorted(_REASON_PASS_FIELDS - keys)
+    extra = sorted(keys - _REASON_PASS_FIELDS)
+    if missing:
+        errors.append("missing field(s): " + ", ".join(missing))
+    if extra:
+        errors.append("unknown field(s): " + ", ".join(extra))
+    value_run_id = receipt.get("run_id")
+    if not isinstance(value_run_id, str) or not value_run_id or len(value_run_id) > 255:
+        errors.append("run_id must be a non-empty string <=255 chars")
+    elif run_id and value_run_id != run_id:
+        errors.append(f"run_id mismatch: receipt={value_run_id!r} current={run_id!r}")
+    cycle = receipt.get("cycle_id")
+    if isinstance(cycle, bool) or not isinstance(cycle, int) or cycle < 1:
+        errors.append("cycle_id must be an integer >=1")
+    for field in REASON_PASS_DIGEST_FIELDS:
+        if not isinstance(receipt.get(field), str) or not _SHA256_RE.fullmatch(
+            str(receipt.get(field) or "")
+        ):
+            errors.append(f"{field} must be lowercase SHA-256")
+    read_at = receipt.get("read_at")
+    valid_read_at = _valid_ts(read_at, time.time() if now is None else now)
+    if not valid_read_at:
+        errors.append("read_at must be a non-future positive timestamp")
+    chosen = receipt.get("chosen_front")
+    if not isinstance(chosen, str) or not _CYCLE_FRONT_RE.fullmatch(chosen):
+        errors.append("chosen_front must be F-<number>[suffix] or NONE")
+    reason = receipt.get("reason")
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 4096:
+        errors.append("reason must be a non-empty string <=4096 chars")
+    previous = receipt.get("previous_receipt_hash")
+    if not isinstance(previous, str) or (previous and not _SHA256_RE.fullmatch(previous)):
+        errors.append("previous_receipt_hash must be empty or lowercase SHA-256")
+    claimed_hash = receipt.get("receipt_hash")
+    if not isinstance(claimed_hash, str) or not _SHA256_RE.fullmatch(claimed_hash):
+        errors.append("receipt_hash must be lowercase SHA-256")
+    elif claimed_hash != _receipt_hash(receipt):
+        errors.append("receipt_hash mismatch")
+    return errors
+
+
+def load_reason_pass_receipts(run_dir: str | Path) -> tuple[list[dict], list[str]]:
+    """Load and validate the bounded append-only receipt chain."""
+    run = Path(run_dir).resolve()
+    path = _reason_pass_path(run)
+    if not path.exists():
+        return [], []
+    try:
+        if path.stat().st_size > REASON_PASS_MAX_BYTES:
+            return [], [f"reason-pass receipt file exceeds {REASON_PASS_MAX_BYTES} bytes"]
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception as exc:
+        return [], [f"cannot read reason-pass receipts: {type(exc).__name__}: {exc}"]
+    nonempty = [(idx, line) for idx, line in enumerate(lines, 1) if line.strip()]
+    if len(nonempty) > REASON_PASS_MAX_RECORDS:
+        return [], [f"reason-pass receipt count exceeds {REASON_PASS_MAX_RECORDS}"]
+    receipts: list[dict] = []
+    errors: list[str] = []
+    previous_hash = ""
+    previous_cycle = 0
+    for lineno, line in nonempty:
+        try:
+            item = json.loads(line)
+        except Exception as exc:
+            errors.append(f"line {lineno}: malformed JSON ({type(exc).__name__})")
+            break
+        item_errors = validate_reason_pass_receipt(item, run_id=run.name)
+        if item_errors:
+            errors.extend(f"line {lineno}: {error}" for error in item_errors)
+            break
+        assert isinstance(item, dict)  # narrowed by validator
+        if item.get("previous_receipt_hash") != previous_hash:
+            errors.append(f"line {lineno}: previous_receipt_hash breaks the chain")
+            break
+        cycle = int(item["cycle_id"])
+        if previous_cycle and cycle != previous_cycle + 1:
+            errors.append(f"line {lineno}: cycle_id must be contiguous")
+            break
+        receipts.append(item)
+        previous_hash = str(item["receipt_hash"])
+        previous_cycle = cycle
+    return (receipts if not errors else []), errors
+
+
+def record_reason_pass(
+    run_dir: str | Path,
+    *,
+    cycle_id: int,
+    chosen_front: str,
+    reason: str,
+    read_at: float | None = None,
+) -> dict:
+    """Append a v1 Reason-pass receipt bound to a stable canonical snapshot."""
+    run = Path(run_dir).resolve()
+    if not run.is_dir():
+        raise FileNotFoundError(f"run directory does not exist: {run}")
+    missing_inputs = [
+        name for name in ("frontier.md", "evidence.md", "decisions.md")
+        if not (run / name).is_file()
+    ]
+    if missing_inputs:
+        raise ValueError("run lacks canonical Reason-pass input(s): " + ", ".join(missing_inputs))
+    chosen = str(chosen_front).strip().upper()
+    reason_text = str(reason).strip()
+    if chosen != "NONE":
+        frontier_text = _markdown_value(run / "frontier.md")["text"]
+        if not re.search(rf"(?m)^###\s+{re.escape(chosen)}(?:\s|$)", frontier_text):
+            raise ValueError(f"chosen_front is not present in frontier.md: {chosen}")
+    with _reason_pass_lock(run):
+        receipts, errors = load_reason_pass_receipts(run)
+        if errors:
+            raise ValueError("invalid reason-pass receipt chain: " + "; ".join(errors[:3]))
+        if receipts and cycle_id != int(receipts[-1]["cycle_id"]) + 1:
+            raise ValueError("cycle_id must be exactly one greater than the latest receipt cycle_id")
+        digests = _stable_reason_pass_digests(run)
+        recorded_at = time.time() if read_at is None else read_at
+        if abs(time.time() - float(recorded_at)) > 300:
+            raise ValueError("read_at for a new receipt must be within five minutes of now")
+        receipt = {
+            "schema": REASON_PASS_SCHEMA,
+            "run_id": run.name,
+            "cycle_id": cycle_id,
+            **digests,
+            "read_at": recorded_at,
+            "chosen_front": chosen,
+            "reason": reason_text,
+            "previous_receipt_hash": receipts[-1]["receipt_hash"] if receipts else "",
+        }
+        receipt["receipt_hash"] = _receipt_hash(receipt)
+        item_errors = validate_reason_pass_receipt(receipt, run_id=run.name)
+        if item_errors:
+            raise ValueError("invalid reason-pass receipt: " + "; ".join(item_errors))
+        path = _reason_pass_path(run)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(receipt, ensure_ascii=False, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        return receipt
+
+
+def semantic_freshness(run_dir: str | Path) -> dict:
+    """Assess Reason-pass freshness from content, never from mtimes.
+
+    A legacy run without v1 receipts remains usable, but freshness is explicitly
+    unproven.  Legacy session-state fields cannot forge a fresh result.
+    """
+    run = Path(run_dir).resolve()
+    try:
+        current = _stable_reason_pass_digests(run)
+    except Exception as exc:
+        return {
+            "status": "invalid",
+            "remind": True,
+            "changed_fields": [],
+            "reason": f"cannot compute canonical digests: {type(exc).__name__}: {exc}",
+        }
+    receipts, errors = load_reason_pass_receipts(run)
+    if errors:
+        return {
+            "status": "invalid",
+            "remind": True,
+            "changed_fields": [],
+            "reason": "invalid reason-pass receipt chain: " + "; ".join(errors[:3]),
+        }
+    if not receipts:
+        return {
+            "status": "legacy_unproven",
+            "remind": True,
+            "changed_fields": [],
+            "reason": "no v1 Reason-pass receipt; legacy timestamps do not prove freshness",
+            "current_digests": current,
+        }
+    latest = receipts[-1]
+    changed = [field for field in REASON_PASS_DIGEST_FIELDS if latest.get(field) != current[field]]
+    if changed:
+        return {
+            "status": "changed_unadjudicated",
+            "remind": True,
+            "changed_fields": changed,
+            "reason": "canonical content changed after the latest Reason-pass receipt",
+            "latest_cycle_id": latest["cycle_id"],
+            "latest_receipt_hash": latest["receipt_hash"],
+            "current_digests": current,
+        }
+    return {
+        "status": "fresh",
+        "remind": False,
+        "changed_fields": [],
+        "reason": "latest Reason-pass receipt covers the current canonical digests",
+        "latest_cycle_id": latest["cycle_id"],
+        "latest_receipt_hash": latest["receipt_hash"],
+        "current_digests": current,
+    }
+
+
+def semantic_trajectory(run_dir: str | Path) -> dict:
+    """Count consecutive receipt transitions with no semantic graph/evidence progress."""
+    receipts, errors = load_reason_pass_receipts(run_dir)
+    if errors:
+        return {
+            "status": "invalid",
+            "no_progress_cycles": 0,
+            "trajectory_review_due": False,
+            "reason": "invalid reason-pass receipt chain: " + "; ".join(errors[:3]),
+        }
+    streak = 0
+    for previous, current in reversed(list(zip(receipts, receipts[1:]))):
+        if any(previous.get(field) != current.get(field) for field in TRAJECTORY_DIGEST_FIELDS):
+            break
+        streak += 1
+    return {
+        "status": "tracked" if receipts else "untracked",
+        "no_progress_cycles": streak,
+        "trajectory_review_due": streak >= NO_SEMANTIC_PROGRESS_THRESHOLD,
+        "threshold": NO_SEMANTIC_PROGRESS_THRESHOLD,
+        "latest_cycle_id": receipts[-1]["cycle_id"] if receipts else None,
+        "reason": (
+            "consecutive cycles changed only adjudication prose, not frontier/evidence/coverage/graph"
+            if streak else "semantic progress is not currently stalled"
+        ),
+    }
+
+
+def operational_liveness(run_dir: str | Path) -> dict:
+    """Project explicit journal/runtime/Agent state without any freshness clocks.
+
+    This function deliberately has no digest comparison and no mtime/age test;
+    callers must not use its result as evidence of Reason-pass freshness.
+    """
+    run = Path(run_dir).resolve()
+    journal_path = run / "state" / "loop_journal.jsonl"
+    journal_events: list[dict] = []
+    errors: list[str] = []
+    if journal_path.exists():
+        for lineno, line in enumerate(
+            journal_path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except Exception:
+                errors.append(f"loop journal line {lineno}: malformed JSON")
+                break
+            if not isinstance(item, dict) or item.get("schema") != "xunji.loop_journal.v1":
+                errors.append(f"loop journal line {lineno}: unknown schema")
+                break
+            journal_events.append(item)
+
+    runtime_events: list[dict] = []
+    active_agents: list[str] = []
+    runtime_path = run / "state" / "runtime_events.jsonl"
+    if runtime_path.exists():
+        try:
+            import runtime_receipts
+            runtime_events, runtime_errors = runtime_receipts.validate_chain(run)
+            errors.extend(f"runtime receipt: {error}" for error in runtime_errors[:3])
+            if not runtime_errors:
+                attempts = runtime_receipts.agent_attempts(run)
+                active_agents = sorted({
+                    str(item.get("agent_id") or item.get("assignment") or "")
+                    for item in attempts
+                    if item.get("launched_at") and not item.get("returned_at")
+                } - {""})
+        except Exception as exc:
+            errors.append(f"runtime receipts unavailable: {type(exc).__name__}: {exc}")
+
+    last_event = str(journal_events[-1].get("event") or "") if journal_events else ""
+    open_journal = last_event in {
+        "cycle_start", "plan", "action", "write_result", "resume", "phase_start"
+    }
+    if errors:
+        status = "invalid"
+    elif active_agents or open_journal:
+        status = "active"
+    elif journal_events or runtime_events:
+        status = "quiescent"
+    else:
+        status = "unknown"
+    return {
+        "status": status,
+        "active_agents": active_agents,
+        "last_journal_event": last_event or None,
+        "journal_event_count": len(journal_events),
+        "runtime_event_count": len(runtime_events),
+        "errors": errors,
+        "clock_free": True,
+    }
 
 
 class SessionStateManager:
@@ -400,17 +875,44 @@ def build_anchor(
     # ---- Phase 1: read session_state.json and inject re-read instructions ----
     run = find_active_run(runs_root, active_pointer=active_pointer)
     drift_flags: list[str] = []
+    semantic_state: dict = {}
+    trajectory_state: dict = {}
     if run is not None:
         SessionStateManager.reset_if_stale(run)
-        drift_flags = SessionStateManager.get_drift_flags(run)
+        # ``frontier_stale`` is a legacy mtime claim.  It may still be present
+        # until output_gate is migrated, but it cannot mint semantic staleness.
+        drift_flags = [
+            flag for flag in SessionStateManager.get_drift_flags(run)
+            if flag != "frontier_stale"
+        ]
+        semantic_state = semantic_freshness(run)
+        trajectory_state = semantic_trajectory(run)
+
+    if semantic_state.get("remind"):
+        lines.append("⚠ Reason-pass 语义新鲜度待处理:")
+        if semantic_state.get("status") == "changed_unadjudicated":
+            changed = ", ".join(semantic_state.get("changed_fields", []))
+            lines.append(f"  · canonical 内容已变化({changed}); 本轮重读全图并记录 v1 receipt")
+        elif semantic_state.get("status") == "legacy_unproven":
+            lines.append("  · 旧 run 尚无 v1 receipt; 做一次全图 Reason pass 建立语义基线(不得 touch canonical 文件)")
+        else:
+            lines.append(f"  · receipt/digest 无法验证: {str(semantic_state.get('reason') or '')[:160]}")
+        lines.append("  · 内容未变时只读确认即可; freshness 不要求 Edit frontier.md")
+        lines.append("")
+    if trajectory_state.get("trajectory_review_due"):
+        lines.append("⚠ Trajectory review due:")
+        lines.append(
+            "  · 连续 " + str(trajectory_state.get("no_progress_cycles", 0))
+            + " 个周期无 frontier/evidence/coverage/graph 语义增量; 复盘盲点并 pivot/分派 review 或 surface Agent"
+        )
+        lines.append("  · 这是轨迹收敛信号, 不是 Completion/收口授权")
+        lines.append("")
 
     # Re-read directives based on drift_flags (injected BEFORE Tier-1 for max attention)
     if drift_flags:
         lines.append("⚠ 检测到漂移信号 — 先 Read 对应约束文件后继续:")
         for flag in drift_flags:
-            if flag == "frontier_stale":
-                lines.append("  · 先 Read frontier.md 然后 EDIT 更新状态(读取不改变 mtime, 必须编辑!)")
-            elif flag == "protocol_violation":
+            if flag == "protocol_violation":
                 lines.append("  · 先 Read CLAUDE.md — 回合协议违规")
             elif flag == "option_list":
                 lines.append("  · 先 Read CLAUDE.md \"自主驱动\"段")
@@ -492,11 +994,15 @@ def build_anchor(
         if "protocol_violation" in drift_flags:
             lines.append("  □ 最后一个非空行是否【唯一】的「下一行动: <对象+具体动作>」？")
             lines.append("    → 不含空值/占位/泛泛继续/多动作/多F-id/错误F-id；未完成 run 不得用 BLOCKED 逃避")
-        if "frontier_stale" in drift_flags:
-            lines.append("  □ 已 Read frontier.md 【并 EDIT 更新】状态了吗？(只读不改 = mtime 不变 = 下轮仍提醒)")
         if "option_list" in drift_flags:
             lines.append("  □ 是否产生了编号选项列表(1.xxx / 2.xxx)把决策抛回给用户？")
             lines.append("    → 如有, 删掉选项, 自主选一个方向, 写成「下一行动:」。")
+
+    if semantic_state.get("remind"):
+        lines.append("")
+        lines.append("【Reason-pass 回执前自检】")
+        lines.append("  □ 是否重读/裁定了当前 digest 对应的全图, 并记录 v1 receipt？")
+        lines.append("  □ 若 canonical 内容未变, 是否避免了无语义 touch/edit？")
 
     return "\n".join(lines)
 
@@ -509,14 +1015,16 @@ def _selftest() -> int:
     globals()["is_dev_mode"] = lambda: False
 
     checks: list[tuple[str, bool]] = []
-    a = build_anchor()
+    d = Path(tempfile.mkdtemp())
+    empty_runs = d / "empty-runs"
+    empty_runs.mkdir()
+    a = build_anchor(runs_root=empty_runs, active_pointer=d / "missing-pointer")
     checks.append(("anchor non-empty", bool(a.strip())))
     checks.append(("anchor carries binding rules", "本轮必做" in a and "约束速查" in a))
     checks.append(("anchor is compact (<3KB)", len(a) < 3072))
     # drift patterns list
     checks.append(("drift patterns non-empty", len(DRIFT_PATTERNS) >= 5))
     # find_active_run: explicit pointer is the only run authority.
-    d = Path(tempfile.mkdtemp())
     checks.append(("stage Detection exists", _detect_stage(d) == "Setup"))
     runs = d / "runs"
     (runs / "a_x").mkdir(parents=True)
@@ -539,7 +1047,6 @@ def _selftest() -> int:
                    find_active_run(runs, active_pointer=pointer) is None))
 
     # SessionStateManager tests
-    time.sleep(1.1)  # ensure mtime is later than a_x/report.md created above
     rd = runs / "test_session"
     rd.mkdir(parents=True)
     # missing file -> {}
@@ -568,7 +1075,6 @@ def _selftest() -> int:
     _tmp_runs.mkdir()
     test_run = _tmp_runs / "_selftest_drift_test"
     test_run.mkdir(parents=True)
-    time.sleep(1.1)  # ensure mtime is fresh
     (test_run / "evidence.md").write_text("# test", encoding="utf-8")
     (test_run / "session_state.json").write_text(
         json.dumps({"drift_flags": ["protocol_violation", "frontier_stale"], "frontier_mtime": 0.0,
@@ -578,8 +1084,11 @@ def _selftest() -> int:
     anchor_with_drift = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
     checks.append(("anchor injects protocol_violation warning",
                    "先 Read CLAUDE.md — 回合协议违规" in anchor_with_drift))
-    checks.append(("anchor injects frontier_stale warning",
-                   "先 Read frontier.md 然后 EDIT 更新状态" in anchor_with_drift))
+    legacy_ritual = "先 Read frontier.md 然后 " + "EDIT 更新状态"
+    legacy_mtime_claim = "只读不改 = " + "mtime"
+    checks.append(("legacy frontier mtime cannot mint ritual edit",
+                   legacy_ritual not in anchor_with_drift
+                   and legacy_mtime_claim not in anchor_with_drift))
     checks.append(("anchor still has Tier-1 rules", "本轮必做" in anchor_with_drift))
     # self-check section present when drift
     checks.append(("anchor has self-check section when drift",
@@ -600,11 +1109,205 @@ def _selftest() -> int:
     checks.append(("stale session_state auto-reset",
                    "先 Read CLAUDE.md — 回合协议违规" not in anchor_fresh))
 
+    # Semantic freshness / Reason-pass receipt fixtures.
+    def _semantic_run(name: str) -> Path:
+        run = _tmp_runs / name
+        run.mkdir()
+        (run / "frontier.md").write_text(
+            "# Frontier\n\n## Open Fronts\n\n"
+            "### F-001 Login\n- Status: open\n- Barrier class: auth-layer\n",
+            encoding="utf-8",
+        )
+        (run / "hypotheses.md").write_text(
+            "# Hypotheses\n\n## H-001\n- Status: open\n", encoding="utf-8"
+        )
+        (run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+        (run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+        (run / "classify").mkdir()
+        (run / "classify" / "coverage.json").write_text(
+            json.dumps({"assets": [{"host": "example.test", "reachable": True}]}),
+            encoding="utf-8",
+        )
+        return run
+
+    semantic_run = _semantic_run("semantic_freshness")
+    forged = canonical_reason_pass_digests(semantic_run)
+    SessionStateManager.save(semantic_run, {
+        "drift_flags": [],
+        "frontier_mtime": time.time(),
+        **forged,
+    })
+    legacy = semantic_freshness(semantic_run)
+    checks.append(("legacy timestamps/digests cannot forge freshness",
+                   legacy.get("status") == "legacy_unproven" and legacy.get("remind") is True))
+
+    canonical_paths = [
+        semantic_run / "frontier.md",
+        semantic_run / "hypotheses.md",
+        semantic_run / "evidence.md",
+        semantic_run / "decisions.md",
+        semantic_run / "classify" / "coverage.json",
+    ]
+    canonical_mtimes = {path: path.stat().st_mtime_ns for path in canonical_paths}
+    first_receipt = record_reason_pass(
+        semantic_run,
+        cycle_id=1,
+        chosen_front="F-001",
+        reason="whole-graph read; F-001 has the strongest unresolved auth signal",
+    )
+    checks.append(("receipt binds all required semantic digests",
+                   first_receipt.get("schema") == REASON_PASS_SCHEMA
+                   and all(_SHA256_RE.fullmatch(str(first_receipt.get(field) or ""))
+                           for field in REASON_PASS_DIGEST_FIELDS)))
+    checks.append(("recording receipt never touches canonical files",
+                   canonical_mtimes == {path: path.stat().st_mtime_ns for path in canonical_paths}))
+    fresh = semantic_freshness(semantic_run)
+    before_readonly = {
+        path: path.stat().st_mtime_ns
+        for path in semantic_run.rglob("*") if path.is_file()
+    }
+    fresh_again = semantic_freshness(semantic_run)
+    semantic_trajectory(semantic_run)
+    after_readonly = {
+        path: path.stat().st_mtime_ns
+        for path in semantic_run.rglob("*") if path.is_file()
+    }
+    checks.append(("matching digest is fresh without reminder",
+                   fresh.get("status") == "fresh" and fresh.get("remind") is False))
+    checks.append(("content-unchanged semantic checks are read-only",
+                   fresh_again.get("status") == "fresh" and before_readonly == after_readonly))
+    test_pointer.write_text(str(semantic_run), encoding="utf-8")
+    anchor_semantic_fresh = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
+    checks.append(("fresh anchor has no semantic-stale reminder",
+                   "Reason-pass 语义新鲜度待处理" not in anchor_semantic_fresh))
+
+    (semantic_run / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001\n- Maturity: candidate\n"
+        "- Certainty: 0.5\n- Supports: F-001\n",
+        encoding="utf-8",
+    )
+    changed = semantic_freshness(semantic_run)
+    checks.append(("canonical digest change without reread reminds",
+                   changed.get("status") == "changed_unadjudicated"
+                   and "evidence_digest" in changed.get("changed_fields", [])))
+    changed_mtime = (semantic_run / "evidence.md").stat().st_mtime_ns
+    changed_again = semantic_freshness(semantic_run)
+    checks.append(("changed-digest assessment does not ritual-edit",
+                   changed_again.get("remind") is True
+                   and (semantic_run / "evidence.md").stat().st_mtime_ns == changed_mtime))
+    anchor_semantic_changed = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
+    checks.append(("anchor names changed canonical digest",
+                   "canonical 内容已变化" in anchor_semantic_changed
+                   and "freshness 不要求 Edit frontier.md" in anchor_semantic_changed))
+
+    # Three decision-only transitions do not count as semantic trajectory progress.
+    trajectory_run = _semantic_run("semantic_trajectory")
+    record_reason_pass(
+        trajectory_run, cycle_id=1, chosen_front="F-001", reason="baseline whole-graph pass"
+    )
+    for cycle in range(2, 5):
+        with (trajectory_run / "decisions.md").open("a", encoding="utf-8") as handle:
+            handle.write(f"\n## D-{cycle:03d}\n- Chosen front: F-001\n- Result: no new signal\n")
+        record_reason_pass(
+            trajectory_run,
+            cycle_id=cycle,
+            chosen_front="F-001",
+            reason=f"cycle {cycle}: same precondition and no new signal",
+        )
+    stalled = semantic_trajectory(trajectory_run)
+    checks.append(("consecutive no-semantic-progress cycles trigger trajectory review",
+                   stalled.get("no_progress_cycles") == 3
+                   and stalled.get("trajectory_review_due") is True))
+    (trajectory_run / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001\n- Maturity: candidate\n- Certainty: 0.5\n",
+        encoding="utf-8",
+    )
+    record_reason_pass(
+        trajectory_run, cycle_id=5, chosen_front="F-001", reason="new E-001 resets trajectory"
+    )
+    progressed = semantic_trajectory(trajectory_run)
+    checks.append(("evidence/graph progress resets trajectory streak",
+                   progressed.get("no_progress_cycles") == 0
+                   and progressed.get("trajectory_review_due") is False))
+    try:
+        record_reason_pass(
+            trajectory_run, cycle_id=7, chosen_front="F-001", reason="attempt to skip cycle 6"
+        )
+        skipped_cycle_rejected = False
+    except ValueError:
+        skipped_cycle_rejected = True
+    checks.append(("receipt cycles cannot skip and hide a no-progress interval",
+                   skipped_cycle_rejected))
+
+    tampered_run = _semantic_run("tampered_receipt")
+    record_reason_pass(
+        tampered_run, cycle_id=1, chosen_front="F-001", reason="baseline before tamper"
+    )
+    tampered_path = _reason_pass_path(tampered_run)
+    tampered_item = json.loads(tampered_path.read_text(encoding="utf-8"))
+    tampered_item["evidence_digest"] = "0" * 64
+    tampered_path.write_text(json.dumps(tampered_item) + "\n", encoding="utf-8")
+    tampered_state = semantic_freshness(tampered_run)
+    checks.append(("tampered receipt hash fails closed",
+                   tampered_state.get("status") == "invalid"
+                   and tampered_state.get("remind") is True))
+
+    unknown_run = _semantic_run("unknown_receipt")
+    unknown_receipt = record_reason_pass(
+        unknown_run, cycle_id=1, chosen_front="F-001", reason="baseline before schema mutation"
+    )
+    unknown_receipt["schema"] = "xunji.reason-pass.v999"
+    unknown_receipt["receipt_hash"] = _receipt_hash(unknown_receipt)
+    _reason_pass_path(unknown_run).write_text(
+        json.dumps(unknown_receipt) + "\n", encoding="utf-8"
+    )
+    unknown_state = semantic_freshness(unknown_run)
+    checks.append(("unknown receipt schema fails closed",
+                   unknown_state.get("status") == "invalid"
+                   and "unknown reason-pass schema" in unknown_state.get("reason", "")))
+
+    # Operational liveness is event/state based and deliberately clock-free.
+    liveness_run = _semantic_run("operational_liveness")
+    unknown_liveness = operational_liveness(liveness_run)
+    journal = liveness_run / "state" / "loop_journal.jsonl"
+    journal.parent.mkdir(exist_ok=True)
+    start_event = {
+        "schema": "xunji.loop_journal.v1",
+        "cycle": 1,
+        "event": "cycle_start",
+        "ts": "2000-01-01T00:00:00Z",
+    }
+    journal.write_text(json.dumps(start_event) + "\n", encoding="utf-8")
+    os.utime(journal, (1, 1))
+    active_liveness = operational_liveness(liveness_run)
+    with journal.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({
+            "schema": "xunji.loop_journal.v1",
+            "cycle": 1,
+            "event": "cycle_end",
+            "ts": "2000-01-01T00:00:01Z",
+        }) + "\n")
+    quiescent_liveness = operational_liveness(liveness_run)
+    checks.append(("operational liveness is separate and clock-free",
+                   unknown_liveness.get("status") == "unknown"
+                   and active_liveness.get("status") == "active"
+                   and active_liveness.get("clock_free") is True
+                   and quiescent_liveness.get("status") == "quiescent"))
+
+    schema_path = ROOT / "contracts" / "reason-pass-receipt.v1.schema.json"
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    except Exception:
+        schema = {}
+    checks.append(("published reason-pass schema matches runtime contract",
+                   schema.get("properties", {}).get("schema", {}).get("const") == REASON_PASS_SCHEMA
+                   and set(schema.get("required", [])) == _REASON_PASS_FIELDS
+                   and schema.get("additionalProperties") is False))
+
     # Agent Board 强制门 selftest
     ab_dir = _tmp_runs / "_selftest_agent_board"
     ab_dir.mkdir(parents=True)
     (ab_dir / "evidence.md").write_text("# test", encoding="utf-8")
-    time.sleep(1.1)  # ensure mtime is fresh
 
     # Case 1: < 4 open fronts -> should NOT remind
     (ab_dir / "frontier.md").write_text(
@@ -684,9 +1387,57 @@ def _selftest() -> int:
     return 0 if not bad else 1
 
 
-def main() -> int:
-    if "--selftest" in sys.argv:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Xunji semantic anti-drift anchor")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--selftest", action="store_true", help="run offline regression fixtures")
+    mode.add_argument(
+        "--record-reason-pass", metavar="RUN_DIR",
+        help="append a v1 Reason-pass receipt for a stable canonical snapshot",
+    )
+    mode.add_argument(
+        "--semantic-status", metavar="RUN_DIR",
+        help="print semantic freshness, trajectory, and separate operational liveness",
+    )
+    parser.add_argument("--cycle-id", type=int, help="strictly increasing run cycle number")
+    parser.add_argument("--chosen-front", help="chosen F-<number> or NONE")
+    parser.add_argument("--reason", help="bounded whole-graph adjudication rationale")
+    args = parser.parse_args(argv)
+
+    if args.selftest:
         return _selftest()
+    if args.record_reason_pass:
+        missing = [
+            flag for flag, value in (
+                ("--cycle-id", args.cycle_id),
+                ("--chosen-front", args.chosen_front),
+                ("--reason", args.reason),
+            )
+            if value is None
+        ]
+        if missing:
+            parser.error("--record-reason-pass requires " + ", ".join(missing))
+        try:
+            receipt = record_reason_pass(
+                args.record_reason_pass,
+                cycle_id=args.cycle_id,
+                chosen_front=args.chosen_front,
+                reason=args.reason,
+            )
+        except Exception as exc:
+            print(f"[anti_drift] reason-pass receipt rejected: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(receipt, ensure_ascii=False, sort_keys=True))
+        return 0
+    if args.semantic_status:
+        run = Path(args.semantic_status).resolve()
+        result = {
+            "semantic_freshness": semantic_freshness(run),
+            "semantic_trajectory": semantic_trajectory(run),
+            "operational_liveness": operational_liveness(run),
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 1 if result["semantic_freshness"].get("status") == "invalid" else 0
     try:
         print(build_anchor())
     except Exception:

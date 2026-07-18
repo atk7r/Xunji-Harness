@@ -193,6 +193,7 @@ def _set_active_run(run_dir: Path) -> bool:
     try:
         setup_transaction.activate_existing_run(
             run_dir,
+            operation=setup_transaction.OP_LOOP_BOOTSTRAP_RESUME,
             root=ROOT,
             runs_root=RUNS,
             pointer=xunji_statusline.ACTIVE_RUN,
@@ -213,6 +214,11 @@ def _create_new_transaction(slug: str, recon_full: str) -> setup_transaction.Tra
     return setup_transaction.create_and_activate(
         request["run_name"],
         source_manifest=request["source_manifest"],
+        effect_profile=setup_transaction.lifecycle_effect_profile(
+            setup_transaction.OP_LOOP_BOOTSTRAP_CREATE,
+            request["run_name"],
+            source_type="recon-json",
+        ),
         build=lambda run_dir, fault: setup_run.prepare_staging_run(
             request, run_dir, fault, bootstrap=True
         ),
@@ -226,6 +232,7 @@ def _create_new_transaction(slug: str, recon_full: str) -> setup_transaction.Tra
 def _create_source_transaction(
     route: setup_source.SourceRoute,
     *,
+    source_type: str = "auto",
     ai_mode: str = "off",
     candidate_json: str | None = None,
     provider: str = "",
@@ -255,6 +262,15 @@ def _create_source_transaction(
     return setup_transaction.create_and_activate(
         request["run_name"],
         source_manifest=request["source_manifest"],
+        effect_profile=setup_transaction.lifecycle_effect_profile(
+            setup_transaction.OP_LOOP_BOOTSTRAP_CREATE,
+            request["run_name"],
+            source_type=source_type,
+            ai_mode=ai_mode,
+            provider=provider,
+            model=model,
+            candidate_json=candidate_json,
+        ),
         build=lambda run_dir, fault: setup_run.prepare_staging_run(
             request, run_dir, fault, bootstrap=True
         ),
@@ -320,6 +336,7 @@ def cmd_source(
     try:
         result = _create_source_transaction(
             route,
+            source_type=source_type,
             ai_mode=ai_mode,
             candidate_json=candidate_json,
             provider=provider,
@@ -425,6 +442,7 @@ def _selftest() -> int:
     try:
         setup_transaction.activate_existing_run(
             p,
+            operation=setup_transaction.OP_TRANSACTION_ACTIVATE,
             root=ROOT,
             runs_root=RUNS,
             pointer=isolated_active_pointer,
@@ -445,10 +463,12 @@ def _selftest() -> int:
         _json.dumps({"target": "https://example.test/"}), encoding="utf-8"
     )
     shared_calls: list[str] = []
+    shared_profiles: list[dict] = []
     original_shared_create = setup_transaction.create_and_activate
 
-    def fake_shared_create(run_name: str, **_kwargs):
+    def fake_shared_create(run_name: str, **kwargs):
         shared_calls.append(run_name)
+        shared_profiles.append(dict(kwargs.get("effect_profile") or {}))
         return setup_transaction.TransactionResult(
             p.resolve(), "e" * 32, "f" * 64, "committed"
         )
@@ -464,10 +484,14 @@ def _selftest() -> int:
         and len(shared_calls) == 1
         and shared_calls[0].startswith("adaptercheck_")
         and shared_calls[0][-8:].isdigit()
+        and shared_profiles[0].get("operation")
+        == setup_transaction.OP_LOOP_BOOTSTRAP_CREATE
+        and shared_profiles[0].get("source_type") == "recon-json"
     ))
     active_hook_calls: list[Path] = []
     transaction_calls: list[tuple[str, str]] = []
     source_transaction_calls: list[str] = []
+    source_transaction_options: list[dict] = []
     orig_set_active = _set_active_run
     orig_create_transaction = _create_new_transaction
     orig_create_source_transaction = _create_source_transaction
@@ -490,8 +514,9 @@ def _selftest() -> int:
             p.resolve(), "a" * 32, "b" * 64, "committed"
         )
 
-    def fake_create_source_transaction(route: setup_source.SourceRoute, **_kwargs):
+    def fake_create_source_transaction(route: setup_source.SourceRoute, **kwargs):
         source_transaction_calls.append(route.kind)
+        source_transaction_options.append(dict(kwargs))
         return setup_transaction.TransactionResult(
             p.resolve(), "c" * 32, "d" * 64, "committed"
         )
@@ -536,6 +561,9 @@ def _selftest() -> int:
                    rc_source == 0 and source_transaction_calls[:1] == ["url"]))
     checks.append(("ordinary JSON --ai off delegates through the shared transaction",
                    rc_normalized_off == 0 and source_transaction_calls == ["url", "json"]))
+    checks.append(("source adapter preserves the validated source type for effect binding",
+                   [item.get("source_type") for item in source_transaction_options]
+                   == ["auto", "auto"]))
     checks.append(("external prepare emits only a redacted request without transaction work",
                    rc_prepare == 0
                    and 'setup-normalizer-request.v1' in prepare_out.getvalue()
@@ -550,7 +578,19 @@ def _selftest() -> int:
     xunji_statusline.ACTIVE_RUN = isolated_active_pointer
     try:
         rc_resume_real = cmd_resume(str(p))
-        rendered_resume = xunji_statusline.render_statusline({"workspace": {"current_dir": str(ROOT)}}, color=False)
+        import turn_contract  # noqa: WPS433
+        resume_session = "loop-bootstrap-statusline-session"
+        resume_transcript = str(p / "loop-bootstrap-statusline.jsonl")
+        turn_contract.write_contract(p, {
+            "session_id": resume_session,
+            "transcript_path": resume_transcript,
+            "prompt": f"/loop runs/{p.name}",
+        })
+        rendered_resume = xunji_statusline.render_statusline({
+            "session_id": resume_session,
+            "transcript_path": resume_transcript,
+            "workspace": {"current_dir": str(ROOT)},
+        }, color=False)
     finally:
         xunji_statusline.ACTIVE_RUN = original_active_pointer
     checks.append(("cmd_resume real set-active renders selected run", rc_resume_real == 0 and p.name in rendered_resume))

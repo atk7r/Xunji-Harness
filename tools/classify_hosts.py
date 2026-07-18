@@ -268,6 +268,8 @@ def _selftest() -> int:
     """Regression for redirect-following + AIS recognition (the lump-fix regression).
     Pure-function checks + one local-server integration (no external traffic)."""
     import http.server
+    import contextlib
+    import io
     import socketserver
     import tempfile
     import threading
@@ -442,6 +444,61 @@ def _selftest() -> int:
         finally:
             srv4.shutdown()
 
+    # Setup egress mode is exercised through the real parser/runner while the
+    # request layer is replaced.  This proves scope selection and output routing
+    # without any network access or dependence on the local loopback server.
+    egress_root = Path(tempfile.mkdtemp())
+    egress_out = egress_root / "classify"
+    egress_out.mkdir()
+    egress_recon = egress_root / "recon.json"
+    egress_recon.write_text(json.dumps({"assets": [
+        {"host": "good.example"},
+        {"host": "review.example"},
+        {"host": "out.example"},
+    ]}), encoding="utf-8")
+    baseline_bytes = (json.dumps({
+        "source": "frozen-baseline",
+        "assets": [
+            {"host": "good.example", "scope_status": "in", "source": "operator"},
+            {"host": "review.example", "scope_status": "review", "source": "source-data"},
+            {"host": "out.example", "scope_status": "out", "source": "scope-policy"},
+        ],
+    }, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    (egress_out / "coverage.json").write_bytes(baseline_bytes)
+    probed: list[str] = []
+    original_fetch_body = globals()["fetch_body"]
+    original_argv = list(sys.argv)
+
+    def _offline_fetch(host: str, _save_dir: Path, _timeout: int) -> tuple[str, dict]:
+        probed.append(host)
+        return "<title>Offline</title><input type='password'>", {
+            "status": 200, "len": 54,
+        }
+
+    try:
+        globals()["fetch_body"] = _offline_fetch
+        sys.argv = [
+            "classify_hosts.py", str(egress_recon), "--out", str(egress_out),
+            "--egress-recheck", "--delay", "0",
+        ]
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            egress_rc = main()
+    finally:
+        sys.argv = original_argv
+        globals()["fetch_body"] = original_fetch_body
+    egress_data = json.loads((egress_out / "egress_coverage.json").read_text(
+        encoding="utf-8"))
+    checks += [
+        ("egress recheck probes explicit in-scope baseline assets only",
+         egress_rc == 0 and probed == ["good.example"]),
+        ("egress recheck leaves baseline coverage byte-identical",
+         (egress_out / "coverage.json").read_bytes() == baseline_bytes),
+        ("egress recheck writes a separate single-host overlay",
+         [item.get("host") for item in egress_data.get("assets", [])]
+         == ["good.example"]),
+    ]
+
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n)
@@ -450,8 +507,9 @@ def _selftest() -> int:
 
 
 def run_classify(hosts: list, out_dir: Path, kb_sigs, delay: float, timeout: int,
-                 flush_every: int = 10):
-    """逐主机分类 + 【增量落盘】coverage.json/classify.txt(每 flush_every 台 + finally)。
+                 flush_every: int = 10, *, coverage_name: str = "coverage.json",
+                 table_name: str = "classify.txt"):
+    """逐主机分类 + 【增量落盘】coverage/classify 文件(每 flush_every 台 + finally)。
     mokwon dogfood: 131 台跑到 71 静默死, coverage 全丢(只在循环末尾写一次)。现在跑到一半被杀/
     超时也留部分 coverage;单台任何异常不致命(防整跑崩)。返回 (coverage, rows, interesting)。
     抽成函数 = 可被 selftest 覆盖(ROOT/落盘那类 main-only 的 bug 不再绿着崩)。"""
@@ -460,18 +518,22 @@ def run_classify(hosts: list, out_dir: Path, kb_sigs, delay: float, timeout: int
     interesting: list = []
     total = len(hosts)
 
+    if coverage_name not in {"coverage.json", "egress_coverage.json"} \
+            or table_name not in {"classify.txt", "egress_classify.txt"}:
+        raise ValueError("unsupported classify output name")
+
     def flush() -> None:
         table = "\n".join(f"{h:30} [{st:14}] {ti:30} {fl}" for h, st, ti, fl in rows)
-        (out_dir / "classify.txt").write_text(table, encoding="utf-8")
+        (out_dir / table_name).write_text(table, encoding="utf-8")
         examined = sum(1 for c in coverage if c["examined"])
         reachable = sum(1 for c in coverage if c["reachable"] is True)
         # 原子写: 先 .tmp 再 replace(同盘原子改名), 防增量落盘中途被杀留半截损坏 JSON(Codex#2)
-        tmp = out_dir / "coverage.json.tmp"
+        tmp = out_dir / f"{coverage_name}.tmp"
         tmp.write_text(json.dumps(
             {"total": len(coverage), "examined": examined, "reachable": reachable,
              "planned": total, "partial": len(coverage) < total, "assets": coverage},
             ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(out_dir / "coverage.json")
+        tmp.replace(out_dir / coverage_name)
 
     try:
         for i, h in enumerate(hosts, 1):
@@ -534,6 +596,41 @@ def run_classify(hosts: list, out_dir: Path, kb_sigs, delay: float, timeout: int
     return coverage, rows, interesting
 
 
+def _egress_hosts_from_baseline(out_dir: Path, recon_path: Path) -> list[str]:
+    """Return only frozen baseline assets with explicit in-scope authority.
+
+    Egress recheck is an overlay, not a second scope derivation.  In particular,
+    review/unknown/out rows from a source file must never become probe targets
+    merely because the classifier can parse them.
+    """
+    baseline_path = out_dir / "coverage.json"
+    try:
+        baseline = json.loads(baseline_path.read_text(
+            encoding="utf-8", errors="strict"))
+        recon_hosts = set(_hosts_from_recon(recon_path))
+    except Exception as exc:
+        raise ValueError("egress recheck requires readable baseline coverage and recon") from exc
+    assets = baseline.get("assets") if isinstance(baseline, dict) else None
+    if not isinstance(assets, list) or any(not isinstance(item, dict) for item in assets):
+        raise ValueError("egress recheck baseline assets are invalid")
+    hosts: list[str] = []
+    seen: set[str] = set()
+    for asset in assets:
+        host = asset.get("host")
+        if not isinstance(host, str) or not host.strip() or host != host.strip() \
+                or re.search(r"[\x00-\x20\x7f/@]", host):
+            raise ValueError("egress recheck baseline contains an invalid host")
+        if host in seen:
+            raise ValueError("egress recheck baseline contains a duplicate host")
+        seen.add(host)
+        if str(asset.get("scope_status") or "").strip().lower() != "in":
+            continue
+        if host not in recon_hosts:
+            raise ValueError("in-scope baseline host is absent from frozen recon")
+        hosts.append(host)
+    return hosts
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="逐主机按活内容分类指纹")
     ap.add_argument("recon", nargs="?", help="recon JSON 路径")
@@ -544,6 +641,8 @@ def main() -> int:
     ap.add_argument("--selftest", action="store_true", help="run regression and exit")
     ap.add_argument("--all", action="store_true",
                     help="不做 scope 过滤, 探 recon 全量(含 ownership=unrelated 的 out-of-scope)")
+    ap.add_argument("--egress-recheck", action="store_true",
+                    help="setup_run 专用的主动出口复核标记；不放宽 scope 或 guard")
     args = ap.parse_args()
 
     if args.selftest:
@@ -553,16 +652,35 @@ def main() -> int:
     if not (args.recon or args.hosts):
         ap.error("need a recon JSON path or --hosts FILE (or --selftest)")
 
-    if args.hosts:
+    if args.egress_recheck and (args.hosts or args.all or not args.recon or not args.out):
+        ap.error("--egress-recheck requires recon + --out and forbids --hosts/--all")
+
+    # --out is a DIRECTORY (stores body + tables). Guard the common footgun of
+    # passing a file path like ".../coverage.json" (which used to create a dir
+    # named coverage.json/ with coverage.json inside it): use its parent instead.
+    if args.out and Path(args.out).suffix:
+        print(f"[!] --out '{args.out}' looks like a file; using its parent dir "
+              f"'{Path(args.out).parent}' (--out is a directory).", file=sys.stderr)
+        out_dir = Path(args.out).parent
+    else:
+        out_dir = Path(args.out) if args.out else Path("tmp") / "classify"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.egress_recheck:
+        try:
+            hosts = _egress_hosts_from_baseline(out_dir, Path(args.recon))
+        except ValueError as exc:
+            ap.error(str(exc))
+    elif args.hosts:
         hosts = [h.strip() for h in Path(args.hosts).read_text(encoding="utf-8").splitlines()
                  if h.strip() and not h.startswith("#")]
     else:
         hosts = _hosts_from_recon(Path(args.recon))
 
-    # scope 过滤(打谁不打谁): 默认跳过 recon 标的 out-of-scope(ownership=unrelated, 如个人 NAS /
-    # 外部域)—— mokwon dogfood 实测: 不过滤会把 classify 群发到个人 Synology NAS。--all 探全量;
-    # --hosts 模式无 recon 上下文, 不过滤。scope 派生自 recon, 非手挑(派生不驱动)。
-    if args.recon and not args.all:
+    # Legacy standalone mode derives a scope view from recon.  Setup's
+    # --egress-recheck never enters this path: it uses the already frozen
+    # baseline ledger above and therefore cannot fail open to recon-wide probing.
+    if args.recon and not args.all and not args.egress_recheck:
         try:
             import scope as _scope
             _recon = json.loads(Path(args.recon).read_text(encoding="utf-8"))
@@ -576,28 +694,22 @@ def main() -> int:
         except Exception as e:
             print(f"[scope] 过滤跳过(派生失败, 探全量): {e}", file=sys.stderr)
 
-    # --out is a DIRECTORY (stores body + tables). Guard the common footgun of
-    # passing a file path like ".../coverage.json" (which used to create a dir
-    # named coverage.json/ with coverage.json inside it): use its parent instead.
-    if args.out and Path(args.out).suffix:
-        print(f"[!] --out '{args.out}' looks like a file; using its parent dir "
-              f"'{Path(args.out).parent}' (--out is a directory).", file=sys.stderr)
-        out_dir = Path(args.out).parent
-    else:
-        out_dir = Path(args.out) if args.out else Path("tmp") / "classify"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     # 飞轮读取端: 加载已入库的 knowledge signatures, 让 classify 识别上次入库的产品。
     kb_sigs = load_knowledge_signatures(ROOT / "knowledge")
 
     # 逐主机分类 + 增量落盘 coverage(抽成 run_classify, 可测 + 中断留部分, 见 #9)
-    coverage, rows, interesting = run_classify(hosts, out_dir, kb_sigs, args.delay, args.timeout)
+    coverage_name = "egress_coverage.json" if args.egress_recheck else "coverage.json"
+    table_name = "egress_classify.txt" if args.egress_recheck else "classify.txt"
+    coverage, rows, interesting = run_classify(
+        hosts, out_dir, kb_sigs, args.delay, args.timeout,
+        coverage_name=coverage_name, table_name=table_name,
+    )
     table = "\n".join(f"{h:30} [{st:14}] {ti:30} {fl}" for h, st, ti, fl in rows)
     examined = sum(1 for c in coverage if c["examined"])
     reachable = sum(1 for c in coverage if c["reachable"] is True)
     print(table)
     print(f"\n[检视覆盖] 资产 {len(coverage)} | 已检视内容 {examined} | "
-          f"可达 {reachable} | 写 {out_dir}/coverage.json")
+          f"可达 {reachable} | 写 {out_dir}/{coverage_name}")
     print("\n===== INTERESTING (未识别栈 / 独立应用 / 带 LOGIN·DYN·FRAMEWORK·SPA) =====")
     if interesting:
         for h, st, ti, fl, ln in interesting:
@@ -612,7 +724,7 @@ def main() -> int:
                   f"{' '.join(str(f) for f in (a.get('flags') or []))} :: {a.get('note', '')}")
         if len(verdict_required) > 20:
             print(f"  … {len(verdict_required) - 20} more")
-    print(f"\n[DONE] {len(rows)} hosts -> {out_dir}/classify.txt ; {len(interesting)} interesting")
+    print(f"\n[DONE] {len(rows)} hosts -> {out_dir}/{table_name} ; {len(interesting)} interesting")
     return 0
 
 

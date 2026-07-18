@@ -44,6 +44,12 @@ ACTIVE_WINDOW_SEC = 900   # 调用兼容参数；run 选择只认显式 pointer�
 DRIFT_TIMEOUT_WINDOW_SEC = 6 * 60 * 60   # 调用兼容参数；漂移年龄由 session_state 自身时间戳判断
 SESSION_TIMEOUT_SEC = 30 * 60   # Phase 2: 超过 30 分钟未更新 + 有漂移信号 → 阻断
 
+sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
+try:
+    import output_gate as _output_gate
+except Exception:
+    _output_gate = None
+
 sys.path.insert(0, str(ROOT / "tools"))
 try:
     import check_run as _cr   # 复用收口判定, 与 check_run 的 closure gate 一致
@@ -62,6 +68,18 @@ try:
     import runtime_receipts as _runtime_receipts
 except Exception:
     _runtime_receipts = None
+try:
+    import work_plan as _work_plan
+except Exception:
+    _work_plan = None
+try:
+    import run_model as _run_model
+except Exception:
+    _run_model = None
+try:
+    import loop_journal as _loop_journal
+except Exception:
+    _loop_journal = None
 
 try:
     from anti_drift import (
@@ -469,7 +487,64 @@ def _check_replay_quality(run_dir: Path) -> tuple[str | None, str]:
 
 
 def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str | None, str]:
-    """Require planned lanes plus two transcript-backed Agents in this execute turn."""
+    """Require current plan closure, then retain the legacy breadth safety net.
+
+    A committed SERIAL/PARALLEL plan is an explicit control-plane obligation even
+    for one front.  The historical >=4-front rule remains a mandatory breadth
+    fallback, but can no longer make unassigned or unreviewed plan lanes vanish.
+    """
+    plan_path = run_dir / "state" / "work_plan.json"
+    if plan_path.exists():
+        if _work_plan is None or _run_model is None or _loop_journal is None:
+            return "block", "Agent plan 状态解析器不可用，按 fail-closed 阻断。"
+        try:
+            raw_plan = json.loads(plan_path.read_text(
+                encoding="utf-8", errors="strict"))
+            plan = _work_plan.validate_plan(raw_plan)
+            projection = _run_model.plan_cycle_projection(run_dir, plan=plan)
+            cycle_ended = _loop_journal.plan_cycle_ended(
+                _loop_journal.load_events(run_dir),
+                str(plan.get("plan_digest") or ""),
+            )
+        except Exception as exc:
+            return "block", (
+                "Agent plan 无法验证，不能在派发/回执债务未知时结束回合："
+                f"{type(exc).__name__}: {exc}"
+            )
+        # A plan is an open Stop obligation until its exact typed cycle_end is
+        # present.  This includes ROOT_DIRECT: it must never bypass the plan
+        # ledger merely because there are no Agent lanes to count.
+        if not cycle_ended:
+            pending_lanes = [
+                f"{item.get('lane_id') or '(missing)'}:"
+                f"{item.get('runtime_state') or 'invalid'}"
+                for item in projection.get("lane_states", [])
+                if isinstance(item, dict) and item.get("complete") is not True
+            ]
+            debt = projection.get("debt") \
+                if isinstance(projection.get("debt"), dict) else {}
+            merge_debt = [str(item) for item in debt.get("merge", [])]
+            review_debt = [str(item) for item in debt.get("review", [])]
+            details = ["cycle_end=missing"]
+            if pending_lanes:
+                details.append("lane=" + ", ".join(pending_lanes[:8]))
+            if merge_debt:
+                details.append("merge=" + ", ".join(merge_debt[:8]))
+            if review_debt:
+                details.append("review=" + ", ".join(review_debt[:8]))
+            mode = str(plan.get("execution_mode") or "")
+            next_step = (
+                "补齐 typed ROOT_DIRECT action receipt 后由 loop_journal end 推导 cycle_end"
+                if mode == "ROOT_DIRECT" else
+                "按 dependency 继续 workers.py delegate，完成真实 return、Reviewer、Root merge，"
+                "再由 loop_journal end 推导 cycle_end"
+            )
+            return "block", (
+                "[Agent plan debt] 当前 work plan 尚无有效 typed cycle_end；"
+                + "；".join(details)
+                + "。" + next_step + "；done/PASS 文本不能清债。"
+            )
+
     try:
         from anti_drift import _check_agent_board_needed as _ab_needed
     except Exception as exc:
@@ -515,11 +590,16 @@ def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str
     if missing_files:
         problems.append("缺少 agents/A-*.md 文件: " + ", ".join(missing_files[:5]))
 
+    epoch = _turn_contract.coordination_epoch(run_dir, contract) \
+        if _turn_contract is not None else {"valid": False, "since": 0.0}
+    if not epoch.get("valid"):
+        problems.append(
+            "coordination_signature + fanout_epoch_started_at 缺失、伪造或已因 material "
+            "front/coverage 变化失效")
     receipt_state = _runtime_receipts.agent_fanout(
         run_dir,
-        session_id=str(contract.get("session_id") or ""),
-        since=float(contract.get("updated_at") or 0.0),
-    ) if _runtime_receipts is not None else {
+        since=float(epoch.get("since") or 0.0),
+    ) if _runtime_receipts is not None and epoch.get("valid") else {
         "satisfied": False, "assignments": [], "fronts": [],
     }
     if not receipt_state.get("satisfied"):
@@ -529,8 +609,7 @@ def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str
     elif _runtime_receipts is not None:
         disposition = _runtime_receipts.agent_disposition(
             run_dir,
-            session_id=str(contract.get("session_id") or ""),
-            since=float(contract.get("updated_at") or 0.0),
+            since=float(epoch.get("since") or 0.0),
         )
         if not disposition.get("disposition_satisfied"):
             problems.append(
@@ -753,9 +832,10 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str,
     if not _has_codex_completion_review(decisions_text, run_dir):
         return (
             "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
-            "NORMAL 模式暂停 #2 前必须经 codex agent 复审完整 run。"
-            "请 spawn fresh-context codex agent 审查完整 run, "
-            "将其裁决写入 decisions.md 的 CodexCompletionReview 字段。"
+            "NORMAL 模式暂停 #2 前必须用 exact subagent_type=xunji-reviewer 和 "
+            "runtime_receipts.completion_review_prompt() 的 assignment-free prompt "
+            "完成真实 Start/Stop 全局复审。请将其裁决写入 decisions.md 的 "
+            "CodexCompletionReview 兼容字段；该挑战不替代 peer_review ReviewReceipt。"
         )
     return ""
 
@@ -807,6 +887,20 @@ def main() -> None:
                     "如有本 run 任务则 CronDelete，再次 CronList 确认消失。" + cron_note},
                     ensure_ascii=False))
             sys.exit(0)
+        msg = event.get("last_assistant_message") or ""
+        if active_run is not None and isinstance(msg, str) and _output_gate is not None:
+            fixed_kind = _output_gate.validated_fixed_stop_kind(
+                msg,
+                active_run,
+                session_id=str(event.get("session_id") or ""),
+                since=float(contract.get("updated_at") or 0.0),
+            )
+            if fixed_kind in {
+                    _output_gate.TARGET_DENIED, _output_gate.MAINTENANCE_BLOCKED}:
+                # The output truth gate has a receipt-backed terminal envelope.
+                # After the pause/Cron transaction above, ordinary drift,
+                # Agent, and closure validators must not reinterpret it as Coda.
+                sys.exit(0)
         # Dev mode: skip Phase 3 notification (drift detection still runs in output_gate)
         if not _is_dev_mode():
             drift_mode, drift_msg = _check_drift_session(active_run)
@@ -914,6 +1008,7 @@ def main() -> None:
 
 def _selftest() -> int:
     import tempfile
+    from harness.selftest_plan import seed_current_plan
     checks: list[tuple[str, bool]] = []
     # decide 真值表
     checks.append(("not final -> pass", decide(False, 1, False) is None))
@@ -954,17 +1049,50 @@ def _selftest() -> int:
                 f"XUNJI_REVIEW_BUNDLE={result.bundle_hash}\nreview completed"
             )},
         })
-        evidence_hash = _cr.current_evidence_index_hash(normal_run)
+        seed_current_plan(normal_run, stage="S3")
+        completion_state = _runtime_receipts.completion_review_state(
+            normal_run, require_current_inputs=True)
+        completion_prompt = _runtime_receipts.completion_review_prompt(normal_run)
+        completion_result = _runtime_receipts.completion_review_result_envelope(
+            normal_run.name,
+            completion_state["evidence_index_hash"],
+            completion_state["completion_bundle_hash"],
+        )
+        with normal_transcript.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": "tool-normal-completion",
+                    "name": "Agent", "input": {
+                        "prompt": completion_prompt,
+                        "subagent_type": "xunji-reviewer",
+                    },
+                }]},
+            }) + "\n")
         _runtime_receipts.append_hook_event(normal_run, {
             "hook_event_name": "PostToolUse", "session_id": "s-normal",
             "transcript_path": str(normal_transcript), "tool_name": "Agent",
             "tool_use_id": "tool-normal-completion",
-            "tool_input": {"prompt":
-                f"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={evidence_hash} run={normal_run.name} "
-                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
-            "tool_response": {"result":
-                f"XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX={evidence_hash} "
-                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
+            "tool_input": {
+                "prompt": completion_prompt,
+                "subagent_type": "xunji-reviewer",
+            },
+            "tool_response": {
+                "agentId": "normal-completion-child", "isAsync": True,
+                "status": "async_launched",
+            },
+        })
+        _runtime_receipts.append_hook_event(normal_run, {
+            "hook_event_name": "SubagentStart", "session_id": "s-normal",
+            "transcript_path": str(normal_transcript),
+            "agent_id": "normal-completion-child",
+            "agent_type": "xunji-reviewer",
+        })
+        _runtime_receipts.append_hook_event(normal_run, {
+            "hook_event_name": "SubagentStop", "session_id": "s-normal",
+            "transcript_path": str(normal_transcript),
+            "agent_id": "normal-completion-child",
+            "agent_type": "xunji-reviewer",
+            "last_assistant_message": completion_result,
         })
         valid_normal_review = (normal_run / "review.md").read_text(encoding="utf-8")
     normal_decisions = (
@@ -1468,6 +1596,87 @@ def _selftest() -> int:
     mode3, _ = _check_agent_board(ab_run3)
     checks.append(("agent board gate: shared barrier -> pass", mode3 is None))
 
+    # Case 3b: a committed Agent plan is debt-bearing even with one front.  The
+    # legacy breadth threshold must not erase a concrete unassigned lane.
+    ab_run3b = ab_test / "single_front_planned_lane"
+    (ab_run3b / "state").mkdir(parents=True)
+    (ab_run3b / "target.md").write_text(
+        "# Target\n- Authorized scope: one.example\n", encoding="utf-8")
+    (ab_run3b / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "one.example", "examined": False}],
+    }), encoding="utf-8")
+    (ab_run3b / "frontier.md").write_text(
+        "# Frontier\n## Open\n### F-001\n- Status: open\n"
+        "- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    planned_contract = {
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+        "session_id": "single-plan", "prompt_sha256": "a" * 64,
+        "updated_at": time.time(), "fanout_override": False,
+    }
+    if _work_plan is not None:
+        _work_plan.commit_plan(
+            ab_run3b, macro_stage="S2", objective="exercise one planned lane",
+            mode="SERIAL_AGENT", reason="one complex lane",
+            exit_gate="return, review, and merge", contract=planned_contract,
+            lanes=[{
+                "id": "L-F001-HUNTER", "role": "web-hunter",
+                "front": "F-001", "effect": "local_read", "assets": [],
+                "dependencies": [], "expected_evidence": "candidate or refutation",
+                "expected_information_gain": "medium",
+                "stop_condition": "lane settled", "request_cost": 0,
+                "request_budget": 0, "merge_cost": 5, "atomic": False,
+            }, {
+                "id": "L-F001-REVIEW", "role": "review",
+                "front": "F-001", "effect": "local_verify", "assets": [],
+                "dependencies": ["L-F001-HUNTER"],
+                "expected_evidence": "digest-bound review",
+                "expected_information_gain": "medium",
+                "stop_condition": "exact result reviewed", "request_cost": 0,
+                "request_budget": 0, "merge_cost": 5, "atomic": False,
+            }],
+        )
+    mode3b, msg3b = _check_agent_board(ab_run3b, planned_contract)
+    checks.append(("agent board gate: single-front unassigned plan lane blocks",
+                   _work_plan is None or (
+                       mode3b == "block" and "L-F001-HUNTER:unassigned" in msg3b)))
+
+    # Case 3c: ROOT_DIRECT is still a plan-cycle obligation.  Stop cannot fall
+    # through merely because the plan has no Agent delegation wave.
+    ab_run3c = ab_test / "root_direct_without_cycle_end"
+    (ab_run3c / "state").mkdir(parents=True)
+    (ab_run3c / "target.md").write_text(
+        "# Target\n- Authorized scope: direct.example\n", encoding="utf-8")
+    (ab_run3c / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "direct.example", "examined": False}],
+    }), encoding="utf-8")
+    (ab_run3c / "frontier.md").write_text(
+        "# Frontier\n## Open\n### F-001\n- Status: open\n"
+        "- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    direct_contract = dict(
+        planned_contract, session_id="root-direct-plan", updated_at=time.time())
+    if _work_plan is not None:
+        _work_plan.commit_plan(
+            ab_run3c, macro_stage="S1", objective="one bounded local read",
+            mode="ROOT_DIRECT", reason="mechanically atomic local action",
+            exit_gate="typed action receipt and cycle_end", contract=direct_contract,
+            lanes=[{
+                "id": "L-DIRECT", "role": "verify", "front": "F-001",
+                "effect": "local_read", "assets": [], "dependencies": [],
+                "capability_id": "read.timestamp-gate",
+                "expected_evidence": "typed local action receipt",
+                "expected_information_gain": "low",
+                "stop_condition": "receipt recorded", "request_cost": 0,
+                "request_budget": 0, "merge_cost": 1, "atomic": True,
+            }],
+        )
+    mode3c, msg3c = _check_agent_board(ab_run3c, direct_contract)
+    checks.append(("agent board gate: ROOT_DIRECT without typed cycle_end blocks Stop",
+                   _work_plan is None or (
+                       mode3c == "block" and "cycle_end=missing" in msg3c
+                       and "root-action-pending:no-claim" in msg3c)))
+
     # Case 4: >= 4 open fronts diverse, no agents -> block
     ab_run4 = ab_test / "diverse_no_agents"
     ab_run4.mkdir()
@@ -1531,23 +1740,72 @@ def _selftest() -> int:
     mode7_manual, _ = _check_agent_board(ab_run7)
     checks.append(("agent board gate: hand-written heartbeat does not prove Agent use",
                    mode7_manual == "block"))
-    if _runtime_receipts is not None:
-        transcript = ab_test / "agent-transcript.jsonl"
-        transcript.write_text("tool-real-1\ntool-real-2\n", encoding="utf-8")
-        for tool_id, aid, fid in (
-            ("tool-real-1", "A-web-hunter-001", "F-001"),
-            ("tool-real-2", "A-web-hunter-002", "F-002"),
-        ):
+    transcript = ab_test / "agent-transcript.jsonl"
+    transcript.write_text("", encoding="utf-8")
+
+    def append_returned_agent(*, tool_id: str, assignment: str, front: str,
+                              session_id: str, child_id: str) -> None:
+        prompt = f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front}"
+        with transcript.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": tool_id, "name": "Agent",
+                    "input": {
+                        "prompt": prompt,
+                        "subagent_type": "xunji-hunter",
+                    },
+                }]},
+            }) + "\n")
+        if _runtime_receipts is not None:
             _runtime_receipts.append_hook_event(ab_run7, {
-                "hook_event_name": "PostToolUse", "session_id": "s-agent",
+                "hook_event_name": "PostToolUse", "session_id": session_id,
                 "transcript_path": str(transcript), "tool_name": "Agent",
                 "tool_use_id": tool_id,
-                "tool_input": {"prompt": f"XUNJI_ASSIGNMENT={aid} XUNJI_FRONT={fid}"},
-                "tool_response": {"result": "candidate completed"},
+                "tool_input": {
+                    "prompt": prompt,
+                    "subagent_type": "xunji-hunter",
+                },
+                "tool_response": {"agentId": child_id, "isAsync": True,
+                                  "status": "async_launched"},
             })
-    mode7, _ = _check_agent_board(ab_run7)
+            _runtime_receipts.append_hook_event(ab_run7, {
+                "hook_event_name": "SubagentStart", "session_id": session_id,
+                "transcript_path": str(transcript), "agent_id": child_id,
+                "agent_type": "xunji-hunter",
+            })
+            _runtime_receipts.append_hook_event(ab_run7, {
+                "hook_event_name": "SubagentStop", "session_id": session_id,
+                "transcript_path": str(transcript), "agent_id": child_id,
+                "agent_type": "xunji-hunter",
+                "last_assistant_message": "candidate completed",
+            })
+
+    for tool_id, aid, fid, child_id in (
+        ("tool-real-1", "A-web-hunter-001", "F-001", "child-real-1"),
+        ("tool-real-2", "A-web-hunter-002", "F-002", "child-real-2"),
+    ):
+        append_returned_agent(
+            tool_id=tool_id, assignment=aid, front=fid,
+            session_id="s-agent", child_id=child_id)
+    epoch_started = time.time() - 60
+    epoch_signature = _turn_contract._coordination_signature(ab_run7) \
+        if _turn_contract is not None else ""
+    epoch_contract = {
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+        "session_id": "s-agent", "updated_at": time.time(),
+        "coordination_signature": epoch_signature,
+        "fanout_epoch_started_at": epoch_started,
+        "fanout_epoch_id": "0123456789abcdef",
+    }
+    mode7, _ = _check_agent_board(ab_run7, epoch_contract)
+    disposition7 = _runtime_receipts.agent_disposition(
+        ab_run7, since=epoch_started) if _runtime_receipts is not None else {}
     checks.append(("agent board gate: Agent receipts without merge disposition still block",
-                   _runtime_receipts is None or mode7 == "block"))
+                   _runtime_receipts is None or (
+                       mode7 == "block"
+                       and {"A-web-hunter-001", "A-web-hunter-002"}
+                       <= {item.split(":", 1)[0]
+                           for item in disposition7.get("pending", [])})))
     assignment_data = json.loads((ab_run7 / "state" / "assignments.json").read_text(encoding="utf-8"))
     for item in assignment_data["assignments"]:
         item.update({
@@ -1557,43 +1815,68 @@ def _selftest() -> int:
         })
     (ab_run7 / "state" / "assignments.json").write_text(
         json.dumps(assignment_data), encoding="utf-8")
-    mode7_merged, _ = _check_agent_board(ab_run7)
+    mode7_merged, _ = _check_agent_board(ab_run7, epoch_contract)
     checks.append(("agent board gate: real receipts plus anchored disposition -> pass",
                    _runtime_receipts is None or mode7_merged is None))
-    current_contract = {
-        "mode": "EXECUTE", "session_id": "s-current", "updated_at": time.time() - 1,
-    }
+    current_contract = dict(
+        epoch_contract, session_id="s-current", updated_at=time.time())
     mode7_old_turn, _ = _check_agent_board(ab_run7, current_contract)
-    checks.append(("agent board gate: previous-turn receipts do not bypass current turn",
-                   _runtime_receipts is None or mode7_old_turn == "block"))
-    if _runtime_receipts is not None:
-        with transcript.open("a", encoding="utf-8") as handle:
-            handle.write("tool-current-1\ntool-current-2\n")
-        for tool_id, aid, fid in (
-            ("tool-current-1", "A-web-hunter-001", "F-001"),
-            ("tool-current-2", "A-web-hunter-002", "F-002"),
-        ):
-            _runtime_receipts.append_hook_event(ab_run7, {
-                "hook_event_name": "PostToolUse", "session_id": "s-current",
-                "transcript_path": str(transcript), "tool_name": "Agent",
-                "tool_use_id": tool_id,
-                "tool_input": {"prompt": f"XUNJI_ASSIGNMENT={aid} XUNJI_FRONT={fid}"},
-                "tool_response": {"result": "candidate completed"},
-            })
-    mode7_current, _ = _check_agent_board(ab_run7, current_contract)
-    checks.append(("agent board gate: old disposition cannot settle new Agent calls",
-                   _runtime_receipts is None or mode7_current == "block"))
-    for item in assignment_data["assignments"]:
-        item.update({
-            "status": "merged",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "last_note": f"Front: {item['front']} current-turn candidate adjudicated",
+    checks.append(("agent board gate: stable epoch survives bare continue across sessions",
+                   _runtime_receipts is None or mode7_old_turn is None))
+    assignment_data = json.loads(
+        (ab_run7 / "state" / "assignments.json").read_text(encoding="utf-8"))
+    new_assignments = (
+        ("A-web-hunter-003", "F-003", "tool-current-1", "child-current-1"),
+        ("A-web-hunter-004", "F-004", "tool-current-2", "child-current-2"),
+    )
+    for aid, fid, _tool_id, _child_id in new_assignments:
+        (ab_run7 / "agents" / f"{aid}.md").write_text("# Agent\n", encoding="utf-8")
+        assignment_data["assignments"].append({
+            "agent": aid, "front": fid, "role": "web-hunter",
+            "status": "assigned", "heartbeat_count": 0,
         })
+    (ab_run7 / "state" / "assignments.json").write_text(
+        json.dumps(assignment_data), encoding="utf-8")
+    for aid, fid, tool_id, child_id in new_assignments:
+        append_returned_agent(
+            tool_id=tool_id, assignment=aid, front=fid,
+            session_id="s-current", child_id=child_id)
+    mode7_current, _ = _check_agent_board(ab_run7, current_contract)
+    disposition7_current = _runtime_receipts.agent_disposition(
+        ab_run7, since=epoch_started) if _runtime_receipts is not None else {}
+    current_pending = {
+        item.split(":", 1)[0] for item in disposition7_current.get("pending", [])
+    }
+    checks.append(("agent board gate: old disposition cannot settle new Agent calls",
+                   _runtime_receipts is None or (
+                       mode7_current == "block"
+                       and {item[0] for item in new_assignments} <= current_pending
+                       and not {"A-web-hunter-001", "A-web-hunter-002"}
+                           & current_pending)))
+    assignment_data = json.loads(
+        (ab_run7 / "state" / "assignments.json").read_text(encoding="utf-8"))
+    new_assignment_ids = {item[0] for item in new_assignments}
+    for item in assignment_data["assignments"]:
+        if item.get("agent") in new_assignment_ids:
+            item.update({
+                "status": "merged",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "last_note": f"Front: {item['front']} current-turn candidate adjudicated",
+            })
     (ab_run7 / "state" / "assignments.json").write_text(
         json.dumps(assignment_data), encoding="utf-8")
     mode7_current_merged, _ = _check_agent_board(ab_run7, current_contract)
     checks.append(("agent board gate: current receipts plus current disposition -> pass",
                    _runtime_receipts is None or mode7_current_merged is None))
+    (ab_run7 / "frontier.md").write_text(
+        (ab_run7 / "frontier.md").read_text(encoding="utf-8")
+        + "\n### F-005\n- Status: open\n- Barrier class: new-layer\n"
+          "- Current depth: shallow\n",
+        encoding="utf-8",
+    )
+    mode7_changed, _ = _check_agent_board(ab_run7, current_contract)
+    checks.append(("agent board gate: material signature change invalidates old epoch",
+                   _runtime_receipts is None or mode7_changed == "block"))
 
     # Case 8: free-text budget reason no longer bypasses; current operator prompt can.
     ab_run8 = ab_test / "diverse_with_budget_reason"

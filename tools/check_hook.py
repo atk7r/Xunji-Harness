@@ -127,7 +127,7 @@ ALLOWED_COMMANDS = [
     # URL-free local compound housekeeping remains outside outbound privacy.  A
     # URL-bearing compound is denied because it cannot be inspected as one argv.
     "grep -rniE 'token' poc/ ; rm -f scratch.txt",
-    "curl http://t.test/?c=rm+-rf+/app/data",
+    "curl 'http://t.test/?c=rm+-rf+/app/data'",
     # 'scrub' as a word / read-only zpool scrub must NOT be denied (narrowed scrub rule):
     "zpool scrub tank",
     "echo 'SCRUB verify: grep poc/'",
@@ -156,7 +156,7 @@ ALLOWED_COMMANDS = [
     "curl -F 'note=proof-20260713-a1b2c3d4' https://t.test/upload",
     "curl -X POST https://t.test/api/users -d 'name=test'",
     "curl -s 'https://t.test/items?id=1 AND 1=1'",
-    "sqlmap -u https://t.test/?id=1 --batch --technique=BEU --banner",
+    "sqlmap -u 'https://t.test/?id=1' --batch --technique=BEU --banner",
     "python tools/probe.py https://t.test/ -X POST --data user=a",
     "XUNJI_PROXY=socks5h://127.0.0.1:1080 python tools/probe.py GET https://t.test/",
     "python tools/probe.py POST https://t.test/login --data 'email=person@real.example.cn' --allow-sensitive-auth",

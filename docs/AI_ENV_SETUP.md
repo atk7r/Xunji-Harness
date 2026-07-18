@@ -72,6 +72,7 @@ playwright install chromium
 | `.claude/settings.json` | Claude hooks、statusline 接线 | 是 |
 | `.claude/settings.local.json` | 本机 Claude 权限白名单 / 本地偏好 | 否 |
 | `.claude/xunji_active_run` | 当前 active run 指针 | 否 |
+| `.claude/xunji_session_selections/` | Claude session resume 专用派生选择回执 | 否 |
 | `tools/harness/proxy.conf` | 交战出口代理，一行一个 URL | 否 |
 | `tools/harness/codex_proxy.conf` | Codex CLI 专用代理，一行一个 URL | 否 |
 | `knowledge/weaponized/` | 本地武器化知识、PoC、payload | 否，除 README/.gitkeep |
@@ -135,10 +136,12 @@ python3 tools/loop_bootstrap.py --resume runs/<dir>
 `surface.md`，也不要默认用 `classify_hosts` 对已有 Guanlan recon 全量重探；
 `--classify` 只用于需要本机出口重新确认可达性的场景。
 
-这些入口会在完成准备后继承当前 Claude 回合契约，再通过同一个 CAS 原语切换
+这些入口会在完成准备后继承当前 Claude 回合契约，再通过同一个 commit CAS 切换
 active run。CAS 冲突会保留 `prepared_not_active` receipt 和旧 pointer；显式 resume
-可通过同一原语恢复，不能手工改 pointer。
-不要直接编辑或删除 `.claude/xunji_active_run`。如果 `/loop` 在新 run 创建前的
+可通过同一事务 owner 恢复。Claude 会话恢复则仅由 `SessionStart source=resume`
+消费对应 session/transcript 的派生回执；不会恢复旧执行权限。
+不要直接编辑或删除 `.claude/xunji_active_run` 或
+`.claude/xunji_session_selections/`。如果 `/loop` 在新 run 创建前的
 CronCreate 被拒绝，先完成 setup，再针对新 run 重新执行 CronList/CronCreate。
 
 active run 通常由 `setup_run.py` / `loop_bootstrap.py` 设置。如果 statusline 没有指向正确 run，可手动设置：
@@ -151,13 +154,16 @@ python3 tools/xunji_statusline.py --set-active runs/<dir>
 
 `.claude/settings.json` 已配置：
 
-- `SessionStart`：hook 自检和 sentinel 启动
+- `SessionStart`：hook 自检、sentinel 启动；仅 matcher=`resume` 的运行态 hook
+  尝试恢复该 Claude session 原来的 run 选择
+- `SessionEnd`：保存 ending session 的精确选择并清空可见 pointer；不删除 run
 - `PreToolUse`：Bash / WebSearch / WebFetch 前置检查
 - `PostToolUse`：sentinel 记录
 - `UserPromptSubmit`：anti-drift 注入
 - `Stop`：output gate 与 run gate
 - `statusLine`：每 2 秒只读显示 `[Xunji-status] [<phase>] <run>`；未明确传入
-  Xunji workspace 或未选择 active run 时不显示
+  Xunji workspace 或未选择 active run 时不显示。当前 renderer 不校验
+  session/transcript；会话绑定只存在于 SessionEnd/resume 的 pointer 生命周期后端
 
 Claude Code 通常会设置 `CLAUDE_PROJECT_DIR`。手动模拟 hook 或排障时，可在项目根目录临时设置：
 
@@ -170,7 +176,10 @@ python3 .claude/hooks/ip_blacklist.py --selftest
 python3 tools/xunji_statusline.py --selftest
 ```
 
-statusline 只读 `.claude/xunji_active_run` 和阶段状态，不会替 AI 选择工作、刷新状态或写证据。
+statusline 只读 pointer 和阶段状态，不读取 turn contract 或 resume receipt，
+不会替 AI 选择工作、恢复状态、刷新状态或写证据。普通 `claude` startup、`/clear`、
+compact、fork/new session 都不会恢复旧选择；只有 Claude resume 可以自动恢复，且
+第一条新 prompt 前保持 `EXPLAIN_ONLY`。
 如需手工模拟 statusLine 的 stdin 契约，不要直接空输入运行；应显式提供 workspace：
 
 ```bash

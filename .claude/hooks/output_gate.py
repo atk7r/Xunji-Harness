@@ -33,6 +33,41 @@ INVISIBLE_RE = re.compile(r"[​‌‍⁠﻿ ]")
 CODA_RE = re.compile(
     r"(?im)^[^\S\n]*(下一行动|BLOCKED)[^\S\n]*[:：][^\S\n]*(.*?)[^\S\n]*$"
 )
+NORMAL_CODA = "NORMAL_CODA"
+TARGET_DENIED = "TARGET_DENIED"
+MAINTENANCE_BLOCKED = "MAINTENANCE_BLOCKED"
+STOP_OUTPUT_TYPES = frozenset({NORMAL_CODA, TARGET_DENIED, MAINTENANCE_BLOCKED})
+STOP_OUTPUT_SCHEMA = "xunji.stop-output.v1"
+STOP_RECORD_FIELDS = {
+    NORMAL_CODA: frozenset({"schema", "type", "coda_kind", "next_action"}),
+    TARGET_DENIED: frozenset({
+        "schema", "type", "error", "recovery", "executed", "next_action",
+    }),
+    MAINTENANCE_BLOCKED: frozenset({
+        "schema", "type", "blocker_class", "error", "recovery",
+        "success_receipt", "reason", "scope", "required_authority",
+        "next_action",
+    }),
+}
+
+RECOVERY_SAME_TURN_RETRY = "SAME_TURN_RETRY"
+RECOVERY_SAME_TURN_ALTERNATIVE = "SAME_TURN_ALTERNATIVE"
+RECOVERY_NEW_OPERATOR_AUTHORITY = "NEW_OPERATOR_AUTHORITY"
+RECOVERY_HARD_SAFETY_DENIAL = "HARD_SAFETY_DENIAL"
+RECOVERY_TYPES = frozenset({
+    RECOVERY_SAME_TURN_RETRY,
+    RECOVERY_SAME_TURN_ALTERNATIVE,
+    RECOVERY_NEW_OPERATOR_AUTHORITY,
+    RECOVERY_HARD_SAFETY_DENIAL,
+})
+
+E_TARGET_ACTION_DENIED = "XUNJI_E_TARGET_ACTION_DENIED"
+E_MAINTENANCE_BLOCKED = "XUNJI_E_MAINTENANCE_BLOCKED"
+_STABLE_ERROR_RE = re.compile(r"\A[A-Z][A-Z0-9_]{2,127}\Z")
+_RESERVED_STOP_MARKER_RE = re.compile(
+    r"(?m)^(?:XUNJI_EXECUTION_STATUS=(?:DENIED|BLOCKED)|"
+    r"XUNJI_MAINTENANCE_STATUS=BLOCKED|XUNJI_STOP_TYPE=)"
+)
 _ACTION_WORDS_ZH = (
     r"运行|执行|检查|验证|更新|记录|分派|读取|修复|重跑|测试|扫描|探测|复审|回放|"
     r"保存|写入|提交|创建|生成|删除|关闭|打开|调用|发送|汇总|同步|标记|裁定|重试|"
@@ -57,6 +92,7 @@ try:
     from anti_drift import (
         DRIFT_PATTERNS, find_active_run, is_normal_mode,
         _valid_ts, SessionStateManager, get_mode,
+        semantic_freshness, semantic_trajectory, record_reason_pass,
     )
 except Exception:
     DRIFT_PATTERNS = [
@@ -73,6 +109,25 @@ except Exception:
 
     def get_mode() -> str:
         return "normal"
+
+    def semantic_freshness(run_dir) -> dict:
+        return {
+            "status": "invalid",
+            "remind": True,
+            "changed_fields": [],
+            "reason": "semantic anti-drift implementation unavailable",
+        }
+
+    def semantic_trajectory(run_dir) -> dict:
+        return {
+            "status": "invalid",
+            "no_progress_cycles": 0,
+            "trajectory_review_due": False,
+            "reason": "semantic anti-drift implementation unavailable",
+        }
+
+    def record_reason_pass(*args, **kwargs):
+        raise RuntimeError("semantic anti-drift implementation unavailable")
 
     def _valid_ts(value, now: float) -> float:
         try:
@@ -109,13 +164,16 @@ try:
     import runtime_receipts as _runtime_receipts
 except Exception:
     _runtime_receipts = None
+try:
+    import loop_journal as _loop_journal
+except Exception:
+    _loop_journal = None
+try:
+    import work_plan as _work_plan
+except Exception:
+    _work_plan = None
 
 
-_DENIED_ONLY_RE = re.compile(
-    r"\AXUNJI_EXECUTION_STATUS=DENIED\n"
-    r"未执行目标动作；不存在该动作的实测结果。\n"
-    r"下一行动: (?:F-\d{3}|frontier\.md) 修复 PreToolUse 前置条件后重试同一动作\Z"
-)
 def _active_run_declared(pointer: Path | None = None) -> bool:
     """Conservatively detect an operator-selected run if lookup itself failed."""
     marker = pointer or Path(os.environ.get(
@@ -127,6 +185,134 @@ def _active_run_declared(pointer: Path | None = None) -> bool:
         return marker.exists()
 
 
+def _stable_receipt_error(receipt: dict, fallback: str) -> str:
+    code = str(receipt.get("decision_code") or "").strip()
+    return code if _STABLE_ERROR_RE.fullmatch(code) else fallback
+
+
+def _validate_stop_record(record: object) -> list[str]:
+    """Stdlib semantic mirror of ``contracts/stop-output.v1.schema.json``."""
+    if not isinstance(record, dict):
+        return ["record must be an object"]
+    kind = str(record.get("type") or "")
+    required = STOP_RECORD_FIELDS.get(kind)
+    if required is None:
+        return ["unknown Stop output type"]
+    errors: list[str] = []
+    if set(record) != required:
+        errors.append("record fields do not match the exclusive variant")
+    if record.get("schema") != STOP_OUTPUT_SCHEMA:
+        errors.append("wrong Stop output schema")
+    next_action = record.get("next_action")
+    if not isinstance(next_action, str) or not (4 <= len(next_action) <= 2048):
+        errors.append("next_action length is invalid")
+    if kind == NORMAL_CODA:
+        if record.get("coda_kind") not in {"NEXT_ACTION", "BLOCKED"}:
+            errors.append("unknown Coda kind")
+        return errors
+    if not isinstance(record.get("error"), str) or not _STABLE_ERROR_RE.fullmatch(
+            str(record.get("error") or "")):
+        errors.append("error code is not stable")
+    if record.get("recovery") not in RECOVERY_TYPES:
+        errors.append("unknown recovery semantics")
+    if kind == TARGET_DENIED:
+        if record.get("executed") is not False:
+            errors.append("TARGET_DENIED must declare executed=false")
+        return errors
+    if record.get("blocker_class") != "MAINTENANCE":
+        errors.append("MAINTENANCE_BLOCKED has the wrong blocker class")
+    if record.get("success_receipt") is not False:
+        errors.append("MAINTENANCE_BLOCKED requires success_receipt=false")
+    reason = record.get("reason")
+    if not isinstance(reason, str) or not (1 <= len(reason) <= 6000):
+        errors.append("maintenance reason length is invalid")
+    scope = record.get("scope")
+    if not isinstance(scope, list) or len(scope) > 16 \
+            or len(scope) != len({str(item) for item in scope}) \
+            or any(not isinstance(item, str) or not (1 <= len(item) <= 1024)
+                   for item in scope):
+        errors.append("maintenance scope is invalid")
+    authority = record.get("required_authority")
+    if not isinstance(authority, str) or not (1 <= len(authority) <= 20000):
+        errors.append("required_authority length is invalid")
+    return errors
+
+
+def _recovery_semantics(receipt: dict, *, maintenance_blocked: bool) -> str:
+    """Map trusted receipt metadata to a finite, machine-checkable recovery class."""
+    hook = str(receipt.get("hook_event_name") or "")
+    decision_class = str(receipt.get("decision_class") or "").strip().lower()
+    code = str(receipt.get("decision_code") or "").strip().upper()
+    if hook == "PostToolUseFailure":
+        return RECOVERY_SAME_TURN_RETRY
+    if receipt.get("retryable_same_turn") is True or decision_class == "command_shape":
+        return RECOVERY_SAME_TURN_ALTERNATIVE
+    if decision_class in {"safety", "privacy", "scope"} or any(
+            token in code for token in ("SAFETY", "PRIVACY", "OUT_OF_SCOPE")):
+        return RECOVERY_HARD_SAFETY_DENIAL
+    if decision_class == "authority" or (maintenance_blocked and hook == "PreToolUseDenied"):
+        return RECOVERY_NEW_OPERATOR_AUTHORITY
+    return RECOVERY_SAME_TURN_RETRY
+
+
+def _target_anchor(denied: list[dict], run_dir: Path | None) -> str:
+    active = _active_protocol_fronts(run_dir) if run_dir is not None else []
+    if active:
+        return active[0]
+    latest = denied[-1] if denied else {}
+    front = str(latest.get("front") or "").upper()
+    return front if re.fullmatch(r"F-\d+", front) else "frontier.md"
+
+
+def _target_denied_record(
+    denied: list[dict],
+    run_dir: Path | None = None,
+) -> dict:
+    latest = denied[-1] if denied else {}
+    recovery = _recovery_semantics(latest, maintenance_blocked=False)
+    code = _stable_receipt_error(latest, E_TARGET_ACTION_DENIED)
+    anchor = _target_anchor(denied, run_dir)
+    if recovery == RECOVERY_SAME_TURN_ALTERNATIVE:
+        action = (
+            f"{anchor} 按 XUNJI_ERROR 修正命令形状后在当前回合重试同一目标动作"
+        )
+    elif recovery == RECOVERY_NEW_OPERATOR_AUTHORITY:
+        action = (
+            f"{anchor} 在新 operator prompt 取得所需授权后重试同一目标动作"
+        )
+    elif recovery == RECOVERY_HARD_SAFETY_DENIAL:
+        action = f"{anchor} 切换到不违反硬安全边界的替代动作"
+    else:
+        action = f"{anchor} 完成前置条件后在当前回合重试同一目标动作"
+    record = {
+        "schema": STOP_OUTPUT_SCHEMA,
+        "type": TARGET_DENIED,
+        "error": code,
+        "recovery": recovery,
+        "executed": False,
+        "next_action": action,
+    }
+    errors = _validate_stop_record(record)
+    if errors:
+        raise RuntimeError("invalid TARGET_DENIED contract: " + "; ".join(errors))
+    return record
+
+
+def _target_denied_text(
+    denied: list[dict],
+    run_dir: Path | None = None,
+) -> str:
+    record = _target_denied_record(denied, run_dir)
+    return (
+        "XUNJI_EXECUTION_STATUS=DENIED\n"
+        f"XUNJI_STOP_TYPE={TARGET_DENIED}\n"
+        f"XUNJI_ERROR={record['error']}\n"
+        f"XUNJI_RECOVERY={record['recovery']}\n"
+        "未执行目标动作；不存在该动作的实测结果。\n"
+        f"下一行动: {record['next_action']}"
+    )
+
+
 def _denied_result_claim_reason(
     msg: str,
     denied: list[dict],
@@ -134,31 +320,25 @@ def _denied_result_claim_reason(
 ) -> str:
     if not denied:
         return ""
-    active = _active_protocol_fronts(run_dir) if run_dir is not None else []
-    anchor = active[0] if active else "frontier.md"
     clean = _strip_invisible(msg).strip()
-    if run_dir is None:
-        if _DENIED_ONLY_RE.fullmatch(clean):
-            return ""
-    else:
-        expected = (
-            "XUNJI_EXECUTION_STATUS=DENIED\n"
-            "未执行目标动作；不存在该动作的实测结果。\n"
-            f"下一行动: {anchor} 修复 PreToolUse 前置条件后重试同一动作"
-        )
-        if clean == expected:
-            return ""
+    expected = _target_denied_text(denied, run_dir)
+    if clean == expected:
+        return ""
     return (
         "[未执行动作真实性硬拦] 本回合仍有未被同工具、同执行动作成功回执消解的"
         " PreToolUse 目标动作拒绝。禁止自由文本和任何结果转述；继续完成前置条件并"
-        "重试原动作，或仅输出以下三行：\n"
-        "XUNJI_EXECUTION_STATUS=DENIED\n"
-        "未执行目标动作；不存在该动作的实测结果。\n"
-        f"下一行动: {anchor} 修复 PreToolUse 前置条件后重试同一动作"
+        "重试原动作，或仅输出以下 fixed envelope：\n" + expected
     )
 
 
-def _maintenance_blocked_text(blocked: list[dict]) -> str:
+def _maintenance_blocked_record(blocked: list[dict]) -> dict:
+    if not blocked or any(
+            not isinstance(receipt, dict)
+            or receipt.get("maintenance_action") is not True
+            for receipt in blocked):
+        raise ValueError(
+            "MAINTENANCE_BLOCKED requires only receipt-classified maintenance blockers"
+        )
     latest = blocked[-1] if blocked else {}
     paths = sorted({
         str(path) for path in (latest.get("maintenance_paths") or [])
@@ -168,14 +348,57 @@ def _maintenance_blocked_text(blocked: list[dict]) -> str:
     raw_reason = str(latest.get("decision_reason") or "")
     if not raw_reason and latest.get("hook_event_name") == "PostToolUseFailure":
         raw_reason = "tool failure: " + str(latest.get("response_excerpt") or "")
-    reason = re.sub(r"\s+", " ", _strip_invisible(raw_reason)).strip() \
+    reason = (
+        re.sub(r"\s+", " ", _strip_invisible(raw_reason)).strip()
         or "maintenance authority or successful tool result required"
+    )[:6000]
+    recovery = _recovery_semantics(latest, maintenance_blocked=True)
+    code = _stable_receipt_error(latest, E_MAINTENANCE_BLOCKED)
+    if recovery == RECOVERY_SAME_TURN_RETRY:
+        action = "修复工具失败后在当前回合重试同一框架维护动作"
+        required_authority = "current operator turn contract (no new authority)"
+    elif recovery == RECOVERY_SAME_TURN_ALTERNATIVE:
+        action = "按 XUNJI_ERROR 修正命令形状后在当前回合重试同一框架维护动作"
+        required_authority = "current operator turn contract (no new authority)"
+    elif recovery == RECOVERY_HARD_SAFETY_DENIAL:
+        action = "停止该维护动作并保留硬安全边界"
+        required_authority = "none (hard safety denial is not authorizable)"
+    else:
+        action = "在新 operator prompt 取得 exact-path 授权后重试同一框架维护动作"
+        required_authority = (
+            f"/xunji-maintenance --scope {scope} --reason <reason>"
+        )
+    record = {
+        "schema": STOP_OUTPUT_SCHEMA,
+        "type": MAINTENANCE_BLOCKED,
+        "blocker_class": "MAINTENANCE",
+        "error": code,
+        "recovery": recovery,
+        "success_receipt": False,
+        "reason": reason,
+        "scope": paths,
+        "required_authority": required_authority,
+        "next_action": action,
+    }
+    errors = _validate_stop_record(record)
+    if errors:
+        raise RuntimeError(
+            "invalid MAINTENANCE_BLOCKED contract: " + "; ".join(errors))
+    return record
+
+
+def _maintenance_blocked_text(blocked: list[dict]) -> str:
+    record = _maintenance_blocked_record(blocked)
     return (
         "XUNJI_MAINTENANCE_STATUS=BLOCKED\n"
+        f"XUNJI_STOP_TYPE={MAINTENANCE_BLOCKED}\n"
+        "XUNJI_BLOCKER_CLASS=MAINTENANCE\n"
+        f"XUNJI_ERROR={record['error']}\n"
+        f"XUNJI_RECOVERY={record['recovery']}\n"
         "未取得框架维护动作的成功回执；不得声称修改完成。\n"
-        f"阻塞原因: {reason}\n"
-        f"所需授权: /xunji-maintenance --scope {scope} --reason <reason>\n"
-        "下一行动: 修复前置条件，并在新回合取得上述 exact-path 授权后重试同一动作"
+        f"阻塞原因: {record['reason']}\n"
+        f"所需授权: {record['required_authority']}\n"
+        f"下一行动: {record['next_action']}"
     )
 
 
@@ -190,8 +413,57 @@ def _maintenance_blocked_claim_reason(msg: str, blocked: list[dict]) -> str:
     return (
         "[未执行维护真实性硬拦] 本回合仍有未被同工具、同执行动作成功回执消解的"
         "安全关键框架维护拒绝。禁止声称已修改、已还原或已修复；继续取得精确授权后"
-        "重试同一动作，或仅输出以下五行：\n" + required
+        "重试同一动作，或仅输出以下 fixed envelope：\n" + required
     )
+
+
+def _stop_output_union(
+    msg: str,
+    denied: list[dict],
+    blocked: list[dict],
+    run_dir: Path | None = None,
+) -> tuple[str, str]:
+    """Return the exclusive Stop output variant and any validation error.
+
+    Maintenance blockers take deterministic precedence if both blocker families are
+    present.  A valid fixed envelope is terminal and must not be parsed as Coda.
+    """
+    clean = _strip_invisible(msg or "").strip()
+    if blocked:
+        return MAINTENANCE_BLOCKED, _maintenance_blocked_claim_reason(msg, blocked)
+    if denied:
+        return TARGET_DENIED, _denied_result_claim_reason(msg, denied, run_dir)
+    if _RESERVED_STOP_MARKER_RE.search(clean):
+        return NORMAL_CODA, (
+            "[STOP_ENVELOPE_UNAUTHORIZED] fixed Stop envelope requires a matching "
+            "unresolved trusted runtime receipt in this prompt/session"
+        )
+    return NORMAL_CODA, ""
+
+
+def validated_fixed_stop_kind(
+    msg: str,
+    run_dir: Path,
+    *,
+    session_id: str = "",
+    since: float = 0.0,
+) -> str:
+    """Read-only validator shared by the later Stop hook.
+
+    The caller may bypass ordinary process/Coda gates only when the exact fixed
+    envelope is backed by an unresolved receipt in this prompt/session.
+    """
+    if _runtime_receipts is None:
+        return ""
+    try:
+        blocked = _runtime_receipts.unresolved_maintenance_blockers(
+            run_dir, session_id=session_id, since=since)
+        denied = _runtime_receipts.unresolved_target_denials(
+            run_dir, session_id=session_id, since=since)
+    except Exception:
+        return ""
+    kind, error = _stop_output_union(msg, denied, blocked, run_dir)
+    return kind if kind in {TARGET_DENIED, MAINTENANCE_BLOCKED} and not error else ""
 
 
 def _emit_gate_violation(reason: str, *, stop_hook_active: bool) -> None:
@@ -225,29 +497,60 @@ def _tail_has_question(msg: str) -> bool:
     return bool(re.search(r'[?？]|[吗呢吧啊][\s。！,，]*$', tail))
 
 
+def _coda_error(code: str, predicate: str) -> str:
+    return f"[{code}] {predicate}"
+
+
+def _normal_coda_record(kind: str, detail: str) -> dict:
+    record = {
+        "schema": STOP_OUTPUT_SCHEMA,
+        "type": NORMAL_CODA,
+        "coda_kind": "BLOCKED" if kind == "BLOCKED" else "NEXT_ACTION",
+        "next_action": detail,
+    }
+    errors = _validate_stop_record(record)
+    if errors:
+        raise RuntimeError("invalid NORMAL_CODA contract: " + "; ".join(errors))
+    return record
+
+
 def _turn_coda(msg: str) -> tuple[str, str, str]:
-    """Return ``(kind, detail, error)`` for one concrete final Coda line."""
+    """Return ``(kind, detail, stable_error)`` for one concrete final Coda line."""
     clean = _strip_invisible(msg or "").rstrip()
+    if _RESERVED_STOP_MARKER_RE.search(clean):
+        return "", "", _coda_error(
+            "STOP_ENVELOPE_UNAUTHORIZED",
+            "fixed Stop envelope requires a matching current receipt",
+        )
     matches = list(CODA_RE.finditer(clean))
     if not matches:
-        return "", "", "缺少回合 Coda"
+        return "", "", _coda_error(
+            "CODA_MISSING", "最后一个非空行必须是唯一的 `下一行动:` Coda")
     if len(matches) != 1:
-        return "", "", "只能有一个回合 Coda"
+        return "", "", _coda_error(
+            "CODA_MULTIPLE", "全文只能出现一个回合 Coda")
     match = matches[0]
     if match.end() != len(clean):
-        return "", "", "Coda 必须是最后一个非空行"
+        trailing = clean[match.end():]
+        if re.fullmatch(r"\s*`{3,}[^\n]*", trailing):
+            return "", "", _coda_error(
+                "CODA_TRAILING_FENCE", "Coda 后不得保留 Markdown closing fence")
+        return "", "", _coda_error(
+            "CODA_NOT_LAST", "Coda 必须是最后一个非空行")
     kind = match.group(1).upper()
     detail = match.group(2).strip()
     compact = re.sub(r"[\s`*_#<>。，、:：;；,.!?！？()（）\[\]-]", "", detail)
     if len(compact) < 4 or re.search(r"<[^>]*>|\b(?:TODO|TBD)\b", detail, re.I):
-        return "", "", "Coda 内容为空、过短或仍是占位符"
+        return "", "", _coda_error(
+            "CODA_INVALID_DETAIL", "Coda 内容不得为空、过短或含占位符")
     vague = re.sub(r"[\s。！!，,；;]", "", detail).lower()
     vague_only = {
         "继续", "继续分析", "继续测试", "继续验证", "继续推进", "按流程继续",
         "处理问题", "执行下一步", "等待", "等待用户", "later", "continue",
     }
     if vague in vague_only:
-        return "", "", "Coda 必须写清对象和动作，不能只写泛泛的继续/处理"
+        return "", "", _coda_error(
+            "CODA_VAGUE_ACTION", "Coda 必须写清一个对象和一个动作")
     vague_phrase = re.search(
         r"(?:根据|按照)(?:前面|上述|以上|之前|当前).*(?:继续|下一步)|"
         r"继续(?:做|执行)?(?:下一步|后续工作|相关工作|剩余工作)|"
@@ -262,13 +565,17 @@ def _turn_coda(msg: str) -> tuple[str, str, str]:
         re.I,
     )
     if vague_phrase and not concrete_anchor:
-        return "", "", "Coda 是换一种说法的泛泛继续，仍缺具体对象和动作"
+        return "", "", _coda_error(
+            "CODA_VAGUE_ACTION", "泛泛继续的改写仍缺一个具体对象和动作")
     if len(set(re.findall(r"\bF-\d+\b", detail, re.I))) > 1:
-        return "", "", "Coda 只能推进一个 F-id，不能把多个前沿打包"
+        return "", "", _coda_error(
+            "CODA_MULTIPLE_FRONTS", "Coda 只能推进一个 F-id")
     if kind != "BLOCKED" and not (_ACTION_RE.search(detail) or _TOOL_RE.search(detail)):
-        return "", "", "下一行动必须包含明确的可执行动作"
+        return "", "", _coda_error(
+            "CODA_ACTION_REQUIRED", "下一行动必须包含一个明确可执行动作")
     if _has_multiple_action_clauses(detail):
-        return "", "", "Coda 只能写一个动作，不能把动作清单塞进一行"
+        return "", "", _coda_error(
+            "CODA_MULTIPLE_ACTIONS", "Coda 恰好只能包含一个可执行动作谓词")
     return kind, detail, ""
 
 
@@ -320,6 +627,40 @@ def _next_drift_started_at(prev_state: dict, drift_flags: list[str], now: float)
         if started:
             return started
     return now
+
+
+def _semantic_reason_pass_state(run_dir: Path) -> tuple[dict, dict, list[str]]:
+    """Return content-bound Reason-pass status and advisory flags.
+
+    This deliberately has no age, mtime, or read-then-edit fallback.  Semantic
+    freshness comes only from the hash-chained v1 receipt contract.
+    """
+    freshness = semantic_freshness(run_dir)
+    trajectory = semantic_trajectory(run_dir)
+    if not isinstance(freshness, dict):
+        freshness = {
+            "status": "invalid",
+            "remind": True,
+            "changed_fields": [],
+            "reason": "semantic_freshness returned a non-object",
+        }
+    if not isinstance(trajectory, dict):
+        trajectory = {
+            "status": "invalid",
+            "no_progress_cycles": 0,
+            "trajectory_review_due": False,
+            "reason": "semantic_trajectory returned a non-object",
+        }
+    flags: list[str] = []
+    # A legacy run with no baseline is migrated by anti_drift's next-prompt
+    # anchor.  Stop-time drift is emitted only for a proven content transition
+    # (or an invalid receipt chain), never merely because a file is old.
+    if freshness.get("remind") is True and freshness.get("status") in {
+            "changed_unadjudicated", "invalid"}:
+        flags.append("reason_pass_due")
+    if trajectory.get("trajectory_review_due") is True:
+        flags.append("trajectory_review_due")
+    return freshness, trajectory, flags
 
 
 def _fallback_protocol_state(run_dir: Path, error: str = "") -> dict:
@@ -399,27 +740,165 @@ def _active_protocol_fronts(run_dir: Path) -> list[str]:
     return sorted(derived | canonical)
 
 
-def _protocol_block_reason(msg: str, run_dir: Path) -> str:
-    state = _protocol_state(run_dir)
-    if not state:
-        return (
-            "[输出协议硬拦] 无法解析 active run 状态；先修复/读取 frontier.md，"
-            "并以唯一具体的 `下一行动:` 结尾。"
+def _structured_cycle_next_action(run_dir: Path) -> tuple[str, str, bool, bool]:
+    """Return the newest validated plan-bound cycle action.
+
+    ``(action, error, present, active_unended)`` keeps an invalid structured
+    receipt distinct from an absent one.  ``active_unended`` enters the normal
+    Coda parser but prevents a stale completion marker from bypassing that Coda.
+    """
+    journal_path = run_dir / "state" / "loop_journal.jsonl"
+    if _loop_journal is None:
+        if journal_path.exists():
+            return "", _coda_error(
+                "CODA_STRUCTURED_RECEIPT_UNAVAILABLE",
+                "无法验证已存在的结构化 cycle_end receipt",
+            ), True, False
+        return "", "", False, False
+    try:
+        events = _loop_journal.load_events(run_dir)
+    except Exception:
+        return "", _coda_error(
+            "CODA_STRUCTURED_RECEIPT_UNREADABLE",
+            "无法读取结构化 cycle_end receipt",
+        ), True, False
+    # Validate the complete typed chain before filtering for a well-shaped
+    # receipt.  Filtering first would make a corrupted plan-bound cycle_end
+    # (for example one missing plan_digest) look identical to genuine absence
+    # and incorrectly re-enable the compatibility/free-text Coda path.
+    has_cycle_contract = any(
+        isinstance(item, dict) and (
+            bool(item.get("_journal_load_error"))
+            or str(item.get("event") or "") == "cycle_end"
+            or str(item.get("event") or "").strip().lower().replace("-", "_")
+            in getattr(_loop_journal, "TYPED_CYCLE_EVENTS", frozenset())
         )
-    if state.get("loop_complete"):
-        return ""
-    active = list(state.get("active_fronts") or [])
-    kind, detail, coda_error = _turn_coda(msg)
-    if not coda_error and kind == "BLOCKED":
-        coda_error = (
-            "active run 尚未完成时不能用 BLOCKED 停止；应写一个能推进、"
-            "转向、记录外部依赖或形成证据化裁定的下一行动"
+        for item in events
+    )
+    if has_cycle_contract:
+        try:
+            typed_state = _loop_journal.validate_cycle_events(events)
+        except Exception as exc:
+            code = str(getattr(exc, "code", "") or "")
+            detail = f" ({code})" if _STABLE_ERROR_RE.fullmatch(code) else ""
+            return "", _coda_error(
+                "CODA_STRUCTURED_RECEIPT_INVALID",
+                "结构化 cycle_end journal 未通过验证" + detail,
+            ), True, False
+    else:
+        typed_state = {}
+    candidates = [
+        item for item in events
+        if isinstance(item, dict)
+        and item.get("event") == "cycle_end"
+        and isinstance(item.get("data"), dict)
+        and item["data"].get("plan_id")
+        and item["data"].get("plan_digest")
+    ]
+    active_digest = str(typed_state.get("active_plan_digest") or "")
+    if not candidates and not active_digest:
+        return "", "", False, False
+    if _work_plan is None:
+        return "", _coda_error(
+            "CODA_STRUCTURED_PROVENANCE_UNAVAILABLE",
+            "无法验证 structured cycle_end 的 committed v2 transaction lineage",
+        ), True, False
+    try:
+        plan = _work_plan.transaction_bound_plan(run_dir)
+    except Exception as exc:
+        detail = str(exc).splitlines()[0][:160] or exc.__class__.__name__
+        return "", _coda_error(
+            "CODA_STRUCTURED_PROVENANCE_INVALID",
+            "structured cycle_end 缺少有效 committed v2 transaction/archive/lineage"
+            f" ({detail})",
+        ), True, False
+    plan_digest = str(plan.get("plan_digest") or "")
+    if not active_digest or active_digest != plan_digest:
+        return "", _coda_error(
+            "CODA_STRUCTURED_PLAN_DIVERGED",
+            "structured journal active plan 与 committed v2 transaction 不一致",
+        ), True, False
+    ended = {
+        str(item) for item in typed_state.get("ended_plan_digests", [])
+        if str(item)
+    }
+    if active_digest not in ended:
+        # A prior cycle's receipt is historical.  Once a newer plan is active,
+        # it must not freeze the current turn's final Coda.
+        return "", "", False, True
+    current = [
+        item for item in candidates
+        if str(item.get("data", {}).get("plan_digest") or "") == active_digest
+    ]
+    if len(current) != 1:
+        return "", _coda_error(
+            "CODA_STRUCTURED_RECEIPT_INVALID",
+            "current committed plan 必须恰好对应一个 structured cycle_end",
+        ), True, False
+    data = current[0]["data"]
+    action = data.get("next_action")
+    if not isinstance(action, str) or not action.strip() or action != action.strip():
+        return "", _coda_error(
+            "CODA_STRUCTURED_RECEIPT_INVALID",
+            "结构化 cycle_end 缺少规范 next_action",
+        ), True, False
+    return action, "", True, False
+
+
+def _structured_projection_error(msg: str, expected: str) -> str:
+    """Validate only the exact final-line projection of trusted structured data."""
+    clean = (msg or "").rstrip()
+    if _RESERVED_STOP_MARKER_RE.search(clean):
+        return _coda_error(
+            "STOP_ENVELOPE_UNAUTHORIZED",
+            "fixed Stop envelope requires a matching current receipt",
         )
-    cited_fronts = set(re.findall(r"\bF-\d+\b", detail, re.I))
-    if not coda_error and active and cited_fronts and not (cited_fronts & set(active)):
-        coda_error = "Coda 引用的 F-id 不属于当前 active 前沿"
-    if not coda_error and not active and cited_fronts:
-        coda_error = "当前没有 active 前沿，Coda 不得引用不存在的活动 F-id"
+    matches = list(CODA_RE.finditer(clean))
+    if not matches:
+        return _coda_error(
+            "CODA_STRUCTURED_PROJECTION_MISSING",
+            "必须投影结构化 cycle_end.next_action",
+        )
+    if len(matches) != 1:
+        return _coda_error(
+            "CODA_STRUCTURED_PROJECTION_MULTIPLE",
+            "结构化 next_action 只能投影一次",
+        )
+    match = matches[0]
+    if match.end() != len(clean):
+        return _coda_error(
+            "CODA_STRUCTURED_PROJECTION_NOT_LAST",
+            "结构化 next_action 投影必须是最后一个非空行",
+        )
+    if match.group(1).upper() != "下一行动":
+        return _coda_error(
+            "CODA_STRUCTURED_PROJECTION_KIND",
+            "结构化 next_action 只能使用 `下一行动:` 投影",
+        )
+    actual = match.group(2).strip()
+    if actual != expected:
+        return _coda_error(
+            "CODA_STRUCTURED_PROJECTION_MISMATCH",
+            "文本 `下一行动:` 必须与最新 validated cycle_end.next_action 完全一致",
+        )
+    _kind, _detail, semantic_error = _turn_coda(clean)
+    if semantic_error:
+        return semantic_error
+    return ""
+
+
+def _action_context_error(detail: str, active: list[str]) -> str:
+    """Apply the same active-front/control-anchor rules to any Coda source."""
+    cited_fronts = {
+        item.upper() for item in re.findall(r"\bF-\d+\b", detail, re.I)
+    }
+    active_fronts = {str(item).upper() for item in active if str(item).strip()}
+    if active_fronts and cited_fronts and not (cited_fronts & active_fronts):
+        return _coda_error(
+            "CODA_WRONG_FRONT", "Coda 引用的 F-id 必须属于当前 active 前沿")
+    if not active_fronts and cited_fronts:
+        return _coda_error(
+            "CODA_WRONG_FRONT", "当前没有 active 前沿，不得引用活动 F-id")
     process_anchor = re.search(
         r"(?:check_run|classify_hosts|workers\.py|coverage_matrix\.py|frontier\.md|"
         r"evidence\.md|report\.md|decisions\.md|retrospective\.md|hints\.md|"
@@ -428,10 +907,54 @@ def _protocol_block_reason(msg: str, run_dir: Path) -> str:
         detail,
         re.I,
     )
-    if not coda_error and active and not cited_fronts and not process_anchor:
-        coda_error = "存在 active 前沿时，Coda 必须引用一个 active F-id 或明确的控制面对象"
-    if not coda_error and not active and not cited_fronts and not process_anchor:
-        coda_error = "当前没有 active 前沿，Coda 必须指向明确的收口或控制面对象"
+    if active_fronts and not cited_fronts and not process_anchor:
+        return _coda_error(
+            "CODA_FRONT_REQUIRED",
+            "存在 active 前沿时必须引用一个 active F-id 或明确的控制面对象",
+        )
+    if not active_fronts and not cited_fronts and not process_anchor:
+        return _coda_error(
+            "CODA_CONTROL_OBJECT_REQUIRED",
+            "当前无 active 前沿，下一行动必须指向明确的收口或控制面对象",
+        )
+    return ""
+
+
+def _protocol_block_reason(msg: str, run_dir: Path) -> str:
+    state = _protocol_state(run_dir)
+    if not state:
+        return (
+            "[输出协议硬拦] 无法解析 active run 状态；先修复/读取 frontier.md，"
+            "并以唯一具体的 `下一行动:` 结尾。"
+        )
+    active = list(state.get("active_fronts") or [])
+    structured_action, structured_error, structured_present, structured_active = (
+        _structured_cycle_next_action(run_dir)
+    )
+    detail = ""
+    if structured_present:
+        coda_error = structured_error or _structured_projection_error(
+            msg, structured_action)
+        if not coda_error:
+            coda_error = _action_context_error(structured_action, active)
+    else:
+        if state.get("loop_complete") and not structured_active:
+            return ""
+        kind, detail, coda_error = _turn_coda(msg)
+        if not coda_error:
+            try:
+                _normal_coda_record(kind, detail)
+            except Exception:
+                coda_error = _coda_error(
+                    "CODA_CONTRACT_INVALID", "Coda 无法投影为 xunji.stop-output.v1")
+        if not coda_error and kind == "BLOCKED":
+            coda_error = _coda_error(
+                "CODA_BLOCKED_INVALID",
+                "active run 尚未完成时不能用 BLOCKED 停止；应写一个能推进、"
+                "转向、记录外部依赖或形成证据化裁定的下一行动",
+            )
+        if not coda_error:
+            coda_error = _action_context_error(detail, active)
     if not coda_error:
         return ""
     sample = ", ".join(active[:6])
@@ -499,10 +1022,10 @@ def main() -> None:
         if not protocol_exempt and detect_option_list(msg):
             drift_flags.append("option_list")
 
-        # Find active run and check frontier staleness
+        # Find the active run and evaluate semantic Reason-pass freshness.  File
+        # age/mtime is deliberately not evidence that the reasoning state is
+        # stale: only content digests bound by a v1 receipt can establish that.
         if run_dir is not None:
-            frontier = run_dir / "frontier.md"
-            claude_md = ROOT / "CLAUDE.md"
             prev_state = SessionStateManager.load(run_dir)
             if _runtime_receipts is None:
                 raise RuntimeError("runtime_receipts unavailable")
@@ -511,21 +1034,21 @@ def main() -> None:
                 session_id=str(event.get("session_id") or ""),
                 since=float(contract.get("updated_at") or 0.0),
             )
-            maintenance_claim = _maintenance_blocked_claim_reason(
-                msg, unresolved_maintenance)
-            if maintenance_claim:
-                _emit_gate_violation(
-                    maintenance_claim, stop_hook_active=stop_active)
-                sys.exit(0)
             unresolved = _runtime_receipts.unresolved_target_denials(
                 run_dir,
                 session_id=str(event.get("session_id") or ""),
                 since=float(contract.get("updated_at") or 0.0),
             )
-            denied_claim = _denied_result_claim_reason(
-                msg, unresolved, run_dir)
-            if denied_claim:
-                _emit_gate_violation(denied_claim, stop_hook_active=stop_active)
+            stop_kind, terminal_error = _stop_output_union(
+                msg, unresolved, unresolved_maintenance, run_dir)
+            if terminal_error and (
+                    stop_kind in {TARGET_DENIED, MAINTENANCE_BLOCKED}
+                    or not protocol_exempt):
+                _emit_gate_violation(terminal_error, stop_hook_active=stop_active)
+                sys.exit(0)
+            if stop_kind in {TARGET_DENIED, MAINTENANCE_BLOCKED}:
+                # Fixed terminal variants are complete Stop outputs.  They do not
+                # enter drift, ordinary Coda, Agent, or closure validators.
                 sys.exit(0)
             # Reset stale session_state (Decision B-2)
             stale_sec = SESSION_STATE_STALE_SEC
@@ -533,19 +1056,9 @@ def main() -> None:
             if prev_updated and now - prev_updated > stale_sec:
                 prev_state = {}
 
-            # frontier_stale: frontier.md mtime > 15 min ago (30 min in normal mode)
-            _frontier_alerted = 0.0
-            frontier_stale_sec = 1800 if is_normal_mode() else 900
-            if frontier.exists():
-                frontier_mtime = frontier.stat().st_mtime
-                if time.time() - frontier_mtime > frontier_stale_sec:
-                    # Suppress re-trigger within 10 min of last alert to avoid infinite loop
-                    last_alert = prev_state.get("frontier_alerted_at", 0)
-                    if time.time() - last_alert > 600:
-                        drift_flags.append("frontier_stale")
-                        _frontier_alerted = time.time()
-            else:
-                frontier_mtime = 0.0
+            semantic_state, trajectory_state, semantic_flags = (
+                _semantic_reason_pass_state(run_dir)
+            )
 
             protocol_block = "" if protocol_exempt else _protocol_block_reason(msg, run_dir)
 
@@ -554,14 +1067,13 @@ def main() -> None:
             drift_started_at = _next_drift_started_at(prev_state, drift_flags, now)
 
             state = {
-                "frontier_mtime": frontier_mtime,
-                "claude_mtime": claude_md.stat().st_mtime if claude_md.exists() else 0.0,
                 "drift_flags": drift_flags,
                 "drift_started_at": drift_started_at,
                 "updated_at": now,
                 "reread_pending": False,
                 "drift_block_count": drift_count,
-                "frontier_alerted_at": _frontier_alerted if _frontier_alerted > 0 else prev_state.get("frontier_alerted_at", 0),
+                "semantic_freshness": semantic_state,
+                "semantic_trajectory": trajectory_state,
             }
             SessionStateManager.save(run_dir, state)
             if protocol_block:
@@ -569,23 +1081,32 @@ def main() -> None:
                 sys.exit(0)
 
         # ---- Drift notification: systemMessage only (no drift_block.json, Decision 2) ----
-        if drift_flags:
+        notification_flags = drift_flags + (
+            semantic_flags if run_dir is not None else [])
+        if notification_flags:
             normal = is_normal_mode()
             threshold_handoff = 5 if normal else 3
             threshold_reread = 3 if normal else 2
-            if drift_count >= threshold_handoff:
+            if not drift_flags:
                 block_msg = (
-                    f"[漂移告警 x{drift_count}] 检测到: {', '.join(drift_flags)}。"
+                    "[Reason-pass 提醒] 检测到: "
+                    f"{', '.join(notification_flags)}。"
+                    "请按 semantic status 重读/裁定 canonical 内容并记录 v1 receipt；"
+                    "内容未变时只读确认，禁止为 freshness 修改文件。"
+                )
+            elif drift_count >= threshold_handoff:
+                block_msg = (
+                    f"[漂移告警 x{drift_count}] 检测到: {', '.join(notification_flags)}。"
                     f"连续 {drift_count} 次违规——建议写 session_handoff.md 后重启新会话。"
                 )
             elif drift_count >= threshold_reread:
                 block_msg = (
-                    f"[漂移告警 x{drift_count}] 检测到: {', '.join(drift_flags)}。"
+                    f"[漂移告警 x{drift_count}] 检测到: {', '.join(notification_flags)}。"
                     f"重复违规——请 Read CLAUDE.md / WORKFLOW.md / frontier.md 后继续。"
                 )
             else:
                 block_msg = (
-                    f"[漂移告警] 检测到: {', '.join(drift_flags)}。"
+                    f"[漂移告警] 检测到: {', '.join(notification_flags)}。"
                     f"请 Read CLAUDE.md / WORKFLOW.md / frontier.md 后继续。"
                 )
             print(json.dumps({"systemMessage": block_msg}, ensure_ascii=False))
@@ -617,7 +1138,102 @@ def _selftest() -> int:
     import tempfile
 
     checks: list[tuple[str, bool]] = []
-    denied_receipt = [{"tool_name": "Bash", "target_action": True}]
+    contract_path = ROOT / "contracts" / "stop-output.v1.schema.json"
+    fixture_path = ROOT / "tools" / "harness" / "fixtures" / "stop-output.json"
+    try:
+        published_contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    except Exception:
+        published_contract = {}
+        fixture = {}
+    contract_defs = published_contract.get("$defs") \
+        if isinstance(published_contract.get("$defs"), dict) else {}
+    published_types = {
+        str(definition.get("properties", {}).get("type", {}).get("const") or "")
+        for definition in contract_defs.values()
+        if isinstance(definition, dict)
+    }
+    published_fields = {
+        str(definition.get("properties", {}).get("type", {}).get("const") or ""):
+            frozenset(str(field) for field in definition.get("required", []))
+        for definition in contract_defs.values()
+        if isinstance(definition, dict)
+    }
+    published_recovery = set(
+        contract_defs.get("targetDenied", {}).get("properties", {})
+        .get("recovery", {}).get("enum", [])
+    )
+    published_maintenance_recovery = set(
+        contract_defs.get("maintenanceBlocked", {}).get("properties", {})
+        .get("recovery", {}).get("enum", [])
+    )
+    checks.append(("published Stop contract freezes the exclusive union",
+                   published_types == STOP_OUTPUT_TYPES
+                   and published_fields == STOP_RECORD_FIELDS
+                   and published_recovery == RECOVERY_TYPES
+                   and published_maintenance_recovery == RECOVERY_TYPES
+                   and all(definition.get("additionalProperties") is False
+                           for definition in contract_defs.values()
+                           if isinstance(definition, dict))
+                   and len(published_contract.get("oneOf", [])) == 3))
+    valid_fixture_records = [
+        item.get("record") for item in fixture.get("valid_records", [])
+        if isinstance(item, dict)
+    ]
+    invalid_fixture_records = [
+        item.get("record") for item in fixture.get("invalid_records", [])
+        if isinstance(item, dict)
+    ]
+    checks.append(("Stop data fixtures accept every declared valid record",
+                   bool(valid_fixture_records)
+                   and all(not _validate_stop_record(record)
+                           for record in valid_fixture_records)))
+    checks.append(("Stop data fixtures reject mixed/unknown terminal records",
+                   bool(invalid_fixture_records)
+                   and all(bool(_validate_stop_record(record))
+                           for record in invalid_fixture_records)))
+    fixture_coda_cases = [
+        item for item in fixture.get("coda_cases", []) if isinstance(item, dict)
+    ]
+    checks.append(("Coda data fixtures expose stable parser error codes",
+                   bool(fixture_coda_cases)
+                   and all(str(item.get("expected_error") or "")
+                           in _turn_coda(str(item.get("message") or ""))[2]
+                           for item in fixture_coda_cases)))
+    structured_projection_cases = [
+        item for item in fixture.get("structured_projection_cases", [])
+        if isinstance(item, dict)
+    ]
+    checks.append(("structured cycle action fixtures freeze exact projection",
+                   bool(structured_projection_cases)
+                   and all(
+                       (lambda actual, expected: actual == "" if not expected
+                        else expected in actual)(
+                            _structured_projection_error(
+                                str(item.get("message") or ""),
+                                str(item.get("receipt_next_action") or ""),
+                            ),
+                            str(item.get("expected_error") or ""),
+                       )
+                       for item in structured_projection_cases)))
+    envelope_shapes = fixture.get("fixed_envelope_lines") \
+        if isinstance(fixture.get("fixed_envelope_lines"), dict) else {}
+
+    def envelope_shape_matches(text: str, kind: str) -> bool:
+        expected = envelope_shapes.get(kind)
+        lines = text.splitlines()
+        return isinstance(expected, list) and len(lines) == len(expected) \
+            and all(isinstance(prefix, str) and line.startswith(prefix)
+                    for line, prefix in zip(lines, expected))
+
+    denied_receipt = [{
+        "hook_event_name": "PreToolUseDenied",
+        "tool_name": "Bash",
+        "target_action": True,
+        "decision_code": "XUNJI_E_AGENT_PREREQUISITE",
+        "decision_class": "delegation",
+    }]
+    denied_text = _target_denied_text(denied_receipt)
     checks.append(("denied target cannot invent HTTP/TLS measurements", bool(
         _denied_result_claim_reason(
             "GET / 返回 200，Server: nginx/1.24.0，TLS 正常，延迟 12ms。",
@@ -636,13 +1252,15 @@ def _selftest() -> int:
     checks.append(("free-form honest prose is rejected while denial is unresolved", bool(
         _denied_result_claim_reason(
             "命令被拒绝，未执行。", denied_receipt))))
-    checks.append(("fixed denial-only envelope is allowed", not bool(
-        _denied_result_claim_reason(
-            "XUNJI_EXECUTION_STATUS=DENIED\n"
-            "未执行目标动作；不存在该动作的实测结果。\n"
-            "下一行动: F-001 修复 PreToolUse 前置条件后重试同一动作",
-            denied_receipt))))
+    checks.append(("fixed target-denied envelope is allowed", not bool(
+        _denied_result_claim_reason(denied_text, denied_receipt))))
+    checks.append(("target-denied envelope exposes stable type/error/recovery",
+                   "XUNJI_STOP_TYPE=TARGET_DENIED" in denied_text
+                   and "XUNJI_ERROR=XUNJI_E_AGENT_PREREQUISITE" in denied_text
+                   and "XUNJI_RECOVERY=SAME_TURN_RETRY" in denied_text
+                   and envelope_shape_matches(denied_text, TARGET_DENIED)))
     maintenance_receipt = [{
+        "hook_event_name": "PreToolUseDenied",
         "tool_name": "Edit",
         "maintenance_action": True,
         "maintenance_paths": ["tools/turn_contract.py"],
@@ -655,7 +1273,11 @@ def _selftest() -> int:
         _maintenance_blocked_claim_reason("已修复并还原 turn_contract。", maintenance_receipt))))
     checks.append(("maintenance denial envelope preserves exact path and original reason",
                    "--scope tools/turn_contract.py" in maintenance_text
-                   and "普通 /loop 不授权修改" in maintenance_text))
+                   and "普通 /loop 不授权修改" in maintenance_text
+                   and "XUNJI_STOP_TYPE=MAINTENANCE_BLOCKED" in maintenance_text
+                   and "XUNJI_RECOVERY=NEW_OPERATOR_AUTHORITY" in maintenance_text
+                   and envelope_shape_matches(
+                       maintenance_text, MAINTENANCE_BLOCKED)))
     checks.append(("exact dynamic maintenance denial envelope is allowed", not bool(
         _maintenance_blocked_claim_reason(maintenance_text, maintenance_receipt))))
     maintenance_failure = [{
@@ -670,7 +1292,55 @@ def _selftest() -> int:
         _maintenance_blocked_claim_reason("Edit succeeded.", maintenance_failure))))
     checks.append(("maintenance failure envelope preserves the tool error",
                    "old_string not found" in failure_text
-                   and "XUNJI_MAINTENANCE_STATUS=BLOCKED" in failure_text))
+                   and "XUNJI_MAINTENANCE_STATUS=BLOCKED" in failure_text
+                   and "XUNJI_RECOVERY=SAME_TURN_RETRY" in failure_text))
+    shape_denial = [{
+        "hook_event_name": "PreToolUseDenied",
+        "decision_code": "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED",
+        "decision_class": "command_shape",
+        "retryable_same_turn": True,
+    }]
+    safety_denial = [{
+        "hook_event_name": "PreToolUseDenied",
+        "decision_code": "XUNJI_E_SAFETY_BOUNDARY",
+        "decision_class": "safety",
+        "maintenance_action": True,
+    }]
+    checks.append(("command-shape denial has same-turn alternative semantics",
+                   "XUNJI_RECOVERY=SAME_TURN_ALTERNATIVE"
+                   in _target_denied_text(shape_denial)))
+    checks.append(("hard-safety denial has non-retry recovery semantics",
+                   "XUNJI_RECOVERY=HARD_SAFETY_DENIAL"
+                   in _target_denied_text(safety_denial)))
+    checks.append(("hard-safety maintenance blocker cannot request new authority",
+                   "XUNJI_RECOVERY=HARD_SAFETY_DENIAL"
+                   in _maintenance_blocked_text(safety_denial)
+                   and "hard safety denial is not authorizable"
+                   in _maintenance_blocked_text(safety_denial)))
+    non_maintenance_rejected = False
+    try:
+        _maintenance_blocked_record([{
+            "hook_event_name": "PreToolUseDenied",
+            "maintenance_action": False,
+            "decision_class": "command_shape",
+        }])
+    except ValueError:
+        non_maintenance_rejected = True
+    checks.append(("third Stop variant requires receipt-classified maintenance blockers",
+                   non_maintenance_rejected))
+    normal_kind, normal_error = _stop_output_union(
+        "下一行动: F-001 检查登录边界", [], [])
+    target_kind, target_error = _stop_output_union(
+        denied_text, denied_receipt, [])
+    blocked_kind, blocked_error = _stop_output_union(
+        maintenance_text, denied_receipt, maintenance_receipt)
+    checks.append(("Stop union variants are mutually exclusive",
+                   {normal_kind, target_kind, blocked_kind} == STOP_OUTPUT_TYPES
+                   and not normal_error and not target_error and not blocked_error))
+    precedence_kind, precedence_error = _stop_output_union(
+        denied_text, denied_receipt, maintenance_receipt)
+    checks.append(("maintenance blocker deterministically precedes target denial",
+                   precedence_kind == MAINTENANCE_BLOCKED and bool(precedence_error)))
     pointer = Path(tempfile.mkdtemp()) / "active-run"
     checks.append(("missing active-run pointer is not declared", not _active_run_declared(pointer)))
     pointer.write_text("runs/example\n", encoding="utf-8")
@@ -704,6 +1374,11 @@ def _selftest() -> int:
     checks.append(("proper close: BLOCKED", _tail_has_proper_close("BLOCKED: 网络不可达") is True))
     checks.append(("proper close: trailing space", _tail_has_proper_close("BLOCKED: 外部依赖  ") is True))
     checks.append(("empty coda rejected", _tail_has_proper_close("下一行动:") is False))
+    checks.append(("missing Coda exposes CODA_MISSING",
+                   "CODA_MISSING" in _turn_coda("本轮先到这里。")[2]))
+    checks.append(("trailing Markdown fence exposes CODA_TRAILING_FENCE",
+                   "CODA_TRAILING_FENCE" in _turn_coda(
+                       "```text\n下一行动: F-001 检查登录边界\n```")[2]))
     checks.append(("placeholder coda rejected", _tail_has_proper_close("下一行动: <具体 action>") is False))
     checks.append(("vague coda rejected", _tail_has_proper_close("下一行动: 继续分析") is False))
     checks.append(("paraphrased vague coda rejected",
@@ -718,6 +1393,9 @@ def _selftest() -> int:
                    _tail_has_proper_close("下一行动: 检查 F-001 + F-002") is False))
     checks.append(("multiple actions rejected",
                    _tail_has_proper_close("下一行动: 运行 check_run、回放验证和独立复审") is False))
+    checks.append(("multiple actions expose CODA_MULTIPLE_ACTIONS",
+                   "CODA_MULTIPLE_ACTIONS" in _turn_coda(
+                       "下一行动: 运行 check_run、回放验证和独立复审")[2]))
     checks.append(("two tools joined by conjunction are multiple actions",
                    _tail_has_proper_close("下一行动: 运行 check_run 与 peer_review") is False))
     checks.append(("two tools joined by 和 are multiple actions",
@@ -800,6 +1478,38 @@ def _selftest() -> int:
     (open_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
     (open_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
     (open_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    old_semantic_mtime = time.time() - 365 * 24 * 60 * 60
+    for canonical in (
+            open_run / "frontier.md", open_run / "evidence.md",
+            open_run / "decisions.md", open_run / "hypotheses.md"):
+        _os.utime(canonical, (old_semantic_mtime, old_semantic_mtime))
+    semantic_before, _, flags_before = _semantic_reason_pass_state(open_run)
+    checks.append(("missing Reason-pass receipt is semantically unproven",
+                   semantic_before.get("status") == "legacy_unproven"
+                   and flags_before == []))
+    record_reason_pass(
+        open_run,
+        cycle_id=1,
+        chosen_front="F-001",
+        reason="whole-graph adjudication selected the open auth-layer front",
+    )
+    semantic_fresh, _, fresh_flags = _semantic_reason_pass_state(open_run)
+    checks.append(("old canonical mtimes do not forge semantic staleness",
+                   semantic_fresh.get("status") == "fresh"
+                   and fresh_flags == []
+                   and (open_run / "frontier.md").stat().st_mtime
+                       <= old_semantic_mtime + 1.0))
+    (open_run / "frontier.md").write_text(
+        (open_run / "frontier.md").read_text(encoding="utf-8")
+        + "\n- New signal: login realm changed\n",
+        encoding="utf-8",
+    )
+    _os.utime(open_run / "frontier.md", (old_semantic_mtime, old_semantic_mtime))
+    semantic_changed, _, changed_flags = _semantic_reason_pass_state(open_run)
+    checks.append(("content change with unchanged mtime requires Reason pass",
+                   semantic_changed.get("status") == "changed_unadjudicated"
+                   and "frontier_digest" in semantic_changed.get("changed_fields", [])
+                   and changed_flags == ["reason_pass_due"]))
     closed_run = d / "closed_run"
     closed_run.mkdir()
     (closed_run / "frontier.md").write_text(
@@ -821,16 +1531,16 @@ def _selftest() -> int:
                    "输出协议硬拦" in _protocol_block_reason("收口检查完成。", closed_run)))
     checks.append(("closed run with concrete closure action passes",
                    _protocol_block_reason("下一行动: 运行 check_run 收口检查", closed_run) == ""))
-    no_front_denial = (
-        "XUNJI_EXECUTION_STATUS=DENIED\n"
-        "未执行目标动作；不存在该动作的实测结果。\n"
-        "下一行动: frontier.md 修复 PreToolUse 前置条件后重试同一动作"
-    )
+    no_front_denial = _target_denied_text(denied_receipt, closed_run)
     checks.append(("no-front denial envelope is accepted by truth gate",
                    not _denied_result_claim_reason(
                        no_front_denial, denied_receipt, closed_run)))
-    checks.append(("no-front denial envelope is accepted by Coda gate",
-                   _protocol_block_reason(no_front_denial, closed_run) == ""))
+    no_front_kind, no_front_error = _stop_output_union(
+        no_front_denial, denied_receipt, [], closed_run)
+    checks.append(("no-front denial is accepted only by terminal union branch",
+                   no_front_kind == TARGET_DENIED and not no_front_error
+                   and "STOP_ENVELOPE_UNAUTHORIZED" in _protocol_block_reason(
+                       no_front_denial, closed_run)))
     checks.append(("frontier.md denial cannot bypass a real active F-id",
                    bool(_denied_result_claim_reason(
                        no_front_denial, denied_receipt, open_run))))
@@ -848,7 +1558,7 @@ def _selftest() -> int:
     checks.append(("active front cannot use BLOCKED coda",
                    "不能用 BLOCKED" in _protocol_block_reason("BLOCKED: 等待外部凭据到位", open_run)))
     checks.append(("wrong active front id is rejected",
-                   "不属于当前 active" in _protocol_block_reason(
+                   "CODA_WRONG_FRONT" in _protocol_block_reason(
                        "下一行动: F-999 检查另一个入口", open_run)))
     checks.append(("active run requires front id or control-plane object",
                    "必须引用一个 active F-id" in _protocol_block_reason(
@@ -858,6 +1568,129 @@ def _selftest() -> int:
     checks.append(("bare Agent token is not a control-plane bypass",
                    "必须引用一个 active F-id" in _protocol_block_reason(
                        "下一行动: 运行 Agent 完成工作", open_run)))
+    original_loop_journal = globals().get("_loop_journal")
+    original_work_plan = globals().get("_work_plan")
+
+    class StructuredJournalFixture:
+        @staticmethod
+        def load_events(_run_dir):
+            return [{
+                "event": "cycle_end",
+                "data": {
+                    "plan_id": "WP-1-11111111",
+                    "plan_digest": "1" * 64,
+                    "next_action": "F-001 分析登录响应差异",
+                },
+            }]
+
+        @staticmethod
+        def validate_cycle_events(_events):
+            return {
+                "ended_plan_digests": ["1" * 64],
+                "active_plan_digest": "1" * 64,
+            }
+
+    class StructuredWorkPlanFixture:
+        @staticmethod
+        def transaction_bound_plan(_run_dir):
+            return {"plan_digest": "1" * 64}
+
+    class MissingStructuredWorkPlanFixture:
+        @staticmethod
+        def transaction_bound_plan(_run_dir):
+            raise RuntimeError("WORK_PLAN_TRANSACTION_REQUIRED")
+
+    class NewActiveJournalFixture(StructuredJournalFixture):
+        @staticmethod
+        def validate_cycle_events(_events):
+            return {
+                "ended_plan_digests": ["1" * 64],
+                "active_plan_digest": "2" * 64,
+            }
+
+    class NewActiveWorkPlanFixture:
+        @staticmethod
+        def transaction_bound_plan(_run_dir):
+            return {"plan_digest": "2" * 64}
+
+    class InvalidStructuredJournalFixture(StructuredJournalFixture):
+        @staticmethod
+        def validate_cycle_events(_events):
+            error = RuntimeError("invalid structured receipt")
+            error.code = "CYCLE_EVENT_HASH_CHAIN_INVALID"
+            raise error
+
+    class MalformedPlanEndJournalFixture(InvalidStructuredJournalFixture):
+        TYPED_CYCLE_EVENTS = frozenset({"cycle_end", "stage_plan"})
+
+        @staticmethod
+        def load_events(_run_dir):
+            return [{
+                "event": "cycle_end",
+                "data": {
+                    "plan_id": "WP-1-11111111",
+                    "next_action": "F-001 分析登录响应差异",
+                },
+            }]
+
+    try:
+        globals()["_loop_journal"] = StructuredJournalFixture
+        globals()["_work_plan"] = StructuredWorkPlanFixture
+        structured_exact = _protocol_block_reason(
+            "下一行动: F-001 分析登录响应差异", open_run)
+        structured_mismatch = _protocol_block_reason(
+            "下一行动: F-001 检查登录错误页", open_run)
+        structured_missing = _protocol_block_reason("本轮完成。", open_run)
+        structured_complete_mismatch = _protocol_block_reason(
+            "收口完成。", closed_run)
+        globals()["_work_plan"] = MissingStructuredWorkPlanFixture
+        structured_no_provenance = _protocol_block_reason(
+            "下一行动: F-001 分析登录响应差异", open_run)
+        globals()["_loop_journal"] = NewActiveJournalFixture
+        globals()["_work_plan"] = NewActiveWorkPlanFixture
+        old_end_new_active = _protocol_block_reason(
+            "下一行动: F-001 检查新计划入口", open_run)
+        old_end_new_active_complete = _protocol_block_reason(
+            "收口完成。", closed_run)
+        globals()["_loop_journal"] = InvalidStructuredJournalFixture
+        globals()["_work_plan"] = StructuredWorkPlanFixture
+        structured_invalid = _protocol_block_reason(
+            "下一行动: F-001 分析登录响应差异", open_run)
+        globals()["_loop_journal"] = MalformedPlanEndJournalFixture
+        malformed_structured_end = _protocol_block_reason(
+            "下一行动: F-001 分析登录响应差异", open_run)
+    finally:
+        globals()["_loop_journal"] = original_loop_journal
+        globals()["_work_plan"] = original_work_plan
+    checks.append(("validated cycle_end next_action is the exact Coda projection",
+                   structured_exact == ""))
+    checks.append(("structured next_action mismatch has a stable rejection code",
+                   "CODA_STRUCTURED_PROJECTION_MISMATCH" in structured_mismatch))
+    checks.append(("structured next_action cannot fall back to missing free text",
+                   "CODA_STRUCTURED_PROJECTION_MISSING" in structured_missing))
+    checks.append(("completion state does not bypass a structured action receipt",
+                   "CODA_STRUCTURED_PROJECTION_MISSING"
+                   in structured_complete_mismatch))
+    checks.append(("invalid structured receipt fails closed without text fallback",
+                   "CODA_STRUCTURED_RECEIPT_INVALID" in structured_invalid))
+    checks.append(("malformed plan-bound end cannot disappear into text fallback",
+                   "CODA_STRUCTURED_RECEIPT_INVALID" in malformed_structured_end))
+    checks.append(("structured receipt requires committed v2 provenance",
+                   "CODA_STRUCTURED_PROVENANCE_INVALID" in structured_no_provenance))
+    checks.append(("old cycle action does not shadow a newer active plan",
+                   old_end_new_active == ""))
+    checks.append(("completion marker cannot bypass a newer active plan Coda",
+                   "CODA_MISSING" in old_end_new_active_complete))
+    checks.append(("structured projection reuses normal Coda semantics",
+                   "CODA_VAGUE_ACTION" in _structured_projection_error(
+                       "下一行动: 等待用户", "等待用户")
+                   and "CODA_MULTIPLE_ACTIONS" in _structured_projection_error(
+                       "下一行动: 运行 check_run 和 peer_review",
+                       "运行 check_run 和 peer_review")
+                   and "CODA_WRONG_FRONT" in _action_context_error(
+                       "F-999 检查其他入口", ["F-001"])
+                   and _action_context_error(
+                       "f-001 检查登录响应差异", ["F-001"]) == ""))
     original_loop_state = globals().get("_loop_state")
     fallback_heading_run = d / "fallback_heading_run"
     fallback_heading_run.mkdir()
@@ -948,6 +1781,202 @@ def _selftest() -> int:
     )
     checks.append(("EXPLAIN_ONLY response is not forced to add Coda",
                    explain_proc.returncode == 0 and not (explain_proc.stdout or "").strip()))
+    explain_marker_proc = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve())],
+        input=json.dumps({
+            "session_id": "s-explain",
+            "last_assistant_message": (
+                "固定终态示例：\nXUNJI_EXECUTION_STATUS=DENIED\n这里仅作说明。"
+            ),
+        }, ensure_ascii=False),
+        text=True, capture_output=True, encoding="utf-8", errors="replace",
+        env=env, timeout=10,
+    )
+    checks.append(("EXPLAIN_ONLY may quote a reserved marker without claiming terminal state",
+                   explain_marker_proc.returncode == 0
+                   and not (explain_marker_proc.stdout or "").strip()))
+
+    # Full main() regression: mutually exclusive terminal variants, receipt-bound
+    # bypass, same-turn resolution, and new-prompt expiry.
+    terminal_run = runs_root / "terminal_run"
+    terminal_run.mkdir()
+    (terminal_run / "state").mkdir()
+    (terminal_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n"
+        "### F-910\n- Status: open\n- Barrier class: auth-layer\n\n"
+        "### F-911\n- Status: open\n- Barrier class: tls-layer\n\n"
+        "### F-912\n- Status: open\n- Barrier class: js-layer\n\n"
+        "### F-913\n- Status: open\n- Barrier class: api-layer\n",
+        encoding="utf-8",
+    )
+    (terminal_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (terminal_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (terminal_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    terminal_transcript = d / "terminal-transcript.jsonl"
+    terminal_transcript.write_text(
+        "target-deny target-success target-new-prompt maintenance-deny paused-target-deny\n",
+        encoding="utf-8",
+    )
+    terminal_contract_path = terminal_run / "state" / "turn_contract.json"
+
+    def write_terminal_contract(mode: str, updated_at: float) -> None:
+        terminal_contract_path.write_text(json.dumps({
+            "schema": "xunji.turn_contract.v1",
+            "mode": mode,
+            "session_id": "s-terminal",
+            "updated_at": updated_at,
+        }), encoding="utf-8")
+
+    def invoke_stop(script: Path, message: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(script)],
+            input=json.dumps({
+                "session_id": "s-terminal",
+                "last_assistant_message": message,
+            }, ensure_ascii=False),
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=15,
+        )
+
+    pointer.write_text(str(terminal_run), encoding="utf-8")
+    write_terminal_contract("EXECUTE", time.time() - 1)
+    target_command = "python3 tools/probe.py GET https://example.test"
+    _runtime_receipts.append_hook_event(terminal_run, {
+        "hook_event_name": "PreToolUseDenied",
+        "session_id": "s-terminal",
+        "transcript_path": str(terminal_transcript),
+        "tool_name": "Bash",
+        "tool_use_id": "target-deny",
+        "tool_input": {"command": target_command},
+        "xunji_decision": "deny",
+        "xunji_reason": "Agent prerequisite missing",
+        "xunji_decision_code": "XUNJI_E_DELEGATION_REQUIRED",
+        "xunji_decision_class": "delegation",
+        "xunji_target_action": True,
+    })
+    target_pending = _runtime_receipts.unresolved_target_denials(
+        terminal_run, session_id="s-terminal",
+        since=json.loads(terminal_contract_path.read_text())['updated_at'])
+    target_envelope = _target_denied_text(target_pending, terminal_run)
+    target_output_proc = invoke_stop(Path(__file__).resolve(), target_envelope)
+    target_run_proc = invoke_stop(
+        ROOT / ".claude" / "hooks" / "run_gate.py", target_envelope)
+    checks.append(("main: receipt-backed TARGET_DENIED bypasses ordinary Coda and run gates",
+                   target_output_proc.returncode == 0
+                   and not (target_output_proc.stdout or "").strip()
+                   and target_run_proc.returncode == 0
+                   and not (target_run_proc.stdout or "").strip()))
+    target_fenced_proc = invoke_stop(
+        Path(__file__).resolve(), target_envelope + "\n```")
+    checks.append(("main: fixed envelope must remain exact",
+                   '"decision": "block"' in (target_fenced_proc.stdout or "")))
+    target_prose_proc = invoke_stop(
+        Path(__file__).resolve(), "下一行动: F-910 检查登录边界")
+    checks.append(("main: unresolved target denial rejects NORMAL_CODA",
+                   '"decision": "block"' in (target_prose_proc.stdout or "")
+                   and "TARGET_DENIED" in (target_prose_proc.stdout or "")))
+
+    _runtime_receipts.append_hook_event(terminal_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": "s-terminal",
+        "transcript_path": str(terminal_transcript),
+        "tool_name": "Bash",
+        "tool_use_id": "target-success",
+        "tool_input": {"command": target_command},
+        "tool_response": {"stdout": "saved artifact"},
+        "xunji_target_action": True,
+    })
+    same_turn_proc = invoke_stop(
+        Path(__file__).resolve(), "下一行动: F-910 检查登录边界")
+    checks.append(("main: identical same-turn target success resolves denial",
+                   same_turn_proc.returncode == 0
+                   and not (same_turn_proc.stdout or "").strip()))
+
+    _runtime_receipts.append_hook_event(terminal_run, {
+        "hook_event_name": "PreToolUseDenied",
+        "session_id": "s-terminal",
+        "transcript_path": str(terminal_transcript),
+        "tool_name": "Bash",
+        "tool_use_id": "target-new-prompt",
+        "tool_input": {"command": target_command + " --save"},
+        "xunji_decision": "deny",
+        "xunji_reason": "work plan missing",
+        "xunji_decision_code": "XUNJI_E_WORK_PLAN_REQUIRED",
+        "xunji_decision_class": "work_plan",
+        "xunji_target_action": True,
+    })
+    write_terminal_contract("EXECUTE", time.time())
+    expired_proc = invoke_stop(
+        Path(__file__).resolve(), "下一行动: F-910 检查登录边界")
+    checks.append(("main: target denial expires across a newer operator prompt",
+                   expired_proc.returncode == 0
+                   and not (expired_proc.stdout or "").strip()))
+    forged_after_expiry = invoke_stop(
+        ROOT / ".claude" / "hooks" / "run_gate.py", target_envelope)
+    checks.append(("main: stale fixed envelope cannot bypass later Stop gates",
+                   '"decision": "block"' in (forged_after_expiry.stdout or "")))
+
+    write_terminal_contract("MAINTENANCE", time.time() - 1)
+    _runtime_receipts.append_hook_event(terminal_run, {
+        "hook_event_name": "PreToolUseDenied",
+        "session_id": "s-terminal",
+        "transcript_path": str(terminal_transcript),
+        "tool_name": "Edit",
+        "tool_use_id": "maintenance-deny",
+        "tool_input": {"file_path": str(ROOT / "tools" / "turn_contract.py")},
+        "xunji_decision": "deny",
+        "xunji_reason": "new operator exact-path authority required",
+        "xunji_decision_code": "XUNJI_E_MAINTENANCE_AUTHORITY_REQUIRED",
+        "xunji_decision_class": "authority",
+        "xunji_maintenance_action": True,
+        "xunji_maintenance_paths": ["tools/turn_contract.py"],
+    })
+    maintenance_pending = _runtime_receipts.unresolved_maintenance_blockers(
+        terminal_run, session_id="s-terminal",
+        since=json.loads(terminal_contract_path.read_text())['updated_at'])
+    maintenance_envelope = _maintenance_blocked_text(maintenance_pending)
+    maintenance_output_proc = invoke_stop(Path(__file__).resolve(), maintenance_envelope)
+    maintenance_run_proc = invoke_stop(
+        ROOT / ".claude" / "hooks" / "run_gate.py", maintenance_envelope)
+    checks.append(("main: receipt-backed MAINTENANCE_BLOCKED bypasses ordinary Coda and run gates",
+                   maintenance_output_proc.returncode == 0
+                   and not (maintenance_output_proc.stdout or "").strip()
+                   and maintenance_run_proc.returncode == 0
+                   and not (maintenance_run_proc.stdout or "").strip()))
+    write_terminal_contract("MAINTENANCE", time.time())
+    maintenance_expired_proc = invoke_stop(
+        Path(__file__).resolve(), "维护拒绝来自上一个 prompt，当前不声称已执行。")
+    checks.append(("main: maintenance blocker expires across a newer operator prompt",
+                   maintenance_expired_proc.returncode == 0
+                   and not (maintenance_expired_proc.stdout or "").strip()))
+
+    write_terminal_contract("PAUSED_BY_OPERATOR", time.time() - 1)
+    _runtime_receipts.append_hook_event(terminal_run, {
+        "hook_event_name": "PreToolUseDenied",
+        "session_id": "s-terminal",
+        "transcript_path": str(terminal_transcript),
+        "tool_name": "Bash",
+        "tool_use_id": "paused-target-deny",
+        "tool_input": {"command": target_command + " --paused"},
+        "xunji_decision": "deny",
+        "xunji_reason": "target action forbidden while paused",
+        "xunji_decision_code": "XUNJI_E_PAUSED_TARGET_FORBIDDEN",
+        "xunji_decision_class": "policy",
+        "xunji_target_action": True,
+    })
+    paused_pending = _runtime_receipts.unresolved_target_denials(
+        terminal_run, session_id="s-terminal",
+        since=json.loads(terminal_contract_path.read_text())['updated_at'])
+    paused_envelope = _target_denied_text(paused_pending, terminal_run)
+    paused_run_proc = invoke_stop(
+        ROOT / ".claude" / "hooks" / "run_gate.py", paused_envelope)
+    checks.append(("main: fixed envelope never bypasses PAUSED Cron quiescence",
+                   '"decision": "block"' in (paused_run_proc.stdout or "")
+                   and "暂停事务" in (paused_run_proc.stdout or "")))
 
     closure_run = runs_root / "closure_run"
     closure_run.mkdir()

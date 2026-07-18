@@ -19,10 +19,18 @@ separate tool invocations (each Bash call is a fresh process).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
+import math
 import os
+import re
+import socket
+import ssl
 import time
+import urllib.error
+from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     from . import privacy as privacymod
@@ -56,6 +64,28 @@ AUTH_FAIL_PIVOT = 25          # 爆破转向阈值: 同一端点连续失败达�
 HOST_ERR_THRESHOLD = 3        # 连续传输错误(超时/RST/拒绝)达此值 -> 熔断该 host
 HOST_BACKOFF_SEC = 120        # 熔断冷却时长(秒); 期间对该 host 的请求直接抛 HostBackoff
 HOST_REQ_WARN = 30           # 单 host 累计请求软告警阈值(只提示, 不阻断)
+HOST_MAX_BACKOFF_SEC = 15 * 60
+HOST_HALF_OPEN_LEASE_SEC = 15
+HOST_BACKOFF_JITTER_RATIO = 0.10
+HOST_HEALTH_SCHEMA = "xunji.host-health.v2"
+HOST_HEALTH_PROVENANCE_LIMIT = 128
+
+# Error attribution is deliberately finite.  Only the two ``target_*`` classes
+# may arm a target-host breaker.  Proxy/local failures arm a route-wide breaker;
+# legacy wrappers keep a same-host, unattributed breaker so an old caller remains
+# throttled without falsely blaming the target.
+HOST_ERROR_POLICIES = {
+    "proxy_connect": ("proxy", "route"),
+    "proxy_tls": ("proxy", "route"),
+    "local_dns": ("local", "route"),
+    "target_tls": ("target", "target"),
+    "target_reset": ("target", "target"),
+    "unattributed_transport": ("unknown", "unattributed_host"),
+}
+
+_ROUTE_RE = re.compile(
+    r"^(?:direct|legacy|proxy:(?:http|https|socks4|socks4a|socks5|socks5h|unknown):[0-9a-f]{16})$"
+)
 # --- 全局会话请求预算 (跨 host; ① 是单 host, 这个管整场总量) -------------------
 SESSION_WINDOW_SEC = 600      # 滑动窗口(秒)
 SESSION_WARN_COUNT = 300      # 窗口内总请求达此值 -> 软告警(整场量偏高, 考虑收敛/换出口)
@@ -157,72 +187,716 @@ class BruteforceLock(Exception):
     eventually stops — raise AUTH_FAIL_LOCK per run if a dictionary is longer."""
 
 
+class GuardStateError(RateBudgetExceeded):
+    """Guard state or caller metadata cannot be trusted.
+
+    A corrupt/unknown HostHealth schema must never be interpreted as an empty
+    breaker file.  Subclassing ``RateBudgetExceeded`` keeps old wrappers
+    fail-closed through their existing abort path.
+    """
+
+
 class HostBackoff(Exception):
-    """Raised when a host has refused/reset/timed out HOST_ERR_THRESHOLD times in
-    a row and is in cooldown. This protects *our own access*: hammering a host
-    that has started blocking us only deepens the block and produces misleading
-    'all blocked' conclusions. The driver should pause that host (or switch
-    egress), not keep firing."""
+    """Raised while a target- or route-scoped breaker is open."""
+
+    def __init__(self, message: str, *, egress_route: str = "legacy",
+                 host: str = "", error_class: str = "unattributed_transport",
+                 attribution: str = "unknown", breaker_scope: str = "unattributed_host",
+                 phase: str = "open", retry_after: float = 0.0):
+        super().__init__(message)
+        self.egress_route = egress_route
+        self.host = host
+        self.error_class = error_class
+        self.attribution = attribution
+        self.breaker_scope = breaker_scope
+        self.phase = phase
+        self.retry_after = max(float(retry_after), 0.0)
+
+    def provenance(self) -> dict:
+        return {
+            "egress_route": self.egress_route,
+            "host": self.host,
+            "error_class": self.error_class,
+            "attribution": self.attribution,
+            "breaker_scope": self.breaker_scope,
+            "phase": self.phase,
+            "retry_after_seconds": round(self.retry_after, 3),
+        }
+
+
+@dataclass(frozen=True)
+class HostHealthLease:
+    """One cross-process half-open trial covering one or more matching breakers."""
+
+    egress_route: str
+    host: str
+    token: str
+    breaker_keys: tuple[str, ...]
+    expires_at: float
+
+
+_HOST_HEALTH_TOP_FIELDS = frozenset({"schema", "breakers", "totals", "provenance"})
+_HOST_HEALTH_BREAKER_FIELDS = frozenset({
+    "egress_route", "host", "error_class", "attribution", "scope",
+    "consecutive", "total_errors", "opens", "phase", "until",
+    "lease_token", "lease_owner", "lease_until", "updated_at",
+    "backoff_seconds",
+})
+_HOST_HEALTH_TOTAL_FIELDS = frozenset({"egress_route", "host", "count"})
+_HOST_HEALTH_PROVENANCE_FIELDS = frozenset({
+    "event_id", "ts", "event", "egress_route", "host", "observed_host",
+    "error_class", "attribution", "scope", "count", "consecutive",
+    "until", "lease_until",
+})
+
+
+def _finite_number(value, field: str, *, minimum: float = 0.0) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise GuardStateError(f"host health field {field!r} must be numeric")
+    out = float(value)
+    if not math.isfinite(out) or out < minimum:
+        raise GuardStateError(f"host health field {field!r} is out of range")
+    return out
+
+
+def _counter(value, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise GuardStateError(f"host health field {field!r} must be a non-negative integer")
+    return value
+
+
+def _normalize_host(host: str) -> str:
+    if not isinstance(host, str) or not host or len(host) > 253:
+        raise GuardStateError("host health requires a non-empty bounded host")
+    if any(ord(ch) < 33 or ch.isspace() for ch in host):
+        raise GuardStateError("host health host contains unsafe characters")
+    value = host.strip(".").lower()
+    try:
+        value = value.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise GuardStateError("host health host is not valid IDNA") from exc
+    if not value or len(value) > 253:
+        raise GuardStateError("host health host is empty or too long")
+    return value
+
+
+def egress_route_id(proxy_url: str | None) -> str:
+    """Return a credential-free stable route ID for direct/proxied egress.
+
+    Proxy endpoint material is represented only by a short SHA-256 digest, so
+    guard state/provenance never persists credentials or an internal proxy host.
+    """
+    if not proxy_url:
+        return "direct"
+    try:
+        parsed = urlparse(proxy_url)
+        scheme = (parsed.scheme or "unknown").lower()
+        if scheme not in {"http", "https", "socks4", "socks4a", "socks5", "socks5h"}:
+            scheme = "unknown"
+        endpoint = f"{(parsed.hostname or '').lower()}:{parsed.port or 0}"
+    except (TypeError, ValueError):
+        scheme = "unknown"
+        endpoint = "invalid"
+    digest = hashlib.sha256(endpoint.encode("utf-8", errors="replace")).hexdigest()[:16]
+    return f"proxy:{scheme}:{digest}"
+
+
+def _normalize_route(egress_route: str | None) -> str:
+    value = "legacy" if egress_route is None else egress_route
+    if not isinstance(value, str) or not _ROUTE_RE.fullmatch(value):
+        raise GuardStateError("unknown or unsafe egress_route; use egress_route_id()")
+    return value
+
+
+def host_error_policy(error_class: str) -> dict:
+    try:
+        attribution, scope = HOST_ERROR_POLICIES[error_class]
+    except (KeyError, TypeError) as exc:
+        raise GuardStateError(f"unknown host-health error_class: {error_class!r}") from exc
+    return {"error_class": error_class, "attribution": attribution,
+            "breaker_scope": scope}
+
+
+def _exception_chain(error: BaseException) -> list[BaseException]:
+    out: list[BaseException] = []
+    seen: set[int] = set()
+    cur: object = error
+    while isinstance(cur, BaseException) and id(cur) not in seen and len(out) < 12:
+        seen.add(id(cur))
+        out.append(cur)
+        reason = getattr(cur, "reason", None)
+        if isinstance(reason, BaseException) and id(reason) not in seen:
+            cur = reason
+            continue
+        cur = cur.__cause__ or cur.__context__
+    return out
+
+
+def classify_network_error(error: BaseException, *, egress_route: str) -> str:
+    """Classify a transport failure without promoting ambiguity to target blame.
+
+    For proxied traffic, an opaque connect/reset/timeout is route-attributed;
+    only direct traffic or a wrapper with stronger evidence may emit target
+    classes.  DNS resolution is always a local/route fault.  Legacy callers are
+    deliberately kept unattributed.
+    """
+    route = _normalize_route(egress_route)
+    chain = _exception_chain(error)
+    text = " ".join(
+        f"{type(item).__module__}.{type(item).__name__}: {item}" for item in chain
+    ).lower()
+    dns_errors = [item for item in chain if isinstance(item, socket.gaierror)]
+    temporary_dns = any(getattr(item, "errno", None) == getattr(socket, "EAI_AGAIN", -3)
+                        for item in dns_errors) or "temporary failure in name resolution" in text
+    if temporary_dns:
+        return "local_dns"
+    ambiguous_dns = bool(dns_errors) or any(marker in text for marker in (
+        "name or service not known", "nodename nor servname", "getaddrinfo failed",
+        "no address associated with hostname", "err_name_not_resolved",
+    ))
+    if ambiguous_dns:
+        # With a proxy this is resolution of the route endpoint.  Direct NXDOMAIN
+        # is host-specific but not proof of a target transport failure, so keep it
+        # unattributed instead of opening either a target or whole-route breaker.
+        return "local_dns" if route.startswith("proxy:") else "unattributed_transport"
+    is_tls = any(isinstance(item, ssl.SSLError) for item in chain) or any(
+        marker in text for marker in ("sslerror", "tls", "ssl handshake", "certificate verify failed")
+    )
+    if route.startswith("proxy:"):
+        return "proxy_tls" if is_tls else "proxy_connect"
+    if route == "direct":
+        if is_tls:
+            return "target_tls"
+        target_reset = any(isinstance(item, (
+            ConnectionResetError, ConnectionRefusedError, ConnectionAbortedError,
+        )) for item in chain) or any(marker in text for marker in (
+            "connection reset by peer", "connection refused", "remote end closed",
+            "err_connection_reset", "err_connection_refused",
+        ))
+        return "target_reset" if target_reset else "unattributed_transport"
+    return "unattributed_transport"
+
+
+def network_error_provenance(error: BaseException, *, egress_route: str,
+                             host: str) -> dict:
+    route = _normalize_route(egress_route)
+    observed_host = _normalize_host(host)
+    error_class = classify_network_error(error, egress_route=route)
+    return {
+        "egress_route": route,
+        "host": observed_host,
+        **host_error_policy(error_class),
+    }
+
+
+def _breaker_host(scope: str, observed_host: str) -> str:
+    return "*" if scope == "route" else observed_host
+
+
+def _breaker_key(egress_route: str, host: str, error_class: str) -> str:
+    raw = json.dumps([egress_route, host, error_class], separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _total_key(egress_route: str, host: str) -> str:
+    raw = json.dumps([egress_route, host], separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _empty_hosthealth_state() -> dict:
+    return {"schema": HOST_HEALTH_SCHEMA, "breakers": {}, "totals": {}, "provenance": []}
+
+
+def _new_breaker(egress_route: str, host: str, error_class: str,
+                 now: float) -> dict:
+    policy = host_error_policy(error_class)
+    return {
+        "egress_route": egress_route,
+        "host": _breaker_host(policy["breaker_scope"], host),
+        "error_class": error_class,
+        "attribution": policy["attribution"],
+        "scope": policy["breaker_scope"],
+        "consecutive": 0,
+        "total_errors": 0,
+        "opens": 0,
+        "phase": "closed",
+        "until": 0.0,
+        "lease_token": None,
+        "lease_owner": None,
+        "lease_until": 0.0,
+        "updated_at": now,
+        "backoff_seconds": 0.0,
+    }
+
+
+def _validate_hosthealth_state(data: object) -> dict:
+    if not isinstance(data, dict) or set(data) != _HOST_HEALTH_TOP_FIELDS:
+        raise GuardStateError("host health v2 has missing or unknown top-level fields")
+    if data.get("schema") != HOST_HEALTH_SCHEMA:
+        raise GuardStateError("unknown host health schema; refusing to discard breaker state")
+    breakers = data.get("breakers")
+    totals = data.get("totals")
+    provenance = data.get("provenance")
+    if not isinstance(breakers, dict) or not isinstance(totals, dict) or not isinstance(provenance, list):
+        raise GuardStateError("host health collections have invalid types")
+    if len(breakers) > 10000 or len(totals) > 10000 or len(provenance) > HOST_HEALTH_PROVENANCE_LIMIT:
+        raise GuardStateError("host health state exceeds bounded collection limits")
+    for key, item in breakers.items():
+        if not isinstance(key, str) or not isinstance(item, dict) or set(item) != _HOST_HEALTH_BREAKER_FIELDS:
+            raise GuardStateError("host health breaker has missing or unknown fields")
+        route = _normalize_route(item.get("egress_route"))
+        error_class = item.get("error_class")
+        policy = host_error_policy(error_class)
+        host = item.get("host")
+        if host != "*":
+            host = _normalize_host(host)
+        if item.get("attribution") != policy["attribution"] or item.get("scope") != policy["breaker_scope"]:
+            raise GuardStateError("host health breaker attribution does not match error policy")
+        expected_host = "*" if policy["breaker_scope"] == "route" else host
+        if host != expected_host or key != _breaker_key(route, host, error_class):
+            raise GuardStateError("host health breaker key does not match its route/host/error class")
+        _counter(item.get("consecutive"), "consecutive")
+        _counter(item.get("total_errors"), "total_errors")
+        _counter(item.get("opens"), "opens")
+        phase = item.get("phase")
+        if phase not in {"closed", "open", "half_open"}:
+            raise GuardStateError("host health breaker has unknown phase")
+        for field in ("until", "lease_until", "updated_at", "backoff_seconds"):
+            _finite_number(item.get(field), field)
+        token = item.get("lease_token")
+        owner = item.get("lease_owner")
+        if token is not None and (not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{32}", token)):
+            raise GuardStateError("host health lease token is invalid")
+        if owner is not None and (isinstance(owner, bool) or not isinstance(owner, int) or owner <= 0):
+            raise GuardStateError("host health lease owner is invalid")
+        if phase == "half_open" and (token is None or owner is None):
+            raise GuardStateError("half-open breaker is missing its lease")
+        if phase != "half_open" and (token is not None or owner is not None or item.get("lease_until") != 0.0):
+            raise GuardStateError("non-half-open breaker carries a lease")
+        if phase == "closed" and item.get("until") != 0.0:
+            raise GuardStateError("closed breaker carries an open-until timestamp")
+        if phase == "open" and item.get("until") <= 0.0:
+            raise GuardStateError("open breaker is missing its cooldown timestamp")
+        if phase == "half_open" and (item.get("until") != 0.0 or item.get("lease_until") <= 0.0):
+            raise GuardStateError("half-open breaker has inconsistent cooldown/lease timestamps")
+    for key, item in totals.items():
+        if not isinstance(key, str) or not isinstance(item, dict) or set(item) != _HOST_HEALTH_TOTAL_FIELDS:
+            raise GuardStateError("host health total has missing or unknown fields")
+        route = _normalize_route(item.get("egress_route"))
+        host = _normalize_host(item.get("host"))
+        if key != _total_key(route, host):
+            raise GuardStateError("host health total key does not match route/host")
+        _counter(item.get("count"), "count")
+    for item in provenance:
+        if not isinstance(item, dict) or set(item) != _HOST_HEALTH_PROVENANCE_FIELDS:
+            raise GuardStateError("host health provenance has missing or unknown fields")
+        if not isinstance(item.get("event_id"), str) or not re.fullmatch(r"[0-9a-f]{16}", item["event_id"]):
+            raise GuardStateError("host health provenance event id is invalid")
+        _finite_number(item.get("ts"), "ts")
+        if item.get("event") not in {"migrated", "error", "success", "opened", "half_open", "recovered"}:
+            raise GuardStateError("host health provenance event is unknown")
+        _normalize_route(item.get("egress_route"))
+        if item.get("host") != "*":
+            _normalize_host(item.get("host"))
+        _normalize_host(item.get("observed_host"))
+        error_class = item.get("error_class")
+        if error_class is not None:
+            policy = host_error_policy(error_class)
+            if item.get("attribution") != policy["attribution"] or item.get("scope") != policy["breaker_scope"]:
+                raise GuardStateError("host health provenance attribution is inconsistent")
+        elif item.get("attribution") != "none" or item.get("scope") != "none":
+            raise GuardStateError("success provenance must use none attribution/scope")
+        _counter(item.get("count"), "count")
+        _counter(item.get("consecutive"), "consecutive")
+        _finite_number(item.get("until"), "until")
+        _finite_number(item.get("lease_until"), "lease_until")
+    return data
+
+
+def _append_hosthealth_event(data: dict, *, now: float, event: str,
+                             egress_route: str, host: str, observed_host: str,
+                             error_class: str | None, attribution: str, scope: str,
+                             count: int = 0, consecutive: int = 0,
+                             until: float = 0.0, lease_until: float = 0.0) -> None:
+    raw = json.dumps(
+        [now, event, egress_route, host, observed_host, error_class, count,
+         consecutive, until, lease_until, len(data["provenance"])],
+        separators=(",", ":"),
+    )
+    data["provenance"].append({
+        "event_id": hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16],
+        "ts": now,
+        "event": event,
+        "egress_route": egress_route,
+        "host": host,
+        "observed_host": observed_host,
+        "error_class": error_class,
+        "attribution": attribution,
+        "scope": scope,
+        "count": count,
+        "consecutive": consecutive,
+        "until": until,
+        "lease_until": lease_until,
+    })
+    data["provenance"] = data["provenance"][-HOST_HEALTH_PROVENANCE_LIMIT:]
+
+
+def _migrate_legacy_hosthealth(data: object, now: float) -> dict:
+    if not isinstance(data, dict):
+        raise GuardStateError("legacy host health state is not an object")
+    out = _empty_hosthealth_state()
+    for raw_host, raw_item in data.items():
+        try:
+            host = _normalize_host(raw_host)
+        except GuardStateError:
+            if not isinstance(raw_host, str):
+                raise
+            # Historical wrappers occasionally wrote a whitespace-joined host
+            # list as one key.  Preserve its counters under a non-routable,
+            # credential-free quarantine identity; it never matched a valid URL
+            # hostname before and must not poison migration for every real host.
+            digest = hashlib.sha256(raw_host.encode("utf-8", errors="replace")).hexdigest()[:16]
+            host = f"legacy-invalid-{digest}.invalid"
+        if not isinstance(raw_item, dict) or not set(raw_item).issubset({"errs", "total", "until"}):
+            raise GuardStateError("legacy host health entry has unknown fields")
+        errs = _counter(raw_item.get("errs", 0), "legacy.errs")
+        total = _counter(raw_item.get("total", 0), "legacy.total")
+        until = _finite_number(raw_item.get("until", 0.0), "legacy.until")
+        total_key = _total_key("legacy", host)
+        out["totals"][total_key] = {"egress_route": "legacy", "host": host, "count": total}
+        state = _new_breaker("legacy", host, "unattributed_transport", now)
+        state["consecutive"] = errs
+        state["total_errors"] = errs
+        if until:
+            state["phase"] = "open"
+            state["until"] = until
+            state["opens"] = 1
+            state["backoff_seconds"] = max(until - now, 0.0)
+        key = _breaker_key("legacy", host, "unattributed_transport")
+        out["breakers"][key] = state
+        _append_hosthealth_event(
+            out, now=now, event="migrated", egress_route="legacy", host=host,
+            observed_host=host, error_class="unattributed_transport",
+            attribution="unknown", scope="unattributed_host", count=total,
+            consecutive=errs, until=until,
+        )
+    return _validate_hosthealth_state(out)
+
+
+def _load_hosthealth_state(now: float) -> tuple[dict, bool]:
+    path = STATE_DIR / "hosthealth.json"
+    if not path.exists():
+        return _empty_hosthealth_state(), False
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise GuardStateError("host health state is unreadable; refusing target traffic") from exc
+    if isinstance(raw, dict) and raw.get("schema") == HOST_HEALTH_SCHEMA:
+        return _validate_hosthealth_state(raw), False
+    if isinstance(raw, dict) and "schema" in raw:
+        raise GuardStateError("unknown host health schema; refusing target traffic")
+    return _migrate_legacy_hosthealth(raw, now), True
+
+
+def _save_hosthealth_state(data: dict) -> None:
+    _save("hosthealth.json", _validate_hosthealth_state(data))
 
 
 class HostHealth:
-    """Per-host transport-error circuit breaker (state in hosthealth.json).
+    """Route-aware transport breaker shared by every active-tool process.
 
-    A TRANSPORT error (timeout / connection reset / refused) means the host is
-    failing us — record_error. An HTTP response of any status (incl. 4xx/5xx)
-    means the connection is healthy — record_ok (resets the streak). After
-    HOST_ERR_THRESHOLD consecutive transport errors the host enters a
-    HOST_BACKOFF_SEC cooldown; check() then raises HostBackoff until it expires.
+    Breaker identity includes ``(egress_route, host, error_class)``.  Route
+    failures use host ``*`` so one broken proxy/local resolver pauses that route
+    across targets.  Only target-attributed classes use a target-host breaker.
+    Cooldown recovery grants one persisted half-open lease; concurrent workers
+    remain blocked until that trial records success/error or the lease expires.
     """
 
     def __init__(self, threshold: int = HOST_ERR_THRESHOLD,
-                 backoff: float = HOST_BACKOFF_SEC, warn_at: int = HOST_REQ_WARN):
+                 backoff: float = HOST_BACKOFF_SEC, warn_at: int = HOST_REQ_WARN,
+                 *, max_backoff: float = HOST_MAX_BACKOFF_SEC,
+                 lease_seconds: float = HOST_HALF_OPEN_LEASE_SEC,
+                 jitter_ratio: float = HOST_BACKOFF_JITTER_RATIO,
+                 clock=None):
+        if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 1:
+            raise ValueError("HostHealth threshold must be a positive integer")
+        if isinstance(warn_at, bool) or not isinstance(warn_at, int) or warn_at < 1:
+            raise ValueError("HostHealth warn_at must be a positive integer")
+        for name, value in (("backoff", backoff), ("max_backoff", max_backoff),
+                            ("lease_seconds", lease_seconds), ("jitter_ratio", jitter_ratio)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                raise ValueError(f"HostHealth {name} must be finite")
+        if backoff <= 0 or max_backoff < backoff or lease_seconds <= 0 or not 0 <= jitter_ratio <= 0.5:
+            raise ValueError("HostHealth backoff/lease/jitter bounds are invalid")
         self.threshold = threshold
-        self.backoff = backoff
+        self.backoff = float(backoff)
+        self.max_backoff = float(max_backoff)
+        self.lease_seconds = float(lease_seconds)
+        self.jitter_ratio = float(jitter_ratio)
         self.warn_at = warn_at
+        self._clock = clock or time.time
 
-    def _state(self, host: str) -> dict:
-        return _load("hosthealth.json").get(host, {"errs": 0, "total": 0, "until": 0.0})
+    def _now(self) -> float:
+        value = float(self._clock())
+        if not math.isfinite(value) or value < 0:
+            raise GuardStateError("HostHealth clock returned an invalid value")
+        return value
 
-    def check(self, host: str) -> None:
-        st = self._state(host)
-        remain = st.get("until", 0.0) - time.time()
-        if remain > 0:
-            raise HostBackoff(
-                f"host '{host}' is in self-throttle backoff for {remain:.0f}s more "
-                f"({self.threshold} consecutive transport failures). Pause this host "
-                "or switch egress — do not keep firing (避免打爆自己 / 误判'全封')."
+    @staticmethod
+    def _matches(item: dict, route: str, host: str) -> bool:
+        # Legacy state had no route dimension.  Its same-host unattributed
+        # cooldown remains a conservative wildcard until a structured success
+        # clears it; otherwise upgrading the wrapper would silently bypass an
+        # already-open live breaker.
+        if item["egress_route"] not in {route, "legacy"}:
+            return False
+        return item["host"] == "*" if item["scope"] == "route" else item["host"] == host
+
+    def _backoff_delay(self, key: str, opens: int) -> float:
+        exponent = min(max(opens - 1, 0), 20)
+        base = min(self.max_backoff, self.backoff * (2 ** exponent))
+        unit = int(hashlib.sha256(f"{key}:{opens}".encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+        return min(self.max_backoff, base + base * self.jitter_ratio * unit)
+
+    def _arm(self, item: dict, key: str, now: float) -> float:
+        item["opens"] += 1
+        delay = self._backoff_delay(key, item["opens"])
+        item["phase"] = "open"
+        item["until"] = now + delay
+        item["lease_token"] = None
+        item["lease_owner"] = None
+        item["lease_until"] = 0.0
+        item["updated_at"] = now
+        item["backoff_seconds"] = delay
+        return delay
+
+    @staticmethod
+    def _lease_authorized(key: str, item: dict,
+                          lease: HostHealthLease | None) -> bool:
+        if lease is not None:
+            return item["lease_token"] == lease.token and key in lease.breaker_keys
+        # Compatibility for an old same-process caller that ignored check()'s new
+        # return value.  Another process can never consume this lease.
+        return item["lease_owner"] == os.getpid()
+
+    @staticmethod
+    def _increment_total(data: dict, route: str, host: str, count: int) -> None:
+        count = _counter(count, "request count")
+        key = _total_key(route, host)
+        item = data["totals"].setdefault(
+            key, {"egress_route": route, "host": host, "count": 0})
+        item["count"] += count
+
+    def check(self, host: str, *, egress_route: str | None = None,
+              acquire_half_open: bool = True) -> HostHealthLease | None:
+        host = _normalize_host(host)
+        route = _normalize_route(egress_route)
+        now = self._now()
+        with _state_lock():
+            data, migrated = _load_hosthealth_state(now)
+            matching = sorted(
+                ((key, item) for key, item in data["breakers"].items()
+                 if self._matches(item, route, host) and item["phase"] != "closed"),
+                key=lambda pair: (0 if pair[1]["scope"] == "route" else 1, pair[0]),
             )
+            for _, item in matching:
+                if item["phase"] == "open" and item["until"] > now:
+                    if migrated:
+                        _save_hosthealth_state(data)
+                    remain = item["until"] - now
+                    raise HostBackoff(
+                        f"{item['scope']} breaker open for route={route} host={host} "
+                        f"error_class={item['error_class']} ({remain:.0f}s remaining)",
+                        egress_route=route, host=host, error_class=item["error_class"],
+                        attribution=item["attribution"], breaker_scope=item["scope"],
+                        phase="open", retry_after=remain,
+                    )
+                if item["phase"] == "half_open" and item["lease_until"] > now:
+                    if migrated:
+                        _save_hosthealth_state(data)
+                    remain = item["lease_until"] - now
+                    raise HostBackoff(
+                        f"{item['scope']} breaker half-open trial already leased for "
+                        f"route={route} host={host} error_class={item['error_class']} "
+                        f"({remain:.0f}s remaining)",
+                        egress_route=route, host=host, error_class=item["error_class"],
+                        attribution=item["attribution"], breaker_scope=item["scope"],
+                        phase="half_open", retry_after=remain,
+                    )
+            expired = [(key, item) for key, item in matching
+                       if (item["phase"] == "open" and item["until"] <= now)
+                       or (item["phase"] == "half_open" and item["lease_until"] <= now)]
+            if not expired:
+                if migrated:
+                    _save_hosthealth_state(data)
+                return None
+            if not acquire_half_open:
+                item = expired[0][1]
+                if migrated:
+                    _save_hosthealth_state(data)
+                raise HostBackoff(
+                    f"{item['scope']} breaker cooldown expired for route={route} host={host}; "
+                    "recovery requires one guarded single-request probe, not a fan-out tool",
+                    egress_route=route, host=host, error_class=item["error_class"],
+                    attribution=item["attribution"], breaker_scope=item["scope"],
+                    phase="half_open_required", retry_after=0.0,
+                )
+            keys = tuple(key for key, _ in expired)
+            token_raw = json.dumps([route, host, now, os.getpid(), keys], separators=(",", ":"))
+            token = hashlib.sha256(token_raw.encode()).hexdigest()[:32]
+            lease_until = now + self.lease_seconds
+            for key, item in expired:
+                item["phase"] = "half_open"
+                item["until"] = 0.0
+                item["lease_token"] = token
+                item["lease_owner"] = os.getpid()
+                item["lease_until"] = lease_until
+                item["updated_at"] = now
+                _append_hosthealth_event(
+                    data, now=now, event="half_open", egress_route=route,
+                    host=item["host"], observed_host=host,
+                    error_class=item["error_class"], attribution=item["attribution"],
+                    scope=item["scope"], consecutive=item["consecutive"],
+                    lease_until=lease_until,
+                )
+            _save_hosthealth_state(data)
+            return HostHealthLease(route, host, token, keys, lease_until)
 
-    def record_ok(self, host: str) -> None:
+    def record_ok(self, host: str, *, egress_route: str | None = None,
+                  count: int = 1, lease: HostHealthLease | None = None) -> None:
+        host = _normalize_host(host)
+        route = _normalize_route(egress_route)
+        count = _counter(count, "request count")
+        now = self._now()
         with _state_lock():
-            all_st = _load("hosthealth.json")
-            st = all_st.get(host, {"errs": 0, "total": 0, "until": 0.0})
-            st["errs"] = 0
-            st["total"] = st.get("total", 0) + 1
-            st["until"] = 0.0
-            all_st[host] = st
-            _save("hosthealth.json", all_st)
+            data, _ = _load_hosthealth_state(now)
+            matching = [(key, item) for key, item in data["breakers"].items()
+                        if self._matches(item, route, host)]
+            for key, item in matching:
+                if item["phase"] == "half_open" and not self._lease_authorized(key, item, lease):
+                    raise GuardStateError("half-open success does not own the persisted lease")
+                if item["phase"] == "open":
+                    raise GuardStateError("success cannot clear an open breaker without a half-open lease")
+            self._increment_total(data, route, host, count)
+            for _, item in matching:
+                recovered = item["phase"] == "half_open" or item["consecutive"] > 0
+                item["consecutive"] = 0
+                item["opens"] = 0
+                item["phase"] = "closed"
+                item["until"] = 0.0
+                item["lease_token"] = None
+                item["lease_owner"] = None
+                item["lease_until"] = 0.0
+                item["updated_at"] = now
+                item["backoff_seconds"] = 0.0
+                if recovered:
+                    _append_hosthealth_event(
+                        data, now=now, event="recovered", egress_route=route,
+                        host=item["host"], observed_host=host,
+                        error_class=item["error_class"], attribution=item["attribution"],
+                        scope=item["scope"], count=count,
+                    )
+            _append_hosthealth_event(
+                data, now=now, event="success", egress_route=route, host=host,
+                observed_host=host, error_class=None, attribution="none", scope="none",
+                count=count,
+            )
+            _save_hosthealth_state(data)
 
-    def record_error(self, host: str) -> None:
+    def record_error(self, host: str, *, error_class: str = "unattributed_transport",
+                     egress_route: str | None = None, count: int = 1,
+                     lease: HostHealthLease | None = None,
+                     request_count: int | None = None) -> None:
+        host = _normalize_host(host)
+        route = _normalize_route(egress_route)
+        policy = host_error_policy(error_class)
+        count = _counter(count, "request count")
+        if count < 1:
+            raise GuardStateError("an error record must represent at least one real request")
+        total_count = count if request_count is None else _counter(request_count, "request count")
+        if total_count < count:
+            raise GuardStateError("request_count cannot be smaller than attributed failures")
+        now = self._now()
         with _state_lock():
-            all_st = _load("hosthealth.json")
-            st = all_st.get(host, {"errs": 0, "total": 0, "until": 0.0})
-            st["errs"] = st.get("errs", 0) + 1
-            st["total"] = st.get("total", 0) + 1
-            if st["errs"] >= self.threshold:
-                st["until"] = time.time() + self.backoff
-            all_st[host] = st
-            _save("hosthealth.json", all_st)
+            data, _ = _load_hosthealth_state(now)
+            matching = [(key, item) for key, item in data["breakers"].items()
+                        if self._matches(item, route, host)]
+            leased: list[tuple[str, dict]] = []
+            for key, item in matching:
+                if item["phase"] == "half_open":
+                    if not self._lease_authorized(key, item, lease):
+                        raise GuardStateError("half-open failure does not own the persisted lease")
+                    leased.append((key, item))
+                elif item["phase"] == "open":
+                    raise GuardStateError("error recorded while breaker is open; caller skipped check()")
+            self._increment_total(data, route, host, total_count)
+            # An unattributed/route failure interrupts a target-failure streak and
+            # vice versa.  Different error classes therefore never accumulate as
+            # if they were consecutive observations of one class.
+            for _, item in matching:
+                if item["phase"] == "closed" and item["error_class"] != error_class:
+                    item["consecutive"] = 0
+                    item["updated_at"] = now
+            rearmed: set[str] = set()
+            for key, item in leased:
+                item["consecutive"] = max(item["consecutive"], self.threshold)
+                self._arm(item, key, now)
+                rearmed.add(key)
+                _append_hosthealth_event(
+                    data, now=now, event="opened", egress_route=route,
+                    host=item["host"], observed_host=host,
+                    error_class=item["error_class"], attribution=item["attribution"],
+                    scope=item["scope"], consecutive=item["consecutive"], until=item["until"],
+                )
+            breaker_host = _breaker_host(policy["breaker_scope"], host)
+            key = _breaker_key(route, breaker_host, error_class)
+            item = data["breakers"].setdefault(key, _new_breaker(route, host, error_class, now))
+            item["total_errors"] += count
+            if key in rearmed:
+                item["consecutive"] = max(item["consecutive"], self.threshold)
+            else:
+                item["consecutive"] += count
+                item["updated_at"] = now
+                if item["consecutive"] >= self.threshold:
+                    self._arm(item, key, now)
+                    _append_hosthealth_event(
+                        data, now=now, event="opened", egress_route=route,
+                        host=item["host"], observed_host=host,
+                        error_class=error_class, attribution=policy["attribution"],
+                        scope=policy["breaker_scope"], consecutive=item["consecutive"],
+                        until=item["until"],
+                    )
+            _append_hosthealth_event(
+                data, now=now, event="error", egress_route=route,
+                host=breaker_host, observed_host=host, error_class=error_class,
+                attribution=policy["attribution"], scope=policy["breaker_scope"],
+                count=count, consecutive=item["consecutive"], until=item["until"],
+            )
+            _save_hosthealth_state(data)
 
-    def soft_warn(self, host: str) -> str | None:
-        """Return a non-blocking warning string once a host crosses the request
-        volume threshold (helps the driver notice it is probing one host hard)."""
-        st = self._state(host)
-        if st.get("total", 0) and st["total"] % self.warn_at == 0:
-            return (f"[guard] 已对 {host} 发出 {st['total']} 次请求 — 注意请求量, "
-                    "目标可能开始限流(放缓/换面/换出口)")
+    def soft_warn(self, host: str, *, egress_route: str | None = None) -> str | None:
+        """Read-only warning; calling it never increments request counts."""
+        host = _normalize_host(host)
+        route = _normalize_route(egress_route)
+        now = self._now()
+        with _state_lock():
+            data, migrated = _load_hosthealth_state(now)
+            if migrated:
+                _save_hosthealth_state(data)
+            total = data["totals"].get(_total_key(route, host), {}).get("count", 0)
+        if total and total % self.warn_at == 0:
+            return (f"[guard] 已通过 {route} 对 {host} 发出 {total} 次真实请求 — "
+                    "注意请求量, 目标可能开始限流(放缓/换面/换出口)")
         return None
+
+    def snapshot(self) -> dict:
+        """Validated state copy for fixtures/observability (never mutable truth)."""
+        now = self._now()
+        with _state_lock():
+            data, migrated = _load_hosthealth_state(now)
+            if migrated:
+                _save_hosthealth_state(data)
+            return json.loads(json.dumps(data))
 
 
 class SessionBudget:
@@ -401,6 +1075,209 @@ class UploadRegistry:
         return [it for r in runs for it in st.get(r, []) if not it["cleaned"]]
 
 
+@contextlib.contextmanager
+def _selftest_state_isolation():
+    """Keep guard.py's executable selftest away from live shared guard state."""
+    import shutil
+    import tempfile
+
+    global STATE_DIR, _LOCK_PATH
+    old_state_dir, old_lock_path = STATE_DIR, _LOCK_PATH
+    root = Path(tempfile.mkdtemp(prefix="xunji_guard_selftest_"))
+    try:
+        STATE_DIR = root / "state"
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        _LOCK_PATH = STATE_DIR / ".lock"
+        yield
+    finally:
+        STATE_DIR, _LOCK_PATH = old_state_dir, old_lock_path
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _selftest_hosthealth_route_breaker() -> None:
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "guard-host-health.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    if set(fixture) != {"schema", "breaker_cases", "classification_cases"} or (
+            fixture.get("schema") != "xunji.guard-host-health-fixtures.v1"):
+        raise AssertionError("guard HostHealth fixture schema/fields drifted")
+
+    clock_value = [1000.0]
+
+    def clock() -> float:
+        return clock_value[0]
+
+    state_path = STATE_DIR / "hosthealth.json"
+
+    for case in fixture["breaker_cases"]:
+        expected_fields = {
+            "name", "route", "host", "error_class", "failures",
+            "blocked_hosts", "expected_scope",
+        }
+        if not expected_fields.issubset(case) or not set(case).issubset(
+                expected_fields | {"allowed_hosts", "allowed_routes"}):
+            raise AssertionError(f"unknown/missing breaker fixture fields: {case.get('name')}")
+        state_path.unlink(missing_ok=True)
+        clock_value[0] = 1000.0
+        hh = HostHealth(threshold=3, backoff=10, max_backoff=30,
+                        lease_seconds=5, jitter_ratio=0.1, clock=clock)
+        for _ in range(case["failures"]):
+            hh.record_error(case["host"], egress_route=case["route"],
+                            error_class=case["error_class"])
+        snap = hh.snapshot()
+        states = [item for item in snap["breakers"].values()
+                  if item["error_class"] == case["error_class"]]
+        if len(states) != 1 or states[0]["scope"] != case["expected_scope"]:
+            raise AssertionError(f"wrong breaker scope/key for {case['name']}")
+        expected_key = _breaker_key(
+            case["route"], "*" if case["expected_scope"] == "route" else case["host"],
+            case["error_class"],
+        )
+        if expected_key not in snap["breakers"]:
+            raise AssertionError(f"route/host/error_class tuple missing for {case['name']}")
+        for blocked_host in case["blocked_hosts"]:
+            try:
+                HostHealth(clock=clock).check(blocked_host, egress_route=case["route"])
+                raise AssertionError(f"breaker did not block {blocked_host}: {case['name']}")
+            except HostBackoff as exc:
+                if exc.error_class != case["error_class"] or exc.breaker_scope != case["expected_scope"]:
+                    raise AssertionError(f"backoff provenance mismatch: {case['name']}") from exc
+        for allowed_host in case.get("allowed_hosts", []):
+            if HostHealth(clock=clock).check(allowed_host, egress_route=case["route"]) is not None:
+                raise AssertionError(f"unrelated host received a lease: {case['name']}")
+        for allowed_route in case.get("allowed_routes", []):
+            if HostHealth(clock=clock).check(case["host"], egress_route=allowed_route) is not None:
+                raise AssertionError(f"unrelated route received a lease: {case['name']}")
+
+    # A shared-state cooldown grants one half-open lease.  A second worker sees
+    # it and remains blocked; only the owner may close it.
+    state_path.unlink(missing_ok=True)
+    clock_value[0] = 2000.0
+    hh1 = HostHealth(threshold=3, backoff=10, max_backoff=30,
+                     lease_seconds=5, jitter_ratio=0.1, clock=clock)
+    hh2 = HostHealth(threshold=3, backoff=10, max_backoff=30,
+                     lease_seconds=5, jitter_ratio=0.1, clock=clock)
+    hh1.record_error("shared.example", egress_route="direct",
+                     error_class="target_reset", count=3)
+    opened = next(iter(hh1.snapshot()["breakers"].values()))
+    first_delay = opened["until"] - clock_value[0]
+    if not 10 <= first_delay <= 11:
+        raise AssertionError("deterministic first backoff is outside bounded jitter")
+    clock_value[0] = opened["until"] + 0.001
+    try:
+        hh2.check("shared.example", egress_route="direct", acquire_half_open=False)
+        raise AssertionError("fan-out wrapper acquired an unsafe half-open trial")
+    except HostBackoff as exc:
+        if exc.phase != "half_open_required":
+            raise
+    lease = hh1.check("shared.example", egress_route="direct")
+    if not isinstance(lease, HostHealthLease):
+        raise AssertionError("expired cooldown did not issue a half-open lease")
+    try:
+        hh2.check("shared.example", egress_route="direct")
+        raise AssertionError("second worker bypassed the shared half-open lease")
+    except HostBackoff as exc:
+        if exc.phase != "half_open":
+            raise
+    wrong = HostHealthLease("direct", "shared.example", "0" * 32,
+                            lease.breaker_keys, lease.expires_at)
+    try:
+        hh1.record_ok("shared.example", egress_route="direct", lease=wrong)
+        raise AssertionError("wrong half-open token closed a breaker")
+    except GuardStateError:
+        pass
+    hh1.record_error("shared.example", egress_route="direct",
+                     error_class="target_reset", lease=lease)
+    reopened = next(iter(hh1.snapshot()["breakers"].values()))
+    second_delay = reopened["until"] - clock_value[0]
+    if not first_delay < second_delay <= 22:
+        raise AssertionError("exponential backoff is not bounded/deterministic")
+    clock_value[0] = reopened["until"] + 0.001
+    recovery_lease = hh2.check("shared.example", egress_route="direct")
+    hh2.record_ok("shared.example", egress_route="direct", lease=recovery_lease)
+    if hh1.check("shared.example", egress_route="direct") is not None:
+        raise AssertionError("successful half-open trial did not close shared breaker")
+
+    # Same state and clock produce exactly the same stable jitter.
+    def deterministic_delay() -> float:
+        state_path.unlink(missing_ok=True)
+        clock_value[0] = 3000.0
+        test = HostHealth(threshold=3, backoff=10, max_backoff=30,
+                          lease_seconds=5, jitter_ratio=0.1, clock=clock)
+        test.record_error("jitter.example", egress_route="direct",
+                          error_class="target_reset", count=3)
+        item = next(iter(test.snapshot()["breakers"].values()))
+        return item["until"] - clock_value[0]
+
+    if deterministic_delay() != deterministic_delay():
+        raise AssertionError("backoff jitter is not deterministic")
+
+    # Counts represent real attempts.  Reading a warning must never mint one.
+    state_path.unlink(missing_ok=True)
+    clock_value[0] = 4000.0
+    counted = HostHealth(threshold=99, warn_at=4, clock=clock)
+    counted.record_error("count.example", egress_route="direct",
+                         error_class="target_reset", count=3)
+    counted.record_ok("count.example", egress_route="direct", count=1)
+    before = counted.snapshot()["totals"][_total_key("direct", "count.example")]["count"]
+    if before != 4 or counted.soft_warn("count.example", egress_route="direct") is None:
+        raise AssertionError("real request count/warning threshold is wrong")
+    after = counted.snapshot()["totals"][_total_key("direct", "count.example")]["count"]
+    if after != before:
+        raise AssertionError("soft warning was counted as a request")
+
+    # Valid legacy state migrates without losing its cooldown/count.  Unknown
+    # legacy/v2 fields are not silently discarded.
+    state_path.write_text(json.dumps({
+        "legacy.example": {"errs": 3, "total": 7, "until": clock_value[0] + 10},
+    }), encoding="utf-8")
+    try:
+        HostHealth(clock=clock).check("legacy.example", egress_route="direct")
+        raise AssertionError("legacy open breaker was lost during migration")
+    except HostBackoff:
+        pass
+    migrated = HostHealth(clock=clock).snapshot()
+    if migrated["schema"] != HOST_HEALTH_SCHEMA or (
+            migrated["totals"][_total_key("legacy", "legacy.example")]["count"] != 7):
+        raise AssertionError("legacy HostHealth state did not migrate losslessly")
+    raw_invalid_host = "one.example two.example"
+    state_path.write_text(json.dumps({
+        raw_invalid_host: {"errs": 1, "total": 2, "until": 0.0},
+    }), encoding="utf-8")
+    quarantined = HostHealth(clock=clock).snapshot()
+    quarantined_text = json.dumps(quarantined)
+    if raw_invalid_host in quarantined_text or not any(
+            item["host"].startswith("legacy-invalid-")
+            for item in quarantined["totals"].values()):
+        raise AssertionError("invalid legacy host was not safely quarantined")
+    corrupt = _empty_hosthealth_state()
+    corrupt["unknown"] = True
+    state_path.write_text(json.dumps(corrupt), encoding="utf-8")
+    try:
+        HostHealth(clock=clock).snapshot()
+        raise AssertionError("unknown HostHealth v2 field failed open")
+    except GuardStateError:
+        pass
+
+    exception_factories = {
+        "gaierror": lambda: urllib.error.URLError(socket.gaierror(
+            getattr(socket, "EAI_AGAIN", -3), "temporary failure in name resolution")),
+        "ssl": lambda: urllib.error.URLError(ssl.SSLError("TLS handshake failed")),
+        "reset": lambda: urllib.error.URLError(ConnectionResetError("connection reset")),
+    }
+    for case in fixture["classification_cases"]:
+        if set(case) != {"name", "exception", "route", "expect"}:
+            raise AssertionError(f"classification fixture fields drifted: {case.get('name')}")
+        actual = classify_network_error(exception_factories[case["exception"]](),
+                                        egress_route=case["route"])
+        if actual != case["expect"]:
+            raise AssertionError(f"network classification mismatch for {case['name']}: {actual}")
+
+    route = egress_route_id("socks5h://user:secret@proxy.internal:1080")
+    if not _ROUTE_RE.fullmatch(route) or any(secret in route for secret in ("user", "secret", "proxy.internal")):
+        raise AssertionError("egress route ID leaked proxy endpoint/credentials")
+    print("host-health selftest OK (route attribution + half-open + shared counts + migration)")
+
+
 def _selftest_session_breaker() -> None:
     """Verify the whole-session hard breaker on an ISOLATED state file (never the
     live sessionbudget.json). Trips on count, then on bytes; check() must abort
@@ -540,13 +1417,16 @@ class RequestRecorder:
 
 
 if __name__ == "__main__":
-    # quick smoke test
-    rl = RateLimiter()
-    rl.gate("example.com")
-    body, trunc = cap_body(b"x" * (MAX_BODY_BYTES + 1))
-    print(f"guard OK; cap truncated={trunc} len={len(body)}; "
-          f"outstanding uploads={len(UploadRegistry().outstanding())}")
-    _selftest_session_breaker()
+    # Quick smoke tests run in an isolated state root.  Executing the test suite
+    # must not consume the live engagement's rate/request/breaker budget.
+    with _selftest_state_isolation():
+        rl = RateLimiter()
+        rl.gate("example.com")
+        body, trunc = cap_body(b"x" * (MAX_BODY_BYTES + 1))
+        print(f"guard OK; cap truncated={trunc} len={len(body)}; "
+              f"outstanding uploads={len(UploadRegistry().outstanding())}")
+        _selftest_hosthealth_route_breaker()
+        _selftest_session_breaker()
     # smoke-test RequestRecorder
     import tempfile
     d = Path(tempfile.mkdtemp())

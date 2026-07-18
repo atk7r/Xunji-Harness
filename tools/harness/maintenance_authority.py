@@ -32,6 +32,7 @@ DEFAULT_EXACT = {
     ".claude/settings.local.json",
     "config.ini",
     "tools/anti_drift.py",
+    "tools/agent_settlement.py",
     "tools/cdn_bypass.py",
     "tools/check_run.py",
     "tools/check_hook.py",
@@ -46,6 +47,7 @@ DEFAULT_EXACT = {
     "tools/fetch_assets.py",
     "tools/graph.py",
     "tools/harness/__init__.py",
+    "tools/harness/capability_registry.py",
     "tools/harness/command_shape.py",
     "tools/harness/codex_proxy.py",
     "tools/harness/codex_proxy.conf",
@@ -82,13 +84,16 @@ DEFAULT_EXACT = {
     "tools/setup_transaction.py",
     "tools/state_project.py",
     "tools/status_style.py",
+    "tools/timestamp_gate.py",
     "tools/turn_contract.py",
+    "tools/work_plan.py",
     "tools/workers.py",
     "tools/xunji_statusline.py",
     "tools/xday_match.py",
 }
 DEFAULT_PREFIXES = {
     ".claude/hooks",
+    "contracts",
     "sentinel",
     "tools/__pycache__",
     "tools/harness/.state",
@@ -100,6 +105,7 @@ FORBIDDEN_SCOPE_EXACT = {
 FORBIDDEN_SCOPE_PREFIXES = {
     ".git",
     ".claude/xunji_pending_turns",
+    ".claude/xunji_session_selections",
     ".claude/xunji_transition_claims",
     ".claude/xunji_scope_admission_claims",
     "runs",
@@ -107,12 +113,9 @@ FORBIDDEN_SCOPE_PREFIXES = {
     "tools/harness/.state",
     "tools/harness/__pycache__",
 }
-PATH_KEYS = {
-    "file_path", "path", "notebook_path", "target_path", "destination", "dest",
-}
+PATH_KEYS = {"destination", "dest"}
 PATH_KEY_RE = re.compile(
-    r"(?i)^(?:file_?path|filepath|path|notebook_?path|target_?path|source_?path|"
-    r"destination(?:_path)?|dest(?:_path)?|file_?name|filename)$"
+    r"(?i)(?:^|_)(?:path|paths|file|files|filepath|filepaths|filename|filenames)$"
 )
 WRITE_TOOLS = {"Write", "Edit", "Update", "MultiEdit", "NotebookEdit"}
 _WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:[/\\]")
@@ -249,24 +252,87 @@ def parse_directive(prompt: str, *, root: Path = ROOT) -> tuple[dict | None, str
     }, ""
 
 
-def _iter_path_values(value: object, *, key: str = ""):
-    if isinstance(value, dict):
-        for child_key, child in value.items():
-            if (child_key in PATH_KEYS or PATH_KEY_RE.fullmatch(str(child_key))) \
-                    and isinstance(child, str):
-                yield child
-            yield from _iter_path_values(child, key=child_key)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _iter_path_values(child, key=key)
+def _path_key(value: object) -> bool:
+    raw = str(value or "").strip().replace("-", "_")
+    # Claude tool schemas use both snake_case and camelCase spellings. Normalize
+    # the latter before matching the final semantic component so nested fields
+    # such as ``edits[].sourcePaths`` cannot disappear from the effect set.
+    normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", raw).lower()
+    return normalized in PATH_KEYS or bool(PATH_KEY_RE.search(normalized))
+
+
+def structured_path_values(value: object) -> tuple[list[str], list[str]]:
+    """Return every raw path member plus deterministic invalid-member markers.
+
+    A path-like field may contain one string or nested lists of strings. Other
+    values, including an empty list, are invalid but are not silently discarded.
+    Dict/list containers outside a path field are traversed so edit collections
+    such as ``edits[].file_path`` remain part of the same direct mutation.
+    """
+    paths: list[str] = []
+    invalid: list[str] = []
+
+    def invalid_marker(node: object) -> str:
+        if isinstance(node, str):
+            return node
+        try:
+            return json.dumps(node, ensure_ascii=False, sort_keys=True)
+        except Exception:
+            return f"<{type(node).__name__}>"
+
+    def visit(
+        node: object,
+        *,
+        path_member: bool = False,
+        nested_path_list: bool = False,
+    ) -> None:
+        if path_member:
+            if isinstance(node, str):
+                paths.append(node)
+                return
+            if isinstance(node, list):
+                # One list level is the supported list-valued path shape. A
+                # nested container is retained and traversed for auditability,
+                # but remains invalid so a malformed member cannot fail open.
+                if nested_path_list or not node:
+                    invalid.append(invalid_marker(node))
+                for child in node:
+                    visit(
+                        child, path_member=True, nested_path_list=True)
+                return
+            invalid.append(invalid_marker(node))
+            # Preserve the invalid container while still discovering any nested
+            # explicitly named path members for the canonical receipt set.
+            if isinstance(node, dict):
+                visit(node)
+            return
+        if isinstance(node, dict):
+            for child_key, child in node.items():
+                if _path_key(child_key):
+                    visit(child, path_member=True)
+                elif isinstance(child, (dict, list)):
+                    visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(value)
+    return paths, invalid
+
+
+def event_path_values(event: dict) -> tuple[list[str], list[str]]:
+    """Return raw structured path members and non-string/container errors."""
+    tool_input = event.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return [], [f"<{type(tool_input).__name__}>"]
+    return structured_path_values(tool_input)
 
 
 def event_paths(event: dict, *, root: Path = ROOT) -> tuple[list[str], list[str]]:
     """Return normalized direct tool paths and invalid path values."""
-    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    raw_paths, invalid = event_path_values(event)
     paths: list[str] = []
-    invalid: list[str] = []
-    for raw in _iter_path_values(tool_input):
+    for raw in raw_paths:
         try:
             path = _canonical_relative(raw, root=root, allow_absolute=True)
         except ValueError:
@@ -368,6 +434,7 @@ def _selftest() -> int:
         "/xunji-maintenance --scope .claude/hooks --reason bad",
         "/xunji-maintenance --scope runs/example/frontier.md --reason bad",
         "/xunji-maintenance --scope .claude/xunji_active_run --reason bad",
+        "/xunji-maintenance --scope .claude/xunji_session_selections --reason bad",
         "/xunji-maintenance --scope docs/maintenance-note.md --reason bad",
         "/xunji-maintenance --scope tools/turn_contract.py,tools/turn_contract.py --reason bad",
         "/xunji-maintenance --reason bad --scope tools/turn_contract.py",
@@ -390,6 +457,48 @@ def _selftest() -> int:
                    event_paths(alternate_path_key, root=root)[0] == [
                        "tools/turn_contract.py", "docs/maintenance-note.md",
                    ]))
+    list_paths = {"tool_name": "MultiEdit", "tool_input": {
+        "edits": [{
+            "filePaths": [
+                str(root / "tools/turn_contract.py"),
+                str(root / "docs/maintenance-note.md"),
+            ],
+        }],
+    }}
+    checks.append(("nested list-valued path fields are complete",
+                   event_paths(list_paths, root=root) == ([
+                       "tools/turn_contract.py", "docs/maintenance-note.md",
+                   ], [])))
+    invalid_members = {"tool_name": "MultiEdit", "tool_input": {
+        "file_paths": [
+            str(root / "tools/turn_contract.py"), "", "tools/*.py",
+            "../escape.py", [], None,
+        ],
+    }}
+    invalid_paths, invalid_values = event_paths(invalid_members, root=root)
+    checks.append(("invalid list members are preserved beside valid paths",
+                   invalid_paths == ["tools/turn_contract.py"]
+                   and {"", "tools/*.py", "../escape.py", "[]", "null"}
+                   <= set(invalid_values)))
+    internal_alias = root / "docs-alias"
+    internal_alias.symlink_to(root / "docs", target_is_directory=True)
+    alias_event = {"tool_name": "Write", "tool_input": {
+        "file_path": str(internal_alias / "missing" / "new.md"),
+    }}
+    checks.append(("symlink aliases with nonexistent tails canonicalize once",
+                   event_paths(alias_event, root=root) == (
+                       ["docs/missing/new.md"], [])))
+    external = root.parent / f"{root.name}-outside"
+    external.mkdir()
+    escaping_alias = root / "escaping-alias"
+    escaping_alias.symlink_to(external, target_is_directory=True)
+    escaping_event = {"tool_name": "Write", "tool_input": {
+        "file_path": str(escaping_alias / "missing.md"),
+    }}
+    escaped_paths, escaped_values = event_paths(escaping_event, root=root)
+    checks.append(("symlink escape with nonexistent tail fails closed",
+                   not escaped_paths and escaped_values == [
+                       str(escaping_alias / "missing.md")]))
     checks.append(("critical Edit path detected",
                    critical_paths_for_event(edit, root=root) == ["tools/turn_contract.py"]))
     bash = {"tool_name": "Bash", "tool_input": {

@@ -92,6 +92,7 @@ REQUIRED_FILES = [
     Path("tools/harness/fixtures/scope-admission.json"),
     Path("bench/setup-normalizer-pilot/cases.json"),
     Path("tools/harness/fixtures/setup-transaction.json"),
+    Path("tools/harness/fixtures/driver-doc-conformance.json"),
     Path("tools/harness/maintenance_authority.py"),
     Path("tools/harness/safety_critical_paths.json"),
 ]
@@ -439,6 +440,14 @@ def main() -> int:
     if architecture_doc.exists():
         errors.extend(check_maintenance_checkpoint(
             architecture_doc.read_text(encoding="utf-8", errors="replace")))
+    try:
+        from check_templates import _driver_doc_errors
+        errors.extend(_driver_doc_errors())
+    except Exception as exc:
+        errors.append(
+            "Claude-primary driver conformance cannot be validated: "
+            + type(exc).__name__
+        )
     errors.extend(check_safety_critical_manifest())
 
     if errors:

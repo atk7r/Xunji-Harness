@@ -511,17 +511,17 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         allow_legacy_cleanup=allow_legacy_cleanup,
     )
     host = urlparse(url).hostname or "unknown"
+    egress_route = guardmod.egress_route_id(proxymod.engagement_proxy(_PROXY))
     afc = AuthFailCounter()
     if auth_key:
         afc.check(auth_key)            # anti-runaway: stop once locked
     hh = HostHealth()
-    hh.check(host)                     # 自熔断: host 在退避冷却期则直接抛 HostBackoff
     sb = SessionBudget()
-    sb.check()                         # 整场量熔断: 冷却期直接 abort(跨 host 总量/外渗)
 
     req = urllib.request.Request(url=url, method=method.upper(),
                                  data=data, headers=req_headers)
-    summary: dict = {"method": method.upper(), "url": url}
+    summary: dict = {"method": method.upper(), "url": url,
+                     "egress_route": egress_route}
     if byte_range:
         summary["range"] = _header_value(req_headers, "Range")
     opener = _opener(
@@ -535,7 +535,13 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     resp_headers: dict = {}
     cookie_list: list[str] = []            # ALL Set-Cookie values (dict() would drop dups)
     attempts = 0                           # 真实发出的请求数(含重试), 供整场量精确计数
+    attempt_error_classes: list[str] = []
     for attempt in range(retry + 1):
+        # Every real attempt re-checks shared route/host and whole-session state.
+        # This prevents one --retry call from overrunning a breaker that armed on
+        # an earlier attempt, and gives a cooled breaker exactly one half-open I/O.
+        lease = hh.check(host, egress_route=egress_route)
+        sb.check()
         attempts += 1
         RateLimiter().gate(host)           # 禁高频(每次实际请求都计入)
         try:
@@ -557,36 +563,44 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
             raise
         except Exception as e:
             last_err = str(e)
+            error_class = guardmod.classify_network_error(e, egress_route=egress_route)
+            attempt_error_classes.append(error_class)
+            sb_warn = sb.record(0, count=1)
+            if sb_warn:
+                print(sb_warn, file=sys.stderr)
+            hh.record_error(host, egress_route=egress_route,
+                            error_class=error_class, lease=lease)
             if attempt < retry:
                 time.sleep(retry_wait)     # 瞬时超时/RST 重试(如本次 vpn)
     if last_err is not None:
-        hh.record_error(host)
-        # P1: classify transport error
-        err_lower = last_err.lower()
-        if 'ssl' in err_lower or 'tls' in err_lower or 'handshake' in err_lower:
-            transport_type = "cdn_tls_reject" if 'eof' in err_lower else "transport_error"
-        elif 'timeout' in err_lower or 'reset' in err_lower or 'refused' in err_lower or 'unreachable' in err_lower:
-            transport_type = "transport_error"
-        else:
-            transport_type = "transport_error"          # 传输错误: 累计, 达阈值即熔断该 host
-        sb.record(0, count=attempts)   # 失败请求(含每次重试)都计入整场量, 防错误洪水绕过会话熔断
-        out = {**summary, "error": last_err, "transport_error": True, "error_type": transport_type}
-        if retry:
-            out["attempts"] = retry + 1
+        error_class = attempt_error_classes[-1]
+        policy = guardmod.host_error_policy(error_class)
+        transport_type = "cdn_tls_reject" if error_class == "target_tls" else "transport_error"
+        out = {
+            **summary,
+            "error": last_err,
+            "transport_error": True,
+            "error_type": transport_type,
+            **policy,
+            "attempt_error_classes": attempt_error_classes,
+            "attempts": attempts,
+        }
         return out
-    hh.record_ok(host)                 # 有 HTTP 响应(含4xx/5xx)=连接健康, 重置错误streak
-    warn = hh.soft_warn(host)
-    if warn:
-        print(warn, file=sys.stderr)
     # JS/CSS 静态资源 >MIN_STATIC_ASSET_BYTES 不计入 bytes budget(防 JS-heavy SPA 的 chunk 下载触发假熔断);
     # 仍计入 count budget。小于阈值的仍正常计(防大量小文件绕过)。
     content_type = (resp_headers.get("Content-Type") or "").lower()
     record_bytes = len(raw)
     if len(raw) >= MIN_STATIC_ASSET_BYTES and any(t in content_type for t in ("javascript", "css")):
         record_bytes = 0
-    sb_warn = sb.record(record_bytes, count=attempts)   # 整场请求(含重试)+外渗量计量; 越硬阈值则布防熔断
+    # Failed attempts were recorded at failure time; this records the one HTTP
+    # response and its wire bytes, so retries cannot be double-counted.
+    sb_warn = sb.record(record_bytes, count=1)
     if sb_warn:
         print(sb_warn, file=sys.stderr)
+    hh.record_ok(host, egress_route=egress_route, lease=lease)  # HTTP response = route/target healthy
+    warn = hh.soft_warn(host, egress_route=egress_route)
+    if warn:
+        print(warn, file=sys.stderr)
 
     body, truncated = cap_body(raw)
     _full_sha1 = hashlib.sha1(raw).hexdigest()
@@ -842,6 +856,8 @@ def _selftest() -> int:
                            bool(_re.search(r"\.AspNetCore\.Antiforgery\.[^=]+=[^;]+", sc))))
             checks.append(("--save wrote the body", tmp.is_file() and tmp.read_bytes() == b"ok-body"))
             checks.append(("len/sha1 summarized", d.get("len") == 7 and bool(d.get("sha1"))))
+            checks.append(("probe exposes credential-free egress route",
+                           d.get("egress_route") == "direct"))
             # 操作录像: --save 同时写 <file>.replay.json(追加扩展名, 非 with_suffix)
             rp = Path(str(tmp) + ".replay.json")
             checks.append(("--save 写了 <file>.replay.json(追加不替换扩展名)", rp.is_file()))
@@ -977,6 +993,27 @@ def _selftest() -> int:
             checks.append(("cookie jar is owner-only",
                            jar.exists() and (jar.stat().st_mode & 0o077) == 0))
             checks.append(("preflight chained POST succeeds", csrf_post.get("status") == 200))
+
+            # Exhausted retries must be attributed structurally and counted as
+            # three real attempts (not one wrapper call, and not four warnings).
+            import socket as _socket
+            unused = _socket.socket()
+            unused.bind(("127.0.0.1", 0))
+            unused_port = unused.getsockname()[1]
+            unused.close()
+            totals_before = HostHealth().snapshot()["totals"].get(
+                guardmod._total_key("direct", "127.0.0.1"), {}).get("count", 0)
+            failed = send("GET", f"http://127.0.0.1:{unused_port}/", {}, None, None, 1,
+                          retry=2, retry_wait=0)
+            totals_after = HostHealth().snapshot()["totals"][
+                guardmod._total_key("direct", "127.0.0.1")]["count"]
+            checks.append(("transport failure exposes route/error attribution",
+                           failed.get("egress_route") == "direct"
+                           and failed.get("error_class") == "target_reset"
+                           and failed.get("attribution") == "target"
+                           and failed.get("breaker_scope") == "target"))
+            checks.append(("retry wrapper records exact real request count",
+                           failed.get("attempts") == 3 and totals_after - totals_before == 3))
         finally:
             srv.shutdown()
     # 统一布局 _place_save: 裸文件名 + --run -> <run>/evidence/; 显式路径/无 --run 原样
@@ -1217,6 +1254,8 @@ def main() -> int:
                                            args.allow_legacy_cleanup)}
             if preflight_meta:
                 out["preflight"] = preflight_meta
+    except guardmod.GuardStateError as e:
+        out = {"error": f"guard-state: {e}", "error_class": "guard_state"}
     except SessionTripped as e:
         out = {"error": f"session-volume-breaker: {e}"}
     except RateBudgetExceeded as e:
@@ -1224,7 +1263,7 @@ def main() -> int:
     except BruteforceLock as e:
         out = {"error": f"brute-force lock: {e}"}
     except HostBackoff as e:
-        out = {"error": f"host-backoff: {e}"}
+        out = {"error": f"host-backoff: {e}", **e.provenance()}
     except OutboundPrivacyError as e:
         out = {"error": f"outbound-privacy: {e}"}
 

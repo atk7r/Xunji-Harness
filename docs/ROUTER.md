@@ -31,13 +31,22 @@ PreToolUse hook.
 Routing invariant:
 
 - Normal chat: answer normally; do not mutate run state.
-- Setup: target/recon/URL/markdown preparation only; do not start loop.
-- Resume: read run files and handoff; do not start loop.
+- Setup: affirmative target/recon/URL/markdown create/preparation only; do not start loop.
+- Resume: affirmative resume request reads run files and handoff; do not start loop.
 - Hint: write/update `hints.md` before the next lifecycle decision.
-- Loop: only when the message contains explicit `/loop`. Its first source is routed
-  by `python3 tools/loop_bootstrap.py --source <input> --type auto`; every later
+- Loop: only when the first non-empty top-level line begins exact `/loop(?:\s|$)`.
+  Indented/fenced code, blockquotes, inline quotes, questions, analysis requests,
+  and lifecycle denials are data/read-only; conflicting `/loop` plus denial fails
+  closed. Its first source is routed
+  by the exact argv-only command
+  `python3 tools/loop_bootstrap.py --source <input> --type auto`. In the same
+  authorized turn it continues through run binding, fresh CronList/CronCreate,
+  iteration tasks, graph/front decomposition, and real Agent launches. Every later
   cycle uses `/loop runs/<normalized-run-dir>` and the fixed protocol in
   `docs/templates/loop_prompt.md`. No generated per-run prompt is required.
+- Affirmative natural-language setup grants source authority only when it names one
+  unique URL. Multiple URLs are ambiguous data; do not choose among them or bootstrap
+  until the operator explicitly identifies the lifecycle source.
 
 Natural language never starts loop by itself. `/loop` is the loop boundary.
 
@@ -117,8 +126,8 @@ When a run directory exists, record the same transition in
 `state/loop_journal.jsonl`:
 
 ```bash
-python tools/loop_journal.py runs/<dir> phase-start --phase "<Phase>" --note "<why>"
-python tools/loop_journal.py runs/<dir> phase-end --phase "<Phase>" --note "<result; next phase>"
+python3 tools/loop_journal.py runs/<dir> phase-start --phase "<Phase>" --note "<why>"
+python3 tools/loop_journal.py runs/<dir> phase-end --phase "<Phase>" --note "<result; next phase>"
 ```
 
 Mechanical Setup performed inside `setup_run.py` is the display exception: keep
@@ -145,8 +154,23 @@ files) · `docs/templates/run/`.
 Input adapter:
 
 ```bash
-python3 tools/loop_bootstrap.py --source <run-or-URL-or-file> --type auto
+python3 tools/loop_bootstrap.py --source '<run-or-URL-or-file>' --type auto
 ```
+
+This is an exact command-shape contract. Use the current registered Python
+executable (a bare name only when it resolves to that identity) and quote source as
+one literal argv token. Do not use `tool_input.env`, inline env assignments,
+unquoted pathname/query glob characters, brace/tilde/EQUALS/parameter/command
+expansion, redirects, chains, comments, newlines, `2>&1`, pipes, `head`/`tail`, or
+another wrapper. Quoted glob characters remain literal data. On
+`XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED`, remove the wrapper; for `invalid-argv`,
+return to the corresponding owner document and supply every registered argument.
+Retry in the same top-level operator turn, and inspect source/manifests with
+Read/Grep/Glob rather than `python -c`. Every new non-internal top-level prompt
+revokes the same session's pending source authority, even if an active pointer appeared between
+prompts; replacing an active contract also revokes the displaced session's live
+claim. `XUNJI_E_RUN_TRANSITION_AUTHORITY_MISSING` requires a new explicit
+create/resume prompt rather than inheriting the earlier URL.
 
 The route order is: recognizable existing run/run file -> explicit
 HTTP(S) target URL -> local file content -> Guanlan/recon JSON -> candidate
@@ -170,8 +194,8 @@ fail-closed until their provenance fixtures exist.
 
 Output:
 
-- **Create the run dir in ONE shot**: `python tools/setup_run.py <slug> <recon.json>`
-  or `python tools/setup_run.py <slug> --target <http-or-https-url>` —
+- **Create the run dir in ONE shot**: `python3 tools/setup_run.py <slug> <recon.json>`
+  or `python3 tools/setup_run.py <slug> --target <http-or-https-url>` —
   builds the skeleton + `evidence/`/`scripts/` subdirs, folds the FULL asset table via
   ingest_recon into `surface_recon.md`, records the recon path in `target.md`, **and
   builds `coverage.json` directly from the Guanlan recon (zero re-probe)**.
@@ -194,8 +218,29 @@ Output:
   candidate `in` row becomes executable.
 - **Switch only after setup completes**: setup inherits the current operator turn
   contract and then atomically updates the active-run pointer. An old run's Agent
-  Board does not govern this lifecycle command. Never clear/edit the pointer to
-  escape a gate; after setup, rerun CronList/CronCreate for the new run.
+  Board does not govern this lifecycle command. Never manually clear/edit the
+  pointer/selection receipts or use `--clear-active` to escape a gate. `SessionEnd`
+  is the sole automatic clear exception: the ending session may save and clear
+  only a pointer whose exact session/transcript contract it still owns, after old
+  authority is replaced by an `EXPLAIN_ONLY` barrier. Only exact Claude
+  `SessionStart.source=resume` may consume that receipt and restore the pointer;
+  all other start sources, new/fork sessions, and ordinary prompts remain unbound
+  unless the operator explicitly selects the exact run/source. Restored selection
+  stays `EXPLAIN_ONLY` until the first new prompt. Recovery must revalidate the
+  receipt, required
+  files, coverage, complete source bundle, and immutable claim binding; pointer +
+  status alone are insufficient. After committed/recovered setup, run fresh CronList, CronCreate
+  naming the new run, and TaskCreate/TaskUpdate before any Agent/target action.
+  Stable recovery codes distinguish missing setup/list/run-name/create/plan state;
+  a denied action is not permission to schedule the old run.
+- **Bind one exact lifecycle effect**: the argv layer validates adapter operation and
+  options before PreToolUse records a redacted operation/options digest, exact target,
+  canonical source-reference digest, session, and prompt. The transaction owner
+  recomputes it from the frozen profile/source manifest or exact target. Claim state
+  is `active -> claimed -> pointer commit -> finalize/delete`; a newer top-level
+  prompt tombstones `active|claimed`, and replacing an active contract also revokes
+  the displaced session's live claim. Only an already-committed pointer with an exact
+  durable binding may finalize a tombstone.
 - **Never hand-curate `surface.md` from the human report** — a curated subset encodes
   the driver's selection bias as ground truth and blinds the anti-lump guard (hamastar
   root cause: 30+ assets silently un-examined, 6 operator nudges).
@@ -225,7 +270,7 @@ Load: `frontier.md` · `hypotheses.md` · latest `decisions.md` · recent `evide
 Begin each cycle with a **Root-level state graph pass**: read the projected graph, all
 open/deferred fronts, newest evidence, assignments, and conflicts before choosing —
 catch newly-unlocked fronts, bad role coverage, duplication, and unresolved conflicts
-early. `python tools/graph.py runs/<dir>` plus `python tools/workers.py status runs/<dir>`
+early. `python3 tools/graph.py runs/<dir>` plus `python3 tools/workers.py status runs/<dir>`
 makes "what just got unlocked / neglected / unassigned" a query, not a full re-read.
 Re-prioritize and assign only; never close a front. See `docs/WORKFLOW.md`
 "Root-level state graph pass" + `docs/WORKFLOW-reference.md` "State Graph".
@@ -241,8 +286,8 @@ updated `decisions.md`.
   not progress. A scan is sensor input to this gate, never the front-selection decision.
 - Once an observation **grounds a product fingerprint** (or `classify_hosts` tagged the
   asset `kb:<id>`), retrieve that stack before crafting the next check —
-  `python tools/knowledge_match.py --body` (weak-point anchors + CVE leads) +
-  `python tools/xday_match.py --body` (stored local exploit; the variant-analysis
+  `python3 tools/knowledge_match.py --body` (weak-point anchors + CVE leads) +
+  `python3 tools/xday_match.py --body` (stored local exploit; the variant-analysis
   read-side, cognition "Grounding and Variant Analysis"). Consult on the hit, adapt
   per-target; **never pre-load the base as a checklist**.
 
@@ -308,7 +353,7 @@ Output:
 Before treating the report as final, run the run-state check and fix what it flags:
 
 ```text
-python tools/check_run.py runs/<target_slug>_<date>
+python3 tools/check_run.py runs/<target_slug>_<date>
 ```
 
 Structural gate, not a quality judge: passing means the run files carry the required
@@ -318,50 +363,50 @@ fields, not that the findings are certified.
 
 Project-discipline and run-structure checks in `tools/`:
 
-- `python tools/check_run.py runs/<dir>` — the run carries all required files and markers
+- `python3 tools/check_run.py runs/<dir>` — the run carries all required files and markers
   (run at Reviewer and before Report). `--replay-verify` at closure re-checks
   `.replay.json` evidence against the live target (idempotent GET only, guard-routed,
   In-scope only; `DIVERGED` = re-adjudicate).
-- `python tools/check_rules.py` — repo ARCHITECTURE-drift guard (no legacy
+- `python3 tools/check_rules.py` — repo ARCHITECTURE-drift guard (no legacy
   orchestrator/playbook dirs or refs; required doctrine files present). Does NOT police
   weapons: exp/poc/scanner code is method and free to live in the repo (`poc_library/`,
   `runs/<target>/`, `tools/poc_*`); irreversible harm is gated by effect at runtime by
   `.claude/hooks/safety_gate.py`, not by filename.
-- `python tools/check_hook.py` — the safety hook actually denies blocked commands and
+- `python3 tools/check_hook.py` — the safety hook actually denies blocked commands and
   stays silent on allowed ones.
-- `python tools/selftest_all.py` — aggregate runner: every tool / hook / sentinel
+- `python3 tools/selftest_all.py` — aggregate runner: every tool / hook / sentinel
   selftest in one shot, one green/red scorecard. Run before declaring a safety-critical
   change done (the floor before the independent review).
-- `python tools/bench.py score <run> <truth.json>` — R-1 self-eval scorer: grade a
+- `python3 tools/bench.py score <run> <truth.json>` — R-1 self-eval scorer: grade a
   finished run against a fixture's ground truth (detection / calibration / false-pos /
   budget) and optional Ultra-native collaboration checks (agent coverage, conflict
   resolution, request budget by agent, time-to-first-evidence, false-positive
   suppression). Measures the Root/Agents, never drives. Fixtures in `bench/` (benign
   known-vuln targets only, never real engagements). Use it to A/B a framework change.
-- `python tools/check_knowledge.py` — the grounding base keeps its structure and stays
+- `python3 tools/check_knowledge.py` — the grounding base keeps its structure and stays
   grounding (no payload/exploit/step fields; every anchor carries a reference + source).
   Run after editing `knowledge/`.
-- `python tools/knowledge_match.py --body <saved-resp>` (or `--id <id>` from a `kb:<id>`
+- `python3 tools/knowledge_match.py --body <saved-resp>` (or `--id <id>` from a `kb:<id>`
   classify tag) — the fingerprint flywheel's **retrieval end**: matches target content
   against the grounding base's `signatures:` and surfaces the entry's Recognition +
   Weak-Point Anchors (class + mechanism + CVE) to drive the next per-target check.
   **Public grounding tier only** (never `weaponized/`); recognition + anchors, never
   payloads. Consult on a fingerprint hit — not a blind pre-load.
-- `python tools/xday_match.py --body <saved-resp>` (or `--id <id>`) — the **xday retrieval
+- `python3 tools/xday_match.py --body <saved-resp>` (or `--id <id>`) — the **xday retrieval
   end** (mirror of `knowledge_match`): same signature match but reads the **local,
   gitignored** weaponized/xday tiers (`knowledge/weaponized/` + `poc_library/xday/`) and
   surfaces the stored exploit path + chain. For xday there is no public payload to research
   online — the local copy is the only source (public vulns: use `knowledge_match` anchors
   + craft from the internet). Match-gated (live `--body` hit or explicit `--id`); `--list`
   inventories without dumping payloads. Local-only; the stores never ship.
-- `python tools/knowledge_seed.py <id> --product … [--from-body <saved>]` — the flywheel's
+- `python3 tools/knowledge_seed.py <id> --product … [--from-body <saved>]` — the flywheel's
   **write-back end**: scaffolds a compliant `knowledge/<id>.md` grounding **seed**
   (recognition + anchor TODOs) when recognition **missed** a clearly-fingerprinted product,
   so the next run recognizes it. `--from-body` suggests candidate `signatures:` (you
   confirm); fill the TODOs, `check_knowledge` validates. Public grounding tier only — never
   payloads. Seed on a recognition miss, not a blind mass-import.
-- `python tools/setup_run.py <slug> <recon.json>` or
-  `python tools/setup_run.py <slug> --target <http-or-https-url>` — Setup-phase ONE-SHOT: build the run
+- `python3 tools/setup_run.py <slug> <recon.json>` or
+  `python3 tools/setup_run.py <slug> --target <http-or-https-url>` — Setup-phase ONE-SHOT: build the run
   dir from templates (+ `evidence/`/`scripts/` subdirs), fold recon via ingest_recon into
   `surface_recon.md`, record the recon path in `target.md`, derive a default
   `In-scope`/`Out-of-scope` into `target.md` from recon `ownership` (`tools/scope.py`;
@@ -374,62 +419,69 @@ Project-discipline and run-structure checks in `tools/`:
   after the proxy is up), not an existing-run refresh mode. **Start every run
   with this**; never hand-curate surface.md (selection bias → blind spots). Builds the
   workbench; makes no front choices.
-- `python tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
+- `python3 tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
   `surface.md`-ready asset table, entry points, and a reachability matrix (recon-view vs
   your-egress-view). Setup helper; structures intel, makes no front choices.
-- `python tools/classify_hosts.py <recon.json>` — **OPT-IN** per-host classification by
+- `python3 tools/classify_hosts.py <recon.json>` — **OPT-IN** per-host classification by
   LIVE re-probe (stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags). **Not the default
   coverage builder** — setup_run's Guanlan adapter already produces `coverage.json` with
   zero re-probe; bulk-running this = re-OSINT. Use it ONLY for a deliberate
   **your-own-egress liveness/fingerprint recheck** (e.g. proxy now up). `--hosts <file>`
   for a plain host list with no recon; skips recon out-of-scope by default; `--all` probes
   everything; scope via `tools/scope.py`.
-- `python tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl. webpack
+- `python3 tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl. webpack
   chunks) and assert completeness. **Run before claiming endpoint enumeration is complete**
   — grepping endpoints from a partial JS set is how a real engagement missed an
   account-takeover endpoint (only 4/13 chunks fetched). "fetched N/M" must be N==M before
   "endpoints fully enumerated".
-- `python tools/rerun_deferred.py --run runs/<dir>` — re-probe the assets that were
+- `python3 tools/rerun_deferred.py --run runs/<dir>` — re-probe the assets that were
   unreachable (egress-deferred) per `coverage.json`, from any egress (after a cooldown, a
   switched egress, or run in-country by the operator). Reports which became reachable +
   re-classifies them — the standardized "come back to the deferred list" path instead of
   hunting through `frontier.md`.
-- `python tools/graph.py runs/<dir>` — derive the typed state graph from the run files
+- `python3 tools/graph.py runs/<dir>` — derive the typed state graph from the run files
   (H/F/E nodes + `Unlocked-by`/`Supports`/`Refutes` edges) → `graph.json` + a view of
   actionable / unlocked-but-deferred / closed-but-unlocked / dangling Facts. **Run at the
   start of a Root graph pass** so "what just got unlocked / neglected" is a query, not a
   re-read. Advisory only — never selects the next front (that stays the Root). See
   `docs/WORKFLOW-reference.md` "State Graph".
-- `python tools/workers.py runs/<dir>` — Agent Board bookkeeping: `assign` creates
-  `agents/A-*.md`, `context/*.md`, and `state/assignments.json`; target-facing assign
-  requires explicit `--asset` packages, and `status` shows role/front/asset coverage;
-  `agent-check` verifies Agent output discipline; `conflicts` derives
-  contradiction / duplicate / confidence / artifact / scope conflicts; `synthesize`
-  drafts the Root merge view. Legacy `--new` worker files remain readable, but new
-  collaboration uses `docs/templates/agents/`. Advisory + ledger only — never writes
-  canonical findings and never bypasses the Single Synthesizer.
-- `python tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash
-  chain for actual Agent/Cron/foreground-review events. `workers.py` lifecycle
+- `python3 tools/workers.py <subcommand> runs/<dir>` — work-plan-bound Agent Board
+  control and inspection. `plan` proposes effect-typed lanes; after
+  `work_plan.py commit`, `delegate` atomically creates the ready assignment,
+  context pack, and exact Claude binary launch contract (`subagent_type` plus
+  byte-exact `launch_prompt`) but does not spawn. Role `review` maps only to
+  `xunji-reviewer`; all canonical execution roles map only to `xunji-hunter`.
+  Parent requested type and actual same-session Start/Stop type must agree. A real Hunter
+  Stop unlocks its dependent Reviewer; `review-disposition` binds the frozen
+  result and `finish` records Root's later canonical disposition. `status`,
+  `agent-check`, `conflicts`, and `synthesize` inspect the ledger. Legacy `assign`
+  and `--new` worker files remain compatibility surfaces, not the current
+  orchestration proof. The board never writes canonical findings or bypasses the
+  Single Synthesizer.
+- `python3 tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash
+  chain for actual Agent/Cron/iteration-plan/foreground-review events. Plan
+  receipts cover TaskCreate/TaskUpdate/TodoWrite and remain derived rather than
+  canonical. `workers.py` lifecycle
   prose is not runtime proof. Async Agent PostToolUse proves launch, matching
   SubagentStop proves return, and the coordination epoch survives bare continue
   prompts. Assignment/front/asset tokens and tool receipts are transcript-backed.
-- `python tools/state_project.py runs/<dir>` — derives `state/projection.json` and
+- `python3 tools/state_project.py runs/<dir>` — derives `state/projection.json` and
   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
   canonical and projection must not be hand-edited back into facts.
-- `python tools/loop_journal.py runs/<dir> status` — reads
+- `python3 tools/loop_journal.py runs/<dir> status` — reads
   `state/loop_journal.jsonl`, the derived interruption journal for explicit `/loop`
   cycles. Use `start|plan|action|write-result|interrupt|end` inside a loop turn,
   and `phase-start|phase-end --phase "<Phase>"` when entering/leaving Router phases.
   It is not evidence and never replaces `decisions.md`.
-- `python tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle
+- `python3 tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle
   snapshot `state/loop_state.{json,md}` after graph / Agent Board / saturation /
   coverage-matrix inputs are refreshed. It records evidence deltas, certainty upgrades,
   coverage improvement, Coda convergence, unresolved conflicts, and fan-out/closure-review
   hints. Advisory only: it never selects a front, promotes evidence, or closes a run.
-- `python tools/progress_ledger.py runs/<dir> --write` — derives
+- `python3 tools/progress_ledger.py runs/<dir> --write` — derives
   `state/progress_ledger.{json,md}` from loop state plus evidence artifacts. It
   records material progress and artifact-backed progress; it is not evidence.
-- `python tools/run_controller.py runs/<dir> --shadow` — writes
+- `python3 tools/run_controller.py runs/<dir> --shadow` — writes
   `state/controller.shadow.json` and `state/controller_diff.md` with advisory
   stop blockers and the next required lifecycle action. It never chooses exploit
   steps, promotes evidence, or grants closure.

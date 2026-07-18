@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/merge-draft.v1.schema.json",
+  "title": "Xunji Merge Draft v1",
+  "description": "Frozen derived Agent return consumed by Reviewer and Root. A merge draft is neither evidence nor merge authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "assignment",
+    "role",
+    "front",
+    "assets",
+    "effect",
+    "plan_id",
+    "plan_digest",
+    "lane_id",
+    "assignment_attempt",
+    "runtime_attempt",
+    "result",
+    "result_digest",
+    "outcome",
+    "per_asset_outcomes",
+    "review_status",
+    "review_receipt",
+    "updated_at"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.merge-draft.v1"},
+    "assignment": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$"},
+    "role": {"type": "string", "minLength": 1, "maxLength": 128},
+    "front": {"type": "string", "pattern": "^F-[0-9]+$"},
+    "assets": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "effect": {
+      "enum": ["", "local_read", "local_verify", "target", "model_egress"]
+    },
+    "plan_id": {"type": "string", "pattern": "^$|^WP-[0-9]+-[0-9a-f]{8}$"},
+    "plan_digest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+    "lane_id": {"type": "string", "pattern": "^$|^L-[A-Za-z0-9._-]+$"},
+    "assignment_attempt": {"type": "integer", "minimum": 0},
+    "runtime_attempt": {"$ref": "#/$defs/runtimeAttempt"},
+    "result": {"$ref": "#/$defs/resultSnapshot"},
+    "result_digest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+    "outcome": {"enum": ["returned", "failed"]},
+    "per_asset_outcomes": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/assetOutcome"}
+    },
+    "review_status": {
+      "enum": ["required", "not_applicable", "complete", "action_required"]
+    },
+    "review_receipt": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "review-disposition.v1.schema.json"}
+      ]
+    },
+    "updated_at": {"type": "string", "maxLength": 128}
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "plan_id": {"const": ""},
+            "plan_digest": {"const": ""},
+            "lane_id": {"const": ""}
+          }
+        },
+        {
+          "properties": {
+            "plan_id": {"pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+            "plan_digest": {"pattern": "^[0-9a-f]{64}$"},
+            "lane_id": {"pattern": "^L-[A-Za-z0-9._-]+$"},
+            "assignment_attempt": {"minimum": 1}
+          }
+        }
+      ]
+    },
+    {
+      "if": {
+        "properties": {
+          "review_status": {"enum": ["complete", "action_required"]}
+        }
+      },
+      "then": {
+        "properties": {
+          "review_receipt": {"$ref": "review-disposition.v1.schema.json"}
+        }
+      },
+      "else": {
+        "properties": {
+          "review_receipt": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "runtimeAttempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "tool_use_id", "state", "returned_at"],
+      "properties": {
+        "agent_id": {"type": "string", "maxLength": 1024},
+        "tool_use_id": {"type": "string", "maxLength": 1024},
+        "state": {"enum": ["returned", "failed"]},
+        "returned_at": {"type": "string", "maxLength": 128}
+      }
+    },
+    "resultSnapshot": {
+      "type": "object",
+      "description": "Immutable return-time copy under state/merge_results; later Agent lifecycle edits do not change these bytes.",
+      "additionalProperties": false,
+      "required": ["path", "length", "sha256", "missing", "source"],
+      "properties": {
+        "path": {"type": "string"},
+        "length": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "missing": {"type": "boolean"},
+        "source": {
+          "enum": [
+            "agent_tool_response", "agent_failure_response",
+            "subagent_stop_response", "transcript_tool_result", "missing"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"missing": {"const": true}}},
+          "then": {
+            "properties": {
+              "length": {"const": 0},
+              "sha256": {"const": ""}
+            }
+          },
+          "else": {
+            "properties": {
+              "path": {"minLength": 1},
+              "sha256": {"pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        }
+      ]
+    },
+    "assetOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset", "disposition"],
+      "properties": {
+        "asset": {"type": "string", "minLength": 1, "maxLength": 512},
+        "disposition": {
+          "enum": [
+            "pending_review",
+            "accept-candidate",
+            "needs-control",
+            "duplicate",
+            "refute",
+            "out-of-scope",
+            "retry",
+            "blocked"
+          ]
+        }
+      }
+    }
+  }
+}

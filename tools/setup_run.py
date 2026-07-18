@@ -315,7 +315,7 @@ def knowledge_match(run_dir: Path) -> str:
 
 
 def _merge_egress_recheck(run_dir):
-    """P0: 合并 Guanlan baseline coverage + classify_hosts egress recheck overlay."""
+    """Merge reachability/fingerprint overlay without replacing scope authority."""
     import json as _json
     cov_path = run_dir / "classify" / "coverage.json"
     egress_path = run_dir / "classify" / "egress_coverage.json"
@@ -323,15 +323,49 @@ def _merge_egress_recheck(run_dir):
         return
     cov = _json.loads(cov_path.read_text(encoding="utf-8"))
     egress = _json.loads(egress_path.read_text(encoding="utf-8"))
-    egress_map = {a["host"]: a for a in egress.get("assets", [])}
-    for a in cov["assets"]:
-        h = a["host"]
+    baseline_assets = cov.get("assets") if isinstance(cov, dict) else None
+    egress_assets = egress.get("assets") if isinstance(egress, dict) else None
+    if not isinstance(baseline_assets, list) \
+            or any(not isinstance(item, dict) for item in baseline_assets) \
+            or not isinstance(egress_assets, list) \
+            or any(not isinstance(item, dict) for item in egress_assets):
+        raise RuntimeError("invalid baseline/egress coverage overlay")
+    allowed_hosts = {
+        str(item.get("host") or "") for item in baseline_assets
+        if str(item.get("scope_status") or "").strip().lower() == "in"
+        and str(item.get("host") or "")
+    }
+    egress_hosts = [str(item.get("host") or "") for item in egress_assets]
+    if any(not host or host not in allowed_hosts for host in egress_hosts) \
+            or len(egress_hosts) != len(set(egress_hosts)):
+        raise RuntimeError("egress overlay contains a non-in-scope or duplicate host")
+    egress_map = {str(a["host"]): a for a in egress_assets}
+    for a in baseline_assets:
+        h = str(a.get("host") or "")
         if h in egress_map:
-            a["current_egress_reachability"] = egress_map[h].get("reachable")
+            current = egress_map[h]
+            a["current_egress_reachability"] = current.get("reachable")
+            a["current_egress_examined"] = current.get("examined") is True
             if a["current_egress_reachability"] is True:
                 a["reachable"] = True
+            if current.get("examined") is True:
+                a["examined"] = True
+            stack = str(current.get("stack") or "")
+            if stack:
+                a["stack"] = stack
+            existing_flags = [str(item) for item in (a.get("flags") or [])]
+            overlay_flags = [str(item) for item in (current.get("flags") or [])]
+            a["flags"] = list(dict.fromkeys([*existing_flags, *overlay_flags]))
+            a["current_egress_fingerprint"] = {
+                key: current[key] for key in (
+                    "stack", "flags", "title", "len", "redirected_to", "discovered_path",
+                ) if key in current
+            }
     cov["source"] = "guanlan-baseline + egress-recheck-overlay"
-    cov_path.write_text(_json.dumps(cov, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path = cov_path.with_suffix(".json.tmp")
+    tmp_path.write_text(
+        _json.dumps(cov, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(cov_path)
 
 
 def _coverage_ready(run_dir: Path) -> bool:
@@ -896,6 +930,12 @@ def create_run(
     return setup_transaction.create_and_activate(
         request["run_name"],
         source_manifest=request["source_manifest"],
+        effect_profile=setup_transaction.lifecycle_effect_profile(
+            setup_transaction.OP_SETUP_RUN_CREATE,
+            request["run_name"],
+            source_type=str(request["source_manifest"]["source"]["kind"]),
+            classify=bool(request.get("classify")),
+        ),
         build=lambda run_dir, nested_fault: prepare_staging_run(
             request, run_dir, nested_fault, bootstrap=bootstrap
         ),
@@ -1081,6 +1121,15 @@ def _selftest() -> int:
     normalized_result = setup_transaction.create_and_activate(
         normalized_request["run_name"],
         source_manifest=normalized_request["source_manifest"],
+        effect_profile=setup_transaction.lifecycle_effect_profile(
+            setup_transaction.OP_LOOP_BOOTSTRAP_CREATE,
+            normalized_request["run_name"],
+            source_type="file",
+            ai_mode="external",
+            provider="fixture-provider",
+            model="fixture-model",
+            candidate_json=json.dumps(normalizer_candidate),
+        ),
         build=lambda run_dir, fault: prepare_staging_run(
             normalized_request, run_dir, fault, bootstrap=True
         ),
@@ -1092,6 +1141,9 @@ def _selftest() -> int:
     normalized_run = normalized_result.run_dir
     normalized_manifest = json.loads(
         (normalized_run / setup_transaction.SOURCE_REL).read_text(encoding="utf-8")
+    )
+    normalized_receipt = json.loads(
+        (normalized_run / setup_transaction.RECEIPT_REL).read_text(encoding="utf-8")
     )
     normalized_coverage = json.loads(
         (normalized_run / "classify" / "coverage.json").read_text(encoding="utf-8")
@@ -1115,6 +1167,13 @@ def _selftest() -> int:
          and (normalized_run / setup_source.NORMALIZER_CANDIDATE_REL).exists()),
         ("stored external request contains no raw query secret or source path",
          "private-value" not in stored_request and str(normalized_source) not in stored_request),
+        ("transaction effect profile stores no raw external option values",
+         all(value not in json.dumps(
+             normalized_receipt.get("effect_profile", {}), sort_keys=True,
+         ) for value in (
+             "fixture-provider", "fixture-model", json.dumps(normalizer_candidate),
+             str(normalized_source),
+         ))),
         ("candidate inventory supplements source-backed assets without probing",
          {item["host"] for item in normalized_coverage["assets"]} >= {
              "normalizer.example.test", "api.normalizer.example.test",
@@ -1149,6 +1208,12 @@ def _selftest() -> int:
         setup_transaction.create_and_activate(
             mutation_request["run_name"],
             source_manifest=mutation_request["source_manifest"],
+            effect_profile=setup_transaction.lifecycle_effect_profile(
+                setup_transaction.OP_TRANSACTION_CREATE,
+                mutation_request["run_name"],
+                source_type=str(
+                    mutation_request["source_manifest"]["source"]["kind"]),
+            ),
             build=lambda run_dir, fault: prepare_staging_run(
                 mutation_request, run_dir, fault, bootstrap=True
             ),
@@ -1277,6 +1342,11 @@ def _selftest() -> int:
         subprocess.run = original_subprocess_run
         globals()["ROOT"] = original_root
     classify_journal = loop_journal.summarize(classify_run)
+    classify_receipt = json.loads(
+        (classify_run / setup_transaction.RECEIPT_REL).read_text(encoding="utf-8")
+    )
+    main_profile = main_receipt.get("effect_profile", {})
+    classify_profile = classify_receipt.get("effect_profile", {})
     checks += [
         ("--classify setup succeeds with isolated classifier", classify_rc == 0),
         ("--classify executes egress recheck",
@@ -1286,6 +1356,58 @@ def _selftest() -> int:
         ("--classify preserves closed Setup journal cycle",
          [str(item.get("event") or "") for item in classify_journal["last_cycle_phase_events"]]
          == ["phase_start", "phase_end"] and not classify_journal["open_phase"]),
+        ("setup receipt freezes classify in its exact effect profile",
+         classify_profile.get("operation") == setup_transaction.OP_SETUP_RUN_CREATE
+         and classify_profile.get("classify") is True
+         and main_profile.get("classify") is False
+         and classify_profile.get("options_sha256")
+         != main_profile.get("options_sha256")),
+    ]
+    overlay_run = d / "egress-overlay"
+    (overlay_run / "classify").mkdir(parents=True)
+    baseline_overlay = {
+        "source": "baseline",
+        "assets": [
+            {"host": "good.example", "scope_status": "in", "scope_authority": "operator",
+             "reachable": False, "examined": False, "stack": "", "flags": ["LOGIN"]},
+            {"host": "review.example", "scope_status": "review", "scope_authority": "source",
+             "reachable": "unknown", "examined": False, "stack": "", "flags": []},
+            {"host": "out.example", "scope_status": "out", "scope_authority": "policy",
+             "reachable": False, "examined": False, "stack": "", "flags": []},
+        ],
+    }
+    (overlay_run / "classify" / "coverage.json").write_text(
+        json.dumps(baseline_overlay), encoding="utf-8")
+    (overlay_run / "classify" / "egress_coverage.json").write_text(json.dumps({
+        "assets": [{
+            "host": "good.example", "reachable": True, "examined": True,
+            "stack": "SpringBoot-api", "flags": ["SURFACE:API"], "title": "API",
+        }],
+    }), encoding="utf-8")
+    _merge_egress_recheck(overlay_run)
+    merged_overlay = json.loads(
+        (overlay_run / "classify" / "coverage.json").read_text(encoding="utf-8"))
+    merged_by_host = {item["host"]: item for item in merged_overlay["assets"]}
+    bad_overlay_rejected = False
+    (overlay_run / "classify" / "egress_coverage.json").write_text(json.dumps({
+        "assets": [{"host": "review.example", "reachable": True, "examined": True}],
+    }), encoding="utf-8")
+    try:
+        _merge_egress_recheck(overlay_run)
+    except RuntimeError as exc:
+        bad_overlay_rejected = "non-in-scope" in str(exc)
+    checks += [
+        ("egress overlay preserves baseline scope authority",
+         [(merged_by_host[host]["scope_status"], merged_by_host[host]["scope_authority"])
+          for host in ("good.example", "review.example", "out.example")]
+         == [("in", "operator"), ("review", "source"), ("out", "policy")]),
+        ("egress overlay merges only in-scope liveness and fingerprint",
+         merged_by_host["good.example"]["reachable"] is True
+         and merged_by_host["good.example"]["examined"] is True
+         and merged_by_host["good.example"]["stack"] == "SpringBoot-api"
+         and merged_by_host["good.example"]["flags"] == ["LOGIN", "SURFACE:API"]
+         and "current_egress_reachability" not in merged_by_host["review.example"]),
+        ("egress overlay rejects review/out hosts", bad_overlay_rejected),
     ]
     recon = {"target": "t", "assets": [{"host": "a.example", "category": "c", "reachability": "confirmed", "ownership": "core"}]}
     rp = d / "recon.json"

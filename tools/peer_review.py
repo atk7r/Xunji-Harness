@@ -52,7 +52,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import proxy as proxymod          # noqa: E402  模型调用【绝不】走交战代理(剥代理 env + 空 opener)
 from harness import codex_proxy                # noqa: E402  Codex CLI 专用代理通道
 from harness import privacy as privacymod      # noqa: E402  model-egress hard redaction
-from evidence_parse import parse_evidence      # noqa: E402  Codex 裁决事实源: evidence_index, 不是散文叙事
+from evidence_parse import (                    # noqa: E402  Codex 裁决事实源: evidence_index, 不是散文叙事
+    canonical_evidence_index,
+    evidence_artifact_manifest,
+    evidence_index_hash,
+    parse_evidence,
+)
 CONFIG_PATH = ROOT / "review" / "peer_review.json"
 DEFAULT_DRIVER = "claude"
 
@@ -401,39 +406,25 @@ def _diff_summary(text: str, *, file_cap: int = 120, hunk_cap: int = 240) -> dic
     }
 
 
-def _artifact_path(run_dir: Path, token: str) -> Path | None:
-    root = run_dir.resolve()
-    tok = token.strip().strip("`\"'").rstrip(").,;:，。）")
-    cands = [tok] if tok.startswith("evidence/") else [tok, f"evidence/{tok}"]
-    for rel in cands:
-        try:
-            p = (run_dir / rel).resolve()
-        except Exception:
-            continue
-        if p != root and root not in p.parents:
-            continue
-        if p.is_file() and p.stat().st_size > 0:
-            return p
-    return None
-
-
 def _artifact_record(run_dir: Path, token: str, *, redact: bool = False,
                      include_excerpt: bool = True,
-                     excerpt_chars: int = ARTIFACT_EXCERPT_CAP) -> dict:
-    p = _artifact_path(run_dir, token)
-    if not p:
-        return {"token": token, "exists": False}
-    rel = p.relative_to(run_dir.resolve()).as_posix()
-    item = {
-        "token": token,
-        "path": rel,
-        "exists": True,
-        "size": p.stat().st_size,
-        "sha1": _sha1_file(p),
-    }
+                     excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
+                     manifest: dict | None = None) -> dict:
+    item = dict(manifest) if isinstance(manifest, dict) \
+        else evidence_artifact_manifest(run_dir, token)
+    if not item.get("valid") or not item.get("exists") \
+            or item.get("kind") != "file":
+        return item
+    p = run_dir.resolve() / str(item.get("path") or "")
     suffix = p.suffix.lower()
-    if include_excerpt and suffix in {".html", ".json", ".txt", ".log", ".xml", ".diff", ".patch", ".md"}:
-        txt = p.read_text(encoding="utf-8", errors="replace")
+    if include_excerpt and suffix in {
+            ".html", ".json", ".txt", ".log", ".xml", ".diff", ".patch", ".md",
+    }:
+        raw = p.read_bytes()
+        if len(raw) != int(item.get("size") or -1) \
+                or _sha1_bytes(raw) != str(item.get("sha1") or ""):
+            return item
+        txt = raw.decode("utf-8", errors="replace")
         if redact:
             txt = _redact_text(txt)
         if suffix in {".diff", ".patch"}:
@@ -450,38 +441,20 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,
                          artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP) -> dict:
     """Content-addressed fact view for reviewers. Narrative files may contain claims;
     this index is the narrow fact source Codex arbitration must cite."""
-    entries = []
-    for rec in parse_evidence(run_dir):
-        include_excerpt = include_artifacts == "snippets"
-        artifacts = sorted(
-            (_artifact_record(run_dir, a, redact=redact, include_excerpt=include_excerpt,
-                              excerpt_chars=artifact_excerpt_chars)
-             for a in rec.get("artifacts", [])),
-            key=lambda x: (str(x.get("path", "")), str(x.get("token", ""))),
-        )
-        entries.append({
-            "id": rec.get("id"),
-            "head": rec.get("head"),
-            "maturity": rec.get("maturity"),
-            "certainties": rec.get("certainties", []),
-            "confirmed": rec.get("confirmed", False),
-            "has_control": rec.get("has_control", False),
-            "supports": rec.get("supports", []),
-            "refutes": rec.get("refutes", []),
-            "refutes_any": rec.get("refutes_any", False),
-            "artifacts": artifacts,
-            "artifacts_missing": rec.get("artifacts_missing", []),
-        })
-    entries.sort(key=lambda x: str(x.get("id", "")))
-    payload = {"schema": "xunji.evidence_index.v1", "entries": entries}
-    digest_entries = json.loads(json.dumps(entries, ensure_ascii=False))
-    for entry in digest_entries:
+    payload = canonical_evidence_index(run_dir)
+    include_excerpt = include_artifacts == "snippets"
+    for entry in payload.get("entries", []):
+        artifacts: list[dict] = []
         for artifact in entry.get("artifacts", []):
-            for key in ("excerpt", "excerpt_truncated_chars", "diff_summary"):
-                artifact.pop(key, None)
-    digest_payload = {"schema": "xunji.evidence_index.v1", "entries": digest_entries}
-    payload["sha1"] = _sha1_bytes(json.dumps(
-        digest_payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+            token = str(artifact.get("token") or "")
+            artifacts.append(_artifact_record(
+                run_dir, token, redact=redact,
+                include_excerpt=include_excerpt,
+                excerpt_chars=artifact_excerpt_chars,
+                manifest=artifact,
+            ))
+        entry["artifacts"] = artifacts
+    payload["sha1"] = evidence_index_hash(payload)
     return payload
 
 
@@ -1678,6 +1651,7 @@ def resolve_finding(run_dir: Path, pr_id: str, status: str, resolution: str) -> 
 def _selftest() -> int:
     import re as _re
     import tempfile
+    from evidence_parse import current_evidence_index_hash as _current_evidence_index_hash
 
     checks = []
     cfg = load_config()
@@ -1858,6 +1832,63 @@ def _selftest() -> int:
         checks.append(("gather_context 含 evidence.md", "FILE: evidence.md" in ctx))
         checks.append(("gather_context 非空", len(ctx) > 1000))
 
+    # The review bundle may add presentation-only excerpts, but its evidence
+    # digest must remain the canonical closure-gate digest for both files and
+    # directory artifacts.
+    d_digest_file = Path(tempfile.mkdtemp())
+    (d_digest_file / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-910 — file digest\n"
+        "- Maturity: finding\n- Certainty: 0.8\n- Control: yes\n"
+        "- Artifacts: `artifact.txt`\n",
+        encoding="utf-8")
+    (d_digest_file / "artifact.txt").write_text(
+        "ordinary artifact bytes\n", encoding="utf-8")
+    file_snippets = build_review_bundle(
+        d_digest_file, include_artifacts="snippets")
+    file_none = build_review_bundle(
+        d_digest_file, include_artifacts="none")
+    file_canonical = evidence_index_hash(
+        canonical_evidence_index(d_digest_file))
+    file_snippet_artifact = file_snippets["evidence_index"]["entries"][0]["artifacts"][0]
+    file_none_artifact = file_none["evidence_index"]["entries"][0]["artifacts"][0]
+
+    d_digest_dir = Path(tempfile.mkdtemp())
+    (d_digest_dir / "evidence" / "tree" / "nested").mkdir(parents=True)
+    (d_digest_dir / "evidence" / "tree" / "root.txt").write_text(
+        "root artifact\n", encoding="utf-8")
+    (d_digest_dir / "evidence" / "tree" / "nested" / "leaf.json").write_text(
+        '{"leaf": true}\n', encoding="utf-8")
+    (d_digest_dir / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-911 — directory digest\n"
+        "- Maturity: finding\n- Certainty: 0.8\n- Control: yes\n"
+        "- Artifacts: `evidence/tree`\n",
+        encoding="utf-8")
+    dir_snippets = build_review_bundle(
+        d_digest_dir, include_artifacts="snippets")
+    dir_none = build_review_bundle(
+        d_digest_dir, include_artifacts="none")
+    dir_canonical = evidence_index_hash(
+        canonical_evidence_index(d_digest_dir))
+    dir_artifact = dir_snippets["evidence_index"]["entries"][0]["artifacts"][0]
+
+    checks += [
+        ("ordinary artifact bundle digest matches canonical/current evidence index",
+         file_snippets["evidence_index"]["sha1"] == file_canonical
+         == _current_evidence_index_hash(d_digest_file)),
+        ("directory artifact bundle digest matches canonical/current evidence index",
+         dir_snippets["evidence_index"]["sha1"] == dir_canonical
+         == _current_evidence_index_hash(d_digest_dir)
+         and dir_artifact.get("kind") == "directory"
+         and len(dir_artifact.get("files", [])) == 2),
+        ("snippets/none presentation does not change evidence index digest",
+         "excerpt" in file_snippet_artifact
+         and "excerpt" not in file_none_artifact
+         and file_snippets["evidence_index"]["sha1"]
+         == file_none["evidence_index"]["sha1"]
+         and dir_snippets["evidence_index"]["sha1"]
+         == dir_none["evidence_index"]["sha1"]),
+    ]
+
     # as_markdown 往返
     md = r.as_markdown()
     checks.append(("as_markdown 含 Verdict", "## Verdict: BLOCKER" in md))
@@ -2023,7 +2054,14 @@ def _selftest() -> int:
     d_err = Path(tempfile.mkdtemp())
     review(d_err, backend="nonexistent_xyz", into_run=True)   # 无此后端 -> ERROR
     d_sf = Path(tempfile.mkdtemp())
-    rr_sf = review(d_sf, config={"priority": ["claude"], "backends": cfg_d["backends"]},
+    sf_backends = {
+        **cfg_d["backends"],
+        # The fixture exercises same-family rejection, not host CLI discovery.
+        # Use an executable that is deterministic even under a hermetic PATH;
+        # require_heterogeneous must reject it before any backend process runs.
+        "claude": {**cfg_d["backends"]["claude"], "cmd": sys.executable},
+    }
+    rr_sf = review(d_sf, config={"priority": ["claude"], "backends": sf_backends},
                    require_heterogeneous=True, into_run=True)  # 只同族 claude + require -> NEEDS_DRIVER
     checks += [
         ("heterogeneous: codex/arkcli=True, claude=False",
