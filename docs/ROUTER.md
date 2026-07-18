@@ -61,6 +61,13 @@ never attack methodology or target selection. Invoke on demand; don't auto-load.
 - `.claude/skills/captcha-solve/SKILL.md` — get past a captcha (slider / click / rotate
   / text) by driving a real browser, reusing the page's own verification JS, extracting
   the validate token. Invoke when a captcha gates the endpoint you need.
+- `.claude/skills/web-research/SKILL.md` — sole public WebSearch protocol for a live
+  run: registered time gate, knowledge-owner routing, source/privacy checks, and a
+  structured lead returned to Root. The old `xunji-web-research-sync` name is only
+  a compatibility alias.
+- `.claude/skills/xunji-reviewops/SKILL.md` — adjudicate review candidates, PR ledger,
+  report parity, and closure. Load its `references/peer-review-panel.md` only when
+  selecting or invoking a reviewer backend; the old panel skill is only an alias.
 
 ## Exploit Reasoning Skills (invoke when the task fits)
 

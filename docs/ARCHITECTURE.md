@@ -706,6 +706,13 @@ Claude live driver 的边界声明，`.agents/skills/src-safety-boundary/SKILL.m
 Codex 辅助侧的边界镜像/入口，不是执法 runtime。共享语义变化先修改 canonical
 owner 与 enforcement/tests，再明确判断是否需要同步辅助镜像并记录原因。
 
+Claude skill 树内部也只允许一个 owner：`web-research` 是公共检索顺序与 lead
+返回形状的 canonical skill；`xunji-reviewops` 拥有复审裁决，其
+`references/peer-review-panel.md` 独占 backend/作者矩阵/CLI/egress 操作语义。
+`xunji-web-research-sync` 与 `xunji-peer-review-panel` 仅保留为兼容路由，不得复制
+命令、矩阵或晋级规则。`driver-doc-conformance` fixture 对 owner 必含和 alias 禁含
+同时校验，防止薄路由重新长成第二套协议。
+
 ## 9. 规则进入与架构决策
 
 项目不接受“每一轮 AI 再加一条近义规则”。新增或修改规则必须回答：
@@ -837,84 +844,45 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-18
-- Scope: 当前 Python/Hook 控制层的 typed capability/effect、互斥 Stop union、语义
-  anti-drift、route-aware guard、`xunji.work-plan.v1` v2 transaction/archive、
-  delegation/assignment/Agent/Reviewer/Root/cycle receipts、Root→Hunter→Reviewer 小周期、
-  byte-exact Hunter/Reviewer type+prompt 二元 launch contract、requested/actual type binding、
-  assignment-free global completion Reviewer lifecycle 与 no-projection contract、
-  unlaunched cancellation/stale Reviewer settlement、runtime projection generation/CAS、
-  activation authority durability/crash recovery、structured edit paths、owner 文档与
-  conformance fixtures。
-  `TODO.md` 仍是唯一前向 backlog；S1/S2/S3 的完整方法学、stage 默认资源策略、A/B scheduler
-  证明与离线传感器扩展不能由本 checkpoint 宣称完成。本 candidate 不含 CCB/TypeScript
-  backlog、实现、验证或复审内容；既有历史架构说明不属于本阶段工作。
-- Architecture impact: yes — 当前 runtime 由唯一 capability registry 对 exact argv
-  分类为有限 effect，并通过 turn/guard/privacy/recorder ports 执行；未知 argv 继续 fail closed。
-  work plan 只有 committed v2 transaction、内容寻址 archive 与 lineage 全部可验证时才成为当前
-  控制投影。Agent launch authority 由 typed assignment row→唯一 role/type+prompt formatter→
-  PreToolUse raw equality→Start/Post/Stop/replay prompt/type binding→attempt receipt 串联；完整
-  token 后追加文字，或缺失/错误/alias/空白 type 均拒绝。Global completion 使用 exact
-  assignment-free xunji-reviewer envelope 与真实 Stop snapshot，只产生 pseudo lifecycle receipt，
-  不产生 assignment/result/merge，并与独立 ReviewReceipt 互不替代。
-  Agent mode 必须走 assignment→真实 launch/Stop→immutable result→Reviewer
-  disposition→Root disposition→typed `cycle_end`；同步 Claude 的 Start→Stop→Post 与
-  Post→Start→Stop 都归并到同一个 child attempt；无 causal identity 的 same-message 多 Start
-  fail closed，安全并发使用 staggered launch；async launch ack 永远不是结果。Stale input 下只
-  允许 exact returned/failed Reviewer settlement，或对无任何 launch fact 的 execution 做 typed
-  cancellation 后 material replan。ROOT_DIRECT
-  只允许 registry 明确标记的单个 local 原子 capability，并只有一条 claim→terminal→cycle_end
-  链。`cycle_end.next_action` 在 producer/consumer 两端复用 normal Coda 语义，并重新验证当前
-  committed plan provenance；旧、畸形或缺 lineage 的 receipt 不能升级为控制真值。
-- State/ownership impact: `setup_transaction.py` 继续是唯一 activation/pointer writer。顶层 create
-  identity 不可变，后续 activation 使用自校验 nested attempt；pointer 前/后 crash、same-target
-  fresh claim follow-up、cross-operation 与 tamper retry 都按 exact effect 幂等结算或拒绝。
-  authority active/claimed/revoked、target contract 与 SessionStart selection consume 采用
-  file + artifact/owner directory durability；missing-path retry 也确认目录链，旧 binding 在
-  fresh claim 前退休。
-  该边界不宣称 builder 整树、SessionEnd selection 创建或 pointer clear 已具同等 durability。
-  Assignment writers 共用单锁，Agent runtime journal 先 fsync，projection gap 可由同一 journal
-  幂等 `--reproject`；projection success generation 对 attempt 排序，只有 later covering success
-  可压过旧 failure，post-success 新 failure 仍保留。Stop result 在 journal 前完成 file 与
-  `state/merge_results/<assignment>` owner/leaf 目录屏障；diagnostic missing retry 也确认 `state`
-  目录。同属 derived state 的 loop journal 只在
-  flush、file fsync 和必要的 parent directory fsync 后承认 append，失败回滚原 byte length。
-  Write/Edit/Update/MultiEdit/NotebookEdit
-  对递归提取的完整 path set 同时做
-  lexical/resolved 判定；任一非法成员拒绝整次 mutation，run-root `sources/*` 也是 protected
-  setup-source state。这些 receipt/plan/selection 都不成为 evidence、finding、scope authority
-  或 closure truth。
-- Statusline boundary: `tools/xunji_statusline.py` 明确排除在本阶段 candidate、验证与提交之外；
-  现行 HEAD renderer 只读取 workspace active pointer 与阶段派生状态，不读取 selection receipt、
-  turn contract、session id 或 transcript path。Session-bound display 仍是 target，不能写成 current。
-- Verification: frozen staged candidate `80c5ec42087f5c1ec3694057ad4433c3c89fd3bf`
-  在 `.venv/bin` 置于 `PATH` 的 documented-argv 环境通过 focused contract suites 6/6、
-  `tools/selftest_all.py` 69/69、`tools/bench.py score-all bench/` 18/18 clean、
-  `check_rules.py`、`check_hook.py`、`check_templates.py`、`check_runtime_boundary.py` 与
-  baseline-to-candidate `git diff --check`。`tools/probe.py --selftest` 真实绑定本机 loopback，
-  覆盖 redirect/auth stripping、replay、range、preflight 与 save paths。全量聚合器虽包含
-  现行 HEAD statusline 自测，但该结果不进入本阶段 acceptance，statusline candidate 仍未暂存。
-  Claude Code 2.1.201 通过 DeepSeek `deepseek-v4-pro[1m]`、effort `max` 在隔离 candidate
-  真实执行四 lane work plan、两 Hunter、两 digest-bound Reviewer、两 Root terminal
-  disposition 与 typed `cycle_end`；最终 62 条 runtime receipts 均未生成 maintenance/target
-  action，journal hash 链与四条 disposition 对账一致。前两轮分别暴露 invalid registered argv
-  与 denial prose 误铸 maintenance truth，均被停止且不计 PASS；第三轮通过。完整的
-  FAIL/ABORTED/PASS 指纹、恢复路径和回执序号见
-  `review/records/2026-07-18-agent-runtime-e2e/README.md`。执行 session 内 work plan 为
-  current；SessionEnd 后在无新 EXECUTE turn 的状态查询按设计返回
-  `WORK_PLAN_EXECUTE_REQUIRED`，不能把 session 内投影跨回合延用。
-- Independent review: operator 明确要求不使用 arkcli。Claude Code 2.1.201 通过本机
-  DeepSeek `deepseek-v4-pro[1m]`、fresh session
-  `31f2b0c4-2455-4568-96a3-e48dd958d7bf` 对 frozen commit
-  `6d9b667dc2996075098afd7d3d8fb658c8fe4c68` / tree
-  `92120979887a5ad80a9b03d5a08daada58ceaaa9` 完成 read-only 独立复审；它重跑 69-suite、
-  18-fixture bench、turn/work-plan、run/output gate、probe、rules/templates，并对 capability、
-  Stop、transaction、Reviewer recovery 与 activation CAS 做静态核验。最终 disposition 为
-  PASS，P0/P1/P2/P3 均为 0。残余风险仅为 fail-closed pending-contract 生产路径调查、
-  本机 trusted-interpreter TOCTOU 平台前提及已明确排除的完整 builder/SessionEnd durability
-  范围，均未成为授权绕过或提交 blocker。可审计记录与 transcript hash 见
-  `review/records/2026-07-18-agent-runtime-fresh-claude-review.md`。复审后的 TODO/checkpoint/
-  review-record 元数据变更仍需在提交前做 final fresh-context parity review；若出现新 finding
-  必须先处置。
+- Scope: Claude Code 主驾驶的 Phase 1 prompt/skill 收敛。`web-research` 成为公共
+  WebSearch 顺序与 structured lead 的唯一 owner；`xunji-reviewops` 保留裁决责任，
+  `references/peer-review-panel.md` 独占 backend/作者矩阵/CLI/egress 细节；两个旧 skill
+  名只保留薄兼容 alias。同步 `ROUTER`、`WORKFLOW*`、anti-drift 生成提示、
+  `timestamp_gate` search hint、deprecated review route 与 driver-doc conformance fixture。
+- Architecture impact: yes — Claude skill 树从重复协议改为 canonical owner + on-demand
+  reference + compatibility alias。Web 研究提示现在与现行 runtime 一致：active run 只用
+  公共 WebSearch，WebFetch 继续由既有代理门拒绝；Agent 只返回 lead，Root/Single
+  Synthesizer 保持 canonical 写入权。复审文档对齐现行 `peer_review.py`：Claude 主驾驶
+  无 Codex/arkcli 时可记录较弱的同族 fallback；Codex-authored diff 下 Claude Code CLI
+  通过 `--driver codex` 是独立 reviewer。上述都是 owner/路由与既有实现对齐，不新增
+  capability、authority、receipt、closure 例外或第二安全 runtime。
+- State/ownership impact: canonical run、active pointer、turn authority、Hook/guard、evidence
+  schema 与 reviewer disposition owner 均未改变。兼容 alias 不拥有命令或规则；fixture
+  同时约束 canonical 必含与 alias 禁含，防止重复协议回生。旧名删除留待兼容期之后，
+  本阶段不把 transitional alias 写成已删除。
+- Prompt-size result: web 两入口由 225 行降为 98 行；ReviewOps/panel 两入口由 333 行
+  收敛为 124 行常用入口，108 行 backend 细节只在需要调用 review 时按需加载。
+- Verification: `check_rules.py`、`check_hook.py`、`check_templates.py`、
+  `check_runtime_boundary.py`、`timestamp_gate.py --selftest`、`anti_drift.py --selftest`、
+  `peer_review.py --selftest`（79 项）及 focused aggregate 均通过；`git diff --check`
+  通过。冻结隔离 candidate 使用项目 Python 通过 `tools/selftest_all.py` 69/69
+  （104.0s），其中 probe 按操作者授权真实绑定本机 loopback。
+- Claude Code primary-driver E2E: Claude Code 2.1.201 通过本机 DeepSeek
+  `deepseek-v4-pro[1m]`、effort `high`，分别从两个旧 slash skill 名启动 fresh session。
+  Web session `cbe7e0c3-ab78-4adb-a7f8-0a0c0a2dbaaf` 实跑 time gate、一次公共
+  WebSearch、alias→owner 路由、capability 与 WebFetch deny 核验；review session
+  `b281ff84-b1fb-4f6a-872f-15c5b3914f87` 实跑 79 项 panel selftest、focused aggregate
+  与 template conformance，未调用 arkcli。无效 argv/系统 Python 3.9 的尝试均被拒绝或
+  中止后以正确项目 Python/clean argv 重跑，未计入 PASS。transcript hash 与恢复记录见
+  `review/records/2026-07-18-claude-primary-skill-consolidation-e2e.md`。
+- Independent review: 操作者明确要求不使用 arkcli。最终 staged framework fingerprint
+  由 fresh Claude Code/DeepSeek session 以 Codex-authored diff 身份只读复审；当前 verdict、
+  findings、处置、fingerprint 与 transcript hash 记录在
+  `review/records/2026-07-18-claude-primary-skill-consolidation-review.md`。只有该记录对最终
+  fingerprint 给出 PASS/WARN 且无未处置 blocker 时才允许提交。
+- Exclusions: `.agents/skills/`、`AGENTS.md`、Codex 行为、CCB/TypeScript 迁移、target
+  methodology 与 pre-existing `tools/xunji_statusline.py`/项目简介/现场 artifact 改动均不在
+  本阶段 candidate、复审或提交范围；不会借本 checkpoint 宣称其完成。
 
 ## 13. 外部设计来源与采用边界
 

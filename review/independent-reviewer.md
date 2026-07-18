@@ -16,5 +16,6 @@ ledger item. A heading, manually filled reviewer identity, copied model output,
 fresh-context prose, timeout, or hand-written PASS never satisfies the gate.
 
 Authoritative behavior is defined in `CLAUDE.md`, `docs/WORKFLOW.md`,
-`docs/WORKFLOW-reference.md`, `.claude/skills/xunji-peer-review-panel/SKILL.md`,
-and `.claude/skills/xunji-reviewops/SKILL.md`.
+`docs/WORKFLOW-reference.md`, `.claude/skills/xunji-reviewops/SKILL.md`, and
+`.claude/skills/xunji-reviewops/references/peer-review-panel.md`. The old
+`xunji-peer-review-panel` skill is a compatibility alias only.

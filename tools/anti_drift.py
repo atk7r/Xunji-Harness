@@ -142,10 +142,10 @@ BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
     "自主驱动: safe 前沿还在就别停下问(会话长/已解决障碍/选下一类 都不是停止理由)",
     "Reason pass: 每轮重读整个 frontier.md(所有 open+deferred)并结合 evidence/coverage/graph 裁定后写 v1 receipt; 内容未变可只读确认, 禁止 freshness touch/edit",
     "回合协议: active run 未完成时结尾必须且只能有一个「下一行动: <一个对象+一个具体动作>」; 空值/占位/泛泛继续/多动作/多F-id/错误F-id/BLOCKED都会被 Stop hook 硬拦",
-    "联网检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 前必须先 python tools/timestamp_gate.py --search-hint --kind vuln 获取当前时间并逐条执行其输出的约束; 非 CVE/CNVD 检索用 --kind generic",
-    "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮执行 timestamp_gate --kind vuln → knowledge/xday → WebSearch/WebFetch, 再决定关闭或定级",
+    "联网检索走唯一 owner: 每次公共 WebSearch 前按 .claude/skills/web-research/SKILL.md 先执行已注册的 python3 tools/timestamp_gate.py --search-hint --kind vuln 并遵守输出; 非 CVE/CNVD 用 --kind generic; active run 不用 WebFetch",
+    "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮走 web-research 的 time gate → xunji-knowledge-flywheel → 公共 WebSearch → structured lead; Root 记录后再关闭或定级",
     "操作者约束持久化: 收到 directive/constraint 后先更新 hints.md(HINT-xxx, Kind=directive/constraint, Status=pending) 再继续; 每轮 Reason pass 无条件 Read hints.md —— constraint 是全 run 级原则非当前前沿上下文, 跨轮有效直到操作者显式解除",
-    "Knowledge-first: 识别到产品签名后, 先 grep knowledge/ 匹配条目(Read 对应的 knowledge/*.md) 再 WebSearch —— 签名→knowledge 是硬步骤非可选; 消费了错误厂商的 CVE 而 correct knowledge 未读 = 协议错误",
+    "Knowledge-first: 识别到产品签名后, WebSearch 前先路由 xunji-knowledge-flywheel 读取匹配接地条目; 不在 anti-drift 复制命令; 消费错误厂商 CVE 而正确 knowledge 未读 = 协议错误",
 ]
 BINDING_RULES_TIER3 = [   # BOTTOM: 约束速查 — placed at recency position
     "消费 Guanlan、跳过不可达; 不重做 OSINT / 不建 egress·relay·重探",
@@ -154,7 +154,7 @@ BINDING_RULES_TIER3 = [   # BOTTOM: 约束速查 — placed at recency position
     "阶段检查点: Driver/Hunter/Reviewer 每批产出后自动触发 peer_review --into-run, codex BLOCKER 先修再继续",
     "任何代码/文档修改必须经过 codex 复审; codex 必须走专用代理(CODEX_PROXY)",
     "不过度工程(画蛇添足); 能进代码闸门的别写 prose · 中文回答",
-    "联网搜索 tripwire: WebSearch/WebFetch/CVE 引用输出前必须已跑 timestamp_gate 并逐条执行其 search_hint 约束; 未跑 = 不得引用, 跳过 = 协议错误",
+    "联网搜索 tripwire: WebSearch/CVE 引用输出前必须已跑 timestamp_gate 并逐条执行 search_hint; active run WebFetch 被代理门拒绝; 未跑 = 不得引用, 跳过 = 协议错误",
     "爆破预算: 同一端点连续爆破 25+ 次无果 → 强制断言 Type B, 转向逻辑漏洞/未授权API(IDOR/路径穿越/配置错误), 不要继续试更多密码(retrospective #4: 500+ 次猜测 0 成功)",
     "攻击录证: certainty≥0.8 的关键攻击行为必须用 probe.py --save 留 .replay.json 录像; 裸 Python script 攻击后必须补跑 `from harness.guard import RequestRecorder; RequestRecorder(run_dir).record(...)` 录证 —— codex 复审只看 .replay.json, 不认散文描述(retrospective #11)",
 ]

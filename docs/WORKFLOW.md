@@ -489,10 +489,12 @@ are non-actionable only, so they are not silently dropped just because they were
 removed from the noisy `INTERESTING` list.
 
 When live evidence identifies a product+version, component version, CVE/CNVD ID,
-or security-advisory-shaped lead, run the web-research protocol in that same
-cycle: `timestamp_gate.py --search-hint --kind vuln`, then local knowledge/xday
-lookup, then authoritative current sources. Record the result before closing the
-front, assigning severity, or writing final report text.
+or security-advisory-shaped lead, load the sole Claude-primary protocol at
+`.claude/skills/web-research/SKILL.md` in that same cycle. It owns the registered
+time gate, knowledge-owner route, public WebSearch discipline, and structured
+lead return. Root records and adjudicates the lead before closing the front,
+assigning severity, or writing final report text; the legacy sync skill owns no
+second protocol.
 
 Claude Code statusline uses `tools/xunji_statusline.py` from the project
 `.claude/settings.json`. It is a read-only, two-second display containing only

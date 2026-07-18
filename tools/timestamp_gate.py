@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """timestamp_gate.py — 漏洞检索前强制获取当前时间戳的统一闸门。
 
-设计意图: 项目规则要求每次漏洞检索(CVE 查询 / WebSearch / knowledge_match /
-WebFetch 漏洞数据)必须先获取当前时间, 再据此约束搜索范围 — 防止 LLM 凭训练截止日期
+设计意图: 项目规则要求每次漏洞检索(CVE 查询 / WebSearch / knowledge_match)
+必须先获取当前时间, 再据此约束搜索范围 — 防止 LLM 凭训练截止日期
 幻觉出过期/不存在 CVE, 确保搜索锚定当下。
 
 用法:
@@ -70,7 +70,7 @@ def build_search_hint(dt: datetime | None = None, kind: str = "vuln") -> str:
         f"当前时间: {cn}。"
         f"所有联网搜索必须以 {year} 年为时间基准: "
         f"WebSearch query 必须包含 {year} 或不晚于 {date} 的明确时间约束; "
-        f"WebFetch 须核验页面发布时间/更新日期不晚于 {date}; "
+        f"引用页面须核验发布时间/更新日期不晚于 {date}; "
         f"引用任何版本号 / 安全公告 / 配置变更 / 绕过技术时, "
         f"必须确认信息发布时间不晚于 {date}; "
         f"优先搜索 {year} 年及近 3 年的资料, 旧信息须标注「可能已过期」; "
@@ -89,7 +89,7 @@ def build_search_hint(dt: datetime | None = None, kind: str = "vuln") -> str:
     vuln_extra = (
         f"漏洞检索附加: 优先搜索 {year} 年及近 3 年的 CVE/CNVD/安全公告; "
         f"引用 CVE 编号前必须验证其发布年份 ≤ {year} 且发布时间不晚于 {date}; "
-        f"拿到的 CVE 须用 WebFetch 验证 NVD 页面确认发布时间; "
+        f"拿到的 CVE 须用 NVD 或厂商官方记录确认发布时间; "
         f"严禁凭模型记忆编造未验证年份的 CVE 编号。"
     )
     return f"{general} {vuln_extra}"
@@ -184,18 +184,21 @@ def _selftest() -> int:
     # Search hint (vuln kind): contains both general and CVE parts
     checks.append(("vuln hint has year", str(dt.year) in out["search_hint"]))
     checks.append(("vuln hint has 'WebSearch query'", "WebSearch query 必须包含" in out["search_hint"]))
-    checks.append(("vuln hint has 'WebFetch 须核验'", "WebFetch 须核验" in out["search_hint"]))
+    checks.append(("vuln hint requires page-date verification", "引用页面须核验" in out["search_hint"]))
     checks.append(("vuln hint has CVE mention", "CVE" in out["search_hint"]))
     checks.append(("vuln hint has CNVD mention", "CNVD" in out["search_hint"]))
     checks.append(("vuln hint has generic time anchor", "所有联网搜索" in out["search_hint"]))
     checks.append(("vuln hint has '可能已过期'", "可能已过期" in out["search_hint"]))
-    checks.append(("vuln hint has NVD WebFetch", "WebFetch 验证 NVD" in out["search_hint"]))
+    checks.append(("vuln hint requires official CVE date source",
+                   "NVD 或厂商官方记录确认发布时间" in out["search_hint"]))
+    checks.append(("vuln hint does not require WebFetch", "WebFetch" not in out["search_hint"]))
 
     # Search hint (generic kind): has time anchor but NO CVE/CNVD
     checks.append(("generic hint has year", str(dt.year) in out_generic["search_hint"]))
     checks.append(("generic hint has 'WebSearch query'", "WebSearch query 必须包含" in out_generic["search_hint"]))
     checks.append(("generic hint has generic time anchor", "所有联网搜索" in out_generic["search_hint"]))
     checks.append(("generic hint has '可能已过期'", "可能已过期" in out_generic["search_hint"]))
+    checks.append(("generic hint does not require WebFetch", "WebFetch" not in out_generic["search_hint"]))
     checks.append(("generic hint NO CVE mention", "CVE" not in out_generic["search_hint"]))
     checks.append(("generic hint NO CNVD mention", "CNVD" not in out_generic["search_hint"]))
 

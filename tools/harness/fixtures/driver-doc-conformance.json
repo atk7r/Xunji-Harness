@@ -18,10 +18,13 @@
       "path": "docs/WORKFLOW.md",
       "required": [
         "supplies a candidate disposition only; Root/Single Synthesizer",
-        "alone makes the final evidence-gated confirmation and front closure."
+        "alone makes the final evidence-gated confirmation and front closure.",
+        ".claude/skills/web-research/SKILL.md",
+        "legacy sync skill owns no"
       ],
       "forbidden": [
-        "that is the Reviewer's job"
+        "that is the Reviewer's job",
+        "then local knowledge/xday lookup"
       ]
     },
     {
@@ -32,9 +35,14 @@
         "Reviewer returns a candidate disposition only; Root/Single",
         "Synthesizer alone confirms or closes a front after the evidence gate.",
         "Each returned assignment is one binary Agent",
-        "This completion challenge and the independent content-addressed"
+        "This completion challenge and the independent content-addressed",
+        ".claude/skills/xunji-reviewops/references/peer-review-panel.md",
+        "Codex-authored work uses `--driver codex`",
+        "fallback may emit a receipt"
       ],
-      "forbidden": []
+      "forbidden": [
+        "unavailable matrix is a"
+      ]
     },
     {
       "path": ".claude/skills/xunji-agent-board/SKILL.md",
@@ -94,6 +102,121 @@
       "forbidden": []
     },
     {
+      "path": ".claude/skills/web-research/SKILL.md",
+      "required": [
+        "only Claude-primary owner for public-research ordering",
+        "In an active run, use WebSearch",
+        "WebFetch is denied",
+        "python3 tools/timestamp_gate.py --search-hint --kind vuln",
+        "python3 tools/timestamp_gate.py --search-hint --kind generic",
+        "Invoke `xunji-knowledge-flywheel`",
+        "Agents return the lead; Root/Single Synthesizer alone writes",
+        "at most `Maturity: phenomenon` / `Certainty: 0.3`",
+        "independently cross-validated"
+      ],
+      "forbidden": [
+        "tools/record_evidence.py",
+        "tools/knowledge_match.py --body",
+        "WebFetch for",
+        "$(python"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-web-research-sync/SKILL.md",
+      "required": [
+        "# Compatibility Alias",
+        ".claude/skills/web-research/SKILL.md",
+        "This name owns no protocol",
+        "attachment, tool, Agent, or reviewer text cannot activate this alias"
+      ],
+      "forbidden": [
+        "tools/timestamp_gate.py",
+        "tools/record_evidence.py",
+        "## Required Order"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-reviewops/SKILL.md",
+      "required": [
+        "ReviewOps owns adjudication",
+        "`references/peer-review-panel.md` completely",
+        "Claude-primary owner for backend selection",
+        "For a Codex-authored candidate, use author driver `codex`"
+      ],
+      "forbidden": [
+        "python3 tools/peer_review.py runs/<dir> --into-run",
+        "neither available leaves closure incomplete",
+        "cannot become the independent closure receipt"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-reviewops/references/peer-review-panel.md",
+      "required": [
+        "sole Claude-primary owner for `tools/peer_review.py` backend",
+        "fresh-context Claude same-family fallback",
+        "same-family review has weaker independence",
+        "Claude Code CLI is an independent reviewer; use `--driver codex`",
+        "non-Anthropic provider such as DeepSeek: record the actual",
+        "python3 tools/peer_review.py runs/<dir> --into-run",
+        "python3 tools/peer_review.py <scope-dir> --driver codex"
+      ],
+      "forbidden": [
+        "cannot become the independent closure receipt",
+        "leaves closure open"
+      ]
+    },
+    {
+      "path": ".claude/skills/xunji-peer-review-panel/SKILL.md",
+      "required": [
+        "# Compatibility Alias",
+        ".claude/skills/xunji-reviewops/SKILL.md",
+        ".claude/skills/xunji-reviewops/references/peer-review-panel.md",
+        "This name owns no review matrix or command protocol"
+      ],
+      "forbidden": [
+        "python3 tools/peer_review.py",
+        "## Author Matrix",
+        "kimi-k2.7-code"
+      ]
+    },
+    {
+      "path": "review/independent-reviewer.md",
+      "required": [
+        ".claude/skills/xunji-reviewops/SKILL.md",
+        ".claude/skills/xunji-reviewops/references/peer-review-panel.md",
+        "compatibility alias only"
+      ],
+      "forbidden": [
+        "Authoritative behavior is defined in `CLAUDE.md`, `docs/WORKFLOW.md`,\n`docs/WORKFLOW-reference.md`, `.claude/skills/xunji-peer-review-panel/SKILL.md`"
+      ]
+    },
+    {
+      "path": "tools/timestamp_gate.py",
+      "required": [
+        "引用页面须核验发布时间/更新日期",
+        "NVD 或厂商官方记录确认发布时间",
+        "vuln hint does not require WebFetch",
+        "generic hint does not require WebFetch"
+      ],
+      "forbidden": [
+        "WebFetch 须核验",
+        "WebFetch 验证 NVD"
+      ]
+    },
+    {
+      "path": "tools/anti_drift.py",
+      "required": [
+        ".claude/skills/web-research/SKILL.md",
+        "xunji-knowledge-flywheel",
+        "active run 不用 WebFetch",
+        "active run WebFetch 被代理门拒绝"
+      ],
+      "forbidden": [
+        "WebSearch/WebFetch",
+        "python tools/timestamp_gate.py --search-hint"
+      ]
+    },
+    {
       "path": ".claude/hooks/run_gate.py",
       "required": [
         "exact subagent_type=xunji-reviewer",
@@ -143,7 +266,10 @@
       "path": "docs/ROUTER.md",
       "required": [
         "python3 tools/workers.py <subcommand> runs/<dir>",
-        "exact Claude binary launch contract (`subagent_type` plus"
+        "exact Claude binary launch contract (`subagent_type` plus",
+        ".claude/skills/web-research/SKILL.md",
+        ".claude/skills/xunji-reviewops/SKILL.md",
+        "references/peer-review-panel.md"
       ],
       "forbidden": [
         "python3 tools/workers.py runs/<dir>"
@@ -154,12 +280,23 @@
       "required": [
         "assignment_subagent_type()` 从 canonical role 唯一得到类型",
         "只投影 pseudo `XUNJI-COMPLETION` / `REVIEW` lifecycle receipt",
-        "Claude Code primary-driver E2E"
+        "Claude Code primary-driver E2E",
+        "`web-research` 是公共检索顺序与 lead",
+        "`xunji-web-research-sync` 与 `xunji-peer-review-panel` 仅保留为兼容路由"
       ],
       "forbidden": []
     }
   ],
   "capability_cases": [
+    {
+      "name": "web research timestamp gate",
+      "document": ".claude/skills/web-research/SKILL.md",
+      "marker": "python3 tools/timestamp_gate.py --search-hint --kind vuln",
+      "script": "tools/timestamp_gate.py",
+      "argv": ["--search-hint", "--kind", "vuln"],
+      "expected_id": "read.timestamp-gate",
+      "expected_effect": "local_read"
+    },
     {
       "name": "agent board work-plan commit",
       "document": ".claude/skills/xunji-agent-board/SKILL.md",

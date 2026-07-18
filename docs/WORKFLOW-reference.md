@@ -967,15 +967,18 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
 **Independent review before closure — procedure.** Self-review doesn't fix self-review
 bias. Freeze the current bundle and run
 `python3 tools/peer_review.py runs/<dir> --into-run` in the foreground. For a
-Claude-driven run, use the configured Codex/arkcli heterogeneous matrix; for a
-Codex-authored maintenance diff, follow `AGENTS.md` and use arkcli plus fresh-context
-Claude when available. `peer_review.py` appends a globally unique PR ledger and a
-content-addressed receipt. Resolve each item, then rerun peer review whenever
-evidence changes. Older receipts remain audit history but cannot validate current
-evidence. Backend failure, absent egress consent, or an unavailable matrix is a
-recorded limitation and leaves closure incomplete; manual-driver prose never replaces
-the vote. Normal-mode Stop separately requires a structured completion-review section
-plus its actual current-evidence Agent receipt.
+Claude-driven run or Codex-authored maintenance diff, load
+`.claude/skills/xunji-reviewops/references/peer-review-panel.md` for the current
+author matrix and fallback semantics; Codex-authored work uses `--driver codex`.
+`peer_review.py` appends a globally unique PR ledger and a content-addressed receipt.
+Resolve each item, then rerun peer review whenever evidence changes. Older receipts
+remain audit history but cannot validate current evidence. If no Codex/arkcli backend
+is available for Claude-driven work, a successful fresh-context Claude same-family
+fallback may emit a receipt with the weaker-independence limitation recorded; it is
+still candidate review, not driver adjudication. Backend failure, absent egress
+consent, or no successful backend leaves closure incomplete; manual-driver prose never
+replaces the vote. Normal-mode Stop separately requires a structured completion-review
+section plus its actual current-evidence Agent receipt.
 
 Claude Code is primary and Codex is auxiliary: Codex commonly appears here as a
 heterogeneous review backend, but it can also provide advice or delegated help when
