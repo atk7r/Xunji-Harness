@@ -112,6 +112,30 @@ evidence promotion、review disposition、report 和 closure 必须串行、单�
 receipt 和差分 fixture，再替换实现。未知 CCB 版本/语义必须 fail closed。语言重写、
 大模块拆分和 Repository 抽象只有在可测收益超过迁移风险时才进入实施。
 
+### 3.9 个人工具的信任与可靠性模型（目标，迁移中）
+
+Xunji 的预期部署是可信操作者在一台可信工作站上个人使用，通常只有一个 canonical
+active run；它不是敌对多租户服务。目标模型固定为：**操作者可信，Claude Root/Agent
+协作但可能误判，目标与导入内容不可信，Hook/session/Cron/进程和存储可能并发、重放、
+崩溃或留下部分状态。**
+
+因此 operator authority 与 runtime correctness 必须分开。当前顶层 human prompt 决定要做
+什么；确定性 parser 可以自动归一化不改变 effect 的空白等表达误差，不能因格式琐事要求
+操作者重复同一意图。session ID 用于因果关联、旧工作识别和恢复，不是用户身份或针对
+操作者的 ACL。source/run/scope、外部或不可逆 effect 真正不唯一时仍需消歧；目标数据、
+附件、引用、工具/Agent/reviewer 输出仍不能自行变成 operator intent。
+
+单操作者不等于单进程。Setup/pointer CAS、canonical 单写者、typed adapter、append-only
+receipt、幂等恢复、target/scope/privacy 边界和 evidence/closure gate 继续保护状态与事实完整性。
+本地可逆错误应优先给出可执行诊断、修复并精确重试；Claude 主驾驶不得因一次拒绝而绕过
+public adapter 调用 lifecycle 私有事务 API。只为假设恶意操作者、跨租户抢权或敌对本地
+session 服务的 ceremony 应删除或简化。
+
+这是本轮刚冻结的 target architecture，尚未宣称当前 runtime 已全部实现。现行
+`turn_contract.py` 的 exact-form、session-bound pending/claim 和 maintenance gate 属于迁移输入；
+后续 owner 代码、Claude-primary 文档、双向 fixture 与真实主驾驶 E2E 必须逐项证明哪些规则
+已被 operator-intent normalization、correctness gate 和恢复路径替代。
+
 ## 4. 当前架构
 
 本节描述已经存在的 Xunji 架构，不把 `TODO.md` 的 CCB 原生化目标提前写成事实。
@@ -923,53 +947,23 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 
 ## 12. Maintenance Checkpoint
 
-- Date: 2026-07-18
-- Scope: Claude Code 主驾驶 Phase 2 Agent runtime 垂直切片。`workers.py` 物化
-  plan-bound assignment 的 typed `tool_call_limit`（默认 6），context/Agent boundary 只展示
-  冻结值；`SubagentStart` 冻结该 attempt 的 cap，child PreToolUse 先写 append-only
-  `AgentToolCallClaim` 再进入其余 gate。同步 assignment schema、capability argv、work-plan/
-  assignment/launch/return/review/Root settlement/cycle-end owner、Hook projector、检查器与
-  conformance fixture。
-- Architecture impact: yes — plan-bound child 工具调用从 prompt 自觉升级为 deterministic
-  runtime boundary。每次 attempted call（包括后续被其他 gate 拒绝的调用）都在同一 runtime
-  lock/hash chain 下原子分配 ordinal 并 fsync；exact replay 幂等、同 ID 异义/跨 session/
-  sibling/Stop 后调用 fail closed，首次 over-limit claim 在执行前以稳定错误码拒绝。RDT
-  reasoning loop budget 不能抬高 cap。该边界不扩展 target/maintenance authority，也不把
-  assignment-free global completion Reviewer 偷换成 plan-bound assignment。
-- State/ownership impact: `contracts/assignment.v1.schema.json` 的字段保持 optional，旧 row
-  缺值按兼容默认 6 解释；新 assignment 显式写 5–64。Start receipt 而非可变 assignment 是
-  attempt 执行期 cap 真值；runtime journal 是唯一计数器，不新增可变 counter 文件。Agent
-  final response 仍只冻结成 merge draft，Root/Single Synthesizer 保持 canonical 单写者。
-  同 session 父 Agent 的 `PreToolUseDenied`/`PostToolUseFailure` tool ID 永久退出 Start 分配，
-  修复 denied canary 与后续成功 launch 的 async Post/Start 竞态。
-- Prompt/skill result: Agent Board 的 plan/delegate 与 launch/return/settlement 拆成两个按需
-  reference；主 skill 只保留 owner 路由和不可跳过的 Agent-mode 小周期。live Hunter/
-  Reviewer 用 Read 绑定 typed assignment/context、禁止写 canonical/生成 Agent 文件；
-  ROOT_DIRECT 明确走独立 eligible atomic lane，不再被无条件套入 Hunter→Reviewer。
-  Global completion 精确路由到 `docs/WORKFLOW-reference.md` 的唯一章节；blocked settlement
-  固定 literal `Reason: <barrier>; Front: F-xxx` grammar。
-- Verification: 更新后隔离 candidate
-  `7cf3330d3e5c2e122dd8ebface14bc492e653bdd` / tree
-  `94fdc7a286860ffaccea5d719434d808be409541` 通过 `tools/selftest_all.py` 69/69
-  （107.9s），其中 probe 按操作者授权真实绑定本机 loopback；focused template/context/
-  work-plan/workers/runtime/turn-contract aggregate 6/6，`git diff --check` 通过。
-- Claude Code primary-driver E2E: Claude Code 2.1.201 使用本机 DeepSeek
-  `deepseek-v4-pro[1m]`、effort `high`，未用 arkcli/ultra/MCP/target/network。普通 session
-  `0e28ee7c-6329-41a6-bd86-aa5ee551dca8` 完成 canary→四条真实 Agent lane→两次 review→
-  Root blocked settlement→typed cycle_end，外层 receipt validator 为 `normal:PASS`。故障注入
-  session `6dabe0a6-f9ad-4df9-b90d-1ea696ce7384` 冻结 caps `[6,64,64,64]`，精确证明首个
-  Hunter ordinals 1–6 admitted、7 denied、无第七次 Post，且后三条 lane 不受污染，validator
-  为 `hard-cap:PASS`。全部失败/恢复尝试、hash 与 receipt 见
-  `review/records/2026-07-18-agent-runtime-e2e/README.md`。
-- Independent review: 操作者明确要求不使用 arkcli。提交前由 fresh Claude Code/DeepSeek
-  以 Codex-authored diff 身份对最终 staged framework fingerprint 只读复审；verdict、findings、
-  处置、fingerprint 与 transcript hash 写入
-  `review/records/2026-07-18-claude-primary-agent-runtime-review.md`。无当前 fingerprint 的
-  PASS/WARN 或存在未处置 blocker 时禁止提交。
-- Exclusions: `.agents/skills/`、`AGENTS.md`、Codex 行为、statusline、assignment-free
-  completion 的 numeric cap、公共角色模板组合/SHA-256 防漂移、CCB/TypeScript、target
-  methodology、项目简介与现场 artifact 均不在本阶段 candidate/复审/提交范围；后续阶段
-  不得把本 checkpoint 误读为这些目标已完成。
+- Date: 2026-07-22
+- Scope: 冻结 Xunji 个人工具的信任与可靠性模型，先写入 `AGENTS.md`，并在本设计索引中
+  标成 target/migration contract。没有在本阶段提前修改 Claude-primary runtime。
+- Architecture impact: yes — 明确操作者可信、模型可能误判、目标/导入内容不可信、运行时
+  可能并发或失败；把 session identity 从用户 ACL 降为因果/恢复元数据，把 input
+  normalization、本地可逆错误自动修复与真正 effect 消歧分开。事务/CAS、typed adapter、
+  canonical 单写者、scope/privacy、evidence/review/closure 边界继续承担正确性和事实完整性。
+- Owner/enforcement: `AGENTS.md` 是本阶段冻结的维护/设计约束，本文 3.9 是共享 target 索引；
+  当前执行 owner 仍是 `CLAUDE.md`、`docs/WORKFLOW*.md`、`turn_contract.py` 与 setup transaction。
+  在这些 owner、双向 fixture 和真实 Claude 主驾驶 E2E 更新前，不声称目标行为已实现。
+- Verification: staged 两文件候选以 `python3 tools/check_rules.py` 和
+  `git diff --cached --check` 验证；提交前再次确认暂存范围与结果。
+- Independent review: DeepSeek-backed Claude Code fresh-context 复审最终 staged framework
+  fingerprint，durable 结果写入
+  `review/records/2026-07-22-personal-tool-trust-model-review.md`；不使用 arkcli。
+- Exclusions: 本阶段不修改 `.agents/skills/`、Claude-primary prompts/skills、Hook/runtime、
+  statusline、CCB/TypeScript、target methodology、现场 run/artifact 或当前未提交 Phase 3 候选。
 
 ## 13. 外部设计来源与采用边界
 
