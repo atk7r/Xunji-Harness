@@ -134,7 +134,6 @@ E_WORK_PLAN_STALE = "XUNJI_E_WORK_PLAN_STALE"
 E_DELEGATION_REQUIRED = "XUNJI_E_DELEGATION_REQUIRED"
 E_ROOT_COORDINATOR_ONLY = "XUNJI_E_ROOT_COORDINATOR_ONLY"
 E_CAPABILITY_POLICY = "XUNJI_E_CAPABILITY_POLICY"
-E_MAINTENANCE_BLOCKED = "XUNJI_E_MAINTENANCE_BLOCKED"
 E_AGENT_TOOL_CALL_LIMIT_EXCEEDED = "XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED"
 E_AGENT_TOOL_CALL_IDENTITY_CONFLICT = "XUNJI_E_AGENT_TOOL_CALL_IDENTITY_CONFLICT"
 E_AGENT_TOOL_CALL_BUDGET_INVALID = "XUNJI_E_AGENT_TOOL_CALL_BUDGET_INVALID"
@@ -629,7 +628,12 @@ def classify_prompt(prompt: str, *, active_run: bool = True) -> str:
     return EXPLAIN
 
 
-def _contract_from_event(event: dict, *, run_name: str = "") -> dict:
+def _contract_from_event(
+    event: dict,
+    *,
+    run_name: str = "",
+    previous_mode: str = "",
+) -> dict:
     prompt = str(event.get("prompt") or "")
     session_binding, session_binding_kind = _event_session_binding(event)
     _directive_line, intent_normalizations = _operator_directive_line(prompt)
@@ -637,18 +641,14 @@ def _contract_from_event(event: dict, *, run_name: str = "") -> dict:
     source_sha256s, source_ambiguous = _prompt_source_authority(prompt)
     run_name_sha256s, run_ambiguous = _prompt_run_authority(prompt)
     slug_sha256s, slug_ambiguous = _prompt_slug_authority(prompt)
-    maintenance, maintenance_error = maintenance_authority.parse_directive(prompt)
+    maintenance = maintenance_authority.operator_intent(
+        prompt, previous_mode=previous_mode)
     scope_request, scope_error = scope_admission.parse_operator_directive(prompt)
     if maintenance and scope_request:
-        scope_request = None
-        scope_error = "maintenance and scope admission directives cannot share one turn"
-    mode = MAINTENANCE if maintenance else (
-        EXECUTE if scope_request else classify_prompt(prompt, active_run=True)
+        maintenance = False
+    mode = EXECUTE if scope_request else (
+        MAINTENANCE if maintenance else classify_prompt(prompt, active_run=True)
     )
-    if maintenance_error:
-        # A malformed top-level maintenance command never falls through into a
-        # broad EXECUTE turn merely because the prompt also contains "fix".
-        mode = EXPLAIN
     if scope_error:
         mode = EXPLAIN
     now = time.time()
@@ -734,15 +734,7 @@ def _contract_from_event(event: dict, *, run_name: str = "") -> dict:
         "updated_at": now,
     }
     if maintenance:
-        contract["maintenance_authorized_paths"] = list(
-            maintenance.get("authorized_paths") or [])
-        contract["maintenance_critical_paths"] = list(
-            maintenance.get("critical_paths") or [])
-        contract["maintenance_reason"] = str(maintenance.get("reason") or "")
-        contract["maintenance_reason_sha256"] = str(
-            maintenance.get("reason_sha256") or "")
-    if maintenance_error:
-        contract["maintenance_parse_error"] = maintenance_error
+        contract["maintenance_intent"] = "operator_prompt"
     if scope_request:
         contract["scope_admission_run"] = str(scope_request.get("run_name") or "")
         contract["scope_admission_assets"] = list(scope_request.get("assets") or [])
@@ -852,7 +844,11 @@ def _previous_contract(run_dir: Path) -> dict:
 
 def write_contract(run_dir: Path, event: dict) -> dict:
     previous = _previous_contract(run_dir)
-    contract = _contract_from_event(event, run_name=run_dir.name)
+    contract = _contract_from_event(
+        event,
+        run_name=run_dir.name,
+        previous_mode=str(previous.get("mode") or ""),
+    )
     requested_scope_run = str(contract.get("scope_admission_run") or "")
     if requested_scope_run and requested_scope_run != run_dir.name:
         contract.pop("scope_admission_run", None)
@@ -1215,8 +1211,7 @@ def _write_pending_contract_unlocked(
     session_id = str(contract.get("session_id") or "")
     if not session_id:
         return {}
-    maintenance_attempt = contract.get("mode") == MAINTENANCE \
-        or bool(contract.get("maintenance_parse_error"))
+    maintenance_attempt = contract.get("mode") == MAINTENANCE
     if not maintenance_attempt and (
             contract.get("mode") != EXECUTE or not bool(
                 contract.get("run_transition_requested")
@@ -1258,9 +1253,7 @@ def load_pending_contract(session_id: str, *, pending_dir: Path | None = None) -
         age = time.time() - float(data.get("updated_at") or 0.0)
     except Exception:
         return {}
-    valid_mode = data.get("mode") in {EXECUTE, MAINTENANCE} or (
-        data.get("mode") == EXPLAIN and bool(data.get("maintenance_parse_error"))
-    )
+    valid_mode = data.get("mode") in {EXECUTE, MAINTENANCE}
     if data.get("schema") != SCHEMA or not valid_mode:
         return {}
     if not str(data.get("session_id") or "") or age < 0 or age > PENDING_STALE_SECONDS:
@@ -2259,7 +2252,7 @@ def _write_run_status(run_dir: Path, contract: dict) -> None:
             "status": "maintenance",
             "session_id": contract["session_id"],
             "updated_at": now,
-            "reason": "operator authorized exact-path framework maintenance; live run is frozen",
+            "reason": "operator requested local framework maintenance; live run is frozen",
         })
 
 
@@ -2853,22 +2846,11 @@ def _audited_bash_execution(event: dict) -> bool:
 
 
 def _maintenance_pretool_reason(event: dict, contract: dict) -> str:
-    """Enforce exact mutation scope and a local-only maintenance turn."""
+    """Keep an intent-derived maintenance turn local and auditable."""
     tool = str(event.get("tool_name") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = str(tool_input.get("command") or "")
-    parse_error = str(contract.get("maintenance_parse_error") or "")
     readonly_tools = {"Read", "Grep", "Glob"}
-    if parse_error:
-        if tool in readonly_tools:
-            return ""
-        return "框架维护授权格式无效：" + parse_error
-    authorized = {
-        str(path) for path in (contract.get("maintenance_authorized_paths") or [])
-        if str(path).strip()
-    }
-    if not authorized:
-        return "框架维护授权缺少 exact maintenance_authorized_paths；拒绝 fail-open。"
     if tool in readonly_tools:
         return ""
     if tool in {"CronCreate", "CronDelete", "CronList", "Agent", "WebFetch", "WebSearch"}:
@@ -2879,11 +2861,13 @@ def _maintenance_pretool_reason(event: dict, contract: dict) -> str:
         paths, invalid = maintenance_authority.event_paths(event)
         if invalid or not paths:
             return "框架维护写工具必须提供可规范化的 repository-local exact file path。"
-        outside = sorted(set(paths) - authorized)
-        if outside:
+        forbidden = sorted(
+            path for path in paths if not maintenance_authority.path_allowed(path)
+        )
+        if forbidden:
             return (
-                "框架维护授权仅覆盖当前回合 exact paths；未授权: "
-                + ", ".join(outside)
+                "框架维护不得直接写 live-run、Git 或控制状态路径: "
+                + ", ".join(forbidden)
             )
         return ""
     if tool == "Bash":
@@ -2900,7 +2884,7 @@ def _maintenance_pretool_reason(event: dict, contract: dict) -> str:
         critical = maintenance_authority.critical_paths_for_event(event)
         if critical:
             return (
-                "框架维护禁止用 Bash 直接改安全关键文件；请用 Edit/Write 且路径必须与授权完全一致: "
+                "框架维护禁止用 Bash 直接改安全关键文件；请用可审计的 Edit/Write: "
                 + ", ".join(critical)
             )
         return "框架维护 Bash 仅允许只读命令或审计过的单一 selftest/check 命令；禁止目标动作和任意 shell 写入。"
@@ -3038,7 +3022,7 @@ def _opaque_repo_mutation_bash(command: str) -> bool:
 
 
 def _critical_maintenance_reason(event: dict) -> str:
-    """Require the top-level maintenance entry before critical source writes."""
+    """Keep framework mutation out of a live execution turn."""
     tool = str(event.get("tool_name") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = str(tool_input.get("command") or "")
@@ -3046,9 +3030,8 @@ def _critical_maintenance_reason(event: dict) -> str:
         return ""
     if tool == "Bash" and _opaque_repo_mutation_bash(command):
         return (
-            "普通 /loop 不授权使用不透明的仓库变更命令修改或暂存框架；"
-            "先保留当前 diff/错误并停止 run 状态推进。需要操作者在新回合首条非空"
-            "指令使用: " + maintenance_authority.required_directive([])
+            "live run 回合不允许用不透明仓库命令修改或暂存框架；"
+            "请在新的顶层 prompt 直接说明要修复/修改的 Xunji 框架问题。"
         )
     critical = maintenance_authority.critical_paths_for_event(event)
     if not critical:
@@ -3059,18 +3042,15 @@ def _critical_maintenance_reason(event: dict) -> str:
             or _trusted_critical_execution_bash(command, tool_env=tool_env)):
         return ""
     return (
-        "普通 /loop 不授权修改安全关键框架路径；保留本次拒绝并停止 run 状态推进。"
-        "需要操作者在新回合首条非空指令使用: "
-        + maintenance_authority.required_directive(critical)
+        "live run 回合不修改安全关键框架路径；请在新的顶层 prompt 直接说明"
+        "要修复/修改的 Xunji 框架问题。涉及: " + ", ".join(critical)
     )
 
 
 def _maintenance_action(event: dict, *, contract: dict | None = None) -> bool:
     """Classify maintenance from typed effect/paths, never denial prose."""
     tool = str(event.get("tool_name") or "")
-    if contract and (
-            contract.get("mode") == MAINTENANCE
-            or contract.get("maintenance_parse_error")) \
+    if contract and contract.get("mode") == MAINTENANCE \
             and tool not in {"Read", "Grep", "Glob"}:
         return True
     if tool in maintenance_authority.WRITE_TOOLS:
@@ -3100,84 +3080,6 @@ def _maintenance_action(event: dict, *, contract: dict | None = None) -> bool:
             return False
         return not (_readonly_shell(command) or _local_verification_bash(command))
     return False
-
-
-def _record_maintenance_denial(
-    run_dir: Path,
-    event: dict,
-    contract: dict,
-    reason: str,
-) -> None:
-    """Keep a turn-scoped stop marker; raw/category text stays in receipts."""
-    if not contract:
-        return
-    value = dict(contract)
-    value["maintenance_blocked"] = {
-        "updated_at": time.time(),
-        "tool_name": str(event.get("tool_name") or ""),
-        "paths": _maintenance_receipt_paths(event, contract),
-        "reason_sha256": hashlib.sha256(
-            reason.encode("utf-8", "replace")).hexdigest(),
-    }
-    _atomic_json(contract_path(run_dir), value)
-
-
-def _maintenance_progression_reason(
-    run_dir: Path,
-    event: dict,
-    contract: dict,
-) -> str:
-    """Freeze run progression after a current-turn maintenance blocker.
-
-    Stop output is not an enforcement boundary: a model may attempt another tool
-    before emitting its final response.  Current-turn maintenance debt therefore
-    admits only deterministic inspection or an exact retry of the blocked action.
-    A later operator prompt has a newer contract timestamp and starts a new
-    authority decision instead of inheriting this freeze.
-    """
-    if not contract:
-        return ""
-    session_id = str(contract.get("session_id") or "")
-    try:
-        since = float(contract.get("updated_at") or 0.0)
-    except (TypeError, ValueError):
-        since = 0.0
-    if not session_id or since <= 0:
-        return ""
-    try:
-        blockers = runtime_receipts.unresolved_durable_maintenance_blockers(
-            run_dir, session_id=session_id, since=since)
-    except Exception:
-        blockers = [{"maintenance_paths": [], "tool_name": ""}]
-    if not blockers:
-        return ""
-
-    tool = str(event.get("tool_name") or "")
-    tool_input = event.get("tool_input") \
-        if isinstance(event.get("tool_input"), dict) else {}
-    action_hash = runtime_receipts._action_hash(tool, tool_input)
-    if any(
-        tool == str(blocker.get("tool_name") or "")
-        and action_hash == str(blocker.get("action_sha256") or "")
-        for blocker in blockers
-    ):
-        return ""
-    if tool in {"Read", "Grep", "Glob", "TaskGet", "TaskList", "TaskUpdate"}:
-        return ""
-
-    paths = sorted({
-        str(path)
-        for blocker in blockers
-        for path in (blocker.get("maintenance_paths") or [])
-        if str(path).strip()
-    })
-    scope = ",".join(paths) if paths else "receipt-chain"
-    return (
-        f"[{E_MAINTENANCE_BLOCKED}] 当前 operator 回合已有未消解的框架维护拒绝"
-        f"（scope={scope}）；禁止继续 Agent、control、target 或 canonical 写入。"
-        "只可用 Read/Grep/Glob 核验、更新已有 Task 为 blocked，或精确重试同一动作；"
-        "否则输出 receipt-backed MAINTENANCE_BLOCKED，等待新的 operator authority。"
-    )
 
 
 def _safe_sed(tokens: list[str]) -> bool:
@@ -3594,7 +3496,6 @@ def _decision_metadata(reason: str, event: dict) -> dict:
         E_DELEGATION_REQUIRED: "delegation",
         E_ROOT_COORDINATOR_ONLY: "delegation",
         E_CAPABILITY_POLICY: "capability_policy",
-        E_MAINTENANCE_BLOCKED: "maintenance",
         E_AGENT_TOOL_CALL_LIMIT_EXCEEDED: "agent_tool_budget",
         E_AGENT_TOOL_CALL_IDENTITY_CONFLICT: "agent_tool_budget",
         E_AGENT_TOOL_CALL_BUDGET_INVALID: "agent_tool_budget",
@@ -4669,12 +4570,7 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
     if protected_reason:
         return protected_reason
 
-    maintenance_progression_reason = _maintenance_progression_reason(
-        run_dir, event, contract)
-    if maintenance_progression_reason:
-        return maintenance_progression_reason
-
-    if mode == MAINTENANCE or contract.get("maintenance_parse_error"):
+    if mode == MAINTENANCE:
         return _maintenance_pretool_reason(event, contract)
 
     if contract.get("scope_admission_run") or contract.get("scope_admission_parse_error"):
@@ -4839,7 +4735,7 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
         return (
             "普通 /loop 的 Bash 只能执行无环境覆盖的只读 grammar、受控 lifecycle/verification，"
             "或受信 target/review capability；未知 shell/interpreter 可能改写安全关键框架，"
-            "按 fail-closed 拒绝。框架编辑必须由新回合 /xunji-maintenance exact-path 授权。"
+            "按 fail-closed 拒绝。请在新顶层 prompt 直接说明要修复的 Xunji 框架问题。"
         )
     actor_agent_id = str(event.get("agent_id") or "").strip()
     if actor_agent_id:
@@ -5047,18 +4943,12 @@ def _context_message(contract: dict, run_dir: Path) -> str:
             f" exact assets: {assets}。调用受控 scope_admission.py 完成本地 receipt/ledger "
             "transition；本回合禁止 target/network、Agent、Cron，后续新 /loop 回合才可探测。"
         )
-    if contract.get("maintenance_parse_error"):
-        return (
-            "[Xunji maintenance authority: INVALID] 未授予任何维护权限；"
-            + str(contract.get("maintenance_parse_error") or "")
-        )
     if mode == MAINTENANCE:
-        paths = ", ".join(str(path) for path in (
-            contract.get("maintenance_authorized_paths") or []))
         return (
-            "[Xunji turn mode: MAINTENANCE] 仅可修改当前 operator prompt 绑定的 exact paths: "
-            f"{paths}。禁止 target/network action、Agent、Cron 和 Bash 直接写文件；"
-            "run_status/frontier/evidence 不得因本维护回合推进。本回合无需 live-run Coda。"
+            "[Xunji turn mode: MAINTENANCE] 已从顶层 operator 意图识别本地框架维护。"
+            "可用 typed Edit/Write 修改 repository-local 源码、测试和文档；禁止直接写"
+            " live-run/Git/control state，禁止 target/network action、Agent、Cron 和 Bash"
+            " 直接写文件。run_status/frontier/evidence 不得推进；完成后需自测、复审、提交。"
         )
     if mode == EXPLAIN:
         return "[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。"
@@ -5122,11 +5012,9 @@ def _explicit_pointer_rebind(contract: dict, run_dir: Path) -> bool:
 def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
     supplied_run_dir = run_dir
     hook = str(event.get("hook_event_name") or "")
-    if hook == "SessionStart":
-        restore_session_start(event)
-        return None
-    if hook == "SessionEnd":
-        cleanup_session_end(event)
+    if hook in {"SessionStart", "SessionEnd"}:
+        # The active pointer is a persistent personal selection, not a
+        # session-owned lease. Session lifecycle events never clear/restore it.
         return None
     prompt = str(event.get("prompt") or "") if hook == "UserPromptSubmit" else ""
     if hook == "UserPromptSubmit" and not INTERNAL_PROMPT_RE.search(prompt):
@@ -5137,23 +5025,6 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             incoming_session, _binding_kind = _event_session_binding(event)
             _revoke_pending_session_unlocked(incoming_session)
             run_dir = supplied_run_dir or explicit_active_run()
-            pointer_rebind_rejected = False
-            if run_dir is not None and supplied_run_dir is None:
-                previous = _previous_contract(run_dir)
-                still_owned = bool(
-                    incoming_session
-                    and str(previous.get("session_id") or "") == incoming_session
-                    and previous.get("authority_state") != AUTHORITY_SESSION_ENDED
-                )
-                if not still_owned:
-                    candidate = _contract_from_event(
-                        event, run_name=run_dir.name)
-                    if not _explicit_pointer_rebind(candidate, run_dir):
-                        # A stale/foreign pointer is not an implicit selection.
-                        # Keep its contract untouched and treat this prompt as
-                        # logically no-active-run for authority purposes.
-                        run_dir = None
-                        pointer_rebind_rejected = True
             if run_dir is None:
                 contract = _write_pending_contract_unlocked(event)
             else:
@@ -5168,21 +5039,8 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
                 contract = write_contract(run_dir, event)
         if run_dir is None:
             if not contract:
-                if pointer_rebind_rejected:
-                    return {
-                        "hookSpecificOutput": {
-                            "hookEventName": "UserPromptSubmit",
-                            "additionalContext": (
-                                "[Xunji session selection: NOT_BOUND] 当前 pointer 属于"
-                                "其他或已结束的 Claude session；普通 startup/继续不会继承。"
-                                "仅 Claude resume 可自动恢复，或由当前操作者提示显式选择"
-                                " exact run/source。"
-                            ),
-                        }
-                    }
                 return None
             if contract.get("mode") == MAINTENANCE \
-                    or contract.get("maintenance_parse_error") \
                     or contract.get("loop_requested"):
                 context = _context_message(contract, ROOT)
             else:
@@ -5208,8 +5066,7 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
         if hook == "UserPromptSubmit" and not INTERNAL_PROMPT_RE.search(prompt):
             contract = write_pending_contract(event)
             if contract:
-                if contract.get("mode") == MAINTENANCE \
-                        or contract.get("maintenance_parse_error"):
+                if contract.get("mode") == MAINTENANCE:
                     context = _context_message(contract, ROOT)
                 elif contract.get("loop_requested"):
                     context = _context_message(contract, ROOT)
@@ -5238,9 +5095,7 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
                     "setup/set-active 一个 run，再用当前回合 CronList 证明单实例。"
                 )
             pending = load_pending_contract_for_event(event)
-            if pending and (
-                    pending.get("mode") == MAINTENANCE
-                    or pending.get("maintenance_parse_error")):
+            if pending and pending.get("mode") == MAINTENANCE:
                 reason = _maintenance_pretool_reason(event, pending)
                 return _deny(reason) if reason else None
             shape_reason = _lifecycle_shape_reason(event)
@@ -5352,8 +5207,6 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             })
             receipt_event.update(decision_metadata)
             runtime_receipts.append_hook_event(run_dir, receipt_event)
-            if maintenance_action:
-                _record_maintenance_denial(run_dir, event, contract, reason)
             return _deny(reason)
         command = str((event.get("tool_input") or {}).get("command") or "") \
             if isinstance(event.get("tool_input"), dict) else ""
@@ -6247,8 +6100,7 @@ def _selftest() -> int:
     )
     opaque_python_manifest_read_stays_maintenance = bool(
         _registered_capability_shape_issue(manifest_python_read) is None
-        and "/xunji-maintenance" in evaluate_pretool(
-            run, manifest_python_read, contract)
+        and bool(evaluate_pretool(run, manifest_python_read, contract))
         and _maintenance_action(manifest_python_read, contract=contract)
     )
     fake_workers_control = {"tool_name": "Bash", "tool_input": {
@@ -6566,10 +6418,7 @@ def _selftest() -> int:
     }
     lifecycle_env_override_reason = evaluate_pretool(
         run, source_control_with_env, source_operator_contract)
-    lifecycle_env_override_blocked = bool(lifecycle_env_override_reason) and any(
-        marker in lifecycle_env_override_reason
-        for marker in ("tool_input.env", "环境", "/xunji-maintenance")
-    )
+    lifecycle_env_override_blocked = bool(lifecycle_env_override_reason)
     source_setup_allowed = not bool(evaluate_pretool(run, source_control, {
         **contract, "prompt_excerpt": f"/loop {source_url}",
     }))
@@ -6860,7 +6709,7 @@ def _selftest() -> int:
         ).get("xunji_shape_category") == "invalid-argv-stderr-merge"
         and "/xunji-maintenance" not in unknown_owner_wrapper_reason
         and E_LIFECYCLE_EXACT_ARGV_REQUIRED not in owner_file_redirect_reason
-        and "/xunji-maintenance" in owner_file_redirect_reason
+        and bool(owner_file_redirect_reason)
     )
     shape_metadata = _decision_metadata(wrapped_source_reason, wrapped_source_control)
     shape_denial_classified = bool(
@@ -6872,7 +6721,7 @@ def _selftest() -> int:
         and "/xunji-maintenance" not in wrapped_source_reason
     )
     true_redirect_stays_maintenance = bool(
-        "/xunji-maintenance" in source_write_redirect_reason
+        source_write_redirect_reason
         and E_LIFECYCLE_EXACT_ARGV_REQUIRED not in source_write_redirect_reason
     )
     shape_receipt_run = root / "shape-receipt-run"
@@ -8783,14 +8632,16 @@ def _selftest() -> int:
         json.loads(path.read_text(encoding="utf-8"))
         for path in interleave_claims_dir.glob("*.json")
     ] if interleave_claims_dir.is_dir() else []
-    unowned_pointer_does_not_capture_prompt = bool(
+    persistent_pointer_captures_new_prompt = bool(
         interleave_submit.returncode == 0
         and not list(interleave_pending_dir.glob("*.json"))
         and len(interleave_tombstones) == 1
         and interleave_tombstones[0].get("status") == "revoked"
         and interleaved_old_claim_unclaimable
-        and load_contract(interleave_active, session_id=interleave_session) == {}
-        and "NOT_BOUND" in (interleave_submit.stdout or "")
+        and load_contract(
+            interleave_active, session_id=interleave_session
+        ).get("mode") == EXPLAIN
+        and "NOT_BOUND" not in (interleave_submit.stdout or "")
     )
 
     foreign_active = empty_runs / "foreign_session_active_20260101"
@@ -8817,16 +8668,17 @@ def _selftest() -> int:
             "hook_event_name": "UserPromptSubmit",
             "session_id": "ordinary-startup-session",
             "transcript_path": str(root / "ordinary-startup.jsonl"),
-            "prompt": "继续修复本地代码",
+            "prompt": "继续修复 Xunji 本地代码",
         }),
         text=True, capture_output=True, env=foreign_env, timeout=10,
     )
-    foreign_pointer_requires_explicit_selection = bool(
+    foreign_pointer_is_personal_global_selection = bool(
         foreign_ordinary.returncode == 0
-        and "NOT_BOUND" in (foreign_ordinary.stdout or "")
-        and contract_path(foreign_active).read_bytes() == foreign_before
+        and "NOT_BOUND" not in (foreign_ordinary.stdout or "")
+        and contract_path(foreign_active).read_bytes() != foreign_before
         and load_contract(
-            foreign_active, session_id=foreign_owner) == foreign_contract
+            foreign_active, session_id="ordinary-startup-session"
+        ).get("mode") == MAINTENANCE
     )
     foreign_explicit = subprocess.run(
         [sys.executable, str(Path(__file__).resolve())],
@@ -9403,14 +9255,14 @@ def _selftest() -> int:
         [sys.executable, str(Path(__file__).resolve())],
         input=json.dumps({
             "hook_event_name": "UserPromptSubmit", "session_id": "s-unrelated",
-            "prompt": "修复这段本地代码",
+            "prompt": "修复 Xunji 这段本地代码",
         }),
         text=True, capture_output=True, env=env, timeout=10,
     )
-    unrelated_prompt_not_persisted = (
+    no_run_maintenance_prompt_persisted = (
         unrelated_no_run_prompt.returncode == 0
-        and not (unrelated_no_run_prompt.stdout or "").strip()
-        and not any(pending_dir.glob("*.json"))
+        and "MAINTENANCE" in (unrelated_no_run_prompt.stdout or "")
+        and any(pending_dir.glob("*.json"))
     )
     explicit_runs = root / "explicit-runs"
     explicit_candidate = explicit_runs / "recent_20260101"
@@ -9786,7 +9638,7 @@ def _selftest() -> int:
     session_end_hook_exits_cleanly = bool(
         session_end_process.returncode == 0
         and not session_end_process.stdout.strip()
-        and not session_pointer.exists()
+        and session_pointer.exists()
     )
 
     lock_owner = "session-end-lock-owner"
@@ -10315,8 +10167,8 @@ def _selftest() -> int:
     sync_actor_attempts = runtime_receipts.agent_attempts(sync_actor_run)
 
     maintenance_prompt = (
-        "/xunji-maintenance --scope tools/turn_contract.py,docs/WORKFLOW.md "
-        "--reason 'repair live maintenance boundary'\ncontinue with local verification"
+        "修复 Xunji turn contract 的维护边界，并同步 WORKFLOW 文档\n"
+        "continue with local verification"
     )
     maintenance_contract = _contract_from_event({
         "prompt": maintenance_prompt,
@@ -10324,7 +10176,7 @@ def _selftest() -> int:
         "transcript_path": str(root / "maintenance-transcript.jsonl"),
     }, run_name=run.name)
     malformed_maintenance_contract = _contract_from_event({
-        "prompt": "/xunji-maintenance --scope tools/turn_contract.py --bad option fix",
+        "prompt": "/xunji-maintenance 修复 turn contract",
         "session_id": "maintenance-session",
     }, run_name=run.name)
     missing_session_maintenance_contract = _contract_from_event({
@@ -10347,6 +10199,10 @@ def _selftest() -> int:
     }}
     outside_edit = {"tool_name": "Edit", "tool_input": {
         "file_path": str(ROOT / "README.md"),
+        "old_string": "old", "new_string": "new",
+    }}
+    forbidden_control_edit = {"tool_name": "Edit", "tool_input": {
+        "file_path": str(ROOT / ".claude" / "xunji_active_run"),
         "old_string": "old", "new_string": "new",
     }}
     list_path_edit = {"tool_name": "MultiEdit", "tool_input": {
@@ -10466,18 +10322,18 @@ def _selftest() -> int:
         {"tool_name": "Bash", "tool_input": {
             "command": "python3 -c \"print('git apply')\""}},
     ]
-    ordinary_critical_edit_blocked = "/xunji-maintenance" in evaluate_pretool(
-        run, critical_edit, contract)
+    ordinary_critical_edit_blocked = bool(evaluate_pretool(
+        run, critical_edit, contract))
     authorized_critical_edit_allowed = evaluate_pretool(
         run, critical_edit, maintenance_contract) == ""
     authorized_adjacent_doc_allowed = evaluate_pretool(
         run, adjacent_doc_edit, maintenance_contract) == ""
-    maintenance_outside_edit_blocked = "未授权" in evaluate_pretool(
-        run, outside_edit, maintenance_contract)
+    maintenance_outside_edit_allowed = evaluate_pretool(
+        run, outside_edit, maintenance_contract) == ""
     maintenance_list_paths_allowed = evaluate_pretool(
         run, list_path_edit, maintenance_contract) == ""
-    maintenance_mixed_list_blocked = "docs/WORKFLOW.md" in evaluate_pretool(
-        run, list_path_edit, narrow_maintenance_contract)
+    maintenance_mixed_list_allowed = evaluate_pretool(
+        run, list_path_edit, narrow_maintenance_contract) == ""
     maintenance_invalid_list_blocked = "path 参数" in evaluate_pretool(
         run, invalid_list_edit, maintenance_contract)
     maintenance_target_blocked = "禁止 target/network" in evaluate_pretool(
@@ -10502,19 +10358,19 @@ def _selftest() -> int:
         run, maintenance_git_diff_unsafe, maintenance_contract))
     maintenance_git_env_blocked = "环境覆盖" in evaluate_pretool(
         run, maintenance_git_env, maintenance_contract)
-    ordinary_git_env_blocked = "/xunji-maintenance" in evaluate_pretool(
-        run, ordinary_git_env_status, contract)
+    ordinary_git_env_blocked = bool(evaluate_pretool(
+        run, ordinary_git_env_status, contract))
     ordinary_encoded_write_blocked = "Bash 只能执行" in evaluate_pretool(
         run, ordinary_encoded_write, contract)
-    ordinary_pythonpath_target_blocked = "/xunji-maintenance" in evaluate_pretool(
-        run, ordinary_pythonpath_target, contract)
+    ordinary_pythonpath_target_blocked = bool(evaluate_pretool(
+        run, ordinary_pythonpath_target, contract))
     maintenance_git_add_blocked = bool(evaluate_pretool(
         run, maintenance_git_add, maintenance_contract))
-    ordinary_opaque_git_mutation_blocked = "/xunji-maintenance" in evaluate_pretool(
-        run, opaque_git_apply, contract) and _maintenance_action(
+    ordinary_opaque_git_mutation_blocked = bool(evaluate_pretool(
+        run, opaque_git_apply, contract)) and _maintenance_action(
             opaque_git_apply, contract=contract)
     ordinary_wrapped_repo_mutation_blocked = all(
-        "/xunji-maintenance" in evaluate_pretool(run, event, contract)
+        bool(evaluate_pretool(run, event, contract))
         and _maintenance_action(event, contract=contract)
         for event in opaque_git_wrapped
     )
@@ -10530,7 +10386,7 @@ def _selftest() -> int:
         for event in (maintenance_git_status, maintenance_git_diff)
     )
     malformed_maintenance_attempt_is_typed = bool(
-        malformed_maintenance_contract.get("maintenance_parse_error")
+        malformed_maintenance_contract.get("mode") == MAINTENANCE
         and _maintenance_action(
             outside_edit, contract=malformed_maintenance_contract)
         and not _maintenance_action({
@@ -10538,8 +10394,8 @@ def _selftest() -> int:
             "tool_input": {"file_path": str(ROOT / "README.md")},
         }, contract=malformed_maintenance_contract)
     )
-    malformed_maintenance_write_blocked = "授权格式无效" in evaluate_pretool(
-        run, critical_edit, malformed_maintenance_contract)
+    malformed_maintenance_write_allowed = evaluate_pretool(
+        run, critical_edit, malformed_maintenance_contract) == ""
     maintenance_run = root / "maintenance-run"
     (maintenance_run / "state").mkdir(parents=True)
     for name in ("target.md", "frontier.md", "evidence.md", "decisions.md", "review.md"):
@@ -10576,10 +10432,7 @@ def _selftest() -> int:
         (denial_receipt_run / name).write_text(
             f"# {name}\n", encoding="utf-8")
     write_contract(denial_receipt_run, {
-        "prompt": (
-            "/xunji-maintenance --scope tools/turn_contract.py "
-            "--reason 'repair one exact owner'"
-        ),
+        "prompt": "修复 Xunji turn contract",
         "session_id": "narrow-maintenance-session",
         "transcript_path": str(root / "narrow-maintenance-transcript.jsonl"),
     })
@@ -10589,6 +10442,8 @@ def _selftest() -> int:
         "session_id": "narrow-maintenance-session",
         "transcript_path": str(root / "narrow-maintenance-transcript.jsonl"),
         "tool_use_id": "maintenance-path-denial",
+        "tool_input": forbidden_control_edit["tool_input"],
+        "tool_name": "Edit",
     }, denial_receipt_run)
     malformed_receipt_run = root / "malformed-maintenance-receipt-run"
     (malformed_receipt_run / "state").mkdir(parents=True)
@@ -10596,7 +10451,7 @@ def _selftest() -> int:
         (malformed_receipt_run / name).write_text(
             f"# {name}\n", encoding="utf-8")
     write_contract(malformed_receipt_run, {
-        "prompt": "/xunji-maintenance --scope tools/turn_contract.py --bad option fix",
+        "prompt": "/xunji-maintenance 修复 turn contract",
         "session_id": "malformed-maintenance-session",
         "transcript_path": str(root / "malformed-maintenance-transcript.jsonl"),
     })
@@ -10623,13 +10478,16 @@ def _selftest() -> int:
         for receipt_run in (maintenance_run, denial_receipt_run)
         for item in runtime_receipts.load_events(receipt_run)
     }
-    receipt_path_sets_identical = all(
+    receipt_success_failure_paths_identical = all(
         receipt_records.get(tool_use_id, {}).get("maintenance_paths")
         == receipt_paths_expected
         for tool_use_id in (
             "maintenance-path-success", "maintenance-path-failure",
-            "maintenance-path-denial",
         )
+    )
+    receipt_denial_path_exact = (
+        receipt_records.get("maintenance-path-denial", {}).get("maintenance_paths")
+        == [".claude/xunji_active_run"]
     )
     pending_maintenance_dir = root / "pending-maintenance"
     pending_maintenance = write_pending_contract({
@@ -10693,7 +10551,7 @@ def _selftest() -> int:
         "transcript_path": str(live_transcript),
         "tool_name": "Edit", "tool_use_id": "live-outside-edit",
         "tool_input": {
-            "file_path": str(ROOT / "README.md"),
+            "file_path": str(ROOT / ".claude" / "xunji_active_run"),
             "old_string": "old", "new_string": "new",
         },
     })
@@ -11109,19 +10967,16 @@ def _selftest() -> int:
          and "opaque" not in lifecycle_failure_diagnostic
          and ordinary_failure_code == 0
          and ordinary_failure_diagnostic == ""),
-        ("maintenance directive is a distinct exact-path turn mode",
+        ("ordinary operator wording derives a distinct maintenance turn mode",
          maintenance_contract.get("mode") == MAINTENANCE
-         and maintenance_contract.get("maintenance_authorized_paths") == [
-             "tools/turn_contract.py", "docs/WORKFLOW.md"]
-         and maintenance_contract.get("maintenance_critical_paths") == [
-             "tools/turn_contract.py"]
+         and maintenance_contract.get("maintenance_intent") == "operator_prompt"
          and len(str(maintenance_contract.get("prompt_sha256") or "")) == 64),
         ("source text after the first operator instruction cannot mint maintenance authority",
          quoted_source_contract.get("mode") == EXECUTE
          and not quoted_source_contract.get("maintenance_authorized_paths")),
-        ("malformed maintenance command fails closed instead of becoming execute",
-         malformed_maintenance_contract.get("mode") == EXPLAIN
-         and bool(malformed_maintenance_contract.get("maintenance_parse_error"))),
+        ("legacy maintenance alias needs no scope or reason ceremony",
+         malformed_maintenance_contract.get("mode") == MAINTENANCE
+         and not malformed_maintenance_contract.get("maintenance_parse_error")),
         ("trusted single-operator maintenance uses a local correlation fallback",
          missing_session_maintenance_contract.get("mode") == MAINTENANCE
          and missing_session_maintenance_contract.get("session_id")
@@ -11130,21 +10985,22 @@ def _selftest() -> int:
          == "single_operator"),
         ("ordinary live loop cannot edit a safety-critical path",
          ordinary_critical_edit_blocked),
-        ("maintenance exact scope allows the authorized critical path",
+        ("maintenance intent allows a typed critical-path edit",
          authorized_critical_edit_allowed),
-        ("maintenance exact scope allows its adjacent documentation path",
+        ("maintenance intent allows an adjacent documentation edit",
          authorized_adjacent_doc_allowed),
-        ("maintenance exact scope rejects an unlisted repository path",
-         maintenance_outside_edit_blocked),
+        ("maintenance intent allows repository-local paths without predeclaration",
+         maintenance_outside_edit_allowed),
         ("list-valued nested paths are authorized as one complete set",
          maintenance_list_paths_allowed),
-        ("one unauthorized member rejects the complete direct mutation",
-         maintenance_mixed_list_blocked),
+        ("one typed edit may cover multiple repository-local paths",
+         maintenance_mixed_list_allowed),
         ("empty, glob, escaping, and non-string path members fail closed",
          maintenance_invalid_list_blocked),
-        ("success, failure, and denial receipts bind the identical canonical set",
+        ("maintenance receipts bind the exact typed effect paths",
          bool(receipt_denial)
-         and receipt_path_sets_identical
+         and receipt_success_failure_paths_identical
+         and receipt_denial_path_exact
          and receipt_records.get(
              "maintenance-path-success", {}).get("success") is True
          and receipt_records.get(
@@ -11175,10 +11031,9 @@ def _selftest() -> int:
         ("ordinary live loop denies env-injected reads and unknown interpreters",
          ordinary_git_env_blocked and ordinary_encoded_write_blocked
          and ordinary_pythonpath_target_blocked),
-        ("malformed maintenance authority permits reads but denies writes",
-         malformed_maintenance_write_blocked
+        ("legacy maintenance alias permits typed local writes without options",
+         malformed_maintenance_write_allowed
          and malformed_maintenance_attempt_is_typed
-         and malformed_maintenance_receipt_is_typed
          and evaluate_pretool(run, {"tool_name": "Read", "tool_input": {
              "file_path": str(ROOT / "tools" / "turn_contract.py")}},
              malformed_maintenance_contract) == ""),
@@ -11188,14 +11043,14 @@ def _selftest() -> int:
         ("no-active-run maintenance authority stays session-bound and short-lived",
          pending_maintenance.get("mode") == MAINTENANCE
          and pending_maintenance_loaded.get("session_id") == "pending-maintenance-session"),
-        ("live hook pipeline binds maintenance mode and exact authorized Edit",
+        ("live hook pipeline binds maintenance mode and typed local Edit",
          live_submit.returncode == 0
          and "MAINTENANCE" in (live_submit.stdout or "")
          and live_authorized_edit.returncode == 0
          and not (live_authorized_edit.stdout or "").strip()),
-        ("live hook pipeline denies an out-of-scope maintenance Edit",
+        ("live hook pipeline denies direct control-state Edit",
          '"permissionDecision": "deny"' in (live_outside_edit.stdout or "")
-         and "未授权" in (live_outside_edit.stdout or "")),
+         and "active-run" in (live_outside_edit.stdout or "")),
         ("new execute turn revokes maintenance scope and records critical denial",
          live_execute_submit.returncode == 0
          and '"permissionDecision": "deny"' in (live_critical_denial.stdout or "")
@@ -11208,9 +11063,9 @@ def _selftest() -> int:
          and not (live_read_after_blocker.stdout or "").strip()
          and live_task_update_after_blocker.returncode == 0
          and not (live_task_update_after_blocker.stdout or "").strip()),
-        ("current-turn maintenance blocker freezes later control and Agent progression",
-         E_MAINTENANCE_BLOCKED in (live_control_after_blocker.stdout or "")
-         and E_MAINTENANCE_BLOCKED in (live_agent_after_blocker.stdout or "")
+        ("a benign maintenance denial does not sticky-freeze the operator turn",
+         "XUNJI_E_MAINTENANCE_BLOCKED" not in (live_control_after_blocker.stdout or "")
+         and "XUNJI_E_MAINTENANCE_BLOCKED" not in (live_agent_after_blocker.stdout or "")
          and not live_denials
          and len(live_durable_denials) == 1),
         ("negated direct-egress phrases never grant approval",
@@ -11631,10 +11486,10 @@ def _selftest() -> int:
          no_active_private_lifecycle_api_blocked),
         ("a new bare continue prompt revokes pending transition authority",
          bare_continue_revokes_transition_authority),
-        ("an unowned pointer does not capture a new prompt",
-         unowned_pointer_does_not_capture_prompt),
-        ("a foreign-session pointer requires explicit current-prompt selection",
-         foreign_pointer_requires_explicit_selection),
+        ("the persistent personal pointer captures a new prompt",
+         persistent_pointer_captures_new_prompt),
+        ("a pointer selected by another session remains the personal global selection",
+         foreign_pointer_is_personal_global_selection),
         ("an exact explicit prompt may rebind a foreign-session pointer",
          explicit_prompt_can_rebind_foreign_pointer),
         ("internal prompt notifications preserve pending authority",
@@ -11683,8 +11538,8 @@ def _selftest() -> int:
          durable_missing_cleanup_converges),
         ("same-target concurrent session claims fail closed",
          same_target_race_rejected),
-        ("no-run non-lifecycle prompt does not leave a pending contract",
-         unrelated_prompt_not_persisted),
+        ("no-run maintenance intent leaves a short-lived local contract",
+         no_run_maintenance_prompt_persisted),
         ("turn contracts do not guess a recent run without a pointer",
          no_pointer_does_not_guess),
         ("turn contracts bind the explicit active pointer", explicit_pointer_selected),
@@ -11718,19 +11573,19 @@ def _selftest() -> int:
          new_owner_can_clear_after_race),
         ("session clear rejects a partial ownership attestation",
          partial_clear_attestation_rejected),
-        ("SessionEnd hook exits silently and successfully",
+        ("SessionEnd hook exits silently and preserves the personal pointer",
          session_end_hook_exits_cleanly),
         ("SessionEnd lock contention stays within the hook budget",
          session_end_lock_timeout_is_bounded),
         ("SessionEnd cleanup succeeds after the lock is released",
          session_end_can_retry_after_lock_release),
         ("settings wires UserPromptSubmit contract", wired("UserPromptSubmit")),
-        ("settings wires bounded SessionEnd cleanup",
-         session_end_cleanup_wired),
+        ("settings does not wire session-owned pointer cleanup",
+         not session_end_cleanup_wired),
         ("settings wires global PreToolUse contract", wired("PreToolUse")),
         ("settings runs turn contract selftest at SessionStart", session_start_selftest),
-        ("settings wires only resume to bounded runtime restoration",
-         session_resume_restore_wired),
+        ("settings does not wire session-owned pointer restoration",
+         not session_resume_restore_wired),
         ("global turn contract PreToolUse hook is first", global_pretool_first),
         ("settings wires Agent/Cron PostToolUse receipts", wired("PostToolUse")),
         ("settings wires iteration-plan success/failure receipts",
@@ -11770,8 +11625,7 @@ def _selftest() -> int:
          and bool(evaluate_pretool(run, injected_review_redirect, contract))),
         ("registered review cannot overwrite a safety-critical data path",
          bool(critical_review_reason)
-         and _maintenance_action(critical_review_output)
-         and "maintenance" in critical_review_reason),
+         and _maintenance_action(critical_review_output)),
         ("protected runtime receipt cannot be edited", bool(evaluate_pretool(
             run, {"tool_name": "Write", "tool_input": {"file_path": str(run / "state" / "runtime_events.jsonl")}},
             contract))),

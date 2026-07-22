@@ -35,18 +35,12 @@ CODA_RE = re.compile(
 )
 NORMAL_CODA = "NORMAL_CODA"
 TARGET_DENIED = "TARGET_DENIED"
-MAINTENANCE_BLOCKED = "MAINTENANCE_BLOCKED"
-STOP_OUTPUT_TYPES = frozenset({NORMAL_CODA, TARGET_DENIED, MAINTENANCE_BLOCKED})
+STOP_OUTPUT_TYPES = frozenset({NORMAL_CODA, TARGET_DENIED})
 STOP_OUTPUT_SCHEMA = "xunji.stop-output.v1"
 STOP_RECORD_FIELDS = {
     NORMAL_CODA: frozenset({"schema", "type", "coda_kind", "next_action"}),
     TARGET_DENIED: frozenset({
         "schema", "type", "error", "recovery", "executed", "next_action",
-    }),
-    MAINTENANCE_BLOCKED: frozenset({
-        "schema", "type", "blocker_class", "error", "recovery",
-        "success_receipt", "reason", "scope", "required_authority",
-        "next_action",
     }),
 }
 
@@ -62,7 +56,6 @@ RECOVERY_TYPES = frozenset({
 })
 
 E_TARGET_ACTION_DENIED = "XUNJI_E_TARGET_ACTION_DENIED"
-E_MAINTENANCE_BLOCKED = "XUNJI_E_MAINTENANCE_BLOCKED"
 _STABLE_ERROR_RE = re.compile(r"\A[A-Z][A-Z0-9_]{2,127}\Z")
 _RESERVED_STOP_MARKER_RE = re.compile(
     r"(?m)^(?:XUNJI_EXECUTION_STATUS=(?:DENIED|BLOCKED)|"
@@ -219,22 +212,6 @@ def _validate_stop_record(record: object) -> list[str]:
         if record.get("executed") is not False:
             errors.append("TARGET_DENIED must declare executed=false")
         return errors
-    if record.get("blocker_class") != "MAINTENANCE":
-        errors.append("MAINTENANCE_BLOCKED has the wrong blocker class")
-    if record.get("success_receipt") is not False:
-        errors.append("MAINTENANCE_BLOCKED requires success_receipt=false")
-    reason = record.get("reason")
-    if not isinstance(reason, str) or not (1 <= len(reason) <= 6000):
-        errors.append("maintenance reason length is invalid")
-    scope = record.get("scope")
-    if not isinstance(scope, list) or len(scope) > 16 \
-            or len(scope) != len({str(item) for item in scope}) \
-            or any(not isinstance(item, str) or not (1 <= len(item) <= 1024)
-                   for item in scope):
-        errors.append("maintenance scope is invalid")
-    authority = record.get("required_authority")
-    if not isinstance(authority, str) or not (1 <= len(authority) <= 20000):
-        errors.append("required_authority length is invalid")
     return errors
 
 
@@ -331,89 +308,35 @@ def _denied_result_claim_reason(
     )
 
 
-def _maintenance_blocked_record(blocked: list[dict]) -> dict:
-    if not blocked or any(
-            not isinstance(receipt, dict)
-            or receipt.get("maintenance_action") is not True
-            for receipt in blocked):
-        raise ValueError(
-            "MAINTENANCE_BLOCKED requires only receipt-classified maintenance blockers"
-        )
+_MAINTENANCE_SUCCESS_CLAIM_RE = re.compile(
+    r"(?<!未)(?:已|已经|成功).{0,24}(?:修复|修改|还原|完成|写入|提交|通过)|"
+    r"\b(?:fixed|modified|reverted|completed|succeeded|passed)\b",
+    re.I,
+)
+_NEGATED_ENGLISH_MAINTENANCE_RE = re.compile(
+    r"\b(?:not|never)\s+(?:fixed|modified|reverted|completed|succeeded|passed)\b|"
+    r"\b(?:did\s+not|didn't|failed\s+to)\s+"
+    r"(?:fix|modify|revert|complete|succeed|pass)\b",
+    re.I,
+)
+
+
+def _maintenance_truth_claim_reason(msg: str, blocked: list[dict]) -> str:
+    """Reject only unsupported success claims, never freeze honest progress."""
+    clean = _strip_invisible(msg).strip()
+    claim_text = _NEGATED_ENGLISH_MAINTENANCE_RE.sub("", clean)
+    if not blocked or not _MAINTENANCE_SUCCESS_CLAIM_RE.search(claim_text):
+        return ""
     latest = blocked[-1] if blocked else {}
     paths = sorted({
         str(path) for path in (latest.get("maintenance_paths") or [])
         if str(path).strip()
     })
-    scope = ",".join(paths) if paths else "<exact-path>"
-    raw_reason = str(latest.get("decision_reason") or "")
-    if not raw_reason and latest.get("hook_event_name") == "PostToolUseFailure":
-        raw_reason = "tool failure: " + str(latest.get("response_excerpt") or "")
-    reason = (
-        re.sub(r"\s+", " ", _strip_invisible(raw_reason)).strip()
-        or "maintenance authority or successful tool result required"
-    )[:6000]
-    recovery = _recovery_semantics(latest, maintenance_blocked=True)
-    code = _stable_receipt_error(latest, E_MAINTENANCE_BLOCKED)
-    if recovery == RECOVERY_SAME_TURN_RETRY:
-        action = "修复工具失败后在当前回合重试同一框架维护动作"
-        required_authority = "current operator turn contract (no new authority)"
-    elif recovery == RECOVERY_SAME_TURN_ALTERNATIVE:
-        action = "按 XUNJI_ERROR 修正命令形状后在当前回合重试同一框架维护动作"
-        required_authority = "current operator turn contract (no new authority)"
-    elif recovery == RECOVERY_HARD_SAFETY_DENIAL:
-        action = "停止该维护动作并保留硬安全边界"
-        required_authority = "none (hard safety denial is not authorizable)"
-    else:
-        action = "在新 operator prompt 取得 exact-path 授权后重试同一框架维护动作"
-        required_authority = (
-            f"/xunji-maintenance --scope {scope} --reason <reason>"
-        )
-    record = {
-        "schema": STOP_OUTPUT_SCHEMA,
-        "type": MAINTENANCE_BLOCKED,
-        "blocker_class": "MAINTENANCE",
-        "error": code,
-        "recovery": recovery,
-        "success_receipt": False,
-        "reason": reason,
-        "scope": paths,
-        "required_authority": required_authority,
-        "next_action": action,
-    }
-    errors = _validate_stop_record(record)
-    if errors:
-        raise RuntimeError(
-            "invalid MAINTENANCE_BLOCKED contract: " + "; ".join(errors))
-    return record
-
-
-def _maintenance_blocked_text(blocked: list[dict]) -> str:
-    record = _maintenance_blocked_record(blocked)
+    scope = ", ".join(paths) if paths else "the denied maintenance effect"
     return (
-        "XUNJI_MAINTENANCE_STATUS=BLOCKED\n"
-        f"XUNJI_STOP_TYPE={MAINTENANCE_BLOCKED}\n"
-        "XUNJI_BLOCKER_CLASS=MAINTENANCE\n"
-        f"XUNJI_ERROR={record['error']}\n"
-        f"XUNJI_RECOVERY={record['recovery']}\n"
-        "未取得框架维护动作的成功回执；不得声称修改完成。\n"
-        f"阻塞原因: {record['reason']}\n"
-        f"所需授权: {record['required_authority']}\n"
-        f"下一行动: {record['next_action']}"
-    )
-
-
-def _maintenance_blocked_claim_reason(msg: str, blocked: list[dict]) -> str:
-    """A denied/failed maintenance action cannot be narrated as successful."""
-    if not blocked:
-        return ""
-    clean = _strip_invisible(msg).strip()
-    required = _maintenance_blocked_text(blocked)
-    if clean == required:
-        return ""
-    return (
-        "[未执行维护真实性硬拦] 本回合仍有未被同工具、同执行动作成功回执消解的"
-        "安全关键框架维护拒绝。禁止声称已修改、已还原或已修复；继续取得精确授权后"
-        "重试同一动作，或仅输出以下 fixed envelope：\n" + required
+        "[未执行维护真实性硬拦] 尚无成功回执的维护拒绝/失败不能被描述为已修复、"
+        f"已修改或已完成（effect={scope}）。请如实说明失败，或修正 typed path/argv 后"
+        "在当前维护回合重试；不需要新的维护授权仪式。"
     )
 
 
@@ -425,12 +348,13 @@ def _stop_output_union(
 ) -> tuple[str, str]:
     """Return the exclusive Stop output variant and any validation error.
 
-    Maintenance blockers take deterministic precedence if both blocker families are
-    present.  A valid fixed envelope is terminal and must not be parsed as Coda.
+    Maintenance receipts only challenge unsupported success prose. Target denials
+    retain the sole fixed terminal envelope.
     """
     clean = _strip_invisible(msg or "").strip()
-    if blocked:
-        return MAINTENANCE_BLOCKED, _maintenance_blocked_claim_reason(msg, blocked)
+    maintenance_error = _maintenance_truth_claim_reason(msg, blocked)
+    if maintenance_error:
+        return NORMAL_CODA, maintenance_error
     if denied:
         return TARGET_DENIED, _denied_result_claim_reason(msg, denied, run_dir)
     if _RESERVED_STOP_MARKER_RE.search(clean):
@@ -463,7 +387,7 @@ def validated_fixed_stop_kind(
     except Exception:
         return ""
     kind, error = _stop_output_union(msg, denied, blocked, run_dir)
-    return kind if kind in {TARGET_DENIED, MAINTENANCE_BLOCKED} and not error else ""
+    return kind if kind == TARGET_DENIED and not error else ""
 
 
 def _emit_gate_violation(reason: str, *, stop_hook_active: bool) -> None:
@@ -1042,13 +966,17 @@ def main() -> None:
             stop_kind, terminal_error = _stop_output_union(
                 msg, unresolved, unresolved_maintenance, run_dir)
             if terminal_error and (
-                    stop_kind in {TARGET_DENIED, MAINTENANCE_BLOCKED}
-                    or not protocol_exempt):
+                    terminal_error.startswith("[未执行维护真实性硬拦]")
+                    or stop_kind == TARGET_DENIED or not protocol_exempt):
                 _emit_gate_violation(terminal_error, stop_hook_active=stop_active)
                 sys.exit(0)
-            if stop_kind in {TARGET_DENIED, MAINTENANCE_BLOCKED}:
+            if stop_kind == TARGET_DENIED:
                 # Fixed terminal variants are complete Stop outputs.  They do not
                 # enter drift, ordinary Coda, Agent, or closure validators.
+                sys.exit(0)
+            if turn_mode == "MAINTENANCE":
+                # Maintenance truth was checked above. Do not apply live-run
+                # Reason/Coda/Agent/closure gates to a local maintenance turn.
                 sys.exit(0)
             # Reset stale session_state (Decision B-2)
             stale_sec = SESSION_STATE_STALE_SEC
@@ -1163,19 +1091,14 @@ def _selftest() -> int:
         contract_defs.get("targetDenied", {}).get("properties", {})
         .get("recovery", {}).get("enum", [])
     )
-    published_maintenance_recovery = set(
-        contract_defs.get("maintenanceBlocked", {}).get("properties", {})
-        .get("recovery", {}).get("enum", [])
-    )
     checks.append(("published Stop contract freezes the exclusive union",
                    published_types == STOP_OUTPUT_TYPES
                    and published_fields == STOP_RECORD_FIELDS
                    and published_recovery == RECOVERY_TYPES
-                   and published_maintenance_recovery == RECOVERY_TYPES
                    and all(definition.get("additionalProperties") is False
                            for definition in contract_defs.values()
                            if isinstance(definition, dict))
-                   and len(published_contract.get("oneOf", [])) == 3))
+                   and len(published_contract.get("oneOf", [])) == 2))
     valid_fixture_records = [
         item.get("record") for item in fixture.get("valid_records", [])
         if isinstance(item, dict)
@@ -1268,18 +1191,20 @@ def _selftest() -> int:
             "普通 /loop 不授权修改安全关键框架路径；需要操作者在新回合首条非空指令使用"
         ),
     }]
-    maintenance_text = _maintenance_blocked_text(maintenance_receipt)
     checks.append(("maintenance denial cannot be narrated as a successful repair", bool(
-        _maintenance_blocked_claim_reason("已修复并还原 turn_contract。", maintenance_receipt))))
-    checks.append(("maintenance denial envelope preserves exact path and original reason",
-                   "--scope tools/turn_contract.py" in maintenance_text
-                   and "普通 /loop 不授权修改" in maintenance_text
-                   and "XUNJI_STOP_TYPE=MAINTENANCE_BLOCKED" in maintenance_text
-                   and "XUNJI_RECOVERY=NEW_OPERATOR_AUTHORITY" in maintenance_text
-                   and envelope_shape_matches(
-                       maintenance_text, MAINTENANCE_BLOCKED)))
-    checks.append(("exact dynamic maintenance denial envelope is allowed", not bool(
-        _maintenance_blocked_claim_reason(maintenance_text, maintenance_receipt))))
+        _maintenance_truth_claim_reason(
+            "已修复并还原 turn_contract。", maintenance_receipt))))
+    checks.append(("maintenance denial permits honest same-turn correction", not bool(
+        _maintenance_truth_claim_reason(
+            "Edit 路径写错，已保留拒绝回执；下一行动: 修正路径后重试。",
+            maintenance_receipt))))
+    checks.append(("English negated maintenance result remains honest prose", all(
+        not _maintenance_truth_claim_reason(message, maintenance_receipt)
+        for message in (
+            "The edit was not fixed; I will retry with the correct path.",
+            "I failed to modify the pointer and did not complete the edit.",
+        )
+    )))
     maintenance_failure = [{
         "hook_event_name": "PostToolUseFailure",
         "tool_name": "Edit",
@@ -1287,13 +1212,12 @@ def _selftest() -> int:
         "maintenance_paths": ["tools/turn_contract.py"],
         "response_excerpt": '{"error":"old_string not found"}',
     }]
-    failure_text = _maintenance_blocked_text(maintenance_failure)
     checks.append(("maintenance tool failure cannot be narrated as success", bool(
-        _maintenance_blocked_claim_reason("Edit succeeded.", maintenance_failure))))
-    checks.append(("maintenance failure envelope preserves the tool error",
-                   "old_string not found" in failure_text
-                   and "XUNJI_MAINTENANCE_STATUS=BLOCKED" in failure_text
-                   and "XUNJI_RECOVERY=SAME_TURN_RETRY" in failure_text))
+        _maintenance_truth_claim_reason("Edit succeeded.", maintenance_failure))))
+    checks.append(("maintenance tool failure does not require a fixed envelope", not bool(
+        _maintenance_truth_claim_reason(
+            "Edit failed: old_string not found。下一行动: 读取当前内容后重试。",
+            maintenance_failure))))
     shape_denial = [{
         "hook_event_name": "PreToolUseDenied",
         "decision_code": "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED",
@@ -1312,35 +1236,23 @@ def _selftest() -> int:
     checks.append(("hard-safety denial has non-retry recovery semantics",
                    "XUNJI_RECOVERY=HARD_SAFETY_DENIAL"
                    in _target_denied_text(safety_denial)))
-    checks.append(("hard-safety maintenance blocker cannot request new authority",
-                   "XUNJI_RECOVERY=HARD_SAFETY_DENIAL"
-                   in _maintenance_blocked_text(safety_denial)
-                   and "hard safety denial is not authorizable"
-                   in _maintenance_blocked_text(safety_denial)))
-    non_maintenance_rejected = False
-    try:
-        _maintenance_blocked_record([{
-            "hook_event_name": "PreToolUseDenied",
-            "maintenance_action": False,
-            "decision_class": "command_shape",
-        }])
-    except ValueError:
-        non_maintenance_rejected = True
-    checks.append(("third Stop variant requires receipt-classified maintenance blockers",
-                   non_maintenance_rejected))
+    checks.append(("hard-safety maintenance receipt still rejects a false success claim",
+                   bool(_maintenance_truth_claim_reason(
+                       "安全边界修改已完成。", safety_denial))))
     normal_kind, normal_error = _stop_output_union(
         "下一行动: F-001 检查登录边界", [], [])
     target_kind, target_error = _stop_output_union(
         denied_text, denied_receipt, [])
-    blocked_kind, blocked_error = _stop_output_union(
-        maintenance_text, denied_receipt, maintenance_receipt)
-    checks.append(("Stop union variants are mutually exclusive",
-                   {normal_kind, target_kind, blocked_kind} == STOP_OUTPUT_TYPES
-                   and not normal_error and not target_error and not blocked_error))
+    maintenance_kind, maintenance_error = _stop_output_union(
+        "下一行动: 修正 Edit 路径并重试", [], maintenance_receipt)
+    checks.append(("Stop union has no sticky maintenance variant",
+                   {normal_kind, target_kind, maintenance_kind} == STOP_OUTPUT_TYPES
+                   and maintenance_kind == NORMAL_CODA
+                   and not normal_error and not target_error and not maintenance_error))
     precedence_kind, precedence_error = _stop_output_union(
         denied_text, denied_receipt, maintenance_receipt)
-    checks.append(("maintenance blocker deterministically precedes target denial",
-                   precedence_kind == MAINTENANCE_BLOCKED and bool(precedence_error)))
+    checks.append(("target denial remains the sole fixed receipt envelope",
+                   precedence_kind == TARGET_DENIED and not precedence_error))
     pointer = Path(tempfile.mkdtemp()) / "active-run"
     checks.append(("missing active-run pointer is not declared", not _active_run_declared(pointer)))
     pointer.write_text("runs/example\n", encoding="utf-8")
@@ -1920,7 +1832,7 @@ def _selftest() -> int:
     checks.append(("main: stale fixed envelope cannot bypass later Stop gates",
                    '"decision": "block"' in (forged_after_expiry.stdout or "")))
 
-    write_terminal_contract("MAINTENANCE", time.time() - 1)
+    write_terminal_contract("MAINTENANCE", time.time())
     _runtime_receipts.append_hook_event(terminal_run, {
         "hook_event_name": "PreToolUseDenied",
         "session_id": "s-terminal",
@@ -1938,15 +1850,26 @@ def _selftest() -> int:
     maintenance_pending = _runtime_receipts.unresolved_maintenance_blockers(
         terminal_run, session_id="s-terminal",
         since=json.loads(terminal_contract_path.read_text())['updated_at'])
-    maintenance_envelope = _maintenance_blocked_text(maintenance_pending)
-    maintenance_output_proc = invoke_stop(Path(__file__).resolve(), maintenance_envelope)
+    maintenance_output_proc = invoke_stop(
+        Path(__file__).resolve(),
+        "Edit 路径错误且未执行；已保留回执，修正后在当前回合重试。",
+    )
     maintenance_run_proc = invoke_stop(
-        ROOT / ".claude" / "hooks" / "run_gate.py", maintenance_envelope)
-    checks.append(("main: receipt-backed MAINTENANCE_BLOCKED bypasses ordinary Coda and run gates",
+        ROOT / ".claude" / "hooks" / "run_gate.py",
+        "Edit 路径错误且未执行；已保留回执，修正后在当前回合重试。",
+    )
+    false_maintenance_success = invoke_stop(
+        Path(__file__).resolve(), "turn_contract 已成功修复并完成。")
+    checks.append(("main: maintenance denial allows honest correction",
                    maintenance_output_proc.returncode == 0
-                   and not (maintenance_output_proc.stdout or "").strip()
-                   and maintenance_run_proc.returncode == 0
+                   and '"decision": "block"' not in (
+                       maintenance_output_proc.stdout or "")))
+    checks.append(("main: maintenance turn bypasses run progression gates",
+                   maintenance_run_proc.returncode == 0
                    and not (maintenance_run_proc.stdout or "").strip()))
+    checks.append(("main: maintenance denial still blocks false success",
+                   '"decision": "block"' in (
+                       false_maintenance_success.stdout or "")))
     write_terminal_contract("MAINTENANCE", time.time())
     maintenance_expired_proc = invoke_stop(
         Path(__file__).resolve(), "维护拒绝来自上一个 prompt，当前不声称已执行。")

@@ -217,14 +217,11 @@ Output:
 - **Switch only after setup completes**: setup inherits the current operator turn
   contract and then atomically updates the active-run pointer. An old run's Agent
   Board does not govern this lifecycle command. Never manually clear/edit the
-  pointer/selection receipts or use `--clear-active` to escape a gate. `SessionEnd`
-  is the sole automatic clear exception: the ending session may save and clear
-  only a pointer whose exact session/transcript contract it still owns, after old
-  authority is replaced by an `EXPLAIN_ONLY` barrier. Only exact Claude
-  `SessionStart.source=resume` may consume that receipt and restore the pointer;
-  all other start sources, new/fork sessions, and ordinary prompts remain unbound
-  unless the operator explicitly selects the exact run/source. Restored selection
-  stays `EXPLAIN_ONLY` until the first new prompt. Recovery must revalidate the
+  pointer or use `--clear-active` to escape a gate. The pointer is the personal
+  operator's persistent current-run selection: SessionEnd preserves it, SessionStart
+  does not restore it, and a new/fork Claude session writes a fresh contract on its
+  first real top-level prompt. Session/transcript values are causal metadata, not
+  selection ownership. Recovery must revalidate the
   receipt, required
   files, coverage, complete source bundle, and immutable claim binding; pointer +
   status alone are insufficient. After committed/recovered setup, follow the bound

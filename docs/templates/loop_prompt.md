@@ -37,9 +37,9 @@ an unfinished active run; record the external dependency in canonical state and
 make that record or the next viable pivot the single next action. Do not treat
 derived state as canonical evidence.
 
-Stop output is an exclusive union: ordinary `NORMAL_CODA`, receipt-backed
-`TARGET_DENIED`, or receipt-backed `MAINTENANCE_BLOCKED`. Never mix variants or
-append success prose to a fixed envelope. A Stop output is not the plan's typed
+Stop output remains evidence-bound: ordinary `NORMAL_CODA` and receipt-backed
+`TARGET_DENIED` cannot include unsupported success prose. Failed maintenance
+effects likewise are not results. A Stop output is not the plan's typed
 `cycle_end` and cannot create completion.
 
 ## Phase Markers

@@ -543,10 +543,9 @@ hash-chain-valid PostToolUse receipt immediately so transcript persistence lag d
 not reject a successful local control action. Agent, target, model, review,
 evidence, and final-output process claims still require transcript-backed events.
 These control-plane files are hook-owned and are not editable narrative state.
-Run selection is also hook/tool-owned. `tools/setup_transaction.py` is the only
-active-pointer and session-selection-receipt writer: operator setup/resume,
-prompt-named set-active, and prepared recovery call its commit CAS; exact Claude
-`SessionStart.source=resume` calls its narrower resume CAS. New setup validates source
+Run selection is tool-owned. `tools/setup_transaction.py` is the only active-pointer
+writer: operator setup/resume, prompt-named set-active, and prepared recovery call
+its commit CAS. Session lifecycle hooks never mutate selection. New setup validates source
 before formal directory creation, builds a complete run in hidden same-filesystem
 staging, writes `state/setup_source.json`, the matching versioned bundle under
 `sources/`, plus a prepared
@@ -557,15 +556,11 @@ hash, and transaction id and never creates a second run.
 
 A no-active-run EXECUTE prompt uses a short-lived pending contract that is consumed
 on first binding. Direct pointer edits, unrelated run switches, and unrequested
-clear-active operations are rejected. The hook-owned `SessionEnd` cleanup is the
-only exception: the transaction owner rechecks the ending session, transcript,
-exact active-contract digest, and pointer under the same lock; it installs an
-`EXPLAIN_ONLY session_ended` barrier, saves a hashed per-session derived receipt,
-retires claims, and then clears the pointer. Only the exact later Claude resume
-event may install an `EXPLAIN_ONLY resume_barrier`, restore the pointer, and consume
-that receipt. `startup`, `clear`, `compact`, fork/new sessions, and ordinary prompts
-do not restore; a first post-resume prompt must mint fresh authority. Pending
-bootstrap permits only reads and its
+clear-active operations are rejected. The pointer is the trusted single operator's
+persistent current-run selection: `SessionEnd` preserves it, `SessionStart` performs
+no restore, and a first prompt in any new local Claude session writes a fresh turn
+contract for the selected run. Session/transcript values remain causal correlation
+metadata, not a user ACL. Pending bootstrap permits only reads and its
 current-session lifecycle transition until binding. A target/session/prompt-hash
 claim prevents cross-session pending selection; concurrent claims fail closed. The
 transaction binds the consumed hook claim to source hash, transaction id, and exact
@@ -595,10 +590,8 @@ and owner-directory barriers. Finalize
 repeats the claim/pending directory fsync even when an unlink already made the path
 absent. Post-pointer recovery first settles the immutable binding belonging to the
 create or current activation attempt, then handles a fresh exact claim; it never
-relabels the old origin. `SessionStart.source=resume` consumes its selection receipt
-with the same durable-absence rule. These guarantees cover transaction authority
-metadata only, not the complete builder tree or SessionEnd selection creation/pointer
-clear.
+relabels the old origin. These guarantees cover transaction authority metadata
+only, not the complete builder tree.
 The validator resolves every candidate asset/scope/auth `source_ref` against the
 frozen snapshot and checks that the referenced content contains the claimed value.
 Only the hook-bound top-level prompt hash can mint `authority=operator`; source,
@@ -637,22 +630,18 @@ Scope commit shares the activation lock with the sole pointer owner, so the
 active-run identity cannot change between the check and the receipt/ledger commit.
 If a crash leaves a prepared admission, it remains non-executable; a new exact
 operator claim for the same assets may finalize the unchanged prepared projection.
-Stop hooks select exactly one `xunji.stop-output.v1` variant: `NORMAL_CODA`,
-receipt-backed `TARGET_DENIED`, or receipt-backed `MAINTENANCE_BLOCKED`. Their
-fields are mutually exclusive. The two fixed-envelope variants reject free-form
-success prose; none grants authority or substitutes for a plan-bound `cycle_end`.
+Stop hooks keep final output evidence-bound: `NORMAL_CODA` and receipt-backed
+`TARGET_DENIED` reject unsupported success prose; neither grants authority or
+substitutes for a plan-bound `cycle_end`.
 After same-session/turn receipt validation, `run_gate` yields to that fixed output
 before ordinary drift, Agent, or closure checks; paused-mode Cron quiescence still
 precedes the yield.
 The first invalid output is blocked, and Claude Code's `stop_hook_active` retry is
 idempotent; retry never marks a run complete or changes a front.
-PreToolUse enforces the same maintenance truth before Stop: after a current-turn
-`maintenance_action=true` denial/failure, only Read/Grep/Glob, an existing Task
-update, or an identical action retry is admitted. Agent, control, target, and
-canonical writes remain frozen until an identical success resolves the receipt or
-a newer operator prompt establishes new authority. Later unrelated success cannot
-wash the blocker out of the turn. The progression check reads the append-only hook
-journal immediately; Stop truth still requires the matching transcript evidence.
+A maintenance denial/failure stays in the append-only receipt journal and cannot
+be narrated as success, but it does not sticky-freeze the personal operator's turn.
+The operator may correct a typed path/argv and retry immediately; `MAINTENANCE`
+itself still prohibits Agent, target, Cron, and canonical run progression.
 
 ## Work plan and reversible Macro-Stage
 
@@ -1038,14 +1027,14 @@ framework code** — the machinery that decides what is allowed or destructive:
 - `tools/harness/guard.py` (rate / volume / auth / body / circuit breakers)
 - `sentinel/` (behavior classification + autonomy decision + circuit breaker)
 
-An active `/loop` cannot self-authorize edits to these owners or to the protected
-entrypoints/transitive dependencies in
-`tools/harness/safety_critical_paths.json`. The only live maintenance entry is a
-new top-level operator prompt whose first non-empty line is
-`/xunji-maintenance --scope <exact-path[,path...]> --reason <text>`. Its contract
-is exact-path/session/turn/prompt-hash bound, freezes target/Cron/run-state work,
-and never accepts authority from source, attachment, target, Agent, tool, or
-reviewer data. This maintenance gate is broader than the narrow independent-review
+An active `/loop` cannot edit these owners or the protected entrypoints/transitive
+dependencies in `tools/harness/safety_critical_paths.json`. A direct top-level
+operator request for Xunji/Claude-driver repair selects local `MAINTENANCE`;
+`/xunji-maintenance` is only an optional alias with no scope/reason ceremony. The
+mode freezes target/Cron/run-state work and never comes from source, attachment,
+target, Agent, tool, reviewer data, or later quoted lines. Typed Edit/Write effects
+record their actual repository-local paths; live-run, Git, pointer, claim, receipt,
+and guard state remain direct-write forbidden. This gate is broader than the narrow independent-review
 list above: it prevents an active run from rewriting its own enforcement and
 trusted executables. Review remains mandatory when a final diff changes what the
 listed safety layers allow, block, escalate, redact, or measure.

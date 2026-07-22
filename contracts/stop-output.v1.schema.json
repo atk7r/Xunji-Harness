@@ -2,11 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xunji.local/contracts/stop-output.v1.schema.json",
   "title": "Xunji Stop Output v1",
-  "description": "Exclusive Stop-output decision contract. NORMAL_CODA is the normalized compatibility projection of the text Coda; TARGET_DENIED and MAINTENANCE_BLOCKED are receipt-backed fixed envelopes. This is not a canonical cycle_end receipt and grants no authority.",
+  "description": "Stop-output decision contract. NORMAL_CODA is the normalized compatibility projection of the text Coda; TARGET_DENIED is the sole receipt-backed fixed envelope. Maintenance failures remain receipts and cannot support success claims, but do not create a terminal variant. This is not a canonical cycle_end receipt and grants no authority.",
   "oneOf": [
     {"$ref": "#/$defs/normalCoda"},
-    {"$ref": "#/$defs/targetDenied"},
-    {"$ref": "#/$defs/maintenanceBlocked"}
+    {"$ref": "#/$defs/targetDenied"}
   ],
   "$defs": {
     "normalCoda": {
@@ -44,46 +43,6 @@
           ]
         },
         "executed": {"const": false},
-        "next_action": {"type": "string", "minLength": 4, "maxLength": 2048}
-      }
-    },
-    "maintenanceBlocked": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema",
-        "type",
-        "blocker_class",
-        "error",
-        "recovery",
-        "success_receipt",
-        "reason",
-        "scope",
-        "required_authority",
-        "next_action"
-      ],
-      "properties": {
-        "schema": {"const": "xunji.stop-output.v1"},
-        "type": {"const": "MAINTENANCE_BLOCKED"},
-        "blocker_class": {"const": "MAINTENANCE"},
-        "error": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"},
-        "recovery": {
-          "enum": [
-            "SAME_TURN_RETRY",
-            "SAME_TURN_ALTERNATIVE",
-            "NEW_OPERATOR_AUTHORITY",
-            "HARD_SAFETY_DENIAL"
-          ]
-        },
-        "success_receipt": {"const": false},
-        "reason": {"type": "string", "minLength": 1, "maxLength": 6000},
-        "scope": {
-          "type": "array",
-          "maxItems": 16,
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1, "maxLength": 1024}
-        },
-        "required_authority": {"type": "string", "minLength": 1, "maxLength": 20000},
         "next_action": {"type": "string", "minLength": 4, "maxLength": 2048}
       }
     }

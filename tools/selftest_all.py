@@ -52,7 +52,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("exploit",        ["tools/exploit.py", "--selftest"],        "exploit plugins inherit guarded probe egress"),
     ("command_shape", ["tools/harness/command_shape.py"],          "exact local-control argv parser + compound-command rejection"),
     ("capability_registry", ["tools/harness/capability_registry.py"], "typed script/argv/effect/service registry"),
-    ("maintenance_authority", ["tools/harness/maintenance_authority.py", "--selftest"], "top-level exact-path framework-maintenance authority"),
+    ("maintenance_authority", ["tools/harness/maintenance_authority.py", "--selftest"], "operator-intent maintenance + typed local path boundary"),
     ("outbound_privacy", ["tools/harness/privacy.py"],             "target-facing identity/PII guard + redaction"),
     ("anti_drift",     ["tools/anti_drift.py", "--selftest"],     "anti-drift anchor (rules+process re-inject)"),
     ("proxy",          ["tools/harness/proxy.py", "--selftest"],  "engagement egress proxy (渗透走/模型不走)"),

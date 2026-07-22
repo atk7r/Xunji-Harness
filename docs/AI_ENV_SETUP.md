@@ -154,16 +154,15 @@ python3 tools/xunji_statusline.py --set-active runs/<dir>
 
 `.claude/settings.json` 已配置：
 
-- `SessionStart`：hook 自检、sentinel 启动；仅 matcher=`resume` 的运行态 hook
-  尝试恢复该 Claude session 原来的 run 选择
-- `SessionEnd`：保存 ending session 的精确选择并清空可见 pointer；不删除 run
+- `SessionStart`：hook 自检、sentinel 启动；不修改 active-run 选择
+- `SessionEnd`：不清空 active-run pointer；pointer 是个人操作者的持久当前选择
 - `PreToolUse`：Bash / WebSearch / WebFetch 前置检查
 - `PostToolUse`：sentinel 记录
 - `UserPromptSubmit`：anti-drift 注入
 - `Stop`：output gate 与 run gate
 - `statusLine`：每 2 秒只读显示 `[Xunji-status] [<phase>] <run>`；未明确传入
   Xunji workspace 或未选择 active run 时不显示。当前 renderer 不校验
-  session/transcript；会话绑定只存在于 SessionEnd/resume 的 pointer 生命周期后端
+  session/transcript；新的 Claude session 由首个真实 prompt 写 fresh turn contract
 
 Claude Code 通常会设置 `CLAUDE_PROJECT_DIR`。手动模拟 hook 或排障时，可在项目根目录临时设置：
 

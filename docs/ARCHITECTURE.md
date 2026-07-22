@@ -106,13 +106,14 @@ receipt/candidate，而不是把完整子会话当作状态。
 evidence promotion、review disposition、report 和 closure 必须串行、单写者，或有
 明确 CAS/merge contract。并行只扩大观察面，不扩大结论权。
 
-### 3.8 契约先于迁移
+### 3.8 契约稳定优先
 
-从 Python 向 CCB/TypeScript 原生能力迁移时，先冻结 schema、事件、错误码、ports、
-receipt 和差分 fixture，再替换实现。未知 CCB 版本/语义必须 fail closed。语言重写、
-大模块拆分和 Repository 抽象只有在可测收益超过迁移风险时才进入实施。
+当前只维护 Claude Code 主驾驶、Python 工具/Hook/guard 与既有 canonical contracts。
+CCB/TypeScript 迁移不在当前路线，不为假设中的替换提前增加 adapter、双跑、抽象层或
+第二 runtime。未来若 operator 重新立项，必须先有独立收益证据和新的 Architecture
+Checkpoint，现有 schema、事件、错误码、receipt 与 fixture 仍是不可暗改的兼容边界。
 
-### 3.9 个人工具的信任与可靠性模型（当前原则，机制迁移中）
+### 3.9 个人工具的信任与可靠性模型（current）
 
 Xunji 的预期部署是可信操作者在一台可信工作站上个人使用，通常只有一个 canonical
 active run；它不是敌对多租户服务。目标模型固定为：**操作者可信，Claude Root/Agent
@@ -141,18 +142,16 @@ receipt、幂等恢复、target/scope/privacy 边界和 evidence/closure gate �
 public adapter 调用 lifecycle 私有事务 API。只为假设恶意操作者、跨租户抢权或敌对本地
 session 服务的 ceremony 应删除或简化。
 
-该 target architecture 正在迁移。当前 `turn_contract.py` 已实现无害前导水平空白/BOM
-normalization（保留 raw prompt hash）、`session_id -> transcript -> personal singleton` 的
-因果关联降级、Claude 直接调用 lifecycle 私有事务 API 的 typed denial，以及把
-`sleep/echo + owner read` 这类无写 effect 的复合命令归为同回合可修复 command-shape denial
-而非 maintenance debt。
-session-bound pointer ownership、sticky maintenance gate 和其他 ceremony 仍是待删除的
-transitional implementation，不是目标安全属性；只有双向 fixture、
-Claude-primary owner 文档和真实主驾驶 E2E 通过的部分才属于 current architecture。
+当前 `turn_contract.py` 已实现无害前导水平空白/BOM normalization（保留 raw prompt hash）、
+`session_id -> transcript -> personal singleton` 的因果关联降级、Claude 直接调用 lifecycle
+私有事务 API 的 typed denial，以及把无写 effect 的复合命令归为同回合可修复
+command-shape denial。active pointer 现为跨 session 持久个人选择；SessionStart/End 不再
+恢复/清空它。local `MAINTENANCE` 由顶层自然语言意图生成，写路径由 typed effect/receipt
+记录；预声明 exact scope/reason 和 sticky maintenance blocker 已从 current runtime 删除。
 
 ## 4. 当前架构
 
-本节描述已经存在的 Xunji 架构，不把 `TODO.md` 的 CCB 原生化目标提前写成事实。
+本节描述已经存在的 Xunji 架构，不把历史或外部方案提前写成事实。
 
 ```text
 Operator prompt
@@ -183,7 +182,7 @@ Observe-only side path
 
 | 层 | 当前组件 | 责任 | 不能拥有的权力 |
 |---|---|---|---|
-| Operator / turn | prompt、`turn_contract.py`、`maintenance_authority.py` | 明确 execute/explain/pause/maintenance 与本轮精确授权 | 不改写证据真假 |
+| Operator / turn | prompt、`turn_contract.py`、`maintenance_authority.py` | 识别 execute/explain/pause/maintenance，规范 typed local effect | 不改写证据真假 |
 | Interaction / phase | Claude Code、`docs/ROUTER.md`、phase skills | 加载合适上下文、显示阶段 | 不私建第二 runtime |
 | Root control plane | `CLAUDE.md`、state graph、Agent Board | 选前沿、分工、冲突调度、持续推进 | 不绕过 hook/guard，不直接伪造 finding |
 | Cognition / knowledge | `docs/cognition/`、`knowledge/` | 推理纪律、签名和弱点接地 | 不成为盲扫 playbook 或确认依据 |
@@ -241,11 +240,9 @@ affirmative setup/resume intent | normalized first-line /loop | named-run one-cy
 ```
 
 Setup/resume 不等于自动进入 `/loop`。`tools/setup_transaction.py` 是当前唯一 activation
-和 session-selection owner：operator 驱动的 `setup_run.py`、`loop_bootstrap.py`、
+pointer owner：operator 驱动的 `setup_run.py`、`loop_bootstrap.py`、
 `xunji_statusline.py --set-active` 与 prepared recovery 调用
-`commit_activation_cas()`；Claude `SessionStart.source=resume` 只调用
-`restore_session_activation_cas()`。两者是同一 owner 的 typed CAS ports，适配器不得各自
-写 pointer 或 selection receipt；Claude 也不得在命令拒绝后用 `python -c`/stdin/import
+`commit_activation_cas()`。适配器不得各自写 pointer；Claude 也不得在命令拒绝后用 `python -c`/stdin/import
 直调这些私有 API。`XUNJI_E_LIFECYCLE_PRIVATE_API` 只引导修正并重试公开 adapter。
 正式目录在 rename 前已经包含
 canonical 文件、coverage、asset ledger、初始 loop projections、`state/setup_source.json`
@@ -275,38 +272,20 @@ authority 的 pending/claim/target-contract 写入只有在 temp file flush+file
 同一两级屏障，不能降级为
 `active`。pointer 后恢复先由 create 或当前 nested activation attempt 的 immutable binding 退休
 旧 claim，再处理 fresh exact effect；same-effect 可消费，cross/multiple/tamper 保留并拒绝。
-claim/pending 已缺失也要重做目录 fsync 才能确认删除。Claude `SessionStart.source=resume`
-消费 selection receipt 同样要求 durable deletion，并可在 unlink 已发生、fsync 失败后幂等重试。
-该声明只覆盖 transaction authority metadata，不扩张为 builder 整棵文件树、SessionEnd
-selection 创建或 pointer clear 已具备同等断电持久性。
+claim/pending 已缺失也要重做目录 fsync 才能确认删除。该声明只覆盖 transaction
+authority metadata，不扩张为 builder 整棵文件树。
 最终 contract/receipt 绑定 session、operator prompt hash、effect、source hash、transaction
 id 与 expected run。CLI/source 输入不能提供 claim 内容或 authority，`turn_contract` 边界
 不可加载时 activation fail-closed。只有 `runs/` 内的现存目录能成为 pointer authority；存在但
 损坏、身份缺失或与 `setup_source` hash 不一致的 transaction receipt 不能降级成 legacy
 run，必须在 pointer 改动前拒绝；`recovered` 路径同样重跑完整 receipt、required-file、
 coverage 与 source-bundle 完整性校验，不能仅凭 pointer 和 status 改写收据。
-Claude Code `SessionEnd` 是唯一自动清空选择态的路径：`turn_contract.py` 只接受非空
-session ID + transcript path；官方 end reason 才允许尝试 clear，未知 reason 只撤销该
-session 的残余 authority。hook 把 pointer snapshot、session/transcript digest 和 exact
-active-contract SHA-256 交给 transaction owner。owner 在 activation lock 内共同复核
-pointer、contract schema/session/transcript/bound run/digest，先把旧 turn 重建为不携带
-lifecycle/maintenance/scope/target authority 的 `EXPLAIN_ONLY session_ended` barrier，再写
-`.claude/xunji_session_selections/<sha256(session_id)>.json`，退休 pending/claim，最后清
-pointer。receipt 只含 session/transcript digest、exact run ref、formal transaction/source
-identity（legacy 绑定 path + device/inode）及 contract/pointer digest，不保存 prompt/URL 或
-authority。旧 session 即使与新 session 选择同一 run，也不能清掉新 contract；任何竞态、
-损坏、身份缺失或同 session 不同 receipt 都保留 pointer。
-
-自动恢复只接受 Claude `SessionStart.source=resume`（包括 Claude 的 resume/continue 会话
-恢复语义）：transaction owner 只按该 session 哈希的 exact receipt 找 run，不扫描 `runs/`、
-transcript 内容或 mtime；先写 `EXPLAIN_ONLY resume_barrier`，再 CAS 恢复 pointer，最后消费
-receipt。`startup`、`clear`、`compact`、fork/new session、wrong transcript、同名重建 run
-和 competing pointer 都 fail closed。恢复仅恢复“选择哪个 run”，首个真实
-UserPromptSubmit 前不能恢复旧 `EXECUTE` 或 claim；普通新 session 的 bare “继续”也不能
-覆盖 foreign/stale pointer，只有当前 prompt 明确选择 exact run/source 才能走 operator
-transition。退出/恢复不删除 run、evidence、journal 或 setup receipt；当前 statusline
-renderer 只读 pointer + 阶段派生状态，不读取 selection receipt 或 turn contract，也不校验
-session/transcript。Session-bound display 是独立 target，不是本轮 current runtime。
+active pointer 是可信个人操作者的持久当前选择，不是 Claude session 的租约。
+`SessionEnd` 不清空 pointer，`SessionStart` 不恢复 selection；新的本地 Claude session 在首个
+真实 UserPromptSubmit 直接绑定现有有效 pointer，并写 fresh turn contract。session ID 与
+transcript path 继续作为因果回执、旧 effect/claim 撤销和 stale-event 关联字段，不是 operator
+ACL。只有公开 setup/resume/set-active transaction 能选择不同 run；statusline 继续只读
+pointer + 阶段派生状态。
 
 当客户端把 literal `/loop <source>` 原样交给 `UserPromptSubmit` 时，它由
 `tools/loop_bootstrap.py --source ... --type auto` 适配，并在同一顶层 operator 回合继续到
@@ -350,8 +329,8 @@ pending contract/transition claim；因此命令形状修复必须在原 operato
 只用于 existing-run 只读兼容，迁移器必须取得与旧 hash 一致的原始/关联 snapshot，
 不能从旧 display/prose 猜回 provenance。JSON Schema 只冻结结构层；`source_ref` 值级
 对应、IDNA host、URL/host/port 一致性、operator prompt 绑定、asset host 一致性与 bundle
-hash 都是所有 runtime 必须实现的语义层。当前 owner 是 `validate_manifest()`；未来
-TypeScript validator 在取得 authority 前必须通过共享 fixture 与 Python 差分测试。
+hash 都是 validator 必须实现的语义层，当前唯一 owner 是 Python
+`validate_manifest()` 与共享 fixture。
 External pilot 还冻结 `sources/normalizer_request.json` 与
 `sources/normalizer_candidate.json`，validator receipt 绑定二者 schema/hash；任何 source、
 request 或 candidate mutation 都阻止 publish/closure。文件派生资产初始
@@ -396,12 +375,13 @@ Synthesizer。
 
 自治不意味着无条件执行：当前 prompt 是 turn contract。Explain/review/ambiguous
 保持只读，pause 保留开放状态，明确 execute/continue/implement 才能继续改变 run
-状态。`MAINTENANCE` 是独立的 local-only 状态：只有顶层 operator prompt 第一条非空
-指令精确匹配 `/xunji-maintenance --scope <exact-path[,path...]> --reason <text>` 才能
-创建，contract 绑定 session、turn timestamp、完整 prompt hash、reason hash 与 exact
-paths。普通 `/loop`、source/attachment/target/Agent/tool/reviewer 文本都不能生成该
-authority。维护回合冻结 target/Cron/Agent/canonical run-state 进展，只允许读取、exact
-Edit/Write 与注册的本地检查；被拒绝或失败的动作不是结果，必须保留 receipt 并如实报告。
+状态。`MAINTENANCE` 是独立的 local-only 状态：顶层 operator 的普通修复/修改/优化 Xunji
+或 Claude 主驾驶表达即可创建；`/xunji-maintenance` 只是无参数仪式的可选别名。普通
+`/loop`、source/attachment/target/Agent/tool/reviewer 与后续引用文本都不能生成该模式。
+维护回合冻结 target/Cron/Agent/canonical run-state 进展，只允许读取、repository-local typed
+Edit/Write 与注册的本地检查；实际路径由 effect/receipt 记录，`runs/`、Git、pointer、claim、
+receipt 与 guard state 仍禁止直接写。被拒绝或失败的动作不是结果，但可在同回合修正并重试，
+不创建 sticky maintenance blocker。
 同回合 PreToolUse 的 Cron/Task 排序使用已 fsync 的 hook journal，避免 Claude transcript 尚未
 刷盘时把已成功的控制动作误拒；Agent/target/model/review/evidence 与最终 Stop truth 仍要求
 transcript-backed receipt。两者不能互换。
@@ -594,8 +574,8 @@ Xunji 管的是自动执行的效果和执行者，而不是禁止技术思考�
 - 普通 `/loop` 不得修改自己依赖的 Hook、guard/privacy/proxy、turn contract、trusted
   capability/review/lifecycle 入口和传递依赖。`tools/harness/maintenance_authority.py`
   内置 fail-closed floor，`safety_critical_paths.json` 是同步 manifest；缺失/损坏 manifest
-  不能缩小 floor。维护 scope 可以同时精确列出相邻 tests/docs，但至少包含一个 critical
-  file，且不能包含目录、glob、绝对路径、`runs/`、active pointer/claim 或 guard state。
+  不能缩小 floor。维护意图允许 typed Edit/Write repository-local source/tests/docs，路径由
+  每次 effect/receipt 记录；`runs/`、Git、active pointer/claim/receipt 或 guard state 仍禁止直写。
 - Write/Edit/Update/MultiEdit/NotebookEdit 的路径字段先结构化提取，再同时按 lexical
   `normpath` 和 `resolve(strict=False)` 视图映射到 workspace、current run 与 configured
   control roots；`//`、`.`、`..`、不存在路径和 symlink alias/escape 不能绕过 protected
@@ -628,7 +608,7 @@ Xunji 管的是自动执行的效果和执行者，而不是禁止技术思考�
   tool-level env、文件重定向、`tee`、链式/多段 pipe、任意 `python -c` 和不透明 shell 在
   执行授权上仍 fail closed；但 denial 文案或 recovery hint 不能反向铸造 effect。只有 typed
   maintenance mode、结构化 critical path 或明确的 Git/patch repo-mutation shape 才记录
-  `maintenance_action`/maintenance blocker；无 destination、无关键路径的普通 shell-shape
+  `maintenance_action`；无 destination、无关键路径的普通 shell-shape
   拒绝保持非 maintenance。引用 critical manifest 的 `python -c` 仍因 exact critical path
   进入 maintenance truth gate。Git/patch effect 只从 direct、`env`、明确 shell `-c`、
   `command`/`exec` 的 executable position 解析；quoted argument 中出现 `git`/`patch` 文本
@@ -717,18 +697,18 @@ review 文本把自己的自审变成独立票。
 ordinary /loop attempts protected write
   -> PreToolUse denies + records exact path/reason/action hash
   -> output truth gate forbids success/revert claims
-  -> operator starts a new exact /xunji-maintenance turn
-  -> UserPromptSubmit binds session/turn/prompt/reason/path authority
-  -> local exact Edit/Write + registered verification only
+  -> operator directly asks to repair/modify Xunji
+  -> UserPromptSubmit derives local MAINTENANCE mode
+  -> typed repository-local Edit/Write + registered verification
   -> final diff fingerprint + author-appropriate independent review
   -> driver disposition + commit gate
   -> a later explicit execute/resume turn may reactivate run work
 ```
 
-Maintenance permission is not target authority, review evidence, or commit approval. Hook
+Maintenance mode is not target authority, review evidence, or commit approval. Hook
 `PostToolUse`/`PostToolUseFailure` watches direct write tools as well as Bash so denied and
-failed actions remain blocked until an identical successful action receipt exists; an invalid
-receipt chain fails closed instead of becoming proof by absence. The derived `run_status` may
+failed actions remain audit facts and cannot be narrated as success. They do not sticky-freeze
+the turn; a corrected typed path/argv may retry immediately. The derived `run_status` may
 show `maintenance`, but canonical fronts/evidence and closure signals do not advance.
 Direct Edit/Write authorization applies to the complete normalized path set recursively
 extracted from every path-like `tool_input` field. Absolute in-repository paths become exact
@@ -740,11 +720,11 @@ Maintenance Bash rejects tool-level environment overrides and treats every Git/p
 outside the audited read grammar as repository mutation; diff/show/log must disable external
 diff and textconv explicitly.
 
-## 6. 过渡架构
+## 6. 当前演进边界
 
-当前生产事实仍是 Claude Code 主驾驶、Python 工具/Hook/guard 和 canonical
-Markdown/JSON run 文件；CCB 原生能力仍是目标。过渡期不是第三套 runtime，而是用
-共享契约和差分证据逐项替换实现的阶段。
+当前生产与演进范围都是 Claude Code 主驾驶、Python 工具/Hook/guard 和 canonical
+Markdown/JSON run 文件。本项目暂不规划 CCB/TypeScript 替换，不建立第三套 runtime、
+双跑层或为未来语言迁移服务的抽象。
 
 本阶段只扩展当前 Python/Hook 控制面中的两条正交轴，不能混成一个 phase 字段：
 
@@ -763,54 +743,12 @@ Claude Code primary-driver E2E 仍是当前实现的验收门。完整 A/B bench
 仍待验证。`>=4 diverse fronts` 继续作为强制 breadth safety net，不是日常 scheduler；
 不能因 Python 调度闭环已落地就推断真实 Agent 验收或 bench 已完成。
 
-| 边界 | Current | Transitional 完成门 | Target |
-|---|---|---|---|
-| Tool surface | Python CLI/wrapper，由 Claude 调用 | 冻结 typed schema、stable error/receipt；Python/TS 双跑 | CCB model-visible capability Tool |
-| 强制服务链 | Hook + Python scope/privacy/proxy/guard/recorder | 同输入差分 fixture、故障注入、未知版本 fail-closed | CCB 内部 runtime service，模型不可跳过 |
-| Run storage | canonical Markdown/JSON + artifacts/journals | repository port 只抽象已证明的耦合；双写必须一致性校验 | backend 可替换但 canonical contract 不变 |
-| Authority / activation | turn claim + 单一 pointer transaction | CCB adapter 只消费现有 authority/commit port | 仍只有一个 authority 与 activation writer |
-| Evidence / closure | Python recorder、replay、review、`check_run.py` | 同一 fixture 同一 verdict；diff fingerprint 独立复审 | 原生 Tool 复用相同 evidence/closure contract |
+## 7. 非当前路线
 
-每项迁移只有在 contract、差分测试、回滚、owner 和独立复审同时具备时，才能把该项
-从 `transitional` 标为 `current`。只创建同名 CCB Tool、通过 happy-path demo 或在
-`TODO.md` 勾选任务，都不足以宣称完成。过渡代码不得建立第二网络出口、第二 active
-pointer writer、第二 evidence store 或第二 closure 判定器。
-
-## 7. 目标架构（CCB 原生化方向，尚未全部实现）
-
-`TODO.md` 描述的长期目标是 Capability-Oriented, Evidence-Governed Agent
-Architecture。目标不是让 CCB 成为第二 Xunji 真值，而是把现有契约作为原生 Tool
-和 runtime service 接入 CCB harness。
-
-```text
-CCB Agent Runtime
-  -> Xunji Root / Skills / Commands
-  -> model-visible capability Tools
-       Create/Resume/Inspect Run
-       Probe/Compare/Replay/Browse/Scan/Inspect Artifact
-       Import Recon/Map Surface/Measure Coverage
-       Plan/Assign/Merge/Inspect Conflicts
-       Record/Link/Audit Evidence
-       Peer Review/Resolve Review/Verify Closure
-  -> mandatory non-model-visible Xunji Runtime Services
-       authority + scope + privacy + proxy + guard + budgets
-       repository + recorder + replay + receipts + journals + review
-  -> canonical Xunji workspace
-```
-
-迁移不变量：
-
-1. CCB adapter 不能创建第二 operator-authority、active-pointer、network-egress、evidence
-   或 closure 通道。
-2. Python 与 TypeScript 共享 versioned schema/ports/fixtures，而不是互相复制隐式行为。
-3. 先双跑和差分验证，再按能力切换默认实现；每步可回滚。
-4. 现有 canonical Markdown/JSON 先继续作为 backend；`RunRepository` 是否扩展由真实
-   耦合证据决定，不作为所有当前修复的前置。
-5. 未知 CCB 版本、Tool 语义、permission/hook 行为或 replay schema 必须 fail closed。
-6. 不因 CCB 有某功能就复制它；只吸收能强化 Xunji 不变量且有测试收益的部分。
-
-当前与目标之间的过渡状态必须在代码、TODO 和本文件中使用 `current`、
-`transitional`、`target` 标签；不得让 AI 从未来 Tool 名称推断当前已经有对应安全保证。
+CCB/TypeScript 原生化、双 runtime、语言重写和为其准备的 repository abstraction 均不在
+当前路线。外部项目只能作为架构思路来源，不能生成 TODO、current claim 或实现前置。
+若未来重新考虑，必须由 operator 明确开启独立阶段，并先更新本节与 Maintenance
+Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩张提示词。
 
 ## 8. 目录与 owner 地图
 
@@ -821,12 +759,12 @@ CCB Agent Runtime
 | `.claude/skills/` | Claude 主驾驶按需方法/流程 | `docs/ROUTER.md`、相关 Tool/Hook/test |
 | `.agents/skills/` | Codex 辅助维护/复审知识 | 仅 Codex-side 或明确镜像共享变化 |
 | `.claude/hooks/` | Claude live runtime 的强制 authority/effect/lifecycle gates | safety skill、hook tests、独立复审 |
-| `contracts/` + `tools/harness/fixtures/` | versioned cross-runtime schemas 与 conformance cases | Python/未来 TypeScript validator、未知版本 fail-closed、差分测试 |
-| `tools/harness/maintenance_authority.py` + `safety_critical_paths.json` | 顶层维护指令解析、exact scope 与普通 `/loop` protected-path floor | `turn_contract.py`、settings write receipts、output truth gate、manifest drift check、独立复审 |
+| `contracts/` + `tools/harness/fixtures/` | versioned schemas 与 conformance cases | 当前 Python validator、未知版本 fail-closed、fixture tests |
+| `tools/harness/maintenance_authority.py` + `safety_critical_paths.json` | 顶层自然语言维护意图、typed path boundary 与普通 `/loop` protected-path floor | `turn_contract.py`、settings write receipts、output truth gate、manifest drift check、独立复审 |
 | `tools/setup_source.py` | setup source 路由、provenance normalization、bundle validator；不拥有 fetch/authority/pointer | schema/fixture、setup adapters/transaction、privacy、target.md、独立复审 |
 | `tools/setup_normalizer.py` | Markdown/普通 JSON token/ref inventory、external surrogate 与 reference-only candidate 晋级；不拥有 model transport/target/pointer | candidate schema、privacy、setup source/transaction、benchmark、独立复审 |
 | `tools/scope_admission.py` | hook-claim 绑定的 exact setup-source `review` 资产零探测准入与 receipt/projection commit；不拥有 target/pointer/Cron | turn contract、coverage/asset ledger、receipt schema/fixture、独立复审 |
-| `tools/setup_transaction.py` | staging、setup receipt、active pointer、per-session selection receipt、typed lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、SessionStart/End turn barriers、turn claim、setup-transaction fixture、独立复审 |
+| `tools/setup_transaction.py` | staging、setup receipt、active pointer、typed lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
 | `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
 | `tools/harness/capability_registry.py` | exact script/argv→effect 与 mandatory service policy；`root_direct_eligible` 默认关闭 | turn contract、command-shape、文档命令 fixture |
 | `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
@@ -895,7 +833,7 @@ plan-bound Read bootstrap、local tool discipline、硬调用预算和返回形�
 4. 是 prompt guidance、机械检查、runtime gate，还是观测提示？不要把软文案写成硬保证。
 5. 如何验证：定向 fixture、自测、artifact/receipt、差分测试或独立复审？
 6. 它替代/删除哪条旧规则？如果没有，为什么不是重复？
-7. 对当前 run、旧 artifact/schema、Python/CCB 兼容和回滚有什么影响？
+7. 对当前 run、旧 artifact/schema、Python 兼容和回滚有什么影响？
 
 一个规则若只存在于聊天、retrospective、TODO、reviewer 输出或本文件的描述段，尚未
 自动成为 runtime 约束。把规则放到 owner，更新调用方/测试，再在本文同步架构含义。
@@ -916,7 +854,7 @@ record；Git history 保存历次 checkpoint，不在正文追加无限流水账
 - Tool 输入输出、内部服务链、网络出口、evidence/replay schema 或 error code；
 - Setup、loop、phase、review、report、closure 或 completion 生命周期；
 - 并发、Agent Board、merge/conflict、单写者或 CAS 语义；
-- Python 与 CCB/TypeScript 的当前/过渡/目标架构；
+- Python current architecture 与明确排除的非当前路线；
 - 原 owner 文档被移动、拆分、删除或改变权威级别。
 
 ### 无架构影响也要留下持久检查点
@@ -959,17 +897,16 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 6. Agent 与 reviewer 只给候选；Single Synthesizer 通过 evidence gate 决定结论。
 7. Derived cache/status/score 可重建且不反写 canonical truth。
 8. Run switch 和其他 canonical transition 只使用 `setup_transaction.py` 的 typed
-   单写者事务/CAS：operator transition 走 `commit_activation_cas()`，Claude resume-only
-   选择恢复走 `restore_session_activation_cas()`；不直接改 pointer/selection receipt，未提交
-   run 必须有 prepared receipt 和可解释状态，resume barrier 不恢复旧 turn authority。
+   单写者事务/CAS：operator transition 走 `commit_activation_cas()`；不直接改 pointer，
+   未提交 run 必须有 prepared receipt 和可解释状态。pointer 是跨 session 的个人当前选择。
 9. 独立复审必须独立、可审计、绑定当前 fingerprint；作者自审不算。
 10. Closure 是多信号机械状态；失败、deny、timeout、session length 和报告存在都不等于完成。
 11. 并行 breadth 不放松 authority、request budget、evidence 或 merge/closure 门。
-12. CCB 迁移通过 versioned contract + differential tests 演进，不建第二 runtime 真值。
-13. 普通 live execute cycle 不能修改自己的 enforcement/trusted-entrypoint 依赖；只有顶层
-    `/xunji-maintenance` exact-path contract 能授权本地修复，且维护回合不并行 target、
-    Agent、Cron 或 canonical run-state 进展；同回合推进消费 durable Hook truth，Stop/结论
-    仍消费 transcript-backed truth。
+12. CCB/TypeScript 迁移不是当前路线；不为其建立 adapter、双跑或第二 runtime 真值。
+13. 普通 live execute cycle 不能修改自己的 enforcement/trusted-entrypoint 依赖；顶层
+    自然语言维护意图进入 local `MAINTENANCE`，且维护回合不并行 target、Agent、Cron 或
+    canonical run-state 进展。实际本地路径由 typed effect/receipt 记录；错误动作可同回合修正，
+    Stop/结论仍消费 transcript-backed truth。
 14. Live Bash 是正向 capability allowlist，不用路径字符串黑名单证明任意解释器只读；
     tool-level/inline env 只能使用目标工具明确登记的 proxy/locale 键。
 15. Setup source 是带来源的候选输入，不是新 canonical authority：每个晋级字段必须能
@@ -1025,33 +962,36 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-22
-- Scope: 完成 Claude-primary Agent runtime 垂直切片：精简并冻结 versioned Agent instruction
-  bundle，接通 work-plan→delegate→real Agent→Reviewer→Root settlement，增加 child tool/request
-  原子预算、target artifact/replay admission、material replan 已结算 lane 继承、ended-plan closure
-  验证，以及可信操作者常见空白/shape 失误的可恢复路径。
-- Architecture impact: yes — plan/delegate/runtime/review/closure 数据流成为可执行 current
-  architecture；同 run replan 只继承 identity-equal 且由 immutable Agent/Reviewer/Root projection
-  完整结算的依赖前缀，旧 plan Reviewer admission 按其 snapshot 保留；active plan 继续绑定 current
-  inputs，typed cycle_end 后改验 transaction+可重派生 receipt。target 出站、privacy/proxy、证据门
-  与 canonical 单写者未放松。
-- Owner/enforcement: Claude-primary 指引由 `CLAUDE.md`、`.claude/agents/`、
-  `.claude/skills/xunji-agent-board/` 与 `docs/WORKFLOW*.md` 拥有；typed enforcement 由
-  `work_plan.py`、`workers.py`、`runtime_receipts.py`、`turn_contract.py`、`check_run.py`、schema、
-  capability/privacy owner 与 instruction-source manifest 实施。`.agents/skills/` 未作为 Root
-  指令源修改。
-- Verification: focused work-plan/workers/runtime/run-model/check-run/turn-contract tests、系统
-  Python 3.9 turn-contract、rules/templates/diff checks 均通过；Claude Code session
-  `ecbdc231-0a62-4316-bc39-8b644f8156d1` 对 localhost 完成六 lane 真实闭环，session
-  `52982078-1e29-4725-88d6-c88d0a8cdc56` 对 exact ended run 给出 PASS。详细证据见
-  `review/records/2026-07-22-agent-runtime-e2e.md`。
-- Independent review: 最终 tree `2a5ebf68abaabb34660ddd8e8dc914659adda243` 由
-  DeepSeek-backed Claude Code fresh-context session
-  `d84273df-1958-448e-8f01-a54841f40a56` 复审，结论 PASS、无 actionable finding、可提交；
-  durable 记录为 `review/records/2026-07-22-agent-runtime-final-review.md`。不使用 arkcli，
-  Codex 自审不计独立票。
+- Scope: 将 Claude-primary runtime 落到可信单操作者个人工具模型：active pointer 改为跨
+  Claude session 持久当前选择，SessionStart/End 不再恢复/清空；普通自然语言修复/优化意图
+  进入 local MAINTENANCE，移除 exact scope/reason DSL 与 sticky maintenance blocker；同步
+  Stop schema、Hook、Claude skills、workflow/architecture 和 conformance fixtures。明确
+  CCB/TypeScript 不在当前路线。
+- Architecture impact: yes — session/transcript 从 pointer ownership/操作者 ACL 降为因果回执
+  metadata；本地维护从预授权路径清单改为 intent-derived mode + typed effect/receipt path；
+  `MAINTENANCE_BLOCKED` 不再是 Stop terminal variant。target 出站 proxy/privacy/scope/audit、
+  active pointer 单一 CAS writer、protected control state、证据/复审/closure 均未放松。
+- Owner/enforcement: Claude-primary guidance 由 `CLAUDE.md`、`.claude/skills/`、
+  `docs/ROUTER.md` 与 `docs/WORKFLOW*.md` 拥有；`turn_contract.py`、
+  `maintenance_authority.py`、settings hooks、output/run gates、stop schema/fixtures 与
+  anti-drift 实施。`.agents/skills/` 未修改。
+- Verification: focused personal-pointer/maintenance/output/CAS suites 6/6，rules/templates/
+  diff checks 通过，完整 `tools/selftest_all.py` 69/69。DeepSeek-backed Claude Code 2.1.201
+  两个 fresh sessions `838d1448-b36e-409d-91c3-21f24991128f`、
+  `5399482f-6292-41ea-9d59-5ee338c6ad84` 在隔离 pointer 上真实执行 denial→same-turn Write/Read
+  与跨 session Edit/Read；证据见 `review/records/2026-07-22-personal-tool-driver-e2e.md`。
+- Independent review: fresh-context Claude session
+  `90abff2a-d475-4383-9129-2d7c687761a2` reviewed framework fingerprint
+  `98d249bd91fdb360` and returned PASS with one low-severity intent-classification
+  observation. The bare `session`/`pointer` triggers were removed, target-side
+  counterexamples were added, and the complete 69-suite battery was rerun green.
+  The exact post-fix fingerprint and fresh Claude verdict must be bound in
+  `review/records/2026-07-22-personal-tool-final-review.md` before commit. Arkcli is
+  not used and Codex self-review is not an independent vote.
 - Exclusions: 不修改 `.agents/skills/`、`tools/xunji_statusline.py`、已删除的
   `docs/XUNJI_PROJECT_INTRO.md`、CCB/TypeScript、target methodology 或现场 run/artifact；
-  parallel-Agent A/B、stage 默认资源策略、runtime messaging/worktree 隔离仍保留 TODO。
+  setup_transaction 中不再可达的旧 selection helper 清理可在独立低风险 cleanup 阶段处理，
+  不作为当前 runtime 语义。
 
 ## 13. 外部设计来源与采用边界
 
@@ -1067,8 +1007,8 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 - [Claude Code 官方：Status line](https://code.claude.com/docs/en/statusline)
   提供 statusline stdin 中稳定 `session_id`、`transcript_path` 与 workspace 的公开契约。
 - [Claude Code 官方：Sessions](https://code.claude.com/docs/en/sessions)
-  提供 resume/continue/fork 的会话边界；fork 产生新 session identity，因此不会继承原
-  session 的 Xunji selection receipt。
+  提供 resume/continue/fork 的会话边界；Xunji 只把 session identity 用作因果元数据，
+  active-run pointer 是个人工具的跨 session 当前选择。
 - [CCB：架构全景](https://ccb.agent-aura.top/docs/introduction/architecture-overview)
   和 [CCB：什么是 Claude Code](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code)
   用于理解其逆向工程/社区实现中的层次、Tool 接口和 Query loop。

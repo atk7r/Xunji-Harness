@@ -20,21 +20,6 @@
         "executed": false,
         "next_action": "F-001 以替代 argv 形状重试同一目标动作"
       }
-    },
-    {
-      "name": "current maintenance blocker projection",
-      "record": {
-        "schema": "xunji.stop-output.v1",
-        "type": "MAINTENANCE_BLOCKED",
-        "blocker_class": "MAINTENANCE",
-        "error": "XUNJI_E_MAINTENANCE_BLOCKED",
-        "recovery": "NEW_OPERATOR_AUTHORITY",
-        "success_receipt": false,
-        "reason": "exact-path authority is required",
-        "scope": ["tools/turn_contract.py"],
-        "required_authority": "/xunji-maintenance --scope tools/turn_contract.py --reason <reason>",
-        "next_action": "在新 operator prompt 取得 exact-path 授权后重试同一框架维护动作"
-      }
     }
   ],
   "invalid_records": [
@@ -60,21 +45,6 @@
         "executed": false,
         "next_action": "F-001 完成前置条件后重试同一目标动作"
       }
-    },
-    {
-      "name": "maintenance success cannot be blocked",
-      "record": {
-        "schema": "xunji.stop-output.v1",
-        "type": "MAINTENANCE_BLOCKED",
-        "blocker_class": "MAINTENANCE",
-        "error": "XUNJI_E_MAINTENANCE_BLOCKED",
-        "recovery": "SAME_TURN_RETRY",
-        "success_receipt": true,
-        "reason": "tool returned success",
-        "scope": ["tools/turn_contract.py"],
-        "required_authority": "current operator turn contract (no new authority)",
-        "next_action": "在当前回合重试同一框架维护动作"
-      }
     }
   ],
   "fixed_envelope_lines": {
@@ -84,17 +54,6 @@
       "XUNJI_ERROR=",
       "XUNJI_RECOVERY=",
       "未执行目标动作；不存在该动作的实测结果。",
-      "下一行动: "
-    ],
-    "MAINTENANCE_BLOCKED": [
-      "XUNJI_MAINTENANCE_STATUS=BLOCKED",
-      "XUNJI_STOP_TYPE=MAINTENANCE_BLOCKED",
-      "XUNJI_BLOCKER_CLASS=MAINTENANCE",
-      "XUNJI_ERROR=",
-      "XUNJI_RECOVERY=",
-      "未取得框架维护动作的成功回执；不得声称修改完成。",
-      "阻塞原因: ",
-      "所需授权: ",
       "下一行动: "
     ]
   },

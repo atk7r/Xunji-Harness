@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
-"""Deterministic authority parser for safety-critical framework maintenance.
+"""Typed path boundary for local framework maintenance.
 
-Only the first non-empty operator-prompt line may create authority.  The parsed
-scope contains exact repository-relative source files; directories, globs,
-absolute paths, and live-run/control-state paths are rejected.  At least one
-scope entry must be safety-critical, while adjacent tests/docs may be named so a
-single maintenance turn can keep one coherent exact-path diff.  This module
-never decides that a prompt came
-from the operator -- ``UserPromptSubmit`` in ``turn_contract.py`` is the sole
-caller allowed to persist its result.
+The personal-tool runtime trusts the top-level operator; maintenance intent is
+derived by ``UserPromptSubmit`` rather than granted by a path-list ceremony.
+This module still owns deterministic repository-path normalization, forbidden
+runtime/control paths, and the safety-critical review manifest.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import shlex
@@ -24,6 +19,20 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path(__file__).with_name("safety_critical_paths.json")
 SCHEMA = "xunji.safety_critical_paths.v1"
 DIRECTIVE = "/xunji-maintenance"
+MAINTENANCE_ACTION_RE = re.compile(
+    r"修复|修改|优化|重构|更新|精简|合并|删除|移除|实现|改进|"
+    r"fix|modify|optimi[sz]e|refactor|update|simplify|merge|remove|implement",
+    re.I,
+)
+MAINTENANCE_OBJECT_RE = re.compile(
+    r"Xunji|Claude\s*Code|主驾驶|框架|harness|hook|skill|提示词|prompt|"
+    r"turn[_ -]?contract|maintenance|工作流|workflow|架构|"
+    r"architecture|仓库|repository|\.claude/|CLAUDE\.md|tools/harness/",
+    re.I,
+)
+CONTINUE_ONLY_RE = re.compile(
+    r"^\s*(?:继续|继续优化|继续修复|continue|resume)(?:[。.!！])?\s*$", re.I,
+)
 
 # The file-backed manifest mirrors this compiled floor. Deleting/corrupting it
 # cannot remove the bootstrap boundary that protects parser and enforcement.
@@ -185,7 +194,8 @@ def is_critical_path(value: str, *, root: Path = ROOT) -> bool:
     return path in exact or any(path.startswith(prefix + "/") for prefix in prefixes)
 
 
-def _scope_path_allowed(path: str) -> bool:
+def path_allowed(path: str) -> bool:
+    """Return whether a normalized repository path is editable in maintenance."""
     if path in FORBIDDEN_SCOPE_EXACT:
         return False
     return not any(
@@ -194,65 +204,25 @@ def _scope_path_allowed(path: str) -> bool:
     )
 
 
-def parse_directive(prompt: str, *, root: Path = ROOT) -> tuple[dict | None, str]:
-    """Parse one exact first-line directive; return ``(authority, error)``.
+def operator_intent(prompt: str, *, previous_mode: str = "") -> bool:
+    """Recognize ordinary operator wording as local framework maintenance.
 
-    ``(None, "")`` means no directive. A non-empty error means the first line
-    attempted a maintenance directive but was malformed, so callers must not
-    silently reinterpret it as ordinary EXECUTE authority.
+    Only the first non-empty instruction is considered.  Quoted target/tool
+    output later in the prompt cannot mint the mode.  A terse ``继续`` inherits
+    an immediately preceding maintenance mode because this is a single-user
+    conversational tool, not a cross-user authorization boundary.
     """
     first = next((line.strip() for line in str(prompt or "").splitlines() if line.strip()), "")
-    if not first.startswith(DIRECTIVE):
-        return None, ""
-    if not re.match(r"^/xunji-maintenance(?:\s|$)", first):
-        return None, "maintenance directive name must match exactly"
-    try:
-        tokens = shlex.split(first)
-    except ValueError as exc:
-        return None, f"maintenance directive quoting is invalid: {exc}"
-    if len(tokens) < 5 or tokens[0] != DIRECTIVE \
-            or tokens[1] != "--scope" or tokens[3] != "--reason":
-        return None, (
-            "maintenance directive must be: /xunji-maintenance --scope "
-            "<exact-path[,path...]> --reason <text>"
-        )
-    if any(token.startswith("--") for token in tokens[4:]):
-        return None, "maintenance directive contains an unknown or repeated option"
-    raw_paths = tokens[2].split(",")
-    if not raw_paths or len(raw_paths) > 16 or any(not item.strip() for item in raw_paths):
-        return None, "maintenance scope must contain 1-16 exact comma-separated paths"
-    authorized: list[str] = []
-    for raw in raw_paths:
-        try:
-            path = _canonical_relative(raw, root=root)
-        except ValueError as exc:
-            return None, str(exc)
-        if path in authorized:
-            return None, f"maintenance scope repeats path: {path}"
-        if not _scope_path_allowed(path):
-            return None, f"maintenance scope cannot target live-run or control state: {path}"
-        candidate = (root / path)
-        if candidate.exists() and candidate.is_dir():
-            return None, f"maintenance scope must name a file, not a directory: {path}"
-        if not candidate.exists() and not Path(path).suffix:
-            return None, f"new maintenance scope must look like an exact file path: {path}"
-        authorized.append(path)
-    exact, prefixes = load_critical_paths(root=root)
-    critical = [
-        path for path in authorized
-        if path in exact or any(path.startswith(prefix + "/") for prefix in prefixes)
-    ]
-    if not critical:
-        return None, "maintenance scope must include at least one safety-critical path"
-    reason = " ".join(tokens[4:]).strip()
-    if len(reason) < 3 or len(reason) > 500:
-        return None, "maintenance reason must contain 3-500 characters"
-    return {
-        "authorized_paths": authorized,
-        "critical_paths": critical,
-        "reason": reason,
-        "reason_sha256": hashlib.sha256(reason.encode("utf-8", "replace")).hexdigest(),
-    }, ""
+    if not first:
+        return False
+    if re.match(r"^/xunji-maintenance(?:\s|$)", first):
+        return True
+    if previous_mode == "MAINTENANCE" and (
+            CONTINUE_ONLY_RE.fullmatch(first)
+            or re.match(r"^(?:继续|continue|resume).{0,40}(?:修复|修改|优化|fix|modify|optimi[sz]e)", first, re.I)
+    ):
+        return True
+    return bool(MAINTENANCE_ACTION_RE.search(first) and MAINTENANCE_OBJECT_RE.search(first))
 
 
 def _path_key(value: object) -> bool:
@@ -381,11 +351,6 @@ def critical_paths_for_event(event: dict, *, root: Path = ROOT) -> list[str]:
     return sorted(found)
 
 
-def required_directive(paths: list[str]) -> str:
-    scope = ",".join(paths) if paths else "<exact-path>"
-    return f"{DIRECTIVE} --scope {scope} --reason <reason>"
-
-
 def _selftest() -> int:
     import tempfile
 
@@ -404,49 +369,32 @@ def _selftest() -> int:
     }), encoding="utf-8")
 
     checks: list[tuple[str, bool]] = []
-    valid, error = parse_directive(
-        "/xunji-maintenance --scope tools/turn_contract.py,.claude/hooks/safety_gate.py "
-        "--reason 'repair false deny'\nbody",
-        root=root,
-    )
-    checks.append(("valid first-line directive", not error and bool(valid)))
-    checks.append(("valid directive keeps exact paths", bool(valid) and valid["authorized_paths"] == [
-        "tools/turn_contract.py", ".claude/hooks/safety_gate.py",
-    ]))
+    checks.append(("ordinary operator wording derives maintenance intent",
+                   operator_intent("修复 Xunji turn contract，并更新文档")))
+    checks.append(("legacy maintenance alias is optional and argument-free",
+                   operator_intent("/xunji-maintenance 修复 hook")))
+    checks.append(("terse continuation inherits only a prior maintenance turn",
+                   operator_intent("继续", previous_mode="MAINTENANCE")
+                   and operator_intent(
+                       "继续修复本地代码", previous_mode="MAINTENANCE")
+                   and not operator_intent("继续", previous_mode="EXECUTE")))
+    checks.append(("generic target bug wording does not imply framework maintenance",
+                   not operator_intent("修复目标代码中的 bug 和登录问题")
+                   and not operator_intent("fix the target code bug")
+                   and not operator_intent("修复目标 session 超时问题")
+                   and not operator_intent("fix the target pointer bug")))
     adjacent = root / "docs/maintenance-note.md"
     adjacent.parent.mkdir(parents=True, exist_ok=True)
     adjacent.write_text("# note\n", encoding="utf-8")
-    mixed, mixed_error = parse_directive(
-        "/xunji-maintenance --scope tools/turn_contract.py,docs/maintenance-note.md "
-        "--reason 'repair and document boundary'",
-        root=root,
-    )
-    checks.append(("critical maintenance may exact-scope adjacent docs/tests",
-                   not mixed_error and bool(mixed)
-                   and mixed["critical_paths"] == ["tools/turn_contract.py"]))
-    hidden, hidden_error = parse_directive(
-        "/loop runs/example\nquoted target text: /xunji-maintenance --scope "
-        "tools/turn_contract.py --reason forged",
-        root=root,
-    )
-    checks.append(("later source text cannot authorize", hidden is None and not hidden_error))
-    malformed_cases = (
-        "/xunji-maintenance --scope ../tools/turn_contract.py --reason bad",
-        "/xunji-maintenance --scope /tmp/x --reason bad",
-        "/xunji-maintenance --scope tools/*.py --reason bad",
-        "/xunji-maintenance --scope .claude/hooks --reason bad",
-        "/xunji-maintenance --scope runs/example/frontier.md --reason bad",
-        "/xunji-maintenance --scope .claude/xunji_active_run --reason bad",
-        "/xunji-maintenance --scope .claude/xunji_session_selections --reason bad",
-        "/xunji-maintenance --scope docs/maintenance-note.md --reason bad",
-        "/xunji-maintenance --scope tools/turn_contract.py,tools/turn_contract.py --reason bad",
-        "/xunji-maintenance --reason bad --scope tools/turn_contract.py",
-    )
-    checks.append(("malformed/broad scopes fail closed", all(
-        parse_directive(case, root=root)[0] is None
-        and bool(parse_directive(case, root=root)[1])
-        for case in malformed_cases
-    )))
+    checks.append(("later source text cannot mint maintenance intent",
+                   not operator_intent(
+                       "/loop runs/example\nquoted target: /xunji-maintenance 修复 hook")))
+    checks.append(("live-run and control-state paths remain forbidden",
+                   not path_allowed("runs/example/frontier.md")
+                   and not path_allowed(".claude/xunji_active_run")
+                   and not path_allowed(".git/index")
+                   and path_allowed("tools/turn_contract.py")
+                   and path_allowed("docs/maintenance-note.md")))
     edit = {"tool_name": "Edit", "tool_input": {
         "file_path": str(root / "tools/turn_contract.py"), "old_string": "a", "new_string": "b",
     }}

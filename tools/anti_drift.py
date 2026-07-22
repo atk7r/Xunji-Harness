@@ -139,7 +139,7 @@ def is_normal_mode() -> bool:
 # Tier-3 (BOTTOM — "约束速查"): constraints, format rules, gating. Placed last so they sit in the
 #   recency zone as a final check before the model produces output.
 BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
-    "回合优先级: 当前回合有 receipt-backed TARGET_DENIED/MAINTENANCE_BLOCKED 时, 停止普通 plan/Agent/Reason-pass/Coda, 只输出 output_gate exact envelope; 否则 safe 前沿还在就自主推进, 未完成时只用唯一「下一行动」收尾(普通 BLOCKED 无效)",
+    "回合优先级: receipt-backed TARGET_DENIED 只输出 output_gate exact envelope; MAINTENANCE 拒绝/失败不得声称成功, 修正 typed path/argv 后可同回合重试; 否则 safe 前沿还在就自主推进, 未完成时只用唯一「下一行动」收尾(普通 BLOCKED 无效)",
     "Reason pass: 每轮重读整个 frontier.md(所有 open+deferred)并结合 evidence/coverage/graph 裁定后写 v1 receipt; 内容未变可只读确认, 禁止 freshness touch/edit",
     "联网检索走唯一 owner: 每次公共 WebSearch 前按 .claude/skills/web-research/SKILL.md 先执行已注册的 python3 tools/timestamp_gate.py --search-hint --kind vuln 并遵守输出; 非 CVE/CNVD 用 --kind generic; active run 不用 WebFetch",
     "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮走 web-research 的 time gate → xunji-knowledge-flywheel → 公共 WebSearch → structured lead; Root 记录后再关闭或定级",
@@ -1026,9 +1026,9 @@ def _selftest() -> int:
                    and "peer_review --into-run" not in a
                    and "replay才有效" not in a
                    and "from harness.guard import RequestRecorder" not in a))
-    checks.append(("fixed Stop debt deterministically precedes autonomy and Coda",
-                   "TARGET_DENIED/MAINTENANCE_BLOCKED" in a
-                   and "停止普通 plan/Agent/Reason-pass/Coda" in a
+    checks.append(("target Stop debt precedes autonomy while maintenance stays retryable",
+                   "receipt-backed TARGET_DENIED" in a
+                   and "修正 typed path/argv 后可同回合重试" in a
                    and "BLOCKED都会被" not in a))
     # drift patterns list
     checks.append(("drift patterns non-empty", len(DRIFT_PATTERNS) >= 5))

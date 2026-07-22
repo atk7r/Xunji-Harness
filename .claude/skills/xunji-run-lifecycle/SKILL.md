@@ -79,11 +79,12 @@ the pointer, and Claude never calls the owner's private transaction APIs directl
   pointer; only the same transaction identity or explicit resume can activate it.
 - Pointer-success/final-receipt failure is recoverable only after revalidating the
   same immutable transaction, source, claim, and run identity.
-- Never edit/remove `.claude/xunji_active_run`, selection receipts, transition
-  claims, or transaction receipts by hand.
-- `SessionStart.source=resume` may restore only the exact selection as an
-  `EXPLAIN_ONLY resume_barrier`; a later top-level prompt must mint fresh execute
-  authority. Startup, clear, compact, fork, and a new-session bare “继续” do not.
+- Never edit/remove `.claude/xunji_active_run`, transition claims, or transaction
+  receipts by hand.
+- The pointer is the single operator's persistent current-run selection.
+  `SessionEnd` does not clear it and `SessionStart` does not restore it. A new
+  Claude session binds that selection with its first real top-level prompt;
+  session/transcript values remain causal metadata, not an operator ACL.
 
 When a Router phase is actually entered or left, emit the existing Chinese phase
 marker and write its `phase-start`/`phase-end` journal event. Do not invent phases

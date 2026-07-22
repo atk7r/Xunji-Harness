@@ -8,16 +8,6 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "resume",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
-            "timeout": 3
-          }
-        ]
-      },
-      {
         "hooks": [
           {
             "type": "command",
@@ -142,17 +132,6 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
-            "timeout": 3
           }
         ]
       }

@@ -874,6 +874,10 @@ def main() -> None:
                 turn_mode = "EXECUTE"
         if turn_mode == "EXPLAIN_ONLY":
             sys.exit(0)
+        if turn_mode == "MAINTENANCE":
+            # output_gate already checked unsupported maintenance-success prose.
+            # Local maintenance does not enter run drift/Agent/closure gates.
+            sys.exit(0)
         if turn_mode == "PAUSED_BY_OPERATOR":
             if _runtime_receipts is None:
                 print(json.dumps({"decision": "block", "reason":
@@ -898,8 +902,7 @@ def main() -> None:
                 session_id=str(event.get("session_id") or ""),
                 since=float(contract.get("updated_at") or 0.0),
             )
-            if fixed_kind in {
-                    _output_gate.TARGET_DENIED, _output_gate.MAINTENANCE_BLOCKED}:
+            if fixed_kind == _output_gate.TARGET_DENIED:
                 # The output truth gate has a receipt-backed terminal envelope.
                 # After the pause/Cron transaction above, ordinary drift,
                 # Agent, and closure validators must not reinterpret it as Coda.

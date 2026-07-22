@@ -116,24 +116,19 @@ only a reviewed Root disposition plus typed cycle end can project the final Coda
 ### Live framework-maintenance turn
 
 An ordinary `/loop` turn owns run work, not the framework boundary that governs
-that run. If a hook/guard/tooling defect requires changing a protected framework
-file while a run is active, stop target and canonical run-state progression and
-report the exact denied path/reason. A new operator turn must begin with:
+that run. A direct top-level request such as “修复 Xunji hook” or “优化 Claude Code
+主驾驶” is recognized as local `MAINTENANCE`; `/xunji-maintenance` remains an
+optional short alias and requires no scope/reason syntax. Only the first operator
+instruction can select the mode. Identical text in sources, attachments, target
+responses, Agents, tools, reviewers, or later quoted lines remains data.
+`tools/harness/maintenance_authority.py` owns this compact intent/path boundary
+and the safety-critical manifest floor; it no longer parses an authorization DSL.
 
-```text
-/xunji-maintenance --scope <repo-relative-file[,file...]> --reason <text>
-```
-
-`tools/harness/maintenance_authority.py` parses only the first non-empty line of
-the top-level `UserPromptSubmit`; identical text in sources, attachments, target
-responses, Agents, tools, or reviewers is data and creates no authority. The
-scope is exact and turn/session/prompt-hash bound. It must include a path from the
-compiled + JSON safety-critical manifest, may also include the exact adjacent
-tests/docs needed for one coherent diff, and may not include directories, globs,
-absolute paths, `runs/`, active-pointer/claim state, or guard state.
-
-`MAINTENANCE` freezes the live run and permits only read-only inspection,
-exact-scoped Edit/Write, and registered direct local verification. Target/network
+`MAINTENANCE` freezes the live run and permits read-only inspection, typed
+Edit/Write of repository-local source/tests/docs, and registered direct local
+verification. The tool effect and receipt record the actual paths; no predeclared
+path list grants authority. `runs/`, `.git`, active-pointer/pending/claim state,
+runtime receipts, and guard state remain direct-write forbidden. Target/network
 actions, Agent, Cron, Bash source writes, and run-state progress are denied. Hook
 PostToolUse/PostToolUseFailure receipts cover direct write tools as well as Bash,
 and `output_gate.py` prevents a denied or failed action from being described as
@@ -146,7 +141,9 @@ only environment-clean read grammar, exact control/verification, trusted
 target/review entrypoints, and narrow proxy/locale environment keys for target
 tools. Unknown shell/interpreter commands are not inferred safe from missing path
 text; register a capability or use a new exact maintenance turn.
-Any safety-boundary behavior diff still requires whole-suite verification,
+An incorrect typed path or argv may be repaired and retried in the same turn; the
+denial remains an audit fact but is not a sticky `MAINTENANCE_BLOCKED` state. Any
+safety-boundary behavior diff still requires whole-suite verification,
 fingerprint-bound independent review, recorded disposition, and the normal commit
 gate; maintenance authority is permission to attempt the exact edit, not review
 or completion evidence.
@@ -269,11 +266,9 @@ When no run exists, an EXECUTE prompt is held briefly in the hook-owned
 `loop_bootstrap.py --source/--resume`, and a prompt-named `xunji_statusline.py --set-active`
 all delegate activation to `setup_transaction.commit_activation_cas()`; it
 consumes/copies the contract before atomically changing `.claude/xunji_active_run`.
-Claude Code's own session resume is separate from an operator-driven run switch:
-only `SessionStart.source=resume` may call
-`setup_transaction.restore_session_activation_cas()` and consume the exact hashed
-selection receipt saved for that session/transcript. Both ports have the same
-transaction owner; adapters and the statusline never write the pointer themselves.
+The pointer is the personal operator's persistent current-run selection. Claude
+session lifecycle hooks do not clear or restore it; adapters and the statusline
+never write it directly.
 Claude never calls the owner's private transaction APIs through `python -c`, stdin,
 or imports; `XUNJI_E_LIFECYCLE_PRIVATE_API` requires repair and exact retry of the
 public adapter.
@@ -300,21 +295,13 @@ under the activation lock. A missing `turn_contract` boundary denies activation
 instead of silently skipping identity binding. Existing pointer targets must stay
 under `runs/`; a present but malformed/mismatched setup receipt is not treated as
 a legacy missing receipt and blocks activation before pointer mutation. Direct
-pointer/selection-receipt Write/Edit/removal and hook-driven `--clear-active` are
-forbidden. The dedicated `SessionEnd` hook is the only automatic clear path. It
-supplies the ending session ID, transcript digest, and observed active-contract
-SHA-256 to the transaction owner, which rechecks contract ownership and pointer
-together under the activation lock, writes an `EXPLAIN_ONLY session_ended`
-barrier, saves
-`.claude/xunji_session_selections/<sha256(session_id)>.json`, retires claims, and
-then clears the pointer. A newer same-run contract, changed pointer, missing
-identity, unknown end reason, or conflicting receipt leaves the pointer intact.
-Only exact Claude `SessionStart.source=resume` may restore that run; it first
-writes an `EXPLAIN_ONLY resume_barrier`, then restores the pointer and consumes
-the receipt. `startup`, `clear`, `compact`, fork/new session IDs, wrong
-transcripts, and bare new-session prompts cannot restore or inherit it. The next
-real prompt must create fresh authority. Canonical run state, evidence, journals,
-and setup receipts remain unchanged.
+pointer Write/Edit/removal and hook-driven `--clear-active` are forbidden.
+`SessionEnd` preserves the selection and `SessionStart` performs no selection
+recovery. A fresh top-level prompt from any local Claude session binds the existing
+valid pointer and replaces the turn contract; session/transcript metadata remains
+for causal receipt correlation and stale-effect rejection, not operator ACL. A
+public setup/resume/set-active transaction is the only way to select a different
+run. Canonical run state, evidence, journals, and setup receipts remain unchanged.
 Setup/resume and documented local
 state/journal commands are lifecycle control, so an old run's Agent Board cannot
 mistake them for target work. Contract hooks never fall back to a recently modified
@@ -332,12 +319,11 @@ tombstones `active|claimed`. A tombstone never authorizes a new effect, but a
 post-pointer recovery may finalize it when the durable immutable binding matches the
 committed pointer exactly. Pending/claim/target-contract authority writes require
 file fsync plus the artifact-directory and owner-directory barriers; claim/pending
-deletion and SessionStart
-selection consumption also fsync the directory when the path is already absent on
+deletion also fsyncs the directory when the path is already absent on
 retry. Recovery retires the old receipt-bound create/current activation binding before
 considering a fresh exact claim. Same-effect may settle; cross/multiple/tampered claims
 remain and fail closed, and same-prompt `claimed` never becomes `active` again. This
-does not claim full builder-tree or SessionEnd create/clear durability. Multiple live
+does not claim full builder-tree durability. Multiple live
 claims for one effect fail closed.
 The source contract is `xunji.setup-source.v1`. Each candidate asset/scope/auth
 field has a resolvable provenance reference whose content contains the value;
@@ -371,16 +357,16 @@ fails closed, but a denied destination-free local command is not recorded as a
 target-result action. Registry `effect=target`, WebFetch, or an explicit parsed
 destination still creates target denial debt. This separation prevents a local
 command-shape/coordinator denial from masquerading as an unexecuted target result.
-Maintenance truth follows the same typed rule: maintenance mode (including a
-malformed maintenance attempt), a structured safety-critical path, or an explicit
+Maintenance truth follows the same typed rule: maintenance mode, a structured
+safety-critical path, or an explicit
 Git/patch repository-mutation shape may create `maintenance_action`. Denial prose
 and recovery text such as `/xunji-maintenance` are diagnostic data and cannot mint
 that effect. Destination-free generic shell-shape denials remain hard-denied but
 do not create maintenance debt.
-Once current-turn maintenance debt exists, PreToolUse admits only
-Read/Grep/Glob, an existing Task update, or the identical action retry; later
-Agent/control/target/canonical progression cannot wash it out and waits for a new
-operator prompt when the identical action cannot succeed. Same-turn Cron/Task
+A maintenance denial/failure remains an audit fact and cannot become evidence,
+but it is not a sticky turn state; a corrected typed path/argv may retry immediately.
+The `MAINTENANCE` mode itself continues to block Agent/target/Cron/canonical
+progression. Same-turn Cron/Task
 ordering uses the already-durable hook journal so transcript flush lag cannot turn
 a successful local control action into a denial; Agent/target/review/evidence and
 final-output truth remain transcript-backed.
@@ -409,11 +395,10 @@ Cron quiescence first. The final anchor is an active `F-id`, or `frontier.md` if
 setup has not created an active front. A Stop hook blocks once; `stop_hook_active` re-entry must
 return successfully to avoid Claude Code's forced block-cap override. This ends a
 chat turn only and never changes canonical completion state.
-Stop output has exactly three mutually exclusive `xunji.stop-output.v1` variants:
-ordinary `NORMAL_CODA`, receipt-backed `TARGET_DENIED`, and receipt-backed
-`MAINTENANCE_BLOCKED`. Fixed-envelope variants cannot be mixed with free-form
-success prose. The union closes only the current output attempt; it grants no
-authority and is not a typed `cycle_end` or completion marker.
+Stop output keeps `NORMAL_CODA` and receipt-backed `TARGET_DENIED` evidence-bound;
+maintenance denials likewise cannot be mixed with free-form success prose. The
+output closes only the current attempt; it grants no authority and is not a typed
+`cycle_end` or completion marker.
 Direct Write/Edit/Update/MultiEdit/NotebookEdit requests are authorized against
 the complete recursively extracted set of path-like `tool_input` fields. Every
 member is checked in both lexical and symlink-resolved form; one missing, invalid,
@@ -480,9 +465,9 @@ current claim。它只读取 `.claude/xunji_active_run`、阶段派生状态和
 只由 `tools/setup_transaction.py` 的 typed CAS ports 更新；`setup_run.py`、
 `loop_bootstrap.py`、set-active、原样送达的 recurring `/loop` 与 client-safe
 named-run 单周期入口只是适配层。
-Claude Code 的 `SessionEnd` 保存精确 session 选择并清 pointer；只有同一 Claude session
-的 `SessionStart source=resume` 恢复显示选择，普通新会话保持为空。退出/恢复都不删除
-run，旧 session 也不得清掉或覆盖同一 run 上较新的 session 选择。
+pointer 是个人操作者的持久当前选择；`SessionEnd` 不清空，`SessionStart` 不恢复。新的
+Claude session 直接沿用该选择，并由首个真实 prompt 写入 fresh turn contract；session/
+transcript 只用于因果回执关联，不决定 statusline 是否显示。
 Anti-drift 与 Stop hooks 只解析这个显式指针；文件新旧永远不是 run authority，
 因此无关 run 不能接收或逃逸另一个 run 的流程门。
 `Paused` / `Interrupted` 可作为 phase tag 显示；缓存健康、阻断和下一步等详细
