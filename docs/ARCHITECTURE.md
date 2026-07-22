@@ -94,6 +94,11 @@ privacy、预算、finding 晋级、report parity 和 closure gate 保持确定�
 生成带 provenance 的候选结构，validator 决定它能否晋级；AI 不能生成自己的
 权限、completion、独立复审或安全例外。
 
+Harness 的核心是不限制模型能力上限，只保证可靠性下限。操作者用自然语言描述目标、
+路由与约束，Claude 负责理解意图、选择策略并随能力升级获得更好的表现；确定性代码只把
+该意图编译为 typed effect，并校验 authority、出站边界、状态转移和证据晋级。模型变强不应
+要求操作者学习新的命令语法，也不应要求绕过 harness 才能发挥能力。
+
 ### 3.6 按需上下文与最小能力
 
 `CLAUDE.md`/`AGENTS.md` 只保存常驻不变量和路由。具体字段、流程和专项方法放进
@@ -182,7 +187,7 @@ Observe-only side path
 
 | 层 | 当前组件 | 责任 | 不能拥有的权力 |
 |---|---|---|---|
-| Operator / turn | prompt、`turn_contract.py`、`maintenance_authority.py` | 识别 execute/explain/pause/maintenance，规范 typed local effect | 不改写证据真假 |
+| Operator / turn | prompt、`turn_contract.py`、`maintenance_authority.py` | 把完整自然语言描述编译为 execute/explain/pause/maintenance、source/run、route、constraints 与 typed effect | 不替模型选择策略，不改写证据真假 |
 | Interaction / phase | Claude Code、`docs/ROUTER.md`、phase skills | 加载合适上下文、显示阶段 | 不私建第二 runtime |
 | Root control plane | `CLAUDE.md`、state graph、Agent Board | 选前沿、分工、冲突调度、持续推进 | 不绕过 hook/guard，不直接伪造 finding |
 | Cognition / knowledge | `docs/cognition/`、`knowledge/` | 推理纪律、签名和弱点接地 | 不成为盲扫 playbook 或确认依据 |
@@ -291,15 +296,23 @@ pointer + 阶段派生状态。
 `tools/loop_bootstrap.py --source ... --type auto` 适配，并在同一顶层 operator 回合继续到
 run activation、fresh CronList/CronCreate、iteration plan、图谱/front 拆解和真实 Agent
 launch；不得停下来等待裸“继续”。source authority 以完整 source SHA-256 绑定，持久化
-prompt 展示和 runtime excerpt 脱敏敏感 query，不能用相同 basename 或不同 query 复用。
+prompt 展示和 runtime excerpt 脱敏敏感 query。current contract 还冻结 canonical-v1 semantic
+source identity：bare host 归一为 HTTPS origin，scheme/host 大小写、默认端口与空 path 只在
+effect 等价时统一；不同 host、path 或 query 仍是不同 authority。raw prompt hash 另行保留用于
+审计，不能用相同 basename 或不同 query 复用。
 只有首个非空顶层行经无害前导水平空白/BOM 归一后以 `/loop(?:\s|$)`
-开头才是显式 recurring loop，并只选择其首个 source token；raw prompt hash 仍绑定
+开头才是显式 recurring loop；完整顶层描述被编译为 operation、唯一 semantic source/run、
+route 与 constraints。URL/host 后紧接的“走代理渗透”等描述保留为 operator instruction，
+不能被吞进 IDN hostname，也不能因 token 截断而丢失。尾随的失败说明或可逆重试要求不撤销
+主要执行意图；自然语言 fallback 中真正否定 lifecycle 或询问是否创建保持 read-only，显式
+顶层 `/loop` 已是 execute command，只有真正 denial 才撤销。raw prompt hash 仍绑定
 未修改的操作者输入。显式 fenced code、blockquote、Markdown list item、引用日志与行内引用都是 data。若客户端
 保留 `/loop` 并在 hook 前展开为自身 scheduler，该展开没有 Xunji authority；current driver
-改用 turn contract 已支持的肯定、唯一命名 source/run 自然语言入口完成单次
+改用 turn contract 已支持的肯定、唯一 semantic source/run 自然语言入口完成单次
 `EXECUTE` setup/resume cycle，`loop_requested=false` 且不创建 recurring Cron。自然语言
-setup 必须是肯定的 create/setup intent 且只有恰好一个唯一 URL 才生成 source authority；
-多个 URL、否定、疑问、分析/评审请求都 fail closed/read-only。即使首行写了 `/loop`，同行
+setup 必须是肯定的 create/setup intent 且只有一个目标 URL、bare host、run 或支持的 source
+才生成 source authority；真正选择多个 semantic source、否定、权限疑问或分析/评审请求都
+fail closed/read-only。即使首行写了 `/loop`，同行
 或正文又明确否定 lifecycle，也按冲突意图 fail closed；“不要修改框架源码”这类窄
 effect constraint 只缩小可做动作，不撤销显式 lifecycle 意图。任意新的非内部顶层 prompt 都按
 session 墓碑化旧
@@ -338,8 +351,9 @@ request 或 candidate mutation 都阻止 publish/closure。文件派生资产初
 补充资产仍须引用冻结 source token，不能提升 scope/authorization/turn/tool 权限。
 `coverage_matrix.py` 必须把 scope status 传到 asset ledger，`turn_contract.py` 对
 `review|out|unknown` 的 target effect fail closed；Setup/active pointer 成功不等于 scope
-准入。独立的 operator-bound 零探测 transition 只接受顶层 prompt 首条 exact
-`/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>`；hook
+准入。独立的 operator-bound 零探测 transition 接受顶层自然语言中明确命名的 active run、
+exact assets 与 reason；`/xunji-scope-admit --run runs/<name> --assets
+<host[,host...]> --reason <text>` 保留为可选 concise alias。两种表达编译成同一 typed admission，hook
 为匹配的 `scope_admission.py` 写一次性 claim，tool 只把指定 setup-source `review` 行更新
 为 `in` 并提交绑定 setup-source hash 的 `xunji.scope_admission.v1`
 receipt/projection hash。prepared/缺失/错 hash
@@ -782,9 +796,9 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `.claude/hooks/` | Claude live runtime 的强制 authority/effect/lifecycle gates | safety skill、hook tests、独立复审 |
 | `contracts/` + `tools/harness/fixtures/` | versioned schemas 与 conformance cases | 当前 Python validator、未知版本 fail-closed、fixture tests |
 | `tools/harness/maintenance_authority.py` + `safety_critical_paths.json` | 顶层自然语言维护意图、typed path boundary 与普通 `/loop` protected-path floor | `turn_contract.py`、settings write receipts、output truth gate、manifest drift check、独立复审 |
-| `tools/setup_source.py` | setup source 路由、provenance normalization、bundle validator；不拥有 fetch/authority/pointer | schema/fixture、setup adapters/transaction、privacy、target.md、独立复审 |
+| `tools/setup_source.py` | setup source 路由、bare-host/URL semantic normalization、provenance bundle validator；不拥有自然语言策略、fetch/authority/pointer | schema/fixture、setup adapters/transaction、privacy、target.md、独立复审 |
 | `tools/setup_normalizer.py` | Markdown/普通 JSON token/ref inventory、external surrogate 与 reference-only candidate 晋级；不拥有 model transport/target/pointer | candidate schema、privacy、setup source/transaction、benchmark、独立复审 |
-| `tools/scope_admission.py` | hook-claim 绑定的 exact setup-source `review` 资产零探测准入与 receipt/projection commit；不拥有 target/pointer/Cron | turn contract、coverage/asset ledger、receipt schema/fixture、独立复审 |
+| `tools/scope_admission.py` | 把明确自然语言或 concise alias 编译为 hook-claim 绑定的 exact setup-source `review` 资产零探测准入与 receipt/projection commit；不拥有 target/pointer/Cron | turn contract、coverage/asset ledger、receipt schema/fixture、独立复审 |
 | `tools/setup_transaction.py` | staging、setup receipt、active pointer、typed lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
 | `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
 | `tools/harness/capability_registry.py` | exact script/argv→effect 与 mandatory service policy；`root_direct_eligible` 默认关闭 | turn contract、command-shape、文档命令 fixture |
@@ -936,18 +950,23 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 16. AI normalizer 只能选择机械 inventory 中的 token/ref ID；external request 先硬脱敏且
     不含原始路径，唯一 target 由 deterministic label 决定，model 不能解决 target 歧义或
     生成值。Request/candidate/source 三者必须 hash 绑定后才可进入 setup transaction。
-17. 文件候选资产的 scope 晋级只能来自 operator 首行 exact directive + hook one-use claim；
-    `scope_admission.py` 只接纳 active run 中指定的 `review` 行，并以 committed receipt 与
-    projection hash 证明。准入回合 zero-probe，source/AI/Agent/front/手改不能铸造权限。
+17. 文件候选资产的 scope 晋级只能来自顶层 operator 明确命名的 active run、exact assets、
+    reason 与 hook one-use claim；普通自然语言是主入口，exact directive 只是可选 alias，二者
+    编译为同一 typed admission。`scope_admission.py` 只接纳 active run 中指定的 `review` 行，
+    并以 committed receipt 与 projection hash 证明。准入回合 zero-probe，source/AI/Agent/
+    front/手改不能铸造权限。
 18. 原样送达的显式 `/loop <source>` 顺序是 exact bootstrap → transaction-bound activation →
     fresh CronList/CronCreate → iteration-plan receipt → graph/front/real Agent；shape deny 只能
     同 operator turn clean retry。客户端保留字导致的 scheduler 展开不是该入口；肯定且唯一
     命名 source/run 的自然语言 fallback 只产生 `loop_requested=false` 单周期 EXECUTE，不创建
-    recurring Cron。每个新的非内部 operator prompt 都撤销同 session 的未消费 source
-    authority，不受 active pointer 是否已出现影响；自然语言多 URL 也不能铸造 source
-    authority。后续 scope 限制不会因 `settings` 等词中的动词子串撤销 exact `/loop`；只有带
+    recurring Cron。完整自然语言描述编译为唯一 semantic source/run、route 与 constraints；
+    bare host 和 effect-preserving URL 写法安全归一，附着描述不会被吞进 hostname。每个新的
+    非内部 operator prompt 都撤销同 session 的未消费 source authority，不受 active pointer
+    是否已出现影响；真正选择多个 semantic source 不能铸造 source authority。后续 scope
+    限制不会因 `settings` 等词中的动词子串撤销 exact `/loop`；只有带
     完整 lifecycle 动词并明确指向 run/运行的否定才撤销该 authority。任务清单不替代 Agent。
-19. Lifecycle authority 同时绑定 exact argv 语义与 one-use effect：未引用 shell expansion、
+19. Lifecycle authority 先绑定自然语言编译后的 canonical semantic intent，再绑定 exact argv
+    语义与 one-use effect：未引用 shell expansion、
     不可信解释器、env/wrapper 都不能生成 claim；effect 只保留 redacted operation/options 与
     canonical input digest。状态按 `active -> claimed -> pointer -> finalize/delete` 推进，新 prompt
     tombstone 旧 authority；恢复必须从完整 bundle/receipt/immutable binding 复算，不能从 pointer
@@ -983,30 +1002,26 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-22
-- Scope: 收尾 Claude-primary 个人操作者真实周期：自然语言创建/恢复 intent、localhost admission、
-  当前回合 egress route、文本响应解析、Agent exact-path context、target body+replay 回执、绝对
-  run-local artifact 校验、`needs-control|retry` 后 Root settlement 与 successor verify lane，以及
-  已由计划内 Agent 成功执行的 pre-plan target denial 语义结算。
-- Architecture impact: current runtime behavior changed — personal-operator intent and prepared Agent
-  execution replace hostile-session ceremony while preserving proxy/privacy/audit hard boundaries；所有
-  Reviewer disposition 均结束 review attempt，但只有 Root settlement 改变 execution lane；pre-plan
-  denial 以 capability/method/URL 结算，不因解释器、route prefix 或 save basename 制造过期重试。
-- Owner/enforcement: `turn_contract.py` owns natural turn/lifecycle intent；`scope_admission.py` owns exact
-  loopback admission；`context_pack.py` owns frozen route/exact paths；`probe.py` owns response artifacts；
-  `workers.py` owns review/Root/successor settlement；`runtime_receipts.py` owns denial truth；Claude
-  Hunter/Reviewer definitions and Agent Board reference own concise return behavior。
-- Verification: post-fix full `python3 tools/selftest_all.py` PASS 69/69；focused
-  `runtime_receipts.py --selftest` PASS；`check_rules.py` and `git diff --check` PASS。DeepSeek-backed Claude
-  Code real operator session `6cc7bb9f-08b0-4c06-bf29-5adeccfc9690` created
-  `runs/localhost_20260722` from natural language, used exact direct route against an operator-approved
-  loopback fixture, executed Hunter→Reviewer→needs-control→Root blocked→Verify→Reviewer→Root merged,
-  saved and independently read three bodies plus three replay sidecars, and completed the typed cycle.
-  That run also exposed the now-fixed stale pre-plan denial retry and missing replay-path return.
-- Independent review: fresh DeepSeek-backed Claude Code session
-  `d1f3704d-a037-4edb-9233-7c45cdbdf5a8` received the complete 16-file patch at exact SHA-256
-  `a0fc82ffdbde290ef9a3507f286ce614467175ec6b324f1a15d73254c0b2f8aa` and returned PASS for all eight
-  requested boundaries with no finding or tool denial；durable record:
-  `review/records/2026-07-22-claude-primary-local-operator-cycle-review.md`。No arkcli or Codex self-vote.
+- Scope: 修复 Claude-primary lifecycle 的自然语言意图编译：无空格 URL/host 后缀不再被吞成
+  IDN target，bare host 与 effect-preserving URL 写法归一为同一 semantic identity，完整描述保留
+  operation、route 与 constraints，尾随失败说明不撤销主动作；scope admission 同时接受明确
+  自然语言和 concise alias。把“保证下限、不限制模型上限”写入 `AGENTS.md` 并同步 Claude owner。
+- Architecture impact: current operator/turn and setup-source behavior changed — natural language is the
+  primary input and exact argv is the post-compile effect contract。Outbound proxy/privacy/scope/audit/
+  recorder、不同 host/path/query 边界、setup transaction 单写者和 evidence/closure gate 均未放松。
+- Owner/enforcement: `turn_contract.py` owns natural-language compilation、typed intent/context and
+  canonical source hashes；`setup_source.py` owns effect-preserving URL/bare-host normalization and IDNA
+  ambiguity rejection；`scope_admission.py` owns natural/alias admission compilation and the unchanged
+  one-use zero-probe commit；Claude lifecycle/setup skills own driver recovery behavior。
+- Verification: focused `setup_source.py --selftest`、`scope_admission.py --selftest`、
+  `turn_contract.py --selftest` and `py_compile` PASS；full `python3 tools/selftest_all.py` PASS 69/69；
+  `python3 tools/check_rules.py` and `git diff --check` PASS。DeepSeek-backed Claude Code primary-driver
+  session `f558c0d0-09ba-473f-aad9-2f5ebd0ea708` received the no-space natural prompt, executed the exact
+  injected `loop_bootstrap.py` argv, created and activated `runs/127-0-0-1_20260722` in an isolated clone,
+  and recorded `success=true`、`target_action=false` with zero Agent/Cron and no framework mutation。
+- Independent review: the no-arkcli Codex-authored matrix uses a fresh-context DeepSeek-backed Claude Code
+  exact-diff review；its authoritative verdict, session, patch hash, findings and Codex disposition are in
+  `review/records/2026-07-22-natural-language-intent-review.md`。Codex self-review is not counted as a vote.
 - Exclusions: CCB/TypeScript migration、statusline behavior、`tools/xunji_statusline.py`、
   `docs/XUNJI_PROJECT_INTRO.md` and user live-run/artifact changes remain outside this phase.
 

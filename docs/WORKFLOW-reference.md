@@ -621,9 +621,11 @@ committed `xunji.scope_admission.v1` receipt、current setup-source hash and sco
 projection hash. Candidate identity is re-derived from the validator-bound frozen
 setup bundle, so changing or removing a mutable coverage/asset-ledger `source`
 label cannot bypass the receipt gate. The only
-promotion path is a new operator turn whose first non-empty line is
-`/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>`,
-followed by the exact matching `tools/scope_admission.py` call. The hook owns the
+promotion path is a new top-level operator turn that clearly names the active run,
+exact assets, and admission reason. Ordinary natural language is primary;
+`/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>` is
+an optional concise alias. Both compile to the exact matching
+`tools/scope_admission.py` call. The hook owns the
 single-use claim. The turn is local-only/zero-probe; `out`, `unknown`, wildcard,
 inactive-run, target, Agent, Cron, replay, and direct ledger edits fail closed.
 Scope commit shares the activation lock with the sole pointer owner, so the

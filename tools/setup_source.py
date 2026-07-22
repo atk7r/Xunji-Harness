@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +134,21 @@ def parse_target_url(value: str) -> dict:
     if not raw or len(raw.encode("utf-8")) > 8192 \
             or re.search(r"[\x00-\x20\x7f]", raw):
         raise SetupSourceError("invalid_url", "URL is empty or contains control/whitespace")
+    # A trusted operator commonly writes ``https://host继续执行`` without a
+    # separating space.  Python's IDNA codec can otherwise turn the attached
+    # Chinese instruction into a different, syntactically valid hostname.  A
+    # real Unicode hostname can be supplied in Unicode from its first label or
+    # as explicit punycode; an ASCII hostname followed immediately by CJK is an
+    # ambiguous human-language boundary and must never become a new target.
+    if re.match(
+        r"(?i)^https?://(?:localhost|[a-z0-9.-]+|\[[0-9a-f:.]+\])"
+        r"(?::\d{1,5})?[\u3400-\u4dbf\u4e00-\u9fff]",
+        raw,
+    ):
+        raise SetupSourceError(
+            "ambiguous_url_suffix",
+            "ASCII URL host is immediately followed by operator-language text",
+        )
     try:
         parsed = urlsplit(raw)
         port = parsed.port
@@ -150,6 +165,72 @@ def parse_target_url(value: str) -> dict:
         "scheme": parsed.scheme.lower(),
         "port": port or (443 if parsed.scheme.lower() == "https" else 80),
     }
+
+
+def canonical_target_url(value: str) -> str:
+    """Normalize effect-preserving URL syntax while preserving path/query bytes."""
+    raw = str(value or "").strip()
+    target = parse_target_url(raw)
+    parsed = urlsplit(raw)
+    scheme = str(target["scheme"])
+    host = str(target["host"])
+    host_text = f"[{host}]" if ":" in host else host
+    explicit_port = parsed.port
+    default_port = 443 if scheme == "https" else 80
+    netloc = host_text + (
+        f":{explicit_port}" if explicit_port and explicit_port != default_port else ""
+    )
+    return urlunsplit((
+        scheme,
+        netloc,
+        parsed.path or "/",
+        parsed.query,
+        parsed.fragment,
+    ))
+
+
+def _bare_target_url(value: str) -> str:
+    """Return a canonical HTTPS URL for an unambiguous bare host[:port]."""
+    raw = str(value or "").strip()
+    if not raw or any(char in raw for char in "/?#@") \
+            or re.search(r"[\x00-\x20\x7f]", raw):
+        return ""
+    if re.match(
+        r"(?i)^(?:localhost|[a-z0-9.-]+|\[[0-9a-f:.]+\])"
+        r"(?::\d{1,5})?[\u3400-\u4dbf\u4e00-\u9fff]",
+        raw,
+    ):
+        return ""
+    try:
+        parsed = urlsplit("//" + raw)
+        host = _idna_host(parsed.hostname or "")
+        port = parsed.port
+    except (SetupSourceError, ValueError):
+        return ""
+    try:
+        ipaddress.ip_address(host)
+        recognizable = True
+    except ValueError:
+        recognizable = host == "localhost" or "." in host
+    if not recognizable or parsed.path or parsed.query or parsed.fragment \
+            or parsed.username is not None or parsed.password is not None:
+        return ""
+    host_text = f"[{host}]" if ":" in host else host
+    return canonical_target_url(
+        "https://" + host_text + (f":{port}" if port else "") + "/"
+    )
+
+
+def normalize_operator_source(value: str) -> str:
+    """Compile one operator URL/bare-host spelling into its semantic identity.
+
+    Non-target values are returned unchanged so explicit run and file routing
+    stays owned by the existing deterministic router.
+    """
+    raw = str(value or "").strip()
+    if re.match(r"(?i)^https?://", raw):
+        return canonical_target_url(raw)
+    return _bare_target_url(raw) or raw
 
 
 def _slug(value: str) -> str:
@@ -1168,9 +1249,23 @@ def route_source(
             return SourceRoute("run", raw_value, run_dir=run_dir)
         if requested == "run":
             raise SetupSourceError("invalid_run", f"not a recognizable run path: {raw_value}")
-    if requested in {"auto", "url"} and re.match(r"(?i)^https?://", raw_value):
-        parsed = parse_target_url(raw_value)
-        return SourceRoute("url", raw_value, slug=_slug(str(parsed["host"])))
+    normalized_target = ""
+    if requested in {"auto", "url"}:
+        try:
+            normalized_target = normalize_operator_source(raw_value)
+        except SetupSourceError:
+            # Preserve the specific URL diagnostic below for explicit URL
+            # spellings instead of falling through to a misleading file error.
+            if re.match(r"(?i)^https?://", raw_value):
+                raise
+    if normalized_target and (
+            re.match(r"(?i)^https?://", raw_value)
+            or normalized_target != raw_value
+    ):
+        parsed = parse_target_url(normalized_target)
+        return SourceRoute(
+            "url", normalized_target, slug=_slug(str(parsed["host"]))
+        )
     if requested == "url":
         parse_target_url(raw_value)
         raise SetupSourceError("invalid_url", "URL must start with http:// or https://")
@@ -1260,6 +1355,33 @@ def _selftest() -> int:
         checks.append((case["name"], code == case["error"]))
 
     url_manifest, url_bytes = normalize_url("https://例子.test:8443/a?key=opaque#frag")
+    bare_route = route_source(
+        "Cloud.SCSHR.com:443", source_type="auto", runs_root=runs,
+    )
+    checks.append((
+        "bare host compiles to one canonical HTTPS source",
+        bare_route.kind == "url"
+        and bare_route.value == "https://cloud.scshr.com/",
+    ))
+    checks.append((
+        "equivalent URL syntax has one semantic identity",
+        canonical_target_url("HTTPS://Cloud.SCSHR.com:443")
+        == canonical_target_url("https://cloud.scshr.com/")
+        == "https://cloud.scshr.com/",
+    ))
+    try:
+        route_source(
+            "https://cloud.scshr.com走代理渗透",
+            source_type="auto",
+            runs_root=runs,
+        )
+        attached_intent_rejected = False
+    except SetupSourceError as exc:
+        attached_intent_rejected = exc.code == "ambiguous_url_suffix"
+    checks.append((
+        "attached operator text cannot become an IDNA target",
+        attached_intent_rejected,
+    ))
     checks.append((
         "JSON Schema required fields match the canonical runtime shape",
         set(contract.get("required", [])) == set(url_manifest)

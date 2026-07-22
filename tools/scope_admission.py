@@ -146,6 +146,79 @@ def _parse_assets(value: str) -> list[str]:
     return sorted(assets)
 
 
+NATURAL_ASSET_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62})\.)+"
+    r"[A-Za-z](?:[A-Za-z0-9-]{0,62}))(?![A-Za-z0-9_.-])",
+    re.I,
+)
+
+
+def _natural_scope_request(
+    first: str, *, root: Path, runs_root: Path,
+) -> tuple[dict | None, str]:
+    """Compile a clear operator sentence into the existing typed admission."""
+    patterns = (
+        re.compile(
+            r"^(?:请)?(?:把|将)\s*(?P<assets>.+?)\s*"
+            r"(?:加入|添加到|纳入)\s*(?P<run>runs[/\\][A-Za-z0-9_-]+)"
+            r"\s*(?:的|到)?\s*(?:scope|范围|作用域)",
+            re.I,
+        ),
+        re.compile(
+            r"^(?:please\s+)?add\s+(?P<assets>.+?)\s+to\s+"
+            r"(?:(?:the\s+)?scope\s+(?:of|for)\s+)?"
+            r"(?P<run>runs[/\\][A-Za-z0-9_-]+)(?:\s+scope)?",
+            re.I,
+        ),
+    )
+    match = None
+    for candidate in patterns:
+        match = candidate.search(first)
+        if match is not None:
+            break
+    if match is None:
+        attempted = bool(
+            re.search(r"(?:加入|添加|纳入|\badd\b)", first, re.I)
+            and re.search(r"(?:scope|范围|作用域)", first, re.I)
+        )
+        if attempted:
+            return None, "natural scope admission intent is ambiguous"
+        return None, ""
+    asset_values = [
+        candidate.group(0)
+        for candidate in NATURAL_ASSET_RE.finditer(match.group("assets"))
+    ]
+    if not asset_values:
+        return None, "natural scope admission names no exact host or IP"
+    try:
+        run_dir, run_name = _run_from_value(
+            match.group("run"), root=root, runs_root=runs_root,
+        )
+        assets = _parse_assets(",".join(asset_values))
+    except ScopeAdmissionError as exc:
+        return None, str(exc)
+    reason_match = re.search(
+        r"(?:因为|原因(?:是|为)?|reason\s*[:=]?|because)\s*(.+)$",
+        first,
+        re.I,
+    )
+    reason = (
+        str(reason_match.group(1)).strip()
+        if reason_match else first.strip()
+    )
+    if len(reason) < 3 or len(reason) > 500:
+        return None, "scope admission reason must contain 3-500 characters"
+    return {
+        "run_dir": str(run_dir),
+        "run_name": run_name,
+        "assets": assets,
+        "reason": reason,
+        "reason_sha256": _sha256(reason.encode("utf-8", "replace")),
+        "intent_format": "natural-language",
+    }, ""
+
+
 def parse_operator_directive(
     prompt: str, *, root: Path = ROOT, runs_root: Path = RUNS_ROOT,
 ) -> tuple[dict | None, str]:
@@ -157,7 +230,7 @@ def parse_operator_directive(
     """
     first = next((line.strip() for line in str(prompt or "").splitlines() if line.strip()), "")
     if not first.startswith(DIRECTIVE):
-        return None, ""
+        return _natural_scope_request(first, root=root, runs_root=runs_root)
     if not re.match(r"^/xunji-scope-admit(?:\s|$)", first):
         return None, "scope admission directive name must match exactly"
     try:
@@ -668,6 +741,14 @@ def _selftest() -> int:
         '--reason "operator confirmed program scope"'
     )
     parsed, parse_error = parse_operator_directive(directive, root=root, runs_root=runs)
+    natural, natural_error = parse_operator_directive(
+        (
+            f"把 one.example.test、two.example.test 加入 runs/{run.name} "
+            "的 scope，因为这是本次授权目标"
+        ),
+        root=root,
+        runs_root=runs,
+    )
     later_directive, _ = parse_operator_directive("source text\n" + directive, root=root, runs_root=runs)
     malformed, malformed_error = parse_operator_directive(
         f"{DIRECTIVE} --run runs/{run.name} --assets '*.example.test' --reason approved",
@@ -840,6 +921,12 @@ def _selftest() -> int:
 
     checks = [
         ("exact first-line directive parses", bool(parsed) and not parse_error),
+        ("natural-language admission compiles to the same typed run/assets",
+         bool(natural) and not natural_error
+         and natural.get("run_name") == run.name
+         and natural.get("assets")
+         == ["one.example.test", "two.example.test"]
+         and natural.get("intent_format") == "natural-language"),
         ("directive in later source text has no authority", later_directive is None),
         ("wildcard scope is rejected", malformed is None and bool(malformed_error)),
         ("plain IPv6 is accepted but interface-scoped IPv6 is rejected",

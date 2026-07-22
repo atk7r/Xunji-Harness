@@ -113,6 +113,18 @@ DIRECT_EGRESS_DENIAL_RE = re.compile(
     r"(?:allow|approve|accept|direct[ -]?egress)",
     re.I,
 )
+DIRECT_ROUTE_APPROVAL_RE = re.compile(
+    r"(?:不用|无需|别|不走)\s*(?:走|使用)?\s*(?:代理|proxy)"
+    r".{0,20}(?:直连|直接访问)|"
+    r"(?:直连|直接访问).{0,20}(?:不用|无需|不走)\s*(?:代理|proxy)|"
+    r"(?:without|no)\s+(?:the\s+)?proxy.{0,20}\bdirect\b",
+    re.I,
+)
+DIRECT_ROUTE_HARD_DENIAL_RE = re.compile(
+    r"(?:不要|不得|禁止|拒绝|不允许)\s*(?:进行)?\s*(?:直连|直接访问)|"
+    r"(?:do\s+not|don't|never|deny|forbid).{0,16}\bdirect\b",
+    re.I,
+)
 ALL_NETWORK_DENIAL_RE = re.compile(
     r"(?:禁止|不要|不得|不允许|无需).{0,24}"
     r"(?:任何|所有|一切)?\s*(?:网络请求|网络访问|联网|出站)|"
@@ -189,6 +201,19 @@ LOOP_EXPLAIN_OVERRIDE_RE = re.compile(
     r"do not (?:act|execute|run|apply|start)",
     re.I,
 )
+LOOP_EXECUTION_DENIAL_RE = re.compile(
+    r"(?:不用做|不要做|先别做|不要执行|不得执行|别执行|无需执行|"
+    r"只(?:回答|分析|解释|说明)(?:即可|就好)?)|"
+    r"(?:explain only|do not (?:act|execute|run|apply|start))",
+    re.I,
+)
+LIFECYCLE_PERMISSION_QUESTION_RE = re.compile(
+    r"(?:创建|新建|建立|启动|恢复|续接|切换).{0,24}"
+    r"(?:run|运行).{0,12}(?:可以|行不行|好吗|是否可行|吗|么)[?？。.!！]*\s*$|"
+    r"\b(?:can|could|should|may)\b.{0,40}"
+    r"\b(?:create|start|setup|resume|continue|switch)\b.{0,32}\brun\b",
+    re.I,
+)
 PAUSE_RE = re.compile(
     r"停止\s*(?:loop|循环|渗透|运行)|渗透结束|暂停\s*(?:loop|循环|渗透|运行)|"
     r"先停(?:止|下)|stop\s+(?:the\s+)?(?:loop|run|testing)|pause\s+(?:the\s+)?(?:loop|run)",
@@ -252,6 +277,28 @@ RUN_BIND_RE = re.compile(
     re.I,
 )
 PROMPT_URL_RE = re.compile(r"(?i)https?://[^\s\"'<>]+")
+ASCII_HOST_TOKEN = (
+    r"(?:localhost|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62})\.)+"
+    r"[A-Za-z](?:[A-Za-z0-9-]{0,62})|(?:\d{1,3}\.){3}\d{1,3}|"
+    r"\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?"
+)
+ASCII_ORIGIN_PREFIX_RE = re.compile(
+    rf"^(?P<source>https?://{ASCII_HOST_TOKEN})(?P<suffix>.*)$", re.I,
+)
+BARE_HOST_PREFIX_RE = re.compile(
+    rf"^(?P<source>{ASCII_HOST_TOKEN})(?P<suffix>.*)$", re.I,
+)
+BARE_HOST_CANDIDATE_RE = re.compile(
+    rf"(?<![A-Za-z0-9_@.-]){ASCII_HOST_TOKEN}(?![A-Za-z0-9_.-])", re.I,
+)
+RUN_PATH_CANDIDATE_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])runs[/\\][A-Za-z0-9_-]+", re.I,
+)
+ATTACHED_OPERATOR_TEXT_RE = re.compile(
+    r"^[，,。；;：:]?(?:走|使用|通过|经由|继续|开始|创建|新建|恢复|执行|"
+    r"进行|渗透|测试|扫描|不要|无需|并|若|如果|告诉|请)",
+    re.I,
+)
 QUESTION_RE = re.compile(
     r"^\s*(?:怎么|如何|是否|要不要|能否|可否|什么|哪|谁)|"
     r"^\s*(?:can|could|would|should|may|might|is|are|do|does|did|"
@@ -329,6 +376,8 @@ def _operator_directive_line(prompt: str) -> tuple[str, list[str]]:
     raw = _first_operator_line(prompt)
     if not raw:
         return "", []
+    if raw.startswith("    ") or raw.startswith("\t"):
+        return "", []
     line = raw.lstrip(DIRECTIVE_LEADING_WHITESPACE).rstrip()
     if not line or DIRECTIVE_DATA_PREFIX_RE.match(line):
         return "", []
@@ -382,8 +431,16 @@ def _natural_lifecycle_intent(intent: str) -> tuple[bool, bool]:
     keeps explanatory prose such as "这是创建新 run 的说明" from minting an
     executable run transition.
     """
+    attached_transition = re.search(
+        r"^[ \t]{0,3}(?:(?:请(?:帮我)?|帮我|现在|立即|马上)\s*)*"
+        r"(?:从|为|针对)\s+[^\r\n]{1,256}?"
+        r"(?:创建|新建|建立|重开|重新开|初始化|启动)"
+        r"[^\r\n]{0,32}?(?:run(?![A-Za-z0-9_-])|运行)",
+        intent,
+        re.I | re.M,
+    )
     return (
-        bool(NATURAL_RUN_TRANSITION_RE.search(intent)),
+        bool(NATURAL_RUN_TRANSITION_RE.search(intent) or attached_transition),
         bool(NATURAL_RUN_BIND_RE.search(intent)),
     )
 
@@ -393,19 +450,100 @@ def _prompt_has_loop_directive(prompt: str) -> bool:
     return bool(re.match(r"^/loop(?:\s|$)", line, re.I))
 
 
-def _prompt_loop_source(prompt: str) -> str:
+def _normalize_source_token(
+    value: str, *, natural_prose: bool = False,
+) -> tuple[str, list[str]]:
+    """Compile one human source spelling without consuming its instructions."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "", []
+    normalizations: list[str] = []
+
+    run_match = re.match(
+        r"^(?P<source>runs[/\\][A-Za-z0-9_-]+(?:[/\\][^\s，,。；;]*)?)"
+        r"(?P<suffix>.*)$",
+        raw,
+        re.I,
+    )
+    if run_match and run_match.group("suffix") \
+            and ATTACHED_OPERATOR_TEXT_RE.match(run_match.group("suffix")):
+        raw = run_match.group("source")
+        normalizations.append("attached_operator_description")
+
+    if re.match(r"(?i)^https?://", raw):
+        origin_match = ASCII_ORIGIN_PREFIX_RE.match(raw)
+        if origin_match and origin_match.group("suffix") \
+                and ATTACHED_OPERATOR_TEXT_RE.match(origin_match.group("suffix")):
+            raw = origin_match.group("source")
+            normalizations.append("attached_operator_description")
+        if natural_prose:
+            stripped = raw.rstrip("，。；")
+            if stripped != raw:
+                raw = stripped
+                normalizations.append("sentence_punctuation")
+    elif not _run_name_from_path(raw):
+        host_match = BARE_HOST_PREFIX_RE.match(raw)
+        if host_match and host_match.group("suffix") \
+                and ATTACHED_OPERATOR_TEXT_RE.match(host_match.group("suffix")):
+            raw = host_match.group("source")
+            normalizations.append("attached_operator_description")
+
+    try:
+        normalized = setup_source.normalize_operator_source(raw)
+    except setup_source.SetupSourceError:
+        return "", normalizations
+    if normalized != raw:
+        normalizations.append(
+            "canonical_url" if re.match(r"(?i)^https?://", raw)
+            else "bare_host_https"
+        )
+    return normalized, list(dict.fromkeys(normalizations))
+
+
+def _prompt_loop_source_info(prompt: str) -> tuple[str, list[str]]:
     line, _normalizations = _operator_directive_line(prompt)
     loop = re.match(r"^/loop\s+(.+)$", line, re.I)
     if not loop:
-        return ""
+        return "", []
     try:
         tokens = shlex.split(loop.group(1), comments=False, posix=True)
     except ValueError:
-        return ""
-    # Keep the exact parsed token.  Characters such as ')' and ']' are legal in
-    # URL paths and file names; silently trimming them would authorize a
-    # different source.  Ambiguous prose punctuation must fail closed.
-    return tokens[0] if tokens else ""
+        return "", []
+    return _normalize_source_token(tokens[0]) if tokens else ("", [])
+
+
+def _prompt_loop_source(prompt: str) -> str:
+    return _prompt_loop_source_info(prompt)[0]
+
+
+def _prompt_source_values(prompt: str) -> tuple[list[str], bool, list[str]]:
+    """Return unique semantic source candidates plus harmless normalizations."""
+    if _prompt_has_loop_directive(prompt):
+        value, normalizations = _prompt_loop_source_info(prompt)
+        return ([value] if value else []), False, normalizations
+
+    text = _operator_intent_text(prompt)
+    values: list[str] = []
+    normalizations: list[str] = []
+    url_spans: list[tuple[int, int]] = []
+    for match in PROMPT_URL_RE.finditer(text):
+        url_spans.append(match.span())
+        value, notes = _normalize_source_token(
+            match.group(0), natural_prose=True,
+        )
+        if value and value not in values:
+            values.append(value)
+        normalizations.extend(notes)
+    if not url_spans:
+        for match in BARE_HOST_CANDIDATE_RE.finditer(text):
+            value, notes = _normalize_source_token(match.group(0))
+            if value and value not in values:
+                values.append(value)
+            normalizations.extend(notes)
+    ambiguous = len(values) > 1
+    if ambiguous:
+        values = []
+    return values, ambiguous, list(dict.fromkeys(normalizations))
 
 
 def _prompt_source_authority(prompt: str) -> tuple[list[str], bool]:
@@ -415,41 +553,24 @@ def _prompt_source_authority(prompt: str) -> tuple[list[str], bool]:
     may name one unique URL, but multiple URLs are data until the operator makes
     the lifecycle source unambiguous; guessing among them would mint authority.
     """
-    text = str(prompt or "")
-    if _prompt_has_loop_directive(text):
-        value = _prompt_loop_source(text)
-        values = [value] if value else []
-        ambiguous = False
-    else:
-        text = _operator_intent_text(text)
-        values = []
-        for match in PROMPT_URL_RE.finditer(text):
-            value = match.group(0)
-            if value and value not in values:
-                values.append(value)
-        ambiguous = len(values) > 1 or any(
-            value.endswith(tuple(".,，。);；]}>")) for value in values
-        )
-        if ambiguous:
-            values = []
+    values, ambiguous, _normalizations = _prompt_source_values(prompt)
     return ([
         hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()
         for value in values[:1]
     ], ambiguous)
 
 
-def _prompt_run_authority(prompt: str) -> tuple[list[str], bool]:
-    """Hash one prompt-named run basename without treating URL paths as runs."""
+def _prompt_run_values(prompt: str) -> tuple[list[str], bool]:
+    """Extract one named run without treating URL paths as run authority."""
     text = str(prompt or "")
     loop_source = _prompt_loop_source(text) if _prompt_has_loop_directive(text) else ""
     if loop_source:
         tokens = [loop_source]
     else:
         text = _operator_intent_text(text)
-        try:
-            tokens = shlex.split(text, comments=False, posix=True)
-        except ValueError:
-            tokens = text.split()
+        tokens = [
+            match.group(0) for match in RUN_PATH_CANDIDATE_RE.finditer(text)
+        ]
     names: list[str] = []
     for raw in tokens:
         token = str(raw)
@@ -459,6 +580,12 @@ def _prompt_run_authority(prompt: str) -> tuple[list[str], bool]:
     ambiguous = len(names) > 1
     if ambiguous:
         names = []
+    return names, ambiguous
+
+
+def _prompt_run_authority(prompt: str) -> tuple[list[str], bool]:
+    """Hash one prompt-named run basename without persisting prompt prose."""
+    names, ambiguous = _prompt_run_values(prompt)
     return ([
         hashlib.sha256(name.encode("utf-8", "replace")).hexdigest()
         for name in names[:1]
@@ -503,6 +630,36 @@ def _operator_flag_approved(
     """Derive an opt-in from the full operator text, never the log excerpt."""
     intent = _operator_intent_text(prompt)
     return bool(positive.search(intent) and not denial.search(intent))
+
+
+def _direct_egress_approved(prompt: str) -> bool:
+    """Recognize an explicit route choice without trusting implied descriptions."""
+    intent = _operator_intent_text(prompt)
+    if DIRECT_ROUTE_HARD_DENIAL_RE.search(intent):
+        return False
+    explicit = bool(
+        DIRECT_EGRESS_APPROVAL_RE.search(intent)
+        and not DIRECT_EGRESS_DENIAL_RE.search(intent)
+    )
+    return explicit or bool(DIRECT_ROUTE_APPROVAL_RE.search(intent))
+
+
+def _safe_lifecycle_source_hint(value: str) -> str:
+    """Persist only a copy-safe source hint; hashes still own authority."""
+    source = str(value or "")
+    if not source:
+        return ""
+    if _run_name_from_path(source):
+        return source.replace("\\", "/")
+    if re.match(r"(?i)^https?://", source):
+        try:
+            safe, redactions = privacy.redact_url(source)
+        except Exception:
+            return ""
+        return source if safe == source and not redactions else ""
+    # Local file paths may contain operator identity and are deliberately not
+    # repeated in the durable contract/additionalContext.
+    return ""
 
 
 class TransitionDurabilityError(RuntimeError):
@@ -651,25 +808,27 @@ def classify_prompt(prompt: str, *, active_run: bool = True) -> str:
     intent = _operator_intent_text(prompt)
     if PAUSE_RE.search(intent):
         return PAUSE
-    if LIFECYCLE_DENIAL_RE.search(intent) or QUESTION_RE.search(intent):
-        return EXPLAIN
     if _prompt_has_loop_directive(prompt):
-        # An exact lifecycle request may also contain narrow safety/effect
-        # constraints such as "do not modify framework source".  Those clauses
-        # reduce the allowed effect; they do not negate the requested run.
-        if LOOP_EXPLAIN_OVERRIDE_RE.search(intent):
+        # The primary lifecycle clause wins over trailing recovery questions or
+        # requests such as “失败时告诉我原因”.  Only an actual instruction not
+        # to execute cancels the explicit action.
+        if (
+            LIFECYCLE_DENIAL_RE.search(intent)
+            or LOOP_EXECUTION_DENIAL_RE.search(intent)
+        ):
             return EXPLAIN
         return EXECUTE
     natural_transition, natural_bind = _natural_lifecycle_intent(intent)
     if natural_transition or natural_bind:
-        # A trusted operator often states the driver role first, then gives the
-        # lifecycle imperative and narrows effects (for example, "do not modify
-        # framework source").  Those constraints must not demote the primary
-        # create/resume action to explain-only.  Explicit lifecycle denial,
-        # questions, and do-not-execute language were handled above.
-        if LOOP_EXPLAIN_OVERRIDE_RE.search(intent):
+        if (
+            LIFECYCLE_DENIAL_RE.search(intent)
+            or LOOP_EXECUTION_DENIAL_RE.search(intent)
+            or LIFECYCLE_PERMISSION_QUESTION_RE.search(intent)
+        ):
             return EXPLAIN
         return EXECUTE
+    if LIFECYCLE_DENIAL_RE.search(intent) or QUESTION_RE.search(intent):
+        return EXPLAIN
     if EXPLAIN_RE.search(intent):
         return EXPLAIN
     if EXECUTE_RE.search(intent):
@@ -687,8 +846,21 @@ def _contract_from_event(
     session_binding, session_binding_kind = _event_session_binding(event)
     _directive_line, intent_normalizations = _operator_directive_line(prompt)
     intent_text = _operator_intent_text(prompt)
-    source_sha256s, source_ambiguous = _prompt_source_authority(prompt)
-    run_name_sha256s, run_ambiguous = _prompt_run_authority(prompt)
+    source_values, source_ambiguous, source_normalizations = (
+        _prompt_source_values(prompt)
+    )
+    source_sha256s = [
+        hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()
+        for value in source_values[:1]
+    ]
+    run_values, run_ambiguous = _prompt_run_values(prompt)
+    run_name_sha256s = [
+        hashlib.sha256(name.encode("utf-8", "replace")).hexdigest()
+        for name in run_values[:1]
+    ]
+    intent_normalizations = list(dict.fromkeys(
+        [*intent_normalizations, *source_normalizations]
+    ))
     slug_sha256s, slug_ambiguous = _prompt_slug_authority(prompt)
     natural_transition, natural_bind = _natural_lifecycle_intent(intent_text)
     loop_requested = _prompt_has_loop_directive(prompt)
@@ -708,7 +880,10 @@ def _contract_from_event(
     if scope_error:
         mode = EXPLAIN
     now = time.time()
-    loop_source = _prompt_loop_source(prompt) if loop_requested else ""
+    loop_source = _prompt_loop_source(prompt) if loop_requested else (
+        source_values[0] if len(source_values) == 1 else
+        f"runs/{run_values[0]}" if natural_bind and len(run_values) == 1 else ""
+    )
     if re.match(r"(?i)^https?://", loop_source):
         loop_source_kind = "url"
     elif _run_name_from_path(loop_source):
@@ -740,6 +915,12 @@ def _contract_from_event(
             if source_sha256s or source_ambiguous else "setup"
     else:
         lifecycle_operation = "none"
+    direct_egress_approved = _direct_egress_approved(prompt)
+    route = (
+        "offline" if target_egress_denied else
+        "direct" if direct_egress_approved else "proxy"
+    )
+    source_hint = _safe_lifecycle_source_hint(loop_source)
     contract = {
         "schema": SCHEMA,
         "mode": mode,
@@ -751,6 +932,8 @@ def _contract_from_event(
         "prompt_excerpt": privacy.sanitize_text_for_log(prompt[:500]),
         "source_sha256s": source_sha256s,
         "source_ambiguous": source_ambiguous,
+        "source_identity_version": "canonical-v1",
+        "lifecycle_source_hint": source_hint,
         "run_name_sha256s": run_name_sha256s,
         "run_ambiguous": run_ambiguous,
         "slug_sha256s": slug_sha256s,
@@ -773,10 +956,7 @@ def _contract_from_event(
         ),
         "lifecycle_operation": lifecycle_operation,
         "memory_approved": bool(MEMORY_APPROVAL_RE.search(prompt)),
-        "direct_egress_approved": bool(
-            DIRECT_EGRESS_APPROVAL_RE.search(prompt)
-            and not DIRECT_EGRESS_DENIAL_RE.search(prompt)
-        ),
+        "direct_egress_approved": direct_egress_approved,
         "target_egress_denied": target_egress_denied,
         "web_tools_denied": web_tools_denied,
         "fanout_override": bool(re.search(r"(?:明确)?允许串行|不要使用\s*(?:Agent|子代理)|serial override", prompt, re.I)),
@@ -788,6 +968,19 @@ def _contract_from_event(
         "origin_run": run_name,
         "bound_run": run_name,
         "updated_at": now,
+    }
+    contract["operator_intent"] = {
+        "schema": "xunji.operator_intent.v1",
+        "operation": lifecycle_operation,
+        "source_kind": loop_source_kind,
+        "source_sha256": source_sha256s[0] if source_sha256s else "",
+        "run_sha256": run_name_sha256s[0] if run_name_sha256s else "",
+        "route": route,
+        "constraints": {
+            "target_egress_denied": target_egress_denied,
+            "web_tools_denied": web_tools_denied,
+            "framework_mutation": "maintenance-only",
+        },
     }
     if maintenance:
         contract["maintenance_intent"] = "operator_prompt"
@@ -1574,7 +1767,13 @@ def _lifecycle_target_name(invocation: tuple[Path, list[str]]) -> str:
 def _source_authority_matches(value: str, contract: dict) -> bool:
     if not value:
         return False
-    digest = hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()
+    candidate = value
+    if contract.get("source_identity_version") == "canonical-v1":
+        try:
+            candidate = setup_source.normalize_operator_source(value)
+        except setup_source.SetupSourceError:
+            return False
+    digest = hashlib.sha256(candidate.encode("utf-8", "replace")).hexdigest()
     if "source_sha256s" in contract:
         return digest in {
             str(item) for item in (contract.get("source_sha256s") or [])
@@ -1924,8 +2123,9 @@ def _lifecycle_authority_reason(
             )
         if not _source_authority_matches(source, contract):
             return prefix + (
-                "loop_bootstrap --source 必须与当前 operator prompt 选定 source 的"
-                " SHA-256 完全一致；相同 basename、不同 query 或上一回合 source 均无效。"
+                "loop_bootstrap --source 必须与当前 operator prompt 的规范化 source"
+                " 语义一致；host/scheme 大小写、默认端口、空路径和裸域名可安全归一，"
+                "不同 host/path/query 或上一回合 source 均无效。"
             )
         if operation == "resume" and not _run_authority_matches(
                 source, contract, run_dir):
@@ -5099,9 +5299,10 @@ def _context_message(contract: dict, run_dir: Path) -> str:
         if str(item)
     }
     intent_note = (
-        "[Xunji operator intent: NORMALIZED] 已忽略首行无语义水平空白；"
-        "原始 prompt hash 与 exact source/effect 绑定保持不变。"
-        if "leading_horizontal_whitespace" in normalizations else ""
+        "[Xunji operator intent: NORMALIZED] 已把不改变 effect 的显示差异、"
+        "裸域名或与 source 粘连的自然语言描述编译为 typed intent；完整操作者"
+        "描述继续约束动作、路由和限制，raw prompt hash 保留用于审计。"
+        if normalizations else ""
     )
     effect_note = ""
     if contract.get("target_egress_denied"):
@@ -5122,9 +5323,18 @@ def _context_message(contract: dict, run_dir: Path) -> str:
     if contract.get("scope_admission_run"):
         assets = ", ".join(str(item) for item in (
             contract.get("scope_admission_assets") or []))
+        retry_hint = _python_control_hint(
+            ROOT / "tools" / "scope_admission.py",
+            [
+                f"runs/{contract.get('scope_admission_run')}",
+                "--assets",
+                ",".join(str(item) for item in (
+                    contract.get("scope_admission_assets") or [])),
+            ],
+        )
         return (
             "[Xunji scope admission: ZERO_PROBE] 当前 operator 首行只授权 active run 的"
-            f" exact assets: {assets}。调用受控 scope_admission.py 完成本地 receipt/ledger "
+            f" exact assets: {assets}。执行 `{retry_hint}` 完成本地 receipt/ledger "
             "transition；本回合禁止 target/network、Agent、Cron，后续新 /loop 回合才可探测。"
         )
     if mode == MAINTENANCE:
@@ -5138,20 +5348,28 @@ def _context_message(contract: dict, run_dir: Path) -> str:
         return "[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。"
     if mode == PAUSE:
         return "[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。"
-    if mode == EXECUTE and contract.get("loop_requested"):
-        if _new_run_transition_pending(contract, run_dir):
+    operation = _contract_lifecycle_operation(contract)
+    if mode == EXECUTE and operation in {"source", "setup", "resume"} \
+            and _new_run_transition_pending(contract, run_dir):
+        source_hint = str(contract.get("lifecycle_source_hint") or "")
+        if source_hint:
             retry_hint = _python_control_hint(
                 ROOT / "tools" / "loop_bootstrap.py",
-                ["--source", "<source>", "--type", "auto"],
+                ["--source", source_hint, "--type", "auto"],
             )
-            return effect_note + intent_note + (
-                "[Xunji lifecycle: SETUP_REQUIRED] 当前显式 /loop 要求创建新 run。先在"
-                "同一顶层 operator 回合执行 prompt 对应的精确 "
-                f"`{retry_hint}`；命令后不得"
-                "附加 2>&1、pipe、head/tail 或其他 shell wrapper。setup/activation 成功后，"
-                "对新 run 依次 fresh CronList、CronCreate、TaskCreate/TaskUpdate，再做图谱/"
-                "front 拆解并真实派发 Agent。形状拒绝应同回合精确重试，不能等裸“继续”。"
+            action = f"执行 `{retry_hint}`"
+        else:
+            action = (
+                "先从当前顶层自然语言描述中保留 path/query 的唯一 source；"
+                "若仍不唯一则直接向操作者消歧，不要猜测或运行 --help"
             )
+        return effect_note + intent_note + (
+            "[Xunji lifecycle: SETUP_REQUIRED] 当前 operator 已请求创建或切换 run。"
+            f"{action}；该 typed action 只完成本地 setup/activation，不发送 target 请求。"
+            "成功后继续当前自然语言描述中的动作和限制；不要因 trailing question、恢复说明"
+            "或格式差异丢弃主执行意图。"
+        )
+    if mode == EXECUTE and contract.get("loop_requested"):
         if contract.get("run_transition_requested"):
             return effect_note + intent_note + (
                 "[Xunji lifecycle: RUN_BOUND] 新 run 已绑定；按 fresh CronList -> CronCreate"
@@ -5225,7 +5443,10 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             if not contract:
                 return None
             if contract.get("mode") == MAINTENANCE \
-                    or contract.get("loop_requested"):
+                    or contract.get("loop_requested") \
+                    or _contract_lifecycle_operation(contract) in {
+                        "source", "setup", "resume",
+                    }:
                 context = _context_message(contract, ROOT)
             else:
                 context = (
@@ -5252,7 +5473,10 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             if contract:
                 if contract.get("mode") == MAINTENANCE:
                     context = _context_message(contract, ROOT)
-                elif contract.get("loop_requested"):
+                elif contract.get("loop_requested") \
+                        or _contract_lifecycle_operation(contract) in {
+                            "source", "setup", "resume",
+                        }:
                     context = _context_message(contract, ROOT)
                 else:
                     context = (
@@ -5570,6 +5794,9 @@ def _selftest() -> int:
     }, run_name=run.name)
     negated_direct_cn = _contract_from_event({"prompt": "不要允许直连，继续使用代理"})
     negated_direct_en = _contract_from_event({"prompt": "do not allow direct egress"})
+    mixed_direct_denial = _contract_from_event({
+        "prompt": "不用代理直连，但 do not allow direct egress",
+    })
     explicit_direct = _contract_from_event({"prompt": "明确允许本回合直连"})
     scope_prompt = (
         "/xunji-scope-admit --run runs/pilot_20260715 "
@@ -5823,6 +6050,40 @@ def _selftest() -> int:
         "prompt": "从 https://natural.example/path。 创建新 run",
         "session_id": "natural-punctuated-session",
     }, run_name=run.name)
+    attached_bare_host_contract = _contract_from_event({
+        "prompt": "/loop cloud.scshr.com走代理渗透",
+        "session_id": "attached-bare-host-session",
+    }, run_name=run.name)
+    attached_url_contract = _contract_from_event({
+        "prompt": "/loop https://cloud.scshr.com走代理渗透",
+        "session_id": "attached-url-session",
+    }, run_name=run.name)
+    natural_attached_url_contract = _contract_from_event({
+        "prompt": "为 https://cloud.scshr.com创建run并走代理渗透",
+        "session_id": "natural-attached-url-session",
+    }, run_name=run.name)
+    trailing_recovery_question_contract = _contract_from_event({
+        "prompt": (
+            "/loop https://cloud.scshr.com 继续执行，"
+            "如果失败告诉我原因，可以自动重试吗？"
+        ),
+        "session_id": "trailing-recovery-question-session",
+    }, run_name=run.name)
+    attached_run_contract = _contract_from_event({
+        "prompt": "继续执行runs/other_20260101",
+        "session_id": "attached-run-session",
+    }, run_name=run.name)
+    natural_direct_route_contract = _contract_from_event({
+        "prompt": "继续执行 runs/other_20260101，不用代理，直连 localhost",
+        "session_id": "natural-direct-route-session",
+    }, run_name=run.name)
+    natural_scope_contract = _contract_from_event({
+        "prompt": (
+            "把 one.example.test、two.example.test 加入 "
+            "runs/pilot_20260715 的 scope，因为这是本次授权目标"
+        ),
+        "session_id": "natural-scope-session",
+    }, run_name="pilot_20260715")
     natural_clean_source = {"tool_name": "Bash", "tool_input": {
         "command": (
             f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
@@ -6688,11 +6949,68 @@ def _selftest() -> int:
         and evaluate_pretool(
             run, source_control, english_imperative_source_contract) == ""
     )
-    natural_trailing_punctuation_fails_closed = bool(
-        natural_punctuated_contract.get("source_ambiguous")
-        and not natural_punctuated_contract.get("source_sha256s")
-        and E_RUN_TRANSITION_AUTHORITY_MISSING in evaluate_pretool(
-            run, natural_clean_source, natural_punctuated_contract)
+    natural_trailing_punctuation_is_normalized = bool(
+        not natural_punctuated_contract.get("source_ambiguous")
+        and natural_punctuated_contract.get("source_sha256s")
+        and "sentence_punctuation"
+        in natural_punctuated_contract.get("intent_normalizations", [])
+        and evaluate_pretool(
+            run, natural_clean_source, natural_punctuated_contract) == ""
+    )
+    operator_language_compiles_to_one_source = all(
+        item.get("mode") == EXECUTE
+        and item.get("lifecycle_operation") == "source"
+        and item.get("loop_source_kind") == "url"
+        and item.get("source_identity_version") == "canonical-v1"
+        and item.get("lifecycle_source_hint") == "https://cloud.scshr.com/"
+        and _source_authority_matches(
+            "HTTPS://Cloud.SCSHR.COM:443", item,
+        )
+        and not _source_authority_matches(
+            "https://cloud.scshr.com/?different=1", item,
+        )
+        for item in (
+            attached_bare_host_contract,
+            attached_url_contract,
+            natural_attached_url_contract,
+        )
+    )
+    attached_source_context_is_copy_safe = all(
+        "https://cloud.scshr.com/" in _context_message(item, ROOT)
+        and "<source>" not in _context_message(item, ROOT)
+        and "走代理渗透" not in str(item.get("lifecycle_source_hint") or "")
+        for item in (
+            attached_bare_host_contract,
+            attached_url_contract,
+            natural_attached_url_contract,
+        )
+    )
+    trailing_recovery_question_keeps_primary_action = bool(
+        trailing_recovery_question_contract.get("mode") == EXECUTE
+        and trailing_recovery_question_contract.get("lifecycle_operation")
+        == "source"
+    )
+    attached_run_path_keeps_named_resume = bool(
+        attached_run_contract.get("mode") == EXECUTE
+        and attached_run_contract.get("lifecycle_operation") == "resume"
+        and attached_run_contract.get("run_name_sha256s")
+        == resume_operator_contract.get("run_name_sha256s")
+        and not attached_run_contract.get("resume_current_approved")
+    )
+    natural_scope_context = _context_message(natural_scope_contract, run)
+    natural_route_and_scope_compile_to_typed_effects = bool(
+        natural_direct_route_contract.get("direct_egress_approved") is True
+        and natural_direct_route_contract.get("operator_intent", {}).get("route")
+        == "direct"
+        and natural_scope_contract.get("mode") == EXECUTE
+        and natural_scope_contract.get("scope_admission_run")
+        == "pilot_20260715"
+        and natural_scope_contract.get("scope_admission_assets")
+        == ["one.example.test", "two.example.test"]
+        and "scope_admission.py runs/pilot_20260715 --assets "
+        "one.example.test,two.example.test" in natural_scope_context
+        and "scope_admission.py --run" not in natural_scope_context
+        and "--reason" not in natural_scope_context
     )
     run_file_source_resumes_current_run = bool(
         run_file_loop_contract.get("loop_source_kind") == "run"
@@ -8641,9 +8959,6 @@ def _selftest() -> int:
     pending_written = (
         no_run_prompt.returncode == 0
         and "Xunji lifecycle: SETUP_REQUIRED" in (no_run_prompt.stdout or "")
-        and str(Path(sys.executable).resolve()) in (no_run_prompt.stdout or "")
-        and str((ROOT / "tools" / "loop_bootstrap.py").resolve())
-        in (no_run_prompt.stdout or "")
         and any(pending_dir.glob("*.json"))
     )
     normalizer_source = root / "operator-normalizer.md"
@@ -11468,7 +11783,8 @@ def _selftest() -> int:
          and len(live_durable_denials) == 1),
         ("negated direct-egress phrases never grant approval",
          not negated_direct_cn["direct_egress_approved"]
-         and not negated_direct_en["direct_egress_approved"]),
+         and not negated_direct_en["direct_egress_approved"]
+         and not mixed_direct_denial["direct_egress_approved"]),
         ("explicit direct-egress phrase grants current-turn approval",
          explicit_direct["direct_egress_approved"]),
         ("exact scope directive binds run/assets and execute mode",
@@ -11607,8 +11923,18 @@ def _selftest() -> int:
          leading_whitespace_operator_intent_normalized),
         ("top-level English imperative still authorizes its unique source",
          english_imperative_source_authorized),
-        ("natural-language trailing URL punctuation fails closed",
-         natural_trailing_punctuation_fails_closed),
+        ("natural-language sentence punctuation preserves source intent",
+         natural_trailing_punctuation_is_normalized),
+        ("operator language compiles attached and bare-host sources to one semantic target",
+         operator_language_compiles_to_one_source),
+        ("lifecycle context returns one copy-safe exact source without placeholders",
+         attached_source_context_is_copy_safe),
+        ("trailing recovery questions do not cancel the primary lifecycle action",
+         trailing_recovery_question_keeps_primary_action),
+        ("an attached run path retains its exact named resume identity",
+         attached_run_path_keeps_named_resume),
+        ("natural route and scope descriptions compile to typed effects",
+         natural_route_and_scope_compile_to_typed_effects),
         ("a file inside the current run routes as resume without new-run transition",
          run_file_source_resumes_current_run),
         ("setup_run --target accepts only the selected source",

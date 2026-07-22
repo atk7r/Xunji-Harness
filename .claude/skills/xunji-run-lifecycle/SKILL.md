@@ -33,6 +33,14 @@ rules here.
   quoted data, and analysis/review requests remain read-only.
 - Narrow effect constraints such as “do not modify framework source” restrict the
   cycle but do not negate an otherwise explicit lifecycle request.
+- Treat the operator's complete natural-language description as the controlling
+  input. The hook compiles operation, one semantic source/run, route, and
+  constraints before any lifecycle argv is authorized. A bare host means its
+  canonical HTTPS origin; case, default port, and empty path may normalize only
+  when the target effect is unchanged. Attached prose remains instruction, never
+  an IDN suffix. Distinct host/path/query choices remain ambiguous and require the
+  operator to select one; harmless wording, spacing, or a trailing retry request
+  does not.
 - When the current Claude Code client reserves `/loop` as its own scheduler
   (observed in Claude Code 2.1.201), an expansion to `cron_manager.py` is not a
   Xunji entry and must remain denied. Use an affirmative, uniquely named
@@ -47,13 +55,17 @@ rules here.
 - Operator steering for an existing run goes to `hints.md`; it is a lead, not a
   fact or scope grant.
 
-The single operator-facing bootstrap shape is:
+After that semantic intent is compiled, the single effect-facing bootstrap shape is:
 
 ```bash
 python3 tools/loop_bootstrap.py --source '<source>' --type auto
 ```
 
-Quote the source as one literal argument and use the registered project Python.
+Use the exact copy-safe source injected by `UserPromptSubmit`; do not reconstruct
+it with `--help`, hashing snippets, or URL guesses. If the source is intentionally
+not repeated because it contains a sensitive query or local path, preserve the
+unique value from the current operator prompt. Quote it as one literal argument
+and use the registered project Python.
 No wrapper, pipe, redirect, inline environment, command substitution, or appended
 inspection is part of this contract. `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED`
 means no transition occurred: repair the argv and retry in the same operator turn.

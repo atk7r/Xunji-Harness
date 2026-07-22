@@ -21,6 +21,14 @@ operator is trusted; Claude Root and Agents are cooperative but fallible; target
 and imported content is untrusted data; local processes and storage can fail,
 overlap, replay, or leave partial state. It is not a hostile multi-tenant service.
 
+**Harness core invariant:** raise the model's minimum reliability without capping
+its maximum capability. The operator may describe the goal, target, route, and
+constraints in ordinary natural language. Claude interprets that intent, chooses
+strategy, and adapts; deterministic code validates only the resulting authority,
+effects, state transitions, outbound boundaries, and evidence claims. A stronger
+future model should improve Xunji without requiring a new operator grammar or a
+harness bypass.
+
 ### Outside: irreversible outbound boundary
 
 - Every target-facing capability follows

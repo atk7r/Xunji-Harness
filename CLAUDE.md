@@ -69,10 +69,19 @@
   token/ref surrogate and AI returns IDs, never values. Do not Read raw source into
   external model context. Unsupported, ambiguous, forged, mutated, or unregistered
   local-AI input fails without creating/activating a run. In an explicit first
-  `/loop`, only the first parsed source token carries source authority. Affirmative
-  natural-language setup may bind one unique URL; if the prompt contains multiple URLs,
-  do not guess among them or run bootstrap until the operator explicitly selects
-  the lifecycle source. In an explicit first `/loop <source>` turn, continue under
+  `/loop`, the complete top-level operator description is compiled into a typed
+  lifecycle intent: operation, one semantic source/run, route, and constraints.
+  A bare host means its canonical HTTPS origin; URL scheme/host case, default port,
+  and empty path are normalized when they preserve the same target. Text attached
+  after a host/URL such as “走代理渗透” remains operator instruction and must not be
+  swallowed into an IDN hostname or discarded. Distinct hosts, paths, or query
+  values remain distinct authority; if more than one semantic lifecycle source is
+  genuinely selected, ask for that boundary instead of guessing. A trailing
+  recovery request such as “失败告诉我原因并自行修正” does not cancel the primary
+  execute request. In the natural-language fallback, an actual lifecycle denial or
+  a question about whether to create a run remains read-only. A literal top-level
+  `/loop` is already an execute command, so only an actual denial cancels it. In an
+  explicit first `/loop <source>` turn, continue under
   that same top-level authority through exact
   bootstrap, run binding, fresh CronList/CronCreate, iteration task planning,
   graph/front decomposition, and execution of the selected typed lane. From the next cycle name only
@@ -80,11 +89,13 @@
   form owned by `xunji-run-lifecycle`. When unsure,
   preserve chat/setup/resume semantics and ask only for missing run/target boundary
   data; never infer loop. File-derived `scope_status=review|out|unknown` assets are
-  setup data, not target authority. Only a new operator turn whose first line is
-  `/xunji-scope-admit --run runs/<name> --assets <host[,host...]> --reason <text>`
-  can admit exact `review` rows through `tools/scope_admission.py`, a one-use hook
-  claim, committed receipt, and projection hash. The admission turn is zero-probe
-  and forbids target/network, Agent, and Cron; never edit coverage by hand.
+  setup data, not target authority. A clear top-level natural-language request
+  naming one active run, exact assets, and the admission reason can admit `review`
+  rows. The concise `/xunji-scope-admit --run runs/<name> --assets
+  <host[,host...]> --reason <text>` form remains an optional exact alias. Both
+  compile to the same typed `tools/scope_admission.py` action, one-use hook claim,
+  committed receipt, and projection hash. The admission turn is zero-probe and
+  forbids target/network, Agent, and Cron; never edit coverage by hand.
 - **OSINT = the upstream tool Guanlan** (collect · dedup · fold wildcard DNS ·
   liveness · ownership). Xunji **consumes the clean inventory and attacks it — it does
   NOT re-do OSINT.** The lifecycle owner's single operator-facing bootstrap consumes

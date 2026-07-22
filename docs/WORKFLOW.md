@@ -233,16 +233,24 @@ For an active run, `EXECUTE` may advance work, `EXPLAIN_ONLY` is read-only and h
 no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while only
 allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
 Only a first non-empty top-level `/loop(?:\s|$)` directive delivered to
-`UserPromptSubmit` enters loop mode. Deterministic parsing ignores harmless leading
-horizontal whitespace/BOM while preserving the exact raw prompt hash.
+`UserPromptSubmit` enters recurring loop mode. Deterministic parsing ignores harmless leading
+horizontal whitespace/BOM while preserving the exact raw prompt hash, then compiles
+the complete operator description into operation, one semantic
+source/run, route, and constraints.
 Explicit fenced code, blockquotes, Markdown list items, inline quotes, questions, analysis/review requests,
 and lifecycle denials stay data/read-only; a conflicting `/loop` plus denial fails
 closed. Narrow effect constraints such as “do not modify framework source” restrict
 the cycle but do not cancel an otherwise explicit lifecycle request. If the client reserves `/loop` as its own scheduler, load
 `xunji-run-lifecycle`: an affirmative uniquely named setup/resume request may run one
 `EXECUTE` cycle with `loop_requested=false`, but it cannot claim recurring-Cron
-semantics. Natural-language setup requires affirmative create/setup intent and one
-unique URL.
+semantics. Natural-language setup accepts a unique URL, bare host, run, or supported
+source. Bare hosts normalize to their canonical HTTPS origin; safe case/default-port/
+empty-path differences share identity, while distinct hosts, paths, and query values
+do not. Prose attached after the source remains operator instruction, never hostname
+data. A trailing retry/explanation request does not cancel the primary operation;
+in the natural-language fallback an actual lifecycle denial or permission question
+remains read-only. A literal top-level `/loop` is already an execute command, so
+only an actual denial cancels it.
 Lifecycle Bash is exactly one argv-only adapter invocation. The exact bare `python3`
 spelling is environment-owned so Hook and Bash `PATH` differences do not force the
 driver to discover an interpreter path; absolute interpreters remain bound to the
@@ -343,9 +351,11 @@ before the shared transaction commits. HTML/PDF/DOCX/plain text and an unregiste
 `scope_status=review`; `coverage_matrix.py` preserves that status and the target
 tool gate rejects `review|out|unknown`. Setup success therefore does not itself
 authorize target effects, and no source/front/Agent/model text may promote the row.
-An operator may admit exact setup-source `review` rows only in a new turn whose
-first non-empty line is `/xunji-scope-admit --run runs/<name> --assets
-<host[,host...]> --reason <text>`. The matching `tools/scope_admission.py` call
+An operator may admit exact setup-source `review` rows only in a new top-level turn
+that clearly names the active run, exact assets, and reason. Ordinary natural
+language is primary; `/xunji-scope-admit --run runs/<name> --assets
+<host[,host...]> --reason <text>` remains an optional concise alias. The matching
+`tools/scope_admission.py` call
 consumes a hook-owned one-use claim and commits `xunji.scope_admission.v1` plus a
 scope projection hash. The admission turn is local-only and zero-probe; wildcard,
 `out`/`unknown`, inactive-run, Agent, Cron, target, and hand-edit paths fail closed.
