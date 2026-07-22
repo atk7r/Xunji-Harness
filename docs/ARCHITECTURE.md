@@ -962,36 +962,27 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-22
-- Scope: 将 Claude-primary runtime 落到可信单操作者个人工具模型：active pointer 改为跨
-  Claude session 持久当前选择，SessionStart/End 不再恢复/清空；普通自然语言修复/优化意图
-  进入 local MAINTENANCE，移除 exact scope/reason DSL 与 sticky maintenance blocker；同步
-  Stop schema、Hook、Claude skills、workflow/architecture 和 conformance fixtures。明确
-  CCB/TypeScript 不在当前路线。
-- Architecture impact: yes — session/transcript 从 pointer ownership/操作者 ACL 降为因果回执
-  metadata；本地维护从预授权路径清单改为 intent-derived mode + typed effect/receipt path；
-  `MAINTENANCE_BLOCKED` 不再是 Stop terminal variant。target 出站 proxy/privacy/scope/audit、
-  active pointer 单一 CAS writer、protected control state、证据/复审/closure 均未放松。
-- Owner/enforcement: Claude-primary guidance 由 `CLAUDE.md`、`.claude/skills/`、
-  `docs/ROUTER.md` 与 `docs/WORKFLOW*.md` 拥有；`turn_contract.py`、
-  `maintenance_authority.py`、settings hooks、output/run gates、stop schema/fixtures 与
-  anti-drift 实施。`.agents/skills/` 未修改。
-- Verification: focused personal-pointer/maintenance/output/CAS suites 6/6，rules/templates/
-  diff checks 通过，完整 `tools/selftest_all.py` 69/69。DeepSeek-backed Claude Code 2.1.201
-  两个 fresh sessions `838d1448-b36e-409d-91c3-21f24991128f`、
-  `5399482f-6292-41ea-9d59-5ee338c6ad84` 在隔离 pointer 上真实执行 denial→same-turn Write/Read
-  与跨 session Edit/Read；证据见 `review/records/2026-07-22-personal-tool-driver-e2e.md`。
-- Independent review: fresh-context Claude session
-  `90abff2a-d475-4383-9129-2d7c687761a2` reviewed framework fingerprint
-  `98d249bd91fdb360` and returned PASS with one low-severity intent-classification
-  observation. The bare `session`/`pointer` triggers were removed, target-side
-  counterexamples were added, and the complete 69-suite battery was rerun green.
-  The exact post-fix fingerprint and fresh Claude verdict must be bound in
-  `review/records/2026-07-22-personal-tool-final-review.md` before commit. Arkcli is
-  not used and Codex self-review is not an independent vote.
-- Exclusions: 不修改 `.agents/skills/`、`tools/xunji_statusline.py`、已删除的
-  `docs/XUNJI_PROJECT_INTRO.md`、CCB/TypeScript、target methodology 或现场 run/artifact；
-  setup_transaction 中不再可达的旧 selection helper 清理可在独立低风险 cleanup 阶段处理，
-  不作为当前 runtime 语义。
+- Scope: 把已经实现并验证的可信单操作者核心正式写入 Codex owner `AGENTS.md`，将常驻规则
+  合并为“对外不可逆出站硬边界 / 对内 LLM 认知护栏 / 非安全边界 / 本地可靠性”四组；删除
+  仍把该模型描述成 transition/target、把 session/pointer 当操作者权限，以及当前 CCB/
+  TypeScript 迁移的陈旧措辞。
+- Architecture impact: none — runtime、Claude-primary owner、Tool contract、状态 owner、出站
+  safety/privacy、evidence/review/closure 行为均不改变；本阶段只让 Codex 常驻规则与本文
+  3.8/3.9 的 current architecture 对齐并去重。
+- Owner/enforcement: `AGENTS.md` 拥有 Codex 辅助/维护常驻边界；`docs/ARCHITECTURE.md` 仍是
+  共享设计索引。实际执行继续由 `CLAUDE.md`、`.claude/hooks/`、typed tools、canonical run
+  files、evidence gate 与 closure gate 拥有。
+- Verification: `check_rules.py`、`check_templates.py`、`git diff --check` 通过；`AGENTS.md`
+  已无 CCB/TypeScript、transition/target model 或 session-identity authority 陈旧措辞。
+- Independent review: fresh DeepSeek-backed Claude Code session
+  `58dc95d5-9b64-4906-9151-a3a72da3efa9` reviewed the complete final-state content
+  for staged SHA-256 `7d04214f893ba0098b754dfd9bd1b7fc9d4018580396110b61290fc6fe7f783e`
+  and returned PASS with no blocking findings. It could not independently execute
+  the hash command under the maintenance Bash boundary, so a final metadata-only
+  exact-diff attestation is required before commit. No arkcli review or Codex self-vote.
+- Exclusions: 不修改 Claude-primary runtime、`.claude/skills/`、`.agents/skills/`、
+  `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md` 或现场 run/artifact；pending-contract
+  生产调用链审计和真实操作者 E2E 留在下一实现阶段。
 
 ## 13. 外部设计来源与采用边界
 
