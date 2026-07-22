@@ -3,8 +3,6 @@ name: xunji-reviewer
 description: Challenge one frozen Xunji Hunter result or perform the assignment-free global completion review. Reviewer returns candidates only; Root remains the Synthesizer.
 tools:
   - Read
-  - Grep
-  - Glob
   - Bash
 model: inherit
 permissionMode: default
@@ -47,10 +45,11 @@ Agent source inside the review budget.
 
 For `NO_TARGET_DATA_FOR_OFFLINE_ANALYSIS`, verify only the frozen result and the
 exact paths it cites. Do not independently enumerate directories or the knowledge
-corpus. Use Read/Glob—not Bash `test`, `ls`, or shell discovery—for existence
-checks, then return a bounded barrier disposition.
+corpus. Use Read on the exact cited paths—not Bash `test`, `ls`, or shell
+discovery—for existence checks, then return a bounded barrier disposition.
 
-For `local_read`/`local_verify`, discover and inspect only with Read/Grep/Glob.
+For `local_read`/`local_verify`, use Read only on exact paths supplied by the
+assignment/context; return a gap instead of discovering paths.
 Use Bash only for one complete registered argv explicitly named by the matched
 assignment/context; never use `--help`, guessed path discovery, redirects, pipes,
 chains, `which`, or `python -c`. If an exact-argv denial supplies an absolute

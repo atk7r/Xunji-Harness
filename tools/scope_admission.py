@@ -97,6 +97,11 @@ def normalize_asset(value: str) -> str:
         ascii_host = candidate.encode("idna").decode("ascii").lower()
     except UnicodeError as exc:
         raise ScopeAdmissionError("invalid_asset", "asset IDNA encoding failed") from exc
+    # `localhost` is the one standards-defined single-label host used by the
+    # local operator fixture. Keep every other single-label name invalid so a
+    # typo or search-domain-dependent intranet label cannot silently enter scope.
+    if ascii_host == "localhost":
+        return ascii_host
     labels = ascii_host.split(".")
     if len(ascii_host) > 253 or len(labels) < 2 or any(
         not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
@@ -674,6 +679,12 @@ def _selftest() -> int:
     except ScopeAdmissionError:
         scoped_ipv6_rejected = True
     plain_ipv6_accepted = normalize_asset("2001:db8::1") == "2001:db8::1"
+    localhost_accepted = normalize_asset("localhost") == "localhost"
+    other_single_label_rejected = False
+    try:
+        normalize_asset("internal")
+    except ScopeAdmissionError:
+        other_single_label_rejected = True
     invocation = parse_invocation(
         [f"runs/{run.name}", "--assets", "one.example.test"], root=root, runs_root=runs,
     )
@@ -833,6 +844,8 @@ def _selftest() -> int:
         ("wildcard scope is rejected", malformed is None and bool(malformed_error)),
         ("plain IPv6 is accepted but interface-scoped IPv6 is rejected",
          plain_ipv6_accepted and scoped_ipv6_rejected),
+        ("exact localhost is accepted without allowing other single-label names",
+         localhost_accepted and other_single_label_rejected),
         ("tool invocation normalizes the exact run/assets", invocation["run_name"] == run.name),
         ("absolute, traversing, and trailing-slash run forms are rejected",
          alternate_run_forms_rejected),

@@ -48,8 +48,9 @@ hypothesis in an observed fact, not in speculation.
 - The grounding base **is** where those weak-point anchors live — consult it on a
   fingerprint hit, don't re-derive a known stack from memory. After an observation
   grounds a product (you recognized the stack while attacking it, or `classify_hosts`
-  tagged it `kb:<id>`), a live run uses built-in Read/Grep/Glob over the saved
-  artifact and the one matching public `knowledge/*.md` entry. Read at most one
+  tagged it `kb:<id>`), Root freezes the exact saved artifact and matching public
+  `knowledge/*.md` path into Agent context; the Agent uses built-in Read only on
+  those paths. Read at most one
   matching local weaponized/xday entry only when the current privacy/model-egress
   boundary permits it. The helper matcher CLIs remain offline developer tools, not
   live capabilities. Consult **after** a recognition match and adapt to the target —

@@ -4833,6 +4833,33 @@ def failed_tool_events(
     ]
 
 
+def _target_semantic_action(event: dict) -> tuple[str, str, str] | None:
+    """Identify the target operation while ignoring routing and save-name details.
+
+    A work-plan denial may be retried by a prepared Agent with an absolute
+    interpreter, an explicit egress prefix, and a different artifact basename.
+    Those are execution details, not a different GET/POST target operation.
+    """
+    if str(event.get("tool_name") or "") != "Bash":
+        return None
+    try:
+        tool_input = json.loads(str(event.get("input_excerpt") or "{}"))
+        command = str(tool_input.get("command") or "")
+        argv = shlex.split(command)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    while argv and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", argv[0]):
+        argv.pop(0)
+    for index, token in enumerate(argv):
+        if Path(token).name != "probe.py" or len(argv) <= index + 2:
+            continue
+        method = argv[index + 1].upper()
+        url = argv[index + 2]
+        if re.fullmatch(r"[A-Z]+", method) and _RECEIPT_URL_RE.fullmatch(url):
+            return ("probe", method, url)
+    return None
+
+
 def unresolved_target_denials(
     run_dir: str | Path,
     *,
@@ -4877,6 +4904,13 @@ def unresolved_target_denials(
                 and event.get("action_sha256") == denial.get("action_sha256")
                 for event in successful
             )
+            if not resolved and denial.get("decision_class") == "work_plan":
+                denied_action = _target_semantic_action(denial)
+                resolved = bool(denied_action) and any(
+                    float(event.get("ts") or 0.0) > denial_ts
+                    and _target_semantic_action(event) == denied_action
+                    for event in successful
+                )
         if not resolved:
             unresolved.append(denial)
     return unresolved
@@ -6960,6 +6994,26 @@ def _selftest() -> int:
     append_hook_event(run, chain_target_success)
     unresolved_chain_after_retry = unresolved_target_denials(
         run, session_id="s1")
+    work_plan_denied_shape = {
+        "tool_name": "Bash",
+        "input_excerpt": json.dumps({
+            "command": (
+                "python3 tools/probe.py GET https://semantic.example/path "
+                "--save before --run runs/example")}),
+    }
+    prepared_agent_shape = {
+        "tool_name": "Bash",
+        "input_excerpt": json.dumps({
+            "command": (
+                "XUNJI_PROXY_REQUIRED=0 python3 /tmp/xunji/tools/probe.py "
+                "GET https://semantic.example/path --save after "
+                "--run /tmp/xunji/runs/example")}),
+    }
+    planned_probe_semantics_match = (
+        _target_semantic_action(work_plan_denied_shape)
+        == _target_semantic_action(prepared_agent_shape)
+        == ("probe", "GET", "https://semantic.example/path")
+    )
     append_hook_event(run, {
         "hook_event_name": "PreToolUseDenied", "session_id": "s1",
         "transcript_path": str(transcript), "tool_name": "Edit",
@@ -10689,6 +10743,8 @@ def _selftest() -> int:
         ("failed identical retry does not resolve denial", len(unresolved_after_failure) == 1),
         ("different successful command does not resolve denial", len(unresolved_after_other) == 1),
         ("successful same command resolves despite description drift", not unresolved_after_success),
+        ("prepared Agent probe resolves prior work-plan denial by target semantics",
+         planned_probe_semantics_match),
         ("target chain denial freezes its exact retry action hash",
          any(
              event.get("tool_use_id") == "tool-target-chain-denied"

@@ -116,7 +116,7 @@ DIRECT_EGRESS_DENIAL_RE = re.compile(
 ALL_NETWORK_DENIAL_RE = re.compile(
     r"(?:禁止|不要|不得|不允许|无需).{0,24}"
     r"(?:任何|所有|一切)?\s*(?:网络请求|网络访问|联网|出站)|"
-    r"(?:完全|仅)?\s*离线(?:测试|运行|执行)?|"
+    r"(?:完全|仅)?\s*离线(?!检查|校验|复核|验证)(?:测试|运行|执行)?|"
     r"(?:do\s+not|don't|must\s+not|no)\s+(?:make\s+|send\s+|use\s+)?"
     r"(?:any\s+|all\s+)?(?:network\s+(?:requests?|access)|egress)|"
     r"(?:offline[- ]only|run\s+offline)",
@@ -284,12 +284,14 @@ INLINE_DATA_RE = re.compile(
     r"(?<![A-Za-z0-9_])'[^'\n]*'(?![A-Za-z0-9_])"
 )
 NATURAL_RUN_TRANSITION_RE = re.compile(
-    r"^[ \t]{0,3}(?:(?:请(?:帮我)?|帮我|现在|立即|马上)\s*)*"
-    r"(?:从\s+\S+\s+)?"
-    r"(?:创建|新建|建立|重开|重新开|初始化|启动)[^\r\n]{0,24}"
+    r"(?:^|[。！？!?；;]\s*)"
+    r"[ \t]{0,3}(?:(?:请(?:帮我)?|帮我|现在|立即|马上)\s*)*"
+    r"(?:(?:从|为|针对)\s+\S+\s+)?"
+    r"(?:创建|新建|建立|重开|重新开|初始化|启动)[^\r\n]{0,256}?"
     r"(?:run(?![A-Za-z0-9_-])|运行)|"
-    r"^[ \t]{0,3}(?:(?:please|now)\s+)*"
-    r"(?:create|start|setup|set\s+up|initialize)\b[^\r\n]{0,24}\brun\b",
+    r"(?:^|[.!?;]\s*)"
+    r"[ \t]{0,3}(?:(?:please|now)\s+)*"
+    r"(?:create|start|setup|set\s+up|initialize)\b[^\r\n]{0,256}?\brun\b",
     re.I | re.M,
 )
 NATURAL_RUN_BIND_RE = re.compile(
@@ -658,11 +660,18 @@ def classify_prompt(prompt: str, *, active_run: bool = True) -> str:
         if LOOP_EXPLAIN_OVERRIDE_RE.search(intent):
             return EXPLAIN
         return EXECUTE
-    if EXPLAIN_RE.search(intent):
-        return EXPLAIN
     natural_transition, natural_bind = _natural_lifecycle_intent(intent)
     if natural_transition or natural_bind:
+        # A trusted operator often states the driver role first, then gives the
+        # lifecycle imperative and narrows effects (for example, "do not modify
+        # framework source").  Those constraints must not demote the primary
+        # create/resume action to explain-only.  Explicit lifecycle denial,
+        # questions, and do-not-execute language were handled above.
+        if LOOP_EXPLAIN_OVERRIDE_RE.search(intent):
+            return EXPLAIN
         return EXECUTE
+    if EXPLAIN_RE.search(intent):
+        return EXPLAIN
     if EXECUTE_RE.search(intent):
         return EXECUTE
     return EXPLAIN
@@ -3734,8 +3743,18 @@ def _transition_commit_reason(run_dir: Path, contract: dict) -> str:
 
 
 def _loop_iteration_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
-    """Derive the explicit-/loop setup -> Cron -> plan execution boundary."""
-    if not contract.get("loop_requested"):
+    """Derive setup -> optional Cron/task UI -> work-plan execution boundary.
+
+    ``loop_requested`` controls recurring-Cron semantics only.  A natural
+    one-cycle EXECUTE turn still needs the same effect-typed work plan before an
+    Agent, target, model-egress, or ROOT_DIRECT action; otherwise the client-safe
+    fallback would become a plan-bypass entrypoint.
+    """
+    recurring_loop = bool(contract.get("loop_requested"))
+    lifecycle_cycle = str(contract.get("lifecycle_operation") or "") in {
+        "source", "setup", "resume",
+    }
+    if not recurring_loop and not lifecycle_cycle:
         return ""
     tool = str(event.get("tool_name") or "")
     tool_input = event.get("tool_input") \
@@ -3791,6 +3810,7 @@ def _loop_iteration_gate_reason(run_dir: Path, event: dict, contract: dict) -> s
         transition_reason = _transition_commit_reason(run_dir, contract)
         if transition_reason:
             return transition_reason
+    if transitioned and recurring_loop:
         cron_ok, cron_note = runtime_receipts.cron_create_observed(
             run_dir, session_id=session_id, since=since,
         )
@@ -3801,6 +3821,8 @@ def _loop_iteration_gate_reason(run_dir: Path, event: dict, contract: dict) -> s
             )
     if task_plan_tool:
         return ""
+    if not recurring_loop:
+        return _work_plan_gate_reason(run_dir, event, contract)
     plan_ok, plan_note = runtime_receipts.iteration_plan_observed(
         run_dir,
         session_id=session_id,
@@ -3892,15 +3914,13 @@ def _stale_reviewer_agent_ready(run_dir: Path, event: dict, plan: dict) -> bool:
 
 
 def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
-    """Require one current plan/delegation decision before /loop effects.
+    """Require one current plan/delegation decision before cycle effects.
 
     TaskCreate proves only that the model made a task list.  This gate binds the
     actual execution mode and effect-typed lanes to the current turn and current
     canonical digest.  Child Agents remain free to execute their assigned lane;
     the later actor/asset gate still enforces their exact runtime assignment.
     """
-    if not contract.get("loop_requested"):
-        return ""
     tool = str(event.get("tool_name") or "")
     event_effect = _event_effect(event)
     if tool != "Agent" and event_effect not in {"target", "model_egress"}:
@@ -3955,7 +3975,7 @@ def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
                 "WORK_PLAN_DIGEST_MISMATCH", "WORK_PLAN_ID_MISMATCH",
             } else E_WORK_PLAN_REQUIRED
             return (
-                f"[{code}] 当前 /loop 在 Agent/目标动作前必须提交与本 turn 和 canonical "
+                f"[{code}] 当前 EXECUTE cycle 在 Agent/目标动作前必须提交与本 turn 和 canonical "
                 "输入 digest 一致的 xunji.work-plan.v1，并先选择 ROOT_DIRECT / "
                 f"SERIAL_AGENT / PARALLEL_AGENTS。当前状态：{detail}。"
                 "完整读取 `.claude/skills/xunji-agent-board/SKILL.md`，再从唯一公共入口 "
@@ -5323,7 +5343,7 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
                     return _deny("无法原子写入当前 session/目标 run 的 transition claim。")
                 return None
             if pending and tool not in {
-                    "Read", "Grep", "Glob", "WebSearch", "ListMcpResourcesTool",
+                    "Read", "Grep", "Glob", "Skill", "WebSearch", "ListMcpResourcesTool",
                     "ReadMcpResourceTool", "CronList"}:
                 return _deny(
                     "当前 session 正在 bootstrap run；绑定 active run 前只允许只读动作和"
@@ -7896,7 +7916,9 @@ def _selftest() -> int:
     canary_transcript = root / "canary-delegation-transcript.jsonl"
     canary_transcript.write_text("canary-delegation\n", encoding="utf-8")
     write_contract(canary_receipt_run, {
-        "prompt": f"继续执行 runs/{canary_receipt_run.name}",
+        # Keep this fixture scoped to the downstream exact-prompt denial.  A
+        # lifecycle resume intentionally reaches the work-plan gate first.
+        "prompt": "修复当前 Agent launch 的追加输入问题",
         "session_id": "canary-delegation-session",
         "transcript_path": str(canary_transcript),
     })
@@ -9140,6 +9162,19 @@ def _selftest() -> int:
     exact_setup_invocation = _control_invocation(exact_setup_command)
     expected_setup_effect = _lifecycle_transition_effect(
         exact_setup_invocation, "bootstrap_20260101")
+    no_run_skill = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve())],
+        input=json.dumps({
+            "hook_event_name": "PreToolUse", "session_id": "s-bootstrap",
+            "tool_name": "Skill", "tool_input": {
+                "skill": "xunji-run-lifecycle", "args": "prepare setup"},
+        }),
+        text=True, capture_output=True, env=env, timeout=10,
+    )
+    pending_skill_allowed = bool(
+        no_run_skill.returncode == 0
+        and not (no_run_skill.stdout or "").strip()
+    )
     no_run_setup = subprocess.run(
         [sys.executable, str(Path(__file__).resolve())],
         input=json.dumps({
@@ -10443,6 +10478,46 @@ def _selftest() -> int:
         ),
         "session_id": "operator-offline-e2e-session",
     })
+    localhost_source_url = "http://127.0.0.1:63023"
+    operator_natural_localhost_contract = _contract_from_event({
+        "prompt": (
+            "请作为 Claude Code 主驾驶真实运行 Xunji。"
+            f"创建一个以 {localhost_source_url} 为唯一授权目标的新 run，并完成一个完整的小周期。"
+            "操作者明确允许本回合对该 localhost 目标直连，无需代理；可以绑定本机端口。"
+            "不要修改 framework source、docs、skills、hooks 或 Git。"
+            "不要使用 WebSearch/WebFetch/MCP，不要访问任何非 localhost 目标。"
+            "若任何 Hook/argv 拒绝，读取错误、修复前置条件并重试同一动作。"
+            "完成后运行 agent/lifecycle/merge/check_run 的离线检查。"
+        ),
+        "session_id": "operator-natural-localhost-session",
+    })
+    operator_for_source_contract = _contract_from_event({
+        "prompt": (
+            f"为 {localhost_source_url} 创建一个新的 run，并完成一个完整的小周期。"
+            "不要修改框架源码、文档、skills、hooks 或 Git；"
+            "若 Hook 或参数拒绝，读取公开诊断、修复前置条件并重试同一动作。"
+        ),
+        "session_id": "operator-for-source-session",
+    })
+    operator_natural_localhost_control = {
+        "tool_name": "Bash",
+        "tool_input": {"command": (
+            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f"--source '{localhost_source_url}' --type auto"
+        )},
+    }
+    operator_natural_localhost_setup_allowed = evaluate_pretool(
+        run,
+        operator_natural_localhost_control,
+        operator_natural_localhost_contract,
+    ) == ""
+    natural_plan_run = root / "natural-plan-run"
+    natural_plan_run.mkdir()
+    operator_natural_localhost_target_reason = _work_plan_gate_reason(
+        natural_plan_run,
+        target_event,
+        operator_natural_localhost_contract,
+    )
     positive_target_loop_contract = _contract_from_event({
         "prompt": (
             f"/loop {source_url} 不要绕过代理，允许使用受控工具对目标探测。"
@@ -11277,6 +11352,23 @@ def _selftest() -> int:
          and operator_e2e_loop_contract.get("loop_requested") is True
          and operator_e2e_loop_contract.get("lifecycle_operation") == "source"
          and not operator_e2e_loop_contract.get("maintenance_intent")),
+        ("natural localhost lifecycle intent outranks negative framework and recovery clauses",
+         operator_natural_localhost_contract.get("mode") == EXECUTE
+         and operator_natural_localhost_contract.get("lifecycle_operation") == "source"
+         and operator_natural_localhost_contract.get("run_transition_requested") is True
+         and operator_natural_localhost_contract.get("direct_egress_approved") is True
+         and operator_natural_localhost_contract.get("target_egress_denied") is False
+         and operator_natural_localhost_contract.get("web_tools_denied") is True
+         and len(operator_natural_localhost_contract.get("source_sha256s") or []) == 1
+         and not operator_natural_localhost_contract.get("source_ambiguous")
+         and not operator_natural_localhost_contract.get("maintenance_intent")
+         and operator_natural_localhost_setup_allowed
+         and E_WORK_PLAN_REQUIRED
+         in operator_natural_localhost_target_reason),
+        ("for-source lifecycle wording outranks a maintenance recovery clause",
+         operator_for_source_contract.get("mode") == EXECUTE
+         and operator_for_source_contract.get("run_transition_requested") is True
+         and not operator_for_source_contract.get("maintenance_intent")),
         ("operator offline intent freezes target and named web-tool constraints",
          operator_offline_loop_contract.get("mode") == EXECUTE
          and operator_offline_loop_contract.get("target_egress_denied") is True
@@ -11820,6 +11912,8 @@ def _selftest() -> int:
          explicit_external_prepare_allowed_without_claim),
         ("pending bootstrap allows its authorized setup command",
          pending_setup_allowed),
+        ("pending bootstrap permits read-only owner skill loading",
+         pending_skill_allowed),
         ("pending bootstrap rejects an unrecognized bare Python without consuming authority",
          unrecognized_bare_python_fails_closed),
         ("documented bare python3 claims across hook and Bash PATH differences",

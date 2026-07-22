@@ -425,7 +425,9 @@ budget ordinal, or lineage remains explicit debt.
 New assignments default to 24 calls; a normal delegate omits the override. When a
 frozen target front already selects HTTP GET liveness, its generated context carries
 the exact registered `probe.py` argv so bounded Agents do not inspect framework
-source to discover command grammar.
+source to discover command grammar. Every target context also freezes the current
+turn's route choice; explicit direct egress uses the exact
+`XUNJI_PROXY_REQUIRED=0` prefix while Hooks retain all outbound validation.
 The conflict projection is strict derived state: its owner serializes
 snapshot/compare/write, rebuilds malformed or non-regular cache files, rejects
 future schemas and unknown fields, and binds an in-run regular file into the work
@@ -636,8 +638,8 @@ promotion, exit-gate satisfaction or closure proof.
 When an observation **grounds a product fingerprint** — i.e. while attacking an asset you
 fetch it and recognize the stack (or an opt-in `classify_hosts` tagged it `kb:<id>`) —
 load `xunji-knowledge-flywheel` **before** crafting the next probe. In a live run,
-use its bounded built-in Read/Grep/Glob path over the matching grounding entry and,
-when present, the matching local exploit entry. Do not preload the base or call
+Root freezes the exact matching grounding entry and, when present, matching local
+exploit entry into Agent context; the Agent uses built-in Read only on those paths. Do not preload the base or call
 unregistered helper CLIs. A clear miss is recorded as deferred repository
 maintenance; knowledge writeback never occurs inside the engagement turn.
 
@@ -651,7 +653,8 @@ saying which in `decisions.md`. Re-collecting existing data wastes the request
 budget, the scarce resource against a rate-limited / WAF target.
 
 When saved JS bundles, rendered `network.json`, or captured pages may hide API
-routes, use built-in Read/Grep/Glob over only those saved artifacts and extract
+routes, freeze the exact saved-artifact paths before delegation; the Agent uses
+built-in Read over only those paths and extracts
 candidate input shapes or threat hypotheses for Root adjudication. The
 `tools/js_inventory.py` CLI is an offline developer helper, not a registered live
 capability. Proof still goes through guarded actions and evidence entries.

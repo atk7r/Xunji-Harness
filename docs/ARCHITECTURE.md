@@ -385,6 +385,9 @@ receipt 与 guard state 仍禁止直接写。被拒绝或失败的动作不是�
 同回合 PreToolUse 的 Cron/Task 排序使用已 fsync 的 hook journal，避免 Claude transcript 尚未
 刷盘时把已成功的控制动作误拒；Agent/target/model/review/evidence 与最终 Stop truth 仍要求
 transcript-backed receipt。两者不能互换。
+仅因 work plan 未就绪而拒绝的 target 动作，在后续 Agent 以相同 capability/method/URL
+成功执行后即被语义结算；解释器绝对路径、直连/代理前缀和 artifact basename 不属于目标
+动作身份，不能在 `cycle_end` 后强迫重放过期命令。其他拒绝仍按 exact receipt 诚实收敛。
 普通 live `/loop` 的 Bash 同样只放行正向注册的 read/control/verification/target/review
 capability 与 target tool 的窄 proxy/locale env；未知解释器或 shell 形状不能因关键路径
 字符串不可见而被推断为只读。
@@ -492,7 +495,8 @@ request/model budget 与 guard 约束。task notification 仅是状态/控制输
 dependency；child transcript 以 `tool_use` 加未消费 tool result 截止时也不是 final envelope。
 即使 notification 与随后冻结的结果交错或内容不一致，也只能以 merge-result bytes/digest 为准；
 target `accept-candidate` 额外要求 Hunter/Reviewer 的冻结结果引用完全相同的 run-local artifact
-集合，并由 `review-disposition` 校验文件、replay request/response、saved body 与 body hash。
+集合；Claude Read 返回的绝对路径与 `runs/<dir>/evidence/...` 先归一到同一 run-local identity，
+再由 `review-disposition` 校验 containment、文件、replay request/response、saved body 与 body hash。
 Plan-bound assignment 的 typed `tool_call_limit` 由 `workers.py` 物化；新 assignment 默认 24，
 旧 v1 row 缺字段时仍按兼容 fail-closed 值 6 解释，显式值只允许 5–64。`SubagentStart` 把有效值连同 assignment/lane/
 plan/prompt/type 冻结进 runtime receipt，之后不再读取可变 assignment 来决定本 attempt 的上限。
@@ -507,6 +511,9 @@ child claim 在任何 effect gate 前标记 target action、分配连续 request
 call 即使随后被其他 gate 拒绝也占用预算，exact replay 不重复扣账，并发调用不能超卖。首个超过
 冻结上限的 request claim 以 `XUNJI_E_AGENT_REQUEST_BUDGET_EXCEEDED` 在执行前拒绝；耗尽提示要求
 Hunter 用现有 artifact 返回，不能靠变换 method/path/argv 扩张操作者要求的最小动作。
+每个合法 `review-disposition` 都表示对当前冻结 bytes 的 review 已完成；`needs-control`/`retry`
+要求 Root 先把该 attempt 结算为证据支持的 `blocked`/`failed`，再由同一 documented delegate
+checkpoint 解锁控制/重试 lane，不能把 review 留在既不能 `finish` 也不能 delegate 的死锁态。
 每次 Root `finish` 后，workers 从同一 plan projection 输出剩余 lane 的
 `NEXT_OWNER_ACTION`。单个 execution/review pair 已合并不等于 plan 完成；剩余 committed lane
 清债前 front 保持 open，不得以关闭/延后 front、replan 或 cycle_end 跳过已选择的验证链。
@@ -527,8 +534,9 @@ Coverage、planner、assignment、launch prompt 与 child target gate 的 effect
 `host[:port]`；coverage 有显式 port 时，host-only 不再被当作同一 assignment。若 target front
 已有合法 `ASSET-...` opaque ID，该 coverage row 是 ID owner，assignment/context projection
 复制该 ID，不再按 display identity 独立哈希并制造第二身份。若 target front
-已冻结 HTTP GET liveness next move，context pack 生成一次精确公开 `probe.py` argv（localhost
-按 operator 已授权的 direct-egress 设置），Agent 不再为发现 CLI 参数读取工具/Hook/guard 源码。
+已冻结 HTTP GET liveness next move，context pack 生成一次精确公开 `probe.py` argv，并把本轮
+operator 已授权的 direct-egress 精确前缀冻结进所有 target lane guidance；Agent 不再为发现 CLI
+参数或 route 读取工具/Hook/guard 源码，Hook 仍重新验证全部出站硬边界。
 Safety gate 在检查 URL 内容前先识别 exact registered active-run control capability；URL 出现在
 `loop_journal`/work-plan 的 note/next-action 只是本地数据，invalid/wrapped argv 不获得豁免。
 Agent lifecycle hook 的内部 receipt 异常以 `XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED` 非零退出并
@@ -820,7 +828,7 @@ Python validator/receipt 为最终 owner；每轮 `loop_prompt` 只保留阶段�
 该 loop prompt 也是多行命令展示的唯一调用规则 owner：每行是一次独立 Bash tool call，
 code fence 只表达顺序；owner reference 不再重复或暗示 compound aggregate。
 公共/本地知识在 live run 中通过 grounded ID/签名
-使用内建 Read/Grep/Glob 做最小只读加载；未注册的 matcher helper 不进入 live capability，
+Root 把最小匹配路径冻结进 context，Agent 仅用内建 Read 读取这些 exact paths；未注册的 matcher helper 不进入 live capability，
 知识写回留给独立 repository-maintenance turn。fixture 同时验证主 skill 禁含重复命令、
 reference 的 typed argv/effect，以及 live replay 仍被分类为显式授权的 `target` effect。
 生成的 Agent 文件和 context pack 仍是 derived artifact，不是 authority、canonical evidence
@@ -975,32 +983,30 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-22
-- Scope: 修复 Claude-primary 个人操作者体验与主动 Agent 垂直切片：缺 Hook metadata 的
-  pending contract 因果降级、显式 offline 两 lane、Reason-pass 自动序号、精确 delegate 容量
-  诊断、Hunter/Reviewer 无数据早停、review→finish→canonical 顺序、barrier/blocked 与
-  cycle-end/front closure 分离，以及 `ScheduleWakeup` control 分类；同步移除 run template 假 ID，
-  并修复 `timestamp_gate` CLI 自测跨 UTC 秒边界的偶发假失败。
-- Architecture impact: current runtime behavior changed — operator intent now survives missing Claude
-  metadata without becoming an ACL ceremony; Agent settlement owns the pre-canonical ordering;
-  no-target-data is decision/barrier state rather than evidence; plan-cycle completion no longer implies
-  front/engagement closure. Outbound proxy/privacy/guard/recorder boundaries remain unchanged.
-- Owner/enforcement: `turn_contract.py` owns prompt/effect and pre-canonical ordering；`work_plan.py`/
-  `workers.py` own offline planning、capacity diagnosis、review/Root settlement；`runtime_receipts.py`
-  owns local control classification；Claude Hunter/Reviewer definitions and `xunji-agent-board` own the
-  concise driver behavior；canonical run files and evidence/closure gates remain truth owners.
-- Verification: focused `selftest_all.py` suites 8/8 PASS、`check_rules.py` PASS、`git diff --check`
-  PASS。DeepSeek-backed Claude Code real operator session
-  `a10df8ba-053e-4714-9a27-c4d2f63cbaeb` created `operator-e2e-invalid_20260722`, ran exactly two
-  offline lanes with authentic Hunter/Reviewer Start/Stop (7/11 admitted local calls), zero target
-  PostToolUse and zero Web requests, settled Root as blocked before canonical writes, kept F-001 open,
-  created no E-id/finding, and returned the exact typed cycle-end Coda. `check_run` returned
-  STRUCTURAL_PASS with only the expected empty-surface warning; this is not completion proof.
+- Scope: 收尾 Claude-primary 个人操作者真实周期：自然语言创建/恢复 intent、localhost admission、
+  当前回合 egress route、文本响应解析、Agent exact-path context、target body+replay 回执、绝对
+  run-local artifact 校验、`needs-control|retry` 后 Root settlement 与 successor verify lane，以及
+  已由计划内 Agent 成功执行的 pre-plan target denial 语义结算。
+- Architecture impact: current runtime behavior changed — personal-operator intent and prepared Agent
+  execution replace hostile-session ceremony while preserving proxy/privacy/audit hard boundaries；所有
+  Reviewer disposition 均结束 review attempt，但只有 Root settlement 改变 execution lane；pre-plan
+  denial 以 capability/method/URL 结算，不因解释器、route prefix 或 save basename 制造过期重试。
+- Owner/enforcement: `turn_contract.py` owns natural turn/lifecycle intent；`scope_admission.py` owns exact
+  loopback admission；`context_pack.py` owns frozen route/exact paths；`probe.py` owns response artifacts；
+  `workers.py` owns review/Root/successor settlement；`runtime_receipts.py` owns denial truth；Claude
+  Hunter/Reviewer definitions and Agent Board reference own concise return behavior。
+- Verification: post-fix full `python3 tools/selftest_all.py` PASS 69/69；focused
+  `runtime_receipts.py --selftest` PASS；`check_rules.py` and `git diff --check` PASS。DeepSeek-backed Claude
+  Code real operator session `6cc7bb9f-08b0-4c06-bf29-5adeccfc9690` created
+  `runs/localhost_20260722` from natural language, used exact direct route against an operator-approved
+  loopback fixture, executed Hunter→Reviewer→needs-control→Root blocked→Verify→Reviewer→Root merged,
+  saved and independently read three bodies plus three replay sidecars, and completed the typed cycle.
+  That run also exposed the now-fixed stale pre-plan denial retry and missing replay-path return.
 - Independent review: fresh DeepSeek-backed Claude Code session
-  `07fb652c-1486-4f86-bc52-66c37d96434f` reviewed exact staged SHA-256
-  `8bff2804a105129e1e41e5ff0c4fabecf18ae95da6772bb63bf51788c575859b` and returned PASS for all
-  seven requested boundaries with no blocker. The only noted non-blocking sensitivity is the deliberately
-  broad Chinese offline-intent regex. Adding this checkpoint result and its durable review record is a
-  metadata-only delta that requires final exact-diff attestation before commit. No arkcli review or Codex self-vote.
+  `d1f3704d-a037-4edb-9233-7c45cdbdf5a8` received the complete 16-file patch at exact SHA-256
+  `a0fc82ffdbde290ef9a3507f286ce614467175ec6b324f1a15d73254c0b2f8aa` and returned PASS for all eight
+  requested boundaries with no finding or tool denial；durable record:
+  `review/records/2026-07-22-claude-primary-local-operator-cycle-review.md`。No arkcli or Codex self-vote.
 - Exclusions: CCB/TypeScript migration、statusline behavior、`tools/xunji_statusline.py`、
   `docs/XUNJI_PROJECT_INTRO.md` and user live-run/artifact changes remain outside this phase.
 

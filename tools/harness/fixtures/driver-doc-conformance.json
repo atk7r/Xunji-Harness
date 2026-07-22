@@ -52,7 +52,7 @@
     {
       "path": "docs/cognition/README.md",
       "required": [
-        "a live run uses built-in Read/Grep/Glob",
+        "Agent uses built-in Read only on",
         "helper matcher CLIs remain offline developer tools",
         "separate, explicitly authorized repository-maintenance turn"
       ],
@@ -271,7 +271,7 @@
       "path": ".claude/skills/xunji-knowledge-flywheel/SKILL.md",
       "required": [
         "Live Run: Bounded Read Only",
-        "built-in Read, Grep, and Glob tools",
+        "Agent uses built-in Read on those exact paths",
         "are offline helper CLIs, not",
         "a gate denial is not a lookup result",
         "separate, explicitly authorized repository",

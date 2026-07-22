@@ -633,6 +633,10 @@ operator claim for the same assets may finalize the unchanged prepared projectio
 Stop hooks keep final output evidence-bound: `NORMAL_CODA` and receipt-backed
 `TARGET_DENIED` reject unsupported success prose; neither grants authority or
 substitutes for a plan-bound `cycle_end`.
+An initial target action denied only because its work plan was not yet prepared is
+resolved when a later admitted Agent performs the same capability/method/URL;
+interpreter path, egress prefix, and artifact basename are execution details, not
+a reason to force the obsolete pre-plan command again after settlement.
 After same-session/turn receipt validation, `run_gate` yields to that fixed output
 before ordinary drift, Agent, or closure checks; paused-mode Cron quiescence still
 precedes the yield.
@@ -814,9 +818,15 @@ another executable protocol.
   dependent Reviewer assignment must carry the same `XUNJI_RESULT_DIGEST`; a
   `review-disposition` binds that digest and the exact Reviewer runtime return before
   Root may adjudicate. Reviewer returns a candidate disposition only; Root/Single
-  Synthesizer alone confirms or closes a front after the evidence gate. For a
-  target-effect acceptance, the disposition receipt also freezes deterministic
+  Synthesizer alone confirms or closes a front after the evidence gate. With a
+  `needs-control`/`retry` disposition, review of the exact frozen bytes is complete;
+  Root settles that attempt as evidence-supported `blocked`/`failed` before the
+  planned control/retry lane can unlock. It is not left in an unexecutable
+  `action_required` state. For a target-effect acceptance, the disposition receipt
+  also freezes deterministic
   artifact validation: Hunter and Reviewer must name the identical run-local set;
+  absolute paths emitted by Claude Read and `runs/<dir>/evidence/...` paths normalize
+  to the same run-local identity before containment checks;
   every file must exist; replay request/response, saved body, and body hash must
   agree. Task notifications remain wake-up signals and are never result truth. `merged`
   requires every assigned asset to have a successful
@@ -837,6 +847,10 @@ another executable protocol.
   first ordinal above the frozen budget is denied before execution with
   `XUNJI_E_AGENT_REQUEST_BUDGET_EXCEEDED`; exhaustion context tells the Hunter to
   return existing artifacts instead of varying method/path/argv.
+- **Frozen egress route**: a target context pack states whether the current turn
+  approved direct egress. When approved it gives the exact
+  `XUNJI_PROXY_REQUIRED=0` prefix for every registered target argv; this is guidance,
+  while Hooks still revalidate scope, privacy, budgets, guard, shape, and recording.
 - **Instruction receipt consumption**: the bundle builder, Root launch, and Hook
   admission own source-integrity validation. Context packs expose version/hash
   receipts plus the complete composed role text, not manifest/template/live-Agent
@@ -844,7 +858,7 @@ another executable protocol.
   or hashing framework instruction sources.
 - **Prepared public action**: when a target lane's frozen front already chooses an
   HTTP GET liveness check, the generated context pack contains the exact registered
-  `probe.py` argv (including the localhost direct-egress setting when applicable).
+  `probe.py` argv (including the current turn's direct-egress prefix when approved).
   The Agent uses that argv before any framework-source inspection. A denial may be
   retried once from public hook guidance; it does not authorize reading hook/guard
   internals until the call budget is exhausted.

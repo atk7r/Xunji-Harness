@@ -294,7 +294,11 @@ def _prepared_action_lines(run_dir: Path, *, effect: str, target: str,
     except ValueError:
         return []
     run_ref = _profile_rel(run_dir)
-    prefix = "XUNJI_PROXY_REQUIRED=0 " if host in {"127.0.0.1", "::1", "localhost"} else ""
+    contract = _load_json(run_dir / "state" / "turn_contract.json")
+    prefix = (
+        "XUNJI_PROXY_REQUIRED=0 "
+        if contract.get("direct_egress_approved") is True else ""
+    )
     command = (
         f'{prefix}python3 tools/probe.py GET "{url}" '
         f'--save initial-liveness --run {run_ref}'
@@ -309,6 +313,25 @@ def _prepared_action_lines(run_dir: Path, *, effect: str, target: str,
         "```",
         "A denial is an attributable outcome: follow its public retry text once, then return",
         "the supported result or barrier instead of reading hook/guard/tool source.",
+    ]
+
+
+def _egress_contract_lines(run_dir: Path, *, effect: str) -> list[str]:
+    """Expose the frozen route choice without minting authority."""
+    if effect != "target":
+        return []
+    contract = _load_json(run_dir / "state" / "turn_contract.json")
+    if contract.get("direct_egress_approved") is True:
+        return [
+            "## Frozen Egress Route",
+            "This turn explicitly approves direct egress. Prefix every registered target",
+            "capability argv with exact `XUNJI_PROXY_REQUIRED=0`; Hooks still revalidate",
+            "scope, privacy, request budget, guard, command shape, and recording.",
+        ]
+    return [
+        "## Frozen Egress Route",
+        "Direct egress is not approved for this turn. Use the registered proxy-aware",
+        "target capability unchanged; do not add or infer an environment override.",
     ]
 
 
@@ -386,8 +409,8 @@ def _knowledge_xday_summary(kb_ids: list[str], *, kb_dir: Path | None = None,
                             weap_dir: Path | None = None) -> list[str]:
     lines: list[str] = []
     fallback = (
-        "use built-in Read/Grep/Glob against the saved artifact and "
-        "`knowledge/*.md`; return an explicit knowledge gap when no grounded "
+        "use built-in Read against exact saved-artifact and knowledge paths "
+        "already supplied by the context; return an explicit knowledge gap when no grounded "
         "match exists; writeback is a separate maintenance turn"
     )
     if not kb_ids:
@@ -588,6 +611,9 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
         "## Assigned Front",
         front_text or f"(front {front} not found in frontier.md)",
     ]
+    egress_contract = _egress_contract_lines(run_dir, effect=effect)
+    if egress_contract:
+        lines += ["", *egress_contract]
     prepared_action = _prepared_action_lines(
         run_dir, effect=effect, target=target, front_text=front_text)
     if prepared_action:
@@ -741,6 +767,10 @@ def _selftest() -> int:
         },
         "retrospective_lessons": ["custom lesson"]
     }), encoding="utf-8")
+    (d / "state" / "turn_contract.json").write_text(json.dumps({
+        "schema": 1,
+        "direct_egress_approved": True,
+    }), encoding="utf-8")
     pack = build_pack(d, front="F-001", role="web-auth", agent="A-web-auth-001",
                       kb_dir=kb, xday_dir=xday, weap_dir=weap)
     out = d / "context" / "F-001.web-auth.md"
@@ -801,7 +831,7 @@ def _selftest() -> int:
         ("pack includes matched coverage", "app.example" in pack and "kb:foobar-cms" in pack),
         ("pack includes knowledge pointer", "knowledge `foobar-cms`" in pack and "FooBar CMS" in pack),
         ("no-kb route uses built-in live lookup and defers writeback",
-         "Read/Grep/Glob" in no_kb_summary
+         "Read against exact" in no_kb_summary
          and "separate maintenance turn" in no_kb_summary
          and "knowledge_match.py" not in no_kb_summary),
         ("local xday pointer requires a matching public grounding entry",
@@ -810,10 +840,14 @@ def _selftest() -> int:
          and "missing-public.md" not in missing_public_summary),
         ("matcher import failure keeps the built-in live fallback",
          "offline matcher module unavailable" in matcher_unavailable_summary
-         and "Read/Grep/Glob" in matcher_unavailable_summary
+         and "Read against exact" in matcher_unavailable_summary
          and "separate maintenance turn" in matcher_unavailable_summary),
         ("pack includes xday pointer without dumping note body", "local xday pointer" in pack and "local note" not in pack),
         ("pack includes evidence block", "E-001" in pack),
+        ("target pack exposes the frozen direct-egress argv prefix",
+         "This turn explicitly approves direct egress" in "\n".join(
+             _egress_contract_lines(d, effect="target"))
+         and prepared_probe.count("XUNJI_PROXY_REQUIRED=0") == 1),
         ("pack includes relevant threat hypothesis", "Relevant Hypotheses / Threat Hypotheses" in pack
          and "hidden admin API may expose cross-role data" in pack
          and "Linked IS/C/E: IS-001" in pack),

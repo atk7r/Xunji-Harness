@@ -588,7 +588,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         return out
     # JS/CSS 静态资源 >MIN_STATIC_ASSET_BYTES 不计入 bytes budget(防 JS-heavy SPA 的 chunk 下载触发假熔断);
     # 仍计入 count budget。小于阈值的仍正常计(防大量小文件绕过)。
-    content_type = (resp_headers.get("Content-Type") or "").lower()
+    response_content_type = _header_value(resp_headers, "Content-Type") or ""
+    content_type = response_content_type.lower()
     record_bytes = len(raw)
     if len(raw) >= MIN_STATIC_ASSET_BYTES and any(t in content_type for t in ("javascript", "css")):
         record_bytes = 0
@@ -604,14 +605,14 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
 
     body, truncated = cap_body(raw)
     _full_sha1 = hashlib.sha1(raw).hexdigest()
-    _snippet_val, _snippet_enc = _safe_snippet(body, resp_headers.get("Content-Type", ""))
+    _snippet_val, _snippet_enc = _safe_snippet(body, response_content_type)
     summary.update({
         "status": status,
         "len": len(raw),
         "truncated": truncated,
         "sha1": _full_sha1[:12],
         "sha1_full": _full_sha1,            # 全 sha1: replay 比对整完整性(不削成 48-bit)
-        "ctype": resp_headers.get("Content-Type", ""),
+        "ctype": response_content_type,
         "server": resp_headers.get("Server", ""),
         "snippet": _snippet_val,
         **_snippet_kwargs(_snippet_enc),
@@ -681,7 +682,7 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
             "request": safe_request,
             "response": {"status": status, "len": len(raw),
                          "sha1": hashlib.sha1(raw).hexdigest(),
-                         "ctype": resp_headers.get("Content-Type", ""),
+                         "ctype": response_content_type,
                          "headers": safe_response["headers"],
                          "snippet": safe_response["body_preview"],
                          **_snippet_kwargs(safe_snippet_encoding)},
@@ -856,6 +857,11 @@ def _selftest() -> int:
                            bool(_re.search(r"\.AspNetCore\.Antiforgery\.[^=]+=[^;]+", sc))))
             checks.append(("--save wrote the body", tmp.is_file() and tmp.read_bytes() == b"ok-body"))
             checks.append(("len/sha1 summarized", d.get("len") == 7 and bool(d.get("sha1"))))
+            checks.append(("Content-Type lookup is case-insensitive",
+                           d.get("ctype") == "text/html"))
+            checks.append(("text response keeps a readable snippet",
+                           d.get("snippet") == "ok-body"
+                           and "snippet_encoding" not in d))
             checks.append(("probe exposes credential-free egress route",
                            d.get("egress_route") == "direct"))
             # 操作录像: --save 同时写 <file>.replay.json(追加扩展名, 非 with_suffix)
@@ -871,6 +877,8 @@ def _selftest() -> int:
                                rj["request"]["method"] == "GET" and rj["request"]["url"].startswith("http")))
                 checks.append(("replay 含响应 status/全sha1",
                                rj["response"]["status"] == 200 and len(rj["response"]["sha1"]) >= 40))
+                checks.append(("replay preserves case-insensitive Content-Type",
+                               rj["response"].get("ctype") == "text/html"))
                 checks.append(("summary.sha1 == replay.sha1 前缀(截断一致)",
                                d.get("sha1") == rj["response"]["sha1"][:12]))
                 checks.append(("replay 请求 Cookie 已脱敏且原值不落盘",

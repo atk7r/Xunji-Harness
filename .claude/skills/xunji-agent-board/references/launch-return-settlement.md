@@ -116,7 +116,10 @@ coverage debt.
 `done` means returned but not Root-disposed; it is not a valid Root-authored
 `finish` transition.
 After `review-disposition`, obey its `NEXT_OWNER_ACTION` and perform Root `finish`
-before canonical promotion or successor delegation. After every `finish`, obey its
+before canonical promotion or successor delegation. `needs-control`/`retry` means
+the review of these frozen bytes is complete but the attempt must settle as the
+evidence-supported `blocked`/`failed` state before the planned control/retry lane
+can unlock. After every `finish`, obey its
 next action: a fresh plan routes to `delegate`; materially changed inputs route to
 owner-generated replan with inherited completed lanes; no debt routes to typed
 `cycle_end`. Keep the assigned front open until that route settles.

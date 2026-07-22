@@ -400,6 +400,17 @@ def _selftest() -> int:
                    and not operator_intent(
                        "创建新 run；若 Xunji Hook 拒绝则修复并重试",
                        lifecycle_intent=True)))
+    checks.append(("natural lifecycle primary intent ignores negated maintenance wording",
+                   not operator_intent(
+                       "请作为 Claude Code 主驾驶真实运行 Xunji。"
+                       "创建一个以 http://127.0.0.1:63023 为唯一授权目标的新 run。"
+                       "不要修改 framework source；若 Hook 拒绝则修复前置条件并重试。",
+                       lifecycle_intent=True)))
+    checks.append(("for-source lifecycle intent outranks a maintenance recovery clause",
+                   not operator_intent(
+                       "为 http://localhost:63023 创建一个新的 run。"
+                       "若 Hook 或参数拒绝，修复前置条件并重试。",
+                       lifecycle_intent=True)))
     adjacent = root / "docs/maintenance-note.md"
     adjacent.parent.mkdir(parents=True, exist_ok=True)
     adjacent.write_text("# note\n", encoding="utf-8")

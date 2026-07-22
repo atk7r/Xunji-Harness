@@ -2324,6 +2324,14 @@ def _evidence_references(run_dir: Path, text: str) -> dict[str, Path]:
     """Return normalized run-local evidence references from one frozen result."""
     references: dict[str, Path] = {}
     prefix = f"runs/{run_dir.name}/"
+    resolved_prefix = str(run_dir.resolve()).rstrip("/") + "/"
+    absolute_prefix = str(run_dir.absolute()).rstrip("/") + "/"
+    # Claude's Read tool reports absolute paths (and macOS may spell /tmp as
+    # /private/tmp). Normalize both exact run roots before applying the bounded
+    # run-local grammar; containment is still revalidated below.
+    text = text.replace(resolved_prefix, prefix)
+    if absolute_prefix != resolved_prefix:
+        text = text.replace(absolute_prefix, prefix)
     for match in _EVIDENCE_REF_RE.finditer(text):
         raw = match.group(1).rstrip(".,);]}")
         relative = raw[len(prefix):] if raw.startswith(prefix) else raw
@@ -2361,7 +2369,9 @@ def _validated_review_artifacts(run_dir: Path, *, target_row: dict,
     target_refs = _evidence_references(run_dir, target_text)
     reviewer_refs = _evidence_references(run_dir, reviewer_text)
     if not target_refs:
-        raise ValueError("target accept-candidate requires frozen evidence references")
+        raise ValueError(
+            "target accept-candidate requires exact absolute or run-relative "
+            "run-local evidence references in both frozen results")
     if set(reviewer_refs) != set(target_refs):
         missing = sorted(set(target_refs) - set(reviewer_refs))
         extra = sorted(set(reviewer_refs) - set(target_refs))
@@ -2528,9 +2538,11 @@ def _record_review_disposition_locked(run_dir: Path, *, target: str, reviewer: s
     receipt["receipt_hash"] = hashlib.sha256(json.dumps(
         receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
-    draft["review_status"] = (
-        "action_required" if disposition in {"needs-control", "retry"} else "complete"
-    )
+    # Every accepted enum is a completed review of these exact frozen bytes.
+    # needs-control/retry describe the evidence-supported Root disposition and
+    # successor work; leaving the review itself action_required deadlocks the
+    # plan because neither finish nor the dependent lane can then proceed.
+    draft["review_status"] = "complete"
     draft["review_receipt"] = receipt
     draft["per_asset_outcomes"] = [
         {"asset": str(item.get("asset") or ""), "disposition": disposition}
@@ -4174,23 +4186,26 @@ def _selftest() -> int:
     d = Path(tempfile.mkdtemp())
     artifact_review_run = d / "artifact-review"
     (artifact_review_run / "evidence").mkdir(parents=True)
-    artifact_body = b"ok\n"
-    artifact_body_path = artifact_review_run / "evidence" / "probe.html"
-    artifact_replay_path = artifact_review_run / "evidence" / "probe.html.replay.json"
-    artifact_body_path.write_bytes(artifact_body)
-    artifact_replay_path.write_text(json.dumps({
-        "request": {"method": "GET", "url": "http://127.0.0.1:18765"},
-        "response": {
-            "status": 200,
-            "len": len(artifact_body),
-            "sha1": hashlib.sha1(artifact_body).hexdigest(),
-        },
-        "saved_body": "runs/artifact-review/evidence/probe.html",
-    }), encoding="utf-8")
-    frozen_artifact_text = (
-        "Artifacts:\n"
-        "- runs/artifact-review/evidence/probe.html\n"
-        "- runs/artifact-review/evidence/probe.html.replay.json\n"
+    artifact_paths: list[Path] = []
+    for name, body, url in (
+        ("root.html", b"root\n", "http://127.0.0.1:18765/"),
+        ("health.json", b'{"ok":true}\n', "http://127.0.0.1:18765/health.json"),
+    ):
+        body_path = artifact_review_run / "evidence" / name
+        replay_path = artifact_review_run / "evidence" / f"{name}.replay.json"
+        body_path.write_bytes(body)
+        replay_path.write_text(json.dumps({
+            "request": {"method": "GET", "url": url},
+            "response": {
+                "status": 200,
+                "len": len(body),
+                "sha1": hashlib.sha1(body).hexdigest(),
+            },
+            "saved_body": str(body_path.resolve()),
+        }), encoding="utf-8")
+        artifact_paths.extend((body_path, replay_path))
+    frozen_artifact_text = "Artifacts:\n" + "".join(
+        f"- {path.resolve()}\n" for path in artifact_paths
     )
     validated_artifact_receipts = _validated_review_artifacts(
         artifact_review_run,
@@ -5819,6 +5834,16 @@ def _selftest() -> int:
     except ValueError as exc:
         immutable_snapshot_tamper_rejected = "changed after return" in str(exc)
     hunter_snapshot_path.write_bytes(hunter_snapshot_bytes)
+    planned_action_receipt = record_review_disposition(
+        planned_run, target=planned_hunter["agent"],
+        reviewer=planned_reviewer["agent"], disposition="needs-control",
+        note="frozen result needs one planned control",
+    )
+    planned_action_draft = json.loads(
+        _runtime_receipts.merge_draft_path(
+            planned_run, planned_hunter["agent"]
+        ).read_text(encoding="utf-8")
+    )
     planned_review_receipt = record_review_disposition(
         planned_run, target=planned_hunter["agent"],
         reviewer=planned_reviewer["agent"], disposition="accept-candidate",
@@ -6230,10 +6255,10 @@ def _selftest() -> int:
         planned_run / "state" / "assignments.json").read_bytes() \
         == assignments_before_journal_tamper
     checks = [
-        ("target review admission validates frozen artifact and replay bindings",
-         len(validated_artifact_receipts) == 2
-         and any(item.get("response", {}).get("status") == 200
-                 for item in validated_artifact_receipts)),
+        ("target review admission accepts four absolute frozen artifact paths",
+         len(validated_artifact_receipts) == 4
+         and sum(item.get("response", {}).get("status") == 200
+                 for item in validated_artifact_receipts) == 2),
         ("target review admission rejects stale or invented Reviewer artifacts",
          stale_reviewer_artifact_rejected),
         ("unknown future assignment ledger schema fails closed",
@@ -6491,6 +6516,9 @@ def _selftest() -> int:
         ("returned Reviewer writes an exact review disposition receipt",
          planned_review_receipt.get("schema") == "xunji.review-disposition.v1"
          and planned_review_receipt.get("reviewer_assignment") == planned_reviewer["agent"]),
+        ("needs-control completes review of frozen bytes before Root settlement",
+         planned_action_receipt.get("disposition") == "needs-control"
+         and planned_action_draft.get("review_status") == "complete"),
         ("non-target planner lane merges without a fabricated target receipt",
          planned_merge.get("coverage_merge_satisfied") is True
          and (planned_merge.get("coverage_merge") or {}).get("non_target_effect")

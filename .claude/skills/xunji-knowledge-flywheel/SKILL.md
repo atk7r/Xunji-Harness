@@ -18,14 +18,14 @@ framework, or component. A match is a lead, not a finding.
 
 ## Live Run: Bounded Read Only
 
-In an active `/loop`, use Claude's built-in Read, Grep, and Glob tools for the
-smallest grounded lookup:
+In an active `/loop`, the Root freezes the smallest matching knowledge paths into
+the Agent context. The Agent uses built-in Read on those exact paths:
 
 1. Read the saved live artifact or the exact `kb:<id>` tag.
 2. Extract the observed vendor/product/component/version signature.
-3. Grep `knowledge/*.md` for that signature or exact ID, then Read only matching
-   entries. If a local weaponized/xday tier exists, inspect only the matching
-   local entry after the public grounding match; never inventory or preload it.
+3. Read only the matching `knowledge/*.md` entry named by the context. If a local
+   weaponized/xday entry is named, inspect it only after the public grounding
+   match; never inventory or discover the corpus from the Agent.
 4. Record in `decisions.md` the observed fingerprint, loaded ID, 1–3
    target-specific hypotheses, and the control/artifact that would confirm or
    refute each.
@@ -33,8 +33,8 @@ smallest grounded lookup:
 `tools/knowledge_match.py` and `tools/xday_match.py` are offline helper CLIs, not
 registered live-run capabilities. Do not invoke, wrap, pipe, or emulate them with
 `python -c` during `/loop`; a gate denial is not a lookup result. The built-in
-read path above keeps the required grounding step executable without granting a
-new control-plane capability.
+exact-path read above keeps the required grounding step executable without
+granting a new control-plane capability.
 
 Allowed reasoning:
 
