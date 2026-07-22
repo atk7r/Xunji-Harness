@@ -50,11 +50,15 @@
   path, or existing `runs/<dir>` mentioned in an affirmative create/setup/resume
   request prepares setup, resume, or `hints.md`; a question, analysis request,
   denial, quoted log, or code example stays read-only. A literal first non-empty
-  top-level `/loop(?:\s|$)` enters loop mode only if the client forwards it unchanged
-  to `UserPromptSubmit`; indented/fenced
-  code, blockquotes, and inline quotes cannot mint that authority, and a conflicting
+  top-level `/loop(?:\s|$)` enters loop mode only if the client forwards it to
+  `UserPromptSubmit`. The hook ignores harmless leading horizontal whitespace/BOM
+  while retaining the exact raw prompt hash; explicit fenced code, blockquotes,
+  Markdown list items, inline quotes, and analysis requests cannot mint that authority. A conflicting
   `/loop` plus lifecycle denial fails closed. A client-reserved `/loop` expansion to
-  `cron_manager.py` is not Xunji authority; load `xunji-run-lifecycle` and use its
+  `cron_manager.py` is not Xunji authority. Narrow effect constraints such as
+  “do not modify framework source” reduce allowed actions but do not cancel an
+  otherwise explicit `/loop`.
+  Load `xunji-run-lifecycle` and use its
   named-run natural-language form for one `EXECUTE` cycle without recurring-Cron
   claims. A delivered `/loop <source>` is adapted through
   `tools/loop_bootstrap.py --source <input> --type auto`: existing run/run file
@@ -152,6 +156,10 @@
   exception and are always hash-redacted in replay URLs. Replay response headers
   and bounded response previews are also redacted before recording. Internal control names such as
   `XUNJI_PROXY` may remain local; they must never be copied into request bytes.
+  Exact registered active-run control capabilities are classified before argument
+  content: a URL inside `loop_journal`/work-plan note text remains local control data
+  and is not reclassified as custom target egress. Invalid or wrapped argv receives
+  no such exemption.
   Put operator/org-specific names or identifiers that have no reliable generic
   shape in newline-separated `OUTBOUND_PRIVACY_DENY_VALUES`; the guard compares
   them in memory and reports only the category, never the matched value.
@@ -201,7 +209,8 @@
 
 ```text
 observe -> update state graph -> decompose fronts
--> commit work plan -> delegate effect lanes -> Claude calls Agents
+-> commit the complete planner draft once with `workers.py commit-plan`
+-> delegate dependency-ready effect lanes -> Claude calls Agents
 -> freeze returned bytes + merge draft -> Reviewer challenges exact digest
 -> review disposition -> Root disposition / synthesis -> typed cycle_end
 ```
@@ -277,19 +286,29 @@ observe -> update state graph -> decompose fronts
   maintenance debt. Destination-free shell-shape denials remain denied but are
   non-maintenance.
   Lifecycle setup is stricter: the operator-facing `loop_bootstrap.py` shape owned by
-  `xunji-run-lifecycle` must be one exact argv-only command using the current registered
-  Python executable; the internal setup adapter is not a second Root route. A bare name is
-  accepted only when it resolves to that same identity. Lifecycle commands reject
+  `xunji-run-lifecycle` must be one exact argv-only command using the documented bare
+  `python3` or the current Hook interpreter; the internal setup adapter is not a second
+  Root route. The bare spelling intentionally trusts the single operator's inherited
+  local environment because Claude Code may give hooks and Bash different `PATH` values.
+  Lifecycle commands reject
   `tool_input.env`, inline environment assignments, unquoted pathname/query glob,
   brace, tilde, zsh EQUALS, parameter/command expansion, redirects, chains, comments,
   newlines, and line continuations. Quote source/URL as one literal argv token;
+  the sole trusted-operator normalization is an exact
+  `XUNJI_PROXY_REQUIRED=0` or `export XUNJI_PROXY_REQUIRED=0 &&` prefix on this
+  local-only public bootstrap, which does not alter its effect. No other env or
+  compound shape inherits that exception.
   quoted glob characters remain data. Do not append `2>&1`, pipes, `head`/`tail`, or
   other wrappers. `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` is a command-shape denial,
   not maintenance authority: remove any observational wrapper; when its category
   is `invalid-argv`, return to the corresponding owner document and supply the
   complete registered argv. Retry in the same operator turn. Inspect source and
   manifests with Read/Grep/Glob, never `python -c`; never use repository Python
-  `--help` or ad-hoc shell discovery to reconstruct a live owner CLI. Once a
+  `--help` or ad-hoc shell discovery to reconstruct a live owner CLI. A known
+  target script carrying only registry-allowed inline env but wrong
+  argv, that is still `invalid-argv`, not framework maintenance. For probe use
+  `python3 tools/probe.py GET "<url>" --save <name> --run runs/<dir>`; do not
+  invent `--method`, `--url`, or `--run-dir` aliases. Once a
   current-turn durable hook journal records `maintenance_action=true` (even
   before Claude flushes the transcript), only Read/Grep/Glob,
   an existing Task update, or an exact retry of that action remains admissible;
@@ -297,6 +316,12 @@ observe -> update state graph -> decompose fronts
   outcome or a new operator authority. A new bare “继续” prompt revokes
   pending source authority and can return
   `XUNJI_E_RUN_TRANSITION_AUTHORITY_MISSING`.
+  Missing Claude hook `session_id` is a correlation fault, not loss of the trusted
+  operator's intent: use the exact transcript binding, or the single-operator local
+  fallback only when both metadata fields are absent. Never consume another named
+  session's pending contract. `XUNJI_E_LIFECYCLE_PRIVATE_API` means Claude attempted
+  to bypass the public adapter; repair and retry the documented adapter instead of
+  calling `setup_transaction` through `python -c`, stdin, or an import.
   A denied or failed maintenance action has no successful
   completion receipt; preserve its hook/tool reason and path receipt, retry the
   identical action after repairing prerequisites, or report the exact blocker.
@@ -310,6 +335,8 @@ observe -> update state graph -> decompose fronts
   `setup_transaction.commit_activation_cas()`; Claude resume-only session recovery
   calls `restore_session_activation_cas()`. Both are typed ports of the same
   `setup_transaction.py` pointer/selection owner; no adapter is a second writer.
+  These private transaction APIs are owner internals, never a Claude fallback after
+  a denied lifecycle command.
   A rename-complete/CAS-failed run remains `prepared_not_active` with its
   transaction receipt and the old pointer intact; it may be activated only by the
   same transaction identity or an explicit resume. If the pointer committed before

@@ -16,6 +16,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
+
+import agent_instruction_bundle as _instruction_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 HWS = r"[^\S\n]"
@@ -37,21 +40,21 @@ except Exception:
 
 
 ROLE_TEMPLATES = {
-    "surface": "surface.md",
-    "web": "web-hunter.md",
-    "web-auth": "web-hunter.md",
-    "web-hunter": "web-hunter.md",
-    "code": "code-audit.md",
-    "code-audit": "code-audit.md",
-    "zhaoxuan": "code-audit.md",
-    "exploit": "exploit.md",
-    "exploit-construction": "exploit.md",
-    "verify": "verify.md",
-    "verification": "verify.md",
-    "review": "review.md",
-    "independent-review": "review.md",
-    "report": "report.md",
-    "synthesizer": "synthesizer.md",
+    "surface": "surface",
+    "web": "web-hunter",
+    "web-auth": "web-auth",
+    "web-hunter": "web-hunter",
+    "code": "code-audit",
+    "code-audit": "code-audit",
+    "zhaoxuan": "code-audit",
+    "exploit": "exploit",
+    "exploit-construction": "exploit",
+    "verify": "verify",
+    "verification": "verify",
+    "review": "review",
+    "independent-review": "review",
+    "report": "report",
+    "synthesizer": "synthesizer",
 }
 
 DEFAULT_OPERATOR_PROFILE = {
@@ -256,6 +259,59 @@ def _front_block(run_dir: Path, front_id: str) -> str:
     return m.group(0).strip() if m else ""
 
 
+def _prepared_action_lines(run_dir: Path, *, effect: str, target: str,
+                           front_text: str) -> list[str]:
+    """Render a narrow public argv when the frozen front already chose GET liveness.
+
+    This is driver guidance, not authority: the assignment effect, assets, hook
+    registry, guard, and recorder still validate the call.  Keeping the exact
+    public shape in the context pack prevents a bounded Agent from reading
+    framework source merely to discover CLI grammar.
+    """
+    if effect != "target":
+        return []
+    next_move = _field(front_text, "Next autonomous move")
+    if not (
+        re.search(r"(?i)\b(?:http\s+)?get\b.*\b(?:probe|liveness|reachab)", next_move)
+        or re.search(r"(?i)\bprobe(?:\.py)?\s+get\b", next_move)
+        or (re.search(r"(?i)\bget\b", next_move)
+            and re.search(r"(?:探活|可达|连通)", next_move))
+    ):
+        return []
+    url_match = re.search(r"(?i)https?://[^\s`'\"<>]+", next_move)
+    if not url_match:
+        url_match = re.search(r"(?im)^\s*[-*]?\s*Target\s*[:：]\s*(https?://\S+)", target)
+    if not url_match:
+        return []
+    # The primary match is the URL itself, while the target.md fallback wraps
+    # it in a labelled Markdown line. Always take the captured URL from the
+    # fallback instead of accidentally passing ``- Target: ...`` to probe.py.
+    url = (url_match.group(1) if url_match.lastindex else url_match.group(0)).rstrip(
+        ".,);]}"
+    )
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return []
+    run_ref = _profile_rel(run_dir)
+    prefix = "XUNJI_PROXY_REQUIRED=0 " if host in {"127.0.0.1", "::1", "localhost"} else ""
+    command = (
+        f'{prefix}python3 tools/probe.py GET "{url}" '
+        f'--save initial-liveness --run {run_ref}'
+    )
+    return [
+        "## Prepared Registered Action",
+        "The frozen front already selected one HTTP GET liveness action. Use this exact",
+        "registered argv first; do not inspect framework source or probe environment variables:",
+        "",
+        "```bash",
+        command,
+        "```",
+        "A denial is an attributable outcome: follow its public retry text once, then return",
+        "the supported result or barrier instead of reading hook/guard/tool source.",
+    ]
+
+
 def _assignment(run_dir: Path, agent_id: str) -> dict:
     data = _load_json(run_dir / "state" / "assignments.json")
     for item in data.get("assignments", []):
@@ -384,9 +440,19 @@ def _recent_lines(text: str, max_lines: int = 20) -> str:
     return "\n".join(lines[-max_lines:])
 
 
+def _canonical_role(role: str) -> str:
+    canonical = ROLE_TEMPLATES.get(str(role or "").strip().lower())
+    if not canonical:
+        raise _instruction_bundle.InstructionBundleError(
+            "source_invalid", f"unknown Agent role: {role}",
+        )
+    return canonical
+
+
 def _role_template_path(role: str) -> Path:
-    fn = ROLE_TEMPLATES.get(role, f"{role}.md")
-    return ROOT / "docs" / "templates" / "agents" / fn
+    canonical = _canonical_role(role)
+    manifest = _instruction_bundle.load_manifest(root=ROOT)
+    return ROOT / str(manifest["roles"][canonical]["path"])
 
 
 def _load_front_constraints(run_dir: Path, front_id: str) -> list[dict]:
@@ -465,8 +531,10 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
                lane_id: str = "", plan_digest: str = "",
                assignment_attempt: int = 0,
                tool_call_limit: int = 0,
+               request_budget: int = 0,
                kb_dir: Path | None = None, xday_dir: Path | None = None,
-               weap_dir: Path | None = None) -> str:
+               weap_dir: Path | None = None,
+               role_bundle: dict | None = None) -> str:
     front_text = _front_block(run_dir, front)
     normalized_assets = [_normalized_asset(item) for item in (assets or [])
                          if _normalized_asset(item)]
@@ -476,11 +544,22 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
     evidence_matches = _matching_blocks(_read(run_dir / "evidence.md"), "E", front)
     fp_matches = _matching_blocks(_read(run_dir / "false_positive.md"), "FP", front)
     decisions_tail = _recent_lines(_read(run_dir / "decisions.md", 6000), 18)
-    role_template = _role_template_path(role)
-    # Role templates are trusted owner instructions, not a recency-oriented
-    # canonical tail slice.  Truncating from the front can silently remove the
-    # role boundary while leaving later operational sections looking intact.
-    role_text = _read(role_template)
+    canonical_role = _canonical_role(role)
+    role_bundle = role_bundle or _instruction_bundle.load_role_contract(
+        canonical_role, root=ROOT)
+    contract = role_bundle.get("contract") \
+        if isinstance(role_bundle, dict) else None
+    if not isinstance(contract, dict) \
+            or contract.get("schema") != _instruction_bundle.ROLE_CONTRACT_SCHEMA \
+            or (contract.get("role") or {}).get("id") != canonical_role:
+        raise _instruction_bundle.InstructionBundleError(
+            "source_invalid", "context pack role contract is invalid",
+        )
+    role_text = str(role_bundle.get("text") or "")
+    if not role_text:
+        raise _instruction_bundle.InstructionBundleError(
+            "source_invalid", "context pack role text is empty",
+        )
     generated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     lines = [
@@ -497,6 +576,8 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
         f"- Plan digest: {plan_digest or '(unbound)'}",
         f"- Hard tool-call limit: {tool_call_limit if tool_call_limit > 0 else '(unbound)'}"
         " total attempted child calls; PreToolUse enforces it and denials count.",
+        f"- Target request budget: {request_budget} attempted target call(s); "
+        "PreToolUse denies the first call above this lane budget.",
         f"- Role: {role}",
         "- Canonical source: markdown run files; this pack is a read-only slice.",
         "- Maturity rule: subagent output is phenomenon/candidate only; Root Synthesizer owns findings.",
@@ -506,9 +587,12 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
         "",
         "## Assigned Front",
         front_text or f"(front {front} not found in frontier.md)",
-        "",
-        "## Matched Coverage",
     ]
+    prepared_action = _prepared_action_lines(
+        run_dir, effect=effect, target=target, front_text=front_text)
+    if prepared_action:
+        lines += ["", *prepared_action]
+    lines += ["", "## Matched Coverage"]
     if cov:
         for a in cov:
             host = a.get("host") or a.get("asset") or a.get("url") or "?"
@@ -549,32 +633,31 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
     lines.extend(_knowledge_xday_summary(kb_ids, kb_dir=kb_dir, xday_dir=xday_dir, weap_dir=weap_dir))
     lines += ["", "## Recent Decisions / Barriers", decisions_tail or "- (decisions.md missing or empty)"]
     lines += ["", *render_operator_profile_lines(run_dir, role=role, front_text=front_text)]
-    lines += ["", "## Role Instructions"]
-    if role_text:
-        lines.append(f"Source: docs/templates/agents/{role_template.name}")
-        lines.append("")
-        lines.append(role_text.strip())
-    else:
-        lines.append(f"- Missing role template for role={role}.")
+    lines += ["", "## Validated Role Receipt And Instructions"]
+    common_source = contract["common"]
+    role_source = contract["role"]
+    live_source = contract.get("live_agent") or {}
+    lines += [
+        f"- Contract: {contract['schema']}",
+        "- Admission: the bundle builder and Hook already verified these hashes; "
+        "consume the embedded role text and do not reread or hash framework sources.",
+        f"- Manifest SHA-256: {contract['manifest']['sha256']}",
+        f"- Common: version={common_source['version']} sha256={common_source['sha256']}",
+        f"- Role: role={canonical_role} version={role_source['version']} "
+        f"sha256={role_source['sha256']}",
+        f"- Composed role SHA-256: {contract['composed_sha256']}",
+        f"- Live Agent: {contract.get('subagent_type') or '(Root-only)'}"
+        + (f" sha256={live_source.get('sha256')}"
+           if live_source else ""),
+        "",
+        role_text.strip(),
+    ]
     lines += [
         "",
         "## Output Contract Reminder",
-        "Agent:",
-        "Role:",
-        "Assigned front:",
-        "Scope:",
-        "Budget used:",
-        "Maturity: phenomenon | candidate",
-        "Supports:",
-        "Refutes:",
-        "Artifacts:",
-        "Control:",
-        "Replicated:",
-        "Confidence:",
-        "Barrier:",
-        "Conflict candidates:",
-        "Recommended next action:",
-        "Merge note:",
+        "Use the generated Agent scaffold's `Final Return` fields.",
+        "Maturity remains phenomenon/candidate; add only the role-authorized",
+        "constraint, threat-hypothesis, or coverage deltas defined above.",
         "",
     ]
     return "\n".join(lines)
@@ -691,9 +774,28 @@ def _selftest() -> int:
             ["foobar-cms"], kb_dir=kb, xday_dir=xday, weap_dir=weap))
     finally:
         _knowledge_match = saved_knowledge_match
-    complete_role_template = _read(
-        _role_template_path("web-auth"),
-    ).strip()
+    complete_role_bundle = _instruction_bundle.load_role_contract(
+        "web-auth", root=ROOT)
+    complete_role_template = complete_role_bundle["text"].strip()
+    prepared_probe = "\n".join(_prepared_action_lines(
+        d,
+        effect="target",
+        target="# Target\n- Target: http://127.0.0.1:18765\n",
+        front_text=(
+            "### F-001\n"
+            "- Next autonomous move: Execute HTTP GET probe against "
+            "http://127.0.0.1:18765 to confirm reachability\n"
+        ),
+    ))
+    prepared_probe_zh = "\n".join(_prepared_action_lines(
+        d,
+        effect="target",
+        target="# Target\n- Target: http://127.0.0.1:18765\n",
+        front_text=(
+            "### F-001\n"
+            "- Next autonomous move: 使用 probe.py GET / 确认可达性并收集响应指纹\n"
+        ),
+    ))
     checks = [
         ("pack names front and role", "Context Pack F-001 / web-auth" in pack),
         ("pack includes matched coverage", "app.example" in pack and "kb:foobar-cms" in pack),
@@ -720,16 +822,31 @@ def _selftest() -> int:
          and "custom lesson" in pack),
         ("pack embeds the complete role template without front truncation",
          complete_role_template and complete_role_template in pack),
+        ("pack records deterministic role provenance",
+         complete_role_bundle["contract"]["composed_sha256"] in pack
+         and complete_role_bundle["contract"]["manifest"]["sha256"] in pack
+         and pack.count("<!-- xunji.agent-role-common.v1 -->") == 1),
         ("embedded role template cannot reintroduce Agent lifecycle commands",
          "workers.py heartbeat/finish" not in complete_role_template
          and "workers.py finish" not in complete_role_template
-         and "Root alone reviews and terminally settles" in complete_role_template
+         and "Root/Single Synthesizer alone promotes" in complete_role_template
          and "workers.py heartbeat/finish" not in pack),
         ("malformed numeric profile values fall back safely",
          malformed_rdt["loop_budget"] == 6
          and malformed_rdt["fallback_seconds"] == DEFAULT_OPERATOR_PROFILE["fallback_seconds"]
          and malformed_rdt["depth_pivot_after_low_cycles"] == 3),
-        ("pack includes output contract", "Maturity: phenomenon | candidate" in pack),
+        ("pack includes output contract",
+         "Maturity remains phenomenon/candidate" in pack
+         and "generated Agent scaffold's `Final Return`" in pack),
+        ("target GET lane receives one exact public probe argv",
+         "## Prepared Registered Action" in prepared_probe
+         and 'XUNJI_PROXY_REQUIRED=0 python3 tools/probe.py GET "http://127.0.0.1:18765"'
+         in prepared_probe
+         and 'GET "- Target:' not in prepared_probe
+         and "--run " in prepared_probe),
+        ("Chinese driver GET intent receives the same prepared probe argv",
+         'python3 tools/probe.py GET "http://127.0.0.1:18765"'
+         in prepared_probe_zh),
         ("atomic write created file", out.exists() and out.read_text(encoding="utf-8") == pack),
     ]
     bad = [n for n, ok in checks if not ok]

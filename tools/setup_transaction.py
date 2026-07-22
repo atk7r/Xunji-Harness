@@ -27,7 +27,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterator, Optional
+from typing import Callable, Iterator, Optional, Union
 
 import setup_source
 
@@ -129,8 +129,8 @@ class _DirectoryDurabilityError(OSError):
 FaultInjector = Callable[[str], None]
 BuildRun = Callable[[Path, Optional[FaultInjector]], None]
 SourceValidator = Callable[[], None]
-OwnedClearCallback = Callable[[Path, bytes, dict], dict | bytes]
-ResumeBarrierCallback = Callable[[Path, dict], dict | bytes]
+OwnedClearCallback = Callable[[Path, bytes, dict], Union[dict, bytes]]
+ResumeBarrierCallback = Callable[[Path, dict], Union[dict, bytes]]
 
 
 def _sha256(raw: bytes) -> str:

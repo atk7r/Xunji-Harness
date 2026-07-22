@@ -538,7 +538,10 @@ of reading, authority, evidence, or closure.
 depth fields. `tools/turn_contract.py` writes the current prompt's
 `EXECUTE`/`EXPLAIN_ONLY`/`PAUSED_BY_OPERATOR` contract. Hook-observed Agent, Cron,
 and foreground peer-review events are appended to the hash-linked
-`state/runtime_events.jsonl`; only transcript-backed events validate process claims.
+`state/runtime_events.jsonl`. Same-turn Cron/Task ordering consumes the fsynced,
+hash-chain-valid PostToolUse receipt immediately so transcript persistence lag does
+not reject a successful local control action. Agent, target, model, review,
+evidence, and final-output process claims still require transcript-backed events.
 These control-plane files are hook-owned and are not editable narrative state.
 Run selection is also hook/tool-owned. `tools/setup_transaction.py` is the only
 active-pointer and session-selection-receipt writer: operator setup/resume,
@@ -770,9 +773,11 @@ vote, finding promotion, exit-gate satisfaction or closure proof.
 
 The run directory is a blackboard. Collaboration is now Root Orchestrator +
 specialized Subagents + Single Synthesizer, not an exceptional "fan-out" mode.
-`docs/templates/agents/` owns per-assignment scaffolds;
-`.claude/agents/xunji-{hunter,reviewer}.md` owns the live Claude Agent execution
-boundary. The legacy worker template remains only for older runs. Operational plan/delegate and launch/return/settlement command shapes live only in the two
+`contracts/agent-instruction-sources.v1.json` selects the common, role delta,
+scaffold, and live `.claude/agents/xunji-{hunter,reviewer}.md` sources;
+`tools/agent_instruction_bundle.py` is their formatter/validator, while
+`tools/workers.py` materializes assignments and derived artifacts. The legacy
+worker template remains only for older runs. Operational plan/delegate and launch/return/settlement command shapes live only in the two
 `xunji-agent-board/references/` owners; this section keeps board semantics, not
 another executable protocol.
 
@@ -781,6 +786,11 @@ another executable protocol.
   capacity. Independent read/verify/model-egress lanes may overlap within budget;
   target lanes additionally require disjoint asset packages. Control/repository
   mutation remains Root single-writer work.
+- **Instruction bundle**: delegate freezes one versioned source/artifact bundle and
+  digest; the exact plan-bound launch carries that digest. Root launch,
+  `SubagentStart`, and every running child call revalidate it. Source/artifact
+  integrity denial requires material replan/delegate, never editing generated
+  context/scaffold in place. Assignment-free global completion remains separate.
 - **When parallel**: use Agents when several mutually-non-blocking fronts hit
   different assets/barriers, a high-value surface needs breadth, code-audit and
   blackbox lanes can test the same claim independently, xday/0day work needs
@@ -804,9 +814,10 @@ another executable protocol.
   prompt explicitly grants a one-turn serial override. WAF/auth/host pressure should
   become a recorded shared barrier, not a prose bypass.
 - **Stigmergy**: Agents coordinate **only through the run dir** — they never message
-  each other. Root/tooling creates the assignment and context pack. The Agent reads
-  only that frozen package and returns final candidate bytes; runtime freezes those
-  bytes into its merge draft. Agents do not write canonical state.
+  each other. Root/tooling creates the assignment and content-bound context/scaffold.
+  The Agent reads only that frozen package, cannot repair or rebind it, and returns
+  final candidate bytes; runtime freezes those bytes into its merge draft. Agents do
+  not write canonical state.
 - **Actor-scoped lifecycle**: Root alone owns global fan-out and disposition. A running
   child Agent may continue its exact asset package even while another returned Agent
   awaits synthesis; it cannot spawn nested Agents or escape to another asset. After
@@ -814,17 +825,48 @@ another executable protocol.
   dependent Reviewer assignment must carry the same `XUNJI_RESULT_DIGEST`; a
   `review-disposition` binds that digest and the exact Reviewer runtime return before
   Root may adjudicate. Reviewer returns a candidate disposition only; Root/Single
-  Synthesizer alone confirms or closes a front after the evidence gate. `merged`
+  Synthesizer alone confirms or closes a front after the evidence gate. For a
+  target-effect acceptance, the disposition receipt also freezes deterministic
+  artifact validation: Hunter and Reviewer must name the identical run-local set;
+  every file must exist; replay request/response, saved body, and body hash must
+  agree. Task notifications remain wake-up signals and are never result truth. `merged`
   requires every assigned asset to have a successful
   target-action receipt by that Agent plus an exact-host canonical E-entry.
   Blocked/failed/abandoned attempts leave unfinished assets in coverage debt.
 - **Plan-bound call budget**: every new typed assignment materializes
-  `tool_call_limit` (5–64; default 6). `SubagentStart` freezes it, and each child
+  `tool_call_limit` (5–64; default 24). `SubagentStart` freezes it, and each child
   PreToolUse first appends/fsyncs an idempotent `AgentToolCallClaim`; later denials
   still count. The first over-limit claim is denied before tool execution with
   `XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED`. RDT reasoning-loop budget never raises
   this runtime boundary. Assignment-free global completion review is outside this
   plan-bound counter and remains governed by its separate exact envelope below.
+- **Plan-bound target-request budget**: every lane's `request_budget` is copied into
+  the assignment and frozen by `SubagentStart`. The same atomic child claim marks
+  target actions and assigns a contiguous request ordinal before any effect gate;
+  attempted calls consume the budget even when a later gate denies them, exact
+  replay does not double-charge, and concurrent calls cannot oversubscribe it. The
+  first ordinal above the frozen budget is denied before execution with
+  `XUNJI_E_AGENT_REQUEST_BUDGET_EXCEEDED`; exhaustion context tells the Hunter to
+  return existing artifacts instead of varying method/path/argv.
+- **Instruction receipt consumption**: the bundle builder, Root launch, and Hook
+  admission own source-integrity validation. Context packs expose version/hash
+  receipts plus the complete composed role text, not manifest/template/live-Agent
+  paths. A child consumes that receipt and must not spend its call budget rereading
+  or hashing framework instruction sources.
+- **Prepared public action**: when a target lane's frozen front already chooses an
+  HTTP GET liveness check, the generated context pack contains the exact registered
+  `probe.py` argv (including the localhost direct-egress setting when applicable).
+  The Agent uses that argv before any framework-source inspection. A denial may be
+  retried once from public hook guidance; it does not authorize reading hook/guard
+  internals until the call budget is exhausted.
+- **Canonical asset identity**: planner, assignment, launch prompt, and child target
+  gate use the coverage display identity `host[:port]`. If coverage carries an
+  explicit port, dropping it to host-only is not an equivalent assignment. The
+  coverage row owns its valid opaque `ASSET-...` ID; assignment and Agent scaffold
+  projections copy it rather than independently re-hashing the display identity.
+- **Indivisible planner draft**: `workers.py commit-plan` recomputes one complete
+  draft and submits it once through the existing `work_plan` transaction owner.
+  Claude never copies lane JSON; `ready` is evaluated afterward by `delegate`.
 - **Single Synthesizer = sole integrator.** Agents produce **candidates, not Facts**.
   At merge the Synthesizer runs every candidate through the **evidence gate**
   (proposed `>= 0.8` without `Control:`/`Replicated:` is downgraded), allocates the
@@ -838,8 +880,9 @@ another executable protocol.
   Target traffic is engagement-proxy fail-closed by default and raw network clients or
   target WebFetch are rejected; prompt-level `export` reminders are not enforcement.
 - `tools/workers.py suggest/plan/delegate/status/conflicts/synthesize` drafts
-  effect lanes, creates plan-bound assignments/context/launch prompts, and projects
-  conflict/synthesis views. It is **not** an Agent runtime: `delegate` never spawns,
+  effect lanes, creates plan-bound assignments/instruction bundles/generated
+  artifacts/launch prompts, and projects conflict/synthesis views. It is **not** an
+  Agent runtime: `delegate` never spawns,
   and workers never writes canonical findings. Same guardrail as the graph: tooling
   assists, Claude calls the Agent, and Root adjudicates.
 - An Agent final response may include `## New Threat Hypotheses` as candidate

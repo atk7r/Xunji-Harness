@@ -14,7 +14,9 @@
         "Setup-only then stops",
         "`loop_requested=false` contract performs no Cron action",
         "current-turn durable hook journal records `maintenance_action=true`",
-        "execution of the selected typed lane"
+        "execution of the selected typed lane",
+        "harmless leading horizontal whitespace/BOM",
+        "XUNJI_E_LIFECYCLE_PRIVATE_API"
       ],
       "forbidden": [
         "closing is the Reviewer's job",
@@ -36,7 +38,9 @@
         "Assignment-free global completion\n  Reviewer",
         "Once current-turn maintenance debt exists",
         "`run_gate` yields before",
-        "typed lane/runtime receipts still govern execution"
+        "typed lane/runtime receipts still govern execution",
+        "harmless leading\nhorizontal whitespace/BOM",
+        "XUNJI_E_LIFECYCLE_PRIVATE_API"
       ],
       "forbidden": [
         "that is the Reviewer's job",
@@ -113,7 +117,7 @@
     {
       "path": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
       "required": [
-        "python3 tools/work_plan.py commit runs/<dir>",
+        "python3 tools/workers.py commit-plan runs/<dir>",
         "python3 tools/workers.py delegate runs/<dir>",
         "python3 tools/workers.py cancel-unlaunched runs/<dir>",
         "digest proves only that some input",
@@ -138,6 +142,7 @@
         "XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2",
         "XUNJI_LANE=L-...",
         "XUNJI_PLAN=<64hex>",
+        "XUNJI_INSTRUCTION_BUNDLE=<64hex>",
         "XUNJI_RESULT_DIGEST=<64hex>",
         "xunji-hunter",
         "xunji-reviewer",
@@ -170,6 +175,7 @@
         "that run's `state/assignments.json`",
         "never use `--help`, guessed path discovery",
         "typed assignment `tool_call_limit`",
+        "XUNJI_INSTRUCTION_BUNDLE",
         "Runtime atomically claims each PreToolUse before other gates",
         "near-cap/final-call Hook notice"
       ],
@@ -188,6 +194,7 @@
         "`run=<name>` binding and never guesses a run",
         "never use `--help`, guessed path discovery",
         "typed assignment `tool_call_limit`",
+        "XUNJI_INSTRUCTION_BUNDLE",
         "Runtime atomically claims each PreToolUse before other gates",
         "near-cap/final-call Hook notice"
       ],
@@ -198,7 +205,8 @@
     {
       "path": "docs/templates/agents/web-hunter.md",
       "required": [
-        "Do not edit the assignment, context pack, generated `agents/A-*.md` scaffold,\n  or canonical run files; return lane material only in the final response."
+        "Explore one assigned web front with proof-level actions.",
+        "{{XUNJI_AGENT_ROLE_COMMON_V1}}"
       ],
       "forbidden": [
         "Do not edit canonical run files except your own `agents/A-*.md`"
@@ -220,7 +228,9 @@
         "if false, perform no Cron action",
         "A denied or failed\naction is not a result",
         "the eligible atomic `ROOT_DIRECT` path",
-        "`docs/WORKFLOW-reference.md` \"Assignment-free global completion Reviewer\""
+        "`docs/WORKFLOW-reference.md` \"Assignment-free global completion Reviewer\"",
+        "Harmless leading horizontal whitespace/BOM",
+        "XUNJI_E_LIFECYCLE_PRIVATE_API"
       ],
       "forbidden": [
         "python3 tools/work_plan.py commit runs/<dir>",
@@ -528,6 +538,7 @@
         "`web-research` 是公共检索顺序与 lead",
         "`xunji-web-research-sync` 与 `xunji-peer-review-panel` 仅保留为兼容路由"
         ,"`loop_requested=false` 单周期 EXECUTE"
+        ,"XUNJI_E_LIFECYCLE_PRIVATE_API"
       ],
       "forbidden": []
     }
@@ -545,10 +556,10 @@
     {
       "name": "agent board work-plan commit",
       "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
-      "marker": "python3 tools/work_plan.py commit runs/<dir>",
-      "script": "tools/work_plan.py",
+      "marker": "python3 tools/workers.py commit-plan runs/<dir>",
+      "script": "tools/workers.py",
       "argv": [
-        "commit",
+        "commit-plan",
         "runs/demo_20260101",
         "--stage",
         "S2",
@@ -560,12 +571,10 @@
         "one dependency chain",
         "--exit-gate",
         "frozen result reviewed and Root-disposed",
-        "--lane",
-        "{\"id\":\"L-F001-HUNTER\",\"role\":\"web-hunter\",\"front\":\"F-001\",\"effect\":\"local_read\",\"assets\":[],\"dependencies\":[],\"expected_evidence\":\"attributable candidate or refutation\",\"expected_information_gain\":\"high\",\"stop_condition\":\"candidate or refutation returned\",\"request_cost\":0,\"request_budget\":0,\"merge_cost\":20,\"atomic\":false}",
-        "--lane",
-        "{\"id\":\"L-F001-REVIEW\",\"role\":\"review\",\"front\":\"F-001\",\"effect\":\"local_verify\",\"assets\":[],\"dependencies\":[\"L-F001-HUNTER\"],\"expected_evidence\":\"digest-bound review disposition\",\"expected_information_gain\":\"medium\",\"stop_condition\":\"exact frozen result challenged\",\"request_cost\":0,\"request_budget\":0,\"merge_cost\":10,\"atomic\":false}"
+        "--limit",
+        "1"
       ],
-      "expected_id": "control.work-plan",
+      "expected_id": "control.workers",
       "expected_effect": "control"
     },
     {
@@ -778,7 +787,7 @@
       "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
       "marker": "exact `subagent_type` plus exact `launch_prompt`",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-hunter-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=app.example XUNJI_LANE=L-F001-HUNTER XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "prompt": "XUNJI_ASSIGNMENT=A-hunter-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=app.example XUNJI_LANE=L-F001-HUNTER XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
         "subagent_type": "xunji-hunter"
       },
       "required_tokens": [
@@ -786,7 +795,8 @@
         "XUNJI_FRONT=",
         "XUNJI_ASSETS=",
         "XUNJI_LANE=",
-        "XUNJI_PLAN="
+        "XUNJI_PLAN=",
+        "XUNJI_INSTRUCTION_BUNDLE="
       ],
       "expected": {
         "assignment": "A-hunter-001",
@@ -806,7 +816,7 @@
       "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
       "marker": "XUNJI_RESULT_DIGEST=<64hex>",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
         "subagent_type": "xunji-reviewer"
       },
       "required_tokens": [
@@ -815,6 +825,7 @@
         "XUNJI_ASSETS=",
         "XUNJI_LANE=",
         "XUNJI_PLAN=",
+        "XUNJI_INSTRUCTION_BUNDLE=",
         "XUNJI_RESULT_DIGEST=",
         "XUNJI_COMPLETION_REVIEW"
       ],
@@ -864,7 +875,7 @@
       "document": ".claude/agents/xunji-reviewer.md",
       "marker": "case-shifted, or whitespace-padded type is invalid.",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW"
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW"
       },
       "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
       "expected": {
@@ -885,7 +896,7 @@
       "document": ".claude/agents/xunji-reviewer.md",
       "marker": "case-shifted, or whitespace-padded type is invalid.",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
         "subagent_type": null
       },
       "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
@@ -907,7 +918,7 @@
       "document": ".claude/agents/xunji-reviewer.md",
       "marker": "case-shifted, or whitespace-padded type is invalid.",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
         "subagent_type": ""
       },
       "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
@@ -929,7 +940,7 @@
       "document": ".claude/agents/xunji-reviewer.md",
       "marker": "case-shifted, or whitespace-padded type is invalid.",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
         "subagent_type": "general-purpose"
       },
       "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
@@ -951,7 +962,7 @@
       "document": ".claude/agents/xunji-reviewer.md",
       "marker": "case-shifted, or whitespace-padded type is invalid.",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
         "subagent_type": "xunji-hunter"
       },
       "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
@@ -973,7 +984,7 @@
       "document": ".claude/agents/xunji-reviewer.md",
       "marker": "case-shifted, or whitespace-padded type is invalid.",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
         "subagent_type": "XUNJI-REVIEWER"
       },
       "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
@@ -995,7 +1006,7 @@
       "document": ".claude/agents/xunji-reviewer.md",
       "marker": "case-shifted, or whitespace-padded type is invalid.",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW",
         "subagent_type": "xunji-reviewer "
       },
       "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW"],
@@ -1017,7 +1028,7 @@
       "document": ".claude/agents/xunji-reviewer.md",
       "marker": "Do not prepend or append",
       "tool_input": {
-        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW XUNJI_CANARY_APPEND=1",
+        "prompt": "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW XUNJI_PLAN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa XUNJI_INSTRUCTION_BUNDLE=44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a XUNJI_RESULT_DIGEST=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb XUNJI_COMPLETION_REVIEW XUNJI_CANARY_APPEND=1",
         "subagent_type": "xunji-reviewer"
       },
       "required_tokens": ["XUNJI_ASSIGNMENT=", "XUNJI_COMPLETION_REVIEW", "XUNJI_CANARY_APPEND=1"],

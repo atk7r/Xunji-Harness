@@ -105,7 +105,10 @@ TaskCreate/TaskUpdate remains iteration-planning proof only. For the executable
 plan/Agent chain, load `xunji-agent-board`, then read its plan/delegate reference
 before planning or delegation and its launch/settlement reference before Agent use
 or disposition. Those references are the sole exact-command and binary-envelope
-owners. Core invariants remain: `delegate` never spawns; Task prose and `done` do
+owners. `workers.py commit-plan` recomputes and submits the complete planner draft
+to the `work_plan` transaction owner in one direct argv; Claude does not transport
+lane JSON. Dependency-ready is a post-commit scheduler state. Core invariants
+remain: `delegate` never spawns; Task prose and `done` do
 not clear debt; transaction/archive lineage must revalidate; only one uniquely
 matching same-session Stop proves return; the generated prompt is byte-exact; and
 only a reviewed Root disposition plus typed cycle end can project the final Coda.
@@ -232,20 +235,30 @@ it grants no authority, evidence maturity, or closure.
 For an active run, `EXECUTE` may advance work, `EXPLAIN_ONLY` is read-only and has
 no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while only
 allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
-Only a first non-empty top-level exact `/loop(?:\s|$)` directive delivered unchanged
-to `UserPromptSubmit` enters loop mode.
-Indented/fenced code, blockquotes, inline quotes, questions, analysis/review requests,
+Only a first non-empty top-level `/loop(?:\s|$)` directive delivered to
+`UserPromptSubmit` enters loop mode. Deterministic parsing ignores harmless leading
+horizontal whitespace/BOM while preserving the exact raw prompt hash.
+Explicit fenced code, blockquotes, Markdown list items, inline quotes, questions, analysis/review requests,
 and lifecycle denials stay data/read-only; a conflicting `/loop` plus denial fails
-closed. If the client reserves `/loop` as its own scheduler, load
+closed. Narrow effect constraints such as “do not modify framework source” restrict
+the cycle but do not cancel an otherwise explicit lifecycle request. If the client reserves `/loop` as its own scheduler, load
 `xunji-run-lifecycle`: an affirmative uniquely named setup/resume request may run one
 `EXECUTE` cycle with `loop_requested=false`, but it cannot claim recurring-Cron
 semantics. Natural-language setup requires affirmative create/setup intent and one
 unique URL.
-Lifecycle Bash is exactly one argv-only adapter invocation. It rejects
-`tool_input.env`, inline env assignments, untrusted Python identity, unquoted
+Lifecycle Bash is exactly one argv-only adapter invocation. The exact bare `python3`
+spelling is environment-owned so Hook and Bash `PATH` differences do not force the
+driver to discover an interpreter path; absolute interpreters remain bound to the
+current Hook identity. It rejects `tool_input.env`, inline env assignments, untrusted Python identity, unquoted
 pathname/query globs, brace/tilde/zsh-EQUALS/parameter/command expansion, redirects,
 chains, comments, newlines, and line continuations. Quote the source as one literal
 argv token. Output wrappers are diagnostic denials only and never mint a claim.
+For the public local-only bootstrap only, trusted-operator reminders
+`XUNJI_PROXY_REQUIRED=0 <bootstrap>` and
+`export XUNJI_PROXY_REQUIRED=0 && <bootstrap>` normalize to that same adapter;
+other values, variables, chains, or destinations do not. Common read-only shell
+inspection preserves quoted punctuation and may discard stderr to `/dev/null`;
+those reads never create target or maintenance debt.
 `state/runtime_events.jsonl` is a hook-owned hash chain for actual
 Agent/Cron/iteration-plan/foreground-review tool events; never edit it or the
 turn/run-status JSON files directly. TaskCreate/TaskUpdate/TodoWrite plan receipts
@@ -261,11 +274,17 @@ only `SessionStart.source=resume` may call
 `setup_transaction.restore_session_activation_cas()` and consume the exact hashed
 selection receipt saved for that session/transcript. Both ports have the same
 transaction owner; adapters and the statusline never write the pointer themselves.
+Claude never calls the owner's private transaction APIs through `python -c`, stdin,
+or imports; `XUNJI_E_LIFECYCLE_PRIVATE_API` requires repair and exact retry of the
+public adapter.
 Every new non-internal top-level prompt first revokes the same session's unconsumed
 pending contract and transition claim, including when the active pointer changed
 between prompts. Replacing an active canonical contract also revokes the displaced
 contract session's live claim, while unrelated concurrent pending sessions remain
-isolated. Multiple URLs fail closed until the operator explicitly selects one.
+isolated. Session ID is causal metadata rather than a user ACL: when a hook omits it,
+the exact transcript binding is used; the personal singleton is used only if both
+fields are absent and never crosses a named session. Multiple URLs fail closed until
+the operator explicitly selects one.
 With an existing run, the same paths copy its current contract to the target run.
 New setup validates its source before formal directory creation, prepares the
 complete run in hidden same-filesystem staging, writes the frozen original,
@@ -361,9 +380,10 @@ do not create maintenance debt.
 Once current-turn maintenance debt exists, PreToolUse admits only
 Read/Grep/Glob, an existing Task update, or the identical action retry; later
 Agent/control/target/canonical progression cannot wash it out and waits for a new
-operator prompt when the identical action cannot succeed. Same-turn progression
-uses the already-durable hook journal so transcript flush lag cannot fail open;
-final-output truth remains transcript-backed.
+operator prompt when the identical action cannot succeed. Same-turn Cron/Task
+ordering uses the already-durable hook journal so transcript flush lag cannot turn
+a successful local control action into a denial; Agent/target/review/evidence and
+final-output truth remain transcript-backed.
 A literal `&&` compound whose executable segments all independently match typed
 capabilities (plus optional static display `echo`) is likewise denied as
 `registered-chain` and never split or executed. It creates no maintenance debt;
@@ -373,7 +393,9 @@ capabilities (plus optional static display `echo`) is likewise denied as
 or count. Each target segment's ordered/repeated identity is instead frozen in
 `target_retry_action_sha256s`. Target-action debt clears only after every exact
 target segment later succeeds. A known Python entry with invalid argv is a nonmaintenance
-`registered-chain-invalid-argv` denial; any opaque/unknown, env-bearing,
+`registered-chain-invalid-argv` denial. A single known script with only its
+registry-allowed inline environment remains the same retryable invalid-argv
+class; any opaque/unknown, unregistered-env,
 repo-mutation, redirected, piped, expanded, or critical-data segment retains the
 normal fail-closed path.
 In every turn mode, `output_gate.py` rejects all free-form final text after an
@@ -415,6 +437,10 @@ or escape their asset package. Each plan-bound child call is claimed before late
 policy gates against the Start-frozen typed assignment limit; denials count and an
 RDT loop budget cannot raise it. Conflicting/ambiguous runtime identity, projection,
 budget ordinal, or lineage remains explicit debt.
+New assignments default to 24 calls; a normal delegate omits the override. When a
+frozen target front already selects HTTP GET liveness, its generated context carries
+the exact registered `probe.py` argv so bounded Agents do not inspect framework
+source to discover command grammar.
 The conflict projection is strict derived state: its owner serializes
 snapshot/compare/write, rebuilds malformed or non-regular cache files, rejects
 future schemas and unknown fields, and binds an in-run regular file into the work
@@ -580,12 +606,18 @@ Go **parallel** when:
   review risk remain.
 
 All Agents share the global guard state, request budget, host breakers, and run dir.
-Agent output is untrusted candidate material until the Single Synthesizer merges it
-through the evidence gate.
+Each target lane's request budget is also frozen into its assignment and atomically
+claimed per attempted target call; the first over-budget call is denied before
+execution, and exhaustion means return rather than vary method/path/argv. Agent
+output is untrusted candidate material until the Single Synthesizer merges it through
+the evidence gate.
 
-Every target-facing assignment requires a bounded asset package, for example
-`--asset a.example --asset b.example`. Those hosts must exist in coverage and be named
-in the chosen front; overlapping active target-effect packages are rejected. The
+Every target-facing assignment requires a bounded canonical `host[:port]` asset
+package, for example `--asset a.example --asset b.example:8443`. An explicit coverage
+port is part of the assignment identity and must be named in the chosen front;
+overlapping active target-effect packages are rejected. The coverage inventory owns
+the opaque `ASSET-...` identifier; assignment/context projections copy that valid ID
+for the matching `host[:port]` row instead of hashing a second identity. The
 Agent prompt must carry the exact assignment/front/assets/lane/plan package.
 Reviewer prompts additionally bind `XUNJI_RESULT_DIGEST=<64hex>` for the exact
 frozen result; reviewing different bytes fails closed. "Exact" means complete

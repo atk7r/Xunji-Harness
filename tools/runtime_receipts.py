@@ -2,8 +2,10 @@
 """Hook-derived runtime receipts for Agent, Cron, iteration-plan, and completion events.
 
 Canonical findings still live in Markdown.  Runtime facts do not: an Agent spawn,
-Cron deletion, or completion review is true only when a Claude Code hook observed
-the tool event and the referenced tool-use id exists in the session transcript.
+target/review result, or completion review is true only when a Claude Code hook
+observed the tool event and the referenced tool-use id exists in the session
+transcript.  Same-turn Cron/Task ordering consumes the fsynced hook chain directly
+because Claude may persist its transcript only after the next PreToolUse begins.
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import agent_instruction_bundle as _instruction_bundle
 from evidence_parse import content_path_manifest, current_evidence_index_hash
 from harness import privacy
 
@@ -77,6 +80,7 @@ _AGENT_BINDING_METADATA_DEFAULTS = {
     # compatibility sentinel for an old immutable receipt, never an executable
     # plan-bound budget.
     "assignment_tool_call_limit": 0,
+    "assignment_request_budget": 0,
 }
 _ASSIGNMENT_ROLE_ALIASES = {
     "surface-agent": "surface", "surface": "surface",
@@ -108,7 +112,8 @@ GLOBAL_COMPLETION_INPUTS = (
     "report.md", "chains.md", "hints.md", "state/conflicts.json",
 )
 _GLOBAL_COMPLETION_FORBIDDEN_RE = re.compile(
-    r"(?i)\bXUNJI_(?:ASSIGNMENT|FRONT|ASSETS|LANE|PLAN|RESULT_DIGEST)\b"
+    r"(?i)\bXUNJI_(?:ASSIGNMENT|FRONT|ASSETS|LANE|PLAN|"
+    r"INSTRUCTION_BUNDLE|RESULT_DIGEST)\b"
 )
 _COMPLETION_MARKER_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9_])XUNJI_COMPLETION_REVIEW(?![A-Za-z0-9_])"
@@ -336,13 +341,23 @@ def assignment_tool_call_limit(row: object) -> int:
     return raw
 
 
-def assignment_launch_prompt(row: dict) -> str:
-    """Reconstruct the only prompt that may exercise a plan-bound assignment.
+def assignment_request_budget(row: object) -> int:
+    """Return the explicit target-call budget for one typed assignment."""
+    if not isinstance(row, dict) or row.get("schema") != "xunji.assignment.v1":
+        return -1
+    raw = row.get("request_budget", 0)
+    if isinstance(raw, bool) or not isinstance(raw, int) \
+            or raw < 0 or raw > 1000000:
+        return -1
+    if str(row.get("effect") or "") == "target" and raw < 1:
+        return -1
+    return raw
 
-    The assignment row, not model prose or a delegate transaction cache, owns
-    the durable launch identity.  Returning an empty string means the row is
-    legacy/unbound or incomplete and therefore cannot claim this exact prompt.
-    """
+
+def _assignment_launch_prompt_text(
+    row: dict, *, instruction_bundle_digest: str | None,
+) -> str:
+    """Format the current or pre-bundle v1 prompt after caller validation."""
     if not isinstance(row, dict):
         return ""
     if row.get("schema") != "xunji.assignment.v1":
@@ -364,8 +379,12 @@ def assignment_launch_prompt(row: dict) -> str:
     asset_token = ",".join(assets) or "none"
     prompt = (
         f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front} "
-        f"XUNJI_ASSETS={asset_token} XUNJI_LANE={lane} XUNJI_PLAN={plan}"
-    )
+        f"XUNJI_ASSETS={asset_token} XUNJI_LANE={lane} XUNJI_PLAN={plan} "
+    ).rstrip()
+    if instruction_bundle_digest is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", instruction_bundle_digest):
+            return ""
+        prompt += f" XUNJI_INSTRUCTION_BUNDLE={instruction_bundle_digest}"
     result_digest = str(row.get("review_result_digest") or "")
     if str(row.get("role") or "").strip().lower() == "review":
         if not re.fullmatch(r"[0-9a-f]{64}", result_digest):
@@ -373,6 +392,63 @@ def assignment_launch_prompt(row: dict) -> str:
         prompt += (
             f" XUNJI_RESULT_DIGEST={result_digest} XUNJI_COMPLETION_REVIEW")
     elif result_digest:
+        return ""
+    return prompt
+
+
+def assignment_launch_prompt(row: dict) -> str:
+    """Reconstruct the only prompt that may launch a plan-bound assignment.
+
+    The assignment row, not model prose or a delegate transaction cache, owns
+    the durable launch identity.  Returning an empty string means the row is
+    legacy/unbound or incomplete and therefore cannot claim a new launch.
+    """
+    if not isinstance(row, dict):
+        return ""
+    bundle = row.get("instruction_bundle")
+    bundle_digest = str(row.get("instruction_bundle_sha256") or "")
+    if not isinstance(bundle, dict) \
+            or not re.fullmatch(r"[0-9a-f]{64}", bundle_digest) \
+            or _instruction_bundle.canonical_digest(bundle) != bundle_digest:
+        return ""
+    return _assignment_launch_prompt_text(
+        row, instruction_bundle_digest=bundle_digest)
+
+
+def _legacy_running_settlement_prompt(row: dict, binding: dict) -> str:
+    """Admit only the Stop of one exact pre-bundle v1 running attempt.
+
+    This is deliberately not a launch fallback: callers must opt in from a
+    SubagentStop already anchored by one durable SubagentStart receipt.  New
+    launches and child tool calls continue to require the current bundle.
+    """
+    if not isinstance(row, dict) or not isinstance(binding, dict) \
+            or any(field in row for field in (
+                "instruction_bundle", "instruction_bundle_sha256")) \
+            or str(row.get("status") or "") not in {"running", "working"}:
+        return ""
+    attempts = row.get("attempts")
+    if not isinstance(attempts, list) or len(attempts) != 1 \
+            or not isinstance(attempts[0], dict):
+        return ""
+    attempt = attempts[0]
+    prompt = _assignment_launch_prompt_text(
+        row, instruction_bundle_digest=None)
+    prompt_hash = _launch_prompt_sha256(prompt)
+    expected_type = assignment_subagent_type(row)
+    if not prompt_hash or not expected_type \
+            or attempt.get("schema") != "xunji.agent-receipt.v1" \
+            or attempt.get("state") != "running" \
+            or str(attempt.get("launch_prompt_sha256") or "") != prompt_hash \
+            or str(attempt.get("subagent_type") or "") != expected_type \
+            or str(row.get("current_attempt") or "") \
+                != str(attempt.get("attempt_id") or "") \
+            or str(row.get("runtime_agent_id") or "") \
+                != str(attempt.get("agent_id") or "") \
+            or str(binding.get("tool_use_id") or "") \
+                != str(attempt.get("tool_use_id") or "") \
+            or str(binding.get("launch_prompt_sha256") or "") != prompt_hash \
+            or str(binding.get("subagent_type") or "") != expected_type:
         return ""
     return prompt
 
@@ -711,6 +787,12 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
             if agent_binding
             and isinstance(agent_binding.get("assignment_tool_call_limit"), int)
             and not isinstance(agent_binding.get("assignment_tool_call_limit"), bool)
+            else 0),
+        "assignment_request_budget": int(
+            agent_binding.get("assignment_request_budget")
+            if agent_binding
+            and isinstance(agent_binding.get("assignment_request_budget"), int)
+            and not isinstance(agent_binding.get("assignment_request_budget"), bool)
             else 0),
         "input_excerpt": "" if hook == AGENT_TOOL_CALL_CLAIM_EVENT else _excerpt(
             event.get("tool_input") or {}),
@@ -1239,6 +1321,7 @@ def _validated_agent_binding(
     binding: dict,
     *,
     actual_agent_type: str | None = None,
+    allow_legacy_running_settlement: bool = False,
 ) -> dict:
     """Validate prompt binding against an existing plan-bound assignment row."""
     requested_type = str(binding.get("subagent_type") or "")
@@ -1319,10 +1402,29 @@ def _validated_agent_binding(
     expected_lane = str(row.get("lane_id") or "")
     expected_plan = str(row.get("plan_digest") or "")
     effective_tool_call_limit = assignment_tool_call_limit(row)
+    effective_request_budget = assignment_request_budget(row)
     if (expected_lane or expected_plan) and not effective_tool_call_limit:
         raise RuntimeError(
             "plan-bound Agent assignment tool-call budget is invalid")
+    if (expected_lane or expected_plan) and effective_request_budget < 0:
+        raise RuntimeError(
+            "plan-bound Agent assignment request budget is invalid")
+    legacy_settlement_prompt = ""
     if expected_lane or expected_plan:
+        if allow_legacy_running_settlement:
+            legacy_settlement_prompt = _legacy_running_settlement_prompt(
+                row, binding)
+        if not legacy_settlement_prompt:
+            try:
+                _instruction_bundle.verify_assignment_bundle(
+                    run_dir, row, root=Path(__file__).resolve().parents[1])
+            except _instruction_bundle.InstructionBundleError as exc:
+                code = (
+                    "XUNJI_E_AGENT_ARTIFACT_INTEGRITY"
+                    if exc.code == "artifact_invalid"
+                    else "XUNJI_E_AGENT_INSTRUCTION_SOURCE_STALE"
+                )
+                raise RuntimeError(f"{code}: {exc}") from exc
         if not expected_lane or not expected_plan \
                 or binding.get("assignment_lane") != expected_lane \
                 or binding.get("assignment_plan_digest") != expected_plan:
@@ -1334,7 +1436,7 @@ def _validated_agent_binding(
                 or binding.get("assignment_result_digest") != expected_result:
             raise RuntimeError(
                 "SubagentStart Reviewer identity lacks exact result digest")
-    expected_prompt = assignment_launch_prompt(row)
+    expected_prompt = legacy_settlement_prompt or assignment_launch_prompt(row)
     if expected_lane or expected_plan:
         # Every genuinely new plan-bound fact must independently rebind the
         # mutable assignment row to the committed transaction/archive lineage.
@@ -1367,6 +1469,7 @@ def _validated_agent_binding(
             str(row.get("effect") or "") != str(lane.get("effect") or ""),
             [str(item) for item in row.get("assets", [])]
                 != [str(item) for item in lane.get("assets", [])],
+            effective_request_budget != int(lane.get("request_budget") or 0),
         )):
             raise RuntimeError(
                 "Agent assignment fields do not match the current work-plan lane")
@@ -1385,6 +1488,8 @@ def _validated_agent_binding(
     return {
         **binding,
         **({"assignment_tool_call_limit": effective_tool_call_limit}
+           if expected_lane or expected_plan else {}),
+        **({"assignment_request_budget": effective_request_budget}
            if expected_lane or expected_plan else {}),
     }
 
@@ -1453,12 +1558,20 @@ def _lifecycle_binding_from_record(record: dict) -> dict:
     limit = record.get("assignment_tool_call_limit")
     if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0:
         binding["assignment_tool_call_limit"] = limit
+    request_budget = record.get("assignment_request_budget")
+    if (str(record.get("assignment_lane") or "")
+            or str(record.get("assignment_plan_digest") or "")) \
+            and "assignment_request_budget" in record \
+            and isinstance(request_budget, int) \
+            and not isinstance(request_budget, bool) \
+            and request_budget >= 0:
+        binding["assignment_request_budget"] = request_budget
     return binding
 
 
 _AGENT_BINDING_SEMANTIC_RE = re.compile(
     r"(?i)\bXUNJI_(?:ASSIGNMENT|FRONT|ASSETS|LANE|PLAN|RESULT_DIGEST|"
-    r"COMPLETION_REVIEW|COMPLETION_BUNDLE)\b"
+    r"INSTRUCTION_BUNDLE|COMPLETION_REVIEW|COMPLETION_BUNDLE)\b"
 )
 
 
@@ -1741,7 +1854,9 @@ def _prepare_agent_lifecycle_binding(
         return prepared
     actual_agent_type = str(event.get("agent_type") or "")
 
-    def validated(binding: dict) -> dict:
+    def validated(
+        binding: dict, *, allow_legacy_running_settlement: bool = False,
+    ) -> dict:
         # A committed cancellation may already have removed the mutable row.
         # The exact parent transcript still supplies the immutable assignment
         # identity, so consult the tombstone before row/plan validation. Exact
@@ -1757,7 +1872,8 @@ def _prepare_agent_lifecycle_binding(
                 binding.get("assignment_plan_digest") or ""),
         })
         return _validated_agent_binding(
-            run_dir, binding, actual_agent_type=actual_agent_type)
+            run_dir, binding, actual_agent_type=actual_agent_type,
+            allow_legacy_running_settlement=allow_legacy_running_settlement)
     same_delivery = [
         item for item in events
         if item.get("hook_event_name") == hook
@@ -1783,7 +1899,8 @@ def _prepare_agent_lifecycle_binding(
         if starts:
             binding = _lifecycle_binding_from_record(starts[0])
             if binding:
-                prepared["xunji_agent_lifecycle_binding"] = validated(binding)
+                prepared["xunji_agent_lifecycle_binding"] = validated(
+                    binding, allow_legacy_running_settlement=True)
                 return prepared
         # Older/partial deliveries can miss SubagentStart while an async parent
         # acknowledgement already names the exact child.  Bind only a unique
@@ -2874,6 +2991,15 @@ def _agent_tool_call_claim_record_error(record: object) -> str:
     ordinal = record.get("agent_tool_call_ordinal")
     limit = record.get("agent_tool_call_limit")
     admitted = record.get("agent_tool_call_admitted")
+    request_budget = record.get("assignment_request_budget")
+    request_action = record.get("agent_request_action")
+    request_ordinal = record.get("agent_request_ordinal")
+    request_admitted = record.get("agent_request_admitted")
+    request_fields = {
+        "assignment_request_budget", "agent_request_action",
+        "agent_request_ordinal", "agent_request_admitted",
+    }
+    request_fields_present = request_fields & set(record)
     if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 1:
         return "ordinal"
     if isinstance(limit, bool) or not isinstance(limit, int) \
@@ -2881,6 +3007,22 @@ def _agent_tool_call_claim_record_error(record: object) -> str:
         return "limit"
     if not isinstance(admitted, bool) or admitted is not (ordinal <= limit):
         return "admission"
+    if request_fields_present:
+        if request_fields_present != request_fields \
+                or isinstance(request_budget, bool) \
+                or not isinstance(request_budget, int) \
+                or request_budget < 0 or request_budget > 1000000 \
+                or not isinstance(request_action, bool) \
+                or isinstance(request_ordinal, bool) \
+                or not isinstance(request_ordinal, int) or request_ordinal < 0 \
+                or not isinstance(request_admitted, bool):
+            return "request-budget"
+        if request_action:
+            if request_ordinal < 1 \
+                    or request_admitted is not (request_ordinal <= request_budget):
+                return "request-admission"
+        elif request_ordinal != 0 or request_admitted is not True:
+            return "request-nonaction"
     if record.get("success") is not False \
             or not str(record.get("session_id") or "") \
             or not str(record.get("agent_id") or "") \
@@ -2948,7 +3090,9 @@ def _agent_tool_call_claim_integrity_errors_from(
             int(item.get("seq") or 0) for item in stops.get(key, [])
         ]
         expected_limit = start.get("assignment_tool_call_limit")
+        expected_request_budget = start.get("assignment_request_budget")
         seen_ids: set[str] = set()
+        expected_request_ordinal = 0
         for expected_ordinal, row in enumerate(
                 sorted(rows, key=lambda item: int(item.get("seq") or 0)), 1):
             label = f"Agent tool-call claim {key[0]}/{key[1]}/{expected_ordinal}"
@@ -2968,9 +3112,15 @@ def _agent_tool_call_claim_integrity_errors_from(
             seen_ids.add(child_tool_id)
             if row.get("agent_parent_tool_use_id") != start.get("tool_use_id") \
                     or row.get("agent_tool_call_limit") != expected_limit \
+                    or row.get("assignment_request_budget") \
+                    != expected_request_budget \
                     or any(row.get(claim_field) != start.get(start_field)
                            for claim_field, start_field in binding_fields):
                 errors.append(f"{label} differs from its frozen Start binding")
+            if row.get("agent_request_action") is True:
+                expected_request_ordinal += 1
+                if row.get("agent_request_ordinal") != expected_request_ordinal:
+                    errors.append(f"{label} has a non-contiguous request ordinal")
             if not _transcript_has(row, events):
                 errors.append(f"{label} lacks its exact child transcript tool-use")
     return errors
@@ -3030,6 +3180,11 @@ def claim_agent_tool_call(run_dir: str | Path, event: dict) -> dict:
         if isinstance(limit, bool) or not isinstance(limit, int) \
                 or not MIN_AGENT_TOOL_CALL_LIMIT <= limit <= MAX_AGENT_TOOL_CALL_LIMIT:
             raise RuntimeError("AGENT_TOOL_CALL_BUDGET_INVALID")
+        request_budget = start.get("assignment_request_budget")
+        if isinstance(request_budget, bool) or not isinstance(request_budget, int) \
+                or request_budget < 0 or request_budget > 1000000:
+            raise RuntimeError("AGENT_REQUEST_BUDGET_INVALID")
+        request_action = event.get("xunji_agent_request_action") is True
 
         claim_event = dict(event)
         claim_event["hook_event_name"] = AGENT_TOOL_CALL_CLAIM_EVENT
@@ -3050,6 +3205,8 @@ def claim_agent_tool_call(run_dir: str | Path, event: dict) -> dict:
             "subagent_type": str(start.get("subagent_type") or ""),
             "completion_review": False,
             "assignment_tool_call_limit": limit,
+            "assignment_request_budget": request_budget,
+            "agent_request_action": request_action,
             "agent_parent_tool_use_id": str(start.get("tool_use_id") or ""),
         })
         prior = [
@@ -3070,6 +3227,7 @@ def claim_agent_tool_call(run_dir: str | Path, event: dict) -> dict:
                 "assignment_lane", "assignment_plan_digest",
                 "assignment_result_digest", "launch_prompt_sha256",
                 "subagent_type", "assignment_tool_call_limit",
+                "assignment_request_budget", "agent_request_action",
                 "agent_parent_tool_use_id",
             )
             if len(same_id) == 1 and all(
@@ -3079,10 +3237,18 @@ def claim_agent_tool_call(run_dir: str | Path, event: dict) -> dict:
             raise RuntimeError("AGENT_TOOL_CALL_IDENTITY_CONFLICT")
 
         ordinal = len(prior) + 1
+        request_ordinal = 0
+        if request_action:
+            request_ordinal = 1 + sum(
+                item.get("agent_request_action") is True for item in prior)
         record.update({
             "agent_tool_call_limit": limit,
             "agent_tool_call_ordinal": ordinal,
             "agent_tool_call_admitted": ordinal <= limit,
+            "agent_request_action": request_action,
+            "agent_request_ordinal": request_ordinal,
+            "agent_request_admitted": (
+                request_ordinal <= request_budget if request_action else True),
         })
         preview = dict(record)
         preview["seq"] = len(events) + 1
@@ -4556,6 +4722,41 @@ def valid_tool_events(
     ]
 
 
+CONTROL_RECEIPT_TOOLS = {
+    "CronList", "CronCreate", "CronDelete",
+    "TaskCreate", "TaskUpdate", "TodoWrite",
+}
+
+
+def valid_control_events(
+    run_dir: str | Path,
+    *,
+    session_id: str = "",
+    since: float = 0.0,
+) -> list[dict]:
+    """Return same-turn local control receipts without transcript-lag races.
+
+    Claude Code invokes PostToolUse before its JSONL transcript is guaranteed to
+    expose the just-finished tool-use id.  Requiring that asynchronous mirror
+    for the next Cron/Task gate causes a successful control action to be denied
+    for several seconds.  The append-only hook chain is already the canonical
+    observer for these local scheduling/checklist facts.  Agent, target, model,
+    review, and evidence-bearing events continue to use ``valid_tool_events``
+    and therefore retain transcript corroboration.
+    """
+    events, errors = validate_chain(run_dir)
+    if errors:
+        return []
+    return [
+        event for event in events
+        if event.get("success") is True
+        and event.get("hook_event_name") == "PostToolUse"
+        and event.get("tool_name") in CONTROL_RECEIPT_TOOLS
+        and (not session_id or str(event.get("session_id") or "") == session_id)
+        and (not since or float(event.get("ts") or 0.0) >= since)
+    ]
+
+
 def valid_lifecycle_events(
     run_dir: str | Path,
     *,
@@ -5393,7 +5594,7 @@ def cron_quiescent(
     session_id: str = "",
     since: float = 0.0,
 ) -> tuple[bool, str]:
-    events = valid_tool_events(run_dir, session_id=session_id, since=since)
+    events = valid_control_events(run_dir, session_id=session_id, since=since)
     cron = [event for event in events if str(event.get("tool_name") or "").startswith("Cron")]
     listed = [event for event in cron if event.get("tool_name") == "CronList"]
     if not listed:
@@ -5433,7 +5634,7 @@ def cron_create_observed(
     since: float = 0.0,
 ) -> tuple[bool, str]:
     """Prove that the current run was named by a successful CronCreate."""
-    events = valid_tool_events(run_dir, session_id=session_id, since=since)
+    events = valid_control_events(run_dir, session_id=session_id, since=since)
     creates = [
         event for event in events
         if event.get("tool_name") == "CronCreate"
@@ -5466,7 +5667,7 @@ def iteration_plan_observed(
     proves that the primary driver created or updated its iteration checklist;
     canonical run files remain the source of truth for fronts and evidence.
     """
-    events = valid_tool_events(run_dir, session_id=session_id, since=since)
+    events = valid_control_events(run_dir, session_id=session_id, since=since)
     floor = 0
     if after_latest_cron_create:
         creates = [
@@ -5511,7 +5712,7 @@ def cron_delete_allowed(
     """Bind CronDelete to a run job observed by a current CronList/Create receipt."""
     if not job_id:
         return False, "CronDelete has no parseable job id"
-    events = valid_tool_events(run_dir, session_id=session_id, since=since)
+    events = valid_control_events(run_dir, session_id=session_id, since=since)
     cron = [event for event in events if str(event.get("tool_name") or "").startswith("Cron")]
     listed = [event for event in cron if event.get("tool_name") == "CronList"]
     if not listed:
@@ -6164,6 +6365,31 @@ def _selftest() -> int:
     })
     plan_after, _ = iteration_plan_observed(
         plan_run, session_id="plan-session", after_latest_cron_create=True)
+    lag_run = run.parent / "control-transcript-lag-run"
+    (lag_run / "state").mkdir(parents=True)
+    lag_transcript = run.parent / "control-transcript-lag.jsonl"
+    lag_transcript.write_text("", encoding="utf-8")
+    lag_base = {
+        "hook_event_name": "PostToolUse", "session_id": "lag-session",
+        "transcript_path": str(lag_transcript),
+    }
+    append_hook_event(lag_run, {
+        **lag_base, "tool_name": "CronCreate", "tool_use_id": "lag-cron",
+        "tool_input": {"prompt": f"/loop {lag_run.name}"},
+        "tool_response": {"id": "lag-cron-id"},
+    })
+    append_hook_event(lag_run, {
+        **lag_base, "tool_name": "TaskCreate", "tool_use_id": "lag-task",
+        "tool_input": {"subject": "same-turn task"},
+        "tool_response": {"taskId": "lag-task-id"},
+    })
+    lag_cron_seen, _ = cron_create_observed(
+        lag_run, session_id="lag-session")
+    lag_plan_seen, _ = iteration_plan_observed(
+        lag_run, session_id="lag-session", after_latest_cron_create=True)
+    control_receipts_ignore_transcript_lag = bool(
+        lag_cron_seen and lag_plan_seen and not valid_tool_events(
+            lag_run, session_id="lag-session"))
     structured_denial = normalize_hook_event(run, {
         "hook_event_name": "PreToolUseDenied", "tool_name": "Bash",
         "xunji_decision": "deny",
@@ -7516,6 +7742,36 @@ def _selftest() -> int:
         reviews_assignments=["A-target"],
     )
     reviewer_row["plan_id"] = reviewer_plan["plan_id"]
+    reviewer_context = reviewer_binding_run / "context" / "A-review-001.md"
+    reviewer_agent_file = reviewer_binding_run / "agents" / "A-review-001.md"
+    reviewer_context.parent.mkdir(parents=True, exist_ok=True)
+    reviewer_agent_file.parent.mkdir(parents=True, exist_ok=True)
+    reviewer_context_text = "# Frozen reviewer context\n"
+    reviewer_agent_text = "# Frozen reviewer Agent\n"
+    reviewer_context.write_bytes(reviewer_context_text.encode("utf-8"))
+    reviewer_agent_file.write_bytes(reviewer_agent_text.encode("utf-8"))
+    reviewer_row["context"] = str(reviewer_context)
+    reviewer_row["agent_file"] = str(reviewer_agent_file)
+    reviewer_role_bundle = _instruction_bundle.load_role_contract(
+        "review", root=Path(__file__).resolve().parents[1])
+    reviewer_scaffold = _instruction_bundle.load_scaffold_source(
+        root=Path(__file__).resolve().parents[1])
+    reviewer_instruction_bundle, reviewer_instruction_digest = (
+        _instruction_bundle.build_assignment_bundle(
+            assignment="A-review-001",
+            plan_digest=str(reviewer_plan["plan_digest"]),
+            lane_id=str(reviewer_lane["id"]),
+            role="review",
+            role_bundle=reviewer_role_bundle,
+            scaffold_source=reviewer_scaffold["source"],
+            context_path=str(reviewer_context),
+            context_text=reviewer_context_text,
+            agent_path=str(reviewer_agent_file),
+            agent_text=reviewer_agent_text,
+        )
+    )
+    reviewer_row["instruction_bundle"] = reviewer_instruction_bundle
+    reviewer_row["instruction_bundle_sha256"] = reviewer_instruction_digest
     (reviewer_binding_run / "state" / "assignments.json").write_text(json.dumps({
         "schema": 3,
         "assignments": [reviewer_row],
@@ -7552,6 +7808,96 @@ def _selftest() -> int:
         )
     except RuntimeError as exc:
         reviewer_missing_result_digest_rejected = "Reviewer identity" in str(exc)
+
+    legacy_settlement_run = run.parent / "pre-bundle-running-settlement-run"
+    _legacy_contract, legacy_plan = seed_current_plan(
+        legacy_settlement_run, stage="S1")
+    legacy_row = workers.create_agent_assignment(
+        legacy_settlement_run, role="verify", front="F-001", assets=[],
+        agent="A-pre-bundle-running",
+        lane_id=str(legacy_plan["lanes"][0]["id"]),
+    )
+    legacy_row.pop("instruction_bundle", None)
+    legacy_row.pop("instruction_bundle_sha256", None)
+    legacy_prompt = _assignment_launch_prompt_text(
+        legacy_row, instruction_bundle_digest=None)
+    legacy_prompt_hash = _launch_prompt_sha256(legacy_prompt)
+    legacy_attempt = {
+        "schema": "xunji.agent-receipt.v1",
+        "parent_run": legacy_settlement_run.name,
+        "assignment": "A-pre-bundle-running",
+        "attempt_id": "pre-bundle-child",
+        "lane_id": str(legacy_row["lane_id"]),
+        "plan_digest": str(legacy_row["plan_digest"]),
+        "launch_prompt_sha256": legacy_prompt_hash,
+        "subagent_type": "xunji-hunter",
+        "assets": [],
+        "agent_id": "pre-bundle-child",
+        "tool_use_id": "pre-bundle-parent-tool",
+        "session_id": "pre-bundle-session",
+        "state": "running",
+        "result_snapshot": {},
+        "launched_at": "2026-07-18T00:00:00Z",
+    }
+    legacy_row.update({
+        "status": "running",
+        "attempts": [legacy_attempt],
+        "current_attempt": "pre-bundle-child",
+        "runtime_agent_id": "pre-bundle-child",
+    })
+    _atomic_json(
+        legacy_settlement_run / "state" / "assignments.json",
+        {"schema": 3, "assignments": [legacy_row]},
+    )
+    legacy_start_record = {
+        "hook_event_name": "SubagentStart",
+        "session_id": "pre-bundle-session",
+        "agent_id": "pre-bundle-child",
+        "agent_type": "xunji-hunter",
+        "tool_use_id": "pre-bundle-parent-tool",
+        "assignment": "A-pre-bundle-running",
+        "front": "F-001",
+        "assignment_assets": [],
+        "assignment_lane": str(legacy_row["lane_id"]),
+        "assignment_plan_digest": str(legacy_row["plan_digest"]),
+        "assignment_result_digest": "",
+        "launch_prompt_sha256": legacy_prompt_hash,
+        "subagent_type": "xunji-hunter",
+        "completion_review": False,
+    }
+    legacy_new_launch_rejected = False
+    try:
+        _validated_agent_binding(
+            legacy_settlement_run,
+            _lifecycle_binding_from_record(legacy_start_record),
+            actual_agent_type="xunji-hunter",
+        )
+    except RuntimeError as exc:
+        legacy_new_launch_rejected = (
+            "XUNJI_E_AGENT_INSTRUCTION_SOURCE_STALE" in str(exc))
+    legacy_stop_prepared = _prepare_agent_lifecycle_binding(
+        legacy_settlement_run,
+        {
+            "hook_event_name": "SubagentStop",
+            "session_id": "pre-bundle-session",
+            "agent_id": "pre-bundle-child",
+            "agent_type": "xunji-hunter",
+        },
+        [legacy_start_record],
+    )
+    legacy_stop_binding = legacy_stop_prepared.get(
+        "xunji_agent_lifecycle_binding", {})
+    pre_bundle_running_stop_only_compat = bool(
+        not assignment_state_errors(
+            {"schema": 3, "assignments": [legacy_row]},
+            parent_run=legacy_settlement_run.name,
+        )
+        and legacy_new_launch_rejected
+        and legacy_stop_binding.get("launch_prompt_sha256")
+            == legacy_prompt_hash
+        and legacy_stop_binding.get("assignment_tool_call_limit")
+            == legacy_row.get("tool_call_limit")
+    )
 
     cross_batch_run = run.parent / "cross-batch-start-allocation-run"
     (cross_batch_run / "state").mkdir(parents=True)
@@ -9787,6 +10133,7 @@ def _selftest() -> int:
         "subagent_type": "xunji-hunter",
         "completion_review": False,
         "assignment_tool_call_limit": 6,
+        "assignment_request_budget": 2,
         "agent_binding_strategy": "exact_child_binding",
         "agent_binding_batch_sha256": "c" * 64,
         "agent_binding_ordinal": 0,
@@ -9815,6 +10162,7 @@ def _selftest() -> int:
             "agent_id": budget_agent,
             "tool_input": {
                 "file_path": f"/tmp/budget-{index}{path_suffix}.txt"},
+            "xunji_agent_request_action": index in {1, 6, 7},
         }
 
     budget_first_five = [
@@ -9831,6 +10179,10 @@ def _selftest() -> int:
                 budget_run, budget_pretool(index)),
             (6, 7),
         ))
+    budget_request_replay_count_before = len(load_events(budget_run))
+    budget_request_replay = claim_agent_tool_call(
+        budget_run, budget_pretool(6))
+    budget_request_replay_count_after = len(load_events(budget_run))
     budget_eighth = claim_agent_tool_call(budget_run, budget_pretool(8))
     budget_identity_conflict = False
     try:
@@ -9916,6 +10268,18 @@ def _selftest() -> int:
                  for item in budget_boundary) == 1
          and budget_eighth.get("agent_tool_call_ordinal") == 8
          and budget_eighth.get("agent_tool_call_admitted") is False),
+        ("target request claims atomically admit through budget and deny the next call",
+         [item.get("agent_request_ordinal") for item in budget_claim_rows
+          if item.get("agent_request_action") is True] == [1, 2, 3]
+         and sum(item.get("agent_request_admitted") is True
+                 for item in budget_boundary) == 1
+         and sum(item.get("agent_request_admitted") is False
+                 for item in budget_boundary) == 1
+         and budget_request_replay.get("receipt_hash")
+             == next(item.get("receipt_hash") for item in budget_boundary
+                     if item.get("tool_use_id") == budget_child_ids[5])
+         and budget_request_replay_count_before
+             == budget_request_replay_count_after),
         ("Agent tool-call identity conflict and post-Stop calls fail closed",
          budget_identity_conflict and budget_after_stop_rejected),
         ("Agent tool-call receipt tamper enters integrity debt",
@@ -9940,6 +10304,8 @@ def _selftest() -> int:
         ("current-session CronCreate receipt names the bound run", cron_seen),
         ("iteration plan is absent immediately after CronCreate", not plan_before),
         ("transcript-backed TaskCreate satisfies the iteration plan", plan_after),
+        ("same-turn Cron and Task gates do not race transcript persistence",
+         control_receipts_ignore_transcript_lag),
         ("shape denial metadata is structured without source material",
          structured_denial.get("decision_code")
          == "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED"
@@ -10214,6 +10580,8 @@ def _selftest() -> int:
          target_controlled_user_binding_rejected),
         ("Reviewer child identity requires the exact target result digest",
          reviewer_missing_result_digest_rejected),
+        ("pre-bundle v1 running attempt permits only its exact Stop settlement",
+         pre_bundle_running_stop_only_compat),
         ("tool_result text cannot forge child identity",
          parallel_allocations.get("parallel-child-b") == "parallel-tool-b"),
         ("Start without exact identity rejects unconfirmed cross-batch candidates",

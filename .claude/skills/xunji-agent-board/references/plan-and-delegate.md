@@ -32,16 +32,24 @@ debt-free and has typed `cycle_end`.
 
 ## Commit The Plan
 
-Use every exact `lane-json:` value printed by the successful `workers.py plan`.
-If it exits nonzero with `NO_STRONG_CANDIDATE`, do not commit, invent lanes, or
-copy a documentation example. Repair the canonical frontier/coverage mapping,
-rerun the state pass, then rerun the planner. For a successful draft, build one
-direct argv with current-run values and repeat `--lane` for every printed lane:
+Treat a successful planner draft as indivisible. Commit it through the planner
+owner so Claude never transports, splits, or shell-wraps lane JSON:
 
 ```bash
-python3 tools/work_plan.py commit runs/<dir> --stage <S1|S2|S3> --objective "<current reversible goal>" --mode <ROOT_DIRECT|SERIAL_AGENT|PARALLEL_AGENTS> --reason "<current scheduler reason>" --exit-gate "<evidence-bound exit>" --lane '<exact planner lane-json>' [--lane '<next exact planner lane-json>' ...]
-python3 tools/work_plan.py status runs/<dir>
+python3 tools/workers.py commit-plan runs/<dir> --stage <S1|S2|S3> --objective "<current reversible goal>" --mode <SERIAL_AGENT|PARALLEL_AGENTS> --reason "<current scheduler reason>" --exit-gate "<evidence-bound exit>" --limit <1|2>
 ```
+
+`commit-plan` recomputes the current complete draft and calls the existing
+`work_plan` transaction owner once. On a material same-run replan, the owner
+inherits only identity-equal lanes already proven complete by Agent return,
+Reviewer disposition, and Root settlement, then commits the unfinished suffix;
+never repeat an inherited lane. "Ready" applies only after that commit when
+`delegate` selects dependency-satisfied work; it never selects a plan subset.
+If it exits nonzero with `NO_STRONG_CANDIDATE`, do not commit, invent lanes, or
+copy a documentation example. Repair the canonical frontier/coverage mapping,
+rerun the state pass, then rerun the planner. For diagnostics, `workers.py plan`
+still prints the exact lanes. Do not manually copy them into `work_plan.py commit`
+during a live Agent-mode run.
 
 `work_plan.py` is the sole plan transaction writer. A current plan requires its
 committed v2 receipt, content-addressed archive, and intact prior-receipt lineage.
@@ -56,8 +64,8 @@ Only independently observed material canonical change justifies stale unlaunched
 cancellation and replan.
 
 If the gate returns `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` with
-`invalid-argv`, the command did not execute. Rebuild one complete direct argv from
-the tool-produced lane JSON and retry in the same operator turn. Do not add pipes,
+`invalid-argv`, the command did not execute. Rebuild the complete `commit-plan`
+direct argv and retry in the same operator turn. Do not add pipes,
 redirects, wrappers, environment assignments, or `python -c` inspection.
 
 ## Delegate Ready Work
@@ -67,12 +75,18 @@ request/model-egress budgets are valid only when ready lanes need neither target
 requests nor model egress:
 
 ```bash
-python3 tools/workers.py delegate runs/<dir> --runtime-slots <n> --request-budget <n> --model-egress-budget <n> --merge-capacity <n> --limit <n> --tool-call-limit <5-64>
+python3 tools/workers.py delegate runs/<dir> --runtime-slots <n> --request-budget <n> --model-egress-budget <n> --merge-capacity <n> --limit <n>
 ```
 
-`--tool-call-limit` becomes a typed assignment field and a deterministic
-PreToolUse budget; it counts all child calls, including binding reads and
-denials. `delegate` atomically creates only ready assignments, exact context
+The owner supplies the normal typed `tool_call_limit=24`; use the optional
+`--tool-call-limit <5-64>` override only when the lane has a concrete smaller or
+larger bound. It counts all child calls, including binding reads and denials.
+Each committed lane's `request_budget` is also copied into the assignment and
+frozen by `SubagentStart`. It counts attempted target calls only; child PreToolUse
+claims them atomically, so concurrent calls cannot oversubscribe the lane and the
+first over-budget call is denied before execution. An exhausted-budget notice
+means return the evidence already collected, not vary the method/path/argv.
+`delegate` atomically creates only ready assignments, exact context
 packs, and binary launch contracts. It does not spawn. Every target lane must carry a
 bounded asset package present in coverage and named by its front. Unknown roles,
 overlapping target packages, stale plan digests, or inadequate budgets fail

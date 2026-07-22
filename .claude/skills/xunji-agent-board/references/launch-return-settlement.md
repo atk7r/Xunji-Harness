@@ -18,12 +18,17 @@ type and actual same-session Start/Stop type must agree.
 The complete Hunter prompt has this formatter-owned shape:
 
 ```text
-XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2 XUNJI_LANE=L-... XUNJI_PLAN=<64hex>
+XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-... XUNJI_ASSETS=h1,h2 XUNJI_LANE=L-... XUNJI_PLAN=<64hex> XUNJI_INSTRUCTION_BUNDLE=<64hex>
 ```
 
 The dependent Reviewer also binds `XUNJI_RESULT_DIGEST=<64hex>` and its required
 completion marker. Complete-string equality is the boundary: do not prepend,
 append, normalize, trim, reorder, or rebuild it in `description`.
+
+The instruction digest binds the manifest-selected common/role/live Agent
+sources and the generated context/scaffold bytes. Root launch, `SubagentStart`,
+and every child PreToolUse revalidate it; a source drift or artifact mismatch is
+a blocker requiring material replan/delegate, never in-place repair.
 
 ## Launch And Return
 
@@ -57,6 +62,14 @@ python3 tools/workers.py status runs/<dir>
 `running`, wait for hook delivery and repeat this checkpoint; do not end the
 phase, delegate, or call `finish`. Root never writes `done`: `SubagentStop`
 projects it.
+Do not express that wait as `sleep ... && workers.py status ...`; it is one
+retryable command-shape denial, not framework maintenance. Retry the clean owner
+status argv in the same turn and continue from its actual state.
+
+Treat task/completion notifications as wake-up signals only. After `state=done`,
+the immutable `state/merge_results/<assignment>/...` bytes and merge-draft digest
+are the result; notification prose may be stale or interleaved and must not be
+copied into evidence or a disposition note.
 
 Start/Stop/Post ordering variants join only through one frozen causal identity.
 Cross-session, unmatched, ambiguous, duplicated, or conflicting attempts remain
@@ -86,6 +99,12 @@ python3 tools/workers.py review-disposition runs/<dir> A-<target> A-<reviewer> -
 python3 tools/workers.py finish runs/<dir> A-<target> --status <merged|blocked|failed|abandoned> --note "<status-specific literal grammar below>"
 ```
 
+For an accepted target-effect result, `review-disposition` verifies that the
+frozen Hunter and Reviewer name the same run-local artifact set, every file
+exists, and each replay sidecar binds its request/response, saved body, and body
+hash. Use its `VERIFIED_ARTIFACT` lines as factual input to canonical evidence;
+never substitute notification prose.
+
 Before `merged`, verify every assigned asset has the required transcript-backed
 target receipt and canonical E-entry, plus any control/replay evidence needed for
 promotion. A zero-tool or partial package cannot merge. `blocked`, `failed`, and
@@ -94,6 +113,11 @@ optional E/D anchors must already exist. These statuses preserve unresolved
 coverage debt.
 `done` means returned but not Root-disposed; it is not a valid Root-authored
 `finish` transition.
+After every `finish`, obey its `NEXT_OWNER_ACTION`. Canonical E/D material may be
+written when supported, but keep the assigned front open while any committed lane
+is unassigned, running, awaiting review, or awaiting Root disposition. Do not mark
+the front closed/deferred, replan around the remaining lane, or attempt `cycle_end`;
+repeat the documented delegate/return/review/finish chain until the notice disappears.
 The assignment's typed `tool_call_limit` covers every attempted child call from
 Agent start, including the four binding Reads and denials; an RDT loop budget
 cannot raise it. `SubagentStart` freezes the value, and PreToolUse atomically

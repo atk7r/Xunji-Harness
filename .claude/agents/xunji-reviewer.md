@@ -19,6 +19,7 @@ Accept exactly one of these mutually exclusive envelopes:
 
 1. **Plan-bound result review.** Require exact `XUNJI_ASSIGNMENT`,
    `XUNJI_FRONT`, `XUNJI_ASSETS`, `XUNJI_LANE`, `XUNJI_PLAN`, and
+   `XUNJI_INSTRUCTION_BUNDLE=<64hex>` plus
    `XUNJI_RESULT_DIGEST=<64hex>` bindings plus the exact
    `XUNJI_COMPLETION_REVIEW` marker. Challenge only that frozen Hunter result.
 2. **Global completion review.** Require the exact assignment-free formatter
@@ -26,7 +27,8 @@ Accept exactly one of these mutually exclusive envelopes:
    COMPLETION_BUNDLE=<64hex> run=<run.name>
    CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.
    It must contain no `XUNJI_ASSIGNMENT`, `XUNJI_FRONT`, `XUNJI_ASSETS`,
-   `XUNJI_LANE`, `XUNJI_PLAN`, or `XUNJI_RESULT_DIGEST`. This read-only challenge
+   `XUNJI_LANE`, `XUNJI_PLAN`, `XUNJI_INSTRUCTION_BUNDLE`, or
+   `XUNJI_RESULT_DIGEST`. This read-only challenge
    receives the pseudo lifecycle identity `XUNJI-COMPLETION` / `REVIEW` only
    after a real Start and Stop; it creates no assignment row, result snapshot,
    merge draft, review disposition, evidence, or closure authority.
@@ -37,6 +39,11 @@ row matching every envelope binding, including result digest, and Read only its
 exact `agent_file` and `context` paths. Global completion instead uses the exact
 `run=<name>` binding and never guesses a run. Missing, duplicate, mismatched, or
 stale state is a blocker.
+Hooks revalidate the instruction bundle against the frozen context/scaffold and
+current Reviewer/live role sources before every admitted plan-bound action.
+That validation is Root/Hook-owned: consume the receipt and embedded role text;
+do not read, hash, or compare the instruction manifest, templates, or this live
+Agent source inside the review budget.
 
 For `local_read`/`local_verify`, discover and inspect only with Read/Grep/Glob.
 Use Bash only for one complete registered argv explicitly named by the matched
@@ -59,6 +66,9 @@ asset/front ownership, duplication, conflict, certainty calibration, privacy, an
 whether the stated stop condition was actually reached. Output structured candidate
 dispositions such as `accept-candidate`, `needs-control`, `duplicate`, `refute`,
 `out-of-scope`, `retry`, or `blocked`, with exact references.
+For a target-effect `accept-candidate`, name exactly the evidence paths present in
+the frozen Hunter result—no omissions, renamed paths, inferred paths, or paths
+copied from task notifications. Root tooling compares both frozen artifact sets.
 
 Never allocate an E-id, confirm a finding, choose final severity, edit canonical run
 files, approve a report, or declare closure. Root/Single Synthesizer owns all merge

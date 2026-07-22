@@ -31,12 +31,13 @@ _HEX64 = re.compile(r"[0-9a-f]{64}")
 _LANE_ID = re.compile(r"L-[A-Za-z0-9._-]+")
 _ASSIGNMENT_ID = re.compile(r"A-[A-Za-z0-9._-]+")
 _TERMINAL_ROOT_DISPOSITIONS = {"merged", "blocked", "failed", "abandoned"}
-_REVIEW_RECEIPT_FIELDS = {
+_REVIEW_RECEIPT_REQUIRED_FIELDS = {
     "schema", "target_assignment", "target_result_digest",
     "reviewer_assignment", "reviewer_agent_id", "reviewer_tool_use_id",
     "reviewer_result_digest", "plan_digest", "target_lane_id",
     "reviewer_lane_id", "disposition", "note", "recorded_at", "receipt_hash",
 }
+_REVIEW_RECEIPT_FIELDS = _REVIEW_RECEIPT_REQUIRED_FIELDS | {"artifact_validation"}
 _REVIEW_DISPOSITIONS = {
     "accept-candidate", "needs-control", "duplicate", "refute",
     "out-of-scope", "retry", "blocked",
@@ -396,7 +397,9 @@ def _runtime_records(run: Path) -> tuple[list[dict], list[dict], list[str], obje
 
 
 def _receipt_hash_valid(receipt: object) -> bool:
-    if not isinstance(receipt, dict) or set(receipt) != _REVIEW_RECEIPT_FIELDS:
+    if not isinstance(receipt, dict) \
+            or not _REVIEW_RECEIPT_REQUIRED_FIELDS.issubset(receipt) \
+            or not set(receipt).issubset(_REVIEW_RECEIPT_FIELDS):
         return False
     if receipt.get("schema") != "xunji.review-disposition.v1" \
             or not _ASSIGNMENT_ID.fullmatch(str(receipt.get("target_assignment") or "")) \
@@ -410,6 +413,35 @@ def _receipt_hash_valid(receipt: object) -> bool:
             or receipt.get("target_lane_id") == receipt.get("reviewer_lane_id") \
             or receipt.get("disposition") not in _REVIEW_DISPOSITIONS:
         return False
+    artifact_validation = receipt.get("artifact_validation", [])
+    if not isinstance(artifact_validation, list):
+        return False
+    for item in artifact_validation:
+        if not isinstance(item, dict) or set(item) not in (
+            {"path", "sha256", "size"},
+            {"path", "sha256", "size", "request", "response", "saved_body"},
+        ):
+            return False
+        if not isinstance(item.get("path"), str) \
+                or not item["path"].startswith("evidence/") \
+                or not _HEX64.fullmatch(str(item.get("sha256") or "")) \
+                or not isinstance(item.get("size"), int) or item["size"] < 0:
+            return False
+        if "request" in item:
+            request = item.get("request")
+            response = item.get("response")
+            if not isinstance(request, dict) or set(request) != {"method", "url"} \
+                    or not all(isinstance(request.get(key), str) and request.get(key)
+                               for key in ("method", "url")) \
+                    or not isinstance(response, dict) \
+                    or set(response) != {"status", "len", "sha1"} \
+                    or not isinstance(response.get("status"), int) \
+                    or not isinstance(response.get("len"), int) \
+                    or response["len"] < 0 \
+                    or not isinstance(response.get("sha1"), str) \
+                    or not isinstance(item.get("saved_body"), str) \
+                    or not item["saved_body"].startswith("evidence/"):
+                return False
     for field, maximum in (
         ("reviewer_agent_id", 1024), ("reviewer_tool_use_id", 1024),
         ("note", 2048), ("recorded_at", 128),

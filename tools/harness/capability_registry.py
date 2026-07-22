@@ -666,7 +666,7 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
     if not args:
         return False
     commands = {
-        "list", "new", "delegate", "assign", "heartbeat", "finish", "review-disposition", "lifecycle-check",
+        "list", "new", "commit-plan", "delegate", "assign", "heartbeat", "finish", "review-disposition", "lifecycle-check",
         "status", "agent-check", "suggest", "plan", "merge-check", "conflicts",
         "synthesize", "merge-constraints", "merge-threats",
     }
@@ -692,6 +692,33 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
             flags=set(), repeatable={"--asset"}, positionals=1,
         )
         return ok and {"--role", "--front"}.issubset(seen)
+    if command == "commit-plan":
+        ok, seen, _pos = _options(
+            args[1:],
+            values={
+                "--stage": {"S1", "S2", "S3"},
+                "--objective": None,
+                # ROOT_DIRECT is a valid public mode spelling even though the
+                # generated multi-lane planner draft will reject it later with
+                # a precise work-plan error. Let the owner CLI explain that
+                # recoverable choice instead of hiding it as an unknown argv.
+                "--mode": {"ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS"},
+                "--reason": None,
+                "--exit-gate": None,
+                "--replan-reason": None,
+                "--limit": None,
+            },
+            flags=set(), positionals=1,
+        )
+        required = {
+            "--stage", "--objective", "--mode", "--reason", "--exit-gate",
+        }
+        if not ok or not required.issubset(seen):
+            return False
+        limits = seen.get("--limit", ["2"])
+        return all(
+            re.fullmatch(r"[12]", raw) is not None for raw in limits
+        )
     if command == "delegate":
         ok, seen, _pos = _options(
             args[1:],
@@ -983,7 +1010,7 @@ def run_reference(spec: CapabilitySpec, args: Iterable[str]) -> str:
         return values[1] if len(values) > 1 else ""
     if validator.startswith("workers-"):
         commands = {
-            "list", "new", "suggest", "plan", "delegate", "assign",
+            "list", "new", "suggest", "plan", "commit-plan", "delegate", "assign",
             "cancel-unlaunched", "status",
             "agent-check", "heartbeat", "finish", "review-disposition",
             "lifecycle-check",
@@ -1128,6 +1155,41 @@ def selftest() -> int:
             ["assign", "runs/demo_20260101", "--role", "web-hunter",
              "--front", "F-001", "--asset", "app.example"],
         ) or _spec("", "", "repo_mutation", "")).effect == "control"),
+        ("workers planner commit is one exact control argv", bool(
+            (lambda matched: bool(
+                matched
+                and matched.effect == "control"
+                and run_reference(matched, [
+                    "commit-plan", "runs/demo_20260101",
+                    "--stage", "S2", "--objective", "probe the selected front",
+                    "--mode", "SERIAL_AGENT", "--reason", "one dependent chain",
+                    "--exit-gate", "reviewed target evidence", "--limit", "1",
+                ]) == "runs/demo_20260101"
+            ))(match(ROOT / "tools/workers.py", [
+                "commit-plan", "runs/demo_20260101",
+                "--stage", "S2", "--objective", "probe the selected front",
+                "--mode", "SERIAL_AGENT", "--reason", "one dependent chain",
+                "--exit-gate", "reviewed target evidence", "--limit", "1",
+            ]))
+            and (match(ROOT / "tools/workers.py", [
+                "commit-plan", "runs/demo_20260101",
+                "--stage", "S1", "--objective", "probe once",
+                "--mode", "ROOT_DIRECT", "--reason", "one atomic action",
+                "--exit-gate", "saved response", "--limit", "1",
+            ]) or _spec("", "", "", "")).effect == "control"
+            and match(ROOT / "tools/workers.py", [
+                "commit-plan", "runs/demo_20260101",
+                "--stage", "S2", "--objective", "probe the selected front",
+                "--mode", "SERIAL_AGENT", "--reason", "one dependent chain",
+                "--exit-gate", "reviewed target evidence", "--limit", "0",
+            ]) is None
+            and match(ROOT / "tools/workers.py", [
+                "commit-plan", "runs/demo_20260101",
+                "--stage", "S2", "--objective", "probe the selected front",
+                "--mode", "SERIAL_AGENT", "--reason", "one dependent chain",
+                "--exit-gate", "reviewed target evidence", "--future", "x",
+            ]) is None
+        )),
         ("workers delegate has exact bounded scheduler argv", bool(
             match(ROOT / "tools/workers.py", [
                 "delegate", "runs/demo_20260101", "--runtime-slots", "2",

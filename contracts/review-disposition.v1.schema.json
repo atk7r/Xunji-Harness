@@ -44,6 +44,54 @@
       ]
     },
     "note": {"type": "string", "minLength": 1, "maxLength": 2048},
+    "artifact_validation": {
+      "description": "Optional deterministic validation of the exact run-local artifact set named by both frozen target and Reviewer results. Empty for non-target or non-accept dispositions.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "size"],
+            "properties": {
+              "path": {"type": "string", "pattern": "^evidence/"},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "size": {"type": "integer", "minimum": 0}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "size", "request", "response", "saved_body"],
+            "properties": {
+              "path": {"type": "string", "pattern": "^evidence/.*\\.replay\\.json$"},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "size": {"type": "integer", "minimum": 0},
+              "request": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["method", "url"],
+                "properties": {
+                  "method": {"type": "string", "minLength": 1},
+                  "url": {"type": "string", "minLength": 1}
+                }
+              },
+              "response": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["status", "len", "sha1"],
+                "properties": {
+                  "status": {"type": "integer"},
+                  "len": {"type": "integer", "minimum": 0},
+                  "sha1": {"type": "string"}
+                }
+              },
+              "saved_body": {"type": "string", "pattern": "^evidence/"}
+            }
+          }
+        ]
+      }
+    },
     "recorded_at": {"type": "string", "minLength": 1, "maxLength": 128},
     "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
   }

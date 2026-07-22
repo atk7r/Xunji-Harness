@@ -31,6 +31,7 @@ def _missing_markers(template_text: str, reference_text: str, markers: list[str]
 
 def _driver_doc_errors(
     *, root: Path = ROOT, fixture_path: Path | None = None,
+    check_instruction_sources: bool = True,
 ) -> list[str]:
     """Validate Claude-primary owner text and copyable command shapes.
 
@@ -81,13 +82,31 @@ def _driver_doc_errors(
             if marker in text:
                 errors.append(f"{rel} retains forbidden driver marker: {marker}")
 
-    for path in sorted((root / "docs" / "templates" / "agents").glob("*.md")):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        rel = path.relative_to(root).as_posix()
-        if "workers.py heartbeat/finish" in text or "workers.py finish" in text:
-            errors.append(f"{rel} retains stale Agent lifecycle command")
-        if "Root alone reviews and terminally settles the assignment" not in text:
-            errors.append(f"{rel} missing Root-owned settlement boundary")
+    if check_instruction_sources:
+        try:
+            import agent_instruction_bundle  # type: ignore
+            errors.extend(
+                "Agent instruction composition: " + detail
+                for detail in agent_instruction_bundle.selftest(root=root)
+            )
+            manifest = agent_instruction_bundle.load_manifest(root=root)
+            for role in sorted(manifest["roles"]):
+                bundle = agent_instruction_bundle.load_role_contract(role, root=root)
+                text = bundle["text"]
+                if "workers.py heartbeat/finish" in text or "workers.py finish" in text:
+                    errors.append(f"composed role {role} retains stale lifecycle command")
+                if "Root/Single Synthesizer alone promotes" not in text:
+                    errors.append(f"composed role {role} misses the Root-owned promotion boundary")
+                if text.count("<!-- xunji.agent-role-common.v1 -->") != 1:
+                    errors.append(f"composed role {role} has an ambiguous common block")
+            for role in ("report", "review"):
+                text = agent_instruction_bundle.load_role_contract(
+                    role, root=root)["text"]
+                if "test cross-role access on state-changing operations" in text:
+                    errors.append(f"composed role {role} retains target-action cross-role guidance")
+        except Exception as exc:
+            errors.append(
+                "Agent instruction composition unavailable: " + type(exc).__name__)
 
     prompt_cases = fixture.get("prompt_cases")
     valid_prompt_cases: list[dict] = []
@@ -223,6 +242,9 @@ def _driver_doc_errors(
         else:
             expected = case["expected"]
             role = "review" if expected_type == "xunji-reviewer" else "web-hunter"
+            fixture_bundle = {}
+            fixture_bundle_sha256 = runtime_receipts._instruction_bundle.canonical_digest(
+                fixture_bundle)
             exact_prompt = prompt == runtime_receipts.assignment_launch_prompt({
                 "schema": "xunji.assignment.v1",
                 "agent": expected["assignment"],
@@ -232,6 +254,8 @@ def _driver_doc_errors(
                 "plan_digest": expected["plan_digest"],
                 "role": role,
                 "review_result_digest": expected["result_digest"],
+                "instruction_bundle": fixture_bundle,
+                "instruction_bundle_sha256": fixture_bundle_sha256,
             })
         observed_valid = bool(
             binding
@@ -379,14 +403,18 @@ def _selftest() -> int:
                 "prompt": (
                     "XUNJI_ASSIGNMENT=A-review-001 XUNJI_FRONT=F-001 "
                     "XUNJI_ASSETS=none XUNJI_LANE=L-F001-REVIEW "
-                    f"XUNJI_PLAN={'a' * 64} XUNJI_RESULT_DIGEST={'b' * 64} "
+                    f"XUNJI_PLAN={'a' * 64} "
+                    "XUNJI_INSTRUCTION_BUNDLE="
+                    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a "
+                    f"XUNJI_RESULT_DIGEST={'b' * 64} "
                     "XUNJI_COMPLETION_REVIEW"
                 ),
                 "subagent_type": "xunji-reviewer",
             },
             "required_tokens": [
                 "XUNJI_ASSIGNMENT=", "XUNJI_FRONT=", "XUNJI_ASSETS=",
-                "XUNJI_LANE=", "XUNJI_PLAN=", "XUNJI_RESULT_DIGEST=",
+                "XUNJI_LANE=", "XUNJI_PLAN=", "XUNJI_INSTRUCTION_BUNDLE=",
+                "XUNJI_RESULT_DIGEST=",
                 "XUNJI_COMPLETION_REVIEW",
             ],
             "expected": {
@@ -425,12 +453,16 @@ def _selftest() -> int:
         }],
     }
     fixture.write_text(json.dumps(driver_fixture), encoding="utf-8")
-    driver_clean = _driver_doc_errors(root=driver_root, fixture_path=fixture)
+    driver_clean = _driver_doc_errors(
+        root=driver_root, fixture_path=fixture,
+        check_instruction_sources=False)
     driver_doc.write_text(
         "CURRENT COMMAND\nJOURNAL START\nCOMPLETION GUARD\nREVIEW PROMPT\nREVIEW RESULT\n",
         encoding="utf-8",
     )
-    driver_order_drift = _driver_doc_errors(root=driver_root, fixture_path=fixture)
+    driver_order_drift = _driver_doc_errors(
+        root=driver_root, fixture_path=fixture,
+        check_instruction_sources=False)
     driver_doc.write_text(
         "CURRENT COMMAND\nCOMPLETION GUARD\nJOURNAL START\nREVIEW PROMPT\nREVIEW RESULT\n",
         encoding="utf-8",
@@ -441,16 +473,20 @@ def _selftest() -> int:
             "XUNJI_ASSETS=none ", "")
     fixture.write_text(json.dumps(missing_token_fixture), encoding="utf-8")
     driver_prompt_drift = _driver_doc_errors(
-        root=driver_root, fixture_path=fixture)
+        root=driver_root, fixture_path=fixture,
+        check_instruction_sources=False)
     wrong_type_fixture = json.loads(json.dumps(driver_fixture))
     wrong_type_fixture["prompt_cases"][0]["tool_input"]["subagent_type"] = \
         "xunji-hunter"
     fixture.write_text(json.dumps(wrong_type_fixture), encoding="utf-8")
     driver_type_drift = _driver_doc_errors(
-        root=driver_root, fixture_path=fixture)
+        root=driver_root, fixture_path=fixture,
+        check_instruction_sources=False)
     fixture.write_text(json.dumps(driver_fixture), encoding="utf-8")
     driver_doc.write_text("LEGACY COMMAND\n", encoding="utf-8")
-    driver_drift = _driver_doc_errors(root=driver_root, fixture_path=fixture)
+    driver_drift = _driver_doc_errors(
+        root=driver_root, fixture_path=fixture,
+        check_instruction_sources=False)
     checks = [
         ("missing marker is reported", any("Fingerprints captured" in m for m in missing)),
         ("aligned markers pass", clean == []),

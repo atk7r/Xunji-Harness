@@ -1962,19 +1962,21 @@ def _selftest() -> int:
         "result_digest", "outcome", "per_asset_outcomes", "review_status",
         "review_receipt", "updated_at",
     }
-    expected_review_fields = {
+    expected_review_required_fields = {
         "schema", "target_assignment", "target_result_digest", "reviewer_assignment",
         "reviewer_agent_id", "reviewer_tool_use_id", "reviewer_result_digest",
         "plan_digest", "target_lane_id", "reviewer_lane_id", "disposition", "note",
         "recorded_at", "receipt_hash",
     }
+    expected_review_fields = expected_review_required_fields | {"artifact_validation"}
     checks.append(("merge draft schema freezes exact runtime fields",
                    merge_schema.get("additionalProperties") is False
                    and set(merge_schema.get("required", [])) == expected_merge_fields
                    and set(merge_schema.get("properties", {})) == expected_merge_fields))
     checks.append(("review receipt schema freezes exact runtime fields",
                    review_schema.get("additionalProperties") is False
-                   and set(review_schema.get("required", [])) == expected_review_fields
+                   and set(review_schema.get("required", []))
+                   == expected_review_required_fields
                    and set(review_schema.get("properties", {})) == expected_review_fields))
     checks.append(("typed cycle schema names only the reserved event subset",
                    cycle_schema.get("$id", "").endswith("cycle-event.v1.schema.json")

@@ -92,9 +92,12 @@
     "reasoning_style": {"const": "personalized-rdt"},
     "loop_budget": {"type": "integer", "minimum": 1, "maximum": 1000},
     "tool_call_limit": {"type": "integer", "minimum": 5, "maximum": 64},
+    "request_budget": {"type": "integer", "minimum": 0, "maximum": 1000000},
     "operator_profile": {"type": "string", "minLength": 1, "maxLength": 4096},
     "context": {"type": "string", "minLength": 1, "maxLength": 4096},
     "agent_file": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "instruction_bundle": {"$ref": "#/$defs/instructionBundle"},
+    "instruction_bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "created_at": {"$ref": "#/$defs/timestamp"},
     "updated_at": {"$ref": "#/$defs/timestamp"},
     "attempts": {
@@ -129,6 +132,14 @@
     "coverage_merge": {"$ref": "#/$defs/coverageMerge"}
   },
   "allOf": [
+    {
+      "if": {"required": ["instruction_bundle"]},
+      "then": {"required": ["instruction_bundle_sha256"]}
+    },
+    {
+      "if": {"required": ["instruction_bundle_sha256"]},
+      "then": {"required": ["instruction_bundle"]}
+    },
     {
       "if": {"properties": {"role": {"const": "review"}}, "required": ["role"]},
       "then": {
@@ -289,6 +300,89 @@
     }
   ],
   "$defs": {
+    "sourceDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "version", "length", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "length": {"type": "integer", "minimum": 1, "maximum": 524288},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "artifactDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "length", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "length": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "roleDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "version", "length", "sha256", "assignable"],
+      "properties": {
+        "id": {
+          "enum": [
+            "surface", "web-auth", "web-hunter", "code-audit", "exploit",
+            "verify", "review", "report"
+          ]
+        },
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "length": {"type": "integer", "minimum": 1, "maximum": 524288},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "assignable": {"const": true}
+      }
+    },
+    "roleContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "manifest", "common", "role", "subagent_type",
+        "live_agent", "composed_length", "composed_sha256"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.agent-role-contract.v1"},
+        "manifest": {"$ref": "#/$defs/sourceDescriptor"},
+        "common": {"$ref": "#/$defs/sourceDescriptor"},
+        "role": {"$ref": "#/$defs/roleDescriptor"},
+        "subagent_type": {"enum": ["xunji-hunter", "xunji-reviewer"]},
+        "live_agent": {"$ref": "#/$defs/sourceDescriptor"},
+        "composed_length": {"type": "integer", "minimum": 1, "maximum": 1048576},
+        "composed_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "instructionBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "assignment", "plan_digest", "lane_id", "role",
+        "subagent_type", "role_contract", "scaffold_source", "context",
+        "agent_file"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.agent-instruction-bundle.v1"},
+        "assignment": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$", "maxLength": 256},
+        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "lane_id": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$", "maxLength": 256},
+        "role": {
+          "enum": [
+            "surface", "web-auth", "web-hunter", "code-audit", "exploit",
+            "verify", "review", "report"
+          ]
+        },
+        "subagent_type": {"enum": ["xunji-hunter", "xunji-reviewer"]},
+        "role_contract": {"$ref": "#/$defs/roleContract"},
+        "scaffold_source": {"$ref": "#/$defs/sourceDescriptor"},
+        "context": {"$ref": "#/$defs/artifactDescriptor"},
+        "agent_file": {"$ref": "#/$defs/artifactDescriptor"}
+      }
+    },
     "timestamp": {
       "type": "string",
       "format": "date-time",

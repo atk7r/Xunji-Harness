@@ -417,11 +417,24 @@ def check_macro_stage_control(run_dir: Path) -> list[str]:
         if typed_state.get("pending_stage_exit_hash"):
             errors.append(
                 "macro-stage control: stage_exit is pending its bound stage_plan")
+    matching_cycle_end = any(
+        item.get("event") == "cycle_end"
+        and isinstance(item.get("data"), dict)
+        and item["data"].get("plan_digest") == plan.get("plan_digest")
+        for _, item in relevant
+    )
     current_plan_valid = True
     try:
-        contract = json.loads((run_dir / "state" / "turn_contract.json").read_text(
-            encoding="utf-8", errors="strict"))
-        _work_plan.current_plan(run_dir, contract)
+        if matching_cycle_end:
+            # Canonical evidence/frontier text may be corrected after the exact
+            # typed cycle_end. Closure validates the immutable transaction and
+            # re-derived cycle receipt; it must not reopen execution because the
+            # ended plan's former input fingerprint naturally changed.
+            _work_plan.transaction_bound_plan(run_dir)
+        else:
+            contract = json.loads((run_dir / "state" / "turn_contract.json").read_text(
+                encoding="utf-8", errors="strict"))
+            _work_plan.current_plan(run_dir, contract)
     except Exception as exc:
         current_plan_valid = False
         errors.append(f"macro-stage control: work plan is stale/inconsistent ({exc})")
@@ -4178,6 +4191,13 @@ def _selftest() -> int:
         note="S1 receipts settled",
         next_action="运行 check_run 验证当前计划",
     )
+    ended_plan_before_canonical_fix = check_macro_stage_control(d_stage)
+    stage_target_text = (d_stage / "target.md").read_text(encoding="utf-8")
+    (d_stage / "target.md").write_text(
+        stage_target_text + "- Closure correction: exact receipt retained\n",
+        encoding="utf-8")
+    ended_plan_after_canonical_fix = check_macro_stage_control(d_stage)
+    (d_stage / "target.md").write_text(stage_target_text, encoding="utf-8")
     _work_plan.commit_plan(
         d_stage, macro_stage="S2", objective="exercise active front",
         mode="SERIAL_AGENT", reason="execution then exact Reviewer",
@@ -4212,6 +4232,9 @@ def _selftest() -> int:
          and all(item.get("result_snapshot")
                  for item in stage_returned_attempts.values())),
         ("macro-stage journal/plan chain validates", stage_control_ok == []),
+        ("ended plan accepts later canonical corrections through its exact cycle receipt",
+         ended_plan_before_canonical_fix == []
+         and ended_plan_after_canonical_fix == []),
         ("stranded stage_exit is a hard error",
          any("pending its bound stage_plan" in item for item in pending_exit)),
         ("forged nonzero stage-exit debt is a hard error",

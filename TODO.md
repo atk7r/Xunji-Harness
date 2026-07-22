@@ -390,10 +390,13 @@ authority 等工作不重新伪装成未完成计划；发现回归时按其现�
 
 - [ ] 清理 ROADMAP/selftest 中已过时的“无法度量/尚未落地”叙述；区分 scorer 已存在与
   fixture/A-B 仍不足。未实现 adapter 不得写成稳定入口。
-- [ ] Router 只路由、WORKFLOW 给主流程、reference/skills 承载细节；generated excerpt 带
-  source hash/version，手工副本由漂移检查拒绝。
-- [ ] `check_templates.py` 覆盖全部 run/Agent templates、关键字段和 scaffold；closure audit 增加
-  skill→tool、tool→selftest、template→scaffold、schema→validator、docs claim→contract 接线。
+- [x] Agent instruction 垂直切片：versioned manifest、common+role delta+scaffold 组合、
+  assignment bundle，以及 source/artifact SHA drift gate。
+- [ ] 其余 Router/WORKFLOW/reference/skill generated-excerpt 治理；手工副本由漂移检查拒绝。
+- [x] `check_templates.py` 覆盖 Agent manifest/common/role/scaffold、手工 common 重复与 bundle
+  prompt parity。
+- [ ] 其余 run templates 与完整 closure audit：skill→tool、tool→selftest、
+  template→scaffold、schema→validator、docs claim→contract 接线。
   当前治理不变量：`TODO.md` 是唯一前向 backlog，`docs/ROADMAP.md` 只保留研究候选/度量
   结论，`todo1.md` 是已吸收的历史审计输入。
 

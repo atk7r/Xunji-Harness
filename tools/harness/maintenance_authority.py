@@ -31,6 +31,7 @@ DEFAULT_EXACT = {
     ".claude/settings.json",
     ".claude/settings.local.json",
     "config.ini",
+    "tools/agent_instruction_bundle.py",
     "tools/anti_drift.py",
     "tools/agent_settlement.py",
     "tools/cdn_bypass.py",
@@ -92,8 +93,10 @@ DEFAULT_EXACT = {
     "tools/xday_match.py",
 }
 DEFAULT_PREFIXES = {
+    ".claude/agents",
     ".claude/hooks",
     "contracts",
+    "docs/templates/agents",
     "sentinel",
     "tools/__pycache__",
     "tools/harness/.state",

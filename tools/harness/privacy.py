@@ -37,6 +37,7 @@ try:
         ROOT as PROJECT_ROOT,
         has_unquoted_shell_control,
         local_setup_metadata_invocation,
+        parse_exact_python_command,
     )
 except ImportError:  # direct ``python tools/harness/privacy.py`` selftest
     from command_shape import (  # type: ignore[no-redef]
@@ -44,6 +45,7 @@ except ImportError:  # direct ``python tools/harness/privacy.py`` selftest
         ROOT as PROJECT_ROOT,
         has_unquoted_shell_control,
         local_setup_metadata_invocation,
+        parse_exact_python_command,
     )
 
 
@@ -734,6 +736,31 @@ def outbound_command_privacy_reason(command: str, *,
         return "URL-bearing command contains shell control, expansion, comment, or redirection and cannot be inspected as one exact argv"
     if local_setup_metadata_invocation(command, root=PROJECT_ROOT) is not None:
         return ""
+    # Parse registered capability identity before inspecting argument *content*.
+    # A URL inside a control-plane note/next-action remains local data; it does
+    # not turn loop_journal/work_plan/etc. into a custom network executor.  The
+    # exact registry match is deliberately required so malformed or wrapped
+    # commands keep flowing through the conservative URL-bearing path below.
+    try:
+        from . import capability_registry
+    except ImportError:  # direct ``python tools/harness/privacy.py`` selftest
+        import capability_registry  # type: ignore[no-redef]
+    invocation = parse_exact_python_command(
+        command,
+        root=PROJECT_ROOT,
+        allowed_scripts=capability_registry.registered_scripts(root=PROJECT_ROOT),
+        allow_environment=True,
+    )
+    if invocation is not None:
+        spec = capability_registry.match(
+            invocation.script, invocation.args, root=PROJECT_ROOT)
+        supplied_env = {
+            item.split("=", 1)[0] for item in invocation.environment if "=" in item
+        }
+        if spec is not None and supplied_env <= set(spec.allowed_env) \
+                and spec.effect == "control" and spec.scope == "active_run" \
+                and spec.privacy == "none":
+            return ""
     try:
         tokens = shlex.split(command, comments=False, posix=True)
     except ValueError:
@@ -999,6 +1026,10 @@ def selftest() -> int:
          outbound_command_privacy_reason(
              "grep -n 'operator' runs/sample/target.md"
          ) == ""),
+        ("typed active-run control note keeps URL as local data",
+         outbound_command_privacy_reason(
+             "python3 tools/loop_journal.py runs/sample end --next-action "
+             "'Probe https://target.test/' --note 'cycle complete'") == ""),
         ("raw payload project marker denied",
          bool(outbound_command_privacy_reason("curl https://target.test/ -d marker=xunji-proof"))),
         ("raw cross-origin auth redirect denied",

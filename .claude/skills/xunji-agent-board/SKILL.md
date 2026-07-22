@@ -16,8 +16,10 @@ writes canonical state, and closes fronts.
 - `docs/WORKFLOW-reference.md` "Work plan" and "Agent Board" own optional board
   details such as operator profile and threat-hypothesis candidates;
   "Assignment-free global completion Reviewer" owns that separate envelope.
-- `tools/work_plan.py`, `tools/workers.py`, `tools/runtime_receipts.py`, and
-  `tools/loop_journal.py` own executable validation and state transitions.
+- `contracts/agent-instruction-sources.v1.json`,
+  `tools/agent_instruction_bundle.py`, `tools/work_plan.py`, `tools/workers.py`,
+  `tools/runtime_receipts.py`, and `tools/loop_journal.py` own executable source,
+  validation, and state transitions.
 - Read `references/plan-and-delegate.md` completely before planning, committing,
   delegating, or settling a stale unlaunched assignment.
 - Read `references/launch-return-settlement.md` completely before invoking an
@@ -46,7 +48,7 @@ writes canonical state, and closes fronts.
 For `SERIAL_AGENT` / `PARALLEL_AGENTS`:
 
 ```text
-committed work plan
+one `workers.py commit-plan` call for the complete planner draft
 -> delegate ready Hunter lane
 -> exact Hunter Agent launch and durable `state=done` return checkpoint
 -> delegate its digest-bound Reviewer lane
@@ -59,7 +61,9 @@ committed work plan
 Every Agent execution lane has exactly one dependent Reviewer. `done`, Agent prose,
 launch acknowledgement, or reviewer confidence cannot skip any arrow. Reviewer
 supplies a candidate disposition only; Root makes the final evidence-gated
-decision.
+decision. A `finish` settles one execution/review pair, not the plan: repeat the
+chain for every committed lane before closing/deferring its front or calling
+`cycle_end`.
 
 ## Runtime Invariants
 
@@ -68,6 +72,9 @@ decision.
 - Role/type mapping, prompt bytes, plan/result digests, and actual Start/Stop type
   must all agree. `description`, reconstructed tokens, aliases, added context, or
   whitespace changes grant no authority.
+- The delegate-returned instruction-bundle digest is part of the binary launch
+  contract. On source/artifact integrity denial, stop and material replan/delegate;
+  never edit generated context/scaffold to repair it in place.
 - An async parent Post proves launch only. Only the uniquely matching,
   same-session `SubagentStop` plus the owner reference's `state=done` checkpoint
   proves durable return and freezes result bytes.
@@ -93,5 +100,5 @@ then run the relevant structural checks before closure.
 ## Maintenance Checks
 
 ```bash
-python3 tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model
+python3 tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model,check_templates
 ```

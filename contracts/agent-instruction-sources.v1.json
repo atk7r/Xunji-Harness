@@ -1,0 +1,78 @@
+{
+  "schema": "xunji.agent-instruction-sources.v1",
+  "version": 1,
+  "common": {
+    "path": "docs/templates/agents/common.v1.md",
+    "version": "xunji.agent-role-common.v1"
+  },
+  "scaffold": {
+    "path": "docs/templates/agents/scaffold.v1.md",
+    "version": "xunji.agent-scaffold.v1"
+  },
+  "live_agents": {
+    "xunji-hunter": {
+      "path": ".claude/agents/xunji-hunter.md",
+      "version": "xunji.live-agent.hunter.v1"
+    },
+    "xunji-reviewer": {
+      "path": ".claude/agents/xunji-reviewer.md",
+      "version": "xunji.live-agent.reviewer.v1"
+    }
+  },
+  "roles": {
+    "code-audit": {
+      "path": "docs/templates/agents/code-audit.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": "xunji-hunter",
+      "assignable": true
+    },
+    "exploit": {
+      "path": "docs/templates/agents/exploit.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": "xunji-hunter",
+      "assignable": true
+    },
+    "report": {
+      "path": "docs/templates/agents/report.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": "xunji-hunter",
+      "assignable": true
+    },
+    "review": {
+      "path": "docs/templates/agents/review.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": "xunji-reviewer",
+      "assignable": true
+    },
+    "surface": {
+      "path": "docs/templates/agents/surface.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": "xunji-hunter",
+      "assignable": true
+    },
+    "synthesizer": {
+      "path": "docs/templates/agents/synthesizer.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": null,
+      "assignable": false
+    },
+    "verify": {
+      "path": "docs/templates/agents/verify.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": "xunji-hunter",
+      "assignable": true
+    },
+    "web-auth": {
+      "path": "docs/templates/agents/web-hunter.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": "xunji-hunter",
+      "assignable": true
+    },
+    "web-hunter": {
+      "path": "docs/templates/agents/web-hunter.md",
+      "version": "xunji.agent-role-delta.v1",
+      "subagent_type": "xunji-hunter",
+      "assignable": true
+    }
+  }
+}

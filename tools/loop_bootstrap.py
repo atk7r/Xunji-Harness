@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
 LOOP_TEMPLATE = ROOT / "docs" / "templates" / "loop_prompt.md"
 PYTHON_CMD = sys.executable or "python3"
+DISPLAY_PYTHON_CMD = "python3"
 sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_journal  # noqa: E402
@@ -405,11 +406,11 @@ def _print_launch_instructions(run_dir: Path) -> None:
         status_style.field("提示", "不生成 per-run loop_prompt.md；lifecycle owner 读取固定协议和 run 文件。该入口不声称 recurring Cron。", "blue", enabled=status_style.color_enabled()),
     ]))
     print(_pretty_block("常用监控命令", [
-        status_style.field("日志", f"{PYTHON_CMD} tools/loop_journal.py {run_dir} status", "cyan", enabled=status_style.color_enabled()),
-        status_style.field("运行态", f"{PYTHON_CMD} tools/loop_state.py {run_dir} --write", "cyan", enabled=status_style.color_enabled()),
-        status_style.field("进展账本", f"{PYTHON_CMD} tools/progress_ledger.py {run_dir} --write", "cyan", enabled=status_style.color_enabled()),
-        status_style.field("控制面", f"{PYTHON_CMD} tools/run_controller.py {run_dir} --shadow", "cyan", enabled=status_style.color_enabled()),
-        status_style.field("结构检查", f"{PYTHON_CMD} tools/check_run.py {run_dir}", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("日志", f"{DISPLAY_PYTHON_CMD} tools/loop_journal.py {run_dir} status", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("运行态", f"{DISPLAY_PYTHON_CMD} tools/loop_state.py {run_dir} --write", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("进展账本", f"{DISPLAY_PYTHON_CMD} tools/progress_ledger.py {run_dir} --write", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("控制面", f"{DISPLAY_PYTHON_CMD} tools/run_controller.py {run_dir} --shadow", "cyan", enabled=status_style.color_enabled()),
+        status_style.field("结构检查", f"{DISPLAY_PYTHON_CMD} tools/check_run.py {run_dir}", "cyan", enabled=status_style.color_enabled()),
         status_style.field("决策流", f"tail -f {run_dir}/decisions.md", "gray", enabled=status_style.color_enabled()),
         status_style.field("运行态文件", f"cat {run_dir}/state/loop_state.md", "gray", enabled=status_style.color_enabled()),
         status_style.field("控制面文件", f"cat {run_dir}/state/controller_diff.md", "gray", enabled=status_style.color_enabled()),

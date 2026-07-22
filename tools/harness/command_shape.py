@@ -13,7 +13,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import shlex
 import stat
 import sys
@@ -272,14 +271,15 @@ def _executable_identity(value: str) -> tuple[Path, int, int] | None:
 
 
 def trusted_python_token(token: str) -> bool:
-    """Bind a Python command token to the interpreter running this boundary.
+    """Trust the documented bare Python 3 command or this hook interpreter.
 
-    ``PATH`` lookup is used only to resolve a bare spelling; its result never
-    mints trust.  The resolved file must be the same canonical executable and
-    inode as ``sys.executable``.  Absolute spellings are narrower still: only
-    the current spelling or its canonical real path is accepted, so an
-    attacker-controlled absolute/relative alias cannot become trusted merely
-    by having a Python-looking basename.
+    Claude Code launches hooks and Bash tools with different inherited ``PATH``
+    values on macOS.  The exact bare spelling ``python3`` therefore belongs to
+    the trusted single-operator environment rather than to the hook process'
+    executable inode.  Command-local environment overrides remain rejected by
+    :func:`parse_exact_python_command`, and the script path/argv are still
+    validated exactly.  Absolute spellings stay narrower: only the current hook
+    interpreter spelling or canonical real path is accepted.
     """
     value = str(token or "")
     path = Path(value)
@@ -296,10 +296,7 @@ def trusted_python_token(token: str) -> bool:
                 current[0],
             }
             return spelling in permitted and _executable_identity(value) == current
-        if path.name != value:
-            return False
-        resolved = shutil.which(value)
-        return bool(resolved and _executable_identity(resolved) == current)
+        return value == "python3"
     except (OSError, RuntimeError, ValueError):
         return False
 
@@ -450,6 +447,7 @@ def local_setup_metadata_invocation(
     A recon positional is also excluded: this exemption exists only for the
     operator-provided URL metadata path, not arbitrary future setup behavior.
     """
+    command = normalize_local_setup_command(command)
     setup_script = (root / "tools" / "setup_run.py").resolve()
     loop_script = (root / "tools" / "loop_bootstrap.py").resolve()
     invocation = parse_exact_python_command(
@@ -583,6 +581,26 @@ def local_setup_metadata_invocation(
     return invocation
 
 
+def normalize_local_setup_command(command: str) -> str:
+    """Fold one harmless direct-egress reminder into its local setup argv.
+
+    The prefix has no effect on the local-only setup adapter.  It commonly
+    appears when a trusted operator says localhost may run without a proxy.
+    Only these two exact spellings are normalized; the remainder still has to
+    pass :func:`local_setup_metadata_invocation` before it gains authority.
+    """
+    value = str(command or "").strip()
+    inline = "XUNJI_PROXY_REQUIRED=0 "
+    if value.startswith(inline):
+        return value[len(inline):].lstrip()
+    exported = re.fullmatch(
+        r"export[ \t]+XUNJI_PROXY_REQUIRED=0[ \t]*&&[ \t]*(.+)",
+        value,
+        re.DOTALL,
+    )
+    return exported.group(1).strip() if exported else value
+
+
 def selftest() -> int:
     import tempfile
     from unittest import mock
@@ -615,6 +633,20 @@ def selftest() -> int:
                 (issue.category if issue else "") == str(case["shape_issue"]),
             ))
     checks.extend((
+        ("trusted localhost direct-egress reminders normalize only for public setup",
+         all(local_setup_metadata_invocation(command) is not None for command in (
+             "XUNJI_PROXY_REQUIRED=0 python3 tools/loop_bootstrap.py "
+             "--source 'http://127.0.0.1:18765' --type auto",
+             "export XUNJI_PROXY_REQUIRED=0 && python3 tools/loop_bootstrap.py "
+             "--source 'http://127.0.0.1:18765' --type auto",
+         ))
+         and all(local_setup_metadata_invocation(command) is None for command in (
+             "XUNJI_PROXY_REQUIRED=1 python3 tools/loop_bootstrap.py "
+             "--source 'http://127.0.0.1:18765' --type auto",
+             "export XUNJI_PROXY_REQUIRED=0 && python3 tools/workers.py list runs/demo",
+             "export XUNJI_PROXY_REQUIRED=0; python3 tools/loop_bootstrap.py "
+             "--source 'http://127.0.0.1:18765' --type auto",
+         ))),
         ("cancel-unlaunched exact Python argv parses as one control invocation",
          (lambda invocation: bool(
              invocation
@@ -700,39 +732,38 @@ def selftest() -> int:
         fake_python.chmod(0o755)
         with mock.patch.dict(os.environ, {"PATH": str(Path(tmp))}):
             checks.append((
-                "PATH-resolved bare Python cannot mint interpreter trust",
-                not trusted_python_token("python3"),
+                "documented bare python3 is stable across hook and tool PATH",
+                trusted_python_token("python3"),
             ))
-        with mock.patch.object(shutil, "which", return_value=None):
-            unavailable_clean = (
-                f"python {ROOT / 'tools' / 'loop_bootstrap.py'} "
-                "--source 'https://example.test/path?key=opaque' --type auto"
-            )
-            unavailable_wrapped = unavailable_clean + " 2>&1"
-            checks.append((
-                "unavailable bare Python alias is rejected",
-                not trusted_python_token("python3.99"),
-            ))
-            checks.append((
-                "clean unavailable bare Python cannot authorize lifecycle control",
-                parse_exact_python_command(
-                    unavailable_clean,
-                    root=ROOT,
-                    allowed_scripts={(ROOT / "tools" / "loop_bootstrap.py").resolve()},
-                ) is None
-                and local_setup_metadata_invocation(unavailable_clean) is None,
-            ))
-            issue = diagnose_python_control_shape(
-                unavailable_wrapped,
+        unavailable_clean = (
+            f"python3.99 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            "--source 'https://example.test/path?key=opaque' --type auto"
+        )
+        unavailable_wrapped = unavailable_clean + " 2>&1"
+        checks.append((
+            "unrecognized bare Python alias is rejected",
+            not trusted_python_token("python3.99"),
+        ))
+        checks.append((
+            "clean unrecognized bare Python cannot authorize lifecycle control",
+            parse_exact_python_command(
+                unavailable_clean,
                 root=ROOT,
                 allowed_scripts={(ROOT / "tools" / "loop_bootstrap.py").resolve()},
-            )
-            checks.append((
-                "unavailable bare Python output wrapper remains diagnostic-only",
-                issue is not None
-                and issue.code == "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED"
-                and issue.category == "stderr-merge",
-            ))
+            ) is None
+            and local_setup_metadata_invocation(unavailable_clean) is None,
+        ))
+        issue = diagnose_python_control_shape(
+            unavailable_wrapped,
+            root=ROOT,
+            allowed_scripts={(ROOT / "tools" / "loop_bootstrap.py").resolve()},
+        )
+        checks.append((
+            "unrecognized bare Python output wrapper remains diagnostic-only",
+            issue is not None
+            and issue.code == "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED"
+            and issue.category == "stderr-merge",
+        ))
         alias_dir = Path(tmp) / "aliases"
         alias_dir.mkdir()
         interpreter_alias = alias_dir / "python3"
@@ -744,7 +775,7 @@ def selftest() -> int:
         with mock.patch.dict(os.environ, {"PATH": str(alias_dir)}):
             checks.extend((
                 (
-                    "documented bare python3 resolves to the running interpreter",
+                    "documented bare python3 remains trusted in a different PATH",
                     trusted_python_token("python3"),
                 ),
                 (
