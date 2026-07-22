@@ -1002,28 +1002,25 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-22
-- Scope: 修复 Claude-primary lifecycle 的自然语言意图编译：无空格 URL/host 后缀不再被吞成
-  IDN target，bare host 与 effect-preserving URL 写法归一为同一 semantic identity，完整描述保留
-  operation、route 与 constraints，尾随失败说明不撤销主动作；scope admission 同时接受明确
-  自然语言和 concise alias。把“保证下限、不限制模型上限”写入 `AGENTS.md` 并同步 Claude owner。
-- Architecture impact: current operator/turn and setup-source behavior changed — natural language is the
-  primary input and exact argv is the post-compile effect contract。Outbound proxy/privacy/scope/audit/
-  recorder、不同 host/path/query 边界、setup transaction 单写者和 evidence/closure gate 均未放松。
-- Owner/enforcement: `turn_contract.py` owns natural-language compilation、typed intent/context and
-  canonical source hashes；`setup_source.py` owns effect-preserving URL/bare-host normalization and IDNA
-  ambiguity rejection；`scope_admission.py` owns natural/alias admission compilation and the unchanged
-  one-use zero-probe commit；Claude lifecycle/setup skills own driver recovery behavior。
-- Verification: focused `setup_source.py --selftest`、`scope_admission.py --selftest`、
-  `turn_contract.py --selftest` and `py_compile` PASS；full `python3 tools/selftest_all.py` PASS 69/69；
-  `python3 tools/check_rules.py` and `git diff --check` PASS。DeepSeek-backed Claude Code primary-driver
-  session `f558c0d0-09ba-473f-aad9-2f5ebd0ea708` received the no-space natural prompt, executed the exact
-  injected `loop_bootstrap.py` argv, created and activated `runs/127-0-0-1_20260722` in an isolated clone,
-  and recorded `success=true`、`target_action=false` with zero Agent/Cron and no framework mutation。
-- Independent review: the no-arkcli Codex-authored matrix uses a fresh-context DeepSeek-backed Claude Code
-  exact-diff review；its authoritative verdict, session, patch hash, findings and Codex disposition are in
-  `review/records/2026-07-22-natural-language-intent-review.md`。Codex self-review is not counted as a vote.
-- Exclusions: CCB/TypeScript migration、statusline behavior、`tools/xunji_statusline.py`、
-  `docs/XUNJI_PROJECT_INTRO.md` and user live-run/artifact changes remain outside this phase.
+- Scope: 在 `AGENTS.md` 固化 Codex 对 Claude-primary 修改的真实主驾驶验证方法：隔离候选补丁，
+  由 DeepSeek-backed Claude Code 接收真实自然语言任务并经过 Hook/tool/state 链执行，再由 Codex
+  核对 transcript、exact argv、receipt、canonical state 与禁止 effect；随后另做 fresh-context
+  no-tools 独立复审，阶段通过后才提交。该规则只绑定 Codex；Claude 不自动读取 `AGENTS.md`，
+  实跑时仍由 `CLAUDE.md`、`.claude/hooks/` 和 `.claude/skills/` 治理。
+- Architecture impact: none — 本次只收紧 Codex-side repository maintenance 的验证与复审流程，
+  不修改 Claude runtime、authority、tool contract、run state、outbound boundary 或 evidence/closure
+  行为；现有 architecture owner 和 data flow 不变。
+- Owner/enforcement: `AGENTS.md` owns Codex maintenance discipline；本 checkpoint 记录变更归属；
+  未来实际触发 real-driver gate 的 Claude-primary/shared patch 必须把 driver/reviewer evidence
+  写入对应 durable review record。
+- Verification: `python3 tools/check_rules.py`、`python3 tools/check_templates.py`、`git diff --check`
+  均须 PASS。由于本次只修改 Codex-side instruction/process，Claude 不消费 `AGENTS.md`，故不把
+  Claude real-driver run 当作本次有效验证；该 gate 只在未来 patch 实际改变 Claude-primary/shared
+  behavior 时触发。本次机械结果由提交前命令输出确认。
+- Independent review: not run — operator explicitly waived review for this Codex-side documentation/process
+  change and requested direct commit；没有生成 review vote、fingerprint record 或伪造复审结论。
+- Exclusions: Claude 主驾驶 runtime/skills/tools、CCB/TypeScript migration、statusline behavior、
+  `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md` 和用户 live-run/artifact 改动均不在本阶段。
 
 ## 13. 外部设计来源与采用边界
 

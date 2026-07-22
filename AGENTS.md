@@ -158,6 +158,51 @@ Codex is especially useful for:
   conflict resolution;
 - taking delegated run work when the operator or Root wants Codex to help directly.
 
+## Claude Code Real-Driver Validation
+
+This section binds Codex, not Claude Code. Claude Code does not automatically
+read `AGENTS.md` and must not be expected to enforce this procedure. Codex owns
+the orchestration below: it launches Claude in the candidate repository, while
+Claude follows `CLAUDE.md`, `.claude/hooks/`, and the routed `.claude/skills/` as
+the primary driver.
+
+When Codex changes Claude-primary behavior—prompts, `.claude/skills/`, Hooks,
+lifecycle, Agent workflow, framework tools, or any contract Claude must actually
+follow—ordinary unit/selftests are necessary but not sufficient. Before calling
+the phase complete:
+
+1. Apply the exact candidate patch to an isolated clone or temporary worktree so
+   the test cannot replace the operator's current active-run pointer or mix with
+   unrelated live artifacts.
+2. Run the configured DeepSeek-backed Claude Code as the primary driver, for
+   example `claude --dangerously-skip-permissions --output-format json -p
+   '<representative operator prompt>'`. Give it the natural-language task a real
+   operator would use; do not have Codex manually execute the intended commands
+   and call that a driver test.
+3. Exercise the changed path through its real Hooks, tools, transactions, and
+   state transitions. Loopback services/ports are preferred for target-effect
+   fixtures; use a real external target only when the operator put it in scope.
+4. Verify effects independently of Claude's final prose: inspect the transcript,
+   exact tool argv, Hook denials/retries, runtime receipts, canonical files, active
+   pointer, artifacts, and forbidden-effect absence that matter to the change. A
+   claimed success without the corresponding receipt/state is a failed test.
+5. Keep real-driver validation separate from independent review. After the driver
+   run passes, send the exact final diff to a fresh-context, no-edit/no-tools Claude
+   Code reviewer under the Codex-authored matrix; neither run substitutes for the
+   other.
+
+The normal phase gate is therefore: focused/full selftests -> Claude Code
+real-driver run -> receipt/state adjudication -> fresh independent review ->
+commit. If Claude Code or a required fixture is unavailable, record the exact
+limitation and do not describe the primary-driver behavior as validated.
+
+This real-driver gate does not apply to a change that is solely Codex-side, such
+as `AGENTS.md` or `.agents/skills/`, unless that same patch also changes shared or
+Claude-primary runtime behavior. Validate a Codex-only documentation/process
+change with its own rule/doc checks and the normal independent-review matrix;
+running Claude as if it consumed `AGENTS.md` would test the wrong instruction
+source.
+
 ## Discipline
 
 - Do not bypass, replace, or reinterpret the Claude Code hook/guard boundary.
