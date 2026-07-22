@@ -1,9 +1,10 @@
 # Xunji 统一实施计划
 
-> 最后更新：2026-07-18。
+> 最后更新：2026-07-22。
 > 本文件是当前 Python/Harness 修复、三段 Run Macro-Stage 和 Agent/Worker 调度的唯一正式
 > backlog。未勾选项都是 target/roadmap，不代表已经实现；历史审计、
 > `todo1.md` 和 review record 只提供来源与论证，不建立第二套 backlog 真值。
+> CCB/TypeScript 迁移不在当前路线；除非 operator 以后重新立项，不为它保留迁移任务。
 
 ## 0. 总体目标与设计原则
 
@@ -32,9 +33,9 @@
 
 ### 1.1 P0：恢复执行边界基线
 
-- [ ] 审计 pending contract 缺少 target claim 的生产触发路径；当前代码将其作为 intentional
-  fail-closed guard，真实 Claude bootstrap E2E 未触发。只有证明正常路径会漏建 claim 后才按
-  回归修 fixture 或生产路径。
+- [x] 修复 Claude Hook 事件缺 `session_id`/`transcript_path` 时 pending contract 静默不落盘：
+  按 `session -> transcript -> personal singleton` 做因果降级，UserPromptSubmit 与 PreToolUse
+  可恢复同一操作者意图；缺全部 metadata fixture 与真实新 run bootstrap E2E 均通过。
 - [x] 在调整 Agent、Coda、allowlist 或 lifecycle 策略前，恢复 turn-contract、command-shape、
   runtime-receipts、setup-transaction 和 Stop hooks 的 focused selftest 全绿。
 - [x] 为文档展示的命令增加端到端 conformance fixture，证明用户复制的解释器/argv 形状
@@ -242,8 +243,10 @@ Worker/Lane 是逻辑工作单元，Agent 是运行时执行者。计划先拆 l
 ### 4.1 Delivery Wave（依赖顺序，不是状态轴）
 
 W0/W1 已完成生产代码、synthetic/fault fixtures、冻结 staged candidate 全量回归、真实
-Claude Code/DeepSeek 主驾驶 E2E 与 fresh-context 独立复审。W2 已完成可执行的
-work-plan→delegate→Hunter→Reviewer→Root→cycle-end 垂直切片，但整体仍保持未完成：
+Claude Code/DeepSeek 主驾驶 E2E 与 fresh-context 独立复审。W2 核心垂直切片已由真实
+Claude 主驾驶完成 `work-plan→delegate→Hunter→Reviewer→Root finish→canonical→cycle-end`：
+离线约束只生成 Hunter/Reviewer 两条 lane，无目标数据按 barrier/blocked 处置，front 保持
+open，零目标/Web 请求且 Coda 精确投影 receipt。W2 整体仍保持未完成：
 A/B scheduler 收益、stage 默认资源策略、通知/追问控制通道和代码维护 worktree 隔离仍是
 验收/剩余工作。W3 仅完成 route-aware guard 子集，离线/WS/JS capability 与完整可观测性仍开放。
 
@@ -303,6 +306,9 @@ A/B scheduler 收益、stage 默认资源策略、通知/追问控制通道和�
   run-relative/absolute/alias/symlink/nonexistent tail，并让 deny/success receipt 绑定同一 normalized set。
 - [x] guard：proxy/local/target error attribution、half-open、共享多 Agent 预算和真实 request
   count。
+- [x] 真实操作者离线 E2E：新 run setup、Reason pass、exact 两 lane 计划、真实 Hunter/Reviewer
+  Start/Stop、review-disposition→Root blocked→canonical 顺序、typed cycle_end/Coda；无 E-id、
+  finding、假 closure 或 target/Web 请求，Agent 不撞 tool-call hard cap。
 
 ### 4.3 度量与完成门
 

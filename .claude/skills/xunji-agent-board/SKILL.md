@@ -55,15 +55,21 @@ one `workers.py commit-plan` call for the complete planner draft
 -> exact Reviewer Agent launch and durable `state=done` return checkpoint
 -> review-disposition
 -> Root/Single-Synthesizer finish
--> typed cycle_end
+-> obey the owner-emitted NEXT_OWNER_ACTION (delegate, material replan, or typed cycle_end)
 ```
 
-Every Agent execution lane has exactly one dependent Reviewer. `done`, Agent prose,
+Every Agent execution lane has exactly one dependent Reviewer. Under an explicit
+operator target-egress denial, the offline Hunter/Reviewer pair is the complete
+offline suffix; do not manufacture a second verification pair. `done`, Agent prose,
 launch acknowledgement, or reviewer confidence cannot skip any arrow. Reviewer
 supplies a candidate disposition only; Root makes the final evidence-gated
-decision. A `finish` settles one execution/review pair, not the plan: repeat the
-chain for every committed lane before closing/deferring its front or calling
-`cycle_end`.
+decision. A `finish` settles one execution/review pair, not necessarily the plan;
+follow its owner-emitted next action before closing/deferring a front.
+
+`NO_TARGET_DATA_FOR_OFFLINE_ANALYSIS` is a barrier, not target evidence: allocate
+no E-id or finding. Even an `accept-candidate` review of that result finishes the
+execution assignment as `blocked`. Keep the front open/deferred with the exact
+barrier and next evidence action.
 
 ## Runtime Invariants
 
@@ -92,10 +98,11 @@ chain for every committed lane before closing/deferring its front or calling
 ## Root Merge Check
 
 Before Root disposition, verify exact assigned assets, immutable returned bytes,
-Reviewer digest binding, canonical E/F/D anchors, target receipts where required,
-and unresolved conflicts. Candidate output never becomes a finding merely because
-an Agent returned it. Use the commands and recovery rules in the two references,
-then run the relevant structural checks before closure.
+Reviewer digest binding, an existing F/D anchor for the disposition note, target
+receipts where required, and unresolved conflicts. Perform `finish` before any
+canonical promotion; the Hook enforces this order. Candidate output never becomes
+a finding merely because an Agent or Reviewer accepted it. Structural PASS is not
+completion proof.
 
 ## Maintenance Checks
 

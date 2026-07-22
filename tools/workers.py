@@ -716,6 +716,21 @@ def _lane_id(front: str, suffix: str) -> str:
     return f"L-{token or 'UNBOUND'}-{suffix}"
 
 
+def _target_egress_denied_for_plan(run_dir: Path) -> bool:
+    """Project the operator's negative target effect into planner output."""
+    path = run_dir / "state" / "turn_contract.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+    if not isinstance(value, dict) \
+            or value.get("schema") != "xunji.turn_contract.v1":
+        return True
+    return value.get("target_egress_denied") is True
+
+
 def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
     """Expand ranked fronts into effect-typed Root/Hunter/Reviewer lanes.
 
@@ -729,6 +744,7 @@ def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
     # plan within the frozen 16-lane contract; later fronts are handled by a
     # material replan after the first wave is merged.
     selected = ranked[:max(0, min(limit if limit is not None else 2, 2))]
+    target_egress_denied = _target_egress_denied_for_plan(run_dir)
     planned: list[dict] = []
     for row in selected:
         front = str(row["front"])
@@ -788,7 +804,7 @@ def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
             request_cost=0, request_budget=0, merge_cost=5,
         )
         predecessor = offline_review_id
-        if assets:
+        if assets and not target_egress_denied:
             add_lane(
                 lane_id=target_id, role="web-hunter", effect="target",
                 dependencies=[offline_review_id],
@@ -802,6 +818,12 @@ def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
                 request_cost=0, request_budget=0, merge_cost=5,
             )
             predecessor = target_review_id
+        if target_egress_denied:
+            # The offline Hunter already returns a bounded preparation artifact
+            # and its dependent Reviewer verifies that exact result.  With no
+            # target artifact, another VERIFY -> REVIEW pair repeats the same
+            # cognition work and creates avoidable plan debt.
+            continue
         add_lane(
             lane_id=verify_id, role="verify", effect="local_verify",
             dependencies=[predecessor],
@@ -883,6 +905,43 @@ def scheduler_width(lanes: list[dict], *, runtime_slots: int,
         merge_capacity=merge_capacity,
         model_egress_budget=model_egress_budget,
     ))
+
+
+def _capacity_diagnostic(
+    ready: list[dict], *, available_slots: int, request_budget: int,
+    model_egress_budget: int, merge_capacity: int,
+) -> str:
+    """Name the exact limiting capacity for the first ready lane.
+
+    This is an operator-facing recovery contract.  A combined generic error
+    invites the driver to guess which budget to raise and can widen an unrelated
+    effect boundary.
+    """
+    lane = ready[0].get("work_plan_lane", ready[0]) if ready else {}
+    lane_id = str(lane.get("id") or "(unknown)")
+    deficits: list[str] = []
+    if available_slots < 1:
+        deficits.append(
+            f"runtime_slots required=1 available={max(0, available_slots)}")
+    effect = str(lane.get("effect") or "")
+    request_cost = max(1, int(lane.get("request_cost") or 0))
+    if effect == "target" and request_cost > max(0, request_budget):
+        deficits.append(
+            f"request_budget required={request_cost} provided={max(0, request_budget)}")
+    if effect == "model_egress" and request_cost > max(0, model_egress_budget):
+        deficits.append(
+            "model_egress_budget "
+            f"required={request_cost} provided={max(0, model_egress_budget)}")
+    merge_cost = max(0, int(lane.get("merge_cost") or 0))
+    if merge_cost > max(0, merge_capacity):
+        deficits.append(
+            f"merge_capacity required={merge_cost} provided={max(0, merge_capacity)}")
+    if not deficits:
+        deficits.append("scheduler_selection returned no lane despite sufficient scalar capacity")
+    return (
+        "DELEGATE_CAPACITY_INSUFFICIENT: "
+        f"lane={lane_id}; " + "; ".join(deficits)
+    )
 
 
 def _fanout_verdict(rows: list[dict]) -> tuple[str, list[str]]:
@@ -2140,19 +2199,6 @@ def _patch_agent_file_lifecycle(path: Path | None, *, status: str, note: str, st
     _atomic_write(path, text if text.endswith("\n") else text + "\n")
 
 
-def _canonical_evidence_text(run_dir: Path) -> str:
-    path = run_dir / "evidence.md"
-    if not path.exists():
-        return ""
-    raw = path.read_text(encoding="utf-8", errors="replace")
-    blocks: list[str] = []
-    for block in re.split(r"(?m)^(?=##\s)", raw):
-        head = block.splitlines()[0] if block.strip() else ""
-        if re.search(r"\bE-\d+[a-z]*\b", head, re.I):
-            blocks.append(block.lower())
-    return "\n".join(blocks)
-
-
 def _validate_asset_merge(run_dir: Path, rec: dict) -> dict:
     assets = [_normalize_asset(item) for item in rec.get("assets", []) if _normalize_asset(item)]
     if not assets:
@@ -2178,21 +2224,16 @@ def _validate_asset_merge(run_dir: Path, rec: dict) -> dict:
         raise ValueError("merged requires a real returned Agent attempt (SubagentStop)")
     activity = _runtime_receipts.agent_asset_activity(run_dir, str(rec.get("agent") or ""))
     no_activity = [host for host in assets if int(activity.get(host, 0) or 0) < 1]
-    evidence = _canonical_evidence_text(run_dir)
-    no_evidence = [host for host in assets if not re.search(
-        r"(?<![\w.\-])" + re.escape(host) + r"(?![\w.\-])", evidence)]
-    errors: list[str] = []
     if no_activity:
-        errors.append("no successful target-action receipt: " + ", ".join(no_activity))
-    if no_evidence:
-        errors.append("missing canonical E-entry: " + ", ".join(no_evidence))
-    if errors:
-        raise ValueError("per-asset merge gate failed; " + "; ".join(errors))
+        raise ValueError(
+            "per-asset settlement gate failed; no successful target-action receipt: "
+            + ", ".join(no_activity))
     return {
         "satisfied": True,
         "validated_at": _now_iso(),
         "assets": {host: {"target_actions": int(activity.get(host, 0) or 0),
-                           "canonical_evidence": True} for host in assets},
+                           "canonical_promotion": "pending_root_synthesis"}
+                   for host in assets},
     }
 
 
@@ -3216,6 +3257,12 @@ def print_plan(run_dir: Path, limit: int) -> int:
     lanes = lane_suggestions(run_dir, limit=limit)
     verdict, notes = _fanout_verdict(rows)
     print(f"[workers plan] draft only: {verdict} ({'; '.join(notes)})")
+    if _target_egress_denied_for_plan(run_dir):
+        print(
+            "[workers plan] operator effect: TARGET_EGRESS_DENIED; target lanes "
+            "and target-dependent verification are omitted; the offline "
+            "Hunter/Reviewer pair is the complete local suffix."
+        )
     if len(selected) < len(rows):
         print(f"Selected {len(selected)} of {len(rows)} strong candidate(s) due to --limit={limit}.")
     print(
@@ -3514,8 +3561,13 @@ def _delegate_ready_lanes_locked(
         merge_capacity=merge_capacity,
     )
     if not selected:
-        raise ValueError(
-            "ready lanes exceed runtime/request/model-egress/merge capacity")
+        raise ValueError(_capacity_diagnostic(
+            ready,
+            available_slots=min(max(0, limit), available_slots),
+            request_budget=request_budget,
+            model_egress_budget=model_egress_budget,
+            merge_capacity=merge_capacity,
+        ))
 
     selected_lane_ids = [
         str(item["work_plan_lane"].get("id") or "") for item in selected
@@ -3692,11 +3744,34 @@ def _plan_continuation_notice(run_dir: Path) -> str:
     ]
     if not pending:
         return ""
+    freshness = "current"
+    if _work_plan is not None:
+        try:
+            contract = _work_plan._load_turn_contract(run_dir)
+            _work_plan.current_plan(run_dir, contract)
+        except Exception as exc:
+            if str(exc) == "WORK_PLAN_INPUTS_STALE":
+                freshness = "stale"
+            else:
+                freshness = "invalid"
+    if freshness == "stale":
+        return (
+            "NEXT_OWNER_ACTION: committed plan inputs changed after the settled "
+            "prefix; keep its front open, rerun workers.py plan, then use "
+            "workers.py commit-plan with a material --replan-reason so the owner "
+            "inherits completed lanes and rebinds only the unfinished suffix."
+        )
+    if freshness == "invalid":
+        return (
+            "NEXT_OWNER_ACTION: committed plan provenance is invalid; keep its "
+            "front open and repair the reported work-plan owner error before "
+            "delegation, replan, or cycle_end."
+        )
     return (
         "NEXT_OWNER_ACTION: committed plan still has lane debt "
         + ", ".join(pending)
-        + "; keep its front open, do not replan or call cycle_end, and run the "
-          "same documented workers.py delegate checkpoint for the next ready lane."
+        + "; keep its front open, do not call cycle_end, and run the same "
+          "documented workers.py delegate checkpoint for the next ready lane."
     )
 
 
@@ -3728,6 +3803,11 @@ def print_review_disposition(run_dir: Path, target: str, reviewer: str,
     print(
         f"[agent-board review] target={target} reviewer={reviewer} "
         f"disposition={receipt['disposition']} receipt={receipt['receipt_hash'][:12]}"
+    )
+    print(
+        "NEXT_OWNER_ACTION: Root/Single Synthesizer must now settle "
+        f"{target} with workers.py finish using the evidence-supported terminal "
+        "status; do not promote canonical state or delegate a successor first."
     )
     replay_receipts = [
         item for item in receipt.get("artifact_validation", [])
@@ -4184,6 +4264,22 @@ def _selftest() -> int:
         encoding="utf-8")
     rows = suggest(run)
     planned_lanes = lane_suggestions(run, limit=1)
+    offline_plan_run = d / "offline-plan"
+    (offline_plan_run / "state").mkdir(parents=True)
+    for name in ("coverage.json", "frontier.md"):
+        (offline_plan_run / name).write_bytes((run / name).read_bytes())
+    (offline_plan_run / "state" / "turn_contract.json").write_text(
+        json.dumps({
+            "schema": "xunji.turn_contract.v1",
+            "mode": "EXECUTE",
+            "target_egress_denied": True,
+        }),
+        encoding="utf-8",
+    )
+    offline_planned_lanes = lane_suggestions(offline_plan_run, limit=1)
+    offline_plan_output = io.StringIO()
+    with contextlib.redirect_stdout(offline_plan_output):
+        offline_plan_exit = print_plan(offline_plan_run, 1)
     asset_rows = asset_suggestions(run)
     issues = merge_check(run)
     clean_run = d / "clean"
@@ -4653,6 +4749,13 @@ def _selftest() -> int:
     delegate_uses_exact_budget_selection = (
         [item.get("lane_id") for item in budget_batch.get("assignments", [])]
         == ["L-CHEAP"]
+    )
+    exact_capacity_diagnostic = _capacity_diagnostic(
+        [{"work_plan_lane": budget_lanes[0]}],
+        available_slots=1,
+        request_budget=0,
+        model_egress_budget=0,
+        merge_capacity=1,
     )
     (budget_run / "hints.md").write_text(
         "# Hints\n\n- New operator steering after the first execution assignment.\n",
@@ -6163,6 +6266,16 @@ def _selftest() -> int:
          and "workers.py commit-plan" in successful_plan_output.getvalue()
          and "Ready is a post-commit delegate state"
          in successful_plan_output.getvalue()),
+        ("offline operator constraint removes target lanes at planner source",
+         offline_plan_exit == 0
+         and [row["work_plan_lane"]["effect"] for row in offline_planned_lanes]
+         == ["local_read", "local_verify"]
+         and offline_planned_lanes[1]["work_plan_lane"]["dependencies"]
+         == [offline_planned_lanes[0]["work_plan_lane"]["id"]]
+         and "TARGET_EGRESS_DENIED; target lanes and target-dependent verification are omitted"
+         in offline_plan_output.getvalue()
+         and "commit all 2 printed lane-json values"
+         in offline_plan_output.getvalue()),
         ("single-front lane plan reviews every execution lane before advancing",
          [row["work_plan_lane"]["effect"] for row in planned_lanes]
          == ["local_read", "local_verify", "target", "local_verify",
@@ -6331,8 +6444,12 @@ def _selftest() -> int:
          receipts_missing_fails_closed),
         ("zero-tool Agent cannot be marked merged", zero_activity_merge_blocked),
         ("partial asset package cannot be marked merged", partial_asset_merge_blocked),
-        ("every asset action plus canonical E-entry satisfies merge gate",
+        ("every asset action settles before later canonical promotion",
          full_asset_merge_allowed),
+        ("delegate capacity error names the exact limiting budget",
+         exact_capacity_diagnostic == (
+             "DELEGATE_CAPACITY_INSUFFICIENT: lane=L-EXPENSIVE; "
+             "merge_capacity required=20 provided=1")),
         ("planner output is committed unchanged before delegation",
          planner_commit_exit == 0
          and generated_plan_lanes == planned_plan.get("lanes")
@@ -6396,9 +6513,9 @@ def _selftest() -> int:
          and planned_next_batch["assignments"][0].get("effect") == "target"),
         ("Root finish keeps the front open until every committed lane settles",
          "NEXT_OWNER_ACTION" in planned_continuation_notice
-         and generated_plan_lanes[2]["id"] in planned_continuation_notice
          and "keep its front open" in planned_continuation_notice
-         and "do not replan or call cycle_end" in planned_continuation_notice),
+         and "--replan-reason" in planned_continuation_notice
+         and "inherits completed lanes" in planned_continuation_notice),
         ("generated replan inherits the exact completed lane prefix",
          inherited_completed_lanes
             == ["L-F-010-OFFLINE", "L-F-010-OFFLINE-REVIEW"]

@@ -7,7 +7,7 @@
 > (check_run hard-fails a confirmed entry with no artifact, warns with no control).
 > Full meanings: `docs/cognition/README.md` "Evidence Confidence".
 
-## E-001
+## E-xxx
 
 - Maturity: phenomenon / candidate / finding
 - Reportable: yes / no (confirmed vuln→report; coverage/verdict→summary)

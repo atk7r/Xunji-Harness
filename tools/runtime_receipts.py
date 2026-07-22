@@ -4724,7 +4724,7 @@ def valid_tool_events(
 
 CONTROL_RECEIPT_TOOLS = {
     "CronList", "CronCreate", "CronDelete",
-    "TaskCreate", "TaskUpdate", "TodoWrite",
+    "ScheduleWakeup", "TaskCreate", "TaskUpdate", "TodoWrite",
 }
 
 

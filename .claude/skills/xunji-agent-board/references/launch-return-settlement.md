@@ -106,18 +106,20 @@ hash. Use its `VERIFIED_ARTIFACT` lines as factual input to canonical evidence;
 never substitute notification prose.
 
 Before `merged`, verify every assigned asset has the required transcript-backed
-target receipt and canonical E-entry, plus any control/replay evidence needed for
-promotion. A zero-tool or partial package cannot merge. `blocked`, `failed`, and
+target receipt and the frozen candidate has any control/replay evidence needed for
+later promotion. Root `finish` accepts the reviewed result into synthesis; it does
+not itself create an E-id or finding. A zero-tool or partial package cannot merge.
+`blocked`, `failed`, and
 `abandoned` use the literal note grammar `Reason: <exact barrier>; Front: F-xxx`;
 optional E/D anchors must already exist. These statuses preserve unresolved
 coverage debt.
 `done` means returned but not Root-disposed; it is not a valid Root-authored
 `finish` transition.
-After every `finish`, obey its `NEXT_OWNER_ACTION`. Canonical E/D material may be
-written when supported, but keep the assigned front open while any committed lane
-is unassigned, running, awaiting review, or awaiting Root disposition. Do not mark
-the front closed/deferred, replan around the remaining lane, or attempt `cycle_end`;
-repeat the documented delegate/return/review/finish chain until the notice disappears.
+After `review-disposition`, obey its `NEXT_OWNER_ACTION` and perform Root `finish`
+before canonical promotion or successor delegation. After every `finish`, obey its
+next action: a fresh plan routes to `delegate`; materially changed inputs route to
+owner-generated replan with inherited completed lanes; no debt routes to typed
+`cycle_end`. Keep the assigned front open until that route settles.
 The assignment's typed `tool_call_limit` covers every attempted child call from
 Agent start, including the four binding Reads and denials; an RDT loop budget
 cannot raise it. `SubagentStart` freezes the value, and PreToolUse atomically
@@ -147,6 +149,12 @@ python3 tools/loop_journal.py runs/<dir> end --next-action "运行 check_run 验
 The example next action is not universal. Use the one concrete action justified by
 the current plan; the final Coda must project the receipt's `next_action` exactly.
 Missing, stale, duplicate, or out-of-order debt fails closed.
+
+Typed `cycle_end` settles this committed plan cycle only. It does not close its
+front or the engagement. If target effects were denied and network classes remain
+unruled, preserve that front as open/deferred, record the barrier without an E-id,
+and project the exact next evidence action in Coda. `STRUCTURAL_PASS` or warnings
+from `check_run` never justify a finding, front closure, or “Residual risk: none”.
 
 Before synthesis/closure, inspect Agent, lifecycle, merge, and conflict debt in the
 following owner-defined order:

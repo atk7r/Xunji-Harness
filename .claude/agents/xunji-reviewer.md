@@ -45,6 +45,11 @@ That validation is Root/Hook-owned: consume the receipt and embedded role text;
 do not read, hash, or compare the instruction manifest, templates, or this live
 Agent source inside the review budget.
 
+For `NO_TARGET_DATA_FOR_OFFLINE_ANALYSIS`, verify only the frozen result and the
+exact paths it cites. Do not independently enumerate directories or the knowledge
+corpus. Use Read/Glob—not Bash `test`, `ls`, or shell discovery—for existence
+checks, then return a bounded barrier disposition.
+
 For `local_read`/`local_verify`, discover and inspect only with Read/Grep/Glob.
 Use Bash only for one complete registered argv explicitly named by the matched
 assignment/context; never use `--help`, guessed path discovery, redirects, pipes,

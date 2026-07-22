@@ -21,6 +21,13 @@ read `.claude/xunji_active_run`, then that run's `state/assignments.json`. Requi
 one row matching every binding, and Read only its exact `agent_file` and `context`
 paths. Missing, duplicate, mismatched, stale, or out-of-plan state is a blocker.
 
+After those binding reads, check the frozen context for local target-derived
+artifacts before any broad discovery. If target egress/request budget is zero and
+no captured target artifact exists, return
+`NO_TARGET_DATA_FOR_OFFLINE_ANALYSIS` after the minimum canonical check. Do not
+enumerate the knowledge corpus: knowledge is selected by a concrete captured
+signal, not used to manufacture one.
+
 For `local_read`/`local_verify`, discover and inspect only with Read/Grep/Glob.
 Use Bash only for one complete registered argv explicitly named by the matched
 assignment/context; never use `--help`, guessed path discovery, redirects, pipes,

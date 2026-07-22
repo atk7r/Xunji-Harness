@@ -25,22 +25,22 @@
 <!-- 条件段 —— 随着攻击深入逐步填充。每个 IS-xxx 记录一个已探测的输入形状。
      跨 front 可复用的请求模板。 -->
 
-### IS-001
+### IS-xxx
 
-- URL pattern: POST /authService/authUser/v2/login/phone
-- Content-Type: application/x-www-form-urlencoded
-- Key params: phone (numeric, 11-digit), password (string)
-- Auth required: none
-- Response shape: JSON {code: int, msg: string, data: object|null}
-- Seen on hosts: app.example.com
-- Source JS/artifact: evidence/render_app/network.json or evidence/app.bundle.js
-- Client-controlled params: phone, password
-- Client-side signature/token/nonce logic: none / sign(param+ts) in app.bundle.js
-- Role or permission hint: public-unauth / user-owned id / admin-only route hint
-- State transition: none / draft->submitted / created->paid
-- Linked threat hypothesis: H-001
-- Tested payload classes: SQLi-login (C-004), NoSQLi (C-005)
-- Saturation: 2/5 (SQLi, NoSQLi, type-confusion, SSTI, auth-bypass)
+- URL pattern:
+- Content-Type:
+- Key params:
+- Auth required:
+- Response shape:
+- Seen on hosts:
+- Source JS/artifact:
+- Client-controlled params:
+- Client-side signature/token/nonce logic:
+- Role or permission hint:
+- State transition:
+- Linked threat hypothesis:
+- Tested payload classes:
+- Saturation:
 
 ## Permission / State Working Matrix (Conditional)
 
@@ -52,7 +52,7 @@
 
 | Front | Action/request | Role A expected | Role B observed E-id | State edge | Next control |
 |---|---|---|---|---|---|
-| F-001 | GET /api/profile?id=... | owner-only | E-001 | n/a | replay with victim-owned id |
+| | | | | | |
 
 ## Discovery Channels
 

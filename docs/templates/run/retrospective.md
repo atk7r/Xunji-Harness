@@ -17,7 +17,7 @@
 不能用整节共用的一个 Status 蒙混。fixed 必须填 Fixed by + Verification，
 open/deferred 必须填 Residual risk；或明确写 no framework/tooling issue。>
 
-### FW-001
+### FW-xxx
 
 - Problem:
 - Status: <fixed|open|deferred>

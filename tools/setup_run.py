@@ -1006,12 +1006,21 @@ def _selftest() -> int:
         str(item.get("event") or "")
         for item in journal["last_cycle_phase_events"]
     ]
+    scaffold_text = "\n".join(
+        (rd / name).read_text(encoding="utf-8", errors="replace")
+        for name in REQUIRED
+    )
     checks = [
         ("all required files copied", all((rd / n).exists() for n in REQUIRED)),
         ("evidence/ subdir", (rd / "evidence").is_dir() and (rd / "evidence" / ".gitkeep").exists()),
         ("scripts/ subdir", (rd / "scripts").is_dir()),
         ("operator profile scaffolded", (rd / "state" / "operator_profile.json").exists()),
         ("frontier template has depth field", "Current depth" in (rd / "frontier.md").read_text(encoding="utf-8")),
+        ("canonical scaffold contains no fake concrete IDs or example hosts",
+         not re.search(
+             r"(?m)^#{2,3}\s+(?:F|H|E|D|FP|FW)-\d{3}\b",
+             scaffold_text)
+         and "app.example.com" not in scaffold_text),
         ("no-overwrite guard raises", _raises_exist(rd)),
         ("setup phase journal records start and end",
          phase_events == ["phase_start", "phase_end"] and not journal["open_phase"]),

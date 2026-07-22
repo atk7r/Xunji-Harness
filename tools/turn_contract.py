@@ -113,11 +113,35 @@ DIRECT_EGRESS_DENIAL_RE = re.compile(
     r"(?:allow|approve|accept|direct[ -]?egress)",
     re.I,
 )
+ALL_NETWORK_DENIAL_RE = re.compile(
+    r"(?:禁止|不要|不得|不允许|无需).{0,24}"
+    r"(?:任何|所有|一切)?\s*(?:网络请求|网络访问|联网|出站)|"
+    r"(?:完全|仅)?\s*离线(?:测试|运行|执行)?|"
+    r"(?:do\s+not|don't|must\s+not|no)\s+(?:make\s+|send\s+|use\s+)?"
+    r"(?:any\s+|all\s+)?(?:network\s+(?:requests?|access)|egress)|"
+    r"(?:offline[- ]only|run\s+offline)",
+    re.I,
+)
+TARGET_EGRESS_DENIAL_RE = re.compile(
+    r"(?:禁止|不要|不得|不允许|无需).{0,32}"
+    r"(?:向|对)?\s*(?:目标).{0,16}(?:网络|请求|访问|出站|探测|扫描)|"
+    r"(?:禁止|不要|不得|不允许|无需).{0,24}(?:探测|扫描)|"
+    r"(?:do\s+not|don't|must\s+not|no)\s+(?:send\s+|make\s+|perform\s+)?"
+    r"(?:target\s+)?(?:network\s+requests?|target\s+(?:egress|requests?|probing|scanning)|"
+    r"probes?|scans?)",
+    re.I,
+)
+WEB_TOOL_DENIAL_RE = re.compile(
+    r"(?:禁止|不要|不得|不允许|无需).{0,32}(?:WebFetch|WebSearch|浏览器)|"
+    r"(?:do\s+not|don't|must\s+not|no)\s+(?:use\s+)?"
+    r"(?:WebFetch|WebSearch|(?:the\s+)?browser|web\s+(?:fetch|search))",
+    re.I,
+)
 NON_EGRESS_TOOLS = {
     "Agent", "AskUserQuestion", "CronCreate", "CronDelete", "CronList",
     "Edit", "Glob", "Grep", "ListMcpResourcesTool", "MultiEdit", "NotebookEdit",
-    "Read", "ReadMcpResourceTool", "Skill", "TaskCreate", "TaskOutput", "TaskStop",
-    "TaskUpdate", "TodoWrite",
+    "Read", "ReadMcpResourceTool", "ScheduleWakeup", "Skill", "TaskCreate",
+    "TaskOutput", "TaskStop", "TaskUpdate", "TodoWrite",
     "WebSearch", "Write",
 }
 
@@ -142,6 +166,7 @@ E_AGENT_INSTRUCTION_SOURCE_STALE = "XUNJI_E_AGENT_INSTRUCTION_SOURCE_STALE"
 E_AGENT_ARTIFACT_INTEGRITY = "XUNJI_E_AGENT_ARTIFACT_INTEGRITY"
 E_LIFECYCLE_PRIVATE_API = "XUNJI_E_LIFECYCLE_PRIVATE_API"
 E_RUNTIME_RECEIPT_HOOK_FAILED = "XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED"
+E_ROOT_SETTLEMENT_REQUIRED = "XUNJI_E_ROOT_SETTLEMENT_REQUIRED"
 ERROR_CODE_RE = re.compile(r"^\[([A-Z0-9_]+)\]")
 ENV_ASSIGNMENT_TOKEN_RE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*=.*", re.DOTALL)
@@ -330,6 +355,21 @@ def _operator_intent_text(prompt: str) -> str:
             continue
         kept.append(INLINE_DATA_RE.sub(" ", raw_line))
     return "\n".join(kept)
+
+
+def _operator_effect_constraints(prompt: str) -> tuple[bool, bool]:
+    """Freeze explicit negative network intent without treating it as an ACL."""
+    intent = _operator_intent_text(prompt)
+    clauses = [
+        item.strip() for item in re.split(r"[\n。！？!?；;，,]+", intent)
+        if item.strip()
+    ]
+    all_network = any(ALL_NETWORK_DENIAL_RE.search(item) for item in clauses)
+    return (
+        all_network or any(
+            TARGET_EGRESS_DENIAL_RE.search(item) for item in clauses),
+        all_network or any(WEB_TOOL_DENIAL_RE.search(item) for item in clauses),
+    )
 
 
 def _natural_lifecycle_intent(intent: str) -> tuple[bool, bool]:
@@ -641,8 +681,15 @@ def _contract_from_event(
     source_sha256s, source_ambiguous = _prompt_source_authority(prompt)
     run_name_sha256s, run_ambiguous = _prompt_run_authority(prompt)
     slug_sha256s, slug_ambiguous = _prompt_slug_authority(prompt)
+    natural_transition, natural_bind = _natural_lifecycle_intent(intent_text)
+    loop_requested = _prompt_has_loop_directive(prompt)
+    target_egress_denied, web_tools_denied = _operator_effect_constraints(prompt)
     maintenance = maintenance_authority.operator_intent(
-        prompt, previous_mode=previous_mode)
+        prompt,
+        previous_mode=previous_mode,
+        lifecycle_intent=bool(
+            loop_requested or natural_transition or natural_bind),
+    )
     scope_request, scope_error = scope_admission.parse_operator_directive(prompt)
     if maintenance and scope_request:
         maintenance = False
@@ -652,8 +699,6 @@ def _contract_from_event(
     if scope_error:
         mode = EXPLAIN
     now = time.time()
-    natural_transition, natural_bind = _natural_lifecycle_intent(intent_text)
-    loop_requested = _prompt_has_loop_directive(prompt)
     loop_source = _prompt_loop_source(prompt) if loop_requested else ""
     if re.match(r"(?i)^https?://", loop_source):
         loop_source_kind = "url"
@@ -723,6 +768,8 @@ def _contract_from_event(
             DIRECT_EGRESS_APPROVAL_RE.search(prompt)
             and not DIRECT_EGRESS_DENIAL_RE.search(prompt)
         ),
+        "target_egress_denied": target_egress_denied,
+        "web_tools_denied": web_tools_denied,
         "fanout_override": bool(re.search(r"(?:明确)?允许串行|不要使用\s*(?:Agent|子代理)|serial override", prompt, re.I)),
         "intent_normalizations": intent_normalizations,
         "loop_requested": loop_requested,
@@ -2907,6 +2954,83 @@ def _maintenance_receipt_paths(event: dict, contract: dict | None = None) -> lis
     return sorted({path for path in _maintenance_event_paths(event) if path})
 
 
+_ROOT_CANONICAL_MUTATION_FILES = {
+    "chains.md", "decisions.md", "evidence.md", "false_positive.md",
+    "findings.md", "frontier.md", "report.md", "review.md",
+}
+
+
+def _root_canonical_mutation_paths(run_dir: Path, event: dict) -> list[str]:
+    """Return canonical run files directly targeted by a Root edit tool."""
+    if str(event.get("tool_name") or "") not in maintenance_authority.WRITE_TOOLS:
+        return []
+    found: set[str] = set()
+    for base in (ROOT, run_dir):
+        paths, invalid = maintenance_authority.event_paths(event, root=base)
+        if invalid:
+            continue
+        for path in paths:
+            normalized = str(path).replace("\\", "/")
+            if normalized in _ROOT_CANONICAL_MUTATION_FILES:
+                found.add(normalized)
+                continue
+            prefix = f"runs/{run_dir.name}/"
+            if normalized.startswith(prefix):
+                relative = normalized[len(prefix):]
+                if relative in _ROOT_CANONICAL_MUTATION_FILES:
+                    found.add(relative)
+    return sorted(found)
+
+
+def _reviewed_unsettled_assignments(run_dir: Path) -> tuple[list[str], str]:
+    """Find execution results reviewed but not yet disposed by Root."""
+    path = run_dir / "state" / "assignments.json"
+    if not path.exists():
+        return [], ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+        rows = data.get("assignments") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            raise ValueError("assignments is not a list")
+    except Exception as exc:
+        return [], f"assignment state unreadable: {type(exc).__name__}"
+    reviewed_targets = {
+        str(target)
+        for row in rows if isinstance(row, dict)
+        and str(row.get("role") or "") == "review"
+        and str(row.get("status") or "").strip().lower() == "reviewed"
+        for target in row.get("reviews_assignments", [])
+        if str(target)
+    }
+    pending = sorted({
+        str(row.get("agent") or "")
+        for row in rows if isinstance(row, dict)
+        and str(row.get("agent") or "") in reviewed_targets
+        and str(row.get("role") or "") != "review"
+        and str(row.get("status") or "").strip().lower() == "done"
+    } - {""})
+    return pending, ""
+
+
+def _root_settlement_reason(run_dir: Path, event: dict) -> str:
+    """Keep review -> Root disposition -> canonical promotion in one order."""
+    if str(event.get("agent_id") or "").strip():
+        return ""
+    paths = _root_canonical_mutation_paths(run_dir, event)
+    if not paths:
+        return ""
+    pending, error = _reviewed_unsettled_assignments(run_dir)
+    if error:
+        return f"[{E_ROOT_SETTLEMENT_REQUIRED}] {error}; canonical mutation denied."
+    if not pending:
+        return ""
+    return (
+        f"[{E_ROOT_SETTLEMENT_REQUIRED}] review-disposition 已冻结，先对 "
+        f"{', '.join(pending)} 执行 workers.py finish（按证据选择 merged/blocked/"
+        f"failed/abandoned），再修改 {', '.join(paths)}；Reviewer 接受候选不等于 finding。"
+    )
+
+
 def _shell_command_names(command: str, *, _depth: int = 0) -> list[str]:
     """Return executable basenames from actual shell command positions only."""
     if _depth > 2:
@@ -4665,6 +4789,31 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             return "缺少当前 session 的 turn contract；先由 UserPromptSubmit 记录 EXECUTE/EXPLAIN/PAUSE 模式。"
         return ""
 
+    if contract.get("web_tools_denied") and (
+            tool in {"WebFetch", "WebSearch"}
+            or "browser" in tool.lower()):
+        return (
+            "[XUNJI_E_OPERATOR_EFFECT_DENIED] 当前顶层操作者明确禁止 "
+            "WebFetch/WebSearch/浏览器；本回合只能继续本地离线工作。"
+        )
+    if contract.get("target_egress_denied"):
+        if _is_target_action(event):
+            return (
+                "[XUNJI_E_OPERATOR_EFFECT_DENIED] 当前顶层操作者明确禁止"
+                "目标出站/探测/扫描；保留本地读取、验证、Reviewer 和"
+                "无网络 Agent lane。"
+            )
+        if tool == "Agent":
+            agent_prompt = str(tool_input.get("prompt") or "")
+            assignment, front = runtime_receipts._assignment_fields(agent_prompt)
+            assignment_record = _assignment_record(run_dir, assignment, front) \
+                if assignment else {}
+            if str((assignment_record or {}).get("effect") or "") == "target":
+                return (
+                    "[XUNJI_E_OPERATOR_EFFECT_DENIED] 当前顶层操作者明确禁止"
+                    "目标出站；不得启动 effect=target 的 Agent assignment。"
+                )
+
     if tool == "CronCreate":
         if _new_run_transition_pending(contract, run_dir):
             return (
@@ -4698,6 +4847,10 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
         if not ok:
             return "CronDelete 只可删除当前 CronList 观察到的本 run job：" + note
         return ""
+
+    settlement_reason = _root_settlement_reason(run_dir, event)
+    if settlement_reason:
+        return settlement_reason
 
     iteration_gate_reason = _loop_iteration_gate_reason(run_dir, event, contract)
     if iteration_gate_reason:
@@ -4930,6 +5083,17 @@ def _context_message(contract: dict, run_dir: Path) -> str:
         "原始 prompt hash 与 exact source/effect 绑定保持不变。"
         if "leading_horizontal_whitespace" in normalizations else ""
     )
+    effect_note = ""
+    if contract.get("target_egress_denied"):
+        effect_note += (
+            "[Xunji operator effect: TARGET_EGRESS_DENIED] 本回合不得规划、"
+            "派发或执行 target lane；只允许本地离线 Hunter/Reviewer/Root 工作。"
+        )
+    if contract.get("web_tools_denied"):
+        effect_note += (
+            "[Xunji operator effect: WEB_TOOLS_DENIED] 本回合不得使用 "
+            "WebFetch/WebSearch/浏览器。"
+        )
     if contract.get("scope_admission_parse_error"):
         return (
             "[Xunji scope admission: INVALID] 未授予任何资产准入权限；"
@@ -4960,7 +5124,7 @@ def _context_message(contract: dict, run_dir: Path) -> str:
                 ROOT / "tools" / "loop_bootstrap.py",
                 ["--source", "<source>", "--type", "auto"],
             )
-            return intent_note + (
+            return effect_note + intent_note + (
                 "[Xunji lifecycle: SETUP_REQUIRED] 当前显式 /loop 要求创建新 run。先在"
                 "同一顶层 operator 回合执行 prompt 对应的精确 "
                 f"`{retry_hint}`；命令后不得"
@@ -4969,13 +5133,13 @@ def _context_message(contract: dict, run_dir: Path) -> str:
                 "front 拆解并真实派发 Agent。形状拒绝应同回合精确重试，不能等裸“继续”。"
             )
         if contract.get("run_transition_requested"):
-            return intent_note + (
+            return effect_note + intent_note + (
                 "[Xunji lifecycle: RUN_BOUND] 新 run 已绑定；按 fresh CronList -> CronCreate"
                 "（prompt 精确命名当前 run）-> TaskCreate/TaskUpdate -> graph/fronts -> real "
                 "Agent launches -> adjudication/synthesis 推进。Agent/目标动作会在缺少当前"
                 "回合回执时 fail closed。"
             )
-        return intent_note + (
+        return effect_note + intent_note + (
             "[Xunji lifecycle: ITERATION_PLAN_REQUIRED] 当前是显式 /loop；在 Agent/目标"
             "动作前先创建或更新本回合 TaskCreate/TaskUpdate（兼容 TodoWrite）清单，再按"
             "图谱、front、真实 Agent 回执和单一综合者流程推进。"
@@ -4986,7 +5150,7 @@ def _context_message(contract: dict, run_dir: Path) -> str:
         "先真实调用至少两个不同 front 的 Agent。"
         if state.get("fanout_required") else ""
     )
-    return "[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。" + fanout
+    return effect_note + "[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。" + fanout
 
 
 def _explicit_pointer_rebind(contract: dict, run_dir: Path) -> bool:
@@ -7285,6 +7449,10 @@ def _selftest() -> int:
         "tool_name": "WebFetch", "tool_input": {
             "url": "https://example.test/health"},
     }
+    denied_schedule_wakeup = {
+        "tool_name": "ScheduleWakeup", "tool_input": {
+            "prompt": "continue offline review for https://example.test/health"},
+    }
     readonly_url_argument = {
         "tool_name": "Bash", "tool_input": {
             "command": "cat https://example.test/not-a-network-read"},
@@ -7302,9 +7470,51 @@ def _selftest() -> int:
             registry_probe, coordinator_denial_reason)
         and _denial_is_target_action(
             denied_webfetch, coordinator_denial_reason)
+        and not _is_target_action(denied_schedule_wakeup)
+        and not _denial_is_target_action(
+            denied_schedule_wakeup, coordinator_denial_reason)
         and not _is_target_action(readonly_url_argument)
         and not _denial_is_target_action(
             readonly_url_argument, coordinator_denial_reason)
+    )
+    settlement_order_run = root / "settlement-order"
+    (settlement_order_run / "state").mkdir(parents=True)
+    (settlement_order_run / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n### F-001\n- Status: open\n"
+        "- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8",
+    )
+    settlement_rows = {
+        "assignments": [{
+            "agent": "A-hunter-001", "role": "web-hunter", "status": "done",
+        }, {
+            "agent": "A-review-001", "role": "review", "status": "reviewed",
+            "reviews_assignments": ["A-hunter-001"],
+        }],
+    }
+    (settlement_order_run / "state" / "assignments.json").write_text(
+        json.dumps(settlement_rows), encoding="utf-8")
+    canonical_edit = {
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": str(settlement_order_run / "evidence.md"),
+            "old_string": "old", "new_string": "new",
+        },
+    }
+    settlement_contract = {
+        "schema": SCHEMA, "mode": EXECUTE, "session_id": "settlement-session",
+        "prompt_sha256": "f" * 64, "updated_at": time.time(),
+    }
+    canonical_before_finish_blocked = (
+        E_ROOT_SETTLEMENT_REQUIRED in evaluate_pretool(
+            settlement_order_run, canonical_edit, settlement_contract)
+    )
+    settlement_rows["assignments"][0]["status"] = "blocked"
+    (settlement_order_run / "state" / "assignments.json").write_text(
+        json.dumps(settlement_rows), encoding="utf-8")
+    canonical_after_finish_unblocked = (
+        E_ROOT_SETTLEMENT_REQUIRED not in evaluate_pretool(
+            settlement_order_run, canonical_edit, settlement_contract)
     )
     pointer_write = {
         "tool_name": "Write",
@@ -8549,6 +8759,42 @@ def _selftest() -> int:
         == "transcript_path"
         and not (missing_metadata_pretool.stdout or "").strip()
         and len(missing_metadata_claims) == 1
+    )
+    singleton_pending_dir = root / "singleton-metadata-pending"
+    singleton_claims_dir = root / "singleton-metadata-claims"
+    singleton_env = dict(env)
+    singleton_env["XUNJI_PENDING_TURN_DIR"] = str(singleton_pending_dir)
+    singleton_env["XUNJI_TRANSITION_CLAIMS_DIR"] = str(singleton_claims_dir)
+    singleton_submit = no_run_hook({
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": f"/loop {source_url} 创建新 run",
+    }, hook_env=singleton_env)
+    singleton_pretool = no_run_hook({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_use_id": "singleton-metadata-bootstrap",
+        "tool_input": source_control["tool_input"],
+    }, hook_env=singleton_env)
+    singleton_pending = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in singleton_pending_dir.glob("*.json")
+    ] if singleton_pending_dir.is_dir() else []
+    singleton_claims = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in singleton_claims_dir.glob("*.json")
+    ] if singleton_claims_dir.is_dir() else []
+    missing_all_metadata_hook_pipeline_recovers_intent = bool(
+        singleton_submit.returncode == 0
+        and len(singleton_pending) == 1
+        and singleton_pending[0].get("session_id")
+        == SINGLE_OPERATOR_SESSION_BINDING
+        and singleton_pending[0].get("session_binding_kind")
+        == "single_operator"
+        and not (singleton_pretool.stdout or "").strip()
+        and len(singleton_claims) == 1
+        and singleton_claims[0].get("session_id")
+        == SINGLE_OPERATOR_SESSION_BINDING
+        and singleton_claims[0].get("status") == "active"
     )
     private_api_attempt = no_run_hook({
         "hook_event_name": "PreToolUse",
@@ -10182,6 +10428,49 @@ def _selftest() -> int:
     missing_session_maintenance_contract = _contract_from_event({
         "prompt": maintenance_prompt,
     }, run_name=run.name)
+    operator_e2e_loop_contract = _contract_from_event({
+        "prompt": (
+            f"/loop {source_url} 创建一个新的 E2E run。你是 Xunji 主驾驶；"
+            "若 Hook 拒绝某个动作，读取诊断并在同一回合修复重试。"
+        ),
+        "session_id": "operator-e2e-session",
+    })
+    operator_offline_loop_contract = _contract_from_event({
+        "prompt": (
+            f"/loop {source_url} 创建一个新的 E2E run。你是 Claude Code 主驾驶；"
+            "禁止对目标发送任何网络请求，不要使用 WebFetch/WebSearch/浏览器/探测/扫描；"
+            "若 Hook 拒绝某个动作，读取诊断并在同一回合修复重试。"
+        ),
+        "session_id": "operator-offline-e2e-session",
+    })
+    positive_target_loop_contract = _contract_from_event({
+        "prompt": (
+            f"/loop {source_url} 不要绕过代理，允许使用受控工具对目标探测。"
+        ),
+        "session_id": "operator-positive-target-session",
+    })
+    offline_target_reason = evaluate_pretool(
+        run, target_event, operator_offline_loop_contract)
+    offline_web_reason = evaluate_pretool(
+        run, {"tool_name": "WebSearch", "tool_input": {"query": "offline"}},
+        operator_offline_loop_contract)
+    offline_browser_reason = evaluate_pretool(
+        run, {"tool_name": "Browser", "tool_input": {"url": source_url}},
+        operator_offline_loop_contract)
+    with mock.patch.object(
+            sys.modules[__name__], "_assignment_record",
+            return_value={"effect": "target"}):
+        offline_agent_reason = evaluate_pretool(run, {
+            "tool_name": "Agent",
+            "tool_input": {
+                "prompt": "XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001",
+                "subagent_type": "xunji-hunter",
+            },
+        }, operator_offline_loop_contract)
+    offline_read_allowed = evaluate_pretool(
+        run, {"tool_name": "Read", "tool_input": {
+            "file_path": str(run / "frontier.md")}},
+        operator_offline_loop_contract) == ""
     quoted_source_contract = _contract_from_event({
         "prompt": (
             "/loop runs/example\nsource text: /xunji-maintenance --scope "
@@ -10983,6 +11272,23 @@ def _selftest() -> int:
          == SINGLE_OPERATOR_SESSION_BINDING
          and missing_session_maintenance_contract.get("session_binding_kind")
          == "single_operator"),
+        ("explicit loop intent outranks a framework recovery clause",
+         operator_e2e_loop_contract.get("mode") == EXECUTE
+         and operator_e2e_loop_contract.get("loop_requested") is True
+         and operator_e2e_loop_contract.get("lifecycle_operation") == "source"
+         and not operator_e2e_loop_contract.get("maintenance_intent")),
+        ("operator offline intent freezes target and named web-tool constraints",
+         operator_offline_loop_contract.get("mode") == EXECUTE
+         and operator_offline_loop_contract.get("target_egress_denied") is True
+         and operator_offline_loop_contract.get("web_tools_denied") is True
+         and "XUNJI_E_OPERATOR_EFFECT_DENIED" in offline_target_reason
+         and "XUNJI_E_OPERATOR_EFFECT_DENIED" in offline_web_reason
+         and "XUNJI_E_OPERATOR_EFFECT_DENIED" in offline_browser_reason
+         and "XUNJI_E_OPERATOR_EFFECT_DENIED" in offline_agent_reason
+         and offline_read_allowed),
+        ("proxy discipline plus positive target intent does not mint an offline denial",
+         positive_target_loop_contract.get("target_egress_denied") is False
+         and positive_target_loop_contract.get("web_tools_denied") is False),
         ("ordinary live loop cannot edit a safety-critical path",
          ordinary_critical_edit_blocked),
         ("maintenance intent allows a typed critical-path edit",
@@ -11344,6 +11650,8 @@ def _selftest() -> int:
          protected_denial_not_target),
         ("destination-free local shell denials do not mint target-result debt",
          denial_receipt_effects_are_narrow),
+        ("Root canonical promotion waits for reviewed assignment settlement",
+         canonical_before_finish_blocked and canonical_after_finish_unblocked),
         ("direct active-run pointer Write is blocked", pointer_write_blocked),
         ("direct coverage ledger Write is blocked", coverage_write_blocked),
         ("controlled coverage sync remains allowed", coverage_sync_control_allowed),
@@ -11482,6 +11790,8 @@ def _selftest() -> int:
          same_turn_clean_retry_claims),
         ("missing session metadata preserves normalized operator intent across hooks",
          missing_session_hook_pipeline_recovers_intent),
+        ("missing all Claude metadata uses the personal singleton across hooks",
+         missing_all_metadata_hook_pipeline_recovers_intent),
         ("private setup transaction APIs cannot bypass the public lifecycle adapter",
          no_active_private_lifecycle_api_blocked),
         ("a new bare continue prompt revokes pending transition authority",

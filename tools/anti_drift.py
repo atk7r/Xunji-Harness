@@ -28,7 +28,7 @@ Usage:
     python tools/anti_drift.py            # print the anchor (UserPromptSubmit hook target)
     python tools/anti_drift.py --selftest # offline regression
     python tools/anti_drift.py --semantic-status runs/<dir>
-    python tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N \
+    python tools/anti_drift.py --record-reason-pass runs/<dir> \
         --chosen-front F-001 --reason "whole-graph adjudication"
 """
 from __future__ import annotations
@@ -396,7 +396,7 @@ def load_reason_pass_receipts(run_dir: str | Path) -> tuple[list[dict], list[str
 def record_reason_pass(
     run_dir: str | Path,
     *,
-    cycle_id: int,
+    cycle_id: int | None = None,
     chosen_front: str,
     reason: str,
     read_at: float | None = None,
@@ -421,7 +421,10 @@ def record_reason_pass(
         receipts, errors = load_reason_pass_receipts(run)
         if errors:
             raise ValueError("invalid reason-pass receipt chain: " + "; ".join(errors[:3]))
-        if receipts and cycle_id != int(receipts[-1]["cycle_id"]) + 1:
+        next_cycle_id = int(receipts[-1]["cycle_id"]) + 1 if receipts else 1
+        if cycle_id is None:
+            cycle_id = next_cycle_id
+        if cycle_id != next_cycle_id:
             raise ValueError("cycle_id must be exactly one greater than the latest receipt cycle_id")
         digests = _stable_reason_pass_digests(run)
         recorded_at = time.time() if read_at is None else read_at
@@ -1159,14 +1162,24 @@ def _selftest() -> int:
     canonical_mtimes = {path: path.stat().st_mtime_ns for path in canonical_paths}
     first_receipt = record_reason_pass(
         semantic_run,
-        cycle_id=1,
         chosen_front="F-001",
         reason="whole-graph read; F-001 has the strongest unresolved auth signal",
     )
     checks.append(("receipt binds all required semantic digests",
                    first_receipt.get("schema") == REASON_PASS_SCHEMA
+                   and first_receipt.get("cycle_id") == 1
                    and all(_SHA256_RE.fullmatch(str(first_receipt.get(field) or ""))
                            for field in REASON_PASS_DIGEST_FIELDS)))
+    auto_receipt_run = _semantic_run("auto_reason_pass_sequence")
+    auto_first = record_reason_pass(
+        auto_receipt_run, chosen_front="F-001", reason="first automatic receipt")
+    auto_second = record_reason_pass(
+        auto_receipt_run, chosen_front="F-001", reason="second automatic receipt")
+    checks.append(("omitted receipt sequence advances atomically",
+                   auto_first.get("cycle_id") == 1
+                   and auto_second.get("cycle_id") == 2
+                   and auto_second.get("previous_receipt_hash")
+                   == auto_first.get("receipt_hash")))
     checks.append(("recording receipt never touches canonical files",
                    canonical_mtimes == {path: path.stat().st_mtime_ns for path in canonical_paths}))
     fresh = semantic_freshness(semantic_run)
@@ -1410,7 +1423,10 @@ def main(argv: list[str] | None = None) -> int:
         "--semantic-status", metavar="RUN_DIR",
         help="print semantic freshness, trajectory, and separate operational liveness",
     )
-    parser.add_argument("--cycle-id", type=int, help="strictly increasing run cycle number")
+    parser.add_argument(
+        "--cycle-id", type=int,
+        help="optional explicit receipt sequence; omitted means the next valid value",
+    )
     parser.add_argument("--chosen-front", help="chosen F-<number> or NONE")
     parser.add_argument("--reason", help="bounded whole-graph adjudication rationale")
     args = parser.parse_args(argv)
@@ -1420,7 +1436,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.record_reason_pass:
         missing = [
             flag for flag, value in (
-                ("--cycle-id", args.cycle_id),
                 ("--chosen-front", args.chosen_front),
                 ("--reason", args.reason),
             )

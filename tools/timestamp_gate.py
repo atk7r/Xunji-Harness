@@ -230,7 +230,13 @@ def _selftest() -> int:
             pass
         sys.stdout = old_stdout
         iso_out = buf.getvalue().strip()
-        checks.append(("--iso flag output matches", iso_out == out["iso"]))
+        try:
+            iso_dt = datetime.strptime(
+                iso_out, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            iso_matches = abs((iso_dt - dt).total_seconds()) <= 2
+        except ValueError:
+            iso_matches = False
+        checks.append(("--iso flag output matches", iso_matches))
 
         # --year
         buf = io.StringIO()

@@ -63,6 +63,10 @@ transaction before typed `cycle_end`; do not replan to manufacture `current=true
 Only independently observed material canonical change justifies stale unlaunched
 cancellation and replan.
 
+When the current turn explicitly denies target egress, the planner emits only the
+offline Hunter and its Reviewer. That pair is the complete offline suffix; do not
+add a verification pair for a target artifact that does not exist.
+
 If the gate returns `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` with
 `invalid-argv`, the command did not execute. Rebuild the complete `commit-plan`
 direct argv and retry in the same operator turn. Do not add pipes,

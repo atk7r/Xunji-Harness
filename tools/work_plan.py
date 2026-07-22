@@ -647,6 +647,9 @@ def _validate_mode(mode: str, lanes: list[dict], run_dir: Path,
                    contract: dict) -> None:
     if mode not in MODES:
         raise PlanError("WORK_PLAN_EXECUTION_MODE_INVALID")
+    if contract.get("target_egress_denied") and any(
+            lane["effect"] == "target" for lane in lanes):
+        raise PlanError("WORK_PLAN_OPERATOR_TARGET_EGRESS_DENIED")
     _validate_reviewer_topology(mode, lanes)
     if mode != "ROOT_DIRECT" and any(
         lane["effect"] in {"control", "repo_mutation"} for lane in lanes
@@ -3791,6 +3794,29 @@ def _selftest() -> int:
     checks.append((
         "work-plan lanes freeze canonical Agent roles without alias fallback",
         noncanonical_roles_rejected,
+    ))
+
+    offline_run, offline_contract = make_run("operator-offline")
+    offline_contract["target_egress_denied"] = True
+    _atomic_json(
+        offline_run / "state" / "turn_contract.json", offline_contract)
+    offline_target_lane = dict(
+        lane_pair("OFFLINE")[0], effect="target", assets=["app.example"],
+        request_cost=1, request_budget=1,
+    )
+    offline_target_plan_error = ""
+    try:
+        commit_plan(
+            offline_run, macro_stage="S1", objective="forbidden target lane",
+            mode="SERIAL_AGENT", reason="should be rejected",
+            exit_gate="no target effect", lanes=[offline_target_lane],
+            contract=offline_contract,
+        )
+    except PlanError as exc:
+        offline_target_plan_error = str(exc)
+    checks.append((
+        "operator offline turn rejects target lanes before assignment",
+        offline_target_plan_error == "WORK_PLAN_OPERATOR_TARGET_EGRESS_DENIED",
     ))
 
     direct_run, direct_contract = make_run("root-direct")

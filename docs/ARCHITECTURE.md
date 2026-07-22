@@ -510,6 +510,19 @@ Hunter 用现有 artifact 返回，不能靠变换 method/path/argv 扩张操作
 每次 Root `finish` 后，workers 从同一 plan projection 输出剩余 lane 的
 `NEXT_OWNER_ACTION`。单个 execution/review pair 已合并不等于 plan 完成；剩余 committed lane
 清债前 front 保持 open，不得以关闭/延后 front、replan 或 cycle_end 跳过已选择的验证链。
+Reviewer disposition 冻结后，Root 必须先 `finish` 再修改 canonical evidence/frontier/decisions；
+PreToolUse 以 `XUNJI_E_ROOT_SETTLEMENT_REQUIRED` 执行该顺序。Target lane 的 `finish merged`
+校验真实 return、per-asset target activity 和冻结 artifact/review binding，但不反向要求 Root
+提前创建 E-entry；canonical promotion 和 finding maturity 仍由后续 evidence/merge/closure gate
+判断。`accept-candidate` 只接受候选，不自动等于 `merged`。
+
+显式 target-egress denial 下，planner 只生成一个 offline Hunter 加其唯一 Reviewer；若本地没有
+target-derived artifact，Hunter 以 `NO_TARGET_DATA_FOR_OFFLINE_ANALYSIS` 早停，Reviewer 只核对
+冻结 result/精确引用，Root 以 `blocked` 记录 barrier，不创建 E-id/finding。Typed `cycle_end`
+只结束该 committed plan cycle，不关闭 front 或 engagement；未排除的网络攻击面必须继续留在
+open/deferred front 和 Coda next action。`ScheduleWakeup` 是 local control，不因其 prompt 含
+target URL 被记成 target denial；delegate 容量不足时诊断必须点名 exact lane、required/provided
+容量，禁止 Root 猜测并抬高无关预算。
 Coverage、planner、assignment、launch prompt 与 child target gate 的 effect identity 统一为
 `host[:port]`；coverage 有显式 port 时，host-only 不再被当作同一 assignment。若 target front
 已有合法 `ASSET-...` opaque ID，该 coverage row 是 ID owner，assignment/context projection
@@ -962,27 +975,34 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-22
-- Scope: 把已经实现并验证的可信单操作者核心正式写入 Codex owner `AGENTS.md`，将常驻规则
-  合并为“对外不可逆出站硬边界 / 对内 LLM 认知护栏 / 非安全边界 / 本地可靠性”四组；删除
-  仍把该模型描述成 transition/target、把 session/pointer 当操作者权限，以及当前 CCB/
-  TypeScript 迁移的陈旧措辞。
-- Architecture impact: none — runtime、Claude-primary owner、Tool contract、状态 owner、出站
-  safety/privacy、evidence/review/closure 行为均不改变；本阶段只让 Codex 常驻规则与本文
-  3.8/3.9 的 current architecture 对齐并去重。
-- Owner/enforcement: `AGENTS.md` 拥有 Codex 辅助/维护常驻边界；`docs/ARCHITECTURE.md` 仍是
-  共享设计索引。实际执行继续由 `CLAUDE.md`、`.claude/hooks/`、typed tools、canonical run
-  files、evidence gate 与 closure gate 拥有。
-- Verification: `check_rules.py`、`check_templates.py`、`git diff --check` 通过；`AGENTS.md`
-  已无 CCB/TypeScript、transition/target model 或 session-identity authority 陈旧措辞。
+- Scope: 修复 Claude-primary 个人操作者体验与主动 Agent 垂直切片：缺 Hook metadata 的
+  pending contract 因果降级、显式 offline 两 lane、Reason-pass 自动序号、精确 delegate 容量
+  诊断、Hunter/Reviewer 无数据早停、review→finish→canonical 顺序、barrier/blocked 与
+  cycle-end/front closure 分离，以及 `ScheduleWakeup` control 分类；同步移除 run template 假 ID，
+  并修复 `timestamp_gate` CLI 自测跨 UTC 秒边界的偶发假失败。
+- Architecture impact: current runtime behavior changed — operator intent now survives missing Claude
+  metadata without becoming an ACL ceremony; Agent settlement owns the pre-canonical ordering;
+  no-target-data is decision/barrier state rather than evidence; plan-cycle completion no longer implies
+  front/engagement closure. Outbound proxy/privacy/guard/recorder boundaries remain unchanged.
+- Owner/enforcement: `turn_contract.py` owns prompt/effect and pre-canonical ordering；`work_plan.py`/
+  `workers.py` own offline planning、capacity diagnosis、review/Root settlement；`runtime_receipts.py`
+  owns local control classification；Claude Hunter/Reviewer definitions and `xunji-agent-board` own the
+  concise driver behavior；canonical run files and evidence/closure gates remain truth owners.
+- Verification: focused `selftest_all.py` suites 8/8 PASS、`check_rules.py` PASS、`git diff --check`
+  PASS。DeepSeek-backed Claude Code real operator session
+  `a10df8ba-053e-4714-9a27-c4d2f63cbaeb` created `operator-e2e-invalid_20260722`, ran exactly two
+  offline lanes with authentic Hunter/Reviewer Start/Stop (7/11 admitted local calls), zero target
+  PostToolUse and zero Web requests, settled Root as blocked before canonical writes, kept F-001 open,
+  created no E-id/finding, and returned the exact typed cycle-end Coda. `check_run` returned
+  STRUCTURAL_PASS with only the expected empty-surface warning; this is not completion proof.
 - Independent review: fresh DeepSeek-backed Claude Code session
-  `58dc95d5-9b64-4906-9151-a3a72da3efa9` reviewed the complete final-state content
-  for staged SHA-256 `7d04214f893ba0098b754dfd9bd1b7fc9d4018580396110b61290fc6fe7f783e`
-  and returned PASS with no blocking findings. It could not independently execute
-  the hash command under the maintenance Bash boundary, so a final metadata-only
-  exact-diff attestation is required before commit. No arkcli review or Codex self-vote.
-- Exclusions: 不修改 Claude-primary runtime、`.claude/skills/`、`.agents/skills/`、
-  `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md` 或现场 run/artifact；pending-contract
-  生产调用链审计和真实操作者 E2E 留在下一实现阶段。
+  `07fb652c-1486-4f86-bc52-66c37d96434f` reviewed exact staged SHA-256
+  `8bff2804a105129e1e41e5ff0c4fabecf18ae95da6772bb63bf51788c575859b` and returned PASS for all
+  seven requested boundaries with no blocker. The only noted non-blocking sensitivity is the deliberately
+  broad Chinese offline-intent regex. Adding this checkpoint result and its durable review record is a
+  metadata-only delta that requires final exact-diff attestation before commit. No arkcli review or Codex self-vote.
+- Exclusions: CCB/TypeScript migration、statusline behavior、`tools/xunji_statusline.py`、
+  `docs/XUNJI_PROJECT_INTRO.md` and user live-run/artifact changes remain outside this phase.
 
 ## 13. 外部设计来源与采用边界
 

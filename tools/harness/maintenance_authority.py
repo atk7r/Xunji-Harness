@@ -204,7 +204,12 @@ def path_allowed(path: str) -> bool:
     )
 
 
-def operator_intent(prompt: str, *, previous_mode: str = "") -> bool:
+def operator_intent(
+    prompt: str,
+    *,
+    previous_mode: str = "",
+    lifecycle_intent: bool = False,
+) -> bool:
     """Recognize ordinary operator wording as local framework maintenance.
 
     Only the first non-empty instruction is considered.  Quoted target/tool
@@ -217,6 +222,11 @@ def operator_intent(prompt: str, *, previous_mode: str = "") -> bool:
         return False
     if re.match(r"^/xunji-maintenance(?:\s|$)", first):
         return True
+    # A top-level lifecycle instruction is the primary effect.  Framework words
+    # in a trailing recovery clause (for example "if a Hook denies it, repair
+    # and retry") must not turn an operator /loop into repository maintenance.
+    if lifecycle_intent or re.match(r"^/loop(?:\s|$)", first, re.I):
+        return False
     if previous_mode == "MAINTENANCE" and (
             CONTINUE_ONLY_RE.fullmatch(first)
             or re.match(r"^(?:继续|continue|resume).{0,40}(?:修复|修改|优化|fix|modify|optimi[sz]e)", first, re.I)
@@ -383,6 +393,13 @@ def _selftest() -> int:
                    and not operator_intent("fix the target code bug")
                    and not operator_intent("修复目标 session 超时问题")
                    and not operator_intent("fix the target pointer bug")))
+    checks.append(("lifecycle primary intent outranks a maintenance recovery clause",
+                   not operator_intent(
+                       "/loop https://operator-e2e.invalid 创建 run；"
+                       "若 Xunji Hook 拒绝则修复并重试")
+                   and not operator_intent(
+                       "创建新 run；若 Xunji Hook 拒绝则修复并重试",
+                       lifecycle_intent=True)))
     adjacent = root / "docs/maintenance-note.md"
     adjacent.parent.mkdir(parents=True, exist_ok=True)
     adjacent.write_text("# note\n", encoding="utf-8")
