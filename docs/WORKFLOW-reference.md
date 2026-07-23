@@ -741,11 +741,14 @@ result, review disposition, or Root disposition; status vocabulary never grants
 permission to accept unsupported material.
 
 If canonical `chains.md` or `hints.md` changes after an execution assignment was
-created, the plan becomes stale. A unique returned/failed execution may still admit its
-exact dependent `local_verify` Reviewer, but only with the frozen result digest and
-the exact reviewed assignment. A non-Reviewer may be cancelled only when it provably
-never launched and input staleness is the sole plan failure. The exact typed command
-and recovery sequence live in
+created, or a newer operator turn supersedes its authority, the plan becomes stale.
+A unique returned/failed execution may still admit its exact dependent
+`local_verify` Reviewer, but only with the frozen result digest and the exact reviewed
+assignment. A non-Reviewer may be cancelled only when it provably never launched and
+the plan is stale solely by turn binding, canonical inputs, or both. The v2 tombstone
+records `stale_basis=turn|inputs|both`, the old/new turn bindings, and both input
+digests; it never revives old execution authority. The exact typed command and
+recovery sequence live in
 `xunji-agent-board/references/plan-and-delegate.md`. Cancellation is not a result,
 review, merge, evidence item, or cycle end; Root must commit a material replan, and
 any new runtime fact for the cancelled assignment fails closed.

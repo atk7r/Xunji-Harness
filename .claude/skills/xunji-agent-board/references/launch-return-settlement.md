@@ -93,7 +93,9 @@ example here.
 This remains true when the committed plan is `WORK_PLAN_TURN_STALE`: the old plan
 is settlement identity only. The current `EXECUTE` turn must have its own normal
 iteration-plan receipt, and only the unique digest/assignment/lane-bound Reviewer
-may launch. Do not re-run the old Hunter or replan around its review debt.
+may launch. If an old non-Reviewer assignment has no authentic launch attempt,
+settle it with `cancel-unlaunched`; do not re-run it or replan around either kind
+of assignment debt.
 
 Invoke the returned exact `xunji-reviewer` binary contract. Its result digest
 must match the frozen Hunter bytes. Reviewer supplies a candidate disposition;

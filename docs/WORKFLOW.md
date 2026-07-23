@@ -239,8 +239,9 @@ Only a first non-empty top-level `/loop(?:\s|$)` directive delivered to
 horizontal whitespace/BOM while preserving the exact raw prompt hash. Claude interprets
 the complete operator description and expresses it through one exact public lifecycle argv;
 the Hook treats that argv as `xunji.lifecycle-intent-candidate.v1` and mechanically promotes
-it only when the prompt hash, unique source/run anchor, exact effect, route constraints, and
-one-use claim match. `INTENT_PENDING` allows that candidate plus reads, but no target action,
+it only when the prompt hash, one unique anchor for the model-selected effect, exact effect,
+route constraints, and one-use claim match. A named run and target URLs may coexist, but only
+the selected role gains lifecycle meaning. `INTENT_PENDING` allows that candidate plus reads, but no target action,
 Agent, Cron, or unrelated mutation. Exact aliases and obvious questions/denials/data containers
 remain deterministic; ordinary affirmative language is not a positive verb allowlist.
 The candidate digest also binds narrowed effect constraints. In particular, `setup only` /

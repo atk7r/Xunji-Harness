@@ -1230,12 +1230,12 @@ def selftest() -> int:
         ("workers unlaunched cancellation is a distinct exact control capability", bool(
             (match(ROOT / "tools/workers.py", [
                 "cancel-unlaunched", "runs/demo_20260101", "A-web-hunter-001",
-                "--reason", "canonical inputs changed before launch",
+                "--reason", "turn or canonical inputs changed before launch",
             ]) or _spec("", "", "", "")).id
             == "control.workers-cancel-unlaunched"
             and (match(ROOT / "tools/workers.py", [
                 "cancel-unlaunched", "runs/demo_20260101", "A-web-hunter-001",
-                "--reason", "canonical inputs changed before launch",
+                "--reason", "turn or canonical inputs changed before launch",
             ]) or _spec("", "", "", "")).recorder == "control_journal"
             and match(ROOT / "tools/workers.py", [
                 "cancel-unlaunched", "runs/demo_20260101", "A-web-hunter-001",

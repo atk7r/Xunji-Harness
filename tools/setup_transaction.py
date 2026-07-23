@@ -3832,7 +3832,7 @@ def _selftest() -> int:
         (true_legacy / "state").mkdir(exist_ok=True)
         direct_source_contract = turn_contract._contract_from_event({
             "session_id": "direct-local-transition",
-            "prompt": f"恢复 run runs/{direct_target.name}",
+            "prompt": f"/loop runs/{direct_target.name}",
         }, run_name=true_legacy.name)
         turn_contract._atomic_json(
             turn_contract.contract_path(true_legacy), direct_source_contract)
@@ -3875,7 +3875,7 @@ def _selftest() -> int:
             (origin / "state").mkdir(parents=True, exist_ok=True)
             contract = turn_contract._contract_from_event({
                 "session_id": session_id,
-                "prompt": f"恢复 run runs/{target.name}",
+                "prompt": f"/loop runs/{target.name}",
             }, run_name=origin.name)
             turn_contract._atomic_json(
                 turn_contract.contract_path(origin), contract)
@@ -3893,7 +3893,7 @@ def _selftest() -> int:
         claims_dir = root / "claims"
         pending = turn_contract.write_pending_contract({
             "session_id": "setup-transaction-selftest",
-            "prompt": "创建一个新 run claim_20260101",
+            "prompt": "/loop https://claim.example 创建一个新 run",
         }, pending_dir=pending_dir)
         turn_contract.write_transition_claim(
             "claim_20260101", pending, claims_dir=claims_dir,
@@ -4327,7 +4327,7 @@ def _selftest() -> int:
         active_target.mkdir()
         active_contract = turn_contract._contract_from_event({
             "session_id": "active-transition",
-            "prompt": f"恢复 run runs/{active_target.name}",
+            "prompt": f"/loop runs/{active_target.name}",
         }, run_name=active_origin.name)
         turn_contract._atomic_json(
             turn_contract.contract_path(active_origin), active_contract)
@@ -4365,7 +4365,7 @@ def _selftest() -> int:
         status_create_identity = frozen_create_identity(status_target)
         status_contract = turn_contract._contract_from_event({
             "session_id": "status-transition",
-            "prompt": f"恢复 run runs/{status_target.name}",
+            "prompt": f"/loop runs/{status_target.name}",
         }, run_name=status_origin.name)
         turn_contract._atomic_json(
             turn_contract.contract_path(status_origin), status_contract)
@@ -4401,7 +4401,7 @@ def _selftest() -> int:
 
         same_target_contract = turn_contract._contract_from_event({
             "session_id": "status-same-target",
-            "prompt": f"恢复 run runs/{status_target.name}",
+            "prompt": f"/loop runs/{status_target.name}",
         }, run_name=status_target.name)
         turn_contract._atomic_json(
             turn_contract.contract_path(status_target), same_target_contract)
@@ -5540,7 +5540,7 @@ def _selftest() -> int:
         wrong_status_target.mkdir()
         wrong_status_contract = turn_contract._contract_from_event({
             "session_id": "wrong-status-transition",
-            "prompt": f"恢复 run runs/{wrong_status_target.name}",
+            "prompt": f"/loop runs/{wrong_status_target.name}",
         }, run_name=wrong_status_origin.name)
         turn_contract._atomic_json(
             turn_contract.contract_path(wrong_status_origin),
@@ -5580,7 +5580,7 @@ def _selftest() -> int:
         overwritten_target.mkdir()
         overwritten_a = turn_contract._contract_from_event({
             "session_id": "overwritten-a",
-            "prompt": f"恢复 run runs/{overwritten_target.name}",
+            "prompt": f"/loop runs/{overwritten_target.name}",
         }, run_name=overwritten_origin.name)
         turn_contract._atomic_json(
             turn_contract.contract_path(overwritten_origin), overwritten_a)

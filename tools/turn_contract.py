@@ -548,15 +548,34 @@ def _model_lifecycle_candidate_allowed(
     if not line:
         return False
     intent = _operator_intent_text(prompt)
-    if source_ambiguous or run_ambiguous \
-            or len(source_values) + len(run_values) != 1:
+    # Source and run anchors have different semantic roles.  A normal operator
+    # prompt may name one existing run and also repeat its target URL; Claude
+    # must be able to select ``resume(run)`` without the URL being promoted to a
+    # second lifecycle source.  Ambiguity in the unselected anchor class remains
+    # harmless because promotion revalidates the exact selected class.
+    unique_source = not source_ambiguous and len(source_values) == 1
+    unique_run = not run_ambiguous and len(run_values) == 1
+    if not (unique_source or unique_run):
         return False
-    return not bool(
+    natural_transition, natural_bind = _natural_lifecycle_intent(intent)
+    hard_denial = bool(
         PAUSE_RE.search(intent)
         or LIFECYCLE_DENIAL_RE.search(intent)
         or LOOP_EXECUTION_DENIAL_RE.search(intent)
         or LIFECYCLE_PERMISSION_QUESTION_RE.search(intent)
-        or QUESTION_RE.search(intent)
+    )
+    if hard_denial:
+        return False
+    if natural_transition or natural_bind:
+        # Effect-narrowing clauses such as "do not modify framework/docs" do
+        # not cancel an earlier affirmative lifecycle request.  Keep only
+        # primary question/data framing as the deterministic read-only floor.
+        primary_data = bool(re.match(
+            r"^\s*(?:这是|以下|上面|日志|记录|引用|示例|例子|文档|教程|复盘|审计)",
+            intent, re.I))
+        return not bool(QUESTION_RE.match(intent) or primary_data)
+    return not bool(
+        QUESTION_RE.search(intent)
         or EXPLAIN_RE.search(intent)
         or SEMANTIC_CANDIDATE_DATA_RE.search(intent)
     )
@@ -640,6 +659,55 @@ def _prompt_run_authority(prompt: str) -> tuple[list[str], bool]:
         hashlib.sha256(name.encode("utf-8", "replace")).hexdigest()
         for name in names[:1]
     ], ambiguous)
+
+
+def _validate_compiled_lifecycle_contract(
+    contract: dict, *, active_run_name: str = "",
+) -> dict:
+    """Reject impossible lifecycle field combinations before they become state.
+
+    This validator is intentionally semantic rather than linguistic.  Prompt
+    parsing and model selection may evolve, but every promoted effect must still
+    fit one coherent state-machine row.
+    """
+    operation = str(contract.get("lifecycle_operation") or "none")
+    source_kind = str(contract.get("loop_source_kind") or "none")
+    run_bind = bool(contract.get("run_bind_requested"))
+    transition = bool(contract.get("run_transition_requested"))
+    mode = str(contract.get("mode") or "")
+    problems: list[str] = []
+
+    if mode == INTENT_PENDING:
+        if operation != "none" or source_kind != "none" or run_bind or transition:
+            problems.append("pending candidate already carries lifecycle authority")
+        if contract.get("model_lifecycle_candidate_allowed") is not True:
+            problems.append("pending candidate is not mechanically promotable")
+    elif operation == "none":
+        if source_kind != "none" or run_bind or transition:
+            problems.append("none operation carries lifecycle state")
+    elif operation == "resume":
+        if source_kind != "run" or not run_bind:
+            problems.append("resume must bind one run source")
+        target = str(contract.get("lifecycle_run_hint") or "")
+        if active_run_name and target == active_run_name and transition:
+            problems.append("same-run resume cannot request a transition")
+    elif operation == "source":
+        if source_kind not in {"url", "file"} or run_bind or not transition:
+            problems.append("source must carry one url/file transition")
+    elif operation == "setup":
+        if source_kind != "none" or run_bind or not transition:
+            problems.append("setup must be an unresolved transition without a source")
+    elif operation == "loop":
+        if source_kind != "none" or run_bind or transition \
+                or not contract.get("loop_requested"):
+            problems.append("source-free loop shape is inconsistent")
+    else:
+        problems.append("unknown lifecycle operation")
+
+    if problems:
+        raise RuntimeError(
+            "TURN_CONTRACT_LIFECYCLE_INVARIANT:" + "; ".join(problems))
+    return contract
 
 
 def _prompt_slug_authority(prompt: str) -> tuple[list[str], bool]:
@@ -934,9 +1002,10 @@ def _contract_from_event(
         mode = EXPLAIN
     model_candidate_allowed = bool(
         not scope_error
+        and not scope_request
         and not maintenance
         and mode in {EXPLAIN, EXECUTE}
-        and not (loop_requested or natural_transition or natural_bind)
+        and not loop_requested
         and _model_lifecycle_candidate_allowed(
             prompt,
             source_values=source_values,
@@ -945,17 +1014,39 @@ def _contract_from_event(
             run_ambiguous=run_ambiguous,
         )
     )
-    # Preserve ordinary execution authority when the deterministic classifier
-    # already recognized an execute turn.  The model candidate path exists to
-    # resolve otherwise-read-only lifecycle wording; it must not turn a normal
-    # target action containing one URL into a lifecycle-only turn.
-    if model_candidate_allowed and mode == EXPLAIN:
+    # A prompt that names one run asks Claude to decide what semantic role that
+    # run has.  Do not let a legacy positive verb classifier skip the candidate
+    # phase: Chinese/English paraphrases such as "运行目录是 ... 按现状继续" or
+    # "use ... as the current run" must compile through the same model-selected
+    # typed effect.  Source-only target execution remains ordinary EXECUTE when
+    # it has no lifecycle intent, so repeating the active target URL does not
+    # accidentally request a new run.
+    semantic_candidate_required = bool(
+        model_candidate_allowed
+        and (
+            natural_transition
+            or natural_bind
+            or (len(run_values) == 1 and not run_ambiguous)
+        )
+    )
+    if semantic_candidate_required \
+            or (model_candidate_allowed and mode == EXPLAIN):
         mode = INTENT_PENDING
+    elif not loop_requested and (
+            natural_transition
+            or natural_bind and (run_ambiguous or bool(run_values))):
+        # A natural-language lifecycle request without one mechanically
+        # selectable anchor cannot carry partial authority.  Keep it read-only
+        # until the operator makes the actual source/run effect unambiguous.
+        mode = EXPLAIN
     now = time.time()
     loop_source = _prompt_loop_source(prompt) if loop_requested else (
-        source_values[0] if len(source_values) == 1 else
-        f"runs/{run_values[0]}" if natural_bind and len(run_values) == 1 else ""
+        "" if mode == INTENT_PENDING else
+        f"runs/{run_values[0]}" if natural_bind and len(run_values) == 1 else
+        source_values[0] if natural_transition and len(source_values) == 1 else ""
     )
+    if mode != EXECUTE:
+        loop_source = ""
     if re.match(r"(?i)^https?://", loop_source):
         loop_source_kind = "url"
     elif _run_name_from_path(loop_source):
@@ -980,7 +1071,7 @@ def _contract_from_event(
             "source" if loop_source_kind in {"url", "file"} else
             "loop"
         )
-    elif natural_bind:
+    elif natural_bind and len(run_values) == 1:
         lifecycle_operation = "resume"
     elif natural_transition:
         lifecycle_operation = "source" \
@@ -992,7 +1083,11 @@ def _contract_from_event(
         "offline" if target_egress_denied else
         "direct" if direct_egress_approved else "proxy"
     )
-    source_hint = _safe_lifecycle_source_hint(loop_source)
+    source_hint_value = loop_source
+    if mode == INTENT_PENDING and len(source_values) == 1:
+        source_hint_value = source_values[0]
+    source_hint = _safe_lifecycle_source_hint(source_hint_value)
+    run_hint = run_values[0] if len(run_values) == 1 else ""
     contract = {
         "schema": SCHEMA,
         "mode": mode,
@@ -1006,6 +1101,7 @@ def _contract_from_event(
         "source_ambiguous": source_ambiguous,
         "source_identity_version": "canonical-v1",
         "lifecycle_source_hint": source_hint,
+        "lifecycle_run_hint": run_hint,
         "run_name_sha256s": run_name_sha256s,
         "run_ambiguous": run_ambiguous,
         "slug_sha256s": slug_sha256s,
@@ -1043,7 +1139,7 @@ def _contract_from_event(
         "intent_normalizations": intent_normalizations,
         "loop_requested": loop_requested,
         "loop_source_kind": loop_source_kind,
-        "run_bind_requested": natural_bind,
+        "run_bind_requested": lifecycle_operation == "resume",
         "run_transition_requested": derived_transition,
         "origin_run": run_name,
         "bound_run": run_name,
@@ -1072,7 +1168,8 @@ def _contract_from_event(
             scope_request.get("reason_sha256") or "")
     if scope_error:
         contract["scope_admission_parse_error"] = scope_error
-    return contract
+    return _validate_compiled_lifecycle_contract(
+        contract, active_run_name=run_name)
 
 
 def _safe_run_summary(run_dir: Path) -> tuple[dict, str]:
@@ -2271,6 +2368,7 @@ def _promote_model_lifecycle_candidate(
         "intent_resolution": "model_tool_candidate",
         "model_lifecycle_candidate_allowed": False,
         "intent_candidate_promoted_at": time.time(),
+        "lifecycle_run_hint": target_name if operation == "resume" else "",
     })
     candidate = {
         "schema": "xunji.lifecycle-intent-candidate.v1",
@@ -2290,7 +2388,8 @@ def _promote_model_lifecycle_candidate(
         "source_kind": source_kind,
     })
     promoted["operator_intent"] = operator_intent
-    return promoted
+    return _validate_compiled_lifecycle_contract(
+        promoted, active_run_name=run_dir.name)
 
 
 def _validate_model_intent_candidate(
@@ -4151,10 +4250,28 @@ def _decision_metadata(reason: str, event: dict) -> dict:
 
 
 def _new_run_transition_pending(contract: dict, run_dir: Path) -> bool:
-    transition = bool(contract.get("run_transition_requested")) or bool(
-        RUN_TRANSITION_RE.search(str(contract.get("prompt_excerpt") or "")))
+    if "run_transition_requested" in contract:
+        transition = bool(contract.get("run_transition_requested"))
+    else:
+        # Read-only compatibility for contracts created before the typed field
+        # existed.  New contracts never regain authority by reparsing prose.
+        transition = bool(
+            RUN_TRANSITION_RE.search(str(contract.get("prompt_excerpt") or "")))
     if not transition:
         return False
+    operation = _contract_lifecycle_operation(contract)
+    candidate = contract.get("intent_candidate") \
+        if isinstance(contract.get("intent_candidate"), dict) else {}
+    transaction = contract.get("transition_transaction") \
+        if isinstance(contract.get("transition_transaction"), dict) else {}
+    target = str(
+        candidate.get("target_run")
+        or transaction.get("expected_run")
+        or contract.get("lifecycle_run_hint")
+        or ""
+    )
+    if target:
+        return target != run_dir.name
     origin = str(contract.get("origin_run") or "")
     bound = str(contract.get("bound_run") or "")
     # Before an active-run transition, origin and bound both name the current
@@ -4164,6 +4281,8 @@ def _new_run_transition_pending(contract: dict, run_dir: Path) -> bool:
     # never replace that sentinel with ``run_dir.name``.
     if not bound or bound != run_dir.name:
         return True
+    if operation == "resume":
+        return False
     return bool(origin and bound == origin)
 
 
@@ -4392,6 +4511,61 @@ def _stale_reviewer_agent_ready(run_dir: Path, event: dict, plan: dict) -> bool:
         return False
 
 
+def _stale_plan_recovery_hint(run_dir: Path, plan: dict) -> str:
+    """Route stale-plan debt without suggesting the replan that debt forbids."""
+    try:
+        projection = run_model.plan_cycle_projection(run_dir, plan=plan)
+    except Exception:
+        projection = {}
+    states = [
+        item for item in projection.get("lane_states", [])
+        if isinstance(item, dict)
+    ]
+    unlaunched = sorted({
+        str(item.get("assignment") or "")
+        for item in states
+        if str(item.get("runtime_state") or "") == "no-attempt"
+        and re.fullmatch(
+            r"A-[A-Za-z0-9._-]+", str(item.get("assignment") or ""))
+    })
+    if unlaunched:
+        assignment = unlaunched[0]
+        return (
+            "旧 plan 含可证明未启动的 assignment；先执行 exact typed settlement "
+            f"`python3 tools/workers.py cancel-unlaunched runs/{run_dir.name} "
+            f"{assignment} --reason \"turn or canonical inputs changed before launch\"`，"
+            "再为仍开放的 front 提交新 plan。"
+        )
+    returned = [
+        item for item in states
+        if str(item.get("runtime_state") or "") in {"returned", "failed"}
+        and str(item.get("role") or "").strip().lower() != "review"
+        and item.get("complete") is not True
+    ]
+    if returned:
+        return (
+            "旧 plan 含真实 returned/failed execution；它只保留 settlement identity。"
+            f"先运行 `python3 tools/workers.py delegate runs/{run_dir.name} --limit 2` "
+            "取得唯一 digest-bound Reviewer 的 exact launch contract，完成 review/Root "
+            "settlement 后再 replan；不得重启旧 Hunter。"
+        )
+    running = [
+        item for item in states
+        if str(item.get("runtime_state") or "") == "running"
+    ]
+    if running:
+        return (
+            "旧 plan 仍有真实 running attempt；不得取消或 replan。"
+            f"运行 `python3 tools/workers.py status runs/{run_dir.name}`，"
+            "等待同一因果 attempt 返回后走 Reviewer settlement。"
+        )
+    return (
+        f"先运行 `python3 tools/workers.py status runs/{run_dir.name}` 读取 canonical "
+        "lane debt，并按 no-attempt cancellation 或 returned/failed Reviewer settlement "
+        "清偿；assignment debt 清零后才可提交新 plan。"
+    )
+
+
 def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
     """Require one current plan/delegation decision before cycle effects.
 
@@ -4457,6 +4631,22 @@ def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
                 "WORK_PLAN_TURN_STALE", "WORK_PLAN_INPUTS_STALE",
                 "WORK_PLAN_DIGEST_MISMATCH", "WORK_PLAN_ID_MISMATCH",
             } else E_WORK_PLAN_REQUIRED
+            if detail in {"WORK_PLAN_TURN_STALE", "WORK_PLAN_INPUTS_STALE"}:
+                try:
+                    stale_plan = work_plan.validate_plan(
+                        work_plan.transaction_bound_plan(run_dir),
+                        check_inputs=False)
+                    next_action = _stale_plan_recovery_hint(
+                        run_dir, stale_plan)
+                except Exception:
+                    next_action = (
+                        f"先运行 `python3 tools/workers.py status runs/{run_dir.name}` "
+                        "读取 canonical debt；不要在 assignment debt 未结算时 replan。"
+                    )
+                return (
+                    f"[{code}] 当前 plan 已与本 turn 或 canonical inputs 脱离："
+                    f"{detail}。{next_action}"
+                )
             return (
                 f"[{code}] 当前 EXECUTE cycle 在 Agent/目标动作前必须提交与本 turn 和 canonical "
                 "输入 digest 一致的 xunji.work-plan.v1，并先选择 ROOT_DIRECT / "
@@ -5663,8 +5853,15 @@ def _context_message(contract: dict, run_dir: Path) -> str:
     if mode == EXPLAIN:
         return "[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。"
     if mode == INTENT_PENDING:
+        run_hint = str(contract.get("lifecycle_run_hint") or "")
         source_hint = str(contract.get("lifecycle_source_hint") or "")
-        if source_hint:
+        if run_hint:
+            candidate_hint = _python_control_hint(
+                ROOT / "tools" / "loop_bootstrap.py",
+                ["--resume", f"runs/{run_hint}"],
+            )
+            action = f"若语义判断是恢复该 run，提交 `{candidate_hint}`"
+        elif source_hint:
             candidate_hint = _python_control_hint(
                 ROOT / "tools" / "loop_bootstrap.py",
                 ["--source", source_hint, "--type", "auto"],
@@ -6468,6 +6665,13 @@ def _selftest() -> int:
         "prompt": "继续执行runs/other_20260101",
         "session_id": "attached-run-session",
     }, run_name=run.name)
+    mixed_run_target_contract = _contract_from_event({
+        "prompt": (
+            "继续渗透 runs/other_20260101 - "
+            "http://www.scshr.com"
+        ),
+        "session_id": "mixed-run-target-session",
+    }, run_name=run.name)
     natural_direct_route_contract = _contract_from_event({
         "prompt": "继续执行 runs/other_20260101，不用代理，直连 localhost",
         "session_id": "natural-direct-route-session",
@@ -6595,8 +6799,12 @@ def _selftest() -> int:
         "prompt": f"resume run runs/{run.name}",
         "session_id": "prepared-recovery-session",
     }, run_name=run.name)
+    promoted_prepared_recovery_contract = _promote_model_lifecycle_candidate(
+        run,
+        _lifecycle_invocation(prepared_recovery_event["tool_input"]["command"]),
+        prepared_recovery_contract)
     prepared_recovery_allowed = evaluate_pretool(
-        run, prepared_recovery_event, prepared_recovery_contract) == ""
+        run, prepared_recovery_event, promoted_prepared_recovery_contract) == ""
     prepared_receipt_path.unlink()
 
     def registered_event(script: str, *args: str) -> dict:
@@ -7264,6 +7472,59 @@ def _selftest() -> int:
     }))
     hashed_source_setup_allowed = evaluate_pretool(
         run, source_control, source_operator_contract) == ""
+    promoted_natural_single_url_contract = _promote_model_lifecycle_candidate(
+        run, _lifecycle_invocation(source_control["tool_input"]["command"]),
+        natural_single_url_contract)
+    promoted_english_imperative_source_contract = \
+        _promote_model_lifecycle_candidate(
+            run, _lifecycle_invocation(source_control["tool_input"]["command"]),
+            english_imperative_source_contract)
+    promoted_natural_punctuated_contract = _promote_model_lifecycle_candidate(
+        run, _lifecycle_invocation(natural_clean_source["tool_input"]["command"]),
+        natural_punctuated_contract)
+    cloud_source_control = {
+        "tool_name": "Bash",
+        "tool_input": {"command": (
+            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            "--source 'https://cloud.scshr.com/' --type auto"
+        )},
+    }
+    promoted_natural_attached_url_contract = \
+        _promote_model_lifecycle_candidate(
+            run, _lifecycle_invocation(
+                cloud_source_control["tool_input"]["command"]),
+            natural_attached_url_contract)
+    promoted_attached_run_contract = _promote_model_lifecycle_candidate(
+        run, _lifecycle_invocation(resume_control["tool_input"]["command"]),
+        attached_run_contract)
+    promoted_mixed_run_target_contract = _promote_model_lifecycle_candidate(
+        run, _lifecycle_invocation(resume_control["tool_input"]["command"]),
+        mixed_run_target_contract)
+    natural_resume_variant_prompts = [
+        "继续 runs/other_20260101，目标仍是 https://www.scshr.com/",
+        "请继续执行 runs/other_20260101 - www.scshr.com",
+        "恢复 run runs/other_20260101，并访问 http://www.scshr.com",
+        "接着处理 runs/other_20260101；目标域名 www.scshr.com",
+        "运行目录是 runs/other_20260101，请按现状继续渗透 www.scshr.com",
+        "Resume runs/other_20260101 and continue testing www.scshr.com",
+        "Pick up runs/other_20260101; the target remains https://www.scshr.com/",
+        "Use runs/other_20260101 as the current run, then continue www.scshr.com",
+        "恢复 run runs/other_20260101",
+        "Resume run runs/other_20260101",
+    ]
+    natural_resume_variant_contracts = [
+        _contract_from_event({
+            "prompt": prompt,
+            "session_id": f"natural-resume-variant-{index}",
+        }, run_name=run.name)
+        for index, prompt in enumerate(natural_resume_variant_prompts, start=1)
+    ]
+    promoted_natural_resume_variants = [
+        _promote_model_lifecycle_candidate(
+            run, _lifecycle_invocation(resume_control["tool_input"]["command"]),
+            item)
+        for item in natural_resume_variant_contracts
+    ]
     punctuated_source_preserved_exactly = bool(
         len(punctuated_source_contract.get("source_sha256s") or []) == 1
         and evaluate_pretool(
@@ -7283,9 +7544,14 @@ def _selftest() -> int:
             run, unselected_source, multi_url_contract)
     )
     natural_single_url_authorized = bool(
-        len(natural_single_url_contract.get("source_sha256s") or []) == 1
+        natural_single_url_contract.get("mode") == INTENT_PENDING
+        and len(natural_single_url_contract.get("source_sha256s") or []) == 1
         and not natural_single_url_contract.get("source_ambiguous")
-        and evaluate_pretool(run, source_control, natural_single_url_contract) == ""
+        and promoted_natural_single_url_contract.get("mode") == EXECUTE
+        and promoted_natural_single_url_contract.get("intent_resolution")
+            == "model_tool_candidate"
+        and evaluate_pretool(
+            run, source_control, promoted_natural_single_url_contract) == ""
     )
     natural_multi_url_reason = evaluate_pretool(
         run, unselected_source, natural_multi_url_contract)
@@ -7293,7 +7559,7 @@ def _selftest() -> int:
         natural_multi_url_contract.get("source_ambiguous")
         and not natural_multi_url_contract.get("source_sha256s")
         and E_RUN_TRANSITION_AUTHORITY_MISSING in natural_multi_url_reason
-        and "多个 URL" in natural_multi_url_reason
+        and natural_multi_url_contract.get("mode") == EXPLAIN
     )
     denied_and_question_intents_are_read_only = all(
         item.get("mode") == EXPLAIN
@@ -7339,18 +7605,23 @@ def _selftest() -> int:
         != implicit_source_contract.get("prompt_sha256")
     )
     english_imperative_source_authorized = bool(
-        english_imperative_source_contract.get("mode") == EXECUTE
-        and english_imperative_source_contract.get("lifecycle_operation") == "source"
+        english_imperative_source_contract.get("mode") == INTENT_PENDING
+        and promoted_english_imperative_source_contract.get("mode") == EXECUTE
+        and promoted_english_imperative_source_contract.get(
+            "lifecycle_operation") == "source"
         and evaluate_pretool(
-            run, source_control, english_imperative_source_contract) == ""
+            run, source_control,
+            promoted_english_imperative_source_contract) == ""
     )
     natural_trailing_punctuation_is_normalized = bool(
         not natural_punctuated_contract.get("source_ambiguous")
         and natural_punctuated_contract.get("source_sha256s")
         and "sentence_punctuation"
         in natural_punctuated_contract.get("intent_normalizations", [])
+        and natural_punctuated_contract.get("mode") == INTENT_PENDING
         and evaluate_pretool(
-            run, natural_clean_source, natural_punctuated_contract) == ""
+            run, natural_clean_source,
+            promoted_natural_punctuated_contract) == ""
     )
     operator_language_compiles_to_one_source = all(
         item.get("mode") == EXECUTE
@@ -7367,7 +7638,7 @@ def _selftest() -> int:
         for item in (
             attached_bare_host_contract,
             attached_url_contract,
-            natural_attached_url_contract,
+            promoted_natural_attached_url_contract,
         )
     )
     attached_source_context_is_copy_safe = all(
@@ -7386,11 +7657,42 @@ def _selftest() -> int:
         == "source"
     )
     attached_run_path_keeps_named_resume = bool(
-        attached_run_contract.get("mode") == EXECUTE
-        and attached_run_contract.get("lifecycle_operation") == "resume"
-        and attached_run_contract.get("run_name_sha256s")
+        attached_run_contract.get("mode") == INTENT_PENDING
+        and promoted_attached_run_contract.get("mode") == EXECUTE
+        and promoted_attached_run_contract.get("lifecycle_operation") == "resume"
+        and promoted_attached_run_contract.get("run_name_sha256s")
         == resume_operator_contract.get("run_name_sha256s")
-        and not attached_run_contract.get("resume_current_approved")
+        and not promoted_attached_run_contract.get("resume_current_approved")
+    )
+    mixed_run_target_uses_model_selected_resume = bool(
+        mixed_run_target_contract.get("mode") == INTENT_PENDING
+        and mixed_run_target_contract.get("lifecycle_operation") == "none"
+        and mixed_run_target_contract.get("loop_source_kind") == "none"
+        and mixed_run_target_contract.get("run_transition_requested") is False
+        and promoted_mixed_run_target_contract.get("mode") == EXECUTE
+        and promoted_mixed_run_target_contract.get("lifecycle_operation") == "resume"
+        and promoted_mixed_run_target_contract.get("loop_source_kind") == "run"
+        and promoted_mixed_run_target_contract.get("intent_resolution")
+            == "model_tool_candidate"
+    )
+    natural_resume_variants_preserve_anchor_roles = bool(
+        len(natural_resume_variant_contracts) == 10
+        and _natural_lifecycle_intent(_operator_intent_text(
+            natural_resume_variant_prompts[-2]))[1] is True
+        and all(
+            item.get("mode") == INTENT_PENDING
+            and item.get("lifecycle_operation") == "none"
+            and item.get("loop_source_kind") == "none"
+            and item.get("run_transition_requested") is False
+            for item in natural_resume_variant_contracts
+        )
+        and all(
+            item.get("mode") == EXECUTE
+            and item.get("lifecycle_operation") == "resume"
+            and item.get("loop_source_kind") == "run"
+            and item.get("intent_resolution") == "model_tool_candidate"
+            for item in promoted_natural_resume_variants
+        )
     )
     natural_scope_context = _context_message(natural_scope_contract, run)
     natural_route_and_scope_compile_to_typed_effects = bool(
@@ -7417,7 +7719,7 @@ def _selftest() -> int:
     setup_unselected_target_blocked = E_RUN_TRANSITION_AUTHORITY_MISSING \
         in evaluate_pretool(run, setup_unselected_target, source_operator_contract)
     natural_single_setup_target_allowed = evaluate_pretool(
-        run, setup_selected_target, natural_single_url_contract) == ""
+        run, setup_selected_target, promoted_natural_single_url_contract) == ""
     natural_multi_setup_targets_blocked = all(
         E_RUN_TRANSITION_AUTHORITY_MISSING in evaluate_pretool(
             run, event, natural_multi_url_contract)
@@ -8055,8 +8357,11 @@ def _selftest() -> int:
     named_set_active_allowed = not bool(evaluate_pretool(run, set_active, {
         **contract, "prompt_excerpt": "/loop runs/other_20260101",
     }))
+    promoted_set_active_operator_contract = _promote_model_lifecycle_candidate(
+        run, _lifecycle_invocation(resume_control["tool_input"]["command"]),
+        set_active_operator_contract)
     exact_set_active_authority = evaluate_pretool(
-        run, set_active, set_active_operator_contract) == ""
+        run, set_active, promoted_set_active_operator_contract) == ""
     set_active_prefix_collision_blocked = bool(evaluate_pretool(
         run, set_active, set_active_prefix_contract))
     set_active_url_path_collision_blocked = bool(evaluate_pretool(
@@ -9799,7 +10104,7 @@ def _selftest() -> int:
         effect=old_active_effect)
     unrelated_pending_contract = write_pending_contract({
         "session_id": "unrelated-pending-session",
-        "prompt": "创建一个新 run unrelated",
+        "prompt": "/loop https://unrelated.example 创建一个新 run",
     }, pending_dir=overwrite_pending, claims_dir=overwrite_claims)
     unrelated_pending_target = "unrelated_pending_20260101"
     unrelated_pending_effect = seed_activate_effect(unrelated_pending_target)
@@ -10158,10 +10463,12 @@ def _selftest() -> int:
     )
     ambiguous_dir = root / "ambiguous-pending"
     write_pending_contract({
-        "session_id": "ambiguous-a", "prompt": "创建一个新 run alpha",
+        "session_id": "ambiguous-a",
+        "prompt": "/loop https://alpha.example 创建一个新 run",
     }, pending_dir=ambiguous_dir)
     write_pending_contract({
-        "session_id": "ambiguous-b", "prompt": "创建一个新 run beta",
+        "session_id": "ambiguous-b",
+        "prompt": "/loop https://beta.example 创建一个新 run",
     }, pending_dir=ambiguous_dir)
     ambiguous_target = root / "neutral_20260101"
     (ambiguous_target / "state").mkdir(parents=True)
@@ -10175,10 +10482,12 @@ def _selftest() -> int:
     exact_dir = root / "exact-pending"
     exact_claims = root / "exact-claims"
     exact_a = write_pending_contract({
-        "session_id": "exact-a", "prompt": "创建一个新 run",
+        "session_id": "exact-a",
+        "prompt": "/loop https://exact-a.example 创建一个新 run",
     }, pending_dir=exact_dir)
     write_pending_contract({
-        "session_id": "exact-b", "prompt": "创建另一个新 run",
+        "session_id": "exact-b",
+        "prompt": "/loop https://exact-b.example 创建另一个新 run",
     }, pending_dir=exact_dir)
     exact_target = root / "exact_20260101"
     (exact_target / "state").mkdir(parents=True)
@@ -10215,7 +10524,7 @@ def _selftest() -> int:
     durable_cleanup_claims = root / "durable-cleanup-claims"
     durable_cleanup_contract = write_pending_contract({
         "session_id": "durable-cleanup",
-        "prompt": "创建一个新 run durable_cleanup_20260101",
+        "prompt": "/loop https://durable-cleanup.example 创建一个新 run",
     }, pending_dir=durable_cleanup_pending)
     durable_cleanup_target = root / "durable_cleanup_20260101"
     (durable_cleanup_target / "state").mkdir(parents=True)
@@ -10272,10 +10581,12 @@ def _selftest() -> int:
     race_dir = root / "race-pending"
     race_claims = root / "race-claims"
     race_a = write_pending_contract({
-        "session_id": "race-a", "prompt": "创建一个新 run race",
+        "session_id": "race-a",
+        "prompt": "/loop https://race-a.example 创建一个新 run",
     }, pending_dir=race_dir)
     race_b = write_pending_contract({
-        "session_id": "race-b", "prompt": "创建一个新 run race",
+        "session_id": "race-b",
+        "prompt": "/loop https://race-b.example 创建一个新 run",
     }, pending_dir=race_dir)
     race_target = root / "race_20260101"
     (race_target / "state").mkdir(parents=True)
@@ -11271,17 +11582,30 @@ def _selftest() -> int:
             f"--source '{localhost_source_url}' --type auto"
         )},
     }
+    promoted_operator_natural_localhost_contract = \
+        _promote_model_lifecycle_candidate(
+            run,
+            _lifecycle_invocation(
+                operator_natural_localhost_control["tool_input"]["command"]),
+            operator_natural_localhost_contract,
+        )
+    promoted_operator_for_source_contract = _promote_model_lifecycle_candidate(
+        run,
+        _lifecycle_invocation(
+            operator_natural_localhost_control["tool_input"]["command"]),
+        operator_for_source_contract,
+    )
     operator_natural_localhost_setup_allowed = evaluate_pretool(
         run,
         operator_natural_localhost_control,
-        operator_natural_localhost_contract,
+        promoted_operator_natural_localhost_contract,
     ) == ""
     natural_plan_run = root / "natural-plan-run"
     natural_plan_run.mkdir()
     operator_natural_localhost_target_reason = _work_plan_gate_reason(
         natural_plan_run,
         target_event,
-        operator_natural_localhost_contract,
+        promoted_operator_natural_localhost_contract,
     )
     positive_target_loop_contract = _contract_from_event({
         "prompt": (
@@ -12118,9 +12442,12 @@ def _selftest() -> int:
          and operator_e2e_loop_contract.get("lifecycle_operation") == "source"
          and not operator_e2e_loop_contract.get("maintenance_intent")),
         ("natural localhost lifecycle intent outranks negative framework and recovery clauses",
-         operator_natural_localhost_contract.get("mode") == EXECUTE
-         and operator_natural_localhost_contract.get("lifecycle_operation") == "source"
-         and operator_natural_localhost_contract.get("run_transition_requested") is True
+         operator_natural_localhost_contract.get("mode") == INTENT_PENDING
+         and promoted_operator_natural_localhost_contract.get("mode") == EXECUTE
+         and promoted_operator_natural_localhost_contract.get(
+             "lifecycle_operation") == "source"
+         and promoted_operator_natural_localhost_contract.get(
+             "run_transition_requested") is True
          and operator_natural_localhost_contract.get("direct_egress_approved") is True
          and operator_natural_localhost_contract.get("target_egress_denied") is False
          and operator_natural_localhost_contract.get("web_tools_denied") is True
@@ -12131,8 +12458,10 @@ def _selftest() -> int:
          and E_WORK_PLAN_REQUIRED
          in operator_natural_localhost_target_reason),
         ("for-source lifecycle wording outranks a maintenance recovery clause",
-         operator_for_source_contract.get("mode") == EXECUTE
-         and operator_for_source_contract.get("run_transition_requested") is True
+         operator_for_source_contract.get("mode") == INTENT_PENDING
+         and promoted_operator_for_source_contract.get("mode") == EXECUTE
+         and promoted_operator_for_source_contract.get(
+             "run_transition_requested") is True
          and not operator_for_source_contract.get("maintenance_intent")),
         ("operator offline intent freezes target and named web-tool constraints",
          operator_offline_loop_contract.get("mode") == EXECUTE
@@ -12144,7 +12473,7 @@ def _selftest() -> int:
          and "XUNJI_E_OPERATOR_EFFECT_DENIED" in offline_agent_reason
          and offline_read_allowed),
         ("natural action-before-target denial freezes target egress",
-         operator_plain_target_denial_contract.get("mode") == EXECUTE
+         operator_plain_target_denial_contract.get("mode") == INTENT_PENDING
          and operator_plain_target_denial_contract.get("target_egress_denied") is True
          and operator_plain_target_denial_contract.get("web_tools_denied") is False),
         ("proxy discipline plus positive target intent does not mint an offline denial",
@@ -12418,6 +12747,10 @@ def _selftest() -> int:
          trailing_recovery_question_keeps_primary_action),
         ("an attached run path retains its exact named resume identity",
          attached_run_path_keeps_named_resume),
+        ("mixed named-run and target URL waits for and promotes model-selected resume",
+         mixed_run_target_uses_model_selected_resume),
+        ("natural-language resume variants keep run and target anchors in separate roles",
+         natural_resume_variants_preserve_anchor_roles),
         ("natural route and scope descriptions compile to typed effects",
          natural_route_and_scope_compile_to_typed_effects),
         ("a file inside the current run routes as resume without new-run transition",

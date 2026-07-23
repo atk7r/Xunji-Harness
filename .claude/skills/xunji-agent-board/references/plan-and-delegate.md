@@ -105,8 +105,10 @@ changed, while the old plan proves only its immutable work identity. Never infer
 changed file path or revive its execution authority.
 Terminal lanes settle against the bound transaction before typed `cycle_end`;
 do not replan to manufacture `current=true`.
-Only independently observed material canonical change justifies stale unlaunched
-cancellation and replan.
+Only a newer prompt-bound authority epoch, an independently observed material
+canonical change, or both justify stale unlaunched cancellation and replan. The
+v2 cancellation receipt records that basis explicitly; identical prompt prose in
+a later turn is still a new authority epoch and does not revive the old Hunter.
 
 When the current turn explicitly denies target egress, the planner emits only the
 offline Hunter and its Reviewer. That pair is the complete offline suffix; do not
@@ -170,7 +172,7 @@ unrelated Reviewer launches remain denied. A non-Reviewer assignment with zero
 launch facts may be retired through the typed command:
 
 ```bash
-python3 tools/workers.py cancel-unlaunched runs/<dir> A-<assignment> --reason "canonical inputs changed before launch"
+python3 tools/workers.py cancel-unlaunched runs/<dir> A-<assignment> --reason "turn or canonical inputs changed before launch"
 ```
 
 Cancellation is auditable settlement, not a result, review, refutation, merge,

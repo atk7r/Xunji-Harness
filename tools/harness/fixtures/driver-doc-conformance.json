@@ -629,7 +629,7 @@
       "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
       "marker": "python3 tools/workers.py cancel-unlaunched runs/<dir>",
       "script": "tools/workers.py",
-      "argv": ["cancel-unlaunched", "runs/demo_20260101", "A-target", "--reason", "canonical inputs changed before launch"],
+      "argv": ["cancel-unlaunched", "runs/demo_20260101", "A-target", "--reason", "turn or canonical inputs changed before launch"],
       "expected_id": "control.workers-cancel-unlaunched",
       "expected_effect": "control"
     },

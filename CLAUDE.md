@@ -72,8 +72,10 @@
   `/loop`, Claude interprets the complete top-level operator description and
   expresses it as one exact lifecycle tool candidate. The hook mechanically
   promotes that candidate into a typed lifecycle intent only after schema,
-  prompt hash, unique source/run anchor, exact effect, narrowed constraints, and
-  one-use authority all match. Deterministic code may recognize exact aliases and
+  prompt hash, one unique anchor for the model-selected effect, exact effect,
+  narrowed constraints, and one-use authority all match. A named run and target
+  URLs may coexist, but only the selected role gains lifecycle meaning.
+  Deterministic code may recognize exact aliases and
   obvious questions/denials/data containers, but it must not replace model
   understanding with an expanding positive verb grammar. “Only complete local
   setup” is a hard effect constraint: after setup, reads/verifiers remain allowed,

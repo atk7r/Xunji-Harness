@@ -36,8 +36,12 @@ rules here.
 - Treat the operator's complete natural-language description as the controlling
   input. Claude decomposes it by choosing one public lifecycle argv as a typed
   candidate. The hook promotes that candidate only after mechanically validating
-  prompt hash, one semantic source/run anchor, exact effect, route/constraints,
-  and one-use authority. Exact aliases and obvious denial/question/data forms may
+  prompt hash, one unique anchor for the selected effect, exact effect,
+  route/constraints, and one-use authority. A prompt may name an existing run and
+  repeat target URLs: `resume(run)` gives only the run lifecycle meaning, while
+  those URLs remain target/context anchors and cannot silently become setup
+  sources. Ambiguity within the selected anchor class still fails closed. Exact
+  aliases and obvious denial/question/data forms may
   be deterministic; do not turn ordinary affirmative wording into a positive
   verb allowlist. A bare host means its
   canonical HTTPS origin; case, default port, and empty path may normalize only

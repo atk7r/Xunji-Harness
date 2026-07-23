@@ -23,8 +23,12 @@ import run_model
 import work_plan
 
 
-CANCELLATION_SCHEMA = "xunji.assignment-cancellation.v1"
+CANCELLATION_SCHEMA = "xunji.assignment-cancellation.v2"
+LEGACY_CANCELLATION_SCHEMA = "xunji.assignment-cancellation.v1"
 CANCELLATION_TRANSACTION_SCHEMA = (
+    "xunji.assignment-cancellation-transaction.v2"
+)
+LEGACY_CANCELLATION_TRANSACTION_SCHEMA = (
     "xunji.assignment-cancellation-transaction.v1"
 )
 CANCELLATION_STATUS = "cancelled-unlaunched"
@@ -34,6 +38,15 @@ _ASSIGNMENT = re.compile(r"A-[A-Za-z0-9._-]+")
 _LANE = re.compile(r"L-[A-Za-z0-9._-]+")
 
 CANCELLATION_FIELDS = frozenset({
+    "schema", "cancellation_id", "status", "plan_id", "plan_digest",
+    "plan_inputs_digest", "observed_inputs_digest", "lane_id", "assignment",
+    "assignment_attempt", "role", "front", "effect", "assets", "reason",
+    "cancelled_at", "turn_binding", "assignment_row_sha256",
+    "delegate_transaction_id", "delegate_receipt_digest", "agent_artifact",
+    "context_artifact", "stale_basis", "plan_turn_binding",
+    "observed_turn_binding", "receipt_digest",
+})
+LEGACY_CANCELLATION_FIELDS = frozenset({
     "schema", "cancellation_id", "status", "plan_id", "plan_digest",
     "plan_inputs_digest", "observed_inputs_digest", "lane_id", "assignment",
     "assignment_attempt", "role", "front", "effect", "assets", "reason",
@@ -52,6 +65,10 @@ TURN_BINDING_FIELDS = frozenset({
     "session_id", "prompt_sha256", "contract_updated_at", "transcript_path",
     "transcript_length", "transcript_prefix_sha256",
 })
+PLAN_TURN_BINDING_FIELDS = frozenset({
+    "session_id", "prompt_sha256", "contract_updated_at",
+})
+STALE_BASES = frozenset({"turn", "inputs", "both"})
 
 
 class SettlementError(RuntimeError):
@@ -216,10 +233,30 @@ def _validate_artifact(value: object, *, directory: str = "", pattern: str = "")
     return value
 
 
+def _validate_plan_turn_binding(value: object, *, label: str) -> dict:
+    if not isinstance(value, dict) or set(value) != PLAN_TURN_BINDING_FIELDS \
+            or not isinstance(value.get("session_id"), str) \
+            or not value.get("session_id") \
+            or not _HEX64.fullmatch(str(value.get("prompt_sha256") or "")) \
+            or isinstance(value.get("contract_updated_at"), bool) \
+            or not isinstance(value.get("contract_updated_at"), (int, float)) \
+            or not math.isfinite(float(value.get("contract_updated_at"))) \
+            or value.get("contract_updated_at") <= 0:
+        raise SettlementError(
+            f"ASSIGNMENT_CANCELLATION_{label}_TURN_BINDING_INVALID")
+    return value
+
+
 def validate_cancellation(value: object) -> dict:
-    if not isinstance(value, dict) or set(value) != CANCELLATION_FIELDS:
+    if not isinstance(value, dict):
         raise SettlementError("ASSIGNMENT_CANCELLATION_SHAPE_INVALID")
-    if value.get("schema") != CANCELLATION_SCHEMA \
+    schema = value.get("schema")
+    legacy = schema == LEGACY_CANCELLATION_SCHEMA
+    expected_fields = LEGACY_CANCELLATION_FIELDS if legacy \
+        else CANCELLATION_FIELDS
+    if set(value) != expected_fields:
+        raise SettlementError("ASSIGNMENT_CANCELLATION_SHAPE_INVALID")
+    if schema not in {CANCELLATION_SCHEMA, LEGACY_CANCELLATION_SCHEMA} \
             or value.get("status") != CANCELLATION_STATUS:
         raise SettlementError("ASSIGNMENT_CANCELLATION_SCHEMA_INVALID")
     for field in (
@@ -281,7 +318,7 @@ def validate_cancellation(value: object) -> dict:
     )
     if value["receipt_digest"] != _digest_without(value, "receipt_digest"):
         raise SettlementError("ASSIGNMENT_CANCELLATION_RECEIPT_DIGEST_MISMATCH")
-    expected_id = hashlib.sha256(_json_bytes({
+    identity = {
         "plan_digest": value["plan_digest"],
         "lane_id": value["lane_id"],
         "assignment": value["assignment"],
@@ -290,7 +327,39 @@ def validate_cancellation(value: object) -> dict:
         "delegate_transaction_id": value["delegate_transaction_id"],
         "observed_inputs_digest": value["observed_inputs_digest"],
         "cancelled_at": value["cancelled_at"],
-    })).hexdigest()
+    }
+    if not legacy:
+        stale_basis = str(value.get("stale_basis") or "")
+        if stale_basis not in STALE_BASES:
+            raise SettlementError(
+                "ASSIGNMENT_CANCELLATION_STALE_BASIS_INVALID")
+        plan_binding = _validate_plan_turn_binding(
+            value.get("plan_turn_binding"), label="PLAN")
+        observed_binding = _validate_plan_turn_binding(
+            value.get("observed_turn_binding"), label="OBSERVED")
+        turn_changed = plan_binding != observed_binding
+        inputs_changed = (
+            value["plan_inputs_digest"] != value["observed_inputs_digest"])
+        expected_basis = (
+            "both" if turn_changed and inputs_changed else
+            "turn" if turn_changed else
+            "inputs" if inputs_changed else ""
+        )
+        if stale_basis != expected_basis:
+            raise SettlementError(
+                "ASSIGNMENT_CANCELLATION_STALE_BASIS_MISMATCH")
+        if any(
+            value["turn_binding"].get(field) != observed_binding.get(field)
+            for field in PLAN_TURN_BINDING_FIELDS
+        ):
+            raise SettlementError(
+                "ASSIGNMENT_CANCELLATION_OBSERVED_TURN_BINDING_DIVERGED")
+        identity.update({
+            "stale_basis": stale_basis,
+            "plan_turn_binding": plan_binding,
+            "observed_turn_binding": observed_binding,
+        })
+    expected_id = hashlib.sha256(_json_bytes(identity)).hexdigest()
     if value["cancellation_id"] != expected_id:
         raise SettlementError("ASSIGNMENT_CANCELLATION_ID_MISMATCH")
     return value
@@ -314,6 +383,9 @@ def build_cancellation(**values: object) -> dict:
         "delegate_transaction_id": saved.get("delegate_transaction_id"),
         "observed_inputs_digest": saved.get("observed_inputs_digest"),
         "cancelled_at": saved.get("cancelled_at"),
+        "stale_basis": saved.get("stale_basis"),
+        "plan_turn_binding": saved.get("plan_turn_binding"),
+        "observed_turn_binding": saved.get("observed_turn_binding"),
     })).hexdigest()
     saved["receipt_digest"] = ""
     return save_cancellation(saved)
@@ -322,7 +394,11 @@ def build_cancellation(**values: object) -> dict:
 def validate_transaction(value: object) -> dict:
     if not isinstance(value, dict) or set(value) != TRANSACTION_FIELDS:
         raise SettlementError("ASSIGNMENT_CANCELLATION_TRANSACTION_SHAPE_INVALID")
-    if value.get("schema") != CANCELLATION_TRANSACTION_SCHEMA \
+    transaction_schema = value.get("schema")
+    if transaction_schema not in {
+            CANCELLATION_TRANSACTION_SCHEMA,
+            LEGACY_CANCELLATION_TRANSACTION_SCHEMA,
+    } \
             or value.get("status") not in TRANSACTION_STATUSES:
         raise SettlementError("ASSIGNMENT_CANCELLATION_TRANSACTION_SCHEMA_INVALID")
     for field in ("transaction_id", "plan_digest", "receipt_digest"):
@@ -352,6 +428,14 @@ def validate_transaction(value: object) -> dict:
             raise SettlementError(
                 "ASSIGNMENT_CANCELLATION_TRANSACTION_LEDGER_SNAPSHOT_INVALID")
     tombstone = validate_cancellation(value.get("tombstone"))
+    expected_transaction_schema = (
+        LEGACY_CANCELLATION_TRANSACTION_SCHEMA
+        if tombstone.get("schema") == LEGACY_CANCELLATION_SCHEMA
+        else CANCELLATION_TRANSACTION_SCHEMA
+    )
+    if transaction_schema != expected_transaction_schema:
+        raise SettlementError(
+            "ASSIGNMENT_CANCELLATION_TRANSACTION_VERSION_DIVERGED")
     if tombstone["plan_id"] != value["plan_id"] \
             or tombstone["plan_digest"] != value["plan_digest"] \
             or tombstone["lane_id"] != value["lane_id"] \

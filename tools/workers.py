@@ -414,15 +414,16 @@ def _resolve_assignment_assets(run_dir: Path, front: str, requested: list[str] |
     return values, inventory
 
 
-def _transaction_bound_plan_without_input_freshness(
-    run_dir: Path, contract: dict,
-) -> dict:
-    """Reload one stale plan without weakening any non-input provenance gate."""
+def _transaction_bound_plan_for_cancellation(run_dir: Path) -> dict:
+    """Reload immutable work identity without reviving stale execution authority."""
     plan = _work_plan.transaction_bound_plan(run_dir)
-    validated = _work_plan.validate_plan(
-        plan, run_dir=run_dir, contract=contract, check_inputs=False)
+    # Cancellation is permitted only after ``current_plan`` proved an exact
+    # turn/input stale condition.  Re-applying current turn or stage checks here
+    # would make the recovery path unreachable; structural lineage remains hard.
+    validated = _work_plan.validate_plan(plan, check_inputs=False)
     if validated != plan:
-        raise ValueError("transaction-bound work plan changed during validation")
+        raise ValueError(
+            "transaction-bound cancellation plan changed during validation")
     return plan
 
 
@@ -480,7 +481,7 @@ def _current_plan_lane(run_dir: Path, *, lane_id: str, role: str,
                         or not _agent_settlement.cancellation_barrier(
                             run_dir, plan_digest=persisted_digest):
                     raise ValueError(
-                        "settlement override requires stale inputs or a cancellation")
+                        "settlement override requires stale turn/inputs or a cancellation")
             plan = _transaction_bound_plan_for_settlement(run_dir)
             if plan != stale_settlement_plan:
                 raise ValueError("stale settlement plan changed before assignment")
@@ -1715,12 +1716,13 @@ def cancel_unlaunched_assignment(
         try:
             _work_plan.current_plan(run_dir, contract)
         except _work_plan.PlanError as exc:
-            if str(exc) != "WORK_PLAN_INPUTS_STALE":
+            if str(exc) not in {
+                    "WORK_PLAN_INPUTS_STALE", "WORK_PLAN_TURN_STALE"}:
                 raise ValueError(
                     f"ASSIGNMENT_CANCELLATION_PLAN_INVALID:{exc}") from exc
         else:
-            raise ValueError("ASSIGNMENT_CANCELLATION_REQUIRES_STALE_INPUTS")
-        plan = _transaction_bound_plan_without_input_freshness(run_dir, contract)
+            raise ValueError("ASSIGNMENT_CANCELLATION_REQUIRES_STALE_PLAN")
+        plan = _transaction_bound_plan_for_cancellation(run_dir)
         data = load_assignments(run_dir)
         rows = [
             item for item in data.get("assignments", [])
@@ -1752,6 +1754,12 @@ def cancel_unlaunched_assignment(
             raise ValueError("ASSIGNMENT_CANCELLATION_ARTIFACT_OWNERSHIP_INVALID")
         _assert_no_assignment_runtime_activity(run_dir, row, plan, lane)
         turn_binding = _transcript_prefix_binding(contract)
+        plan_turn_binding = dict(plan.get("turn_binding") or {})
+        observed_turn_binding = {
+            "session_id": str(contract.get("session_id") or ""),
+            "prompt_sha256": str(contract.get("prompt_sha256") or ""),
+            "contract_updated_at": float(contract.get("updated_at") or 0.0),
+        }
         provisional = {
             "assignment": assignment,
             "plan_digest": plan["plan_digest"],
@@ -1760,8 +1768,15 @@ def cancel_unlaunched_assignment(
         }
         _assert_no_transcript_launch_intent(provisional)
         observed_digest = _work_plan.input_fingerprint(run_dir)[0]
-        if observed_digest == plan.get("inputs_digest"):
-            raise ValueError("ASSIGNMENT_CANCELLATION_INPUTS_NO_LONGER_STALE")
+        inputs_changed = observed_digest != plan.get("inputs_digest")
+        turn_changed = observed_turn_binding != plan_turn_binding
+        stale_basis = (
+            "both" if inputs_changed and turn_changed else
+            "inputs" if inputs_changed else
+            "turn" if turn_changed else ""
+        )
+        if not stale_basis:
+            raise ValueError("ASSIGNMENT_CANCELLATION_PLAN_NO_LONGER_STALE")
         cancelled_at = datetime.now(timezone.utc).isoformat(
             timespec="milliseconds").replace("+00:00", "Z")
         row_digest = hashlib.sha256(json.dumps(
@@ -1771,6 +1786,9 @@ def cancel_unlaunched_assignment(
             plan_id=plan["plan_id"], plan_digest=plan["plan_digest"],
             plan_inputs_digest=plan["inputs_digest"],
             observed_inputs_digest=observed_digest,
+            stale_basis=stale_basis,
+            plan_turn_binding=plan_turn_binding,
+            observed_turn_binding=observed_turn_binding,
             lane_id=str(row["lane_id"]), assignment=assignment,
             assignment_attempt=int(row.get("assignment_attempt") or 0),
             role=str(row.get("role") or ""), front=str(row.get("front") or ""),
@@ -2841,7 +2859,7 @@ def agent_lifecycle_issues(run_dir: Path, *, closure: bool = False,
                 disposition_guidance = (
                     "plan-bound 状态只能由真实 launch/return 投影推进；不得由 Root "
                     "finish 为 done。等待匹配 SubagentStop 投影 done 后，执行 Reviewer "
-                    "disposition 与 Root settlement；未启动且 inputs stale 才走 "
+                    "disposition 与 Root settlement；未启动且 turn/inputs stale 才走 "
                     "cancel-unlaunched。"
                 )
             else:
@@ -3641,6 +3659,13 @@ def print_cancel_unlaunched(run_dir: Path, assignment: str, reason: str) -> int:
         print(f"[workers cancel-unlaunched] ERROR {exc}", file=sys.stderr)
         return 1
     print(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True))
+    print(
+        "NEXT_OWNER_ACTION: cancellation settled assignment debt only; keep "
+        f"front {receipt.get('front') or '(unknown)'} open. It is not a result, "
+        "review, evidence item, refutation, completed lane/cycle, or authority "
+        "to close the front. Re-read canonical status and replan only after all "
+        "assignment debt is clear."
+    )
     return 0
 
 
@@ -3961,12 +3986,44 @@ def _plan_continuation_notice(run_dir: Path) -> str:
             else:
                 freshness = "invalid"
     if freshness == "stale":
+        unlaunched = sorted({
+            str(item.get("assignment") or "")
+            for item in projection.get("lane_states", [])
+            if isinstance(item, dict)
+            and str(item.get("runtime_state") or "") == "no-attempt"
+            and re.fullmatch(
+                r"A-[A-Za-z0-9._-]+", str(item.get("assignment") or ""))
+        })
+        if unlaunched:
+            return (
+                "NEXT_OWNER_ACTION: committed plan is stale and assignment "
+                f"{unlaunched[0]} has no authentic launch attempt; run the exact "
+                f"typed `workers.py cancel-unlaunched {display_path(run_dir)} "
+                f"{unlaunched[0]} --reason "
+                "\"turn or canonical inputs changed before launch\"` settlement, "
+                "then replan the still-open front."
+            )
+        returned = [
+            item for item in projection.get("lane_states", [])
+            if isinstance(item, dict)
+            and str(item.get("runtime_state") or "") in {"returned", "failed"}
+            and str(item.get("role") or "").strip().lower() != "review"
+            and item.get("complete") is not True
+        ]
+        if returned:
+            return (
+                "NEXT_OWNER_ACTION: committed plan is stale but retains exact "
+                "settlement identity for a returned/failed execution; run the "
+                "same documented workers.py delegate checkpoint to create only "
+                "its unique digest-bound Reviewer, settle it, then replan. Do "
+                "not relaunch the old execution lane."
+            )
         return (
-            "NEXT_OWNER_ACTION: committed plan inputs changed after the settled "
-            "prefix; keep its front open, rerun workers.py plan, then use "
-            "the model proposal's replan_reason field plus workers.py "
-            "commit-proposal so the owner inherits completed lanes and rebinds "
-            "only the unfinished suffix."
+            "NEXT_OWNER_ACTION: committed plan is turn/input stale after the "
+            "settled prefix and has no unsettled assignment debt; keep its "
+            "front open, rerun workers.py plan, then use the model proposal's "
+            "replan_reason field plus workers.py commit-proposal so the owner "
+            "inherits completed lanes and rebinds only the unfinished suffix."
         )
     if freshness == "invalid":
         return (
@@ -5210,6 +5267,152 @@ def _selftest() -> int:
         )
         for item in cancellation_batch["assignments"]
     ]
+    turn_stale_cancellation_run = build_delegate_transaction_run(
+        "delegate-turn-stale-unlaunched-cancellation", "d")
+    turn_stale_batch = delegate_ready_lanes(
+        turn_stale_cancellation_run, runtime_slots=1, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=1,
+    )
+    turn_stale_assignment = turn_stale_batch["assignments"][0]["assignment"]
+    turn_stale_contract_path = (
+        turn_stale_cancellation_run / "state" / "turn_contract.json")
+    turn_stale_contract = json.loads(
+        turn_stale_contract_path.read_text(encoding="utf-8"))
+    turn_stale_contract["prompt_sha256"] = "e" * 64
+    turn_stale_contract["updated_at"] = (
+        float(turn_stale_contract["updated_at"]) + 1.0)
+    _atomic_write(
+        turn_stale_contract_path,
+        json.dumps(turn_stale_contract, ensure_ascii=False, indent=2) + "\n",
+    )
+    turn_stale_receipt = cancel_unlaunched_assignment(
+        turn_stale_cancellation_run,
+        turn_stale_assignment,
+        reason="new operator turn superseded authority before launch",
+    )
+    both_stale_cancellation_run = build_delegate_transaction_run(
+        "delegate-turn-and-input-stale-unlaunched-cancellation", "e")
+    both_stale_batch = delegate_ready_lanes(
+        both_stale_cancellation_run, runtime_slots=1, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=1,
+    )
+    both_stale_assignment = both_stale_batch["assignments"][0]["assignment"]
+    (both_stale_cancellation_run / "hints.md").write_text(
+        "# Hints\n\n- Steering and operator turn changed before Agent launch.\n",
+        encoding="utf-8",
+    )
+    both_stale_contract_path = (
+        both_stale_cancellation_run / "state" / "turn_contract.json")
+    both_stale_contract = json.loads(
+        both_stale_contract_path.read_text(encoding="utf-8"))
+    both_stale_contract["prompt_sha256"] = "f" * 64
+    both_stale_contract["updated_at"] = (
+        float(both_stale_contract["updated_at"]) + 1.0)
+    _atomic_write(
+        both_stale_contract_path,
+        json.dumps(both_stale_contract, ensure_ascii=False, indent=2) + "\n",
+    )
+    both_stale_receipt = cancel_unlaunched_assignment(
+        both_stale_cancellation_run,
+        both_stale_assignment,
+        reason="canonical inputs and operator turn changed before launch",
+    )
+    valid_v2_cancellation_transaction = _agent_settlement.load_transaction(
+        turn_stale_cancellation_run)
+    v1_transaction_with_v2_tombstone = json.loads(json.dumps(
+        valid_v2_cancellation_transaction))
+    v1_transaction_with_v2_tombstone["schema"] = (
+        _agent_settlement.LEGACY_CANCELLATION_TRANSACTION_SCHEMA)
+    v1_transaction_with_v2_tombstone_rejected = False
+    try:
+        _agent_settlement.validate_transaction(
+            v1_transaction_with_v2_tombstone)
+    except _agent_settlement.SettlementError as exc:
+        v1_transaction_with_v2_tombstone_rejected = (
+            str(exc)
+            == "ASSIGNMENT_CANCELLATION_TRANSACTION_VERSION_DIVERGED")
+
+    legacy_tombstone = {
+        key: value for key, value in turn_stale_receipt.items()
+        if key in _agent_settlement.LEGACY_CANCELLATION_FIELDS
+    }
+    legacy_tombstone["schema"] = _agent_settlement.LEGACY_CANCELLATION_SCHEMA
+    legacy_identity = {
+        "plan_digest": legacy_tombstone["plan_digest"],
+        "lane_id": legacy_tombstone["lane_id"],
+        "assignment": legacy_tombstone["assignment"],
+        "assignment_attempt": legacy_tombstone["assignment_attempt"],
+        "assignment_row_sha256": legacy_tombstone[
+            "assignment_row_sha256"],
+        "delegate_transaction_id": legacy_tombstone[
+            "delegate_transaction_id"],
+        "observed_inputs_digest": legacy_tombstone[
+            "observed_inputs_digest"],
+        "cancelled_at": legacy_tombstone["cancelled_at"],
+    }
+    legacy_tombstone["cancellation_id"] = hashlib.sha256(
+        _agent_settlement._json_bytes(legacy_identity)).hexdigest()
+    legacy_tombstone["receipt_digest"] = (
+        _agent_settlement._digest_without(
+            legacy_tombstone, "receipt_digest"))
+    _agent_settlement.validate_cancellation(legacy_tombstone)
+    v2_transaction_with_v1_tombstone = json.loads(json.dumps(
+        valid_v2_cancellation_transaction))
+    v2_transaction_with_v1_tombstone["tombstone"] = legacy_tombstone
+    v2_transaction_with_v1_tombstone_rejected = False
+    try:
+        _agent_settlement.validate_transaction(
+            v2_transaction_with_v1_tombstone)
+    except _agent_settlement.SettlementError as exc:
+        v2_transaction_with_v1_tombstone_rejected = (
+            str(exc)
+            == "ASSIGNMENT_CANCELLATION_TRANSACTION_VERSION_DIVERGED")
+    cancellation_cross_version_mixes_rejected = bool(
+        v1_transaction_with_v2_tombstone_rejected
+        and v2_transaction_with_v1_tombstone_rejected
+    )
+    cancellation_cli_output = io.StringIO()
+    with contextlib.redirect_stdout(cancellation_cli_output):
+        cancellation_cli_exit = print_cancel_unlaunched(
+            turn_stale_cancellation_run,
+            turn_stale_assignment,
+            "new operator turn superseded authority before launch",
+        )
+    cancellation_cli_preserves_open_front = bool(
+        cancellation_cli_exit == 0
+        and "settled assignment debt only" in cancellation_cli_output.getvalue()
+        and "keep front F-030 open" in cancellation_cli_output.getvalue()
+        and "not a result" in cancellation_cli_output.getvalue()
+        and "authority to close the front" in cancellation_cli_output.getvalue()
+    )
+    turn_stale_cancellation_is_typed = bool(
+        turn_stale_receipt.get("schema")
+            == "xunji.assignment-cancellation.v2"
+        and turn_stale_receipt.get("stale_basis") == "turn"
+        and turn_stale_receipt.get("plan_inputs_digest")
+            == turn_stale_receipt.get("observed_inputs_digest")
+        and turn_stale_receipt.get("plan_turn_binding")
+            != turn_stale_receipt.get("observed_turn_binding")
+        and not any(
+            item.get("agent") == turn_stale_assignment
+            for item in load_assignments(
+                turn_stale_cancellation_run)["assignments"]
+        )
+    )
+    both_stale_cancellation_is_typed = bool(
+        both_stale_receipt.get("schema")
+            == "xunji.assignment-cancellation.v2"
+        and both_stale_receipt.get("stale_basis") == "both"
+        and both_stale_receipt.get("plan_inputs_digest")
+            != both_stale_receipt.get("observed_inputs_digest")
+        and both_stale_receipt.get("plan_turn_binding")
+            != both_stale_receipt.get("observed_turn_binding")
+        and not any(
+            item.get("agent") == both_stale_assignment
+            for item in load_assignments(
+                both_stale_cancellation_run)["assignments"]
+        )
+    )
     cancellation_projection = _run_model.plan_cycle_projection(
         cancellation_run,
         plan=_work_plan.transaction_bound_plan(cancellation_run),
@@ -5228,7 +5431,7 @@ def _selftest() -> int:
         cancellation_cycle_end_blocked = (
             exc.code == "CYCLE_EVENT_PLAN_DEBT_OPEN")
     cancellation_schema = json.loads((
-        ROOT / "contracts" / "assignment-cancellation.v1.schema.json"
+        ROOT / "contracts" / "assignment-cancellation.v2.schema.json"
     ).read_text(encoding="utf-8", errors="strict"))
 
     def cancellation_schema_errors(value: object) -> list[str]:
@@ -5710,18 +5913,25 @@ def _selftest() -> int:
             transcript_payload = transcript.read_bytes()
             cancelled_at = datetime.now(timezone.utc).isoformat(
                 timespec="milliseconds").replace("+00:00", "Z")
+            cancellation_turn = {
+                "session_id": session_id,
+                "prompt_sha256": "c" * 64,
+                "contract_updated_at": time.time(),
+            }
             receipt = _agent_settlement.build_cancellation(
                 plan_id="WP-1-replay", plan_digest=plan_digest,
                 plan_inputs_digest="a" * 64,
                 observed_inputs_digest="b" * 64,
+                stale_basis="inputs",
+                plan_turn_binding=cancellation_turn,
+                observed_turn_binding=cancellation_turn,
                 lane_id="L-REPLAY", assignment=assignment,
                 assignment_attempt=1, role="web-hunter", front="F-030",
                 effect="local_read", assets=[],
                 reason="exact replay precedence fixture",
                 cancelled_at=cancelled_at,
                 turn_binding={
-                    "session_id": session_id, "prompt_sha256": "c" * 64,
-                    "contract_updated_at": time.time(),
+                    **cancellation_turn,
                     "transcript_path": str(transcript.resolve()),
                     "transcript_length": len(transcript_payload),
                     "transcript_prefix_sha256": hashlib.sha256(
@@ -6716,6 +6926,14 @@ def _selftest() -> int:
          and all(item.get("complete") is False
                  for item in cancellation_projection.get("lane_states", []))
          and cancellation_cycle_end_blocked),
+        ("turn-only stale authority can retire a provably unlaunched assignment",
+         turn_stale_cancellation_is_typed),
+        ("turn-and-input stale authority records the exact combined basis",
+         both_stale_cancellation_is_typed),
+        ("cancellation CLI keeps the front open and denies completion semantics",
+         cancellation_cli_preserves_open_front),
+        ("v1/v2 cancellation transaction and tombstone mixes fail closed",
+         cancellation_cross_version_mixes_rejected),
         ("material replan is required and canceled Agent ids are never reused",
          cancellation_replan.get("plan_digest")
             != cancellation_receipts[0].get("plan_digest")
