@@ -42,6 +42,11 @@ a blocker requiring material replan/delegate, never in-place repair.
 - Root alone spawns Agents. Child fan-out is rejected.
 - Never put two unbound Agent calls in one assistant message. For real parallel
   work, launch the next Agent in a later message while the prior one runs.
+- Turn authority is checked again at every child tool call. A newer explain,
+  review, pause, or ambiguous operator turn may therefore deny an already-running
+  Hunter's next effect; do not preserve target authority with a background lease.
+  Its eventual returned blocker/candidate still crosses the same immutable return
+  checkpoint and must receive its exact Reviewer in a later `EXECUTE` turn.
 
 After a completion notification, cross the durable return barrier with the
 read-only owner command:
@@ -84,6 +89,11 @@ After the Hunter Stop freezes bytes, repeat the single registered delegate comma
 owned by `plan-and-delegate.md`, with budgets justified by the ready Reviewer lane.
 That creates the now-ready Reviewer assignment; do not reconstruct a second argv
 example here.
+
+This remains true when the committed plan is `WORK_PLAN_TURN_STALE`: the old plan
+is settlement identity only. The current `EXECUTE` turn must have its own normal
+iteration-plan receipt, and only the unique digest/assignment/lane-bound Reviewer
+may launch. Do not re-run the old Hunter or replan around its review debt.
 
 Invoke the returned exact `xunji-reviewer` binary contract. Its result digest
 must match the frozen Hunter bytes. Reviewer supplies a candidate disposition;

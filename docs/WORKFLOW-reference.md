@@ -869,9 +869,12 @@ another executable protocol.
   explicit port, dropping it to host-only is not an equivalent assignment. The
   coverage row owns its valid opaque `ASSET-...` ID; assignment and Agent scaffold
   projections copy it rather than independently re-hashing the display identity.
-- **Indivisible planner draft**: `workers.py commit-plan` recomputes one complete
-  draft and submits it once through the existing `work_plan` transaction owner.
-  Claude never copies lane JSON; `ready` is evaluated afterward by `delegate`.
+- **Model-proposed typed DAG**: `workers.py plan` writes a replaceable proposal
+  seed bound to the current turn/input. Root may reshape its execution/Reviewer
+  pairs under the existing 16-lane schema, then `workers.py commit-proposal`
+  validates scope, effects, assets, topology, and provenance before one existing
+  `work_plan` transaction. The proposal is not authority; `ready` is evaluated
+  only afterward by `delegate`.
 - **Single Synthesizer = sole integrator.** Agents produce **candidates, not Facts**.
   At merge the Synthesizer runs every candidate through the **evidence gate**
   (proposed `>= 0.8` without `Control:`/`Replicated:` is downgraded), allocates the

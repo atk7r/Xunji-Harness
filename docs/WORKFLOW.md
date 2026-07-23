@@ -105,9 +105,11 @@ TaskCreate/TaskUpdate remains iteration-planning proof only. For the executable
 plan/Agent chain, load `xunji-agent-board`, then read its plan/delegate reference
 before planning or delegation and its launch/settlement reference before Agent use
 or disposition. Those references are the sole exact-command and binary-envelope
-owners. `workers.py commit-plan` recomputes and submits the complete planner draft
-to the `work_plan` transaction owner in one direct argv; Claude does not transport
-lane JSON. Dependency-ready is a post-commit scheduler state. Core invariants
+owners. `workers.py plan` writes a derived proposal seed bound to the current
+turn/input. Root may reshape its typed lane DAG, then `workers.py commit-proposal`
+validates and submits it to the `work_plan` transaction owner in one direct argv;
+Claude does not shell-transport lane JSON. Dependency-ready is a post-commit
+scheduler state. Core invariants
 remain: `delegate` never spawns; Task prose and `done` do
 not clear debt; transaction/archive lineage must revalidate; only one uniquely
 matching same-session Stop proves return; the generated prompt is byte-exact; and
@@ -234,9 +236,16 @@ no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while on
 allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
 Only a first non-empty top-level `/loop(?:\s|$)` directive delivered to
 `UserPromptSubmit` enters recurring loop mode. Deterministic parsing ignores harmless leading
-horizontal whitespace/BOM while preserving the exact raw prompt hash, then compiles
-the complete operator description into operation, one semantic
-source/run, route, and constraints.
+horizontal whitespace/BOM while preserving the exact raw prompt hash. Claude interprets
+the complete operator description and expresses it through one exact public lifecycle argv;
+the Hook treats that argv as `xunji.lifecycle-intent-candidate.v1` and mechanically promotes
+it only when the prompt hash, unique source/run anchor, exact effect, route constraints, and
+one-use claim match. `INTENT_PENDING` allows that candidate plus reads, but no target action,
+Agent, Cron, or unrelated mutation. Exact aliases and obvious questions/denials/data containers
+remain deterministic; ordinary affirmative language is not a positive verb allowlist.
+The candidate digest also binds narrowed effect constraints. In particular, `setup only` /
+`只完成本地 setup` permits the transaction and post-commit reads/registered verification,
+but freezes target, Agent, Cron, frontier/evidence, and other state mutation.
 Explicit fenced code, blockquotes, Markdown list items, inline quotes, questions, analysis/review requests,
 and lifecycle denials stay data/read-only; a conflicting `/loop` plus denial fails
 closed. Narrow effect constraints such as “do not modify framework source” restrict
@@ -443,9 +452,14 @@ snapshot/compare/write, rebuilds malformed or non-regular cache files, rejects
 future schemas and unknown fields, and binds an in-run regular file into the work
 plan fingerprint. Synthesis and closure checks must use that strict contract.
 
-When conditional canonical inputs stale a committed plan, load the plan/delegate
-reference for its typed unlaunched-cancellation and material-replan path. A returned
-lane may unlock only its exact digest-bound Reviewer. Cancellation is lifecycle
+When conditional canonical inputs or a newer operator turn stale a committed
+plan, load the plan/delegate reference for its settlement path. A superseding
+non-execute turn revokes subsequent child effects; it does not keep background
+target authority alive and does not erase an authentic return. In a later
+`EXECUTE` turn with its own iteration-plan receipt, the transaction-bound old plan
+may identify only the returned/failed lane's exact digest-bound Reviewer. Old
+Hunter/target/model-egress work remains denied. An unlaunched assignment uses the
+typed cancellation/material-replan path. Cancellation is lifecycle
 settlement—not Agent result, review, evidence, merge, or cycle completion.
 
 Coverage classification may mark root 401/403 pages as `AUTH_GATE` and pure
@@ -464,7 +478,9 @@ or security-advisory-shaped lead, load the sole Claude-primary protocol at
 time gate, knowledge-owner route, public WebSearch discipline, and structured
 lead return. Root records and adjudicates the lead before closing the front,
 assigning severity, or writing final report text; the legacy sync skill owns no
-second protocol.
+second protocol. This is Root cognition work before the next lane commit, not an
+OFFLINE/TARGET Agent lane; do not postpone an already-triggered search to a later
+cycle merely because the current planner wave is offline.
 
 Claude Code statusline uses `tools/xunji_statusline.py` from the project
 `.claude/settings.json`. It is a read-only, two-second display containing only
@@ -572,6 +588,15 @@ slots, request budget, model-egress budget, and merge capacity. Independent
 `local_read`/`local_verify`/model-egress lanes may overlap within those budgets;
 target lanes must also have disjoint asset packages. Control/repository mutation
 remains Root single-writer work and is not an Agent lane.
+
+Canonical fronts describe semantic threat/business lines, not scheduler shards.
+Do not create fake `F-003a/F-003b` fronts merely to inflate concurrency. Root may
+instead express several strategy-selected lanes under one F-id in the derived
+work-plan proposal. The generated OFFLINE→review→TARGET→review→VERIFY→review chain
+is only a conservative seed: omit work already satisfied by current state and add
+independent hypothesis lanes when useful. Deterministic validation owns turn/input
+binding, scope/assets, effects, budgets, Reviewer topology, DAG integrity, and
+single-writer boundaries; it does not choose the attack strategy.
 
 The historical four-diverse-front rule is a mandatory breadth fallback, not the
 primary scheduler. When the canonical front model reports at least four active

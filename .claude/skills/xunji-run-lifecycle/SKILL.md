@@ -34,8 +34,12 @@ rules here.
 - Narrow effect constraints such as “do not modify framework source” restrict the
   cycle but do not negate an otherwise explicit lifecycle request.
 - Treat the operator's complete natural-language description as the controlling
-  input. The hook compiles operation, one semantic source/run, route, and
-  constraints before any lifecycle argv is authorized. A bare host means its
+  input. Claude decomposes it by choosing one public lifecycle argv as a typed
+  candidate. The hook promotes that candidate only after mechanically validating
+  prompt hash, one semantic source/run anchor, exact effect, route/constraints,
+  and one-use authority. Exact aliases and obvious denial/question/data forms may
+  be deterministic; do not turn ordinary affirmative wording into a positive
+  verb allowlist. A bare host means its
   canonical HTTPS origin; case, default port, and empty path may normalize only
   when the target effect is unchanged. Attached prose remains instruction, never
   an IDN suffix. Distinct host/path/query choices remain ambiguous and require the
@@ -78,6 +82,13 @@ If a hook omits `session_id`, correlate by its exact transcript; use the persona
 singleton only when both fields are absent. `XUNJI_E_LIFECYCLE_PRIVATE_API` means
 Claude tried to bypass this adapter: retry the public command, never invoke
 `setup_transaction` through `python -c`, stdin, or an import.
+`INTENT_PENDING` is not `EXPLAIN_ONLY`: it permits reads and exactly one
+model-selected lifecycle candidate, but no target, Agent, Cron, or unrelated write.
+If the candidate does not match the prompt-anchored source/run and exact effect, it
+remains non-authorizing and the turn stays pending/read-only.
+`setup only` / `只完成本地 setup` narrows the promoted effect itself: after the
+transaction commits, use reads or registered local verification only; do not add a
+front, evidence, Agent, Cron, or target action.
 
 ## Setup And Activation
 
@@ -91,6 +102,10 @@ the pointer, and Claude never calls the owner's private transaction APIs directl
   pointer; only the same transaction identity or explicit resume can activate it.
 - Pointer-success/final-receipt failure is recoverable only after revalidating the
   same immutable transaction, source, claim, and run identity.
+- A pointer pathname that was dangling before publish and becomes resolvable only
+  because atomic rename created that same run is not a prior pointer commit. The
+  transaction uses the frozen pre-publish origin, binds the no-origin claim, and
+  explicitly commits the pointer before terminalizing the receipt.
 - Never edit/remove `.claude/xunji_active_run`, transition claims, or transaction
   receipts by hand.
 - The pointer is the single operator's persistent current-run selection.

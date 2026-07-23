@@ -687,6 +687,36 @@ def _pointer_target(
     return candidate if candidate.is_dir() else None
 
 
+def _materialized_dangling_create_pointer(
+    target: Path,
+    receipt: dict,
+    snapshot: PointerSnapshot,
+    *,
+    root: Path,
+    runs_root: Path,
+) -> bool:
+    """Detect unchanged pointer bytes whose missing referent was just published.
+
+    A pathname can change meaning without a pointer write: before atomic rename it
+    is dangling, afterwards it resolves to the newly published target.  That is
+    not evidence of a prior pointer commit and must not enter post-commit recovery.
+    New receipts freeze the pre-publication semantic origin to distinguish this
+    case from a real crash after pointer replacement.
+    """
+    expected = receipt.get("expected_pointer") \
+        if isinstance(receipt.get("expected_pointer"), dict) else {}
+    return bool(
+        receipt.get("status") in {"prepared", "prepared_not_active"}
+        and receipt.get("expected_origin_valid") is False
+        and str(receipt.get("expected_origin_run") or "") == ""
+        and expected.get("exists") is snapshot.exists
+        and expected.get("sha256") == snapshot.sha256
+        and _pointer_target(snapshot, root=root, runs_root=runs_root) == target
+        and receipt.get("contract_binding") is None
+        and receipt.get("transition_claim") is None
+    )
+
+
 def _read_json(path: Path) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8", errors="strict"))
@@ -1936,6 +1966,14 @@ def commit_activation_cas(
     fault: FaultInjector | None = None,
 ) -> TransactionResult:
     """Atomically select ``run_dir`` iff the pointer still matches ``expected``."""
+    # Transition authority belongs to the selected repository root.  Falling
+    # back to turn_contract's import-time global directories would let a fresh
+    # pending turn in the real checkout contaminate an isolated clone, test
+    # root, or temporary worktree that passed its own pointer/runs_root.
+    if pending_dir is None:
+        pending_dir = root / ".claude" / "xunji_pending_turns"
+    if claims_dir is None:
+        claims_dir = root / ".claude" / "xunji_transition_claims"
     target = _inside(run_dir, runs_root)
     if not target.is_dir():
         raise SetupTransactionError("missing_run", f"run does not exist: {target}")
@@ -2032,6 +2070,16 @@ def commit_activation_cas(
             current_snapshot, root=root, runs_root=runs_root
         )
         receipt_status = str(receipt.get("status") or "")
+        materialized_dangling_pointer = bool(
+            effect_kind == "create"
+            and _materialized_dangling_create_pointer(
+                target, receipt, current_snapshot,
+                root=root, runs_root=runs_root,
+            )
+        )
+        pointer_already_committed = bool(
+            current_target == target and not materialized_dangling_pointer)
+        authority_origin = None if materialized_dangling_pointer else current_target
         needs_create_terminalization = receipt_status in {
             "prepared", "prepared_not_active",
         }
@@ -2045,7 +2093,7 @@ def commit_activation_cas(
         # exact create retry may use that immutable top-level binding; a later
         # activation must leave historical create identity untouched.
         needs_create_binding_retirement = bool(
-            current_target == target
+            pointer_already_committed
             and (
                 needs_create_terminalization
                 or (effect_kind == "create" and has_immutable_create_binding)
@@ -2078,7 +2126,7 @@ def commit_activation_cas(
         # directory fsync before it could terminalize the receipt.  Seeing the
         # target bytes is not enough: recovery must execute the durability
         # barrier again before retiring authority or recording success.
-        if current_target == target:
+        if pointer_already_committed:
             _confirm_active_pointer_durable(
                 pointer,
                 run_dir=target,
@@ -2109,7 +2157,7 @@ def commit_activation_cas(
             )
 
         if pending_attempt is not None:
-            if current_target == target:
+            if pointer_already_committed:
                 _invoke_fault(fault, "before_recovered_receipt")
                 receipt = _finalize_activation_attempt(
                     target, recovered=True, pointer=pointer)
@@ -2190,7 +2238,7 @@ def commit_activation_cas(
                 recovered=True,
             )
 
-        if current_target == target:
+        if pointer_already_committed:
             recovered_create = needs_create_binding_retirement
             if needs_create_terminalization:
                 _invoke_fault(fault, "before_recovered_receipt")
@@ -2269,7 +2317,7 @@ def commit_activation_cas(
             )
 
         contract = _claim_or_transfer_contract(
-            current_target,
+            authority_origin,
             target,
             transaction_id=transaction_id,
             source_hash=source_hash,
@@ -2361,6 +2409,10 @@ def activate_existing_run(
     invalid rather than silently inheriting statusline authority.  New adapters
     and transaction-internal callers must pass their exact operation explicitly.
     """
+    if pending_dir is None:
+        pending_dir = root / ".claude" / "xunji_pending_turns"
+    if claims_dir is None:
+        claims_dir = root / ".claude" / "xunji_transition_claims"
     receipt = _read_receipt(run_dir)
     if operation is _OPERATION_OMITTED:
         normalized_operation = OP_STATUSLINE_SET_ACTIVE
@@ -2877,6 +2929,14 @@ def _recover_existing(
             current, root=root, runs_root=runs_root
         ) != final_dir.resolve():
             return None
+        if _materialized_dangling_create_pointer(
+            final_dir.resolve(), receipt, current,
+            root=root, runs_root=runs_root,
+        ):
+            # The unchanged pointer only became resolvable because this run was
+            # published.  No pointer commit or contract transfer has happened;
+            # let commit_activation_cas bind the frozen no-origin claim first.
+            return None
         _confirm_active_pointer_durable(
             pointer,
             run_dir=final_dir,
@@ -2977,6 +3037,10 @@ def create_and_activate(
     fault: FaultInjector | None = None,
 ) -> TransactionResult:
     """Prepare, publish, and activate one run as a recoverable transaction."""
+    if pending_dir is None:
+        pending_dir = root / ".claude" / "xunji_pending_turns"
+    if claims_dir is None:
+        claims_dir = root / ".claude" / "xunji_transition_claims"
     _validate_run_name(run_name)
     source = dict(source_manifest)
     try:
@@ -3003,6 +3067,8 @@ def create_and_activate(
     runs_root.mkdir(parents=True, exist_ok=True)
     final_dir = _inside(runs_root / run_name, runs_root)
     initial_pointer = pointer_snapshot(pointer)
+    initial_origin = _pointer_target(
+        initial_pointer, root=root, runs_root=runs_root)
     setup_lock = runs_root / SETUP_LOCK_NAME
     staging_parent = runs_root / STAGING_NAME
     staging_dir = staging_parent / f"{run_name}.{txid}"
@@ -3078,6 +3144,9 @@ def create_and_activate(
                     "exists": initial_pointer.exists,
                     "sha256": initial_pointer.sha256,
                 },
+                "expected_origin_valid": initial_origin is not None,
+                "expected_origin_run": initial_origin.name
+                if initial_origin is not None else "",
             }
             _invoke_fault(fault, "prepared_receipt")
             _write_receipt(staging_dir, receipt)
@@ -3873,6 +3942,56 @@ def _selftest() -> int:
              and not any(claims_dir.glob("*.json"))
              and not any(pending_dir.glob("*.json"))),
         ])
+
+        # Exact incident regression: the pointer bytes already name the run,
+        # but the run does not exist until atomic publish.  Publishing must not
+        # reinterpret those unchanged bytes as a completed pointer commit.
+        same_dangling_name = "same_dangling_20260101"
+        _atomic_write(
+            pointer, f"runs/{same_dangling_name}\n".encode("utf-8"))
+        same_dangling_before = pointer_snapshot(pointer)
+        same_dangling_pending = root / "same-dangling-pending"
+        same_dangling_claims = root / "same-dangling-claims"
+        same_pending = turn_contract.write_pending_contract({
+            "session_id": "same-dangling-session",
+            "prompt": f"为 {source['source']['reference']} 创建一个新 run",
+        }, pending_dir=same_dangling_pending)
+        turn_contract.write_transition_claim(
+            same_dangling_name,
+            same_pending,
+            claims_dir=same_dangling_claims,
+            effect=test_create_effect(same_dangling_name),
+        )
+        same_dangling_result = create_and_activate(
+            same_dangling_name,
+            source_manifest=source,
+            build=_minimal_builder,
+            root=root,
+            runs_root=runs,
+            pointer=pointer,
+            required_files=required,
+            pending_dir=same_dangling_pending,
+            claims_dir=same_dangling_claims,
+        )
+        same_dangling_receipt = _read_receipt(
+            same_dangling_result.run_dir)
+        same_dangling_contract = turn_contract.load_contract(
+            same_dangling_result.run_dir,
+            session_id="same-dangling-session",
+        )
+        checks.append((
+            "same-target dangling pointer binds no-origin claim before commit",
+            same_dangling_result.status == "committed"
+            and not same_dangling_result.recovered
+            and same_dangling_receipt.get("status") == "committed"
+            and same_dangling_receipt.get("expected_origin_valid") is False
+            and same_dangling_receipt.get("expected_pointer", {}).get("sha256")
+                == same_dangling_before.sha256
+            and same_dangling_contract.get("transition_claim", {}).get(
+                "origin_run") == ""
+            and not any(same_dangling_pending.glob("*.json"))
+            and not any(same_dangling_claims.glob("*.json")),
+        ))
 
         import builtins
         original_import = builtins.__import__

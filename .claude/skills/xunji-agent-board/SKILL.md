@@ -28,6 +28,9 @@ writes canonical state, and closes fronts.
   `.claude/skills/xunji-agent-board/references/`. Never discover its owner CLI
   through Bash, `--help`, redirects, chains, or path guessing.
 - Use `xunji-reviewops` for independent review and review-ledger adjudication.
+  A plan-bound Reviewer is never that independent review; when report/closure
+  quality requires the latter, pause this board flow at its normal boundary and
+  load the ReviewOps owner rather than relabeling an Agent receipt.
 - Use `xunji-evidence-replay-gate` for candidate promotion and replay quality.
 - Use `src-safety-boundary` for privacy, target artifact, cleanup, and effect
   limits; this skill does not restate those rules.
@@ -48,7 +51,9 @@ writes canonical state, and closes fronts.
 For `SERIAL_AGENT` / `PARALLEL_AGENTS`:
 
 ```text
-one `workers.py commit-plan` call for the complete planner draft
+`workers.py plan` writes one turn/input-bound non-authorizing proposal seed
+-> Root reshapes its typed lane DAG for the current strategy
+-> one `workers.py commit-proposal` transaction
 -> delegate ready Hunter lane
 -> exact Hunter Agent launch and durable `state=done` return checkpoint
 -> delegate its digest-bound Reviewer lane
@@ -65,6 +70,13 @@ launch acknowledgement, or reviewer confidence cannot skip any arrow. Reviewer
 supplies a candidate disposition only; Root makes the final evidence-gated
 decision. A `finish` settles one execution/review pair, not necessarily the plan;
 follow its owner-emitted next action before closing/deferring a front.
+
+The generated OFFLINE/target/verify sequence is a conservative seed, not a fixed
+playbook. Root may omit work already satisfied by current canonical state, add
+independent lanes under one semantic front, and express dependencies that make
+one result change the next move. Never split one semantic front merely to inflate
+Agent count. The proposal has no authority until the transaction owner validates
+its exact turn/input basis, Reviewer topology, effects, assets, budgets, and DAG.
 
 `NO_TARGET_DATA_FOR_OFFLINE_ANALYSIS` is a barrier, not target evidence: allocate
 no E-id or finding. Even an `accept-candidate` review of that result finishes the
@@ -86,6 +98,10 @@ barrier and next evidence action.
   proves durable return and freezes result bytes.
 - Do not place two unbound Agent calls in one assistant message. Stagger real
   parallel launches across messages while earlier Agents remain running.
+- A superseding non-execute turn revokes subsequent child effects but does not
+  erase an authentic return. In the next authorized execute turn, use the normal
+  plan/delegate owner to launch only its exact Reviewer; never replay the stale
+  Hunter or restore background target authority.
 - Agents do not spawn Agents. All canonical writes, conflict resolution, finding
   promotion, and closure remain Root-owned.
 - The global completion challenge is assignment-free and separate from a

@@ -65,6 +65,7 @@ SCHEMA = "xunji.turn_contract.v1"
 EXECUTE = "EXECUTE"
 EXPLAIN = "EXPLAIN_ONLY"
 PAUSE = "PAUSED_BY_OPERATOR"
+INTENT_PENDING = "INTENT_PENDING"
 MAINTENANCE = "MAINTENANCE"
 NORMAL = "NORMAL"
 STALE_SECONDS = 6 * 60 * 60
@@ -137,10 +138,14 @@ ALL_NETWORK_DENIAL_RE = re.compile(
 TARGET_EGRESS_DENIAL_RE = re.compile(
     r"(?:禁止|不要|不得|不允许|无需).{0,32}"
     r"(?:向|对)?\s*(?:目标).{0,16}(?:网络|请求|访问|出站|探测|扫描)|"
+    r"(?:禁止|不要|不得|不允许|不)\s*(?:向|对)?\s*"
+    r"(?:访问|请求|连接|探测|扫描)\s*(?:任何|所有|一切)?\s*目标(?:站点|系统|主机)?|"
     r"(?:禁止|不要|不得|不允许|无需).{0,24}(?:探测|扫描)|"
     r"(?:do\s+not|don't|must\s+not|no)\s+(?:send\s+|make\s+|perform\s+)?"
     r"(?:target\s+)?(?:network\s+requests?|target\s+(?:egress|requests?|probing|scanning)|"
-    r"probes?|scans?)",
+    r"probes?|scans?)|"
+    r"(?:do\s+not|don't|must\s+not|never)\s+"
+    r"(?:access|contact|probe|scan)\s+(?:any\s+|all\s+)?targets?",
     re.I,
 )
 WEB_TOOL_DENIAL_RE = re.compile(
@@ -294,9 +299,17 @@ BARE_HOST_CANDIDATE_RE = re.compile(
 RUN_PATH_CANDIDATE_RE = re.compile(
     r"(?<![A-Za-z0-9_-])runs[/\\][A-Za-z0-9_-]+", re.I,
 )
-ATTACHED_OPERATOR_TEXT_RE = re.compile(
-    r"^[，,。；;：:]?(?:走|使用|通过|经由|继续|开始|创建|新建|恢复|执行|"
-    r"进行|渗透|测试|扫描|不要|无需|并|若|如果|告诉|请)",
+ATTACHED_OPERATOR_BOUNDARY_RE = re.compile(r"^(?:[，,。；;：:]|[^\x00-\x7f])")
+SEMANTIC_CANDIDATE_DATA_RE = re.compile(
+    r"(?:说明|示例|例子|日志|记录|引用|文档|教程|复盘|审计)|"
+    r"\b(?:description|sample|log|record|quote|documentation|tutorial|audit)\b|"
+    r"\b(?:this\s+is|as)\s+an?\s+example\b",
+    re.I,
+)
+SETUP_ONLY_RE = re.compile(
+    r"(?:只(?:完成|做|执行)?\s*(?:本地\s*)?(?:setup|初始化|建(?:立|好)?\s*run))|"
+    r"\bsetup\s+only\b|"
+    r"\bonly\s+(?:do|perform|complete)\s+(?:the\s+)?(?:local\s+)?setup\b",
     re.I,
 )
 QUESTION_RE = re.compile(
@@ -466,14 +479,15 @@ def _normalize_source_token(
         re.I,
     )
     if run_match and run_match.group("suffix") \
-            and ATTACHED_OPERATOR_TEXT_RE.match(run_match.group("suffix")):
+            and ATTACHED_OPERATOR_BOUNDARY_RE.match(run_match.group("suffix")):
         raw = run_match.group("source")
         normalizations.append("attached_operator_description")
 
     if re.match(r"(?i)^https?://", raw):
         origin_match = ASCII_ORIGIN_PREFIX_RE.match(raw)
         if origin_match and origin_match.group("suffix") \
-                and ATTACHED_OPERATOR_TEXT_RE.match(origin_match.group("suffix")):
+                and not origin_match.group("suffix").startswith(("/", "?", "#")) \
+                and ATTACHED_OPERATOR_BOUNDARY_RE.match(origin_match.group("suffix")):
             raw = origin_match.group("source")
             normalizations.append("attached_operator_description")
         if natural_prose:
@@ -484,7 +498,8 @@ def _normalize_source_token(
     elif not _run_name_from_path(raw):
         host_match = BARE_HOST_PREFIX_RE.match(raw)
         if host_match and host_match.group("suffix") \
-                and ATTACHED_OPERATOR_TEXT_RE.match(host_match.group("suffix")):
+                and not host_match.group("suffix").startswith(("/", "?", "#")) \
+                and ATTACHED_OPERATOR_BOUNDARY_RE.match(host_match.group("suffix")):
             raw = host_match.group("source")
             normalizations.append("attached_operator_description")
 
@@ -510,6 +525,41 @@ def _prompt_loop_source_info(prompt: str) -> tuple[str, list[str]]:
     except ValueError:
         return "", []
     return _normalize_source_token(tokens[0]) if tokens else ("", [])
+
+
+def _model_lifecycle_candidate_allowed(
+    prompt: str,
+    *,
+    source_values: list[str],
+    source_ambiguous: bool,
+    run_values: list[str],
+    run_ambiguous: bool,
+) -> bool:
+    """Allow Claude to propose one typed lifecycle effect without minting it.
+
+    This is deliberately a negative mechanical floor, not another positive
+    language grammar.  Claude interprets affirmative wording and expresses its
+    interpretation through one exact lifecycle argv.  The hook may promote that
+    candidate only when the operator text has one mechanically anchored source
+    or run and is not an obvious question, explanation, pause, denial, or data
+    container.  Exact argv/source/effect validation still happens afterwards.
+    """
+    line, _normalizations = _operator_directive_line(prompt)
+    if not line:
+        return False
+    intent = _operator_intent_text(prompt)
+    if source_ambiguous or run_ambiguous \
+            or len(source_values) + len(run_values) != 1:
+        return False
+    return not bool(
+        PAUSE_RE.search(intent)
+        or LIFECYCLE_DENIAL_RE.search(intent)
+        or LOOP_EXECUTION_DENIAL_RE.search(intent)
+        or LIFECYCLE_PERMISSION_QUESTION_RE.search(intent)
+        or QUESTION_RE.search(intent)
+        or EXPLAIN_RE.search(intent)
+        or SEMANTIC_CANDIDATE_DATA_RE.search(intent)
+    )
 
 
 def _prompt_loop_source(prompt: str) -> str:
@@ -865,6 +915,9 @@ def _contract_from_event(
     natural_transition, natural_bind = _natural_lifecycle_intent(intent_text)
     loop_requested = _prompt_has_loop_directive(prompt)
     target_egress_denied, web_tools_denied = _operator_effect_constraints(prompt)
+    lifecycle_scope = (
+        "setup_only" if SETUP_ONLY_RE.search(intent_text) else "normal"
+    )
     maintenance = maintenance_authority.operator_intent(
         prompt,
         previous_mode=previous_mode,
@@ -879,6 +932,25 @@ def _contract_from_event(
     )
     if scope_error:
         mode = EXPLAIN
+    model_candidate_allowed = bool(
+        not scope_error
+        and not maintenance
+        and mode in {EXPLAIN, EXECUTE}
+        and not (loop_requested or natural_transition or natural_bind)
+        and _model_lifecycle_candidate_allowed(
+            prompt,
+            source_values=source_values,
+            source_ambiguous=source_ambiguous,
+            run_values=run_values,
+            run_ambiguous=run_ambiguous,
+        )
+    )
+    # Preserve ordinary execution authority when the deterministic classifier
+    # already recognized an execute turn.  The model candidate path exists to
+    # resolve otherwise-read-only lifecycle wording; it must not turn a normal
+    # target action containing one URL into a lifecycle-only turn.
+    if model_candidate_allowed and mode == EXPLAIN:
+        mode = INTENT_PENDING
     now = time.time()
     loop_source = _prompt_loop_source(prompt) if loop_requested else (
         source_values[0] if len(source_values) == 1 else
@@ -955,10 +1027,18 @@ def _contract_from_event(
             and not run_ambiguous
         ),
         "lifecycle_operation": lifecycle_operation,
+        "intent_resolution": (
+            "model_candidate_pending" if mode == INTENT_PENDING else
+            "model_candidate_available" if model_candidate_allowed else
+            "deterministic_alias" if lifecycle_operation != "none" else
+            "read_only"
+        ),
+        "model_lifecycle_candidate_allowed": model_candidate_allowed,
         "memory_approved": bool(MEMORY_APPROVAL_RE.search(prompt)),
         "direct_egress_approved": direct_egress_approved,
         "target_egress_denied": target_egress_denied,
         "web_tools_denied": web_tools_denied,
+        "lifecycle_scope": lifecycle_scope,
         "fanout_override": bool(re.search(r"(?:明确)?允许串行|不要使用\s*(?:Agent|子代理)|serial override", prompt, re.I)),
         "intent_normalizations": intent_normalizations,
         "loop_requested": loop_requested,
@@ -979,6 +1059,7 @@ def _contract_from_event(
         "constraints": {
             "target_egress_denied": target_egress_denied,
             "web_tools_denied": web_tools_denied,
+            "lifecycle_scope": lifecycle_scope,
             "framework_mutation": "maintenance-only",
         },
     }
@@ -1461,7 +1542,11 @@ def _write_pending_contract_unlocked(
     if not session_id:
         return {}
     maintenance_attempt = contract.get("mode") == MAINTENANCE
-    if not maintenance_attempt and (
+    model_candidate_pending = bool(
+        contract.get("model_lifecycle_candidate_allowed")
+        and contract.get("mode") in {EXECUTE, INTENT_PENDING}
+    )
+    if not maintenance_attempt and not model_candidate_pending and (
             contract.get("mode") != EXECUTE or not bool(
                 contract.get("run_transition_requested")
                 or contract.get("run_bind_requested")
@@ -1502,7 +1587,7 @@ def load_pending_contract(session_id: str, *, pending_dir: Path | None = None) -
         age = time.time() - float(data.get("updated_at") or 0.0)
     except Exception:
         return {}
-    valid_mode = data.get("mode") in {EXECUTE, MAINTENANCE}
+    valid_mode = data.get("mode") in {EXECUTE, INTENT_PENDING, MAINTENANCE}
     if data.get("schema") != SCHEMA or not valid_mode:
         return {}
     if not str(data.get("session_id") or "") or age < 0 or age > PENDING_STALE_SECONDS:
@@ -1665,6 +1750,8 @@ def write_hook_transition_claim(
     effect = _lifecycle_transition_effect(invocation, target_name) if invocation else None
     if not effect:
         raise RuntimeError("hook transition claim lacks an exact lifecycle effect")
+    _validate_model_intent_candidate(
+        contract, target_name=target_name, effect=effect)
     lock = ACTIVE_RUN_POINTER.parent / setup_transaction.ACTIVATION_LOCK_NAME
     with setup_transaction.exclusive_directory_lock(lock):
         if origin_run is None:
@@ -2097,6 +2184,185 @@ def _lifecycle_transition_effect(
     return None
 
 
+def _lifecycle_constraints_sha256(contract: dict) -> str:
+    """Bind one model candidate to prompt-derived effect narrowing."""
+    operator_intent = contract.get("operator_intent") \
+        if isinstance(contract.get("operator_intent"), dict) else {}
+    constraints = {
+        "route": str(operator_intent.get("route") or ""),
+        "target_egress_denied": bool(contract.get("target_egress_denied")),
+        "web_tools_denied": bool(contract.get("web_tools_denied")),
+        "lifecycle_scope": str(contract.get("lifecycle_scope") or "normal"),
+    }
+    return hashlib.sha256(json.dumps(
+        constraints, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _promote_model_lifecycle_candidate(
+    run_dir: Path,
+    invocation: tuple[Path, list[str]] | None,
+    contract: dict,
+) -> dict:
+    """Promote Claude's exact lifecycle tool choice into typed turn authority.
+
+    The top-level operator prompt remains the authority source.  Claude supplies
+    only the semantic candidate by choosing one public adapter and exact input;
+    this function mechanically proves that the input is the prompt-anchored
+    source/run and freezes the resulting effect before any lifecycle write.
+    """
+    if contract.get("mode") not in {EXECUTE, INTENT_PENDING} \
+            or contract.get("model_lifecycle_candidate_allowed") is not True \
+            or not invocation:
+        return contract
+    script, args = invocation
+    if script.name != "loop_bootstrap.py":
+        return contract
+    target_name = _lifecycle_target_name(invocation)
+    effect = _lifecycle_transition_effect(invocation, target_name)
+    if not target_name or not effect:
+        return contract
+
+    operation = "none"
+    source_kind = "none"
+    if "--source" in args:
+        parsed = _parse_loop_source_args(args)
+        if not parsed:
+            return contract
+        source = str(parsed["source"])
+        kind, reference = _canonical_effect_source(
+            source,
+            source_type=str(parsed["values"].get("--type", "auto")),
+        )
+        if kind == "create":
+            if contract.get("source_ambiguous") \
+                    or not _source_authority_matches(reference, contract):
+                return contract
+            operation = "source"
+            source_kind = "url" if re.match(r"(?i)^https?://", reference) else "file"
+        elif kind == "activate":
+            if contract.get("run_ambiguous") \
+                    or not _run_authority_matches(
+                        f"runs/{reference}", contract, run_dir):
+                return contract
+            operation = "resume"
+            source_kind = "run"
+        else:
+            return contract
+    elif len(args) == 2 and args[0] == "--resume":
+        if contract.get("run_ambiguous") \
+                or not _run_authority_matches(args[1], contract, run_dir):
+            return contract
+        operation = "resume"
+        source_kind = "run"
+    else:
+        return contract
+
+    promoted = dict(contract)
+    promoted.update({
+        "mode": EXECUTE,
+        "lifecycle_operation": operation,
+        "loop_source_kind": source_kind,
+        "run_bind_requested": operation == "resume",
+        "run_transition_requested": bool(
+            operation == "source" or target_name != run_dir.name),
+        "resume_current_approved": bool(
+            operation == "resume" and target_name == run_dir.name),
+        "intent_resolution": "model_tool_candidate",
+        "model_lifecycle_candidate_allowed": False,
+        "intent_candidate_promoted_at": time.time(),
+    })
+    candidate = {
+        "schema": "xunji.lifecycle-intent-candidate.v1",
+        "prompt_sha256": str(contract.get("prompt_sha256") or ""),
+        "operation": operation,
+        "target_run": target_name,
+        "effect_sha256": str(effect.get("effect_sha256") or ""),
+        "constraints_sha256": _lifecycle_constraints_sha256(contract),
+    }
+    candidate["candidate_sha256"] = hashlib.sha256(json.dumps(
+        candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    promoted["intent_candidate"] = candidate
+    operator_intent = dict(promoted.get("operator_intent") or {})
+    operator_intent.update({
+        "operation": operation,
+        "source_kind": source_kind,
+    })
+    promoted["operator_intent"] = operator_intent
+    return promoted
+
+
+def _validate_model_intent_candidate(
+    contract: dict,
+    *,
+    target_name: str,
+    effect: dict,
+) -> None:
+    """Revalidate the protected AI candidate before claim/transaction use."""
+    if contract.get("intent_resolution") != "model_tool_candidate":
+        return
+    candidate = contract.get("intent_candidate")
+    if not isinstance(candidate, dict):
+        raise RuntimeError("model lifecycle intent candidate is missing")
+    body = {key: value for key, value in candidate.items()
+            if key != "candidate_sha256"}
+    expected_digest = hashlib.sha256(json.dumps(
+        body, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    if set(candidate) != {
+            "schema", "prompt_sha256", "operation", "target_run",
+            "effect_sha256", "constraints_sha256", "candidate_sha256",
+    } or candidate.get("schema") != "xunji.lifecycle-intent-candidate.v1" \
+            or candidate.get("prompt_sha256") != contract.get("prompt_sha256") \
+            or candidate.get("operation") != _contract_lifecycle_operation(contract) \
+            or candidate.get("target_run") != target_name \
+            or candidate.get("effect_sha256") != effect.get("effect_sha256") \
+            or candidate.get("constraints_sha256") \
+                != _lifecycle_constraints_sha256(contract) \
+            or candidate.get("candidate_sha256") != expected_digest:
+        raise RuntimeError("model lifecycle intent candidate binding is invalid")
+
+
+def _promote_model_candidate_for_event(
+    event: dict,
+    invocation: tuple[Path, list[str]] | None,
+    contract: dict,
+    *,
+    run_dir: Path | None,
+    pending_dir: Path | None = None,
+) -> dict:
+    """Durably promote one candidate while rechecking prompt/pointer lineage."""
+    if contract.get("mode") not in {EXECUTE, INTENT_PENDING} or not invocation:
+        return contract
+    lock = ACTIVE_RUN_POINTER.parent / setup_transaction.ACTIVATION_LOCK_NAME
+    with setup_transaction.exclusive_directory_lock(lock):
+        session_id = str(contract.get("session_id") or "")
+        if run_dir is None:
+            if explicit_active_run() is not None:
+                return contract
+            current = load_pending_contract(session_id, pending_dir=pending_dir)
+        else:
+            selected = explicit_active_run()
+            if selected is None or selected.resolve() != run_dir.resolve():
+                return contract
+            current = load_contract(run_dir, session_id=session_id)
+        if not current or str(current.get("prompt_sha256") or "") \
+                != str(contract.get("prompt_sha256") or ""):
+            return contract
+        promoted = _promote_model_lifecycle_candidate(
+            run_dir or ROOT, invocation, current)
+        if promoted == current:
+            return contract
+        if run_dir is None:
+            _atomic_json(
+                _pending_path(session_id, pending_dir), promoted, durable=True)
+        else:
+            _atomic_json(contract_path(run_dir), promoted, durable=True)
+            _write_run_status(run_dir, promoted)
+        return promoted
+
+
 def _lifecycle_authority_reason(
     run_dir: Path,
     invocation: tuple[Path, list[str]],
@@ -2343,6 +2609,8 @@ def claim_transition_contract(
         raise RuntimeError("transition claim has no matching current contract")
     if str(contract.get("prompt_sha256") or "") != str(claim.get("prompt_sha256") or ""):
         raise RuntimeError("transition claim prompt hash mismatch")
+    _validate_model_intent_candidate(
+        contract, target_name=target_run.name, effect=claim_effect)
     if not session_id:
         return {}
     claim_binding = {
@@ -2509,6 +2777,17 @@ def _write_run_status(run_dir: Path, contract: dict) -> None:
             "session_id": contract["session_id"],
             "updated_at": now,
             "reason": "operator requested local framework maintenance; live run is frozen",
+        })
+    elif mode == INTENT_PENDING:
+        _atomic_json(run_status_path(run_dir), {
+            "schema": SCHEMA,
+            "status": "intent_pending",
+            "session_id": contract["session_id"],
+            "updated_at": now,
+            "reason": (
+                "model lifecycle interpretation awaits an exact typed tool "
+                "candidate; target effects remain frozen"
+            ),
         })
 
 
@@ -4154,12 +4433,16 @@ def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
     except work_plan.PlanError as exc:
         detail = str(exc)
         plan = {}
-        if detail == "WORK_PLAN_INPUTS_STALE" and tool == "Agent":
+        if detail in {"WORK_PLAN_INPUTS_STALE", "WORK_PLAN_TURN_STALE"} \
+                and tool == "Agent":
             try:
                 candidate = work_plan.transaction_bound_plan(run_dir)
+                # The old plan supplies immutable settlement identity only; it
+                # never regains target/model execution authority. Do not pass
+                # run_dir/contract here: that would re-run current stage/mode/
+                # turn checks after transaction_bound_plan proved its lineage.
                 validated = work_plan.validate_plan(
-                    candidate, run_dir=run_dir, contract=contract,
-                    check_inputs=False)
+                    candidate, check_inputs=False)
                 if candidate == validated \
                         and _stale_reviewer_agent_ready(
                             run_dir, event, candidate):
@@ -4972,6 +5255,27 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             "Read", "Grep", "Glob", "CronList"} and not lifecycle_recovery:
         return setup_transaction_reason
 
+    if contract.get("lifecycle_scope") == "setup_only" \
+            and not lifecycle_recovery:
+        if tool in {"Read", "Grep", "Glob", "Skill",
+                    "ListMcpResourcesTool", "ReadMcpResourceTool"}:
+            pass
+        elif tool == "Bash" and not tool_env and (
+                _readonly_shell(command)
+                or (
+                    registered_capability is not None
+                    and registered_capability[0].effect in {
+                        "local_read", "local_verify",
+                    }
+                )):
+            pass
+        else:
+            return (
+                "[XUNJI_E_SETUP_ONLY] 当前顶层操作者把 lifecycle effect 限定为"
+                "本地 setup；setup 完成后仅允许读取/验证，禁止 target、Agent、Cron、"
+                "frontier/evidence 或其他状态修改。"
+            )
+
     if MEMORY_PATH_RE.search(text) and not contract.get("memory_approved"):
         memory_read = tool in {"Read", "Grep", "Glob"} or (
             tool == "Bash" and not tool_env and _readonly_shell(command)
@@ -4990,6 +5294,13 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
     if mode == EXPLAIN:
         if tool not in {"Read", "Grep", "Glob", "WebSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"}:
             return "当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。"
+        return ""
+    if mode == INTENT_PENDING:
+        if tool not in {"Read", "Grep", "Glob", "Skill", "ListMcpResourcesTool", "ReadMcpResourceTool"}:
+            return (
+                "当前回合等待 Claude 将自然语言拆解为一个 exact lifecycle-intent candidate；"
+                "候选尚未通过 prompt anchor/effect 校验，禁止其他修改、探测、Agent 或 Cron。"
+            )
         return ""
     if mode == PAUSE:
         if tool not in {"Read", "Grep", "Glob", "CronList", "CronDelete"}:
@@ -5315,6 +5626,11 @@ def _context_message(contract: dict, run_dir: Path) -> str:
             "[Xunji operator effect: WEB_TOOLS_DENIED] 本回合不得使用 "
             "WebFetch/WebSearch/浏览器。"
         )
+    if contract.get("lifecycle_scope") == "setup_only":
+        effect_note += (
+            "[Xunji operator effect: SETUP_ONLY] 只完成 lifecycle setup；"
+            "成功后仅可读取/验证，禁止 target、Agent、Cron 或 canonical state 修改。"
+        )
     if contract.get("scope_admission_parse_error"):
         return (
             "[Xunji scope admission: INVALID] 未授予任何资产准入权限；"
@@ -5346,6 +5662,22 @@ def _context_message(contract: dict, run_dir: Path) -> str:
         )
     if mode == EXPLAIN:
         return "[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。"
+    if mode == INTENT_PENDING:
+        source_hint = str(contract.get("lifecycle_source_hint") or "")
+        if source_hint:
+            candidate_hint = _python_control_hint(
+                ROOT / "tools" / "loop_bootstrap.py",
+                ["--source", source_hint, "--type", "auto"],
+            )
+            action = f"若语义判断是 setup/resume，提交 `{candidate_hint}`"
+        else:
+            action = "若语义判断是 lifecycle，提交唯一 source/run 的公开 bootstrap argv"
+        return effect_note + (
+            "[Xunji lifecycle: MODEL_INTENT_CANDIDATE_REQUIRED] 由 Claude 理解完整顶层"
+            "自然语言并选择是否产生 lifecycle effect；确定性层不按动词词表替代语义判断。"
+            f"{action}；该工具选择只是 candidate，只有 prompt anchor、schema、exact effect、"
+            "约束与一次性 claim 全部验证后才晋级 EXECUTE。若操作者只是陈述或分析，则保持只读回答。"
+        )
     if mode == PAUSE:
         return "[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。"
     operation = _contract_lifecycle_operation(contract)
@@ -5442,7 +5774,7 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
         if run_dir is None:
             if not contract:
                 return None
-            if contract.get("mode") == MAINTENANCE \
+            if contract.get("mode") in {MAINTENANCE, INTENT_PENDING} \
                     or contract.get("loop_requested") \
                     or _contract_lifecycle_operation(contract) in {
                         "source", "setup", "resume",
@@ -5471,7 +5803,7 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
         if hook == "UserPromptSubmit" and not INTERNAL_PROMPT_RE.search(prompt):
             contract = write_pending_contract(event)
             if contract:
-                if contract.get("mode") == MAINTENANCE:
+                if contract.get("mode") in {MAINTENANCE, INTENT_PENDING}:
                     context = _context_message(contract, ROOT)
                 elif contract.get("loop_requested") \
                         or _contract_lifecycle_operation(contract) in {
@@ -5554,6 +5886,8 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
                         "set-active 没有匹配当前顶层 human prompt 的 operator intent；先由"
                         " UserPromptSubmit 明确唯一 source/run。空白等无害格式会自动归一化，"
                         "不要调用 setup_transaction 私有 API 绕过。")
+                pending = _promote_model_candidate_for_event(
+                    event, invocation, pending, run_dir=None)
                 reason = evaluate_pretool(ROOT, event, pending)
                 if reason:
                     return _deny(reason)
@@ -5594,6 +5928,13 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
     if hook == "PreToolUse":
         private_api_reason = _private_lifecycle_api_reason(event)
         contract = load_contract_for_event(run_dir, event)
+        command = str((event.get("tool_input") or {}).get("command") or "") \
+            if isinstance(event.get("tool_input"), dict) else ""
+        lifecycle_invocation = _lifecycle_invocation(command) \
+            if str(event.get("tool_name") or "") == "Bash" else None
+        if lifecycle_invocation:
+            contract = _promote_model_candidate_for_event(
+                event, lifecycle_invocation, contract, run_dir=run_dir)
         budget_reason = _claim_plan_bound_child_tool_call(run_dir, event)
         reason = private_api_reason or budget_reason \
             or evaluate_pretool(run_dir, event, contract)
@@ -5616,11 +5957,7 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
             receipt_event.update(decision_metadata)
             runtime_receipts.append_hook_event(run_dir, receipt_event)
             return _deny(reason)
-        command = str((event.get("tool_input") or {}).get("command") or "") \
-            if isinstance(event.get("tool_input"), dict) else ""
         control_invocation = _control_invocation(command) \
-            if str(event.get("tool_name") or "") == "Bash" else None
-        lifecycle_invocation = _lifecycle_invocation(command) \
             if str(event.get("tool_name") or "") == "Bash" else None
         if _scope_admission_invocation(control_invocation):
             try:
@@ -5967,6 +6304,64 @@ def _selftest() -> int:
         "prompt": f"/loop {source_url} 创建新 run",
         "session_id": "shape-session",
     }, run_name=run.name)
+    attached_open_loop_contract = _contract_from_event({
+        "prompt": "/loop www.scshr.com，开一个新run渗透。",
+        "session_id": "attached-open-loop-session",
+    }, run_name=run.name)
+    model_candidate_contract = _contract_from_event({
+        "prompt": f"把 {source_url} 另起一套 run 来做",
+        "session_id": "model-candidate-session",
+    }, run_name=run.name)
+    ordinary_target_execute_contract = _contract_from_event({
+        "prompt": f"执行探测 {source_url}",
+        "session_id": "ordinary-target-execute-session",
+    }, run_name=run.name)
+    setup_only_candidate_contract = _contract_from_event({
+        "prompt": f"把 {source_url} 另起一套 run；只完成本地 setup",
+        "session_id": "setup-only-candidate-session",
+    }, run_name=run.name)
+    model_candidate_invocation = _lifecycle_invocation(
+        str(source_control["tool_input"]["command"]))
+    promoted_model_candidate = _promote_model_lifecycle_candidate(
+        run, model_candidate_invocation, model_candidate_contract)
+    promoted_setup_only_candidate = _promote_model_lifecycle_candidate(
+        run, model_candidate_invocation, setup_only_candidate_contract)
+    setup_only_edit_reason = evaluate_pretool(run, {
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": str(run / "notes.md"),
+            "old_string": "before",
+            "new_string": "after",
+        },
+    }, promoted_setup_only_candidate)
+    setup_only_read_reason = evaluate_pretool(run, {
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(run / "notes.md")},
+    }, promoted_setup_only_candidate)
+    wrong_model_candidate = _promote_model_lifecycle_candidate(
+        run,
+        _lifecycle_invocation(
+            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            "--source 'https://other.example/' --type auto"
+        ),
+        model_candidate_contract,
+    )
+    tampered_model_candidate = json.loads(json.dumps(promoted_model_candidate))
+    tampered_model_candidate["intent_candidate"]["target_run"] = "other_20260101"
+    try:
+        _validate_model_intent_candidate(
+            tampered_model_candidate,
+            target_name=str(promoted_model_candidate.get(
+                "intent_candidate", {}).get("target_run") or ""),
+            effect=_lifecycle_transition_effect(
+                model_candidate_invocation,
+                str(promoted_model_candidate.get(
+                    "intent_candidate", {}).get("target_run") or ""),
+            ) or {},
+        )
+        tampered_model_candidate_rejected = False
+    except RuntimeError:
+        tampered_model_candidate_rejected = True
     punctuated_source_url = "https://punct.example/path)"
     punctuated_source_control = {"tool_name": "Bash", "tool_input": {
         "command": (
@@ -8687,9 +9082,29 @@ def _selftest() -> int:
             "tool_response": [{
                 "type": "text", "text": "STALE HUNTER FULL RESULT"}],
         })
-    (stale_review_run / "hints.md").write_text(
-        "# Hints\n\n- New steering applies only after this result is reviewed.\n",
-        encoding="utf-8")
+    stale_review_current_contract = dict(stale_review_contract)
+    stale_review_current_contract["prompt_sha256"] = "b" * 64
+    stale_review_current_contract["updated_at"] = (
+        float(stale_review_contract["updated_at"]) + 0.001)
+    _atomic_json(contract_path(stale_review_run), stale_review_current_contract)
+    stale_turn_only_detected = False
+    try:
+        work_plan.current_plan(
+            stale_review_run, stale_review_current_contract)
+    except work_plan.PlanError as exc:
+        stale_turn_only_detected = bool(
+            str(exc) == "WORK_PLAN_TURN_STALE"
+            and work_plan.input_fingerprint(stale_review_run)[0]
+                == stale_review_plan.get("inputs_digest")
+        )
+    runtime_receipts.append_hook_event(stale_review_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": stale_review_current_contract["session_id"],
+        "transcript_path": str(stale_review_transcript),
+        "tool_name": "TaskCreate", "tool_use_id": "stale-review-current-task",
+        "tool_input": {"subject": "Settle the exact returned result only"},
+        "tool_response": {"taskId": "stale-review-current-task-id"},
+    })
     stale_reviewer_batch = workers.delegate_ready_lanes(
         stale_review_run, runtime_slots=1, request_budget=0,
         model_egress_budget=0, merge_capacity=10, limit=1)
@@ -8702,7 +9117,7 @@ def _selftest() -> int:
             "prompt": stale_reviewer_prompt,
             "subagent_type": stale_reviewer_type,
         }},
-        stale_review_contract,
+        stale_review_current_contract,
     ) == ""
     stale_old_execution_pretool_blocked = E_WORK_PLAN_STALE in evaluate_pretool(
         stale_review_run,
@@ -8710,7 +9125,7 @@ def _selftest() -> int:
             "prompt": stale_hunter_prompt,
             "subagent_type": stale_hunter_type,
         }},
-        stale_review_contract,
+        stale_review_current_contract,
     )
     stale_reviewer_without_digest_blocked = bool(evaluate_pretool(
         stale_review_run,
@@ -8720,7 +9135,7 @@ def _selftest() -> int:
                 stale_reviewer_prompt),
             "subagent_type": stale_reviewer_type,
         }},
-        stale_review_contract,
+        stale_review_current_contract,
     ))
     stale_reviewer_without_marker_blocked = bool(evaluate_pretool(
         stale_review_run,
@@ -8729,7 +9144,7 @@ def _selftest() -> int:
                 r"\s+XUNJI_COMPLETION_REVIEW\b", "", stale_reviewer_prompt),
             "subagent_type": stale_reviewer_type,
         }},
-        stale_review_contract,
+        stale_review_current_contract,
     ))
     stale_reviewer_appended_context_blocked = bool(evaluate_pretool(
         stale_review_run,
@@ -8737,7 +9152,7 @@ def _selftest() -> int:
             "prompt": stale_reviewer_prompt + "\nAdditional reviewer context",
             "subagent_type": stale_reviewer_type,
         }},
-        stale_review_contract,
+        stale_review_current_contract,
     ))
     stale_projection = run_model.plan_cycle_projection(
         stale_review_run, plan=stale_review_plan)
@@ -8778,7 +9193,7 @@ def _selftest() -> int:
                 "prompt": stale_reviewer_prompt,
                 "subagent_type": stale_reviewer_type,
             }},
-            stale_review_contract,
+            stale_review_current_contract,
         )
     )
     _atomic_json(stale_assignment_path, stale_assignments_before_confusion)
@@ -8792,7 +9207,6 @@ def _selftest() -> int:
                 "assignments", [])
         )
     )
-
     # ROOT_DIRECT is an exact hook-owned claim, not a prose shortcut.  Exercise
     # the real PreToolUse -> runtime claim -> PostToolUse -> typed cycle_end
     # path, including same-effect capability substitution, hook replay, and a
@@ -9059,6 +9473,35 @@ def _selftest() -> int:
     same_turn_clean_retry_claims = bool(
         not (no_active_clean.stdout or "").strip()
         and list(shape_claims_dir.glob("*.json"))
+    )
+    semantic_pending_dir = root / "semantic-candidate-pending"
+    semantic_claims_dir = root / "semantic-candidate-claims"
+    semantic_env = dict(env)
+    semantic_env["XUNJI_PENDING_TURN_DIR"] = str(semantic_pending_dir)
+    semantic_env["XUNJI_TRANSITION_CLAIMS_DIR"] = str(semantic_claims_dir)
+    semantic_submit = no_run_hook({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "semantic-candidate-hook",
+        "prompt": f"把 {source_url} 另起一套 run 来做",
+    }, hook_env=semantic_env)
+    semantic_pretool = no_run_hook({
+        "hook_event_name": "PreToolUse",
+        "session_id": "semantic-candidate-hook",
+        "tool_name": "Bash",
+        "tool_input": source_control["tool_input"],
+    }, hook_env=semantic_env)
+    semantic_pending = load_pending_contract(
+        "semantic-candidate-hook", pending_dir=semantic_pending_dir)
+    model_candidate_hook_pipeline_promotes_exact_effect = bool(
+        semantic_submit.returncode == 0
+        and "MODEL_INTENT_CANDIDATE_REQUIRED" in (semantic_submit.stdout or "")
+        and semantic_pretool.returncode == 0
+        and not (semantic_pretool.stdout or "").strip()
+        and semantic_pending.get("mode") == EXECUTE
+        and semantic_pending.get("intent_resolution") == "model_tool_candidate"
+        and semantic_pending.get("intent_candidate", {}).get("schema")
+            == "xunji.lifecycle-intent-candidate.v1"
+        and len(list(semantic_claims_dir.glob("*.json"))) == 1
     )
     missing_metadata_pending_dir = root / "missing-metadata-pending"
     missing_metadata_claims_dir = root / "missing-metadata-claims"
@@ -10793,6 +11236,13 @@ def _selftest() -> int:
         ),
         "session_id": "operator-offline-e2e-session",
     })
+    operator_plain_target_denial_contract = _contract_from_event({
+        "prompt": (
+            "继续执行 runs/demo_20260101。验证本地计划，不访问任何目标，"
+            "只读取当前 run 的 canonical 文件。"
+        ),
+        "session_id": "operator-plain-target-denial-session",
+    }, run_name=run.name)
     localhost_source_url = "http://127.0.0.1:63023"
     operator_natural_localhost_contract = _contract_from_event({
         "prompt": (
@@ -11693,6 +12143,10 @@ def _selftest() -> int:
          and "XUNJI_E_OPERATOR_EFFECT_DENIED" in offline_browser_reason
          and "XUNJI_E_OPERATOR_EFFECT_DENIED" in offline_agent_reason
          and offline_read_allowed),
+        ("natural action-before-target denial freezes target egress",
+         operator_plain_target_denial_contract.get("mode") == EXECUTE
+         and operator_plain_target_denial_contract.get("target_egress_denied") is True
+         and operator_plain_target_denial_contract.get("web_tools_denied") is False),
         ("proxy discipline plus positive target intent does not mint an offline denial",
          positive_target_loop_contract.get("target_egress_denied") is False
          and positive_target_loop_contract.get("web_tools_denied") is False),
@@ -11902,6 +12356,37 @@ def _selftest() -> int:
          source_contract_redacted),
         ("explicit /loop URL derives a new-run transition without extra wording",
          loop_url_derives_transition),
+        ("attached open-run wording keeps the bare host as the semantic source",
+         attached_open_loop_contract.get("mode") == EXECUTE
+         and attached_open_loop_contract.get("lifecycle_operation") == "source"
+         and attached_open_loop_contract.get("loop_source_kind") == "url"
+         and attached_open_loop_contract.get("lifecycle_source_hint")
+             == "https://www.scshr.com/"),
+        ("Claude lifecycle argv is a candidate mechanically promoted to typed authority",
+         model_candidate_contract.get("mode") == INTENT_PENDING
+         and promoted_model_candidate.get("mode") == EXECUTE
+         and promoted_model_candidate.get("lifecycle_operation") == "source"
+         and promoted_model_candidate.get("intent_resolution")
+             == "model_tool_candidate"
+         and promoted_model_candidate.get("intent_candidate", {}).get("schema")
+             == "xunji.lifecycle-intent-candidate.v1"
+         and len(str(promoted_model_candidate.get(
+             "intent_candidate", {}).get("candidate_sha256") or "")) == 64),
+        ("model lifecycle candidate cannot select a source absent from the prompt",
+         wrong_model_candidate == model_candidate_contract),
+        ("AI lifecycle candidate availability does not cap ordinary target execution",
+         ordinary_target_execute_contract.get("mode") == EXECUTE
+         and ordinary_target_execute_contract.get("lifecycle_operation") == "none"
+         and ordinary_target_execute_contract.get("intent_resolution")
+             == "model_candidate_available"),
+        ("setup-only semantic scope is candidate-bound and freezes post-setup mutation",
+         promoted_setup_only_candidate.get("lifecycle_scope") == "setup_only"
+         and len(str(promoted_setup_only_candidate.get(
+             "intent_candidate", {}).get("constraints_sha256") or "")) == 64
+         and "XUNJI_E_SETUP_ONLY" in setup_only_edit_reason
+         and not setup_only_read_reason),
+        ("tampered model lifecycle candidate cannot reach a transition claim",
+         tampered_model_candidate_rejected),
         ("hashed current-prompt source authority permits the exact clean argv",
          hashed_source_setup_allowed),
         ("same basename with a different query cannot reuse source authority",
@@ -12148,7 +12633,8 @@ def _selftest() -> int:
         ("plan-bound Agent rejects a mismatched plan digest",
          mismatched_plan_agent_blocked),
         ("real PreToolUse admits only the unique stale-result Reviewer",
-         stale_reviewer_pretool_allowed
+         stale_turn_only_detected
+         and stale_reviewer_pretool_allowed
          and stale_old_execution_pretool_blocked
          and stale_reviewer_without_digest_blocked
          and stale_reviewer_without_marker_blocked
@@ -12206,6 +12692,8 @@ def _selftest() -> int:
          no_active_shape_denied_without_claim),
         ("no-active clean exact retry succeeds in the same operator turn",
          same_turn_clean_retry_claims),
+        ("no-active hook promotes Claude semantic candidate before writing a claim",
+         model_candidate_hook_pipeline_promotes_exact_effect),
         ("missing session metadata preserves normalized operator intent across hooks",
          missing_session_hook_pipeline_recovers_intent),
         ("missing all Claude metadata uses the personal singleton across hooks",

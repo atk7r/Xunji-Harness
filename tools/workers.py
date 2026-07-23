@@ -35,7 +35,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {
-    "list", "new", "suggest", "plan", "commit-plan", "delegate", "assign", "cancel-unlaunched",
+    "list", "new", "suggest", "plan", "commit-plan", "commit-proposal",
+    "delegate", "assign", "cancel-unlaunched",
     "status", "agent-check",
     "heartbeat", "finish", "review-disposition", "lifecycle-check",
     "merge-check", "conflicts",
@@ -51,6 +52,9 @@ REVIEW_DISPOSITIONS = {
     "out-of-scope", "retry", "blocked",
 }
 STALE_HEARTBEAT_SECONDS = 30 * 60
+PLAN_PROPOSAL_SCHEMA = "xunji.work-plan-proposal.v1"
+PLAN_PROPOSAL_FILE = "work_plan_proposal.json"
+PLAN_PROPOSAL_MAX_BYTES = 64 * 1024
 
 SATURATION_SCRIPT = ROOT / "tools" / "saturation.py"
 
@@ -422,6 +426,18 @@ def _transaction_bound_plan_without_input_freshness(
     return plan
 
 
+def _transaction_bound_plan_for_settlement(run_dir: Path) -> dict:
+    """Reload a committed plan for settlement without reviving its authority."""
+    plan = _work_plan.transaction_bound_plan(run_dir)
+    # Intentionally omit run_dir/contract: validate_plan uses them to re-run
+    # current stage/mode/turn checks. transaction_bound_plan already proves the
+    # committed lineage; stale settlement needs structural identity only.
+    validated = _work_plan.validate_plan(plan, check_inputs=False)
+    if validated != plan:
+        raise ValueError("transaction-bound settlement plan changed during validation")
+    return plan
+
+
 def _current_plan_lane(run_dir: Path, *, lane_id: str, role: str,
                        front: str, assets: list[str],
                        stale_settlement_plan: dict | None = None) \
@@ -454,7 +470,7 @@ def _current_plan_lane(run_dir: Path, *, lane_id: str, role: str,
             try:
                 _work_plan.current_plan(run_dir, contract)
             except _work_plan.PlanError as exc:
-                if str(exc) != "WORK_PLAN_INPUTS_STALE" \
+                if str(exc) not in {"WORK_PLAN_INPUTS_STALE", "WORK_PLAN_TURN_STALE"} \
                         and not (_agent_settlement is not None
                                  and _agent_settlement.cancellation_barrier(
                                      run_dir, plan_digest=persisted_digest)):
@@ -465,8 +481,7 @@ def _current_plan_lane(run_dir: Path, *, lane_id: str, role: str,
                             run_dir, plan_digest=persisted_digest):
                     raise ValueError(
                         "settlement override requires stale inputs or a cancellation")
-            plan = _transaction_bound_plan_without_input_freshness(
-                run_dir, contract)
+            plan = _transaction_bound_plan_for_settlement(run_dir)
             if plan != stale_settlement_plan:
                 raise ValueError("stale settlement plan changed before assignment")
     except Exception as exc:
@@ -736,8 +751,9 @@ def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
 
     This remains an advisory planner: it does not commit ``work_plan.json``,
     assign an Agent, or mint a lifecycle receipt.  The returned ``work_plan_lane``
-    value is deliberately shaped for ``tools/work_plan.py commit --lane`` while the
-    surrounding fields explain scheduler cost and overlap decisions.
+    value is the conservative generated seed placed into the non-authorizing
+    proposal; Root may reshape that seed before the proposal owner validates and
+    atomically commits it.
     """
     ranked = [row for row in suggest(run_dir) if row["score"] >= 3]
     # A fully reviewable front currently expands to six lanes.  Keep one work
@@ -837,6 +853,110 @@ def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
             request_cost=0, request_budget=0, merge_cost=5,
         )
     return planned
+
+
+def _plan_proposal_path(run_dir: Path) -> Path:
+    return state_dir(run_dir) / PLAN_PROPOSAL_FILE
+
+
+def _plan_proposal_basis(run_dir: Path) -> dict:
+    """Bind a model-authored draft to the exact current turn and inputs."""
+    if _work_plan is None:
+        raise ValueError("work_plan unavailable; proposal fails closed")
+    contract = _work_plan._load_turn_contract(run_dir)
+    inputs_digest, _ = _work_plan.input_fingerprint(run_dir)
+    return {
+        "inputs_digest": inputs_digest,
+        "turn_binding": {
+            "session_id": str(contract.get("session_id") or ""),
+            "prompt_sha256": str(contract.get("prompt_sha256") or ""),
+            "contract_updated_at": float(contract.get("updated_at") or 0.0),
+        },
+    }
+
+
+def write_plan_proposal(run_dir: Path, lanes: list[dict]) -> dict:
+    """Write a replaceable, non-authorizing seed for Root strategy edits."""
+    ready = [lane for lane in lanes if not lane.get("dependencies")]
+    topology_mode = (
+        "PARALLEL_AGENTS" if len(ready) >= 2
+        and all(lanes_can_overlap(left, right)
+                for index, left in enumerate(ready)
+                for right in ready[index + 1:])
+        else "SERIAL_AGENT"
+    )
+    proposal = {
+        "schema": PLAN_PROPOSAL_SCHEMA,
+        "basis": _plan_proposal_basis(run_dir),
+        "macro_stage": None,
+        "objective": "",
+        "execution_mode": topology_mode,
+        "delegation_reason": "",
+        "exit_gate": "",
+        "replan_reason": "",
+        "lanes": lanes,
+    }
+    path = _plan_proposal_path(run_dir)
+    _atomic_write(path, json.dumps(proposal, ensure_ascii=False, indent=2) + "\n")
+    return {"path": path, "proposal": proposal}
+
+
+def load_plan_proposal(run_dir: Path) -> tuple[dict, str]:
+    """Load one exact in-run proposal without granting it plan authority."""
+    path = _plan_proposal_path(run_dir)
+    try:
+        info = path.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError(
+            "WORK_PLAN_PROPOSAL_MISSING: rerun workers.py plan") from exc
+    if not stat.S_ISREG(info.st_mode) or path.is_symlink():
+        raise ValueError("WORK_PLAN_PROPOSAL_NOT_REGULAR")
+    if info.st_size <= 0 or info.st_size > PLAN_PROPOSAL_MAX_BYTES:
+        raise ValueError("WORK_PLAN_PROPOSAL_SIZE_INVALID")
+    try:
+        raw = path.read_bytes()
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except Exception as exc:
+        raise ValueError("WORK_PLAN_PROPOSAL_JSON_INVALID") from exc
+    expected_fields = {
+        "schema", "basis", "macro_stage", "objective", "execution_mode",
+        "delegation_reason", "exit_gate", "replan_reason", "lanes",
+    }
+    if not isinstance(value, dict) or value.get("schema") != PLAN_PROPOSAL_SCHEMA:
+        raise ValueError("WORK_PLAN_PROPOSAL_SCHEMA_INVALID")
+    if set(value) != expected_fields:
+        raise ValueError("WORK_PLAN_PROPOSAL_FIELDS_INVALID")
+    if value.get("basis") != _plan_proposal_basis(run_dir):
+        raise ValueError("WORK_PLAN_PROPOSAL_STALE")
+    if value.get("macro_stage") not in _work_plan.STAGES:
+        raise ValueError("WORK_PLAN_PROPOSAL_STAGE_REQUIRED")
+    if value.get("execution_mode") not in {"SERIAL_AGENT", "PARALLEL_AGENTS"}:
+        raise ValueError("WORK_PLAN_PROPOSAL_MODE_INVALID")
+    for field in ("objective", "delegation_reason", "exit_gate", "replan_reason"):
+        if not isinstance(value.get(field), str):
+            raise ValueError(f"WORK_PLAN_PROPOSAL_{field.upper()}_INVALID")
+    lanes = value.get("lanes")
+    if not isinstance(lanes, list) or not 1 <= len(lanes) <= 16 \
+            or not all(isinstance(item, dict) for item in lanes):
+        raise ValueError("WORK_PLAN_PROPOSAL_LANES_INVALID")
+    return value, hashlib.sha256(raw).hexdigest()
+
+
+def _validate_proposal_assignment_scope(run_dir: Path, lanes: list[dict]) -> None:
+    """Reject a proposal that would commit debt no assignment can satisfy."""
+    known_fronts = {str(item.get("id") or "") for item in parse_frontiers(run_dir)}
+    for lane in lanes:
+        front = str(lane.get("front") or "")
+        if front not in known_fronts:
+            raise ValueError(
+                f"WORK_PLAN_PROPOSAL_FRONT_UNKNOWN:{front or '(empty)'}")
+        _resolve_assignment_assets(
+            run_dir,
+            front,
+            [str(item) for item in lane.get("assets", [])],
+            str(lane.get("role") or ""),
+            effect=str(lane.get("effect") or ""),
+        )
 
 
 def lanes_can_overlap(left: dict, right: dict) -> bool:
@@ -944,20 +1064,16 @@ def _capacity_diagnostic(
     )
 
 
-def _fanout_verdict(rows: list[dict]) -> tuple[str, list[str]]:
+def _breadth_signals(rows: list[dict]) -> list[str]:
+    """Describe candidate breadth without pretending it is a scheduler."""
     strong = [r for r in rows if r["score"] >= 3]
     distinct_assets = {a for r in strong for a in r["assets"]}
     distinct_barriers = {r["barrier"] for r in strong if r["barrier"] not in {"", "unknown"}}
-    notes = [
+    return [
         f"strong candidates={len(strong)}",
         f"distinct assets={len(distinct_assets)}",
         f"barrier classes={len(distinct_barriers) or 'mostly none/unknown'}",
     ]
-    if len(strong) >= 3 and len(distinct_assets) >= 3:
-        return "fan-out recommended", notes
-    if len(strong) >= 2 and len(distinct_assets) >= 2:
-        return "fan-out optional; driver should weigh rate limit and shared barriers", notes
-    return "stay serial for now", notes
 
 
 def _candidate_blocks(text: str) -> list[dict]:
@@ -3225,11 +3341,11 @@ def print_suggest(run_dir: Path, limit: int | None = None) -> int:
     if not rows:
         print("[workers suggest] 无可建议 front: 缺 frontier.md 或没有 open/probing/deferred front。")
         return 0
-    verdict, notes = _fanout_verdict(rows)
+    notes = _breadth_signals(rows)
     planned = lane_suggestions(run_dir, limit=(limit if limit is not None else 2))
     ready = [row for row in planned if not row["work_plan_lane"]["dependencies"]]
     mode = "PARALLEL_AGENTS" if len(ready) >= 2 else "SERIAL_AGENT"
-    print(f"[workers suggest] {mode} advisory ({'; '.join(notes)}; legacy breadth={verdict})")
+    print(f"[workers suggest] generated topology={mode} ({'; '.join(notes)})")
     print("  note: advisory only; Root must commit xunji.work-plan.v1 before assignment.")
     print("  driver still weighs live rate limits, shared auth/WAF barriers, and prior worker hit rate.")
     for r in rows:
@@ -3267,8 +3383,8 @@ def print_plan(run_dir: Path, limit: int) -> int:
         return 1
     selected = rows[:min(limit, 2)]
     lanes = lane_suggestions(run_dir, limit=limit)
-    verdict, notes = _fanout_verdict(rows)
-    print(f"[workers plan] draft only: {verdict} ({'; '.join(notes)})")
+    notes = _breadth_signals(rows)
+    print(f"[workers plan] generated seed only ({'; '.join(notes)})")
     if _target_egress_denied_for_plan(run_dir):
         print(
             "[workers plan] operator effect: TARGET_EGRESS_DENIED; target lanes "
@@ -3276,13 +3392,25 @@ def print_plan(run_dir: Path, limit: int) -> int:
             "Hunter/Reviewer pair is the complete local suffix."
         )
     if len(selected) < len(rows):
-        print(f"Selected {len(selected)} of {len(rows)} strong candidate(s) due to --limit={limit}.")
+        requested = max(0, limit)
+        reason = (
+            "generated-seed cap=2; the model proposal may instead express up to 16 lanes"
+            if requested > 2 else f"--limit={limit}"
+        )
+        print(f"Selected {len(selected)} of {len(rows)} strong candidate(s) due to {reason}.")
+    proposal_info = write_plan_proposal(
+        run_dir, [row["work_plan_lane"] for row in lanes])
     print(
-        f"INDIVISIBLE_DRAFT: commit all {len(lanes)} printed lane-json values in "
-        "one workers.py commit-plan call; do not copy lane JSON, use shell line "
-        "continuations, or commit a subset. Ready is a post-commit delegate state."
+        f"MODEL_PROPOSAL: {display_path(proposal_info['path'])} is a derived, "
+        "non-authorizing seed bound to this turn/input. Root may replace, omit, "
+        "or add typed execution/Reviewer pairs (maximum 16 lanes) before "
+        "workers.py commit-proposal."
     )
-    print("Driver must commit a work plan before assignment; this tool creates no facts, Agents, or receipts.\n")
+    print(
+        "Root must fill macro_stage, objective, delegation_reason, and exit_gate; "
+        "keep basis unchanged. Lanes are strategy, not an indivisible planner mandate."
+    )
+    print("Only the validated transaction commit authorizes delegation; this seed creates no facts, Agents, or receipts.\n")
     for row in lanes:
         lane = row["work_plan_lane"]
         print(f"## {lane['id']} -> {lane['front']} ({lane['role']})")
@@ -3292,7 +3420,6 @@ def print_plan(run_dir: Path, limit: int) -> int:
         print(f"- request_cost / budget: {lane['request_cost']} / {lane['request_budget']}")
         print(f"- expected_information_gain: {lane['expected_information_gain']}")
         print(f"- merge_cost: {lane['merge_cost']}")
-        print("- lane-json: " + json.dumps(lane, ensure_ascii=False, sort_keys=True))
         print()
     ready = [row for row in lanes if not row["work_plan_lane"]["dependencies"]]
     width = scheduler_width(
@@ -3303,7 +3430,12 @@ def print_plan(run_dir: Path, limit: int) -> int:
             row["work_plan_lane"]["request_budget"] for row in ready
             if row["work_plan_lane"]["effect"] == "model_egress"),
     )
-    print(f"Scheduler advisory: ready={len(ready)} bounded_parallel_width={width}.")
+    recommended_mode = "PARALLEL_AGENTS" if width >= 2 else "SERIAL_AGENT"
+    print(
+        f"Topology advisory: ready={len(ready)} capacity-free_parallel_width={width} "
+        f"topology_mode={recommended_mode}; actual delegate width still depends "
+        "on runtime/request/egress/merge capacity."
+    )
     return 0
 
 
@@ -3380,7 +3512,7 @@ def print_commit_plan(
     run_dir: Path, *, stage: str, objective: str, mode: str, reason: str,
     exit_gate: str, limit: int, replan_reason: str = "",
 ) -> int:
-    """Commit one complete planner draft without model-side JSON transport."""
+    """Compatibility path: commit the conservative generated seed directly."""
     lanes = [row["work_plan_lane"] for row in lane_suggestions(run_dir, limit=limit)]
     if not lanes:
         print(
@@ -3405,17 +3537,79 @@ def print_commit_plan(
     except Exception as exc:
         print(f"[workers commit-plan] ERROR {exc}", file=sys.stderr)
         return 1
-    print(json.dumps({
-        "schema": "xunji.planner-commit.v1",
+    _print_plan_commit_receipt(
+        plan, inherited=inherited, source="generated-seed")
+    return 0
+
+
+def _print_plan_commit_receipt(
+    plan: dict, *, inherited: list[str], source: str,
+    proposal_sha256: str = "",
+) -> None:
+    ready = [item for item in plan.get("lanes") or []
+             if isinstance(item, dict) and not item.get("dependencies")]
+    topology_mode = (
+        "PARALLEL_AGENTS" if len(ready) >= 2
+        and all(lanes_can_overlap(left, right)
+                for index, left in enumerate(ready)
+                for right in ready[index + 1:])
+        else "SERIAL_AGENT"
+    )
+    receipt = {
+        "schema": "xunji.planner-commit.v2",
+        "source": source,
         "plan_id": plan.get("plan_id"),
         "plan_digest": plan.get("plan_digest"),
         "macro_stage": plan.get("macro_stage"),
+        "objective": plan.get("objective"),
         "execution_mode": plan.get("execution_mode"),
+        "topology_mode": topology_mode,
+        "ready_lane_count": len(ready),
+        "mode_matches_topology": plan.get("execution_mode") == topology_mode,
         "lane_count": len(plan.get("lanes") or []),
         "lanes": [str(item.get("id") or "") for item in plan.get("lanes") or []],
+        "fronts": sorted({str(item.get("front") or "")
+                          for item in plan.get("lanes") or []
+                          if isinstance(item, dict) and item.get("front")}),
         "inherited_completed_lanes": inherited,
         "next_action": "delegate dependency-ready lanes from this committed plan",
-    }, ensure_ascii=False, indent=2))
+    }
+    if proposal_sha256:
+        receipt["proposal_sha256"] = proposal_sha256
+    print(json.dumps(receipt, ensure_ascii=False, indent=2))
+
+
+def print_commit_proposal(run_dir: Path) -> int:
+    """Commit the exact current model-authored DAG through the plan owner."""
+    try:
+        proposal, proposal_sha256 = load_plan_proposal(run_dir)
+        normalized_lanes = [
+            _work_plan.normalize_lane(item) for item in proposal["lanes"]]
+        _validate_proposal_assignment_scope(run_dir, normalized_lanes)
+        lanes, inherited = _remaining_replan_lanes(
+            run_dir,
+            normalized_lanes,
+            replan_reason=proposal["replan_reason"],
+        )
+        plan = _work_plan.commit_plan(
+            run_dir,
+            macro_stage=proposal["macro_stage"],
+            objective=proposal["objective"],
+            mode=proposal["execution_mode"],
+            reason=proposal["delegation_reason"],
+            exit_gate=proposal["exit_gate"],
+            lanes=lanes,
+            replan_reason=proposal["replan_reason"],
+        )
+    except Exception as exc:
+        print(f"[workers commit-proposal] ERROR {exc}", file=sys.stderr)
+        return 1
+    _print_plan_commit_receipt(
+        plan,
+        inherited=inherited,
+        source="model-proposal",
+        proposal_sha256=proposal_sha256,
+    )
     return 0
 
 
@@ -3455,9 +3649,9 @@ def _plan_for_delegation(run_dir: Path, contract: dict) -> tuple[dict, bool]:
     try:
         plan = _work_plan.current_plan(run_dir, contract)
     except _work_plan.PlanError as exc:
-        if str(exc) != "WORK_PLAN_INPUTS_STALE":
+        if str(exc) not in {"WORK_PLAN_INPUTS_STALE", "WORK_PLAN_TURN_STALE"}:
             raise
-        plan = _transaction_bound_plan_without_input_freshness(run_dir, contract)
+        plan = _transaction_bound_plan_for_settlement(run_dir)
         return plan, True
     if _agent_settlement is not None and _agent_settlement.cancellation_barrier(
             run_dir, plan_digest=str(plan.get("plan_digest") or "")):
@@ -3762,7 +3956,7 @@ def _plan_continuation_notice(run_dir: Path) -> str:
             contract = _work_plan._load_turn_contract(run_dir)
             _work_plan.current_plan(run_dir, contract)
         except Exception as exc:
-            if str(exc) == "WORK_PLAN_INPUTS_STALE":
+            if str(exc) in {"WORK_PLAN_INPUTS_STALE", "WORK_PLAN_TURN_STALE"}:
                 freshness = "stale"
             else:
                 freshness = "invalid"
@@ -3770,8 +3964,9 @@ def _plan_continuation_notice(run_dir: Path) -> str:
         return (
             "NEXT_OWNER_ACTION: committed plan inputs changed after the settled "
             "prefix; keep its front open, rerun workers.py plan, then use "
-            "workers.py commit-plan with a material --replan-reason so the owner "
-            "inherits completed lanes and rebinds only the unfinished suffix."
+            "the model proposal's replan_reason field plus workers.py "
+            "commit-proposal so the owner inherits completed lanes and rebinds "
+            "only the unfinished suffix."
         )
     if freshness == "invalid":
         return (
@@ -4228,6 +4423,16 @@ def _selftest() -> int:
         stale_reviewer_artifact_rejected = "evidence set mismatch" in str(exc)
     run = d / "run"
     run.mkdir()
+    (run / "state").mkdir()
+    (run / "target.md").write_text(
+        "# Target\n- Authorized scope: a.example b.example c.example\n",
+        encoding="utf-8",
+    )
+    (run / "state" / "turn_contract.json").write_text(json.dumps({
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+        "session_id": "planner-fixture", "prompt_sha256": "a" * 64,
+        "updated_at": time.time(), "fanout_override": False,
+    }), encoding="utf-8")
     empty_run = d / "empty"
     empty_run.mkdir()
     legacy_assignment_run = d / "legacy-assignment"
@@ -4288,6 +4493,10 @@ def _selftest() -> int:
             "schema": "xunji.turn_contract.v1",
             "mode": "EXECUTE",
             "target_egress_denied": True,
+            "session_id": "offline-planner-fixture",
+            "prompt_sha256": "b" * 64,
+            "updated_at": time.time(),
+            "fanout_override": False,
         }),
         encoding="utf-8",
     )
@@ -4318,6 +4527,12 @@ def _selftest() -> int:
     successful_plan_output = io.StringIO()
     with contextlib.redirect_stdout(successful_plan_output):
         successful_plan_exit = print_plan(run, 1)
+    parallel_plan_output = io.StringIO()
+    with contextlib.redirect_stdout(parallel_plan_output):
+        parallel_plan_exit = print_plan(run, 2)
+    planner_seed_bytes = _plan_proposal_path(run).read_bytes()
+    planner_seed_proposal = json.loads(planner_seed_bytes.decode("utf-8"))
+    planner_seed_digest = hashlib.sha256(planner_seed_bytes).hexdigest()
     driver_output = io.StringIO()
     with contextlib.redirect_stdout(driver_output):
         no_strong_exit = print_plan(no_strong, 3)
@@ -5746,10 +5961,20 @@ def _selftest() -> int:
         and hunter_draft_after_return["result"].get("source")
             == "subagent_stop_response"
     )
-    (planned_run / "hints.md").write_text(
-        "# Hints\n\n- Preserve the returned result but apply new steering next cycle.\n",
-        encoding="utf-8",
-    )
+    superseding_contract = dict(planned_contract)
+    superseding_contract["prompt_sha256"] = "f" * 64
+    superseding_contract["updated_at"] = float(planned_contract["updated_at"]) + 1.0
+    (planned_run / "state" / "turn_contract.json").write_text(
+        json.dumps(superseding_contract), encoding="utf-8")
+    stale_turn_only_detected = False
+    try:
+        _work_plan.current_plan(planned_run, superseding_contract)
+    except _work_plan.PlanError as exc:
+        stale_turn_only_detected = bool(
+            str(exc) == "WORK_PLAN_TURN_STALE"
+            and _work_plan.input_fingerprint(planned_run)[0]
+                == planned_plan.get("inputs_digest")
+        )
     stale_direct_reviewer_assign_blocked = False
     try:
         create_agent_assignment(
@@ -5758,7 +5983,7 @@ def _selftest() -> int:
         )
     except ValueError as exc:
         stale_direct_reviewer_assign_blocked = (
-            "WORK_PLAN_INPUTS_STALE" in str(exc))
+            "WORK_PLAN_TURN_STALE" in str(exc))
     stale_premature_replan_blocked = False
     try:
         _work_plan.commit_plan(
@@ -5879,7 +6104,7 @@ def _selftest() -> int:
         exit_gate="newly bound execution and Reviewer chain is settled",
         lanes=replanned_lanes,
         replan_reason="operator hint changed after the prior Hunter returned",
-        contract=planned_contract,
+        contract=superseding_contract,
     )
     planned_next_batch = delegate_ready_lanes(
         planned_run, runtime_slots=1, request_budget=10,
@@ -6254,6 +6479,121 @@ def _selftest() -> int:
     journal_tamper_preserved_assignments = (
         planned_run / "state" / "assignments.json").read_bytes() \
         == assignments_before_journal_tamper
+
+    def make_model_proposal_run(name: str, *, host: str, front: str) -> Path:
+        proposal_run = d / name
+        (proposal_run / "state").mkdir(parents=True)
+        (proposal_run / "target.md").write_text(
+            f"# Target\n- Authorized scope: {host}\n", encoding="utf-8")
+        (proposal_run / "coverage.json").write_text(json.dumps({
+            "assets": [{"asset_id": "ASSET-PROPOSAL0001", "host": host,
+                        "reachable": True, "examined": False}],
+        }), encoding="utf-8")
+        (proposal_run / "frontier.md").write_text(
+            f"# Frontier\n\n## Open Fronts\n\n### {front} — {host} adaptive lanes\n"
+            "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+            encoding="utf-8",
+        )
+        (proposal_run / "evidence.md").write_text(
+            f"# Evidence\n\n## E-901\n- Front: {front}\n"
+            "- Claim: enough prior state to choose the next effect\n",
+            encoding="utf-8",
+        )
+        _atomic_write(
+            proposal_run / "state" / "turn_contract.json",
+            json.dumps({
+                "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+                "session_id": f"{name}-session", "prompt_sha256": "e" * 64,
+                "updated_at": time.time(), "fanout_override": False,
+            }, ensure_ascii=False, indent=2) + "\n",
+        )
+        return proposal_run
+
+    def proposal_lane(
+        lane_id: str, *, front: str, host: str, role: str = "web-hunter",
+        effect: str = "local_read", dependencies: list[str] | None = None,
+    ) -> dict:
+        return {
+            "id": lane_id, "role": role, "front": front, "effect": effect,
+            "assets": [host], "dependencies": list(dependencies or []),
+            "expected_evidence": "one bounded strategy-selected signal",
+            "expected_information_gain": "high",
+            "stop_condition": "the signal is observed or a control refutes it",
+            "request_cost": 1 if effect == "target" else 0,
+            "request_budget": 2 if effect == "target" else 0,
+            "merge_cost": 5, "atomic": False,
+        }
+
+    adaptive_run = make_model_proposal_run(
+        "adaptive-model-proposal", host="proposal.example", front="F-020")
+    adaptive_lanes: list[dict] = []
+    for suffix in ("SOURCE", "CVE", "CONFIG"):
+        execution_id = f"L-F-020-{suffix}"
+        adaptive_lanes.append(proposal_lane(
+            execution_id, front="F-020", host="proposal.example"))
+        adaptive_lanes.append(proposal_lane(
+            f"{execution_id}-REVIEW", front="F-020", host="proposal.example",
+            role="review", effect="local_verify", dependencies=[execution_id]))
+    adaptive_proposal = {
+        "schema": PLAN_PROPOSAL_SCHEMA,
+        "basis": _plan_proposal_basis(adaptive_run),
+        "macro_stage": "S2",
+        "objective": "run three independent local investigations without splitting the front",
+        "execution_mode": "PARALLEL_AGENTS",
+        "delegation_reason": "three effect-compatible ready lanes",
+        "exit_gate": "each exact result receives its bound Reviewer",
+        "replan_reason": "",
+        "lanes": adaptive_lanes,
+    }
+    _atomic_write(
+        _plan_proposal_path(adaptive_run),
+        json.dumps(adaptive_proposal, ensure_ascii=False, indent=2) + "\n",
+    )
+    adaptive_commit_output = io.StringIO()
+    with contextlib.redirect_stdout(adaptive_commit_output):
+        adaptive_commit_exit = print_commit_proposal(adaptive_run)
+    adaptive_plan = _work_plan.load_plan(adaptive_run)
+    adaptive_contract_path = adaptive_run / "state" / "turn_contract.json"
+    adaptive_contract = json.loads(adaptive_contract_path.read_text(encoding="utf-8"))
+    adaptive_contract["prompt_sha256"] = "f" * 64
+    adaptive_contract["updated_at"] = time.time() + 1
+    _atomic_write(
+        adaptive_contract_path,
+        json.dumps(adaptive_contract, ensure_ascii=False, indent=2) + "\n",
+    )
+    try:
+        load_plan_proposal(adaptive_run)
+        stale_model_proposal_rejected = False
+    except ValueError as exc:
+        stale_model_proposal_rejected = str(exc) == "WORK_PLAN_PROPOSAL_STALE"
+
+    target_only_run = make_model_proposal_run(
+        "target-only-model-proposal", host="target-only.example", front="F-021")
+    target_execution = proposal_lane(
+        "L-F-021-TARGET", front="F-021", host="target-only.example",
+        effect="target")
+    target_review = proposal_lane(
+        "L-F-021-TARGET-REVIEW", front="F-021", host="target-only.example",
+        role="review", effect="local_verify", dependencies=[target_execution["id"]])
+    target_only_proposal = {
+        "schema": PLAN_PROPOSAL_SCHEMA,
+        "basis": _plan_proposal_basis(target_only_run),
+        "macro_stage": "S2",
+        "objective": "use existing state for one bounded target check",
+        "execution_mode": "SERIAL_AGENT",
+        "delegation_reason": "one target effect is ready",
+        "exit_gate": "the target result receives its exact Reviewer",
+        "replan_reason": "",
+        "lanes": [target_execution, target_review],
+    }
+    _atomic_write(
+        _plan_proposal_path(target_only_run),
+        json.dumps(target_only_proposal, ensure_ascii=False, indent=2) + "\n",
+    )
+    target_only_output = io.StringIO()
+    with contextlib.redirect_stdout(target_only_output):
+        target_only_exit = print_commit_proposal(target_only_run)
+    target_only_plan = _work_plan.load_plan(target_only_run)
     checks = [
         ("target review admission accepts four absolute frozen artifact paths",
          len(validated_artifact_receipts) == 4
@@ -6265,7 +6605,10 @@ def _selftest() -> int:
          unknown_assignment_schema_rejected),
         ("suggest returns open/probing before bad deferred", rows[0]["front"] in {"F-001", "F-002", "F-003"}),
         ("suggest excludes closed", all(r["front"] != "F-099" for r in rows)),
-        ("fanout verdict recommends with 3 mapped fronts", _fanout_verdict(rows[:3])[0] == "fan-out recommended"),
+        ("breadth signals stay descriptive rather than choosing scheduler mode",
+         _breadth_signals(rows[:3])[0] == "strong candidates=3"
+         and not any("serial" in item or "fan-out" in item
+                     for item in _breadth_signals(rows[:3]))),
         ("scan sees two done workers", len(unmerged(run)) == 2),
         ("empty run suggest returns []", suggest(empty_run) == []),
         ("asset suggestions live in workers not graph",
@@ -6283,14 +6626,22 @@ def _selftest() -> int:
         ("field parser does not cross newline on empty value", _field("- Barrier class:\n- Same barrier failures: 1", "Barrier class") == ""),
         ("empty Claim does not swallow next line", any(i["kind"] == "missing-claim" for i in missing_issues)),
         ("empty Control does not swallow following text", any(i["kind"] == "worker-missing-control" for i in missing_issues)),
-        ("plan --limit uses full pool verdict source", _fanout_verdict(plan_limited_rows)[0] == "fan-out recommended"),
-        ("successful planner output declares the complete draft indivisible",
+        ("plan breadth signals use the full candidate pool",
+         _breadth_signals(plan_limited_rows)[0]
+         == f"strong candidates={len(plan_limited_rows)}"),
+        ("planner names parallel mode for two dependency-free compatible fronts",
+         parallel_plan_exit == 0
+         and "ready=2 capacity-free_parallel_width=2 "
+             "topology_mode=PARALLEL_AGENTS"
+             in parallel_plan_output.getvalue()),
+        ("planner writes a turn-bound non-authorizing model proposal seed",
          successful_plan_exit == 0
-         and "INDIVISIBLE_DRAFT: commit all 6 printed lane-json values"
-         in successful_plan_output.getvalue()
-         and "workers.py commit-plan" in successful_plan_output.getvalue()
-         and "Ready is a post-commit delegate state"
-         in successful_plan_output.getvalue()),
+         and "MODEL_PROPOSAL:" in successful_plan_output.getvalue()
+         and planner_seed_proposal.get("schema") == PLAN_PROPOSAL_SCHEMA
+         and set(planner_seed_proposal.get("basis") or {})
+            == {"inputs_digest", "turn_binding"}
+         and len(planner_seed_proposal.get("lanes") or []) == 12
+         and bool(re.fullmatch(r"[0-9a-f]{64}", planner_seed_digest))),
         ("offline operator constraint removes target lanes at planner source",
          offline_plan_exit == 0
          and [row["work_plan_lane"]["effect"] for row in offline_planned_lanes]
@@ -6299,8 +6650,8 @@ def _selftest() -> int:
          == [offline_planned_lanes[0]["work_plan_lane"]["id"]]
          and "TARGET_EGRESS_DENIED; target lanes and target-dependent verification are omitted"
          in offline_plan_output.getvalue()
-         and "commit all 2 printed lane-json values"
-         in offline_plan_output.getvalue()),
+         and len(json.loads(_plan_proposal_path(offline_plan_run).read_text(
+             encoding="utf-8")).get("lanes") or []) == 2),
         ("single-front lane plan reviews every execution lane before advancing",
          [row["work_plan_lane"]["effect"] for row in planned_lanes]
          == ["local_read", "local_verify", "target", "local_verify",
@@ -6319,6 +6670,24 @@ def _selftest() -> int:
          == [planned_lanes[2]["work_plan_lane"]["id"]]
          and planned_lanes[-1]["work_plan_lane"]["dependencies"]
          == [planned_lanes[-2]["work_plan_lane"]["id"]]),
+        ("model proposal can commit three ready lanes under one semantic front",
+         adaptive_commit_exit == 0
+         and adaptive_plan.get("execution_mode") == "PARALLEL_AGENTS"
+         and len(adaptive_plan.get("lanes") or []) == 6
+         and {item.get("front") for item in adaptive_plan.get("lanes") or []}
+            == {"F-020"}
+         and sum(not item.get("dependencies")
+                 for item in adaptive_plan.get("lanes") or []) == 3
+         and '"source": "model-proposal"' in adaptive_commit_output.getvalue()
+         and '"ready_lane_count": 3' in adaptive_commit_output.getvalue()),
+        ("model proposal may omit the generated offline prefix",
+         target_only_exit == 0
+         and [item.get("effect") for item in target_only_plan.get("lanes") or []]
+            == ["target", "local_verify"]
+         and [item.get("id") for item in target_only_plan.get("lanes") or []]
+            == ["L-F-021-TARGET", "L-F-021-TARGET-REVIEW"]),
+        ("model proposal is rejected after its turn binding changes",
+         stale_model_proposal_rejected),
         ("scheduler width is bounded by runtime and merge capacity",
          scheduler_width(lane_suggestions(run, limit=3), runtime_slots=2,
                          request_budget=99, merge_capacity=10) == 1),
@@ -6479,6 +6848,12 @@ def _selftest() -> int:
          planner_commit_exit == 0
          and generated_plan_lanes == planned_plan.get("lanes")
          and '"lane_count": 6' in planner_commit_output.getvalue()
+         and '"objective": "exercise serial review closure"'
+            in planner_commit_output.getvalue()
+         and '"topology_mode": "SERIAL_AGENT"'
+            in planner_commit_output.getvalue()
+         and '"mode_matches_topology": true' in planner_commit_output.getvalue()
+         and '"fronts": [' in planner_commit_output.getvalue()
          and planned_hunter_batch.get("schema") == "xunji.delegate-batch.v1"
          and planned_hunter_batch["assignments"][0].get("lane_id")
          == generated_plan_lanes[0]["id"]),
@@ -6488,7 +6863,8 @@ def _selftest() -> int:
         ("plan-bound Reviewer cannot delegate before Hunter runtime return",
          reviewer_before_return_blocked),
         ("stale settlement is available only through delegate, not direct assign",
-         stale_direct_reviewer_assign_blocked
+         stale_turn_only_detected
+         and stale_direct_reviewer_assign_blocked
          and stale_premature_replan_blocked
          and planned_reviewer_batch.get("input_freshness")
             == "stale-settlement-only"
@@ -6542,7 +6918,8 @@ def _selftest() -> int:
         ("Root finish keeps the front open until every committed lane settles",
          "NEXT_OWNER_ACTION" in planned_continuation_notice
          and "keep its front open" in planned_continuation_notice
-         and "--replan-reason" in planned_continuation_notice
+         and "replan_reason" in planned_continuation_notice
+         and "commit-proposal" in planned_continuation_notice
          and "inherits completed lanes" in planned_continuation_notice),
         ("generated replan inherits the exact completed lane prefix",
          inherited_completed_lanes
@@ -6702,6 +7079,8 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("--exit-gate", required=True)
             ap.add_argument("--replan-reason", default="")
             ap.add_argument("--limit", type=int, default=2)
+        elif cmd == "commit-proposal":
+            ap.add_argument("run_dir", type=Path)
         elif cmd == "delegate":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("--runtime-slots", type=int, default=2)
@@ -6777,6 +7156,8 @@ def main(argv: list[str] | None = None) -> int:
                 replan_reason=args.replan_reason,
                 limit=args.limit,
             )
+        if cmd == "commit-proposal":
+            return print_commit_proposal(run_dir)
         if cmd == "delegate":
             return print_delegate(
                 run_dir,

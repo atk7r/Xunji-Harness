@@ -69,8 +69,15 @@
   token/ref surrogate and AI returns IDs, never values. Do not Read raw source into
   external model context. Unsupported, ambiguous, forged, mutated, or unregistered
   local-AI input fails without creating/activating a run. In an explicit first
-  `/loop`, the complete top-level operator description is compiled into a typed
-  lifecycle intent: operation, one semantic source/run, route, and constraints.
+  `/loop`, Claude interprets the complete top-level operator description and
+  expresses it as one exact lifecycle tool candidate. The hook mechanically
+  promotes that candidate into a typed lifecycle intent only after schema,
+  prompt hash, unique source/run anchor, exact effect, narrowed constraints, and
+  one-use authority all match. Deterministic code may recognize exact aliases and
+  obvious questions/denials/data containers, but it must not replace model
+  understanding with an expanding positive verb grammar. “Only complete local
+  setup” is a hard effect constraint: after setup, reads/verifiers remain allowed,
+  while target, Agent, Cron, frontier/evidence, and other state mutation stay denied.
   A bare host means its canonical HTTPS origin; URL scheme/host case, default port,
   and empty path are normalized when they preserve the same target. Text attached
   after a host/URL such as “走代理渗透” remains operator instruction and must not be
@@ -215,7 +222,8 @@
 
 ```text
 observe -> update state graph -> decompose fronts
--> commit the complete planner draft once with `workers.py commit-plan`
+-> let `workers.py plan` seed a turn/input-bound model proposal
+-> reshape the typed lane DAG, then commit once with `workers.py commit-proposal`
 -> delegate dependency-ready effect lanes -> Claude calls Agents
 -> freeze returned bytes + merge draft -> Reviewer challenges exact digest
 -> review disposition -> Root disposition / synthesis -> typed cycle_end

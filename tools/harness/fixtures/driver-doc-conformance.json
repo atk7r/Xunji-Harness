@@ -117,7 +117,7 @@
     {
       "path": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
       "required": [
-        "python3 tools/workers.py commit-plan runs/<dir>",
+        "python3 tools/workers.py commit-proposal runs/<dir>",
         "python3 tools/workers.py delegate runs/<dir>",
         "python3 tools/workers.py cancel-unlaunched runs/<dir>",
         "digest proves only that some input",
@@ -554,25 +554,13 @@
       "expected_effect": "local_read"
     },
     {
-      "name": "agent board work-plan commit",
+      "name": "agent board model-proposal commit",
       "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
-      "marker": "python3 tools/workers.py commit-plan runs/<dir>",
+      "marker": "python3 tools/workers.py commit-proposal runs/<dir>",
       "script": "tools/workers.py",
       "argv": [
-        "commit-plan",
-        "runs/demo_20260101",
-        "--stage",
-        "S2",
-        "--objective",
-        "review one bounded front",
-        "--mode",
-        "SERIAL_AGENT",
-        "--reason",
-        "one dependency chain",
-        "--exit-gate",
-        "frozen result reviewed and Root-disposed",
-        "--limit",
-        "1"
+        "commit-proposal",
+        "runs/demo_20260101"
       ],
       "expected_id": "control.workers",
       "expected_effect": "control"

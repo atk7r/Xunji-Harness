@@ -41,9 +41,11 @@ Routing invariant:
   `loop_requested=false`; it must not claim recurring-Cron semantics. Once bound,
   use the fixed protocol in `docs/templates/loop_prompt.md` and always name the
   normalized run path, not the original source.
-- Affirmative natural-language setup grants source authority only when it names one
-  unique URL. Multiple URLs are ambiguous data; do not choose among them or bootstrap
-  until the operator explicitly identifies the lifecycle source.
+- Affirmative natural-language setup names the controlling goal; Claude decomposes it
+  into one public lifecycle-tool candidate. The Hook grants source authority only when
+  that candidate matches one unique prompt-anchored URL/run and the exact constrained
+  effect. Multiple sources remain ambiguous data. Deterministic rules recognize exact
+  aliases and hard negative/data boundaries, not an expanding list of positive verbs.
 
 Natural language never claims recurring loop mode by itself; it may authorize the
 single setup/resume/execute lifecycle operation classified by the turn contract.
