@@ -520,7 +520,11 @@ plan 只读取 settlement identity，放行唯一 exact assignment/lane/result-d
 assigned-but-never-launched 的非 Reviewer 只能通过 typed `cancel-unlaunched` 事务退休。prepared
 cancellation 先成为 runtime/replan barrier，再耐久删除 launch artifacts 与 assignment row，
 最后发布 immutable tombstone；它不生成 result/review/merge/evidence/cycle_end，必须 material
-replan。
+replan。父 Agent 的 exact `PreToolUseDenied` 是该 tool-use 未跨越 launch boundary 的负证据：
+它既不生成 attempt，也不阻止上述 cancellation；`PostToolUseFailure`、成功 Post、Start/Stop
+或任一 assignment 子动作仍是真实 runtime debt。Cancellation 只读取旧 transaction 的 immutable
+identity 并在锁内两次证明 turn/input stale，不用当前回合的 target-egress policy 重新授权旧 plan；
+因此当前禁网继续硬阻 target lanes，但不会卡死纯本地 assignment settlement。
 `state/conflicts.json` 是参与 plan fingerprint 的语义投影；`workers.py conflicts` 在
 `schema/conflict_types/conflicts` 未变化时保留原文件字节与 `generated_at`，只有真实冲突语义
 变化才原子重写并使 current plan stale。重复 owner 检查不得靠刷新投影时间戳制造假 replan。
@@ -531,11 +535,20 @@ regular file。`work_plan` 对直接注入的 canonical-input symlink 同样 fai
 所有 assignment RMW 共用同一跨进程锁，runtime journal 锁与 assignment 锁不嵌套；Agent
 hook exact replay 幂等，冲突 identity 或重复 projected attempt 保留 lifecycle debt；
 `SubagentStop` 只允许关闭同 `session_id` 的唯一 launch，跨 session、未匹配或多匹配 Stop
-不能改变 attempt/assignment 终态。Start 没有 parent tool/prompt identity 时只接受唯一完整
+不能改变 attempt/assignment 终态。其中“未匹配”只指带 Xunji 类型或部分 owner 信号的候选；
+Claude Code 自己的 recap/compaction 等内部子代理若发出无 Xunji Agent type、assignment、
+parent tool-use、同 session Start/launch 或 assignment-ledger owner 的 bare Stop，不是 Agent
+事实。新事件以 content-addressed `xunji.foreign_agent_lifecycle.v1` 记录在独立目录而不进入
+`runtime_events.jsonl`；旧 journal 污染只能由 typed quarantine owner 追加绑定原 seq/hash 与
+validated journal head 的 immutable supersession，再从未改写的物理 journal 重建有效 Agent
+投影。任一 Xunji 归属信号都禁止 quarantine 并继续 fail closed。
+Start 没有 parent tool/prompt identity 时只接受唯一完整
 unbound candidate；同一 assistant message 的多个候选不再按到达顺序猜测，真实并行必须跨
 assistant messages stagger launch。父 Agent 的 `PreToolUseDenied` / `PostToolUseFailure` receipt
 会永久退休该 tool-use 的 Start 分配资格，避免后续成功 launch 的 `PostToolUse` 与 child Start
-竞态时让已拒绝 canary 重新参与候选歧义。
+竞态时让已拒绝 canary 重新参与候选歧义。这里的 Start 候选退休不等于 assignment 结算：
+只有 `PreToolUseDenied` 证明未 launch；`PostToolUseFailure` 已形成 failed attempt，必须 Reviewer
+settlement。
 Child tool hook 的 `transcript_path` 指向父 session transcript，但工具调用只存在于 Claude 的
 exact `<session>/subagents/agent-<agent_id>.jsonl` sidechain。Runtime receipt 因此只从安全的
 session/agent token 派生该单一路径，不 glob、不回退父/兄弟 transcript，并要求结构化
@@ -847,7 +860,7 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `contracts/agent-instruction-sources.v1.json` + `tools/agent_instruction_bundle.py` + `docs/templates/agents/` + `.claude/agents/xunji-{hunter,reviewer}.md` | Claude-primary versioned source selection、common+role delta 组合、scaffold/live definition 与 source/artifact byte-integrity contract | workers、context pack、assignment schema、runtime receipts、turn contract、template check、protected-path manifest |
 | `tools/workers.py` + assignment/merge/review schemas | lane planner、预算/effect scheduler、批量 assignment 事务、原子物化 instruction bundle/context/Agent scaffold，并由 typed row 返回 canonical type+prompt 二元 launch contract、Reviewer/Root disposition | runtime receipts、context pack、Agent source manifest、merge/conflict tests |
 | `tools/agent_settlement.py` + `contracts/assignment-cancellation.v2.schema.json`（v1 只读兼容） | turn/input/both stale-plan unlaunched assignment 的 typed cancellation、immutable tombstone、runtime/replan barrier 与 forward recovery | workers 单写者、runtime receipts、turn contract、fault/schema fixtures |
-| `tools/runtime_receipts.py` + Root/Agent receipt schemas | 含 instruction-bundle digest 的 plan-bound type+prompt、typed tool-call/request budget 唯一 formatter、Start 冻结与 child PreToolUse 重验/原子 claim，assignment-free global completion formatter/lifecycle、exact child-sidechain transcript truth、hook-observed launch/return/failure、immutable result、ROOT_DIRECT claim/terminal projection | workers、instruction bundle、turn contract、parent/child transcript、run model、loop journal、schema conformance |
+| `tools/runtime_receipts.py` + Root/Agent/foreign-lifecycle receipt schemas | 含 instruction-bundle digest 的 plan-bound type+prompt、typed tool-call/request budget 唯一 formatter、Start 冻结与 child PreToolUse 重验/原子 claim，assignment-free global completion formatter/lifecycle、exact child-sidechain transcript truth、hook-observed launch/return/failure、foreign Claude lifecycle admission/quarantine、immutable result、ROOT_DIRECT claim/terminal projection | workers、instruction bundle、turn contract、parent/child transcript、run model、loop journal、schema conformance |
 | `tools/run_model.py` + `tools/loop_journal.py` + cycle schema | receipt-derived plan debt/readiness 与 append-only typed cycle/stage sequence | work plan、run/check gates、exact rederive/fallback/tamper fixtures |
 | `docs/WORKFLOW*.md` | live run 核心/按需参考流程 | templates、check_run、skills |
 | `docs/cognition/` | 判断纪律与 evidence confidence | 不把攻击 playbook 写进 cognition |
@@ -1040,55 +1053,65 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     Start 与每次运行中 child call 重验 versioned source、context 和 Agent artifact；unknown
     version、symlink/source drift/artifact mismatch 都 fail closed。Start 冻结含 bundle digest 的
     prompt hash，global completion envelope 明确不携带该 token。
+27. Claude Code 内部 lifecycle 只有在“无 Xunji type + 无 assignment/binding + 无同 session
+    Start/launch + assignment ledger 无 owner”全部成立时才可隔离；隔离是 content-addressed
+    observation/supersession，不删除或改写 runtime journal。任一 Xunji 因果信号继续作为
+    lifecycle debt fail closed。
 
 ## 12. Maintenance Checkpoint
 
-- Date: 2026-07-23
-- Scope: 根治“自然语言恢复既有 run，同时提到 target URL，却被机械层选成新 source”以及
-  “turn 已变化、旧 assignment 未启动却无法结算”的组合死锁。自然语言先进入
-  `INTENT_PENDING`；Claude 通过公开 exact lifecycle argv 选择 source/run 的语义角色，Hook
-  再把该选择编译成 typed effect。一个 prompt 中的 run path 与 URL 可以分别作为 lifecycle
-  anchor 和 target anchor 共存，未被选择的 anchor 不获得 lifecycle authority。编译后统一校验
-  operation/source-kind/bind/transition 的状态机不变量；same-run resume 不再靠重新解析 prose
-  推断 transition。
-- Architecture impact: lifecycle authority、turn supersede recovery 与 assignment cancellation
-  contract changed。该规则 supersedes “正向动词表直接决定 lifecycle effect”、将任意 URL
-  优先当作新-run source、以及 stale guard 在 cancellation/reviewer settlement 之前一律拒绝的行为。
-  Model 仍拥有自然语言语义、策略和 lane 分解；deterministic layer 只拥有 prompt anchor、
-  negative boundary、typed effect、state invariant、CAS、outbound/evidence enforcement。没有新增
-  operator DSL，也没有扩大 `ROOT_DIRECT`。
-- Cancellation migration: `xunji.assignment-cancellation.v2` 与 transaction v2 记录
-  `stale_basis=turn|inputs|both`、plan turn binding 和 observed turn binding。v1 receipt/transaction
-  只读兼容；v1/v2 混合 transaction fail closed。只有 canonical receipts 与 parent transcript
-  同时证明 assignment 从未启动时才能取消。取消只清 assignment debt，不产生 result、review、
-  evidence、refutation、lane/cycle completion 或 front closure；随后必须按当前 turn/inputs 重建
-  material plan。已 returned/failed 的旧 Agent 只能进入其唯一 Reviewer settlement，running
-  Agent 只能 status/wait。
-- Owner/enforcement: `tools/turn_contract.py` owns lifecycle candidate admission/promotion、
-  role-separated anchors、compiled-state invariant 与 PreToolUse turn gate；
-  `tools/agent_settlement.py` owns cancellation identity/schema validation；
-  `tools/workers.py` owns no-launch proof、cancellation transaction、exact stale recovery routing
-  与 front-open CLI boundary；`tools/work_plan.py` 仍唯一拥有 authoritative plan commit/archive/CAS。
-  `.claude/skills/`、`CLAUDE.md` 与 `docs/WORKFLOW*.md` 只拥有 Claude routing/说明，不铸造 authority。
-- Verification: focused `turn_contract.py --selftest`、`workers.py --selftest`、
-  `setup_transaction.py --selftest`、`capability_registry.py --selftest`、template/rule checks 与
-  `git diff --check` PASS；最终 `tools/selftest_all.py` 为 69/69 PASS。自然语言回归覆盖 10 种中英文
-  run+target 表达及 denial/ambiguity negative cases；cancellation 覆盖 inputs-only、turn-only、
-  turn+inputs 与双向 v1/v2 mix rejection。隔离 Claude primary-driver 使用真实 Hooks/receipts 完成
-  same-run resume、turn-only cancellation、fresh plan、Hunter、唯一 Reviewer、Root settlement 和
-  typed cycle_end，target actions=0；durable record:
-  `review/records/2026-07-23-lifecycle-turn-cancellation-e2e.md`。
-- Independent review: Codex-authored matrix 已执行，Codex 不计独立票。arkcli 的 Kimi backend
-  timeout，GLM output parse failure，因此 panel 是 partial 而非 PASS。fresh-context/no-tools Claude
-  review 为 WARN；其唯一 high source finding 漏读了 `mode != EXECUTE` 已清空 lifecycle operation
-  的分支；所举的 mixed prompt 已在回归中，随后又加入 reviewer 点名的纯自然语言中英文
-  `restore/resume run` 并断言 `natural_bind=True`，予以驳回。它提出的 v1/v2 mix 与
-  `stale_basis=both` coverage gap 已接受、补测并重跑 69/69；最终没有未处置的 concrete source
-  defect。完整 availability、finding dispositions、session 和 diff fingerprint 记录在
-  `review/records/2026-07-23-lifecycle-turn-cancellation-review.md`。
-- Exclusions: 不直接修改 live run，不发送 target 请求，不把 Agent Reviewer 当独立维护复审，
-  不修改用户的 `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md` 或现有 target/evidence
-  artifacts。
+- Date: 2026-07-24
+- Scope: 根治 Claude Code `away_summary`/recap 内部子代理的 bare `SubagentStop` 被
+  Xunji 当作正式 Agent lifecycle receipt，继而污染 projection、遮蔽 typed stale-assignment
+  settlement 的死锁。新增 current-delivery admission 分流、legacy append-only quarantine、
+  content-addressed receipt schema、effective Agent projection 与 recovery-first driver routing；
+  同时修复 denied Agent launch 被误算为 runtime activity、offline turn 错误重验旧 target plan，
+  以及动作句加效果约束被跨分句误判为 `EXPLAIN_ONLY` 的 resume settlement 链。
+- Architecture impact: Agent lifecycle ownership、negative launch proof、local settlement
+  authority、runtime receipt persistence、自然语言 turn classification 与 recovery contract
+  changed。该规则 supersedes “任何 unmatched Stop 都必须进入 Agent journal 并成为 lifecycle
+  debt”、 “任何 assignment 字段 runtime event 都阻止 cancellation”以及“否定词可跨分句撤销
+  主动作”。只有带 Xunji type/binding/Start/launch/assignment owner 的 unmatched Stop 继续
+  fail closed；完全无 Xunji 因果 owner 的 Claude 内部事件只进入独立审计 receipt。
+  `runtime_events.jsonl` 仍是不可改写的物理 hash chain，quarantine 只追加 immutable
+  supersession，并以原 seq/hash 和 observed head 决定 effective Agent projection。只有 exact
+  `PreToolUseDenied Agent` 是未 launch 负证据；failure/success/Start/Stop/child action 继续形成
+  debt。当前 target denial 只缩窄外部效果，不撤销 local cancellation；自然语言否定只在自己的
+  分句内生效。
+- Owner/enforcement: `tools/runtime_receipts.py` 唯一拥有 foreign classification、receipt
+  validation/durability、legacy quarantine 与 projection filtering；
+  `contracts/foreign-agent-lifecycle.v1.schema.json` 冻结 receipt shape；
+  `capability_registry.py` 冻结唯一 public control argv；`workers.py` 以 exact receipt identity
+  证明 denied launch 并在锁内重复 stale proof；`turn_contract.py` 只把 clause-local denial
+  用作机械底线；`run_model.py`/driver routing 把 owner recovery 排在 reproject/cancel/replan
+  前面；Claude skill、`CLAUDE.md` 与 workflow 说明语义和精确顺序。
+- Live migration: `runs/www-scshr-com_20260723` 的 seq `163,171,192,232,233` 已通过 typed
+  owner quarantine。五条都无 Xunji type/assignment/parent/Start/launch/ledger owner，并与
+  `away_summary` 对齐。journal SHA-256 恢复前后均为
+  `f0927bf076d2ef4bfea72c72c7c9dfe451d3dcf06bee5b03db8df25d7ebcf292`；
+  projection error 已清除。真实 resumed session
+  `c706831c-6700-4fbe-9d49-a00029bbed50` 随后以 typed owner 将
+  `A-web-hunter-003` 结算为 `cancelled-unlaunched`；transaction=`committed`、
+  `stale_basis=both`、receipt digest=`c742140e56c194356bd8578e4f4000d0d9d4c61beca88e275de30c475f6f41e8`。
+  Agent Board 已无该 row，未伪造 result/review/merge/cycle_end，也未直接编辑 assignment/journal。
+- Verification: focused runtime/capability/workers/turn selftests、rule/template checks、
+  `git diff --check` PASS；最终 `tools/selftest_all.py` 为 69/69 PASS（115.4s）。隔离的真实
+  DeepSeek-backed Claude Code 主驾驶两次从污染 run 走 Hooks 和 exact typed quarantine，
+  receipt/state adjudication 为 `errors=[]`、projection diagnostic absent、target=0、Agent=0。
+  最终候选在 live path-bound resumed session 完成 cancellation，target=0、Agent=0。复制 run
+  的 cancellation E2E 因 receipt 冻结原 absolute `run_dir` 而正确 fail closed，不绕过或伪报；
+  synthetic selftest 覆盖 deny + old target plan + current offline turn。详见
+  `review/records/2026-07-24-foreign-lifecycle-quarantine-e2e.md`。
+- Independent review: Codex 不计独立票。先前 foreign-lifecycle scoped fresh review PASS；
+  完整 staged 候选随后由 fresh-context、`--tools ""` Claude session
+  `a56dc829-8096-48fc-8191-8d5850b016e5` 刷新复审，结论 PASS、无 actionable source
+  defect；其逐项确认 exact denied identity、failed-attempt debt、locked stale proof、TOCTOU、
+  clause-local intent、append-only durability 与 schema/docs/test consistency。Stop hook 后续
+  Coda retry 不改变 transcript 中已完成的 no-tools review vote。完整处置见
+  `review/records/2026-07-24-foreign-lifecycle-quarantine-review.md`。
+- Exclusions: 未发送 target 请求，未把 Agent Reviewer 当独立维护复审，未删除/改写 runtime
+  journal，未修改用户的 `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md` 或现有
+  target/evidence artifacts。
 
 ## 13. 外部设计来源与采用边界
 

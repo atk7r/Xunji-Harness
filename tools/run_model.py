@@ -373,6 +373,15 @@ def _runtime_records(run: Path) -> tuple[list[dict], list[dict], list[str], obje
             return [], [], ["runtime-receipts:invalid-chain:" + errors[0]], module
         projection_error = run / "state" / "runtime_projection_error.json"
         if projection_error.exists():
+            recovery = module.foreign_lifecycle_recovery_status(run) \
+                if hasattr(module, "foreign_lifecycle_recovery_status") else {}
+            candidates = recovery.get("candidate_event_seqs", []) \
+                if isinstance(recovery, dict) else []
+            if candidates:
+                return [], [], [
+                    "runtime-receipts:foreign-lifecycle-quarantine-required:"
+                    + ",".join(str(item) for item in candidates)
+                ], module
             try:
                 error_value = json.loads(projection_error.read_text(
                     encoding="utf-8", errors="strict"))

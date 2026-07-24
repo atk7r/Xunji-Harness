@@ -63,6 +63,22 @@ python3 tools/runtime_receipts.py runs/<dir> --reproject
 python3 tools/workers.py status runs/<dir>
 ```
 
+If `workers.py status` instead names
+`foreign-lifecycle-quarantine-required` or gives event sequences for proven
+non-Xunji lifecycle receipts, run the typed supersession owner first:
+
+```bash
+python3 tools/runtime_receipts.py runs/<dir> --quarantine-unowned-lifecycle
+python3 tools/workers.py status runs/<dir>
+```
+
+This path never deletes or rewrites `runtime_events.jsonl`. It admits only a
+bare Stop with no Xunji Agent type, assignment, parent tool-use, same-session
+Start/launch, or assignment-ledger owner; the content-addressed quarantine
+receipt binds the original event seq/hash and validated journal head. A Stop
+with any Xunji ownership signal remains lifecycle debt and must not use this
+recovery.
+
 `status=reconciled` alone is not return proof. If the assignment is still
 `running`, wait for hook delivery and repeat this checkpoint; do not end the
 phase, delegate, or call `finish`. Root never writes `done`: `SubagentStop`
@@ -77,8 +93,11 @@ are the result; notification prose may be stale or interleaved and must not be
 copied into evidence or a disposition note.
 
 Start/Stop/Post ordering variants join only through one frozen causal identity.
-Cross-session, unmatched, ambiguous, duplicated, or conflicting attempts remain
-lifecycle debt; never select the newest by arrival order. A result becomes
+Cross-session, Xunji-owned unmatched, ambiguous, duplicated, or conflicting
+attempts remain lifecycle debt; never select the newest by arrival order.
+Claude-internal lifecycle events with no Xunji causal owner are recorded in a
+separate foreign-lifecycle receipt directory and do not become Agent attempts.
+A result becomes
 journal-eligible only after its immutable file and merge-result directory chain
 cross the durability barrier. Retry the same Stop after a pre-journal crash; the
 checkpoint above recovers only derived projection.
@@ -95,7 +114,11 @@ is settlement identity only. The current `EXECUTE` turn must have its own normal
 iteration-plan receipt, and only the unique digest/assignment/lane-bound Reviewer
 may launch. If an old non-Reviewer assignment has no authentic launch attempt,
 settle it with `cancel-unlaunched`; do not re-run it or replan around either kind
-of assignment debt.
+of assignment debt. Exact parent `PreToolUseDenied Agent` receipts prove their
+matching transcript tool-uses never launched and therefore do not block this
+cancellation. A parent `PostToolUseFailure`, successful Post, Start/Stop, or child
+action is an attempt and must not be relabeled as unlaunched. Current offline/target
+denial narrows external effects; it does not revoke this local settlement owner.
 
 Invoke the returned exact `xunji-reviewer` binary contract. Its result digest
 must match the frozen Hunter bytes. Reviewer supplies a candidate disposition;

@@ -274,6 +274,9 @@ observe -> update state graph -> decompose fronts
   Execution begins/resumes only from a prompt with an explicit action verb such
   as `/loop`, continue/resume, execute, implement, or fix. Ambiguous declarative
   prompts default read-only; never infer permission to resume target work.
+  Interpret effect-narrowing constraints by clause: “继续修复当前运行；不要联网、
+  不要启动 Agent” remains `EXECUTE` with those effects denied. A clause-local
+  “不要恢复这个运行” or an actual why/explain-only request remains read-only.
 - **Live framework maintenance is inferred from ordinary operator wording.**
   Ordinary `/loop` authority cannot modify the safety-critical paths compiled in
   `tools/harness/maintenance_authority.py` and mirrored by

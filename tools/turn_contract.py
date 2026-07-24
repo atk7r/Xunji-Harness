@@ -226,8 +226,8 @@ PAUSE_RE = re.compile(
 )
 EXECUTE_RE = re.compile(
     r"继续(?:执行|推进|修复|运行|渗透)?|恢复(?:执行|运行|loop)?|"
-    r"修复|实现|落实|执行|修改|彻底解决|开始(?:运行|渗透)|"
-    r"resume|continue|implement|fix|execute|apply",
+    r"修复|实现|落实|执行|修改|处理|清理|结算|完成|彻底解决|开始(?:运行|渗透)|"
+    r"resume|continue|implement|fix|execute|apply|repair|settle|complete",
     re.I,
 )
 MEMORY_APPROVAL_RE = re.compile(r"(?:明确|现在)?(?:写入|保存|更新)(?:长期)?记忆|approve memory|write (?:to )?memory", re.I)
@@ -320,12 +320,18 @@ QUESTION_RE = re.compile(
     re.I,
 )
 LIFECYCLE_DENIAL_RE = re.compile(
-    r"(?:不(?:要|得|应|用|再|允许)?|禁止|无需|别|取消).{0,32}"
+    # Denial is clause-local.  A constraint such as “继续修复当前运行；不要
+    # 启动 Agent，也不要结束运行” narrows effects; it must not reach across
+    # punctuation and negate the affirmative resume clause.
+    r"(?:不(?:要|得|应|用|再|允许)?|禁止|无需|别|取消)"
+    r"[^，,、。；;！？!?\r\n]{0,32}"
     r"(?:创建|新建|建立|启动|恢复|续接|切换|设置|"
     r"\b(?:setup|create|start|resume|continue|switch|set)\b)"
-    r".{0,24}(?:\brun\b|运行)|"
-    r"(?:do\s+not|don't|never|no\s+need\s+to|should\s+not|must\s+not).{0,32}"
-    r"\b(?:create|start|setup|resume|continue|switch|set)\b.{0,24}\brun\b",
+    r"[^，,、。；;！？!?\r\n]{0,24}(?:\brun\b|运行)|"
+    r"(?:do\s+not|don't|never|no\s+need\s+to|should\s+not|must\s+not)"
+    r"[^,.;!?\r\n]{0,32}"
+    r"\b(?:create|start|setup|resume|continue|switch|set)\b"
+    r"[^,.;!?\r\n]{0,24}\brun\b",
     re.I,
 )
 CLASSIFY_DENIAL_RE = re.compile(
@@ -6309,6 +6315,34 @@ def _selftest() -> int:
     ambiguous = classify_prompt("这是最新状态")
     pause = classify_prompt("停止loop，渗透结束")
     execute = classify_prompt("彻底修复所有问题")
+    constrained_execute_prompts = [
+        (
+            "继续修复当前卡住的运行：把从未真正启动的 assignment 安全结算掉，"
+            "并核验它已消失。只做本地恢复；不要联网、不要启动 Agent、"
+            "不要重规划或结束运行。"
+        ),
+        "继续处理当前任务，只做本地状态恢复，别联网，也不要启动新 Agent。",
+        "把残留的未启动 assignment 安全结算掉，完成后核验状态。",
+        "恢复当前运行，但不要发请求，也不要启动 Agent。",
+        "Continue repairing the current run; do not access the target or start agents.",
+    ]
+    constrained_execute_modes = [
+        classify_prompt(item) for item in constrained_execute_prompts
+    ]
+    constrained_execute_contract = _contract_from_event({
+        "prompt": constrained_execute_prompts[0],
+        "session_id": "constrained-execute-session",
+    }, run_name=run.name)
+    natural_read_only_prompts = [
+        "为什么 cancel-unlaunched 失败？只解释，不要修改。",
+        "如何安全结算这个 assignment？",
+        "先不要继续运行，只告诉我当前状态。",
+        "不要恢复这个运行，只分析状态。",
+        "这是运行日志，你来看看还有什么问题。",
+    ]
+    natural_read_only_modes = [
+        classify_prompt(item) for item in natural_read_only_prompts
+    ]
     indirect_english = classify_prompt("Please deploy the prepared workflow")
     no_run_question = classify_prompt("what runs exist?", active_run=False)
     active_run_question = classify_prompt("active run 是什么？")
@@ -12402,6 +12436,12 @@ def _selftest() -> int:
         ("ambiguous active-run prompt defaults read-only", ambiguous == EXPLAIN),
         ("operator stop maps to pause", pause == PAUSE),
         ("repair request maps to execute", execute == EXECUTE),
+        ("effect-narrowing clauses preserve affirmative natural-language execution",
+         constrained_execute_modes == [EXECUTE] * len(constrained_execute_modes)
+         and constrained_execute_contract.get("mode") == EXECUTE
+         and constrained_execute_contract.get("target_egress_denied") is True),
+        ("natural-language questions and explicit explanation requests stay read-only",
+         natural_read_only_modes == [EXPLAIN] * len(natural_read_only_modes)),
         ("unrecognized English execution wording defaults read-only", indirect_english == EXPLAIN),
         ("no-active-run ordinary question stays outside run execution", no_run_question == NORMAL),
         ("active-run informational question stays read-only", active_run_question == EXPLAIN),

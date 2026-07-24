@@ -731,9 +731,18 @@ after the state directory is fsynced; a retry that sees the path already missing
 that barrier, and a covering success clears an old directory entry if it reappears after
 reboot. The cursor orders recovery attempts; it is
 not proof that every derived assignment or merge write is power-loss durable.
-`SubagentStop` must map to exactly one launch with the same `session_id` and
-runtime agent id. Cross-session, unmatched, or ambiguous Stops cannot close an
-attempt or assignment and remain explicit lifecycle debt.
+`SubagentStop` admitted to the Xunji Agent journal must map to exactly one launch
+with the same `session_id` and runtime agent id. Cross-session, Xunji-typed or
+partially bound unmatched, and ambiguous Stops cannot close an attempt or
+assignment and remain explicit lifecycle debt. A Claude-internal bare Stop with
+no Xunji Agent type, assignment, parent tool-use, same-session Start/launch, or
+assignment-ledger owner is not an Agent fact: new deliveries receive a
+content-addressed `xunji.foreign_agent_lifecycle.v1` observation outside
+`runtime_events.jsonl`. Legacy journal pollution is recovered only with
+`python3 tools/runtime_receipts.py runs/<dir> --quarantine-unowned-lifecycle`;
+the immutable supersession binds the original seq/hash and validated journal
+head, preserves the journal bytes, then reprojects. Any ownership signal keeps
+the event fail closed.
 Plan-bound settlement and typed cycle-end command shapes live only in
 `xunji-agent-board/references/launch-return-settlement.md`. A plan-bound end
 re-derives the exact receipt chain and fails closed on any missing lane, frozen
@@ -747,7 +756,13 @@ A unique returned/failed execution may still admit its exact dependent
 assignment. A non-Reviewer may be cancelled only when it provably never launched and
 the plan is stale solely by turn binding, canonical inputs, or both. The v2 tombstone
 records `stale_basis=turn|inputs|both`, the old/new turn bindings, and both input
-digests; it never revives old execution authority. The exact typed command and
+digests; it never revives old execution authority. An exact plan/lane/session-bound
+parent `PreToolUseDenied Agent` is negative launch proof and does not block
+cancellation even though the attempted tool-use remains in the transcript and
+append-only journal. `PostToolUseFailure`, successful Post, Start/Stop, or any child
+action remains runtime debt. Current `TARGET_EGRESS_DENIED` continues to block target
+effects but cannot block this local control-plane settlement by revalidating every
+old plan lane. The exact typed command and
 recovery sequence live in
 `xunji-agent-board/references/plan-and-delegate.md`. Cancellation is not a result,
 review, merge, evidence item, or cycle end; Root must commit a material replan, and

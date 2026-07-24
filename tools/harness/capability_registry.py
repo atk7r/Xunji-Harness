@@ -208,6 +208,9 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
     _spec("control.runtime-receipts-reproject", "tools/runtime_receipts.py",
           "control", "runtime-receipts-reproject", scope="active_run",
           recorder="control_journal"),
+    _spec("control.runtime-receipts-quarantine", "tools/runtime_receipts.py",
+          "control", "runtime-receipts-quarantine", scope="active_run",
+          recorder="control_journal"),
     _spec("control.scope-admission", "tools/scope_admission.py", "control",
           "scope-admission", scope="active_run", recorder="control_journal"),
     _spec("target.probe", "tools/probe.py", "target", "probe-live",
@@ -844,6 +847,9 @@ def argv_matches(validator: str, args: Iterable[str]) -> bool:
     if validator == "runtime-receipts-reproject":
         return len(values) == 2 and _one_run(values[:1]) \
             and values[1] == "--reproject"
+    if validator == "runtime-receipts-quarantine":
+        return len(values) == 2 and _one_run(values[:1]) \
+            and values[1] == "--quarantine-unowned-lifecycle"
     if validator == "coverage-read":
         return _validate_coverage(values, write=False)
     if validator == "coverage-write":
@@ -1025,6 +1031,7 @@ def run_reference(spec: CapabilitySpec, args: Iterable[str]) -> str:
             else (values[0] if values else "")
     if validator in {
         "one-run", "runtime-receipts-read", "runtime-receipts-reproject",
+        "runtime-receipts-quarantine",
         "coverage-read", "coverage-write", "loop-journal-read",
         "loop-journal-control", "state-read", "loop-state-write",
         "progress-write", "controller-write", "scope-admission",
@@ -1250,7 +1257,7 @@ def selftest() -> int:
         ("work-plan status is read while commit is control", (match(
             ROOT / "tools/work_plan.py", ["status", "runs/demo_20260101"]
         ) or _spec("", "", "repo_mutation", "")).effect == "local_read"),
-        ("runtime receipts read and reproject have exact distinct effects", bool(
+        ("runtime receipt read/reproject/quarantine have exact distinct effects", bool(
             (match(ROOT / "tools/runtime_receipts.py", [
                 "runs/demo_20260101",
             ]) or _spec("", "", "", "")).id == "read.runtime-receipts"
@@ -1272,6 +1279,16 @@ def selftest() -> int:
             ]) is None
             and match(ROOT / "tools/runtime_receipts.py", [
                 "runs/demo_20260101", "--future",
+            ]) is None
+            and (match(ROOT / "tools/runtime_receipts.py", [
+                "runs/demo_20260101", "--quarantine-unowned-lifecycle",
+            ]) or _spec("", "", "", "")).id
+            == "control.runtime-receipts-quarantine"
+            and (match(ROOT / "tools/runtime_receipts.py", [
+                "runs/demo_20260101", "--quarantine-unowned-lifecycle",
+            ]) or _spec("", "", "", "")).recorder == "control_journal"
+            and match(ROOT / "tools/runtime_receipts.py", [
+                "--quarantine-unowned-lifecycle", "runs/demo_20260101",
             ]) is None
         )),
         ("legacy work-plan migration is exact recorded active-run control", bool(

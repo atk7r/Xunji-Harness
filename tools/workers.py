@@ -1495,7 +1495,33 @@ def _transcript_prefix_binding(contract: dict) -> dict:
     }
 
 
-def _assert_no_transcript_launch_intent(tombstone: dict) -> None:
+def _denied_agent_launch_ids(
+    events: list[dict], *,
+    assignment: str, plan_digest: str, lane_id: str,
+    session_id: str = "", transcript_path: str = "",
+) -> set[str]:
+    """Return exact parent Agent calls that the hook proved never launched."""
+    return {
+        str(event.get("tool_use_id") or "")
+        for event in events
+        if event.get("hook_event_name") == "PreToolUseDenied"
+        and event.get("tool_name") == "Agent"
+        and event.get("decision") == "deny"
+        and event.get("success") is False
+        and str(event.get("assignment") or "") == assignment
+        and str(event.get("assignment_plan_digest") or "") == plan_digest
+        and str(event.get("assignment_lane") or "") == lane_id
+        and (not session_id
+             or str(event.get("session_id") or "") == session_id)
+        and (not transcript_path
+             or str(event.get("transcript_path") or "") == transcript_path)
+        and str(event.get("tool_use_id") or "")
+    }
+
+
+def _assert_no_transcript_launch_intent(
+    run_dir: Path, tombstone: dict,
+) -> None:
     if _runtime_receipts is None \
             or not hasattr(_runtime_receipts, "_transcript_agent_tool_uses") \
             or not hasattr(_runtime_receipts, "_agent_invocation_binding"):
@@ -1517,12 +1543,30 @@ def _assert_no_transcript_launch_intent(tombstone: dict) -> None:
         candidates = _runtime_receipts._transcript_agent_tool_uses(path)
     except Exception as exc:
         raise ValueError("ASSIGNMENT_CANCELLATION_TRANSCRIPT_UNREADABLE") from exc
+    events, chain_errors = _runtime_receipts.validate_chain(run_dir)
+    if chain_errors:
+        raise ValueError(
+            "ASSIGNMENT_CANCELLATION_RUNTIME_CHAIN_INVALID:" + chain_errors[0])
     assignment = str(tombstone.get("assignment") or "")
     plan_digest = str(tombstone.get("plan_digest") or "")
     lane_id = str(tombstone.get("lane_id") or "")
+    denied_tool_ids = _denied_agent_launch_ids(
+        events,
+        assignment=assignment,
+        plan_digest=plan_digest,
+        lane_id=lane_id,
+        session_id=str(binding.get("session_id") or ""),
+        transcript_path=str(path.resolve(strict=True)),
+    )
     for candidate in candidates:
         parsed = _runtime_receipts._agent_invocation_binding(candidate)
         if parsed.get("assignment") != assignment:
+            continue
+        # A transcript contains the attempted Agent tool_use even when
+        # PreToolUse rejects it.  Only an exact immutable deny receipt proves
+        # that this particular invocation never crossed the launch boundary.
+        # Any unretired or differently-bound tool_use remains launch debt.
+        if str(parsed.get("tool_use_id") or "") in denied_tool_ids:
             continue
         # A malformed/incomplete prompt using the same assignment id is still
         # an in-flight launch intent; exact plan/lane equality only strengthens
@@ -1535,7 +1579,8 @@ def _assert_no_transcript_launch_intent(tombstone: dict) -> None:
 
 
 def _assert_no_assignment_runtime_records(
-    run_dir: Path, assignment: str,
+    run_dir: Path, assignment: str, *,
+    plan_digest: str, lane_id: str,
 ) -> None:
     if _runtime_receipts is None:
         raise ValueError("runtime_receipts unavailable; cancellation fails closed")
@@ -1547,7 +1592,21 @@ def _assert_no_assignment_runtime_records(
     if integrity:
         raise ValueError(
             "ASSIGNMENT_CANCELLATION_RUNTIME_INTEGRITY_INVALID:" + integrity[0])
-    if any(str(event.get("assignment") or "") == assignment for event in events):
+    denied_tool_ids = _denied_agent_launch_ids(
+        events,
+        assignment=assignment,
+        plan_digest=plan_digest,
+        lane_id=lane_id,
+    )
+    if any(
+        str(event.get("assignment") or "") == assignment
+        and not (
+            event.get("hook_event_name") == "PreToolUseDenied"
+            and event.get("tool_name") == "Agent"
+            and str(event.get("tool_use_id") or "") in denied_tool_ids
+        )
+        for event in events
+    ):
         raise ValueError("ASSIGNMENT_CANCELLATION_RUNTIME_EVENT_EXISTS")
     if any(str(item.get("assignment") or "") == assignment
            for item in _runtime_receipts.agent_attempts(run_dir)):
@@ -1585,7 +1644,11 @@ def _assert_no_assignment_runtime_activity(
         "root_disposition_at", "root_disposition_review_receipt_hash",
     )):
         raise ValueError("ASSIGNMENT_CANCELLATION_RUNTIME_STATE_EXISTS")
-    _assert_no_assignment_runtime_records(run_dir, assignment)
+    _assert_no_assignment_runtime_records(
+        run_dir, assignment,
+        plan_digest=str(row.get("plan_digest") or ""),
+        lane_id=str(row.get("lane_id") or ""),
+    )
     projection = _run_model.plan_cycle_projection(run_dir, plan=plan)
     states = [
         item for item in projection.get("lane_states", [])
@@ -1641,9 +1704,12 @@ def _apply_prepared_cancellation_locked(
         transaction["next_assignments_text"],
     }:
         raise ValueError("ASSIGNMENT_CANCELLATION_LEDGER_DIVERGED")
-    _assert_no_transcript_launch_intent(tombstone)
+    _assert_no_transcript_launch_intent(run_dir, tombstone)
     _assert_no_assignment_runtime_records(
-        run_dir, str(transaction.get("assignment") or ""))
+        run_dir, str(transaction.get("assignment") or ""),
+        plan_digest=str(transaction.get("plan_digest") or ""),
+        lane_id=str(transaction.get("lane_id") or ""),
+    )
     if current_text == transaction["previous_assignments_text"]:
         _assert_no_assignment_runtime_activity(run_dir, row, plan, lane)
     _agent_settlement.durable_unlink_artifact(
@@ -1713,15 +1779,11 @@ def cancel_unlaunched_assignment(
         if len(existing) > 1:
             raise ValueError("ASSIGNMENT_CANCELLATION_IDENTITY_AMBIGUOUS")
         contract = _work_plan._load_turn_contract(run_dir)
-        try:
-            _work_plan.current_plan(run_dir, contract)
-        except _work_plan.PlanError as exc:
-            if str(exc) not in {
-                    "WORK_PLAN_INPUTS_STALE", "WORK_PLAN_TURN_STALE"}:
-                raise ValueError(
-                    f"ASSIGNMENT_CANCELLATION_PLAN_INVALID:{exc}") from exc
-        else:
-            raise ValueError("ASSIGNMENT_CANCELLATION_REQUIRES_STALE_PLAN")
+        # Do not re-authorize the old plan under the current operator policy.
+        # In particular, a current TARGET_EGRESS_DENIED turn must keep target
+        # lanes blocked without making this local control-plane settlement
+        # unreachable.  Immutable lineage is loaded below; exact input/turn
+        # staleness is proven twice under the mutation locks before commit.
         plan = _transaction_bound_plan_for_cancellation(run_dir)
         data = load_assignments(run_dir)
         rows = [
@@ -1766,7 +1828,7 @@ def cancel_unlaunched_assignment(
             "lane_id": row["lane_id"],
             "turn_binding": turn_binding,
         }
-        _assert_no_transcript_launch_intent(provisional)
+        _assert_no_transcript_launch_intent(run_dir, provisional)
         observed_digest = _work_plan.input_fingerprint(run_dir)[0]
         inputs_changed = observed_digest != plan.get("inputs_digest")
         turn_changed = observed_turn_binding != plan_turn_binding
@@ -1829,7 +1891,7 @@ def cancel_unlaunched_assignment(
             fault("after_prepared")
         # The prepared receipt is now a turn-gate barrier.  Repeat both exact
         # proofs at the serialized cut before publishing the immutable tombstone.
-        _assert_no_transcript_launch_intent(tombstone)
+        _assert_no_transcript_launch_intent(run_dir, tombstone)
         _assert_no_assignment_runtime_activity(run_dir, row, plan, lane)
         transaction = _apply_prepared_cancellation_locked(
             run_dir, transaction, fault=fault)
@@ -3963,6 +4025,26 @@ def _plan_continuation_notice(run_dir: Path) -> str:
     """Return one driver action when the committed plan still has lane debt."""
     if _run_model is None:
         return ""
+    projection_error = run_dir / "state" / "runtime_projection_error.json"
+    if projection_error.exists() and _runtime_receipts is not None:
+        recovery = _runtime_receipts.foreign_lifecycle_recovery_status(run_dir)
+        candidates = recovery.get("candidate_event_seqs", []) \
+            if isinstance(recovery, dict) else []
+        if candidates:
+            seqs = ",".join(str(item) for item in candidates)
+            return (
+                "NEXT_OWNER_ACTION: runtime projection is blocked by proven "
+                f"non-Xunji lifecycle receipts at event seq {seqs}; run exact typed "
+                f"`python3 tools/runtime_receipts.py {display_path(run_dir)} "
+                "--quarantine-unowned-lifecycle`, then repeat workers.py status. "
+                "This appends supersession receipts and preserves runtime_events.jsonl."
+            )
+        return (
+            "NEXT_OWNER_ACTION: runtime projection has unresolved lifecycle debt; "
+            f"run exact `python3 tools/runtime_receipts.py {display_path(run_dir)} "
+            "--reproject` and inspect the retained diagnostic. Do not cancel, "
+            "replan, delete, or rewrite runtime receipts around an unresolved error."
+        )
     try:
         projection = _run_model.plan_cycle_projection(run_dir)
     except Exception:
@@ -5080,7 +5162,9 @@ def _selftest() -> int:
         )
     )
 
-    def build_delegate_transaction_run(name: str, token: str) -> Path:
+    def build_delegate_transaction_run(
+        name: str, token: str, *, include_target_lane: bool = False,
+    ) -> Path:
         transaction_run = d / name
         (transaction_run / "state").mkdir(parents=True)
         parent_transcript = transaction_run / "parent-transcript.jsonl"
@@ -5096,7 +5180,9 @@ def _selftest() -> int:
             "# Frontier\n\n## Open Fronts\n\n"
             "### F-030 — first local lane\n- Status: open\n"
             "- Barrier class: none\n- Current depth: shallow\n\n"
-            "### F-031 — second local lane\n- Status: open\n"
+            "### F-031 — second local lane"
+            + (" for transaction.example" if include_target_lane else "")
+            + "\n- Status: open\n"
             "- Barrier class: none\n- Current depth: shallow\n",
             encoding="utf-8",
         )
@@ -5121,11 +5207,15 @@ def _selftest() -> int:
             "atomic": False,
         }, {
             "id": "L-SECOND", "role": "web-hunter", "front": "F-031",
-            "effect": "local_read", "assets": [], "dependencies": [],
+            "effect": "target" if include_target_lane else "local_read",
+            "assets": ["transaction.example"] if include_target_lane else [],
+            "dependencies": [],
             "expected_evidence": "second bounded local result",
             "expected_information_gain": "medium",
             "stop_condition": "one attributable local result",
-            "request_cost": 0, "request_budget": 0, "merge_cost": 5,
+            "request_cost": 1 if include_target_lane else 0,
+            "request_budget": 1 if include_target_lane else 0,
+            "merge_cost": 5,
             "atomic": False,
         }]
         reviewer_lanes = [{
@@ -5783,6 +5873,72 @@ def _selftest() -> int:
     except ValueError as exc:
         transcript_launch_cancel_blocked = (
             "TRANSCRIPT_LAUNCH_EXISTS" in str(exc))
+
+    denied_launch_run = build_delegate_transaction_run(
+        "cancellation-pretool-denied-agent", "7",
+        include_target_lane=True)
+    denied_launch_batch = delegate_ready_lanes(
+        denied_launch_run, runtime_slots=1, request_budget=0,
+        model_egress_budget=0, merge_capacity=10, limit=1,
+    )
+    denied_launch = denied_launch_batch["assignments"][0]
+    denied_contract = _work_plan._load_turn_contract(denied_launch_run)
+    denied_transcript = Path(denied_contract["transcript_path"])
+    denied_tool_id = "pretool-denied-agent"
+    denied_transcript.write_text(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": denied_tool_id, "name": "Agent",
+            "input": {
+                "prompt": denied_launch["launch_prompt"],
+                "subagent_type": denied_launch["subagent_type"],
+            },
+        }, {
+            "type": "tool_result", "tool_use_id": denied_tool_id,
+            "content": {"decision": "deny", "reason": "turn mode changed"},
+        }]},
+    }) + "\n", encoding="utf-8")
+    denied_receipt = _runtime_receipts.append_hook_event(
+        denied_launch_run, {
+            "hook_event_name": "PreToolUseDenied",
+            "session_id": denied_contract["session_id"],
+            "transcript_path": str(denied_transcript),
+            "tool_name": "Agent",
+            "tool_use_id": denied_tool_id,
+            "tool_input": {
+                "prompt": denied_launch["launch_prompt"],
+                "subagent_type": denied_launch["subagent_type"],
+            },
+            "tool_response": {
+                "decision": "deny", "reason": "turn mode changed"},
+            "xunji_decision": "deny",
+        })
+    denied_contract["target_egress_denied"] = True
+    _atomic_write(
+        denied_launch_run / "state" / "turn_contract.json",
+        json.dumps(denied_contract, ensure_ascii=False, indent=2) + "\n",
+    )
+    (denied_launch_run / "hints.md").write_text(
+        "# Hints\n\n- Denied Agent call never crossed launch boundary.\n",
+        encoding="utf-8")
+    denied_launch_receipt = cancel_unlaunched_assignment(
+        denied_launch_run, denied_launch["assignment"],
+        reason="exact PreToolUse denial proves the assignment never launched")
+    denied_launch_cancellation_allowed = bool(
+        denied_receipt.get("hook_event_name") == "PreToolUseDenied"
+        and denied_receipt.get("decision") == "deny"
+        and any(
+            lane.get("effect") == "target"
+            for lane in _work_plan.transaction_bound_plan(
+                denied_launch_run).get("lanes", [])
+        )
+        and denied_launch_receipt.get("status") == "cancelled-unlaunched"
+        and not load_assignments(denied_launch_run)["assignments"]
+        and any(
+            item.get("tool_use_id") == denied_tool_id
+            for item in _runtime_receipts.validate_chain(
+                denied_launch_run)[0]
+        )
+    )
 
     runtime_launch_run = build_delegate_transaction_run(
         "cancellation-runtime-event", "1")
@@ -6959,6 +7115,8 @@ def _selftest() -> int:
          unlink_barrier_retry_complete),
         ("parent transcript Agent tool_use blocks unlaunched cancellation",
          transcript_launch_cancel_blocked),
+        ("exact PreToolUse denial is negative launch proof for cancellation",
+         denied_launch_cancellation_allowed),
         ("runtime failure/event cannot be relabeled as not-run cancellation",
          runtime_event_cancel_blocked),
         ("all Agent lifecycle identities replay exactly without a tombstone",

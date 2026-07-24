@@ -41,6 +41,9 @@ PROJECTION_ERROR = "runtime_projection_error.json"
 PROJECTION_CURSOR = "runtime_projection_cursor.json"
 PROJECTION_ERROR_SCHEMA = "xunji.runtime_projection_error.v1"
 PROJECTION_CURSOR_SCHEMA = "xunji.runtime_projection_cursor.v1"
+FOREIGN_LIFECYCLE_DIR = "foreign_agent_lifecycle"
+FOREIGN_LIFECYCLE_SCHEMA = "xunji.foreign_agent_lifecycle.v1"
+FOREIGN_LIFECYCLE_REASON = "no_xunji_causal_owner"
 MAX_PROJECTION_SUCCESS_GENERATION = (1 << 63) - 1
 NONTERMINAL_ASSIGNMENT_STATUSES = {"assigned", "starting", "running", "working", "?", ""}
 TERMINAL_ASSIGNMENT_STATUSES = {
@@ -120,6 +123,15 @@ _COMPLETION_MARKER_RE = re.compile(
 )
 _PROCESS_RUNTIME_LOCK = threading.RLock()
 _PROCESS_ASSIGNMENT_LOCK = threading.RLock()
+_FOREIGN_LIFECYCLE_FIELDS = {
+    "schema", "parent_run", "disposition", "reason", "hook_event_name",
+    "session_id", "transcript_sha256", "agent_id", "agent_type",
+    "event_identity_sha256", "runtime_event_seq", "runtime_event_hash",
+    "observed_head_seq", "observed_head_hash", "recorded_at", "receipt_hash",
+}
+_FOREIGN_LIFECYCLE_DISPOSITIONS = {
+    "observed_not_admitted", "legacy_quarantined",
+}
 
 
 class RuntimeReceiptDurabilityError(OSError):
@@ -161,6 +173,10 @@ def _projection_cursor_path(run_dir: Path) -> Path:
 
 def _assignment_lock_path(run_dir: Path) -> Path:
     return run_dir / "state" / ".assignments.lock"
+
+
+def _foreign_lifecycle_dir(run_dir: Path) -> Path:
+    return run_dir / "state" / FOREIGN_LIFECYCLE_DIR
 
 
 @contextlib.contextmanager
@@ -1073,6 +1089,313 @@ def _atomic_bytes(path: Path, payload: bytes, *, owner_directory: Path) -> None:
                 os.unlink(raw)
             except FileNotFoundError:
                 pass
+
+
+def _foreign_lifecycle_event_identity(record: dict) -> str:
+    """Hash only stable identity fields; never persist foreign result prose."""
+    return _hash({
+        "hook_event_name": str(record.get("hook_event_name") or ""),
+        "session_id": str(record.get("session_id") or ""),
+        # v1 field name is retained for immutable compatibility; it hashes the
+        # local path identity, never transcript contents or model prose.
+        "transcript_sha256": hashlib.sha256(
+            str(record.get("transcript_path") or "").encode("utf-8")).hexdigest(),
+        "agent_id": str(record.get("agent_id") or ""),
+        "agent_type": str(record.get("agent_type") or ""),
+        "tool_name": str(record.get("tool_name") or ""),
+        "tool_use_id": str(record.get("tool_use_id") or ""),
+        "assignment": str(record.get("assignment") or ""),
+        "front": str(record.get("front") or ""),
+        "assignment_lane": str(record.get("assignment_lane") or ""),
+        "assignment_plan_digest": str(
+            record.get("assignment_plan_digest") or ""),
+        "subagent_type": str(record.get("subagent_type") or ""),
+        "completion_review": bool(record.get("completion_review")),
+        "response_sha256": str(record.get("response_sha256") or ""),
+    })
+
+
+def _assignment_ledger_mentions_agent(run_dir: Path, agent_id: str) -> bool:
+    """Retain debt only when an exact runtime identity field names the Agent."""
+    path = run_dir / "state" / "assignments.json"
+    if not path.exists():
+        return False
+    if path.is_symlink() or not path.is_file():
+        return True
+    try:
+        value = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except Exception:
+        return True
+
+    identity_fields = {
+        "agent_id", "attempt_id", "actor_agent_id", "current_attempt",
+        "runtime_agent_id",
+    }
+
+    def exact_owner(node: object) -> bool:
+        if isinstance(node, dict):
+            return any(
+                key in identity_fields
+                and isinstance(child, str)
+                and child == agent_id
+                or exact_owner(child)
+                for key, child in node.items()
+            )
+        if isinstance(node, list):
+            return any(exact_owner(child) for child in node)
+        return False
+
+    return exact_owner(value)
+
+
+def _is_unowned_foreign_lifecycle_stop(
+    run_dir: Path,
+    record: dict,
+    events: list[dict],
+    *,
+    require_parent_transcript: bool,
+) -> bool:
+    """Recognize only lifecycle events that cannot belong to a Xunji Agent.
+
+    Missing causal data by itself is not enough.  The event must also lack every
+    Xunji type/binding marker, have no matching Start/parent launch/assignment
+    owner, and point at the parent session transcript.  Anything less remains
+    ordinary fail-closed lifecycle debt.
+    """
+    if str(record.get("hook_event_name") or "") != "SubagentStop":
+        return False
+    session_id = str(record.get("session_id") or "")
+    agent_id = str(record.get("agent_id") or "")
+    transcript_raw = str(record.get("transcript_path") or "")
+    if not session_id or not agent_id or not transcript_raw:
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", session_id) \
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", agent_id):
+        return False
+    transcript = Path(transcript_raw)
+    if transcript.name != f"{session_id}.jsonl" or transcript.parent.name == "subagents":
+        return False
+    if require_parent_transcript and (
+            transcript.is_symlink() or not transcript.is_file()):
+        return False
+    if isinstance(record.get("xunji_agent_lifecycle_binding"), dict) \
+            and record.get("xunji_agent_lifecycle_binding") \
+            or isinstance(record.get("xunji_agent_parent_binding"), dict) \
+            and record.get("xunji_agent_parent_binding"):
+        return False
+    scalar_owner_fields = (
+        "tool_name", "tool_use_id", "assignment", "front", "assignment_lane",
+        "assignment_plan_digest", "assignment_result_digest",
+        "completion_bundle_hash", "completion_plan_digest",
+        "launch_prompt_sha256", "subagent_type", "agent_binding_strategy",
+        "agent_binding_batch_sha256",
+    )
+    if any(str(record.get(field) or "") for field in scalar_owner_fields):
+        return False
+    if str(record.get("agent_type") or "") in {
+            _HUNTER_AGENT_TYPE, _REVIEWER_AGENT_TYPE}:
+        return False
+    if record.get("completion_review") is True \
+            or record.get("agent_result_snapshot") not in ({}, None) \
+            or record.get("assignment_assets") not in ([], None) \
+            or record.get("agent_binding_ordinal") not in (-1, None) \
+            or record.get("agent_binding_batch_size") not in (0, None) \
+            or record.get("assignment_tool_call_limit") not in (0, None) \
+            or record.get("assignment_request_budget") not in (0, None):
+        return False
+    if _assignment_ledger_mentions_agent(run_dir, agent_id):
+        return False
+    for item in events:
+        if str(item.get("session_id") or "") != session_id:
+            continue
+        if item is record:
+            continue
+        if item.get("hook_event_name") == "SubagentStart" \
+                and str(item.get("agent_id") or "") == agent_id:
+            return False
+        if item.get("hook_event_name") == "PostToolUse" \
+                and item.get("tool_name") == "Agent" \
+                and str(item.get("launched_agent_id") or "") == agent_id:
+            return False
+    return True
+
+
+def _foreign_lifecycle_receipt_hash(receipt: dict) -> str:
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_hash", None)
+    return _hash(unsigned)
+
+
+def _validate_foreign_lifecycle_receipt(
+    run_dir: Path,
+    receipt: object,
+    events: list[dict],
+    *,
+    filename: str,
+) -> str:
+    if not isinstance(receipt, dict) or set(receipt) != _FOREIGN_LIFECYCLE_FIELDS:
+        return "invalid receipt shape"
+    if receipt.get("schema") != FOREIGN_LIFECYCLE_SCHEMA \
+            or receipt.get("parent_run") != run_dir.name \
+            or receipt.get("disposition") not in _FOREIGN_LIFECYCLE_DISPOSITIONS \
+            or receipt.get("reason") != FOREIGN_LIFECYCLE_REASON \
+            or receipt.get("hook_event_name") != "SubagentStop":
+        return "invalid receipt identity"
+    claimed = str(receipt.get("receipt_hash") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", claimed) \
+            or claimed != _foreign_lifecycle_receipt_hash(receipt) \
+            or filename != f"{claimed}.json":
+        return "invalid receipt hash or filename"
+    if not _valid_iso_datetime(receipt.get("recorded_at")) \
+            or not re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(receipt.get("transcript_sha256") or "")) \
+            or not re.fullmatch(
+                r"[0-9a-f]{64}", str(receipt.get("event_identity_sha256") or "")):
+        return "invalid receipt digest or timestamp"
+    head_seq = receipt.get("observed_head_seq")
+    head_hash = str(receipt.get("observed_head_hash") or "")
+    if isinstance(head_seq, bool) or not isinstance(head_seq, int) \
+            or head_seq < 0 or head_seq > len(events) \
+            or (head_seq == 0 and head_hash) \
+            or (head_seq > 0 and (
+                not re.fullmatch(r"[0-9a-f]{64}", head_hash)
+                or str(events[head_seq - 1].get("receipt_hash") or "") != head_hash)):
+        return "receipt journal head is not a validated prefix"
+    seq = receipt.get("runtime_event_seq")
+    event_hash = str(receipt.get("runtime_event_hash") or "")
+    if receipt.get("disposition") == "observed_not_admitted":
+        if seq != 0 or event_hash:
+            return "non-admitted receipt claims a runtime event"
+        return ""
+    if isinstance(seq, bool) or not isinstance(seq, int) \
+            or seq < 1 or seq > len(events) \
+            or not re.fullmatch(r"[0-9a-f]{64}", event_hash):
+        return "legacy quarantine event identity is invalid"
+    event = events[seq - 1]
+    if str(event.get("receipt_hash") or "") != event_hash \
+            or str(receipt.get("session_id") or "") \
+                != str(event.get("session_id") or "") \
+            or str(receipt.get("agent_id") or "") \
+                != str(event.get("agent_id") or "") \
+            or str(receipt.get("agent_type") or "") \
+                != str(event.get("agent_type") or "") \
+            or str(receipt.get("transcript_sha256") or "") != hashlib.sha256(
+                str(event.get("transcript_path") or "").encode("utf-8")).hexdigest() \
+            or str(receipt.get("event_identity_sha256") or "") \
+                != _foreign_lifecycle_event_identity(event):
+        return "legacy quarantine does not match the immutable runtime event"
+    if not _is_unowned_foreign_lifecycle_stop(
+            run_dir, event, events, require_parent_transcript=False):
+        # Receipt validation is durable after the parent transcript ages out.
+        # The immutable event fields, complete journal, and assignment ledger
+        # remain the ownership proof; transcript existence was required only at
+        # first admission/quarantine.
+        return "legacy quarantine event now has a Xunji causal owner"
+    return ""
+
+
+def _load_foreign_lifecycle_receipts(
+    run_dir: Path,
+    events: list[dict],
+) -> list[dict]:
+    directory = _foreign_lifecycle_dir(run_dir)
+    if not directory.exists():
+        return []
+    if directory.is_symlink() or not directory.is_dir():
+        raise RuntimeError("foreign lifecycle receipt directory is not regular")
+    receipts: list[dict] = []
+    for path in sorted(directory.glob("*.json")):
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(
+                f"foreign lifecycle receipt is not regular: {path.name}")
+        try:
+            receipt = json.loads(path.read_text(
+                encoding="utf-8", errors="strict"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"foreign lifecycle receipt is unreadable: {path.name}") from exc
+        error = _validate_foreign_lifecycle_receipt(
+            run_dir, receipt, events, filename=path.name)
+        if error:
+            raise RuntimeError(
+                f"foreign lifecycle receipt {path.name} invalid: {error}")
+        receipts.append(receipt)
+    legacy_ids = [
+        (int(item["runtime_event_seq"]), str(item["runtime_event_hash"]))
+        for item in receipts
+        if item.get("disposition") == "legacy_quarantined"
+    ]
+    if len(legacy_ids) != len(set(legacy_ids)):
+        raise RuntimeError("foreign lifecycle receipt duplicates a runtime event")
+    return receipts
+
+
+def _effective_agent_events(
+    run_dir: Path,
+    events: list[dict],
+    *,
+    receipt_events: list[dict] | None = None,
+) -> list[dict]:
+    receipt_basis = events if receipt_events is None else receipt_events
+    quarantined = {
+        (int(item["runtime_event_seq"]), str(item["runtime_event_hash"]))
+        for item in _load_foreign_lifecycle_receipts(run_dir, receipt_basis)
+        if item.get("disposition") == "legacy_quarantined"
+    }
+    return [
+        item for item in events
+        if (int(item.get("seq") or 0), str(item.get("receipt_hash") or ""))
+        not in quarantined
+    ]
+
+
+def _publish_foreign_lifecycle_receipt(
+    run_dir: Path,
+    record: dict,
+    events: list[dict],
+    *,
+    disposition: str,
+) -> dict:
+    receipts = _load_foreign_lifecycle_receipts(run_dir, events)
+    identity = _foreign_lifecycle_event_identity(record)
+    for existing in receipts:
+        if existing.get("disposition") == disposition \
+                and existing.get("event_identity_sha256") == identity:
+            return existing
+    seq = int(record.get("seq") or 0) if disposition == "legacy_quarantined" else 0
+    event_hash = str(record.get("receipt_hash") or "") \
+        if disposition == "legacy_quarantined" else ""
+    head = events[-1] if events else {}
+    receipt = {
+        "schema": FOREIGN_LIFECYCLE_SCHEMA,
+        "parent_run": run_dir.name,
+        "disposition": disposition,
+        "reason": FOREIGN_LIFECYCLE_REASON,
+        "hook_event_name": "SubagentStop",
+        "session_id": str(record.get("session_id") or ""),
+        # Immutable v1 compatibility: this is the path-identity digest.
+        "transcript_sha256": hashlib.sha256(
+            str(record.get("transcript_path") or "").encode("utf-8")).hexdigest(),
+        "agent_id": str(record.get("agent_id") or ""),
+        "agent_type": str(record.get("agent_type") or ""),
+        "event_identity_sha256": identity,
+        "runtime_event_seq": seq,
+        "runtime_event_hash": event_hash,
+        "observed_head_seq": int(head.get("seq") or 0),
+        "observed_head_hash": str(head.get("receipt_hash") or ""),
+        "recorded_at": _iso_timestamp(float(record.get("ts") or time.time())),
+        "receipt_hash": "",
+    }
+    receipt["receipt_hash"] = _foreign_lifecycle_receipt_hash(receipt)
+    payload = json.dumps(
+        receipt, ensure_ascii=False, indent=2, sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    path = _foreign_lifecycle_dir(run_dir) / f"{receipt['receipt_hash']}.json"
+    if path.exists() and path.read_bytes() != payload:
+        raise RuntimeError("foreign lifecycle receipt hash collision")
+    _atomic_bytes(path, payload, owner_directory=run_dir / "state")
+    return receipt
 
 
 def _agent_result_bytes(value: object) -> bytes:
@@ -3649,13 +3972,18 @@ def _agent_event_integrity_errors_from(events: list[dict]) -> list[str]:
 
 
 def agent_event_integrity_errors(run_dir: str | Path) -> list[str]:
-    events, chain_errors = validate_chain(run_dir)
+    run = Path(run_dir).resolve()
+    events, chain_errors = validate_chain(run)
     if chain_errors:
         return ["runtime chain invalid: " + chain_errors[0]]
-    cursor_error = _projection_cursor_error(Path(run_dir).resolve(), events)
+    try:
+        effective_events = _effective_agent_events(run, events)
+    except RuntimeError as exc:
+        return ["foreign lifecycle receipts invalid: " + str(exc)]
+    cursor_error = _projection_cursor_error(run, events)
     if cursor_error:
         return ["runtime projection cursor invalid: " + cursor_error]
-    return _agent_event_integrity_errors_from(events)
+    return _agent_event_integrity_errors_from(effective_events)
 
 
 def _root_action_plan_binding(plan: object) -> tuple[dict, str]:
@@ -4348,20 +4676,24 @@ def reconcile_agent_projection(
     try:
         if chain_errors:
             raise RuntimeError("runtime chain invalid: " + chain_errors[0])
-        integrity_errors = _agent_event_integrity_errors_from(snapshot)
+        effective_snapshot = _effective_agent_events(
+            run, snapshot, receipt_events=current)
+        integrity_errors = _agent_event_integrity_errors_from(effective_snapshot)
         if integrity_errors:
             raise RuntimeError(integrity_errors[0])
         # Lock order is deliberately non-nested: immutable journal snapshot
         # first, assignment projection second, diagnostic cleanup last.
         with assignment_mutation_lock(run):
-            for lifecycle_record in _projection_records(snapshot):
+            for lifecycle_record in _projection_records(effective_snapshot):
                 _project_agent_lifecycle(run, lifecycle_record)
         diagnostic_status, cursor_status = _clear_projection_error(
             run, snapshot, recover_corrupt_cursor=explicit_full_reproject)
         return {
             "status": "reconciled",
             "event_count": len(snapshot),
-            "lifecycle_event_count": len(_projection_records(snapshot)),
+            "lifecycle_event_count": len(_projection_records(effective_snapshot)),
+            "quarantined_foreign_event_count": (
+                len(snapshot) - len(effective_snapshot)),
             "diagnostic_status": diagnostic_status,
             "cursor_status": cursor_status,
         }
@@ -4446,12 +4778,13 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
             raise RuntimeError(
                 "cannot append to invalid runtime receipt chain: "
                 + chain_errors[0])
+        effective_events = _effective_agent_events(run, events)
         # A cancellation may remove the mutable assignment row before a late
         # runtime delivery reaches prompt validation.  Check the immutable
         # tombstone first so every genuinely new delivery observes one stable
         # barrier code regardless of that race.  Existing journal identities
         # still proceed to the exact-replay path below.
-        existing_delivery = _agent_event_identity_exists(events, event)
+        existing_delivery = _agent_event_identity_exists(effective_events, event)
         if not existing_delivery:
             import agent_settlement
             agent_settlement.require_runtime_event_not_cancelled(
@@ -4486,17 +4819,29 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
         # Exact lifecycle binding and append are one serialized transaction.
         # Replays reuse a frozen binding; multiple unhinted same-batch Starts
         # remain ambiguity debt instead of consuming candidates by arrival order.
-        prepared = _prepare_agent_lifecycle_binding(run, event, events)
+        prepared = _prepare_agent_lifecycle_binding(
+            run, event, effective_events)
+        if str(prepared.get("hook_event_name") or "") == "SubagentStop":
+            if _is_unowned_foreign_lifecycle_stop(
+                    run, prepared, effective_events,
+                    require_parent_transcript=True):
+                foreign_preview = normalize_hook_event(run, prepared)
+                return _publish_foreign_lifecycle_receipt(
+                    run, foreign_preview, events,
+                    disposition="observed_not_admitted")
         # A delivery identity already owned by the journal is resolved by the
         # exact-replay check below; cancellation cannot erase that older fact.
         # A genuinely new delivery crosses the cancellation barrier before any
         # result snapshot or journal bytes can be created.
-        if _agent_event_identity_exists(events, prepared):
+        if _agent_event_identity_exists(effective_events, prepared):
             record = normalize_hook_event(run, prepared)
-            record = _freeze_terminal_root_action_binding(events, record)
-            replay = _exact_root_action_terminal_replay(events, record)
+            record = _freeze_terminal_root_action_binding(
+                effective_events, record)
+            replay = _exact_root_action_terminal_replay(
+                effective_events, record)
             if replay is None:
-                replay = _exact_agent_event_replay(events, record)
+                replay = _exact_agent_event_replay(
+                    effective_events, record)
             if replay is None:
                 raise RuntimeError(
                     "Agent event identity exists without an exact replay owner")
@@ -4510,10 +4855,13 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
                 run, _agent_cancellation_preflight(prepared))
             prepared = _prepare_agent_result_snapshot(run, prepared)
             record = normalize_hook_event(run, prepared)
-            record = _freeze_terminal_root_action_binding(events, record)
-            replay = _exact_root_action_terminal_replay(events, record)
+            record = _freeze_terminal_root_action_binding(
+                effective_events, record)
+            replay = _exact_root_action_terminal_replay(
+                effective_events, record)
             if replay is None:
-                replay = _exact_agent_event_replay(events, record)
+                replay = _exact_agent_event_replay(
+                    effective_events, record)
             if replay is not None:
                 record = replay
                 projection_events = list(events)
@@ -4534,6 +4882,97 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
 def validate_chain(run_dir: str | Path) -> tuple[list[dict], list[str]]:
     events = load_events(run_dir)
     return events, _runtime_chain_errors(events)
+
+
+def foreign_lifecycle_recovery_status(run_dir: str | Path) -> dict:
+    """Report exact legacy receipts eligible for typed, append-only quarantine."""
+    run = Path(run_dir).resolve()
+    events, chain_errors = validate_chain(run)
+    if chain_errors:
+        return {
+            "status": "invalid",
+            "errors": ["runtime chain invalid: " + chain_errors[0]],
+            "candidate_event_seqs": [],
+            "quarantined_event_seqs": [],
+        }
+    try:
+        receipts = _load_foreign_lifecycle_receipts(run, events)
+    except RuntimeError as exc:
+        return {
+            "status": "invalid",
+            "errors": [str(exc)],
+            "candidate_event_seqs": [],
+            "quarantined_event_seqs": [],
+        }
+    quarantined = {
+        (int(item["runtime_event_seq"]), str(item["runtime_event_hash"]))
+        for item in receipts
+        if item.get("disposition") == "legacy_quarantined"
+    }
+    candidates = [
+        int(item.get("seq") or 0)
+        for item in events
+        if (int(item.get("seq") or 0), str(item.get("receipt_hash") or ""))
+        not in quarantined
+        and _is_unowned_foreign_lifecycle_stop(
+            run, item, events, require_parent_transcript=True)
+    ]
+    quarantined_seqs = sorted(seq for seq, _digest in quarantined)
+    return {
+        "status": "recovery_required" if candidates else "clean",
+        "errors": [],
+        "candidate_event_seqs": sorted(candidates),
+        "quarantined_event_seqs": quarantined_seqs,
+    }
+
+
+def quarantine_unowned_foreign_lifecycle(run_dir: str | Path) -> dict:
+    """Supersede proven foreign legacy Stops without rewriting their journal."""
+    run = Path(run_dir).resolve()
+    created: list[dict] = []
+    with _locked(run):
+        events, chain_errors = validate_chain(run)
+        if chain_errors:
+            raise RuntimeError(
+                "cannot quarantine from invalid runtime receipt chain: "
+                + chain_errors[0])
+        receipts = _load_foreign_lifecycle_receipts(run, events)
+        quarantined = {
+            (int(item["runtime_event_seq"]), str(item["runtime_event_hash"]))
+            for item in receipts
+            if item.get("disposition") == "legacy_quarantined"
+        }
+        candidates = [
+            item for item in events
+            if (int(item.get("seq") or 0), str(item.get("receipt_hash") or ""))
+            not in quarantined
+            and _is_unowned_foreign_lifecycle_stop(
+                run, item, events, require_parent_transcript=True)
+        ]
+        for item in candidates:
+            created.append(_publish_foreign_lifecycle_receipt(
+                run, item, events, disposition="legacy_quarantined"))
+    # Never nest runtime and assignment locks: publish all immutable
+    # supersessions under the runtime lock, release it, then let the ordinary
+    # reconcile port reacquire runtime for its snapshot and assignment only for
+    # derived projection.
+    projection = reconcile_agent_projection(run)
+    status = foreign_lifecycle_recovery_status(run)
+    integrity = agent_event_integrity_errors(run)
+    if status.get("status") == "invalid" or integrity:
+        detail = (status.get("errors") or integrity or ["unknown error"])[0]
+        raise RuntimeError(
+            "foreign lifecycle quarantine did not restore integrity: " + detail)
+    return {
+        "status": "reconciled",
+        "created_event_seqs": sorted(
+            int(item["runtime_event_seq"]) for item in created),
+        "quarantined_event_seqs": status["quarantined_event_seqs"],
+        "runtime_event_count": projection["event_count"],
+        "lifecycle_event_count": projection["lifecycle_event_count"],
+        "diagnostic_status": projection["diagnostic_status"],
+        "cursor_status": projection["cursor_status"],
+    }
 
 
 def _file_contains_token(path: Path, token: str) -> bool:
@@ -4764,8 +5203,13 @@ def valid_lifecycle_events(
     since: float = 0.0,
 ) -> list[dict]:
     """Return transcript-backed SubagentStart/SubagentStop hook receipts."""
-    events, errors = validate_chain(run_dir)
+    run = Path(run_dir).resolve()
+    events, errors = validate_chain(run)
     if errors:
+        return []
+    try:
+        events = _effective_agent_events(run, events)
+    except RuntimeError:
         return []
     transcript_cache: dict[tuple[str, str], bool] = {}
     out: list[dict] = []
@@ -5035,10 +5479,16 @@ def agent_attempts(
     comes only from the exact parent transcript Agent tool_use frozen on Start.
     """
     if _ignore_projection_cursor:
-        events, chain_errors = validate_chain(run_dir)
+        run = Path(run_dir).resolve()
+        events, chain_errors = validate_chain(run)
+        try:
+            effective_events = _effective_agent_events(run, events)
+        except RuntimeError as exc:
+            effective_events = []
+            chain_errors = [str(exc)]
         integrity_errors = (
             ["runtime chain invalid: " + chain_errors[0]] if chain_errors
-            else _agent_event_integrity_errors_from(events)
+            else _agent_event_integrity_errors_from(effective_events)
         )
     else:
         integrity_errors = agent_event_integrity_errors(run_dir)
@@ -5457,10 +5907,14 @@ def completion_review_valid(run_dir: str | Path, evidence_index_hash: str) -> bo
     expected_prompt_hash = _launch_prompt_sha256(expected_prompt)
 
     events, chain_errors = validate_chain(run)
-    if chain_errors or _agent_event_integrity_errors_from(events):
+    try:
+        effective_events = _effective_agent_events(run, events)
+    except RuntimeError:
+        return False
+    if chain_errors or _agent_event_integrity_errors_from(effective_events):
         return False
     completion_events = [
-        item for item in events
+        item for item in effective_events
         if item.get("completion_review")
         and str(item.get("assignment") or "") == "XUNJI-COMPLETION"
         and str(item.get("front") or "") == "REVIEW"
@@ -10287,8 +10741,127 @@ def _selftest() -> int:
     _event_path(root_run).write_text(
         "\n".join(tampered_root_lines) + "\n", encoding="utf-8")
     tampered_root_projection = root_action_receipt(root_run, root_success_plan)
+
+    # Claude Code may run internal recap/compaction subagents that emit a bare
+    # SubagentStop. They are not Xunji Agents and must not enter Agent truth.
+    foreign_session = "foreign-session"
+    foreign_agent = "foreign-recap-agent"
+    foreign_run = run.parent / "foreign-lifecycle-new-run"
+    (foreign_run / "state").mkdir(parents=True)
+    foreign_transcript = foreign_run / f"{foreign_session}.jsonl"
+    foreign_transcript.write_text(
+        json.dumps({
+            "type": "system", "subtype": "away_summary",
+            "sessionId": foreign_session,
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (foreign_run / "state" / "assignments.json").write_text(
+        json.dumps({
+            "schema": 3,
+            "assignments": [{
+                "note": f"diagnostic mentions {foreign_agent}-routing only",
+            }],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    foreign_event = {
+        "hook_event_name": "SubagentStop",
+        "session_id": foreign_session,
+        "transcript_path": str(foreign_transcript),
+        "agent_id": foreign_agent,
+        "agent_type": "",
+        "last_assistant_message": "internal recap only",
+    }
+    foreign_receipt = append_hook_event(foreign_run, foreign_event)
+    foreign_replay = append_hook_event(foreign_run, foreign_event)
+    foreign_receipt_files = list(
+        _foreign_lifecycle_dir(foreign_run).glob("*.json"))
+    foreign_not_admitted = bool(
+        foreign_receipt.get("disposition") == "observed_not_admitted"
+        and foreign_replay == foreign_receipt
+        and load_events(foreign_run) == []
+        and len(foreign_receipt_files) == 1
+    )
+    xunji_unbound_run = run.parent / "xunji-unbound-stop-run"
+    (xunji_unbound_run / "state").mkdir(parents=True)
+    xunji_unbound_transcript = xunji_unbound_run / "xunji-session.jsonl"
+    xunji_unbound_transcript.write_text("{}\n", encoding="utf-8")
+    xunji_unbound_recorded = False
+    try:
+        append_hook_event(xunji_unbound_run, {
+            **foreign_event,
+            "session_id": "xunji-session",
+            "transcript_path": str(xunji_unbound_transcript),
+            "agent_id": "xunji-missing-owner",
+            "agent_type": "xunji-hunter",
+        })
+        xunji_unbound_recorded = True
+    except RuntimeError:
+        pass
+    xunji_unbound_stays_debt = bool(
+        xunji_unbound_recorded
+        and len(load_events(xunji_unbound_run)) == 1
+        and agent_event_integrity_errors(xunji_unbound_run)
+        and not _foreign_lifecycle_dir(xunji_unbound_run).exists()
+    )
+
+    legacy_run = run.parent / "foreign-lifecycle-legacy-run"
+    (legacy_run / "state").mkdir(parents=True)
+    legacy_session = "legacy-session"
+    legacy_transcript = legacy_run / f"{legacy_session}.jsonl"
+    legacy_transcript.write_text(
+        json.dumps({
+            "type": "system", "subtype": "away_summary",
+            "sessionId": legacy_session,
+        }) + "\n",
+        encoding="utf-8",
+    )
+    legacy_record = normalize_hook_event(legacy_run, {
+        "hook_event_name": "SubagentStop",
+        "session_id": legacy_session,
+        "transcript_path": str(legacy_transcript),
+        "agent_id": "legacy-recap-agent",
+        "agent_type": "",
+        "last_assistant_message": "legacy internal recap",
+    })
+    with _locked(legacy_run):
+        legacy_record = _append_runtime_record_locked(
+            legacy_run, legacy_record, [])
+    legacy_projection_failed = reconcile_agent_projection(
+        legacy_run, raise_on_error=False)
+    legacy_before = _event_path(legacy_run).read_bytes()
+    legacy_status_before = foreign_lifecycle_recovery_status(legacy_run)
+    legacy_recovery = quarantine_unowned_foreign_lifecycle(legacy_run)
+    legacy_after = _event_path(legacy_run).read_bytes()
+    legacy_status_after = foreign_lifecycle_recovery_status(legacy_run)
+    legacy_quarantine_preserves_journal = bool(
+        legacy_projection_failed.get("status") == "error"
+        and legacy_status_before.get("candidate_event_seqs") == [1]
+        and legacy_recovery.get("created_event_seqs") == [1]
+        and legacy_recovery.get("quarantined_event_seqs") == [1]
+        and legacy_before == legacy_after
+        and legacy_status_after.get("status") == "clean"
+        and not agent_event_integrity_errors(legacy_run)
+        and not _projection_error_path(legacy_run).exists()
+    )
+    foreign_schema = json.loads((
+        Path(__file__).resolve().parents[1]
+        / "contracts" / "foreign-agent-lifecycle.v1.schema.json"
+    ).read_text(encoding="utf-8", errors="strict"))
+    foreign_receipt_schema_valid = not _selftest_schema_errors(
+        foreign_receipt, foreign_schema)
+
     checks = [
         ("hash chain validates", not chain_errors and len(events) == len(ids)),
+        ("foreign internal SubagentStop is audited outside Agent journal",
+         foreign_not_admitted),
+        ("unbound Xunji-typed SubagentStop remains fail-closed debt",
+         xunji_unbound_stays_debt),
+        ("legacy foreign Stop quarantine preserves journal and restores projection",
+         legacy_quarantine_preserves_journal),
+        ("foreign lifecycle receipt conforms to frozen schema",
+         foreign_receipt_schema_valid),
         ("new runtime journal append flushes and fsyncs file plus parent directory",
          runtime_new_append_durable),
         ("existing nonempty runtime journal append does not repeat directory fsync",
@@ -10794,11 +11367,29 @@ def main() -> int:
         "--reproject", action="store_true",
         help="idempotently rebuild Agent assignment/merge projections from runtime journal",
     )
+    parser.add_argument(
+        "--quarantine-unowned-lifecycle", action="store_true",
+        help=(
+            "append immutable supersession receipts for proven non-Xunji "
+            "lifecycle Stops, then reproject"
+        ),
+    )
     args = parser.parse_args()
     if args.selftest:
         return _selftest()
     if not args.run_dir:
         parser.error("run_dir is required")
+    if args.reproject and args.quarantine_unowned_lifecycle:
+        parser.error("choose only one recovery action")
+    if args.quarantine_unowned_lifecycle:
+        try:
+            result = quarantine_unowned_foreign_lifecycle(args.run_dir)
+        except RuntimeError as exc:
+            print(json.dumps(
+                {"status": "error", "error": str(exc)}, ensure_ascii=False))
+            return 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     if args.reproject:
         try:
             result = reconcile_agent_projection(args.run_dir)
