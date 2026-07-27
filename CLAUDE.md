@@ -462,7 +462,12 @@ observe -> update state graph -> decompose fronts
   consecutive cycles produced **zero new evidence entries, zero certainty
   upgrades, AND zero coverage-matrix improvement** on any open front or
   applicable asset×vuln-family cell, the Coda has converged. This is a mandatory
-  trajectory-review signal, not a Completion pause by itself: record why the path
+  trajectory-review signal only when two new, hash-chain-valid typed
+  `cycle_end` events advanced the journal watermark. Re-running
+  `loop_state.py --write`, refreshing a status line, restarting a session, or
+  rereading unchanged canonical files does not create a semantic cycle or
+  increment the no-progress streak. It is not a Completion pause by itself:
+  record why the path
   stalled, then pivot mechanism/input shape/role, assign a review/surface Agent,
   or explicitly justify continuing with a changed precondition. Remaining open
   fronts and Type A barriers still block stop until evidence-backed adjudication

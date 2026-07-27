@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_state  # noqa: E402
+import loop_journal  # noqa: E402
 import progress_ledger  # noqa: E402
 import status_style  # noqa: E402
 
@@ -262,7 +263,11 @@ def _selftest() -> int:
     (run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
     (run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
     loop_state.write_outputs(run)
+    loop_journal.append_event(run, "cycle_start", note="selftest cycle one")
+    loop_journal.append_event(run, "cycle_end", note="selftest no-progress end one")
     loop_state.write_outputs(run)
+    loop_journal.append_event(run, "cycle_start", note="selftest cycle two")
+    loop_journal.append_event(run, "cycle_end", note="selftest no-progress end two")
     loop_data = loop_state.write_outputs(run)
     ledger = progress_ledger.derive(run, loop_data=loop_data)
     controller = derive(run, loop_data=loop_data, ledger_data=ledger)

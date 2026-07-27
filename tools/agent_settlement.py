@@ -69,6 +69,12 @@ PLAN_TURN_BINDING_FIELDS = frozenset({
     "session_id", "prompt_sha256", "contract_updated_at",
 })
 STALE_BASES = frozenset({"turn", "inputs", "both"})
+RECOVERY_REPLAY_ASSIGNED_REVIEWER = "replay_assigned_reviewer"
+RECOVERY_CREATE_REVIEWER = "create_reviewer"
+RECOVERY_CANCEL_UNLAUNCHED_EXECUTION = "cancel_unlaunched_execution"
+RECOVERY_WAIT_RUNNING = "wait_running"
+RECOVERY_MATERIAL_REPLAN = "material_replan"
+RECOVERY_HARD_INVALID = "hard_invalid"
 
 
 class SettlementError(RuntimeError):
@@ -671,3 +677,110 @@ def stale_settlement_reviewer_ready(
         and dependency_states[0].get("runtime_state") in {"returned", "failed"}
         and work_plan.lane_dependencies_satisfied(run_dir, plan, lane)
     )
+
+
+def stale_recovery_action(
+    run_dir: str | Path, plan: dict, *, projection: dict | None = None,
+) -> dict:
+    """Classify the one safe next owner action for a stale plan.
+
+    This classifier intentionally knows only durable plan/projection roles.  The
+    workers owner performs the stronger assignment-row, bundle, artifact, and
+    runtime-journal validation before it replays or creates a launch contract.
+    Keeping the ordering here prevents turn/status/Stop surfaces from suggesting
+    Reviewer cancellation while the Reviewer is the mandatory settlement path.
+    """
+    if projection is None:
+        try:
+            projection = run_model.plan_cycle_projection(run_dir, plan=plan)
+        except Exception:
+            return {"action": RECOVERY_HARD_INVALID, "reason": "projection_invalid"}
+    if not isinstance(projection, dict) \
+            or projection.get("plan_digest") != plan.get("plan_digest"):
+        return {"action": RECOVERY_HARD_INVALID, "reason": "projection_plan_mismatch"}
+
+    lanes = {
+        str(item.get("id") or ""): item
+        for item in plan.get("lanes", [])
+        if isinstance(item, dict) and str(item.get("id") or "")
+    }
+    states = [
+        item for item in projection.get("lane_states", [])
+        if isinstance(item, dict) and item.get("complete") is not True
+    ]
+    state_by_lane = {
+        str(item.get("lane_id") or ""): item
+        for item in states if str(item.get("lane_id") or "")
+    }
+
+    replay_reviewers: list[dict] = []
+    create_reviewers: list[dict] = []
+    invalid_reviewers: list[dict] = []
+    running: list[dict] = []
+    cancellable: list[dict] = []
+    review_roles = {
+        "review", "reviewer", "independent-review",
+        "independent-review-agent",
+    }
+
+    for lane_id, lane in lanes.items():
+        state = state_by_lane.get(lane_id)
+        if not state:
+            continue
+        role = str(lane.get("role") or "").strip().lower()
+        runtime_state = str(state.get("runtime_state") or "")
+        assignment = str(state.get("assignment") or "")
+        item = {
+            "assignment": assignment,
+            "lane_id": lane_id,
+            "role": role,
+            "runtime_state": runtime_state,
+        }
+        if runtime_state == "running":
+            running.append(item)
+            continue
+        if role in review_roles:
+            reviewer_ready = stale_settlement_reviewer_ready(
+                run_dir, plan, lane)
+            if reviewer_ready and runtime_state == "no-attempt" and assignment:
+                replay_reviewers.append(item)
+            elif reviewer_ready and runtime_state in {"unassigned", ""} \
+                    and not assignment:
+                create_reviewers.append(item)
+            elif runtime_state == "no-attempt":
+                invalid_reviewers.append(item)
+            continue
+        if runtime_state == "no-attempt" and assignment:
+            cancellable.append(item)
+
+    key = lambda item: (
+        str(item.get("lane_id") or ""),
+        str(item.get("assignment") or ""),
+    )
+    if replay_reviewers:
+        return {
+            "action": RECOVERY_REPLAY_ASSIGNED_REVIEWER,
+            "items": sorted(replay_reviewers, key=key),
+        }
+    if create_reviewers:
+        return {
+            "action": RECOVERY_CREATE_REVIEWER,
+            "items": sorted(create_reviewers, key=key),
+        }
+    if running:
+        return {
+            "action": RECOVERY_WAIT_RUNNING,
+            "items": sorted(running, key=key),
+        }
+    if cancellable:
+        return {
+            "action": RECOVERY_CANCEL_UNLAUNCHED_EXECUTION,
+            "items": sorted(cancellable, key=key),
+        }
+    if invalid_reviewers:
+        return {
+            "action": RECOVERY_HARD_INVALID,
+            "reason": "reviewer_no_attempt_without_returned_dependency",
+            "items": sorted(invalid_reviewers, key=key),
+        }
+    return {"action": RECOVERY_MATERIAL_REPLAN, "items": []}

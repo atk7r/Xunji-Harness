@@ -2551,6 +2551,112 @@ def _frozen_result_text(draft: dict, *, label: str) -> str:
         raise ValueError(f"{label} frozen result is unavailable") from exc
 
 
+def _validated_replay_body(
+    run_dir: Path, replay_ref: str, replay: dict, response: dict,
+    body_path: Path,
+) -> dict:
+    """Validate saved bytes separately from the full wire-response digest.
+
+    Legacy replay sidecars used ``response.sha1`` for the full wire body even
+    when guard capping saved only a prefix.  New v2 sidecars bind both byte
+    domains.  A legacy capped body remains an honest partial artifact; an empty
+    or malformed wire digest never bypasses integrity checks.
+    """
+    body = body_path.read_bytes()
+    saved_len = len(body)
+    saved_sha1 = hashlib.sha1(body).hexdigest()
+    wire_len_raw = response.get("wire_len", response.get("len"))
+    wire_sha1 = str(response.get("wire_sha1") or response.get("sha1") or "")
+    if isinstance(wire_len_raw, bool) or not isinstance(wire_len_raw, int) \
+            or wire_len_raw < 0:
+        raise ValueError(f"replay sidecar has invalid wire length: {replay_ref}")
+    wire_len = int(wire_len_raw)
+    if not re.fullmatch(r"[0-9a-f]{40}", wire_sha1):
+        raise ValueError(f"replay sidecar has missing/invalid wire hash: {replay_ref}")
+    if saved_len > wire_len:
+        raise ValueError(f"replay sidecar saved body exceeds wire length: {replay_ref}")
+
+    meta = replay.get("saved_body_meta")
+    if replay.get("schema") == "xunji.probe.replay.v2" and not isinstance(meta, dict):
+        raise ValueError(f"v2 replay sidecar lacks saved_body_meta: {replay_ref}")
+    if isinstance(meta, dict):
+        meta_len = meta.get("len")
+        meta_sha1 = str(meta.get("sha1") or "")
+        meta_truncated = meta.get("truncated")
+        if isinstance(meta_len, bool) or not isinstance(meta_len, int) \
+                or meta_len < 0 \
+                or not re.fullmatch(r"[0-9a-f]{40}", meta_sha1) \
+                or not isinstance(meta_truncated, bool):
+            raise ValueError(f"replay sidecar has invalid saved_body_meta: {replay_ref}")
+        if meta_len != saved_len or meta_sha1 != saved_sha1:
+            raise ValueError(f"replay sidecar saved body hash mismatch: {replay_ref}")
+        if meta_truncated != (saved_len < wire_len):
+            raise ValueError(f"replay sidecar truncation metadata mismatch: {replay_ref}")
+        truncated = meta_truncated
+    else:
+        truncated = saved_len < wire_len
+
+    wire_verified = False
+    manifest_token = str(replay.get("saved_body_chunks") or "")
+    if manifest_token:
+        manifest_refs = _evidence_references(run_dir, manifest_token)
+        if len(manifest_refs) != 1:
+            raise ValueError(f"replay sidecar has invalid chunk manifest: {replay_ref}")
+        _, manifest_path = next(iter(manifest_refs.items()))
+        try:
+            manifest = json.loads(
+                manifest_path.read_text(encoding="utf-8", errors="strict"))
+        except Exception as exc:
+            raise ValueError(f"replay chunk manifest is unavailable: {replay_ref}") from exc
+        chunks = manifest.get("chunks") if isinstance(manifest, dict) else None
+        if manifest.get("schema") != "xunji.probe.body_chunks.v1" \
+                or manifest.get("full_len") != wire_len \
+                or str(manifest.get("full_sha1") or "") != wire_sha1 \
+                or not isinstance(chunks, list) or not chunks:
+            raise ValueError(f"replay chunk manifest binding mismatch: {replay_ref}")
+        full_hash = hashlib.sha1()
+        next_offset = 0
+        total = 0
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                raise ValueError(f"replay chunk entry is invalid: {replay_ref}")
+            refs = _evidence_references(run_dir, str(chunk.get("file") or ""))
+            if len(refs) != 1:
+                raise ValueError(f"replay chunk path is invalid: {replay_ref}")
+            _, chunk_path = next(iter(refs.items()))
+            part = chunk_path.read_bytes()
+            expected_bytes = chunk.get("bytes")
+            expected_offset = chunk.get("offset")
+            expected_sha1 = str(chunk.get("sha1") or "")
+            if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) \
+                    or isinstance(expected_offset, bool) \
+                    or not isinstance(expected_offset, int) \
+                    or expected_offset != next_offset \
+                    or expected_bytes != len(part) \
+                    or not re.fullmatch(r"[0-9a-f]{40}", expected_sha1) \
+                    or hashlib.sha1(part).hexdigest() != expected_sha1:
+                raise ValueError(f"replay chunk integrity mismatch: {replay_ref}")
+            full_hash.update(part)
+            total += len(part)
+            next_offset += len(part)
+        if total != wire_len or full_hash.hexdigest() != wire_sha1:
+            raise ValueError(f"replay full-body chunk hash mismatch: {replay_ref}")
+        wire_verified = True
+    elif not truncated:
+        if saved_sha1 != wire_sha1:
+            raise ValueError(f"replay sidecar full body hash mismatch: {replay_ref}")
+        wire_verified = True
+
+    return {
+        "wire_len": wire_len,
+        "wire_sha1": wire_sha1,
+        "saved_len": saved_len,
+        "saved_sha1": saved_sha1,
+        "truncated": truncated,
+        "wire_verified": wire_verified,
+    }
+
+
 def _validated_review_artifacts(run_dir: Path, *, target_row: dict,
                                 target_text: str, reviewer_text: str,
                                 disposition: str) -> list[dict]:
@@ -2602,20 +2708,23 @@ def _validated_review_artifacts(run_dir: Path, *, target_row: dict,
             body_ref, body_path = next(iter(saved_refs.items()))
             if body_ref not in target_refs or not body_path.is_file():
                 raise ValueError(f"replay sidecar body is absent from frozen artifact set: {ref}")
-            expected_sha1 = str(response.get("sha1") or "")
-            if expected_sha1 and hashlib.sha1(body_path.read_bytes()).hexdigest() != expected_sha1:
-                raise ValueError(f"replay sidecar body hash mismatch: {ref}")
             if not request.get("method") or not request.get("url") \
                     or not isinstance(response.get("status"), int):
                 raise ValueError(f"replay sidecar lacks request/response binding: {ref}")
+            body_binding = _validated_replay_body(
+                run_dir, ref, replay, response, body_path)
             entry["request"] = {
                 "method": str(request["method"]),
                 "url": str(request["url"]),
             }
             entry["response"] = {
                 "status": int(response["status"]),
-                "len": int(response.get("len") or 0),
-                "sha1": expected_sha1,
+                "len": body_binding["wire_len"],
+                "sha1": body_binding["wire_sha1"],
+                "saved_len": body_binding["saved_len"],
+                "saved_sha1": body_binding["saved_sha1"],
+                "truncated": body_binding["truncated"],
+                "wire_verified": body_binding["wire_verified"],
             }
             entry["saved_body"] = body_ref
         receipts.append(entry)
@@ -3763,6 +3872,109 @@ def _stale_settlement_reviewer_ready(
     )
 
 
+def _replayable_existing_assignment(
+    run_dir: Path, plan: dict, lane: dict, *, settlement_only: bool,
+) -> dict:
+    """Return one durable no-attempt assignment whose launch may be replayed."""
+    lane_id = str(lane.get("id") or "")
+    projection = _run_model.plan_cycle_projection(run_dir, plan=plan) \
+        if _run_model is not None else {}
+    states = [
+        item for item in projection.get("lane_states", [])
+        if isinstance(item, dict) and str(item.get("lane_id") or "") == lane_id
+    ]
+    if len(states) != 1 \
+            or str(states[0].get("runtime_state") or "") != "no-attempt":
+        raise ValueError(
+            f"WORK_PLAN_ASSIGNMENT_REPLAY_STATE_INVALID:{lane_id}")
+    assignment = str(states[0].get("assignment") or "")
+    if not re.fullmatch(r"A-[A-Za-z0-9._-]+", assignment):
+        raise ValueError(
+            f"WORK_PLAN_ASSIGNMENT_REPLAY_IDENTITY_INVALID:{lane_id}")
+    rows = [
+        item for item in load_assignments(run_dir).get("assignments", [])
+        if isinstance(item, dict)
+        and str(item.get("agent") or "") == assignment
+        and str(item.get("plan_digest") or "") == str(plan.get("plan_digest") or "")
+        and str(item.get("lane_id") or "") == lane_id
+    ]
+    if len(rows) != 1:
+        raise ValueError(
+            f"WORK_PLAN_ASSIGNMENT_REPLAY_ROW_AMBIGUOUS:{assignment}")
+    row = rows[0]
+    if _role(str(row.get("role") or "")) \
+            != _role(str(lane.get("role") or "")) \
+            or str(row.get("effect") or "") != str(lane.get("effect") or "") \
+            or str(row.get("front") or "").upper() \
+                != str(lane.get("front") or "").upper() \
+            or [_normalize_asset(item) for item in row.get("assets", [])] \
+                != [_normalize_asset(item) for item in lane.get("assets", [])] \
+            or _normalized_agent_status(str(row.get("status") or "")) != "assigned" \
+            or row.get("attempts") != [] \
+            or any(row.get(field) not in (None, "", [], {}) for field in (
+                "current_attempt", "runtime_agent_id", "root_disposition_at",
+                "root_disposition_review_receipt_hash",
+            )):
+        raise ValueError(
+            f"WORK_PLAN_ASSIGNMENT_REPLAY_ROW_INVALID:{assignment}")
+    if settlement_only and not _stale_settlement_reviewer_ready(
+            run_dir, plan, lane):
+        raise ValueError(
+            f"WORK_PLAN_ASSIGNMENT_REPLAY_STALE_ROLE_FORBIDDEN:{assignment}")
+
+    if _role(str(lane.get("role") or "")) == "review":
+        dependencies = [str(item) for item in lane.get("dependencies", [])]
+        target_states = [
+            item for item in projection.get("lane_states", [])
+            if isinstance(item, dict)
+            and str(item.get("lane_id") or "") in dependencies
+            and str(item.get("runtime_state") or "") in {"returned", "failed"}
+        ]
+        if len(dependencies) != 1 or len(target_states) != 1 \
+                or row.get("reviews_assignments") \
+                    != [str(target_states[0].get("assignment") or "")] \
+                or str(row.get("review_result_digest") or "") \
+                    != str(target_states[0].get("result_digest") or "") \
+                or not re.fullmatch(
+                    r"[0-9a-f]{64}",
+                    str(row.get("review_result_digest") or "")):
+            raise ValueError(
+                f"WORK_PLAN_ASSIGNMENT_REPLAY_REVIEW_BINDING_INVALID:{assignment}")
+    elif row.get("review_result_digest"):
+        raise ValueError(
+            f"WORK_PLAN_ASSIGNMENT_REPLAY_EXECUTION_BINDING_INVALID:{assignment}")
+
+    _assert_no_assignment_runtime_records(
+        run_dir, assignment,
+        plan_digest=str(plan.get("plan_digest") or ""),
+        lane_id=lane_id,
+    )
+    try:
+        _instruction_bundle.verify_assignment_bundle(
+            run_dir, row, root=ROOT)
+    except Exception as exc:
+        raise ValueError(
+            f"WORK_PLAN_ASSIGNMENT_REPLAY_BUNDLE_INVALID:{assignment}") from exc
+    prompt = _runtime_receipts.assignment_launch_prompt(row) \
+        if _runtime_receipts is not None else ""
+    subagent_type = _runtime_receipts.assignment_subagent_type(row) \
+        if _runtime_receipts is not None else ""
+    if not prompt or not subagent_type:
+        raise ValueError(
+            f"WORK_PLAN_ASSIGNMENT_REPLAY_CONTRACT_INVALID:{assignment}")
+    return {
+        "assignment": assignment,
+        "lane_id": lane_id,
+        "role": str(row.get("role") or ""),
+        "effect": str(row.get("effect") or ""),
+        "tool_call_limit": int(row.get("tool_call_limit") or 0),
+        "context": str(row.get("context") or ""),
+        "subagent_type": subagent_type,
+        "launch_prompt": prompt,
+        "replayed_existing": True,
+    }
+
+
 def delegate_ready_lanes(
     run_dir: Path,
     *,
@@ -3816,21 +4028,41 @@ def _delegate_ready_lanes_locked(
     mode = str(plan.get("execution_mode") or "")
     if mode == "ROOT_DIRECT":
         raise ValueError("ROOT_DIRECT plan has no Agent delegation wave")
+    projection = _run_model.plan_cycle_projection(run_dir, plan=plan) \
+        if _run_model is not None else {}
+    projected_states = {
+        str(item.get("lane_id") or ""): str(item.get("runtime_state") or "")
+        for item in projection.get("lane_states", [])
+        if isinstance(item, dict) and str(item.get("lane_id") or "")
+    }
     ready: list[dict] = []
     for lane in plan.get("lanes", []):
         if not isinstance(lane, dict):
             continue
         if str(lane.get("effect") or "") in {"control", "repo_mutation"}:
             continue
-        if _work_plan.lane_runtime_state(run_dir, plan, str(lane.get("id") or "")) \
-                != "unassigned":
-            continue
+        lane_id = str(lane.get("id") or "")
+        runtime_state = _work_plan.lane_runtime_state(
+            run_dir, plan, lane_id)
         if settlement_only \
                 and not _stale_settlement_reviewer_ready(run_dir, plan, lane):
             continue
+        existing: dict | None = None
+        if projected_states.get(lane_id) == "no-attempt":
+            existing = _replayable_existing_assignment(
+                run_dir, plan, lane, settlement_only=settlement_only)
+            if existing.get("tool_call_limit") != tool_call_limit:
+                raise ValueError(
+                    "WORK_PLAN_ASSIGNMENT_REPLAY_TOOL_CALL_LIMIT_MISMATCH:"
+                    f"{existing.get('assignment')}")
+        elif runtime_state != "unassigned":
+            continue
         if not _work_plan.lane_dependencies_satisfied(run_dir, plan, lane):
             continue
-        ready.append({"work_plan_lane": {**lane, "dependencies": []}})
+        ready.append({
+            "work_plan_lane": {**lane, "dependencies": []},
+            **({"existing_assignment": existing} if existing else {}),
+        })
     if not ready:
         if settlement_only:
             raise ValueError(
@@ -3861,6 +4093,35 @@ def _delegate_ready_lanes_locked(
             model_egress_budget=model_egress_budget,
             merge_capacity=merge_capacity,
         ))
+
+    replayed = [
+        item["existing_assignment"] for item in selected
+        if isinstance(item.get("existing_assignment"), dict)
+    ]
+    if replayed:
+        # Never mix a durable contract replay with new assignment mutation in
+        # one batch.  Replaying first is deterministic and leaves the later
+        # ready suffix for the next ordinary delegate call.
+        return {
+            "schema": "xunji.delegate-batch.v1",
+            "plan_id": plan["plan_id"],
+            "plan_digest": plan["plan_digest"],
+            "transaction_id": "",
+            "execution_mode": mode,
+            "input_freshness": (
+                "stale-settlement-only" if settlement_only else "current"),
+            "runtime_slots": runtime_slots,
+            "running_before": running,
+            "request_budget": request_budget,
+            "model_egress_budget": model_egress_budget,
+            "merge_capacity": merge_capacity,
+            "tool_call_limit": tool_call_limit,
+            "assignments": replayed,
+            "replayed_existing": len(replayed),
+            "next_action": (
+                "Claude primary driver calls Agent once per assignment using "
+                "both exact subagent_type and exact launch_prompt"),
+        }
 
     selected_lane_ids = [
         str(item["work_plan_lane"].get("id") or "") for item in selected
@@ -3924,6 +4185,12 @@ def _delegate_ready_lanes_locked(
             })
             if fault is not None:
                 fault(f"after_assignment_{len(created)}")
+        refreshed_plan, refreshed_settlement_only = _plan_for_delegation(
+            run_dir, _work_plan._load_turn_contract(run_dir))
+        if refreshed_plan != plan \
+                or refreshed_settlement_only is not settlement_only:
+            raise ValueError(
+                "WORK_PLAN_DELEGATE_BASIS_CHANGED_BEFORE_COMMIT")
         transaction["status"] = "committed"
         transaction["committed_at"] = datetime.now(timezone.utc).isoformat(
             timespec="milliseconds").replace("+00:00", "Z")
@@ -4068,37 +4335,61 @@ def _plan_continuation_notice(run_dir: Path) -> str:
             else:
                 freshness = "invalid"
     if freshness == "stale":
-        unlaunched = sorted({
-            str(item.get("assignment") or "")
-            for item in projection.get("lane_states", [])
-            if isinstance(item, dict)
-            and str(item.get("runtime_state") or "") == "no-attempt"
-            and re.fullmatch(
-                r"A-[A-Za-z0-9._-]+", str(item.get("assignment") or ""))
-        })
-        if unlaunched:
+        if _agent_settlement is None:
             return (
-                "NEXT_OWNER_ACTION: committed plan is stale and assignment "
-                f"{unlaunched[0]} has no authentic launch attempt; run the exact "
-                f"typed `workers.py cancel-unlaunched {display_path(run_dir)} "
-                f"{unlaunched[0]} --reason "
-                "\"turn or canonical inputs changed before launch\"` settlement, "
-                "then replan the still-open front."
+                "NEXT_OWNER_ACTION: stale assignment settlement owner is "
+                "unavailable; keep the front open and repair that local "
+                "dependency before cancel, delegate, replan, or cycle_end."
             )
-        returned = [
-            item for item in projection.get("lane_states", [])
-            if isinstance(item, dict)
-            and str(item.get("runtime_state") or "") in {"returned", "failed"}
-            and str(item.get("role") or "").strip().lower() != "review"
-            and item.get("complete") is not True
-        ]
-        if returned:
+        recovery = _agent_settlement.stale_recovery_action(
+            run_dir, _transaction_bound_plan_for_settlement(run_dir),
+            projection=projection,
+        )
+        action = str(recovery.get("action") or "")
+        items = recovery.get("items") \
+            if isinstance(recovery.get("items"), list) else []
+        first = items[0] if items and isinstance(items[0], dict) else {}
+        assignment = str(first.get("assignment") or "")
+        if action == _agent_settlement.RECOVERY_REPLAY_ASSIGNED_REVIEWER:
+            return (
+                "NEXT_OWNER_ACTION: committed plan is stale and its unique "
+                f"Reviewer {assignment} is assigned with no authentic launch; "
+                f"rerun `python3 tools/workers.py delegate {display_path(run_dir)} "
+                "--limit 1` to replay the exact durable launch contract, then "
+                "settle review and Root disposition. Do not cancel the Reviewer "
+                "or rebuild its prompt."
+            )
+        if action == _agent_settlement.RECOVERY_CREATE_REVIEWER:
             return (
                 "NEXT_OWNER_ACTION: committed plan is stale but retains exact "
                 "settlement identity for a returned/failed execution; run the "
                 "same documented workers.py delegate checkpoint to create only "
                 "its unique digest-bound Reviewer, settle it, then replan. Do "
                 "not relaunch the old execution lane."
+            )
+        if action == _agent_settlement.RECOVERY_CANCEL_UNLAUNCHED_EXECUTION \
+                and assignment:
+            return (
+                "NEXT_OWNER_ACTION: committed plan is stale and non-Reviewer "
+                f"assignment {assignment} has no authentic launch attempt; run "
+                f"the exact typed `workers.py cancel-unlaunched "
+                f"{display_path(run_dir)} {assignment} --reason "
+                "\"turn or canonical inputs changed before launch\"` settlement, "
+                "then replan the still-open front."
+            )
+        if action == _agent_settlement.RECOVERY_WAIT_RUNNING:
+            return (
+                "NEXT_OWNER_ACTION: committed plan retains an authentic running "
+                f"attempt; repeat `python3 tools/workers.py status "
+                f"{display_path(run_dir)}` after its Stop receipt. Do not cancel "
+                "or replan around it."
+            )
+        if action == _agent_settlement.RECOVERY_HARD_INVALID:
+            return (
+                "NEXT_OWNER_ACTION: stale Reviewer settlement cannot be safely "
+                "classified; inspect the exact owner invariant and runtime "
+                "projection. Do not cancel a Reviewer, delete ledger/journal "
+                "files, or replan around assignment debt."
             )
         return (
             "NEXT_OWNER_ACTION: committed plan is turn/input stale after the "
@@ -4165,7 +4456,10 @@ def print_review_disposition(run_dir: Path, target: str, reviewer: str,
         print(
             "  VERIFIED_ARTIFACT "
             f"{request['method']} {request['url']} -> {response['status']} "
-            f"len={response['len']} body={item['saved_body']} "
+            f"wire_len={response['len']} saved_len={response.get('saved_len', response['len'])} "
+            f"truncated={str(bool(response.get('truncated'))).lower()} "
+            f"wire_verified={str(bool(response.get('wire_verified'))).lower()} "
+            f"body={item['saved_body']} "
             f"replay={item['path']}"
         )
     return 0
@@ -4548,6 +4842,91 @@ def _selftest() -> int:
         reviewer_text=frozen_artifact_text,
         disposition="accept-candidate",
     )
+    partial_wire = b"prefix-" + b"x" * 64
+    partial_saved = partial_wire[:16]
+    partial_body = artifact_review_run / "evidence" / "partial.html"
+    partial_replay = artifact_review_run / "evidence" / "partial.html.replay.json"
+    partial_body.write_bytes(partial_saved)
+    partial_record = {
+        "schema": "xunji.probe.replay.v2",
+        "request": {"method": "GET", "url": "http://127.0.0.1:18765/partial"},
+        "response": {
+            "status": 200,
+            "len": len(partial_wire),
+            "sha1": hashlib.sha1(partial_wire).hexdigest(),
+            "wire_len": len(partial_wire),
+            "wire_sha1": hashlib.sha1(partial_wire).hexdigest(),
+        },
+        "saved_body": str(partial_body.resolve()),
+        "saved_body_meta": {
+            "len": len(partial_saved),
+            "sha1": hashlib.sha1(partial_saved).hexdigest(),
+            "truncated": True,
+        },
+    }
+    partial_replay.write_text(json.dumps(partial_record), encoding="utf-8")
+    partial_text = (
+        "Artifacts:\n"
+        f"- {partial_body.resolve()}\n"
+        f"- {partial_replay.resolve()}\n"
+    )
+    partial_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=partial_text,
+        reviewer_text=partial_text,
+        disposition="accept-candidate",
+    )
+    partial_response = next(
+        item["response"] for item in partial_receipts
+        if item.get("path", "").endswith(".replay.json"))
+    legacy_partial_body = artifact_review_run / "evidence" / "legacy-partial.html"
+    legacy_partial_replay = (
+        artifact_review_run / "evidence" / "legacy-partial.html.replay.json")
+    legacy_partial_body.write_bytes(partial_saved)
+    legacy_partial_replay.write_text(json.dumps({
+        "request": {
+            "method": "GET",
+            "url": "http://127.0.0.1:18765/legacy-partial",
+        },
+        "response": {
+            "status": 200,
+            "len": len(partial_wire),
+            "sha1": hashlib.sha1(partial_wire).hexdigest(),
+        },
+        "saved_body": str(legacy_partial_body.resolve()),
+    }), encoding="utf-8")
+    legacy_partial_text = (
+        "Artifacts:\n"
+        f"- {legacy_partial_body.resolve()}\n"
+        f"- {legacy_partial_replay.resolve()}\n"
+    )
+    legacy_partial_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=legacy_partial_text,
+        reviewer_text=legacy_partial_text,
+        disposition="accept-candidate",
+    )
+    legacy_partial_response = next(
+        item["response"] for item in legacy_partial_receipts
+        if item.get("path", "").endswith(".replay.json"))
+    empty_wire_hash_rejected = False
+    invalid_partial_record = json.loads(json.dumps(partial_record))
+    invalid_partial_record["response"]["sha1"] = ""
+    invalid_partial_record["response"]["wire_sha1"] = ""
+    partial_replay.write_text(json.dumps(invalid_partial_record), encoding="utf-8")
+    try:
+        _validated_review_artifacts(
+            artifact_review_run,
+            target_row={"effect": "target"},
+            target_text=partial_text,
+            reviewer_text=partial_text,
+            disposition="accept-candidate",
+        )
+    except ValueError as exc:
+        empty_wire_hash_rejected = "wire hash" in str(exc)
+    partial_replay.write_text(json.dumps(partial_record), encoding="utf-8")
     stale_reviewer_artifact_rejected = False
     try:
         _validated_review_artifacts(
@@ -6259,9 +6638,15 @@ def _selftest() -> int:
     )
     reviewer_before_return_blocked = False
     try:
-        delegate_ready_lanes(
+        before_return_batch = delegate_ready_lanes(
             planned_run, runtime_slots=1, request_budget=10,
             model_egress_budget=1, merge_capacity=100, limit=1,
+        )
+        reviewer_before_return_blocked = bool(
+            before_return_batch.get("replayed_existing") == 1
+            and before_return_batch["assignments"][0]["assignment"]
+                == planned_hunter["agent"]
+            and before_return_batch["assignments"][0]["role"] != "review"
         )
     except ValueError as exc:
         reviewer_before_return_blocked = "no unassigned lane" in str(exc)
@@ -6376,9 +6761,117 @@ def _selftest() -> int:
         planned_reviewer_batch["assignments"][0]["launch_prompt"]
         == _runtime_receipts.assignment_launch_prompt(planned_reviewer)
     )
+    planned_reviewer_wrong_prompt = re.sub(
+        r"XUNJI_RESULT_DIGEST=[0-9a-f]{64}",
+        "XUNJI_RESULT_DIGEST=" + ("0" * 64),
+        planned_reviewer_batch["assignments"][0]["launch_prompt"],
+    )
+    planned_reviewer_wrong_tool = "planned-reviewer-wrong-tool"
+    with planned_transcript.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": planned_reviewer_wrong_tool,
+                "name": "Agent", "input": {
+                    "prompt": planned_reviewer_wrong_prompt,
+                    "subagent_type": planned_reviewer_batch[
+                        "assignments"][0]["subagent_type"],
+                },
+            }, {
+                "type": "tool_result",
+                "tool_use_id": planned_reviewer_wrong_tool,
+                "content": {"decision": "deny", "reason": "digest mismatch"},
+            }]},
+        }) + "\n")
+    planned_reviewer_wrong_denial = _runtime_receipts.append_hook_event(
+        planned_run, {
+            "hook_event_name": "PreToolUseDenied",
+            "session_id": superseding_contract["session_id"],
+            "transcript_path": str(planned_transcript),
+            "tool_name": "Agent",
+            "tool_use_id": planned_reviewer_wrong_tool,
+            "tool_input": {
+                "prompt": planned_reviewer_wrong_prompt,
+                "subagent_type": planned_reviewer_batch[
+                    "assignments"][0]["subagent_type"],
+            },
+            "tool_response": {
+                "decision": "deny", "reason": "digest mismatch"},
+            "xunji_decision": "deny",
+        })
+    planned_reviewer_assignments_before_replay = (
+        planned_run / "state" / "assignments.json").read_bytes()
+    planned_reviewer_replay_batch = delegate_ready_lanes(
+        planned_run, runtime_slots=1, request_budget=10,
+        model_egress_budget=1, merge_capacity=100, limit=1,
+    )
+    planned_reviewer_assignments_after_replay = (
+        planned_run / "state" / "assignments.json").read_bytes()
+    planned_reviewer_replay_is_idempotent = bool(
+        planned_reviewer_wrong_denial.get("hook_event_name")
+            == "PreToolUseDenied"
+        and planned_reviewer_wrong_denial.get("decision") == "deny"
+        and planned_reviewer_replay_batch.get("replayed_existing") == 1
+        and planned_reviewer_replay_batch["assignments"][0]["assignment"]
+            == planned_reviewer["agent"]
+        and planned_reviewer_replay_batch["assignments"][0]["launch_prompt"]
+            == planned_reviewer_batch["assignments"][0]["launch_prompt"]
+        and planned_reviewer_replay_batch["assignments"][0].get(
+            "replayed_existing") is True
+        and planned_reviewer_assignments_before_replay
+            == planned_reviewer_assignments_after_replay
+    )
+    planned_reviewer_replay_routes_without_cancel = bool(
+        "replay the exact durable launch contract"
+        in _plan_continuation_notice(planned_run)
+    )
+    planned_reviewer_binding_tamper_blocks_replay = False
+    planned_assignment_path = planned_run / "state" / "assignments.json"
+    planned_assignment_bytes = planned_assignment_path.read_bytes()
+    try:
+        tampered_ledger = json.loads(
+            planned_assignment_bytes.decode("utf-8"))
+        for item in tampered_ledger.get("assignments", []):
+            if item.get("agent") == planned_reviewer["agent"]:
+                item["review_result_digest"] = "0" * 64
+        planned_assignment_path.write_text(
+            json.dumps(tampered_ledger, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        delegate_ready_lanes(
+            planned_run, runtime_slots=1, request_budget=10,
+            model_egress_budget=1, merge_capacity=100, limit=1,
+        )
+    except ValueError as exc:
+        planned_reviewer_binding_tamper_blocks_replay = (
+            "WORK_PLAN_ASSIGNMENT_REPLAY_REVIEW_BINDING_INVALID" in str(exc))
+    finally:
+        planned_assignment_path.write_bytes(planned_assignment_bytes)
+    planned_reviewer_cancel_still_forbidden = False
+    try:
+        cancel_unlaunched_assignment(
+            planned_run, planned_reviewer["agent"],
+            reason="must never cancel a mandatory Reviewer")
+    except ValueError as exc:
+        planned_reviewer_cancel_still_forbidden = (
+            "ASSIGNMENT_CANCELLATION_REVIEWER_FORBIDDEN" in str(exc))
     planned_reviewer_context = Path(planned_reviewer["context"])
     if not planned_reviewer_context.is_absolute():
         planned_reviewer_context = ROOT / planned_reviewer_context
+    planned_reviewer_context_bytes = planned_reviewer_context.read_bytes()
+    planned_reviewer_bundle_tamper_blocks_replay = False
+    try:
+        planned_reviewer_context.write_bytes(
+            planned_reviewer_context_bytes + b"\nTAMPERED\n")
+        delegate_ready_lanes(
+            planned_run, runtime_slots=1, request_budget=10,
+            model_egress_budget=1, merge_capacity=100, limit=1,
+        )
+    except ValueError as exc:
+        planned_reviewer_bundle_tamper_blocks_replay = (
+            "WORK_PLAN_ASSIGNMENT_REPLAY_BUNDLE_INVALID" in str(exc))
+    finally:
+        planned_reviewer_context.write_bytes(
+            planned_reviewer_context_bytes)
     _runtime_receipts.append_hook_event(planned_run, {
         "hook_event_name": "PostToolUse", "session_id": "planned-session",
         "transcript_path": str(planned_transcript), "tool_name": "Agent",
@@ -6965,6 +7458,19 @@ def _selftest() -> int:
          len(validated_artifact_receipts) == 4
          and sum(item.get("response", {}).get("status") == 200
                  for item in validated_artifact_receipts) == 2),
+        ("truncated replay validates saved bytes without comparing them to the wire hash",
+         partial_response.get("truncated") is True
+         and partial_response.get("saved_len") == len(partial_saved)
+         and partial_response.get("wire_verified") is False),
+        ("legacy capped replay preserves full-wire identity without claiming full verification",
+         legacy_partial_response.get("len") == len(partial_wire)
+         and legacy_partial_response.get("sha1")
+            == hashlib.sha1(partial_wire).hexdigest()
+         and legacy_partial_response.get("saved_len") == len(partial_saved)
+         and legacy_partial_response.get("truncated") is True
+         and legacy_partial_response.get("wire_verified") is False),
+        ("empty replay wire hash cannot bypass artifact integrity",
+         empty_wire_hash_rejected),
         ("target review admission rejects stale or invented Reviewer artifacts",
          stale_reviewer_artifact_rejected),
         ("unknown future assignment ledger schema fails closed",
@@ -7236,6 +7742,12 @@ def _selftest() -> int:
         ("Hunter and Reviewer launch prompts reconstruct from persisted assignments",
          planned_hunter_prompt_reconstructs
          and planned_reviewer_prompt_reconstructs),
+        ("denied wrong Reviewer prompt replays the durable assigned contract",
+         planned_reviewer_replay_is_idempotent
+         and planned_reviewer_replay_routes_without_cancel
+         and planned_reviewer_cancel_still_forbidden
+         and planned_reviewer_bundle_tamper_blocks_replay
+         and planned_reviewer_binding_tamper_blocks_replay),
         ("plan-bound Reviewer cannot delegate before Hunter runtime return",
          reviewer_before_return_blocked),
         ("stale settlement is available only through delegate, not direct assign",

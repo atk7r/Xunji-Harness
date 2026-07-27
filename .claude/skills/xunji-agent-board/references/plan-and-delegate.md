@@ -143,6 +143,15 @@ bounded asset package present in coverage and named by its front. Unknown roles,
 overlapping target packages, stale plan digests, or inadequate budgets fail
 closed.
 
+If a ready lane already has exactly one durable `assigned` row with no authentic
+launch attempt, `delegate` does not allocate another assignment. It revalidates
+the row, instruction bundle, generated artifacts, plan/lane binding, and runtime
+journal, then returns the same exact binary launch contract without mutating the
+assignment ledger. This recovery is especially important for a stale plan's
+mandatory Reviewer after a denied or interrupted parent launch. Never reconstruct
+the prompt from chat text. A replay whose row, bundle, dependency result digest,
+tool-call limit, or runtime state differs fails closed.
+
 Invoke Agents only after reading `launch-return-settlement.md`.
 `no unassigned lane has satisfied runtime dependencies` routes back to that
 reference's durable-return checkpoint; it does not authorize `finish`, replan, or
@@ -167,9 +176,12 @@ operator turn supersedes the plan's prompt binding, do not reuse an unlaunched
 execution assignment. In a later `EXECUTE` turn, first satisfy that turn's normal
 iteration-plan receipt, then run the same `delegate` owner command. It may load
 the transaction-bound old plan only to create the unique exact Reviewer for an
-authentic returned/failed execution. All old Hunter, target, model-egress, and
-unrelated Reviewer launches remain denied. A non-Reviewer assignment with zero
-launch facts may be retired through the typed command:
+authentic returned/failed execution, or to replay that Reviewer's already
+persisted `assigned`/no-attempt launch contract. Exact parent
+`PreToolUseDenied Agent` is negative launch proof: rerun `delegate --limit 1`
+to recover the durable Reviewer contract. All old Hunter, target, model-egress,
+and unrelated Reviewer launches remain denied. A non-Reviewer assignment with
+zero launch facts may be retired through the typed command:
 
 ```bash
 python3 tools/workers.py cancel-unlaunched runs/<dir> A-<assignment> --reason "turn or canonical inputs changed before launch"

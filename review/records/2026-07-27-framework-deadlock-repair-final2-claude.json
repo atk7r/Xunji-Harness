@@ -1,0 +1,93 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "claude:code-cli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "6db994717c04b1593ca3b7a6d0f74e2033a358b0",
+  "evidence_index_hash": "a8e74af0bd4e5fdb64a895b3580475f9fa9ca73d",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "All four evidence entries share identical certainty (0.8) and confirmation (true), despite fundamentally different evidence types — code diffs, documentation changes, and live test-execution output should carry different confidence levels.",
+      "evidence": "`evidence_index.entries[0-3].certainties` each `[0.8]`, `confirmed:true`",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "E-004 (live test output from a separate Claude primary-driver session) is stronger evidence for the behaviors it demonstrates than E-003 (documentation prose) is for architectural claims. Flattening certainty obscures this distinction and makes the credibility assessment less useful.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "The `claims` object is empty (`\"claims\":{}`) — the review bundle has no formal claim decomposition linking claims to supporting evidence entries.",
+      "evidence": "`claims:{}` in bundle root",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "Without structured claims, it is impossible to verify that every assertion in `review.md`/`decisions.md` is covered by evidence. The reviewer must rely on narrative in `head` fields, which is less rigorous and more prone to blind-spot propagation.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "No evidence entry carries `refutes_any: true` or a non-empty `refutes` list.",
+      "evidence": "`refutes:[]` and `refutes_any:false` on all 4 entries",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "A perfect review with zero refutations of any prior claim is unrealistic. Either no prior claims existed (in which case the review is a baseline, not a delta), or the review did not exercise a refutation search. Both are blind-spot risks.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Evidence manifest (`evidence.md`) is only 1,156 bytes but claims 4 evidence entries with narrative `head` fields of 3-7 lines each; the manifest likely contains only cross-references without criterion-level detail.",
+      "evidence": "`evidence_manifest.path:evidence.md`, `evidence_manifest.size:1156`",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "At ~290 bytes per entry in the manifest, there is insufficient space for per-criterion certainty, artifact chain, and control classification. The reviewer cannot verify whether the `certainty:0.8` label is correctly applied without per-criterion breakdowns that the manifest size suggests are absent.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "E-003 (Architecture continuity) relies solely on documentation diffs (04-docs.diff), with no cross-evidence anchor proving the documentation accurately reflects the implemented behavior.",
+      "evidence": "`E-003.artifacts:[\"04-docs.diff\"]` — all are `.diff` files against documentation",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "Documentation can describe intended design that diverges from implementation. Without evidence of traceability (e.g., a test that validates a documented invariant), the docs could contain idealized descriptions that the code does not satisfy.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "The `<redacted:internal:*>` tokens obscure schema identifiers, tool names, and repository references needed for independent verification.",
+      "evidence": "Multiple redacted tokens across all diffs (e.g., `<redacted:internal:9bd5909b229b>` as schema prefix, `<redacted:internal:543c2b4aa1f5>` as tool path)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "An independent reviewer cannot verify that the replay schema (`*.probe.replay.v2`) is correct, that the registry capability match is exact, or that paths don't reference nonexistent files. Redaction is a necessary operational constraint but creates an unverifiable trust boundary.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "**No \"Type B\" or abandoned-front classification appears in the evidence at all.** The rubric warns about work abandoned as \"Type B\" without deeper investigation — but the entire evidence set is about code-quality improvement, not threat-surface exploration. The \"red-team pentest\" framing in the system prompt is misleading: what is actually being reviewed is a framework maintenance diff (6-7 files changed across ~20 hunks), not a penetration test. The author likely did not notice that the rubric makes assumptions (surface assets, coverage matrix, unprobed attack surfaces) that the reviewed work does not satisfy, and therefore did not adjust the review approach to match the actual deliverable type. This is a frame-mismatch blind spot that could cause an automated reviewer to flag phantom misses.",
+    "**No assertion about what changes were NOT made.** The evidence only describes what was added — reviewer replay, CAS check, Coda watermark, docs — but never enumerates rejected alternatives or design trade-offs (e.g., \"why wasn't the Reviewer simply cancelled and recreated?\"). This makes the review appear to have considered only one path.",
+    "**The test-output evidence (E-004) shows 69/69 PASS but does not include a cross-reference back to which test cases cover each evidence item.** For example, the \"denied wrong Reviewer prompt replays durable contract\" test in `02-workers-part-1.diff` (around `@@ -7238,2 +7744,8 @@`) is mentioned in the test fixture, but E-004's raw output only shows aggregate scores. There is no per-test-case pass/fail mapping, so a failed sub-assertion within a passing test suite would be invisible.",
+    "**The 6 changed files across 3 modules with ~20 hunks (01.diff: 6 files, 02-part-0.diff: 2 files, 02-part-1.diff: unknown, 03.diff: 4 files, 04.diff: 5 files) total about 17 unique files**, but the evidence entries claim coverage of run_gate.py, agent_settlement.py, turn_contract.py, work_plan.py, workers.py, loop_state.py, peer_review.py, probe.py, run_controller.py, 5 documentation files, and 2 schema/contract files. A file-level coverage check against the actual diff hunks would confirm everything is accounted for, but the review bundle doesn't provide such a checklist — the `diff_summary.changed_files` fields in the artifacts show the list but no reconciliation step.",
+    "**The AGENT-SETTLEMENT module introduces a new classifier (`stale_recovery_action`) with 6 output actions, but there is no evidence of a \"classifier escape\" safety check** — what happens if a lane simultaneously matches two conditions? The code shows early-return ordering (replay_reviewers > create_reviewers > wait_running > cancellable > invalid > replan), but the evidence does not justify why this ordering is safe or what happens if an incorrect early match occurs (e.g., a Reviewer lane that is also \"running\" — the code explicitly `continue`s on running before checking Reviewer status, so recovery would return `wait_running` and never inform the owner of the Reviewer debt. This is a potential hidden deadlock path not discussed in any evidence entry).",
+    "**The \"China/CNAVD/Taiwan\" context flag** is active in the rubric, meaning there may be local regulatory or naming conventions the reviewer should be aware of. The codebase uses terms like \"ROOT_DIRECT\" and \"cycle_end\" that appear to be translation artifacts or domain-internal jargon. An independent reviewer unfamiliar with this framework's conventions might misinterpret what constitutes a \"vulnerability\" or \"finding\" in this context."
+  ],
+  "context_limits": [
+    "I cannot open the actual artifact files (`01-core-authority.diff`, etc.) beyond what the bundle snippet provides, because the review bundle is a frozen JSON and I am read-only. My artifact checks are limited to the excerpts included in the bundle (which are truncated — several have `excerpt_truncated_chars` > 0). If critical evidence (e.g., the exact diff hunks proving a claimed behavior) is in the truncated portion, I cannot verify it.",
+    "The taxonomy of certainty (0.3/0.5/0.8/1.0) is specific to the pentest rubric, not the code-review task being performed. The evidence creator applied it mechanically (0.8 for everything), which both matches and undermines the rubric. A proper adaptation would use confidence levels calibrated to code-review evidence (compile proof, test pass, manual inspection, formal verification).",
+    "The system bundles for `02-workers-part-1.diff` and `evidence_index` do not provide full file contents — only unified diffs and a manifest reference. I cannot confirm that the test fixture actually produces the claimed pass/fail outcomes without executing the code.",
+    "Chinese-language context: the `ARCHITECTURE.md` excerpt contains Chinese prose describing the architecture rules. I can read the Chinese, but some domain-specific terms (e.g., \"typed\", \"settlement identity\", \"payer\", \"assignment debt\") may have precise meanings in the framework that are not fully conveyed in translation. My assessment may miss culturally-bound assumptions about workflow terminology.",
+    "claude succeeded after 2 attempt(s); previous failures: attempt 1: no verdict in backend response"
+  ],
+  "error": ""
+}

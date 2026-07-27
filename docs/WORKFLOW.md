@@ -183,8 +183,10 @@ Coda convergence, Agent Board conflicts, fan-out/closure-review hints, and
 advisory mentor hints. `progress_ledger.py` records whether the last cycle had
 material/artifact-backed progress, and `run_controller.py --shadow` writes the
 next required control-plane action plus stop blockers. These are derived caches
-only; Root still chooses the next front and the evidence gate still owns
-promotion and closure.
+only; repeated derivation is idempotent and never increments the no-progress
+streak. A Coda trajectory cycle advances only when the validated loop journal
+gains a new typed `cycle_end`; Root still chooses the next front and the evidence
+gate still owns promotion and closure.
 `coverage_matrix.py --write` also writes `state/asset_ledger.json`, retaining every
 in-scope inventory row with a stable asset id, reachability, front links, assignment
 links, tested groups, and disposition. Before target traffic, every reachable/unknown
@@ -459,9 +461,15 @@ non-execute turn revokes subsequent child effects; it does not keep background
 target authority alive and does not erase an authentic return. In a later
 `EXECUTE` turn with its own iteration-plan receipt, the transaction-bound old plan
 may identify only the returned/failed lane's exact digest-bound Reviewer. Old
-Hunter/target/model-egress work remains denied. An unlaunched assignment uses the
-typed cancellation/material-replan path. Cancellation is lifecycle
-settlement—not Agent result, review, evidence, merge, or cycle completion.
+Hunter/target/model-egress work remains denied. If that Reviewer already has one
+durable `assigned` row but no authentic launch attempt, the same
+`workers.py delegate --limit 1` owner call revalidates the
+row/bundle/runtime journal and returns its
+exact launch contract without a second assignment mutation. Reviewer debt is
+never routed to cancellation or bypassed by replan. Only an unlaunched
+non-Reviewer uses the typed cancellation/material-replan path. Cancellation is
+lifecycle settlement—not Agent result, review, evidence, merge, or cycle
+completion.
 
 Coverage classification may mark root 401/403 pages as `AUTH_GATE` and pure
 default/stub pages as `STUB_PAGE`. These flags only suppress anti-lump

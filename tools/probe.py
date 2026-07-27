@@ -678,10 +678,13 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
             item.startswith("response.body") for item in response_redactions
         ) else None
         replay = {
+            "schema": "xunji.probe.replay.v2",
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "request": safe_request,
             "response": {"status": status, "len": len(raw),
                          "sha1": hashlib.sha1(raw).hexdigest(),
+                         "wire_len": len(raw),
+                         "wire_sha1": hashlib.sha1(raw).hexdigest(),
                          "ctype": response_content_type,
                          "headers": safe_response["headers"],
                          "snippet": safe_response["body_preview"],
@@ -691,6 +694,11 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                 "response_redactions": response_redactions,
             },
             "saved_body": save,
+            "saved_body_meta": {
+                "len": len(body),
+                "sha1": hashlib.sha1(body).hexdigest(),
+                "truncated": bool(truncated),
+            },
         }
         if chunk_info:
             replay["saved_body_chunks"] = chunk_info["manifest"]
@@ -877,6 +885,16 @@ def _selftest() -> int:
                                rj["request"]["method"] == "GET" and rj["request"]["url"].startswith("http")))
                 checks.append(("replay 含响应 status/全sha1",
                                rj["response"]["status"] == 200 and len(rj["response"]["sha1"]) >= 40))
+                checks.append(("replay v2 separates wire and saved-body integrity",
+                               rj.get("schema") == "xunji.probe.replay.v2"
+                               and rj["response"].get("wire_len") == 7
+                               and rj["response"].get("wire_sha1")
+                                   == hashlib.sha1(b"ok-body").hexdigest()
+                               and rj.get("saved_body_meta") == {
+                                   "len": 7,
+                                   "sha1": hashlib.sha1(b"ok-body").hexdigest(),
+                                   "truncated": False,
+                               }))
                 checks.append(("replay preserves case-insensitive Content-Type",
                                rj["response"].get("ctype") == "text/html"))
                 checks.append(("summary.sha1 == replay.sha1 前缀(截断一致)",
@@ -938,6 +956,17 @@ def _selftest() -> int:
                            and manifest_data.get("full_sha1") == hashlib.sha1(
                                b"L" * (guardmod.MAX_BODY_BYTES + 17)).hexdigest()
                            and dl.get("chunk_manifest") == str(manifest)))
+            large_replay = json.loads(
+                Path(str(large) + ".replay.json").read_text(encoding="utf-8"))
+            checks.append(("large replay binds capped saved bytes separately from wire bytes",
+                           large_replay.get("saved_body_meta", {}).get("len")
+                               == guardmod.MAX_BODY_BYTES
+                           and large_replay.get("saved_body_meta", {}).get("truncated") is True
+                           and large_replay.get("saved_body_meta", {}).get("sha1")
+                               == hashlib.sha1(
+                                   b"L" * guardmod.MAX_BODY_BYTES).hexdigest()
+                           and large_replay.get("response", {}).get("wire_len")
+                               == guardmod.MAX_BODY_BYTES + 17))
             # 认证流: --no-redirect 不跟随 302, 捕获【跳转那一跳】的 Set-Cookie(会话 cookie)
             nr = send("GET", f"http://127.0.0.1:{port}/redir", {}, None, None, 5,
                       want_headers=True, no_redirect=True)

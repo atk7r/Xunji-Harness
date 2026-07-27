@@ -417,12 +417,18 @@ def lane_by_id(plan: dict, lane_id: str) -> dict:
     return matches[0]
 
 
-def _plan_cycle_ended(run_dir: str | Path, plan: dict) -> bool:
+def plan_cycle_ended(run_dir: str | Path, plan: dict) -> bool:
+    """Return whether the validated journal ended this exact committed plan."""
     digest = str(plan.get("plan_digest") or "")
     if not _HEX64.fullmatch(digest):
         return False
     _, state = _validated_journal_events(run_dir)
     return digest in state.get("ended_plan_digests", [])
+
+
+def _plan_cycle_ended(run_dir: str | Path, plan: dict) -> bool:
+    """Backward-compatible internal alias for older callers/tests."""
+    return plan_cycle_ended(run_dir, plan)
 
 
 def lane_runtime_state(run_dir: str | Path, plan: dict, lane_id: str) -> str:

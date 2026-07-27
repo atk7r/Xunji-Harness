@@ -77,6 +77,10 @@ try:
 except Exception:
     _run_model = None
 try:
+    import agent_settlement as _agent_settlement
+except Exception:
+    _agent_settlement = None
+try:
     import loop_journal as _loop_journal
 except Exception:
     _loop_journal = None
@@ -533,12 +537,43 @@ def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str
             if review_debt:
                 details.append("review=" + ", ".join(review_debt[:8]))
             mode = str(plan.get("execution_mode") or "")
-            next_step = (
-                "补齐 typed ROOT_DIRECT action receipt 后由 loop_journal end 推导 cycle_end"
-                if mode == "ROOT_DIRECT" else
-                "按 dependency 继续 workers.py delegate，完成真实 return、Reviewer、Root merge，"
-                "再由 loop_journal end 推导 cycle_end"
-            )
+            if mode == "ROOT_DIRECT":
+                next_step = (
+                    "补齐 typed ROOT_DIRECT action receipt 后由 loop_journal end "
+                    "推导 cycle_end"
+                )
+            else:
+                recovery = _agent_settlement.stale_recovery_action(
+                    run_dir, plan, projection=projection,
+                ) if _agent_settlement is not None else {}
+                recovery_action = str(recovery.get("action") or "")
+                recovery_items = recovery.get("items") \
+                    if isinstance(recovery.get("items"), list) else []
+                recovery_first = recovery_items[0] \
+                    if recovery_items and isinstance(recovery_items[0], dict) \
+                    else {}
+                reviewer = str(recovery_first.get("assignment") or "")
+                if recovery_action == getattr(
+                        _agent_settlement,
+                        "RECOVERY_REPLAY_ASSIGNED_REVIEWER", ""):
+                    next_step = (
+                        f"Reviewer {reviewer} 已 assigned/no-attempt；重跑 exact "
+                        "workers.py delegate --limit 1 幂等取回 durable launch "
+                        "contract，真实完成 Reviewer 与 Root merge，再由 "
+                        "loop_journal end 推导 cycle_end"
+                    )
+                elif recovery_action == getattr(
+                        _agent_settlement, "RECOVERY_HARD_INVALID", ""):
+                    next_step = (
+                        "Reviewer settlement identity 无法安全分类；修复 owner "
+                        "invariant，禁止取消 Reviewer、删除 ledger/journal 或绕过 "
+                        "assignment debt replan"
+                    )
+                else:
+                    next_step = (
+                        "按 dependency 继续 workers.py delegate，完成真实 return、"
+                        "Reviewer、Root merge，再由 loop_journal end 推导 cycle_end"
+                    )
             return "block", (
                 "[Agent plan debt] 当前 work plan 尚无有效 typed cycle_end；"
                 + "；".join(details)
@@ -1663,6 +1698,33 @@ def _selftest() -> int:
     checks.append(("agent board gate: single-front unassigned plan lane blocks",
                    _work_plan is None or (
                        mode3b == "block" and "L-F001-HUNTER:unassigned" in msg3b)))
+    if _work_plan is not None and _agent_settlement is not None:
+        original_stale_recovery_action = (
+            _agent_settlement.stale_recovery_action)
+        try:
+            _agent_settlement.stale_recovery_action = (
+                lambda *_args, **_kwargs: {
+                    "action": (
+                        _agent_settlement
+                        .RECOVERY_REPLAY_ASSIGNED_REVIEWER),
+                    "items": [{
+                        "assignment": "A-review-007",
+                        "lane_id": "L-F001-REVIEW",
+                    }],
+                })
+            mode3b_replay, msg3b_replay = _check_agent_board(
+                ab_run3b, planned_contract)
+        finally:
+            _agent_settlement.stale_recovery_action = (
+                original_stale_recovery_action)
+        checks.append((
+            "agent board gate: assigned Reviewer debt routes to durable replay",
+            mode3b_replay == "block"
+            and "A-review-007" in msg3b_replay
+            and "workers.py delegate --limit 1" in msg3b_replay
+            and "durable launch contract" in msg3b_replay
+            and "取消 Reviewer" not in msg3b_replay,
+        ))
 
     # Case 3c: ROOT_DIRECT is still a plan-cycle obligation.  Stop cannot fall
     # through merely because the plan has no Agent delegation wave.

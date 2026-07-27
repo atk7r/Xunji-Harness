@@ -49,6 +49,14 @@ Default Claude-driver run review and receipt append:
 python3 tools/peer_review.py runs/<dir> --into-run
 ```
 
+For an Agent-mode plan, invoke that exact foreground command only after the
+transaction owner has emitted typed `cycle_end` and no launched Agent remains
+running. This is a narrow coordinator-review exception: it does not reopen
+Hunter, target, repository-write, or arbitrary model-egress capabilities. If
+canonical evidence or any referenced artifact changes while reviewers are
+running, append fails with `XUNJI_E_REVIEW_INPUT_STALE`; rebuild the bundle and
+rerun review instead of copying the old verdict.
+
 Inspect the frozen bundle before model egress:
 
 ```bash

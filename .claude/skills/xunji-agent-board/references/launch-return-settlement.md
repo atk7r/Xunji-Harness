@@ -106,19 +106,25 @@ checkpoint above recovers only derived projection.
 
 After the Hunter Stop freezes bytes, repeat the single registered delegate command
 owned by `plan-and-delegate.md`, with budgets justified by the ready Reviewer lane.
-That creates the now-ready Reviewer assignment; do not reconstruct a second argv
-example here.
+That creates the now-ready Reviewer assignment, or idempotently returns the same
+durable contract when the assignment already exists but has no authentic launch
+attempt. Do not reconstruct a second argv example here. A denied wrong prompt
+does not create an attempt and does not strand the assignment: repeat the owner
+`delegate --limit 1` command and invoke the returned exact contract.
 
 This remains true when the committed plan is `WORK_PLAN_TURN_STALE`: the old plan
 is settlement identity only. The current `EXECUTE` turn must have its own normal
 iteration-plan receipt, and only the unique digest/assignment/lane-bound Reviewer
-may launch. If an old non-Reviewer assignment has no authentic launch attempt,
+may launch. An already-assigned Reviewer is replayed from its immutable row; it
+is never cancelled, recreated, or bypassed by replan. If an old non-Reviewer
+assignment has no authentic launch attempt,
 settle it with `cancel-unlaunched`; do not re-run it or replan around either kind
 of assignment debt. Exact parent `PreToolUseDenied Agent` receipts prove their
 matching transcript tool-uses never launched and therefore do not block this
-cancellation. A parent `PostToolUseFailure`, successful Post, Start/Stop, or child
-action is an attempt and must not be relabeled as unlaunched. Current offline/target
-denial narrows external effects; it does not revoke this local settlement owner.
+cancellation or Reviewer contract replay. A parent `PostToolUseFailure`,
+successful Post, Start/Stop, or child action is an attempt and must not be
+relabeled as unlaunched. Current offline/target denial narrows external effects;
+it does not revoke this local settlement owner.
 
 Invoke the returned exact `xunji-reviewer` binary contract. Its result digest
 must match the frozen Hunter bytes. Reviewer supplies a candidate disposition;
@@ -136,9 +142,13 @@ python3 tools/workers.py finish runs/<dir> A-<target> --status <merged|blocked|f
 
 For an accepted target-effect result, `review-disposition` verifies that the
 frozen Hunter and Reviewer name the same run-local artifact set, every file
-exists, and each replay sidecar binds its request/response, saved body, and body
-hash. Use its `VERIFIED_ARTIFACT` lines as factual input to canonical evidence;
-never substitute notification prose.
+exists, and each replay sidecar binds its request/response. Replay v2 keeps
+full-wire `wire_len`/`wire_sha1` separate from capped
+`saved_body_meta.len`/`saved_body_meta.sha1`; a truncated saved body is valid
+partial storage and cannot be compared to the full wire hash. Only a complete
+validated chunk manifest upgrades `wire_verified=true`. Use the resulting
+`VERIFIED_ARTIFACT` wire/saved/truncation fields as factual input to canonical
+evidence; never clear a digest or substitute notification prose.
 
 Before `merged`, verify every assigned asset has the required transcript-backed
 target receipt and the frozen candidate has any control/replay evidence needed for

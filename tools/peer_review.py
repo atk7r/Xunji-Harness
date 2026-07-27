@@ -54,6 +54,7 @@ from harness import codex_proxy                # noqa: E402  Codex CLI 专用代
 from harness import privacy as privacymod      # noqa: E402  model-egress hard redaction
 from evidence_parse import (                    # noqa: E402  Codex 裁决事实源: evidence_index, 不是散文叙事
     canonical_evidence_index,
+    current_evidence_index_hash,
     evidence_artifact_manifest,
     evidence_index_hash,
     parse_evidence,
@@ -1524,6 +1525,19 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> str:
     """把复审【追加】进 runs/<t>/review.md 的独立复审区块 —— 满足 check_run 的独立复审硬门
     (re.search 'Independent Review|独立复审')。追加不覆盖(review.md 可能已有别的内容)。
     NEEDS_DRIVER/ERROR 不写(没真复审就不该满足门)。"""
+    reviewed_hash = str(result.evidence_index_hash or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", reviewed_hash):
+        raise RuntimeError(
+            "XUNJI_E_REVIEW_INPUT_UNBOUND: completed review is missing its exact "
+            "40-character evidence index hash"
+        )
+    current_hash = current_evidence_index_hash(run_dir)
+    if current_hash != reviewed_hash:
+        raise RuntimeError(
+            "XUNJI_E_REVIEW_INPUT_STALE: evidence/artifact state changed after the "
+            f"review bundle was frozen (reviewed={reviewed_hash}, current={current_hash}); "
+            "rebuild the bundle and rerun the independent review"
+        )
     rv = run_dir / "review.md"
     existing = rv.read_text(encoding="utf-8", errors="replace") if rv.exists() else "# Review\n"
     existing = _strip_template_review_placeholders(existing)
@@ -1960,7 +1974,11 @@ def _selftest() -> int:
     rv1 = (d_run / "review.md").read_text(encoding="utf-8")
     resolve_finding(d_run, "PR-001", "dismissed", "Evidence: E-001 artifact a.html supports dismissal")
     rv_resolved = (d_run / "review.md").read_text(encoding="utf-8")
-    _append_run_review(d_run, ReviewResult(verdict="PASS", backend_used="arkcli:kimi-k2.7-code+glm-5.2"))
+    _append_run_review(d_run, ReviewResult(
+        verdict="PASS", backend_used="arkcli:kimi-k2.7-code+glm-5.2",
+        bundle_hash=b_run["sha1"],
+        evidence_index_hash=b_run["evidence_index"]["sha1"],
+    ))
     rv2 = (d_run / "review.md").read_text(encoding="utf-8")
     _append_run_review(d_run, ReviewResult(
         verdict="WARN", findings=[Finding("WARN", "second", "E-001", "check")],
@@ -1976,8 +1994,37 @@ def _selftest() -> int:
         "- Status: pending\n- Claim:\n- EvidenceRefs:\n- AffectedEIDs:\n"
         "- RecommendedAction:\n- Why:\n- DriverResolution: pending\n",
         encoding="utf-8")
-    _append_run_review(d_tpl, rr_block)
+    b_tpl = build_review_bundle(d_tpl)
+    rr_tpl = ReviewResult(
+        verdict="BLOCKER",
+        findings=[Finding("BLOCKER", "x", "E-001", "y")],
+        backend_used="codex",
+        bundle_hash=b_tpl["sha1"],
+        evidence_index_hash=b_tpl["evidence_index"]["sha1"],
+    )
+    _append_run_review(d_tpl, rr_tpl)
     rv_tpl = (d_tpl / "review.md").read_text(encoding="utf-8")
+    d_stale = Path(tempfile.mkdtemp())
+    (d_stale / "evidence.md").write_text(
+        "# Evidence Ledger\n\n## E-001 — x\n- Certainty: 0.8\n"
+        "- Control: yes\n- Artifacts: `a.html`\n",
+        encoding="utf-8",
+    )
+    (d_stale / "a.html").write_text("before", encoding="utf-8")
+    b_stale = build_review_bundle(d_stale)
+    stale_result = ReviewResult(
+        verdict="PASS",
+        backend_used="claude",
+        bundle_hash=b_stale["sha1"],
+        evidence_index_hash=b_stale["evidence_index"]["sha1"],
+        driver="codex",
+    )
+    (d_stale / "a.html").write_text("after", encoding="utf-8")
+    stale_rejected = False
+    try:
+        _append_run_review(d_stale, stale_result)
+    except RuntimeError as exc:
+        stale_rejected = "XUNJI_E_REVIEW_INPUT_STALE" in str(exc)
     checks += [
         ("into_run 写'Independent Review'标记(满足门)", bool(_re.search(r"Independent Review", rv1))),
         ("into_run 保留已有内容(追加不覆盖)", "已有内容" in rv1),
@@ -1990,6 +2037,10 @@ def _selftest() -> int:
          rv3.count("### PR-001") == 1 and rv3.count("### PR-002") == 1),
         ("into_run strips old blank PR template before appending",
          rv_tpl.count("### PR-001") == 1 and "— category" not in rv_tpl),
+        ("into_run rejects evidence drift after the review bundle was frozen",
+         stale_rejected
+         and not (d_stale / "review.md").exists()
+         and not (d_stale / "review" / "receipts").exists()),
         ("resolve_finding 更新 status/resolution",
          "Status: dismissed" in rv_resolved and "Evidence: E-001 artifact a.html" in rv_resolved),
         ("bundle 写入 review/review_bundle.json", (d_run / "review" / "review_bundle.json").exists()),
@@ -2075,8 +2126,13 @@ def _selftest() -> int:
         ("require_hetero: 唯一同族 claude -> NEEDS_DRIVER(不跑/不写)", rr_sf.verdict == "NEEDS_DRIVER"),
         ("require_hetero: 同族不写 review.md", not (d_sf / "review.md").exists()),
     ]
-    _append_run_review(d_run, ReviewResult(verdict="PASS", backend_used="claude",
-                                           driver="codex"))
+    _append_run_review(d_run, ReviewResult(
+        verdict="PASS",
+        backend_used="claude",
+        driver="codex",
+        bundle_hash=b_run["sha1"],
+        evidence_index_hash=b_run["evidence_index"]["sha1"],
+    ))
     rv_codex_driver = (d_run / "review.md").read_text(encoding="utf-8")
     checks.append(("codex driver 下 Claude 记录为独立复审",
                    "Claude Code CLI 相对 Codex-authored diff 是独立复审" in rv_codex_driver

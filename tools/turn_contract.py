@@ -4521,54 +4521,102 @@ def _stale_plan_recovery_hint(run_dir: Path, plan: dict) -> str:
     """Route stale-plan debt without suggesting the replan that debt forbids."""
     try:
         projection = run_model.plan_cycle_projection(run_dir, plan=plan)
+        recovery = agent_settlement.stale_recovery_action(
+            run_dir, plan, projection=projection)
     except Exception:
-        projection = {}
-    states = [
-        item for item in projection.get("lane_states", [])
-        if isinstance(item, dict)
-    ]
-    unlaunched = sorted({
-        str(item.get("assignment") or "")
-        for item in states
-        if str(item.get("runtime_state") or "") == "no-attempt"
-        and re.fullmatch(
-            r"A-[A-Za-z0-9._-]+", str(item.get("assignment") or ""))
-    })
-    if unlaunched:
-        assignment = unlaunched[0]
+        recovery = {
+            "action": agent_settlement.RECOVERY_HARD_INVALID,
+            "reason": "projection_invalid",
+        }
+    action = str(recovery.get("action") or "")
+    items = recovery.get("items") \
+        if isinstance(recovery.get("items"), list) else []
+    first = items[0] if items and isinstance(items[0], dict) else {}
+    assignment = str(first.get("assignment") or "")
+    if action == agent_settlement.RECOVERY_REPLAY_ASSIGNED_REVIEWER:
         return (
-            "旧 plan 含可证明未启动的 assignment；先执行 exact typed settlement "
+            "旧 plan 含 authentic returned/failed execution，且其唯一 Reviewer "
+            f"{assignment} 已 assigned 但未启动。运行 "
+            f"`python3 tools/workers.py delegate runs/{run_dir.name} --limit 1` "
+            "幂等重放 durable row 的 exact launch contract，再完成 review/Root "
+            "settlement；不得取消 Reviewer、重建 prompt 或重启旧 Hunter。"
+        )
+    if action == agent_settlement.RECOVERY_CREATE_REVIEWER:
+        return (
+            "旧 plan 含真实 returned/failed execution；它只保留 settlement identity。"
+            f"运行 `python3 tools/workers.py delegate runs/{run_dir.name} --limit 1` "
+            "创建唯一 digest-bound Reviewer 的 exact launch contract，完成 review/Root "
+            "settlement 后再 replan；不得重启旧 Hunter。"
+        )
+    if action == agent_settlement.RECOVERY_CANCEL_UNLAUNCHED_EXECUTION \
+            and assignment:
+        return (
+            "旧 plan 含可证明未启动的非 Reviewer assignment；先执行 exact typed "
+            "settlement "
             f"`python3 tools/workers.py cancel-unlaunched runs/{run_dir.name} "
             f"{assignment} --reason \"turn or canonical inputs changed before launch\"`，"
             "再为仍开放的 front 提交新 plan。"
         )
-    returned = [
-        item for item in states
-        if str(item.get("runtime_state") or "") in {"returned", "failed"}
-        and str(item.get("role") or "").strip().lower() != "review"
-        and item.get("complete") is not True
-    ]
-    if returned:
-        return (
-            "旧 plan 含真实 returned/failed execution；它只保留 settlement identity。"
-            f"先运行 `python3 tools/workers.py delegate runs/{run_dir.name} --limit 2` "
-            "取得唯一 digest-bound Reviewer 的 exact launch contract，完成 review/Root "
-            "settlement 后再 replan；不得重启旧 Hunter。"
-        )
-    running = [
-        item for item in states
-        if str(item.get("runtime_state") or "") == "running"
-    ]
-    if running:
+    if action == agent_settlement.RECOVERY_WAIT_RUNNING:
         return (
             "旧 plan 仍有真实 running attempt；不得取消或 replan。"
             f"运行 `python3 tools/workers.py status runs/{run_dir.name}`，"
             "等待同一因果 attempt 返回后走 Reviewer settlement。"
         )
+    if action == agent_settlement.RECOVERY_MATERIAL_REPLAN:
+        return (
+            f"旧 plan 已无 assignment settlement debt。运行 "
+            f"`python3 tools/workers.py plan runs/{run_dir.name} --limit 2`，"
+            "再通过 commit-proposal material replan；不得复活旧 execution authority。"
+        )
     return (
-        f"先运行 `python3 tools/workers.py status runs/{run_dir.name}` 读取 canonical "
-        "lane debt，并按 no-attempt cancellation 或 returned/failed Reviewer settlement "
-        "清偿；assignment debt 清零后才可提交新 plan。"
+        "旧 plan 的 Reviewer settlement identity 无法安全分类；运行 "
+        f"`python3 tools/workers.py status runs/{run_dir.name}` 读取 canonical "
+        "debt，修复 owner 报告的具体 invariant。不得取消 Reviewer、删除 ledger/journal "
+        "或绕过 assignment debt replan。"
+    )
+
+
+_FOREGROUND_COORDINATOR_REVIEW_CAPABILITIES = frozenset({
+    "review.peer-review",
+    "review.check-run-auto",
+})
+
+
+def _ended_plan_foreground_review_allowed(
+    run_dir: Path, event: dict, contract: dict,
+) -> bool:
+    """Admit exact Root-owned review only after the current plan is settled.
+
+    Independent review remains model egress and keeps every privacy/shape/receipt
+    gate outside this work-plan predicate.  This exception only prevents an
+    already-ended Agent plan from being mistaken for live Hunter authority.
+    Running or ambiguous Agent attempts keep the action fail closed so review
+    cannot race mutable evidence.
+    """
+    if str(event.get("tool_name") or "") != "Bash" \
+            or _event_effect(event) != "model_egress":
+        return False
+    tool_input = event.get("tool_input") \
+        if isinstance(event.get("tool_input"), dict) else {}
+    command = str(tool_input.get("command") or "")
+    tool_env = tool_input.get("env") \
+        if isinstance(tool_input.get("env"), dict) else {}
+    capability = _registered_capability_invocation(
+        command, tool_env=tool_env)
+    if capability is None \
+            or capability[0].id not in _FOREGROUND_COORDINATOR_REVIEW_CAPABILITIES:
+        return False
+    try:
+        plan = work_plan.transaction_bound_plan(run_dir)
+        if not work_plan.plan_cycle_ended(run_dir, plan):
+            return False
+        attempts = runtime_receipts.agent_attempts(run_dir)
+    except Exception:
+        return False
+    return not any(
+        item.get("launched_at") and not item.get("returned_at")
+        for item in attempts if isinstance(item, dict)
     )
 
 
@@ -4607,6 +4655,12 @@ def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
             )
         ):
             return ""
+    # A typed cycle_end retires execution authority without deleting the
+    # content-addressed plan.  Foreground independent review is Root-owned and
+    # must remain reachable after that terminal receipt.
+    if _ended_plan_foreground_review_allowed(run_dir, event, contract):
+        return ""
+
     stale_settlement = False
     try:
         plan = work_plan.current_plan(run_dir, contract)
@@ -9450,6 +9504,26 @@ def _selftest() -> int:
     stale_reviewer_prompt = stale_reviewer_batch["assignments"][0]["launch_prompt"]
     stale_reviewer_type = stale_reviewer_batch["assignments"][0]["subagent_type"]
     stale_hunter_type = stale_hunter_batch["assignments"][0]["subagent_type"]
+    stale_reviewer_wrong_prompt = re.sub(
+        r"XUNJI_RESULT_DIGEST=[0-9a-f]{64}",
+        "XUNJI_RESULT_DIGEST=" + ("0" * 64),
+        stale_reviewer_prompt,
+    )
+    stale_reviewer_wrong_prompt_reason = evaluate_pretool(
+        stale_review_run,
+        {"tool_name": "Agent", "tool_input": {
+            "prompt": stale_reviewer_wrong_prompt,
+            "subagent_type": stale_reviewer_type,
+        }},
+        stale_review_current_contract,
+    )
+    stale_reviewer_wrong_prompt_routes_replay = bool(
+        E_WORK_PLAN_STALE in stale_reviewer_wrong_prompt_reason
+        and "已 assigned 但未启动" in stale_reviewer_wrong_prompt_reason
+        and "workers.py delegate" in stale_reviewer_wrong_prompt_reason
+        and "--limit 1" in stale_reviewer_wrong_prompt_reason
+        and "cancel-unlaunched" not in stale_reviewer_wrong_prompt_reason
+    )
     stale_reviewer_pretool_allowed = evaluate_pretool(
         stale_review_run,
         {"tool_name": "Agent", "tool_input": {
@@ -9676,6 +9750,16 @@ def _selftest() -> int:
         and _loop_journal.plan_cycle_ended(
             _loop_journal.load_events(direct_run), direct_plan["plan_digest"])
     )
+    ended_plan_review = registered_event(
+        "tools/peer_review.py", str(direct_run), "--into-run")
+    ended_plan_review.update({
+        "hook_event_name": "PreToolUse",
+        "session_id": direct_contract["session_id"],
+        "transcript_path": str(direct_transcript),
+        "tool_use_id": "ended-plan-foreground-review",
+    })
+    ended_plan_foreground_review_allowed = (
+        evaluate_pretool(direct_run, ended_plan_review, direct_contract) == "")
     lifecycle_codes = {
         E_NEW_RUN_SETUP_REQUIRED, E_CRON_CREATE_REQUIRED, E_ITERATION_PLAN_REQUIRED,
     }
@@ -13012,6 +13096,7 @@ def _selftest() -> int:
          and stale_reviewer_without_digest_blocked
          and stale_reviewer_without_marker_blocked
          and stale_reviewer_appended_context_blocked
+         and stale_reviewer_wrong_prompt_routes_replay
          and stale_equal_digest_decoy_exists
          and stale_reviewer_wrong_equal_digest_assignment_blocked
          and stale_reviewer_exact_target_frozen
@@ -13030,6 +13115,8 @@ def _selftest() -> int:
          child_rebind_start_hash_blocks_mutable_rebind),
         ("serial Agent mode keeps Root coordinator-only for target and model effects",
          serial_root_target_blocked and serial_root_model_egress_blocked),
+        ("typed cycle_end admits exact foreground Root peer review without reviving execution",
+         direct_cycle_end_valid and ended_plan_foreground_review_allowed),
         ("ROOT_DIRECT rejects a same-effect capability id substitution",
          wrong_direct_blocked),
         ("ROOT_DIRECT PreToolUse freezes one exact claim and exact replay is idempotent",

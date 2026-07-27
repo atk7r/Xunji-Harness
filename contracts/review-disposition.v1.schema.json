@@ -83,7 +83,11 @@
                 "properties": {
                   "status": {"type": "integer"},
                   "len": {"type": "integer", "minimum": 0},
-                  "sha1": {"type": "string"}
+                  "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                  "saved_len": {"type": "integer", "minimum": 0},
+                  "saved_sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                  "truncated": {"type": "boolean"},
+                  "wire_verified": {"type": "boolean"}
                 }
               },
               "saved_body": {"type": "string", "pattern": "^evidence/"}

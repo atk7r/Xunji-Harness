@@ -37,6 +37,7 @@ import state_project  # noqa: E402
 import status_style  # noqa: E402
 import workers  # noqa: E402
 import run_model  # noqa: E402
+import loop_journal  # noqa: E402
 
 SCHEMA = "xunji.loop_state.v1"
 CONFIRMED = 0.8
@@ -293,13 +294,45 @@ def _agent_summary(run_dir: Path, *, write: bool) -> dict:
     }
 
 
-def _progress(previous: dict, evidence: dict, coverage: dict) -> dict:
+def _cycle_end_marker(run_dir: Path) -> dict:
+    """Return the validated typed cycle-end watermark for idempotent derivation."""
+    try:
+        events = loop_journal.load_events(run_dir)
+        loop_journal.validate_cycle_events(events)
+    except Exception as exc:
+        return {
+            "valid": False,
+            "count": 0,
+            "event_hash": "",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    ended = [
+        item for item in events
+        if isinstance(item, dict)
+        and item.get("schema") == loop_journal.SCHEMA
+        and item.get("event") == "cycle_end"
+    ]
+    latest = ended[-1] if ended else {}
+    return {
+        "valid": True,
+        "count": len(ended),
+        "event_hash": str(latest.get("event_hash") or ""),
+        "cycle_id": int(latest.get("cycle") or 0) if latest else 0,
+    }
+
+
+def _progress(previous: dict, evidence: dict, coverage: dict,
+              cycle_marker: dict) -> dict:
     prev_progress = previous.get("progress", {}) if previous else {}
-    prev_evidence_ids = set(prev_progress.get("evidence_ids", []))
+    prev_evidence_ids = set(
+        prev_progress.get("cycle_baseline_evidence_ids",
+                          prev_progress.get("evidence_ids", [])))
     now_evidence_ids = set(evidence["ids"])
     new_evidence = sorted(now_evidence_ids - prev_evidence_ids) if previous else []
 
-    prev_cert = prev_progress.get("cert_by_id", {}) if previous else {}
+    prev_cert = prev_progress.get(
+        "cycle_baseline_cert_by_id", prev_progress.get("cert_by_id", {})
+    ) if previous else {}
     upgrades = []
     if previous:
         for eid, cert in evidence["cert_by_id"].items():
@@ -307,13 +340,38 @@ def _progress(previous: dict, evidence: dict, coverage: dict) -> dict:
             if cert > old:
                 upgrades.append({"id": eid, "from": old, "to": cert})
 
-    prev_cells = set(prev_progress.get("coverage_tested_cells", []))
+    prev_cells = set(prev_progress.get(
+        "cycle_baseline_coverage_tested_cells",
+        prev_progress.get("coverage_tested_cells", [])))
     now_cells = set(coverage["tested_cells"])
     new_cells = sorted(now_cells - prev_cells) if previous else []
 
     made_progress = bool(new_evidence or upgrades or new_cells)
     prev_no_progress = int(prev_progress.get("no_progress_cycles", 0) or 0)
-    no_progress_cycles = 0 if made_progress or not previous else prev_no_progress + 1
+    current_cycle_count = int(cycle_marker.get("count", 0) or 0) \
+        if cycle_marker.get("valid") is True else 0
+    previous_cycle_count = int(
+        prev_progress.get("observed_cycle_end_count", current_cycle_count) or 0
+    ) if previous else current_cycle_count
+    cycle_delta = max(0, current_cycle_count - previous_cycle_count)
+    cycle_advanced = bool(
+        previous and cycle_marker.get("valid") is True and cycle_delta > 0)
+    if not previous:
+        no_progress_cycles = 0
+    elif cycle_advanced:
+        no_progress_cycles = 0 if made_progress else prev_no_progress + cycle_delta
+    else:
+        # Re-rendering or rebuilding a derived cache is not a semantic cycle.
+        no_progress_cycles = prev_no_progress
+
+    if not previous or cycle_advanced:
+        baseline_evidence_ids = evidence["ids"]
+        baseline_cert = evidence["cert_by_id"]
+        baseline_cells = coverage["tested_cells"]
+    else:
+        baseline_evidence_ids = sorted(prev_evidence_ids)
+        baseline_cert = prev_cert
+        baseline_cells = sorted(prev_cells)
 
     return {
         "evidence_total": evidence["total"],
@@ -330,6 +388,12 @@ def _progress(previous: dict, evidence: dict, coverage: dict) -> dict:
         "made_progress": made_progress,
         "no_progress_cycles": no_progress_cycles,
         "coda_converged": no_progress_cycles >= 2,
+        "observed_cycle_end_count": current_cycle_count,
+        "observed_cycle_end_hash": str(cycle_marker.get("event_hash") or ""),
+        "observed_cycle_end_valid": cycle_marker.get("valid") is True,
+        "cycle_baseline_evidence_ids": baseline_evidence_ids,
+        "cycle_baseline_cert_by_id": baseline_cert,
+        "cycle_baseline_coverage_tested_cells": baseline_cells,
     }
 
 
@@ -623,7 +687,7 @@ def derive(run_dir: Path, *, write: bool = False) -> dict:
     coverage = _coverage_summary(run_dir, write=write)
     fronts = _front_summary(run_dir, view, projection)
     agents = _agent_summary(run_dir, write=write)
-    progress = _progress(previous, evidence, coverage)
+    progress = _progress(previous, evidence, coverage, _cycle_end_marker(run_dir))
     gates = _gates(fronts, agents, progress, coverage)
     completion_markers = _completion_markers(run_dir)
     gates["completion_markers"] = completion_markers
@@ -776,6 +840,25 @@ def _selftest() -> int:
     first = write_outputs(run)
     second = write_outputs(run)
     third = write_outputs(run)
+    baseline_evidence = _evidence_summary(run)
+    baseline_coverage = _coverage_summary(run, write=False)
+    cycle_one_progress = _progress(
+        {"progress": first["progress"]},
+        baseline_evidence,
+        baseline_coverage,
+        {"valid": True, "count": 1, "event_hash": "1" * 64, "cycle_id": 1},
+    )
+    cycle_two_progress = _progress(
+        {"progress": cycle_one_progress},
+        baseline_evidence,
+        baseline_coverage,
+        {"valid": True, "count": 2, "event_hash": "2" * 64, "cycle_id": 2},
+    )
+    cycle_two_hints = _mentor_hints(
+        run, third["fronts"], third["agents"], cycle_two_progress,
+        _gates(third["fronts"], third["agents"], cycle_two_progress,
+               third["coverage"]),
+    )
     old_color = os.environ.get("XUNJI_COLOR")
     os.environ["XUNJI_COLOR"] = "1"
     write_outputs(run)
@@ -868,6 +951,15 @@ def _selftest() -> int:
     write_outputs(blocked_run)
     write_outputs(blocked_run)
     blocked_state = write_outputs(blocked_run)
+    blocked_coda_state = json.loads(json.dumps(blocked_state))
+    blocked_coda_state["progress"]["no_progress_cycles"] = 2
+    blocked_coda_state["progress"]["coda_converged"] = True
+    blocked_coda_state["gates"] = _gates(
+        blocked_coda_state["fronts"],
+        blocked_coda_state["agents"],
+        blocked_coda_state["progress"],
+        blocked_coda_state["coverage"],
+    )
 
     hyphen_run = d / "hyphen_run"
     hyphen_run.mkdir()
@@ -1026,11 +1118,15 @@ def _selftest() -> int:
         ("fanout required with four diverse open fronts", first["gates"]["fanout_required"]),
         ("coverage attention is surfaced", first["gates"]["needs_coverage_attention"]),
         ("first snapshot does not count existing evidence as new", first["progress"]["new_evidence_ids"] == []),
-        ("no-progress cycles increase", second["progress"]["no_progress_cycles"] == 1),
-        ("coda converges after two no-progress cycles", third["progress"]["coda_converged"]),
+        ("repeated derived writes do not invent semantic cycles",
+         second["progress"]["no_progress_cycles"] == 0
+         and third["progress"]["no_progress_cycles"] == 0),
+        ("typed cycle-end watermark advances no-progress cycles",
+         cycle_one_progress["no_progress_cycles"] == 1),
+        ("coda converges after two typed no-progress cycles",
+         cycle_two_progress["coda_converged"]),
         ("mentor hints include no-progress pivot",
-         any(h.get("kind") == "no-progress-pivot" for h in third.get("mentor_hints", []))
-         and "Mentor Hints" in render_markdown(third)),
+         any(h.get("kind") == "no-progress-pivot" for h in cycle_two_hints)),
         ("certainty upgrade resets no-progress", fourth["progress"]["certainty_upgrades"]
          and fourth["progress"]["no_progress_cycles"] == 0),
         ("coverage improvement is recorded", fourth["progress"]["coverage_new_tested_cells"]),
@@ -1047,9 +1143,9 @@ def _selftest() -> int:
          blocked_state["fronts"]["open_count"] == 2
          and set(blocked_state["fronts"]["blocked_type_a"]) == {"F-001", "F-002"}),
         ("coda convergence is not closure while type-a fronts are open",
-         blocked_state["progress"]["coda_converged"]
-         and not blocked_state["gates"]["completion_pause_candidate"]
-         and "open_fronts_present" in blocked_state["gates"]["closure_blockers"]),
+         blocked_coda_state["progress"]["coda_converged"]
+         and not blocked_coda_state["gates"]["completion_pause_candidate"]
+         and "open_fronts_present" in blocked_coda_state["gates"]["closure_blockers"]),
         ("hyphenated type-a spelling remains open",
          hyphen_state["fronts"]["open_count"] == 1
          and hyphen_state["fronts"]["blocked_type_a"] == ["F-001"]),

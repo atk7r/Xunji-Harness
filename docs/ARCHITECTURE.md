@@ -516,8 +516,12 @@ stale；新的 operator prompt 也会使旧 plan 的 turn binding stale。turn m
 用跨 turn lease 保留 target authority。真实 return/failure 仍属于旧 transaction 的 immutable
 work identity；之后获授权的 `EXECUTE` turn 必须先拥有自己的 iteration-plan receipt，才可从旧
 plan 只读取 settlement identity，放行唯一 exact assignment/lane/result-digest-bound Reviewer。
-旧 Hunter、target/model-egress、无关 Reviewer 均不得恢复。真正
-assigned-but-never-launched 的非 Reviewer 只能通过 typed `cancel-unlaunched` 事务退休。prepared
+如果该 Reviewer 已存在唯一 durable `assigned` row 且没有 authentic launch attempt，
+同一 `workers.py delegate` owner 必须重验 row、instruction bundle、派生 artifact、dependency
+result digest 与 runtime journal，再无写入地返回原 exact type+prompt contract；denied wrong
+prompt 不得把 Reviewer 变成不可恢复债务。该重放不创建第二 assignment，不重建 prompt，也不
+扩大旧 plan 的 execution authority。旧 Hunter、target/model-egress、无关 Reviewer 均不得恢复。
+真正 assigned-but-never-launched 的非 Reviewer 只能通过 typed `cancel-unlaunched` 事务退休。prepared
 cancellation 先成为 runtime/replan barrier，再耐久删除 launch artifacts 与 assignment row，
 最后发布 immutable tombstone；它不生成 result/review/merge/evidence/cycle_end，必须 material
 replan。父 Agent 的 exact `PreToolUseDenied` 是该 tool-use 未跨越 launch boundary 的负证据：
@@ -561,7 +565,11 @@ dependency；child transcript 以 `tool_use` 加未消费 tool result 截止时�
 即使 notification 与随后冻结的结果交错或内容不一致，也只能以 merge-result bytes/digest 为准；
 target `accept-candidate` 额外要求 Hunter/Reviewer 的冻结结果引用完全相同的 run-local artifact
 集合；Claude Read 返回的绝对路径与 `runs/<dir>/evidence/...` 先归一到同一 run-local identity，
-再由 `review-disposition` 校验 containment、文件、replay request/response、saved body 与 body hash。
+再由 `review-disposition` 校验 containment、文件以及 replay 的 wire/saved-body identities。
+Replay v2 将完整 wire 的 `wire_len/wire_sha1` 与上限保存片段的
+`saved_body_meta.len/sha1/truncated` 分离校验；截断片段只证明自身完整性，不得与完整响应 hash
+比较，也不得靠空 hash 跳过。只有连续、逐块 hash 正确且重建为相同 full wire hash 的
+`saved_body_chunks` manifest 才可标记 `wire_verified=true`。
 Plan-bound assignment 的 typed `tool_call_limit` 由 `workers.py` 物化；新 assignment 默认 24，
 旧 v1 row 缺字段时仍按兼容 fail-closed 值 6 解释，显式值只允许 5–64。`SubagentStart` 把有效值连同 assignment/lane/
 plan/prompt/type 冻结进 runtime receipt，之后不再读取可变 assignment 来决定本 attempt 的上限。
@@ -626,6 +634,14 @@ replay 幂等，第二动作、缺 terminal、stale replan、冲突或篡改均�
 receipt 只证明工具级 `succeeded|failed`，不生成 assignment/Reviewer/merge 虚构字段，也不
 证明 exit gate、finding、independent review 或 closure。
 
+Agent-mode plan 的 typed `cycle_end` 之后，若没有 launched-but-unreturned Agent，
+`turn_contract.py` 可仅放行 registry 中精确的前台 coordinator review capability
+（当前 `review.peer-review` / `review.check-run-auto`）。它沿用 model-egress privacy/redaction
+边界，不恢复旧 plan 的 Hunter、target、repository mutation 或任意 model-egress authority。
+独立 reviewer 返回后，`peer_review.py --into-run` 在写 receipt/ledger 之前重新计算 canonical
+evidence index（含 artifact hash）；与冻结 result 不同就以
+`XUNJI_E_REVIEW_INPUT_STALE` fail closed，必须重建 bundle 并复审。
+
 ### 4.6 证据与收口
 
 Discovery 可以发散；confirmation 必须收敛。单次异常、环境已有痕迹、redirect、
@@ -651,6 +667,12 @@ result/merge draft 或 evidence。该 challenge 与 `peer_review.py --into-run` 
 ReviewReceipt/ledger 是两道互不替代的门；`## CodexCompletionReview` 仅保留为兼容标题。
 PASS 只接受绑定同一 S3 plan/input bundle 的精确最后非空行，四项 check 均须显式
 `:PASS`；latest attempt、重复 verdict、任一显式 FAIL/WARN/false 均 fail closed。
+
+Coda convergence 是 derived trajectory signal，不是写次数。`loop_state.py` 只在验证通过的
+loop journal 新增 typed `cycle_end` watermark 时比较上一 cycle baseline 并推进 no-progress
+streak；重复 `derive/--write`、statusline 刷新、session 重启或 unchanged reread 均保持 streak
+不变。两次真实 cycle 均无 evidence/certainty/coverage 增量才触发 pivot 提醒；提醒仍不得把
+open front、Type A barrier 或未结算 review debt 伪装成 closure。
 
 ### 4.7 安全与隐私
 
@@ -1057,61 +1079,65 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     Start/launch + assignment ledger 无 owner”全部成立时才可隔离；隔离是 content-addressed
     observation/supersession，不删除或改写 runtime journal。任一 Xunji 因果信号继续作为
     lifecycle debt fail closed。
+28. Replay 完整 wire identity 与本地保存片段 identity 必须分域校验；截断不是 hash
+    mismatch，也不是完整 wire proof。空/畸形 wire hash 不得满足 Reviewer artifact gate。
+29. Agent-mode foreground peer review 只能在 typed `cycle_end` 且无 running Agent 后按 exact
+    registered capability 放行；review receipt 写入还必须 CAS 匹配冻结 evidence-index hash。
+30. Coda no-progress 计数只消费 hash-chain-valid typed `cycle_end` watermark；derived cache 写入
+    不得创造语义周期或收敛债务。
 
 ## 12. Maintenance Checkpoint
 
-- Date: 2026-07-24
-- Scope: 根治 Claude Code `away_summary`/recap 内部子代理的 bare `SubagentStop` 被
-  Xunji 当作正式 Agent lifecycle receipt，继而污染 projection、遮蔽 typed stale-assignment
-  settlement 的死锁。新增 current-delivery admission 分流、legacy append-only quarantine、
-  content-addressed receipt schema、effective Agent projection 与 recovery-first driver routing；
-  同时修复 denied Agent launch 被误算为 runtime activity、offline turn 错误重验旧 target plan，
-  以及动作句加效果约束被跨分句误判为 `EXPLAIN_ONLY` 的 resume settlement 链。
-- Architecture impact: Agent lifecycle ownership、negative launch proof、local settlement
-  authority、runtime receipt persistence、自然语言 turn classification 与 recovery contract
-  changed。该规则 supersedes “任何 unmatched Stop 都必须进入 Agent journal 并成为 lifecycle
-  debt”、 “任何 assignment 字段 runtime event 都阻止 cancellation”以及“否定词可跨分句撤销
-  主动作”。只有带 Xunji type/binding/Start/launch/assignment owner 的 unmatched Stop 继续
-  fail closed；完全无 Xunji 因果 owner 的 Claude 内部事件只进入独立审计 receipt。
-  `runtime_events.jsonl` 仍是不可改写的物理 hash chain，quarantine 只追加 immutable
-  supersession，并以原 seq/hash 和 observed head 决定 effective Agent projection。只有 exact
-  `PreToolUseDenied Agent` 是未 launch 负证据；failure/success/Start/Stop/child action 继续形成
-  debt。当前 target denial 只缩窄外部效果，不撤销 local cancellation；自然语言否定只在自己的
-  分句内生效。
-- Owner/enforcement: `tools/runtime_receipts.py` 唯一拥有 foreign classification、receipt
-  validation/durability、legacy quarantine 与 projection filtering；
-  `contracts/foreign-agent-lifecycle.v1.schema.json` 冻结 receipt shape；
-  `capability_registry.py` 冻结唯一 public control argv；`workers.py` 以 exact receipt identity
-  证明 denied launch 并在锁内重复 stale proof；`turn_contract.py` 只把 clause-local denial
-  用作机械底线；`run_model.py`/driver routing 把 owner recovery 排在 reproject/cancel/replan
-  前面；Claude skill、`CLAUDE.md` 与 workflow 说明语义和精确顺序。
-- Live migration: `runs/www-scshr-com_20260723` 的 seq `163,171,192,232,233` 已通过 typed
-  owner quarantine。五条都无 Xunji type/assignment/parent/Start/launch/ledger owner，并与
-  `away_summary` 对齐。journal SHA-256 恢复前后均为
-  `f0927bf076d2ef4bfea72c72c7c9dfe451d3dcf06bee5b03db8df25d7ebcf292`；
-  projection error 已清除。真实 resumed session
-  `c706831c-6700-4fbe-9d49-a00029bbed50` 随后以 typed owner 将
-  `A-web-hunter-003` 结算为 `cancelled-unlaunched`；transaction=`committed`、
-  `stale_basis=both`、receipt digest=`c742140e56c194356bd8578e4f4000d0d9d4c61beca88e275de30c475f6f41e8`。
-  Agent Board 已无该 row，未伪造 result/review/merge/cycle_end，也未直接编辑 assignment/journal。
-- Verification: focused runtime/capability/workers/turn selftests、rule/template checks、
-  `git diff --check` PASS；最终 `tools/selftest_all.py` 为 69/69 PASS（115.4s）。隔离的真实
-  DeepSeek-backed Claude Code 主驾驶两次从污染 run 走 Hooks 和 exact typed quarantine，
-  receipt/state adjudication 为 `errors=[]`、projection diagnostic absent、target=0、Agent=0。
-  最终候选在 live path-bound resumed session 完成 cancellation，target=0、Agent=0。复制 run
-  的 cancellation E2E 因 receipt 冻结原 absolute `run_dir` 而正确 fail closed，不绕过或伪报；
-  synthetic selftest 覆盖 deny + old target plan + current offline turn。详见
-  `review/records/2026-07-24-foreign-lifecycle-quarantine-e2e.md`。
-- Independent review: Codex 不计独立票。先前 foreign-lifecycle scoped fresh review PASS；
-  完整 staged 候选随后由 fresh-context、`--tools ""` Claude session
-  `a56dc829-8096-48fc-8191-8d5850b016e5` 刷新复审，结论 PASS、无 actionable source
-  defect；其逐项确认 exact denied identity、failed-attempt debt、locked stale proof、TOCTOU、
-  clause-local intent、append-only durability 与 schema/docs/test consistency。Stop hook 后续
-  Coda retry 不改变 transcript 中已完成的 no-tools review vote。完整处置见
-  `review/records/2026-07-24-foreign-lifecycle-quarantine-review.md`。
-- Exclusions: 未发送 target 请求，未把 Agent Reviewer 当独立维护复审，未删除/改写 runtime
-  journal，未修改用户的 `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md` 或现有
-  target/evidence artifacts。
+- Date: 2026-07-27
+- Scope: 一次收口修复五条互相叠加的生命周期问题：
+  (1) stale plan 中 mandatory Reviewer 已 durable `assigned` 但尚无 authentic launch
+  attempt 时，`delegate` 幂等重放原 binary contract；
+  (2) Agent-mode plan 的 typed `cycle_end` 后，Root 只获得精确前台 peer-review capability；
+  (3) probe replay 将完整 wire 与 capped saved body 的 hash/length 分域；
+  (4) peer-review receipt 写入前 CAS 重验 evidence/artifact projection；
+  (5) Coda no-progress 只按真实 typed `cycle_end` 推进。运行中 Agent、task notification、
+  denial 和 derived-cache refresh 都不能伪造终态或语义周期。
+- Architecture impact: Agent settlement recovery、delegate/review authority、replay schema、
+  review persistence 和 trajectory accounting changed。它 supersedes “delegate 只能创建新
+  assignment”“所有 no-attempt row 都优先 cancel”“response.sha1 必须等于 capped file
+  hash”以及“每次 loop-state derive 都代表新 cycle”这些隐含假设。Reviewer replay 不创建
+  第二 row、不刷新 plan authority；foreground review 不恢复 Hunter/target/general model
+  egress；partial replay 不冒充 full-wire proof；Coda 仍是 advisory pivot signal 而非 closure。
+- Owner/enforcement: `tools/agent_settlement.py` 分类
+  `replay_assigned_reviewer | create_reviewer | cancel_unlaunched_execution |
+  wait_running | material_replan | hard_invalid`；`tools/workers.py` 在 assignment 单写锁内
+  重验 durable row、dependency、bundle/artifact 与 runtime journal，并从
+  `runtime_receipts.py` 只重建 canonical type+prompt；`turn_contract.py` 复用
+  `work_plan.plan_cycle_ended` 并只开放两条 registered foreground review capability；
+  `probe.py` 生成 replay v2，`workers.py` 与 disposition schema fail closed 校验；
+  `peer_review.py` 在 receipt 前重算 evidence index；`loop_state.py` 消费 validated journal
+  watermark，`run_controller.py` 只消费该 derived signal。
+- Live migration: 不改写现有 run。合格 Reviewer row 在下次 exact `workers.py delegate
+  <run> --limit 1` 时无写重放；legacy replay 的原 `response.len/sha1` 本来就是完整 raw
+  response identity，故可由新 validator 识别 saved prefix；没有 wire hash 的畸形 sidecar
+  fail closed。旧 loop-state cache 在首次读取时只建立当前 cycle watermark baseline，不把
+  历史写次数迁成假 cycle；后续真实 cycle-end 才推进 streak。
+- Verification: Python compile、`tools/check_rules.py`、`git diff --check` 与所有 focused
+  owner selftests PASS；Codex 全套 `tools/selftest_all.py` 为 69/69 PASS（117.2s）。
+  隔离 detached worktree 中 configured DeepSeek-backed Claude Code 2.1.201 主驾驶 session
+  `61a05a61-4c92-4eca-a706-677615a93dbf` 经真实 Hooks 只执行 exact
+  `python3 tools/selftest_all.py`，69/69 PASS（112.4s）、exit 0、permission denials=0。
+  Transcript/工作树独立裁定确认无 Edit/Write、Agent、target request、active-run pointer 或
+  候选外副作用。更早一次 Claude session 因自行添加 `2>&1`/pipe/`||` 被 exact-argv gate
+  正确拒绝，其 prose PASS 明确不计验证。
+- Independent review: Codex 不计独立票。首轮 Codex-author matrix 只完成 fresh
+  Claude，arkcli 的 kimi 超时且 glm 输出解析失败，因此总 verdict=`NEEDS_DRIVER`，不计通过。
+  其 checkpoint 循环引用、certainty 与 bundle 证据不足已接受并修复；legacy replay 和
+  Reviewer dependency tamper 已补明确负测。最终同一 frozen bundle
+  `6db994717c04b1593ca3b7a6d0f74e2033a358b0` 上，fresh Claude 为 WARN、无 source
+  blocker；arkcli 的 GLM 票完成且无 source blocker，Kimi 超时，故 arkcli 为 WARN/partial。
+  维护 diff 被通用 pentest rubric 要求 claims/refutes/Type-B、统一 certainty、强制脱敏和
+  classifier priority 的剩余 warning 已逐项裁定；running 优先 wait、终态后重分类，真正
+  contract replay 始终由 assignment lock 内 owner 重验。完整记录与 fingerprint disposition
+  位于 `review/records/2026-07-27-framework-deadlock-repair*`。
+- Exclusions: 未修改或提交用户现有的 `tools/xunji_statusline.py`、
+  `docs/XUNJI_PROJECT_INTRO.md`、target/evidence artifacts 与其他 untracked 文件；未直接
+  编辑 live assignment/journal；未用 Reviewer Agent 代替独立维护复审。
 
 ## 13. 外部设计来源与采用边界
 
