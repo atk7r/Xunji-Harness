@@ -469,6 +469,24 @@ def _prompt_has_loop_directive(prompt: str) -> bool:
     return bool(re.match(r"^/loop(?:\s|$)", line, re.I))
 
 
+def _split_attached_run_description(value: str) -> str:
+    """Trim prose glued to a lexical run root without changing its identity."""
+    normalized = str(value or "").replace("\\", "/")
+    match = re.match(
+        r"^(?P<source>(?:runs|\./runs|.+/runs)/[A-Za-z0-9_-]+)"
+        r"(?P<suffix>.*)$",
+        normalized,
+    )
+    if not match:
+        return str(value or "")
+    source = match.group("source")
+    suffix = match.group("suffix")
+    if suffix and ATTACHED_OPERATOR_BOUNDARY_RE.match(suffix) \
+            and _run_name_from_path(source):
+        return source
+    return str(value or "")
+
+
 def _normalize_source_token(
     value: str, *, natural_prose: bool = False,
 ) -> tuple[str, list[str]]:
@@ -478,15 +496,9 @@ def _normalize_source_token(
         return "", []
     normalizations: list[str] = []
 
-    run_match = re.match(
-        r"^(?P<source>runs[/\\][A-Za-z0-9_-]+(?:[/\\][^\s，,。；;]*)?)"
-        r"(?P<suffix>.*)$",
-        raw,
-        re.I,
-    )
-    if run_match and run_match.group("suffix") \
-            and ATTACHED_OPERATOR_BOUNDARY_RE.match(run_match.group("suffix")):
-        raw = run_match.group("source")
+    run_source = _split_attached_run_description(raw)
+    if run_source != raw:
+        raw = run_source
         normalizations.append("attached_operator_description")
 
     if re.match(r"(?i)^https?://", raw):
@@ -6753,6 +6765,19 @@ def _selftest() -> int:
         "prompt": "继续执行runs/other_20260101",
         "session_id": "attached-run-session",
     }, run_name=run.name)
+    attached_absolute_run_contract = _contract_from_event({
+        "prompt": f"/loop {RUNS / 'other_20260101'}继续",
+        "session_id": "attached-absolute-run-session",
+    }, run_name=run.name)
+    attached_resolved_run_contract = _contract_from_event({
+        "prompt": (
+            f"/loop {RUNS / '..' / 'runs' / 'other_20260101'}继续"
+        ),
+        "session_id": "attached-resolved-run-session",
+    }, run_name=run.name)
+    foreign_attached_absolute_source = _normalize_source_token(
+        "/tmp/foreign/runs/other_20260101继续",
+    )
     mixed_run_target_contract = _contract_from_event({
         "prompt": (
             "继续渗透 runs/other_20260101 - "
@@ -7751,6 +7776,25 @@ def _selftest() -> int:
         and promoted_attached_run_contract.get("run_name_sha256s")
         == resume_operator_contract.get("run_name_sha256s")
         and not promoted_attached_run_contract.get("resume_current_approved")
+    )
+    attached_absolute_run_path_keeps_named_resume = bool(
+        attached_absolute_run_contract.get("mode") == EXECUTE
+        and attached_absolute_run_contract.get("loop_requested")
+        and attached_absolute_run_contract.get("loop_source_kind") == "run"
+        and attached_absolute_run_contract.get("lifecycle_operation") == "resume"
+        and attached_absolute_run_contract.get("run_name_sha256s")
+        == resume_operator_contract.get("run_name_sha256s")
+        and attached_absolute_run_contract.get("intent_normalizations")
+        == ["attached_operator_description"]
+        and evaluate_pretool(
+            run, resume_control, attached_absolute_run_contract) == ""
+        and attached_resolved_run_contract.get("mode") == EXECUTE
+        and attached_resolved_run_contract.get("loop_source_kind") == "run"
+        and attached_resolved_run_contract.get("lifecycle_operation") == "resume"
+        and evaluate_pretool(
+            run, resume_control, attached_resolved_run_contract) == ""
+        and foreign_attached_absolute_source
+        == ("/tmp/foreign/runs/other_20260101继续", [])
     )
     mixed_run_target_uses_model_selected_resume = bool(
         mixed_run_target_contract.get("mode") == INTENT_PENDING
@@ -12871,6 +12915,8 @@ def _selftest() -> int:
          trailing_recovery_question_keeps_primary_action),
         ("an attached run path retains its exact named resume identity",
          attached_run_path_keeps_named_resume),
+        ("an attached absolute run path retains its exact named resume identity",
+         attached_absolute_run_path_keeps_named_resume),
         ("mixed named-run and target URL waits for and promotes model-selected resume",
          mixed_run_target_uses_model_selected_resume),
         ("natural-language resume variants keep run and target anchors in separate roles",

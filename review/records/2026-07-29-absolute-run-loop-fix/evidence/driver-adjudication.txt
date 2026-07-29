@@ -1,0 +1,47 @@
+Claude Code real-driver adjudication
+
+Candidate environment:
+- detached worktree based on 2dae071
+- exact candidate applied only to tools/turn_contract.py and docs/ARCHITECTURE.md
+- Claude Code 2.1.201, configured model deepseek-v4-flash[1m]
+- fixture pointer initially: runs/driver-origin_20260729
+- requested run: runs/driver-abs_20260729
+- target egress, Agent, Cron, and canonical mutation explicitly denied
+
+Attempt 1 — failed and not counted:
+- session: 329f3cbb-22af-4c35-a88c-394f209ace7a
+- lexical candidate recognized /Users paths but not the /tmp spelling whose resolved
+  repository root was /private/tmp
+- resulting contract remained source_kind=file; pointer stayed on driver-origin
+- disposition: accepted test failure; implementation changed to validate the stripped
+  candidate through _run_name_from_path() after resolution
+
+Attempt 2 — passed core lifecycle behavior:
+- session: 518f475c-db62-48fb-9375-6c790da231ac
+- prompt used the attached absolute form:
+  /loop /tmp/xunji-abs-run-driver2.bBEh2Y/repo/runs/driver-abs_20260729继续
+- UserPromptSubmit additional context supplied one exact public adapter command
+- first adapter attempt appended `2>&1` and was correctly denied with
+  XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED
+- exact clean retry tool id: call_00_lqk1zN2vfmRV750Mwgoe0565
+- retry result: is_error=false; `[bootstrap] 续接 run: .../driver-abs_20260729`
+- pointer after retry: runs/driver-abs_20260729
+
+Activation receipt:
+- schema: xunji.setup-activation-attempt.v1
+- status: committed
+- operation: loop_bootstrap.resume
+- target_run: driver-abs_20260729
+- origin_run: driver-origin_20260729
+- session_id: 518f475c-db62-48fb-9375-6c790da231ac
+- prompt_sha256: a158772a25194f74226df096f115d169b614800486381ef65e4fa4ddd676c5c9
+- effect_sha256: a49dfccfb2219e237954f171ee89786c0845fb39a02a8cb5394afe4d6c479a31
+
+Forbidden-effect audit:
+- CronCreate: absent
+- Agent: absent
+- WebFetch/WebSearch: absent
+- Edit/Write: absent
+- target request: absent
+- the public adapter wrote only the expected pointer, activation receipt,
+  session_handoff, and derived runtime projections in the isolated fixture

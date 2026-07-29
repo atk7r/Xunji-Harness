@@ -1,0 +1,50 @@
+{
+  "schema": "xunji.maintenance-driver-excerpt.v1",
+  "attempt": 2,
+  "session_id": "518f475c-db62-48fb-9375-6c790da231ac",
+  "client": {
+    "name": "Claude Code",
+    "version": "2.1.201",
+    "model": "deepseek-v4-flash[1m]"
+  },
+  "prompt": "/loop /tmp/xunji-abs-run-driver2.bBEh2Y/repo/runs/driver-abs_20260729继续",
+  "initial_pointer": "runs/driver-origin_20260729",
+  "hook_context": {
+    "event": "UserPromptSubmit",
+    "operation": "resume",
+    "source_kind": "run",
+    "target_run": "driver-abs_20260729",
+    "exact_adapter": "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/bin/python3.9 /private/tmp/xunji-abs-run-driver2.bBEh2Y/repo/tools/loop_bootstrap.py --source /tmp/xunji-abs-run-driver2.bBEh2Y/repo/runs/driver-abs_20260729 --type auto"
+  },
+  "attempted_effects": [
+    {
+      "tool": "Bash",
+      "tool_use_id": "call_00_G9r4A7NtZiDI6BalpWtm9582",
+      "shape": "exact adapter plus 2>&1",
+      "result": "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED"
+    },
+    {
+      "tool": "Bash",
+      "tool_use_id": "call_00_lqk1zN2vfmRV750Mwgoe0565",
+      "shape": "exact clean adapter",
+      "is_error": false,
+      "result_excerpt": "[bootstrap] 续接 run: /private/tmp/xunji-abs-run-driver2.bBEh2Y/repo/runs/driver-abs_20260729"
+    }
+  ],
+  "activation_receipt": {
+    "schema": "xunji.setup-activation-attempt.v1",
+    "status": "committed",
+    "operation": "loop_bootstrap.resume",
+    "origin_run": "driver-origin_20260729",
+    "target_run": "driver-abs_20260729",
+    "prompt_sha256": "a158772a25194f74226df096f115d169b614800486381ef65e4fa4ddd676c5c9",
+    "effect_sha256": "a49dfccfb2219e237954f171ee89786c0845fb39a02a8cb5394afe4d6c479a31"
+  },
+  "observed_pointer_after": "runs/driver-abs_20260729",
+  "tool_inventory": {
+    "present": ["Read", "Bash"],
+    "absent": ["CronCreate", "CronList", "CronDelete", "Agent", "WebFetch", "WebSearch", "Edit", "Write"]
+  },
+  "target_request_count": 0,
+  "verdict": "passed"
+}

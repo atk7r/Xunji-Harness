@@ -1,0 +1,164 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-29-absolute-run-loop-fix",
+  "files": {
+    "report.md": {
+      "sha1": "688e946ec1b756521548cbe82427d62b8ac48157",
+      "size": 1975
+    },
+    "evidence.md": {
+      "sha1": "08e240806c51b4bcad0eae1913985ab7688508ec",
+      "size": 1883
+    },
+    "frontier.md": {
+      "sha1": "8e6e9acc7a453b48b377e94e3a66e0dd29605c1e",
+      "size": 847
+    },
+    "decisions.md": {
+      "sha1": "c1e03e6e1aada311cd7b2cbccea166da23bb2958",
+      "size": 781
+    },
+    "review.md": {
+      "sha1": "e177cc12d6c9d36e315d981856caa487d984fa08",
+      "size": 1264
+    },
+    "target.md": {
+      "sha1": "80e0551c9fb247971f2bafab53195a2cefdb25d0",
+      "size": 865
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "evidence_manifest": {
+      "path": "evidence.md",
+      "exists": true,
+      "valid": true,
+      "kind": "file",
+      "size": 1883,
+      "sha1": "08e240806c51b4bcad0eae1913985ab7688508ec"
+    },
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 — candidate diff and authority boundary",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/active-diff.txt",
+            "path": "evidence/active-diff.txt",
+            "exists": true,
+            "valid": true,
+            "kind": "file",
+            "size": 1551,
+            "sha1": "299ab1568f8108cacb54fbedbedb5df74c35b236",
+            "excerpt": "Functional diff summary against 2dae071:\n\ntools/turn_contract.py\n\n+ def _split_attached_run_description(value: str) -> str:\n+     normalized = str(value or \"\").replace(\"\\\\\", \"/\")\n+     match = re.match(\n+         r\"^(?P<source>(?:runs|\\./runs|.+/runs)/[A-Za-z0-9_-]+)\"\n+         r\"(?P<suffix>.*)$\",\n+         normalized,\n+     )\n+     if not match:\n+         return str(value or \"\")\n+     source = match.group(\"source\")\n+     suffix = match.group(\"suffix\")\n+     if suffix and ATTACHED_OPERATOR_BOUNDARY_RE.match(suffix) \\\n+             and _run_name_from_path(source):\n+         return source\n+     return str(value or \"\")\n\nThe old relative-only `run_match` normalization is replaced by this helper.\n\nNew selftest cases:\n- `/loop <absolute RUNS>/other_20260101继续` compiles to EXECUTE/resume.\n- a resolution-equivalent `<RUNS>/../runs/other_20260101继续` compiles to\n  EXECUTE/resume and admits the exact typed resume control.\n- `/tmp/foreign/runs/other_20260101继续` remains unchanged and does not receive run\n  authority.\n- the existing relative attached-run and run-internal-file fixtures remain.\n\ndocs/ARCHITECTURE.md\n\n- Lifecycle design now states that relative, `./`, repository-absolute, and\n  effect-equivalent resolved spellings share the existing-run identity only after\n  resolving under authoritative `RUNS`.\n- The Maintenance Checkpoint records scope, owner, migration, verification,\n  independent review, and exclusions for this candidate.\n\nExact changed-file fingerprint inputs:\n- docs/ARCHITECTURE.md\n- tools/turn_contract.py\n\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002 — focused and full selftests",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/test-results.txt",
+            "path": "evidence/test-results.txt",
+            "exists": true,
+            "valid": true,
+            "kind": "file",
+            "size": 989,
+            "sha1": "a855c15b0300a2b4773ee60c6b2066487d69aa23",
+            "excerpt": "Candidate verification on 2026-07-29\n\n1. python3 -m py_compile tools/turn_contract.py\n   exit 0\n\n2. python3 tools/turn_contract.py --selftest\n   exit 0\n   relevant checks:\n   - an attached run path retains its exact named resume identity: ok\n   - an attached absolute run path retains its exact named resume identity: ok\n   - a file inside the current run routes as resume without new-run transition: ok\n   - prompt-named resume is allowed across runs: ok\n\n3. python3 tools/check_rules.py\n   rule check passed\n\n4. git diff --check -- tools/turn_contract.py docs/ARCHITECTURE.md\n   exit 0\n\n5. python3 tools/selftest_all.py\n   interpreter: /opt/homebrew/opt/python@3.14/bin/python3.14\n   69 passed, 0 failed (119.2s total)\n   relevant suites:\n   - peer_review PASS\n   - probe PASS\n   - setup_transaction PASS\n   - work_plan PASS\n   - runtime_receipts PASS\n   - turn_contract PASS\n   - loop_state PASS\n   - run_controller PASS\n   - loop_bootstrap PASS\n   - workers PASS\n   - check_hook PASS\n\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003 — failed first real-driver attempt",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/driver-attempt-1.json",
+            "path": "evidence/driver-attempt-1.json",
+            "exists": true,
+            "valid": true,
+            "kind": "file",
+            "size": 635,
+            "sha1": "4e14bdacc9022417e3b5bcfee089f867bde215a2",
+            "excerpt": "{\n  \"schema\": \"<redacted:internal:9bd5909b229b>.maintenance-driver-excerpt.v1\",\n  \"attempt\": 1,\n  \"session_id\": \"329f3cbb-22af-4c35-a88c-394f209ace7a\",\n  \"candidate_state\": {\n    \"mode\": \"EXECUTE\",\n    \"loop_requested\": true,\n    \"loop_source_kind\": \"file\",\n    \"lifecycle_operation\": \"source\",\n    \"origin_run\": \"driver-origin_20260729\"\n  },\n  \"observed_pointer_after\": \"runs/driver-origin_20260729\",\n  \"verdict\": \"failed\",\n  \"root_cause\": \"The lexical /tmp source did not equal RUNS.resolve() under /private/tmp, so the first implementation did not strip attached prose.\",\n  \"disposition\": \"Accepted as a failed real-driver test; not counted as validation.\"\n}\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004 — successful isolated Claude primary-driver rerun",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/driver-attempt-2.json",
+            "path": "evidence/driver-attempt-2.json",
+            "exists": true,
+            "valid": true,
+            "kind": "file",
+            "size": 1992,
+            "sha1": "03d4ab39625eda6d7c81a5f04305848689b6c85e",
+            "excerpt": "{\n  \"schema\": \"<redacted:internal:9bd5909b229b>.maintenance-driver-excerpt.v1\",\n  \"attempt\": 2,\n  \"session_id\": \"518f475c-db62-48fb-9375-6c790da231ac\",\n  \"client\": {\n    \"name\": \"Claude Code\",\n    \"version\": \"2.1.201\",\n    \"model\": \"deepseek-v4-flash[1m]\"\n  },\n  \"prompt\": \"/loop /tmp/<redacted:internal:507abf950c4a>/repo/runs/driver-abs_20260729继续\",\n  \"initial_pointer\": \"runs/driver-origin_20260729\",\n  \"hook_context\": {\n    \"event\": \"UserPromptSubmit\",\n    \"operation\": \"resume\",\n    \"source_kind\": \"run\",\n    \"target_run\": \"driver-abs_20260729\",\n    \"exact_adapter\": \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/bin/python3.9 /private/tmp/<redacted:internal:507abf950c4a>/repo/tools/loop_bootstrap.py --source /tmp/<redacted:internal:507abf950c4a>/repo/runs/driver-abs_20260729 --type auto\"\n  },\n  \"attempted_effects\": [\n    {\n      \"tool\": \"Bash\",\n      \"tool_use_id\": \"call_00_G9r4A7NtZiDI6BalpWtm9582\",\n      \"shape\": \"exact adapter plus 2>&1\",\n      \"result\": \"<redacted:internal:bd3b47d3d36c>\"\n    },\n    {\n      \"tool\": \"Bash\",\n      \"tool_use_id\": \"call_00_lqk1zN2vfmRV750Mwgoe0565\",\n      \"shape\": \"exact clean adapter\",\n      \"is_error\": false,\n      \"result_excerpt\": \"[bootstrap] 续接 run: /private/tmp/<redacted:internal:507abf950c4a>/repo/runs/driver-abs_20260729\"\n    }\n  ],\n  \"activation_receipt\": {\n    \"schema\": \"<redacted:internal:9bd5909b229b>.setup-activation-attempt.v1\",\n    \"status\": \"committed\",\n    \"operation\": \"loop_bootstrap.resume\",\n    \"origin_run\": \"driver-origin_20260729\",\n    \"target_run\": \"driver-abs_20260729\",\n    \"prompt_sha256\": \"a158772a25194f74226df096f115d169b614800486381ef65e4fa4ddd676c5c9\",\n    \"effect_sha256\": \"a49dfccfb2219e237954f171ee89786c0845fb39a02a8cb5394afe4d6c479a31\"\n  },\n  \"observed_pointer_after\": \"runs/driver-abs_20260729\",\n  \"tool_inventory\": {\n    \"present\": [\"Read\", \"Bash\"],\n    \"absent\": [\"CronCreate\", \"CronList\", \"CronDelete\", \"Agent\", \"WebFetch\", \"WebSearch\", \"Edit\", \"Write\"]\n  },\n  \"target_request_count\": 0,\n  \"verdict\": \"passed\"\n}\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "d3bb8f0889dc048b670c0ac3e4b04baa145e0677"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Absolute Run `/loop` Repair\n\n## Claim\n\nThis is a repository-maintenance verification, not a target pentest or coverage\nassessment.\n\nThe candidate compiles relative, repository-absolute, and resolution-equivalent\nspellings of the same existing run to the existing typed `resume` effect when\nnon-ASCII operator prose is attached directly to its ASCII basename.\n\nIt does not treat a foreign path containing `/runs/` as a run and does not create a\nnew lifecycle effect, bypass activation CAS, or edit live run state.\n\n## Verification\n\n- Focused `turn_contract` selftest: PASS, including exact resume admission,\n  resolution-equivalent spelling, and a foreign-path negative control.\n- Rule check, Python compile, and diff check: PASS.\n- Full framework scorecard: 69 passed, 0 failed in 119.2 seconds.\n- DeepSeek-backed Claude Code 2.1.201 real-driver rerun in an isolated detached\n  worktree: the exact public `loop_bootstrap.py --source ... --type auto` clean retry\n  changed the pointer from `driver-origin_20260729` to `driver-abs_20260729`.\n- The activation receipt records `operation=loop_bootstrap.resume`,\n  `target_run=driver-abs_20260729`, `status=committed`, and binds the exact\n  session/prompt/effect.\n- The real-driver transcript contains no CronCreate, Agent, WebFetch, WebSearch,\n  Edit, Write, or target request. The first output-wrapped adapter call was denied\n  and then corrected in the same operator turn.\n\n## Client scheduler interaction\n\nClaude Code 2.1.201 still treats literal `/loop` as its own scheduler skill before\nthe task body runs. This client-owned parse is not <redacted:internal:ad09fe04db9e> authority, but it also did\nnot bypass <redacted:internal:ad09fe04db9e> in the tested dispatch: the original prompt reached\nUserPromptSubmit, <redacted:internal:ad09fe04db9e> supplied the exact local lifecycle action, no CronCreate\noccurred, and the typed resume receipt committed. This behavior is F-003/E-004,\nnot an untested residual claim.\n\nIndependent review remains a separate gate; software test PASS is not a review\nverdict.\n",
+    "frontier.md": "# Frontier\n\n## F-001 — absolute existing-run token with attached prose\n\n- Status: closed\n- Evidence: E-001, E-002, E-003, E-004\n- Resolution: the attached description is stripped only after the remaining lexical\n  source resolves into the repository's authoritative `runs/` root.\n\n## F-002 — authority expansion outside the repository\n\n- Status: closed\n- Evidence: E-001, E-002\n- Resolution: a same-shaped foreign absolute path remains a file source and cannot\n  mint run authority.\n\n## F-003 — Claude client scheduler interaction\n\n- Status: closed\n- Evidence: E-004\n- Resolution: Claude Code 2.1.201 expanded `/loop` as a client skill, but the\n  original prompt still reached UserPromptSubmit before any effect. <redacted:internal:ad09fe04db9e> injected\n  the exact resume adapter; the transcript contains no CronCreate and the typed\n  resume committed successfully.\n",
+    "decisions.md": "# Decisions\n\n- D-001: Repair source normalization, not `loop_bootstrap.py`; the adapter correctly\n  routed a valid existing run once the turn contract supplied the right identity.\n- D-002: Validate the stripped candidate with `_run_name_from_path()` after path\n  resolution. Do not trust a lexical `/runs/` substring by itself.\n- D-003: Preserve run-internal subpaths because their suffix begins with `/`, not the\n  existing attached-operator boundary.\n- D-004: Preserve one-use prompt authority. Previously malformed contracts require a\n  new top-level operator prompt; no state file is edited or deleted to migrate them.\n- D-005: Count the first isolated Claude driver run as failed. It exposed the\n  `/tmp` versus `/private/tmp` equivalent-path gap and was fixed before rerun.\n\n",
+    "review.md": "# Review\n\n- Required matrix: Codex-authored maintenance; arkcli panel plus fresh Claude Code\n  CLI when available. Codex remains synthesizer and does not count as a vote.\n- First matrix: bundle `4a9b738e478960e81e903dcd75a9d1deae31ba93`,\n  verdict BLOCKER. GLM and fresh Claude completed; Kimi timed out.\n- Accepted findings: separate failed/successful driver artifacts, add raw transcript\n  excerpts, add explicit evidence certainty, declare maintenance/no-recon scope, and\n  make scheduler interaction a first-class front.\n- PR-006 disposition: the claimed scheduler bypass is refuted by E-004. The raw\n  transcript shows UserPromptSubmit context before effects, no CronCreate tool use,\n  and a committed `loop_bootstrap.resume` receipt. The useful part—making this\n  ordering explicit—was accepted as F-003.\n- PR-003 disposition: unit and live Hook code share the same turn-contract owner;\n  the foreign-path negative control is deterministic and fail-closed. A targetless\n  third model run would add model variance, not a different authority path.\n- PR-009 disposition: rubric mismatch. This scope is software maintenance with no\n  recon/target coverage; final rerun uses `--no-recon`.\n- Status: first findings addressed; final exact-bundle rerun pending.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 110000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "815e141072a94074f8ce645889fd8762be143ee7"
+}

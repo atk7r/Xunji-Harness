@@ -1,0 +1,41 @@
+Functional diff summary against 2dae071:
+
+tools/turn_contract.py
+
++ def _split_attached_run_description(value: str) -> str:
++     normalized = str(value or "").replace("\\", "/")
++     match = re.match(
++         r"^(?P<source>(?:runs|\./runs|.+/runs)/[A-Za-z0-9_-]+)"
++         r"(?P<suffix>.*)$",
++         normalized,
++     )
++     if not match:
++         return str(value or "")
++     source = match.group("source")
++     suffix = match.group("suffix")
++     if suffix and ATTACHED_OPERATOR_BOUNDARY_RE.match(suffix) \
++             and _run_name_from_path(source):
++         return source
++     return str(value or "")
+
+The old relative-only `run_match` normalization is replaced by this helper.
+
+New selftest cases:
+- `/loop <absolute RUNS>/other_20260101继续` compiles to EXECUTE/resume.
+- a resolution-equivalent `<RUNS>/../runs/other_20260101继续` compiles to
+  EXECUTE/resume and admits the exact typed resume control.
+- `/tmp/foreign/runs/other_20260101继续` remains unchanged and does not receive run
+  authority.
+- the existing relative attached-run and run-internal-file fixtures remain.
+
+docs/ARCHITECTURE.md
+
+- Lifecycle design now states that relative, `./`, repository-absolute, and
+  effect-equivalent resolved spellings share the existing-run identity only after
+  resolving under authoritative `RUNS`.
+- The Maintenance Checkpoint records scope, owner, migration, verification,
+  independent review, and exclusions for this candidate.
+
+Exact changed-file fingerprint inputs:
+- docs/ARCHITECTURE.md
+- tools/turn_contract.py
