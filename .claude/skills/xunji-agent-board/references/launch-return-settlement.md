@@ -63,6 +63,24 @@ python3 tools/runtime_receipts.py runs/<dir> --reproject
 python3 tools/workers.py status runs/<dir>
 ```
 
+Exception: when the foreground Reviewer parent call itself ended with
+`[Request interrupted by user for tool use]` after a
+`SubagentStart:xunji-reviewer` hook cancellation, do not loop on `--reproject`
+or try `SendMessage`. Repeat the registered `workers.py delegate --limit 1`
+owner command from `plan-and-delegate.md`. It automatically attempts the narrow
+interrupted-Start recovery before ordinary delegation. Recovery succeeds only
+when parent and exact child transcripts prove the frozen prompt, hook timeout,
+zero assistant/tool activity, zero admitted parent terminal, and no Stop; it
+then returns the same durable Reviewer contract. If those facts are absent or
+ambiguous, the row remains `running` and this exception gives no authority to
+cancel, edit, abandon, or synthesize a Reviewer result.
+
+This v1 recovery contract covers only that exact Claude Code interruption shape.
+OOM, process kill, network loss, a different hook terminal, or any other
+pre-model failure must remain `running`/integrity debt until a separately
+versioned reason and transcript-proof contract is added with its own fixtures.
+Do not widen the v1 reason string or infer equivalence from prose.
+
 If `workers.py status` instead names
 `foreign-lifecycle-quarantine-required` or gives event sequences for proven
 non-Xunji lifecycle receipts, run the typed supersession owner first:
@@ -80,9 +98,9 @@ with any Xunji ownership signal remains lifecycle debt and must not use this
 recovery.
 
 `status=reconciled` alone is not return proof. If the assignment is still
-`running`, wait for hook delivery and repeat this checkpoint; do not end the
-phase, delegate, or call `finish`. Root never writes `done`: `SubagentStop`
-projects it.
+`running` and the exact interrupted-Start exception above does not apply, wait
+for hook delivery and repeat this checkpoint; do not end the phase, delegate, or
+call `finish`. Root never writes `done`: `SubagentStop` projects it.
 Do not express that wait as `sleep ... && workers.py status ...`; it is one
 retryable command-shape denial, not framework maintenance. Retry the clean owner
 status argv in the same turn and continue from its actual state.
@@ -125,6 +143,12 @@ cancellation or Reviewer contract replay. A parent `PostToolUseFailure`,
 successful Post, Start/Stop, or child action is an attempt and must not be
 relabeled as unlaunched. Current offline/target denial narrows external effects;
 it does not revoke this local settlement owner.
+
+The interrupted-Start exception does not relabel an admitted
+`PostToolUseFailure`. It applies only when the parent transcript reports the
+client interruption but no matching Agent terminal entered the runtime journal,
+and the child sidechain proves that the Start hook was cancelled before model
+execution.
 
 Invoke the returned exact `xunji-reviewer` binary contract. Its result digest
 must match the frozen Hunter bytes. Reviewer supplies a candidate disposition;

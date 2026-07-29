@@ -525,6 +525,17 @@ plan 只读取 settlement identity，放行唯一 exact assignment/lane/result-d
 result digest 与 runtime journal，再无写入地返回原 exact type+prompt contract；denied wrong
 prompt 不得把 Reviewer 变成不可恢复债务。该重放不创建第二 assignment，不重建 prompt，也不
 扩大旧 plan 的 execution authority。旧 Hunter、target/model-egress、无关 Reviewer 均不得恢复。
+若 Claude 已把 plan-bound Reviewer 的 `SubagentStart` 写入 immutable journal，但同一个
+`SubagentStart:xunji-reviewer` hook 随后在模型首个 assistant message 之前被客户端取消，
+`delegate` 允许进入更窄的 typed recovery：它必须同时证明 exact parent Agent call、同
+tool-use 的显式 interrupted error、exact child sidechain 首条 frozen prompt、达到 hook timeout
+的 cancellation、零 assistant/tool activity、零 child claim、零 Stop 和零 admitted parent
+terminal。证明成立后，`xunji.interrupted-reviewer-start.v1` content-addressed receipt 绑定
+原 Start seq/hash、validated journal head 和 parent/child transcript hash；effective projection
+只 supersede 该 Start，物理 journal 不改写，assignment 只回到同一 durable row 的
+`assigned`/no-attempt，再由既有 exact replay 返回原 type+prompt。任一 late Stop、assistant/tool
+activity、binding mismatch 或已记录 parent terminal 都保持 lifecycle debt，不可恢复、取消、
+重建 Reviewer 或强制结算。
 真正 assigned-but-never-launched 的非 Reviewer 只能通过 typed `cancel-unlaunched` 事务退休。prepared
 cancellation 先成为 runtime/replan barrier，再耐久删除 launch artifacts 与 assignment row，
 最后发布 immutable tombstone；它不生成 result/review/merge/evidence/cycle_end，必须 material
@@ -540,7 +551,10 @@ identity 并在锁内两次证明 turn/input stale，不用当前回合的 targe
 投影带诊断重建，future schema/unknown field fail closed，symlink/non-regular 投影重建为 run 内
 regular file。`work_plan` 对直接注入的 canonical-input symlink 同样 fail closed；`synthesize`
 与 `check_run` 不能以宽松 JSON 把未知投影解释成零冲突。
-所有 assignment RMW 共用同一跨进程锁，runtime journal 锁与 assignment 锁不嵌套；Agent
+所有 assignment RMW 共用同一跨进程锁。普通 projection 先冻结 journal snapshot、释放 runtime
+锁，再获取 assignment 锁；只有 cancellation 与 transcript-proven interrupted-Reviewer
+recovery 事务允许按唯一 `runtime -> assignment` 顺序嵌套，以冻结新 Stop/child activity 与
+assignment reset 之间的竞态，任何反向顺序都禁止。Agent
 hook exact replay 幂等，冲突 identity 或重复 projected attempt 保留 lifecycle debt；
 `SubagentStop` 只允许关闭同 `session_id` 的唯一 launch，跨 session、未匹配或多匹配 Stop
 不能改变 attempt/assignment 终态。其中“未匹配”只指带 Xunji 类型或部分 owner 信号的候选；
@@ -626,6 +640,11 @@ generation，只有之后覆盖同一 validated journal prefix 的更高 generat
 success 后新发生的同 seq/hash 失败仍是 debt；cursor 只是恢复排序水位，不证明所有 derived
 assignment/merge 写入都已断电持久。projection diagnostic 删除即使重试时已不可见，也必须
 再次 fsync `state` 目录才可报告 absent；掉电后复现的旧目录项由 covering success 再次清理。
+Reprojection 对 validated snapshot 只构造一次 Agent attempt graph；同一 parent transcript 的
+所有 tool/lifecycle token 合并为一次流式扫描，child-claim causal owner 也缓存同一 parent 的
+Agent tool-use index。不得在每条 lifecycle record 内重新读取整本 journal、重建全部 attempts
+或逐 token 重扫大型 transcript；否则 Start hook 会在 receipt 已提交后卡在 derived projection，
+制造不可见的半启动窗口。
 独立的 `state/loop_journal.jsonl` 只有在锁内 append、flush、file fsync，以及新建/零字节重试时
 parent-directory fsync 全部成功后才承认事件；任一持久化失败回滚到原 byte length 并报错，重试
 沿既有 hash chain exactly once 前进。它仍是可恢复的 derived interruption journal，不是证据。
@@ -886,7 +905,7 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `contracts/agent-instruction-sources.v1.json` + `tools/agent_instruction_bundle.py` + `docs/templates/agents/` + `.claude/agents/xunji-{hunter,reviewer}.md` | Claude-primary versioned source selection、common+role delta 组合、scaffold/live definition 与 source/artifact byte-integrity contract | workers、context pack、assignment schema、runtime receipts、turn contract、template check、protected-path manifest |
 | `tools/workers.py` + assignment/merge/review schemas | lane planner、预算/effect scheduler、批量 assignment 事务、原子物化 instruction bundle/context/Agent scaffold，并由 typed row 返回 canonical type+prompt 二元 launch contract、Reviewer/Root disposition | runtime receipts、context pack、Agent source manifest、merge/conflict tests |
 | `tools/agent_settlement.py` + `contracts/assignment-cancellation.v2.schema.json`（v1 只读兼容） | turn/input/both stale-plan unlaunched assignment 的 typed cancellation、immutable tombstone、runtime/replan barrier 与 forward recovery | workers 单写者、runtime receipts、turn contract、fault/schema fixtures |
-| `tools/runtime_receipts.py` + Root/Agent/foreign-lifecycle receipt schemas | 含 instruction-bundle digest 的 plan-bound type+prompt、typed tool-call/request budget 唯一 formatter、Start 冻结与 child PreToolUse 重验/原子 claim，assignment-free global completion formatter/lifecycle、exact child-sidechain transcript truth、hook-observed launch/return/failure、foreign Claude lifecycle admission/quarantine、immutable result、ROOT_DIRECT claim/terminal projection | workers、instruction bundle、turn contract、parent/child transcript、run model、loop journal、schema conformance |
+| `tools/runtime_receipts.py` + Root/Agent/foreign-lifecycle/interrupted-Reviewer receipt schemas | 含 instruction-bundle digest 的 plan-bound type+prompt、typed tool-call/request budget 唯一 formatter、Start 冻结与 child PreToolUse 重验/原子 claim，assignment-free global completion formatter/lifecycle、exact child-sidechain transcript truth、hook-observed launch/return/failure、foreign Claude lifecycle admission/quarantine、pre-model Reviewer Start supersession、batched transcript projection、immutable result、ROOT_DIRECT claim/terminal projection | workers、instruction bundle、turn contract、parent/child transcript、run model、loop journal、schema conformance |
 | `tools/run_model.py` + `tools/loop_journal.py` + cycle schema | receipt-derived plan debt/readiness 与 append-only typed cycle/stage sequence | work plan、run/check gates、exact rederive/fallback/tamper fixtures |
 | `docs/WORKFLOW*.md` | live run 核心/按需参考流程 | templates、check_run、skills |
 | `docs/cognition/` | 判断纪律与 evidence confidence | 不把攻击 playbook 写进 cognition |
@@ -1089,49 +1108,56 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     registered capability 放行；review receipt 写入还必须 CAS 匹配冻结 evidence-index hash。
 30. Coda no-progress 计数只消费 hash-chain-valid typed `cycle_end` watermark；derived cache 写入
     不得创造语义周期或收敛债务。
+31. Reviewer Start 只有在 parent interruption、child hook timeout、零模型/工具活动、零
+    terminal/Stop 全部由 exact transcript+journal 共同证明时，才可用 content-addressed
+    `xunji.interrupted-reviewer-start.v1` supersede 并回到同 row no-attempt exact replay。
+    Receipt 不删除 journal、不取消或重建 Reviewer；任一歧义或 late lifecycle 继续 fail closed。
+    v1 只拥有当前 exact Claude Code tool-use interruption + Reviewer Start-hook timeout
+    形状；OOM、process kill、network loss 或其他 pre-model failure 不得共用或放宽此
+    reason，必须以新的 versioned reason/schema、迁移语义和 fault fixtures 单独准入。
 
 ## 12. Maintenance Checkpoint
 
 - Date: 2026-07-29
-- Scope: 修复 `/loop ABSOLUTE_RUN_PATH继续` 的词法边界缺口。此前相对
-  `runs/<name>继续` 会剥离附着描述，绝对 run 路径却被误判为新 file source，继而错误触发
-  `XUNJI_E_NEW_RUN_SETUP_REQUIRED`，且 exact relative resume retry 又因 prompt-bound
-  authority 不一致被拒绝。新 fixture 同时覆盖 exact absolute run、typed resume admission
-  与 repository 外绝对路径不获 run authority。
-- Architecture impact: existing-run lifecycle source normalization changed，但未增加新的
-  authority 或 lifecycle effect。它把同一现存 run 的相对、`./` 与 repository-local
-  absolute spelling 统一到既有 `resume` contract，并保留外部绝对路径与 run 内子路径边界。
-- Owner/enforcement: `tools/turn_contract.py` 的 `_split_attached_run_description()` 先
-  lexical 提取 relative/absolute `runs/<ASCII-basename>`，只有去除附着描述后的 source 经
-  resolve 确实落入当前 `RUNS` root、且后缀以既有 attached-operator boundary 起始时才剥离；
-  后续仍由
-  `_run_name_from_path()`、compiled lifecycle invariant 和 exact PreToolUse admission 重验。
-- Live migration: 不改写 run、pointer、pending claim、assignment、journal 或 evidence。
-  修复只影响新顶层 prompt 的 contract 编译；已经被错误编译的 one-use authority 仍须由新
-  operator prompt 重新生成，不能从历史回合继承。
-- Verification: `python3 -m py_compile tools/turn_contract.py`、
-  `python3 tools/turn_contract.py --selftest` 与 `git diff --check` PASS；新增 regression
-  显示原始粘连绝对路径编译为 `EXECUTE + loop_requested + resume`，repository 外同形路径
-  保持 file source。最终 `tools/selftest_all.py` 为 69/69 PASS（119.2s）。隔离 detached
-  worktree 的首轮 Claude Code 2.1.201 主驾驶暴露 `/tmp` 与 resolved `/private/tmp` spelling
-  差异并保持 origin pointer，明确记为失败；修复后 session
-  `518f475c-db62-48fb-9375-6c790da231ac` 经真实 Hooks 先拒绝带 `2>&1` 的 wrapper，再在同
-  operator turn 运行 exact clean adapter，pointer 从 `driver-origin_20260729` 切换到
-  `driver-abs_20260729`。activation receipt 以 `loop_bootstrap.resume`、status=`committed`
-  绑定 session/prompt/effect；transcript 无 CronCreate、Agent、WebFetch/WebSearch、
-  Edit/Write 或 target request。
-- Independent review: Codex 是作者，不计独立票。按 Codex-authored maintenance matrix，
-  首个 frozen bundle `4a9b738e478960e81e903dcd75a9d1deae31ba93` 由 arkcli GLM 与 fresh
-  Claude 完成、Kimi 超时，matrix verdict=BLOCKER。artifact 分离、raw transcript excerpt、
-  certainty、no-recon scope 与 scheduler ordering front 已接受并补齐；“scheduler 绕过”
-  blocker 被真实 E-004 refute：UserPromptSubmit context 先于任何 effect、tool inventory 无
-  CronCreate、typed resume 已提交。final bundle
-  `815e141072a94074f8ce645889fd8762be143ee7` / evidence index
-  `d3bb8f0889dc048b670c0ac3e4b04baa145e0677` 由同一矩阵复审为 WARN、无 source
-  blocker；Kimi 仍超时。剩余 warning 限定于未外发 raw transcript、foreign-path 只做
-  deterministic Hook fixture、以及主驾驶只证明当前 Claude Code 2.1.201 + DeepSeek 配置，
-  不外推未来客户端版本。完整 disposition 位于
-  `review/records/2026-07-29-absolute-run-loop-fix/`。
+- Scope: 修复 plan-bound Reviewer Start 的 receipt/projection 半提交死锁。真实
+  A-review-012 在 `SubagentStart` journal receipt 成功后，Start hook 对 25MB parent transcript
+  重复扫描并在 600 秒取消；child sidechain 没有任何模型输出，但 derived assignment 永久显示
+  `running`，旧 plan 不能结算、新 plan 不能提交。
+- Architecture impact: runtime projection 与 Reviewer recovery lifecycle changed。
+  新增严格、fail-closed、content-addressed 的 pre-model Start supersession；保持 Reviewer
+  不可取消、不可绕过，保持 `runtime_events.jsonl` append-only，并把 recovery 后续动作收敛到
+  原 assignment row 的 exact durable launch-contract replay。Projection 从 per-record/per-token
+  重复解析改为 snapshot-once attempt graph 与 per-transcript batched token scan。
+- Owner/enforcement: `tools/runtime_receipts.py` 独占 transcript proof、receipt schema、
+  effective projection 与 runtime→assignment recovery transaction；
+  `contracts/interrupted-reviewer-start.v1.schema.json` 冻结 receipt；`tools/workers.py delegate`
+  在 assignment writer 前调用 typed recovery，再复用既有 assigned/no-attempt replay gate。
+  已有 authentic Stop、child claim/tool/assistant、parent terminal 或 binding drift 均拒绝恢复。
+- Live migration: 不自动扫描或改写所有 run。下一次对受影响 run 执行正常
+  `workers.py delegate` 时，只有 exact proof 成立的 Start 才追加 receipt 并重置 derived row；
+  physical journal、Hunter result、review dependency、evidence/frontier/report 均不删除或改写。
+- Verification: `runtime_receipts.py --selftest`、`workers.py --selftest`、
+  `turn_contract.py --selftest`、rule/compile/diff checks 均 PASS；完整
+  `selftest_all.py` 为 69 passed / 0 failed。真实 `workers.py delegate` owner path
+  在原始 live run 的隔离 byte copy 上以 `/usr/bin/time -p` 1.61 秒发布 receipt，并把
+  A-review-012 恢复为同 row assigned/no-attempt；随后仅因 copied work-plan 的绝对
+  `run_dir` binding 正确 fail closed。独立 detached worktree 的 Claude Code 2.1.201 /
+  configured DeepSeek session `e459e35b-e576-4596-a689-3f1724fa0efa` 对 path-native
+  targetless fixture 完成 recovery → exact replay → real Reviewer return → review
+  disposition → Hunter merge → typed cycle_end；runtime/transcript adjudication为
+  target_action=0、WebFetch/WebSearch/Edit/Write=0。并发 fixture 在 receipt publish
+  临界区暂停 recovery，证明 late runtime writer 被 runtime lock 串行化；额外负例证明
+  non-Reviewer assignment 与不同 pre-model failure reason 均不能误用 v1。
+- Independent review: round 1 fresh-context Claude 提出的 machine timing、
+  synthetic/full-path 边界与 concurrent-writer WARN 已分别补 raw `/usr/bin/time`、
+  明确分层声明和 targeted regression。round 2 `panel:arkcli+claude` 为 WARN、无 source
+  blocker；arkcli 内部 GLM parse error 保留为 partial-panel 限制，Kimi 路径与 fresh
+  Claude 完成。round 2 的 split high-load/full-lifecycle E2E 边界已显式 deferred，v1
+  rigid reason 已记录独立 schema 演进规则。final3 arkcli 再次 timeout/parse failure 后，
+  operator 明确要求最终门不再使用 arkcli；最终 exact-diff fresh-context Claude review
+  保存在
+  `review/records/2026-07-29-interrupted-reviewer-recovery/peer-review.final4-claude.*`。
+  Codex 是作者，不计自己的 review。
 - Exclusions: 不修改 live run canonical/control-plane 状态，不删除任何缓存或 journal；
   不改动用户已有的 `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md`、
   target/evidence artifacts 与其他 untracked 文件。

@@ -1,0 +1,46 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "claude:code-cli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "dba25f7c2f1d7c8b98c3148530805037b9628a6a",
+  "evidence_index_hash": "522de176a55dcb87fdcc2f7ac7fb793c845871c1",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "**E-002 verification artifacts do not fully cover the report claim for \"rule, compile, and diff checks pass\".** The report lists four verification categories under \"Focused runtime, workers, turn-contract, rule, compile, and diff checks pass\". The evidence index for E-002 contains only two artifacts (`test-results.txt`, `test-summary.txt`), both showing module selftests. No dedicated `git diff --check`, `py_compile`, or equivalent build/lint artifact is present. The claim relies on the general cleanliness of the bundled diff but lacks a timestamped pass/fail record.",
+      "evidence": "`report.md:23`, `evidence_index:E-002` (artifacts `evidence/test-results.txt`, `evidence/test-summary.txt`)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "The report makes an explicit verification claim that is over-supported by the provided artifacts. The missing artifact does not create a risk of a wrong conclusion (the tests pass and the diff is clean), but it is a strict evidence discipline gap.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "**4 of 8 E-004 raw evidence files are not excerpted in the bundle**, preventing fully independent artifact cross-check as required by the rubric: `evidence/driver-loop-journal.jsonl`, `evidence/driver-runtime-events.jsonl`, `evidence/driver-reviewer-transcript.jsonl`, `evidence/driver-session-transcript.jsonl`. The decisive claims (zero target actions, cycle_end settlement, forbidden tool count) are mediated through proxy parsers (`driver-adjudication.json`, `post-driver-inspection.txt`) rather than directly verifiable by opening the cited files. The proxy documents are consistent and authoritative, but the strict rubric requirement of confirming markers against raw content cannot be met for these 4 artifacts.",
+      "evidence": "`evidence_index:E-004` (4 artifacts exist but have no excerpt key; `evidence/driver-adjudication.json` and `evidence/post-driver-inspection.txt` serve as proxies)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "Rubric item 7 demands opening cited artifact files to verify claims. The bundle size constraint (110,000 chars) makes skipping multi-megabyte transcripts reasonable, but it creates a verification trust boundary between the reviewer and the raw data.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "**Proxy parser dependency in E-004:** The author assumed the adjudication JSON and inspection text are sufficient proxies for the raw journal/transcript files. For a reviewer familiar with the codebase and tooling this is adequate. For a fresh-context model performing a mandated artifact cross-check, the missing excerpts of `driver-loop-journal.jsonl` (the `cycle_end` line) and `driver-runtime-events.jsonl` (the `target_action=0` event) mean the decisive claims depend on the author's own parsing accuracy.",
+    "**Truncated diff excerpt:** `evidence/reviewed.diff` is truncated at ~57 KB of the full 83 KB. The new schema file (`contracts/interrupted-reviewer-start.v1.schema.json`) body is entirely in the truncated tail. A reviewer relying only on the excerpt cannot manually compare the schema field set against the receipt production code in the visible portion. (The file exists on disk; the truncation is in the bundle distribution.)",
+    "**E-003 single-observation performance claim:** The report correctly assigns certainty 0.8 to the 1.61-second benchmark, acknowledging it as a single observation on a copied fixture. The author likely assumed this would be accepted as parametric evidence rather than a formal pass/fail gate. The rubric warns against single observations, and 0.8 is the borderline threshold for confirmed status. An auditor requiring multiple timed runs would downgrade E-003 to uncertainty (and remove the 1.61-second detail from the confirmed evidence narrative), though the *recovery* claim itself is independently proven by the row state (assigned/no-attempt) in the same artifact.",
+    "**Chinese-language architecture notes:** The `docs/ARCHITECTURE.md` diff contains Chinese paragraphs restating the recovery logic. The English diff in the same hunks matches the code logic. A reviewer who reads Chinese might verify synonymity; this reviewer cannot."
+  ],
+  "context_limits": [
+    "This is an internal Python framework maintenance review, not a web-pentest with `probe_*.html` / `replay.json` artifacts. The rubric's web-pentest framing is adapted; the evidence model maps cleanly but the naming conventions differ from CNVD/OWASP formats.",
+    "Chinese text appears in `docs/ARCHITECTURE.md` diff hunks and the `post-driver-inspection.txt` note. The bundle's English evidence, diffs, and test outputs are sufficient for assessment, but native Mandarin fluency would allow independent verification of the architecture notes.",
+    "The v1 receipt is explicitly rigid (D-008). The report defends this as a safety boundary. No evidence suggests the author missed a failure mode; the limitation is a designed architectural choice, not an oversight.",
+    "The evidence bundle references `arkcli` (which timed out/failed to parse) and `Kimi` (timeout) as failed reviewers in the review matrix history. The final gate is fresh-context Claude only. The author did not suppress these failures; they are recorded honestly. The final review is the correct independent gate."
+  ],
+  "error": ""
+}

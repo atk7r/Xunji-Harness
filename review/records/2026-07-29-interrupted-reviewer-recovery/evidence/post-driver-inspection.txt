@@ -1,0 +1,70 @@
+Inspection owner: Codex after Claude driver termination
+Session: e459e35b-e576-4596-a689-3f1724fa0efa
+Transcript SHA-256: 7092184270a2dbb55db88101a27538c3f4ff830c1bb5b3260e9fc8d0406361f5  review/records/2026-07-29-interrupted-reviewer-recovery/evidence/driver-session-transcript.jsonl
+
+Tool inventory from every assistant tool_use block:
+[
+  {
+    "tool": "Agent",
+    "count": 1
+  },
+  {
+    "tool": "Bash",
+    "count": 20
+  },
+  {
+    "tool": "Read",
+    "count": 5
+  },
+  {
+    "tool": "Skill",
+    "count": 1
+  },
+  {
+    "tool": "TaskCreate",
+    "count": 1
+  },
+  {
+    "tool": "TaskUpdate",
+    "count": 2
+  }
+]
+
+Forbidden editor/network tools present:
+[]
+
+Runtime target_action event count:
+0
+
+All driver Bash commands (inspect for source/target effects):
+[
+  "ls -la runs/driver-reviewer-recovery_20260729/",
+  "cat runs/driver-reviewer-recovery_20260729/frontier.md 2>/dev/null || echo \"NO_FRONTIER\"",
+  "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/bin/python3.9 /private/tmp/xunji-reviewer-driver.U0x4in/repo/tools/loop_bootstrap.py --resume runs/driver-reviewer-recovery_20260729",
+  "ls runs/ 2>/dev/null || echo \"NO_RUNS_DIR\"",
+  "ls -la runs/driver-reviewer-recovery_20260729/ 2>/dev/null | head -30",
+  "cat runs/driver-reviewer-recovery_20260729/frontier.md 2>/dev/null || echo \"NO_FRONTIER\"",
+  "ls runs/driver-reviewer-recovery_20260729/state/ 2>/dev/null || echo \"NO_STATE\"",
+  "cat runs/driver-reviewer-recovery_20260729/target.md runs/driver-reviewer-recovery_20260729/coverage.json",
+  "cat runs/driver-reviewer-recovery_20260729/state/delegate_transaction.json 2>/dev/null || echo \"NO_DELEGATE_TX\"",
+  "ls -la runs/driver-reviewer-recovery_20260729/agents/",
+  "python3 tools/workers.py delegate runs/driver-reviewer-recovery_20260729 --runtime-slots 1 --request-budget 0 --model-egress-budget 1 --merge-capacity 10 --limit 1 --tool-call-limit 24",
+  "python3 tools/workers.py status runs/driver-reviewer-recovery_20260729",
+  "python3 tools/runtime_receipts.py runs/driver-reviewer-recovery_20260729 --reproject 2>&1",
+  "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/bin/python3.9 /private/tmp/xunji-reviewer-driver.U0x4in/repo/tools/runtime_receipts.py runs/driver-reviewer-recovery_20260729 --reproject",
+  "python3 tools/workers.py status runs/driver-reviewer-recovery_20260729",
+  "python3 tools/workers.py review-disposition runs/driver-reviewer-recovery_20260729 A-verify-001 A-review-001 --status accept-candidate --note \"Reviewer verified envelope bindings, frozen source paths, result digest SHA-256 match, and zero security claims. Candidate disposition: accept-candidate. No evidence paths or target assets to verify.\"",
+  "python3 tools/workers.py finish runs/driver-reviewer-recovery_20260729 A-verify-001 --status merged --note \"Fixture result accepted by reviewer A-review-001 (disposition=accept-candidate). Zero-tool non-target lane with no security claims, assets: none. Settled as merged per accepted fixture review.\"",
+  "python3 tools/workers.py finish runs/driver-reviewer-recovery_20260729 A-verify-001 --status merged --note \"Front: F-001; Decision: accepted fixture candidate via review-disposition accept-candidate; Barrier: none; Evidence: none (zero-request local_verify fixture with assets: none); Refuted: none\"",
+  "python3 tools/workers.py merge-check runs/driver-reviewer-recovery_20260729 2>&1; python3 tools/workers.py lifecycle-check runs/driver-reviewer-recovery_20260729 2>&1",
+  "python3 tools/loop_journal.py runs/driver-reviewer-recovery_20260729 end --next-action \"检查 check_run 验证当前 run 状态\" --note \"plan cycle disposition complete: L-F001-EXEC finished merged, L-F001-REVIEW finished accept-candidate; fixture recovery cycle complete\""
+]
+
+Isolated worktree post-driver status (candidate patch only; no additional driver file):
+ M .claude/skills/xunji-agent-board/references/launch-return-settlement.md
+ M .claude/skills/xunji-agent-board/references/plan-and-delegate.md
+ M docs/ARCHITECTURE.md
+ M docs/WORKFLOW.md
+ M tools/runtime_receipts.py
+ M tools/workers.py
+?? contracts/interrupted-reviewer-start.v1.schema.json

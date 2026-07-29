@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/interrupted-reviewer-start.v1.schema.json",
+  "title": "Xunji Interrupted Reviewer Start Receipt v1",
+  "description": "Content-addressed proof that one exact plan-bound Reviewer SubagentStart was cancelled before any Reviewer model output and may be superseded for exact contract replay.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "parent_run",
+    "reason",
+    "assignment",
+    "role",
+    "session_id",
+    "agent_id",
+    "tool_use_id",
+    "lane_id",
+    "plan_digest",
+    "launch_prompt_sha256",
+    "start_event_seq",
+    "start_event_hash",
+    "observed_head_seq",
+    "observed_head_hash",
+    "parent_transcript_length",
+    "parent_transcript_sha256",
+    "child_transcript_length",
+    "child_transcript_sha256",
+    "recorded_at",
+    "receipt_hash"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.interrupted-reviewer-start.v1"},
+    "parent_run": {"type": "string", "minLength": 1, "maxLength": 512},
+    "reason": {"const": "subagent_start_hook_cancelled_before_assistant"},
+    "assignment": {
+      "type": "string",
+      "pattern": "^A-[A-Za-z0-9._-]+$",
+      "maxLength": 256
+    },
+    "role": {"const": "review"},
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "agent_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "tool_use_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "lane_id": {
+      "type": "string",
+      "pattern": "^L-[A-Za-z0-9._-]+$",
+      "maxLength": 256
+    },
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "launch_prompt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "start_event_seq": {"type": "integer", "minimum": 1},
+    "start_event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "observed_head_seq": {"type": "integer", "minimum": 1},
+    "observed_head_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "parent_transcript_length": {"type": "integer", "minimum": 1},
+    "parent_transcript_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "child_transcript_length": {"type": "integer", "minimum": 1},
+    "child_transcript_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time",
+      "minLength": 20,
+      "maxLength": 64
+    },
+    "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

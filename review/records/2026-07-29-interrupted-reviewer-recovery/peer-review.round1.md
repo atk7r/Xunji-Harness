@@ -1,0 +1,79 @@
+# Peer Review Panel — 2026-07-29-interrupted-reviewer-recovery
+
+_backend: panel:claude · 2026-07-29T07:16Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: NEEDS_DRIVER
+
+_backend: panel:claude_
+_brain: codex_
+_bundle_hash: cf2c527d260a2844deebee2d25f75262769777c9_
+_evidence_index_hash: 3ef5481c368650ed704edf66e8da8431ed0d3741_
+
+## Findings
+- [WARN] PR-001 Isolated-reproduction timing claim (~1.58 s) rests on unmeasured prose, not machine-verifiable evidence | Evidence: evidence/reproduction.txt, E-003 | Why: [panel:claude] The 1.58-second projection timing reported in the report and Frontier F-003 closure is sourced from a single prose paragraph in `evidence/reproduction.txt`. No automated benchmark output, `time` prefix, wall-clock measurement captured alongside the SHA1 chain, or repeat-run artifact exists. The real-driver adjudication (E-004) does not independently report recovery timing. The structural fix (batched tokens, single-pass attempt graph) is sound, and the fix almost certainly outperforms the previous per-record/per-token scan that hit the 600-second timeout. But the specific "1.58 s" figure reported as an evidence-supported fact has weaker evidentiary grounding than the rest of the finding set. Recommended action: either downgrade the precision ("< 2 s" instead of "~1.58 s") or capture a machine-timed run with output committed alongside the SHA1 chain.
+- [WARN] PR-002 The decisive real-driver verification (E-004) used a synthetic fixture (request_budget=0, zero assets), not a replay of the actual A-review-012 live failure | Evidence: E-004 — evidence/driver-adjudication.json "request_budget": 0, "target_action_events": 0, report.md | Why: [panel:claude] The A-review-012 live failure involved real artifact paths, a real 25 MB transcript, and real tool-call/result interactions during a live run. The decisive test used a newly fabricated fixture designed to match the observed failure characteristics. While the recovery logic is largely structural (transcript pattern matching, receipt validation, lock ordering), the end-to-end success was never verified against a copy of the actual stuck run — only a purpose-built synthetic approximation. The first attempt to use a live-run copy failed due to work-plan journal path binding (documented as D-005). The report is transparent about this, but the closure language for F-001–F-003 does not qualify the findings as "synthetic fixture only." This is not a BLOCKER because the recovery logic is genuinely structural, but it represents a residual semantic gap between the test conditions and the production incident that motivated the fix.
+- [WARN] PR-003 No explicit concurrent writer + interrupted-recovery race test | Evidence: evidence/test-results.txt (E-002), evidence/reviewed.diff (E-001) | Why: [panel:claude] The recovery transaction holds the runtime lock (freezing the journal snapshot), validates interruption proof, then acquires the assignment lock in a documented `runtime → assignment` order (ARCHITECTURE.md diff). Between validation and receipt publication while holding both locks, no concurrent writer can alter the journal. This is architecturally sound. However, the test suite has no dedicated test for racing a concurrent runtime event append against the recovery validation window — that is, a test proving that an event that arrives between "validation passed" and "lock acquired" correctly invalidates the recovery. The existing concurrency tests (e.g. "concurrent successful reconciles serialize cursor generations," "concurrent boundary calls linearize") cover other contention patterns but not this specific ordering. Recommended action: add a targeted regression test that simulates a concurrent runtime event landing between the proof-validation and lock-acquisition phases, confirming the transaction fails closed.
+- [WARN] PR-004 review panel had backend errors; aggregation is partial | Evidence: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": EOF, request_id: 202607291512050000552A2B0DAC530F6E"
+  }
+}
+; glm-5.2: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": EOF, request_id: 202607291512320000F0CF1AED213C130C"
+  }
+}
+ | Why: At least one requested heterogeneous reviewer failed or was unavailable.
+
+## Blind-spot check
+- [claude] **Performance claim verified in isolation only.** The 1.58-second isolated-reprojection number was not independently reproduced in the real-driver run. The real-driver adjudication focuses on correctness outcomes (recovery, replay, settlement, zero target/edits) but contains no timing telemetry. Anyone reading the report could reasonably infer the real driver also completed quickly — this is not proven.
+- [claude] **Only one driver-model combination tested.** The real-driver run used Claude Code 2.1.201 with deepseek-v4-flash. The report caveats this in one place but the F-003 closure and the report body do not reiterate the constraint. Different model providers, different client versions, or different transcript sizes may surface timing or behavior issues that this single-point verification did not cover.
+- [claude] **The recovery path is manually triggered, not automatic.** The report's summary ("the framework no longer leaves a plan-bound Reviewer permanently running") could be read as automatic recovery. In fact, recovery requires re-running `workers.py delegate --limit 1` with the owner command — it is not a background daemon or hook-level fix. The operation manual (launch-return-settlement.md diff) is clear, but the report's executive phrasing may oversell the level of automation.
+- [claude] **The data model for interrupted-start receipts is live-migration by "next delegation" only.** The report says live migration does not auto-scan all runs. An affected run from before the fix will not be repaired until someone manually runs `delegate` on it. If the original Claude Code session is long gone and the stuck assignment prevents new plans, the recovery precondition ("run `delegate --limit 1`") itself may be blocked. The documentation does not address this catch-22 case.
+- [claude] **Absent post-recovery hardening test for late-arriving SubagentStop.** The receipt validation checks for an existing runtime Stop at `_validate_interrupted_reviewer_start_receipt` (lines 1440-1445 of the diff). But what happens if a Stop event arrives *after* the recovery receipt has been published but *before* the replayed Reviewer is launched? The lock ordering should prevent this (assignment lock is held), but no test explicitly simulates this window.
+
+## Context-limit notes
+- [claude] The redacted identifiers (`<redacted:internal:48f8aac894c1>` for SubagentStart/Reviewer type, `<redacted:internal:9bd5909b229b>` for schema namespace) make it impossible to verify cross-references against the actual code base. I assume these are consistent namespace redactions, but I cannot confirm that the diff references match the real schema names.
+- [claude] The documentation is extensively bilingual (Chinese/English). My understanding of the Chinese sections (ARCHITECTURE.md diff, some workers.py comments) is functional but I may miss implicit domain conventions specific to this framework's Chinese-language design documentation.
+- [claude] This is not a penetration test — it is a targeted engineering-fix verification for an internal framework bug. Several rubric items (coverage ledger, missed surface per target.md) are structurally inapplicable because the scope was explicitly targetless and the analysis was single-point. I have noted this in my findings rather than forcing pentest-adjacent criteria.
+- [claude] I cannot open the actual `.replay.json` files because none are listed as artifacts in the evidence index — all artifacts are `.txt`, `.json`, `.jsonl`, or `.diff` format files. The artifacts I checked (adjudication JSON, assignments JSON, recovery receipt, loop journal) are present, non-empty, and their SHA1s match the index. I validated content structure through the provided excerpts; for full content verification I would need the actual file bytes.
+- [claude] The `tool_call_limit: 24` and `loop_budget: 5/8` values in the driver assignments suggest the fix was tested under generous resource limits. It is not clear whether recovery works correctly under tighter budgets (e.g. `tool_call_limit: 1` for a minimal mock scenario), though the unit tests cover various budget scenarios independently.
+- [claude] claude succeeded after 2 attempt(s); previous failures: attempt 1: claude code cli exit 1; tail:  claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+{"type":"result","subtype":"success","is_error":true,"api_error_status":null,"duration_ms":136145,"duration_api_ms":136098,"num_turns":1,"result":"API Error: Connection closed mid-response. The response above may be incomplete.","stop_reason":"stop_sequence","session_id":"fdcba2a2-10ae-4de6-8f1c-eb701e53c150","total_cost_usd":0.12902,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0},"inference_geo":"","iterations":[],"speed":"standard"},"modelUsage":{"deepseek-v4-flash[1m]":{"inputTokens":25804,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"webSearchRequests":0,"costUSD":0.12902,"contextWindow":1000000,"maxOutputTokens":32000}},"permission_denials":[],"terminal_reason":"completed","fast_mode_state":"off","uuid":"bc57c377-f9ac-4d38-90b7-063ba94f9b9c"}
+
+- arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": EOF, request_id: 202607291512050000552A2B0DAC530F6E"
+  }
+}
+; glm-5.2: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": EOF, request_id: 202607291512320000F0CF1AED213C130C"
+  }
+}
+
+- panel completed 1/2 required heterogeneous backends
+
+> ERROR: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": EOF, request_id: 202607291512050000552A2B0DAC530F6E"
+  }
+}
+; glm-5.2: arkcli exit 1; stderr/stdout tail: {
+  "ok": false,
+  "error": {
+    "type": "error",
+    "message": "arkruntime.create_responses: RequestError code: 500, err: Post \"https://ark.cn-beijing.volces.com/api/plan/v3/responses\": EOF, request_id: 202607291512320000F0CF1AED213C130C"
+  }
+}

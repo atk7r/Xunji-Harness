@@ -152,6 +152,18 @@ mandatory Reviewer after a denied or interrupted parent launch. Never reconstruc
 the prompt from chat text. A replay whose row, bundle, dependency result digest,
 tool-call limit, or runtime state differs fails closed.
 
+One interrupted launch has a narrower typed bridge into that same no-attempt
+replay. If a Reviewer `SubagentStart` receipt exists but Claude cancelled the
+Start hook before the child produced any assistant message or tool call,
+`delegate` first verifies the exact parent interrupted tool result, the exact
+child prompt, the timed-out `SubagentStart:xunji-reviewer` hook, and the absence
+of child claims, parent terminal receipts, and `SubagentStop`. It then appends a
+content-addressed interrupted-Start receipt, leaves `runtime_events.jsonl`
+untouched, resets only the derived attempt on the same Reviewer row, and returns
+the original persisted launch contract. Any ambiguous or later lifecycle
+activity stays `running` debt. This is not Reviewer cancellation, recreation, or
+force settlement.
+
 Invoke Agents only after reading `launch-return-settlement.md`.
 `no unassigned lane has satisfied runtime dependencies` routes back to that
 reference's durable-return checkpoint; it does not authorize `finish`, replan, or

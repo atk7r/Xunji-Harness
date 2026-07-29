@@ -1581,6 +1581,7 @@ def _assert_no_transcript_launch_intent(
 def _assert_no_assignment_runtime_records(
     run_dir: Path, assignment: str, *,
     plan_digest: str, lane_id: str,
+    allow_typed_interrupted_reviewer_start: bool = False,
 ) -> None:
     if _runtime_receipts is None:
         raise ValueError("runtime_receipts unavailable; cancellation fails closed")
@@ -1592,8 +1593,12 @@ def _assert_no_assignment_runtime_records(
     if integrity:
         raise ValueError(
             "ASSIGNMENT_CANCELLATION_RUNTIME_INTEGRITY_INVALID:" + integrity[0])
+    runtime_events = (
+        _runtime_receipts.effective_agent_events(run_dir)
+        if allow_typed_interrupted_reviewer_start else events
+    )
     denied_tool_ids = _denied_agent_launch_ids(
-        events,
+        runtime_events,
         assignment=assignment,
         plan_digest=plan_digest,
         lane_id=lane_id,
@@ -1605,7 +1610,7 @@ def _assert_no_assignment_runtime_records(
             and event.get("tool_name") == "Agent"
             and str(event.get("tool_use_id") or "") in denied_tool_ids
         )
-        for event in events
+        for event in runtime_events
     ):
         raise ValueError("ASSIGNMENT_CANCELLATION_RUNTIME_EVENT_EXISTS")
     if any(str(item.get("assignment") or "") == assignment
@@ -3948,6 +3953,8 @@ def _replayable_existing_assignment(
         run_dir, assignment,
         plan_digest=str(plan.get("plan_digest") or ""),
         lane_id=lane_id,
+        allow_typed_interrupted_reviewer_start=(
+            _role(str(lane.get("role") or "")) == "review"),
     )
     try:
         _instruction_bundle.verify_assignment_bundle(
@@ -3995,6 +4002,13 @@ def delegate_ready_lanes(
     """
     if fault is not None and not callable(fault):
         raise TypeError("delegate fault injector must be callable")
+    if _runtime_receipts is not None:
+        # This takes the runtime lock before the assignment lock and only
+        # supersedes a Reviewer Start when parent+child Claude transcripts prove
+        # that the Start hook was cancelled before any model output.  The
+        # ordinary exact assigned/no-attempt replay below then reuses the
+        # persisted Reviewer contract.
+        _runtime_receipts.recover_interrupted_reviewer_starts(run_dir)
     with _assignment_mutation_lock(run_dir):
         _recover_prepared_delegate_transaction(run_dir)
         _require_no_prepared_cancellation(run_dir)
@@ -6824,6 +6838,116 @@ def _selftest() -> int:
         "replay the exact durable launch contract"
         in _plan_continuation_notice(planned_run)
     )
+    interrupted_session = "planned-interrupted-reviewer"
+    interrupted_agent = "planned-interrupted-reviewer-child"
+    interrupted_tool = "planned-interrupted-reviewer-tool"
+    interrupted_parent = planned_run / f"{interrupted_session}.jsonl"
+    interrupted_parent.write_text("\n".join((
+        json.dumps({
+            "isSidechain": False,
+            "sessionId": interrupted_session,
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use",
+                "id": interrupted_tool,
+                "name": "Agent",
+                "input": {
+                    "prompt": planned_reviewer_batch[
+                        "assignments"][0]["launch_prompt"],
+                    "subagent_type": planned_reviewer_batch[
+                        "assignments"][0]["subagent_type"],
+                    "run_in_background": False,
+                },
+            }]},
+        }),
+        json.dumps({
+            "isSidechain": False,
+            "sessionId": interrupted_session,
+            "message": {"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": interrupted_tool,
+                "is_error": True,
+                "content": "[Request interrupted by user for tool use]",
+            }]},
+        }),
+    )) + "\n", encoding="utf-8")
+    interrupted_child_dir = (
+        interrupted_parent.with_suffix("") / "subagents")
+    interrupted_child_dir.mkdir(parents=True)
+    interrupted_child = (
+        interrupted_child_dir / f"agent-{interrupted_agent}.jsonl")
+    interrupted_child.write_text("\n".join((
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": interrupted_session,
+            "agentId": interrupted_agent,
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": planned_reviewer_batch[
+                    "assignments"][0]["launch_prompt"],
+            },
+        }),
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": interrupted_session,
+            "agentId": interrupted_agent,
+            "type": "attachment",
+            "attachment": {
+                "type": "hook_cancelled",
+                "hookName": "SubagentStart:xunji-reviewer",
+                "hookEvent": "SubagentStart",
+                "command": (
+                    'python3 "$CLAUDE_PROJECT_DIR/tools/turn_contract.py"'),
+                "durationMs": 600017,
+                "timeoutMs": 600000,
+                "timedOut": False,
+            },
+        }),
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": interrupted_session,
+            "agentId": interrupted_agent,
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "text",
+                    "text": "[Request interrupted by user]",
+                }],
+            },
+        }),
+    )) + "\n", encoding="utf-8")
+    _runtime_receipts.append_hook_event(planned_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": interrupted_session,
+        "transcript_path": str(interrupted_parent),
+        "agent_id": interrupted_agent,
+        "agent_type": "xunji-reviewer",
+    })
+    interrupted_running_row = next(
+        item for item in load_assignments(planned_run)["assignments"]
+        if item.get("agent") == planned_reviewer["agent"])
+    interrupted_replay_batch = delegate_ready_lanes(
+        planned_run, runtime_slots=1, request_budget=10,
+        model_egress_budget=1, merge_capacity=100, limit=1,
+    )
+    interrupted_replayed_row = next(
+        item for item in load_assignments(planned_run)["assignments"]
+        if item.get("agent") == planned_reviewer["agent"])
+    interrupted_reviewer_auto_replay = bool(
+        interrupted_running_row.get("status") == "running"
+        and interrupted_replay_batch.get("replayed_existing") == 1
+        and interrupted_replay_batch["assignments"][0]["assignment"]
+            == planned_reviewer["agent"]
+        and interrupted_replay_batch["assignments"][0]["launch_prompt"]
+            == planned_reviewer_batch["assignments"][0]["launch_prompt"]
+        and interrupted_replayed_row.get("status") == "assigned"
+        and interrupted_replayed_row.get("attempts") == []
+        and len(_runtime_receipts._load_interrupted_reviewer_start_receipts(
+            planned_run,
+            _runtime_receipts.load_events(planned_run),
+        )) == 1
+    )
     planned_reviewer_binding_tamper_blocks_replay = False
     planned_assignment_path = planned_run / "state" / "assignments.json"
     planned_assignment_bytes = planned_assignment_path.read_bytes()
@@ -7748,6 +7872,8 @@ def _selftest() -> int:
          and planned_reviewer_cancel_still_forbidden
          and planned_reviewer_bundle_tamper_blocks_replay
          and planned_reviewer_binding_tamper_blocks_replay),
+        ("transcript-proven interrupted Reviewer Start auto-recovers and replays",
+         interrupted_reviewer_auto_replay),
         ("plan-bound Reviewer cannot delegate before Hunter runtime return",
          reviewer_before_return_blocked),
         ("stale settlement is available only through delegate, not direct assign",

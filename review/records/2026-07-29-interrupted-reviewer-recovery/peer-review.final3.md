@@ -1,0 +1,49 @@
+# Peer Review Panel — 2026-07-29-interrupted-reviewer-recovery
+
+_backend: panel:claude · 2026-07-29T08:01Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: NEEDS_DRIVER
+
+_backend: panel:claude_
+_brain: codex_
+_bundle_hash: 2f518d7fe5ed27307bd1c8c352dcb4728a511224_
+_evidence_index_hash: 7d4682be44d7c7435954b5ed0f1e09c763eb6167_
+
+## Findings
+- [WARN] PR-001 review panel had backend errors; aggregation is partial | Evidence: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: f1a030d534a3f37ed`. The E-004 `driver-adjudication.json` recovery receipt hash is `362c76f25448cc37aaf0b09438810836a94c27af53a1530f1a030d534a3f37ed`. Match!
+- `performance-benchmark.txt`: recovery receipt hash `817260706d0364ae2c952bfae4f5fe8fddc187a50dd0cec343b8ec3828884e43`. E-003 says it's for the original live run copy. Match.
+
+Let's look closer at the E-003 performance benchmark:
+`fixture: isolated byte copy of original live run; original is read-only`
+`started_utc: 2026-07-29T07:18:31Z`
+`[ | Why: At least one requested heterogeneous reviewer failed or was unavailable.
+
+## Blind-spot check
+- [claude] **Root-cause evidence gap**: The diagnosis that "projection repeatedly rescanned the full 25 MB transcript for individual tokens" is recorded as established fact without attaching any raw timing data, profile output, or journal excerpt from the original failure. A reviewer relying on the evidence trail cannot independently confirm the root cause — only the fix's effectiveness.
+- [claude] **Single-version driver coverage**: The real Claude Code driver used only `Claude Code 2.1.201 / deepseek-v4-flash`. The interruption artifact is a specific client-side string `[Request interrupted by user for tool use]`. No testing was performed with other Claude Code versions (e.g., 2.1.200, 2.2.x, Opus/Haiku configs). If the interruption format changes, the mechanism silently stays unexercised.
+- [claude] **Performance benchmark context not captured**: The 1.61-second result (`evidence/performance-benchmark.txt`) includes no machine specs, CPU model, memory, disk type, or concurrent load. The time arguably includes both recovery and the subsequent `WORK_PLAN_TRANSACTION_JOURNAL_DIVERGED` failure path. The report reads "recovers ... in 1.61 seconds" but the full command did more than recovery alone.
+- [claude] **Post-driver inspection single-instrument**: `evidence/post-driver-inspection.txt` was produced by Codex (Claude, the implementation author), not an independent instrument. While independent review rounds existed earlier, the final safety-assertion artifact (zero target effects, clean tool inventory) was authored by the same system that implemented the change. The independent-review section of `ARCHITECTURE.md` properly discloses this, but the evidence chain for the safety claim has no separate verifier.
+- [claude] **Test coverage does not extend to the deferred unified E2E**: The "deferred" label in D-007/F-004 is accurate, but the report does not describe any planned follow-up to close it. Without a scheduled verification step, the deferred item could become permanently open.
+
+## Context-limit notes
+- [claude] Several ARCHITECTURE.md and documentation excerpts are in Chinese. I read them through available excerpts but may miss nuance in the original-language reasoning about lock-ordering exceptions and projection invariants.
+- [claude] Heavy use of `<redacted:internal:...>` placeholders obscures schema IDs, team names, tool IDs, and cryptographic material. This may hide cross-references to external contracts or dependencies that I cannot verify.
+- [claude] The `target.md` (401 GET /) suggests a parent pentest context. This review's scope is confined to the interrupted-Reviewer recovery maintenance mutation. I cannot assess whether this maintenance fix addresses any vulnerability in the original pentest scope — that question was out of this run's charter.
+- [claude] The codebase uses a patently non-standard framework with custom Agent/receipt/settlement semantics (`<redacted:internal:9bd5909b229b>` schemas, runtime journal, plan transactions). I am reasoning from diff excerpts and documented behavior, not from deep familiarity with this framework. Logical gaps I perceive in the design may stem from incomplete understanding rather than actual defects.
+- arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: f1a030d534a3f37ed`. The E-004 `driver-adjudication.json` recovery receipt hash is `362c76f25448cc37aaf0b09438810836a94c27af53a1530f1a030d534a3f37ed`. Match!
+- `performance-benchmark.txt`: recovery receipt hash `817260706d0364ae2c952bfae4f5fe8fddc187a50dd0cec343b8ec3828884e43`. E-003 says it's for the original live run copy. Match.
+
+Let's look closer at the E-003 performance benchmark:
+`fixture: isolated byte copy of original live run; original is read-only`
+`started_utc: 2026-07-29T07:18:31Z`
+`[
+- panel completed 1/2 required heterogeneous backends
+
+> ERROR: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: f1a030d534a3f37ed`. The E-004 `driver-adjudication.json` recovery receipt hash is `362c76f25448cc37aaf0b09438810836a94c27af53a1530f1a030d534a3f37ed`. Match!
+- `performance-benchmark.txt`: recovery receipt hash `817260706d0364ae2c952bfae4f5fe8fddc187a50dd0cec343b8ec3828884e43`. E-003 says it's for the original live run copy. Match.
+
+Let's look closer at the E-003 performance benchmark:
+`fixture: isolated byte copy of original live run; original is read-only`
+`started_utc: 2026-07-29T07:18:31Z`
+`[

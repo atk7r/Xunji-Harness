@@ -1,0 +1,796 @@
+$ python3 tools/runtime_receipts.py --selftest
+ok   hash chain validates
+ok   foreign internal SubagentStop is audited outside Agent journal
+ok   unbound Xunji-typed SubagentStop remains fail-closed debt
+ok   legacy foreign Stop quarantine preserves journal and restores projection
+ok   foreign lifecycle receipt conforms to frozen schema
+ok   new runtime journal append flushes and fsyncs file plus parent directory
+ok   existing nonempty runtime journal append does not repeat directory fsync
+ok   runtime flush failure rolls back the uncommitted tail
+ok   runtime flush failure retry repeats file and zero-byte directory barriers
+ok   runtime file fsync failure preserves the prior committed byte length
+ok   runtime file fsync retry is durable and neither duplicates nor skips seq
+ok   runtime new-file directory fsync failure rolls back the first event
+ok   runtime zero-byte retry repeats the parent-directory fsync
+ok   unknown future assignment ledger schema fails closed
+ok   Agent tool-call claims are durable, contiguous, and exact-replay idempotent
+ok   concurrent boundary calls linearize to one admitted sixth and one denied seventh
+ok   target request claims atomically admit through budget and deny the next call
+ok   Agent tool-call identity conflict and post-Stop calls fail closed
+ok   Agent tool-call receipt tamper enters integrity debt
+ok   Agent tool-use replay identity is scoped by session
+ok   two real Agent receipts satisfy fanout
+ok   done Agent remains unmerged
+ok   anchored merged/blocked dispositions satisfy
+ok   missing canonical anchor is reported precisely
+ok   CronList with no jobs is quiescent
+ok   created run job is active
+ok   CronDelete binds to listed run job
+ok   CronDelete rejects response-substring job prefix
+ok   CronDelete rejects unlisted job
+ok   post-delete CronList is still required
+ok   post-delete CronList proves quiescence
+ok   old-session CronList cannot satisfy current turn
+ok   current-session CronCreate receipt names the bound run
+ok   iteration plan is absent immediately after CronCreate
+ok   transcript-backed TaskCreate satisfies the iteration plan
+ok   same-turn Cron and Task gates do not race transcript persistence
+ok   shape denial metadata is structured without source material
+ok   foreground review receipt is time-bound
+ok   review receipt requires exact output marker
+ok   shell-decorated review command is rejected
+ok   unrelated later invocation cannot validate stale review
+ok   bare PASS cannot satisfy completion review
+ok   structured evidence-bound completion receipt passes
+ok   canonical completion inputs invalidate old PASS and exact restore recovers it
+ok   completion-owned decisions write preserves the frozen PASS bundle
+ok   newest running and failed completion attempts mask an older PASS
+ok   deleted current plan permits exact replay but rejects a late Start with zero append
+ok   global completion parent-only and Start-only lifecycles cannot pass
+ok   global completion parent, Start, and Stop types fail closed on mismatch
+ok   global completion rejects mixed assignment envelopes and marker substrings
+ok   global completion pseudo-attempts never project assignment or merge state
+ok   tampered receipt chain cannot satisfy Agent fanout
+ok   tampered receipt chain fails closed for maintenance truth
+ok   async launch receipts satisfy fanout without pretending return
+ok   exact Agent hook replay is idempotent and conflicts fail closed
+ok   exact SubagentStop replay is idempotent and conflicts fail closed
+ok   running async Agents do not create post-return disposition deadlock
+ok   async launch projects assignments to running attempts
+ok   child target receipt is attributed to its assigned asset
+ok   exact child transcript backs target debt and its identical retry
+ok   exact child transcript backs maintenance debt and its identical retry
+ok   child receipt truth never scans a sibling transcript
+ok   child transcript derivation rejects traversal, session drift, and symlinks
+ok   SubagentStop alone creates a disposition obligation
+ok   missing or structurally empty Agent responses fail closed
+ok   appended and description-only plan prompts fail before runtime append
+ok   missing, blank, legacy, whitespace, and role-swapped parent/Start types fail closed
+ok   wrong Stop types fail before journal or assignment-state mutation
+ok   a replay cannot omit the frozen Agent type
+ok   Agent description metadata cannot override raw prompt/type authority
+ok   plan-bound attempt receipt persists the exact launch prompt hash
+ok   nested Agent attempts bind back to their exact owning assignment row
+ok   assignment ledger rejects cross-row runtime identity reuse
+ok   real returned and failed plan-bound attempts conform to frozen schema
+ok   agent receipt schema rejects unknown and missing fields
+ok   agent receipt schema rejects unknown types; assignment semantics own role swaps
+ok   agent receipt schema rejects bool-as-integer and snapshot extensions
+ok   agent receipt schema enforces timestamp and attempt-state transitions
+ok   normalize preserves exact capability metadata and no forged binding
+ok   ROOT_DIRECT claim is atomic and exact replay is idempotent
+ok   ROOT_DIRECT receipt remains pending until the claimed terminal
+ok   terminal freezes claim binding even when caller metadata is absent/forged
+ok   successful ROOT_DIRECT receipt is exact, self-hashed, and schema-conformant
+ok   concurrent different PreToolUse claims have one durable winner
+ok   wrong terminal tool fails the exact claim projection
+ok   terminal without a claim cannot mint a Root binding
+ok   conflicting success/failure terminals fail closed
+ok   failed ROOT_DIRECT action emits an honest terminal receipt
+ok   a replan may claim a new digest without rebinding the old action
+ok   tampered Root action chain cannot project a receipt
+ok   immutable merge result freezes exact SubagentStop final response, not launch ack
+ok   reverse async lifecycle freezes the exact SubagentStop final response
+ok   unchanged merge binding preserves the exact completed review
+ok   new runtime attempt invalidates an old review receipt
+ok   new immutable result digest invalidates an old review receipt
+ok   returned assignment may be adjudicated while peer Agent is still running
+ok   SubagentStop recorded before launch acknowledgement still closes the attempt
+ok   delayed reverse lifecycle events match by unique agent id without time window
+ok   synchronous Start authorizes the exact child before parent PostToolUse
+ok   Start -> Stop -> synchronous Post merges into one returned attempt
+ok   real sync text-block Post without agentId joins the Stop child attempt
+ok   Post -> Start keeps the exact child actor running until Stop
+ok   sync parent Post alone remains explicit unconfirmed lifecycle debt
+ok   same-batch Starts without causal identity fail closed before append
+ok   reverse-order Starts bind exact child prompts rather than arrival ordinals
+ok   parallel Start replay is idempotent and conflicting replay fails closed
+ok   parallel child Stop bytes remain authoritative over parent Posts
+ok   child prompt asset drift cannot select a parent invocation
+ok   later child user binding cannot drift only the assignment assets
+ok   partial explicit Start text cannot graft onto child identity
+ok   a later complete child user message cannot mint missing initial authority
+ok   malformed child binding JSON cannot be repaired by a later prompt
+ok   plan-bound child prompt missing lane/plan tokens fails closed
+ok   conflicting later user text cannot replace the initial child identity
+ok   Reviewer child identity requires the exact target result digest
+ok   interrupted Reviewer recovery rejects any child assistant output
+ok   interrupted Reviewer recovery rejects a non-Reviewer assignment
+ok   transcript-proven interrupted Reviewer Start reverts to exact no-attempt replay
+ok   interrupted Reviewer Start receipt conforms to frozen schema
+ok   interrupted Reviewer Start v1 rejects a different failure reason
+ok   interrupted Reviewer recovery serializes a concurrent runtime writer
+ok   Reviewer reproject builds the attempt graph once per snapshot
+ok   interrupted Reviewer Start recovery is idempotent
+ok   pre-bundle v1 running attempt permits only its exact Stop settlement
+ok   tool_result text cannot forge child identity
+ok   Start without exact identity rejects unconfirmed cross-batch candidates
+ok   denied Agent canary cannot compete with a racing later Start
+ok   another session's Agent denial cannot retire this session's candidate
+ok   Post -> Start -> Stop freezes one child attempt and Stop result
+ok   SubagentStop can freeze the exact child transcript final assistant output
+ok   nested target-controlled assistant objects cannot become final output
+ok   max-turn tool_use plus trailing tool_result is not a final Agent output
+ok   conflicting top-level assistant envelopes fail closed
+ok   malformed JSON after assistant output invalidates the result scan
+ok   SubagentStop without exact final output fails before journal append
+ok   immutable result directory crash windows precede journal and retry exactly
+ok   process death after runtime fsync leaves a recoverable projection gap
+ok   explicit reproject idempotently heals assignment and merge draft
+ok   stale Agent receipt cannot rebind a reused assignment id
+ok   cross-session SubagentStop cannot close another session's launch
+ok   duplicate launched agent id is lifecycle debt
+ok   one SubagentStop cannot close two reused-agent assignments
+ok   assignment projection and creator RMW serialize without a lost row
+ok   projection cursor file-fsync failure rolls back and retry is durable
+ok   cursor generation write failure rolls back and exact retry increments once
+ok   projection diagnostic dir-fsync failures roll back publish and unlink
+ok   missing diagnostic retry confirms the deletion directory barrier
+ok   projection cursor rejects corrupt, extra, mixed, and invalid-time state
+ok   concurrent successful reconciles serialize cursor generations
+ok   cursor generation overflow and rollback both fail closed
+ok   projection diagnostic accepts only explicit legacy or exact current state
+ok   corrupt projection cursor is visible debt until explicit full reproject
+ok   non-Agent journal-head growth cannot discard an unreconciled failure
+ok   missing cursor is legacy-compatible but does not hide an empty-head failure
+ok   a failure started before concurrent covering success is superseded
+ok   a new same-snapshot failure after success remains durable debt
+ok   older projection failure cannot overwrite a newer diagnostic
+ok   older projection success cannot clear a newer diagnostic
+ok   newer successful projection clears an exactly covered older diagnostic
+ok   same event sequence with a conflicting diagnostic hash fails closed
+ok   runtime projection failure is persisted instead of swallowed
+ok   parent Agent Post revalidates assignment assets before journal append
+ok   runtime projection revalidates the exact assignment asset package
+ok   target denial is transcript-backed
+ok   target denial remains unresolved without a retry
+ok   failed identical retry does not resolve denial
+ok   different successful command does not resolve denial
+ok   successful same command resolves despite description drift
+ok   prepared Agent probe resolves prior work-plan denial by target semantics
+ok   target chain denial freezes its exact retry action hash
+ok   successful exact target segment resolves registered-chain debt
+ok   maintenance denial remains unresolved without success
+ok   maintenance denial preserves exact authorized-path evidence
+ok   failed maintenance retry is itself an unresolved blocker
+ok   successful identical maintenance action resolves denial
+ok   durable hook truth freezes progression before transcript flush
+ok   durable identical success clears pre-flush maintenance debt
+ok   Bash environment participates in action hash
+ok   WebFetch extended parameters participate in action hash
+runtime_receipts selftest passed
+
+$ python3 tools/workers.py --selftest
+[agent-board check] clean: no Agent discipline issues found.
+ok   target review admission accepts four absolute frozen artifact paths
+ok   truncated replay validates saved bytes without comparing them to the wire hash
+ok   legacy capped replay preserves full-wire identity without claiming full verification
+ok   empty replay wire hash cannot bypass artifact integrity
+ok   target review admission rejects stale or invented Reviewer artifacts
+ok   unknown future assignment ledger schema fails closed
+ok   suggest returns open/probing before bad deferred
+ok   suggest excludes closed
+ok   breadth signals stay descriptive rather than choosing scheduler mode
+ok   scan sees two done workers
+ok   empty run suggest returns []
+ok   asset suggestions live in workers not graph
+ok   coverage asset identity preserves an explicit port
+ok   assignment projections preserve the inventory-owned asset id
+ok   plan with no strong candidate exits 1 and forbids example fallback
+ok   merge-check clean path exits 0
+ok   created worker scans assigned front
+ok   field parser does not cross newline on empty value
+ok   empty Claim does not swallow next line
+ok   empty Control does not swallow following text
+ok   plan breadth signals use the full candidate pool
+ok   planner names parallel mode for two dependency-free compatible fronts
+ok   planner writes a turn-bound non-authorizing model proposal seed
+ok   offline operator constraint removes target lanes at planner source
+ok   single-front lane plan reviews every execution lane before advancing
+ok   lane planner emits cost and information-gain fields
+ok   lane dependencies serialize each execution-review pair
+ok   model proposal can commit three ready lanes under one semantic front
+ok   model proposal may omit the generated offline prefix
+ok   model proposal is rejected after its turn binding changes
+ok   scheduler width is bounded by runtime and merge capacity
+ok   delegate assigns the later lane actually selected under budget
+ok   stale inputs cannot launch another unassigned execution lane
+ok   scheduler skips over-budget merge, target, and model-egress rows
+ok   delegate batch failure rolls back assignments and generated artifacts
+ok   delegate batch retry commits both ready execution lanes
+ok   prepared delegate transaction recovers idempotently through assign entry
+ok   crash-recovered delegate retry commits the complete batch
+ok   immutable cancellation receipts satisfy the versioned JSON schema
+ok   typed cancellation removes only unlaunched rows and keeps cycle debt open
+ok   turn-only stale authority can retire a provably unlaunched assignment
+ok   turn-and-input stale authority records the exact combined basis
+ok   cancellation CLI keeps the front open and denies completion semantics
+ok   v1/v2 cancellation transaction and tombstone mixes fail closed
+ok   material replan is required and canceled Agent ids are never reused
+ok   read-only archive scan never deletes a concurrent writer temp
+ok   parent creation durability faults map stably and retry in order
+ok   every cancellation crash point forward-recovers one receipt
+ok   prepared cancellation blocks concurrent late Agent failures before snapshots
+ok   prepared cancellation blocks material replan until forward recovery
+ok   late transcript Start remains debt and cannot cross or erase cancellation
+ok   missing artifact retry repeats the unlink parent durability barrier
+ok   parent transcript Agent tool_use blocks unlaunched cancellation
+ok   exact PreToolUse denial is negative launch proof for cancellation
+ok   runtime failure/event cannot be relabeled as not-run cancellation
+ok   all Agent lifecycle identities replay exactly without a tombstone
+ok   older Agent facts replay exactly across a later cancellation tombstone
+ok   stale failed execution unlocks only its unique Reviewer
+ok   same-asset target lanes cannot overlap
+ok   merge-check catches missing control
+ok   merge-check catches duplicate candidate
+ok   merge-check catches conflicting candidate certainty
+ok   merge-check catches done-but-unmerged
+ok   schema-v1 assignment rows migrate explicitly to schema-v3 defaults
+ok   real initial, returned, reviewed, merged, and next-lane assignments conform
+ok   working heartbeat preserves and conforms with the authentic running attempt
+ok   assignment contract rejects unknown and missing fields
+ok   assignment contract rejects bool-as-integer and invalid timestamps
+ok   new assignments materialize a bounded typed child tool-call limit
+ok   new assignments freeze the exact typed lane request budget
+ok   assignment contract enforces assignment/review/root state fields
+ok   assignment attempts resolve exact nested receipt contract
+ok   assignment role freezes the exact nested Agent type
+ok   corrupt loop journal fails closed before assignment/lifecycle mutation
+ok   legacy main list exits 0
+ok   legacy main --new exits 0
+ok   assign command exits 0
+ok   target-facing assignment requires an explicit asset package
+ok   hunter alias cannot create an empty target assignment
+ok   unknown Agent role is rejected instead of becoming a legacy lane
+ok   invalid disposition note is rejected before state mutation
+ok   blocked disposition requires the literal Reason label
+ok   blocked disposition requires the literal canonical Front label
+ok   malformed finish attempts preserve assignment bytes
+ok   terminal disposition rewrite requires explicit amendment
+ok   explicit disposition amendment preserves prior audit state
+ok   heartbeat cannot write a terminal disposition
+ok   done assignment can advance to an adjudicated terminal state
+ok   missing disposition validator fails closed
+ok   zero-tool Agent cannot be marked merged
+ok   partial asset package cannot be marked merged
+ok   every asset action settles before later canonical promotion
+ok   delegate capacity error names the exact limiting budget
+ok   planner output is committed unchanged before delegation
+ok   Hunter and Reviewer launch prompts reconstruct from persisted assignments
+ok   denied wrong Reviewer prompt replays the durable assigned contract
+ok   transcript-proven interrupted Reviewer Start auto-recovers and replays
+ok   plan-bound Reviewer cannot delegate before Hunter runtime return
+ok   stale settlement is available only through delegate, not direct assign
+ok   plan-bound context path is attempt-unique and freezes exact bindings
+ok   Hunter return creates a plan/lane/result-bound merge draft
+ok   immutable result snapshot contains the full Agent response, not launch ack
+ok   immutable result snapshot tamper invalidates Reviewer admission
+ok   mutable Agent scaffold changes do not replace the frozen result
+ok   Reviewer return without review disposition cannot delegate next execution
+ok   returned Reviewer writes an exact review disposition receipt
+ok   needs-control completes review of frozen bytes before Root settlement
+ok   non-target planner lane merges without a fabricated target receipt
+ok   Root merge follows review and unlocks the next planner execution lane
+ok   Root finish keeps the front open until every committed lane settles
+ok   generated replan inherits the exact completed lane prefix
+ok   replan preserves prior-plan frozen Reviewer admission
+ok   Single Synthesizer cannot be fanned out as an Agent role
+ok   status command exits 0
+ok   empty status command exits 0
+ok   driver-facing legacy/status output routes to typed Agent Board
+ok   agent-check empty run exits 0
+ok   agent-check clean scaffold has no issues
+ok   agent scaffold includes personalized RDT controls
+ok   agent scaffold routes launch and settlement without duplicating argv
+ok   merge-threats writes Root-owned hypothesis
+ok   merge-threats skips duplicate suggestions
+ok   agent-check catches bad threat hypothesis fields
+ok   agent-check catches target artifact project label
+ok   agent-check catches target cleanup requiring yes
+ok   agent-check catches invalid instruction provenance
+ok   status sync: complete file flips assignment to done
+ok   status sync: Findings section flips assignment to done
+ok   status sync: empty Findings section stays assigned
+ok   status sync: negative Findings summary flips assignment to done
+ok   status sync: investigatory placeholder stays assigned
+ok   lifecycle: assigned agent hard-fails closure
+ok   lifecycle: heartbeat records running state
+ok   lifecycle: plan-bound running guidance never tells Root to write done
+ok   lifecycle: done remains an adjudication blocker and patches agent file
+ok   role alias web uses web-hunter template
+ok   agent assignment writes context pack
+ok   assignments.json records agent
+ok   agent-check catches missing loop/safety sections
+ok   agent-check catches non-synthesizer finding/closure
+ok   agent-check catches high-confidence candidate missing control/artifact
+ok   conflicts detects support/refute contradiction
+ok   direct contradiction alone does not create confidence mismatch
+ok   conflicts detects same-polarity duplicate
+ok   conflicts detects same-polarity confidence mismatch
+ok   conflicts detects same-polarity artifact mismatch
+ok   unchanged conflict projection preserves bytes and work-plan fingerprint
+ok   semantic conflict change updates the work-plan fingerprint
+ok   concurrent conflict projection compare/write is linear
+ok   duplicate conflict keys rebuild with an explicit diagnostic
+ok   invalid conflict timestamps rebuild with an explicit diagnostic
+ok   future conflict schema fails closed without downgrade
+ok   unknown conflict fields fail closed without loss
+ok   conflict symlink is rebuilt in-run and bound by work-plan fingerprint
+ok   synthesis rejects future conflict projection schema
+ok   synthesis rejects unknown conflict projection fields
+ok   synthesis draft is advisory not canonical
+ok   synthesis treats placeholder control as missing
+ok   synthesis carries unresolved conflicts
+workers selftest passed
+
+$ python3 tools/turn_contract.py --selftest
+ok   plan-bound child attempts are claimed before a later policy denial
+ok   near-cap and final-call PreToolUse context instruct an immediate return
+ok   the seventh child call has one stable hard-limit denial code
+ok   child tool-use identity conflicts fail closed with a stable code
+ok   target request budget exhausts with context and denies the next call
+ok   explain overrides action words
+ok   history/audit prompt without execute verb is read-only
+ok   ambiguous active-run prompt defaults read-only
+ok   operator stop maps to pause
+ok   repair request maps to execute
+ok   effect-narrowing clauses preserve affirmative natural-language execution
+ok   natural-language questions and explicit explanation requests stay read-only
+ok   unrecognized English execution wording defaults read-only
+ok   no-active-run ordinary question stays outside run execution
+ok   active-run informational question stays read-only
+ok   explicit active-run switch remains executable
+ok   scoped safety restrictions do not revoke an exact loop directive
+ok   an explicit lifecycle denial still revokes a conflicting loop directive
+ok   runtime lifecycle hook exceptions surface a stable fail-closed diagnostic
+ok   ordinary operator wording derives a distinct maintenance turn mode
+ok   source text after the first operator instruction cannot mint maintenance authority
+ok   legacy maintenance alias needs no scope or reason ceremony
+ok   trusted single-operator maintenance uses a local correlation fallback
+ok   explicit loop intent outranks a framework recovery clause
+ok   natural localhost lifecycle intent outranks negative framework and recovery clauses
+ok   for-source lifecycle wording outranks a maintenance recovery clause
+ok   operator offline intent freezes target and named web-tool constraints
+ok   natural action-before-target denial freezes target egress
+ok   proxy discipline plus positive target intent does not mint an offline denial
+ok   ordinary live loop cannot edit a safety-critical path
+ok   maintenance intent allows a typed critical-path edit
+ok   maintenance intent allows an adjacent documentation edit
+ok   maintenance intent allows repository-local paths without predeclaration
+ok   list-valued nested paths are authorized as one complete set
+ok   one typed edit may cover multiple repository-local paths
+ok   empty, glob, escaping, and non-string path members fail closed
+ok   maintenance receipts bind the exact typed effect paths
+ok   authorized scope is never reported as an untouched receipt path
+ok   maintenance turn blocks target actions and Cron
+ok   maintenance turn forbids Bash source mutation
+ok   maintenance turn allows read-only Bash and direct py_compile
+ok   maintenance turn denies git index/worktree mutation
+ok   ordinary live loop denies opaque git patch mutation
+ok   Git env helpers remain typed repo mutation while Git words in data do not
+ok   ordinary live loop denies env-injected reads and unknown interpreters
+ok   legacy maintenance alias permits typed local writes without options
+ok   maintenance contract freezes the live run in derived run status
+ok   no-active-run maintenance authority stays session-bound and short-lived
+ok   live hook pipeline binds maintenance mode and typed local Edit
+ok   live hook pipeline denies direct control-state Edit
+ok   new execute turn revokes maintenance scope and records critical denial
+ok   current-turn maintenance blocker allows deterministic inspection only
+ok   a benign maintenance denial does not sticky-freeze the operator turn
+ok   negated direct-egress phrases never grant approval
+ok   explicit direct-egress phrase grants current-turn approval
+ok   exact scope directive binds run/assets and execute mode
+ok   scope admission turn is zero-probe and blocks target actions
+ok   malformed scope directive permits no write authority
+ok   target action blocked before real fanout
+ok   run-model failure produces a deterministic fail-closed contract state
+ok   raw target curl is denied by proxy egress gate
+ok   raw target requests code is denied by proxy egress gate
+ok   target WebFetch is denied because it cannot attest engagement proxy
+ok   unknown-host WebFetch cannot bypass the engagement proxy gate
+ok   proxy-aware guarded target tool is allowed
+ok   source/AI review-scope asset cannot become a target capability
+ok   explicit out-of-scope asset stays blocked
+ok   candidate in-scope hand edit without committed operator receipt stays blocked
+ok   explicit in-scope ledger asset remains executable
+ok   proxy-aware tool rejects destinations absent from the asset ledger
+ok   direct-egress opt-out requires current operator approval
+ok   current operator may explicitly approve direct egress
+ok   non-Bash target network tool cannot bypass proxy attestation
+ok   unassigned coverage asset blocks target action
+ok   corrupt coverage fails closed instead of disabling the asset gate
+ok   valid nested coverage still enforces hosts when root coverage is corrupt
+ok   continue prompts preserve a material fanout epoch across sessions
+ok   material coverage-debt change resets fanout epoch
+ok   asset-bound Agent prompt is accepted
+ok   Agent prompt with mismatched asset package is denied
+ok   bound child Agent may execute its own target lane
+ok   child Agent cannot escape its assigned asset package
+ok   child Agent cannot create nested Agent fanout
+ok   Root is not deadlocked while async Agents are still running
+ok   Root disposition gate starts only after real SubagentStop
+ok   running child is not blocked by a returned peer's disposition debt
+ok   legacy empty-asset child cannot execute target actions
+ok   completion-review child can read frozen run state
+ok   completion-review child cannot mutate run state
+ok   synchronous child is authorized from transcript-bound SubagentStart
+ok   synchronous child loses authority at SubagentStop before parent PostToolUse
+ok   Start -> Stop -> synchronous Post projects one causal returned attempt
+ok   encoded network command blocked before fanout
+ok   renamed unknown script blocked before fanout
+ok   workers control command allowed before fanout
+ok   workers --asset control is not misclassified as target egress
+ok   quoted disposition punctuation remains valid control data
+ok   registered owner notes may name protected records as inert data
+ok   all quoted shell punctuation remains inert control data
+ok   single-quoted substitutions remain literal control data
+ok   backslash-escaped substitution remains literal control data
+ok   ANSI-C shell expansion is not accepted as exact control argv
+ok   trailing shell comments are not accepted as exact control argv
+ok   unquoted shell chaining cannot impersonate a control command
+ok   adversarial shell syntax fails closed through evaluate_pretool
+ok   documented bare python3 survives hook and Bash PATH differences
+ok   unresolved micro-version Python token cannot impersonate control
+ok   new-run setup command is lifecycle control before old-run fanout
+ok   benign direct-egress reminders normalize into local bootstrap control
+ok   setup --classify requires a current explicit non-negated opt-in
+ok   classify opt-in uses the full unquoted prompt rather than its log excerpt
+ok   explicit setup slug authority is hashed from full unquoted prompt text
+ok   prompt-named --source URL is local lifecycle control
+ok   source authority persists only as a hash with a redacted prompt display
+ok   explicit /loop URL derives a new-run transition without extra wording
+ok   attached open-run wording keeps the bare host as the semantic source
+ok   Claude lifecycle argv is a candidate mechanically promoted to typed authority
+ok   model lifecycle candidate cannot select a source absent from the prompt
+ok   AI lifecycle candidate availability does not cap ordinary target execution
+ok   setup-only semantic scope is candidate-bound and freezes post-setup mutation
+ok   tampered model lifecycle candidate cannot reach a transition claim
+ok   hashed current-prompt source authority permits the exact clean argv
+ok   same basename with a different query cannot reuse source authority
+ok   explicit /loop binds only its source token, not other mentioned URLs
+ok   natural-language setup authorizes one unique URL source
+ok   natural-language setup with multiple URLs fails closed as ambiguous
+ok   negated and interrogative create intents remain read-only
+ok   negated resume intent remains read-only
+ok   quoted/code-fenced /loop text cannot mint lifecycle authority
+ok   indented /loop plus explicit analysis remains read-only
+ok   leading whitespace is normalized without changing source authority
+ok   top-level English imperative still authorizes its unique source
+ok   natural-language sentence punctuation preserves source intent
+ok   operator language compiles attached and bare-host sources to one semantic target
+ok   lifecycle context returns one copy-safe exact source without placeholders
+ok   trailing recovery questions do not cancel the primary lifecycle action
+ok   an attached run path retains its exact named resume identity
+ok   an attached absolute run path retains its exact named resume identity
+ok   mixed named-run and target URL waits for and promotes model-selected resume
+ok   natural-language resume variants keep run and target anchors in separate roles
+ok   natural route and scope descriptions compile to typed effects
+ok   a file inside the current run routes as resume without new-run transition
+ok   setup_run --target accepts only the selected source
+ok   natural-language unique URL permits its deterministic setup target
+ok   natural-language multi-URL authority blocks selected, mentioned, and arbitrary setup targets
+ok   source turn cannot substitute an unrelated legacy recon
+ok   source turn cannot substitute a resume operation
+ok   resume turn binds the exact named run operation
+ok   output-only lifecycle wrappers return a stable non-maintenance shape denial
+ok   shape denial receipt is structured, redacted, and non-maintenance
+ok   clean exact owner status commands remain registered local reads
+ok   owner status output wrappers are retryable command-shape denials
+ok   owner status shape receipt is structured and non-maintenance
+ok   registered capability chains are denied without maintenance truth
+ok   every denied registered-chain segment remains an exact individual retry
+ok   target and model registered chains retain typed non-maintenance denials
+ok   chain effect set is risk ordered while duplicate target identities remain
+ok   invalid-argv registered chains are retryable nonmaintenance shape denials
+ok   registered chain denial receipts create no maintenance blocker
+ok   effectful registered-chain receipts preserve effect without maintenance
+ok   invalid registered-chain receipts cannot mint maintenance debt
+ok   env, critical-data, and repository chains retain maintenance debt
+ok   exact target segment retry resolves registered-chain target debt
+ok   opaque or mutating chain segments retain the normal fail-closed path
+ok   invalid owner argv is retryable while true file redirects stay maintenance-class
+ok   real incomplete work-plan argv and valid control failure receipts stay non-maintenance
+ok   common read chains execute without maintenance or target debt
+ok   true lifecycle output writes remain maintenance-class mutations
+ok   --source URL absent from the operator prompt is blocked
+ok   --source basename collision is not operator authority
+ok   prepared setup transaction blocks target work
+ok   prepared setup transaction blocks CronCreate
+ok   prepared setup transaction remains readable
+ok   prepared setup transaction permits explicit recovery lifecycle
+ok   setup cannot be used without current operator run-transition intent
+ok   documented loop journal command is control before fanout
+ok   clear-active is denied without operator wording
+ok   operator text cannot authorize active-pointer clearing
+ok   English operator text cannot authorize active-pointer clearing
+ok   wrapped clear-active remains a fail-closed lifecycle command
+ok   set-active cannot switch to a run absent from the operator prompt
+ok   prompt-named set-active is allowed
+ok   set-active binds an exact hashed run name without prefix or URL-path authority
+ok   prompt-named resume is allowed across runs
+ok   setup --classify keeps the following slug positional
+ok   invalid normalizer flags, empty setup source, and invalid dates fail closed
+ok   lifecycle commands reject tool-level PATH/environment overrides
+ok   setup --target URL is consumed without replacing the run slug
+ok   loop bootstrap --source URL derives the exact target run
+ok   unknown lifecycle options fail closed instead of rebinding the slug
+ok   loop bootstrap resume extracts the exact target run
+ok   statusline set-active extracts the exact target run
+ok   lifecycle claims distinguish adapter and semantic option effects
+ok   typed capability effects separate target, control, local verify, and model egress
+ok   anti-drift and runtime-receipt capabilities bind exact argv and active run
+ok   capability scope and output resources bind to the active run
+ok   unknown argv for a registered script remains target-capable and non-control
+ok   clean invalid registered argv is a non-authorizing retryable shape denial
+ok   allowed probe env plus invalid argv remains a retryable shape denial
+ok   arbitrary python-c access to a critical manifest remains maintenance-class
+ok   out-of-tree workers.py cannot impersonate control plane
+ok   read-only helper allowlist rejects path-spelled impersonators
+ok   ripgrep read helper rejects external preprocessor options
+ok   quoted punctuation and stderr-to-devnull stay read-only
+ok   exact shasum file reads never mint framework maintenance debt
+ok   narrow sed print remains read-only before fanout
+ok   sed in-place mutation blocked before fanout
+ok   sed write command blocked before fanout
+ok   find file-output action blocked before fanout
+ok   protected control-plane denial is not a target-result action
+ok   destination-free local shell denials do not mint target-result debt
+ok   Root canonical promotion waits for reviewed assignment settlement
+ok   direct active-run pointer Write is blocked
+ok   direct coverage ledger Write is blocked
+ok   controlled coverage sync remains allowed
+ok   active-run pointer shell denial is local, not a target result
+ok   old-session Agent receipts do not satisfy this turn
+ok   receipts without post-return disposition remain blocked
+ok   current receipts plus anchored disposition unlock target action
+ok   missing contract blocks target action
+ok   malformed frontier blocks target action
+ok   missing frontier blocks target action
+ok   malformed contract is rejected
+ok   wrong contract schema is rejected
+ok   cross-session contract reuse is rejected
+ok   stale contract is rejected
+ok   active-run transition preserves the current contract and run status
+ok   serial override requires current operator prompt
+ok   internal task notification cannot replace operator turn contract
+ok   Agent without binding tokens blocked
+ok   bound Agent call allowed
+ok   completion Agent without full checklist is blocked
+ok   completion Agent with evidence hash and checklist is allowed
+ok   completion Agent rejects missing, legacy, whitespace, and role-swapped types
+ok   completion Agent rejects stale hash and mixed assignment envelopes
+ok   completion marker matching is token-exact rather than substring-based
+ok   completion prompt requires current committed S3 plan provenance
+ok   missing, S1, S2, stale, prepared, and corrupt plans block completion launch
+ok   blocked completion PreToolUse attempts append no runtime facts
+ok   explain mode blocks Bash
+ok   pause mode allows CronList
+ok   CronCreate requires current-turn CronList
+ok   CronCreate allowed after current-turn empty CronList
+ok   new-run /loop cannot schedule the origin run before transition
+ok   pending new-run /loop blocks task planning on the origin run
+ok   pending new-run /loop blocks Agent launch on the origin run
+ok   post-bind work requires a committed transaction/contract binding
+ok   new-run task planning waits for current-turn CronCreate
+ok   new-run Agent launch waits for current-turn CronCreate
+ok   a committed no-active-run transition reaches the bound-run Cron gate
+ok   Agent launch waits for a post-Cron iteration plan receipt
+ok   TaskCreate is allowed after the bound run Cron receipt
+ok   post-Cron task receipt unlocks the lifecycle gate
+ok   Task receipt alone does not replace xunji.work-plan.v1
+ok   serial work plan permits its uniquely bound Agent
+ok   plan-bound Agent prompt rejects suffix, prefix, whitespace, and reorder drift
+ok   appended-prompt canary persists the stable delegation denial code
+ok   Agent description cannot replace an exact tool_input.prompt
+ok   plan-bound Agent rejects a mismatched plan digest
+ok   real PreToolUse admits only the unique stale-result Reviewer
+ok   plan-bound child may read its lane context but cannot escape its effect
+ok   context tamper before parent launch is denied without a fake Agent attempt
+ok   artifact drift between parent Post and SubagentStart appends no Start
+ok   Start-frozen prompt hash rejects a coordinated mutable child rebind
+ok   serial Agent mode keeps Root coordinator-only for target and model effects
+ok   typed cycle_end admits exact foreground Root peer review without reviving execution
+ok   ROOT_DIRECT rejects a same-effect capability id substitution
+ok   ROOT_DIRECT PreToolUse freezes one exact claim and exact replay is idempotent
+ok   ROOT_DIRECT PostToolUse replay preserves one exact terminal receipt
+ok   ROOT_DIRECT projection completes without Agent or Reviewer fiction
+ok   ROOT_DIRECT terminal blocks exact replay and a second tool use before cycle_end
+ok   ROOT_DIRECT exact receipt derives the typed cycle_end
+ok   TaskCreate with a URL remains control-plane only
+ok   task-plan runtime receipt redacts sensitive URL query values
+ok   CronCreate without an active run is blocked
+ok   root control files stay protected with no active run
+ok   clear-active fails closed even without an active run
+ok   no-active-run UserPromptSubmit stores a bootstrap contract
+ok   no-active lifecycle wrapper returns shape denial without a claim
+ok   no-active clean exact retry succeeds in the same operator turn
+ok   no-active hook promotes Claude semantic candidate before writing a claim
+ok   missing session metadata preserves normalized operator intent across hooks
+ok   missing all Claude metadata uses the personal singleton across hooks
+ok   private setup transaction APIs cannot bypass the public lifecycle adapter
+ok   a new bare continue prompt revokes pending transition authority
+ok   the persistent personal pointer captures a new prompt
+ok   a pointer selected by another session remains the personal global selection
+ok   an exact explicit prompt may rebind a foreign-session pointer
+ok   internal prompt notifications preserve pending authority
+ok   no-active prompt revocation preserves unrelated session authority
+ok   active canonical contract overwrite revokes the old session claims
+ok   missing-session active overwrite still revokes the displaced claim
+ok   no-active-run normalizer prepare needs a current bootstrap contract
+ok   no-active-run normalizer prepare cannot self-authorize external egress
+ok   external-model opt-in uses full unquoted prompt with late denial precedence
+ok   operator-bound external prepare is read-only and creates no transition claim
+ok   pending bootstrap allows its authorized setup command
+ok   pending bootstrap permits read-only owner skill loading
+ok   pending bootstrap rejects an unrecognized bare Python without consuming authority
+ok   documented bare python3 claims across hook and Bash PATH differences
+ok   pending bootstrap blocks target execution before run binding
+ok   pending bootstrap blocks arbitrary writes before run binding
+ok   authority mkdir and mkstemp failures map to the durability boundary
+ok   authority file and directory fsync failures map to the durability boundary
+ok   set-active without a current-session bootstrap contract is blocked
+ok   first active run consumes and binds the bootstrap contract
+ok   claimed exact replay retries the owner-directory durability barrier
+ok   ambiguous pending contracts fail closed instead of crossing sessions
+ok   target claim selects the exact session among concurrent pending contracts
+ok   consumed target claim binds source, transaction, and expected run
+ok   missing claim and pending artifacts converge after deletion fsync retry
+ok   same-target concurrent session claims fail closed
+ok   no-run maintenance intent leaves a short-lived local contract
+ok   turn contracts do not guess a recent run without a pointer
+ok   turn contracts bind the explicit active pointer
+ok   SessionEnd clears the exact session-owned statusline selection
+ok   startup clear and compact never restore a saved selection
+ok   wrong transcript and fork session cannot consume a selection
+ok   resume restores selection behind a non-executable barrier
+ok   the first prompt after resume mints a fresh turn contract
+ok   SessionEnd cannot clear another session's selection
+ok   unknown SessionEnd reason leaves the pointer intact
+ok   all official SessionEnd reasons clear an owned selection
+ok   SessionEnd without a session id preserves the pointer
+ok   SessionEnd without a transcript preserves the pointer
+ok   missing or corrupt SessionEnd ownership contracts fail closed
+ok   same-run session replacement wins the contract-and-pointer CAS
+ok   different-run pointer replacement wins the SessionEnd CAS
+ok   the replacement session can clear its own selection
+ok   session clear rejects a partial ownership attestation
+ok   SessionEnd hook exits silently and preserves the personal pointer
+ok   SessionEnd lock contention stays within the hook budget
+ok   SessionEnd cleanup succeeds after the lock is released
+ok   settings wires UserPromptSubmit contract
+ok   settings does not wire session-owned pointer cleanup
+ok   settings wires global PreToolUse contract
+ok   settings runs turn contract selftest at SessionStart
+ok   settings does not wire session-owned pointer restoration
+ok   global turn contract PreToolUse hook is first
+ok   settings wires Agent/Cron PostToolUse receipts
+ok   settings wires iteration-plan success/failure receipts
+ok   settings wires failed tool receipts
+ok   settings wires maintenance write success and failure receipts
+ok   settings wires Subagent lifecycle receipts
+ok   CronDelete rejects job not listed for this run
+ok   memory write needs explicit approval
+ok   relative Bash memory path needs explicit approval
+ok   read-only Bash memory access remains allowed
+ok   direct memory Read remains allowed
+ok   background review is blocked
+ok   foreground review uses typed --out instead of shell redirection
+ok   peer review redirect metacharacters cannot enter the capability registry
+ok   registered review cannot overwrite a safety-critical data path
+ok   protected runtime receipt cannot be edited
+ok   structured edit paths reject duplicate-slash, dot, and parent aliases
+ok   active-run-relative structured paths remain protected
+ok   every edit-tool path field protects plan and merge archives
+ok   every structured edit tool protects the run-root setup source bundle
+ok   symlink aliases and protected-namespace escapes remain protected
+ok   nonexistent ordinary edit path remains unprotected
+ok   reason-pass receipt and lock cannot be edited directly
+ok   journals, plan/delegate transactions, and immutable snapshots cannot be edited directly
+ok   protected runtime receipt remains readable
+ok   runtime projection cursor remains readable
+ok   normalized and symlinked protected paths remain readable
+ok   reason-pass receipt remains readable
+ok   content-addressed plan/transaction and Agent-result snapshots remain readable
+turn_contract selftest passed
+
+$ python3 tools/check_rules.py
+rule check passed
+
+$ python3 -m py_compile tools/runtime_receipts.py tools/workers.py
+
+$ git diff --check -- candidate files
+
+$ python3 tools/selftest_all.py
+running 69 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14
+
+  PASS  check_run          0.4s  evidence gate + closure
+  PASS  classify_hosts    39.8s  recon -> coverage
+  PASS  scope              0.1s  run scope derive/match
+  PASS  peer_review        0.1s  heterogeneous review
+  PASS  probe             15.6s  active HTTP sensor
+  PASS  render             0.1s  headless browser + --eval replay
+  PASS  scan               0.1s  scanner input privacy + proof-only defaults
+  PASS  exploit            0.1s  exploit plugins inherit guarded probe egress
+  PASS  command_shape      0.1s  exact local-control argv parser + compound-command rejection
+  PASS  capability_registry   0.1s  typed script/argv/effect/service registry
+  PASS  maintenance_authority   0.0s  operator-intent maintenance + typed local path boundary
+  PASS  outbound_privacy   0.1s  target-facing identity/PII guard + redaction
+  PASS  anti_drift         0.1s  anti-drift anchor (rules+process re-inject)
+  PASS  proxy              0.1s  engagement egress proxy (渗透走/模型不走)
+  PASS  codex_proxy        0.0s  Codex review proxy hygiene
+  PASS  replay            13.6s  evidence replay
+  PASS  setup_transaction   1.2s  atomic setup + active-pointer CAS/recovery
+  PASS  setup_source       0.1s  versioned setup source provenance + deterministic router
+  PASS  setup_normalizer   0.1s  reference-only Markdown/JSON AI candidate normalizer
+  PASS  setup_normalizer_bench   0.1s  setup normalizer A/B quality and hard gates
+  PASS  scope_admission    0.2s  operator-bound zero-probe candidate asset admission
+  PASS  setup_run          0.2s  run scaffolding
+  PASS  ingest_recon       0.0s  Guanlan recon adapter
+  PASS  bench              0.1s  R-1 self-eval scorer
+  PASS  check_knowledge    0.0s  public knowledge grounding structure
+  PASS  local_hygiene      0.1s  local/publication hygiene guard
+  PASS  runtime_boundary   0.0s  Codex hooks absence guard
+  PASS  check_templates    0.1s  template/reference drift guard
+  PASS  knowledge_match    0.0s  fingerprint→knowledge retrieval
+  PASS  xday_match         0.0s  fingerprint→local xday retrieval
+  PASS  knowledge_seed     0.0s  fingerprint→knowledge write-back
+  PASS  timestamp_gate     0.0s  web research time gate
+  PASS  record_evidence    0.1s  web research -> evidence ledger
+  PASS  decode_viewstate   0.0s  ASP.NET ViewState decoder
+  PASS  captcha_ocr        0.1s  bounded captcha OCR wrapper
+  PASS  input_shape        0.0s  request shape parser
+  PASS  js_inventory       0.0s  saved-artifact JS/API inventory sensor
+  PASS  oob_listener       1.0s  local OOB listener
+  PASS  sensor_oob         0.2s  OOB callback artifact sensor
+  PASS  sensor_mutate      0.1s  payload mutation artifact sensor
+  PASS  sensor_blind_diff   1.2s  blind differential artifact sensor
+  PASS  sensor_upload      1.2s  harmless upload proof sensor
+  PASS  sensor_client_graybox   0.1s  client graybox phenomenon sensor
+  PASS  state_project      0.1s  markdown-derived run state projection
+  PASS  run_model          0.1s  canonical front/status parser
+  PASS  work_plan          3.9s  versioned work-plan + delegation contract
+  PASS  runtime_receipts   3.2s  hook-derived Agent/Cron receipts
+  PASS  turn_contract     15.1s  execute/explain/pause/maintenance turn modes
+  PASS  context_pack       0.1s  minimal subagent context pack
+  PASS  loop_state         0.1s  closed-loop progress and gate snapshot
+  PASS  status_style       0.0s  operator-facing colored status panels
+  PASS  xunji_statusline   0.2s  Claude Code Xunji statusline
+  PASS  progress_ledger    0.1s  material-progress ledger
+  PASS  run_controller     0.1s  advisory shadow run controller
+  PASS  loop_journal       0.1s  loop interruption journal
+  PASS  loop_bootstrap     1.0s  autonomous loop launcher
+  PASS  session_handoff    0.1s  session handoff tool
+  PASS  deferred_queue     0.0s  deferred asset retry manager
+  PASS  workers            3.2s  fan-out worker planning helpers
+  PASS  saturation         0.0s  front saturation scoring
+  PASS  coverage_matrix    0.1s  asset x vuln-family coverage matrix
+  PASS  safety_gate        0.1s  hard-boundary gate
+  PASS  ip_blacklist       0.0s  local IP/domain deny hook
+  PASS  output_gate        2.8s  output drift Stop gate
+  PASS  run_gate           0.3s  coverage/depth Stop gate
+  PASS  check_hook         7.9s  safety_gate live-fire
+  PASS  sentinel_replay    0.0s  behavior detectors 26-case
+  PASS  verify_layers      2.8s  safety-floor coverage
+  PASS  guard_smoke        0.1s  guard rate/cap/breaker smoke
+
+69 passed, 0 failed  (118.4s total)

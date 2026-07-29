@@ -471,6 +471,18 @@ non-Reviewer uses the typed cancellation/material-replan path. Cancellation is
 lifecycle settlement—not Agent result, review, evidence, merge, or cycle
 completion.
 
+A second, narrower Reviewer-only recovery covers a Claude client interruption
+after the immutable Start receipt but before the Reviewer model begins. The same
+`delegate --limit 1` owner must prove the exact parent interrupted tool result,
+the exact child frozen prompt, a timed-out `SubagentStart:xunji-reviewer` hook,
+and the absence of assistant/tool activity, child claims, parent terminal
+receipts, and Stop. It then appends a content-addressed
+`xunji.interrupted-reviewer-start.v1` supersession receipt, preserves the
+physical runtime journal, restores only the derived row to assigned/no-attempt,
+and returns the original contract through the ordinary replay gate. Ambiguity or
+late lifecycle stays fail-closed; direct assignment edits, `force-abandon`,
+Reviewer cancellation, and synthesized dispositions remain forbidden.
+
 Coverage classification may mark root 401/403 pages as `AUTH_GATE` and pure
 default/stub pages as `STUB_PAGE`. These flags only suppress anti-lump
 "independent application candidate" noise. They do not close the asset: final

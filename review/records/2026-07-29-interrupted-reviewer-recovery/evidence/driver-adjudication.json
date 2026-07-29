@@ -1,0 +1,65 @@
+{
+  "schema": "xunji.maintenance-driver-adjudication.v1",
+  "driver": {
+    "client": "Claude Code 2.1.201",
+    "configured_model": "deepseek-v4-flash",
+    "session_id": "e459e35b-e576-4596-a689-3f1724fa0efa",
+    "worktree": "isolated detached candidate worktree",
+    "fixture": "driver-reviewer-recovery_20260729",
+    "fixture_kind": "targetless path-native production-API fixture"
+  },
+  "recovery": {
+    "schema": "xunji.interrupted-reviewer-start.v1",
+    "assignment": "A-review-001",
+    "superseded_agent_id": "prep-interrupted-reviewer-child",
+    "start_event_seq": 3,
+    "start_event_hash": "217f9f0b59e97ca87e8982cf882c076b2a25b92b0104b771b91307fa573635a1",
+    "observed_head_seq": 8,
+    "parent_transcript_length": 25154066,
+    "receipt_hash": "362c76f25448cc37aaf0b09438810836a94c27af53a1530f1a030d534a3f37ed"
+  },
+  "replayed_reviewer": {
+    "assignment": "A-review-001",
+    "agent_id": "ae500ae8c6e829370",
+    "tool_use_id": "call_00_xO61taQGflaN35J9xqoT3109",
+    "subagent_type": "xunji-reviewer",
+    "launch_prompt_sha256": "1051fe7371229b361abbb07db6ff6bd00600dfc138dae785a38c081c4b9dfb69",
+    "launched_at": "2026-07-29T06:51:23.519Z",
+    "returned_at": "2026-07-29T06:52:32.286Z",
+    "result_sha256": "cf981a897b44e50e9983c740c5540eeddb874fa3c8df37079ac20c0590032e41",
+    "child_read_claims": 7,
+    "final_assignment_status": "reviewed"
+  },
+  "settlement": {
+    "hunter_assignment": "A-verify-001",
+    "hunter_final_status": "merged",
+    "review_receipt_hash": "8a6081670bcc9467d41d132eac9a684b7769f55a26d210c42491daddf2bdbc4a",
+    "cycle_end_hash": "06dc087a76307454db14b46dbd4ae05cc07d7ec8e9e20aec8f596f7e164dff21"
+  },
+  "negative_controls": {
+    "request_budget": 0,
+    "target_action_events": 0,
+    "forbidden_tools_present": [],
+    "tool_inventory": {
+      "Agent": 1,
+      "Bash": 20,
+      "Read": 5,
+      "Skill": 1,
+      "TaskCreate": 1,
+      "TaskUpdate": 2
+    },
+    "candidate_source_edits_by_driver": 0
+  },
+  "artifact_sha256": {
+    "driver_assignments_json": "da141d09415924dffa6bae06591be3775eaf4c6c66aa5a5a6efed6a8bcc6d18f",
+    "driver_recovery_receipt_json": "ff5e8229b76bc047bb2d36e18db50d0a579380fec2478504136fa71371015d44",
+    "driver_reviewer_transcript_jsonl": "0f777af4a2847befb69c24af0e987aa2d31889345899bd5bd3fe7101c515a8a9",
+    "driver_runtime_events_jsonl": "01ae85d87069ec9fd1b9cee19ed4625ef7e00443a61f0888bfb90c7645cfee66",
+    "driver_session_transcript_jsonl": "7092184270a2dbb55db88101a27538c3f4ff830c1bb5b3260e9fc8d0406361f5",
+    "driver_loop_journal_jsonl": "1c8f4e09d9c4540c0edb45546f2eb93a66a5e9b4298188c52bdd18000b28df26",
+    "performance_benchmark_txt": "e889b1a7e2f287ff91f2975e0c8c0028b46aa6973e35d6caa54fd59e65f08135",
+    "reviewed_diff": "33e9a3543c92dbc55d0a11285c3044ecb57447b3435471602c0032fb16aa4af9",
+    "test_results_txt": "0bab9cb71216d06df7baf5200ca17a83b40337299f4cfb8fde16e1cf2d2ee5db",
+    "test_summary_txt": "993d66f02ab664327c21772388e8c3545ec42d10fa7a6715fae3d69b4171fed7"
+  }
+}

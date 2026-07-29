@@ -44,6 +44,11 @@ PROJECTION_CURSOR_SCHEMA = "xunji.runtime_projection_cursor.v1"
 FOREIGN_LIFECYCLE_DIR = "foreign_agent_lifecycle"
 FOREIGN_LIFECYCLE_SCHEMA = "xunji.foreign_agent_lifecycle.v1"
 FOREIGN_LIFECYCLE_REASON = "no_xunji_causal_owner"
+INTERRUPTED_REVIEWER_START_DIR = "interrupted_reviewer_starts"
+INTERRUPTED_REVIEWER_START_SCHEMA = "xunji.interrupted-reviewer-start.v1"
+INTERRUPTED_REVIEWER_START_REASON = (
+    "subagent_start_hook_cancelled_before_assistant"
+)
 MAX_PROJECTION_SUCCESS_GENERATION = (1 << 63) - 1
 NONTERMINAL_ASSIGNMENT_STATUSES = {"assigned", "starting", "running", "working", "?", ""}
 TERMINAL_ASSIGNMENT_STATUSES = {
@@ -132,6 +137,15 @@ _FOREIGN_LIFECYCLE_FIELDS = {
 _FOREIGN_LIFECYCLE_DISPOSITIONS = {
     "observed_not_admitted", "legacy_quarantined",
 }
+_INTERRUPTED_REVIEWER_START_FIELDS = {
+    "schema", "parent_run", "reason", "assignment", "role", "session_id",
+    "agent_id", "tool_use_id", "lane_id", "plan_digest",
+    "launch_prompt_sha256", "start_event_seq", "start_event_hash",
+    "observed_head_seq", "observed_head_hash",
+    "parent_transcript_length", "parent_transcript_sha256",
+    "child_transcript_length", "child_transcript_sha256",
+    "recorded_at", "receipt_hash",
+}
 
 
 class RuntimeReceiptDurabilityError(OSError):
@@ -177,6 +191,10 @@ def _assignment_lock_path(run_dir: Path) -> Path:
 
 def _foreign_lifecycle_dir(run_dir: Path) -> Path:
     return run_dir / "state" / FOREIGN_LIFECYCLE_DIR
+
+
+def _interrupted_reviewer_start_dir(run_dir: Path) -> Path:
+    return run_dir / "state" / INTERRUPTED_REVIEWER_START_DIR
 
 
 @contextlib.contextmanager
@@ -1331,6 +1349,126 @@ def _load_foreign_lifecycle_receipts(
     return receipts
 
 
+def _interrupted_reviewer_start_receipt_hash(receipt: dict) -> str:
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_hash", None)
+    return _hash(unsigned)
+
+
+def _validate_interrupted_reviewer_start_receipt(
+    run_dir: Path,
+    receipt: object,
+    events: list[dict],
+    *,
+    filename: str,
+) -> str:
+    if not isinstance(receipt, dict) \
+            or set(receipt) != _INTERRUPTED_REVIEWER_START_FIELDS:
+        return "invalid receipt shape"
+    if receipt.get("schema") != INTERRUPTED_REVIEWER_START_SCHEMA \
+            or receipt.get("parent_run") != run_dir.name \
+            or receipt.get("reason") != INTERRUPTED_REVIEWER_START_REASON \
+            or receipt.get("role") != "review":
+        return "invalid receipt identity"
+    claimed = str(receipt.get("receipt_hash") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", claimed) \
+            or claimed != _interrupted_reviewer_start_receipt_hash(receipt) \
+            or filename != f"{claimed}.json":
+        return "invalid receipt hash or filename"
+    digest_fields = (
+        "launch_prompt_sha256", "plan_digest", "start_event_hash",
+        "parent_transcript_sha256", "child_transcript_sha256",
+    )
+    if not _valid_iso_datetime(receipt.get("recorded_at")) \
+            or any(
+                re.fullmatch(r"[0-9a-f]{64}", str(receipt.get(field) or ""))
+                is None for field in digest_fields):
+        return "invalid receipt digest or timestamp"
+    for field in (
+            "start_event_seq", "observed_head_seq",
+            "parent_transcript_length", "child_transcript_length"):
+        value = receipt.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return f"invalid {field}"
+    start_seq = int(receipt["start_event_seq"])
+    start_hash = str(receipt["start_event_hash"])
+    if start_seq > len(events) \
+            or str(events[start_seq - 1].get("receipt_hash") or "") != start_hash:
+        return "receipt Start is not an immutable runtime event"
+    head_seq = int(receipt["observed_head_seq"])
+    head_hash = str(receipt.get("observed_head_hash") or "")
+    if head_seq < start_seq or head_seq > len(events) \
+            or not re.fullmatch(r"[0-9a-f]{64}", head_hash) \
+            or str(events[head_seq - 1].get("receipt_hash") or "") != head_hash:
+        return "receipt journal head is not a validated prefix"
+    start = events[start_seq - 1]
+    exact = {
+        "hook_event_name": "SubagentStart",
+        "assignment": str(receipt.get("assignment") or ""),
+        "session_id": str(receipt.get("session_id") or ""),
+        "agent_id": str(receipt.get("agent_id") or ""),
+        "tool_use_id": str(receipt.get("tool_use_id") or ""),
+        "assignment_lane": str(receipt.get("lane_id") or ""),
+        "assignment_plan_digest": str(receipt.get("plan_digest") or ""),
+        "launch_prompt_sha256": str(
+            receipt.get("launch_prompt_sha256") or ""),
+        "subagent_type": _REVIEWER_AGENT_TYPE,
+    }
+    if any(start.get(field) != value for field, value in exact.items()) \
+            or start.get("agent_type") != _REVIEWER_AGENT_TYPE \
+            or start.get("completion_review") is True:
+        return "receipt does not bind the exact Reviewer Start"
+    if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == exact["session_id"]
+            and str(item.get("agent_id") or "") == exact["agent_id"]
+            and str(item.get("transcript_path") or "")
+                == str(start.get("transcript_path") or "")
+            for item in events):
+        return "superseded Reviewer Start has a runtime Stop"
+    return ""
+
+
+def _load_interrupted_reviewer_start_receipts(
+    run_dir: Path,
+    events: list[dict],
+) -> list[dict]:
+    directory = _interrupted_reviewer_start_dir(run_dir)
+    if not directory.exists():
+        return []
+    if directory.is_symlink() or not directory.is_dir():
+        raise RuntimeError(
+            "interrupted Reviewer Start receipt directory is not regular")
+    receipts: list[dict] = []
+    for path in sorted(directory.glob("*.json")):
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(
+                "interrupted Reviewer Start receipt is not regular: "
+                + path.name)
+        try:
+            receipt = json.loads(path.read_text(
+                encoding="utf-8", errors="strict"))
+        except Exception as exc:
+            raise RuntimeError(
+                "interrupted Reviewer Start receipt is unreadable: "
+                + path.name) from exc
+        error = _validate_interrupted_reviewer_start_receipt(
+            run_dir, receipt, events, filename=path.name)
+        if error:
+            raise RuntimeError(
+                f"interrupted Reviewer Start receipt {path.name} invalid: "
+                + error)
+        receipts.append(receipt)
+    identities = [
+        (int(item["start_event_seq"]), str(item["start_event_hash"]))
+        for item in receipts
+    ]
+    if len(identities) != len(set(identities)):
+        raise RuntimeError(
+            "interrupted Reviewer Start receipt duplicates a runtime event")
+    return receipts
+
+
 def _effective_agent_events(
     run_dir: Path,
     events: list[dict],
@@ -1343,11 +1481,25 @@ def _effective_agent_events(
         for item in _load_foreign_lifecycle_receipts(run_dir, receipt_basis)
         if item.get("disposition") == "legacy_quarantined"
     }
+    interrupted = {
+        (int(item["start_event_seq"]), str(item["start_event_hash"]))
+        for item in _load_interrupted_reviewer_start_receipts(
+            run_dir, receipt_basis)
+    }
     return [
         item for item in events
         if (int(item.get("seq") or 0), str(item.get("receipt_hash") or ""))
-        not in quarantined
+        not in quarantined | interrupted
     ]
+
+
+def effective_agent_events(run_dir: str | Path) -> list[dict]:
+    """Return the validated runtime projection after typed supersessions."""
+    run = Path(run_dir).resolve()
+    events, errors = validate_chain(run)
+    if errors:
+        raise RuntimeError("runtime chain invalid: " + errors[0])
+    return _effective_agent_events(run, events)
 
 
 def _publish_foreign_lifecycle_receipt(
@@ -2698,7 +2850,12 @@ def _write_merge_draft(run_dir: Path, row: dict, attempt: dict,
     return draft
 
 
-def _project_agent_lifecycle(run_dir: Path, record: dict) -> None:
+def _project_agent_lifecycle(
+    run_dir: Path,
+    record: dict,
+    *,
+    derived_attempts: list[dict] | None = None,
+) -> None:
     """Project trusted hook lifecycle into assignment attempts.
 
     Agent PostToolUse is a parent observation, never completion.  A synchronous
@@ -2742,9 +2899,12 @@ def _project_agent_lifecycle(run_dir: Path, record: dict) -> None:
         if start_projection:
             derived = {"returned_at": 0.0, "result_snapshot": {}}
         else:
-            derived_matches = [
-                item for item in agent_attempts(
+            attempt_source = derived_attempts
+            if attempt_source is None:
+                attempt_source = agent_attempts(
                     run_dir, _ignore_projection_cursor=True)
+            derived_matches = [
+                item for item in attempt_source
                 if str(item.get("session_id") or "")
                 == str(record.get("session_id") or "")
                 and str(item.get("tool_use_id") or "")
@@ -3400,6 +3560,7 @@ def _agent_tool_call_claim_integrity_errors_from(
         ("launch_prompt_sha256", "launch_prompt_sha256"),
         ("subagent_type", "subagent_type"),
     )
+    parent_tool_ids_cache: dict[str, set[str]] = {}
     for key, rows in claims.items():
         start_rows = starts.get(key, [])
         if len(start_rows) != 1:
@@ -3444,7 +3605,8 @@ def _agent_tool_call_claim_integrity_errors_from(
                 expected_request_ordinal += 1
                 if row.get("agent_request_ordinal") != expected_request_ordinal:
                     errors.append(f"{label} has a non-contiguous request ordinal")
-            if not _transcript_has(row, events):
+            if not _transcript_has(
+                    row, events, parent_tool_ids_cache):
                 errors.append(f"{label} lacks its exact child transcript tool-use")
     return errors
 
@@ -4681,11 +4843,18 @@ def reconcile_agent_projection(
         integrity_errors = _agent_event_integrity_errors_from(effective_snapshot)
         if integrity_errors:
             raise RuntimeError(integrity_errors[0])
+        derived_attempts = agent_attempts(
+            run,
+            _ignore_projection_cursor=True,
+            _prevalidated_events=effective_snapshot,
+        )
         # Lock order is deliberately non-nested: immutable journal snapshot
         # first, assignment projection second, diagnostic cleanup last.
         with assignment_mutation_lock(run):
             for lifecycle_record in _projection_records(effective_snapshot):
-                _project_agent_lifecycle(run, lifecycle_record)
+                _project_agent_lifecycle(
+                    run, lifecycle_record,
+                    derived_attempts=derived_attempts)
         diagnostic_status, cursor_status = _clear_projection_error(
             run, snapshot, recover_corrupt_cursor=explicit_full_reproject)
         return {
@@ -4975,24 +5144,38 @@ def quarantine_unowned_foreign_lifecycle(run_dir: str | Path) -> dict:
     }
 
 
-def _file_contains_token(path: Path, token: str) -> bool:
-    if not token or not path.is_file():
-        return False
-    needle = token.encode("utf-8")
-    overlap = max(0, len(needle) - 1)
+def _file_contains_tokens(path: Path, tokens: set[str]) -> set[str]:
+    pending = {
+        token: token.encode("utf-8")
+        for token in tokens if token
+    }
+    if not pending or not path.is_file():
+        return set()
+    max_overlap = max(len(needle) for needle in pending.values()) - 1
     tail = b""
+    found: set[str] = set()
     try:
         with path.open("rb") as handle:
-            while True:
+            while pending:
                 chunk = handle.read(1024 * 1024)
                 if not chunk:
-                    return False
+                    break
                 haystack = tail + chunk
-                if needle in haystack:
-                    return True
-                tail = haystack[-overlap:] if overlap else b""
+                matched = [
+                    token for token, needle in pending.items()
+                    if needle in haystack
+                ]
+                for token in matched:
+                    found.add(token)
+                    pending.pop(token, None)
+                tail = haystack[-max_overlap:] if max_overlap else b""
     except OSError:
-        return False
+        return set()
+    return found
+
+
+def _file_contains_token(path: Path, token: str) -> bool:
+    return token in _file_contains_tokens(path, {token})
 
 
 _TRANSCRIPT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
@@ -5090,7 +5273,346 @@ def _child_transcript_has_tool_use(path: Path, record: dict) -> bool:
     return found
 
 
-def _child_receipt_has_causal_owner(record: dict, events: list[dict]) -> bool:
+def _transcript_json_records(path: Path) -> tuple[bytes, list[dict]]:
+    """Read one regular transcript once and reject ambiguous oversized rows."""
+    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+        raise RuntimeError("transcript is not one absolute regular file")
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError("transcript cannot be read") from exc
+    records: list[dict] = []
+    for raw in payload.splitlines():
+        if len(raw) > MAX_AGENT_RESULT_BYTES:
+            raise RuntimeError("transcript event exceeds immutable snapshot limit")
+        try:
+            decoded = json.loads(raw.decode("utf-8", errors="strict"))
+        except Exception as exc:
+            raise RuntimeError("transcript contains invalid JSON") from exc
+        if not isinstance(decoded, dict):
+            raise RuntimeError("transcript event is not an object")
+        records.append(decoded)
+    if not records:
+        raise RuntimeError("transcript is empty")
+    return payload, records
+
+
+def _nested_nodes(value: object):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _nested_nodes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _nested_nodes(child)
+
+
+def _interrupted_reviewer_start_proof(
+    run_dir: Path,
+    start: dict,
+    events: list[dict],
+    row: dict,
+) -> dict:
+    """Prove that Claude cancelled a Reviewer before its model ever ran."""
+    assignment = str(start.get("assignment") or "")
+    session_id = str(start.get("session_id") or "")
+    agent_id = str(start.get("agent_id") or "")
+    tool_use_id = str(start.get("tool_use_id") or "")
+    transcript_path = Path(str(start.get("transcript_path") or ""))
+    expected_prompt = assignment_launch_prompt(row)
+    exact_start = {
+        "hook_event_name": "SubagentStart",
+        "assignment": assignment,
+        "front": str(row.get("front") or ""),
+        "assignment_lane": str(row.get("lane_id") or ""),
+        "assignment_plan_digest": str(row.get("plan_digest") or ""),
+        "assignment_result_digest": str(
+            row.get("review_result_digest") or ""),
+        "launch_prompt_sha256": _launch_prompt_sha256(expected_prompt),
+        "subagent_type": _REVIEWER_AGENT_TYPE,
+        "agent_type": _REVIEWER_AGENT_TYPE,
+    }
+    if row.get("role") != "review" \
+            or any(start.get(field) != value
+                   for field, value in exact_start.items()) \
+            or start.get("completion_review") is True \
+            or not session_id or not agent_id or not tool_use_id:
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_BINDING_INVALID:{assignment}")
+    if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("agent_id") or "") == agent_id
+            and str(item.get("transcript_path") or "")
+                == str(transcript_path)
+            for item in events):
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_HAS_STOP:{assignment}")
+    if any(
+            item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("agent_id") or "") == agent_id
+            and str(item.get("transcript_path") or "")
+                == str(transcript_path)
+            for item in events):
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_HAS_CHILD_ACTIVITY:{assignment}")
+    if any(
+            item.get("tool_name") == "Agent"
+            and item.get("hook_event_name") in {
+                "PostToolUse", "PostToolUseFailure"}
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("tool_use_id") or "") == tool_use_id
+            for item in events):
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_HAS_PARENT_TERMINAL:{assignment}")
+
+    parent_payload, parent_records = _transcript_json_records(transcript_path)
+    parent_tool_uses = [
+        candidate
+        for record in parent_records
+        for candidate in _agent_tool_use_candidates(record)
+        if str(candidate.get("tool_use_id") or "") == tool_use_id
+    ]
+    if len(parent_tool_uses) != 1:
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_PARENT_CALL_INVALID:{assignment}")
+    tool_input = parent_tool_uses[0].get("tool_input")
+    if not isinstance(tool_input, dict) \
+            or str(tool_input.get("prompt") or "") != expected_prompt \
+            or str(tool_input.get("subagent_type") or "") \
+                != _REVIEWER_AGENT_TYPE \
+            or tool_input.get("run_in_background") is not False:
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_PARENT_PROMPT_INVALID:{assignment}")
+    parent_results: list[dict] = []
+    for record in parent_records:
+        for node in _nested_nodes(record):
+            kind = str(node.get("type") or "").replace("_", "").lower()
+            result_tool_id = str(
+                node.get("tool_use_id") or node.get("toolUseId") or "")
+            if kind == "toolresult" and result_tool_id == tool_use_id:
+                parent_results.append(node)
+    if len(parent_results) != 1 \
+            or parent_results[0].get("is_error") is not True \
+            or parent_results[0].get("content") \
+                != "[Request interrupted by user for tool use]":
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_PARENT_RESULT_INVALID:{assignment}")
+
+    child_path = _child_transcript_path(start)
+    if child_path is None:
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_CHILD_MISSING:{assignment}")
+    child_payload, child_records = _transcript_json_records(child_path)
+    first = child_records[0]
+    first_message = first.get("message") \
+        if isinstance(first.get("message"), dict) else {}
+    if first.get("isSidechain") is not True \
+            or str(first.get("sessionId") or "") != session_id \
+            or str(first.get("agentId") or "") != agent_id \
+            or first.get("type") != "user" \
+            or first_message.get("role") != "user" \
+            or first_message.get("content") != expected_prompt:
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_CHILD_PROMPT_INVALID:{assignment}")
+    cancelled = False
+    interrupted = False
+    for record in child_records:
+        message = record.get("message") \
+            if isinstance(record.get("message"), dict) else {}
+        if record.get("type") == "assistant" \
+                or message.get("role") == "assistant":
+            raise RuntimeError(
+                f"INTERRUPTED_REVIEWER_START_CHILD_ASSISTANT_EXISTS:{assignment}")
+        for node in _nested_nodes(record):
+            kind = str(node.get("type") or "").replace("_", "").lower()
+            if kind in {"tooluse", "toolresult"}:
+                raise RuntimeError(
+                    f"INTERRUPTED_REVIEWER_START_CHILD_TOOL_EXISTS:{assignment}")
+            if node.get("type") == "attachment":
+                attachment = node.get("attachment") \
+                    if isinstance(node.get("attachment"), dict) else {}
+                timeout_ms = attachment.get("timeoutMs")
+                duration_ms = attachment.get("durationMs")
+                if attachment.get("type") == "hook_cancelled" \
+                        and attachment.get("hookName") \
+                            == "SubagentStart:xunji-reviewer" \
+                        and attachment.get("hookEvent") == "SubagentStart" \
+                        and attachment.get("command") \
+                            == 'python3 "$CLAUDE_PROJECT_DIR/tools/turn_contract.py"' \
+                        and isinstance(timeout_ms, int) \
+                        and isinstance(duration_ms, int) \
+                        and timeout_ms >= 1000 and duration_ms >= timeout_ms:
+                    cancelled = True
+            if node.get("text") == "[Request interrupted by user]" \
+                    or node.get("content") == "[Request interrupted by user]":
+                interrupted = True
+    if not cancelled or not interrupted:
+        raise RuntimeError(
+            f"INTERRUPTED_REVIEWER_START_CHILD_CANCEL_INVALID:{assignment}")
+    head = events[-1]
+    return {
+        "schema": INTERRUPTED_REVIEWER_START_SCHEMA,
+        "parent_run": run_dir.name,
+        "reason": INTERRUPTED_REVIEWER_START_REASON,
+        "assignment": assignment,
+        "role": "review",
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "tool_use_id": tool_use_id,
+        "lane_id": str(row.get("lane_id") or ""),
+        "plan_digest": str(row.get("plan_digest") or ""),
+        "launch_prompt_sha256": _launch_prompt_sha256(expected_prompt),
+        "start_event_seq": int(start.get("seq") or 0),
+        "start_event_hash": str(start.get("receipt_hash") or ""),
+        "observed_head_seq": int(head.get("seq") or 0),
+        "observed_head_hash": str(head.get("receipt_hash") or ""),
+        "parent_transcript_length": len(parent_payload),
+        "parent_transcript_sha256": hashlib.sha256(parent_payload).hexdigest(),
+        "child_transcript_length": len(child_payload),
+        "child_transcript_sha256": hashlib.sha256(child_payload).hexdigest(),
+        "recorded_at": _iso_timestamp(time.time()),
+        "receipt_hash": "",
+    }
+
+
+def _publish_interrupted_reviewer_start_receipt(
+    run_dir: Path,
+    proof: dict,
+) -> dict:
+    receipt = dict(proof)
+    receipt["receipt_hash"] = _interrupted_reviewer_start_receipt_hash(receipt)
+    payload = json.dumps(
+        receipt, ensure_ascii=False, indent=2, sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    path = _interrupted_reviewer_start_dir(
+        run_dir) / f"{receipt['receipt_hash']}.json"
+    if path.exists() and path.read_bytes() != payload:
+        raise RuntimeError("interrupted Reviewer Start receipt hash collision")
+    _atomic_bytes(path, payload, owner_directory=run_dir / "state")
+    return receipt
+
+
+def recover_interrupted_reviewer_starts(run_dir: str | Path) -> dict:
+    """Supersede only transcript-proven pre-model Reviewer Starts and replay."""
+    run = Path(run_dir).resolve()
+    recovered: list[str] = []
+    existing: list[str] = []
+    with _locked(run):
+        events, errors = validate_chain(run)
+        if errors:
+            raise RuntimeError("runtime chain invalid: " + errors[0])
+        receipts = _load_interrupted_reviewer_start_receipts(run, events)
+        receipt_by_start = {
+            (int(item["start_event_seq"]), str(item["start_event_hash"])): item
+            for item in receipts
+        }
+        assignments_path = run / "state" / "assignments.json"
+        if not assignments_path.exists() and not receipts:
+            return {
+                "status": "unchanged",
+                "recovered_assignments": [],
+                "existing_assignments": [],
+                "projection": {"status": "unchanged"},
+            }
+        with assignment_mutation_lock(run):
+            try:
+                data = json.loads(assignments_path.read_text(
+                    encoding="utf-8", errors="strict"))
+            except Exception as exc:
+                raise RuntimeError(
+                    "cannot read assignments for interrupted Reviewer recovery"
+                ) from exc
+            rows = data.get("assignments") \
+                if isinstance(data, dict) else None
+            if not isinstance(rows, list):
+                raise RuntimeError("assignments state has no assignments list")
+            row_by_assignment = {
+                str(item.get("agent") or ""): item
+                for item in rows if isinstance(item, dict)
+            }
+            changed = False
+            starts = [
+                item for item in events
+                if item.get("hook_event_name") == "SubagentStart"
+                and item.get("subagent_type") == _REVIEWER_AGENT_TYPE
+                and item.get("completion_review") is not True
+            ]
+            for start in starts:
+                identity = (
+                    int(start.get("seq") or 0),
+                    str(start.get("receipt_hash") or ""),
+                )
+                assignment = str(start.get("assignment") or "")
+                row = row_by_assignment.get(assignment)
+                if not isinstance(row, dict):
+                    continue
+                attempt = row.get("attempts")
+                matching_projection = (
+                    row.get("role") == "review"
+                    and row.get("status") == "running"
+                    and isinstance(attempt, list) and len(attempt) == 1
+                    and isinstance(attempt[0], dict)
+                    and attempt[0].get("state") == "running"
+                    and str(attempt[0].get("agent_id") or "")
+                        == str(start.get("agent_id") or "")
+                    and str(attempt[0].get("tool_use_id") or "")
+                        == str(start.get("tool_use_id") or "")
+                    and str(row.get("current_attempt") or "")
+                        == str(start.get("agent_id") or "")
+                    and str(row.get("runtime_agent_id") or "")
+                        == str(start.get("agent_id") or "")
+                )
+                receipt = receipt_by_start.get(identity)
+                if receipt is None:
+                    if not matching_projection:
+                        continue
+                    try:
+                        proof = _interrupted_reviewer_start_proof(
+                            run, start, events, row)
+                    except RuntimeError:
+                        # Ordinary live Reviewers and ambiguous transcript state
+                        # remain running; recovery never broadens from exact proof.
+                        continue
+                    receipt = _publish_interrupted_reviewer_start_receipt(
+                        run, proof)
+                    receipt_by_start[identity] = receipt
+                    recovered.append(assignment)
+                elif matching_projection:
+                    existing.append(assignment)
+                if matching_projection:
+                    row["status"] = "assigned"
+                    row["attempts"] = []
+                    row.pop("current_attempt", None)
+                    row.pop("runtime_agent_id", None)
+                    row.pop("last_note", None)
+                    row["updated_at"] = str(receipt["recorded_at"])
+                    changed = True
+            if changed:
+                state_errors = assignment_state_errors(
+                    data, parent_run=run.name)
+                if state_errors:
+                    raise RuntimeError(
+                        "interrupted Reviewer recovery would invalidate "
+                        "assignments: " + state_errors[0])
+                _atomic_json(assignments_path, data)
+    projection = reconcile_agent_projection(run) if recovered or existing else {
+        "status": "unchanged",
+    }
+    return {
+        "status": "recovered" if recovered else "unchanged",
+        "recovered_assignments": sorted(set(recovered)),
+        "existing_assignments": sorted(set(existing)),
+        "projection": projection,
+    }
+
+
+def _child_receipt_has_causal_owner(
+    record: dict,
+    events: list[dict],
+    parent_tool_ids_cache: dict[str, set[str]] | None = None,
+) -> bool:
     """Bind a child tool receipt to one earlier Start or async Agent return."""
     session_id = str(record.get("session_id") or "")
     agent_id = str(record.get("agent_id") or "")
@@ -5117,24 +5639,36 @@ def _child_receipt_has_causal_owner(record: dict, events: list[dict]) -> bool:
     if len(owner_tool_ids) != 1:
         return False
     parent = Path(transcript_path)
-    try:
-        parent_tool_ids = {
-            str(item.get("tool_use_id") or "")
-            for item in _transcript_agent_tool_uses(parent)
-        }
-    except RuntimeError:
-        return False
+    cache_key = str(parent)
+    if parent_tool_ids_cache is not None \
+            and cache_key in parent_tool_ids_cache:
+        parent_tool_ids = parent_tool_ids_cache[cache_key]
+    else:
+        try:
+            parent_tool_ids = {
+                str(item.get("tool_use_id") or "")
+                for item in _transcript_agent_tool_uses(parent)
+            }
+        except RuntimeError:
+            return False
+        if parent_tool_ids_cache is not None:
+            parent_tool_ids_cache[cache_key] = parent_tool_ids
     return next(iter(owner_tool_ids)) in parent_tool_ids
 
 
-def _transcript_has(record: dict, events: list[dict] | None = None) -> bool:
+def _transcript_has(
+    record: dict,
+    events: list[dict] | None = None,
+    parent_tool_ids_cache: dict[str, set[str]] | None = None,
+) -> bool:
     tool_use_id = str(record.get("tool_use_id") or "")
     transcript = Path(str(record.get("transcript_path") or ""))
     if not tool_use_id or not transcript.is_file():
         return False
     if not str(record.get("agent_id") or ""):
         return _file_contains_token(transcript, tool_use_id)
-    if events is None or not _child_receipt_has_causal_owner(record, events):
+    if events is None or not _child_receipt_has_causal_owner(
+            record, events, parent_tool_ids_cache):
         return False
     child = _child_transcript_path(record)
     return bool(child and _child_transcript_has_tool_use(child, record))
@@ -5150,14 +5684,47 @@ def valid_tool_events(
     events, errors = validate_chain(run_dir)
     if errors:
         return []
-    return [
+    return _valid_tool_events_from(
+        events, tool_name, session_id=session_id, since=since)
+
+
+def _valid_tool_events_from(
+    events: list[dict],
+    tool_name: str | None = None,
+    *,
+    session_id: str = "",
+    since: float = 0.0,
+) -> list[dict]:
+    candidates = [
         event for event in events
         if event.get("success") is True
         and event.get("hook_event_name") == "PostToolUse"
         and (tool_name is None or event.get("tool_name") == tool_name)
         and (not session_id or str(event.get("session_id") or "") == session_id)
         and (not since or float(event.get("ts") or 0.0) >= since)
-        and _transcript_has(event, events)
+    ]
+    parent_tokens: dict[Path, set[str]] = {}
+    for event in candidates:
+        if str(event.get("agent_id") or ""):
+            continue
+        transcript = Path(str(event.get("transcript_path") or ""))
+        token = str(event.get("tool_use_id") or "")
+        if token:
+            parent_tokens.setdefault(transcript, set()).add(token)
+    parent_matches = {
+        str(path): _file_contains_tokens(path, tokens)
+        for path, tokens in parent_tokens.items()
+    }
+    parent_tool_ids_cache: dict[str, set[str]] = {}
+    return [
+        event for event in candidates
+        if (
+            str(event.get("tool_use_id") or "") in parent_matches.get(
+                str(Path(str(event.get("transcript_path") or ""))), set())
+            if not str(event.get("agent_id") or "")
+            else _transcript_has(
+                event, events, parent_tool_ids_cache)
+        )
     ]
 
 
@@ -5211,8 +5778,18 @@ def valid_lifecycle_events(
         events = _effective_agent_events(run, events)
     except RuntimeError:
         return []
-    transcript_cache: dict[tuple[str, str], bool] = {}
-    out: list[dict] = []
+    return _valid_lifecycle_events_from(
+        events, session_id=session_id, since=since)
+
+
+def _valid_lifecycle_events_from(
+    events: list[dict],
+    *,
+    session_id: str = "",
+    since: float = 0.0,
+) -> list[dict]:
+    candidates: list[dict] = []
+    transcript_tokens: dict[Path, set[str]] = {}
     for event in events:
         if event.get("hook_event_name") not in {"SubagentStart", "SubagentStop"}:
             continue
@@ -5226,11 +5803,19 @@ def valid_lifecycle_events(
         if not agent_id or not transcript_path:
             continue
         transcript_token = tool_use_id or agent_id
-        cache_key = (transcript_path, transcript_token)
-        if cache_key not in transcript_cache:
-            transcript_cache[cache_key] = _file_contains_token(
-                Path(transcript_path), transcript_token)
-        if transcript_cache[cache_key]:
+        candidates.append(event)
+        transcript_tokens.setdefault(
+            Path(transcript_path), set()).add(transcript_token)
+    transcript_matches = {
+        str(path): _file_contains_tokens(path, tokens)
+        for path, tokens in transcript_tokens.items()
+    }
+    out: list[dict] = []
+    for event in candidates:
+        tool_use_id = str(event.get("tool_use_id") or "")
+        transcript_path = str(event.get("transcript_path") or "")
+        transcript_token = tool_use_id or str(event.get("agent_id") or "")
+        if transcript_token in transcript_matches.get(transcript_path, set()):
             out.append(event)
     return out
 
@@ -5471,6 +6056,7 @@ def agent_attempts(
     session_id: str = "",
     since: float = 0.0,
     _ignore_projection_cursor: bool = False,
+    _prevalidated_events: list[dict] | None = None,
 ) -> list[dict]:
     """Build attempts from parent Agent returns plus provisional SubagentStart.
 
@@ -5478,7 +6064,11 @@ def agent_attempts(
     child tool hooks run before the parent Agent PostToolUse exists.  Its binding
     comes only from the exact parent transcript Agent tool_use frozen on Start.
     """
-    if _ignore_projection_cursor:
+    effective_events: list[dict] | None = None
+    if _prevalidated_events is not None:
+        effective_events = list(_prevalidated_events)
+        integrity_errors: list[str] = []
+    elif _ignore_projection_cursor:
         run = Path(run_dir).resolve()
         events, chain_errors = validate_chain(run)
         try:
@@ -5494,8 +6084,18 @@ def agent_attempts(
         integrity_errors = agent_event_integrity_errors(run_dir)
     if integrity_errors:
         return []
-    launches = valid_tool_events(run_dir, "Agent", session_id=session_id, since=since)
-    lifecycle = valid_lifecycle_events(run_dir, session_id=session_id, since=since)
+    if effective_events is None:
+        launches = valid_tool_events(
+            run_dir, "Agent", session_id=session_id, since=since)
+        lifecycle = valid_lifecycle_events(
+            run_dir, session_id=session_id, since=since)
+    else:
+        launches = _valid_tool_events_from(
+            effective_events, "Agent",
+            session_id=session_id, since=since)
+        lifecycle = _valid_lifecycle_events_from(
+            effective_events,
+            session_id=session_id, since=since)
     stops: dict[tuple[str, str], list[dict]] = {}
     starts: dict[tuple[str, str], list[dict]] = {}
     starts_by_tool: dict[tuple[str, str], list[dict]] = {}
@@ -8316,6 +8916,271 @@ def _selftest() -> int:
         )
     except RuntimeError as exc:
         reviewer_missing_result_digest_rejected = "Reviewer identity" in str(exc)
+
+    reviewer_recovery_session = "reviewer-recovery-session"
+    reviewer_recovery_agent = "reviewer-recovery-child"
+    reviewer_recovery_tool = "reviewer-recovery-tool"
+    reviewer_recovery_prompt = assignment_launch_prompt(reviewer_row)
+    reviewer_recovery_parent = (
+        run.parent / f"{reviewer_recovery_session}.jsonl")
+    reviewer_recovery_parent.write_text("\n".join((
+        json.dumps({
+            "isSidechain": False,
+            "sessionId": reviewer_recovery_session,
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use",
+                "id": reviewer_recovery_tool,
+                "name": "Agent",
+                "input": {
+                    "prompt": reviewer_recovery_prompt,
+                    "subagent_type": "xunji-reviewer",
+                    "run_in_background": False,
+                },
+            }]},
+        }),
+        json.dumps({
+            "isSidechain": False,
+            "sessionId": reviewer_recovery_session,
+            "message": {"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": reviewer_recovery_tool,
+                "is_error": True,
+                "content": "[Request interrupted by user for tool use]",
+            }]},
+        }),
+    )) + "\n", encoding="utf-8")
+    reviewer_recovery_child_dir = (
+        reviewer_recovery_parent.with_suffix("") / "subagents")
+    reviewer_recovery_child_dir.mkdir(parents=True)
+    reviewer_recovery_child = (
+        reviewer_recovery_child_dir
+        / f"agent-{reviewer_recovery_agent}.jsonl")
+    reviewer_recovery_child.write_text("\n".join((
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": reviewer_recovery_session,
+            "agentId": reviewer_recovery_agent,
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": reviewer_recovery_prompt,
+            },
+        }),
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": reviewer_recovery_session,
+            "agentId": reviewer_recovery_agent,
+            "type": "attachment",
+            "attachment": {
+                "type": "hook_cancelled",
+                "hookName": "SubagentStart:xunji-reviewer",
+                "hookEvent": "SubagentStart",
+                "command": (
+                    'python3 "$CLAUDE_PROJECT_DIR/tools/turn_contract.py"'),
+                "durationMs": 600017,
+                "timeoutMs": 600000,
+                "timedOut": False,
+            },
+        }),
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": reviewer_recovery_session,
+            "agentId": reviewer_recovery_agent,
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "text",
+                    "text": "[Request interrupted by user]",
+                }],
+            },
+        }),
+    )) + "\n", encoding="utf-8")
+    reviewer_recovery_start = append_hook_event(
+        reviewer_binding_run,
+        {
+            "hook_event_name": "SubagentStart",
+            "session_id": reviewer_recovery_session,
+            "transcript_path": str(reviewer_recovery_parent),
+            "agent_id": reviewer_recovery_agent,
+            "agent_type": "xunji-reviewer",
+        },
+    )
+    reviewer_recovery_running = json.loads(
+        (reviewer_binding_run / "state" / "assignments.json").read_text(
+            encoding="utf-8"))
+    reviewer_recovery_row_running = reviewer_recovery_running["assignments"][0]
+    reviewer_recovery_child_original = reviewer_recovery_child.read_bytes()
+    reviewer_recovery_nonreviewer_row = dict(
+        reviewer_recovery_row_running)
+    reviewer_recovery_nonreviewer_row["role"] = "verify"
+    try:
+        _interrupted_reviewer_start_proof(
+            reviewer_binding_run,
+            reviewer_recovery_start,
+            load_events(reviewer_binding_run),
+            reviewer_recovery_nonreviewer_row,
+        )
+        reviewer_recovery_nonreviewer_rejected = False
+    except RuntimeError as exc:
+        reviewer_recovery_nonreviewer_rejected = (
+            "BINDING_INVALID" in str(exc))
+    with reviewer_recovery_child.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({
+            "isSidechain": True,
+            "sessionId": reviewer_recovery_session,
+            "agentId": reviewer_recovery_agent,
+            "type": "assistant",
+            "message": {"role": "assistant", "content": "late model output"},
+        }) + "\n")
+    try:
+        _interrupted_reviewer_start_proof(
+            reviewer_binding_run,
+            reviewer_recovery_start,
+            load_events(reviewer_binding_run),
+            reviewer_recovery_row_running,
+        )
+        reviewer_recovery_assistant_rejected = False
+    except RuntimeError as exc:
+        reviewer_recovery_assistant_rejected = (
+            "CHILD_ASSISTANT_EXISTS" in str(exc))
+    reviewer_recovery_child.write_bytes(reviewer_recovery_child_original)
+    reviewer_recovery_publish_entered = threading.Event()
+    reviewer_recovery_publish_release = threading.Event()
+    reviewer_recovery_late_writer_started = threading.Event()
+    reviewer_recovery_late_writer_done = threading.Event()
+    reviewer_recovery_thread_result: dict[str, object] = {}
+    reviewer_recovery_thread_errors: list[str] = []
+    reviewer_recovery_late_transcript = (
+        run.parent / "reviewer-recovery-late-writer.jsonl")
+    reviewer_recovery_late_tool = "reviewer-recovery-late-writer-tool"
+    _write_transcript(
+        reviewer_recovery_late_transcript, reviewer_recovery_late_tool)
+    original_reviewer_recovery_publish = (
+        _publish_interrupted_reviewer_start_receipt)
+
+    def blocked_reviewer_recovery_publish(run_dir_arg, proof_arg):
+        reviewer_recovery_publish_entered.set()
+        if not reviewer_recovery_publish_release.wait(timeout=5):
+            raise RuntimeError(
+                "selftest timed out waiting to release Reviewer recovery")
+        return original_reviewer_recovery_publish(run_dir_arg, proof_arg)
+
+    def run_reviewer_recovery() -> None:
+        try:
+            reviewer_recovery_thread_result.update(
+                recover_interrupted_reviewer_starts(
+                    reviewer_binding_run))
+        except Exception as exc:
+            reviewer_recovery_thread_errors.append(
+                f"recovery:{type(exc).__name__}:{exc}")
+
+    def append_during_reviewer_recovery() -> None:
+        reviewer_recovery_late_writer_started.set()
+        try:
+            append_hook_event(
+                reviewer_binding_run,
+                {
+                    "hook_event_name": "PostToolUse",
+                    "session_id": "reviewer-recovery-late-session",
+                    "transcript_path": str(
+                        reviewer_recovery_late_transcript),
+                    "tool_name": "CronList",
+                    "tool_use_id": reviewer_recovery_late_tool,
+                    "tool_input": {},
+                    "tool_response": {"tasks": []},
+                },
+            )
+        except Exception as exc:
+            reviewer_recovery_thread_errors.append(
+                f"writer:{type(exc).__name__}:{exc}")
+        finally:
+            reviewer_recovery_late_writer_done.set()
+
+    with mock.patch.object(
+            sys.modules[__name__],
+            "_publish_interrupted_reviewer_start_receipt",
+            side_effect=blocked_reviewer_recovery_publish):
+        reviewer_recovery_thread = threading.Thread(
+            target=run_reviewer_recovery,
+            name="interrupted-reviewer-recovery")
+        reviewer_recovery_thread.start()
+        reviewer_recovery_publish_reached = (
+            reviewer_recovery_publish_entered.wait(timeout=5))
+        reviewer_recovery_writer_thread = threading.Thread(
+            target=append_during_reviewer_recovery,
+            name="interrupted-reviewer-late-writer")
+        reviewer_recovery_writer_thread.start()
+        reviewer_recovery_writer_started = (
+            reviewer_recovery_late_writer_started.wait(timeout=5))
+        time.sleep(0.05)
+        reviewer_recovery_writer_blocked = (
+            reviewer_recovery_writer_started
+            and not reviewer_recovery_late_writer_done.is_set())
+        reviewer_recovery_publish_release.set()
+        reviewer_recovery_thread.join(timeout=10)
+        reviewer_recovery_writer_thread.join(timeout=10)
+    reviewer_recovery_result = reviewer_recovery_thread_result
+    reviewer_recovery_after = json.loads(
+        (reviewer_binding_run / "state" / "assignments.json").read_text(
+            encoding="utf-8"))
+    reviewer_recovery_row_after = reviewer_recovery_after["assignments"][0]
+    reviewer_recovery_final_events = load_events(reviewer_binding_run)
+    reviewer_recovery_receipts = (
+        _load_interrupted_reviewer_start_receipts(
+            reviewer_binding_run, reviewer_recovery_final_events))
+    reviewer_recovery_schema = json.loads(
+        (Path(__file__).resolve().parents[1] / "contracts"
+         / "interrupted-reviewer-start.v1.schema.json").read_text(
+             encoding="utf-8"))
+    reviewer_recovery_schema_valid = bool(
+        len(reviewer_recovery_receipts) == 1
+        and not _selftest_schema_errors(
+            reviewer_recovery_receipts[0], reviewer_recovery_schema)
+    )
+    reviewer_recovery_reason_drift = dict(
+        reviewer_recovery_receipts[0])
+    reviewer_recovery_reason_drift["reason"] = "process_killed_before_assistant"
+    reviewer_recovery_reason_drift_rejected = bool(
+        _selftest_schema_errors(
+            reviewer_recovery_reason_drift, reviewer_recovery_schema))
+    reviewer_recovery_exact = (
+        reviewer_recovery_result.get("status") == "recovered"
+        and reviewer_recovery_result.get("recovered_assignments")
+            == ["A-review-001"]
+        and reviewer_recovery_row_running.get("status") == "running"
+        and len(reviewer_recovery_row_running.get("attempts", [])) == 1
+        and reviewer_recovery_row_after.get("status") == "assigned"
+        and reviewer_recovery_row_after.get("attempts") == []
+        and "current_attempt" not in reviewer_recovery_row_after
+        and "runtime_agent_id" not in reviewer_recovery_row_after
+        and not agent_attempts(reviewer_binding_run)
+    )
+    reviewer_recovery_concurrent_writer_serialized = bool(
+        reviewer_recovery_publish_reached
+        and reviewer_recovery_writer_blocked
+        and not reviewer_recovery_thread.is_alive()
+        and not reviewer_recovery_writer_thread.is_alive()
+        and reviewer_recovery_late_writer_done.is_set()
+        and not reviewer_recovery_thread_errors
+        and len(reviewer_recovery_receipts) == 1
+        and int(reviewer_recovery_receipts[0]["observed_head_seq"])
+            < len(reviewer_recovery_final_events)
+        and reviewer_recovery_final_events[-1].get("tool_use_id")
+            == reviewer_recovery_late_tool
+    )
+    with mock.patch.object(
+            sys.modules[__name__], "agent_attempts",
+            wraps=agent_attempts) as reviewer_recovery_attempt_spy:
+        reconcile_agent_projection(reviewer_binding_run)
+    reviewer_recovery_snapshot_attempt_graph_once = (
+        reviewer_recovery_attempt_spy.call_count == 1)
+    reviewer_recovery_idempotent = (
+        recover_interrupted_reviewer_starts(
+            reviewer_binding_run).get("status") == "unchanged"
+        and len(_load_interrupted_reviewer_start_receipts(
+            reviewer_binding_run, load_events(reviewer_binding_run))) == 1
+    )
 
     legacy_settlement_run = run.parent / "pre-bundle-running-settlement-run"
     _legacy_contract, legacy_plan = seed_current_plan(
@@ -11207,6 +12072,22 @@ def _selftest() -> int:
          target_controlled_user_binding_rejected),
         ("Reviewer child identity requires the exact target result digest",
          reviewer_missing_result_digest_rejected),
+        ("interrupted Reviewer recovery rejects any child assistant output",
+         reviewer_recovery_assistant_rejected),
+        ("interrupted Reviewer recovery rejects a non-Reviewer assignment",
+         reviewer_recovery_nonreviewer_rejected),
+        ("transcript-proven interrupted Reviewer Start reverts to exact no-attempt replay",
+         reviewer_recovery_exact),
+        ("interrupted Reviewer Start receipt conforms to frozen schema",
+         reviewer_recovery_schema_valid),
+        ("interrupted Reviewer Start v1 rejects a different failure reason",
+         reviewer_recovery_reason_drift_rejected),
+        ("interrupted Reviewer recovery serializes a concurrent runtime writer",
+         reviewer_recovery_concurrent_writer_serialized),
+        ("Reviewer reproject builds the attempt graph once per snapshot",
+         reviewer_recovery_snapshot_attempt_graph_once),
+        ("interrupted Reviewer Start recovery is idempotent",
+         reviewer_recovery_idempotent),
         ("pre-bundle v1 running attempt permits only its exact Stop settlement",
          pre_bundle_running_stop_only_compat),
         ("tool_result text cannot forge child identity",
