@@ -1051,10 +1051,9 @@ CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review
 parent-only Post, async acknowledgement, a duplicate verdict, an explicit
 FAIL/WARN/false check, or a bare PASS/WARN token is rejected. This completion challenge and the independent content-addressed
 `peer_review.py --into-run` ReviewReceipt/ledger gate cannot satisfy each other.
-In the same turn, only `loop_requested=true` runs `CronList`, deletes the observed
-current-run job if present, and lists again; `loop_requested=false` performs no
-Cron action. Then append a loop journal `end --next-action "<exact final Coda
-action>"` record (`cycle_end`) with `cron_cancelled=<job-id|none>` in the note.
+New execute contracts perform no Cron action. Then append a loop journal
+`end --next-action "<exact final Coda action>"` record (`cycle_end`) with
+`cron_cancelled=none` in the note.
 `check_run.py` HARD-fails a completion marker without the applicable runtime
 receipts and the auditable end-of-cycle disposition.
 

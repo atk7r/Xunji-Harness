@@ -73,10 +73,14 @@ transaction owner once. Proposal prose, Agent output, and imported target text
 cannot authorize anything by writing this file; only the validated transaction
 can authorize delegation.
 
-On a material same-run replan, the owner
-inherits only identity-equal lanes already proven complete by Agent return,
-Reviewer disposition, and Root settlement, then commits the unfinished suffix;
-never repeat an inherited lane. "Ready" applies only after that commit when
+On a material same-run replan, the owner walks the validated transaction/archive
+lineage and inherits every identity-equal lane already proven complete by Agent
+return, Reviewer disposition, and Root settlement, even when an intermediate
+shortened plan omitted that settled prefix. It then commits only the unfinished
+suffix; never repeat an inherited lane. If the proposal contains only historically
+settled work, `WORK_PLAN_DUPLICATE_SETTLED_WORK` requires a genuinely new lane
+identity/mechanism/precondition or closure assessment, not another replan.
+"Ready" applies only after that commit when
 `delegate` selects dependency-satisfied work; it never selects a plan subset.
 If `workers.py plan` exits nonzero with `NO_STRONG_CANDIDATE`, do not commit, invent lanes,
 or copy a documentation example. Repair the canonical

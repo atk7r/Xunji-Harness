@@ -38,7 +38,9 @@ Routing invariant:
   semantics only when the client forwards it unchanged to `UserPromptSubmit`.
   Client-reserved scheduler expansion is not authority. The lifecycle owner routes
   that case to an affirmative, uniquely named run/source for one execute cycle with
-  `loop_requested=false`; it must not claim recurring-Cron semantics. Once bound,
+  `loop_requested=false`. A delivered literal entry also compiles to
+  `loop_requested=false` and records `loop_entry_delivered=true`; neither form
+  authorizes Cron. Once bound,
   use the fixed protocol in `docs/templates/loop_prompt.md` and always name the
   normalized run path, not the original source.
 - Affirmative natural-language setup names the controlling goal; Claude decomposes it
@@ -47,8 +49,8 @@ Routing invariant:
   effect. Multiple sources remain ambiguous data. Deterministic rules recognize exact
   aliases and hard negative/data boundaries, not an expanding list of positive verbs.
 
-Natural language never claims recurring loop mode by itself; it may authorize the
-single setup/resume/execute lifecycle operation classified by the turn contract.
+Every entry authorizes only the single setup/resume/execute lifecycle operation
+classified by the turn contract.
 
 ## Capability Skills (invoke when the task fits)
 
@@ -227,11 +229,10 @@ Output:
   receipt, required
   files, coverage, complete source bundle, and immutable claim binding; pointer +
   status alone are insufficient. After committed/recovered setup, follow the bound
-  turn contract: setup-only stops after activation; `loop_requested=true` runs fresh
-  CronList/CronCreate naming the new run; `loop_requested=false` performs no Cron
-  action. An execute cycle records TaskCreate/TaskUpdate before any Agent/target action.
-  Stable recovery codes distinguish missing setup/list/run-name/create/plan state;
-  a denied action is not permission to schedule the old run.
+  turn contract: setup-only stops after activation; execute cycles use
+  `loop_requested=false` and perform no Cron action. They record
+  TaskCreate/TaskUpdate and a typed work plan before any Agent/target action.
+  A denied action is not permission to schedule the old run.
 - **Bind one exact lifecycle effect**: the argv layer validates adapter operation and
   options before PreToolUse records a redacted operation/options digest, exact target,
   canonical source-reference digest, session, and prompt. The transaction owner

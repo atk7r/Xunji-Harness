@@ -237,7 +237,7 @@ review record 和对应设计 owner 为事实源；两种工作不可混成一�
 ### 4.3 Run 生命周期
 
 ```text
-affirmative setup/resume intent | normalized first-line /loop | named-run one-cycle fallback
+affirmative setup/resume intent | normalized first-line /loop | named-run execute
   -> bind turn authority
   -> exact argv-only lifecycle adapter (no shell wrapper)
   -> route existing-run | URL | local file by deterministic content rules
@@ -248,10 +248,10 @@ affirmative setup/resume intent | normalized first-line /loop | named-run one-cy
   -> atomic rename to runs/<dir>
   -> commit active-run transition through one compare-and-swap writer
      |-> setup/resume-only intent: stop after activation
-     |-> first-source exact /loop: fresh CronList -> CronCreate naming bound run
-     |      -> TaskCreate/TaskUpdate iteration plan
-     |-> existing-run exact /loop: current-turn iteration plan (no new Cron required)
-     |-> named-run execute fallback: loop_requested=false -> iteration plan, no Cron
+     |-> first-source exact /loop: loop_entry_delivered=true, loop_requested=false
+     |      -> TaskCreate/TaskUpdate + typed work plan, no Cron
+     |-> existing-run exact /loop: same one-cycle plan, no Cron
+     |-> named-run execute: loop_requested=false -> same one-cycle plan, no Cron
   -> execute cycle only: Setup -> Root -> Hunter -> Reviewer -> Report
   -> check_run + zero open fronts + independent review
   -> terminal journal/completion evidence
@@ -314,14 +314,15 @@ pointer + 阶段派生状态。
 
 当客户端把 literal `/loop <source>` 原样交给 `UserPromptSubmit` 时，它由
 `tools/loop_bootstrap.py --source ... --type auto` 适配，并在同一顶层 operator 回合继续到
-run activation、fresh CronList/CronCreate、iteration plan、图谱/front 拆解和真实 Agent
-launch；不得停下来等待裸“继续”。source authority 以完整 source SHA-256 绑定，持久化
+run activation、Task/work plan、图谱/front 拆解、真实 Agent launch、Hunter return、
+Reviewer disposition、Root settlement 与 typed `cycle_end`；不得停下来等待裸“继续”，
+也不得创建 Cron。source authority 以完整 source SHA-256 绑定，持久化
 prompt 展示和 runtime excerpt 脱敏敏感 query。current contract 还冻结 canonical-v1 semantic
 source identity：bare host 归一为 HTTPS origin，scheme/host 大小写、默认端口与空 path 只在
 effect 等价时统一；不同 host、path 或 query 仍是不同 authority。raw prompt hash 另行保留用于
 审计，不能用相同 basename 或不同 query 复用。
 只有首个非空顶层行经无害前导水平空白/BOM 归一后以 `/loop(?:\s|$)`
-开头才是显式 recurring loop；Claude 把完整顶层描述拆解为一个公开 exact lifecycle argv
+开头才是显式单周期 execute entry；Claude 把完整顶层描述拆解为一个公开 exact lifecycle argv
 候选，Hook 再机械晋级为 operation、所选 effect 类内唯一 semantic source/run、route 与 constraints。
 同一 prompt 可以同时命名现存 run 与一个或多个 target URL；`resume(run)` 只把 run anchor
 晋级为 lifecycle authority，未选择的 URL 保持 target/context，不得抢占 setup source。
@@ -338,8 +339,8 @@ authority。尾随的失败说明或可逆重试要求不撤销
 顶层 `/loop` 已是 execute command，只有真正 denial 才撤销。raw prompt hash 仍绑定
 未修改的操作者输入。显式 fenced code、blockquote、Markdown list item、引用日志与行内引用都是 data。若客户端
 保留 `/loop` 并在 hook 前展开为自身 scheduler，该展开没有 Xunji authority；current driver
-改用 turn contract 已支持的肯定、所选 effect 唯一 anchor 的自然语言入口完成单次
-`EXECUTE` setup/resume cycle，`loop_requested=false` 且不创建 recurring Cron。自然语言
+改用 turn contract 已支持的肯定、所选 effect 唯一 anchor 的自然语言入口完成同样的单次
+`EXECUTE` setup/resume cycle，`loop_requested=false` 且不创建 Cron。自然语言
 setup 的 AI candidate 必须只有一个 prompt-anchored URL、bare host、run 或支持的 source，
 且 exact effect 经机械校验后才生成 source authority；真正选择多个 semantic source、否定、权限疑问或分析/评审请求都
 fail closed/read-only。即使首行写了 `/loop`，同行
@@ -364,9 +365,9 @@ Markdown/普通 JSON pilot 由 `tools/setup_normalizer.py` 处理，HTML/PDF/DOC
 boundary；会影响 baseline reachable/low-quality 的相邻 recon report 作为带独立 hash 的
 `related_sources` snapshot 冻结，不能成为隐形第二输入。机械 validator 校验 hash、路径、URL/host/port、重复资产和 `source_ref` 值级
 对应关系；只有 hook 绑定的顶层 prompt hash 能加入 `authority=operator`，source/附件/
-target/tool/reviewer 文本只能是 data。从第二轮起，已建立的 recurring Cron payload 只携带
-规范化的 `/loop runs/<dir>`；client-reserved 情况下手动入口只命名同一规范化 run 并执行
-`loop_requested=false` 单周期，二者都避免重新抽取原始 source 漂移。新的顶层 prompt 会先撤销同 session 未消费的
+target/tool/reviewer 文本只能是 data。后续周期必须由新的顶层 execute prompt 命名规范化
+`runs/<dir>`，不再抽取原始 source；新的 prompt 同时建立新的 turn authority，并撤销同
+session 未消费的
 pending contract/transition claim；因此命令形状修复必须在原 operator turn 重试，不能从
 历史 prompt 继承转换权限。未知 schema major fail closed；旧下划线 schema
 只用于 existing-run 只读兼容，迁移器必须取得与旧 hash 一致的原始/关联 snapshot，
@@ -410,12 +411,12 @@ journal 状态。只要仍有安全、在 scope 内且有信息增益的前沿�
 重要理由写入 `decisions.md`；不把 routine choice 重新推给 operator。
 
 显式 `/loop` 有派生的执行前序，而不是另一份持久 phase 状态：首次 source turn 必须有
-一致的 committed/recovered setup transaction/contract binding，再有当前 session、当前 turn、
-hash-chain-valid 且命名 bound run 的 hook-observed CronCreate；随后 TaskCreate/TaskUpdate（TodoWrite 兼容）
-计划回执必须晚于该 CronCreate。现存 run 的后续 `/loop` 不要求重建 Cron，但在 Agent/目标
-动作前仍要求当前回合计划回执。自然语言 setup-only 不进入该门。计划只证明主驾驶做了
-任务拆解，不能替代 graph/front、workers assignment、真实 Agent、证据合并或 Single
-Synthesizer。
+一致的 committed/recovered setup transaction/contract binding；随后当前 turn 的
+TaskCreate/TaskUpdate（TodoWrite 兼容）与 typed work plan 必须先于 Agent/目标动作。
+新 contract 一律 `loop_requested=false`；literal entry 另记
+`loop_entry_delivered=true`，`CronCreate` 以
+`XUNJI_E_CRON_CREATE_NOT_REQUESTED` fail closed。计划只证明主驾驶做了任务拆解，不能
+替代 graph/front、workers assignment、真实 Agent、证据合并或 Single Synthesizer。
 
 自治不意味着无条件执行：当前 prompt 是 turn contract。Explain/review/ambiguous
 保持只读，pause 保留开放状态，明确 execute/continue/implement 才能继续改变 run
@@ -951,8 +952,10 @@ plan-bound Read bootstrap、local tool discipline、硬调用预算和返回形�
 当前 Claude Code 客户端若把 `/loop` 保留为内建 scheduler（2.1.201 已观察到），字面命令
 可能在 `UserPromptSubmit` 前被消费；该展开不产生 Xunji authority。lifecycle owner 在这种
 客户端只路由到 turn-contract 已支持的命名 source/run 单周期 `EXECUTE`，其
-`loop_requested=false`，不得创建或声称 recurring-Cron 语义。Hook 对真正原样送达的 exact
-`/loop` 契约不变；未来若更名入口，需要另阶段修改 contract/fixtures，而非提示词假装完成。
+`loop_requested=false`，不得创建或声称 recurring-Cron 语义。真正原样送达的 exact
+`/loop` 也只增加 `loop_entry_delivered=true`，不把同一 Claude 会话变成定时任务。未来若要
+递归自动运行，必须由会话外 supervisor 提供新 prompt、新 context 和明确的终止/交接契约；
+当前实现不具备该 authority。
 
 ## 9. 规则进入与架构决策
 
@@ -1052,10 +1055,11 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     并以 committed receipt 与 projection hash 证明。准入回合 zero-probe，source/AI/Agent/
     front/手改不能铸造权限。
 18. 原样送达的显式 `/loop <source>` 顺序是 exact bootstrap → transaction-bound activation →
-    fresh CronList/CronCreate → iteration-plan receipt → graph/front/real Agent；shape deny 只能
-    同 operator turn clean retry。客户端保留字导致的 scheduler 展开不是该入口；肯定且唯一
-    命名 source/run 的自然语言 fallback 只产生 `loop_requested=false` 单周期 EXECUTE，不创建
-    recurring Cron。完整自然语言描述由 Claude 拆解为 lifecycle candidate，再机械晋级为唯一
+    Task/work plan → graph/front/real Agent → Hunter return → Reviewer disposition → Root settlement
+    → typed `cycle_end`；shape deny 只能同 operator turn clean retry。literal 与肯定且唯一命名
+    source/run 的自然语言入口都产生 `loop_requested=false` 单周期 EXECUTE，前者另记
+    `loop_entry_delivered=true`；二者都不创建 recurring Cron。完整自然语言描述由 Claude
+    拆解为 lifecycle candidate，再机械晋级为唯一
     semantic source/run、route 与 constraints；
     bare host 和 effect-preserving URL 写法安全归一，附着描述不会被吞进 hostname。每个新的
     非内部 operator prompt 都撤销同 session 的未消费 source authority，不受 active pointer
@@ -1118,49 +1122,45 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 
 ## 12. Maintenance Checkpoint
 
-- Date: 2026-07-29
-- Scope: 修复 plan-bound Reviewer Start 的 receipt/projection 半提交死锁。真实
-  A-review-012 在 `SubagentStart` journal receipt 成功后，Start hook 对 25MB parent transcript
-  重复扫描并在 600 秒取消；child sidechain 没有任何模型输出，但 derived assignment 永久显示
-  `running`，旧 plan 不能结算、新 plan 不能提交。
-- Architecture impact: runtime projection 与 Reviewer recovery lifecycle changed。
-  新增严格、fail-closed、content-addressed 的 pre-model Start supersession；保持 Reviewer
-  不可取消、不可绕过，保持 `runtime_events.jsonl` append-only，并把 recovery 后续动作收敛到
-  原 assignment row 的 exact durable launch-contract replay。Projection 从 per-record/per-token
-  重复解析改为 snapshot-once attempt graph 与 per-transcript batched token scan。
-- Owner/enforcement: `tools/runtime_receipts.py` 独占 transcript proof、receipt schema、
-  effective projection 与 runtime→assignment recovery transaction；
-  `contracts/interrupted-reviewer-start.v1.schema.json` 冻结 receipt；`tools/workers.py delegate`
-  在 assignment writer 前调用 typed recovery，再复用既有 assigned/no-attempt replay gate。
-  已有 authentic Stop、child claim/tool/assistant、parent terminal 或 binding drift 均拒绝恢复。
-- Live migration: 不自动扫描或改写所有 run。下一次对受影响 run 执行正常
-  `workers.py delegate` 时，只有 exact proof 成立的 Start 才追加 receipt 并重置 derived row；
-  physical journal、Hunter result、review dependency、evidence/frontier/report 均不删除或改写。
-- Verification: `runtime_receipts.py --selftest`、`workers.py --selftest`、
-  `turn_contract.py --selftest`、rule/compile/diff checks 均 PASS；完整
-  `selftest_all.py` 为 69 passed / 0 failed。真实 `workers.py delegate` owner path
-  在原始 live run 的隔离 byte copy 上以 `/usr/bin/time -p` 1.61 秒发布 receipt，并把
-  A-review-012 恢复为同 row assigned/no-attempt；随后仅因 copied work-plan 的绝对
-  `run_dir` binding 正确 fail closed。独立 detached worktree 的 Claude Code 2.1.201 /
-  configured DeepSeek session `e459e35b-e576-4596-a689-3f1724fa0efa` 对 path-native
-  targetless fixture 完成 recovery → exact replay → real Reviewer return → review
-  disposition → Hunter merge → typed cycle_end；runtime/transcript adjudication为
-  target_action=0、WebFetch/WebSearch/Edit/Write=0。并发 fixture 在 receipt publish
-  临界区暂停 recovery，证明 late runtime writer 被 runtime lock 串行化；额外负例证明
-  non-Reviewer assignment 与不同 pre-model failure reason 均不能误用 v1。
-- Independent review: round 1 fresh-context Claude 提出的 machine timing、
-  synthetic/full-path 边界与 concurrent-writer WARN 已分别补 raw `/usr/bin/time`、
-  明确分层声明和 targeted regression。round 2 `panel:arkcli+claude` 为 WARN、无 source
-  blocker；arkcli 内部 GLM parse error 保留为 partial-panel 限制，Kimi 路径与 fresh
-  Claude 完成。round 2 的 split high-load/full-lifecycle E2E 边界已显式 deferred，v1
-  rigid reason 已记录独立 schema 演进规则。final3 arkcli 再次 timeout/parse failure 后，
-  operator 明确要求最终门不再使用 arkcli；最终 exact-diff fresh-context Claude review
-  保存在
-  `review/records/2026-07-29-interrupted-reviewer-recovery/peer-review.final4-claude.*`。
-  Codex 是作者，不计自己的 review。
-- Exclusions: 不修改 live run canonical/control-plane 状态，不删除任何缓存或 journal；
-  不改动用户已有的 `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md`、
-  target/evidence artifacts 与其他 untracked 文件。
+- Date: 2026-07-30
+- Scope: 根治 Claude Code 交互中 schedule-less `/loop` 被解释成十分钟 recurring
+  Cron、同一会话反复重入、计划回合持续 stale，以及中间 replan 丢失 settled prefix 后
+  相同生成 lane 被再次委派的问题。事故 run 最终有 73 个 assignment，并在大上下文中连续
+  收到 DeepSeek context-window 400。
+- Architecture impact: lifecycle authority、work-plan history projection 与状态输出 changed。
+  新 contract 把 delivered literal `/loop` 冻结为
+  `loop_entry_delivered=true, loop_requested=false` 的单 material cycle；
+  `CronCreate` 以 `XUNJI_E_CRON_CREATE_NOT_REQUESTED` fail closed。周期内部仍由 Root
+  自主选择策略，但必须经 task/work plan、Hunter、Reviewer、Root settlement 与 typed
+  `cycle_end`；下一周期只能来自新的顶层 execute prompt。生成 replan 从 verified
+  transaction/archive lineage 继承 identity-equal 且完整结算的 lane，即使中间 shortened
+  plan 已省略该 prefix；全重复 proposal 以 `WORK_PLAN_DUPLICATE_SETTLED_WORK` 拒绝。
+  默认 assignment status 只显示全部 active/debt 与最近八个 terminal rows，`--all`
+  保留完整审计面。
+- Owner/enforcement: `tools/turn_contract.py` 是 entry/Cron authority owner；
+  `tools/work_plan.py` 验证 transaction lineage；`tools/workers.py` 独占生成 replan
+  inheritance 与 assignment status projection；capability registry 冻结 `status --all`
+  形状。Claude-primary `CLAUDE.md`、lifecycle/Agent Board owners、loop template 与 workflow
+  同步单周期语义，不创建第二 scheduler runtime。
+- Live migration: 不改写、删除或伪造任何旧 run journal/assignment。已有 legacy Cron job
+  只能在独立、观察绑定的 cleanup authority 下删除，不能由新 `/loop` 重建。旧
+  transaction archives 继续 append-only；下一次生成 replan 时只读投影其 settled identity。
+- Verification: focused turn-contract/work-plan/workers/capability/template/rule checks PASS；
+  完整 `selftest_all.py` 为 69 passed / 0 failed。Claude Code 2.1.201 configured
+  DeepSeek session `0eb64b14-f43c-4496-8136-e7053b466495` 对 loopback、目标网络禁用的
+  path-native fixture 完成 exact bootstrap → typed plan → real Hunter Start/Stop → real
+  Reviewer Start/Stop → Root settlement → typed `cycle_end`。独立 receipt adjudication为
+  `loop_requested=false`、Cron events=0、target_action=0、WebFetch/WebSearch=0。第一次同时
+  禁止 run-state Edit/Write 的 overconstrained fixture 正确 fail closed，不计为通过。
+  冻结 transcript、runtime、plan、assignment、turn contract、journal 与 raw test output 位于
+  `review/records/2026-07-30-interactive-loop-deadlock/evidence/`。
+- Independent review: Codex 是作者，不计自己的 review。按 operator 要求不使用 arkcli；
+  commit 前把冻结的 exact final source/doc diff 交给 fresh-context Claude Code
+  no-edit/no-tools review，fingerprint 与 verdict 记录在同一 review record，checkpoint
+  本身不预声明 verdict。
+- Exclusions: 不改写原始 `runs/www-scshr-com_20260729` 或其 append-only journals；
+  不把一次 cycle 宣称为整个渗透完成；不引入后台 daemon、第二 authority runtime 或固定
+  攻击 playbook。
 
 ## 13. 外部设计来源与采用边界
 

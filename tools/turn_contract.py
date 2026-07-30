@@ -169,6 +169,7 @@ E_CLEAR_ACTIVE_FORBIDDEN = "XUNJI_E_CLEAR_ACTIVE_FORBIDDEN"
 E_CRON_LIST_REQUIRED = "XUNJI_E_CRON_LIST_REQUIRED"
 E_CRON_RUN_MISMATCH = "XUNJI_E_CRON_RUN_MISMATCH"
 E_CRON_CREATE_REQUIRED = "XUNJI_E_CRON_CREATE_REQUIRED"
+E_CRON_CREATE_NOT_REQUESTED = "XUNJI_E_CRON_CREATE_NOT_REQUESTED"
 E_ITERATION_PLAN_REQUIRED = "XUNJI_E_ITERATION_PLAN_REQUIRED"
 E_WORK_PLAN_REQUIRED = "XUNJI_E_WORK_PLAN_REQUIRED"
 E_WORK_PLAN_STALE = "XUNJI_E_WORK_PLAN_STALE"
@@ -999,7 +1000,14 @@ def _contract_from_event(
     ))
     slug_sha256s, slug_ambiguous = _prompt_slug_authority(prompt)
     natural_transition, natural_bind = _natural_lifecycle_intent(intent_text)
-    loop_requested = _prompt_has_loop_directive(prompt)
+    # ``/loop`` is an execution entry, not recurring scheduling authority.
+    # Claude Code 2.1.201 gives a schedule-less /loop a client-side 10 minute
+    # default.  Binding that client default to Xunji authority re-enters the
+    # same interactive session, invalidates the current plan turn, and can grow
+    # context forever.  Keep the literal entry mechanically visible while all
+    # newly compiled contracts remain single-cycle.
+    loop_entry_delivered = _prompt_has_loop_directive(prompt)
+    loop_requested = False
     target_egress_denied, web_tools_denied = _operator_effect_constraints(prompt)
     lifecycle_scope = (
         "setup_only" if SETUP_ONLY_RE.search(intent_text) else "normal"
@@ -1008,7 +1016,7 @@ def _contract_from_event(
         prompt,
         previous_mode=previous_mode,
         lifecycle_intent=bool(
-            loop_requested or natural_transition or natural_bind),
+            loop_entry_delivered or natural_transition or natural_bind),
     )
     scope_request, scope_error = scope_admission.parse_operator_directive(prompt)
     if maintenance and scope_request:
@@ -1023,7 +1031,7 @@ def _contract_from_event(
         and not scope_request
         and not maintenance
         and mode in {EXPLAIN, EXECUTE}
-        and not loop_requested
+        and not loop_entry_delivered
         and _model_lifecycle_candidate_allowed(
             prompt,
             source_values=source_values,
@@ -1050,7 +1058,7 @@ def _contract_from_event(
     if semantic_candidate_required \
             or (model_candidate_allowed and mode == EXPLAIN):
         mode = INTENT_PENDING
-    elif not loop_requested and (
+    elif not loop_entry_delivered and (
             natural_transition
             or natural_bind and (run_ambiguous or bool(run_values))):
         # A natural-language lifecycle request without one mechanically
@@ -1058,7 +1066,7 @@ def _contract_from_event(
         # until the operator makes the actual source/run effect unambiguous.
         mode = EXPLAIN
     now = time.time()
-    loop_source = _prompt_loop_source(prompt) if loop_requested else (
+    loop_source = _prompt_loop_source(prompt) if loop_entry_delivered else (
         "" if mode == INTENT_PENDING else
         f"runs/{run_values[0]}" if natural_bind and len(run_values) == 1 else
         source_values[0] if natural_transition and len(source_values) == 1 else ""
@@ -1083,11 +1091,11 @@ def _contract_from_event(
         derived_transition = not run_name or _run_name_from_path(loop_source) != run_name
     if mode != EXECUTE:
         lifecycle_operation = "none"
-    elif loop_requested:
+    elif loop_entry_delivered:
         lifecycle_operation = (
             "resume" if loop_source_kind == "run" else
             "source" if loop_source_kind in {"url", "file"} else
-            "loop"
+            "none"
         )
     elif natural_bind and len(run_values) == 1:
         lifecycle_operation = "resume"
@@ -1144,7 +1152,8 @@ def _contract_from_event(
         "intent_resolution": (
             "model_candidate_pending" if mode == INTENT_PENDING else
             "model_candidate_available" if model_candidate_allowed else
-            "deterministic_alias" if lifecycle_operation != "none" else
+            "deterministic_alias"
+            if lifecycle_operation != "none" or loop_entry_delivered else
             "read_only"
         ),
         "model_lifecycle_candidate_allowed": model_candidate_allowed,
@@ -1155,6 +1164,7 @@ def _contract_from_event(
         "lifecycle_scope": lifecycle_scope,
         "fanout_override": bool(re.search(r"(?:明确)?允许串行|不要使用\s*(?:Agent|子代理)|serial override", prompt, re.I)),
         "intent_normalizations": intent_normalizations,
+        "loop_entry_delivered": loop_entry_delivered,
         "loop_requested": loop_requested,
         "loop_source_kind": loop_source_kind,
         "run_bind_requested": lifecycle_operation == "resume",
@@ -4219,6 +4229,7 @@ def _decision_metadata(reason: str, event: dict) -> dict:
         E_CRON_LIST_REQUIRED: "cron",
         E_CRON_RUN_MISMATCH: "cron",
         E_CRON_CREATE_REQUIRED: "cron",
+        E_CRON_CREATE_NOT_REQUESTED: "cron",
         E_ITERATION_PLAN_REQUIRED: "iteration_plan",
         E_WORK_PLAN_REQUIRED: "work_plan",
         E_WORK_PLAN_STALE: "work_plan",
@@ -4367,7 +4378,8 @@ def _loop_iteration_gate_reason(run_dir: Path, event: dict, contract: dict) -> s
     fallback would become a plan-bypass entrypoint.
     """
     recurring_loop = bool(contract.get("loop_requested"))
-    lifecycle_cycle = str(contract.get("lifecycle_operation") or "") in {
+    lifecycle_cycle = bool(contract.get("loop_entry_delivered")) or str(
+        contract.get("lifecycle_operation") or "") in {
         "source", "setup", "resume",
     }
     if not recurring_loop and not lifecycle_cycle:
@@ -5608,6 +5620,13 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
                 )
 
     if tool == "CronCreate":
+        if contract.get("loop_requested") is not True:
+            return (
+                f"[{E_CRON_CREATE_NOT_REQUESTED}] Xunji 的交互式 /loop 是单周期"
+                "执行入口，不授权 recurring Cron。继续在当前 turn 内自主选择并完成"
+                "一个 material cycle；需要下一周期时由新的顶层 EXECUTE prompt 建立"
+                "新 authority，不能向同一 Claude 会话定时回灌。"
+            )
         if _new_run_transition_pending(contract, run_dir):
             return (
                 f"[{E_NEW_RUN_SETUP_REQUIRED}] Cron 单实例门：当前 prompt 要求创建新 run；"
@@ -5969,6 +5988,14 @@ def _context_message(contract: dict, run_dir: Path) -> str:
             f"{action}；该 typed action 只完成本地 setup/activation，不发送 target 请求。"
             "成功后继续当前自然语言描述中的动作和限制；不要因 trailing question、恢复说明"
             "或格式差异丢弃主执行意图。"
+        )
+    if mode == EXECUTE and contract.get("loop_entry_delivered"):
+        return effect_note + intent_note + (
+            "[Xunji lifecycle: SINGLE_CYCLE] 当前 /loop 只授权一个 material "
+            "execute cycle；不得 CronCreate。先创建或更新本回合 "
+            "TaskCreate/TaskUpdate（兼容 TodoWrite）清单，再完成 graph/front、"
+            "Hunter -> Reviewer -> Root settlement 与 typed cycle_end。下一周期必须"
+            "由新的顶层 EXECUTE prompt 建立 authority。"
         )
     if mode == EXECUTE and contract.get("loop_requested"):
         if contract.get("run_transition_requested"):
@@ -7708,7 +7735,8 @@ def _selftest() -> int:
     )
     leading_whitespace_operator_intent_normalized = bool(
         normalized_source_contract.get("mode") == EXECUTE
-        and normalized_source_contract.get("loop_requested")
+        and normalized_source_contract.get("loop_entry_delivered")
+        and normalized_source_contract.get("loop_requested") is False
         and normalized_source_contract.get("lifecycle_operation") == "source"
         and normalized_source_contract.get("intent_normalizations")
         == ["leading_horizontal_whitespace"]
@@ -7779,7 +7807,8 @@ def _selftest() -> int:
     )
     attached_absolute_run_path_keeps_named_resume = bool(
         attached_absolute_run_contract.get("mode") == EXECUTE
-        and attached_absolute_run_contract.get("loop_requested")
+        and attached_absolute_run_contract.get("loop_entry_delivered")
+        and attached_absolute_run_contract.get("loop_requested") is False
         and attached_absolute_run_contract.get("loop_source_kind") == "run"
         and attached_absolute_run_contract.get("lifecycle_operation") == "resume"
         and attached_absolute_run_contract.get("run_name_sha256s")
@@ -7873,7 +7902,8 @@ def _selftest() -> int:
         and "redacted%3Aquery" in str(source_operator_contract.get("prompt_excerpt") or "")
     )
     loop_url_derives_transition = bool(
-        implicit_source_contract.get("loop_requested")
+        implicit_source_contract.get("loop_entry_delivered")
+        and implicit_source_contract.get("loop_requested") is False
         and implicit_source_contract.get("loop_source_kind") == "url"
         and implicit_source_contract.get("run_transition_requested")
         and _new_run_transition_pending(implicit_source_contract, run)
@@ -8794,7 +8824,8 @@ def _selftest() -> int:
     (run / "frontier.md").write_text(original_frontier, encoding="utf-8")
     cron_create = {"tool_name": "CronCreate", "tool_input": {"prompt": f"/loop {run.name}"}}
     cron_contract = {**contract, "prompt_excerpt": f"/loop {run.name}"}
-    cron_before_list = bool(evaluate_pretool(run, cron_create, cron_contract))
+    cron_before_list = E_CRON_CREATE_NOT_REQUESTED in evaluate_pretool(
+        run, cron_create, cron_contract)
     with transcript.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({
             "message": {"role": "assistant", "content": [{
@@ -8814,9 +8845,11 @@ def _selftest() -> int:
         "tool_use_id": "current-cron-list", "tool_input": {},
         "tool_response": {"tasks": []},
     })
-    cron_after_list = evaluate_pretool(run, cron_create, cron_contract) == ""
-    new_run_cron_blocked_until_transition = "先完成 setup" in evaluate_pretool(
-        run, cron_create, contract)
+    cron_after_list = E_CRON_CREATE_NOT_REQUESTED in evaluate_pretool(
+        run, cron_create, cron_contract)
+    new_run_cron_blocked_until_transition = (
+        E_CRON_CREATE_NOT_REQUESTED in evaluate_pretool(
+            run, cron_create, contract))
     lifecycle_task = {"tool_name": "TaskCreate", "tool_input": {
         "subject": "decompose assets and Agent lanes",
         "description": "review https://bound.example.test/?key=plan-secret",
@@ -8878,10 +8911,10 @@ def _selftest() -> int:
             "prompt_sha256": str(lifecycle_contract.get("prompt_sha256") or ""),
         },
     }), encoding="utf-8")
-    plan_before_cron_blocked = E_CRON_CREATE_REQUIRED in evaluate_pretool(
-        lifecycle_run, lifecycle_task, lifecycle_contract)
+    plan_before_cron_blocked = evaluate_pretool(
+        lifecycle_run, lifecycle_task, lifecycle_contract) == ""
     lifecycle_agent = {"tool_name": "Agent", "tool_input": {"prompt": "work F-001"}}
-    agent_before_cron_blocked = E_CRON_CREATE_REQUIRED in evaluate_pretool(
+    agent_before_cron_blocked = E_WORK_PLAN_REQUIRED in evaluate_pretool(
         lifecycle_run, lifecycle_agent, lifecycle_contract)
     no_active_lifecycle_contract = {
         **lifecycle_contract,
@@ -8891,9 +8924,9 @@ def _selftest() -> int:
     }
     no_active_transition_reaches_cron_gate = bool(
         not _new_run_transition_pending(no_active_lifecycle_contract, lifecycle_run)
-        and E_CRON_CREATE_REQUIRED in evaluate_pretool(
-            lifecycle_run, lifecycle_task, no_active_lifecycle_contract)
-        and "RUN_BOUND" in _context_message(
+        and evaluate_pretool(
+            lifecycle_run, lifecycle_task, no_active_lifecycle_contract) == ""
+        and "SINGLE_CYCLE" in _context_message(
             no_active_lifecycle_contract, lifecycle_run)
     )
     lifecycle_transcript = root / "lifecycle-transcript.jsonl"
@@ -8907,7 +8940,7 @@ def _selftest() -> int:
         "tool_input": {"prompt": f"/loop {lifecycle_run.name}"},
         "tool_response": {"id": "bound-cron-job"},
     })
-    agent_before_plan_blocked = E_ITERATION_PLAN_REQUIRED in evaluate_pretool(
+    agent_before_plan_blocked = E_WORK_PLAN_REQUIRED in evaluate_pretool(
         lifecycle_run, lifecycle_agent, lifecycle_contract)
     plan_allowed_after_cron = evaluate_pretool(
         lifecycle_run, lifecycle_task, lifecycle_contract) == ""
@@ -12606,7 +12639,8 @@ def _selftest() -> int:
          == "single_operator"),
         ("explicit loop intent outranks a framework recovery clause",
          operator_e2e_loop_contract.get("mode") == EXECUTE
-         and operator_e2e_loop_contract.get("loop_requested") is True
+         and operator_e2e_loop_contract.get("loop_entry_delivered") is True
+         and operator_e2e_loop_contract.get("loop_requested") is False
          and operator_e2e_loop_contract.get("lifecycle_operation") == "source"
          and not operator_e2e_loop_contract.get("maintenance_intent")),
         ("natural localhost lifecycle intent outranks negative framework and recovery clauses",
@@ -13100,9 +13134,9 @@ def _selftest() -> int:
          unavailable_completion_pretool_is_read_only),
         ("explain mode blocks Bash", bool(evaluate_pretool(run, target_event, {"mode": EXPLAIN}))),
         ("pause mode allows CronList", evaluate_pretool(run, {"tool_name": "CronList", "tool_input": {}}, {"mode": PAUSE}) == ""),
-        ("CronCreate requires current-turn CronList", cron_before_list),
-        ("CronCreate allowed after current-turn empty CronList", cron_after_list),
-        ("new-run /loop cannot schedule the origin run before transition",
+        ("single-cycle contract rejects CronCreate before CronList", cron_before_list),
+        ("single-cycle contract still rejects CronCreate after CronList", cron_after_list),
+        ("new-run /loop cannot schedule the origin run",
          new_run_cron_blocked_until_transition),
         ("pending new-run /loop blocks task planning on the origin run",
          pending_plan_requires_setup),
@@ -13110,15 +13144,15 @@ def _selftest() -> int:
          pending_agent_requires_setup),
         ("post-bind work requires a committed transaction/contract binding",
          uncommitted_transition_blocked),
-        ("new-run task planning waits for current-turn CronCreate",
+        ("new-run task planning proceeds without recurring Cron",
          plan_before_cron_blocked),
-        ("new-run Agent launch waits for current-turn CronCreate",
+        ("new-run Agent launch waits for the single-cycle work plan",
          agent_before_cron_blocked),
-        ("a committed no-active-run transition reaches the bound-run Cron gate",
+        ("a committed no-active-run transition reaches single-cycle execution",
          no_active_transition_reaches_cron_gate),
-        ("Agent launch waits for a post-Cron iteration plan receipt",
+        ("Agent launch waits for a typed single-cycle work plan",
          agent_before_plan_blocked),
-        ("TaskCreate is allowed after the bound run Cron receipt",
+        ("TaskCreate is allowed for the bound single-cycle run",
          plan_allowed_after_cron),
         ("post-Cron task receipt unlocks the lifecycle gate",
          plan_unlocks_lifecycle_gate),

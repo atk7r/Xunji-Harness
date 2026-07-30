@@ -1271,6 +1271,62 @@ def _verify_transaction_lineage(
         current = prior
 
 
+def transaction_plan_lineage(run_dir: str | Path) -> list[dict]:
+    """Return the verified plan lineage from newest to oldest.
+
+    Replan consumers need durable work history, not merely the lanes that remain
+    in ``state/work_plan.json``.  A previous replan may legitimately omit an
+    already-settled prefix; looking only at that shortened immediate predecessor
+    loses the completed identity and permits the generated planner to dispatch
+    it again.  The transaction archive chain is the canonical history owner.
+    """
+    run = _resolve_run(run_dir)
+    transaction = _load_transaction(run)
+    if not transaction:
+        raise PlanError("WORK_PLAN_TRANSACTION_REQUIRED")
+    if transaction["status"] == "prepared":
+        # This read API may need to finish an interrupted publish before it can
+        # expose lineage.  Recovery writes the snapshot/journal/current receipt,
+        # so serialize it with normal plan commits and re-read under the lock in
+        # case another process completed the exact transaction first.
+        with _plan_lock(run):
+            transaction = _load_transaction(run)
+            if not transaction:
+                raise PlanError("WORK_PLAN_TRANSACTION_RECOVERY_MISSING")
+            if transaction["status"] == "prepared":
+                _recover_transaction(run, transaction)
+        transaction = _load_transaction(run)
+        if not transaction:
+            raise PlanError("WORK_PLAN_TRANSACTION_RECOVERY_MISSING")
+    transaction = _validate_transaction(transaction)
+    _verify_transaction_lineage(
+        run, transaction, require_current_archive=True)
+
+    plans: list[dict] = []
+    seen_plans: set[str] = set()
+    current = transaction
+    while True:
+        plan = validate_plan(current.get("plan"))
+        digest = str(plan.get("plan_digest") or "")
+        if digest not in seen_plans:
+            plans.append(json.loads(json.dumps(plan, ensure_ascii=False)))
+            seen_plans.add(digest)
+        prior_hash = str(current.get("prior_transaction_receipt_hash") or "")
+        if not prior_hash:
+            break
+        current = _load_transaction_archive(run, prior_hash)
+        # A native-v1 upgrade archives the same exact plan as its migration
+        # source.  It is already represented above and terminates that branch.
+        if current.get("schema") == LEGACY_TRANSACTION_SCHEMA:
+            legacy_plan = validate_plan(current.get("plan"))
+            legacy_digest = str(legacy_plan.get("plan_digest") or "")
+            if legacy_digest not in seen_plans:
+                plans.append(json.loads(json.dumps(
+                    legacy_plan, ensure_ascii=False)))
+            break
+    return plans
+
+
 def _render_expected_event(spec: dict, event_hashes: list[str]) -> dict:
     data = json.loads(json.dumps(spec["data"], ensure_ascii=False))
     for field, source_index in spec["bindings"].items():

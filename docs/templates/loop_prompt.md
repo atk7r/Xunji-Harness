@@ -1,15 +1,14 @@
 # Xunji Loop Protocol: {{RUN_DIR}}
 
 This is the fixed run-bound execute-cycle protocol, not the client-entry owner.
-`xunji-run-lifecycle` owns the one exact bootstrap shape and the literal `/loop`
-versus natural-language one-cycle route. Bind `{{RUN_DIR}}` and `{{PYTHON}}` only
+`xunji-run-lifecycle` owns the one exact bootstrap shape and both the literal
+`/loop` and natural-language one-cycle routes. Bind `{{RUN_DIR}}` and `{{PYTHON}}` only
 after the current turn contract and active selection identify the same run.
 
-When `loop_requested=true`, the delivered literal entry may continue through the
-registered recurring-Cron sequence. When a client-reserved `/loop` forces the
-owner's natural-language fallback, `loop_requested=false`: run one material cycle,
-skip recurring-Cron creation, and never describe that fallback as scheduled loop
-authority. A scheduler expansion to `cron_manager.py` is not a Xunji transition.
+Every newly compiled entry has `loop_requested=false`. A delivered literal entry
+also records `loop_entry_delivered=true`; run one material cycle and never create,
+refresh, or claim recurring-Cron authority. A client scheduler expansion to
+`cron_manager.py` is not a Xunji transition.
 
 `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` is a non-authorizing command-shape denial.
 Remove any observational wrapper; for `invalid-argv`, return to the corresponding
@@ -68,10 +67,7 @@ material. Record Setup only when the first-source adapter actually entered it.
 
 Before any journal `start`, phase marker, task, work plan, Agent, or target action,
 check whether this run already has a valid `GHOST_COMPLETE` or `NORMAL_COMPLETE`
-marker. If it does and `loop_requested=true`, perform a fresh CronList, delete only
-a scheduled `/loop` job whose prompt names this exact run if one exists, then
-CronList again to verify it is gone. If `loop_requested=false`, perform no Cron
-operation. In either mode, do not create/reschedule a Cron or call
+marker. If it does, perform no Cron operation. Do not create/reschedule a Cron or call
 `loop_journal.py ... start|end`: the existing typed cycle end remains terminal.
 Return directly with `BLOCKED: run already complete` after the applicable guard;
 do not create tasks, plans, receipts, phases, or canonical writes.
@@ -278,9 +274,8 @@ assignment-free completion formatter and verdict contract from
 `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer". It
 still requires real same-session
 Reviewer Start/Stop, creates no assignment/merge projection, and does not replace
-the independent ReviewReceipt. For recurring mode, cancel only this run's listed
-job and record `cron_cancelled=<job-id|none>`; a one-cycle fallback has no invented
-Cron to cancel.
+the independent ReviewReceipt. Record `cron_cancelled=none`; a new execute cycle
+has no invented Cron to cancel.
 
 After reviewer disposition is recorded in the relevant run file, close Reviewer
 with the generic phase-end contract and name the actual next phase.
@@ -333,9 +328,8 @@ the plan transaction/archive lineage and all return/review/Root debt; never repl
 the receipt with a hand-written journal row or Coda.
 
 If this iteration wrote `GHOST_COMPLETE` or `NORMAL_COMPLETE`, the `end` note
-must include `cron_cancelled=<job-id|none>`. Only `loop_requested=true` performs
-CronList/delete/verification; `loop_requested=false` records `none` without a Cron
-operation or recurring-loop claim.
+must include `cron_cancelled=none`, without a Cron operation or recurring-loop
+claim.
 
 If the loop is interrupted before Markdown files are consistent, append an
 `interrupt` event with the last completed step before handing back or restarting:

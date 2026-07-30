@@ -18,7 +18,7 @@ Hooks and guard enforce authority/effects; this skill only routes the lifecycle.
 - Evidence promotion or live replay: read `xunji-evidence-replay-gate`.
 - Independent review or ledger adjudication: read `xunji-reviewops`.
 - Safety/privacy/target effects: read `src-safety-boundary`.
-- Exact iteration order: render and follow `docs/templates/loop_prompt.md`.
+- Exact single-cycle order: render and follow `docs/templates/loop_prompt.md`.
 
 Do not restate another owner's argv, backend matrix, Agent envelope, or evidence
 rules here.
@@ -54,7 +54,8 @@ rules here.
   Xunji entry and must remain denied. Use an affirmative, uniquely named
   `继续执行 runs/<normalized-run-dir>` for one existing-run execute/resume cycle,
   or an affirmative one-source setup request for setup. This fallback has
-  `loop_requested=false`: it does not mint recurring-Cron semantics.
+  `loop_requested=false`: it has the same no-Cron single-cycle semantics as a
+  delivered literal entry.
 - Existing `runs/<dir>` or a file inside it resumes that run. A URL is saved
   locally without fetching; recon and supported files route through setup ingest.
 - After setup, every later entry names `runs/<normalized-run-dir>`, never the
@@ -200,8 +201,9 @@ Closure is a sequence, not a report-presence heuristic:
 5. Run the separate assignment-free completion Reviewer contract in
    `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer".
    Its pseudo receipt does not replace the independent peer review.
-6. If `loop_requested=true`, list/cancel/re-list only the observed current-run job;
-   if false, perform no Cron action. Record `cron_cancelled=<job-id|none>` either way.
+6. New contracts perform no Cron action and record `cron_cancelled=none`. A
+   pre-existing legacy job may be listed/deleted only under its separately
+   observed cleanup authority; it is never recreated by `/loop`.
 7. Only after every hard gate passes may Root write the completion marker.
 
 Open/Type-A fronts, unresolved coverage, stale review, failed/denied actions, Agent

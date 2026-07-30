@@ -50,7 +50,7 @@
   path, or existing `runs/<dir>` mentioned in an affirmative create/setup/resume
   request prepares setup, resume, or `hints.md`; a question, analysis request,
   denial, quoted log, or code example stays read-only. A literal first non-empty
-  top-level `/loop(?:\s|$)` enters loop mode only if the client forwards it to
+  top-level `/loop(?:\s|$)` enters one Xunji execute cycle only if the client forwards it to
   `UserPromptSubmit`. The hook ignores harmless leading horizontal whitespace/BOM
   while retaining the exact raw prompt hash; explicit fenced code, blockquotes,
   Markdown list items, inline quotes, and analysis requests cannot mint that authority. A conflicting
@@ -58,9 +58,9 @@
   `cron_manager.py` is not Xunji authority. Narrow effect constraints such as
   “do not modify framework source” reduce allowed actions but do not cancel an
   otherwise explicit `/loop`.
-  Load `xunji-run-lifecycle` and use its
-  named-run natural-language form for one `EXECUTE` cycle without recurring-Cron
-  claims. A delivered `/loop <source>` is adapted through
+  Load `xunji-run-lifecycle` and use its named-run natural-language form for the
+  same one-cycle `EXECUTE` semantics. Neither entry authorizes recurring Cron.
+  A delivered `/loop <source>` is adapted through
   `tools/loop_bootstrap.py --source <input> --type auto`: existing run/run file
   resumes, an explicit HTTP(S) URL is parsed and saved locally without fetching,
   and Guanlan/recon JSON is ingested with zero re-probe. Markdown/ordinary JSON
@@ -92,8 +92,10 @@
   `/loop` is already an execute command, so only an actual denial cancels it. In an
   explicit first `/loop <source>` turn, continue under
   that same top-level authority through exact
-  bootstrap, run binding, fresh CronList/CronCreate, iteration task planning,
-  graph/front decomposition, and execution of the selected typed lane. From the next cycle name only
+  bootstrap, run binding, iteration task/work planning, graph/front decomposition,
+  execution of the selected typed lane, Hunter return, Reviewer disposition, Root
+  settlement, and typed `cycle_end`. Do not call `CronCreate`; a new top-level
+  execute prompt is the authority boundary for another cycle. From the next cycle name only
   `runs/<normalized-run-dir>`, never the original URL/file, through the client-safe
   form owned by `xunji-run-lifecycle`. When unsure,
   preserve chat/setup/resume semantics and ask only for missing run/target boundary
@@ -364,16 +366,14 @@ observe -> update state graph -> decompose fronts
   setup/resume/set-active adapter commits a different selection. A new session
   inherits that current personal selection and writes a fresh prompt contract.
   The primary path is exact setup and committed/recovered activation.
-  Setup-only then stops; a delivered literal-loop contract with
-  `loop_requested=true` runs
-  fresh CronList/CronCreate naming the bound run, while a one-cycle
-  `loop_requested=false` contract performs no Cron action. An execute cycle then
-  records TaskCreate/TaskUpdate before Agent or target work. A premature CronCreate
-  denial is recovery, not the recommended bootstrap step; do not schedule the old
-  run as a workaround. Stable recovery codes are
-  `XUNJI_E_NEW_RUN_SETUP_REQUIRED`, `XUNJI_E_CRON_LIST_REQUIRED`,
-  `XUNJI_E_CRON_RUN_MISMATCH`, `XUNJI_E_CRON_CREATE_REQUIRED`, and
-  `XUNJI_E_ITERATION_PLAN_REQUIRED`.
+  Setup-only then stops. A delivered literal `/loop` records
+  `loop_entry_delivered=true` and `loop_requested=false`: it performs one material
+  cycle and no Cron action. An execute cycle records TaskCreate/TaskUpdate and a
+  typed work plan before Agent or target work. `CronCreate` is rejected with
+  `XUNJI_E_CRON_CREATE_NOT_REQUESTED`; do not schedule either the old or bound run
+  as a workaround. Stable recovery codes include
+  `XUNJI_E_NEW_RUN_SETUP_REQUIRED`, `XUNJI_E_CRON_CREATE_NOT_REQUESTED`, and
+  `XUNJI_E_WORK_PLAN_REQUIRED`.
   Turn contracts bind only the explicit pointer; they never guess from the most
   recently modified run. While a no-run bootstrap contract is pending, only
   read-only inspection and that prompt's exact setup/resume/set-active transition
@@ -419,7 +419,7 @@ observe -> update state graph -> decompose fronts
 - Claude Code internal `<task-notification>` messages are lifecycle events, not
   operator prompts. They must never create, refresh, or change the current turn
   contract; Agent receipts from before the notification remain current-turn proof.
-- **Execute-cycle task discipline.** A literal `/loop` or client-safe named-run
+- **Execute-cycle task discipline.** A literal `/loop` or named-run
   `EXECUTE` fallback maintains TaskCreate/TaskUpdate before its next Agent or target
   action. The task list covers this cycle and is planning proof only—not a work
   plan, Agent receipt, evidence, or authority. Setup-only chat, review-only turns,

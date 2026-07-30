@@ -1,0 +1,1271 @@
+diff --git a/.claude/skills/xunji-agent-board/references/plan-and-delegate.md b/.claude/skills/xunji-agent-board/references/plan-and-delegate.md
+index 70d2f22..356bac0 100644
+--- a/.claude/skills/xunji-agent-board/references/plan-and-delegate.md
++++ b/.claude/skills/xunji-agent-board/references/plan-and-delegate.md
+@@ -73,10 +73,14 @@ transaction owner once. Proposal prose, Agent output, and imported target text
+ cannot authorize anything by writing this file; only the validated transaction
+ can authorize delegation.
+ 
+-On a material same-run replan, the owner
+-inherits only identity-equal lanes already proven complete by Agent return,
+-Reviewer disposition, and Root settlement, then commits the unfinished suffix;
+-never repeat an inherited lane. "Ready" applies only after that commit when
++On a material same-run replan, the owner walks the validated transaction/archive
++lineage and inherits every identity-equal lane already proven complete by Agent
++return, Reviewer disposition, and Root settlement, even when an intermediate
++shortened plan omitted that settled prefix. It then commits only the unfinished
++suffix; never repeat an inherited lane. If the proposal contains only historically
++settled work, `WORK_PLAN_DUPLICATE_SETTLED_WORK` requires a genuinely new lane
++identity/mechanism/precondition or closure assessment, not another replan.
++"Ready" applies only after that commit when
+ `delegate` selects dependency-satisfied work; it never selects a plan subset.
+ If `workers.py plan` exits nonzero with `NO_STRONG_CANDIDATE`, do not commit, invent lanes,
+ or copy a documentation example. Repair the canonical
+diff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md
+index d7003e5..7135015 100644
+--- a/.claude/skills/xunji-run-lifecycle/SKILL.md
++++ b/.claude/skills/xunji-run-lifecycle/SKILL.md
+@@ -18,7 +18,7 @@ Hooks and guard enforce authority/effects; this skill only routes the lifecycle.
+ - Evidence promotion or live replay: read `xunji-evidence-replay-gate`.
+ - Independent review or ledger adjudication: read `xunji-reviewops`.
+ - Safety/privacy/target effects: read `src-safety-boundary`.
+-- Exact iteration order: render and follow `docs/templates/loop_prompt.md`.
++- Exact single-cycle order: render and follow `docs/templates/loop_prompt.md`.
+ 
+ Do not restate another owner's argv, backend matrix, Agent envelope, or evidence
+ rules here.
+@@ -54,7 +54,8 @@ rules here.
+   Xunji entry and must remain denied. Use an affirmative, uniquely named
+   `继续执行 runs/<normalized-run-dir>` for one existing-run execute/resume cycle,
+   or an affirmative one-source setup request for setup. This fallback has
+-  `loop_requested=false`: it does not mint recurring-Cron semantics.
++  `loop_requested=false`: it has the same no-Cron single-cycle semantics as a
++  delivered literal entry.
+ - Existing `runs/<dir>` or a file inside it resumes that run. A URL is saved
+   locally without fetching; recon and supported files route through setup ingest.
+ - After setup, every later entry names `runs/<normalized-run-dir>`, never the
+@@ -200,8 +201,9 @@ Closure is a sequence, not a report-presence heuristic:
+ 5. Run the separate assignment-free completion Reviewer contract in
+    `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer".
+    Its pseudo receipt does not replace the independent peer review.
+-6. If `loop_requested=true`, list/cancel/re-list only the observed current-run job;
+-   if false, perform no Cron action. Record `cron_cancelled=<job-id|none>` either way.
++6. New contracts perform no Cron action and record `cron_cancelled=none`. A
++   pre-existing legacy job may be listed/deleted only under its separately
++   observed cleanup authority; it is never recreated by `/loop`.
+ 7. Only after every hard gate passes may Root write the completion marker.
+ 
+ Open/Type-A fronts, unresolved coverage, stale review, failed/denied actions, Agent
+diff --git a/CLAUDE.md b/CLAUDE.md
+index d6c0409..436b887 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -50,7 +50,7 @@
+   path, or existing `runs/<dir>` mentioned in an affirmative create/setup/resume
+   request prepares setup, resume, or `hints.md`; a question, analysis request,
+   denial, quoted log, or code example stays read-only. A literal first non-empty
+-  top-level `/loop(?:\s|$)` enters loop mode only if the client forwards it to
++  top-level `/loop(?:\s|$)` enters one Xunji execute cycle only if the client forwards it to
+   `UserPromptSubmit`. The hook ignores harmless leading horizontal whitespace/BOM
+   while retaining the exact raw prompt hash; explicit fenced code, blockquotes,
+   Markdown list items, inline quotes, and analysis requests cannot mint that authority. A conflicting
+@@ -58,9 +58,9 @@
+   `cron_manager.py` is not Xunji authority. Narrow effect constraints such as
+   “do not modify framework source” reduce allowed actions but do not cancel an
+   otherwise explicit `/loop`.
+-  Load `xunji-run-lifecycle` and use its
+-  named-run natural-language form for one `EXECUTE` cycle without recurring-Cron
+-  claims. A delivered `/loop <source>` is adapted through
++  Load `xunji-run-lifecycle` and use its named-run natural-language form for the
++  same one-cycle `EXECUTE` semantics. Neither entry authorizes recurring Cron.
++  A delivered `/loop <source>` is adapted through
+   `tools/loop_bootstrap.py --source <input> --type auto`: existing run/run file
+   resumes, an explicit HTTP(S) URL is parsed and saved locally without fetching,
+   and Guanlan/recon JSON is ingested with zero re-probe. Markdown/ordinary JSON
+@@ -92,8 +92,10 @@
+   `/loop` is already an execute command, so only an actual denial cancels it. In an
+   explicit first `/loop <source>` turn, continue under
+   that same top-level authority through exact
+-  bootstrap, run binding, fresh CronList/CronCreate, iteration task planning,
+-  graph/front decomposition, and execution of the selected typed lane. From the next cycle name only
++  bootstrap, run binding, iteration task/work planning, graph/front decomposition,
++  execution of the selected typed lane, Hunter return, Reviewer disposition, Root
++  settlement, and typed `cycle_end`. Do not call `CronCreate`; a new top-level
++  execute prompt is the authority boundary for another cycle. From the next cycle name only
+   `runs/<normalized-run-dir>`, never the original URL/file, through the client-safe
+   form owned by `xunji-run-lifecycle`. When unsure,
+   preserve chat/setup/resume semantics and ask only for missing run/target boundary
+@@ -364,16 +366,14 @@ observe -> update state graph -> decompose fronts
+   setup/resume/set-active adapter commits a different selection. A new session
+   inherits that current personal selection and writes a fresh prompt contract.
+   The primary path is exact setup and committed/recovered activation.
+-  Setup-only then stops; a delivered literal-loop contract with
+-  `loop_requested=true` runs
+-  fresh CronList/CronCreate naming the bound run, while a one-cycle
+-  `loop_requested=false` contract performs no Cron action. An execute cycle then
+-  records TaskCreate/TaskUpdate before Agent or target work. A premature CronCreate
+-  denial is recovery, not the recommended bootstrap step; do not schedule the old
+-  run as a workaround. Stable recovery codes are
+-  `XUNJI_E_NEW_RUN_SETUP_REQUIRED`, `XUNJI_E_CRON_LIST_REQUIRED`,
+-  `XUNJI_E_CRON_RUN_MISMATCH`, `XUNJI_E_CRON_CREATE_REQUIRED`, and
+-  `XUNJI_E_ITERATION_PLAN_REQUIRED`.
++  Setup-only then stops. A delivered literal `/loop` records
++  `loop_entry_delivered=true` and `loop_requested=false`: it performs one material
++  cycle and no Cron action. An execute cycle records TaskCreate/TaskUpdate and a
++  typed work plan before Agent or target work. `CronCreate` is rejected with
++  `XUNJI_E_CRON_CREATE_NOT_REQUESTED`; do not schedule either the old or bound run
++  as a workaround. Stable recovery codes include
++  `XUNJI_E_NEW_RUN_SETUP_REQUIRED`, `XUNJI_E_CRON_CREATE_NOT_REQUESTED`, and
++  `XUNJI_E_WORK_PLAN_REQUIRED`.
+   Turn contracts bind only the explicit pointer; they never guess from the most
+   recently modified run. While a no-run bootstrap contract is pending, only
+   read-only inspection and that prompt's exact setup/resume/set-active transition
+@@ -419,7 +419,7 @@ observe -> update state graph -> decompose fronts
+ - Claude Code internal `<task-notification>` messages are lifecycle events, not
+   operator prompts. They must never create, refresh, or change the current turn
+   contract; Agent receipts from before the notification remain current-turn proof.
+-- **Execute-cycle task discipline.** A literal `/loop` or client-safe named-run
++- **Execute-cycle task discipline.** A literal `/loop` or named-run
+   `EXECUTE` fallback maintains TaskCreate/TaskUpdate before its next Agent or target
+   action. The task list covers this cycle and is planning proof only—not a work
+   plan, Agent receipt, evidence, or authority. Setup-only chat, review-only turns,
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 878a49e..71395c4 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -237,7 +237,7 @@ review record 和对应设计 owner 为事实源；两种工作不可混成一
+ ### 4.3 Run 生命周期
+ 
+ ```text
+-affirmative setup/resume intent | normalized first-line /loop | named-run one-cycle fallback
++affirmative setup/resume intent | normalized first-line /loop | named-run execute
+   -> bind turn authority
+   -> exact argv-only lifecycle adapter (no shell wrapper)
+   -> route existing-run | URL | local file by deterministic content rules
+@@ -248,10 +248,10 @@ affirmative setup/resume intent | normalized first-line /loop | named-run one-cy
+   -> atomic rename to runs/<dir>
+   -> commit active-run transition through one compare-and-swap writer
+      |-> setup/resume-only intent: stop after activation
+-     |-> first-source exact /loop: fresh CronList -> CronCreate naming bound run
+-     |      -> TaskCreate/TaskUpdate iteration plan
+-     |-> existing-run exact /loop: current-turn iteration plan (no new Cron required)
+-     |-> named-run execute fallback: loop_requested=false -> iteration plan, no Cron
++     |-> first-source exact /loop: loop_entry_delivered=true, loop_requested=false
++     |      -> TaskCreate/TaskUpdate + typed work plan, no Cron
++     |-> existing-run exact /loop: same one-cycle plan, no Cron
++     |-> named-run execute: loop_requested=false -> same one-cycle plan, no Cron
+   -> execute cycle only: Setup -> Root -> Hunter -> Reviewer -> Report
+   -> check_run + zero open fronts + independent review
+   -> terminal journal/completion evidence
+@@ -314,14 +314,15 @@ pointer + 阶段派生状态。
+ 
+ 当客户端把 literal `/loop <source>` 原样交给 `UserPromptSubmit` 时，它由
+ `tools/loop_bootstrap.py --source ... --type auto` 适配，并在同一顶层 operator 回合继续到
+-run activation、fresh CronList/CronCreate、iteration plan、图谱/front 拆解和真实 Agent
+-launch；不得停下来等待裸“继续”。source authority 以完整 source SHA-256 绑定，持久化
++run activation、Task/work plan、图谱/front 拆解、真实 Agent launch、Hunter return、
++Reviewer disposition、Root settlement 与 typed `cycle_end`；不得停下来等待裸“继续”，
++也不得创建 Cron。source authority 以完整 source SHA-256 绑定，持久化
+ prompt 展示和 runtime excerpt 脱敏敏感 query。current contract 还冻结 canonical-v1 semantic
+ source identity：bare host 归一为 HTTPS origin，scheme/host 大小写、默认端口与空 path 只在
+ effect 等价时统一；不同 host、path 或 query 仍是不同 authority。raw prompt hash 另行保留用于
+ 审计，不能用相同 basename 或不同 query 复用。
+ 只有首个非空顶层行经无害前导水平空白/BOM 归一后以 `/loop(?:\s|$)`
+-开头才是显式 recurring loop；Claude 把完整顶层描述拆解为一个公开 exact lifecycle argv
++开头才是显式单周期 execute entry；Claude 把完整顶层描述拆解为一个公开 exact lifecycle argv
+ 候选，Hook 再机械晋级为 operation、所选 effect 类内唯一 semantic source/run、route 与 constraints。
+ 同一 prompt 可以同时命名现存 run 与一个或多个 target URL；`resume(run)` 只把 run anchor
+ 晋级为 lifecycle authority，未选择的 URL 保持 target/context，不得抢占 setup source。
+@@ -338,8 +339,8 @@ authority。尾随的失败说明或可逆重试要求不撤销
+ 顶层 `/loop` 已是 execute command，只有真正 denial 才撤销。raw prompt hash 仍绑定
+ 未修改的操作者输入。显式 fenced code、blockquote、Markdown list item、引用日志与行内引用都是 data。若客户端
+ 保留 `/loop` 并在 hook 前展开为自身 scheduler，该展开没有 Xunji authority；current driver
+-改用 turn contract 已支持的肯定、所选 effect 唯一 anchor 的自然语言入口完成单次
+-`EXECUTE` setup/resume cycle，`loop_requested=false` 且不创建 recurring Cron。自然语言
++改用 turn contract 已支持的肯定、所选 effect 唯一 anchor 的自然语言入口完成同样的单次
++`EXECUTE` setup/resume cycle，`loop_requested=false` 且不创建 Cron。自然语言
+ setup 的 AI candidate 必须只有一个 prompt-anchored URL、bare host、run 或支持的 source，
+ 且 exact effect 经机械校验后才生成 source authority；真正选择多个 semantic source、否定、权限疑问或分析/评审请求都
+ fail closed/read-only。即使首行写了 `/loop`，同行
+@@ -364,9 +365,9 @@ Markdown/普通 JSON pilot 由 `tools/setup_normalizer.py` 处理，HTML/PDF/DOC
+ boundary；会影响 baseline reachable/low-quality 的相邻 recon report 作为带独立 hash 的
+ `related_sources` snapshot 冻结，不能成为隐形第二输入。机械 validator 校验 hash、路径、URL/host/port、重复资产和 `source_ref` 值级
+ 对应关系；只有 hook 绑定的顶层 prompt hash 能加入 `authority=operator`，source/附件/
+-target/tool/reviewer 文本只能是 data。从第二轮起，已建立的 recurring Cron payload 只携带
+-规范化的 `/loop runs/<dir>`；client-reserved 情况下手动入口只命名同一规范化 run 并执行
+-`loop_requested=false` 单周期，二者都避免重新抽取原始 source 漂移。新的顶层 prompt 会先撤销同 session 未消费的
++target/tool/reviewer 文本只能是 data。后续周期必须由新的顶层 execute prompt 命名规范化
++`runs/<dir>`，不再抽取原始 source；新的 prompt 同时建立新的 turn authority，并撤销同
++session 未消费的
+ pending contract/transition claim；因此命令形状修复必须在原 operator turn 重试，不能从
+ 历史 prompt 继承转换权限。未知 schema major fail closed；旧下划线 schema
+ 只用于 existing-run 只读兼容，迁移器必须取得与旧 hash 一致的原始/关联 snapshot，
+@@ -410,12 +411,12 @@ journal 状态。只要仍有安全、在 scope 内且有信息增益的前沿
+ 重要理由写入 `decisions.md`；不把 routine choice 重新推给 operator。
+ 
+ 显式 `/loop` 有派生的执行前序，而不是另一份持久 phase 状态：首次 source turn 必须有
+-一致的 committed/recovered setup transaction/contract binding，再有当前 session、当前 turn、
+-hash-chain-valid 且命名 bound run 的 hook-observed CronCreate；随后 TaskCreate/TaskUpdate（TodoWrite 兼容）
+-计划回执必须晚于该 CronCreate。现存 run 的后续 `/loop` 不要求重建 Cron，但在 Agent/目标
+-动作前仍要求当前回合计划回执。自然语言 setup-only 不进入该门。计划只证明主驾驶做了
+-任务拆解，不能替代 graph/front、workers assignment、真实 Agent、证据合并或 Single
+-Synthesizer。
++一致的 committed/recovered setup transaction/contract binding；随后当前 turn 的
++TaskCreate/TaskUpdate（TodoWrite 兼容）与 typed work plan 必须先于 Agent/目标动作。
++新 contract 一律 `loop_requested=false`；literal entry 另记
++`loop_entry_delivered=true`，`CronCreate` 以
++`XUNJI_E_CRON_CREATE_NOT_REQUESTED` fail closed。计划只证明主驾驶做了任务拆解，不能
++替代 graph/front、workers assignment、真实 Agent、证据合并或 Single Synthesizer。
+ 
+ 自治不意味着无条件执行：当前 prompt 是 turn contract。Explain/review/ambiguous
+ 保持只读，pause 保留开放状态，明确 execute/continue/implement 才能继续改变 run
+@@ -951,8 +952,10 @@ plan-bound Read bootstrap、local tool discipline、硬调用预算和返回形
+ 当前 Claude Code 客户端若把 `/loop` 保留为内建 scheduler（2.1.201 已观察到），字面命令
+ 可能在 `UserPromptSubmit` 前被消费；该展开不产生 Xunji authority。lifecycle owner 在这种
+ 客户端只路由到 turn-contract 已支持的命名 source/run 单周期 `EXECUTE`，其
+-`loop_requested=false`，不得创建或声称 recurring-Cron 语义。Hook 对真正原样送达的 exact
+-`/loop` 契约不变；未来若更名入口，需要另阶段修改 contract/fixtures，而非提示词假装完成。
++`loop_requested=false`，不得创建或声称 recurring-Cron 语义。真正原样送达的 exact
++`/loop` 也只增加 `loop_entry_delivered=true`，不把同一 Claude 会话变成定时任务。未来若要
++递归自动运行，必须由会话外 supervisor 提供新 prompt、新 context 和明确的终止/交接契约；
++当前实现不具备该 authority。
+ 
+ ## 9. 规则进入与架构决策
+ 
+@@ -1052,10 +1055,11 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history 
+     并以 committed receipt 与 projection hash 证明。准入回合 zero-probe，source/AI/Agent/
+     front/手改不能铸造权限。
+ 18. 原样送达的显式 `/loop <source>` 顺序是 exact bootstrap → transaction-bound activation →
+-    fresh CronList/CronCreate → iteration-plan receipt → graph/front/real Agent；shape deny 只能
+-    同 operator turn clean retry。客户端保留字导致的 scheduler 展开不是该入口；肯定且唯一
+-    命名 source/run 的自然语言 fallback 只产生 `loop_requested=false` 单周期 EXECUTE，不创建
+-    recurring Cron。完整自然语言描述由 Claude 拆解为 lifecycle candidate，再机械晋级为唯一
++    Task/work plan → graph/front/real Agent → Hunter return → Reviewer disposition → Root settlement
++    → typed `cycle_end`；shape deny 只能同 operator turn clean retry。literal 与肯定且唯一命名
++    source/run 的自然语言入口都产生 `loop_requested=false` 单周期 EXECUTE，前者另记
++    `loop_entry_delivered=true`；二者都不创建 recurring Cron。完整自然语言描述由 Claude
++    拆解为 lifecycle candidate，再机械晋级为唯一
+     semantic source/run、route 与 constraints；
+     bare host 和 effect-preserving URL 写法安全归一，附着描述不会被吞进 hostname。每个新的
+     非内部 operator prompt 都撤销同 session 的未消费 source authority，不受 active pointer
+@@ -1118,49 +1122,45 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history 
+ 
+ ## 12. Maintenance Checkpoint
+ 
+-- Date: 2026-07-29
+-- Scope: 修复 plan-bound Reviewer Start 的 receipt/projection 半提交死锁。真实
+-  A-review-012 在 `SubagentStart` journal receipt 成功后，Start hook 对 25MB parent transcript
+-  重复扫描并在 600 秒取消；child sidechain 没有任何模型输出，但 derived assignment 永久显示
+-  `running`，旧 plan 不能结算、新 plan 不能提交。
+-- Architecture impact: runtime projection 与 Reviewer recovery lifecycle changed。
+-  新增严格、fail-closed、content-addressed 的 pre-model Start supersession；保持 Reviewer
+-  不可取消、不可绕过，保持 `runtime_events.jsonl` append-only，并把 recovery 后续动作收敛到
+-  原 assignment row 的 exact durable launch-contract replay。Projection 从 per-record/per-token
+-  重复解析改为 snapshot-once attempt graph 与 per-transcript batched token scan。
+-- Owner/enforcement: `tools/runtime_receipts.py` 独占 transcript proof、receipt schema、
+-  effective projection 与 runtime→assignment recovery transaction；
+-  `contracts/interrupted-reviewer-start.v1.schema.json` 冻结 receipt；`tools/workers.py delegate`
+-  在 assignment writer 前调用 typed recovery，再复用既有 assigned/no-attempt replay gate。
+-  已有 authentic Stop、child claim/tool/assistant、parent terminal 或 binding drift 均拒绝恢复。
+-- Live migration: 不自动扫描或改写所有 run。下一次对受影响 run 执行正常
+-  `workers.py delegate` 时，只有 exact proof 成立的 Start 才追加 receipt 并重置 derived row；
+-  physical journal、Hunter result、review dependency、evidence/frontier/report 均不删除或改写。
+-- Verification: `runtime_receipts.py --selftest`、`workers.py --selftest`、
+-  `turn_contract.py --selftest`、rule/compile/diff checks 均 PASS；完整
+-  `selftest_all.py` 为 69 passed / 0 failed。真实 `workers.py delegate` owner path
+-  在原始 live run 的隔离 byte copy 上以 `/usr/bin/time -p` 1.61 秒发布 receipt，并把
+-  A-review-012 恢复为同 row assigned/no-attempt；随后仅因 copied work-plan 的绝对
+-  `run_dir` binding 正确 fail closed。独立 detached worktree 的 Claude Code 2.1.201 /
+-  configured DeepSeek session `e459e35b-e576-4596-a689-3f1724fa0efa` 对 path-native
+-  targetless fixture 完成 recovery → exact replay → real Reviewer return → review
+-  disposition → Hunter merge → typed cycle_end；runtime/transcript adjudication为
+-  target_action=0、WebFetch/WebSearch/Edit/Write=0。并发 fixture 在 receipt publish
+-  临界区暂停 recovery，证明 late runtime writer 被 runtime lock 串行化；额外负例证明
+-  non-Reviewer assignment 与不同 pre-model failure reason 均不能误用 v1。
+-- Independent review: round 1 fresh-context Claude 提出的 machine timing、
+-  synthetic/full-path 边界与 concurrent-writer WARN 已分别补 raw `/usr/bin/time`、
+-  明确分层声明和 targeted regression。round 2 `panel:arkcli+claude` 为 WARN、无 source
+-  blocker；arkcli 内部 GLM parse error 保留为 partial-panel 限制，Kimi 路径与 fresh
+-  Claude 完成。round 2 的 split high-load/full-lifecycle E2E 边界已显式 deferred，v1
+-  rigid reason 已记录独立 schema 演进规则。final3 arkcli 再次 timeout/parse failure 后，
+-  operator 明确要求最终门不再使用 arkcli；最终 exact-diff fresh-context Claude review
+-  保存在
+-  `review/records/2026-07-29-interrupted-reviewer-recovery/peer-review.final4-claude.*`。
+-  Codex 是作者，不计自己的 review。
+-- Exclusions: 不修改 live run canonical/control-plane 状态，不删除任何缓存或 journal；
+-  不改动用户已有的 `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md`、
+-  target/evidence artifacts 与其他 untracked 文件。
++- Date: 2026-07-30
++- Scope: 根治 Claude Code 交互中 schedule-less `/loop` 被解释成十分钟 recurring
++  Cron、同一会话反复重入、计划回合持续 stale，以及中间 replan 丢失 settled prefix 后
++  相同生成 lane 被再次委派的问题。事故 run 最终有 73 个 assignment，并在大上下文中连续
++  收到 DeepSeek context-window 400。
++- Architecture impact: lifecycle authority、work-plan history projection 与状态输出 changed。
++  新 contract 把 delivered literal `/loop` 冻结为
++  `loop_entry_delivered=true, loop_requested=false` 的单 material cycle；
++  `CronCreate` 以 `XUNJI_E_CRON_CREATE_NOT_REQUESTED` fail closed。周期内部仍由 Root
++  自主选择策略，但必须经 task/work plan、Hunter、Reviewer、Root settlement 与 typed
++  `cycle_end`；下一周期只能来自新的顶层 execute prompt。生成 replan 从 verified
++  transaction/archive lineage 继承 identity-equal 且完整结算的 lane，即使中间 shortened
++  plan 已省略该 prefix；全重复 proposal 以 `WORK_PLAN_DUPLICATE_SETTLED_WORK` 拒绝。
++  默认 assignment status 只显示全部 active/debt 与最近八个 terminal rows，`--all`
++  保留完整审计面。
++- Owner/enforcement: `tools/turn_contract.py` 是 entry/Cron authority owner；
++  `tools/work_plan.py` 验证 transaction lineage；`tools/workers.py` 独占生成 replan
++  inheritance 与 assignment status projection；capability registry 冻结 `status --all`
++  形状。Claude-primary `CLAUDE.md`、lifecycle/Agent Board owners、loop template 与 workflow
++  同步单周期语义，不创建第二 scheduler runtime。
++- Live migration: 不改写、删除或伪造任何旧 run journal/assignment。已有 legacy Cron job
++  只能在独立、观察绑定的 cleanup authority 下删除，不能由新 `/loop` 重建。旧
++  transaction archives 继续 append-only；下一次生成 replan 时只读投影其 settled identity。
++- Verification: focused turn-contract/work-plan/workers/capability/template/rule checks PASS；
++  完整 `selftest_all.py` 为 69 passed / 0 failed。Claude Code 2.1.201 configured
++  DeepSeek session `0eb64b14-f43c-4496-8136-e7053b466495` 对 loopback、目标网络禁用的
++  path-native fixture 完成 exact bootstrap → typed plan → real Hunter Start/Stop → real
++  Reviewer Start/Stop → Root settlement → typed `cycle_end`。独立 receipt adjudication为
++  `loop_requested=false`、Cron events=0、target_action=0、WebFetch/WebSearch=0。第一次同时
++  禁止 run-state Edit/Write 的 overconstrained fixture 正确 fail closed，不计为通过。
++  冻结 transcript、runtime、plan、assignment、turn contract、journal 与 raw test output 位于
++  `review/records/2026-07-30-interactive-loop-deadlock/evidence/`。
++- Independent review: Codex 是作者，不计自己的 review。按 operator 要求不使用 arkcli；
++  commit 前把冻结的 exact final source/doc diff 交给 fresh-context Claude Code
++  no-edit/no-tools review，fingerprint 与 verdict 记录在同一 review record，checkpoint
++  本身不预声明 verdict。
++- Exclusions: 不改写原始 `runs/www-scshr-com_20260729` 或其 append-only journals；
++  不把一次 cycle 宣称为整个渗透完成；不引入后台 daemon、第二 authority runtime 或固定
++  攻击 playbook。
+ 
+ ## 13. 外部设计来源与采用边界
+ 
+diff --git a/docs/ROUTER.md b/docs/ROUTER.md
+index c87a1e5..33de495 100644
+--- a/docs/ROUTER.md
++++ b/docs/ROUTER.md
+@@ -38,7 +38,9 @@ Routing invariant:
+   semantics only when the client forwards it unchanged to `UserPromptSubmit`.
+   Client-reserved scheduler expansion is not authority. The lifecycle owner routes
+   that case to an affirmative, uniquely named run/source for one execute cycle with
+-  `loop_requested=false`; it must not claim recurring-Cron semantics. Once bound,
++  `loop_requested=false`. A delivered literal entry also compiles to
++  `loop_requested=false` and records `loop_entry_delivered=true`; neither form
++  authorizes Cron. Once bound,
+   use the fixed protocol in `docs/templates/loop_prompt.md` and always name the
+   normalized run path, not the original source.
+ - Affirmative natural-language setup names the controlling goal; Claude decomposes it
+@@ -47,8 +49,8 @@ Routing invariant:
+   effect. Multiple sources remain ambiguous data. Deterministic rules recognize exact
+   aliases and hard negative/data boundaries, not an expanding list of positive verbs.
+ 
+-Natural language never claims recurring loop mode by itself; it may authorize the
+-single setup/resume/execute lifecycle operation classified by the turn contract.
++Every entry authorizes only the single setup/resume/execute lifecycle operation
++classified by the turn contract.
+ 
+ ## Capability Skills (invoke when the task fits)
+ 
+@@ -227,11 +229,10 @@ Output:
+   receipt, required
+   files, coverage, complete source bundle, and immutable claim binding; pointer +
+   status alone are insufficient. After committed/recovered setup, follow the bound
+-  turn contract: setup-only stops after activation; `loop_requested=true` runs fresh
+-  CronList/CronCreate naming the new run; `loop_requested=false` performs no Cron
+-  action. An execute cycle records TaskCreate/TaskUpdate before any Agent/target action.
+-  Stable recovery codes distinguish missing setup/list/run-name/create/plan state;
+-  a denied action is not permission to schedule the old run.
++  turn contract: setup-only stops after activation; execute cycles use
++  `loop_requested=false` and perform no Cron action. They record
++  TaskCreate/TaskUpdate and a typed work plan before any Agent/target action.
++  A denied action is not permission to schedule the old run.
+ - **Bind one exact lifecycle effect**: the argv layer validates adapter operation and
+   options before PreToolUse records a redacted operation/options digest, exact target,
+   canonical source-reference digest, session, and prompt. The transaction owner
+diff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md
+index 97e39f8..da9ac2d 100644
+--- a/docs/WORKFLOW-reference.md
++++ b/docs/WORKFLOW-reference.md
+@@ -1051,10 +1051,9 @@ CHECKS=report_parity:PASS,severity_artifacts:PASS,reachable_frontier:PASS,review
+ parent-only Post, async acknowledgement, a duplicate verdict, an explicit
+ FAIL/WARN/false check, or a bare PASS/WARN token is rejected. This completion challenge and the independent content-addressed
+ `peer_review.py --into-run` ReviewReceipt/ledger gate cannot satisfy each other.
+-In the same turn, only `loop_requested=true` runs `CronList`, deletes the observed
+-current-run job if present, and lists again; `loop_requested=false` performs no
+-Cron action. Then append a loop journal `end --next-action "<exact final Coda
+-action>"` record (`cycle_end`) with `cron_cancelled=<job-id|none>` in the note.
++New execute contracts perform no Cron action. Then append a loop journal
++`end --next-action "<exact final Coda action>"` record (`cycle_end`) with
++`cron_cancelled=none` in the note.
+ `check_run.py` HARD-fails a completion marker without the applicable runtime
+ receipts and the auditable end-of-cycle disposition.
+ 
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index 992f370..e430203 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -74,7 +74,7 @@ assign the right Agent lane when useful, and record why in `decisions.md`.
+ 
+ ### Root-level state graph pass (every cycle, cheap)
+ 
+-For every explicit `/loop`, including a first source turn after run/Cron binding,
++For every explicit `/loop`, including a first source turn after run binding,
+ maintain a Claude Code TaskCreate/TaskUpdate list before the next Agent or target
+ action. TodoWrite is a compatibility surface. Track the assets/vectors/Agent
+ lanes/evidence writes/gates for this iteration, then update the list as items
+@@ -237,7 +237,7 @@ For an active run, `EXECUTE` may advance work, `EXPLAIN_ONLY` is read-only and h
+ no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while only
+ allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
+ Only a first non-empty top-level `/loop(?:\s|$)` directive delivered to
+-`UserPromptSubmit` enters recurring loop mode. Deterministic parsing ignores harmless leading
++`UserPromptSubmit` enters a single execute cycle. Deterministic parsing ignores harmless leading
+ horizontal whitespace/BOM while preserving the exact raw prompt hash. Claude interprets
+ the complete operator description and expresses it through one exact public lifecycle argv;
+ the Hook treats that argv as `xunji.lifecycle-intent-candidate.v1` and mechanically promotes
+@@ -253,9 +253,10 @@ Explicit fenced code, blockquotes, Markdown list items, inline quotes, questions
+ and lifecycle denials stay data/read-only; a conflicting `/loop` plus denial fails
+ closed. Narrow effect constraints such as “do not modify framework source” restrict
+ the cycle but do not cancel an otherwise explicit lifecycle request. If the client reserves `/loop` as its own scheduler, load
+-`xunji-run-lifecycle`: an affirmative uniquely named setup/resume request may run one
+-`EXECUTE` cycle with `loop_requested=false`, but it cannot claim recurring-Cron
+-semantics. Natural-language setup accepts a unique URL, bare host, run, or supported
++`xunji-run-lifecycle`: an affirmative uniquely named setup/resume request runs the
++same one `EXECUTE` cycle with `loop_requested=false`. A delivered literal entry
++also compiles with `loop_requested=false` and records `loop_entry_delivered=true`;
++neither form authorizes Cron. Natural-language setup accepts a unique URL, bare host, run, or supported
+ source. Bare hosts normalize to their canonical HTTPS origin; safe case/default-port/
+ empty-path differences share identity, while distinct hosts, paths, and query values
+ do not. Prose attached after the source remains operator instruction, never hostname
+@@ -512,8 +513,8 @@ current claim。它只读取 `.claude/xunji_active_run`、阶段派生状态和
+ `state/loop_journal.jsonl`；不会读取 selection receipt、恢复状态、刷新状态、选择工作、写证据
+ 或执行阶段约束。active-run pointer 是本地运行态，
+ 只由 `tools/setup_transaction.py` 的 typed CAS ports 更新；`setup_run.py`、
+-`loop_bootstrap.py`、set-active、原样送达的 recurring `/loop` 与 client-safe
+-named-run 单周期入口只是适配层。
++`loop_bootstrap.py`、set-active、原样送达的单周期 `/loop` 与 named-run
++单周期入口只是适配层。
+ pointer 是个人操作者的持久当前选择；`SessionEnd` 不清空，`SessionStart` 不恢复。新的
+ Claude session 直接沿用该选择，并由首个真实 prompt 写入 fresh turn contract；session/
+ transcript 只用于因果回执关联，不决定 statusline 是否显示。
+@@ -953,11 +954,9 @@ assets were only header / recon-classified, never examined. Before any such clai
+ 
+ - **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
+   independent review resolved, retrospective written), write `GHOST_COMPLETE` at
+-  the end of `decisions.md`. In the same turn, only `loop_requested=true` performs
+-  `CronList`, deletes an observed current-run job if present, and lists again;
+-  `loop_requested=false` performs no Cron action. Append a loop journal `end`
+-  record whose note contains `cron_cancelled=<job-id|none>` either way. The loop
+-  detects this and stops. No operator review required.
++  the end of `decisions.md`. New execute contracts perform no Cron action. Append
++  a loop journal `end` record whose note contains `cron_cancelled=none`. The
++  cycle detects this and stops. No operator review required.
+ 
+ `check_run.py` HARD-fails / WARN mechanics for closure, and the same independent
+ review applied to **safety-critical code** changes, are in the reference.
+diff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md
+index 88a4f9a..1847d27 100644
+--- a/docs/templates/loop_prompt.md
++++ b/docs/templates/loop_prompt.md
+@@ -1,15 +1,14 @@
+ # Xunji Loop Protocol: {{RUN_DIR}}
+ 
+ This is the fixed run-bound execute-cycle protocol, not the client-entry owner.
+-`xunji-run-lifecycle` owns the one exact bootstrap shape and the literal `/loop`
+-versus natural-language one-cycle route. Bind `{{RUN_DIR}}` and `{{PYTHON}}` only
++`xunji-run-lifecycle` owns the one exact bootstrap shape and both the literal
++`/loop` and natural-language one-cycle routes. Bind `{{RUN_DIR}}` and `{{PYTHON}}` only
+ after the current turn contract and active selection identify the same run.
+ 
+-When `loop_requested=true`, the delivered literal entry may continue through the
+-registered recurring-Cron sequence. When a client-reserved `/loop` forces the
+-owner's natural-language fallback, `loop_requested=false`: run one material cycle,
+-skip recurring-Cron creation, and never describe that fallback as scheduled loop
+-authority. A scheduler expansion to `cron_manager.py` is not a Xunji transition.
++Every newly compiled entry has `loop_requested=false`. A delivered literal entry
++also records `loop_entry_delivered=true`; run one material cycle and never create,
++refresh, or claim recurring-Cron authority. A client scheduler expansion to
++`cron_manager.py` is not a Xunji transition.
+ 
+ `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` is a non-authorizing command-shape denial.
+ Remove any observational wrapper; for `invalid-argv`, return to the corresponding
+@@ -68,10 +67,7 @@ material. Record Setup only when the first-source adapter actually entered it.
+ 
+ Before any journal `start`, phase marker, task, work plan, Agent, or target action,
+ check whether this run already has a valid `GHOST_COMPLETE` or `NORMAL_COMPLETE`
+-marker. If it does and `loop_requested=true`, perform a fresh CronList, delete only
+-a scheduled `/loop` job whose prompt names this exact run if one exists, then
+-CronList again to verify it is gone. If `loop_requested=false`, perform no Cron
+-operation. In either mode, do not create/reschedule a Cron or call
++marker. If it does, perform no Cron operation. Do not create/reschedule a Cron or call
+ `loop_journal.py ... start|end`: the existing typed cycle end remains terminal.
+ Return directly with `BLOCKED: run already complete` after the applicable guard;
+ do not create tasks, plans, receipts, phases, or canonical writes.
+@@ -278,9 +274,8 @@ assignment-free completion formatter and verdict contract from
+ `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer". It
+ still requires real same-session
+ Reviewer Start/Stop, creates no assignment/merge projection, and does not replace
+-the independent ReviewReceipt. For recurring mode, cancel only this run's listed
+-job and record `cron_cancelled=<job-id|none>`; a one-cycle fallback has no invented
+-Cron to cancel.
++the independent ReviewReceipt. Record `cron_cancelled=none`; a new execute cycle
++has no invented Cron to cancel.
+ 
+ After reviewer disposition is recorded in the relevant run file, close Reviewer
+ with the generic phase-end contract and name the actual next phase.
+@@ -333,9 +328,8 @@ the plan transaction/archive lineage and all return/review/Root debt; never repl
+ the receipt with a hand-written journal row or Coda.
+ 
+ If this iteration wrote `GHOST_COMPLETE` or `NORMAL_COMPLETE`, the `end` note
+-must include `cron_cancelled=<job-id|none>`. Only `loop_requested=true` performs
+-CronList/delete/verification; `loop_requested=false` records `none` without a Cron
+-operation or recurring-loop claim.
++must include `cron_cancelled=none`, without a Cron operation or recurring-loop
++claim.
+ 
+ If the loop is interrupted before Markdown files are consistent, append an
+ `interrupt` event with the last completed step before handing back or restarting:
+diff --git a/review/records/2026-07-30-interactive-loop-deadlock/decisions.md b/review/records/2026-07-30-interactive-loop-deadlock/decisions.md
+new file mode 100644
+index 0000000..bc0cdfb
+--- /dev/null
++++ b/review/records/2026-07-30-interactive-loop-deadlock/decisions.md
+@@ -0,0 +1,18 @@
++# Decisions
++
++- D-001: Treat interactive `/loop` as one execute cycle, not as recurring
++  scheduling authority. Root keeps strategy autonomy inside that cycle.
++- D-002: A normal cycle ends only after the exact typed `cycle_end`; whole-run
++  completion remains the separate `check_run` plus review/closure predicate.
++- D-003: Another cycle requires a new top-level execute prompt. Xunji does not
++  inject periodic prompts into the same growing Claude conversation.
++- D-004: Preserve plan and runtime journals. Prevent repeat work by projecting
++  settled identities through verified transaction lineage, not by deleting or
++  editing old assignments.
++- D-005: Bound the default status projection rather than hiding active debt;
++  retain `--all` for explicit ledger inspection.
++- D-006: Count only the second path-native, target-network-denied DeepSeek
++  Claude Code run as decisive real-driver validation. Preserve the first
++  overconstrained run as a failed fixture, not a product failure or pass.
++- D-007: Per operator instruction, use no arkcli. Independent maintenance
++  review is fresh-context Claude Code only.
+diff --git a/review/records/2026-07-30-interactive-loop-deadlock/evidence.md b/review/records/2026-07-30-interactive-loop-deadlock/evidence.md
+new file mode 100644
+index 0000000..055ef9d
+--- /dev/null
++++ b/review/records/2026-07-30-interactive-loop-deadlock/evidence.md
+@@ -0,0 +1,81 @@
++# Interactive Loop Deadlock Repair Evidence
++
++## Observed failure
++
++- The supplied Claude Code 2.1.201 transcript interpreted schedule-less `/loop`
++  as a recurring ten-minute client job and created Cron job `a9eb77ea`.
++- The same run was re-entered repeatedly. Its Agent ledger grew to 73 rows and
++  the parent transcript ended with repeated DeepSeek context-window errors.
++- The same generated offline work identity reappeared as
++  `L-F-002-OFFLINE` in plans associated with A-web-hunter-025, -027, -029,
++  -031, and -033.
++- `_remaining_replan_lanes()` consulted only the immediate predecessor plan.
++  Once one shortened replan omitted a settled prefix, a later replan could no
++  longer see that completed identity and generated it again.
++
++## Repair
++
++- Newly compiled `/loop` contracts record
++  `loop_entry_delivered=true, loop_requested=false`. `CronCreate` is denied
++  with `XUNJI_E_CRON_CREATE_NOT_REQUESTED`.
++- The literal entry still requires one material execute cycle: task/work plan,
++  Hunter, Reviewer, Root settlement, and typed `cycle_end`. Another cycle
++  requires a new top-level execute prompt and fresh authority.
++- Generated replans inherit identity-equal, fully settled lanes across the
++  verified transaction/archive lineage. An all-duplicate proposal fails with
++  `WORK_PLAN_DUPLICATE_SETTLED_WORK`.
++- `workers.py status` keeps every active/debt row but bounds historical terminal
++  output to the newest eight rows unless `--all` is explicit.
++
++## Deterministic verification
++
++- Focused selftests passed for turn contract, work plan, workers, capability
++  registry, templates, and rules.
++- `tools/workers.py --selftest` includes the exact regression: a middle replan
++  drops the settled prefix, then a later generated replan must still inherit it
++  from the grandparent transaction.
++- Full suite: 69 passed, 0 failed. Raw output:
++  `evidence/test-results.txt`.
++
++## Claude Code real driver
++
++Decisive command:
++
++```text
++claude --dangerously-skip-permissions --output-format json -p \
++'/loop http://127.0.0.2:65533 ... 禁止任何目标网络请求 ... 允许按 Xunji 协议更新这个 run ... 完成一个 material cycle ...'
++```
++
++The configured DeepSeek-backed Claude Code 2.1.201 session
++`0eb64b14-f43c-4496-8136-e7053b466495` completed successfully:
++
++- model: `deepseek-v4-flash[1m]`;
++- turn contract: `loop_entry_delivered=true`, `loop_requested=false`;
++- Cron events: 0;
++- target actions: 0;
++- WebFetch/WebSearch: 0;
++- real Hunter Start/Stop: A-web-hunter-001;
++- real Reviewer Start/Stop: A-review-001;
++- Root settlement: Hunter `blocked`, Reviewer `reviewed`;
++- typed `cycle_end` hash:
++  `2b867f56f447cef5deff033833073c06b2c4935f581a4fb9fbd321eb63d50373`;
++- no candidate framework file was changed by the driver.
++
++The first driver attempt is not counted as a pass. Its prompt also prohibited
++Edit/Write, which made the required new-run frontier mapping impossible. It
++proved zero Cron and zero target actions but correctly failed closed before
++`cycle_end`; the decisive rerun removed only that fixture contradiction while
++retaining the target/network and framework-source prohibitions.
++
++## Frozen artifact hashes
++
++```text
++91b923b459f70f429782c99e10e190894b9ec35142ef5f6765eaf733053f409a  evidence/driver-assignments.json
++3ac18c5c9fe1f1298827deaeb3441ea80ee13172c744ac0ce55d289058d9d08e  evidence/driver-loop-journal.jsonl
++a60e36531dcd3d49528d730528503cc9e54f55b198e28b392a8159925aefc52d  evidence/driver-output.json
++aa639de241683138573480ada15446d6005a6de667cc97669d7ead14125c0535  evidence/driver-runtime-events.jsonl
++e91cf61a6d7e9138bd4cdee9dd0972f61bf2127278ab96635463e8aa2147a2c7  evidence/driver-session-transcript.jsonl
++23e0cf340ce65d9624d176ccaed3d7c40c330beca0a9fc66104865f720a116bb  evidence/driver-turn-contract.json
++79e0bd73b73c861a75366977026e8944fba24c530ce7a0814fa57e3ae202406c  evidence/driver-work-plan.json
++444cb9cf8920a09c4abe5312be7867c35f43d51a788d8fda8963764b290b3d93  evidence/test-results.txt
++```
+diff --git a/tools/harness/capability_registry.py b/tools/harness/capability_registry.py
+index af8cca0..0d5988b 100644
+--- a/tools/harness/capability_registry.py
++++ b/tools/harness/capability_registry.py
+@@ -766,7 +766,11 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
+             flags=set(), positionals=3,
+         )
+         return ok and {"--status", "--note"}.issubset(seen)
+-    flags = {"--closure"} if command == "lifecycle-check" else set()
++    flags = (
++        {"--closure"} if command == "lifecycle-check" else
++        {"--all"} if command == "status" else
++        set()
++    )
+     values = {"--limit": None} if command in {"suggest", "plan"} else {}
+     ok, _seen, _pos = _options(
+         args[1:], values=values, flags=flags, positionals=1,
+@@ -1251,9 +1255,18 @@ def selftest() -> int:
+                 "cancel-unlaunched", "runs/demo_20260101", "A-web-hunter-001",
+                 "--reason", "ok", "--future",
+             ]) is None)),
+-        ("workers status is read while assignment is control", (match(
+-            ROOT / "tools/workers.py", ["status", "runs/demo_20260101"]
+-        ) or _spec("", "", "repo_mutation", "")).effect == "local_read"),
++        ("workers status is read, bounded by default, and accepts only explicit --all", bool(
++            (match(
++                ROOT / "tools/workers.py", ["status", "runs/demo_20260101"]
++            ) or _spec("", "", "repo_mutation", "")).effect == "local_read"
++            and (match(
++                ROOT / "tools/workers.py",
++                ["status", "runs/demo_20260101", "--all"],
++            ) or _spec("", "", "repo_mutation", "")).effect == "local_read"
++            and match(
++                ROOT / "tools/workers.py",
++                ["status", "runs/demo_20260101", "--future"],
++            ) is None)),
+         ("work-plan status is read while commit is control", (match(
+             ROOT / "tools/work_plan.py", ["status", "runs/demo_20260101"]
+         ) or _spec("", "", "repo_mutation", "")).effect == "local_read"),
+diff --git a/tools/harness/fixtures/driver-doc-conformance.json b/tools/harness/fixtures/driver-doc-conformance.json
+index c6ba5d5..2a1f8e6 100644
+--- a/tools/harness/fixtures/driver-doc-conformance.json
++++ b/tools/harness/fixtures/driver-doc-conformance.json
+@@ -12,7 +12,8 @@
+         "Assignment-free global completion Reviewer",
+         "client-reserved `/loop` expansion",
+         "Setup-only then stops",
+-        "`loop_requested=false` contract performs no Cron action",
++        "`loop_entry_delivered=true` and `loop_requested=false`",
++        "`XUNJI_E_CRON_CREATE_NOT_REQUESTED`",
+         "benign operator mistake is not a sticky turn blocker",
+         "execution of the selected typed lane",
+         "harmless leading horizontal whitespace/BOM",
+@@ -225,7 +226,7 @@
+         "python3 tools/check_run.py runs/<dir>",
+         "python3 tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift",
+         "is a live `target` effect",
+-        "if false, perform no Cron action",
++        "New contracts perform no Cron action",
+         "A denied or failed\naction is not a result",
+         "the eligible atomic `ROOT_DIRECT` path",
+         "`docs/WORKFLOW-reference.md` \"Assignment-free global completion Reviewer\"",
+@@ -468,11 +469,11 @@
+         "ordered board-debt/conflict checks",
+         "{{PYTHON}} tools/anti_drift.py --semantic-status \"{{RUN_DIR}}\"",
+         "does not duplicate the target-tool catalog",
+-        "`loop_requested=false`: run one material cycle",
++        "Every newly compiled entry has `loop_requested=false`",
++        "`loop_entry_delivered=true`; run one material cycle",
+         "Before any journal `start`, phase marker, task, work plan, Agent, or target action",
+-        "If it does and `loop_requested=true`",
+-        "If `loop_requested=false`, perform no Cron",
+-        "do not create/reschedule a Cron or call",
++        "If it does, perform no Cron operation",
++        "Do not create/reschedule a Cron or call",
+         "Return directly with `BLOCKED: run already complete` after the applicable guard",
+         "references/plan-and-delegate.md",
+         "references/launch-return-settlement.md",
+@@ -519,7 +520,7 @@
+         ".claude/skills/xunji-reviewops/SKILL.md",
+         "references/peer-review-panel.md",
+         "setup-only stops after activation",
+-        "`loop_requested=false` performs no Cron"
++        "execute cycles use\n  `loop_requested=false` and perform no Cron"
+       ],
+       "forbidden": [
+         "python3 tools/workers.py runs/<dir>",
+diff --git a/tools/turn_contract.py b/tools/turn_contract.py
+index b99189c..b4c908d 100644
+--- a/tools/turn_contract.py
++++ b/tools/turn_contract.py
+@@ -169,6 +169,7 @@ E_CLEAR_ACTIVE_FORBIDDEN = "XUNJI_E_CLEAR_ACTIVE_FORBIDDEN"
+ E_CRON_LIST_REQUIRED = "XUNJI_E_CRON_LIST_REQUIRED"
+ E_CRON_RUN_MISMATCH = "XUNJI_E_CRON_RUN_MISMATCH"
+ E_CRON_CREATE_REQUIRED = "XUNJI_E_CRON_CREATE_REQUIRED"
++E_CRON_CREATE_NOT_REQUESTED = "XUNJI_E_CRON_CREATE_NOT_REQUESTED"
+ E_ITERATION_PLAN_REQUIRED = "XUNJI_E_ITERATION_PLAN_REQUIRED"
+ E_WORK_PLAN_REQUIRED = "XUNJI_E_WORK_PLAN_REQUIRED"
+ E_WORK_PLAN_STALE = "XUNJI_E_WORK_PLAN_STALE"
+@@ -999,7 +1000,14 @@ def _contract_from_event(
+     ))
+     slug_sha256s, slug_ambiguous = _prompt_slug_authority(prompt)
+     natural_transition, natural_bind = _natural_lifecycle_intent(intent_text)
+-    loop_requested = _prompt_has_loop_directive(prompt)
++    # ``/loop`` is an execution entry, not recurring scheduling authority.
++    # Claude Code 2.1.201 gives a schedule-less /loop a client-side 10 minute
++    # default.  Binding that client default to Xunji authority re-enters the
++    # same interactive session, invalidates the current plan turn, and can grow
++    # context forever.  Keep the literal entry mechanically visible while all
++    # newly compiled contracts remain single-cycle.
++    loop_entry_delivered = _prompt_has_loop_directive(prompt)
++    loop_requested = False
+     target_egress_denied, web_tools_denied = _operator_effect_constraints(prompt)
+     lifecycle_scope = (
+         "setup_only" if SETUP_ONLY_RE.search(intent_text) else "normal"
+@@ -1008,7 +1016,7 @@ def _contract_from_event(
+         prompt,
+         previous_mode=previous_mode,
+         lifecycle_intent=bool(
+-            loop_requested or natural_transition or natural_bind),
++            loop_entry_delivered or natural_transition or natural_bind),
+     )
+     scope_request, scope_error = scope_admission.parse_operator_directive(prompt)
+     if maintenance and scope_request:
+@@ -1023,7 +1031,7 @@ def _contract_from_event(
+         and not scope_request
+         and not maintenance
+         and mode in {EXPLAIN, EXECUTE}
+-        and not loop_requested
++        and not loop_entry_delivered
+         and _model_lifecycle_candidate_allowed(
+             prompt,
+             source_values=source_values,
+@@ -1050,7 +1058,7 @@ def _contract_from_event(
+     if semantic_candidate_required \
+             or (model_candidate_allowed and mode == EXPLAIN):
+         mode = INTENT_PENDING
+-    elif not loop_requested and (
++    elif not loop_entry_delivered and (
+             natural_transition
+             or natural_bind and (run_ambiguous or bool(run_values))):
+         # A natural-language lifecycle request without one mechanically
+@@ -1058,7 +1066,7 @@ def _contract_from_event(
+         # until the operator makes the actual source/run effect unambiguous.
+         mode = EXPLAIN
+     now = time.time()
+-    loop_source = _prompt_loop_source(prompt) if loop_requested else (
++    loop_source = _prompt_loop_source(prompt) if loop_entry_delivered else (
+         "" if mode == INTENT_PENDING else
+         f"runs/{run_values[0]}" if natural_bind and len(run_values) == 1 else
+         source_values[0] if natural_transition and len(source_values) == 1 else ""
+@@ -1083,11 +1091,11 @@ def _contract_from_event(
+         derived_transition = not run_name or _run_name_from_path(loop_source) != run_name
+     if mode != EXECUTE:
+         lifecycle_operation = "none"
+-    elif loop_requested:
++    elif loop_entry_delivered:
+         lifecycle_operation = (
+             "resume" if loop_source_kind == "run" else
+             "source" if loop_source_kind in {"url", "file"} else
+-            "loop"
++            "none"
+         )
+     elif natural_bind and len(run_values) == 1:
+         lifecycle_operation = "resume"
+@@ -1144,7 +1152,8 @@ def _contract_from_event(
+         "intent_resolution": (
+             "model_candidate_pending" if mode == INTENT_PENDING else
+             "model_candidate_available" if model_candidate_allowed else
+-            "deterministic_alias" if lifecycle_operation != "none" else
++            "deterministic_alias"
++            if lifecycle_operation != "none" or loop_entry_delivered else
+             "read_only"
+         ),
+         "model_lifecycle_candidate_allowed": model_candidate_allowed,
+@@ -1155,6 +1164,7 @@ def _contract_from_event(
+         "lifecycle_scope": lifecycle_scope,
+         "fanout_override": bool(re.search(r"(?:明确)?允许串行|不要使用\s*(?:Agent|子代理)|serial override", prompt, re.I)),
+         "intent_normalizations": intent_normalizations,
++        "loop_entry_delivered": loop_entry_delivered,
+         "loop_requested": loop_requested,
+         "loop_source_kind": loop_source_kind,
+         "run_bind_requested": lifecycle_operation == "resume",
+@@ -4219,6 +4229,7 @@ def _decision_metadata(reason: str, event: dict) -> dict:
+         E_CRON_LIST_REQUIRED: "cron",
+         E_CRON_RUN_MISMATCH: "cron",
+         E_CRON_CREATE_REQUIRED: "cron",
++        E_CRON_CREATE_NOT_REQUESTED: "cron",
+         E_ITERATION_PLAN_REQUIRED: "iteration_plan",
+         E_WORK_PLAN_REQUIRED: "work_plan",
+         E_WORK_PLAN_STALE: "work_plan",
+@@ -4367,7 +4378,8 @@ def _loop_iteration_gate_reason(run_dir: Path, event: dict, contract: dict) -> s
+     fallback would become a plan-bypass entrypoint.
+     """
+     recurring_loop = bool(contract.get("loop_requested"))
+-    lifecycle_cycle = str(contract.get("lifecycle_operation") or "") in {
++    lifecycle_cycle = bool(contract.get("loop_entry_delivered")) or str(
++        contract.get("lifecycle_operation") or "") in {
+         "source", "setup", "resume",
+     }
+     if not recurring_loop and not lifecycle_cycle:
+@@ -5608,6 +5620,13 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
+                 )
+ 
+     if tool == "CronCreate":
++        if contract.get("loop_requested") is not True:
++            return (
++                f"[{E_CRON_CREATE_NOT_REQUESTED}] Xunji 的交互式 /loop 是单周期"
++                "执行入口，不授权 recurring Cron。继续在当前 turn 内自主选择并完成"
++                "一个 material cycle；需要下一周期时由新的顶层 EXECUTE prompt 建立"
++                "新 authority，不能向同一 Claude 会话定时回灌。"
++            )
+         if _new_run_transition_pending(contract, run_dir):
+             return (
+                 f"[{E_NEW_RUN_SETUP_REQUIRED}] Cron 单实例门：当前 prompt 要求创建新 run；"
+@@ -5970,6 +5989,14 @@ def _context_message(contract: dict, run_dir: Path) -> str:
+             "成功后继续当前自然语言描述中的动作和限制；不要因 trailing question、恢复说明"
+             "或格式差异丢弃主执行意图。"
+         )
++    if mode == EXECUTE and contract.get("loop_entry_delivered"):
++        return effect_note + intent_note + (
++            "[Xunji lifecycle: SINGLE_CYCLE] 当前 /loop 只授权一个 material "
++            "execute cycle；不得 CronCreate。先创建或更新本回合 "
++            "TaskCreate/TaskUpdate（兼容 TodoWrite）清单，再完成 graph/front、"
++            "Hunter -> Reviewer -> Root settlement 与 typed cycle_end。下一周期必须"
++            "由新的顶层 EXECUTE prompt 建立 authority。"
++        )
+     if mode == EXECUTE and contract.get("loop_requested"):
+         if contract.get("run_transition_requested"):
+             return effect_note + intent_note + (
+@@ -7708,7 +7735,8 @@ def _selftest() -> int:
+     )
+     leading_whitespace_operator_intent_normalized = bool(
+         normalized_source_contract.get("mode") == EXECUTE
+-        and normalized_source_contract.get("loop_requested")
++        and normalized_source_contract.get("loop_entry_delivered")
++        and normalized_source_contract.get("loop_requested") is False
+         and normalized_source_contract.get("lifecycle_operation") == "source"
+         and normalized_source_contract.get("intent_normalizations")
+         == ["leading_horizontal_whitespace"]
+@@ -7779,7 +7807,8 @@ def _selftest() -> int:
+     )
+     attached_absolute_run_path_keeps_named_resume = bool(
+         attached_absolute_run_contract.get("mode") == EXECUTE
+-        and attached_absolute_run_contract.get("loop_requested")
++        and attached_absolute_run_contract.get("loop_entry_delivered")
++        and attached_absolute_run_contract.get("loop_requested") is False
+         and attached_absolute_run_contract.get("loop_source_kind") == "run"
+         and attached_absolute_run_contract.get("lifecycle_operation") == "resume"
+         and attached_absolute_run_contract.get("run_name_sha256s")
+@@ -7873,7 +7902,8 @@ def _selftest() -> int:
+         and "redacted%3Aquery" in str(source_operator_contract.get("prompt_excerpt") or "")
+     )
+     loop_url_derives_transition = bool(
+-        implicit_source_contract.get("loop_requested")
++        implicit_source_contract.get("loop_entry_delivered")
++        and implicit_source_contract.get("loop_requested") is False
+         and implicit_source_contract.get("loop_source_kind") == "url"
+         and implicit_source_contract.get("run_transition_requested")
+         and _new_run_transition_pending(implicit_source_contract, run)
+@@ -8794,7 +8824,8 @@ def _selftest() -> int:
+     (run / "frontier.md").write_text(original_frontier, encoding="utf-8")
+     cron_create = {"tool_name": "CronCreate", "tool_input": {"prompt": f"/loop {run.name}"}}
+     cron_contract = {**contract, "prompt_excerpt": f"/loop {run.name}"}
+-    cron_before_list = bool(evaluate_pretool(run, cron_create, cron_contract))
++    cron_before_list = E_CRON_CREATE_NOT_REQUESTED in evaluate_pretool(
++        run, cron_create, cron_contract)
+     with transcript.open("a", encoding="utf-8") as handle:
+         handle.write(json.dumps({
+             "message": {"role": "assistant", "content": [{
+@@ -8814,9 +8845,11 @@ def _selftest() -> int:
+         "tool_use_id": "current-cron-list", "tool_input": {},
+         "tool_response": {"tasks": []},
+     })
+-    cron_after_list = evaluate_pretool(run, cron_create, cron_contract) == ""
+-    new_run_cron_blocked_until_transition = "先完成 setup" in evaluate_pretool(
+-        run, cron_create, contract)
++    cron_after_list = E_CRON_CREATE_NOT_REQUESTED in evaluate_pretool(
++        run, cron_create, cron_contract)
++    new_run_cron_blocked_until_transition = (
++        E_CRON_CREATE_NOT_REQUESTED in evaluate_pretool(
++            run, cron_create, contract))
+     lifecycle_task = {"tool_name": "TaskCreate", "tool_input": {
+         "subject": "decompose assets and Agent lanes",
+         "description": "review https://bound.example.test/?key=plan-secret",
+@@ -8878,10 +8911,10 @@ def _selftest() -> int:
+             "prompt_sha256": str(lifecycle_contract.get("prompt_sha256") or ""),
+         },
+     }), encoding="utf-8")
+-    plan_before_cron_blocked = E_CRON_CREATE_REQUIRED in evaluate_pretool(
+-        lifecycle_run, lifecycle_task, lifecycle_contract)
++    plan_before_cron_blocked = evaluate_pretool(
++        lifecycle_run, lifecycle_task, lifecycle_contract) == ""
+     lifecycle_agent = {"tool_name": "Agent", "tool_input": {"prompt": "work F-001"}}
+-    agent_before_cron_blocked = E_CRON_CREATE_REQUIRED in evaluate_pretool(
++    agent_before_cron_blocked = E_WORK_PLAN_REQUIRED in evaluate_pretool(
+         lifecycle_run, lifecycle_agent, lifecycle_contract)
+     no_active_lifecycle_contract = {
+         **lifecycle_contract,
+@@ -8891,9 +8924,9 @@ def _selftest() -> int:
+     }
+     no_active_transition_reaches_cron_gate = bool(
+         not _new_run_transition_pending(no_active_lifecycle_contract, lifecycle_run)
+-        and E_CRON_CREATE_REQUIRED in evaluate_pretool(
+-            lifecycle_run, lifecycle_task, no_active_lifecycle_contract)
+-        and "RUN_BOUND" in _context_message(
++        and evaluate_pretool(
++            lifecycle_run, lifecycle_task, no_active_lifecycle_contract) == ""
++        and "SINGLE_CYCLE" in _context_message(
+             no_active_lifecycle_contract, lifecycle_run)
+     )
+     lifecycle_transcript = root / "lifecycle-transcript.jsonl"
+@@ -8907,7 +8940,7 @@ def _selftest() -> int:
+         "tool_input": {"prompt": f"/loop {lifecycle_run.name}"},
+         "tool_response": {"id": "bound-cron-job"},
+     })
+-    agent_before_plan_blocked = E_ITERATION_PLAN_REQUIRED in evaluate_pretool(
++    agent_before_plan_blocked = E_WORK_PLAN_REQUIRED in evaluate_pretool(
+         lifecycle_run, lifecycle_agent, lifecycle_contract)
+     plan_allowed_after_cron = evaluate_pretool(
+         lifecycle_run, lifecycle_task, lifecycle_contract) == ""
+@@ -12606,7 +12639,8 @@ def _selftest() -> int:
+          == "single_operator"),
+         ("explicit loop intent outranks a framework recovery clause",
+          operator_e2e_loop_contract.get("mode") == EXECUTE
+-         and operator_e2e_loop_contract.get("loop_requested") is True
++         and operator_e2e_loop_contract.get("loop_entry_delivered") is True
++         and operator_e2e_loop_contract.get("loop_requested") is False
+          and operator_e2e_loop_contract.get("lifecycle_operation") == "source"
+          and not operator_e2e_loop_contract.get("maintenance_intent")),
+         ("natural localhost lifecycle intent outranks negative framework and recovery clauses",
+@@ -13100,9 +13134,9 @@ def _selftest() -> int:
+          unavailable_completion_pretool_is_read_only),
+         ("explain mode blocks Bash", bool(evaluate_pretool(run, target_event, {"mode": EXPLAIN}))),
+         ("pause mode allows CronList", evaluate_pretool(run, {"tool_name": "CronList", "tool_input": {}}, {"mode": PAUSE}) == ""),
+-        ("CronCreate requires current-turn CronList", cron_before_list),
+-        ("CronCreate allowed after current-turn empty CronList", cron_after_list),
+-        ("new-run /loop cannot schedule the origin run before transition",
++        ("single-cycle contract rejects CronCreate before CronList", cron_before_list),
++        ("single-cycle contract still rejects CronCreate after CronList", cron_after_list),
++        ("new-run /loop cannot schedule the origin run",
+          new_run_cron_blocked_until_transition),
+         ("pending new-run /loop blocks task planning on the origin run",
+          pending_plan_requires_setup),
+@@ -13110,15 +13144,15 @@ def _selftest() -> int:
+          pending_agent_requires_setup),
+         ("post-bind work requires a committed transaction/contract binding",
+          uncommitted_transition_blocked),
+-        ("new-run task planning waits for current-turn CronCreate",
++        ("new-run task planning proceeds without recurring Cron",
+          plan_before_cron_blocked),
+-        ("new-run Agent launch waits for current-turn CronCreate",
++        ("new-run Agent launch waits for the single-cycle work plan",
+          agent_before_cron_blocked),
+-        ("a committed no-active-run transition reaches the bound-run Cron gate",
++        ("a committed no-active-run transition reaches single-cycle execution",
+          no_active_transition_reaches_cron_gate),
+-        ("Agent launch waits for a post-Cron iteration plan receipt",
++        ("Agent launch waits for a typed single-cycle work plan",
+          agent_before_plan_blocked),
+-        ("TaskCreate is allowed after the bound run Cron receipt",
++        ("TaskCreate is allowed for the bound single-cycle run",
+          plan_allowed_after_cron),
+         ("post-Cron task receipt unlocks the lifecycle gate",
+          plan_unlocks_lifecycle_gate),
+diff --git a/tools/work_plan.py b/tools/work_plan.py
+index f2b7d29..7888366 100644
+--- a/tools/work_plan.py
++++ b/tools/work_plan.py
+@@ -1271,6 +1271,62 @@ def _verify_transaction_lineage(
+         current = prior
+ 
+ 
++def transaction_plan_lineage(run_dir: str | Path) -> list[dict]:
++    """Return the verified plan lineage from newest to oldest.
++
++    Replan consumers need durable work history, not merely the lanes that remain
++    in ``state/work_plan.json``.  A previous replan may legitimately omit an
++    already-settled prefix; looking only at that shortened immediate predecessor
++    loses the completed identity and permits the generated planner to dispatch
++    it again.  The transaction archive chain is the canonical history owner.
++    """
++    run = _resolve_run(run_dir)
++    transaction = _load_transaction(run)
++    if not transaction:
++        raise PlanError("WORK_PLAN_TRANSACTION_REQUIRED")
++    if transaction["status"] == "prepared":
++        # This read API may need to finish an interrupted publish before it can
++        # expose lineage.  Recovery writes the snapshot/journal/current receipt,
++        # so serialize it with normal plan commits and re-read under the lock in
++        # case another process completed the exact transaction first.
++        with _plan_lock(run):
++            transaction = _load_transaction(run)
++            if not transaction:
++                raise PlanError("WORK_PLAN_TRANSACTION_RECOVERY_MISSING")
++            if transaction["status"] == "prepared":
++                _recover_transaction(run, transaction)
++        transaction = _load_transaction(run)
++        if not transaction:
++            raise PlanError("WORK_PLAN_TRANSACTION_RECOVERY_MISSING")
++    transaction = _validate_transaction(transaction)
++    _verify_transaction_lineage(
++        run, transaction, require_current_archive=True)
++
++    plans: list[dict] = []
++    seen_plans: set[str] = set()
++    current = transaction
++    while True:
++        plan = validate_plan(current.get("plan"))
++        digest = str(plan.get("plan_digest") or "")
++        if digest not in seen_plans:
++            plans.append(json.loads(json.dumps(plan, ensure_ascii=False)))
++            seen_plans.add(digest)
++        prior_hash = str(current.get("prior_transaction_receipt_hash") or "")
++        if not prior_hash:
++            break
++        current = _load_transaction_archive(run, prior_hash)
++        # A native-v1 upgrade archives the same exact plan as its migration
++        # source.  It is already represented above and terminates that branch.
++        if current.get("schema") == LEGACY_TRANSACTION_SCHEMA:
++            legacy_plan = validate_plan(current.get("plan"))
++            legacy_digest = str(legacy_plan.get("plan_digest") or "")
++            if legacy_digest not in seen_plans:
++                plans.append(json.loads(json.dumps(
++                    legacy_plan, ensure_ascii=False)))
++            break
++    return plans
++
++
+ def _render_expected_event(spec: dict, event_hashes: list[str]) -> dict:
+     data = json.loads(json.dumps(spec["data"], ensure_ascii=False))
+     for field, source_index in spec["bindings"].items():
+diff --git a/tools/workers.py b/tools/workers.py
+index 52f3753..9168c36 100644
+--- a/tools/workers.py
++++ b/tools/workers.py
+@@ -11,6 +11,7 @@ surfaces.
+ from __future__ import annotations
+ 
+ import argparse
++import collections
+ import contextlib
+ import fcntl
+ import hashlib
+@@ -3636,24 +3637,19 @@ def print_plan(run_dir: Path, limit: int) -> int:
+ def _remaining_replan_lanes(
+     run_dir: Path, lanes: list[dict], *, replan_reason: str,
+ ) -> tuple[list[dict], list[str]]:
+-    """Carry exact completed lane prefixes across a generated same-run replan.
++    """Carry exact completed lane prefixes across the verified plan lineage.
+ 
+     Canonical evidence normally changes after Root settles a lane, so a later
+     generated replan must not turn the same deterministic lane id into a fresh
+-    assignment.  Only transcript/review/Root-complete lanes with the same frozen
+-    work identity are inherited.  Their dependency-ordered descendants are
+-    inherited only when every predecessor was inherited too.
++    assignment.  The immediate prior plan is insufficient because a replan may
++    already have removed a settled prefix.  Only transcript/review/Root-complete
++    lanes from the validated transaction archive chain with the same frozen work
++    identity are inherited.  Their dependency-ordered descendants are inherited
++    only when every predecessor was inherited too.
+     """
+     copied = json.loads(json.dumps(lanes))
+     if not str(replan_reason or "").strip():
+         return copied, []
+-    prior = _work_plan.transaction_bound_plan(run_dir)
+-    projection = _run_model.plan_cycle_projection(run_dir, plan=prior)
+-    states = {
+-        str(item.get("lane_id") or ""): item
+-        for item in projection.get("lane_states", [])
+-        if isinstance(item, dict)
+-    }
+     generated = {
+         str(item.get("id") or ""): item for item in copied
+         if isinstance(item, dict)
+@@ -3669,22 +3665,45 @@ def _remaining_replan_lanes(
+             )
+         }
+ 
++    # Index only candidate ids/identities that this proposal could inherit.
++    # Each projection still revalidates assignments, runtime receipts, frozen
++    # result, Reviewer disposition, and Root settlement for that exact plan.
++    completed_identities: dict[str, list[dict]] = {}
++    for historical in _work_plan.transaction_plan_lineage(run_dir):
++        relevant = [
++            item for item in historical.get("lanes", [])
++            if isinstance(item, dict)
++            and str(item.get("id") or "") in generated
++            and identity(item) == identity(
++                generated[str(item.get("id") or "")])
++        ]
++        if not relevant:
++            continue
++        projection = _run_model.plan_cycle_projection(
++            run_dir, plan=historical)
++        states = {
++            str(item.get("lane_id") or ""): item
++            for item in projection.get("lane_states", [])
++            if isinstance(item, dict)
++        }
++        for old in relevant:
++            lane_id = str(old.get("id") or "")
++            if states.get(lane_id, {}).get("complete") is True:
++                completed_identities.setdefault(lane_id, []).append(
++                    identity(old))
++
+     inherited: set[str] = set()
+-    pending = [item for item in prior.get("lanes", []) if isinstance(item, dict)]
++    pending = [item for item in copied if isinstance(item, dict)]
+     while pending:
+         progressed = False
+-        for old in list(pending):
+-            lane_id = str(old.get("id") or "")
+-            new = generated.get(lane_id)
+-            dependencies = [str(item) for item in old.get("dependencies", [])]
+-            if not new or identity(old) != identity(new) \
+-                    or [str(item) for item in new.get("dependencies", [])] \
+-                    != dependencies \
+-                    or not states.get(lane_id, {}).get("complete") \
++        for new in list(pending):
++            lane_id = str(new.get("id") or "")
++            dependencies = [str(item) for item in new.get("dependencies", [])]
++            if identity(new) not in completed_identities.get(lane_id, []) \
+                     or any(item not in inherited for item in dependencies):
+                 continue
+             inherited.add(lane_id)
+-            pending.remove(old)
++            pending.remove(new)
+             progressed = True
+         if not progressed:
+             break
+@@ -3697,8 +3716,10 @@ def _remaining_replan_lanes(
+         ]
+     if inherited and not remaining:
+         raise ValueError(
+-            "WORK_PLAN_REPLAN_ALREADY_SETTLED: all generated lanes are already "
+-            "complete; use the typed cycle_end path")
++            "WORK_PLAN_DUPLICATE_SETTLED_WORK: every proposed lane has an "
++            "identity-equal transcript/Reviewer/Root-complete predecessor in "
++            "the verified transaction lineage; choose a genuinely new lane "
++            "identity/mechanism/precondition, or proceed to closure assessment")
+     return remaining, sorted(inherited)
+ 
+ 
+@@ -4262,13 +4283,37 @@ def print_delegate(
+     return 0
+ 
+ 
+-def print_status(run_dir: Path) -> int:
++def print_status(run_dir: Path, *, show_all: bool = False) -> int:
+     rows = agent_status_rows(run_dir)
+     if not rows:
+         print("[agent-board] no assignments yet. Load xunji-agent-board, commit the current typed plan, then delegate ready lanes.")
+         return 0
+-    print(f"[agent-board] {len(rows)} assignment(s)")
+-    for r in rows:
++    counts = collections.Counter(
++        str(row.get("status") or "?") for row in rows)
++    active = [
++        row for row in rows
++        if str(row.get("status") or "?") in NONTERMINAL_AGENT_STATUSES
++        or row.get("parse_error")
++    ]
++    if show_all:
++        shown = rows
++    else:
++        recent_terminal = [
++            row for row in rows
++            if row not in active
++        ][-8:]
++        shown = [*active, *recent_terminal]
++    count_text = ", ".join(
++        f"{key}={counts[key]}" for key in sorted(counts))
++    print(
++        f"[agent-board] total={len(rows)} active/debt={len(active)} "
++        f"states: {count_text}")
++    if not show_all and len(shown) < len(rows):
++        print(
++            f"  bounded view: {len(rows) - len(shown)} older terminal row(s) "
++            "omitted; use `workers.py status runs/<dir> --all` only for an "
++            "explicit full-ledger audit.")
++    for r in shown:
+         warn = " parse=ERROR" if r.get("parse_error") else ""
+         last = r.get("last_seen_at") or r.get("updated_at") or "-"
+         print(f"  {r['agent']:22} role={r['role']:12} front={r['front']:8} "
+@@ -7089,6 +7134,17 @@ def _selftest() -> int:
+         replan_reason="operator hint changed after the prior Hunter returned",
+         contract=superseding_contract,
+     )
++    # The current plan has intentionally omitted the settled OFFLINE prefix.
++    # A second generated replan must still find that completion in the verified
++    # grandparent transaction rather than creating another Hunter/Reviewer pair.
++    transitive_replanned_lanes, transitive_inherited_lanes = (
++        _remaining_replan_lanes(
++            planned_run,
++            [row["work_plan_lane"] for row in lane_suggestions(
++                planned_run, limit=1)],
++            replan_reason="a later cycle regenerated the conservative seed",
++        )
++    )
+     planned_next_batch = delegate_ready_lanes(
+         planned_run, runtime_slots=1, request_budget=10,
+         model_egress_budget=1, merge_capacity=100, limit=1,
+@@ -7941,6 +7997,12 @@ def _selftest() -> int:
+          and [item.get("id") for item in replanned_lanes]
+             == [item.get("id") for item in generated_plan_lanes[2:]]
+          and replanned_lanes[0].get("dependencies") == []),
++        ("later replan inherits settled prefix across transaction lineage",
++         transitive_inherited_lanes
++            == ["L-F-010-OFFLINE", "L-F-010-OFFLINE-REVIEW"]
++         and [item.get("id") for item in transitive_replanned_lanes]
++            == [item.get("id") for item in generated_plan_lanes[2:]]
++         and transitive_replanned_lanes[0].get("dependencies") == []),
+         ("replan preserves prior-plan frozen Reviewer admission",
+          _review_receipt_complete(planned_run, planned_hunter)),
+         ("Single Synthesizer cannot be fanned out as an Agent role",
+@@ -8141,6 +8203,11 @@ def main(argv: list[str] | None = None) -> int:
+             ap.add_argument("run_dir", type=Path)
+             ap.add_argument("--closure", action="store_true",
+                             help="treat non-terminal/stale Agents as hard errors for closure")
++        elif cmd == "status":
++            ap.add_argument("run_dir", type=Path)
++            ap.add_argument(
++                "--all", action="store_true",
++                help="print the complete assignment ledger instead of the bounded active/recent view")
+         else:
+             ap.add_argument("run_dir", type=Path)
+         if cmd in {"suggest", "plan"}:
+@@ -8195,7 +8262,7 @@ def main(argv: list[str] | None = None) -> int:
+         if cmd == "lifecycle-check":
+             return print_lifecycle_check(run_dir, closure=args.closure)
+         if cmd == "status":
+-            return print_status(run_dir)
++            return print_status(run_dir, show_all=args.all)
+         if cmd == "agent-check":
+             return print_agent_check(run_dir)
+         if cmd == "suggest":

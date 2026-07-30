@@ -74,7 +74,7 @@ assign the right Agent lane when useful, and record why in `decisions.md`.
 
 ### Root-level state graph pass (every cycle, cheap)
 
-For every explicit `/loop`, including a first source turn after run/Cron binding,
+For every explicit `/loop`, including a first source turn after run binding,
 maintain a Claude Code TaskCreate/TaskUpdate list before the next Agent or target
 action. TodoWrite is a compatibility surface. Track the assets/vectors/Agent
 lanes/evidence writes/gates for this iteration, then update the list as items
@@ -237,7 +237,7 @@ For an active run, `EXECUTE` may advance work, `EXPLAIN_ONLY` is read-only and h
 no Coda requirement, and `PAUSED_BY_OPERATOR` preserves all open fronts while only
 allowing state reads plus a current-list-bound Cron deletion. Pause is not closure.
 Only a first non-empty top-level `/loop(?:\s|$)` directive delivered to
-`UserPromptSubmit` enters recurring loop mode. Deterministic parsing ignores harmless leading
+`UserPromptSubmit` enters a single execute cycle. Deterministic parsing ignores harmless leading
 horizontal whitespace/BOM while preserving the exact raw prompt hash. Claude interprets
 the complete operator description and expresses it through one exact public lifecycle argv;
 the Hook treats that argv as `xunji.lifecycle-intent-candidate.v1` and mechanically promotes
@@ -253,9 +253,10 @@ Explicit fenced code, blockquotes, Markdown list items, inline quotes, questions
 and lifecycle denials stay data/read-only; a conflicting `/loop` plus denial fails
 closed. Narrow effect constraints such as “do not modify framework source” restrict
 the cycle but do not cancel an otherwise explicit lifecycle request. If the client reserves `/loop` as its own scheduler, load
-`xunji-run-lifecycle`: an affirmative uniquely named setup/resume request may run one
-`EXECUTE` cycle with `loop_requested=false`, but it cannot claim recurring-Cron
-semantics. Natural-language setup accepts a unique URL, bare host, run, or supported
+`xunji-run-lifecycle`: an affirmative uniquely named setup/resume request runs the
+same one `EXECUTE` cycle with `loop_requested=false`. A delivered literal entry
+also compiles with `loop_requested=false` and records `loop_entry_delivered=true`;
+neither form authorizes Cron. Natural-language setup accepts a unique URL, bare host, run, or supported
 source. Bare hosts normalize to their canonical HTTPS origin; safe case/default-port/
 empty-path differences share identity, while distinct hosts, paths, and query values
 do not. Prose attached after the source remains operator instruction, never hostname
@@ -512,8 +513,8 @@ current claim。它只读取 `.claude/xunji_active_run`、阶段派生状态和
 `state/loop_journal.jsonl`；不会读取 selection receipt、恢复状态、刷新状态、选择工作、写证据
 或执行阶段约束。active-run pointer 是本地运行态，
 只由 `tools/setup_transaction.py` 的 typed CAS ports 更新；`setup_run.py`、
-`loop_bootstrap.py`、set-active、原样送达的 recurring `/loop` 与 client-safe
-named-run 单周期入口只是适配层。
+`loop_bootstrap.py`、set-active、原样送达的单周期 `/loop` 与 named-run
+单周期入口只是适配层。
 pointer 是个人操作者的持久当前选择；`SessionEnd` 不清空，`SessionStart` 不恢复。新的
 Claude session 直接沿用该选择，并由首个真实 prompt 写入 fresh turn contract；session/
 transcript 只用于因果回执关联，不决定 statusline 是否显示。
@@ -953,11 +954,9 @@ assets were only header / recon-classified, never examined. Before any such clai
 
 - **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
   independent review resolved, retrospective written), write `GHOST_COMPLETE` at
-  the end of `decisions.md`. In the same turn, only `loop_requested=true` performs
-  `CronList`, deletes an observed current-run job if present, and lists again;
-  `loop_requested=false` performs no Cron action. Append a loop journal `end`
-  record whose note contains `cron_cancelled=<job-id|none>` either way. The loop
-  detects this and stops. No operator review required.
+  the end of `decisions.md`. New execute contracts perform no Cron action. Append
+  a loop journal `end` record whose note contains `cron_cancelled=none`. The
+  cycle detects this and stops. No operator review required.
 
 `check_run.py` HARD-fails / WARN mechanics for closure, and the same independent
 review applied to **safety-critical code** changes, are in the reference.

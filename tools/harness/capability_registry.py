@@ -766,7 +766,11 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
             flags=set(), positionals=3,
         )
         return ok and {"--status", "--note"}.issubset(seen)
-    flags = {"--closure"} if command == "lifecycle-check" else set()
+    flags = (
+        {"--closure"} if command == "lifecycle-check" else
+        {"--all"} if command == "status" else
+        set()
+    )
     values = {"--limit": None} if command in {"suggest", "plan"} else {}
     ok, _seen, _pos = _options(
         args[1:], values=values, flags=flags, positionals=1,
@@ -1251,9 +1255,18 @@ def selftest() -> int:
                 "cancel-unlaunched", "runs/demo_20260101", "A-web-hunter-001",
                 "--reason", "ok", "--future",
             ]) is None)),
-        ("workers status is read while assignment is control", (match(
-            ROOT / "tools/workers.py", ["status", "runs/demo_20260101"]
-        ) or _spec("", "", "repo_mutation", "")).effect == "local_read"),
+        ("workers status is read, bounded by default, and accepts only explicit --all", bool(
+            (match(
+                ROOT / "tools/workers.py", ["status", "runs/demo_20260101"]
+            ) or _spec("", "", "repo_mutation", "")).effect == "local_read"
+            and (match(
+                ROOT / "tools/workers.py",
+                ["status", "runs/demo_20260101", "--all"],
+            ) or _spec("", "", "repo_mutation", "")).effect == "local_read"
+            and match(
+                ROOT / "tools/workers.py",
+                ["status", "runs/demo_20260101", "--future"],
+            ) is None)),
         ("work-plan status is read while commit is control", (match(
             ROOT / "tools/work_plan.py", ["status", "runs/demo_20260101"]
         ) or _spec("", "", "repo_mutation", "")).effect == "local_read"),

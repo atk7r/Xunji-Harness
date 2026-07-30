@@ -1,0 +1,85 @@
+{
+  "ai_external_approved": false,
+  "bound_run": "127-0-0-2_20260730",
+  "classify_approved": false,
+  "coordination_signature": "5be87c37d350f7f9312d7f9d938abf9b39df535fe1b96cc30b2f9b0051079022",
+  "direct_egress_approved": false,
+  "fanout_epoch_id": "4762c70207945ab8",
+  "fanout_epoch_started_at": 1785401602.893473,
+  "fanout_override": false,
+  "intent_normalizations": [
+    "canonical_url"
+  ],
+  "intent_resolution": "deterministic_alias",
+  "lifecycle_operation": "source",
+  "lifecycle_run_hint": "",
+  "lifecycle_scope": "normal",
+  "lifecycle_source_hint": "http://127.0.0.2:65533/",
+  "loop_entry_delivered": true,
+  "loop_requested": false,
+  "loop_source_kind": "url",
+  "memory_approved": false,
+  "mode": "EXECUTE",
+  "model_lifecycle_candidate_allowed": false,
+  "operator_intent": {
+    "constraints": {
+      "framework_mutation": "maintenance-only",
+      "lifecycle_scope": "normal",
+      "target_egress_denied": true,
+      "web_tools_denied": true
+    },
+    "operation": "source",
+    "route": "offline",
+    "run_sha256": "",
+    "schema": "xunji.operator_intent.v1",
+    "source_kind": "url",
+    "source_sha256": "1864d8ad3889a1639852408fa3aa2ad33192c2e23464d6bb186ea295fec8c182"
+  },
+  "origin_run": "127-0-0-1_20260730",
+  "prompt_excerpt": "/loop http://127.0.0.2:65533 创建一个新的驱动测试 run。禁止任何目标网络请求、WebFetch、WebSearch和修改框架源码；允许按 <redacted:internal:ad09fe04db9e> 协议更新这个 run 的 canonical 状态并使用离线 Agent。自主完成一个 material cycle，包括 typed work plan、真实 Hunter 返回、Reviewer 处置、Root settlement 和 typed cycle_end，然后结束本次回合。",
+  "prompt_sha256": "3c724e1f71e6363bcf85168a1ffd2b31fb100b57d9832bb4f1fb9be775efb0df",
+  "reported_session_id": "0eb64b14-f43c-4496-8136-e7053b466495",
+  "resume_current_approved": false,
+  "run_ambiguous": false,
+  "run_bind_requested": false,
+  "run_name_sha256s": [],
+  "run_transition_requested": true,
+  "schema": "xunji.turn_contract.v1",
+  "session_binding_kind": "session_id",
+  "session_id": "0eb64b14-f43c-4496-8136-e7053b466495",
+  "slug_ambiguous": false,
+  "slug_sha256s": [],
+  "source_ambiguous": false,
+  "source_identity_version": "canonical-v1",
+  "source_sha256s": [
+    "1864d8ad3889a1639852408fa3aa2ad33192c2e23464d6bb186ea295fec8c182"
+  ],
+  "target_egress_denied": true,
+  "transcript_path": "/Users/ccj/.claude/projects/-private-tmp-xunji-loop-fix-Ge3pl0-worktree/0eb64b14-f43c-4496-8136-e7053b466495.jsonl",
+  "transition_claim": {
+    "effect": {
+      "effect_sha256": "a6c965fe3fb5fa3c7d8d26c8ab692d77ed76ff723df47292f54b06542a9e8548",
+      "input_sha256": "1864d8ad3889a1639852408fa3aa2ad33192c2e23464d6bb186ea295fec8c182",
+      "kind": "create",
+      "operation": "loop_bootstrap.create",
+      "options_sha256": "fe13d5401cbcef15c18c723cec1be87532f3e883250bfb454290095f47fc4394",
+      "schema": "xunji.lifecycle-effect.v1",
+      "target_run": "127-0-0-2_20260730"
+    },
+    "expected_run": "127-0-0-2_20260730",
+    "origin_run": "127-0-0-1_20260730",
+    "prompt_sha256": "3c724e1f71e6363bcf85168a1ffd2b31fb100b57d9832bb4f1fb9be775efb0df",
+    "session_id": "0eb64b14-f43c-4496-8136-e7053b466495",
+    "source_sha256": "1864d8ad3889a1639852408fa3aa2ad33192c2e23464d6bb186ea295fec8c182",
+    "target_run": "127-0-0-2_20260730",
+    "transaction_id": "747429ef1dab44eaa283b6014239b771"
+  },
+  "transition_transaction": {
+    "expected_run": "127-0-0-2_20260730",
+    "source_sha256": "1864d8ad3889a1639852408fa3aa2ad33192c2e23464d6bb186ea295fec8c182",
+    "transaction_id": "747429ef1dab44eaa283b6014239b771"
+  },
+  "transitioned_from": "127-0-0-1_20260730",
+  "updated_at": 1785401602.893473,
+  "web_tools_denied": true
+}

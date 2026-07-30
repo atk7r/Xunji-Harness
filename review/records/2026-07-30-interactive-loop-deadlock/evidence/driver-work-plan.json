@@ -1,0 +1,67 @@
+{
+  "committed_at": 1785401835.132753,
+  "cycle_id": 2,
+  "delegation_decision": {
+    "committed_at": 1785401835.132753,
+    "lane_ids": [
+      "L-F-001-OFFLINE",
+      "L-F-001-OFFLINE-REVIEW"
+    ],
+    "mode": "SERIAL_AGENT",
+    "reason": "Target egress denied by operator; offline Hunter can analyze the asset profile from setup data and provide candidates for service identification without network requests.",
+    "schema": "xunji.delegation-decision.v1"
+  },
+  "execution_mode": "SERIAL_AGENT",
+  "exit_gate": "Offline Hunter returns with structured observations; Reviewer challenges and adjudicates; Root settles E-001 evidence, updates front, projects next action.",
+  "inputs_digest": "c1283db6913f5e943e8c798fca5205f94dfcc2b7b9d894b357383ff07d1671e3",
+  "lanes": [
+    {
+      "assets": [
+        "127.0.0.2:65533"
+      ],
+      "atomic": false,
+      "dependencies": [],
+      "effect": "local_read",
+      "expected_evidence": "bounded source/artifact observations and explicit refutations",
+      "expected_information_gain": "high",
+      "front": "F-001",
+      "id": "L-F-001-OFFLINE",
+      "merge_cost": 10,
+      "request_budget": 0,
+      "request_cost": 0,
+      "role": "web-hunter",
+      "stop_condition": "the declared signal is observed or one attributable control refutes it"
+    },
+    {
+      "assets": [
+        "127.0.0.2:65533"
+      ],
+      "atomic": false,
+      "dependencies": [
+        "L-F-001-OFFLINE"
+      ],
+      "effect": "local_verify",
+      "expected_evidence": "review disposition for the frozen offline merge draft",
+      "expected_information_gain": "high",
+      "front": "F-001",
+      "id": "L-F-001-OFFLINE-REVIEW",
+      "merge_cost": 5,
+      "request_budget": 0,
+      "request_cost": 0,
+      "role": "review",
+      "stop_condition": "the declared signal is observed or one attributable control refutes it"
+    }
+  ],
+  "macro_stage": "S1",
+  "merge_owner": "Root/Single Synthesizer",
+  "objective": "Offline profile and identification of web service at 127.0.0.2:65533. Since target egress is denied this cycle, perform local analysis of the asset metadata, build E-001 baseline evidence entry, and structure the front for next-cycle probe work.",
+  "plan_digest": "2ca6a364c4a0c6f7ee6e3970a0de20bc5d8877b291b325e43b60731621461ddd",
+  "plan_id": "WP-2-2ca6a364",
+  "replan_reason": "",
+  "schema": "xunji.work-plan.v1",
+  "turn_binding": {
+    "contract_updated_at": 1785401602.893473,
+    "prompt_sha256": "3c724e1f71e6363bcf85168a1ffd2b31fb100b57d9832bb4f1fb9be775efb0df",
+    "session_id": "0eb64b14-f43c-4496-8136-e7053b466495"
+  }
+}

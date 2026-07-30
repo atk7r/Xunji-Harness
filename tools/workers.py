@@ -11,6 +11,7 @@ surfaces.
 from __future__ import annotations
 
 import argparse
+import collections
 import contextlib
 import fcntl
 import hashlib
@@ -3636,24 +3637,19 @@ def print_plan(run_dir: Path, limit: int) -> int:
 def _remaining_replan_lanes(
     run_dir: Path, lanes: list[dict], *, replan_reason: str,
 ) -> tuple[list[dict], list[str]]:
-    """Carry exact completed lane prefixes across a generated same-run replan.
+    """Carry exact completed lane prefixes across the verified plan lineage.
 
     Canonical evidence normally changes after Root settles a lane, so a later
     generated replan must not turn the same deterministic lane id into a fresh
-    assignment.  Only transcript/review/Root-complete lanes with the same frozen
-    work identity are inherited.  Their dependency-ordered descendants are
-    inherited only when every predecessor was inherited too.
+    assignment.  The immediate prior plan is insufficient because a replan may
+    already have removed a settled prefix.  Only transcript/review/Root-complete
+    lanes from the validated transaction archive chain with the same frozen work
+    identity are inherited.  Their dependency-ordered descendants are inherited
+    only when every predecessor was inherited too.
     """
     copied = json.loads(json.dumps(lanes))
     if not str(replan_reason or "").strip():
         return copied, []
-    prior = _work_plan.transaction_bound_plan(run_dir)
-    projection = _run_model.plan_cycle_projection(run_dir, plan=prior)
-    states = {
-        str(item.get("lane_id") or ""): item
-        for item in projection.get("lane_states", [])
-        if isinstance(item, dict)
-    }
     generated = {
         str(item.get("id") or ""): item for item in copied
         if isinstance(item, dict)
@@ -3663,28 +3659,51 @@ def _remaining_replan_lanes(
         return {
             key: lane.get(key)
             for key in (
-                "id", "role", "front", "effect", "assets",
+                "id", "role", "front", "effect", "assets", "dependencies",
                 "expected_evidence", "stop_condition", "request_cost",
                 "request_budget", "merge_cost", "atomic",
             )
         }
 
+    # Index only candidate ids/identities that this proposal could inherit.
+    # Each projection still revalidates assignments, runtime receipts, frozen
+    # result, Reviewer disposition, and Root settlement for that exact plan.
+    completed_identities: dict[str, list[dict]] = {}
+    for historical in _work_plan.transaction_plan_lineage(run_dir):
+        relevant = [
+            item for item in historical.get("lanes", [])
+            if isinstance(item, dict)
+            and str(item.get("id") or "") in generated
+            and identity(item) == identity(
+                generated[str(item.get("id") or "")])
+        ]
+        if not relevant:
+            continue
+        projection = _run_model.plan_cycle_projection(
+            run_dir, plan=historical)
+        states = {
+            str(item.get("lane_id") or ""): item
+            for item in projection.get("lane_states", [])
+            if isinstance(item, dict)
+        }
+        for old in relevant:
+            lane_id = str(old.get("id") or "")
+            if states.get(lane_id, {}).get("complete") is True:
+                completed_identities.setdefault(lane_id, []).append(
+                    identity(old))
+
     inherited: set[str] = set()
-    pending = [item for item in prior.get("lanes", []) if isinstance(item, dict)]
+    pending = [item for item in copied if isinstance(item, dict)]
     while pending:
         progressed = False
-        for old in list(pending):
-            lane_id = str(old.get("id") or "")
-            new = generated.get(lane_id)
-            dependencies = [str(item) for item in old.get("dependencies", [])]
-            if not new or identity(old) != identity(new) \
-                    or [str(item) for item in new.get("dependencies", [])] \
-                    != dependencies \
-                    or not states.get(lane_id, {}).get("complete") \
+        for new in list(pending):
+            lane_id = str(new.get("id") or "")
+            dependencies = [str(item) for item in new.get("dependencies", [])]
+            if identity(new) not in completed_identities.get(lane_id, []) \
                     or any(item not in inherited for item in dependencies):
                 continue
             inherited.add(lane_id)
-            pending.remove(old)
+            pending.remove(new)
             progressed = True
         if not progressed:
             break
@@ -3697,8 +3716,10 @@ def _remaining_replan_lanes(
         ]
     if inherited and not remaining:
         raise ValueError(
-            "WORK_PLAN_REPLAN_ALREADY_SETTLED: all generated lanes are already "
-            "complete; use the typed cycle_end path")
+            "WORK_PLAN_DUPLICATE_SETTLED_WORK: every proposed lane has an "
+            "identity-equal transcript/Reviewer/Root-complete predecessor in "
+            "the verified transaction lineage; choose a genuinely new lane "
+            "identity/mechanism/precondition, or proceed to closure assessment")
     return remaining, sorted(inherited)
 
 
@@ -4262,13 +4283,37 @@ def print_delegate(
     return 0
 
 
-def print_status(run_dir: Path) -> int:
+def print_status(run_dir: Path, *, show_all: bool = False) -> int:
     rows = agent_status_rows(run_dir)
     if not rows:
         print("[agent-board] no assignments yet. Load xunji-agent-board, commit the current typed plan, then delegate ready lanes.")
         return 0
-    print(f"[agent-board] {len(rows)} assignment(s)")
-    for r in rows:
+    counts = collections.Counter(
+        str(row.get("status") or "?") for row in rows)
+    active = [
+        row for row in rows
+        if str(row.get("status") or "?") in NONTERMINAL_AGENT_STATUSES
+        or row.get("parse_error")
+    ]
+    if show_all:
+        shown = rows
+    else:
+        recent_terminal = [
+            row for row in rows
+            if row not in active
+        ][-8:]
+        shown = [*active, *recent_terminal]
+    count_text = ", ".join(
+        f"{key}={counts[key]}" for key in sorted(counts))
+    print(
+        f"[agent-board] total={len(rows)} active/debt={len(active)} "
+        f"states: {count_text}")
+    if not show_all and len(shown) < len(rows):
+        print(
+            f"  bounded view: {len(rows) - len(shown)} older terminal row(s) "
+            "omitted; use `workers.py status runs/<dir> --all` only for an "
+            "explicit full-ledger audit.")
+    for r in shown:
         warn = " parse=ERROR" if r.get("parse_error") else ""
         last = r.get("last_seen_at") or r.get("updated_at") or "-"
         print(f"  {r['agent']:22} role={r['role']:12} front={r['front']:8} "
@@ -7089,6 +7134,26 @@ def _selftest() -> int:
         replan_reason="operator hint changed after the prior Hunter returned",
         contract=superseding_contract,
     )
+    # The current plan has intentionally omitted the settled OFFLINE prefix.
+    # A second generated replan must still find that completion in the verified
+    # grandparent transaction rather than creating another Hunter/Reviewer pair.
+    transitive_replanned_lanes, transitive_inherited_lanes = (
+        _remaining_replan_lanes(
+            planned_run,
+            [row["work_plan_lane"] for row in lane_suggestions(
+                planned_run, limit=1)],
+            replan_reason="a later cycle regenerated the conservative seed",
+        )
+    )
+    changed_dependency_lanes = json.loads(json.dumps(generated_plan_lanes))
+    changed_dependency_lanes[1]["dependencies"] = []
+    dependency_changed_replanned_lanes, dependency_changed_inherited_lanes = (
+        _remaining_replan_lanes(
+            planned_run,
+            changed_dependency_lanes,
+            replan_reason="Reviewer dependency precondition changed",
+        )
+    )
     planned_next_batch = delegate_ready_lanes(
         planned_run, runtime_slots=1, request_budget=10,
         model_egress_budget=1, merge_capacity=100, limit=1,
@@ -7941,6 +8006,17 @@ def _selftest() -> int:
          and [item.get("id") for item in replanned_lanes]
             == [item.get("id") for item in generated_plan_lanes[2:]]
          and replanned_lanes[0].get("dependencies") == []),
+        ("later replan inherits settled prefix across transaction lineage",
+         transitive_inherited_lanes
+            == ["L-F-010-OFFLINE", "L-F-010-OFFLINE-REVIEW"]
+         and [item.get("id") for item in transitive_replanned_lanes]
+            == [item.get("id") for item in generated_plan_lanes[2:]]
+         and transitive_replanned_lanes[0].get("dependencies") == []),
+        ("changed dependency identity is never inherited from historical settlement",
+         dependency_changed_inherited_lanes == ["L-F-010-OFFLINE"]
+         and [item.get("id") for item in dependency_changed_replanned_lanes]
+            == [item.get("id") for item in changed_dependency_lanes[1:]]
+         and dependency_changed_replanned_lanes[0].get("dependencies") == []),
         ("replan preserves prior-plan frozen Reviewer admission",
          _review_receipt_complete(planned_run, planned_hunter)),
         ("Single Synthesizer cannot be fanned out as an Agent role",
@@ -8141,6 +8217,11 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("--closure", action="store_true",
                             help="treat non-terminal/stale Agents as hard errors for closure")
+        elif cmd == "status":
+            ap.add_argument("run_dir", type=Path)
+            ap.add_argument(
+                "--all", action="store_true",
+                help="print the complete assignment ledger instead of the bounded active/recent view")
         else:
             ap.add_argument("run_dir", type=Path)
         if cmd in {"suggest", "plan"}:
@@ -8195,7 +8276,7 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "lifecycle-check":
             return print_lifecycle_check(run_dir, closure=args.closure)
         if cmd == "status":
-            return print_status(run_dir)
+            return print_status(run_dir, show_all=args.all)
         if cmd == "agent-check":
             return print_agent_check(run_dir)
         if cmd == "suggest":

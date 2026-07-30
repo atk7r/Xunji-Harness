@@ -1,0 +1,267 @@
+{
+  "schema": 3,
+  "assignments": [
+    {
+      "schema": "xunji.assignment.v1",
+      "agent": "A-web-hunter-001",
+      "role": "web-hunter",
+      "front": "F-001",
+      "front_title": "F-001 — Web service identification on 127.0.0.2:65533",
+      "plan_id": "WP-2-2ca6a364",
+      "plan_digest": "2ca6a364c4a0c6f7ee6e3970a0de20bc5d8877b291b325e43b60731621461ddd",
+      "lane_id": "L-F-001-OFFLINE",
+      "effect": "local_read",
+      "assignment_attempt": 1,
+      "assets": [
+        "127.0.0.2:65533"
+      ],
+      "asset_ids": [
+        "ASSET-EC254BC58511"
+      ],
+      "coverage_before": {
+        "127.0.0.2:65533": {
+          "examined": true,
+          "verdict": null,
+          "tested_groups": []
+        }
+      },
+      "scope": "run target scope",
+      "status": "blocked",
+      "reasoning_style": "personalized-rdt",
+      "loop_budget": 5,
+      "tool_call_limit": 24,
+      "request_budget": 0,
+      "operator_profile": "runs/127-0-0-2_20260730/state/operator_profile.json",
+      "context": "runs/127-0-0-2_20260730/context/A-web-hunter-001.F-001.11a9311c7b17.attempt-001.md",
+      "agent_file": "runs/127-0-0-2_20260730/agents/A-web-hunter-001.md",
+      "instruction_bundle": {
+        "schema": "xunji.agent-instruction-bundle.v1",
+        "assignment": "A-web-hunter-001",
+        "plan_digest": "2ca6a364c4a0c6f7ee6e3970a0de20bc5d8877b291b325e43b60731621461ddd",
+        "lane_id": "L-F-001-OFFLINE",
+        "role": "web-hunter",
+        "subagent_type": "xunji-hunter",
+        "role_contract": {
+          "schema": "xunji.agent-role-contract.v1",
+          "manifest": {
+            "path": "contracts/agent-instruction-sources.v1.json",
+            "version": "xunji.agent-instruction-sources.v1",
+            "length": 2255,
+            "sha256": "6eee63e9fd4283bdffc46d97eb797c9420d5f5a4bdf67188b3368bc4d4a00dec"
+          },
+          "common": {
+            "path": "docs/templates/agents/common.v1.md",
+            "version": "xunji.agent-role-common.v1",
+            "length": 1815,
+            "sha256": "d21fa02c9cfa3da6917ecae0079a786a29bbb69222304d1f0dcd7a7c0f394a75"
+          },
+          "role": {
+            "id": "web-hunter",
+            "path": "docs/templates/agents/web-hunter.md",
+            "version": "xunji.agent-role-delta.v1",
+            "length": 903,
+            "sha256": "db2e060fdea550ddc1bc5b0f14787ddc64f386e3484a0723b2c2e02fc20eee68",
+            "assignable": true
+          },
+          "subagent_type": "xunji-hunter",
+          "live_agent": {
+            "path": ".claude/agents/xunji-hunter.md",
+            "version": "xunji.live-agent.hunter.v1",
+            "length": 3834,
+            "sha256": "1752953effe8bd9a37b4746c2f35e8a447973c65d677b7c487c6830c0aaed790"
+          },
+          "composed_length": 2687,
+          "composed_sha256": "91d2eaccdffde651d2119949b63a213ad6d9ac2426f8042ccc1f73769f3f01a4"
+        },
+        "scaffold_source": {
+          "path": "docs/templates/agents/scaffold.v1.md",
+          "version": "xunji.agent-scaffold.v1",
+          "length": 2100,
+          "sha256": "71573d37c3bfd100bbe85cc59b0879a0341034aab80c3739f1d54750f06e6c3c"
+        },
+        "context": {
+          "path": "runs/127-0-0-2_20260730/context/A-web-hunter-001.F-001.11a9311c7b17.attempt-001.md",
+          "length": 10584,
+          "sha256": "bd7aa9354c3b1686e8ed5efc2365e20ce230235ae9e261e7759f5d8ab815fb32"
+        },
+        "agent_file": {
+          "path": "runs/127-0-0-2_20260730/agents/A-web-hunter-001.md",
+          "length": 3637,
+          "sha256": "baeba1dbf268e4fc5f72e8ec7a9231272533f19e99386cf1336a3d743d394532"
+        }
+      },
+      "instruction_bundle_sha256": "6bae321a4c7c3ebb42a62ae66763042fa1dbe42ce8b53333c76415b37a837c64",
+      "created_at": "2026-07-30T08:57:29Z",
+      "updated_at": "2026-07-30T09:00:41.040Z",
+      "attempts": [
+        {
+          "schema": "xunji.agent-receipt.v1",
+          "parent_run": "127-0-0-2_20260730",
+          "assignment": "A-web-hunter-001",
+          "attempt_id": "a66ce49590f4e113c",
+          "agent_id": "a66ce49590f4e113c",
+          "tool_use_id": "call_00_jAmU3o0UbXlXuhCIBPqh9479",
+          "session_id": "0eb64b14-f43c-4496-8136-e7053b466495",
+          "lane_id": "L-F-001-OFFLINE",
+          "plan_digest": "2ca6a364c4a0c6f7ee6e3970a0de20bc5d8877b291b325e43b60731621461ddd",
+          "launch_prompt_sha256": "909bed72cf1950427ec4577fc20472f407138343a9be056be99d49de0f78ff25",
+          "subagent_type": "xunji-hunter",
+          "assets": [
+            "127.0.0.2:65533"
+          ],
+          "result_snapshot": {
+            "path": "/private/tmp/xunji-loop-fix.Ge3pl0/worktree/runs/127-0-0-2_20260730/state/merge_results/A-web-hunter-001/a66ce49590f4e113c-de878fdf0031a441a747465ed6ed2fc250c971b9e2cb8651aadaf5c81bbf141d.json",
+            "length": 2600,
+            "sha256": "de878fdf0031a441a747465ed6ed2fc250c971b9e2cb8651aadaf5c81bbf141d",
+            "missing": false,
+            "source": "subagent_stop_response"
+          },
+          "launched_at": "2026-07-30T08:58:12.134Z",
+          "state": "returned",
+          "returned_at": "2026-07-30T08:59:00.721Z"
+        }
+      ],
+      "reviews_assignments": [],
+      "coverage_merge_satisfied": false,
+      "current_attempt": "a66ce49590f4e113c",
+      "runtime_agent_id": "a66ce49590f4e113c",
+      "last_note": "Reason: OFFLINE_NO_CAPTURED_ARTIFACTS; Front: F-001",
+      "last_seen_at": "2026-07-30T09:00:41.040Z",
+      "heartbeat_count": 1,
+      "finished_at": "2026-07-30T09:00:41.040Z",
+      "root_disposition_review_receipt_hash": "76f4fa93e92ddd1382bca10850332674164ba3e34b9e476aff6b4ec66b39e81c",
+      "root_disposition_at": "2026-07-30T09:00:41.040Z"
+    },
+    {
+      "schema": "xunji.assignment.v1",
+      "agent": "A-review-001",
+      "role": "review",
+      "front": "F-001",
+      "front_title": "F-001 — Web service identification on 127.0.0.2:65533",
+      "plan_id": "WP-2-2ca6a364",
+      "plan_digest": "2ca6a364c4a0c6f7ee6e3970a0de20bc5d8877b291b325e43b60731621461ddd",
+      "lane_id": "L-F-001-OFFLINE-REVIEW",
+      "effect": "local_verify",
+      "assignment_attempt": 1,
+      "assets": [
+        "127.0.0.2:65533"
+      ],
+      "asset_ids": [
+        "ASSET-EC254BC58511"
+      ],
+      "coverage_before": {
+        "127.0.0.2:65533": {
+          "examined": true,
+          "verdict": null,
+          "tested_groups": []
+        }
+      },
+      "scope": "run target scope",
+      "status": "reviewed",
+      "reasoning_style": "personalized-rdt",
+      "loop_budget": 8,
+      "tool_call_limit": 24,
+      "request_budget": 0,
+      "operator_profile": "runs/127-0-0-2_20260730/state/operator_profile.json",
+      "context": "runs/127-0-0-2_20260730/context/A-review-001.F-001.11a9311c7b17.attempt-001.md",
+      "agent_file": "runs/127-0-0-2_20260730/agents/A-review-001.md",
+      "instruction_bundle": {
+        "schema": "xunji.agent-instruction-bundle.v1",
+        "assignment": "A-review-001",
+        "plan_digest": "2ca6a364c4a0c6f7ee6e3970a0de20bc5d8877b291b325e43b60731621461ddd",
+        "lane_id": "L-F-001-OFFLINE-REVIEW",
+        "role": "review",
+        "subagent_type": "xunji-reviewer",
+        "role_contract": {
+          "schema": "xunji.agent-role-contract.v1",
+          "manifest": {
+            "path": "contracts/agent-instruction-sources.v1.json",
+            "version": "xunji.agent-instruction-sources.v1",
+            "length": 2255,
+            "sha256": "6eee63e9fd4283bdffc46d97eb797c9420d5f5a4bdf67188b3368bc4d4a00dec"
+          },
+          "common": {
+            "path": "docs/templates/agents/common.v1.md",
+            "version": "xunji.agent-role-common.v1",
+            "length": 1815,
+            "sha256": "d21fa02c9cfa3da6917ecae0079a786a29bbb69222304d1f0dcd7a7c0f394a75"
+          },
+          "role": {
+            "id": "review",
+            "path": "docs/templates/agents/review.md",
+            "version": "xunji.agent-role-delta.v1",
+            "length": 974,
+            "sha256": "ae4a044cef62d3121d02e8c7900f314b20016d0b0e66343057de08b02fbcc603",
+            "assignable": true
+          },
+          "subagent_type": "xunji-reviewer",
+          "live_agent": {
+            "path": ".claude/agents/xunji-reviewer.md",
+            "version": "xunji.live-agent.reviewer.v1",
+            "length": 5369,
+            "sha256": "87707e265d49d50ba95022d6f0fac64ad54abc542f227304db9a83ad420f263b"
+          },
+          "composed_length": 2758,
+          "composed_sha256": "d16a64f593a0ee32ae24b1a804365b26682afdbd6396060f2c2389a2a1cf42b2"
+        },
+        "scaffold_source": {
+          "path": "docs/templates/agents/scaffold.v1.md",
+          "version": "xunji.agent-scaffold.v1",
+          "length": 2100,
+          "sha256": "71573d37c3bfd100bbe85cc59b0879a0341034aab80c3739f1d54750f06e6c3c"
+        },
+        "context": {
+          "path": "runs/127-0-0-2_20260730/context/A-review-001.F-001.11a9311c7b17.attempt-001.md",
+          "length": 10905,
+          "sha256": "11bde3ae885a71a7e42cde9224715fc966f6cfadb838d485de7220371f69fe7e"
+        },
+        "agent_file": {
+          "path": "runs/127-0-0-2_20260730/agents/A-review-001.md",
+          "length": 3641,
+          "sha256": "c4fb77c51cacd18207ae33c22ac74162afa74260e10afe01ec8ec85a08f4d716"
+        }
+      },
+      "instruction_bundle_sha256": "d137b0a1584932f5f58b464ffaff05fa6bde61002a4932c1680c59a1352c030c",
+      "created_at": "2026-07-30T08:59:13Z",
+      "updated_at": "2026-07-30T09:00:31.574Z",
+      "attempts": [
+        {
+          "schema": "xunji.agent-receipt.v1",
+          "parent_run": "127-0-0-2_20260730",
+          "assignment": "A-review-001",
+          "attempt_id": "acd63a2643a154850",
+          "agent_id": "acd63a2643a154850",
+          "tool_use_id": "call_00_LyNItL0hHlUVFuGpQF8i6682",
+          "session_id": "0eb64b14-f43c-4496-8136-e7053b466495",
+          "lane_id": "L-F-001-OFFLINE-REVIEW",
+          "plan_digest": "2ca6a364c4a0c6f7ee6e3970a0de20bc5d8877b291b325e43b60731621461ddd",
+          "launch_prompt_sha256": "c8dadf89cec48a793673212770f835380398cc246701c24acf6865f50a9d1f2b",
+          "subagent_type": "xunji-reviewer",
+          "result_digest_binding": "de878fdf0031a441a747465ed6ed2fc250c971b9e2cb8651aadaf5c81bbf141d",
+          "assets": [
+            "127.0.0.2:65533"
+          ],
+          "result_snapshot": {
+            "path": "/private/tmp/xunji-loop-fix.Ge3pl0/worktree/runs/127-0-0-2_20260730/state/merge_results/A-review-001/acd63a2643a154850-c68ff1f24335ec1bbfbecd94d395aba94c85b2136a591c67f83e7b63af064c0d.json",
+            "length": 2726,
+            "sha256": "c68ff1f24335ec1bbfbecd94d395aba94c85b2136a591c67f83e7b63af064c0d",
+            "missing": false,
+            "source": "subagent_stop_response"
+          },
+          "launched_at": "2026-07-30T08:59:23.692Z",
+          "state": "returned",
+          "returned_at": "2026-07-30T09:00:10.215Z"
+        }
+      ],
+      "reviews_assignments": [
+        "A-web-hunter-001"
+      ],
+      "review_result_digest": "de878fdf0031a441a747465ed6ed2fc250c971b9e2cb8651aadaf5c81bbf141d",
+      "coverage_merge_satisfied": false,
+      "current_attempt": "acd63a2643a154850",
+      "runtime_agent_id": "acd63a2643a154850",
+      "last_note": "Review: A-web-hunter-001 Disposition: accept-candidate Result: de878fdf0031 Note: Reviewer confirms: NO_TARGET_DATA_FOR_OFFLINE_ANALYSIS correctly reflects pre-probe state with request_budget=0. Barrier OFFLINE_NO_CAPTURED_ARTIFACTS properly identified. No evidence, no conflicts, no overclaim.",
+      "finished_at": "2026-07-30T09:00:31.574Z"
+    }
+  ]
+}
