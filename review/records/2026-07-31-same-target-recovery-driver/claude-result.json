@@ -1,0 +1,30 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 266102,
+  "duration_api_ms": 261352,
+  "num_turns": 25,
+  "result": "Setup completed for runs/same-target-driver-r2-invalid_20260731. The model reported no target access and no Cron. Its additional check_run and git-history discussion was read-only and was not used as transaction proof.",
+  "stop_reason": "end_turn",
+  "session_id": "9e4982fd-7203-4130-ba75-ceedbd46b8f0",
+  "model": "deepseek-v4-flash[1m]",
+  "usage": {
+    "input_tokens": 78623,
+    "cache_read_input_tokens": 718336,
+    "output_tokens": 26192,
+    "web_search_requests": 0
+  },
+  "tool_counts": {
+    "Skill": 2,
+    "Bash": 6,
+    "Read": 13,
+    "Edit": 0,
+    "Write": 0,
+    "Agent": 0,
+    "Cron": 0,
+    "WebFetch": 0,
+    "WebSearch": 0
+  },
+  "permission_or_verification_failures": 4
+}

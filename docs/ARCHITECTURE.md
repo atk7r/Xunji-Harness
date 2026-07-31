@@ -299,6 +299,16 @@ authority 的 pending/claim/target-contract 写入只有在 temp file flush+file
 旧 claim，再处理 fresh exact effect；same-effect 可消费，cross/multiple/tamper 保留并拒绝。
 claim/pending 已缺失也要重做目录 fsync 才能确认删除。该声明只覆盖 transaction
 authority metadata，不扩张为 builder 整棵文件树。
+origin 与 target 相同也属于一次新的 lifecycle effect，Hook 不得因 pointer 已经选择该 run
+而跳过 one-use claim。精确重复同一 create source 时，Hook-bound setup receipt 顶层
+`contract_binding/transition_claim` 在存在时继续表示历史首次 create，不被新 prompt 重写；direct
+CLI create 保持无 binding。事务 owner claim/finalize 新权限后，把当前
+session/prompt/source/transaction/effect binding 留在 target turn contract 作为 same-run
+reconciliation proof。跨 origin create 仍由首次 receipt pair 证明。5d0a99c 之前的
+binding-only v1 receipt 只允许精确的历史 frozen turn，不得授权 fresh effect。后绑定执行只接受
+这些机械证明、terminal nested `activation_attempt` 或 exact same-run create reconciliation。
+存在 fresh live lifecycle contract 却没有 exact claim 时必须 fail closed，不得降级成 direct
+CLI 幂等成功；same-target resume/set-active 与 candidate target/effect mismatch 同样如此。
 最终 contract/receipt 绑定 session、operator prompt hash、effect、source hash、transaction
 id 与 expected run。CLI/source 输入不能提供 claim 内容或 authority，`turn_contract` 边界
 不可加载时 activation fail-closed。只有 `runs/` 内的现存目录能成为 pointer authority；存在但
@@ -1067,7 +1077,10 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     不可信解释器、env/wrapper 都不能生成 claim；effect 只保留 redacted operation/options 与
     canonical input digest。状态按 `active -> claimed -> pointer -> finalize/delete` 推进，新 prompt
     tombstone 旧 authority；恢复必须从完整 bundle/receipt/immutable binding 复算，不能从 pointer
-    或 status 推断。
+    或 status 推断。origin/target 相同也必须生成和消费 fresh claim；重复 exact create 只能由
+    当前 target contract 的 same-run reconciliation binding，加上其 formal receipt identity
+    共同证明；Hook-bound original receipt pair 若存在则保持 immutable，direct CLI original
+    可以无 pair。缺 claim 不得报成功。
 20. Work plan 与 delegate 都是 typed 单写者事务：prepared 状态不能被消费者当作 committed，
     crash recovery 必须从冻结 prior state 和 intents 幂等前向恢复或完整回滚，不能留下部分
     journal、plan、assignment 或 context。
@@ -1117,6 +1130,47 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     reason，必须以新的 versioned reason/schema、迁移语义和 fault fixtures 单独准入。
 
 ## 12. Maintenance Checkpoint
+
+### 2026-07-31 — same-target lifecycle claim reconciliation
+
+- Date: 2026-07-31
+- Scope: 修复重复 exact source 已解析到当前 active run 时的 lifecycle 假成功。PreToolUse
+  不再因 `target == origin` 跳过 claim；setup transaction 对 fresh live lifecycle contract
+  缺 claim fail closed；post-bind 由 transaction owner 统一验证 original create、terminal
+  activation attempt 或 exact same-run create reconciliation；同时冻结 legacy binding-only、
+  cross-origin create、same-target activation 与 candidate mismatch 的兼容/拒绝边界。
+- Architecture impact: lifecycle authority、setup recovery 与 post-bind verification 改变。
+  active pointer 和 setup receipt 顶层 create identity 的 owner 不变；新增的是同目标 effect
+  也必须消费 one-use claim，以及重复 create 的当前 turn contract 作为 reconciliation proof。
+  Hook-bound original pair 存在时不可变，direct CLI original 无 pair；历史 pre-effect-profile
+  binding-only receipt 仅保留 exact frozen-turn post-bind 兼容，不成为新 effect authority。
+  本轮取代“同目标是无需 claim 的 direct/no-op 情形”和“post-bind 只认 receipt 顶层首次
+  prompt binding”这两个不完整实现。
+- Owner/enforcement: `.claude/skills/xunji-run-lifecycle/SKILL.md`、`docs/WORKFLOW.md`
+  与本文描述 Claude-primary 协议；`tools/turn_contract.py` 生成同目标 claim、拒绝 transition
+  proof 不完整的后绑定执行；`tools/setup_transaction.py` 是 claim/receipt/pointer commit 与
+  terminal binding validator 的唯一 owner。真实 Hook 子进程 → transaction consume → post-bind、
+  cross-origin create、legacy/tamper 与事务 fault/recovery selftest 冻结跨层行为。
+- Live migration: 无 schema 或数据迁移，不编辑 live run、pointer、claim、journal、evidence。
+  现代 committed/recovered receipt 继续有效且顶层 binding 不改写；pre-effect-profile
+  binding-only receipt 继续证明其 exact historical turn，但既有严格 activation/profile gate
+  不因本修复放宽。下一次现代重复 source/resume/set-active prompt 自动走 fresh claim。当前正
+  卡在旧假成功状态的 turn 需要由操作者重新发起 lifecycle prompt，不能从历史 prompt 补铸权限。
+- Verification: `turn_contract.py --selftest`、`setup_transaction.py --selftest`、
+  `loop_bootstrap.py --selftest`、`check_rules.py`、`check_templates.py`、
+  `check_runtime_boundary.py` 均 PASS；`tools/selftest_all.py` 为 70 passed / 0 failed
+ （120.5s）。隔离 DeepSeek-backed Claude Code real-driver 的 transcript/argv/claim/contract/
+  receipt adjudication记录在 `review/records/2026-07-31-same-target-recovery-driver/`；fresh-context
+  Claude Code 独立复审记录在 `review/records/2026-07-31-same-target-recovery-review/`，二者都是
+  commit gate。
+- Independent review: Codex 是作者，不计自己的 review。按 operator 要求不使用 arkcli；只以
+  fresh-context、no-edit 的 DeepSeek-backed Claude Code 检查 exact scoped diff，Codex 负责
+  disposition 和最终综合。
+- Exclusions: 不修改现有 live engagement/runtime artifacts，不把 `.agents/skills` 当作 Claude
+  主驾驶源；保留 worktree 中既有 Codex skill ownership、statusline、project intro、target/
+  evidence/review artifacts 与其他无关 dirty/untracked 内容，不纳入本修复提交。
+
+### 2026-07-29 — interrupted Reviewer recovery（历史 checkpoint）
 
 - Date: 2026-07-29
 - Scope: 修复 plan-bound Reviewer Start 的 receipt/projection 半提交死锁。真实

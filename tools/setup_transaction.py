@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
 import time
 import uuid
@@ -1539,6 +1540,169 @@ def _validate_activation_attempt(
     return dict(value)
 
 
+def validate_committed_transition_contract(run_dir: Path, contract: dict) -> None:
+    """Validate the current turn's binding to one committed setup transaction.
+
+    The top-level receipt binding is the immutable identity of the original
+    create.  A later activation is proven by its terminal nested attempt.  An
+    exact same-source create on the already-active run is an idempotent
+    reconciliation: its fresh one-use claim is retained by the current turn
+    contract while the historical top-level create identity remains unchanged.
+    """
+    if not isinstance(contract, dict):
+        raise SetupTransactionError(
+            "transaction_identity_mismatch",
+            "current turn contract is missing or invalid",
+            run_dir=run_dir,
+        )
+    receipt = _read_receipt(run_dir)
+    transaction = contract.get("transition_transaction")
+    if not isinstance(transaction, dict):
+        raise SetupTransactionError(
+            "transaction_identity_mismatch",
+            "current turn lacks a setup transition transaction",
+            run_dir=run_dir,
+        )
+    transaction_id = str(transaction.get("transaction_id") or "")
+    source_hash = str(transaction.get("source_sha256") or "")
+    expected_run = str(transaction.get("expected_run") or "")
+    if not re.fullmatch(r"[0-9a-f]{32}", transaction_id) \
+            or not re.fullmatch(r"[0-9a-f]{64}", source_hash) \
+            or receipt.get("status") not in {"committed", "recovered"} \
+            or transaction_id != str(receipt.get("transaction_id") or "") \
+            or source_hash != str(receipt.get("source_sha256") or "") \
+            or str(receipt.get("run_name") or "") != run_dir.name \
+            or expected_run != run_dir.name:
+        raise SetupTransactionError(
+            "transaction_identity_mismatch",
+            "current transition does not match a terminal setup receipt",
+            run_dir=run_dir,
+            transaction_id=transaction_id,
+        )
+
+    session_id = str(contract.get("session_id") or "")
+    prompt_sha = str(contract.get("prompt_sha256") or "")
+    current_claim = contract.get("transition_claim")
+    current_binding = {
+        "session_id": session_id,
+        "prompt_sha256": prompt_sha,
+        "source_sha256": source_hash,
+        "transaction_id": transaction_id,
+        "expected_run": run_dir.name,
+    }
+    if not session_id or not re.fullmatch(r"[0-9a-f]{64}", prompt_sha):
+        raise SetupTransactionError(
+            "transaction_identity_mismatch",
+            "current transition lacks an exact session/prompt binding",
+            run_dir=run_dir,
+            transaction_id=transaction_id,
+        )
+
+    # Before lifecycle-effect profiles and one-use claim receipts were
+    # introduced, the v1 receipt stored only the exact terminal contract
+    # binding.  Preserve that already-issued authority narrowly: it can prove
+    # only the identical historical session/prompt/transaction, never a fresh
+    # create or activation.  A profile-bearing receipt with only half of the
+    # modern claim pair is corruption, not a legacy shape.
+    legacy_binding_only = bool(
+        "effect_profile" not in receipt
+        and "transition_claim" not in receipt
+        and "activation_attempt" not in receipt
+        and isinstance(receipt.get("contract_binding"), dict)
+    )
+    if legacy_binding_only:
+        source = _read_json(run_dir / SOURCE_REL)
+        try:
+            setup_source.validate_manifest(source, allow_legacy=True)
+            if source.get("schema") == SOURCE_SCHEMA:
+                setup_source.verify_bundle(run_dir, source)
+        except setup_source.SetupSourceError as exc:
+            raise SetupTransactionError(
+                exc.code,
+                f"legacy setup source manifest/bundle is invalid: {exc}",
+                run_dir=run_dir,
+                transaction_id=transaction_id,
+            ) from exc
+        if str(source.get("source_sha256") or "") == source_hash \
+                and receipt.get("contract_binding") == current_binding \
+                and current_claim is None:
+            return
+        raise SetupTransactionError(
+            "transaction_identity_mismatch",
+            "legacy setup receipt authorizes only its exact frozen binding",
+            run_dir=run_dir,
+            transaction_id=transaction_id,
+        )
+
+    _validate_activation_receipt(run_dir, receipt)
+    if not isinstance(current_claim, dict):
+        raise SetupTransactionError(
+            "transaction_identity_mismatch",
+            "current transition lacks an exact claim binding",
+            run_dir=run_dir,
+            transaction_id=transaction_id,
+        )
+
+    # The initial create turn remains bound directly to the immutable receipt.
+    if receipt.get("contract_binding") == current_binding \
+            and receipt.get("transition_claim") == current_claim:
+        return
+
+    # A later explicit activation is admitted only through its terminal,
+    # self-validating nested attempt; a pending attempt cannot authorize work.
+    attempt = receipt.get("activation_attempt")
+    if isinstance(attempt, dict):
+        validated_attempt = _validate_activation_attempt(
+            run_dir, receipt, attempt)
+        if validated_attempt.get("status") in {"committed", "recovered"} \
+                and validated_attempt.get("contract_binding") == current_binding \
+                and validated_attempt.get("transition_claim") == current_claim:
+            return
+
+    # Repeating the exact create source for its already-active run performs no
+    # new pointer effect.  The fresh claim still has to bind this current prompt,
+    # the original transaction/source, the exact frozen create profile, and the
+    # same run as both origin and target.  This is the only path that may rely on
+    # the current contract instead of mutating the immutable create receipt.
+    source = _read_json(run_dir / SOURCE_REL)
+    source_section = source.get("source") \
+        if isinstance(source.get("source"), dict) else {}
+    try:
+        profile = validate_lifecycle_effect_profile(
+            receipt.get("effect_profile"), expected_kind="create")
+        expected_effect = transition_effect(
+            "create",
+            run_dir.name,
+            source_reference=str(source_section.get("reference") or ""),
+            profile=profile,
+        )
+    except ValueError as exc:
+        raise SetupTransactionError(
+            "transaction_identity_mismatch",
+            f"current create reconciliation identity is invalid: {exc}",
+            run_dir=run_dir,
+            transaction_id=transaction_id,
+        ) from exc
+    validated_claim = _validate_exact_claim_binding(
+        run_dir,
+        transaction_id=transaction_id,
+        source_hash=source_hash,
+        contract_binding=current_binding,
+        transition_binding=current_claim,
+        expected_effect=expected_effect,
+        code="transaction_identity_mismatch",
+        label="current create reconciliation",
+    )
+    if not isinstance(validated_claim, dict) \
+            or str(validated_claim.get("origin_run") or "") != run_dir.name:
+        raise SetupTransactionError(
+            "transaction_identity_mismatch",
+            "create reconciliation is not an exact same-run transition",
+            run_dir=run_dir,
+            transaction_id=transaction_id,
+        )
+
+
 def _build_activation_attempt(
     run_dir: Path,
     receipt: dict,
@@ -1723,6 +1887,16 @@ def _claim_or_transfer_contract(
             expected_run=expected_run,
             effect=effect,
         )
+        if not contract and current is not None \
+                and current.resolve() == target.resolve() \
+                and turn_contract.current_contract_requires_transition_claim(
+                    target, effect=effect):
+            raise SetupTransactionError(
+                "contract_claim_invalid",
+                "current lifecycle contract exists without its exact target claim",
+                run_dir=target,
+                transaction_id=transaction_id,
+            )
         if contract or current is None or current.resolve() == target.resolve() \
                 or str(effect.get("kind") or "") != "activate":
             return contract
@@ -3943,6 +4117,243 @@ def _selftest() -> int:
              and not any(pending_dir.glob("*.json"))),
         ])
 
+        # A create launched while another run is active records that origin in
+        # the immutable receipt claim.  The target contract and receipt must
+        # remain a sufficient post-bind proof after the pointer switches.
+        cross_create_origin = runs / "cross_create_origin_20260101"
+        (cross_create_origin / "state").mkdir(parents=True)
+        (cross_create_origin / "target.md").write_text(
+            "# cross-create origin\n", encoding="utf-8")
+        cross_create_target_name = "cross_create_target_20260101"
+        cross_create_contract = turn_contract._contract_from_event({
+            "session_id": "cross-create-session",
+            "prompt": f"/loop {source['source']['reference']}",
+        }, run_name=cross_create_origin.name)
+        turn_contract._atomic_json(
+            turn_contract.contract_path(cross_create_origin),
+            cross_create_contract,
+        )
+        cross_create_claims = root / "cross-create-claims"
+        turn_contract.write_transition_claim(
+            cross_create_target_name,
+            cross_create_contract,
+            origin_run=cross_create_origin.name,
+            claims_dir=cross_create_claims,
+            effect=test_create_effect(cross_create_target_name),
+        )
+        _atomic_write(
+            pointer,
+            (_pointer_ref(cross_create_origin, root) + "\n").encode("utf-8"),
+        )
+        cross_create_result = create_and_activate(
+            cross_create_target_name,
+            source_manifest=source,
+            build=_minimal_builder,
+            root=root,
+            runs_root=runs,
+            pointer=pointer,
+            required_files=required,
+            pending_dir=root / "cross-create-pending",
+            claims_dir=cross_create_claims,
+        )
+        cross_create_bound = turn_contract.load_contract(
+            cross_create_result.run_dir,
+            session_id="cross-create-session",
+        )
+        cross_create_receipt = _read_receipt(cross_create_result.run_dir)
+        try:
+            validate_committed_transition_contract(
+                cross_create_result.run_dir, cross_create_bound)
+            cross_create_post_bind_valid = True
+        except SetupTransactionError:
+            cross_create_post_bind_valid = False
+        checks.append((
+            "cross-origin create remains exact receipt-bound after pointer switch",
+            cross_create_post_bind_valid
+            and cross_create_bound.get("bound_run") == cross_create_target_name
+            and cross_create_receipt.get("transition_claim", {}).get("origin_run")
+            == cross_create_origin.name
+            and not list(cross_create_claims.glob("*.json")),
+        ))
+
+        # Pre-effect-profile v1 receipts stored only the terminal contract
+        # binding.  Keep that exact historical turn readable without allowing
+        # the shape to authorize a new claim/effect or to excuse a half-modern
+        # profile-bearing receipt.
+        legacy_bound_run = runs / "legacy_bound_receipt_20260101"
+        builder_for(source, source_bytes)(legacy_bound_run, None)
+        _atomic_json(legacy_bound_run / SOURCE_REL, source)
+        legacy_bound_contract = turn_contract._contract_from_event({
+            "session_id": "legacy-bound-session",
+            "prompt": "legacy exact setup turn",
+        }, run_name=legacy_bound_run.name)
+        legacy_bound_txid = "a" * 32
+        legacy_bound_contract["transition_transaction"] = {
+            "transaction_id": legacy_bound_txid,
+            "source_sha256": source_hash,
+            "expected_run": legacy_bound_run.name,
+        }
+        legacy_bound_binding = {
+            "session_id": "legacy-bound-session",
+            "prompt_sha256": legacy_bound_contract["prompt_sha256"],
+            "source_sha256": source_hash,
+            "transaction_id": legacy_bound_txid,
+            "expected_run": legacy_bound_run.name,
+        }
+        legacy_bound_receipt = {
+            "schema": RECEIPT_SCHEMA,
+            "status": "committed",
+            "transaction_id": legacy_bound_txid,
+            "run_name": legacy_bound_run.name,
+            "source_sha256": source_hash,
+            "contract_binding": legacy_bound_binding,
+            "active_pointer": str(pointer),
+            "committed_at": time.time(),
+        }
+        _write_receipt(legacy_bound_run, legacy_bound_receipt)
+        try:
+            validate_committed_transition_contract(
+                legacy_bound_run, legacy_bound_contract)
+            legacy_bound_post_bind_valid = True
+        except SetupTransactionError:
+            legacy_bound_post_bind_valid = False
+        legacy_bound_tampered = dict(legacy_bound_contract)
+        legacy_bound_tampered["prompt_sha256"] = "b" * 64
+        try:
+            validate_committed_transition_contract(
+                legacy_bound_run, legacy_bound_tampered)
+            legacy_bound_tamper_rejected = False
+        except SetupTransactionError:
+            legacy_bound_tamper_rejected = True
+        half_modern_receipt = dict(legacy_bound_receipt)
+        half_modern_receipt["effect_profile"] = test_create_profile(
+            legacy_bound_run.name)
+        half_modern_receipt["activation_attempt"] = None
+        _write_receipt(legacy_bound_run, half_modern_receipt)
+        try:
+            validate_committed_transition_contract(
+                legacy_bound_run, legacy_bound_contract)
+            half_modern_receipt_rejected = False
+        except SetupTransactionError:
+            half_modern_receipt_rejected = True
+        checks.append((
+            "legacy binding-only receipt accepts only its frozen turn binding",
+            legacy_bound_post_bind_valid
+            and legacy_bound_tamper_rejected
+            and half_modern_receipt_rejected,
+        ))
+
+        # Cross the real Hook subprocess boundary, then let the transaction
+        # owner consume that exact same-target claim and validate post-bind.
+        # The public adapter itself receives a separate isolated-worktree driver
+        # test; invoking it here would use its repository-global ROOT/RUNS.
+        hook_e2e_url = "https://hook-e2e.example.test/"
+        hook_e2e_source, hook_e2e_bytes = setup_source.normalize_url(hook_e2e_url)
+        hook_e2e_command = (
+            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f"--source {hook_e2e_url} --type auto"
+        )
+        hook_e2e_invocation = turn_contract._control_invocation(hook_e2e_command)
+        hook_e2e_target_name = turn_contract._lifecycle_target_name(
+            hook_e2e_invocation)
+        hook_e2e_profile = lifecycle_effect_profile(
+            OP_LOOP_BOOTSTRAP_CREATE,
+            hook_e2e_target_name,
+            source_type="auto",
+        )
+        hook_e2e_claims = root / "hook-e2e-claims"
+        hook_e2e_pending = root / "hook-e2e-pending"
+        hook_e2e_seed = real_create_and_activate(
+            hook_e2e_target_name,
+            source_manifest=hook_e2e_source,
+            effect_profile=hook_e2e_profile,
+            build=builder_for(hook_e2e_source, hook_e2e_bytes),
+            root=root,
+            runs_root=runs,
+            pointer=pointer,
+            required_files=required,
+            pending_dir=hook_e2e_pending,
+            claims_dir=hook_e2e_claims,
+        )
+        _atomic_write(
+            pointer,
+            (str(hook_e2e_seed.run_dir.resolve()) + "\n").encode("utf-8"),
+        )
+        hook_e2e_env = dict(os.environ)
+        hook_e2e_env.update({
+            "XUNJI_RUNS_ROOT": str(runs),
+            "XUNJI_ACTIVE_RUN_FILE": str(pointer),
+            "XUNJI_PENDING_TURN_DIR": str(hook_e2e_pending),
+            "XUNJI_TRANSITION_CLAIMS_DIR": str(hook_e2e_claims),
+        })
+        hook_e2e_submit = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "turn_contract.py")],
+            input=json.dumps({
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "hook-e2e-session",
+                "prompt": f"/loop {hook_e2e_url}",
+            }),
+            text=True,
+            capture_output=True,
+            env=hook_e2e_env,
+            timeout=10,
+        )
+        hook_e2e_pretool = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "turn_contract.py")],
+            input=json.dumps({
+                "hook_event_name": "PreToolUse",
+                "session_id": "hook-e2e-session",
+                "tool_name": "Bash",
+                "tool_input": {"command": hook_e2e_command},
+            }),
+            text=True,
+            capture_output=True,
+            env=hook_e2e_env,
+            timeout=10,
+        )
+        hook_e2e_claim_paths = list(hook_e2e_claims.glob("*.json"))
+        hook_e2e_repeat = real_create_and_activate(
+            hook_e2e_target_name,
+            source_manifest=hook_e2e_source,
+            effect_profile=hook_e2e_profile,
+            build=builder_for(hook_e2e_source, hook_e2e_bytes),
+            root=root,
+            runs_root=runs,
+            pointer=pointer,
+            required_files=required,
+            pending_dir=hook_e2e_pending,
+            claims_dir=hook_e2e_claims,
+        )
+        hook_e2e_bound = turn_contract.load_contract(
+            hook_e2e_seed.run_dir, session_id="hook-e2e-session")
+        try:
+            validate_committed_transition_contract(
+                hook_e2e_seed.run_dir, hook_e2e_bound)
+            hook_e2e_post_bind_valid = True
+        except SetupTransactionError:
+            hook_e2e_post_bind_valid = False
+        checks.extend([
+            (
+                "real Hook same-target submit/pretool mints one exact claim",
+                hook_e2e_seed.status == "committed"
+                and hook_e2e_submit.returncode == 0
+                and hook_e2e_pretool.returncode == 0
+                and not (hook_e2e_pretool.stdout or "").strip()
+                and len(hook_e2e_claim_paths) == 1,
+            ),
+            (
+                "real Hook claim is consumed by transaction and passes post-bind",
+                hook_e2e_repeat.status in {"committed", "recovered"}
+                and not list(hook_e2e_claims.glob("*.json")),
+            ),
+            (
+                "real Hook same-target binding retains origin and validates",
+                hook_e2e_post_bind_valid
+                and hook_e2e_bound.get("transition_claim", {}).get("origin_run")
+                == hook_e2e_target_name,
+            ),
+        ])
+
         # Exact incident regression: the pointer bytes already name the run,
         # but the run does not exist until atomic publish.  Publishing must not
         # reinterpret those unchanged bytes as a completed pointer commit.
@@ -4386,9 +4797,15 @@ def _selftest() -> int:
         status_bound = turn_contract.load_contract(
             status_target, session_id="status-transition")
         status_receipt = _read_receipt(status_target)
+        try:
+            validate_committed_transition_contract(status_target, status_bound)
+            status_post_bind_valid = True
+        except SetupTransactionError:
+            status_post_bind_valid = False
         checks.append((
             "legacy statusline omission consumes only the statusline effect claim",
             status_result.status == "committed"
+            and status_post_bind_valid
             and status_bound.get("transition_claim", {}).get("effect", {}).get(
                 "operation") == OP_STATUSLINE_SET_ACTIVE
             and status_receipt.get("activation_attempt", {}).get("status")
@@ -4422,15 +4839,67 @@ def _selftest() -> int:
         same_target_bound = turn_contract.load_contract(
             status_target, session_id="status-same-target")
         same_target_receipt = _read_receipt(status_target)
+        try:
+            validate_committed_transition_contract(
+                status_target, same_target_bound)
+            same_target_activation_post_bind_valid = True
+        except SetupTransactionError:
+            same_target_activation_post_bind_valid = False
         checks.append((
             "same-target statusline selection retires its fresh exact claim",
             same_target_result.status == "committed"
+            and same_target_activation_post_bind_valid
             and _same_snapshot(pointer_snapshot(pointer), same_target_before)
             and same_target_bound.get("bound_run") == status_target.name
             and same_target_receipt.get("activation_attempt", {}).get("status")
             == "committed"
             and frozen_create_identity(status_target) == status_create_identity
             and not list(same_target_claims.glob("*.json")),
+        ))
+
+        missing_same_target_activation = turn_contract._contract_from_event({
+            "session_id": "status-same-target-missing-claim",
+            "prompt": f"/loop runs/{status_target.name}",
+        }, run_name=status_target.name)
+        turn_contract._atomic_json(
+            turn_contract.contract_path(status_target),
+            missing_same_target_activation,
+        )
+        missing_same_target_activation_before = pointer_snapshot(pointer)
+        try:
+            activate_existing_run(
+                status_target,
+                root=root,
+                runs_root=runs,
+                pointer=pointer,
+                pending_dir=root / "status-same-target-missing-pending",
+                claims_dir=root / "status-same-target-missing-claims",
+            )
+            missing_same_target_activation_rejected = False
+        except SetupTransactionError as exc:
+            missing_same_target_activation_rejected = \
+                exc.code == "contract_claim_invalid"
+        mismatched_candidate_contract = dict(missing_same_target_activation)
+        mismatched_candidate_contract["intent_candidate"] = {
+            "target_run": status_target.name,
+            "effect_sha256": "0" * 64,
+        }
+        turn_contract._atomic_json(
+            turn_contract.contract_path(status_target),
+            mismatched_candidate_contract,
+        )
+        mismatched_effect_requires_claim = \
+            turn_contract.current_contract_requires_transition_claim(
+                status_target,
+                effect=test_activate_effect(
+                    status_target.name, OP_STATUSLINE_SET_ACTIVE),
+            )
+        checks.append((
+            "same-target activation and candidate mismatch cannot lose claim requirement",
+            missing_same_target_activation_rejected
+            and mismatched_effect_requires_claim
+            and _same_snapshot(
+                pointer_snapshot(pointer), missing_same_target_activation_before),
         ))
 
         invalid_operation_before = pointer_snapshot(pointer)
@@ -5380,6 +5849,20 @@ def _selftest() -> int:
         )
         create_followup_bound = turn_contract.load_contract(
             create_followup_target, session_id="create-followup")
+        try:
+            validate_committed_transition_contract(
+                create_followup_target, create_followup_bound)
+            create_followup_post_bind_valid = True
+        except SetupTransactionError:
+            create_followup_post_bind_valid = False
+        tampered_create_followup = dict(create_followup_bound)
+        tampered_create_followup["prompt_sha256"] = "f" * 64
+        try:
+            validate_committed_transition_contract(
+                create_followup_target, tampered_create_followup)
+            create_followup_tamper_rejected = False
+        except SetupTransactionError:
+            create_followup_tamper_rejected = True
         checks.append((
             "create recovery consumes only its fresh exact create claim",
             activation_cases.get(
@@ -5390,8 +5873,44 @@ def _selftest() -> int:
             == create_followup_contract.get("prompt_sha256")
             and create_followup_bound.get("transition_claim", {}).get("effect")
             == test_create_effect(create_followup_target.name)
+            and create_followup_post_bind_valid
+            and create_followup_tamper_rejected
             and frozen_create_identity(create_followup_target)
             == create_followup_identity
+            and not list(create_followup_claims.glob("*.json")),
+        ))
+
+        # The same live lifecycle contract without its Hook-created claim must
+        # fail instead of falling through the direct-CLI idempotence path.
+        missing_claim_contract = turn_contract._contract_from_event({
+            "session_id": "create-followup-missing-claim",
+            "prompt": f"/loop {source['source']['reference']}",
+        }, run_name=create_followup_target.name)
+        turn_contract._atomic_json(
+            turn_contract.contract_path(create_followup_target),
+            missing_claim_contract,
+        )
+        missing_claim_before = pointer_snapshot(pointer)
+        try:
+            create_and_activate(
+                create_followup_target.name,
+                source_manifest=source,
+                build=builder_for(source, source_bytes),
+                root=root,
+                runs_root=runs,
+                pointer=pointer,
+                required_files=required,
+                pending_dir=create_followup_pending,
+                claims_dir=create_followup_claims,
+            )
+            missing_same_target_claim_rejected = False
+        except SetupTransactionError as exc:
+            missing_same_target_claim_rejected = \
+                exc.code == "contract_claim_invalid"
+        checks.append((
+            "live same-target create cannot report success without an exact claim",
+            missing_same_target_claim_rejected
+            and _same_snapshot(pointer_snapshot(pointer), missing_claim_before)
             and not list(create_followup_claims.glob("*.json")),
         ))
 

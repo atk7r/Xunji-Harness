@@ -106,6 +106,15 @@ the pointer, and Claude never calls the owner's private transaction APIs directl
   pointer; only the same transaction identity or explicit resume can activate it.
 - Pointer-success/final-receipt failure is recoverable only after revalidating the
   same immutable transaction, source, claim, and run identity.
+- Origin and target equality never skips lifecycle authority. Repeating the exact
+  source for its already-active deterministic run must still consume a fresh
+  same-session/prompt/effect claim. A hook-bound original create receipt stays
+  immutable when present; a direct-CLI create remains intentionally unbound. The
+  current turn contract is the same-run reconciliation proof. Cross-origin create
+  remains proven by its immutable original receipt pair. A pre-effect-profile v1
+  binding-only receipt authorizes only its exact frozen historical turn, never a
+  fresh effect. A missing exact claim is a transaction integrity failure, not
+  successful idempotence, including same-target resume/set-active.
 - A pointer pathname that was dangling before publish and becomes resolvable only
   because atomic rename created that same run is not a prior pointer commit. The
   transaction uses the frozen pre-publish origin, binds the no-origin claim, and

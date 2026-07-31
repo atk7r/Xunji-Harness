@@ -4325,36 +4325,71 @@ def _transition_commit_reason(run_dir: Path, contract: dict) -> str:
     if not isinstance(transaction, dict) or not transaction:
         return ""  # Explicit resume/set-active may bind a legacy run.
     try:
-        receipt = json.loads(
-            (run_dir / "state" / "setup_transaction.json").read_text(
-                encoding="utf-8", errors="strict",
-            )
-        )
-    except Exception:
-        receipt = {}
-    binding = receipt.get("contract_binding") if isinstance(receipt, dict) else {}
-    expected = {
-        "transaction_id": str(transaction.get("transaction_id") or ""),
-        "source_sha256": str(transaction.get("source_sha256") or ""),
-        "expected_run": str(transaction.get("expected_run") or ""),
-        "session_id": str(contract.get("session_id") or ""),
-        "prompt_sha256": str(contract.get("prompt_sha256") or ""),
-    }
-    valid = bool(
-        receipt.get("schema") == "xunji.setup_transaction.v1"
-        and receipt.get("status") in {"committed", "recovered"}
-        and receipt.get("transaction_id") == expected["transaction_id"]
-        and receipt.get("source_sha256") == expected["source_sha256"]
-        and expected["expected_run"] == run_dir.name
-        and isinstance(binding, dict)
-        and all(str(binding.get(key) or "") == value for key, value in expected.items())
-    )
-    if valid:
+        setup_transaction.validate_committed_transition_contract(
+            run_dir, contract)
         return ""
+    except (OSError, UnicodeError, ValueError,
+            setup_transaction.SetupTransactionError):
+        pass
     return (
         f"[{E_NEW_RUN_SETUP_REQUIRED}] 新 run 的 setup transaction 尚未形成与当前 "
         "session/prompt/source/transaction/expected-run 一致的 committed/recovered 回执；"
         "拒绝把指针或模型叙述当作 setup 完成。"
+    )
+
+
+def current_contract_requires_transition_claim(
+    run_dir: Path,
+    *,
+    effect: dict,
+) -> bool:
+    """Return whether a fresh active lifecycle turn must have minted a claim.
+
+    Direct local CLI invocations remain supported when no live lifecycle turn
+    exists.  Once Claude has a current EXECUTE/INTENT_PENDING source, setup, or
+    resume contract for this run, however, a missing exact claim is an internal
+    boundary failure and must never be reported as an idempotent success.
+    """
+    contract = load_contract(run_dir)
+    if not contract or contract.get("mode") not in {EXECUTE, INTENT_PENDING}:
+        return False
+    lifecycle_operation = _contract_lifecycle_operation(contract)
+    if lifecycle_operation not in {"source", "setup", "resume"}:
+        return False
+    try:
+        validated_effect = setup_transaction.validate_transition_effect(effect)
+    except ValueError:
+        return True
+    # A prior attempt may have durably installed its transaction/claim binding
+    # and then faulted while terminalizing the pointer or receipt.  Only the
+    # exact same frozen effect is recovery; stale or cross-operation fields
+    # still require a fresh claim and therefore fail closed when none exists.
+    frozen_claim = contract.get("transition_claim") \
+        if isinstance(contract.get("transition_claim"), dict) else {}
+    if isinstance(contract.get("transition_transaction"), dict) and frozen_claim:
+        try:
+            frozen_effect = setup_transaction.validate_transition_effect(
+                frozen_claim.get("effect"))
+        except ValueError:
+            return True
+        return not bool(
+            frozen_effect == validated_effect
+            and frozen_effect.get("target_run") == run_dir.name
+        )
+    candidate = contract.get("intent_candidate") \
+        if isinstance(contract.get("intent_candidate"), dict) else {}
+    candidate_target = str(candidate.get("target_run") or "")
+    candidate_effect = str(candidate.get("effect_sha256") or "")
+    if candidate_target and candidate_target != run_dir.name:
+        return True
+    if candidate_effect and candidate_effect != validated_effect.get("effect_sha256"):
+        return True
+    # Resume/set-active is an effect even when it selects the already-active
+    # run; operator-exact contracts predate ``resume_current_approved`` and do
+    # not need that advisory flag to retain the hard claim requirement.
+    return bool(
+        lifecycle_operation == "resume"
+        or contract.get("run_transition_requested")
     )
 
 
@@ -6240,7 +6275,7 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
                 and not ({"--selftest", "--help", "-h", "--prepare-normalizer"}
                          & set(lifecycle_invocation[1])):
             target_name = _lifecycle_target_name(lifecycle_invocation)
-            if target_name and target_name != run_dir.name:
+            if target_name:
                 try:
                     write_hook_transition_claim(
                         target_name, contract, origin_run=run_dir,
@@ -8851,7 +8886,25 @@ def _selftest() -> int:
     (lifecycle_run / "state" / "assignments.json").write_text(
         json.dumps({"assignments": []}), encoding="utf-8")
     lifecycle_txid = "7" * 32
-    lifecycle_source_hash = "8" * 64
+    lifecycle_source, lifecycle_source_bytes = setup_source.normalize_url(
+        "https://bound.example.test/"
+    )
+    setup_source.write_bundle(
+        lifecycle_run, lifecycle_source, lifecycle_source_bytes)
+    (lifecycle_run / setup_transaction.SOURCE_REL).write_text(
+        json.dumps(lifecycle_source), encoding="utf-8")
+    lifecycle_source_hash = str(lifecycle_source["source_sha256"])
+    lifecycle_profile = setup_transaction.lifecycle_effect_profile(
+        setup_transaction.OP_LOOP_BOOTSTRAP_CREATE,
+        lifecycle_run.name,
+        source_type="url",
+    )
+    lifecycle_effect = setup_transaction.transition_effect(
+        "create",
+        lifecycle_run.name,
+        source_reference=str(lifecycle_source["source"]["reference"]),
+        profile=lifecycle_profile,
+    )
     lifecycle_contract = {
         **source_operator_contract,
         "origin_run": run.name,
@@ -8863,13 +8916,27 @@ def _selftest() -> int:
             "expected_run": lifecycle_run.name,
         },
     }
+    lifecycle_claim = {
+        "target_run": lifecycle_run.name,
+        "origin_run": run.name,
+        "session_id": str(lifecycle_contract.get("session_id") or ""),
+        "prompt_sha256": str(lifecycle_contract.get("prompt_sha256") or ""),
+        "transaction_id": lifecycle_txid,
+        "source_sha256": lifecycle_source_hash,
+        "expected_run": lifecycle_run.name,
+        "effect": lifecycle_effect,
+    }
+    lifecycle_contract["transition_claim"] = lifecycle_claim
     uncommitted_transition_blocked = E_NEW_RUN_SETUP_REQUIRED in evaluate_pretool(
         lifecycle_run, lifecycle_task, lifecycle_contract)
     (lifecycle_run / "state" / "setup_transaction.json").write_text(json.dumps({
         "schema": "xunji.setup_transaction.v1",
         "status": "committed",
         "transaction_id": lifecycle_txid,
+        "run_name": lifecycle_run.name,
         "source_sha256": lifecycle_source_hash,
+        "effect_profile": lifecycle_profile,
+        "activation_attempt": None,
         "contract_binding": {
             "transaction_id": lifecycle_txid,
             "source_sha256": lifecycle_source_hash,
@@ -8877,6 +8944,7 @@ def _selftest() -> int:
             "session_id": str(lifecycle_contract.get("session_id") or ""),
             "prompt_sha256": str(lifecycle_contract.get("prompt_sha256") or ""),
         },
+        "transition_claim": lifecycle_claim,
     }), encoding="utf-8")
     plan_before_cron_blocked = E_CRON_CREATE_REQUIRED in evaluate_pretool(
         lifecycle_run, lifecycle_task, lifecycle_contract)
@@ -9829,6 +9897,70 @@ def _selftest() -> int:
     claims_dir = root / "xunji_transition_claims"
     env["XUNJI_PENDING_TURN_DIR"] = str(pending_dir)
     env["XUNJI_TRANSITION_CLAIMS_DIR"] = str(claims_dir)
+
+    # Exercise the real hook subprocess with an already-selected run whose
+    # deterministic create target is that same run.  This is the cross-layer
+    # shape that a transaction-only test with a manually seeded claim misses.
+    same_source_url = "https://same-target.example.test/"
+    same_source_command = (
+        f"python3 {shlex.quote(str(ROOT / 'tools' / 'loop_bootstrap.py'))} "
+        f"--source {shlex.quote(same_source_url)} --type auto"
+    )
+    same_source_invocation = _control_invocation(same_source_command)
+    same_source_target_name = _lifecycle_target_name(same_source_invocation)
+    same_source_runs = root / "same-source-runs"
+    same_source_run = same_source_runs / same_source_target_name
+    (same_source_run / "state").mkdir(parents=True)
+    (same_source_run / "target.md").write_text(
+        "# Target\n- Authorized scope: same-target.example.test\n",
+        encoding="utf-8",
+    )
+    same_source_pointer = root / "same-source-active-run"
+    same_source_pointer.write_text(
+        str(same_source_run.resolve()) + "\n", encoding="utf-8")
+    same_source_claims = root / "same-source-claims"
+    same_source_pending = root / "same-source-pending"
+    same_source_env = dict(os.environ)
+    same_source_env.update({
+        "XUNJI_RUNS_ROOT": str(same_source_runs),
+        "XUNJI_ACTIVE_RUN_FILE": str(same_source_pointer),
+        "XUNJI_PENDING_TURN_DIR": str(same_source_pending),
+        "XUNJI_TRANSITION_CLAIMS_DIR": str(same_source_claims),
+    })
+    same_source_submit = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve())],
+        input=json.dumps({
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "same-source-hook-session",
+            "prompt": f"/loop {same_source_url}",
+        }),
+        text=True, capture_output=True, env=same_source_env, timeout=10,
+    )
+    same_source_pretool = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve())],
+        input=json.dumps({
+            "hook_event_name": "PreToolUse",
+            "session_id": "same-source-hook-session",
+            "tool_name": "Bash",
+            "tool_input": {"command": same_source_command},
+        }),
+        text=True, capture_output=True, env=same_source_env, timeout=10,
+    )
+    same_source_claim_paths = sorted(same_source_claims.glob("*.json"))
+    same_source_claim = json.loads(same_source_claim_paths[0].read_text(
+        encoding="utf-8")) if len(same_source_claim_paths) == 1 else {}
+    same_target_create_hook_claimed = bool(
+        same_source_submit.returncode == 0
+        and same_source_pretool.returncode == 0
+        and not (same_source_pretool.stdout or "").strip()
+        and len(same_source_claim_paths) == 1
+        and same_source_claim.get("status") == "active"
+        and same_source_claim.get("origin_run") == same_source_run.name
+        and same_source_claim.get("target_run") == same_source_run.name
+        and same_source_claim.get("effect")
+        == _lifecycle_transition_effect(
+            same_source_invocation, same_source_run.name)
+    )
     no_run_prompt = subprocess.run(
         [sys.executable, str(Path(__file__).resolve())],
         input=json.dumps({
@@ -13194,6 +13326,8 @@ def _selftest() -> int:
         ("clear-active fails closed even without an active run",
          no_active_clear_fail_closed and no_active_wrapped_clear_fail_closed),
         ("no-active-run UserPromptSubmit stores a bootstrap contract", pending_written),
+        ("same-target create PreToolUse mints a fresh exact hook claim",
+         same_target_create_hook_claimed),
         ("no-active lifecycle wrapper returns shape denial without a claim",
          no_active_shape_denied_without_claim),
         ("no-active clean exact retry succeeds in the same operator turn",

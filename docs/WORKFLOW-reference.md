@@ -584,6 +584,20 @@ effect remains unconsumed and the call is denied. The compatibility port maps on
 truly omitted `activate_existing_run(operation=...)` argument to statusline
 set-active. Explicit `None`, empty, and unknown operations are rejected, and new
 callers must pass their exact operation.
+Target equality does not bypass Hook authority. `setup_run`, `loop_bootstrap`, and
+prompt-named set-active/resume mint the exact one-use claim even when origin and
+target name the same active run. For a repeated exact create, the top-level setup
+receipt retains its immutable original Hook create identity when one exists; a
+direct-CLI original create intentionally has no such pair. Cross-origin create stays
+admitted by that immutable original receipt binding. The newly claimed and finalized
+same-target binding remains in the current target turn contract as the reconciliation
+proof. Post-bind execution validates either an exact historical binding-only v1
+receipt, the modern original pair, a terminal nested `activation_attempt`, or this
+exact same-run create reconciliation through
+`setup_transaction.validate_committed_transition_contract()`. A fresh lifecycle
+contract without its expected claim is an integrity error, not a supported direct
+local CLI invocation and not idempotent success; this includes same-target
+resume/set-active and candidate target/effect mismatch.
 Authority state is durable, not merely visible: pending contracts, active/claimed/
 revoked claims, and the target turn contract use file plus fixed artifact-directory
 and owner-directory barriers. Finalize

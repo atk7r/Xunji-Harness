@@ -345,6 +345,19 @@ considering a fresh exact claim. Same-effect may settle; cross/multiple/tampered
 remain and fail closed, and same-prompt `claimed` never becomes `active` again. This
 does not claim full builder-tree durability. Multiple live
 claims for one effect fail closed.
+The one-use claim is required even when the lifecycle target is already the active
+run. An exact repeated create source may reconcile idempotently only after its fresh
+same-run claim is claimed and retired; the current target contract retains that
+session/prompt/effect binding while a hook-bound setup receipt's original create
+binding stays immutable when present. A direct-CLI create stays unbound; a
+cross-origin Hook create is admitted by its immutable receipt binding. A terminal
+nested `activation_attempt` proves a later resume/set-active. A historical
+pre-effect-profile v1 binding-only receipt remains readable only for that exact
+frozen turn and cannot authorize a new effect. The post-bind gate asks the
+transaction owner to validate those alternatives. If a fresh live lifecycle
+contract exists without its exact claim, including same-target resume/set-active,
+the adapter fails with `contract_claim_invalid` instead of reporting a
+direct-CLI/no-op success. Candidate target/effect mismatch also fails closed.
 The source contract is `xunji.setup-source.v1`. Each candidate asset/scope/auth
 field has a resolvable provenance reference whose content contains the value;
 source language can only remain `source-data|derived`. Only a hook-bound top-level
