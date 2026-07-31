@@ -34,6 +34,10 @@ try:
 except Exception:
     _knowledge_match = None
 try:
+    import canonical_records as _canonical_records
+except Exception:
+    _canonical_records = None
+try:
     import xday_match as _xday_match
 except Exception:
     _xday_match = None
@@ -479,26 +483,13 @@ def _role_template_path(role: str) -> Path:
 
 
 def _load_front_constraints(run_dir: Path, front_id: str) -> list[dict]:
-    """解析 constraints.md(如果存在), 返回该 front 的约束列表。"""
-    path = run_dir / "constraints.md"
-    if not path.exists():
-        return []
-    text = path.read_text(encoding="utf-8", errors="replace")
-    constraints: list[dict] = []
-    for m in re.finditer(r"(?ms)^##[ \t]+(C-\d+).*?(?=^##[ \t]+C-\d+|\Z)", text):
-        block = m.group(0)
-        cid = m.group(1)
-        c_front = _field(block, "Front")
-        if c_front != front_id:
-            continue
-        constraints.append({
-            "id": cid,
-            "mechanism_class": _field(block, "Mechanism class"),
-            "input_shape": _field(block, "Input shape"),
-            "why_blocked": _field(block, "Why blocked"),
-            "ruled_out": _field(block, "Ruled out"),
-        })
-    return constraints
+    """Return front constraints from the shared typed source-span parser."""
+    if _canonical_records is None:
+        raise RuntimeError("canonical constraint parser unavailable")
+    return [
+        item for item in _canonical_records.parse_constraints(run_dir)
+        if item.get("front") == front_id
+    ]
 
 
 def _load_front_hypotheses(run_dir: Path, front_id: str, limit: int = 4) -> list[str]:

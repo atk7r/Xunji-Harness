@@ -41,6 +41,9 @@ FORBIDDEN_TRACKED_PREFIXES = {
 ROOT_RUN_DIR_RE = re.compile(
     r"^[^/]+_20\d{6}(?:_20\d{6})?/",
 )
+ROOT_SCRATCH_RE = re.compile(
+    r"(?i)^[^/]+(?:\.replay\.json|\.(?:html?|har|png|jpe?g|gif|webp|pdf|ocr|log))$"
+)
 
 
 def scan_file(path: Path) -> list[str]:
@@ -122,6 +125,29 @@ def check_publication_index() -> list[str]:
     return publication_issues_for_tracked(tracked, tracked_ignored)
 
 
+def scratch_warnings_for_untracked(untracked: list[str]) -> list[str]:
+    """Warn from path names only; never open or remove field artifacts."""
+    return [
+        (
+            f"{rel}: untracked root scratch artifact; move it under an ignored "
+            "runs/<target>/evidence/ or .scratch/ directory"
+        )
+        for rel in untracked
+        if ROOT_SCRATCH_RE.fullmatch(rel)
+    ]
+
+
+def check_scratch_warnings() -> list[str]:
+    rows = _git_lines(["ls-files", "--others", "--exclude-standard"])
+    git_errors = [
+        row.removeprefix("__git_error__:")
+        for row in rows if row.startswith("__git_error__:")
+    ]
+    if git_errors:
+        return [f"untracked scratch scan unavailable: {item}" for item in git_errors]
+    return scratch_warnings_for_untracked(rows)
+
+
 def _selftest() -> int:
     d = Path(tempfile.mkdtemp())
     clean = d / "clean.json"
@@ -144,6 +170,10 @@ def _selftest() -> int:
         ],
         ["config.ini"],
     )
+    scratch_warnings = scratch_warnings_for_untracked([
+        "capture.html", "response.replay.json", "screen.PNG",
+        "runs/local/evidence/body.html", "docs/example.html",
+    ])
     checks = [
         ("clean file has no issues", clean_issues == []),
         ("dirty file reports category", dirty_issues and "github-token" in dirty_issues[0]),
@@ -155,6 +185,11 @@ def _selftest() -> int:
         ("publication rejects Codex hooks", any(".codex/hooks" in i for i in tracked_issues)),
         ("publication rejects generated review bundle",
          any("review/review_bundle.json" in i for i in tracked_issues)),
+        ("root scratch warnings inspect names without reading content",
+         len(scratch_warnings) == 3
+         and all("move it under" in item for item in scratch_warnings)
+         and not any("runs/local" in item or "docs/example" in item
+                     for item in scratch_warnings)),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:
@@ -170,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.selftest:
         return _selftest()
     issues = check()
+    warnings = check_scratch_warnings()
+    for warning in warnings:
+        print(f"warning: {warning}")
     if issues:
         print("local hygiene check failed")
         for issue in issues:

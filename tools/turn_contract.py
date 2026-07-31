@@ -353,6 +353,7 @@ INLINE_DATA_RE = re.compile(
 NATURAL_RUN_TRANSITION_RE = re.compile(
     r"(?:^|[。！？!?；;]\s*)"
     r"[ \t]{0,3}(?:(?:请(?:帮我)?|帮我|现在|立即|马上)\s*)*"
+    r"(?:(?:使用|用)\s*[^\r\n]{1,128}?\s*)?"
     r"(?:(?:从|为|针对)\s+\S+\s+)?"
     r"(?:创建|新建|建立|重开|重新开|初始化|启动)[^\r\n]{0,256}?"
     r"(?:run(?![A-Za-z0-9_-])|运行)|"
@@ -502,7 +503,19 @@ def _normalize_source_token(
         raw = run_source
         normalizations.append("attached_operator_description")
 
-    if re.match(r"(?i)^https?://", raw):
+    local_candidate = Path(raw).expanduser()
+    if not local_candidate.is_absolute():
+        # Match the lifecycle subprocess: relative setup sources resolve from
+        # the actual invocation cwd, not from the installed module location.
+        local_candidate = Path.cwd() / local_candidate
+    if not _run_name_from_path(raw) and (
+            local_candidate.exists() or local_candidate.is_symlink()):
+        # The setup router gives a concrete existing local file precedence over
+        # the bare-host convenience grammar.  Compile prompt authority to the
+        # same absolute reference used by the lifecycle effect projection.
+        raw = str(local_candidate.resolve(strict=False))
+        normalizations.append("existing_local_file")
+    elif re.match(r"(?i)^https?://", raw):
         origin_match = ASCII_ORIGIN_PREFIX_RE.match(raw)
         if origin_match and origin_match.group("suffix") \
                 and not origin_match.group("suffix").startswith(("/", "?", "#")) \
@@ -1982,8 +1995,8 @@ def _source_authority_matches(value: str, contract: dict) -> bool:
     candidate = value
     if contract.get("source_identity_version") == "canonical-v1":
         try:
-            candidate = setup_source.normalize_operator_source(value)
-        except setup_source.SetupSourceError:
+            candidate, _normalizations = _normalize_source_token(value)
+        except (OSError, setup_source.SetupSourceError):
             return False
     digest = hashlib.sha256(candidate.encode("utf-8", "replace")).hexdigest()
     if "source_sha256s" in contract:
@@ -11770,6 +11783,43 @@ def _selftest() -> int:
         ),
         "session_id": "operator-for-source-session",
     })
+    relative_markdown_dir = Path(tempfile.mkdtemp())
+    relative_markdown_source = (
+        relative_markdown_dir / "operator-source-selftest.md")
+    relative_markdown_source.write_text(
+        "# Authorized setup source\n\n"
+        "- Target: `https://relative-source.example.test/`\n"
+        "- Scope: `relative-source.example.test`\n",
+        encoding="utf-8",
+    )
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(relative_markdown_dir)
+        relative_markdown_prompt = (
+            "用默认 auto 路由从 operator-source-selftest.md 创建并激活一个新 run。"
+            "只做 setup/activation，禁止目标请求，也不要修改框架源码。"
+        )
+        operator_relative_markdown_contract = _contract_from_event({
+            "prompt": relative_markdown_prompt,
+            "session_id": "operator-relative-markdown-session",
+        })
+        relative_markdown_invocation = _lifecycle_invocation(
+            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            "--source operator-source-selftest.md --type auto"
+        )
+        promoted_relative_markdown_contract = _promote_model_lifecycle_candidate(
+            run,
+            relative_markdown_invocation,
+            operator_relative_markdown_contract,
+        )
+        relative_markdown_authority_matches = _source_authority_matches(
+            "operator-source-selftest.md",
+            operator_relative_markdown_contract,
+        )
+    finally:
+        os.chdir(original_cwd)
+        relative_markdown_source.unlink(missing_ok=True)
+        relative_markdown_dir.rmdir()
     operator_natural_localhost_control = {
         "tool_name": "Bash",
         "tool_input": {"command": (
@@ -12926,6 +12976,14 @@ def _selftest() -> int:
          unselected_prompt_url_blocked),
         ("natural-language setup authorizes one unique URL source",
          natural_single_url_authorized),
+        ("existing relative Markdown source outranks bare-host intent identity",
+         operator_relative_markdown_contract.get("mode") == INTENT_PENDING
+         and promoted_relative_markdown_contract.get("mode") == EXECUTE
+         and promoted_relative_markdown_contract.get("loop_source_kind") == "file"
+         and promoted_relative_markdown_contract.get("lifecycle_operation") == "source"
+         and "existing_local_file" in operator_relative_markdown_contract.get(
+             "intent_normalizations", [])
+         and relative_markdown_authority_matches),
         ("natural-language setup with multiple URLs fails closed as ambiguous",
          natural_multi_url_fails_closed),
         ("negated and interrogative create intents remain read-only",

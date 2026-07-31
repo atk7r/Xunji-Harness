@@ -6,14 +6,18 @@ each item must still earn its place by the gating principle below.
 
 ## The gating principle: measure before you add
 
-This roadmap exists because the framework grew fast (the Cairn borrowings —
-Reason pass, state graph, hints, parallel fan-out — plus the guard concurrency
-hardening; see the `cairn-borrowings` memory and git history) and there is **no
-way yet to tell which additions actually improve vuln-finding**. The field's own
-consensus is "measure what matters" (SoK below). So:
+This roadmap exists because the framework grew fast and every addition still
+needs measured value. `tools/bench.py` is now a real scorer with detection,
+calibration, false-positive, process, collaboration, closure, delegation,
+information-gain, request/token, merge, and reopen observability. That is a
+measurement surface, not proof that a particular mechanism improves
+vulnerability finding: fixture breadth and real driver A/B runs remain limited.
+The field's own consensus is "measure what matters" (SoK below). So:
 
-1. **P0 (measurement) is a prerequisite for the rest.** Adopt P1–P3 only once the
-   eval harness can show the change helps. Plausible-sounding mechanism != better.
+1. **P0 measurement remains the admission gate.** Adopt P1–P3 only when a named
+   fixture/A-B comparison shows net value. The scheduler A/B fixture currently
+   keeps parallelism a soft, capacity-bounded recommendation because measured
+   merge overhead exceeds its cap.
 2. Every item must pass the project's three tests, or it does not ship:
    - **not a playbook** — structure/discipline, never a fixed attack checklist;
    - **not an orchestrator** — tooling assists/derives, never auto-drives or
@@ -29,9 +33,11 @@ consensus is "measure what matters" (SoK below). So:
 
 ## P0 — Measurement (do this first)
 
-### R-1. Self-eval / regression harness  ⭐ highest value
-- **Gap**: you cannot A/B a framework change. Did the 4 Cairn borrowings help, or
-  just add surface? Unknown.
+### R-1. Self-eval / regression harness  ⭐ scorer landed; fixture expansion ongoing
+- **Current**: `tools/bench.py` scores recorded fixtures and compares baseline/
+  change JSON. It does not drive a target or manufacture a run.
+- **Remaining gap**: the current fixture set is too small to generalize whether
+  the 4 Cairn borrowings improve vulnerability finding.
 - **Steal**: a small regression suite of **locally reproducible known-vuln
   fixtures** (DVWA / Juice Shop / intentionally-vuln containers, or recorded run
   fixtures) + a scorer that reports **detection rate, false-positive rate,

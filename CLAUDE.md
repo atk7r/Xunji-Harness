@@ -62,7 +62,8 @@
   same one-cycle `EXECUTE` semantics. Neither entry authorizes recurring Cron.
   A delivered `/loop <source>` is adapted through
   `tools/loop_bootstrap.py --source <input> --type auto`: existing run/run file
-  resumes, an explicit HTTP(S) URL is parsed and saved locally without fetching,
+  resumes, an existing local file outranks the bare-host convenience grammar,
+  and an explicit HTTP(S) URL is parsed and saved locally without fetching,
   and Guanlan/recon JSON is ingested with zero re-probe. Markdown/ordinary JSON
   use the reference-only `setup-normalizer-candidate.v1` pilot: default `--ai off`;
   operator-explicit external mode first exposes only a hard-redacted, path-free

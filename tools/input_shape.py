@@ -18,6 +18,8 @@ import re
 import sys
 from pathlib import Path
 
+import canonical_records
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
 except Exception:
@@ -93,20 +95,8 @@ def parse_input_shapes(run_dir: Path) -> list[dict]:
 
 
 def _parse_constraints(run_dir: Path) -> list[dict]:
-    """解析 constraints.md, 返回约束列表。"""
-    path = run_dir / "constraints.md"
-    if not path.exists():
-        return []
-    text = path.read_text(encoding="utf-8", errors="replace")
-    constraints: list[dict] = []
-    for m in re.finditer(r"(?ms)^##[ \t]+(C-\d+).*?(?=^##[ \t]+C-\d+|\Z)", text):
-        block = m.group(0)
-        constraints.append({
-            "id": m.group(1),
-            "mechanism_class": _field(block, "Mechanism class"),
-            "input_shape": _field(block, "Input shape"),
-        })
-    return constraints
+    """Parse constraints through the shared typed source-span owner."""
+    return canonical_records.parse_constraints(run_dir)
 
 
 def list_shapes(run_dir: Path) -> int:

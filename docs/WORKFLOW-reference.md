@@ -435,6 +435,17 @@ rule), set `Status: absorbed` and link the `D-xxx` / front, re-read every cycle 
 part of the Root graph pass; `check_run.py` warns while any hint is `pending`. (Core
 "Operator Hints" has the short version.)
 
+### constraints.md — evidence-backed ruled-out mechanisms (conditional)
+
+Create only after a concrete attempt establishes a constraint. Use
+`docs/templates/run/constraints.md`; every new C-id binds a front, canonical
+mechanism class, input shape, reason, and existing E-id. `canonical_records.py`
+is the shared typed/source-span parser used by context, saturation, input-shape,
+and closure consumers. Historical case variants, duplicate IDs/fields, bounded
+oversize values, or missing `Front:` remain readable with explicit compatibility
+warnings; native templates and writers must not emit those shapes. The parser
+caps retained text, so compatibility never means unbounded context.
+
 ### chains.md — vulnerability chain / chaining (conditional)
 
 Confirmed findings linked because one's proven output state meets the next's
@@ -667,6 +678,20 @@ material `--replan-reason`; stage change also needs the prior plan's debt-free
 typed `cycle_end`. `work_plan.py` alone writes the typed stage/replan sequence.
 The current owner is the Python/Hook control path. This stage does not add a
 parallel plan, assignment, or merge runtime.
+
+`stage_policy.py` checks S1 target exclusion and S3 target fan-out across the
+whole plan. S2 overlap is intentionally limited to dependency-ready target lanes,
+because valid same-asset successors may be serialized by the plan DAG. Its
+mechanically derived debt/journal facts come only from `run_model.py` and
+`loop_journal.py`; `check_run`, independent review, and report/evidence parity
+remain explicit owner-required facts and keep stage exit fail closed.
+
+New plans hash the expanded canonical input set. An immutable plan created before
+that expansion may continue only when its digest exactly matches the frozen
+pre-expansion input set; it retains its already-admitted lane shape while all
+pre-existing target-egress, DAG, Reviewer, budget, and effect gates still run.
+It is never rewritten or upgraded in place. New plans always use current stage
+validation, and any digest matching neither set is stale.
 
 The sole Claude-primary operational owner for current plan/delegate argv,
 transaction recovery, and stale-unlaunched cancellation is
@@ -988,8 +1013,11 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
   foreground review capability becomes eligible only after the plan has a typed
   `cycle_end` and no launched Agent remains running; it does not revive Hunter,
   target, or general model-egress authority. And
-  every BLOCKER ledger item must be resolved. A heading, prose mention, copied model
-  output, manual Reviewer/Verdict, or untouched choices do not count.
+  every BLOCKER ledger item must be resolved. Pre-ledger records whose heading
+  explicitly says `PR-nnn — BLOCKER|WARN` remain typed and gated for migration;
+  ordinary historical `PR-*` prose outside a finding ledger stays advisory and
+  cannot create a finding. A heading, prose mention, copied model output, manual
+  Reviewer/Verdict, or untouched choices do not count.
 - **HARD FAIL** on any `>= 0.8` evidence entry that references no existing saved
   artifact under the run dir (see "evidence.md" above).
 - **WARN** (advisory) if the run lacks a `classify.txt`, a Closed Front lacks an
@@ -1016,6 +1044,13 @@ gate, guard/hook boundary, and review requirements still apply.
 
 Backend/proxy/fallback details live only in the peer-review-panel reference and
 `review/independent-reviewer.md`; this closure document does not copy them.
+
+Non-live `maintenance-diff`/`plan`/`docs` review builds its bundle in memory and
+does not refresh `evidence.json` or write a run-local `review_bundle.json`.
+An empty Git diff, untracked non-ignored path, zero-file plan/docs scope,
+collection failure, truncation, or a reviewed hash covering omitted context
+cannot produce PASS. `--bundle-only` is the explicit diagnostic command that
+writes the ignored bundle artifact.
 
 **Mandatory retrospective before closure — procedure.** Every pentest closes with an honest
 `retrospective.md` (scaffolded from `docs/templates/run/retrospective.md`): what *I* (the

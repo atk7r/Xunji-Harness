@@ -1,0 +1,27 @@
+{
+  "schema": "xunji.context-budgets.v1",
+  "files": {
+    "CLAUDE.md": {
+      "max_chars": 51000,
+      "required": ["Project Role", "Evidence Gate", "Autonomous Drive"]
+    },
+    "docs/ROUTER.md": {
+      "max_chars": 31000,
+      "required": ["skill", "route"]
+    },
+    "docs/WORKFLOW.md": {
+      "max_chars": 66000,
+      "required": ["Root", "evidence"]
+    },
+    "docs/templates/loop_prompt.md": {
+      "max_chars": 21000,
+      "required": ["cycle_end", "Coda"]
+    }
+  },
+  "duplicate_rule_limit": 1,
+  "forbidden_loop_prompt_copies": [
+    "## Autonomous Work Discipline",
+    "## Harness core invariant"
+  ],
+  "token_estimate": "ceil(utf8_chars/4); measurement only, not a model tokenizer"
+}

@@ -515,6 +515,20 @@ lane，再提交未完成后缀；canonical evidence 更新不得重放已经结
 只由 commit 后的 delegate 判断。候选/front/asset/barrier 数只作为 breadth signals；唯一
 `topology_mode` 描述 proposal 的 capacity-free ready 拓扑，实际并发宽度仍由 runtime/request/
 model-egress/merge capacity 决定。
+`stage_policy.py` 是该计划的只读策略投影，不是第二个 scheduler 或阶段选择器。Root 仍从
+canonical state 选择 `macro_stage`；policy 只检查该阶段必须重读的输入、exit facts 与 lane
+shape。S1 默认 effect-disjoint offline fan-out，并拒绝计划内任何 target lane，且不能把
+observation/candidate 晋级为 finding；S2 对同一 asset 只允许一个 dependency-ready target
+lane，依赖链和 settlement 由 work-plan owner 验证，因此同资产串行后继不是并发冲突；
+S3 只建议 verify/review/parity，并在完整计划中最多允许一个 target lane，缺口可机械阻止
+exit 并由 Root 回退 S2。merge/review/Agent debt 与 terminal journal 只从
+`run_model.py`/`loop_journal.py` 的 canonical projection 派生；`check_run`、独立 review 和
+report/evidence parity 保持显式 owner-required facts，policy 不复制一个较弱 closure
+predicate。`workers.py` 的 stage-specific proposal 是可删除 seed，`work_plan.py` 的
+transaction 仍是唯一计划 authority。
+Native `SendMessage`/runtime notification 只用于状态、澄清、冻结 authority 内的追问和
+请求返回；它不修改 assignment、scope、effect、budget 或 plan，也不能替代 authentic
+return/failure、result artifact、review disposition、merge、cancellation 或 evidence。
 `chains.md` 与 `hints.md` 是带显式 absence 的条件输入，create/modify/delete 都使 current plan
 stale；新的 operator prompt 也会使旧 plan 的 turn binding stale。turn mode 在每次 child tool
 调用处重新生效，因此 explain/review/pause/ambiguous turn 会撤销后台 Hunter 后续 effect，而不会
@@ -863,17 +877,21 @@ Markdown/JSON run 文件。本项目暂不规划 CCB/TypeScript 替换，不建�
 1. **运行目标轴**：可回退的
    `S1 信息收集 / S2 渗透测试与持续复审 / S3 最终收口` Run Macro-Stage；Root 根据
    canonical run 状态和 blockers 选择并在 work plan 声明，确定性层只派生
-   readiness/一致性，不替模型选择策略，也不另建事实源。阶段语义、预算和调度收益仍需
-   持续 benchmark，不能因状态机已落地就声称所有 S1/S2/S3 方法已完成。
+   readiness/一致性，不替模型选择策略，也不另建事实源。当前 stage policy 已冻结三段
+   必需输入、exit facts、effect/fan-out 默认和回退形状；长期真实 run 的质量与成本仍持续
+   benchmark，但这不把已落地的阶段 contract 重新写成 roadmap。
 2. **小周期轴**：每段内部执行
    `Root plan/assign -> Hunter lanes -> Reviewer challenge -> Root merge/adjudicate/replan`，
    或采用窄 `ROOT_DIRECT` local capability receipt。Root 是贯穿周期的 Single Synthesizer，
    不是一次性 phase；Setup 是前置，Report 是持续投影并在 S3 收口。
-Python 版本的 work plan、effect lane、transaction、hook-shaped synthetic
-Agent/Reviewer/Root receipt 与 ROOT_DIRECT receipt 已由 focused/fault fixtures 执法；真实
-Claude Code primary-driver E2E 仍是当前实现的验收门。完整 A/B benchmark 和长期调度收益
-仍待验证。`>=4 diverse fronts` 继续作为强制 breadth safety net，不是日常 scheduler；
-不能因 Python 调度闭环已落地就推断真实 Agent 验收或 bench 已完成。
+Python 版本的 work plan、stage/effect lane、transaction、hook-shaped synthetic
+Agent/Reviewer/Root receipt 与 ROOT_DIRECT receipt 已由 focused/fault fixtures 执法。
+Root-direct/serial/parallel A/B fixture 已测得 speed/coverage benefit，但 parallel 的 merge
+cost 超过冻结上限，因此当前结论是 soft recommendation only；没有把“两个 lane”升级为
+硬并行门。A/B row/cap 必须是 finite、非负且语义有界的 typed 数值；lane capture 只按当前
+canonical plan 的 lane-id 交集计算，缺 plan 时返回 unknown，不以 assignment 数猜分母。
+`>=4 diverse fronts` 继续作为强制 breadth safety net，不是日常 scheduler。
+真实 Claude Code primary-driver E2E 仍是每次影响 Claude-primary/shared behavior 的交付门。
 
 ## 7. 非当前路线
 
@@ -893,7 +911,7 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `.claude/hooks/` | Claude live runtime 的强制 authority/effect/lifecycle gates | safety skill、hook tests、独立复审 |
 | `contracts/` + `tools/harness/fixtures/` | versioned schemas 与 conformance cases | 当前 Python validator、未知版本 fail-closed、fixture tests |
 | `tools/harness/maintenance_authority.py` + `safety_critical_paths.json` | 顶层自然语言维护意图、typed path boundary 与普通 `/loop` protected-path floor | `turn_contract.py`、settings write receipts、output truth gate、manifest drift check、独立复审 |
-| `tools/setup_source.py` | setup source 路由、bare-host/URL semantic normalization、provenance bundle validator；不拥有自然语言策略、fetch/authority/pointer | schema/fixture、setup adapters/transaction、privacy、target.md、独立复审 |
+| `tools/setup_source.py` | setup source 路由、existing-local-file-over-bare-host precedence、bare-host/URL semantic normalization、provenance bundle validator；不拥有自然语言策略、fetch/authority/pointer | schema/fixture、setup adapters/transaction、privacy、target.md、独立复审 |
 | `tools/setup_normalizer.py` | Markdown/普通 JSON token/ref inventory、external surrogate 与 reference-only candidate 晋级；不拥有 model transport/target/pointer | candidate schema、privacy、setup source/transaction、benchmark、独立复审 |
 | `tools/scope_admission.py` | 把明确自然语言或 concise alias 编译为 hook-claim 绑定的 exact setup-source `review` 资产零探测准入与 receipt/projection commit；不拥有 target/pointer/Cron | turn contract、coverage/asset ledger、receipt schema/fixture、独立复审 |
 | `tools/setup_transaction.py` | staging、setup receipt、active pointer、typed lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
@@ -901,6 +919,12 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `tools/harness/capability_registry.py` | exact script/argv→effect 与 mandatory service policy；`root_direct_eligible` 默认关闭 | turn contract、command-shape、文档命令 fixture |
 | `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
 | `tools/harness/guard.py` | 主动工具统一运行时护栏 | wrappers、privacy/proxy、fixtures、独立复审 |
+| `tools/stage_policy.py` | S1/S2/S3 输入、exit facts、lane shape 的只读投影；不选择阶段、不写计划 | work plan、workers、run model、stage fixtures |
+| `tools/inspect_artifact.py` + `tools/websocket_probe.py` | bounded local artifact query 与只到 opening handshake 的 WebSocket target capability | capability registry、containment/caps、probe privacy/proxy/guard/recorder、fixtures |
+| `tools/canonical_records.py` | constraints/review/Agent result typed source-span parser 聚合；front/status 与 evidence 沿用既有 owner | input shape、context、saturation、check_run、parser fixtures |
+| `tools/peer_review.py` | `live-run/maintenance-diff/plan/docs` 冻结 bundle、rubric 与 v2 reviewer result；Root disposition 分离 | reviewed hash、backend/context limits、check_run live receipt、review fixtures |
+| `tools/context_budget.py` + `contracts/context-budgets.v1.json` | always-loaded file 字符/token-estimate预算与 owner/重复规则检查 | closure audit、rule/doc checks |
+| `tools/preflight.py` + `tools/check_local_hygiene.py` + `tools/clean_scratch.py` | read-only diff/fingerprint/sensitive preflight、warning-only scratch 发现和 dry-run-first bounded TTL cleanup | CI、onboarding、retention、selftests |
 | `tools/` | lifecycle、state projection、evidence、review、sensors | canonical owner、error/receipt contract、selftests |
 | `tools/work_plan.py` + `contracts/work-plan.v1.schema.json` | Macro-Stage/work-plan/delegation 单一 commit owner、前向恢复事务、plan snapshots 与 stage transition | run_model、loop journal、workers、turn/run gates、fault fixtures |
 | `contracts/agent-instruction-sources.v1.json` + `tools/agent_instruction_bundle.py` + `docs/templates/agents/` + `.claude/agents/xunji-{hunter,reviewer}.md` | Claude-primary versioned source selection、common+role delta 组合、scaffold/live definition 与 source/artifact byte-integrity contract | workers、context pack、assignment schema、runtime receipts、turn contract、template check、protected-path manifest |
@@ -1119,48 +1143,81 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     v1 只拥有当前 exact Claude Code tool-use interruption + Reviewer Start-hook timeout
     形状；OOM、process kill、network loss 或其他 pre-model failure 不得共用或放宽此
     reason，必须以新的 versioned reason/schema、迁移语义和 fault fixtures 单独准入。
+32. Stage policy 只投影 canonical inputs、exit facts 与 lane shape；Macro-Stage 和常规下一
+    策略仍由 Root 自主选择。S1 的 offline-only 和 S3 的 target 上限检查所有模式的完整
+    计划；`ROOT_DIRECT` 不伪造 Reviewer lane，但不能绕过 stage effect policy。S2 的
+    same-asset overlap 只检查 dependency-ready lanes；串行依赖由 work-plan owner 验证。
+    Stage 声明、proposal 或 Task 完成不能铸造 evidence、finding、coverage、review 或
+    closure，未知/外部 owner-required exit fact 继续阻止 `exit_ready`。
+33. Peer review 的 scope kind 不可混用：maintenance diff/plan/docs 不得伪装成 live report；
+    只有绑定当前 evidence-index hash 的 `live-run` v2 receipt 可进入 closure gate。Reviewer
+    原始输出、backend failure 与 Root disposition 必须可区分。
+34. Native Agent message 是非权威控制通道；消息不能改变 assignment 或 effect，也不能充当
+    return、result、review、merge、cancel 或 evidence。
+35. Source maintenance worktree 可隔离 effect-disjoint repository edits，但 live engagement
+    的 run、pointer、journal、receipt、review disposition 与 closure 仍只有一个 canonical
+    evidence store 和既有 single-writer/CAS owner。
 
 ## 12. Maintenance Checkpoint
 
-- Date: 2026-07-30
-- Scope: 根治 Claude Code 交互中 schedule-less `/loop` 被解释成十分钟 recurring
-  Cron、同一会话反复重入、计划回合持续 stale，以及中间 replan 丢失 settled prefix 后
-  相同生成 lane 被再次委派的问题。事故 run 最终有 73 个 assignment，并在大上下文中连续
-  收到 DeepSeek context-window 400。
-- Architecture impact: lifecycle authority、work-plan history projection 与状态输出 changed。
-  新 contract 把 delivered literal `/loop` 冻结为
-  `loop_entry_delivered=true, loop_requested=false` 的单 material cycle；
-  `CronCreate` 以 `XUNJI_E_CRON_CREATE_NOT_REQUESTED` fail closed。周期内部仍由 Root
-  自主选择策略，但必须经 task/work plan、Hunter、Reviewer、Root settlement 与 typed
-  `cycle_end`；下一周期只能来自新的顶层 execute prompt。生成 replan 从 verified
-  transaction/archive lineage 继承 identity-equal 且完整结算的 lane，即使中间 shortened
-  plan 已省略该 prefix；全重复 proposal 以 `WORK_PLAN_DUPLICATE_SETTLED_WORK` 拒绝。
-  默认 assignment status 只显示全部 active/debt 与最近八个 terminal rows，`--all`
-  保留完整审计面。
-- Owner/enforcement: `tools/turn_contract.py` 是 entry/Cron authority owner；
-  `tools/work_plan.py` 验证 transaction lineage；`tools/workers.py` 独占生成 replan
-  inheritance 与 assignment status projection；capability registry 冻结 `status --all`
-  形状。Claude-primary `CLAUDE.md`、lifecycle/Agent Board owners、loop template 与 workflow
-  同步单周期语义，不创建第二 scheduler runtime。
-- Live migration: 不改写、删除或伪造任何旧 run journal/assignment。已有 legacy Cron job
-  只能在独立、观察绑定的 cleanup authority 下删除，不能由新 `/loop` 重建。旧
-  transaction archives 继续 append-only；下一次生成 replan 时只读投影其 settled identity。
-- Verification: focused turn-contract/work-plan/workers/capability/template/rule checks PASS；
-  完整 `selftest_all.py` 为 69 passed / 0 failed。Claude Code 2.1.201 configured
-  DeepSeek session `0eb64b14-f43c-4496-8136-e7053b466495` 对 loopback、目标网络禁用的
-  path-native fixture 完成 exact bootstrap → typed plan → real Hunter Start/Stop → real
-  Reviewer Start/Stop → Root settlement → typed `cycle_end`。独立 receipt adjudication为
-  `loop_requested=false`、Cron events=0、target_action=0、WebFetch/WebSearch=0。第一次同时
-  禁止 run-state Edit/Write 的 overconstrained fixture 正确 fail closed，不计为通过。
-  冻结 transcript、runtime、plan、assignment、turn contract、journal 与 raw test output 位于
-  `review/records/2026-07-30-interactive-loop-deadlock/evidence/`。
-- Independent review: Codex 是作者，不计自己的 review。按 operator 要求不使用 arkcli；
-  commit 前把冻结的 exact final source/doc diff 交给 fresh-context Claude Code
-  no-edit/no-tools review，fingerprint 与 verdict 记录在同一 review record，checkpoint
-  本身不预声明 verdict。
-- Exclusions: 不改写原始 `runs/www-scshr-com_20260729` 或其 append-only journals；
-  不把一次 cycle 宣称为整个渗透完成；不引入后台 daemon、第二 authority runtime 或固定
-  攻击 playbook。
+- Date: 2026-07-31
+- Scope: 在已根治 Claude Code 交互 `/loop` recurring re-entry 与 settled-prefix 重派的
+  基线上，逐项落实 `TODO.md`：三段 stage policy、typed offline/WebSocket capability、
+  scheduler A/B 与度量、native Agent message 边界、review scope productization、canonical
+  parser、CI/preflight/local hygiene、closure wiring与 context budget；decision-gated
+  adapters/refactors 逐项形成“不准入/已 supersede”记录，不伪装为实现。
+- Architecture impact: planning/lane defaults、tool contract、review bundle/receipt、canonical
+  parser consumption、maintenance/CI governance changed。Root 保留 stage 与常规下一策略
+  选择权；确定性层只验证 authority/effect/state/evidence/closure。新增 capability 沿既有
+  mandatory service chain，不增加 shell 或网络逃生口；review scope 和 live closure receipt
+  fail closed 分离。
+- Owner/enforcement: `stage_policy.py`/`work_plan.py`/`workers.py` 拥有阶段投影和计划；
+  capability registry 拥有 InspectArtifact/WebSocket exact argv/effect；
+  `canonical_records.py` 与既有 parser owners 共同收敛 typed records；
+  `peer_review.py`/`check_run.py` 拥有 scope-kind review 与 live stale gate；
+  context budget、closure audit、preflight、CI 和 cleanup owners 负责工程验收。
+  stage policy 从 run-model/loop-journal owner 读取 lifecycle fact；owner import/API
+  漂移时 fact 保持 unknown，并输出稳定 `STAGE_POLICY_OWNER_UNAVAILABLE:*` 诊断，不把
+  generic missing fact 当成唯一线索。S2→S1 的可逆 replan 由 work-plan owner 和真实
+  settled-cycle fixture 执法，不归只读 policy projection 所有。
+- Live migration: 不改写任何现有 `runs/`、pointer、journal、assignment、review disposition
+  或 evidence。新 plan 总是绑定扩展后的 canonical input digest；精确匹配扩展前 input 集的
+  immutable in-flight plan 可 dual-read 继续结算，并保留提交时已接受的 lane shape；既有
+  target-egress、DAG、Reviewer、budget 和 effect gates 仍重验。兼容 plan 不会被重写，
+  新 plan 必须通过当前 stage policy，其他 digest mismatch 仍 stale。
+  constraints 的历史 case variant/duplicate/oversize/missing-Front 形状和 review ledger
+  外的普通 `PR-*` 叙述按 bounded compatibility warning/非 finding 文本处理；旧版标题中
+  明确声明 `PR-nnn — BLOCKER|WARN` 的 finding 仍 typed parse 并继续受 closure disposition
+  gate，避免兼容迁移把既有硬门降级。模板和 native owner 只生成 canonical
+  spelling/shape，closure 会显式显示 legacy warning 而不要求改写历史记录；
+  review receipt v1 只读兼容，v2 对新增字段 fail closed。Maintenance worktree 不复制 live
+  evidence store。
+- Verification: stage/work-plan/workers（含 CLI `commit-plan --stage` 与 legacy fingerprint）、
+  typed capabilities、benchmark（含 unknown-event attribution 与 reopen 方向）、parser
+  consumers/历史兼容、完整 review scope/fail-closed truncation/empty scope、non-live
+  read-only review、check_run、context budget
+  owner/duplicate rules、preflight/hygiene/cleanup、portable symlink fallback 与 closure audit
+  的 focused selftests 已通过；full suite 为 76 passed / 0 failed，18/18 benchmark fixtures
+  clean；CI 的新增 Python 文件进入扩展 ruff/mypy gate，clean checkout 的 preflight
+  显式读取 PR base 或 push event `before` 到 HEAD 的完整 committed diff；初始 push 用
+  empty-tree fallback，而不是审查空 worktree 或只检查最后一个 commit。
+  Claude Code 2.1.201/DeepSeek isolated primary-driver 完成 S1 stage plan → real Hunter
+  Start/Stop → real Reviewer Start/Stop → Root merge → typed `cycle_end`，独立裁定
+  target/Web/Cron=0、Agent start/stop=2/2、active debt=0、`STRUCTURAL_PASS` 且未声称
+  finding/closure。该 run 暴露的 existing relative Markdown/bare-host 路由歧义已在
+  `setup_source.py` 与 turn-contract source identity 根治并由 focused fixture 覆盖；
+  第二次 setup-only Claude Code real-driver 独立裁定 source kind=`markdown`、snapshot
+  hash exact、transaction committed、target/Web/Cron/Agent=0。Fresh-context independent
+  原始 receipt/journal/state 的最小可复核投影及源文件 hash 保存在本轮
+  `real-driver-evidence.json`；fresh-context independent review 在最终 candidate 上执行并
+  绑定 reviewed hash。
+- Independent review: Codex 是作者，不计自己的 review；最终 candidate 使用 fresh-context
+  Claude Code maintenance-diff scope 复审，原始输出、reviewed hash、backend/context limits
+  与 Root disposition 写入本轮 review record。
+- Exclusions: 不改写事故 run 或 append-only state；不把一次 cycle 宣称整个渗透完成；
+  不准入无 provenance 的 HTML/PDF/DOCX/text/OCR adapter、默认 intel fetch、无收益的 AI
+  candidate expansion、无复现 race 的 fd-relative 全仓改写、假想 repository adapter 或
+  无度量收益的 module split。
 
 ## 13. 外部设计来源与采用边界
 

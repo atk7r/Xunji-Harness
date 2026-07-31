@@ -110,6 +110,17 @@ the immutable `state/merge_results/<assignment>/...` bytes and merge-draft diges
 are the result; notification prose may be stale or interleaved and must not be
 copied into evidence or a disposition note.
 
+Native runtime `SendMessage` may be used only as an in-flight control channel:
+request a short status, clarify the already-frozen assignment, deliver a
+follow-up that does not expand its authority, or ask an execution Agent to stop
+and return its best bounded result. A message never changes the assignment,
+assets, effect, request/tool budget, plan digest, reviewer binding, or operator
+authority. It is neither lifecycle return nor evidence. After any message, the
+same Start/Stop, immutable result, Reviewer disposition, and Root settlement
+checkpoints below still decide truth. Cancellation of a provably unlaunched row
+continues to use the typed `cancel-unlaunched` owner; a message cannot manufacture
+negative launch proof or cancel an admitted Reviewer.
+
 Start/Stop/Post ordering variants join only through one frozen causal identity.
 Cross-session, Xunji-owned unmatched, ambiguous, duplicated, or conflicting
 attempts remain lifecycle debt; never select the newest by arrival order.

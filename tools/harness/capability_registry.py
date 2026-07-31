@@ -75,9 +75,12 @@ def _spec(
 _SELFTEST_SCRIPTS = (
     "tools/selftest_all.py", "tools/check_rules.py", "tools/check_hook.py",
     "tools/check_runtime_boundary.py", "tools/check_templates.py",
+    "tools/canonical_records.py", "tools/clean_scratch.py",
+    "tools/context_budget.py", "tools/preflight.py",
     "tools/harness/command_shape.py", "tools/harness/guard.py",
     "tools/harness/maintenance_authority.py", "tools/harness/privacy.py",
-    "tools/setup_source.py", "tools/run_model.py", "tools/runtime_receipts.py",
+    "tools/setup_source.py", "tools/stage_policy.py", "tools/run_model.py",
+    "tools/runtime_receipts.py",
     "tools/turn_contract.py", "tools/work_plan.py", "tools/workers.py",
     "tools/anti_drift.py",
     "tools/timestamp_gate.py", "tools/check_run.py",
@@ -86,7 +89,8 @@ _SELFTEST_SCRIPTS = (
     "tools/progress_ledger.py", "tools/run_controller.py",
     "tools/session_handoff.py", "tools/setup_run.py",
     "tools/scope_admission.py", "tools/xunji_statusline.py",
-    "tools/probe.py", "tools/render.py", "tools/scan.py", "tools/replay.py",
+    "tools/inspect_artifact.py", "tools/probe.py", "tools/websocket_probe.py",
+    "tools/render.py", "tools/scan.py", "tools/replay.py",
     "tools/classify_hosts.py", "tools/exploit.py",
     ".claude/hooks/ip_blacklist.py", ".claude/hooks/output_gate.py",
     ".claude/hooks/run_gate.py", ".claude/hooks/safety_gate.py",
@@ -144,6 +148,10 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
           recorder="review_receipt"),
     _spec("read.work-plan", "tools/work_plan.py", "local_read",
           "work-plan-status", scope="active_run"),
+    _spec("read.stage-policy", "tools/stage_policy.py", "local_read",
+          "stage-policy", scope="active_run"),
+    _spec("read.inspect-artifact", "tools/inspect_artifact.py", "local_read",
+          "inspect-artifact", scope="active_run"),
     _spec("control.work-plan", "tools/work_plan.py", "control",
           "work-plan-commit", scope="active_run", recorder="control_journal"),
     _spec("control.work-plan-legacy-migration", "tools/work_plan.py", "control",
@@ -215,6 +223,10 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
           "scope-admission", scope="active_run", recorder="control_journal"),
     _spec("target.probe", "tools/probe.py", "target", "probe-live",
           allowed_env=TARGET_ENV, scope="target_assets",
+          privacy="target_egress", proxy="engagement", guard="target",
+          recorder="target_artifact"),
+    _spec("target.websocket-handshake", "tools/websocket_probe.py", "target",
+          "websocket-handshake", allowed_env=TARGET_ENV, scope="target_assets",
           privacy="target_egress", proxy="engagement", guard="target",
           recorder="target_artifact"),
     _spec("target.render", "tools/render.py", "target", "render-live",
@@ -465,6 +477,61 @@ def _validate_probe(args: tuple[str, ...]) -> bool:
     return False
 
 
+def _validate_inspect_artifact(args: tuple[str, ...]) -> bool:
+    ok, seen, _pos = _options(
+        args,
+        values={
+            "--mode": {"lines", "search", "sort", "unique", "cut", "json"},
+            "--start": None, "--count": None, "--pattern": None,
+            "--delimiter": None, "--fields": None, "--query": None,
+        },
+        flags={"--regex", "--reverse"},
+        positionals=2,
+    )
+    if not ok or "--mode" not in seen:
+        return False
+    numeric = {"--start": (1, 10_000_000), "--count": (1, 500)}
+    return all(
+        all(re.fullmatch(r"[0-9]+", raw) is not None
+            and lower <= int(raw) <= upper
+            for raw in seen.get(flag, []))
+        for flag, (lower, upper) in numeric.items()
+    )
+
+
+def _validate_websocket_handshake(args: tuple[str, ...]) -> bool:
+    ok, seen, pos = _options(
+        args,
+        values={
+            "--run": None, "--save": None, "--origin": None,
+            "--protocol": None, "--timeout": None, "--proxy": None,
+        },
+        flags=set(),
+        positionals=1,
+    )
+    if not ok or not {"--run", "--save"}.issubset(seen):
+        return False
+    parsed = urlsplit(pos[0])
+    if parsed.scheme not in {"ws", "wss"} or not parsed.hostname \
+            or parsed.username or parsed.password:
+        return False
+    if not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", seen["--save"][0]):
+        return False
+    for raw in seen.get("--timeout", []):
+        if not re.fullmatch(r"[0-9]+", raw) or not 1 <= int(raw) <= 60:
+            return False
+    for raw in seen.get("--origin", []):
+        origin = urlsplit(raw)
+        if origin.scheme not in {"http", "https"} or not origin.hostname \
+                or origin.username or origin.password:
+            return False
+    return all(
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", raw) is not None
+        for raw in seen.get("--protocol", [])
+    )
+
+
 def _validate_render(args: tuple[str, ...], *, eval_mode: bool) -> bool:
     ok, seen, _pos = _options(
         args,
@@ -665,6 +732,16 @@ def _validate_work_plan_legacy_migration(args: tuple[str, ...]) -> bool:
         and _one_run(args[1:])
 
 
+def _validate_stage_policy(args: tuple[str, ...]) -> bool:
+    ok, seen, _pos = _options(
+        args,
+        values={"--stage": {"S1", "S2", "S3"}},
+        flags=set(),
+        positionals=1,
+    )
+    return ok and "--stage" in seen
+
+
 def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
     if not args:
         return False
@@ -772,10 +849,16 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
         set()
     )
     values = {"--limit": None} if command in {"suggest", "plan"} else {}
-    ok, _seen, _pos = _options(
+    if command == "plan":
+        values["--stage"] = {"S1", "S2", "S3"}
+    ok, seen, _pos = _options(
         args[1:], values=values, flags=flags, positionals=1,
     )
-    return ok
+    return ok and all(
+        re.fullmatch(r"[0-9]+", raw) is not None
+        and 1 <= int(raw) <= 16
+        for raw in seen.get("--limit", [])
+    )
 
 
 def _validate_workers_cancel_unlaunched(args: tuple[str, ...]) -> bool:
@@ -794,6 +877,7 @@ def _validate_peer_review(args: tuple[str, ...], mode: str) -> bool:
         return args == ("--list-backends",)
     common_values = {
         "--out": None, "--json-out": None, "--timeout": None,
+        "--scope-kind": {"live-run", "maintenance-diff", "plan", "docs"},
     }
     if mode == "bundle":
         ok, seen, _pos = _options(
@@ -894,6 +978,10 @@ def argv_matches(validator: str, args: Iterable[str]) -> bool:
         return _validate_scope_admission(values)
     if validator == "probe-live":
         return _validate_probe(values)
+    if validator == "inspect-artifact":
+        return _validate_inspect_artifact(values)
+    if validator == "websocket-handshake":
+        return _validate_websocket_handshake(values)
     if validator == "render-live":
         return _validate_render(values, eval_mode=False)
     if validator == "render-eval":
@@ -928,6 +1016,8 @@ def argv_matches(validator: str, args: Iterable[str]) -> bool:
         return _validate_work_plan(values, status=False)
     if validator == "work-plan-migrate-legacy":
         return _validate_work_plan_legacy_migration(values)
+    if validator == "stage-policy":
+        return _validate_stage_policy(values)
     if validator == "workers-read":
         return _validate_workers(values, read=True)
     if validator == "workers-cancel-unlaunched":

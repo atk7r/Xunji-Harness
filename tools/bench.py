@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -48,9 +49,13 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # tools/  (evidence_parse)
-import evidence_parse   # 复用唯一权威证据解析器(独立模块, 不必拉整个收口门 check_run)
+import evidence_parse  # noqa: E402  # tools/ is the standalone script import root.
 
 _E_BLOCK = re.compile(r"(?ms)^##\s+(E-\d+[a-z]*).*?(?=^##\s+E-|\Z)")
+_ATTRIBUTABLE_METRIC_EVENTS = {
+    "request", "action", "evidence", "delegation", "assignment",
+    "agent_start", "agent_stop", "agent_result", "review", "merge", "model",
+}
 
 
 def _confirmed_blocks(run_dir: Path) -> tuple[dict, dict, set]:
@@ -115,14 +120,24 @@ def _timeline_metrics(run_dir: Path) -> dict:
     p = run_dir / "state" / "events.jsonl"
     if not p.exists():
         p = run_dir / "events.jsonl"
-    out = {"event_requests": 0, "time_to_first_evidence_sec": None}
+    out = {
+        "event_requests": 0,
+        "time_to_first_delegation_sec": None,
+        "time_to_first_evidence_sec": None,
+        "duplicate_target_requests": 0,
+        "information_gain_total": 0.0,
+        "token_budget_spent": 0,
+        "closure_reopen_events": 0,
+    }
     if not p.exists():
         return out
     out["timeline_source"] = str(p.relative_to(run_dir))
     if p.name == "events.jsonl" and p.parent == run_dir:
         out["timeline_warning"] = "legacy root events.jsonl fallback; prefer state/events.jsonl"
     first_activity = None
+    first_delegation = None
     first_evidence = None
+    request_shapes: set[tuple[str, str, str]] = set()
     for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             ev = json.loads(line)
@@ -132,12 +147,42 @@ def _timeline_metrics(run_dir: Path) -> dict:
         typ = str(ev.get("type", "")).lower()
         if typ == "request":
             out["event_requests"] += 1
+            shape = (
+                str(ev.get("method") or "").upper(),
+                str(ev.get("asset") or ev.get("host") or ""),
+                str(ev.get("url") or ev.get("path") or ""),
+            )
+            if shape[1] or shape[2]:
+                if shape in request_shapes:
+                    # Count repeated occurrences beyond the first, not the
+                    # number of distinct repeated shapes.
+                    out["duplicate_target_requests"] += 1
+                request_shapes.add(shape)
+        if typ in {"delegation", "agent_start", "assignment"} \
+                and first_delegation is None:
+            first_delegation = ts
+        if typ in _ATTRIBUTABLE_METRIC_EVENTS:
+            try:
+                out["information_gain_total"] += float(
+                    ev.get("information_gain") or 0)
+                out["token_budget_spent"] += int(ev.get("tokens") or 0)
+            except (TypeError, ValueError):
+                pass
+        if typ in {"stage_transition", "stage-transition"} \
+                and str(ev.get("from") or "").upper() == "S3" \
+                and str(ev.get("to") or "").upper() == "S2":
+            out["closure_reopen_events"] += 1
         if typ in {"request", "action"} and first_activity is None:
             first_activity = ts
         if typ == "evidence" and first_evidence is None:
             first_evidence = ts
     if first_activity is not None and first_evidence is not None and first_evidence >= first_activity:
         out["time_to_first_evidence_sec"] = round(first_evidence - first_activity, 3)
+    if first_activity is not None and first_delegation is not None \
+            and first_delegation >= first_activity:
+        out["time_to_first_delegation_sec"] = round(
+            first_delegation - first_activity, 3)
+    out["information_gain_total"] = round(out["information_gain_total"], 3)
     return out
 
 
@@ -202,6 +247,22 @@ def _collaboration_metrics(run_dir: Path, truth: dict) -> dict:
     """
     assignments = _load_json(run_dir / "state" / "assignments.json").get("assignments", [])
     assignments = [a for a in assignments if isinstance(a, dict)]
+    plan_lanes = _load_json(
+        run_dir / "state" / "work_plan.json").get("lanes", [])
+    plan_lanes = plan_lanes if isinstance(plan_lanes, list) else []
+    plan_lane_ids = {
+        str(lane.get("id") or lane.get("lane_id") or "").strip()
+        for lane in plan_lanes
+        if isinstance(lane, dict)
+    } - {""}
+    assigned_lane_ids = {
+        str(item.get("lane_id") or "").strip()
+        for item in assignments
+    } - {""}
+    lane_capture_rate = (
+        round(len(assigned_lane_ids & plan_lane_ids) / len(plan_lane_ids), 3)
+        if plan_lane_ids else None
+    )
     agents = _agent_blocks(run_dir)
     fronts = _front_blocks(run_dir)
     conflicts = _load_json(run_dir / "state" / "conflicts.json").get("conflicts", [])
@@ -297,6 +358,22 @@ def _collaboration_metrics(run_dir: Path, truth: dict) -> dict:
         "conflict_resolution_correct": not unresolved if conflicts else None,
         "request_budget_by_agent": req_by_agent,
         "time_to_first_evidence_by_mode_sec": ttfe_by_mode,
+        "front_coverage_rate": round(
+            sum(1 for front in fronts if front["status"] in {
+                "closed", "blocked_type_b", "deferred", "done", "complete",
+            }) / len(fronts), 3,
+        ) if fronts else None,
+        "effective_lane_capture_rate": lane_capture_rate,
+        "agent_useful_yield": round(
+            sum(1 for item in assignments if str(
+                item.get("root_disposition") or item.get("status") or "").lower()
+                in {"merged", "blocked", "failed"}) / len(assignments), 3,
+        ) if assignments else None,
+        "merge_debt": sum(
+            1 for item in assignments
+            if str(item.get("status") or "").lower() in {"done", "returned"}
+            and not item.get("root_disposition")
+        ),
         "false_positive_suppression_events": fp_suppressed,
         "checks": checks,
     }
@@ -375,6 +452,11 @@ def score(run_dir: Path, truth: dict) -> dict:
         "budget_max": budget_max,
         "over_budget": bool(budget_max is not None and budget > int(budget_max)),
         "time_to_first_evidence_sec": timeline["time_to_first_evidence_sec"],
+        "time_to_first_delegation_sec": timeline["time_to_first_delegation_sec"],
+        "duplicate_target_requests": timeline["duplicate_target_requests"],
+        "information_gain_total": timeline["information_gain_total"],
+        "token_budget_spent": timeline["token_budget_spent"],
+        "closure_reopen_events": timeline["closure_reopen_events"],
         "closure": closure,
         "findings": findings, "fp_detail": fps,
         "process": proc,
@@ -484,6 +566,20 @@ def _aggregate(scores: list[dict]) -> dict:
         "request_budget_over": sum(1 for s in scores if s.get("over_budget")),
         "request_budget_total": sum(s["recorded_requests"] for s in scores),
         "time_to_first_evidence_avg_sec": round(sum(ttfe) / len(ttfe), 3) if ttfe else None,
+        "time_to_first_delegation_avg_sec": (
+            round(sum(values) / len(values), 3) if (
+                values := [s["time_to_first_delegation_sec"] for s in scores
+                           if s.get("time_to_first_delegation_sec") is not None]
+            ) else None
+        ),
+        "duplicate_target_requests": sum(
+            int(s.get("duplicate_target_requests", 0)) for s in scores),
+        "information_gain_total": round(sum(
+            float(s.get("information_gain_total", 0)) for s in scores), 3),
+        "token_budget_spent": sum(
+            int(s.get("token_budget_spent", 0)) for s in scores),
+        "closure_reopen_events": sum(
+            int(s.get("closure_reopen_events", 0)) for s in scores),
         "closure_correct": sum(1 for s in closures if s["closure"]["correct"]),
         "closure_expected": len(closures),
         "agent_assignments": sum(int(co.get("assignments", 0)) for co in collaborations),
@@ -498,6 +594,92 @@ def _aggregate(scores: list[dict]) -> dict:
         "total_expected_findings": total_expected,
         "total_detected_findings": total_detected,
         "total_calibrated_findings": total_calibrated,
+    }
+
+
+def scheduler_ab_decision(value: dict) -> dict:
+    """Adjudicate a recorded Root/serial/parallel comparison.
+
+    A hard parallel gate is admitted only when parallel has no quality loss,
+    improves elapsed time or coverage, and its merge/request/token overhead stays
+    within the fixture's declared caps.  Otherwise the scheduler remains a soft,
+    capacity-bounded recommendation.
+    """
+    modes = value.get("modes") if isinstance(value, dict) else None
+    required = {"root_direct", "serial_agent", "parallel_agent"}
+    if not isinstance(modes, dict) or set(modes) != required:
+        raise ValueError("SCHEDULER_AB_MODES_INVALID")
+    metric_names = (
+        "quality", "elapsed_sec", "coverage", "merge_cost", "requests", "tokens",
+    )
+    normalized_modes: dict[str, dict[str, float]] = {}
+    for name, row in modes.items():
+        if not isinstance(row, dict) or not {
+            *metric_names,
+        }.issubset(row):
+            raise ValueError(f"SCHEDULER_AB_ROW_INVALID:{name}")
+        try:
+            normalized = {
+                metric: float(row[metric])
+                for metric in metric_names
+                if not isinstance(row[metric], bool)
+            }
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"SCHEDULER_AB_ROW_INVALID:{name}") from exc
+        if len(normalized) != len(metric_names) or any(
+            not math.isfinite(number) or number < 0
+            for number in normalized.values()
+        ) or any(normalized[metric] > 1 for metric in ("quality", "coverage")):
+            raise ValueError(f"SCHEDULER_AB_ROW_INVALID:{name}")
+        normalized_modes[name] = normalized
+    parallel = normalized_modes["parallel_agent"]
+    baselines = [
+        normalized_modes["root_direct"], normalized_modes["serial_agent"],
+    ]
+    caps = value.get("caps")
+    cap_names = {"merge_cost", "requests", "tokens"}
+    if not isinstance(caps, dict) or set(caps) != cap_names:
+        raise ValueError("SCHEDULER_AB_CAPS_INVALID")
+    try:
+        cap_values = {
+            name: float(caps[name])
+            for name in cap_names
+            if not isinstance(caps[name], bool)
+        }
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("SCHEDULER_AB_CAPS_INVALID") from exc
+    if len(cap_values) != len(cap_names) or any(
+        not math.isfinite(number) or number < 0
+        for number in cap_values.values()
+    ):
+        raise ValueError("SCHEDULER_AB_CAPS_INVALID")
+    quality_ok = all(parallel["quality"] >= row["quality"]
+                     for row in baselines)
+    benefit = (
+        parallel["elapsed_sec"] < min(row["elapsed_sec"] for row in baselines)
+        or parallel["coverage"] > max(row["coverage"] for row in baselines)
+    )
+    overhead_ok = (
+        parallel["merge_cost"] <= cap_values["merge_cost"]
+        and parallel["requests"] <= cap_values["requests"]
+        and parallel["tokens"] <= cap_values["tokens"]
+    )
+    promote = bool(quality_ok and benefit and overhead_ok)
+    decision = (
+        "hard-gate-eligible" if promote else "soft-recommendation-only"
+    )
+    expected = value.get("expected_decision")
+    if expected is not None and expected != decision:
+        raise ValueError("SCHEDULER_AB_EXPECTED_MISMATCH")
+    return {
+        "schema": "xunji.scheduler-ab-decision.v1",
+        "promote_parallel_hard_gate": promote,
+        "decision": decision,
+        "checks": {
+            "no_quality_regression": quality_ok,
+            "speed_or_coverage_benefit": benefit,
+            "overhead_within_caps": overhead_ok,
+        },
     }
 
 
@@ -553,19 +735,23 @@ def _compare(baseline: Path, change: Path) -> int:
     keys = [
         "detection_rate", "calibration_rate", "false_positives", "false_positive_rate_mean",
         "request_budget_total", "request_budget_over", "time_to_first_evidence_avg_sec",
+        "time_to_first_delegation_avg_sec", "duplicate_target_requests",
+        "information_gain_total", "token_budget_spent", "closure_reopen_events",
         "closure_correct", "missed_high_value_fronts", "role_mismatched_fronts",
         "conflicts_unresolved", "collaboration_checks_failed", "agent_first_evidence_avg_sec",
         "false_positive_suppression_events",
     ]
     higher_is_better = {
         "detection_rate", "calibration_rate", "closure_correct",
-        "false_positive_suppression_events",
+        "false_positive_suppression_events", "information_gain_total",
     }
     lower_is_better = {
         "false_positives", "false_positive_rate_mean", "request_budget_total",
         "request_budget_over", "time_to_first_evidence_avg_sec", "missed_high_value_fronts",
+        "time_to_first_delegation_avg_sec", "duplicate_target_requests",
+        "token_budget_spent",
         "role_mismatched_fronts", "conflicts_unresolved", "collaboration_checks_failed",
-        "agent_first_evidence_avg_sec",
+        "agent_first_evidence_avg_sec", "closure_reopen_events",
     }
     regressed = False
     print("== bench compare ==")
@@ -601,6 +787,11 @@ def main() -> int:
     cp = sub.add_parser("compare", help="compare two score/summary JSON files")
     cp.add_argument("baseline", type=Path)
     cp.add_argument("change", type=Path)
+    ab = sub.add_parser(
+        "scheduler-ab",
+        help="adjudicate a recorded root-direct/serial/parallel fixture",
+    )
+    ab.add_argument("fixture", type=Path)
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
@@ -644,6 +835,14 @@ def main() -> int:
         return worst
     if args.cmd == "compare":
         return _compare(args.baseline, args.change)
+    if args.cmd == "scheduler-ab":
+        try:
+            decision = scheduler_ab_decision(_load_truth(args.fixture))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"scheduler A/B invalid: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(decision, ensure_ascii=False, indent=2))
+        return 0
     ap.print_help()
     return 2
 
@@ -753,10 +952,22 @@ def _selftest() -> int:
     (run4_state / "state").mkdir()
     (run4_state / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
     (run4_state / "state" / "events.jsonl").write_text(
-        '{"ts": 1.0, "type": "request"}\n{"ts": 4.0, "type": "evidence"}\n',
+        '{"ts": 1.0, "type": "request", "method":"GET", "url":"/a", "tokens":10}\n'
+        '{"ts": 1.5, "type": "delegation"}\n'
+        '{"ts": 2.0, "type": "request", "method":"GET", "url":"/a", "tokens":5, "information_gain":0.25}\n'
+        '{"ts": 4.0, "type": "evidence"}\n'
+        '{"ts": 4.5, "type": "untrusted_noise", "tokens":999, "information_gain":99}\n'
+        '{"ts": 5.0, "type": "stage_transition", "from":"S3", "to":"S2"}\n',
         encoding="utf-8")
+    timeline_state = _timeline_metrics(run4_state)
     checks.append(("时间线: state/events.jsonl 优先",
-                   _timeline_metrics(run4_state)["time_to_first_evidence_sec"] == 3.0))
+                   timeline_state["time_to_first_evidence_sec"] == 3.0))
+    checks.append(("协作度量: delegation/duplicate/gain/token/reopen 可观测",
+                   timeline_state["time_to_first_delegation_sec"] == 0.5
+                   and timeline_state["duplicate_target_requests"] == 1
+                   and timeline_state["information_gain_total"] == 0.25
+                   and timeline_state["token_budget_spent"] == 15
+                   and timeline_state["closure_reopen_events"] == 1))
     checks.append(("时间线: legacy events.jsonl 标记 fallback",
                    _timeline_metrics(run4).get("timeline_warning") is not None))
     checks.append(("收口: 无正向发现 + Independent Review + markers -> clean", _is_clean(sc)))
@@ -843,6 +1054,8 @@ def _selftest() -> int:
                    sco["collaboration"]["time_to_first_evidence_by_mode_sec"].get("A-web-auth-001") == 2.5))
     checks.append(("协作: false-positive suppression 记录 pure negative confirmed event",
                    sco["collaboration"]["false_positive_suppression_events"] == 1))
+    checks.append(("协作: 无 canonical plan 时 lane capture 不猜测分母",
+                   sco["collaboration"]["effective_lane_capture_rate"] is None))
     checks.append(("协作门: checks 全绿 -> clean", _is_clean(sco)))
 
     run6 = d / "collab_bad_20260101"
@@ -892,6 +1105,19 @@ def _selftest() -> int:
     checks.append(("协作门: 要求 per-agent budget 但缺 events -> skipped 且非 clean",
                    not _is_clean(snoevents) and budget_check.get("skipped")
                    and budget_check.get("reason") == "state/events.jsonl missing"))
+    lane_run = d / "lane_capture_20260101"
+    (lane_run / "state").mkdir(parents=True)
+    (lane_run / "state" / "work_plan.json").write_text(json.dumps({
+        "lanes": [{"id": "L-001"}],
+    }), encoding="utf-8")
+    (lane_run / "state" / "assignments.json").write_text(json.dumps({
+        "assignments": [
+            {"lane_id": "L-001"}, {"lane_id": "L-stale"},
+        ],
+    }), encoding="utf-8")
+    lane_metrics = _collaboration_metrics(lane_run, {})
+    checks.append(("协作: lane capture 只计算当前 plan 交集且不超过 1",
+                   lane_metrics["effective_lane_capture_rate"] == 1.0))
     summ2 = _summary([sco, sbad])["summary"]
     checks.append(("协作汇总: failed checks / missed high / unresolved conflict 可见",
                    summ2["collaboration_checks_failed"] >= 3
@@ -906,6 +1132,7 @@ def _selftest() -> int:
                                             "false_positives": 0, "false_positive_rate_mean": 0.0,
                                             "request_budget_total": 10, "request_budget_over": 0,
                                             "time_to_first_evidence_avg_sec": 2.0,
+                                            "closure_reopen_events": 0,
                                             "closure_correct": 1,
                                             "missed_high_value_fronts": 0,
                                             "role_mismatched_fronts": 0,
@@ -917,6 +1144,7 @@ def _selftest() -> int:
                                                  "false_positives": 0, "false_positive_rate_mean": 0.0,
                                                  "request_budget_total": 10, "request_budget_over": 0,
                                                  "time_to_first_evidence_avg_sec": 2.0,
+                                                 "closure_reopen_events": 0,
                                                  "closure_correct": 1,
                                                  "missed_high_value_fronts": 0,
                                                  "role_mismatched_fronts": 0,
@@ -928,6 +1156,7 @@ def _selftest() -> int:
                                                   "false_positives": 1, "false_positive_rate_mean": 0.5,
                                                   "request_budget_total": 12, "request_budget_over": 1,
                                                   "time_to_first_evidence_avg_sec": 3.0,
+                                                  "closure_reopen_events": 1,
                                                   "closure_correct": 1,
                                                   "missed_high_value_fronts": 1,
                                                   "role_mismatched_fronts": 1,
@@ -940,6 +1169,73 @@ def _selftest() -> int:
         cmp_bad = _compare(base, change_bad)
     checks.append(("compare: unchanged metrics exit 0", cmp_ok == 0))
     checks.append(("compare: worse metrics exit 1", cmp_bad == 1))
+    ab_soft = scheduler_ab_decision({
+        "modes": {
+            "root_direct": {"quality": 0.8, "elapsed_sec": 10, "coverage": 0.5,
+                            "merge_cost": 0, "requests": 2, "tokens": 100},
+            "serial_agent": {"quality": 0.9, "elapsed_sec": 8, "coverage": 0.7,
+                             "merge_cost": 1, "requests": 2, "tokens": 150},
+            "parallel_agent": {"quality": 0.9, "elapsed_sec": 5, "coverage": 0.8,
+                               "merge_cost": 4, "requests": 2, "tokens": 220},
+        },
+        "caps": {"merge_cost": 2, "requests": 3, "tokens": 300},
+    })
+    checks.append(("scheduler A/B keeps parallel soft when merge overhead loses",
+                   ab_soft["decision"] == "soft-recommendation-only"
+                   and not ab_soft["checks"]["overhead_within_caps"]))
+    try:
+        scheduler_ab_decision({
+            "modes": {
+                name: {
+                    "quality": 1, "elapsed_sec": 1, "coverage": 1,
+                    "merge_cost": 0, "requests": 0, "tokens": 0,
+                }
+                for name in ("root_direct", "serial_agent", "parallel_agent")
+            },
+        })
+        missing_caps_closed = False
+    except ValueError as exc:
+        missing_caps_closed = str(exc) == "SCHEDULER_AB_CAPS_INVALID"
+    checks.append(("scheduler A/B requires explicit finite caps",
+                   missing_caps_closed))
+    malformed_ab = {
+        "modes": {
+            name: {
+                "quality": 1, "elapsed_sec": 1, "coverage": 1,
+                "merge_cost": 0, "requests": 0, "tokens": 0,
+            }
+            for name in ("root_direct", "serial_agent", "parallel_agent")
+        },
+        "caps": {"merge_cost": 1, "requests": 1, "tokens": 1},
+    }
+    malformed_ab["modes"]["parallel_agent"]["quality"] = "NaN"
+    try:
+        scheduler_ab_decision(malformed_ab)
+        malformed_row_closed = False
+    except ValueError as exc:
+        malformed_row_closed = (
+            str(exc) == "SCHEDULER_AB_ROW_INVALID:parallel_agent"
+        )
+    checks.append(("scheduler A/B rejects non-finite row metrics stably",
+                   malformed_row_closed))
+    expected_mismatch = dict(malformed_ab)
+    expected_mismatch["modes"] = {
+        name: {
+            "quality": 1, "elapsed_sec": 1, "coverage": 1,
+            "merge_cost": 0, "requests": 0, "tokens": 0,
+        }
+        for name in ("root_direct", "serial_agent", "parallel_agent")
+    }
+    expected_mismatch["expected_decision"] = "hard-gate-eligible"
+    try:
+        scheduler_ab_decision(expected_mismatch)
+        expected_mismatch_closed = False
+    except ValueError as exc:
+        expected_mismatch_closed = (
+            str(exc) == "SCHEDULER_AB_EXPECTED_MISMATCH"
+        )
+    checks.append(("scheduler A/B binds the recorded expected decision",
+                   expected_mismatch_closed))
 
     # Keep the checked-in Ultra-native collaboration fixture from drifting.
     fixture_truth = ROOT / "bench" / "ultra-agent-collab" / "truth.json"

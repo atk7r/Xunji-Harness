@@ -13,6 +13,7 @@ import hashlib
 import ipaddress
 import json
 import mimetypes
+import os
 import re
 import tempfile
 import time
@@ -1228,6 +1229,32 @@ def _sniff_file(path: Path, raw: bytes, requested_type: str) -> str:
     raise SetupSourceError("unrecognized_source", "source type cannot be identified")
 
 
+def _route_file(
+    candidate_path: Path,
+    raw_value: str,
+    requested_type: str,
+) -> SourceRoute:
+    """Route one already selected local path through the bounded source owner."""
+    file_bytes = read_source_bytes(candidate_path)
+    resolved = candidate_path.resolve(strict=False)
+    kind = _sniff_file(resolved, file_bytes, requested_type)
+    if kind == "recon-json":
+        data = json.loads(file_bytes.decode("utf-8", "strict"))
+        first = data["assets"][0]
+        first_value = next(
+            str(first.get(key) or "").strip()
+            for key in ("host", "asset", "name", "url")
+            if str(first.get(key) or "").strip()
+        )
+        host, _ = _asset_from_value(first_value)
+        return SourceRoute(
+            "recon-json", raw_value, slug=_slug(host), source_path=resolved
+        )
+    if kind in {"json", "markdown"}:
+        return SourceRoute(kind, raw_value, source_path=resolved)
+    raise SetupSourceError("unrecognized_source", "source type cannot be identified")
+
+
 def route_source(
     value: str,
     *,
@@ -1249,6 +1276,14 @@ def route_source(
             return SourceRoute("run", raw_value, run_dir=run_dir)
         if requested == "run":
             raise SetupSourceError("invalid_run", f"not a recognizable run path: {raw_value}")
+    # A concrete existing path is a stronger local identity than the bare-host
+    # convenience grammar.  This lets an operator pass ``report.md`` from the
+    # current directory without it silently becoming ``https://report.md/``.
+    # Explicit HTTP(S) input and ``--type url`` remain unambiguous URL routes.
+    if requested == "auto" and (
+        candidate_path.exists() or candidate_path.is_symlink()
+    ):
+        return _route_file(candidate_path, raw_value, requested)
     normalized_target = ""
     if requested in {"auto", "url"}:
         try:
@@ -1269,21 +1304,7 @@ def route_source(
     if requested == "url":
         parse_target_url(raw_value)
         raise SetupSourceError("invalid_url", "URL must start with http:// or https://")
-    file_bytes = read_source_bytes(candidate_path)
-    resolved = candidate_path.resolve(strict=False)
-    kind = _sniff_file(resolved, file_bytes, requested)
-    if kind == "recon-json":
-        data = json.loads(file_bytes.decode("utf-8", "strict"))
-        first = data["assets"][0]
-        first_value = next(
-            str(first.get(key) or "").strip()
-            for key in ("host", "asset", "name", "url") if str(first.get(key) or "").strip()
-        )
-        host, _ = _asset_from_value(first_value)
-        return SourceRoute("recon-json", raw_value, slug=_slug(host), source_path=resolved)
-    if kind in {"json", "markdown"}:
-        return SourceRoute(kind, raw_value, source_path=resolved)
-    raise SetupSourceError("unrecognized_source", "source type cannot be identified")
+    return _route_file(candidate_path, raw_value, requested)
 
 
 def _selftest() -> int:
@@ -1308,6 +1329,11 @@ def _selftest() -> int:
     ordinary.write_text(json.dumps({"url": "https://example.test"}), encoding="utf-8")
     markdown = temp / "report.bin"
     markdown.write_text("# target\nhttps://example.test\n", encoding="utf-8")
+    relative_markdown = temp / "driver-offline-source.md"
+    relative_markdown.write_text(
+        "# Authorized target\n\n- Target: `http://127.0.0.1:9`\n",
+        encoding="utf-8",
+    )
     oversized = temp / "oversized.bin"
     with oversized.open("wb") as handle:
         handle.truncate(MAX_SOURCE_BYTES + 1)
@@ -1362,6 +1388,19 @@ def _selftest() -> int:
         "bare host compiles to one canonical HTTPS source",
         bare_route.kind == "url"
         and bare_route.value == "https://cloud.scshr.com/",
+    ))
+    prior_cwd = Path.cwd()
+    try:
+        os.chdir(temp)
+        relative_route = route_source(
+            relative_markdown.name, source_type="auto", runs_root=runs,
+        )
+    finally:
+        os.chdir(prior_cwd)
+    checks.append((
+        "existing relative Markdown filename outranks bare-host convenience",
+        relative_route.kind == "markdown"
+        and relative_route.source_path == relative_markdown.resolve(),
     ))
     checks.append((
         "equivalent URL syntax has one semantic identity",

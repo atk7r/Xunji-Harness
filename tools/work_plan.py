@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_journal  # noqa: E402
 import run_model  # noqa: E402
+import stage_policy  # noqa: E402
 from harness import capability_registry  # noqa: E402
 
 
@@ -53,12 +54,24 @@ EFFECTS = frozenset({
     "model_egress", "repo_mutation",
 })
 CANONICAL_INPUTS = (
+    "target.md", "surface.md", "surface_recon.md", "constraints.md",
+    "knowledge_hits.md", "frontier.md", "hypotheses.md",
+    "evidence.md", "false_positive.md", "decisions.md", "review.md",
+    "report.md", "chains.md", "hints.md", "retrospective.md", "coverage.json",
+    "state/setup_source.json", "state/asset_ledger.json",
+    "state/conflicts.json",
+)
+CONDITIONAL_CANONICAL_INPUTS = frozenset({
+    "chains.md", "hints.md", "surface_recon.md", "constraints.md",
+    "knowledge_hits.md", "state/setup_source.json", "state/asset_ledger.json",
+})
+LEGACY_CANONICAL_INPUTS = (
     "target.md", "surface.md", "frontier.md", "hypotheses.md",
     "evidence.md", "false_positive.md", "decisions.md", "review.md",
     "report.md", "chains.md", "hints.md", "retrospective.md", "coverage.json",
     "state/conflicts.json",
 )
-CONDITIONAL_CANONICAL_INPUTS = frozenset({"chains.md", "hints.md"})
+LEGACY_CONDITIONAL_CANONICAL_INPUTS = frozenset({"chains.md", "hints.md"})
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _LANE_ID = re.compile(r"L-[A-Za-z0-9._-]+")
 _FRONT_ID = re.compile(r"F-[0-9]+")
@@ -218,14 +231,17 @@ def _validated_journal_events(run_dir: str | Path) -> tuple[list[dict], dict]:
     return events, state
 
 
-def input_fingerprint(run_dir: str | Path) -> tuple[str, list[dict]]:
-    """Hash semantic inputs without using mtimes or derived plan state."""
+def _input_fingerprint(
+    run_dir: str | Path,
+    canonical_inputs: tuple[str, ...],
+    conditional_inputs: frozenset[str],
+) -> tuple[str, list[dict]]:
     run = _resolve_run(run_dir)
     rows: list[dict] = []
     seen: set[Path] = set()
     candidates: list[tuple[Path, str, bool]] = [
-        (run / value, value, value in CONDITIONAL_CANONICAL_INPUTS)
-        for value in CANONICAL_INPUTS
+        (run / value, value, value in conditional_inputs)
+        for value in canonical_inputs
     ]
     candidates.extend(
         (path, path.relative_to(run).as_posix(), False)
@@ -267,6 +283,19 @@ def input_fingerprint(run_dir: str | Path) -> tuple[str, list[dict]]:
         rows.append(row)
     rows.sort(key=lambda item: item["path"])
     return _hash(rows), rows
+
+
+def input_fingerprint(run_dir: str | Path) -> tuple[str, list[dict]]:
+    """Hash current semantic inputs without using mtimes or derived plan state."""
+    return _input_fingerprint(
+        run_dir, CANONICAL_INPUTS, CONDITIONAL_CANONICAL_INPUTS)
+
+
+def legacy_input_fingerprint(run_dir: str | Path) -> tuple[str, list[dict]]:
+    """Recompute the pre-expansion fingerprint for immutable in-flight plans."""
+    return _input_fingerprint(
+        run_dir, LEGACY_CANONICAL_INPUTS,
+        LEGACY_CONDITIONAL_CANONICAL_INPUTS)
 
 
 def _load_turn_contract(run_dir: Path) -> dict:
@@ -650,13 +679,20 @@ def _validate_capability_binding(mode: str, lanes: list[dict]) -> None:
 
 
 def _validate_mode(mode: str, lanes: list[dict], run_dir: Path,
-                   contract: dict) -> None:
+                   contract: dict, *, stage: str,
+                   enforce_stage_policy: bool = True) -> None:
     if mode not in MODES:
         raise PlanError("WORK_PLAN_EXECUTION_MODE_INVALID")
     if contract.get("target_egress_denied") and any(
             lane["effect"] == "target" for lane in lanes):
         raise PlanError("WORK_PLAN_OPERATOR_TARGET_EGRESS_DENIED")
     _validate_reviewer_topology(mode, lanes)
+    if enforce_stage_policy:
+        stage_issues = stage_policy.validate_lane_shape(
+            stage, lanes, require_reviewer=mode != "ROOT_DIRECT",
+        )
+        if stage_issues:
+            raise PlanError(stage_issues[0])
     if mode != "ROOT_DIRECT" and any(
         lane["effect"] in {"control", "repo_mutation"} for lane in lanes
     ):
@@ -792,7 +828,14 @@ def validate_plan(value: object, *, run_dir: str | Path | None = None,
         _validate_stage(stage, run, ignore_plan_digest=str(plan.get("plan_digest") or ""))
     if run_dir is not None and contract is not None:
         run = _resolve_run(run_dir)
-        _validate_mode(mode, lanes, run, contract)
+        legacy_stage_policy = (
+            legacy_input_fingerprint(run)[0] == plan["inputs_digest"]
+            and input_fingerprint(run)[0] != plan["inputs_digest"]
+        )
+        _validate_mode(
+            mode, lanes, run, contract, stage=stage,
+            enforce_stage_policy=not legacy_stage_policy,
+        )
         current_binding = {
             "session_id": str(contract.get("session_id") or ""),
             "prompt_sha256": str(contract.get("prompt_sha256") or ""),
@@ -800,7 +843,8 @@ def validate_plan(value: object, *, run_dir: str | Path | None = None,
         }
         if binding != current_binding:
             raise PlanError("WORK_PLAN_TURN_STALE")
-        if check_inputs and input_fingerprint(run)[0] != plan["inputs_digest"]:
+        if check_inputs and input_fingerprint(run)[0] != plan["inputs_digest"] \
+                and legacy_input_fingerprint(run)[0] != plan["inputs_digest"]:
             raise PlanError("WORK_PLAN_INPUTS_STALE")
     plan["lanes"] = lanes
     return plan
@@ -1833,7 +1877,8 @@ def commit_plan(run_dir: str | Path, *, macro_stage: str, objective: str,
     clean_replan_reason = _clean_text(
         replan_reason, field="replan_reason", required=False)
     _validate_dependency_dag(normalized_lanes)
-    _validate_mode(mode, normalized_lanes, run, current_contract)
+    _validate_mode(
+        mode, normalized_lanes, run, current_contract, stage=macro_stage)
     with _plan_lock(run):
         cancellation_path = (
             run / "state" / "assignment_cancellation_transaction.json")
@@ -2478,9 +2523,39 @@ def _selftest() -> int:
         absence_digest == repeated_absence_digest
         and absence_rows == repeated_absence_rows
         and missing_rows == {
-            "chains.md": {"path": "chains.md", "present": False},
-            "hints.md": {"path": "hints.md", "present": False},
+            name: {"path": name, "present": False}
+            for name in CONDITIONAL_CANONICAL_INPUTS
         },
+    ))
+    legacy_digest, _legacy_rows = legacy_input_fingerprint(absence_run)
+    compatibility_plan = commit_plan(
+        absence_run, macro_stage="S1",
+        objective="legacy fingerprint compatibility fixture",
+        mode="SERIAL_AGENT", reason="one execution and exact Reviewer",
+        exit_gate="legacy plan remains resumable after framework upgrade",
+        lanes=lane_pair("LEGACYFP"),
+        contract=_load_turn_contract(absence_run),
+    )
+    legacy_plan = dict(compatibility_plan)
+    legacy_plan["inputs_digest"] = legacy_digest
+    legacy_plan["lanes"] = [
+        {
+            **lane,
+            **({"effect": "target", "assets": ["example.test"]}
+               if index == 0 else {}),
+        }
+        for index, lane in enumerate(legacy_plan["lanes"])
+    ]
+    legacy_plan["plan_digest"] = _plan_digest(legacy_plan)
+    legacy_plan["plan_id"] = (
+        f"WP-{legacy_plan['cycle_id']}-{legacy_plan['plan_digest'][:8]}")
+    checks.append((
+        "pre-expansion in-flight plan fingerprint and lane shape remain readable",
+        legacy_digest != absence_digest
+        and validate_plan(
+            legacy_plan, run_dir=absence_run,
+            contract=_load_turn_contract(absence_run),
+            check_inputs=True)["inputs_digest"] == legacy_digest,
     ))
     semantic_reversion_path = absence_run / "hints.md"
     semantic_reversion_path.write_text("# transient hint\n", encoding="utf-8")
@@ -3892,6 +3967,20 @@ def _selftest() -> int:
         mode="ROOT_DIRECT", reason="mechanically atomic", exit_gate="receipt",
         lanes=[direct_lane], contract=direct_contract,
     )
+    direct_target_stage_error = ""
+    try:
+        _validate_mode(
+            "ROOT_DIRECT",
+            [dict(
+                direct_lane, effect="target",
+                assets=["app.example"],
+            )],
+            direct_run,
+            direct_contract,
+            stage="S1",
+        )
+    except PlanError as exc:
+        direct_target_stage_error = str(exc)
     direct_blocked = False
     try:
         loop_journal.append_event(
@@ -3903,6 +3992,10 @@ def _selftest() -> int:
         direct_blocked = exc.code == "CYCLE_EVENT_PLAN_DEBT_OPEN"
     checks.append(("ROOT_DIRECT remains fail-closed without typed action receipt",
                    direct_plan["execution_mode"] == "ROOT_DIRECT" and direct_blocked))
+    checks.append((
+        "ROOT_DIRECT cannot bypass whole-plan S1 target policy",
+        direct_target_stage_error == "STAGE_POLICY_S1_OFFLINE_FIRST:L-DIRECT",
+    ))
 
     def root_direct_binding_error(lane: dict) -> str:
         try:

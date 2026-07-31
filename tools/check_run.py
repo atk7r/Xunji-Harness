@@ -54,6 +54,10 @@ try:
     import setup_source as _setup_source
 except Exception:
     _setup_source = None
+try:
+    import canonical_records as _canonical_records
+except Exception:
+    _canonical_records = None
 from evidence_parse import (  # 唯一权威证据解析器与 evidence-index hash owner
     current_evidence_index_hash,
     evidence_artifact_manifest,
@@ -1582,7 +1586,9 @@ def validate_independent_review_receipt(run_dir: Path, review_text: str) -> tupl
     ).encode("utf-8")).hexdigest()
     if claimed != receipt_id or actual != receipt_id:
         return False, "review receipt content hash mismatch"
-    if record.get("schema") != "xunji.peer_review_receipt.v1":
+    if record.get("schema") not in {
+            "xunji.peer_review_receipt.v1",
+            "xunji.peer_review_receipt.v2"}:
         return False, "review receipt schema mismatch"
     result = record.get("result") if isinstance(record.get("result"), dict) else {}
     if str(result.get("verdict") or "") not in {"PASS", "WARN", "BLOCKER", "CONFIRMED", "PASSED"}:
@@ -1593,6 +1599,12 @@ def validate_independent_review_receipt(run_dir: Path, review_text: str) -> tupl
     current_hash = current_evidence_index_hash(run_dir)
     if str(result.get("evidence_index_hash") or "") != current_hash:
         return False, "review receipt evidence_index hash is stale"
+    if record.get("schema") == "xunji.peer_review_receipt.v2" and (
+            result.get("scope_kind") != "live-run"
+            or result.get("reviewed_hash") != current_hash
+            or not str(result.get("reviewer_identity") or "")
+    ):
+        return False, "review receipt scope/reviewer/reviewed hash mismatch"
     bundle_path = run_dir / "review" / "review_bundle.json"
     try:
         bundle = json.loads(bundle_path.read_text(encoding="utf-8", errors="replace"))
@@ -1742,12 +1754,18 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
 
 def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:
     """ReviewOps v2: peer_review 写入的 PR-xxx ledger 必须被处理。
-    只约束新格式 `## Review Finding Ledger`; 旧独立复审记录不带 ledger, 不 retroactive 误杀。"""
+    新格式 ledger 与旧版明确带 BLOCKER/WARN 的 finding 都继续受门控；普通历史
+    PR prose 不 retroactive 误杀。"""
     review = run_dir / "review.md"
     if not review.exists():
         return [], []
     text = review.read_text(encoding="utf-8", errors="replace")
-    if "Review Finding Ledger" not in text:
+    has_legacy_severity_finding = bool(re.search(
+        r"(?im)^\s*###\s+PR-\d+\b[ \t]*(?:—|-|:|：)"
+        r"[ \t]*(?:BLOCKER|WARN)\b",
+        text,
+    ))
+    if "Review Finding Ledger" not in text and not has_legacy_severity_finding:
         return [], []
     errors: list[str] = []
     warns: list[str] = []
@@ -1766,23 +1784,33 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:
                 "裁决失效, 需加载 xunji-reviewops 刷新当前 fingerprint-bound ReviewReceipt。"
                 "更早的历史 receipt 保留审计价值，不再反向污染最新裁决。")
 
-    finding_blocks = list(re.finditer(
-        r"(?ms)^###\s+(PR-\d+)\s+—\s+(BLOCKER|WARN)\b(.*?)(?=^###\s+PR-\d+\s+—|^##\s|\Z)",
-        text,
-    ))
-    ids = [match.group(1) for match in finding_blocks]
+    if _canonical_records is None:
+        return ["复审硬门: canonical review ledger parser unavailable"], []
+    for compatibility_warning in (
+        _canonical_records.review_ledger_compatibility_warnings(run_dir)
+    ):
+        warns.append(f"复审 compatibility warning: {compatibility_warning}")
+    finding_blocks = _canonical_records.parse_review_ledger(run_dir)
+    ids = [str(item.get("id") or "") for item in finding_blocks]
     duplicates = sorted({prid for prid in ids if ids.count(prid) > 1})
     if duplicates:
         errors.append(
             "复审硬门(PR id 重复): " + ", ".join(duplicates)
             + " 在多个 review ledger 中重复，无法可靠 resolve；重新复审时必须分配全局唯一 PR id。")
 
-    for m in finding_blocks:
-        prid, sev, block = m.group(1), m.group(2), m.group(3)
-        sm = re.search(r"(?im)^\s*-\s*Status\s*[:：]\s*([^\n]+)", block)
-        rm = re.search(r"(?im)^\s*-\s*DriverResolution\s*[:：]\s*([^\n]+)", block)
-        status = (sm.group(1).strip().lower() if sm else "pending")
-        resolution = (rm.group(1).strip().lower() if rm else "pending")
+    for item in finding_blocks:
+        prid = str(item.get("id") or "")
+        sev = str(item.get("severity") or "")
+        status = str(item.get("status") or "pending")
+        resolution = str(item.get("resolution") or "pending").lower()
+        for schema_error in item.get("schema_errors", []):
+            errors.append(
+                f"复审硬门(schema): {prid} {schema_error}; "
+                f"source={item.get('source_span')}")
+        for compatibility_warning in item.get("compatibility_warnings", []):
+            warns.append(
+                f"复审 compatibility warning: {prid} "
+                f"{compatibility_warning}; source={item.get('source_span')}")
         unresolved = status in {"", "pending", "open", "unresolved"} or resolution in {"", "pending", "open", "unresolved"}
         allowed_status = {"accepted", "dismissed", "superseded", "escalated"}
         has_audit_anchor = bool(re.search(
@@ -2276,7 +2304,6 @@ def check_constraints_ledger(run_dir: Path) -> tuple[list[str], list[str]]:
     if not path.exists():
         return [], []
 
-    text = path.read_text(encoding="utf-8", errors="replace")
     # 收集所有已知 E-id
     evidence_ids = {r["id"] for r in parse_evidence(run_dir) if r["id"].startswith("E-")}
 
@@ -2289,19 +2316,20 @@ def check_constraints_ledger(run_dir: Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warns: list[str] = []
 
-    for m in re.finditer(r"(?ms)^##[ \t]+(C-\d+).*?(?=^##[ \t]+C-\d+|\Z)", text):
-        block = m.group(0)
-        cid = m.group(1)
-
-        # 提取字段
-        ev_field = ""
-        mc_field = ""
-        for line in block.splitlines():
-            stripped = line.strip()
-            if re.match(r"-\s*Evidence\s*[:：]", stripped, re.I):
-                ev_field = re.sub(r"-\s*Evidence\s*[:：]\s*", "", stripped, flags=re.I).strip()
-            if re.match(r"-\s*Mechanism class\s*[:：]", stripped, re.I):
-                mc_field = re.sub(r"-\s*Mechanism class\s*[:：]\s*", "", stripped, flags=re.I).strip()
+    if _canonical_records is None:
+        return ["constraints.md canonical parser unavailable"], []
+    for item in _canonical_records.parse_constraints(run_dir):
+        cid = str(item.get("id") or "")
+        ev_field = str(item.get("evidence") or "")
+        mc_field = str(item.get("mechanism_class") or "")
+        for schema_error in item.get("schema_errors", []):
+            errors.append(
+                f"constraints.md {cid}: schema error {schema_error}; "
+                f"source={item.get('source_span')}")
+        for compatibility_warning in item.get("compatibility_warnings", []):
+            warns.append(
+                f"constraints.md {cid}: compatibility warning "
+                f"{compatibility_warning}; source={item.get('source_span')}")
 
         # 硬门: Evidence 字段必须指向存在的 E-xxx
         ev_ids = re.findall(r"E-\d+[a-z]*", ev_field)
@@ -3608,6 +3636,38 @@ def _selftest() -> int:
         "### PR-001 — WARN — second\n- Status: dismissed\n- DriverResolution: Reason: fixed\n",
         encoding="utf-8")
     pr_dup_e, _ = check_peer_review_ledger(d_pr_dup)
+    d_pr_compat = Path(tempfile.mkdtemp())
+    (d_pr_compat / "evidence.md").write_text(
+        "# Evidence Ledger\n", encoding="utf-8")
+    compat_hash = current_evidence_index_hash(d_pr_compat)
+    (d_pr_compat / "review.md").write_text(
+        "# Review\n"
+        "### PR-900 — historical prose outside ledger\n"
+        "## Review Finding Ledger\n"
+        f"- EvidenceIndexHash: {compat_hash}\n"
+        "### PR-901 — historical native title\n"
+        "- Status: dismissed\n- DriverResolution: Reason: legacy title\n",
+        encoding="utf-8",
+    )
+    pr_compat_e, pr_compat_w = check_peer_review_ledger(d_pr_compat)
+    d_pr_legacy_blocker = Path(tempfile.mkdtemp())
+    (d_pr_legacy_blocker / "review.md").write_text(
+        "# Review\n"
+        "### PR-902 — BLOCKER — legacy pending finding\n"
+        "- Status: pending\n- DriverResolution: pending\n",
+        encoding="utf-8",
+    )
+    pr_legacy_blocker_e, _ = check_peer_review_ledger(
+        d_pr_legacy_blocker)
+    (d_pr_legacy_blocker / "review.md").write_text(
+        "# Review\n"
+        "### PR-902 — BLOCKER — legacy pending finding\n"
+        "- Status: dismissed\n"
+        "- DriverResolution: Reason: historical false positive\n",
+        encoding="utf-8",
+    )
+    pr_legacy_resolved_e, _ = check_peer_review_ledger(
+        d_pr_legacy_blocker)
     checks += [
         ("peer_review ledger: pending BLOCKER hard fails",
          any("未处理 BLOCKER" in e and "PR-001" in e for e in pr_pending_e)),
@@ -3623,6 +3683,14 @@ def _selftest() -> int:
          not any("evidence_index 已变" in e for e in pr_refreshed_e)),
         ("peer_review ledger: duplicate PR ids hard fail",
          any("PR id 重复" in e for e in pr_dup_e)),
+        ("peer_review ledger: historical boundary/title shapes warn, not hard fail",
+         not pr_compat_e
+         and any("outside Review Finding Ledger" in w for w in pr_compat_w)
+         and any("missing severity" in w for w in pr_compat_w)),
+        ("peer_review ledger: legacy explicit BLOCKER stays hard gated",
+         any("未处理 BLOCKER" in e and "PR-902" in e
+             for e in pr_legacy_blocker_e)
+         and not pr_legacy_resolved_e),
     ]
 
     # --- Ultra-native agent-board conflict gate ---
@@ -4029,6 +4097,23 @@ def _selftest() -> int:
         ("replay preflight SystemExit becomes hard gate",
          any("replay 环境" in e and "PySocks" in e for e in replay_env_errors)),
     ]
+    d_constraint_parser = Path(tempfile.mkdtemp())
+    (d_constraint_parser / "constraints.md").write_text(
+        "# Constraints\n## C-001\n- Evidence: E-001\n", encoding="utf-8")
+    original_canonical_records = globals().get("_canonical_records")
+    try:
+        globals()["_canonical_records"] = None
+        unavailable_constraint_e, unavailable_constraint_w = (
+            check_constraints_ledger(d_constraint_parser)
+        )
+    finally:
+        globals()["_canonical_records"] = original_canonical_records
+    checks.append((
+        "constraints ledger: unavailable canonical parser fails closed",
+        any("canonical parser unavailable" in item
+            for item in unavailable_constraint_e)
+        and not unavailable_constraint_w,
+    ))
     d21 = Path(tempfile.mkdtemp())
     (d21 / "frontier.md").write_text(
         "# Frontier\n\n## Open Fronts\n\n"

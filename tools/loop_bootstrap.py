@@ -627,7 +627,7 @@ def main() -> int:
     ap.add_argument("--source", help="统一输入: existing run、http/https URL 或本地文件")
     ap.add_argument("--type", dest="source_type", default=None,
                     choices=sorted(setup_source.SUPPORTED_TYPES),
-                    help="source 路由类型；auto 按 run → URL → 内容识别")
+                    help="source 路由类型；auto 按 run → 现有本地文件 → URL → 内容识别")
     ap.add_argument("--ai", choices=sorted(setup_normalizer.AI_MODES), default="off",
                     help="candidate normalizer: off(默认) / local(需登记) / external(硬脱敏)")
     ap.add_argument("--ai-provider", default="", help="external normalizer provider identity")

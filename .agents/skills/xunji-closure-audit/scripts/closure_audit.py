@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -111,6 +112,75 @@ def check_selftest_registry(root: Path) -> list[str]:
     return not_registered
 
 
+def check_template_wiring(root: Path) -> list[str]:
+    owners = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in (
+            root / "tools" / "setup_run.py",
+            root / "docs" / "WORKFLOW-reference.md",
+            root / "tools" / "check_templates.py",
+        )
+        if path.is_file()
+    )
+    missing = [
+        path.relative_to(root).as_posix()
+        for path in sorted((root / "docs" / "templates" / "run").glob("*"))
+        if path.is_file() and path.name not in owners
+    ]
+    print(f"run_template_wiring total={len(list((root / 'docs/templates/run').glob('*')))} "
+          f"missing={len(missing)}")
+    return missing
+
+
+def check_schema_wiring(root: Path) -> list[str]:
+    source_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for base in ("tools", ".claude", "docs")
+        for path in sorted((root / base).rglob("*"))
+        if path.is_file() and path.suffix in {".py", ".md", ".json"}
+    )
+    missing: list[str] = []
+    schemas = sorted((root / "contracts").glob("*.schema.json"))
+    for path in schemas:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            missing.append(f"{path.name}:invalid-json")
+            continue
+        object_schemas = [
+            item for item in [value, *value.get("$defs", {}).values()]
+            if isinstance(item, dict) and item.get("type") == "object"
+        ]
+        if not object_schemas or any(
+                item.get("additionalProperties") is not False
+                for item in object_schemas):
+            missing.append(f"{path.name}:not-fail-closed")
+        if path.name not in source_text and path.name.removesuffix(
+                ".schema.json") not in source_text:
+            missing.append(f"{path.name}:no-validator-reference")
+    print(f"schema_wiring total={len(schemas)} missing={len(missing)}")
+    return missing
+
+
+def check_context_budgets(root: Path) -> list[str]:
+    contract_path = root / "contracts" / "context-budgets.v1.json"
+    if not contract_path.is_file():
+        return ["context budget contract missing"]
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    failures: list[str] = []
+    for relative, spec in contract.get("files", {}).items():
+        path = root / relative
+        if not path.is_file():
+            failures.append(f"{relative}:missing")
+            continue
+        if len(path.read_text(encoding="utf-8", errors="replace")) \
+                > int(spec.get("max_chars") or 0):
+            failures.append(f"{relative}:budget-exceeded")
+    print(f"context_budgets total={len(contract.get('files', {}))} "
+          f"missing={len(failures)}")
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Xunji static closure-audit checks.")
     parser.add_argument("--root", help="repository root; defaults to current directory")
@@ -123,6 +193,12 @@ def main(argv: list[str] | None = None) -> int:
         failures.append(f"MISSING_COMMAND {item}")
     for item in check_selftest_registry(root):
         failures.append(f"SELFTEST_NOT_REGISTERED {item}")
+    for item in check_template_wiring(root):
+        failures.append(f"TEMPLATE_NOT_WIRED {item}")
+    for item in check_schema_wiring(root):
+        failures.append(f"SCHEMA_NOT_WIRED {item}")
+    for item in check_context_budgets(root):
+        failures.append(f"CONTEXT_BUDGET {item}")
 
     if failures:
         for item in failures:

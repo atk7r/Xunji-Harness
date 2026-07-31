@@ -1,0 +1,36 @@
+{
+  "schema": "xunji.scheduler-ab-fixture.v1",
+  "description": "Recorded deterministic scheduler comparison; no live target data.",
+  "modes": {
+    "root_direct": {
+      "quality": 0.72,
+      "elapsed_sec": 12.0,
+      "coverage": 0.5,
+      "merge_cost": 0,
+      "requests": 2,
+      "tokens": 100
+    },
+    "serial_agent": {
+      "quality": 0.9,
+      "elapsed_sec": 9.0,
+      "coverage": 0.75,
+      "merge_cost": 1,
+      "requests": 2,
+      "tokens": 160
+    },
+    "parallel_agent": {
+      "quality": 0.9,
+      "elapsed_sec": 5.0,
+      "coverage": 0.8,
+      "merge_cost": 4,
+      "requests": 2,
+      "tokens": 230
+    }
+  },
+  "caps": {
+    "merge_cost": 2,
+    "requests": 3,
+    "tokens": 300
+  },
+  "expected_decision": "soft-recommendation-only"
+}

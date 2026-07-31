@@ -748,7 +748,9 @@ def _target_egress_denied_for_plan(run_dir: Path) -> bool:
     return value.get("target_egress_denied") is True
 
 
-def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
+def lane_suggestions(
+    run_dir: Path, limit: int | None = None, *, stage: str = "S2",
+) -> list[dict]:
     """Expand ranked fronts into effect-typed Root/Hunter/Reviewer lanes.
 
     This remains an advisory planner: it does not commit ``work_plan.json``,
@@ -757,6 +759,9 @@ def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
     proposal; Root may reshape that seed before the proposal owner validates and
     atomically commits it.
     """
+    stage = str(stage or "").upper()
+    if stage not in {"S1", "S2", "S3"}:
+        raise ValueError("STAGE_POLICY_STAGE_INVALID")
     ranked = [row for row in suggest(run_dir) if row["score"] >= 3]
     # A fully reviewable front currently expands to six lanes.  Keep one work
     # plan within the frozen 16-lane contract; later fronts are handled by a
@@ -809,6 +814,23 @@ def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
                 "work_plan_lane": lane,
             })
 
+        if stage == "S3":
+            add_lane(
+                lane_id=verify_id, role="verify", effect="local_verify",
+                dependencies=[],
+                expected_evidence=(
+                    "closure-gate, report/evidence parity, and lifecycle-debt adjudication"),
+                request_cost=0, request_budget=0, merge_cost=10,
+            )
+            add_lane(
+                lane_id=verify_review_id, role="review", effect="local_verify",
+                dependencies=[verify_id],
+                expected_evidence=(
+                    "independent disposition for the frozen S3 closure bundle"),
+                request_cost=0, request_budget=0, merge_cost=5,
+            )
+            continue
+
         add_lane(
             lane_id=offline_id, role="web-hunter", effect="local_read",
             dependencies=[],
@@ -821,6 +843,8 @@ def lane_suggestions(run_dir: Path, limit: int | None = None) -> list[dict]:
             expected_evidence="review disposition for the frozen offline merge draft",
             request_cost=0, request_budget=0, merge_cost=5,
         )
+        if stage == "S1":
+            continue
         predecessor = offline_review_id
         if assets and not target_egress_denied:
             add_lane(
@@ -877,7 +901,9 @@ def _plan_proposal_basis(run_dir: Path) -> dict:
     }
 
 
-def write_plan_proposal(run_dir: Path, lanes: list[dict]) -> dict:
+def write_plan_proposal(
+    run_dir: Path, lanes: list[dict], *, stage: str | None = None,
+) -> dict:
     """Write a replaceable, non-authorizing seed for Root strategy edits."""
     ready = [lane for lane in lanes if not lane.get("dependencies")]
     topology_mode = (
@@ -890,7 +916,7 @@ def write_plan_proposal(run_dir: Path, lanes: list[dict]) -> dict:
     proposal = {
         "schema": PLAN_PROPOSAL_SCHEMA,
         "basis": _plan_proposal_basis(run_dir),
-        "macro_stage": None,
+        "macro_stage": stage,
         "objective": "",
         "execution_mode": topology_mode,
         "delegation_reason": "",
@@ -3567,7 +3593,7 @@ def print_suggest(run_dir: Path, limit: int | None = None) -> int:
     return 0
 
 
-def print_plan(run_dir: Path, limit: int) -> int:
+def print_plan(run_dir: Path, limit: int, *, stage: str | None = None) -> int:
     rows = [r for r in suggest(run_dir) if r["score"] >= 3]
     if not rows:
         print(
@@ -3577,7 +3603,8 @@ def print_plan(run_dir: Path, limit: int) -> int:
         )
         return 1
     selected = rows[:min(limit, 2)]
-    lanes = lane_suggestions(run_dir, limit=limit)
+    selected_stage = str(stage or "S2").upper()
+    lanes = lane_suggestions(run_dir, limit=limit, stage=selected_stage)
     notes = _breadth_signals(rows)
     print(f"[workers plan] generated seed only ({'; '.join(notes)})")
     if _target_egress_denied_for_plan(run_dir):
@@ -3594,16 +3621,19 @@ def print_plan(run_dir: Path, limit: int) -> int:
         )
         print(f"Selected {len(selected)} of {len(rows)} strong candidate(s) due to {reason}.")
     proposal_info = write_plan_proposal(
-        run_dir, [row["work_plan_lane"] for row in lanes])
+        run_dir, [row["work_plan_lane"] for row in lanes], stage=stage)
     print(
         f"MODEL_PROPOSAL: {display_path(proposal_info['path'])} is a derived, "
         "non-authorizing seed bound to this turn/input. Root may replace, omit, "
         "or add typed execution/Reviewer pairs (maximum 16 lanes) before "
         "workers.py commit-proposal."
     )
+    missing = "objective, delegation_reason, and exit_gate"
+    if stage is None:
+        missing = "macro_stage, " + missing
     print(
-        "Root must fill macro_stage, objective, delegation_reason, and exit_gate; "
-        "keep basis unchanged. Lanes are strategy, not an indivisible planner mandate."
+        f"Root must fill {missing}; keep basis unchanged. Lanes are strategy, "
+        "not an indivisible planner mandate."
     )
     print("Only the validated transaction commit authorizes delegation; this seed creates no facts, Agents, or receipts.\n")
     for row in lanes:
@@ -3728,7 +3758,10 @@ def print_commit_plan(
     exit_gate: str, limit: int, replan_reason: str = "",
 ) -> int:
     """Compatibility path: commit the conservative generated seed directly."""
-    lanes = [row["work_plan_lane"] for row in lane_suggestions(run_dir, limit=limit)]
+    lanes = [
+        row["work_plan_lane"]
+        for row in lane_suggestions(run_dir, limit=limit, stage=stage)
+    ]
     if not lanes:
         print(
             "[workers commit-plan] NO_STRONG_CANDIDATE: update canonical "
@@ -5061,6 +5094,8 @@ def _selftest() -> int:
         encoding="utf-8")
     rows = suggest(run)
     planned_lanes = lane_suggestions(run, limit=1)
+    s1_planned_lanes = lane_suggestions(run, limit=2, stage="S1")
+    s3_planned_lanes = lane_suggestions(run, limit=2, stage="S3")
     offline_plan_run = d / "offline-plan"
     (offline_plan_run / "state").mkdir(parents=True)
     for name in ("coverage.json", "frontier.md"):
@@ -6668,15 +6703,15 @@ def _selftest() -> int:
     generated_plan_lanes = [row["work_plan_lane"] for row in generated_plan_rows]
     planner_commit_output = io.StringIO()
     with contextlib.redirect_stdout(planner_commit_output):
-        planner_commit_exit = print_commit_plan(
-            planned_run,
-            stage="S2",
-            objective="exercise serial review closure",
-            mode="SERIAL_AGENT",
-            reason="one Hunter then its dependent Reviewer",
-            exit_gate="review receipt precedes Root merge",
-            limit=1,
-        )
+        planner_commit_exit = main([
+            "commit-plan", str(planned_run),
+            "--stage", "S2",
+            "--objective", "exercise serial review closure",
+            "--mode", "SERIAL_AGENT",
+            "--reason", "one Hunter then its dependent Reviewer",
+            "--exit-gate", "review receipt precedes Root merge",
+            "--limit", "1",
+        ])
     planned_plan = _work_plan.load_plan(planned_run)
     planned_hunter_batch = delegate_ready_lanes(
         planned_run, runtime_slots=1, request_budget=10,
@@ -7703,6 +7738,20 @@ def _selftest() -> int:
             == {"inputs_digest", "turn_binding"}
          and len(planner_seed_proposal.get("lanes") or []) == 12
          and bool(re.fullmatch(r"[0-9a-f]{64}", planner_seed_digest))),
+        ("S1 planner keeps target work behind the collection-stage boundary",
+         [row["work_plan_lane"]["effect"] for row in s1_planned_lanes]
+         == ["local_read", "local_verify", "local_read", "local_verify"]
+         and sum(
+             not row["work_plan_lane"]["dependencies"]
+             for row in s1_planned_lanes
+         ) == 2),
+        ("S3 planner emits closure verification and dependent review only",
+         [row["work_plan_lane"]["role"] for row in s3_planned_lanes]
+         == ["verify", "review", "verify", "review"]
+         and all(
+             row["work_plan_lane"]["effect"] == "local_verify"
+             for row in s3_planned_lanes
+         )),
         ("offline operator constraint removes target lanes at planner source",
          offline_plan_exit == 0
          and [row["work_plan_lane"]["effect"] for row in offline_planned_lanes]
@@ -8226,6 +8275,13 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("run_dir", type=Path)
         if cmd in {"suggest", "plan"}:
             ap.add_argument("--limit", type=int, default=(3 if cmd == "plan" else None))
+        if cmd == "plan":
+            ap.add_argument(
+                "--stage", choices=["S1", "S2", "S3"],
+                help=(
+                    "seed the selected stage profile; omitted leaves macro_stage "
+                    "for Root to choose and preserves the conservative S2 lane shape"),
+            )
         args = ap.parse_args(argv)
         run_dir = resolve_run_dir(args.run_dir)
         if not run_dir.exists():
@@ -8282,7 +8338,7 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "suggest":
             return print_suggest(run_dir, args.limit)
         if cmd == "plan":
-            return print_plan(run_dir, args.limit)
+            return print_plan(run_dir, args.limit, stage=args.stage)
         if cmd == "merge-check":
             return print_merge_check(run_dir)
         if cmd == "conflicts":
