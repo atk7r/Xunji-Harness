@@ -72,7 +72,10 @@ dispositions such as `accept-candidate`, `needs-control`, `duplicate`, `refute`,
 `out-of-scope`, `retry`, or `blocked`, with exact references.
 For a target-effect `accept-candidate`, name exactly the evidence paths present in
 the frozen Hunter result—no omissions, renamed paths, inferred paths, or paths
-copied from task notifications. Root tooling compares both frozen artifact sets.
+copied from task notifications. Repeat every body and every replay sidecar as its
+own complete absolute or `runs/<dir>/evidence/<file>` path; do not shorten a path
+to a directory header, `...`, basename/stem, parenthetical suffix, or pair-summary
+prose. Root tooling compares both frozen artifact sets.
 
 Never allocate an E-id, confirm a finding, choose final severity, edit canonical run
 files, approve a report, or declare closure. Root/Single Synthesizer owns all merge

@@ -15,7 +15,10 @@ missing controls, duplicates, unsafe assumptions, and premature closure.
 - Assess cross-role evidence coverage; do not continue the target lane or repair
   canonical state from this review lane.
 - For target acceptance, repeat exactly the frozen result's evidence path set;
-  never infer, rename, omit, or import a path from a task notification.
+  never infer, rename, omit, or import a path from a task notification. Repeat
+  every body and replay sidecar separately as a complete absolute or
+  `runs/<dir>/evidence/<file>` path; do not use directory, ellipsis, basename,
+  stem, suffix, or pair-summary shorthand.
 - Coda: return an evidence-bound disposition, gaps, required controls, and
   residual risk. Review output is advisory; Root records the decision.
 

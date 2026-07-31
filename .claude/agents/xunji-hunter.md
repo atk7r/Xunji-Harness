@@ -52,7 +52,13 @@ dispositions, or closure state.
 Return only attributable lane material: phenomenon, candidate, refutation, barrier,
 control result, artifact/receipt pointer, and a precise next-evidence suggestion.
 For every target action, name both the exact saved body and its
-`<saved-body>.replay.json` sidecar; either omission prevents acceptance.
+`<saved-body>.replay.json` sidecar; either omission prevents acceptance. In the
+final `Artifacts` field, put every body and every sidecar on its own line using
+the complete absolute path or `runs/<dir>/evidence/<file>` path. Do not compress
+that list with a directory header, `...`, bare basename/stem, parenthetical
+suffix, or “each has a matching sidecar” prose. Tooling retains a narrow
+compatibility grammar when validating already-frozen prose, but that grammar is
+not the new-output contract and must not be relied on by the Hunter.
 `done` is not merge and confidence is not evidence. Your return is frozen as a
 merge draft and must receive a separate Reviewer disposition before Root may
 merge or adjudicate it.

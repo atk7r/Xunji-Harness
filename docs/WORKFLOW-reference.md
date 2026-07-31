@@ -866,7 +866,18 @@ another executable protocol.
   also freezes deterministic
   artifact validation: Hunter and Reviewer must name the identical run-local set;
   absolute paths emitted by Claude Read and `runs/<dir>/evidence/...` paths normalize
-  to the same run-local identity before containment checks;
+  to the same run-local identity before containment checks. New returns list every
+  saved body and replay sidecar separately with one complete path. A narrow
+  compatibility grammar for frozen prose also normalizes an exact run evidence
+  directory plus safe basenames, an explicitly elided `.../evidence/<file>` only
+  after an exact current-run binding, and
+  affirmative explicit replay-pair shorthand; Reviewer stem shorthand must be a
+  backticked token and resolves only when it uniquely names an item already present
+  in the normalized Hunter set. The normalization never searches the run, infers
+  a sidecar without an affirmative pair declaration, treats a negated/excluded/
+  absent artifact line as affirmative, mistakes a negation word inside a path or
+  benign `no issues` annotation for an artifact exclusion, accepts
+  traversal outside `evidence/`, or relaxes exact set equality;
   every file must exist. Replay v2 validates full wire length/hash separately
   from the capped saved-body length/hash; `truncated=true` is honest partial
   storage, not a full-body mismatch or an integrity bypass. A complete chunk

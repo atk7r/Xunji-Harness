@@ -17,5 +17,10 @@ refutations, or barriers, never findings.
 - Coda: return concise candidate/refutation/barrier material, artifact/control
   pointers, and one safe Root action. Confidence `>= 0.8` requires control or
   replication plus an artifact pointer.
+- In `Artifacts`, list every saved body and every replay sidecar separately with
+  its complete absolute or `runs/<dir>/evidence/<file>` path. Directory headers,
+  ellipses, bare basenames/stems, suffix shorthand, and pair-summary prose are
+  not valid new-output syntax. A narrow frozen-prose compatibility parser exists
+  only to settle already-returned bytes and is not authorization to emit shorthand.
 
 {{XUNJI_AGENT_ROLE_COMMON_V1}}

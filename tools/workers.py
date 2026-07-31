@@ -2520,6 +2520,60 @@ _EVIDENCE_REF_RE = re.compile(
     r"[A-Za-z0-9._/-]+)"
 )
 
+_FROZEN_ARTIFACT_HEADING_RE = re.compile(
+    r"(?:\bArtifacts?\b|\bEvidence paths?\b|\bArtifact/receipt pointers?\b|"
+    r"\bExact evidence path set\b)",
+    re.I,
+)
+_FROZEN_ARTIFACT_FIELD_RE = re.compile(r"^\s*\*\*[^*\n]{1,120}:\*\*", re.I)
+_ELIDED_EVIDENCE_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9._/-])\.\.\./(evidence/[A-Za-z0-9][A-Za-z0-9._/-]*)"
+)
+_ARTIFACT_NEGATION_RE = re.compile(
+    r"(?:\b(?:did|does?|was|were|is|are|has|have|had|could|would)\s+"
+    r"not\s+(?:been\s+)?(?:review(?:ed)?|save(?:d)?|include(?:d)?|"
+    r"list(?:ed)?|present|available|generate(?:d)?|find|found|verify|"
+    r"verified|capture(?:d)?|produce(?:d)?)\b|"
+    r"\bnot\s+(?:review(?:ed)?|save(?:d)?|include(?:d)?|list(?:ed)?|"
+    r"present|available|generate(?:d)?|find|found|verify|verified|"
+    r"capture(?:d)?|produce(?:d)?)\b|"
+    r"\b(?:excluded?|omitted|missing|absent|unavailable)\b|"
+    r"\b(?:lacks?|omits?)\b|"
+    r"\bwithout\s+(?:an?\s+)?(?:artifact|evidence|path|file|sidecar|"
+    r"pair|body|replay|reference)s?\b|"
+    r"\bno\s+(?:artifact|evidence|path|file|sidecar|pair|body|replay|"
+    r"reference)s?\b|(?:^|[?;:.])\s*(?:no\s*[,;:]|none\b))",
+    re.I,
+)
+
+
+def _artifact_line_is_negated(line: str) -> bool:
+    """Detect negative artifact semantics without treating path words as prose."""
+    prose = re.sub(r"`[^`\r\n]*`", " ", line)
+    prose = _EVIDENCE_REF_RE.sub(" ", prose)
+    prose = _ELIDED_EVIDENCE_REF_RE.sub(" ", prose)
+    prose = re.sub(
+        r"(?<![A-Za-z0-9._/-])[A-Za-z0-9][A-Za-z0-9._-]*\."
+        r"[A-Za-z0-9._-]+(?![A-Za-z0-9._/-])",
+        " ",
+        prose,
+    )
+    return bool(_ARTIFACT_NEGATION_RE.search(prose))
+
+
+def _normalize_evidence_reference(run_dir: Path, raw: str) -> tuple[str, Path]:
+    """Normalize one bounded evidence reference and enforce evidence containment."""
+    prefix = f"runs/{run_dir.name}/"
+    relative = raw[len(prefix):] if raw.startswith(prefix) else raw
+    if not relative.startswith("evidence/"):
+        raise ValueError(f"invalid run-local evidence reference: {raw}")
+    candidate = (run_dir / relative).resolve()
+    try:
+        candidate.relative_to((run_dir / "evidence").resolve())
+    except ValueError as exc:
+        raise ValueError(f"evidence reference escapes run: {raw}") from exc
+    return relative, candidate
+
 
 def _evidence_references(run_dir: Path, text: str) -> dict[str, Path]:
     """Return normalized run-local evidence references from one frozen result."""
@@ -2535,15 +2589,190 @@ def _evidence_references(run_dir: Path, text: str) -> dict[str, Path]:
         text = text.replace(absolute_prefix, prefix)
     for match in _EVIDENCE_REF_RE.finditer(text):
         raw = match.group(1).rstrip(".,);]}")
-        relative = raw[len(prefix):] if raw.startswith(prefix) else raw
-        if not relative.startswith("evidence/"):
-            continue
-        candidate = (run_dir / relative).resolve()
-        try:
-            candidate.relative_to(run_dir.resolve())
-        except ValueError as exc:
-            raise ValueError(f"evidence reference escapes run: {raw}") from exc
+        relative, candidate = _normalize_evidence_reference(run_dir, raw)
         references[relative] = candidate
+    return references
+
+
+def _frozen_artifact_references(
+    run_dir: Path, text: str, *, expected: set[str] | None = None,
+) -> dict[str, Path]:
+    """Parse exact references plus narrow compatibility shorthand from frozen prose.
+
+    New Agent output must use one exact absolute or run-relative path per body
+    and replay sidecar.  Frozen results can contain three deterministic prose
+    compressions retained for compatibility: an exact ``Under
+    <run>/evidence/`` directory followed by safe basenames,
+    ``.../evidence/<name>`` after an exact run binding, and an affirmative,
+    explicit ``.replay.json`` pair declaration.  Recover only those shapes
+    inside an artifact declaration.  Reviewer-only stem shorthand must be a
+    backticked token, is resolved solely against the already parsed target set,
+    and must be unique.
+    """
+    references: dict[str, Path] = {}
+    prefix = f"runs/{run_dir.name}/"
+    resolved_prefix = str(run_dir.resolve()).rstrip("/") + "/"
+    absolute_prefix = str(run_dir.absolute()).rstrip("/") + "/"
+    normalized = text.replace(resolved_prefix, prefix)
+    if absolute_prefix != resolved_prefix:
+        normalized = normalized.replace(absolute_prefix, prefix)
+
+    expected_set = set(expected or set())
+    expected_aliases: dict[str, set[str]] = {}
+    for ref in expected_set:
+        name = Path(ref).name
+        aliases = {name}
+        if not ref.endswith(".replay.json"):
+            aliases.add(Path(name).stem)
+        for alias in aliases:
+            if alias and alias not in {".replay.json", "replay.json"}:
+                expected_aliases.setdefault(alias, set()).add(ref)
+
+    def add(raw: str) -> str:
+        relative, candidate = _normalize_evidence_reference(run_dir, raw)
+        references[relative] = candidate
+        return relative
+
+    in_artifacts = False
+    directory_anchor = False
+    run_bound = False
+    block_refs: set[str] = set()
+    pair_inference_used = False
+    block_has_content = False
+    for line in normalized.splitlines():
+        heading = bool(
+            _FROZEN_ARTIFACT_HEADING_RE.search(line)
+            and re.match(
+                r"(?i)^\s*(?:#{1,6}\s+|\*\*|Artifacts?\b|Evidence paths?\b|"
+                r"Artifact/receipt pointers?\b|Exact evidence path set\b)",
+                line,
+            )
+        )
+        if heading:
+            in_artifacts = True
+            directory_anchor = False
+            run_bound = False
+            block_refs = set()
+            pair_inference_used = False
+            block_has_content = False
+        elif in_artifacts and not line.strip():
+            if not block_has_content:
+                continue
+            in_artifacts = False
+            directory_anchor = False
+            run_bound = False
+            block_refs = set()
+            pair_inference_used = False
+            block_has_content = False
+            continue
+        elif in_artifacts and (
+            re.match(r"^\s*#{1,6}\s+", line)
+            or _FROZEN_ARTIFACT_FIELD_RE.match(line)
+        ):
+            in_artifacts = False
+            directory_anchor = False
+            run_bound = False
+            block_refs = set()
+            pair_inference_used = False
+            block_has_content = False
+        if not in_artifacts:
+            continue
+
+        # A frozen artifact set is an affirmative declaration.  A line that
+        # negates, excludes, or marks a path absent cannot contribute exact or
+        # compatibility references.  If it contradicts a preceding global pair
+        # shorthand in the same block, reject the block instead of keeping the
+        # earlier inference.
+        if _artifact_line_is_negated(line):
+            if pair_inference_used:
+                raise ValueError(
+                    "contradictory frozen artifact pair declaration")
+            continue
+
+        if re.search(
+            rf"(?i)^\s*Under\s+`?{re.escape(prefix)}evidence/`?\s*:\s*$",
+            line,
+        ):
+            directory_anchor = True
+            run_bound = True
+            block_has_content = True
+            continue
+
+        line_refs = set(_evidence_references(run_dir, line))
+        if line_refs:
+            run_bound = True
+        declaration_line = bool(
+            heading or re.match(r"^\s*(?:[-*]|\d+[.)])\s+", line)
+        )
+        elided_matches = list(_ELIDED_EVIDENCE_REF_RE.finditer(line))
+        if elided_matches and not declaration_line:
+            raise ValueError(
+                "elided frozen evidence reference is not a list declaration")
+        if elided_matches and not run_bound:
+            raise ValueError(
+                "elided frozen evidence reference lacks exact run binding")
+        for match in elided_matches:
+            line_refs.add(add(match.group(1).rstrip(".,);]}")))
+
+        if directory_anchor and declaration_line:
+            for token in re.findall(r"`([^`\r\n]+)`", line):
+                token = token.strip()
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", token) \
+                        and "." in token:
+                    line_refs.add(add(f"evidence/{token}"))
+
+        if expected_aliases and declaration_line:
+            quoted_tokens = {
+                token.strip() for token in re.findall(r"`([^`\r\n]+)`", line)
+            }
+            for alias, matches in expected_aliases.items():
+                if alias not in quoted_tokens:
+                    continue
+                if len(matches) != 1:
+                    raise ValueError(
+                        f"ambiguous frozen Reviewer evidence shorthand: {alias}")
+                line_refs.add(add(next(iter(matches))))
+
+        pair_declared = bool(
+            re.search(
+                r"(?i)(?:\+\s*`?[A-Za-z0-9._-]*\.replay\.json`?|"
+                r"\(\s*(?:\+\s*)?`?[A-Za-z0-9._-]*\.replay\.json`?\s*\))",
+                line,
+            )
+            or re.search(
+                r"(?i)\ball\s+\d+\s+pairs?\s+(?:exist|present|match)",
+                line,
+            )
+        )
+        pair_shorthand = bool(line_refs) and pair_declared
+        if pair_shorthand:
+            pair_inference_used = True
+            for ref in list(line_refs):
+                if ref.endswith(".replay.json"):
+                    continue
+                sidecar = ref + ".replay.json"
+                if not expected_set or sidecar in expected_set:
+                    line_refs.add(add(sidecar))
+
+        references.update(
+            (ref, _normalize_evidence_reference(run_dir, ref)[1])
+            for ref in line_refs
+        )
+        block_refs.update(line_refs)
+        if line_refs:
+            block_has_content = True
+
+        if re.fullmatch(
+            r"(?i)\s*(?:[-*]\s*)?Each\s+has\s+a\s+matching\s+"
+            r"`?\.replay\.json`?\s+sidecar\s+in\s+the\s+same\s+"
+            r"directory[.!]?\s*",
+            line,
+        ):
+            pair_inference_used = True
+            block_has_content = True
+            for ref in list(block_refs):
+                if not ref.endswith(".replay.json"):
+                    block_refs.add(add(ref + ".replay.json"))
     return references
 
 
@@ -2673,8 +2902,9 @@ def _validated_review_artifacts(run_dir: Path, *, target_row: dict,
     """
     if disposition != "accept-candidate" or str(target_row.get("effect") or "") != "target":
         return []
-    target_refs = _evidence_references(run_dir, target_text)
-    reviewer_refs = _evidence_references(run_dir, reviewer_text)
+    target_refs = _frozen_artifact_references(run_dir, target_text)
+    reviewer_refs = _frozen_artifact_references(
+        run_dir, reviewer_text, expected=set(target_refs))
     if not target_refs:
         raise ValueError(
             "target accept-candidate requires exact absolute or run-relative "
@@ -4856,6 +5086,239 @@ def _selftest() -> int:
         reviewer_text=frozen_artifact_text,
         disposition="accept-candidate",
     )
+    root_body = artifact_review_run / "evidence" / "root.html"
+    legacy_under_target = (
+        "## Artifacts (saved body + replay pairs)\n"
+        f"Under `{artifact_review_run.resolve()}/evidence/`:\n"
+        "1. `root.html` + `.replay.json`\n"
+        "2. `health.json` + `.replay.json`\n"
+    )
+    legacy_under_reviewer = (
+        "**Evidence paths in the frozen result (all 2 pairs exist and match):** "
+        f"`{root_body.resolve()}(.replay.json)`, `health`.\n"
+    )
+    legacy_under_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=legacy_under_target,
+        reviewer_text=legacy_under_reviewer,
+        disposition="accept-candidate",
+    )
+    legacy_elided_target = (
+        "**Artifacts (each with saved body + `.replay.json` sidecar):**\n"
+        f"- `{root_body.resolve()}` + `root.html.replay.json`\n"
+        "- `.../evidence/health.json` + `.replay.json`\n"
+    )
+    legacy_elided_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=legacy_elided_target,
+        reviewer_text=frozen_artifact_text,
+        disposition="accept-candidate",
+    )
+    legacy_pair_statement_target = (
+        "**Artifacts (body + replay pairs):**\n"
+        f"- {root_body.resolve()}\n"
+        f"- {(artifact_review_run / 'evidence' / 'health.json').resolve()}\n"
+        "Each has a matching `.replay.json` sidecar in the same directory.\n"
+    )
+    legacy_pair_statement_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=legacy_pair_statement_target,
+        reviewer_text=frozen_artifact_text,
+        disposition="accept-candidate",
+    )
+    implicit_sidecar_without_claim_rejected = False
+    bodies_only_text = (
+        "Artifacts:\n"
+        f"- {root_body.resolve()}\n"
+        f"- {(artifact_review_run / 'evidence' / 'health.json').resolve()}\n"
+    )
+    try:
+        _validated_review_artifacts(
+            artifact_review_run,
+            target_row={"effect": "target"},
+            target_text=bodies_only_text,
+            reviewer_text=bodies_only_text,
+            disposition="accept-candidate",
+        )
+    except ValueError as exc:
+        implicit_sidecar_without_claim_rejected = "at least one replay sidecar" in str(exc)
+    negated_sidecar_claim_rejected = False
+    try:
+        _validated_review_artifacts(
+            artifact_review_run,
+            target_row={"effect": "target"},
+            target_text=(bodies_only_text
+                         + "No `.replay.json` pair was generated for these bodies.\n"),
+            reviewer_text=bodies_only_text,
+            disposition="accept-candidate",
+        )
+    except ValueError as exc:
+        negated_sidecar_claim_rejected = "at least one replay sidecar" in str(exc)
+    negated_global_pair_claim_rejected = False
+    try:
+        _validated_review_artifacts(
+            artifact_review_run,
+            target_row={"effect": "target"},
+            target_text=(
+                bodies_only_text
+                + "Each has a matching `.replay.json` sidecar? No; none exists "
+                  "in the same directory.\n"
+            ),
+            reviewer_text=bodies_only_text,
+            disposition="accept-candidate",
+        )
+    except ValueError as exc:
+        negated_global_pair_claim_rejected = "at least one replay sidecar" in str(exc)
+    non_evidence_run_path_ignored = not _evidence_references(
+        artifact_review_run,
+        f"runs/{artifact_review_run.name}/frontier.md",
+    )
+    ambiguous_reviewer_stem_rejected = False
+    try:
+        _frozen_artifact_references(
+            artifact_review_run,
+            "**Evidence paths:** `config`\n",
+            expected={"evidence/config.json", "evidence/config.txt"},
+        )
+    except ValueError as exc:
+        ambiguous_reviewer_stem_rejected = "ambiguous" in str(exc)
+    coincidental_reviewer_prose_rejected = False
+    try:
+        _validated_review_artifacts(
+            artifact_review_run,
+            target_row={"effect": "target"},
+            target_text=frozen_artifact_text,
+            reviewer_text=(
+                "**Evidence paths:**\n"
+                f"- {root_body.resolve()}\n"
+                f"- {(root_body.parent / 'root.html.replay.json').resolve()}\n"
+                "The health observation was reviewed, but no path is listed.\n"
+            ),
+            disposition="accept-candidate",
+        )
+    except ValueError as exc:
+        coincidental_reviewer_prose_rejected = "evidence set mismatch" in str(exc)
+    expected_artifact_set = {
+        f"evidence/{path.name}" for path in artifact_paths
+    }
+    negated_stem_refs = _frozen_artifact_references(
+        artifact_review_run,
+        "**Evidence paths:**\n"
+        f"- {root_body.resolve()}\n"
+        f"- {(root_body.parent / 'root.html.replay.json').resolve()}\n"
+        "- Did not review `health` or `health.json.replay.json`.\n",
+        expected=expected_artifact_set,
+    )
+    negated_reviewer_stem_ignored = set(negated_stem_refs) == {
+        "evidence/root.html", "evidence/root.html.replay.json",
+    }
+    negated_elided_refs = _frozen_artifact_references(
+        artifact_review_run,
+        "**Artifacts:**\n"
+        f"- {root_body.resolve()}\n"
+        "- Excluded `.../evidence/health.json` and its replay sidecar.\n",
+    )
+    negated_elided_ref_ignored = set(negated_elided_refs) == {
+        "evidence/root.html",
+    }
+    negated_directory_refs = _frozen_artifact_references(
+        artifact_review_run,
+        "**Artifacts:**\n"
+        f"Under `{artifact_review_run.resolve()}/evidence/`:\n"
+        "- `health.json` was not saved.\n",
+    )
+    negated_directory_basename_ignored = not negated_directory_refs
+    filename_negation_word_preserved = set(_frozen_artifact_references(
+        artifact_review_run,
+        "Artifacts:\n"
+        f"- {artifact_review_run.resolve()}/evidence/not-found.html\n",
+    )) == {"evidence/not-found.html"}
+    benign_no_issues_annotation_preserved = set(_frozen_artifact_references(
+        artifact_review_run,
+        "Artifacts:\n"
+        f"- {root_body.resolve()} — no issues\n",
+    )) == {"evidence/root.html"}
+    positive_prose_stem_ignored = set(_frozen_artifact_references(
+        artifact_review_run,
+        "**Evidence paths:**\n"
+        f"- {root_body.resolve()}\n"
+        "The `health` observation is discussed below.\n",
+        expected=expected_artifact_set,
+    )) == {"evidence/root.html"}
+    unbound_elided_ref_rejected = False
+    try:
+        _frozen_artifact_references(
+            artifact_review_run,
+            "**Artifacts:**\n- `.../evidence/health.json`\n",
+        )
+    except ValueError as exc:
+        unbound_elided_ref_rejected = "lacks exact run binding" in str(exc)
+    contradictory_global_pair_rejected = False
+    try:
+        _frozen_artifact_references(
+            artifact_review_run,
+            legacy_pair_statement_target
+            + "No, those pairs are absent.\n",
+        )
+    except ValueError as exc:
+        contradictory_global_pair_rejected = "contradictory" in str(exc)
+    contradictory_line_pair_rejected = False
+    try:
+        _frozen_artifact_references(
+            artifact_review_run,
+            "Artifacts:\n"
+            f"- {root_body.resolve()} + `.replay.json`\n"
+            "No path was saved for the health observation.\n",
+        )
+    except ValueError as exc:
+        contradictory_line_pair_rejected = "contradictory" in str(exc)
+    post_block_negative_prose_ignored = len(_frozen_artifact_references(
+        artifact_review_run,
+        legacy_pair_statement_target
+        + "\nNo artifacts exist for separately failed probes.\n",
+    )) == 4
+    missing_body = artifact_review_run / "evidence" / "orphan-sidecar.html"
+    missing_body.write_bytes(b"missing sidecar\n")
+    missing_sidecar_text = (
+        "Artifacts:\n"
+        f"- {missing_body.resolve()} + `.replay.json`\n"
+    )
+    declared_missing_sidecar_rejected = False
+    try:
+        _validated_review_artifacts(
+            artifact_review_run,
+            target_row={"effect": "target"},
+            target_text=missing_sidecar_text,
+            reviewer_text=missing_sidecar_text,
+            disposition="accept-candidate",
+        )
+    except ValueError as exc:
+        declared_missing_sidecar_rejected = "missing evidence" in str(exc)
+    cross_run_reference_rejected = False
+    try:
+        _frozen_artifact_references(
+            artifact_review_run,
+            "Artifacts:\n- runs/another-run/evidence/root.html\n",
+        )
+    except ValueError as exc:
+        cross_run_reference_rejected = "invalid run-local" in str(exc)
+    non_artifact_stale_ignored = len(_validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=(frozen_artifact_text
+                     + "## Exclusions\n- evidence/stale-probe.html\n"),
+        reviewer_text=(frozen_artifact_text
+                       + "## Exclusions\n- evidence/stale-probe.html\n"),
+        disposition="accept-candidate",
+    )) == 4
+    evidence_escape_rejected = False
+    try:
+        _evidence_references(artifact_review_run, "evidence/../outside.txt")
+    except ValueError as exc:
+        evidence_escape_rejected = "escapes run" in str(exc)
     partial_wire = b"prefix-" + b"x" * 64
     partial_saved = partial_wire[:16]
     partial_body = artifact_review_run / "evidence" / "partial.html"
@@ -7582,6 +8045,58 @@ def _selftest() -> int:
          len(validated_artifact_receipts) == 4
          and sum(item.get("response", {}).get("status") == 200
                  for item in validated_artifact_receipts) == 2),
+        ("legacy exact-directory plus basename artifact pairs normalize narrowly",
+         len(legacy_under_receipts) == 4
+         and sum(item["path"].endswith(".replay.json")
+                 for item in legacy_under_receipts) == 2),
+        ("legacy elided evidence paths normalize after an exact run binding",
+         len(legacy_elided_receipts) == 4
+         and sum(item["path"].endswith(".replay.json")
+                 for item in legacy_elided_receipts) == 2),
+        ("legacy explicit same-directory replay pair statement normalizes",
+         len(legacy_pair_statement_receipts) == 4
+         and sum(item["path"].endswith(".replay.json")
+                 for item in legacy_pair_statement_receipts) == 2),
+        ("artifact parser does not invent replay sidecars without an explicit claim",
+         implicit_sidecar_without_claim_rejected),
+        ("artifact parser does not treat a negated replay mention as a pair claim",
+         negated_sidecar_claim_rejected),
+        ("global same-directory shorthand also rejects a negated pair claim",
+         negated_global_pair_claim_rejected),
+        ("run-local prose outside evidence is ignored by the evidence grammar",
+         non_evidence_run_path_ignored),
+        ("ambiguous backticked Reviewer stems fail closed",
+         ambiguous_reviewer_stem_rejected),
+        ("ordinary Reviewer prose cannot stand in for an omitted evidence path",
+         coincidental_reviewer_prose_rejected),
+        ("negated backticked Reviewer stems do not complete an artifact set",
+         negated_reviewer_stem_ignored),
+        ("negated elided references do not contribute artifacts",
+         negated_elided_ref_ignored),
+        ("negated directory-anchor basenames do not contribute artifacts",
+         negated_directory_basename_ignored),
+        ("negation-looking words inside evidence filenames remain path data",
+         filename_negation_word_preserved),
+        ("benign no-issues annotations do not erase affirmative exact paths",
+         benign_no_issues_annotation_preserved),
+        ("positive prose outside a list item cannot resolve Reviewer stems",
+         positive_prose_stem_ignored),
+        ("elided references require a prior exact current-run binding",
+         unbound_elided_ref_rejected),
+        ("a later negation rejects a preceding global replay-pair shorthand",
+         contradictory_global_pair_rejected),
+        ("a later negation rejects preceding per-line replay-pair shorthand",
+         contradictory_line_pair_rejected),
+        ("negative prose after a blank-line block boundary is not artifact syntax",
+         post_block_negative_prose_ignored),
+        ("an affirmatively declared but absent replay sidecar is rejected",
+         declared_missing_sidecar_rejected),
+        ("cross-run evidence references fail closed",
+         cross_run_reference_rejected),
+        ("artifact-looking text in a later non-artifact section is ignored",
+         non_artifact_stale_ignored),
+        ("artifact parser rejects evidence traversal outside the evidence directory",
+         evidence_escape_rejected),
         ("truncated replay validates saved bytes without comparing them to the wire hash",
          partial_response.get("truncated") is True
          and partial_response.get("saved_len") == len(partial_saved)

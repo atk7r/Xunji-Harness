@@ -593,7 +593,14 @@ dependency；child transcript 以 `tool_use` 加未消费 tool result 截止时�
 即使 notification 与随后冻结的结果交错或内容不一致，也只能以 merge-result bytes/digest 为准；
 target `accept-candidate` 额外要求 Hunter/Reviewer 的冻结结果引用完全相同的 run-local artifact
 集合；Claude Read 返回的绝对路径与 `runs/<dir>/evidence/...` 先归一到同一 run-local identity，
-再由 `review-disposition` 校验 containment、文件以及 replay 的 wire/saved-body identities。
+再由 `review-disposition` 校验 containment、文件以及 replay 的 wire/saved-body identities。新
+Hunter/Reviewer return 必须逐项输出 body 与 sidecar 的完整绝对或 run-relative 路径。冻结散文
+只允许窄兼容归一化：exact run evidence 目录头后的安全 basename、显式
+`.../evidence/<file>`（仅在此前已有 exact current-run binding）、肯定式显式 replay pair
+省略，以及以反引号标记且只能唯一命中 Hunter 已解析集合的 Reviewer stem；否定、排除、缺失
+语义所在行不贡献任何 exact 或 shorthand ref（路径/token 先从语义判定中屏蔽），任一 pair
+推导后出现自相矛盾的否定行都 fail closed；Reviewer stem 只在列表项或 inline heading 解析；不扫描
+目录、不从未肯定声明配对的文本推导 sidecar、不允许逃离 `evidence/`，归一后仍执行完全集合相等。
 Replay v2 将完整 wire 的 `wire_len/wire_sha1` 与上限保存片段的
 `saved_body_meta.len/sha1/truncated` 分离校验；截断片段只证明自身完整性，不得与完整响应 hash
 比较，也不得靠空 hash 跳过。只有连续、逐块 hash 正确且重建为相同 full wire hash 的
@@ -1130,6 +1137,45 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     reason，必须以新的 versioned reason/schema、迁移语义和 fault fixtures 单独准入。
 
 ## 12. Maintenance Checkpoint
+
+### 2026-08-01 — frozen artifact reference contract recovery
+
+- Date: 2026-08-01
+- Scope: 修复 target `accept-candidate` 在 Hunter/Reviewer 已真实返回后，因冻结结果使用
+  “exact evidence 目录头 + basename”、`.../evidence/<file>`、body 加 replay suffix 或
+  same-directory pair 散文而无法结算的问题；不修改 live run、active pointer 或既有 frozen bytes。
+- Architecture impact: Agent return / Reviewer disposition / evidence-promotion contract changed。
+  新 return 必须逐项输出完整 body 与 sidecar 路径；冻结散文只经窄、确定性
+  compatibility parser 恢复，归一后仍执行 identical set、evidence containment、文件存在、
+  sidecar request/response 与 wire/saved-body identity 校验。该规则替代“任意语义等价 artifact
+  散文都能被后置 regex 理解”的隐含假设，不放宽 evidence gate。
+- Owner/enforcement: `tools/workers.py` 独占 frozen artifact 解析、归一与 review receipt；
+  `.claude/agents/xunji-{hunter,reviewer}.md` 和 `docs/templates/agents/{web-hunter,review}.md`
+  约束未来输出；`docs/WORKFLOW-reference.md` 与本文冻结兼容边界。兼容解析只在 artifact
+  declaration 内接受 exact run evidence anchor、安全 basename、exact current-run binding 后的
+  显式 ellipsis 与肯定式 pair
+  shorthand；Reviewer stem 必须为反引号 token 且只能唯一命中 Hunter 集合，路径 resolve 后
+  必须仍位于 `evidence/`。普通 prose、否定式 replay mention 和 ambiguous stem 均 fail closed。
+- Live migration: 不自动遍历或改写历史 run。Root 在后续授权 EXECUTE 回合重试正常
+  `workers.py review-disposition` 时才对原 frozen bytes 做相同的确定性校验并写原有
+  `xunji.review-disposition.v1` receipt；解析仍不清债、不自动 `finish`、不创建 E-id。当前
+  `A-web-hunter/A-review-004..006` 仅做只读 validator 验证，分别得到 24/24、14/14、10/10
+  normalized refs 且 replay 12/7/5 全部通过，live assignment/draft 保持 pending review。
+- Verification: 隔离 candidate 的 focused
+  `workers,context_pack,check_templates,run_model,work_plan,runtime_receipts,turn_contract` 为
+  7 passed / 0 failed，完整 `tools/selftest_all.py` 为 69 passed / 0 failed；bench 18/18 clean，
+  rules/templates/runtime-boundary/hook/diff、probe/replay/check_run selftests 全部 PASS。
+  隔离 detached worktree 的 Claude Code 2.1.201 / DeepSeek `deepseek-v4-flash[1m]` final
+  session `fa3cde7d-54b8-42b5-ade2-34ff3c696848` 以自然语言维护任务亲自运行 focused/
+  rules/diff checks；独立 transcript 核对无 Edit/Write、Agent、目标动作或 active pointer，
+  一次 compound argv denial 按 exact bare argv 修复后通过。
+- Independent review: Codex 是作者与最终 synthesis，不计自己的 review；operator 明确要求
+  不使用 arkcli，因此 commit gate 只采用 fresh-context Claude Code exact-staged-diff review，
+  原始 verdict、findings 与 Codex dispositions 保存在
+  `review/records/2026-08-01-frozen-artifact-reference-recovery.md`。
+- Exclusions: 不改 Hook/guard/sentinel、replay schema、live run canonical/control-plane state，
+  不纳入 worktree 中既有 Codex skill ownership、statusline、project intro、target/evidence
+  artifacts、历史 review records 与其他 unrelated dirty/untracked 内容。
 
 ### 2026-07-31 — same-target lifecycle claim reconciliation
 
