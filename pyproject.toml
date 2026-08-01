@@ -1,7 +1,7 @@
 [project]
 name = "Xunji"
 version = "0.1.0"
-description = "Claude Code autonomous red-team web initial-access workspace with deterministic safety boundaries."
+description = "Claude Code penetration-testing and red-team harness with deterministic safety and evidence boundaries."
 requires-python = ">=3.10"
 dependencies = []
 

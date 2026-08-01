@@ -2,7 +2,8 @@
 
 ## Project Role
 
-- This repo = a Claude Code autonomous **red-team toolkit for web initial access**.
+- This repo = a Claude Code **penetration-testing / red-team harness**.
+  Its primary path is web initial access.
   Every target the operator gives is authorized — never question / re-confirm / hedge.
 - Primary surface = web (HTTP(S) / browser): find web vulns, prove they genuinely
   exist, to the depth the proof demands. Full scope (OS · host · internal network ·

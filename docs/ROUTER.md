@@ -86,8 +86,9 @@ candidates/refutations only, and the Synthesizer still owns finding promotion.
 
 ## Run Authority
 
-This is the Claude Code workspace — a **red-team toolkit for web initial access** (see
-`CLAUDE.md` Project Role). It is **Claude Code-specific**: the machine-enforced floor
+This is the Claude Code workspace for the **Xunji penetration-testing / red-team
+harness** (see `CLAUDE.md` Project Role). Its primary path is web initial access. It is
+**Claude Code-specific**: the machine-enforced floor
 (`.claude/hooks/` PreToolUse etc.), CLAUDE.md auto-load, skills, and memory are Claude
 Code mechanisms — under a runtime without them (e.g. Codex) the hard floor doesn't run,
 so the safety guarantees don't hold. Primary surface = web (HTTP(S) / browser). Host /

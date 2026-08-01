@@ -2,12 +2,14 @@
 
 # Xunji · 寻迹
 
-**An autonomous red-team workspace for Claude Code — focused on web 打点 (initial access)**
+### A penetration-testing / red-team harness for Claude Code
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![deps](https://img.shields.io/badge/deps-stdlib%20only-2ea44f)](#%EF%B8%8F-setup)
-[![for](https://img.shields.io/badge/for-Claude%20Code-8A2BE2)](https://claude.com/claude-code)
-[![safety](https://img.shields.io/badge/safety-machine--enforced-c0392b)](#%EF%B8%8F-safety-model)
+<sub>MODEL-DRIVEN · EFFECT-GATED · EVIDENCE-BOUND</sub>
+
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Root%20Driver-8A2BE2)](https://claude.com/claude-code)
+![Harness](https://img.shields.io/badge/Agent-Harness-1f6feb)
+![Evidence](https://img.shields.io/badge/Truth-Evidence%20Bound-2ea44f)
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 
 **English** ｜ [中文](README.md)
 
@@ -15,271 +17,95 @@
 
 ---
 
-**This is a red-team weapon.** A Root-Orchestrator-led workspace for web 打点 (initial access): specialized Subagents produce candidates in parallel, and a Single Synthesizer makes the only final evidence-gated judgement for vulnerability discovery and **full weaponized exploitation**. The process stays **auditable, evidence-bound, and bounded by a machine-enforced hard-rule floor**.
+Xunji makes Claude Code the Root Orchestrator for penetration-testing and red-team work:
+the model interprets the target, chooses strategy, and drives the attack; deterministic
+runtime services own authority, scope, outbound boundaries, recovery, evidence, and closure.
 
-> It gives the AI **judgment discipline · grounded recognition knowledge · run-state structure · a hard floor drawn by effect** — and is **not** a scanner, a turnkey mass-exploit kit, or a JSON orchestrator.
-> Weaponized exploits authored by Root/Agents are **free (no method ceiling)**; the only hard-blocked thing is an **irreversible / harm-as-purpose effect auto-executed against the target**.
-> **"Not a turnkey kit" ≠ "not a weapon"**: the project itself is a weapon; what is excluded is only indiscriminate, target-agnostic mass exploitation.
+> **Keep the model's ceiling for attack judgment; let the system enforce the floor for execution and truth.**
 
-## 🧭 Architecture
+## ⚡ Usage
 
-```text
-                Operator · highest authority
-                     │  authorized target
-                     ▼
-        ════════  Root Orchestrator  ════════
-        state graph · front decomposition · agent assignment · conflict routing
-                     │
-   ╭───────────────┬───────────────╯
-   │               │
-   │        Subagents: surface · web-hunter · code-audit
-   │        exploit · verify · review · report
-   │               │
-   │        candidates / refutations / conflicts
-   │               ▼
-   │        Single Synthesizer
-   │        evidence gate · dedupe · conflict judgement · final findings
-   │
-   ├─①  written run state  →  runs/<target>/   audit trail (not committed)
-   │
-   ├─②  active verification →  probe · render · scan · fetch_assets
-   │                        →  guard.py (rate · body cap · 3 circuit breakers) →  target
-   │
-   ├─③  every tool call     →  turn_contract hook  authority · scope · effect · lifecycle
-   │    every Bash call     →  safety_gate hook   ✋ L4 irreversible harm · hard block
-   │
-   ├─④  observe-only sidecar →  sentinel/   behavior detection · 4-level autonomy · breaker
-   │
-   └─⑤  closure / safety-critical change →  review/   independent review (hard gate) →  runs/
-
-   Defenses:  ③ turn_contract gates authority/effect · safety_gate blocks L4
-              ② guard trips · ④ sentinel observes, never blocks
-```
-
-Four layers have distinct jobs: the **`turn_contract.py` hook** validates the current operator turn,
-scope, effect, plan, and lifecycle; the **`safety_gate` hook** hard-blocks irreversible harm by effect;
-**`guard.py`** rate/volume-limits and trips; **`sentinel/`** observes without blocking and records
-action attribution and risk trends.
-
-## 🔁 Operating Loop
+For continuous autonomous progress, use `/loop`:
 
 ```text
-Root Orchestrator
-  → update the state graph
-  → decompose fronts and assign Subagents
-  → merge candidates and check conflicts
-  → trigger verification / falsification
-  → Single Synthesizer reports only what evidence supports
+/loop https://example.com
 ```
 
-The Root should **not** wait for the user to name the next vulnerability class while safe open fronts remain. It selects fronts, records why, assigns suitable agents, and continues until each front is **confirmed / rejected / deferred (blocker) / closed (Type B reasoning)**. Subagents can only produce `phenomenon` / `candidate` / `refutes`; only the Single Synthesizer can promote a candidate into a reportable finding after the evidence gate.
+Xunji creates the run and, after each `cycle_end`, re-reads state and plans the next
+cycle until closure or a real blocker. Claude Code must forward `/loop` unchanged to
+the project Hook; if the client consumes the command first, it has no Xunji recurring-loop semantics.
 
-## 🧠 Design Philosophy
+For one execution cycle, use natural language:
 
-The whole project rests on **one decision** and **three pillars**.
+```text
+Penetrate https://example.com.
+```
 
-### The axis: gate EFFECTS, not METHODS
+Both entries establish run state, read existing intelligence, decompose the attack surface,
+coordinate Hunters and Reviewers, and persist artifacts, controls, conclusions, and unfinished
+fronts under `runs/`; the difference is whether execution continues across cycles. Unless overriding
+a default constraint, the operator does not need a vulnerability checklist, phase command, or orchestration format.
 
-What is ever restricted is the **irreversible effect an action has on the live target, and who presses execute** — never the technique. Crafting and writing weaponized exploitation (RCE chains, auth bypass, deserialization gadgets, upload-to-shell, privesc, C2 / reverse-shell / webshell) is **method, and method is free**; 0day discovery lives there. The only hard line is an **irreversible / harm-as-purpose effect auto-executed against the target** (destruction, 拖库, DoS, money movement) — drawn by **effect**, in **code**, at **runtime**, never by a filename or a banned keyword.
+## 🧭 Design Principles
 
-> A soft constraint that makes the AI timid ("don't write that exploit", "don't name that tool") is **backwards** — it cripples the very capability the operator needs while doing nothing for safety. **Safety is the hook's job, by effect; capability is Root/Agents', without a method ceiling.**
-
-### Three pillars, deliberately NOT a playbook
-
-| Pillar | What | Where |
-|---|---|---|
-| **Judgment discipline** | how to choose fronts, weigh evidence, resist false positives, not stop early | `docs/cognition/` · `docs/WORKFLOW.md` |
-| **Grounding knowledge** | recognition signatures + weak-point anchors for real products, as **variant-analysis input**, never turnkey payloads | `knowledge/` |
-| **Machine hard floor** | the deny boundary, by effect | `.claude/hooks/` |
-
-It **refuses to be a fourth thing**: a checklist / playbook / scanner-runner / JSON orchestrator. An earlier orchestrator architecture was **deliberately removed**; `tools/check_rules.py` exists to stop it creeping back. The thesis: **a capable model + discipline + grounded recognition + a hard floor out-performs any fixed playbook — and a playbook would only cap the model.**
-
-### Root orchestration · Single Synthesizer · author-and-handoff
-
-- **Author** — write complete, runnable exploitation code up to full impact and hand it to the operator. **No ceiling**; under-delivering exploitation code for an authorized target is a failure, symmetric to under-proving.
-- **Auto-execute** — what Root/Agents fire at the live target. Defaults to **proof-level (证明即止)**: demonstrate the vuln genuinely exists, then stop. Going deeper is operator-gated, normally delivered as code the operator runs under supervision.
-- **Synthesize** — agent parallelism widens observation, not conclusion authority. The Single Synthesizer owns dedupe, conflict judgement, certainty calibration, and report entry; parallel breadth never relaxes the evidence gate.
-
-### Evidence over confidence
-
-A signal is not a conclusion; model confidence is not evidence; a single observation is never confirmation. The run directory is the audit trail, and a finding is reported only at the certainty its evidence supports (with a recorded **control / replication** for anything ≥ 0.8).
-
-## ✨ Design Highlights
-
-### 1 ｜ Effect × executor safety, enforced in code
-A three-tier model (autonomous / operator-gated / hard) graded by **what gets touched** and **who executes**, not by technique. PreToolUse first uses `turn_contract.py` to validate current-prompt authority, scope, and effect; `safety_gate.py` then enforces the L4 automatic-execution ceiling for Bash. Neither treats a technique name or authored exploit code as harm by itself.
-
-### 2 ｜ A guard layer that protects *your own* access too + circuit breakers
-All active tools route through `tools/harness/guard.py`: rate limiter (禁高频 — also the real brute-force throttle, **by rate not attempt count**), body cap (禁拖库), auth-fail backstop (anti-runaway only). Three circuit breakers close the field-exposed "DoS yourself / DoS the target" failure:
-
-- **HostHealth** — N consecutive transport failures on a host → auto-backoff (stop hammering a host that started blocking you, and stop mis-reading it as "the whole site blocked my IP").
-- **SessionBudget (hard volume breaker)** — whole-session request count / egress bytes over a hard ceiling → tool aborts (the global "engagement hammering every IP" dimension a per-host breaker can't see).
-- **AuthFailCounter** — repeated failures at one authentication endpoint hit a hard runaway-loop stop; it is not a weak-password attempt quota.
-
-### 3 ｜ `sentinel/` runtime behavior detection (observe-only)
-Reconstructs the agent's action trace from Claude Code hooks and attributes each action by locus and provenance, separating **"my cleanup" vs "behavior to watch"**. It computes a four-level recommendation and may raise the internal recommendation from `AUTO` to `GATE`, writing alerts/pending records as aggregate risk rises. **Phase 1 never blocks the tool call on that basis**: the real execution gates remain the turn/scope/safety hooks and guard.
-
-| Level | Meaning | Example | Handling |
-|:--:|---|---|---|
-| 🟢 **L1 AUTO** | reversible / proof-level, unattended | SQLi differential, single `id`, harmless upload | run (trace only) |
-| 🟡 **L2 NOTIFY** | reversible but noteworthy | reading creds, tearing down own container, volume | run + audit |
-| 🟠 **L3 GATE** | irreversible but legitimate | get shell, privesc, write, out-of-scope | operator-gated / queued |
-| 🔴 **L4 BLOCK** | irreversible harm-as-purpose | 拖库, DoS, drop DB, money, ransomware / wipe | machine hard-block, never auto |
-
-### 4 ｜ Anti-premature-closure + the `review/` independent-review module (the standout)
-The field showed the deepest failure is not capability — it is an eager model **closing too early**: lumping hosts by header, equating "I couldn't reach it" with "it is safe", scoring a wrong conclusion at full confidence. **Self-review cannot fix self-review bias.** So:
-
-- **Per-asset examination ledger** — `classify_hosts.py` fingerprints each host by **live content** (not Server header) into `coverage.json`; `check_run.py` reads it on **every** run and lists distinct-app candidates to investigate — surfacing lumping *when it happens*.
-- **Independent Reviewer = a HARD gate** — every "explored enough / no attack surface" claim gets an independent-context challenge. The current gate does not accept a handwritten `Independent Review` heading or copied PASS: it requires a content-addressed `ReviewReceipt`, current evidence index, hook-observed markers, and disposition of every ledger item. The portable principle lives in [`review/review-mechanism.md`](review/review-mechanism.md); current Xunji operations are owned by `.claude/skills/xunji-reviewops/` and `docs/WORKFLOW-reference.md`.
-- **Now extended to safety-critical code** — behavior changes to `.claude/hooks/` · `privacy.py` · `command_shape.py` · `guard.py` · `sentinel/` also require an independent review recorded under `review/records/` before "done" (narrow scope, see `docs/WORKFLOW-reference.md`). Evidence-backed: one such review caught a real bug in the circuit breaker the author's self-audit missed.
-- **Ledger contradiction + certainty control + egress re-run queue** — a conclusion that another entry `Refutes:` but still carries ≥ 0.8 is flagged; ≥ 0.8 must carry `Control:` / `Replicated:`; merely-unreachable assets form a standardized queue that `rerun_deferred.py` re-probes from another egress later.
-
-### 5 ｜ Knowledge base: grounding (public) + weaponized (local) — attacker, not scanner
-The goal is to **use vulnerability / payload knowledge to attack**, so payload knowledge is a first-class input, not something to strip out. The base has two tiers; the line between them is **what publishes**, not whether it is "a weapon":
-
-- **Grounding tier `knowledge/*.md` (public · shipped)**: recognition signatures + weak-point anchors (class + mechanism + CVE/CNVD reference) + proof-only verification principles — **no raw payloads** (it ships publicly).
-- **Weaponized tier `knowledge/weaponized/` (local · gitignored)**: working payloads / exploit chains / PoC keyed to recognition, **never pushed** (same as `poc_library/xday`).
-
-The only forbidden thing is the **blind scanner**: knowledge fired the same regardless of target — **payloads or not**. What separates an attacker from a scanner is the **use pattern** (look up after fingerprint · adapt to the target · evidence-gate), not whether payloads are present. `check_knowledge.py` polices the public tier only (a payload there = publish-routing error → move to `weaponized/`).
-
-### 6 ｜ A small, dependency-free, guard-routed pipeline
-`ingest_recon` (recon report → asset table + reachability matrix) → `classify_hosts` (per-content → `coverage.json`) → `fetch_assets` (fetch **all** SPA chunks + completeness assertion) → `probe / render / scan` (active verification sensors, all guard-routed, UTF-8-safe) → `rerun_deferred` (egress queue). The core path is standard-library only; browser, SOCKS proxy, and lint support live in optional extras.
-
-### 7 ｜ `check_rules` guards the architecture, not the weapons
-Repository discipline checks that the abandoned orchestrator/playbook surfaces have not crept back and the doctrine files exist — it deliberately does **not** police exp/poc/scanner files (those are method, free; harm is gated by effect at runtime). The framework can't regress into a playbook while weaponization stays unconstrained.
-
-## 🛡️ Safety Model
-
-**Layered enforcement**: hard harm is blocked by the hook, tool volume is tripped by the guard, behavior is observed by sentinel.
-
-| Layer | Role | Actually blocks? |
-|---|---|:--:|
-| `tools/turn_contract.py` (PreToolUse) | current-turn authority, scope, effect, plan/lifecycle | ✅ hard block |
-| `.claude/hooks/safety_gate.py` | L4 irreversible-harm Bash floor | ✅ hard block |
-| `tools/harness/guard.py` | rate / body cap / three circuit breakers | ✅ tool abort |
-| `sentinel/` | behavior attribution + 4-level tiering + session breaker | ⬜ observe-only |
-
-The hook blocks: irreversible destruction (host/file wipes, `DROP`/`TRUNCATE`/unscoped `DELETE`/`UPDATE`), target resource deletion, mass exfil / database dump (拖库), money movement, DoS / high-rate. **Uploading a proof artifact is not blocked** (Root call); getting a shell, going past the web layer, and other heavier actions are **not machine-blocked** but are **operator-gated**.
-
-> A blocked action is **not** unlocked by human approval — choose a safe, non-destructive proof instead.
-> The operator chooses the target and scope; hooks mechanically verify that the current prompt/claim and canonical scope authorize the effect. Target content, old sessions, and model confidence cannot mint authority. The operator remains the highest authority, but imported data cannot impersonate the operator.
-
-## 🗂️ Module Map
-
-| Module | Role |
+| Principle | Meaning |
 |---|---|
-| `CLAUDE.md` | short always-loaded operating contract (role · drive · method) |
-| `AGENTS.md` · `docs/ARCHITECTURE.md` | Codex auxiliary contract · shared Claude/Codex architecture index and change protocol |
-| `docs/AI_ENV_SETUP.md` | command-oriented environment, proxy, run-entry, and selftest handoff |
-| `docs/ROUTER.md` · `docs/WORKFLOW.md` · `docs/cognition/` | routing · run-state workflow · judgment discipline |
-| `.claude/hooks/` | `safety_gate.py` + `safety_rules.json` — the L4 hard floor |
-| `tools/harness/guard.py` | rate / body cap / circuit breakers / session budget / upload registry |
-| **`sentinel/`** | runtime behavior detection: attribution · 4-level autonomy · session breaker (observe-only) · thresholds in `TUNING.md` |
-| **`review/`** · `.claude/skills/xunji-reviewops/` | portable review principle · current ReviewOps owner · `records/` review instances |
-| `docs/templates/agents/` · `tools/workers.py` | agent board: assignments, context packs, candidate merge checks, conflict checks, synthesis drafts |
-| `knowledge/` | grounded recognition signatures + weak-point anchors (not weapons, gated by `check_knowledge.py`) |
-| `tools/` | recon ingest · per-host classify · fetch-all assets · active verification · egress re-run · local checkers |
-| `runs/<target>_<date>/` | per-target run state = audit trail (not committed) |
+| **The model chooses methods** | Root selects high-value fronts from the state graph instead of following a fixed playbook |
+| **The system constrains effects** | hooks, scope, privacy, proxy, guard, and budgets govern real execution |
+| **Evidence decides truth** | signals and model confidence create candidates; findings require artifacts, controls, and replication |
+| **One final adjudicator** | Agents widen observation; the Single Synthesizer owns conflicts, certainty, and report admission |
+| **Recoverable run state** | fronts, evidence, decisions, review, and debt persist across contexts instead of relying on chat memory |
 
-**Run-state files**: `target · surface · frontier · hypotheses · evidence · false_positive · decisions · review · report`, plus conditional `chains · hints` (empty templates in `docs/templates/run/`). Findings are **not** confirmed from chat memory, model confidence, or single unattributed signals.
+## 🔁 Runtime Flow
 
-## 🚀 Quick Start
-
-Read [`docs/AI_ENV_SETUP.md`](docs/AI_ENV_SETUP.md) first to align local Python, proxy, and Claude Code wiring. These are the standard run entry points; a clear natural-language create/continue request in Claude Code is normalized into the same lifecycle transaction path.
-
-```bash
-# Guanlan recon artifact
-python3 tools/setup_run.py <slug> <recon.json>
-
-# One authorized target
-python3 tools/setup_run.py <slug> --target https://example.com
-
-# New-run launcher / existing-run resume
-python3 tools/loop_bootstrap.py <slug> <recon.json>
-python3 tools/loop_bootstrap.py --resume runs/<dir>
+```text
+╭──────────────────────────────╮
+│ Operator · /loop <source>    │
+╰──────────────┬───────────────╯
+               ▼
+╭──────────────────────────────╮
+│ Root · read state · plan     │
+╰──────────────┬───────────────╯
+               ▼
+╭──────────────────────────────╮
+│ Hunter · investigate/verify  │
+╰──────────────┬───────────────╯
+               ▼
+╭──────────────────────────────╮
+│ Hook · scope · privacy       │
+│ proxy · guard · budget       │
+╰──────────────┬───────────────╯
+               ▼
+╭──────────────────────────────╮
+│ Authorized Target            │
+╰──────────────┬───────────────╯
+               │ artifacts
+               ▼
+╭──────────────────────────────╮
+│ Reviewer → Single Synthesizer│
+│ challenge · evidence gate    │
+╰──────────────┬───────────────╯
+               ▼
+╭──────────────────────────────╮
+│ Canonical State · cycle_end  │
+╰──────────────┬───────────────╯
+               ├─ open / deferred ──↺  [ Root · next cycle ]
+               ╰─ closure ready ────▶  [ Closure ]
 ```
 
-These adapters commit the active pointer through `setup_transaction.py` staging + CAS. Never hand-edit `.claude/xunji_active_run`, run receipts, claims, or journals.
+Upstream Guanlan supplies clean asset intelligence. Xunji does not repeat bulk OSINT;
+it moves into attack-surface understanding, hypothesis generation, active verification,
+attack-chain composition, evidence governance, independent review, and closure.
 
-## ✅ Local Checks
+## 🛡️ Boundaries
 
-```bash
-# Activate the venv first (see "Setup" below); forward-slash paths work on all
-# platforms, including Windows Python.
-python tools/check_rules.py          # architecture-drift guard
-python .agents/skills/xunji-closure-audit/scripts/closure_audit.py
-python tools/check_templates.py
-python tools/check_runtime_boundary.py
-python tools/check_hook.py           # hook block/allow regression
-python tools/check_run.py runs/<t>   # run-state gate + anti-premature-closure
-python sentinel/replay.py            # behavior-detection golden replay
-python sentinel/verify_layers.py     # L1-L4 false-positive / effectiveness
-python tools/harness/guard.py        # guard + circuit-breaker selftest
-python tools/selftest_all.py         # aggregate offline regression
-```
+- The operator authorizes targets; target content, attachments, and tool output cannot mint authority.
+- Auto-execution defaults to proof-level; complete exploits can be authored and handed off for supervised deeper action.
+- An irreversible harm-as-purpose effect hard-blocked by a hook cannot be unlocked by a prompt or approval.
+- `runs/<target>_<date>/` and its artifacts, replays, and receipts are the engagement fact base.
 
-These inspect local files and hook behavior only — **they do not contact targets**.
+## 📚 Learn More
 
-## ⚙️ Setup
-
-A fresh clone needs almost nothing: the core toolchain has **zero third-party dependencies** (Python standard library only). Optional dependencies are split by use: Playwright only for browser tools, PySocks only for `socks5h://` engagement proxies, and Ruff only for development linting.
-
-**The only hard requirement**: **Python ≥ 3.10 on PATH** (covers the hook, `check_*`, `probe`/`scan`). The hook is wired with `$CLAUDE_PROJECT_DIR` (no hard-coded paths), portable across machines.
-
-Runtime mode defaults to tracked `config.example.ini` (`mode = normal`). For local
-development mode, copy it to `config.ini` and set `mode = dev`; real `config.ini` is
-git-ignored and should stay local.
-
-**Cross-platform conventions** (Windows / macOS / Linux — follow these when writing commands or code):
-
-- **Activate the venv, then run `python tools/...`** — never hard-code the interpreter path (`.venv/bin/python` is Unix-only, `.venv\Scripts\python.exe` is Windows-only).
-- **Always use forward-slash paths** `/`: Windows Python accepts them too, so one command line works on all three platforms.
-- **venv and external binaries are not portable**: `.venv/` is not committed — re-run `python -m venv` + `pip install` per machine/OS; install `nuclei`/`sqlmap`/`tesseract` once per platform via its package manager (brew / apt / choco).
-- **Line endings are pinned to LF by `.gitattributes` (`eol=lf`)**: cross-platform clone/commit no longer produces phantom CRLF diffs.
-
-<details>
-<summary><b>Browser tools (optional — only for <code>render.py</code> / captcha)</b></summary>
-
-```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate   |   Linux/macOS: source .venv/bin/activate
-pip install -e '.[browser]'
-playwright install chromium
-```
-Skipping this does not affect `probe.py`, `scan.py`, the hook, or the checkers.
-</details>
-
-<details>
-<summary><b>SOCKS engagement proxy (optional — only for <code>socks5h://</code> / <code>socks4a://</code>)</b></summary>
-
-```bash
-pip install -e '.[socks]'
-```
-Without it, SOCKS proxy use fails closed instead of silently connecting directly. HTTP proxies do not need this extra.
-</details>
-
-<details>
-<summary><b>Developer checks (optional — Ruff)</b></summary>
-
-```bash
-pip install -e '.[dev]'
-ruff check .
-```
-</details>
-
-<details>
-<summary><b>Not restored by a clone (by design)</b></summary>
-
-- **Auto-memory** lives outside the repo (`~/.claude/projects/.../memory/`), per-machine.
-- **Weaponized 0day** (`poc_library/xday/`): the repo keeps only the folder scaffolding; exploit source / binaries stay **local, never committed**. "Method is free" means authoring is allowed, not that it must be published.
-- **The grounding knowledge base** (`knowledge/*.md`) **ships with the repo**, meant to be shared across machines and grow with field work.
-- **Real-target findings** (`runs/` · `reports/` · `poc/`) are git-ignored — transfer out of band if needed.
-- **`.claude/settings.local.json`** (permission allowlist) is local — re-grant once on a new machine.
-</details>
-
-## 🔐 Authority · Routing
-
-- **Authority**: this is the **Claude Code** workspace; Root may edit project files when the user asks, and owns run-level files plus the Agent Board during a run.
-- **Why Claude Code-specific**: the machine-enforced safety floor (`.claude/hooks/` PreToolUse etc.), CLAUDE.md auto-load, skills, and memory are all Claude Code mechanisms. **A runtime without that hook system (e.g. Codex) does not run the hard floor, so the safety guarantees do not hold** — the project is designed and verified for Claude Code and does not claim Codex compatibility.
-- **Codex's place**: Claude Code is primary; Codex is auxiliary. Use Codex for heterogeneous review, engagement advice, disagreement, or delegated collaboration when helpful. It does not create a separate runtime or safety boundary; the same run ledger, evidence gate, guard/hook boundary, and review requirements apply.
-- **Routing**: start environment handoff with [`docs/AI_ENV_SETUP.md`](docs/AI_ENV_SETUP.md), then use [`docs/ROUTER.md`](docs/ROUTER.md) to decide what guidance applies; always active are `CLAUDE.md` · `docs/WORKFLOW.md` · `docs/cognition/README.md` · the `src-safety-boundary` skill.
+- [Architecture and design contract](docs/ARCHITECTURE.md)
+- [Run workflow](docs/WORKFLOW.md)
+- [Environment and proxy setup](docs/AI_ENV_SETUP.md)
