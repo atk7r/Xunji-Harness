@@ -45,16 +45,19 @@
    ├─②  主动验证          →  probe · render · scan · fetch_assets
    │                       →  guard.py（限速 · 体上限 · 三道熔断器）→  授权目标
    │
-   ├─③  每次 Bash 调用    →  safety_gate hook   ✋ L4 不可逆危害 · 硬拦
+   ├─③  每次工具调用      →  turn_contract hook  authority · scope · effect · lifecycle
+   │    每次 Bash 调用    →  safety_gate hook   ✋ L4 不可逆危害 · 硬拦
    │
    ├─④  observe-only 旁路 →  sentinel/   行为检测 · 四级自治 · 会话熔断（永不拦）
    │
    └─⑤  收口/安全关键改动  →  review/   独立复审（硬门）→  写回 runs/
 
-   防线：③ safety_gate 硬拦（执法者） · ② guard 工具层熔断 · ④ sentinel 只观察不拦
+   防线：③ turn_contract 管 authority/effect · safety_gate 拦 L4 · ② guard 熔断 · ④ sentinel 只观察
 ```
 
-三条防线各司其职：**`safety_gate` hook** 按效果硬拦不可逆危害（执法者）；**`guard.py`** 在工具层限速、限量、熔断（保护目标也保护你自己的可达性）；**`sentinel/`** 只观察不拦截，给每个动作归因贴级、聚合失控时刹车。
+四层各司其职：**`turn_contract.py` hook** 校验当前 operator turn、scope、effect、计划与生命周期；
+**`safety_gate` hook** 按效果硬拦不可逆危害；**`guard.py`** 在工具层限速、限量、熔断；
+**`sentinel/`** 只观察不拦截，记录动作归因和风险趋势。
 
 ## 🔁 运行循环
 
@@ -102,16 +105,22 @@ Root Orchestrator
 ## ✨ 设计亮点
 
 ### 1 ｜ 效果 × 执行者的安全模型，由代码强制
-三层（自主 / 操作者把关 / 硬拦）按**触碰了什么**和**由谁执行**分级，而非按技术。PreToolUse hook（`safety_gate.py`）只按效果强制**自动执行的硬上限**，从不碰 Root/Agent 为操作者编写的代码。
+三层（自主 / 操作者把关 / 硬拦）按**触碰了什么**和**由谁执行**分级，而非按技术。
+PreToolUse 先由 `turn_contract.py` 验证当前 prompt 产生的 authority、scope 和 effect，再由
+`safety_gate.py` 对 Bash 强制自动执行的 L4 硬上限；两者都不把技术名称或利用代码本身当作危害。
 
 ### 2 ｜ 连「你自己访问」都保护的 guard 层 + 熔断器
 所有主动工具走 `tools/harness/guard.py`：限速器（禁高频 —— 也是爆破的真正闸，**按速率不按次数**）、响应体上限（禁拖库）、认证失败兜底（只防死循环）。三道熔断器堵住实战暴露的「打爆自己 / 打爆目标」失败：
 
 - **HostHealth** —— 单主机连续 N 次传输失败 → 自动退避（别再猛捶已经开始封你的主机，也别误读成「整站封了我 IP」）。
 - **SessionBudget（会话量硬熔断）** —— 全局滚动窗口的请求数 / 外渗字节超硬阈值 → 工具 abort（单主机熔断看不到的「整场反复打爆各 IP」全局维度）。
+- **AuthFailCounter** —— 同一认证入口连续失败达到硬阈值 → 停止失控认证循环；它不是弱口令次数配额。
 
 ### 3 ｜ `sentinel/` 运行态行为检测（observe-only）
-从 Claude Code 钩子重建 agent 动作轨迹，按两个**不可伪造**维度归因（locus 在哪 / provenance 谁触发），区分**「我的清理」vs「要警惕的行为」**。给每个动作算出**四级自治**决策，并内置**会话级熔断器**（被劫持 / 风险滚雪球 / 反复越界时**刹车不熄火**：钳住 effectful 动作、proof/recon 照常流）。**永不拦截**——只写告警与风险分，供操作者验证准度后再考虑转 inline。
+从 Claude Code 钩子重建 agent 动作轨迹，按 locus / provenance 归因，区分
+**「我的清理」vs「要警惕的行为」**。它给每个动作计算四级自治建议，并在聚合风险升高时把
+内部建议从 `AUTO` 调高到 `GATE`、写入告警/待批准记录；**Phase 1 永不据此阻止工具执行**。
+真正的执行门仍是 turn/scope/safety Hook 与 guard，sentinel 只是 observe-only 旁路。
 
 | 级别 | 含义 | 例子 | 处理 |
 |:--:|---|---|---|
@@ -124,7 +133,11 @@ Root Orchestrator
 实战表明最深的失败不是能力，而是急切的模型**过早收口**：凭响应头不看内容一锅端、把「我够不着」等同「它安全」、给错误结论打满自信。**自评治不了自评偏见。** 于是：
 
 - **逐资产检视台账** —— `classify_hosts.py` 按**实时内容**（非 Server 头）给每台主机指纹写入 `coverage.json`；`check_run.py` **每次**运行都读它、列出必须深挖的「独立应用」候选 —— 让一锅端**当下**暴露。
-- **独立 Reviewer = 硬门** —— 任何「探尽 / 无攻击面」论断前，一个**全新上下文子 agent**（无收口利益）审计本次运行；`check_run.py` 对**没有 `Independent Review` 记录**的收口论断**硬性失败**。可移植设计见 [`review/review-mechanism.md`](review/review-mechanism.md)。
+- **独立 Reviewer = 硬门** —— 任何「探尽 / 无攻击面」论断前都要由独立上下文挑战；当前门不接受
+  手写 `Independent Review` 标题或复制的 PASS，而要求 content-addressed `ReviewReceipt`、当前
+  evidence-index、Hook 观察标记和逐项 ledger disposition。可移植原理见
+  [`review/review-mechanism.md`](review/review-mechanism.md)，Xunji 当前操作契约由
+  `.claude/skills/xunji-reviewops/` 与 `docs/WORKFLOW-reference.md` 拥有。
 - **已扩到安全关键代码** —— `.claude/hooks/` · `privacy.py` · `command_shape.py` · `guard.py` · `sentinel/` 的**行为改动**收口前同样须独立复审、记录到 `review/records/`（窄边界，详见 `docs/WORKFLOW-reference.md`）。这条是实证换来的：一次独立复审在熔断器上抓出了作者自检漏掉的真 bug。
 - **台账矛盾 + certainty 管控 + 够不着重跑队列** —— 被 `Refutes:` 却仍 ≥ 0.8 的结论会被标出；≥ 0.8 须带 `Control:` / `Replicated:`；仅「够不着」的资产进标准化队列，`rerun_deferred.py` 稍后换出口重探。
 
@@ -148,14 +161,16 @@ Root Orchestrator
 
 | 层 | 角色 | 是否真拦 |
 |---|---|:--:|
-| `.claude/hooks/safety_gate.py` | L4 不可逆危害硬底线（执法者） | ✅ 硬拦 |
+| `tools/turn_contract.py`（PreToolUse） | 当前 turn authority、scope、effect、plan/lifecycle | ✅ 硬拦 |
+| `.claude/hooks/safety_gate.py` | Bash 的 L4 不可逆危害硬底线 | ✅ 硬拦 |
 | `tools/harness/guard.py` | 限速 / 体上限 / 三道熔断器 | ✅ 工具 abort |
 | `sentinel/` | 行为归因 + 四级贴级 + 会话熔断 | ⬜ observe-only |
 
 hook 拦截：不可逆销毁（主机/文件抹除、`DROP`/`TRUNCATE`/无范围 `DELETE`/`UPDATE`）、目标资源删除、海量外带 / 拖库、资金移动、DoS / 高频。**上传证明用产物不拦**（Root 裁量）；拿 shell、越过 Web 层等更重动作**不被机器拦**但需**操作者把关**。
 
 > 被拦的动作**不会**因人工批准而解锁 —— 换一个安全、非破坏性的证明方式。
-> scope 不写进 hook。操作者是最高权威，其指令凌驾软约束、除上述硬边界外处处生效。
+> 操作者决定目标与 scope；Hook 机械验证当前 prompt/claim 与 canonical scope 是否允许这次 effect，
+> 不能从目标内容、旧会话或模型自信补造授权。操作者仍是最高权威，但目标数据不能冒充操作者指令。
 
 ## 🗂️ 模块地图
 
@@ -163,28 +178,55 @@ hook 拦截：不可逆销毁（主机/文件抹除、`DROP`/`TRUNCATE`/无范�
 |---|---|
 | `CLAUDE.md` | 始终加载的简短操作契约（角色 · 驱动 · 方法） |
 | `AGENTS.md` · `docs/ARCHITECTURE.md` | Codex 辅助契约 · Claude/Codex 共用的架构设计索引与变更协议 |
+| `docs/AI_ENV_SETUP.md` | 新机器/新 Agent 的命令式环境、代理、run 入口与自检交接 |
 | `docs/ROUTER.md` · `docs/WORKFLOW.md` · `docs/cognition/` | 路由 · 运行态工作流 · 判断纪律 |
 | `.claude/hooks/` | `safety_gate.py` + `safety_rules.json` —— L4 硬底线 |
 | `tools/harness/guard.py` | 限速 / 体上限 / 熔断器 / 会话预算 / 上传登记 |
 | **`sentinel/`** | 运行态行为检测：归因 · 四级自治 · 会话熔断（observe-only）· 阈值见 `TUNING.md` |
-| **`review/`** | 独立复审模块：可移植规范 · 复审员模板 · `records/` 复审实例 |
+| **`review/`** · `.claude/skills/xunji-reviewops/` | 可移植复审原理 · 当前 ReviewOps owner · `records/` 复审实例 |
 | `docs/templates/agents/` · `tools/workers.py` | Agent board：前沿分配、上下文包、候选合并、冲突检查、综合草案 |
 | `knowledge/` | 接地识别签名 + 弱点锚点（非武器，`check_knowledge.py` 把关） |
 | `tools/` | recon 摄入 · 逐主机分类 · 资产抓全 · 主动验证 · 出口重跑 · 本地检查器 |
 | `runs/<target>_<date>/` | 每个授权目标的运行态 = 审计轨迹（不入库） |
 
-**运行态文件**：`target · surface · frontier · hypotheses · evidence · false_positive · decisions · review · report`（空模板在 `docs/templates/run/`）。结论**不**从聊天记忆、模型自信或单个无归因信号上确认。
+**运行态文件**：`target · surface · frontier · hypotheses · evidence · false_positive · decisions · review · report`，
+以及按需出现的 `chains · hints`（空模板在 `docs/templates/run/`）。结论**不**从聊天记忆、模型自信或单个无归因信号上确认。
+
+## 🚀 快速开始
+
+先读 [`docs/AI_ENV_SETUP.md`](docs/AI_ENV_SETUP.md) 对齐本机 Python、代理和 Claude Code 接线。
+标准 run 入口如下；在 Claude Code 中也可以用自然语言明确说“为这个 source 创建/继续 run”，
+由 lifecycle contract 归一到同一事务路径。
+
+```bash
+# Guanlan recon 产物
+python3 tools/setup_run.py <slug> <recon.json>
+
+# 单个已授权目标
+python3 tools/setup_run.py <slug> --target https://example.com
+
+# 新 run 自动启动器 / 续接现有 run
+python3 tools/loop_bootstrap.py <slug> <recon.json>
+python3 tools/loop_bootstrap.py --resume runs/<dir>
+```
+
+这些入口通过 `setup_transaction.py` 的 staging + CAS 提交 active pointer；不要手工编辑
+`.claude/xunji_active_run`、run receipt、claim 或 journal。
 
 ## ✅ 本地检查
 
 ```bash
 # 先激活 venv（见下方「安装」）；未激活 venv 时 macOS/Linux 通常用 python3。
 python3 tools/check_rules.py          # 架构漂移守卫
+python3 .agents/skills/xunji-closure-audit/scripts/closure_audit.py
+python3 tools/check_templates.py
+python3 tools/check_runtime_boundary.py
 python3 tools/check_hook.py           # hook 拦/放回归
 python3 tools/check_run.py runs/<t>   # 运行态门 + 反过早收口
 python3 sentinel/replay.py            # 行为检测黄金回放
 python3 sentinel/verify_layers.py     # L1-L4 误报 / 有效性
 python3 tools/harness/guard.py        # guard + 熔断器自测
+python3 tools/selftest_all.py         # 聚合离线回归
 ```
 
 这些只检视本地文件与 hook 行为，**不接触目标**。
@@ -250,4 +292,6 @@ ruff check .
 - **权限**：这是 **Claude Code** 的工作区；Root 在用户要求时可编辑项目文件，运行期间拥有运行级文件与 Agent Board。
 - **为什么是 Claude Code 专属**：机器强制的安全底线（`.claude/hooks/` 的 PreToolUse 等）、CLAUDE.md 自动加载、skills、memory 都是 Claude Code 的机制。**Codex 等不提供这套 hook，硬底线不会运行、安全保证不成立** —— 因此本项目按 Claude Code 设计与验证，不维护 `.codex/hooks` 镜像，也不声称兼容 Codex 运行时。
 - **Codex 的位置**：Claude Code 为主，Codex 为辅。Codex 可用于异构复审、交战建议、分歧补盲或被委派协作；不另立运行时或安全边界，仍以同一运行态台账、证据门、guard/hook 边界与复审要求为准。
-- **路由**：用 [`docs/ROUTER.md`](docs/ROUTER.md) 决定哪些指引生效；始终生效的有 `CLAUDE.md` · `docs/WORKFLOW.md` · `docs/cognition/README.md` · `src-safety-boundary` skill。
+- **路由**：环境交接先读 [`docs/AI_ENV_SETUP.md`](docs/AI_ENV_SETUP.md)，再用
+  [`docs/ROUTER.md`](docs/ROUTER.md) 决定哪些指引生效；始终生效的有 `CLAUDE.md` ·
+  `docs/WORKFLOW.md` · `docs/cognition/README.md` · `src-safety-boundary` skill。

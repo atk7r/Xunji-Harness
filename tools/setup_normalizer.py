@@ -24,6 +24,7 @@ from typing import Any, Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import setup_source
+import contract_schema
 from harness import privacy
 
 
@@ -486,6 +487,14 @@ def prepare_request(
 def _validate_candidate_shape(candidate: object) -> dict:
     if not isinstance(candidate, dict):
         raise NormalizerError("invalid_ai_candidate", "AI candidate must be one JSON object")
+    formal_errors = contract_schema.named_schema_errors(
+        candidate, "setup-normalizer-candidate.v1.schema.json")
+    if formal_errors:
+        raise NormalizerError(
+            "invalid_ai_candidate",
+            "AI candidate violates its formal contract: "
+            + "; ".join(formal_errors[:4]),
+        )
     required = {
         "schema", "request_sha256", "source_sha256", "redacted_sha256",
         "target_token", "asset_tokens", "entry_tokens", "scope_refs",

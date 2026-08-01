@@ -256,7 +256,8 @@ Type B reasoning.
 - Alternative explanation:
 - Certainty: 0.3 / 0.5 / 0.8 / 1.0
 - Replicated / Control: (conditional — required when Certainty >= 0.8)
-- Artifacts: (conditional — required when Certainty >= 0.8; the saved file/dir that proves it, e.g. `evidence/foo.html`. check_run hard-fails a confirmed entry with none. `probe --save NAME --run runs/<dir>`.)
+- Replay: (conditional — adjudication prose for DIVERGED or SKIPPED-PRIVACY-REDACTED; this field is not parsed as an artifact list)
+- Artifacts: (conditional — required when Certainty >= 0.8; list each concrete saved file/dir on its own continuation line. For `probe --save`, cite both `evidence/foo.html` and `evidence/foo.html.replay.json` separately. check_run hard-fails a confirmed entry with none.)
 - Supports:
 - Refutes:
 - Unlocks: (conditional — the F-id this confirmed fact makes actionable, satisfying that front's precondition. The chaining edge; omit when it unlocks nothing.)
@@ -285,6 +286,13 @@ after the structural gate passed: a `1.0` DOM-XSS whose only saved file was a
 redirect-to-login page, and `1.0` blind-SQLi / CSRF conclusions never saved at all.)
 `tools/check_run.py` warns on a missing control and **hard-fails the closure gate**
 on a missing artifact.
+
+The artifact-list contract is exact: when `probe --save` creates a response body
+and its `.replay.json`, put both concrete paths in `Artifacts`, one path per line.
+`Replay` records later adjudication of replay results; a path mentioned only there,
+a directory heading plus basenames, suffix shorthand, or “matching sidecar” prose
+does not become an artifact citation. This keeps the ledger producer aligned with
+the scoped artifact parser and the review-disposition gate.
 
 **Replay-verify the evidence (close the trust loop).** A saved `*.html` proves a
 response existed; a `.replay.json` (written automatically by `probe --save`) proves
@@ -544,8 +552,10 @@ not reject a successful local control action. Agent, target, model, review,
 evidence, and final-output process claims still require transcript-backed events.
 These control-plane files are hook-owned and are not editable narrative state.
 Run selection is tool-owned. `tools/setup_transaction.py` is the only active-pointer
-writer: operator setup/resume, prompt-named set-active, and prepared recovery call
-its commit CAS. Session lifecycle hooks never mutate selection. New setup validates source
+writer: operator setup/resume, prompt-named set-active, exact session-resume recovery,
+and prepared recovery call its commit CAS. Startup, clear, and compact lifecycle hooks
+never mutate selection; only an exact resume event may restore its matching receipt
+through the same owner and an EXPLAIN-only barrier. New setup validates source
 before formal directory creation, builds a complete run in hidden same-filesystem
 staging, writes `state/setup_source.json`, the matching versioned bundle under
 `sources/`, plus a prepared
@@ -557,9 +567,11 @@ hash, and transaction id and never creates a second run.
 A no-active-run EXECUTE prompt uses a short-lived pending contract that is consumed
 on first binding. Direct pointer edits, unrelated run switches, and unrequested
 clear-active operations are rejected. The pointer is the trusted single operator's
-persistent current-run selection: `SessionEnd` preserves it, `SessionStart` performs
-no restore, and a first prompt in any new local Claude session writes a fresh turn
-contract for the selected run. Session/transcript values remain causal correlation
+persistent current-run selection: `SessionEnd` preserves it while retiring that
+session's visible binding; startup, clear, and compact do not restore it; exact
+resume may restore only its matching receipt through the public lifecycle path. A
+first prompt in any new local Claude session writes a fresh turn contract for the
+selected run. Session/transcript values remain causal correlation and display-binding
 metadata, not a user ACL. Pending bootstrap permits only reads and its
 current-session lifecycle transition until binding. A target/session/prompt-hash
 claim prevents cross-session pending selection; concurrent claims fail closed. The
@@ -881,10 +893,18 @@ another executable protocol.
   every file must exist. Replay v2 validates full wire length/hash separately
   from the capped saved-body length/hash; `truncated=true` is honest partial
   storage, not a full-body mismatch or an integrity bypass. A complete chunk
-  manifest may independently prove the full wire bytes. Task notifications
+  manifest may independently prove the full wire bytes. The plan projection
+  accepts either the exact legacy response triple (`status/len/sha1`) or the
+  complete v2 seven-field response; a partial v2 field mix fails closed and cannot
+  erase a current Reviewer disposition. Task notifications
   remain wake-up signals and are never result truth. `merged`
-  requires every assigned asset to have a successful
-  target-action receipt by that Agent plus an exact-host canonical E-entry.
+  requires every assigned asset to have a successful target-action receipt by that
+  Agent. Its current `coverage_merge` records exact target-action counts plus
+  `canonical_promotion=pending_root_synthesis`; it must not claim that canonical
+  evidence already exists before the Root settlement gate allows synthesis. The
+  assignment contract continues to read the exact legacy `canonical_evidence=true`
+  shape, while rejecting partial or mixed shapes. Root then promotes or refutes the
+  reviewed candidate through the evidence gate before changing canonical findings.
   Blocked/failed/abandoned attempts leave unfinished assets in coverage debt.
 - **Plan-bound call budget**: every new typed assignment materializes
   `tool_call_limit` (5–64; default 24). `SubagentStart` freezes it, and each child

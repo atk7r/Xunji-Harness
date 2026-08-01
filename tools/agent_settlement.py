@@ -21,6 +21,7 @@ from pathlib import Path
 
 import run_model
 import work_plan
+import contract_schema
 
 
 CANCELLATION_SCHEMA = "xunji.assignment-cancellation.v2"
@@ -258,6 +259,13 @@ def validate_cancellation(value: object) -> dict:
         raise SettlementError("ASSIGNMENT_CANCELLATION_SHAPE_INVALID")
     schema = value.get("schema")
     legacy = schema == LEGACY_CANCELLATION_SCHEMA
+    if schema in {CANCELLATION_SCHEMA, LEGACY_CANCELLATION_SCHEMA}:
+        schema_name = (
+            "assignment-cancellation.v1.schema.json" if legacy
+            else "assignment-cancellation.v2.schema.json"
+        )
+        if contract_schema.named_schema_errors(value, schema_name):
+            raise SettlementError("ASSIGNMENT_CANCELLATION_SHAPE_INVALID")
     expected_fields = LEGACY_CANCELLATION_FIELDS if legacy \
         else CANCELLATION_FIELDS
     if set(value) != expected_fields:

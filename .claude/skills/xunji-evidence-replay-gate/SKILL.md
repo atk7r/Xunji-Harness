@@ -14,7 +14,11 @@ evidence grounded in saved target responses and safe replays, not prose.
 - Set `Maturity:` explicitly: `phenomenon`, `candidate`, or `finding`.
 - Only `Maturity: finding` with canonical certainty `>= 0.8` belongs in
   `report.md` `Evidence IDs:`.
-- A confirmed entry needs `Artifacts:` plus `Replicated / Control:`.
+- A confirmed entry needs `Artifacts:` plus `Replicated / Control:`. When a probe
+  produced a saved response and `.replay.json`, cite both concrete paths under
+  `Artifacts`, each on its own continuation line. `Replay:` is adjudication prose,
+  not an artifact-list continuation. Do not use a directory header, basename,
+  suffix shorthand, or pair-summary prose for new entries.
 - Script output is not proof by itself. If a script performed the proof, preserve
   the request/response with recorder or re-run the proof with `probe --save`.
 - Saved replay URLs, request fields, response headers, and bounded response previews
@@ -42,6 +46,7 @@ python3 tools/probe.py DIFF "<baseline-url>" "<mutant-url>" --save <name> --run 
 ```
 
 This places the response and the `.replay.json` under `runs/<dir>/evidence/`.
+Put both complete paths, separately, in the evidence entry's `Artifacts` field.
 For rendered/browser proof, save screenshots or render directories under
 `evidence/` and cite that path.
 

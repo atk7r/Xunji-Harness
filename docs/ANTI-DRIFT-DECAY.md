@@ -1,32 +1,40 @@
-# Anti-Drift Decay -- 长对话规则衰减对策
+# Anti-Drift Decay -- 长对话规则衰减设计记录
 
-Xunji 自主驱动依赖 CLAUDE.md + anti-drift anchor hook + Stop gate 约束行为。
-但在长对话（20-30 轮后）中，模型对中段规则的注意力衰减，出现三类漂移：
+> **文档状态：历史设计记录，不是当前运行契约或待办清单。** 当前行为以
+> `CLAUDE.md`、`tools/anti_drift.py`、`.claude/hooks/output_gate.py`、
+> `.claude/hooks/run_gate.py`、`docs/WORKFLOW.md` 及注册 selftest 为准；前向工作只进入
+> `TODO.md`。下文的 schema、阈值与伪代码用于解释设计演进，不得照抄成当前接口。
+
+Xunji 自主驱动依赖 CLAUDE.md + anti-drift anchor hook + Stop gates 约束行为。
+长对话中，模型仍可能出现三类漂移：
 
 - **自主性衰减**：列出选项等待确认而非直接执行
-- **回合协议违规**：结尾出现 ? / 是否 / 继续还是（`output_gate.py` 可检测但仅警告）
+- **回合协议违规**：结尾出现 ? / 是否 / 继续还是；output gate 记录信号，run gate
+  对低次数提醒、对连续协议/自主性漂移升级硬拦
 - **隧道视野**：忘记 Reason pass（重读整个 frontier），只盯着当前 front
 
-三种已提出的对策如下，下面逐条给出在当前框架下的可落地设计。
+当前实现已经采用外部 Stop 检测、run-local 状态和下一回合再注入。下面保留当时的
+设计推导，帮助解释 owner 分工，但不声明具体字段/次数仍与代码一致。
 
 ---
 
-## 一、现有防漂移机制盘点
+## 一、当前 owner 快照（具体字段与阈值以代码为准）
 
 | 层级 | 机制 | 触发时机 | 作用 | 局限性 |
 |------|------|----------|------|--------|
-| L0 静态规则 | `CLAUDE.md` | SessionStart | 项目角色/操作循环/自主驱动/证据门 | 早期 context，长对话中沉入 "lost in the middle" |
-| L1 动态注入 | `tools/anti_drift.py` | UserPromptSubmit | 每回合在 recency zone 注入绑定规则 + 当前 run 状态 | 规则是**静态列表**，不随会话长度/阶段自适应；无会话级状态追踪 |
-| L2 末尾检测 | `.claude/hooks/output_gate.py` | Stop | 检测 Assistant 回复末尾的漂移话术，打印 systemMessage 警告 | fail-open advisory only；检测到只警告，不改变下一回合的行为倾向 |
-| L3 收口闸门 | `.claude/hooks/run_gate.py` | Stop | 收尾阶段结构性硬门（覆盖台账/假证据/复审） | 仅在"终版报告已写入"时触发，不覆盖中段自主性衰减 |
+| L0 静态规则 | `CLAUDE.md` | 项目指令加载 | 项目角色/操作循环/自主驱动/证据门 | 长上下文仍可能降低注意力 |
+| L1 动态注入 | `tools/anti_drift.py` | UserPromptSubmit | 注入绑定规则、canonical run 状态和未消解漂移信号 | 只读/投影层，不替代状态 owner |
+| L2 末尾检测 | `.claude/hooks/output_gate.py` | Stop | 检测输出漂移并更新 run-local session state | 检测/解析故障本身 fail-open；不单独拥有最终 Stop 裁决 |
+| L3 流程闸门 | `.claude/hooks/run_gate.py` | Stop | 漂移升级、timeout、plan/lifecycle debt 与收口结构门 | Stop 重入只放行聊天回合，不把 canonical debt 变成完成 |
 | L4 安全边界 | `.claude/hooks/safety_gate.py` | PreToolUse | 阻断不可逆破坏性命令 | 不涉及行为协议 |
 | L5 行为监控 | `sentinel/monitor.py` | 全域 | 行为分类 + 检测器 + 断路器（observe-only） | 不注入纠正信息 |
 
-**现有机制的共同缺口**：都是**无状态、无自适应**的——不知道这是第几轮、不知道模型已漂移多少轮、不知道上次"Reason pass"是多久前。
+**当前边界**：这套机制已有状态和分级响应，但仍只能约束可机械观察的输出、receipt 与
+canonical 状态，不能证明模型内部真的完成了 Reason pass，也不能把提醒器当作证据门。
 
 ---
 
-## 二、关键架构约束：自指悖论与外部化原则
+## 二、历史设计推导：自指悖论与外部化原则
 
 ### 2.0 自指悖论
 

@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import agent_instruction_bundle as _instruction_bundle
+import contract_schema
 from evidence_parse import content_path_manifest, current_evidence_index_hash
 from harness import privacy
 
@@ -1251,6 +1252,9 @@ def _validate_foreign_lifecycle_receipt(
     *,
     filename: str,
 ) -> str:
+    if contract_schema.named_schema_errors(
+            receipt, "foreign-agent-lifecycle.v1.schema.json"):
+        return "invalid formal receipt shape"
     if not isinstance(receipt, dict) or set(receipt) != _FOREIGN_LIFECYCLE_FIELDS:
         return "invalid receipt shape"
     if receipt.get("schema") != FOREIGN_LIFECYCLE_SCHEMA \
@@ -1362,6 +1366,9 @@ def _validate_interrupted_reviewer_start_receipt(
     *,
     filename: str,
 ) -> str:
+    if contract_schema.named_schema_errors(
+            receipt, "interrupted-reviewer-start.v1.schema.json"):
+        return "invalid formal receipt shape"
     if not isinstance(receipt, dict) \
             or set(receipt) != _INTERRUPTED_REVIEWER_START_FIELDS:
         return "invalid receipt shape"
@@ -2846,6 +2853,12 @@ def _write_merge_draft(run_dir: Path, row: dict, attempt: dict,
             or attempt.get("launched_at") or ""
         ),
     }
+    draft_errors = contract_schema.named_schema_errors(
+        draft, "merge-draft.v1.schema.json")
+    if draft_errors:
+        raise RuntimeError(
+            "merge draft violates its formal contract: "
+            + "; ".join(draft_errors[:4]))
     _atomic_json(path, draft)
     return draft
 
@@ -4308,7 +4321,9 @@ def root_action_receipt(run_dir: str | Path,
         "receipt_hash": "",
     }
     receipt["receipt_hash"] = _root_action_receipt_hash(receipt)
-    if set(receipt) != _ROOT_ACTION_RECEIPT_FIELDS:
+    if set(receipt) != _ROOT_ACTION_RECEIPT_FIELDS \
+            or contract_schema.named_schema_errors(
+                receipt, "root-action-receipt.v1.schema.json"):
         return {}, "root-action-invalid:receipt-shape"
     return receipt, ""
 
@@ -6823,159 +6838,15 @@ def _selftest_schema_errors(
     documents: dict[str, dict] | None = None,
     path: str = "$",
 ) -> list[str]:
-    """Dependency-free Draft-2020-12 subset for assignment contracts and fixtures.
+    """Compatibility alias for the repository-wide contract validator.
 
-    The runtime deliberately has no jsonschema dependency.  This mirror covers
-    the keywords used by the assignment/attempt contracts so live projection
-    and the positive/negative fixtures resolve the same JSON documents.
+    Existing focused tests import this private name.  Keep the name while all
+    structural decisions are delegated to ``contract_schema`` so producers,
+    consumers, and fixtures cannot drift onto separate validator copies.
     """
-    if not isinstance(schema, dict):
-        return [f"{path}: schema is not an object"]
-    root = root or schema
-    documents = documents or {}
-    ref = schema.get("$ref")
-    if isinstance(ref, str):
-        if ref.startswith("#/"):
-            target: object = root
-            for raw in ref[2:].split("/"):
-                token = raw.replace("~1", "/").replace("~0", "~")
-                if not isinstance(target, dict) or token not in target:
-                    return [f"{path}: unresolved ref {ref}"]
-                target = target[token]
-            return _selftest_schema_errors(
-                value, target, root=root, documents=documents, path=path)
-        target_root = documents.get(ref)
-        if target_root is None:
-            return [f"{path}: unresolved external ref {ref}"]
-        return _selftest_schema_errors(
-            value, target_root, root=target_root,
-            documents=documents, path=path)
-
-    errors: list[str] = []
-
-    def matches(candidate: object) -> bool:
-        return not _selftest_schema_errors(
-            value, candidate, root=root, documents=documents, path=path)
-
-    if "allOf" in schema:
-        for child in schema["allOf"]:
-            errors.extend(_selftest_schema_errors(
-                value, child, root=root, documents=documents, path=path))
-    if "oneOf" in schema:
-        count = sum(1 for child in schema["oneOf"] if matches(child))
-        if count != 1:
-            errors.append(f"{path}: oneOf matched {count}")
-    if "anyOf" in schema \
-            and not any(matches(child) for child in schema["anyOf"]):
-        errors.append(f"{path}: anyOf did not match")
-    if "not" in schema and matches(schema["not"]):
-        errors.append(f"{path}: matched forbidden schema")
-    if "if" in schema:
-        branch = schema.get("then") if matches(schema["if"]) else schema.get("else")
-        if isinstance(branch, dict):
-            errors.extend(_selftest_schema_errors(
-                value, branch, root=root, documents=documents, path=path))
-
-    expected_type = schema.get("type")
-    type_ok = True
-    if expected_type == "object":
-        type_ok = isinstance(value, dict)
-    elif expected_type == "array":
-        type_ok = isinstance(value, list)
-    elif expected_type == "string":
-        type_ok = isinstance(value, str)
-    elif expected_type == "integer":
-        type_ok = isinstance(value, int) and not isinstance(value, bool)
-    elif expected_type == "number":
-        type_ok = isinstance(value, (int, float)) and not isinstance(value, bool)
-    elif expected_type == "boolean":
-        type_ok = isinstance(value, bool)
-    elif expected_type == "null":
-        type_ok = value is None
-    if expected_type is not None and not type_ok:
-        errors.append(f"{path}: expected {expected_type}")
-        return errors
-    if "const" in schema and value != schema["const"]:
-        errors.append(f"{path}: const mismatch")
-    if "enum" in schema and value not in schema["enum"]:
-        errors.append(f"{path}: enum mismatch")
-
-    if isinstance(value, str):
-        if len(value) < int(schema.get("minLength", 0)):
-            errors.append(f"{path}: shorter than minLength")
-        if "maxLength" in schema and len(value) > int(schema["maxLength"]):
-            errors.append(f"{path}: longer than maxLength")
-        if "pattern" in schema and re.search(str(schema["pattern"]), value) is None:
-            errors.append(f"{path}: pattern mismatch")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if "minimum" in schema and value < schema["minimum"]:
-            errors.append(f"{path}: below minimum")
-        if "maximum" in schema and value > schema["maximum"]:
-            errors.append(f"{path}: above maximum")
-        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
-            errors.append(f"{path}: below exclusiveMinimum")
-
-    if isinstance(value, list):
-        if len(value) < int(schema.get("minItems", 0)):
-            errors.append(f"{path}: fewer than minItems")
-        if "maxItems" in schema and len(value) > int(schema["maxItems"]):
-            errors.append(f"{path}: more than maxItems")
-        if schema.get("uniqueItems"):
-            encoded = [json.dumps(item, sort_keys=True, separators=(",", ":"))
-                       for item in value]
-            if len(encoded) != len(set(encoded)):
-                errors.append(f"{path}: duplicate array item")
-        item_schema = schema.get("items")
-        if isinstance(item_schema, dict):
-            for index, item in enumerate(value):
-                errors.extend(_selftest_schema_errors(
-                    item, item_schema, root=root, documents=documents,
-                    path=f"{path}[{index}]"))
-        contains = schema.get("contains")
-        if isinstance(contains, dict):
-            count = sum(
-                1 for item in value
-                if not _selftest_schema_errors(
-                    item, contains, root=root, documents=documents, path=path)
-            )
-            minimum = int(schema.get("minContains", 1))
-            maximum = schema.get("maxContains")
-            if count < minimum or maximum is not None and count > int(maximum):
-                errors.append(f"{path}: contains matched {count}")
-
-    if isinstance(value, dict):
-        required = schema.get("required", [])
-        for key in required if isinstance(required, list) else []:
-            if key not in value:
-                errors.append(f"{path}: missing {key}")
-        properties = schema.get("properties") \
-            if isinstance(schema.get("properties"), dict) else {}
-        extra = set(value) - set(properties)
-        additional = schema.get("additionalProperties", True)
-        if additional is False and extra:
-            errors.append(f"{path}: unknown fields {sorted(extra)}")
-        elif isinstance(additional, dict):
-            for key in extra:
-                errors.extend(_selftest_schema_errors(
-                    value[key], additional, root=root, documents=documents,
-                    path=f"{path}.{key}"))
-        names = schema.get("propertyNames")
-        if isinstance(names, dict):
-            for key in value:
-                errors.extend(_selftest_schema_errors(
-                    key, names, root=root, documents=documents,
-                    path=f"{path}.<name>"))
-        if len(value) < int(schema.get("minProperties", 0)):
-            errors.append(f"{path}: fewer than minProperties")
-        if "maxProperties" in schema and len(value) > int(schema["maxProperties"]):
-            errors.append(f"{path}: more than maxProperties")
-        for key, child in properties.items():
-            if key in value and isinstance(child, dict):
-                errors.extend(_selftest_schema_errors(
-                    value[key], child, root=root, documents=documents,
-                    path=f"{path}.{key}"))
-    return errors
-
+    return contract_schema.schema_errors(
+        value, schema, root=root, documents=documents, path=path,
+    )
 
 _ASSIGNMENT_SCHEMA_CACHE: tuple[dict, dict] | None = None
 
@@ -9182,6 +9053,64 @@ def _selftest() -> int:
             reviewer_binding_run, load_events(reviewer_binding_run))) == 1
     )
 
+    # Exercise the real projection writer after the interrupted Start has been
+    # recovered.  Reviewer receipts must persist the exact frozen target-result
+    # digest before the returned attempt can satisfy the published schema.
+    reviewer_return_session = "reviewer-return-session"
+    reviewer_return_tool = "reviewer-return-tool"
+    reviewer_return_child = "reviewer-return-child"
+    reviewer_return_text = "exact reviewer returned value"
+    reviewer_return_transcript = run.parent / "reviewer-return-parent.jsonl"
+    reviewer_return_transcript.write_text(json.dumps({
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": reviewer_return_tool, "name": "Agent",
+            "input": {
+                "prompt": reviewer_recovery_prompt,
+                "subagent_type": "xunji-reviewer",
+            },
+        }]},
+    }) + "\n", encoding="utf-8")
+    append_hook_event(reviewer_binding_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": reviewer_return_session,
+        "transcript_path": str(reviewer_return_transcript),
+        "agent_id": reviewer_return_child,
+        "agent_type": "xunji-reviewer",
+    })
+    append_hook_event(reviewer_binding_run, {
+        "hook_event_name": "SubagentStop",
+        "session_id": reviewer_return_session,
+        "transcript_path": str(reviewer_return_transcript),
+        "agent_id": reviewer_return_child,
+        "agent_type": "xunji-reviewer",
+        "last_assistant_message": reviewer_return_text,
+    })
+    append_hook_event(reviewer_binding_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": reviewer_return_session,
+        "transcript_path": str(reviewer_return_transcript),
+        "tool_name": "Agent",
+        "tool_use_id": reviewer_return_tool,
+        "tool_input": {
+            "prompt": reviewer_recovery_prompt,
+            "subagent_type": "xunji-reviewer",
+        },
+        "tool_response": [{"type": "text", "text": reviewer_return_text}],
+    })
+    reviewer_return_state = _load_json_file(
+        reviewer_binding_run / "state" / "assignments.json")
+    reviewer_return_receipt = (
+        reviewer_return_state.get("assignments", [{}])[0]
+        .get("attempts", [{}])[0]
+    )
+    reviewer_result_binding_persisted = bool(
+        reviewer_return_receipt.get("state") == "returned"
+        and reviewer_return_receipt.get("subagent_type") == "xunji-reviewer"
+        and reviewer_return_receipt.get("result_digest_binding") == "b" * 64
+        and not contract_schema.named_schema_errors(
+            reviewer_return_receipt, "agent-receipt.v1.schema.json")
+    )
+
     legacy_settlement_run = run.parent / "pre-bundle-running-settlement-run"
     _legacy_contract, legacy_plan = seed_current_plan(
         legacy_settlement_run, stage="S1")
@@ -9673,7 +9602,7 @@ def _selftest() -> int:
         "schema": 3,
         "assignments": [{
             "agent": "A-crash-001", "front": "F-001", "status": "assigned",
-            "assets": [], "attempts": [],
+            "role": "web-hunter", "assets": [], "attempts": [],
         }],
     }), encoding="utf-8")
     crash_prompt = "XUNJI_ASSIGNMENT=A-crash-001 XUNJI_FRONT=F-001"
@@ -11192,6 +11121,10 @@ def _selftest() -> int:
     unknown_type_receipt["subagent_type"] = "general-purpose"
     swapped_type_receipt = json.loads(json.dumps(returned_receipt))
     swapped_type_receipt["subagent_type"] = "xunji-reviewer"
+    reviewer_receipt = json.loads(json.dumps(swapped_type_receipt))
+    reviewer_receipt["result_digest_binding"] = "7" * 64
+    hunter_with_review_binding = json.loads(json.dumps(returned_receipt))
+    hunter_with_review_binding["result_digest_binding"] = "7" * 64
     bool_length_receipt = json.loads(json.dumps(returned_receipt))
     bool_length_receipt["result_snapshot"]["length"] = True
     bad_snapshot_receipt = json.loads(json.dumps(returned_receipt))
@@ -11899,9 +11832,11 @@ def _selftest() -> int:
          and bool(receipt_errors(missing_receipt))
          and bool(receipt_errors(missing_launch_prompt_receipt))
          and bool(receipt_errors(missing_type_receipt))),
-        ("agent receipt schema rejects unknown types; assignment semantics own role swaps",
+        ("agent receipt schema discriminates Hunter and Reviewer bindings",
          bool(receipt_errors(unknown_type_receipt))
-         and not receipt_errors(swapped_type_receipt)
+         and bool(receipt_errors(swapped_type_receipt))
+         and not receipt_errors(reviewer_receipt)
+         and bool(receipt_errors(hunter_with_review_binding))
          and nested_attempt_reverse_binding_rejected),
         ("agent receipt schema rejects bool-as-integer and snapshot extensions",
          bool(receipt_errors(bool_length_receipt))
@@ -12088,6 +12023,8 @@ def _selftest() -> int:
          reviewer_recovery_snapshot_attempt_graph_once),
         ("interrupted Reviewer Start recovery is idempotent",
          reviewer_recovery_idempotent),
+        ("returned Reviewer receipt persists its exact result digest binding",
+         reviewer_result_binding_persisted),
         ("pre-bundle v1 running attempt permits only its exact Stop settlement",
          pre_bundle_running_stop_only_compat),
         ("tool_result text cannot forge child identity",

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/transition-claim.v1.schema.json",
+  "title": "Xunji one-use lifecycle transition claim v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "target_run",
+    "session_id",
+    "prompt_sha256",
+    "origin_run",
+    "effect",
+    "status",
+    "updated_at"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.transition-claim.v1"},
+    "target_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "origin_run": {"type": "string", "maxLength": 255},
+    "effect": {"$ref": "#/$defs/lifecycleEffect"},
+    "status": {"enum": ["active", "claimed", "revoked"]},
+    "claim_binding": {"$ref": "#/$defs/claimBinding"},
+    "claimed_at": {"type": "number", "exclusiveMinimum": 0},
+    "revoked_at": {"type": "number", "exclusiveMinimum": 0},
+    "updated_at": {"type": "number", "exclusiveMinimum": 0}
+  },
+  "oneOf": [
+    {
+      "properties": {"status": {"const": "active"}},
+      "required": ["status"],
+      "not": {
+        "anyOf": [
+          {"required": ["claim_binding"]},
+          {"required": ["claimed_at"]},
+          {"required": ["revoked_at"]}
+        ]
+      }
+    },
+    {
+      "properties": {"status": {"const": "claimed"}},
+      "required": ["status", "claim_binding", "claimed_at"],
+      "not": {"required": ["revoked_at"]}
+    },
+    {
+      "properties": {"status": {"const": "revoked"}},
+      "required": ["status", "revoked_at"],
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {"required": ["claim_binding"]},
+              {"required": ["claimed_at"]}
+            ]
+          }
+        },
+        {"required": ["claim_binding", "claimed_at"]}
+      ]
+    }
+  ],
+  "$defs": {
+    "lifecycleEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "target_run",
+        "input_sha256",
+        "operation",
+        "options_sha256",
+        "effect_sha256"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.lifecycle-effect.v1"},
+        "kind": {"enum": ["create", "activate"]},
+        "target_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "input_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "operation": {"type": "string", "minLength": 1, "maxLength": 128},
+        "options_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "effect_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "claimBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_run",
+        "origin_run",
+        "session_id",
+        "prompt_sha256",
+        "transaction_id",
+        "source_sha256",
+        "expected_run",
+        "effect"
+      ],
+      "properties": {
+        "target_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "origin_run": {"type": "string", "maxLength": 255},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "transaction_id": {"type": "string", "pattern": "^$|^[0-9a-f]{32}$"},
+        "source_sha256": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "expected_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "effect": {"$ref": "#/$defs/lifecycleEffect"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "transaction_id": {"const": ""},
+            "source_sha256": {"const": ""}
+          }
+        },
+        {
+          "properties": {
+            "transaction_id": {"pattern": "^[0-9a-f]{32}$"},
+            "source_sha256": {"pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      ]
+    }
+  }
+}

@@ -54,6 +54,10 @@ try:
     import setup_source as _setup_source
 except Exception:
     _setup_source = None
+try:
+    import contract_schema as _contract_schema
+except Exception:
+    _contract_schema = None
 from evidence_parse import (  # 唯一权威证据解析器与 evidence-index hash owner
     current_evidence_index_hash,
     evidence_artifact_manifest,
@@ -434,6 +438,10 @@ def check_macro_stage_control(run_dir: Path) -> list[str]:
         else:
             contract = json.loads((run_dir / "state" / "turn_contract.json").read_text(
                 encoding="utf-8", errors="strict"))
+            if _contract_schema is None \
+                    or _contract_schema.turn_contract_errors(
+                        contract, allow_legacy=True):
+                raise ValueError("turn contract violates its formal contract")
             _work_plan.current_plan(run_dir, contract)
     except Exception as exc:
         current_plan_valid = False
@@ -4065,7 +4073,11 @@ def _selftest() -> int:
     )
     stage_contract = {
         "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
-        "session_id": "check-run-stage", "prompt_sha256": "d" * 64,
+        "session_id": "check-run-stage",
+        "transcript_path": str(d_stage / "check-run-transcript.jsonl"),
+        "prompt_sha256": "d" * 64,
+        "prompt_excerpt": "check-run stage fixture",
+        "memory_approved": False,
         "updated_at": 1.0, "fanout_override": False,
     }
     (d_stage / "state" / "turn_contract.json").write_text(

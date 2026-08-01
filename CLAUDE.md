@@ -149,17 +149,20 @@
   current phase, run dir, blockers, and next required action before any raw
   details.
 - Claude Code statusline is a read-only indicator for this project. It prints
-  nothing without an explicit Xunji workspace and active run; otherwise it shows
-  only `[Xunji-status] [<phase>] <run>`. The current renderer does not inspect a
-  session id, transcript, or turn contract. Session-bound rendering remains a
-  separate target change; do not describe it as current behavior. Detailed
-  progress and health remain in visible phase banners and `loop_journal.py`
-  phase-start/phase-end records. The pointer is the trusted single operator's
-  persistent current-run selection, not a session lease: `SessionEnd` does not
-  clear it and `SessionStart` does not restore it. Each real UserPromptSubmit
-  writes a fresh turn contract for that selected run. Session/transcript fields
-  remain causal receipt metadata and stale-effect correlation keys, never a user
-  ACL or a reason to reject a new personal session.
+  nothing without an explicit Xunji workspace, active run, non-empty statusline
+  session id, and an exact current turn-contract binding for that run; otherwise
+  it shows only `[Xunji-status] [<phase>] <run>`. When the client supplies a
+  transcript path, it must also match the contract exactly; clients that omit the
+  field retain the exact session-only compatibility path. Unknown authority state
+  hides instead of guessing. Detailed progress and health remain in visible phase
+  banners and `loop_journal.py` phase-start/phase-end records. The pointer is the
+  trusted single operator's persistent current-run selection, not a session lease:
+  `SessionEnd` preserves the pointer and canonical run but retires that session's
+  visible binding; startup/clear cannot resurrect it, while an exact resume event
+  may restore it through the public lifecycle path. Each real UserPromptSubmit
+  writes a fresh turn contract for the selected run. Session/transcript fields
+  remain causal receipt metadata, display binding, and stale-effect correlation
+  keys, never a user ACL or a reason to reject a new personal session.
 - **Target-facing privacy boundary:** Root and every Agent must keep generated
   project/run/Agent/operator identity and real personal data out of outbound URL
   paths/queries, headers, bodies, multipart names/content, and target writes. Use

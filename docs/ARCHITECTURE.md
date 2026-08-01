@@ -316,11 +316,13 @@ id 与 expected run。CLI/source 输入不能提供 claim 内容或 authority，
 run，必须在 pointer 改动前拒绝；`recovered` 路径同样重跑完整 receipt、required-file、
 coverage 与 source-bundle 完整性校验，不能仅凭 pointer 和 status 改写收据。
 active pointer 是可信个人操作者的持久当前选择，不是 Claude session 的租约。
-`SessionEnd` 不清空 pointer，`SessionStart` 不恢复 selection；新的本地 Claude session 在首个
-真实 UserPromptSubmit 直接绑定现有有效 pointer，并写 fresh turn contract。session ID 与
-transcript path 继续作为因果回执、旧 effect/claim 撤销和 stale-event 关联字段，不是 operator
-ACL。只有公开 setup/resume/set-active transaction 能选择不同 run；statusline 继续只读
-pointer + 阶段派生状态。
+`SessionEnd` 不清空 pointer，但会退休该 session 的 visible binding；startup、clear、compact
+不恢复 selection，只有 exact resume event 可通过 transaction owner 消费匹配回执并先写入
+EXPLAIN-only barrier。新的本地 Claude session 在首个真实 UserPromptSubmit 直接绑定现有有效
+pointer，并写 fresh turn contract。session ID 与 transcript path 继续作为因果回执、statusline
+display binding、旧 effect/claim 撤销和 stale-event 关联字段，不是 operator ACL。只有公开
+setup/resume/set-active transaction 或 exact session-resume recovery 能选择不同 run；statusline
+继续只读 pointer、当前 turn contract 与阶段派生状态。
 
 当客户端把 literal `/loop <source>` 原样交给 `UserPromptSubmit` 时，它由
 `tools/loop_bootstrap.py --source ... --type auto` 适配，并在同一顶层 operator 回合继续到
@@ -439,6 +441,17 @@ receipt 与 guard state 仍禁止直接写。被拒绝或失败的动作不是�
 同回合 PreToolUse 的 Cron/Task 排序使用已 fsync 的 hook journal，避免 Claude transcript 尚未
 刷盘时把已成功的控制动作误拒；Agent/target/model/review/evidence 与最终 Stop truth 仍要求
 transcript-backed receipt。两者不能互换。
+
+所有 versioned JSON control-plane contract 的结构真值由 `contracts/*.schema.json` 拥有，
+`tools/contract_schema.py` 是 production writer、reader 与 conformance test 共用的 stdlib
+Draft 2020-12 subset validator；各 owner 只在其后补充 hash、时间顺序、路径、状态机和
+canonical identity 等语义约束，不得再维护一份可独立演进的字段白名单。当前 writer 必须满足
+closed schema；历史兼容只能通过列举的 exact keyset/variant adapter，未知字段、半套升级和
+不同 contract 复用同一 schema ID 均 fail closed。`turn_contract`、派生 `run_status` 与一次性
+`transition_claim` 分别使用 `xunji.turn_contract.v1`、`xunji.run-status.v1` 与
+`xunji.transition-claim.v1`；旧 run 中后两者误用 turn-contract ID 的对象只在完整满足目标
+shape 时迁移读取，任何新写入都使用独立 ID。
+
 仅因 work plan 未就绪而拒绝的 target 动作，在后续 Agent 以相同 capability/method/URL
 成功执行后即被语义结算；解释器绝对路径、直连/代理前缀和 artifact basename 不属于目标
 动作身份，不能在 `cycle_end` 后强迫重放过期命令。其他拒绝仍按 exact receipt 诚实收敛。
@@ -604,7 +617,14 @@ Hunter/Reviewer return 必须逐项输出 body 与 sidecar 的完整绝对或 ru
 Replay v2 将完整 wire 的 `wire_len/wire_sha1` 与上限保存片段的
 `saved_body_meta.len/sha1/truncated` 分离校验；截断片段只证明自身完整性，不得与完整响应 hash
 比较，也不得靠空 hash 跳过。只有连续、逐块 hash 正确且重建为相同 full wire hash 的
-`saved_body_chunks` manifest 才可标记 `wire_verified=true`。
+`saved_body_chunks` manifest 才可标记 `wire_verified=true`。`review-disposition` receipt 的
+plan projection 精确兼容 legacy `status/len/sha1` 三字段或完整 v2 七字段 response；半套 v2、
+类型/hash/truncation 关系错误继续 fail closed，合法 v2 receipt 不得因旧 projection 白名单而
+消失并阻塞 Root `finish`。
+Canonical `evidence.md` 的新写入同样使用 exact artifact-list contract：`probe --save` 产生的
+body 与 `.replay.json` 必须分别作为完整 run-local path 写进 `Artifacts`；`Replay` 只记录
+DIVERGED/privacy-redacted 后的裁定说明，不是 artifact field 的续行。`record_evidence.py` 用
+repeatable `--artifact` 直接生成该形状，避免 producer 把两个文件压成解析器不可见的散文。
 Plan-bound assignment 的 typed `tool_call_limit` 由 `workers.py` 物化；新 assignment 默认 24，
 旧 v1 row 缺字段时仍按兼容 fail-closed 值 6 解释，显式值只允许 5–64。`SubagentStart` 把有效值连同 assignment/lane/
 plan/prompt/type 冻结进 runtime receipt，之后不再读取可变 assignment 来决定本 attempt 的上限。
@@ -629,7 +649,10 @@ Reviewer disposition 冻结后，Root 必须先 `finish` 再修改 canonical evi
 PreToolUse 以 `XUNJI_E_ROOT_SETTLEMENT_REQUIRED` 执行该顺序。Target lane 的 `finish merged`
 校验真实 return、per-asset target activity 和冻结 artifact/review binding，但不反向要求 Root
 提前创建 E-entry；canonical promotion 和 finding maturity 仍由后续 evidence/merge/closure gate
-判断。`accept-candidate` 只接受候选，不自动等于 `merged`。
+判断。Target settlement 的 current `coverage_merge` 因此冻结每个 asset 的 target-action 数量与
+`canonical_promotion=pending_root_synthesis`；assignment contract 只为读取历史 ledger 精确兼容
+旧 `canonical_evidence=true` 形状，半套或混搭字段 fail closed。`accept-candidate` 只接受候选，
+不自动等于 `merged`。
 
 显式 target-egress denial 下，planner 只生成一个 offline Hunter 加其唯一 Reviewer；若本地没有
 target-derived artifact，Hunter 以 `NO_TARGET_DATA_FOR_OFFLINE_ANALYSIS` 早停，Reviewer 只核对
@@ -908,6 +931,7 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `.agents/skills/` | Codex 辅助维护/复审知识 | 仅 Codex-side 或明确镜像共享变化 |
 | `.claude/hooks/` | Claude live runtime 的强制 authority/effect/lifecycle gates | safety skill、hook tests、独立复审 |
 | `contracts/` + `tools/harness/fixtures/` | versioned schemas 与 conformance cases | 当前 Python validator、未知版本 fail-closed、fixture tests |
+| `tools/contract_schema.py` | 所有 published JSON contract 共用的 closed structural validator、external `$ref` 解析与 exact historical adapters；不拥有 hash/路径/状态机语义 | 每个 contract owner 的 production writer/reader、schema negative fixtures、完整 selftest |
 | `tools/harness/maintenance_authority.py` + `safety_critical_paths.json` | 顶层自然语言维护意图、typed path boundary 与普通 `/loop` protected-path floor | `turn_contract.py`、settings write receipts、output truth gate、manifest drift check、独立复审 |
 | `tools/setup_source.py` | setup source 路由、bare-host/URL semantic normalization、provenance bundle validator；不拥有自然语言策略、fetch/authority/pointer | schema/fixture、setup adapters/transaction、privacy、target.md、独立复审 |
 | `tools/setup_normalizer.py` | Markdown/普通 JSON token/ref inventory、external surrogate 与 reference-only candidate 晋级；不拥有 model transport/target/pointer | candidate schema、privacy、setup source/transaction、benchmark、独立复审 |
@@ -938,6 +962,28 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 Claude live driver 的边界声明，`.agents/skills/src-safety-boundary/SKILL.md` 是
 Codex 辅助侧的边界镜像/入口，不是执法 runtime。共享语义变化先修改 canonical
 owner 与 enforcement/tests，再明确判断是否需要同步辅助镜像并记录原因。
+
+Codex skill discovery 也必须保留明确 owner：每个
+`.agents/skills/*/SKILL.md` 的 frontmatter 都声明 `Codex-side`；保留的同名能力/政策镜像
+（`captcha-solve`、`network-proxy`、`poc-package`、`src-rules`、
+`src-safety-boundary`）同时声明不继承 Claude Root、live-run 或 Hook authority。
+Claude-primary-only 的 `web-research` 不得出现在 `.agents/skills/`；普通 Codex 外部检索、
+项目对比和只读建议服从宿主产品的检索规则，不自动执行 Xunji live run 的时间门、本地
+知识优先或 evidence ledger 写入。`.agents/skills/xunji-web-research-sync` 只负责 Codex
+对该 Claude-primary 协议的维护审计，不是普通检索入口。Codex 对 live run 的
+ReviewOps 默认只返回挑战与修复候选；只有 operator 或 Claude Root 明确委派 canonical
+effect 时才经既有 owner path 修改 run。
+
+`.agents/skills/xunji-closure-audit/scripts/closure_audit.py` 对上述 discovery 归属做
+机械漂移检查：目录名与 frontmatter name 必须一致、description 必须声明
+`Codex-side`、Claude-primary-only skill 必须缺席且 canonical Claude owner 必须存在；
+所有跨树同名项默认拒绝，只有显式分类为 shared mirror 或 Codex-adapted counterpart
+才允许，允许的通用镜像还必须保留 Claude runtime 边界。对改名复制，检查只使用
+已知 Claude-primary protocol 的窄、多特征组合指纹（当前仅 `web-research`）；显式分类的
+Codex `xunji-web-research-sync` maintenance-audit 入口可以引用 owner 步骤，其他 Codex
+entry 命中多项则失败。该检查只证明标准技能发现、
+说明归属和已知协议复制，不阻止提示词临时复述相同步骤，也不替代 live Hook、scope、
+evidence 或 review gate。
 
 Claude skill 树内部也只允许一个 owner：`web-research` 是公共检索顺序与 lead
 返回形状的 canonical skill；`xunji-reviewops` 拥有复审裁决，其
@@ -1138,129 +1184,83 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
 
 ## 12. Maintenance Checkpoint
 
-### 2026-08-01 — frozen artifact reference contract recovery
+### 2026-08-01 — cross-component contract-drift closure
 
 - Date: 2026-08-01
-- Scope: 修复 target `accept-candidate` 在 Hunter/Reviewer 已真实返回后，因冻结结果使用
-  “exact evidence 目录头 + basename”、`.../evidence/<file>`、body 加 replay suffix 或
-  same-directory pair 散文而无法结算的问题；不修改 live run、active pointer 或既有 frozen bytes。
-- Architecture impact: Agent return / Reviewer disposition / evidence-promotion contract changed。
-  新 return 必须逐项输出完整 body 与 sidecar 路径；冻结散文只经窄、确定性
-  compatibility parser 恢复，归一后仍执行 identical set、evidence containment、文件存在、
-  sidecar request/response 与 wire/saved-body identity 校验。该规则替代“任意语义等价 artifact
-  散文都能被后置 regex 理解”的隐含假设，不放宽 evidence gate。
-- Owner/enforcement: `tools/workers.py` 独占 frozen artifact 解析、归一与 review receipt；
-  `.claude/agents/xunji-{hunter,reviewer}.md` 和 `docs/templates/agents/{web-hunter,review}.md`
-  约束未来输出；`docs/WORKFLOW-reference.md` 与本文冻结兼容边界。兼容解析只在 artifact
-  declaration 内接受 exact run evidence anchor、安全 basename、exact current-run binding 后的
-  显式 ellipsis 与肯定式 pair
-  shorthand；Reviewer stem 必须为反引号 token 且只能唯一命中 Hunter 集合，路径 resolve 后
-  必须仍位于 `evidence/`。普通 prose、否定式 replay mention 和 ambiguous stem 均 fail closed。
-- Live migration: 不自动遍历或改写历史 run。Root 在后续授权 EXECUTE 回合重试正常
-  `workers.py review-disposition` 时才对原 frozen bytes 做相同的确定性校验并写原有
-  `xunji.review-disposition.v1` receipt；解析仍不清债、不自动 `finish`、不创建 E-id。当前
-  `A-web-hunter/A-review-004..006` 仅做只读 validator 验证，分别得到 24/24、14/14、10/10
-  normalized refs 且 replay 12/7/5 全部通过，live assignment/draft 保持 pending review。
-- Verification: 隔离 candidate 的 focused
-  `workers,context_pack,check_templates,run_model,work_plan,runtime_receipts,turn_contract` 为
-  7 passed / 0 failed，完整 `tools/selftest_all.py` 为 69 passed / 0 failed；bench 18/18 clean，
-  rules/templates/runtime-boundary/hook/diff、probe/replay/check_run selftests 全部 PASS。
-  隔离 detached worktree 的 Claude Code 2.1.201 / DeepSeek `deepseek-v4-flash[1m]` final
-  session `fa3cde7d-54b8-42b5-ade2-34ff3c696848` 以自然语言维护任务亲自运行 focused/
-  rules/diff checks；独立 transcript 核对无 Edit/Write、Agent、目标动作或 active pointer，
-  一次 compound argv denial 按 exact bare argv 修复后通过。
-- Independent review: Codex 是作者与最终 synthesis，不计自己的 review；operator 明确要求
-  不使用 arkcli，因此 commit gate 只采用 fresh-context Claude Code exact-staged-diff review，
-  原始 verdict、findings 与 Codex dispositions 保存在
-  `review/records/2026-08-01-frozen-artifact-reference-recovery.md`。
-- Exclusions: 不改 Hook/guard/sentinel、replay schema、live run canonical/control-plane state，
-  不纳入 worktree 中既有 Codex skill ownership、statusline、project intro、target/evidence
-  artifacts、历史 review records 与其他 unrelated dirty/untracked 内容。
-
-### 2026-07-31 — same-target lifecycle claim reconciliation
-
-- Date: 2026-07-31
-- Scope: 修复重复 exact source 已解析到当前 active run 时的 lifecycle 假成功。PreToolUse
-  不再因 `target == origin` 跳过 claim；setup transaction 对 fresh live lifecycle contract
-  缺 claim fail closed；post-bind 由 transaction owner 统一验证 original create、terminal
-  activation attempt 或 exact same-run create reconciliation；同时冻结 legacy binding-only、
-  cross-origin create、same-target activation 与 candidate mismatch 的兼容/拒绝边界。
-- Architecture impact: lifecycle authority、setup recovery 与 post-bind verification 改变。
-  active pointer 和 setup receipt 顶层 create identity 的 owner 不变；新增的是同目标 effect
-  也必须消费 one-use claim，以及重复 create 的当前 turn contract 作为 reconciliation proof。
-  Hook-bound original pair 存在时不可变，direct CLI original 无 pair；历史 pre-effect-profile
-  binding-only receipt 仅保留 exact frozen-turn post-bind 兼容，不成为新 effect authority。
-  本轮取代“同目标是无需 claim 的 direct/no-op 情形”和“post-bind 只认 receipt 顶层首次
-  prompt binding”这两个不完整实现。
-- Owner/enforcement: `.claude/skills/xunji-run-lifecycle/SKILL.md`、`docs/WORKFLOW.md`
-  与本文描述 Claude-primary 协议；`tools/turn_contract.py` 生成同目标 claim、拒绝 transition
-  proof 不完整的后绑定执行；`tools/setup_transaction.py` 是 claim/receipt/pointer commit 与
-  terminal binding validator 的唯一 owner。真实 Hook 子进程 → transaction consume → post-bind、
-  cross-origin create、legacy/tamper 与事务 fault/recovery selftest 冻结跨层行为。
-- Live migration: 无 schema 或数据迁移，不编辑 live run、pointer、claim、journal、evidence。
-  现代 committed/recovered receipt 继续有效且顶层 binding 不改写；pre-effect-profile
-  binding-only receipt 继续证明其 exact historical turn，但既有严格 activation/profile gate
-  不因本修复放宽。下一次现代重复 source/resume/set-active prompt 自动走 fresh claim。当前正
-  卡在旧假成功状态的 turn 需要由操作者重新发起 lifecycle prompt，不能从历史 prompt 补铸权限。
-- Verification: `turn_contract.py --selftest`、`setup_transaction.py --selftest`、
-  `loop_bootstrap.py --selftest`、`check_rules.py`、`check_templates.py`、
-  `check_runtime_boundary.py` 均 PASS；`tools/selftest_all.py` 为 70 passed / 0 failed
- （120.5s）。隔离 DeepSeek-backed Claude Code real-driver 的 transcript/argv/claim/contract/
-  receipt adjudication记录在 `review/records/2026-07-31-same-target-recovery-driver/`；fresh-context
-  Claude Code 独立复审记录在 `review/records/2026-07-31-same-target-recovery-review/`，二者都是
-  commit gate。
-- Independent review: Codex 是作者，不计自己的 review。按 operator 要求不使用 arkcli；只以
-  fresh-context、no-edit 的 DeepSeek-backed Claude Code 检查 exact scoped diff，Codex 负责
-  disposition 和最终综合。
-- Exclusions: 不修改现有 live engagement/runtime artifacts，不把 `.agents/skills` 当作 Claude
-  主驾驶源；保留 worktree 中既有 Codex skill ownership、statusline、project intro、target/
-  evidence/review artifacts 与其他无关 dirty/untracked 内容，不纳入本修复提交。
-
-### 2026-07-29 — interrupted Reviewer recovery（历史 checkpoint）
-
-- Date: 2026-07-29
-- Scope: 修复 plan-bound Reviewer Start 的 receipt/projection 半提交死锁。真实
-  A-review-012 在 `SubagentStart` journal receipt 成功后，Start hook 对 25MB parent transcript
-  重复扫描并在 600 秒取消；child sidechain 没有任何模型输出，但 derived assignment 永久显示
-  `running`，旧 plan 不能结算、新 plan 不能提交。
-- Architecture impact: runtime projection 与 Reviewer recovery lifecycle changed。
-  新增严格、fail-closed、content-addressed 的 pre-model Start supersession；保持 Reviewer
-  不可取消、不可绕过，保持 `runtime_events.jsonl` append-only，并把 recovery 后续动作收敛到
-  原 assignment row 的 exact durable launch-contract replay。Projection 从 per-record/per-token
-  重复解析改为 snapshot-once attempt graph 与 per-transcript batched token scan。
-- Owner/enforcement: `tools/runtime_receipts.py` 独占 transcript proof、receipt schema、
-  effective projection 与 runtime→assignment recovery transaction；
-  `contracts/interrupted-reviewer-start.v1.schema.json` 冻结 receipt；`tools/workers.py delegate`
-  在 assignment writer 前调用 typed recovery，再复用既有 assigned/no-attempt replay gate。
-  已有 authentic Stop、child claim/tool/assistant、parent terminal 或 binding drift 均拒绝恢复。
-- Live migration: 不自动扫描或改写所有 run。下一次对受影响 run 执行正常
-  `workers.py delegate` 时，只有 exact proof 成立的 Start 才追加 receipt 并重置 derived row；
-  physical journal、Hunter result、review dependency、evidence/frontier/report 均不删除或改写。
-- Verification: `runtime_receipts.py --selftest`、`workers.py --selftest`、
-  `turn_contract.py --selftest`、rule/compile/diff checks 均 PASS；完整
-  `selftest_all.py` 为 69 passed / 0 failed。真实 `workers.py delegate` owner path
-  在原始 live run 的隔离 byte copy 上以 `/usr/bin/time -p` 1.61 秒发布 receipt，并把
-  A-review-012 恢复为同 row assigned/no-attempt；随后仅因 copied work-plan 的绝对
-  `run_dir` binding 正确 fail closed。独立 detached worktree 的 Claude Code 2.1.201 /
-  configured DeepSeek session `e459e35b-e576-4596-a689-3f1724fa0efa` 对 path-native
-  targetless fixture 完成 recovery → exact replay → real Reviewer return → review
-  disposition → Hunter merge → typed cycle_end；runtime/transcript adjudication为
-  target_action=0、WebFetch/WebSearch/Edit/Write=0。并发 fixture 在 receipt publish
-  临界区暂停 recovery，证明 late runtime writer 被 runtime lock 串行化；额外负例证明
-  non-Reviewer assignment 与不同 pre-model failure reason 均不能误用 v1。
-- Independent review: round 1 fresh-context Claude 提出的 machine timing、
-  synthetic/full-path 边界与 concurrent-writer WARN 已分别补 raw `/usr/bin/time`、
-  明确分层声明和 targeted regression。round 2 `panel:arkcli+claude` 为 WARN、无 source
-  blocker；arkcli 内部 GLM parse error 保留为 partial-panel 限制，Kimi 路径与 fresh
-  Claude 完成。round 2 的 split high-load/full-lifecycle E2E 边界已显式 deferred，v1
-  rigid reason 已记录独立 schema 演进规则。final3 arkcli 再次 timeout/parse failure 后，
-  operator 明确要求最终门不再使用 arkcli；最终 exact-diff fresh-context Claude review
-  保存在
-  `review/records/2026-07-29-interrupted-reviewer-recovery/peer-review.final4-claude.*`。
-  Codex 是作者，不计自己的 review。
-- Exclusions: 不修改 live run canonical/control-plane 状态，不删除任何缓存或 journal；
-  不改动用户已有的 `tools/xunji_statusline.py`、`docs/XUNJI_PROJECT_INTRO.md`、
-  target/evidence artifacts 与其他 untracked 文件。
+- Scope: 全仓检查并修复 producer/consumer/schema 版本不同步：review-disposition legacy/v2
+  response、target settlement current/legacy promotion、Reviewer attempt digest binding、scope
+  admission prepared/normal/recovered 三态、turn contract、run-status、transition-claim、merge-draft
+  legacy/current 以及 evidence Artifacts/Replay 输出。真实驱动随后补齐 Hook selftest 伪 turn
+  shape、本地 source path 被尾部文件名降级成 bare-host URL、同句标点后的 resume 误判、
+  `外网请求/访问` 未同时冻结 Web/target egress，以及 Reviewer 使用
+  `Exact evidence paths from ...` 标题时 artifact list 未被识别的问题。新增共用 structural
+  validator，并把 setup
+  source/normalizer、work plan、assignment cancellation、typed cycle、reason pass、Agent/runtime/
+  foreign/interrupted receipts、merge/review/root-action projection 的 production 边界接到同一 schema。
+  独立审查继续发现 statusline 实现已 session-bound 而 `CLAUDE.md` 仍描述旧 pointer-only renderer，
+  以及 shared validator 把 `$ref` 当 replacement、未执行 Draft 2020-12 sibling keywords；本 diff
+  同步文档并把 `$ref` 改为 applicator，非字符串 ref 继续 fail closed。最终审查又发现 Python
+  `True == 1` 会放宽无显式 type 的 composite `const/enum`；validator 现在递归执行 JSON type-aware
+  equality，保留 number `1 == 1.0`，同时让 `uniqueItems` 使用相同语义。scheme-less host/path/query
+  重新作为一个完整 source token，而相对本地文件仍由左侧 slash boundary 与 local-source role
+  保护；句中 lifecycle denial 与 `session_ended` 不再因 sentence-boundary resume/fresh-artifact
+  fallback 获得 transition claim。同步中英文 README、AI 环境说明、WORKFLOW/reference、
+  ROADMAP、anti-drift 设计记录与独立复审概念文档：公开入口现在区分 all-tool turn authority
+  与窄 safety/egress gate，statusline 文档与 session-bound renderer 一致，Evidence body/sidecar
+  逐项契约一致，ROADMAP 只保留研究候选和 dated evidence，前向 backlog 唯一归 `TODO.md`；
+  Architecture 只保留本轮一个 checkpoint，历史由 Git 追溯。
+- Architecture impact: control-plane contract ownership、lifecycle projection identity、Agent/review
+  settlement、setup/scope receipt、evidence-output data flow changed。Formal schema 现在拥有 closed
+  structural shape；owner semantic validator 只补充 content hash、路径、时序、状态机与 current
+  canonical binding。该规则替代“schema 只在 selftest 比对、production 另写字段白名单”的旧模式。
+- Owner/enforcement: `contracts/*.schema.json` 冻结 current variants；`tools/contract_schema.py`
+  统一解析 internal/external refs、JSON type/oneOf/conditional/format 等项目使用子集；各 producer
+  在原子写入前验证，各 reader 在投影/授权前验证。`turn_contract.py` 继续拥有 lifecycle 语义，
+  `workers.py`/`run_model.py` 继续拥有 review/settlement 语义，`setup_transaction.py` 继续独占 pointer
+  CAS；shared validator 不获得这些 authority。
+- Compatibility/migration: 不重写 live run、receipt、claim、journal 或 pointer。历史 turn contract
+  只接受仓库实存的 exact 9/15/29/37/40-key shapes；旧 run-status/transition-claim ID 只在完整目标
+  shape 下读取；review response 只接受 exact 3-field legacy 或 exact 7-field v2；merge draft 仅在
+  plan binding 全空的 legacy variant 允许空 role，plan-bound current variant仍要求非空 role。
+  半套字段、未知字段、bool-as-number、hash/type/时序不一致继续 fail closed。
+- Evidence output: Hunter/Reviewer 与 canonical ledger 的新输出都逐项列 body/sidecar 完整路径；
+  frozen Agent prose仅保留已记录的窄兼容 parser。`record_evidence.py --artifact` 可重复，旧
+  `--artifacts` 单值仍精确兼容；`Replay` 字段不再被描述成 artifact 引用入口。artifact 标题 grammar
+  由一个共享 phrase source 同时生成 search/start matcher，避免两份 regex 再次偏斜；兼容
+  `Exact evidence paths from the frozen Hunter result ...` 只打开后续 exact-path list，仍不从普通
+  prose 推导路径。
+- Verification: focused contract/lifecycle/setup/evidence/Hook owner selftests、`git diff --check`、
+  Python compile、rules/templates/runtime-boundary/hook checks 均通过；在隔离 staged tree、
+  使用仓库已提交版本的 closure audit 得到 `python_command_refs total=243 missing=0`、
+  `selftest_entrypoints total=63 not_registered=0`；完整 `tools/selftest_all.py` 为
+  70 passed / 0 failed（120.1s，包含最终 JSON equality、host/path、lifecycle denial、
+  `session_ended` 与标题兼容回归）。历史只读扫描中 12/12 turn
+  contract、12/12 run-status、11 assignment stores / 208 rows 通过对应 production reader；151 个
+  merge draft 中 146 个匹配 exact legacy/current variant，5 个 2026-07-27 旧 draft 因 replay
+  `response.sha1` 为空继续作为 integrity debt fail closed，不定义成合法历史版本，当前 live run
+  不含该形状；`runs/*/state/scope_admissions/*.json` 为 0 个，因此 canonical-sort 收紧没有历史
+  receipt 迁移面。Reviewer writer fixture 真实投影 returned receipt，并验证
+  `result_digest_binding` 在 schema admission 前已持久化；extensionless natural-language local
+  source 与缺 `updated_at` contract 负例均 fail closed，statusline selftest 也核实恢复全局
+  `ACTIVE_RUN` 后 real pointer/contract fingerprint 不变。隔离 candidate 的 Claude primary-driver session
+  `74462770-edae-4a02-b0f5-eece5e782943` 用自然语言 local JSON source 成功提交
+  `runs/example-test_20260801`，source kind=`recon-json`、snapshot/run binding 与双 offline flag
+  均由 receipt/state 独立核实，target/Agent/Web effect 为零。原 live session
+  `d04e5447-3168-466e-af8e-dbc68b8dadaa` 在新顶层 EXECUTE contract 下结算 WP-8，并完成
+  WP-9 的 023/024/025/026 四组 Hunter→Reviewer→accept-candidate→merged；5/10/3/2 对真实
+  body/replay 分别通过 wire/saved-body 校验，最后写入 typed cycle_end。续跑旧上下文曾再次输出
+  canonical Evidence suffix shorthand，Stop gate 正确拒绝并由 Root 改成逐行 exact sidecar，未放宽
+  parser 或绕过入账。
+- Independent review: 不使用 arkcli。由于本轮触及 `tools/setup_transaction.py` 的
+  safety-critical contract reader，只有 handoff 时精确 fingerprint 绑定的 fresh-context、
+  no-tool/no-edit Claude Code verdict 才计入最终 gate；Codex 自审不算票。最终 verdict、原始
+  findings、fingerprint 与 disposition 记录在
+  `review/records/2026-08-01-contract-drift-doc-sync.md`。此前 fingerprint
+  `33f79ad34bb5a50f`、`e4e6d0aa4cb735f9` 与 `a9e14c20a2955017` 的 `Verdict: PASS` 均因后续
+  drift/doc 修复而失效，只作为 superseded review history 保留。
+- Exclusions: 不直接编辑 live assignment/draft/journal/evidence/finding/report/closure 或 active pointer；
+  不改 guard/privacy/sentinel/target request policy；不纳入既有 `.agents/skills`、`AGENTS.md`、
+  project intro、target/evidence artifacts、历史 review records 或其他 unrelated dirty/untracked 内容。
 
 ## 13. 外部设计来源与采用边界
 

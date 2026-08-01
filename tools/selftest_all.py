@@ -42,6 +42,7 @@ except Exception:
 # Exit 0 == pass for every one of these. Keep this list explicit and audited.
 SUITES: list[tuple[str, list[str], str]] = [
     # --- verification tools (--selftest flag) ---
+    ("contract_schema", ["tools/contract_schema.py", "--selftest"], "shared closed JSON contract validator"),
     ("check_run",      ["tools/check_run.py", "--selftest"],      "evidence gate + closure"),
     ("classify_hosts", ["tools/classify_hosts.py", "--selftest"], "recon -> coverage"),
     ("scope",          ["tools/scope.py", "--selftest"],          "run scope derive/match"),

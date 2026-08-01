@@ -77,18 +77,10 @@
                 }
               },
               "response": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["status", "len", "sha1"],
-                "properties": {
-                  "status": {"type": "integer"},
-                  "len": {"type": "integer", "minimum": 0},
-                  "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-                  "saved_len": {"type": "integer", "minimum": 0},
-                  "saved_sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-                  "truncated": {"type": "boolean"},
-                  "wire_verified": {"type": "boolean"}
-                }
+                "oneOf": [
+                  {"$ref": "#/$defs/legacyReplayResponse"},
+                  {"$ref": "#/$defs/v2ReplayResponse"}
+                ]
               },
               "saved_body": {"type": "string", "pattern": "^evidence/"}
             }
@@ -98,5 +90,39 @@
     },
     "recorded_at": {"type": "string", "minLength": 1, "maxLength": 128},
     "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "legacyReplayResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "len", "sha1"],
+      "properties": {
+        "status": {"type": "integer"},
+        "len": {"type": "integer", "minimum": 0},
+        "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "v2ReplayResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "len",
+        "sha1",
+        "saved_len",
+        "saved_sha1",
+        "truncated",
+        "wire_verified"
+      ],
+      "properties": {
+        "status": {"type": "integer"},
+        "len": {"type": "integer", "minimum": 0},
+        "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "saved_len": {"type": "integer", "minimum": 0},
+        "saved_sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "truncated": {"type": "boolean"},
+        "wire_verified": {"type": "boolean"}
+      }
+    }
   }
 }

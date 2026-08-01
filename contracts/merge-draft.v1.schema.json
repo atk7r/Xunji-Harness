@@ -28,7 +28,7 @@
   "properties": {
     "schema": {"const": "xunji.merge-draft.v1"},
     "assignment": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$"},
-    "role": {"type": "string", "minLength": 1, "maxLength": 128},
+    "role": {"type": "string", "maxLength": 128},
     "front": {"type": "string", "pattern": "^F-[0-9]+$"},
     "assets": {
       "type": "array",
@@ -78,7 +78,8 @@
             "plan_id": {"pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
             "plan_digest": {"pattern": "^[0-9a-f]{64}$"},
             "lane_id": {"pattern": "^L-[A-Za-z0-9._-]+$"},
-            "assignment_attempt": {"minimum": 1}
+            "assignment_attempt": {"minimum": 1},
+            "role": {"minLength": 1}
           }
         }
       ]

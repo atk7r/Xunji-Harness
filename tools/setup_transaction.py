@@ -28,6 +28,8 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+
+import contract_schema
 from typing import Callable, Iterator, Optional, Union
 
 import setup_source
@@ -40,7 +42,6 @@ SETUP_LOCK_NAME = ".xunji_setup.lock"
 ACTIVATION_LOCK_NAME = ".xunji_activation.lock"
 SOURCE_SCHEMA = setup_source.SCHEMA
 RECEIPT_SCHEMA = "xunji.setup_transaction.v1"
-TURN_CONTRACT_SCHEMA = "xunji.turn_contract.v1"
 SESSION_SELECTION_SCHEMA = "xunji.session_selection.v2"
 TRANSITION_EFFECT_SCHEMA = "xunji.lifecycle-effect.v1"
 EFFECT_PROFILE_SCHEMA = "xunji.lifecycle-effect-profile.v1"
@@ -986,6 +987,12 @@ def _callback_contract(
             "invalid_resume_barrier", "session contract callback returned a non-object",
             run_dir=target,
         )
+    if contract_schema.turn_contract_errors(contract, allow_legacy=False):
+        raise SetupTransactionError(
+            "invalid_resume_barrier",
+            "session contract callback persisted an invalid turn contract",
+            run_dir=target,
+        )
     if isinstance(callback_result, bytes):
         matches = callback_result == raw
     elif isinstance(callback_result, dict):
@@ -1011,7 +1018,7 @@ def _validate_safe_session_contract(
     active_contract_sha256: str = "",
     selection_sha256: str = "",
 ) -> None:
-    if contract.get("schema") != TURN_CONTRACT_SCHEMA \
+    if contract_schema.turn_contract_errors(contract, allow_legacy=False) \
             or contract.get("mode") != "EXPLAIN_ONLY" \
             or str(contract.get("session_id") or "") != session_id \
             or str(contract.get("bound_run") or "") != target.name \
@@ -1549,7 +1556,8 @@ def validate_committed_transition_contract(run_dir: Path, contract: dict) -> Non
     reconciliation: its fresh one-use claim is retained by the current turn
     contract while the historical top-level create identity remains unchanged.
     """
-    if not isinstance(contract, dict):
+    if not isinstance(contract, dict) \
+            or contract_schema.turn_contract_errors(contract, allow_legacy=True):
         raise SetupTransactionError(
             "transaction_identity_mismatch",
             "current turn contract is missing or invalid",
@@ -2697,7 +2705,8 @@ def clear_activation_cas(
                 if isinstance(contract, dict) else ""
             if _sha256(raw_contract) != contract_sha256 \
                     or not isinstance(contract, dict) \
-                    or contract.get("schema") != TURN_CONTRACT_SCHEMA \
+                    or contract_schema.turn_contract_errors(
+                        contract, allow_legacy=True) \
                     or str(contract.get("session_id") or "") != session_id \
                     or str(contract.get("bound_run") or "") != target.name \
                     or not contract_transcript \
@@ -6346,24 +6355,15 @@ def _selftest() -> int:
         transcript_path = str(session_root / "transcripts" / "session.jsonl")
         transcript_sha = _sha256(
             transcript_path.encode("utf-8", "replace"))
-        session_prompt_sha = _sha256(b"resume protected run")
         callback_order: list[str] = []
+        import turn_contract as _turn_contract
 
         def select_session_run() -> tuple[PointerSnapshot, bytes, dict]:
-            active_contract = {
-                "schema": TURN_CONTRACT_SCHEMA,
-                "mode": "EXECUTE",
+            active_contract = _turn_contract._contract_from_event({
                 "session_id": session_id,
                 "transcript_path": transcript_path,
-                "prompt_sha256": session_prompt_sha,
-                "bound_run": session_run.name,
-                "authority_state": "active",
-                "run_transition_requested": False,
-                "run_bind_requested": False,
-                "loop_requested": True,
-                "lifecycle_operation": "loop",
-                "updated_at": time.time(),
-            }
+                "prompt": "/loop",
+            }, run_name=session_run.name)
             _atomic_json(
                 session_run / "state" / "turn_contract.json",
                 active_contract,
@@ -6386,50 +6386,26 @@ def _selftest() -> int:
             prior = str(contract.get("ended_from_contract_sha256") or "") \
                 if contract.get("authority_state") == "session_ended" \
                 else _sha256(raw_contract)
-            value = {
-                "schema": TURN_CONTRACT_SCHEMA,
-                "mode": "EXPLAIN_ONLY",
-                "session_id": session_id,
-                "transcript_path": transcript_path,
-                "transcript_sha256": transcript_sha,
-                "prompt_sha256": session_prompt_sha,
-                "bound_run": target.name,
-                "authority_state": "session_ended",
-                "resume_requires_prompt": True,
-                "ended_from_contract_sha256": prior,
-                "run_transition_requested": False,
-                "run_bind_requested": False,
-                "loop_requested": False,
-                "lifecycle_operation": "none",
-                "updated_at": time.time(),
-            }
-            _atomic_json(target / "state" / "turn_contract.json", value)
-            return value
+            return _turn_contract._write_session_barrier(
+                target,
+                session_id=session_id,
+                transcript_path=transcript_path,
+                authority_state="session_ended",
+                ended_from_contract_sha256=prior,
+                session_end_reason="resume",
+            )
 
         def write_resume_barrier(target: Path, selection: dict) -> dict:
             callback_order.append("resume-barrier")
-            value = {
-                "schema": TURN_CONTRACT_SCHEMA,
-                "mode": "EXPLAIN_ONLY",
-                "session_id": session_id,
-                "transcript_path": transcript_path,
-                "transcript_sha256": transcript_sha,
-                "prompt_sha256": session_prompt_sha,
-                "bound_run": target.name,
-                "authority_state": "resume_barrier",
-                "resume_requires_prompt": True,
-                "session_start_source": "resume",
-                "resume_selection_sha256": selection["receipt_sha256"],
-                "ended_from_contract_sha256": selection[
+            return _turn_contract._write_session_barrier(
+                target,
+                session_id=session_id,
+                transcript_path=transcript_path,
+                authority_state="resume_barrier",
+                ended_from_contract_sha256=selection[
                     "active_contract_sha256"],
-                "run_transition_requested": False,
-                "run_bind_requested": False,
-                "loop_requested": False,
-                "lifecycle_operation": "none",
-                "updated_at": time.time(),
-            }
-            _atomic_json(target / "state" / "turn_contract.json", value)
-            return value
+                resume_selection_sha256=selection["receipt_sha256"],
+            )
 
         def clean_session_authority() -> None:
             callback_order.append("cleanup")

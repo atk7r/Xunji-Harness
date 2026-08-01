@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import run_model  # noqa: E402
 import runtime_receipts  # noqa: E402
+import contract_schema  # noqa: E402
 import scope_admission  # noqa: E402
 import setup_normalizer  # noqa: E402
 import setup_source  # noqa: E402
@@ -62,6 +63,8 @@ from harness import maintenance_authority, privacy  # noqa: E402
 
 
 SCHEMA = "xunji.turn_contract.v1"
+RUN_STATUS_SCHEMA = "xunji.run-status.v1"
+TRANSITION_CLAIM_SCHEMA = "xunji.transition-claim.v1"
 EXECUTE = "EXECUTE"
 EXPLAIN = "EXPLAIN_ONLY"
 PAUSE = "PAUSED_BY_OPERATOR"
@@ -96,6 +99,28 @@ PROXY_AWARE_TARGET_TOOLS = set(capability_registry.registered_scripts(
 REGISTERED_CAPABILITY_SCRIPTS = set(
     capability_registry.registered_scripts(root=ROOT)
 )
+
+
+def _require_turn_contract_shape(
+    value: object, *, allow_legacy: bool = False,
+) -> dict:
+    errors = contract_schema.turn_contract_errors(
+        value, allow_legacy=allow_legacy,
+    )
+    if errors or not isinstance(value, dict):
+        raise RuntimeError(
+            "TURN_CONTRACT_SCHEMA_INVALID:"
+            + "; ".join(errors[:4] or ["contract is not an object"])
+        )
+    return value
+
+
+def _transition_claim_shape_valid(
+    value: object, *, allow_legacy: bool = True,
+) -> bool:
+    return not contract_schema.transition_claim_errors(
+        value, allow_legacy=allow_legacy,
+    )
 RAW_NETWORK_CLIENT_RE = re.compile(
     r"(?i)(?:^|[\s;&|])(curl|wget|httpx|nuclei|sqlmap)(?:\s|$)|"
     r"\b(?:requests\.(?:get|post|request)|urllib\.request|socket\.(?:socket|create_connection))\b"
@@ -128,7 +153,7 @@ DIRECT_ROUTE_HARD_DENIAL_RE = re.compile(
 )
 ALL_NETWORK_DENIAL_RE = re.compile(
     r"(?:禁止|不要|不得|不允许|无需).{0,24}"
-    r"(?:任何|所有|一切)?\s*(?:网络请求|网络访问|联网|出站)|"
+    r"(?:任何|所有|一切)?\s*(?:网络请求|网络访问|外网请求|外网访问|联网|出站)|"
     r"(?:完全|仅)?\s*离线(?!检查|校验|复核|验证)(?:测试|运行|执行)?|"
     r"(?:do\s+not|don't|must\s+not|no)\s+(?:make\s+|send\s+|use\s+)?"
     r"(?:any\s+|all\s+)?(?:network\s+(?:requests?|access)|egress)|"
@@ -293,9 +318,26 @@ ASCII_ORIGIN_PREFIX_RE = re.compile(
 BARE_HOST_PREFIX_RE = re.compile(
     rf"^(?P<source>{ASCII_HOST_TOKEN})(?P<suffix>.*)$", re.I,
 )
-BARE_HOST_CANDIDATE_RE = re.compile(
-    rf"(?<![A-Za-z0-9_@.-]){ASCII_HOST_TOKEN}(?![A-Za-z0-9_.-])", re.I,
+BARE_HOST_SOURCE_TOKEN = (
+    rf"{ASCII_HOST_TOKEN}"
+    r"(?:[/?#][A-Za-z0-9._~%!$&'()*+,;=:@/?#-]*)?"
 )
+BARE_HOST_CANDIDATE_RE = re.compile(
+    rf"(?<![A-Za-z0-9_@./\\-]){BARE_HOST_SOURCE_TOKEN}"
+    r"(?![A-Za-z0-9_.-])",
+    re.I,
+)
+LOCAL_SOURCE_PATH_TOKEN = (
+    r"(?:(?:~|\.{1,2})[/\\]|/|[A-Za-z]:[/\\]|[A-Za-z0-9._-]+[/\\])"
+    r"(?:[A-Za-z0-9._-]+[/\\])*"
+    r"[A-Za-z0-9._-]+\.(?:json|md|markdown|txt|data|bin|pdf|doc|docx)"
+)
+LOCAL_SOURCE_PATH_RE = re.compile(
+    rf"(?<![A-Za-z0-9_@./\\-])(?P<source>{LOCAL_SOURCE_PATH_TOKEN})"
+    r"(?=$|[\s，,。；;：:！？!?\"'<>])",
+    re.I,
+)
+LOCAL_SOURCE_TOKEN_RE = re.compile(rf"^{LOCAL_SOURCE_PATH_TOKEN}$", re.I)
 RUN_PATH_CANDIDATE_RE = re.compile(
     r"(?<![A-Za-z0-9_-])runs[/\\][A-Za-z0-9_-]+", re.I,
 )
@@ -361,10 +403,12 @@ NATURAL_RUN_TRANSITION_RE = re.compile(
     re.I | re.M,
 )
 NATURAL_RUN_BIND_RE = re.compile(
-    r"^[ \t]{0,3}(?:(?:请(?:帮我)?|帮我|现在|立即|马上)\s*)*"
+    r"(?:^|[。！？!?；;：:]\s*)"
+    r"[ \t]{0,3}(?:(?:请(?:帮我)?|帮我|现在|立即|马上)\s*)*"
     r"(?:(?:继续|恢复|续接)[^\r\n]{0,24}(?:run(?![A-Za-z0-9_-])|运行|runs[/\\])|"
     r"(?:设置|切换|选择|绑定)[^\r\n]{0,20}(?:active[ -]?run|运行指针))|"
-    r"^[ \t]{0,3}(?:(?:please|now)\s+)*"
+    r"(?:^|[.!?;:]\s*)"
+    r"[ \t]{0,3}(?:(?:please|now)\s+)*"
     r"(?:(?:resume|continue)\b[^\r\n]{0,24}(?:\brun\b|runs[/\\])|"
     r"(?:set|switch|select|bind)\b[^\r\n]{0,20}\bactive[ -]?run\b)",
     re.I | re.M,
@@ -525,7 +569,15 @@ def _normalize_source_token(
         normalized = setup_source.normalize_operator_source(raw)
     except setup_source.SetupSourceError:
         return "", normalizations
-    if normalized != raw:
+    if normalized == raw and LOCAL_SOURCE_TOKEN_RE.fullmatch(raw) \
+            and not _run_name_from_path(raw):
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = ROOT / candidate
+        normalized = str(candidate.resolve(strict=False))
+        if normalized != raw:
+            normalizations.append("canonical_local_path")
+    elif normalized != raw:
         normalizations.append(
             "canonical_url" if re.match(r"(?i)^https?://", raw)
             else "bare_host_https"
@@ -543,6 +595,28 @@ def _prompt_loop_source_info(prompt: str) -> tuple[str, list[str]]:
     except ValueError:
         return "", []
     return _normalize_source_token(tokens[0]) if tokens else ("", [])
+
+
+def _explicit_local_source_match(text: str, match: re.Match[str]) -> bool:
+    """Recognize a path explicitly assigned the lifecycle-source role.
+
+    Other paths in the same operator prompt may name outputs to inspect after
+    setup.  This narrow adapter only resolves the path role; the public
+    lifecycle argv, source router, typed effect, and transaction still own the
+    actual state change.
+    """
+    before = text[max(0, match.start() - 48):match.start()]
+    after = text[match.end():match.end() + 80]
+    cn_prefix = re.search(r"(?:以|从|用|使用|基于)\s*$", before)
+    cn_suffix = re.match(
+        r"\s*(?:(?:为|作为)\s*(?:source|来源|输入)|"
+        r"(?:来|去)?\s*(?:创建|新建|建立|初始化|启动).{0,24}"
+        r"(?:run(?![A-Za-z0-9_-])|运行))",
+        after,
+        re.I,
+    )
+    en_prefix = re.search(r"\b(?:from|using|source(?:\s+is|\s*:))\s*$", before, re.I)
+    return bool((cn_prefix and cn_suffix) or en_prefix)
 
 
 def _model_lifecycle_candidate_allowed(
@@ -612,16 +686,35 @@ def _prompt_source_values(prompt: str) -> tuple[list[str], bool, list[str]]:
     text = _operator_intent_text(prompt)
     values: list[str] = []
     normalizations: list[str] = []
-    url_spans: list[tuple[int, int]] = []
-    for match in PROMPT_URL_RE.finditer(text):
-        url_spans.append(match.span())
-        value, notes = _normalize_source_token(
-            match.group(0), natural_prose=True,
-        )
+    source_spans: list[tuple[int, int]] = []
+    local_matches = list(LOCAL_SOURCE_PATH_RE.finditer(text))
+    explicit_local_matches = [
+        match for match in local_matches
+        if _explicit_local_source_match(text, match)
+    ]
+    selected_local_matches = explicit_local_matches or local_matches
+    if not explicit_local_matches:
+        for match in PROMPT_URL_RE.finditer(text):
+            source_spans.append(match.span())
+            value, notes = _normalize_source_token(
+                match.group(0), natural_prose=True,
+            )
+            if value and value not in values:
+                values.append(value)
+            normalizations.extend(notes)
+    for match in selected_local_matches:
+        if any(start < match.end() and match.start() < end
+               for start, end in source_spans):
+            continue
+        raw_path = match.group("source")
+        if _run_name_from_path(raw_path):
+            continue
+        source_spans.append(match.span())
+        value, notes = _normalize_source_token(raw_path)
         if value and value not in values:
             values.append(value)
         normalizations.extend(notes)
-    if not url_spans:
+    if not source_spans:
         for match in BARE_HOST_CANDIDATE_RE.finditer(text):
             value, notes = _normalize_source_token(match.group(0))
             if value and value not in values:
@@ -725,7 +818,7 @@ def _validate_compiled_lifecycle_contract(
     if problems:
         raise RuntimeError(
             "TURN_CONTRACT_LIFECYCLE_INVARIANT:" + "; ".join(problems))
-    return contract
+    return _require_turn_contract_shape(contract)
 
 
 def _prompt_slug_authority(prompt: str) -> tuple[list[str], bool]:
@@ -1284,7 +1377,9 @@ def _previous_contract(run_dir: Path) -> dict:
         data = json.loads(contract_path(run_dir).read_text(encoding="utf-8", errors="replace"))
     except Exception:
         return {}
-    return data if isinstance(data, dict) and data.get("schema") == SCHEMA else {}
+    if contract_schema.turn_contract_errors(data, allow_legacy=True):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def write_contract(run_dir: Path, event: dict) -> dict:
@@ -1314,6 +1409,7 @@ def write_contract(run_dir: Path, event: dict) -> dict:
             f"{run_dir.resolve()}:{signature}:{contract['updated_at']}".encode("utf-8")
         ).hexdigest()[:16]
     contract["coordination_signature"] = signature
+    _require_turn_contract_shape(contract)
     _atomic_json(contract_path(run_dir), contract, durable=True)
     _write_run_status(run_dir, contract)
     return contract
@@ -1364,6 +1460,7 @@ def _write_session_barrier(
         barrier["session_start_source"] = "resume"
         barrier["resume_selection_sha256"] = resume_selection_sha256
         barrier["session_resumed_at"] = time.time()
+    _require_turn_contract_shape(barrier)
     _atomic_json(contract_path(run_dir), barrier, durable=True)
     return barrier
 
@@ -1437,20 +1534,23 @@ def _revoke_transition_claims_unlocked(
                 raise RuntimeError(
                     "matching transition claim cannot be durably revoked"
                 ) from exc
-            if claim.get("schema") != SCHEMA \
+            if not _transition_claim_shape_valid(claim) \
                     or str(claim.get("status") or "") not in {
                         "active", "claimed", "revoked",
                     }:
                 raise RuntimeError(
                     "matching transition claim has an invalid revocation state")
             claim.update({
-                "schema": SCHEMA,
+                "schema": TRANSITION_CLAIM_SCHEMA,
                 "session_id": session_id,
                 "status": "revoked",
                 "revoked_at": float(
                     claim.get("revoked_at") or time.time()),
                 "updated_at": time.time(),
             })
+            if not _transition_claim_shape_valid(claim, allow_legacy=False):
+                raise RuntimeError(
+                    "matching transition claim cannot be migrated safely")
             _atomic_json(path, claim, durable=True)
 
 
@@ -1703,7 +1803,7 @@ def load_pending_contract(session_id: str, *, pending_dir: Path | None = None) -
     except Exception:
         return {}
     valid_mode = data.get("mode") in {EXECUTE, INTENT_PENDING, MAINTENANCE}
-    if data.get("schema") != SCHEMA or not valid_mode:
+    if contract_schema.turn_contract_errors(data, allow_legacy=False) or not valid_mode:
         return {}
     if not str(data.get("session_id") or "") or age < 0 or age > PENDING_STALE_SECONDS:
         return {}
@@ -1788,7 +1888,7 @@ def write_transition_claim(
     if effect.get("target_run") != target_name:
         raise ValueError("transition claim effect target mismatch")
     claim = {
-        "schema": SCHEMA,
+        "schema": TRANSITION_CLAIM_SCHEMA,
         "target_run": target_name,
         "session_id": session_id,
         "prompt_sha256": prompt_sha,
@@ -1803,6 +1903,8 @@ def write_transition_claim(
         try:
             existing = json.loads(path.read_text(
                 encoding="utf-8", errors="strict"))
+            if not _transition_claim_shape_valid(existing):
+                raise ValueError("transition claim shape is invalid")
             existing_effect = setup_transaction.validate_transition_effect(
                 existing.get("effect"))
         except Exception as exc:
@@ -1810,8 +1912,7 @@ def write_transition_claim(
                 "existing transition claim is unreadable or invalid"
             ) from exc
         exact_identity = bool(
-            existing.get("schema") == SCHEMA
-            and existing.get("target_run") == target_name
+            existing.get("target_run") == target_name
             and existing.get("session_id") == session_id
             and existing.get("prompt_sha256") == prompt_sha
             and str(existing.get("origin_run") or "") == origin_run
@@ -1844,6 +1945,8 @@ def write_transition_claim(
             raise RuntimeError("existing transition claim state is invalid")
         claim["updated_at"] = max(
             float(existing.get("updated_at") or 0.0), time.time())
+    if not _transition_claim_shape_valid(claim, allow_legacy=False):
+        raise RuntimeError("new transition claim does not satisfy its contract")
     _atomic_json(path, claim, durable=True)
     return claim
 
@@ -1971,9 +2074,8 @@ def _source_authority_matches(value: str, contract: dict) -> bool:
         return False
     candidate = value
     if contract.get("source_identity_version") == "canonical-v1":
-        try:
-            candidate = setup_source.normalize_operator_source(value)
-        except setup_source.SetupSourceError:
+        candidate, _normalizations = _normalize_source_token(value)
+        if not candidate:
             return False
     digest = hashlib.sha256(candidate.encode("utf-8", "replace")).hexdigest()
     if "source_sha256s" in contract:
@@ -2501,7 +2603,7 @@ def _lifecycle_authority_reason(
             return prefix + "当前 prompt 未授权 source/resume lifecycle 操作。"
         if contract.get("source_ambiguous"):
             return prefix + (
-                "当前 operator prompt 含多个 URL，不能猜测 lifecycle source；"
+                "当前 operator prompt 含多个 source（URL 或本地文件），不能猜测 lifecycle source；"
                 "请用 `/loop <source>` 显式选择唯一 source。"
             )
         if not _source_authority_matches(source, contract):
@@ -2635,14 +2737,15 @@ def claim_transition_contract(
     for candidate in claim_paths:
         try:
             item = json.loads(candidate.read_text(encoding="utf-8", errors="replace"))
+            if not _transition_claim_shape_valid(item):
+                raise ValueError("transition claim shape is invalid")
             item_age = time.time() - float(item.get("updated_at") or 0.0)
             item_effect = setup_transaction.validate_transition_effect(item.get("effect"))
         except Exception as exc:
             raise RuntimeError(
                 "matching transition claim artifact is unreadable or invalid"
             ) from exc
-        if item.get("schema") != SCHEMA \
-                or item.get("target_run") != target_run.name \
+        if item.get("target_run") != target_run.name \
                 or not str(item.get("session_id") or "") \
                 or item_age < 0 or item_age > PENDING_STALE_SECONDS \
                 or (requested_effect is not None and item_effect != requested_effect):
@@ -2676,7 +2779,7 @@ def claim_transition_contract(
                         encoding="utf-8", errors="replace"))
                     age = time.time() - float(data.get("updated_at") or 0.0)
                     fresh_other_claim = fresh_other_claim or bool(
-                        data.get("schema") == SCHEMA
+                        _transition_claim_shape_valid(data)
                         and str(data.get("session_id") or "")
                         and 0 <= age <= PENDING_STALE_SECONDS
                     )
@@ -2692,7 +2795,8 @@ def claim_transition_contract(
                 data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
                 age = time.time() - float(data.get("updated_at") or 0.0)
                 fresh_pending = fresh_pending or bool(
-                    data.get("schema") == SCHEMA
+                    not contract_schema.turn_contract_errors(
+                        data, allow_legacy=False)
                     and data.get("mode") == EXECUTE
                     and str(data.get("session_id") or "")
                     and 0 <= age <= PENDING_STALE_SECONDS
@@ -2746,11 +2850,14 @@ def claim_transition_contract(
         _confirm_authority_directory_chain(claim_path.parent)
     else:
         claim.update({
+            "schema": TRANSITION_CLAIM_SCHEMA,
             "status": "claimed",
             "claim_binding": claim_binding,
             "claimed_at": time.time(),
             "updated_at": time.time(),
         })
+        if not _transition_claim_shape_valid(claim, allow_legacy=False):
+            raise RuntimeError("claimed transition shape is invalid")
         _atomic_json(claim_path, claim, durable=True)
     contract = dict(contract)
     contract["bound_run"] = target_run.name
@@ -2764,6 +2871,7 @@ def claim_transition_contract(
             "expected_run": expected_run,
         }
     contract["transition_claim"] = claim_binding
+    _require_turn_contract_shape(contract)
     _atomic_json(contract_path(target_run), contract, durable=True)
     _write_run_status(target_run, contract)
     return contract
@@ -2805,7 +2913,7 @@ def finalize_transition_claim(
                 encoding="utf-8", errors="strict"))
         except Exception as exc:
             raise RuntimeError("committed transition claim is unreadable") from exc
-        if claim.get("schema") != SCHEMA \
+        if not _transition_claim_shape_valid(claim) \
                 or str(claim.get("target_run") or "") != target_name \
                 or str(claim.get("session_id") or "") != session_id \
                 or str(claim.get("prompt_sha256") or "") != prompt_sha \
@@ -2872,32 +2980,32 @@ def _write_run_status(run_dir: Path, contract: dict) -> None:
     mode = str(contract.get("mode") or "")
     now = float(contract.get("updated_at") or time.time())
     if mode == PAUSE:
-        _atomic_json(run_status_path(run_dir), {
-            "schema": SCHEMA,
+        status = {
+            "schema": RUN_STATUS_SCHEMA,
             "status": "paused_by_operator",
             "session_id": contract["session_id"],
             "updated_at": now,
             "reason": "operator prompt requested pause; open fronts remain open",
-        })
+        }
     elif mode == EXECUTE:
-        _atomic_json(run_status_path(run_dir), {
-            "schema": SCHEMA,
+        status = {
+            "schema": RUN_STATUS_SCHEMA,
             "status": "active",
             "session_id": contract["session_id"],
             "updated_at": now,
             "reason": "operator prompt requested execution/resume",
-        })
+        }
     elif mode == MAINTENANCE:
-        _atomic_json(run_status_path(run_dir), {
-            "schema": SCHEMA,
+        status = {
+            "schema": RUN_STATUS_SCHEMA,
             "status": "maintenance",
             "session_id": contract["session_id"],
             "updated_at": now,
             "reason": "operator requested local framework maintenance; live run is frozen",
-        })
+        }
     elif mode == INTENT_PENDING:
-        _atomic_json(run_status_path(run_dir), {
-            "schema": SCHEMA,
+        status = {
+            "schema": RUN_STATUS_SCHEMA,
             "status": "intent_pending",
             "session_id": contract["session_id"],
             "updated_at": now,
@@ -2905,7 +3013,13 @@ def _write_run_status(run_dir: Path, contract: dict) -> None:
                 "model lifecycle interpretation awaits an exact typed tool "
                 "candidate; target effects remain frozen"
             ),
-        })
+        }
+    else:
+        return
+    errors = contract_schema.run_status_errors(status, allow_legacy=False)
+    if errors:
+        raise RuntimeError("RUN_STATUS_SCHEMA_INVALID:" + "; ".join(errors[:4]))
+    _atomic_json(run_status_path(run_dir), status)
 
 
 def load_contract(run_dir: Path, *, session_id: str = "") -> dict:
@@ -2913,7 +3027,7 @@ def load_contract(run_dir: Path, *, session_id: str = "") -> dict:
         data = json.loads(contract_path(run_dir).read_text(encoding="utf-8", errors="replace"))
     except Exception:
         return {}
-    if data.get("schema") != SCHEMA:
+    if contract_schema.turn_contract_errors(data, allow_legacy=True):
         return {}
     if data.get("authority_state") == AUTHORITY_SESSION_ENDED:
         return {}
@@ -2985,6 +3099,7 @@ def transfer_contract(
             "source_sha256": source_hash,
             "expected_run": expected_run,
         }
+    _require_turn_contract_shape(contract)
     _atomic_json(contract_path(target_run), contract, durable=True)
     _write_run_status(target_run, contract)
     return contract
@@ -4351,7 +4466,28 @@ def current_contract_requires_transition_claim(
     boundary failure and must never be reported as an idempotent success.
     """
     contract = load_contract(run_dir)
-    if not contract or contract.get("mode") not in {EXECUTE, INTENT_PENDING}:
+    if not contract:
+        # A fresh object that identifies itself as a turn contract but fails
+        # the closed schema is integrity debt, not proof that Claude has no
+        # lifecycle turn.  Direct local CLI compatibility applies only when no
+        # fresh Xunji contract artifact exists.
+        try:
+            raw = json.loads(contract_path(run_dir).read_text(
+                encoding="utf-8", errors="strict"))
+            age = time.time() - float(raw.get("updated_at") or 0.0)
+        except Exception:
+            return False
+        if isinstance(raw, dict) \
+                and not contract_schema.turn_contract_errors(
+                    raw, allow_legacy=True) \
+                and raw.get("authority_state") == AUTHORITY_SESSION_ENDED:
+            return False
+        return bool(
+            isinstance(raw, dict)
+            and raw.get("schema") == SCHEMA
+            and 0 <= age <= STALE_SECONDS
+        )
+    if contract.get("mode") not in {EXECUTE, INTENT_PENDING}:
         return False
     lifecycle_operation = _contract_lifecycle_operation(contract)
     if lifecycle_operation not in {"source", "setup", "resume"}:
@@ -6411,6 +6547,22 @@ def _selftest() -> int:
         {"agent": "A-auth-001", "front": "F-002", "status": "assigned",
          "assets": ["auth.example.test"]},
     ]}), encoding="utf-8")
+    ended_claim_run = root / "ended-claim-run"
+    (ended_claim_run / "state").mkdir(parents=True)
+    _write_session_barrier(
+        ended_claim_run,
+        session_id="ended-claim-session",
+        transcript_path=str(root / "ended-claim.jsonl"),
+        authority_state=AUTHORITY_SESSION_ENDED,
+        ended_from_contract_sha256="a" * 64,
+        session_end_reason="prompt_input_exit",
+    )
+    session_ended_requires_no_transition_claim = not (
+        current_contract_requires_transition_claim(
+            ended_claim_run,
+            effect=seed_activate_effect(ended_claim_run.name),
+        )
+    )
     explain = classify_prompt("为什么不用 Agent？只告诉我原因，不用修改")
     history_only = classify_prompt("这是这几次的历史，你来看看还有什么问题")
     ambiguous = classify_prompt("这是最新状态")
@@ -6460,6 +6612,13 @@ def _selftest() -> int:
     denied_loop_contract = _contract_from_event({
         "prompt": f"/loop runs/{run.name}\nDo not resume run runs/{run.name}.",
         "session_id": "denied-loop-session",
+    }, run_name=run.name)
+    post_sentence_resume_contract = _contract_from_event({
+        "prompt": (
+            f"问题已经修复。继续 runs/{run.name} 的剩余流程；"
+            "如果发现框架 bug 就如实报告，不要绕过"
+        ),
+        "session_id": "post-sentence-resume-session",
     }, run_name=run.name)
     negated_direct_cn = _contract_from_event({"prompt": "不要允许直连，继续使用代理"})
     negated_direct_en = _contract_from_event({"prompt": "do not allow direct egress"})
@@ -6730,6 +6889,35 @@ def _selftest() -> int:
         "prompt": f"从 {source_url} 创建新 run",
         "session_id": "natural-single-url-session",
     }, run_name=run.name)
+    bare_host_path_source = "portal.example.test/login?next=%2Fhome"
+    bare_host_path_contract = _contract_from_event({
+        "prompt": f"从 {bare_host_path_source} 创建新 run",
+        "session_id": "bare-host-path-session",
+    }, run_name=run.name)
+    natural_local_source = str(root / "recon.json")
+    natural_local_contract = _contract_from_event({
+        "prompt": f"从 {natural_local_source} 创建新 run",
+        "session_id": "natural-local-source-session",
+    }, run_name=run.name)
+    extensionless_local_source = str(root / "recon-data")
+    extensionless_local_contract = _contract_from_event({
+        "prompt": f"从 {extensionless_local_source} 创建新 run",
+        "session_id": "extensionless-local-source-session",
+    }, run_name=run.name)
+    natural_local_control = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f"--source {shlex.quote(natural_local_source)} --type auto"
+        ),
+    }}
+    relative_local_contract = _contract_from_event({
+        "prompt": (
+            "以 driver-fixture/recon.json 为 source 创建新 run；"
+            "创建后读取 state/turn_contract.json 与 state/run_status.json；"
+            "明确禁止任何 target、Web 或外网请求"
+        ),
+        "session_id": "relative-local-source-session",
+    }, run_name=run.name)
     natural_multi_url_contract = _contract_from_event({
         "prompt": (
             f"从 {source_url} 创建新 run；参考资料是 "
@@ -6841,6 +7029,16 @@ def _selftest() -> int:
         "prompt": "不要恢复 run runs/other_20260101",
         "session_id": "negated-resume-session",
     }, run_name=run.name)
+    sentence_negated_resume_contracts = [
+        _contract_from_event({
+            "prompt": prompt,
+            "session_id": f"sentence-negated-resume-{index}",
+        }, run_name=run.name)
+        for index, prompt in enumerate((
+            "问题已经修复。不要恢复运行 runs/other_20260101",
+            "继续；不要恢复运行 runs/other_20260101",
+        ), start=1)
+    ]
     run_file_loop_contract = _contract_from_event({
         "prompt": f"/loop runs/{run.name}/target.md",
         "session_id": "run-file-loop-session",
@@ -7623,6 +7821,11 @@ def _selftest() -> int:
     promoted_natural_single_url_contract = _promote_model_lifecycle_candidate(
         run, _lifecycle_invocation(source_control["tool_input"]["command"]),
         natural_single_url_contract)
+    promoted_natural_local_contract = _promote_model_lifecycle_candidate(
+        run,
+        _lifecycle_invocation(natural_local_control["tool_input"]["command"]),
+        natural_local_contract,
+    )
     promoted_english_imperative_source_contract = \
         _promote_model_lifecycle_candidate(
             run, _lifecycle_invocation(source_control["tool_input"]["command"]),
@@ -7701,6 +7904,43 @@ def _selftest() -> int:
         and evaluate_pretool(
             run, source_control, promoted_natural_single_url_contract) == ""
     )
+    normalized_bare_host_path, _ = _normalize_source_token(
+        bare_host_path_source)
+    bare_host_path_preserved = bool(
+        bare_host_path_contract.get("mode") == INTENT_PENDING
+        and bare_host_path_contract.get("source_sha256s") == [hashlib.sha256(
+            normalized_bare_host_path.encode("utf-8", "replace")
+        ).hexdigest()]
+        and normalized_bare_host_path.endswith("/login?next=%2Fhome")
+    )
+    natural_local_source_authorized = bool(
+        natural_local_contract.get("mode") == INTENT_PENDING
+        and len(natural_local_contract.get("source_sha256s") or []) == 1
+        and not natural_local_contract.get("source_ambiguous")
+        and promoted_natural_local_contract.get("mode") == EXECUTE
+        and promoted_natural_local_contract.get("loop_source_kind") == "file"
+        and evaluate_pretool(
+            run, natural_local_control, promoted_natural_local_contract) == ""
+    )
+    relative_local_path_not_host = bool(
+        relative_local_contract.get("source_sha256s") == [hashlib.sha256(
+            str((ROOT / "driver-fixture/recon.json").resolve(strict=False)).encode(
+                "utf-8", "replace"
+            )
+        ).hexdigest()]
+        and "canonical_local_path"
+            in relative_local_contract.get("intent_normalizations", [])
+        and "bare_host_https"
+            not in relative_local_contract.get("intent_normalizations", [])
+        and relative_local_contract.get("lifecycle_source_hint") == ""
+        and relative_local_contract.get("target_egress_denied") is True
+        and relative_local_contract.get("web_tools_denied") is True
+    )
+    extensionless_local_not_inferred = bool(
+        not extensionless_local_contract.get("source_sha256s")
+        and extensionless_local_contract.get("lifecycle_operation") == "none"
+        and extensionless_local_contract.get("mode") == EXPLAIN
+    )
     natural_multi_url_reason = evaluate_pretool(
         run, unselected_source, natural_multi_url_contract)
     natural_multi_url_fails_closed = bool(
@@ -7727,6 +7967,13 @@ def _selftest() -> int:
         and negated_resume_contract.get("lifecycle_operation") == "none"
         and E_RUN_TRANSITION_AUTHORITY_MISSING in evaluate_pretool(
             run, resume_control, negated_resume_contract)
+    )
+    sentence_negated_resume_is_read_only = all(
+        item.get("mode") == EXPLAIN
+        and item.get("lifecycle_operation") == "none"
+        and E_RUN_TRANSITION_AUTHORITY_MISSING in evaluate_pretool(
+            run, resume_control, item)
+        for item in sentence_negated_resume_contracts
     )
     quoted_loop_data_cannot_mint_authority = bool(
         not quoted_log_contract.get("loop_requested")
@@ -8471,6 +8718,8 @@ def _selftest() -> int:
         "bound_run": generic_shell_run.name,
         "updated_at": time.time(),
         "coordination_signature": _coordination_signature(generic_shell_run),
+        "fanout_epoch_started_at": generic_shell_contract["updated_at"],
+        "fanout_epoch_id": "1" * 16,
     })
     _atomic_json(contract_path(generic_shell_run), generic_shell_contract)
     generic_shell_reason = evaluate_pretool(
@@ -9473,16 +9722,11 @@ def _selftest() -> int:
         encoding="utf-8")
     stale_review_transcript = root / "stale-review-transcript.jsonl"
     stale_review_transcript.write_text("stale-review-task\n", encoding="utf-8")
-    stale_review_contract = {
-        "schema": SCHEMA, "mode": EXECUTE,
-        "session_id": "stale-review-session", "prompt_sha256": "a" * 64,
-        "prompt_excerpt": "continue the explicit loop",
-        "updated_at": time.time() - 0.01, "loop_requested": True,
-        "origin_run": stale_review_run.name,
-        "bound_run": stale_review_run.name,
+    stale_review_contract = _contract_from_event({
+        "session_id": "stale-review-session",
         "transcript_path": str(stale_review_transcript.resolve()),
-        "fanout_override": False,
-    }
+        "prompt": "/loop",
+    }, run_name=stale_review_run.name)
     _atomic_json(contract_path(stale_review_run), stale_review_contract)
     runtime_receipts.append_hook_event(stale_review_run, {
         "hook_event_name": "PostToolUse",
@@ -9753,17 +9997,11 @@ def _selftest() -> int:
     )
     (direct_run / "state" / "assignments.json").write_text(
         json.dumps({"schema": 3, "assignments": []}), encoding="utf-8")
-    direct_contract = {
-        "schema": SCHEMA,
-        "mode": EXECUTE,
+    direct_contract = _contract_from_event({
         "session_id": "root-direct-session",
-        "prompt_sha256": "d" * 64,
-        "prompt_excerpt": "continue the existing explicit loop",
-        "updated_at": time.time() - 0.01,
-        "loop_requested": True,
-        "origin_run": direct_run.name,
-        "bound_run": direct_run.name,
-    }
+        "transcript_path": str(root / "root-direct-transcript.jsonl"),
+        "prompt": "/loop",
+    }, run_name=direct_run.name)
     _atomic_json(contract_path(direct_run), direct_contract)
     direct_transcript = root / "root-direct-transcript.jsonl"
     direct_transcript.write_text(
@@ -11379,21 +11617,84 @@ def _selftest() -> int:
     state_path = contract_path(run)
     state_path.write_text("{broken", encoding="utf-8")
     malformed_contract_rejected = load_contract(run, session_id="s") == {}
-    _atomic_json(state_path, {
-        "schema": "wrong", "mode": EXECUTE, "session_id": "s",
-        "updated_at": time.time(),
-    })
+    valid_load_contract = _contract_from_event({
+        "session_id": "s",
+        "transcript_path": str(transcript),
+        "prompt": "继续执行当前 run",
+    }, run_name=run.name)
+    wrong_schema_contract = dict(valid_load_contract)
+    wrong_schema_contract["schema"] = "wrong"
+    _atomic_json(state_path, wrong_schema_contract)
     wrong_schema_rejected = load_contract(run, session_id="s") == {}
-    _atomic_json(state_path, {
-        "schema": SCHEMA, "mode": EXECUTE, "session_id": "other",
-        "updated_at": time.time(),
-    })
+    wrong_session_contract = dict(valid_load_contract)
+    wrong_session_contract["session_id"] = "other"
+    _atomic_json(state_path, wrong_session_contract)
     wrong_session_rejected = load_contract(run, session_id="s") == {}
-    _atomic_json(state_path, {
-        "schema": SCHEMA, "mode": EXECUTE, "session_id": "s",
-        "updated_at": time.time() - STALE_SECONDS - 1,
-    })
+    stale_load_contract = dict(valid_load_contract)
+    stale_load_contract["updated_at"] = time.time() - STALE_SECONDS - 1
+    _atomic_json(state_path, stale_load_contract)
     stale_contract_rejected = load_contract(run, session_id="s") == {}
+    missing_updated_at_contract = dict(valid_load_contract)
+    missing_updated_at_contract.pop("updated_at")
+    _atomic_json(state_path, missing_updated_at_contract)
+    missing_updated_at_contract_rejected = (
+        load_contract(run, session_id="s") == {})
+    unknown_field_contract = dict(valid_load_contract)
+    unknown_field_contract["future_writer_only_field"] = True
+    missing_binding_contract = dict(valid_load_contract)
+    missing_binding_contract.pop("prompt_sha256")
+    partial_group_contract = dict(valid_load_contract)
+    partial_group_contract["coordination_signature"] = "a" * 64
+    structural_drift_rejected = bool(
+        contract_schema.turn_contract_errors(
+            unknown_field_contract, allow_legacy=True)
+        and contract_schema.turn_contract_errors(
+            missing_binding_contract, allow_legacy=True)
+        and contract_schema.turn_contract_errors(
+            partial_group_contract, allow_legacy=True)
+    )
+    current_status_shape = {
+        "schema": RUN_STATUS_SCHEMA,
+        "status": "active",
+        "session_id": "s",
+        "updated_at": time.time(),
+        "reason": "operator prompt requested execution/resume",
+    }
+    status_schema_is_independent = bool(
+        not contract_schema.run_status_errors(
+            current_status_shape, allow_legacy=False)
+        and contract_schema.turn_contract_errors(
+            current_status_shape, allow_legacy=True)
+    )
+    claim_effect_fixture = {
+        "schema": "xunji.lifecycle-effect.v1",
+        "kind": "activate",
+        "target_run": "claim-target",
+        "input_sha256": "b" * 64,
+        "operation": "loop_bootstrap.resume",
+        "options_sha256": "c" * 64,
+        "effect_sha256": "d" * 64,
+    }
+    revoked_claim_shape = {
+        "schema": TRANSITION_CLAIM_SCHEMA,
+        "target_run": "claim-target",
+        "session_id": "claim-session",
+        "prompt_sha256": "e" * 64,
+        "origin_run": "claim-origin",
+        "effect": claim_effect_fixture,
+        "status": "revoked",
+        "revoked_at": time.time(),
+        "updated_at": time.time(),
+    }
+    partial_revoked_claim = dict(revoked_claim_shape, claimed_at=time.time())
+    transition_claim_schema_is_independent = bool(
+        not contract_schema.transition_claim_errors(
+            revoked_claim_shape, allow_legacy=False)
+        and contract_schema.transition_claim_errors(
+            partial_revoked_claim, allow_legacy=False)
+        and contract_schema.turn_contract_errors(
+            revoked_claim_shape, allow_legacy=True)
+    )
     source_run = root / "source-run"
     target_run = root / "target-run"
     (source_run / "state").mkdir(parents=True)
@@ -12713,6 +13014,11 @@ def _selftest() -> int:
         ("an explicit lifecycle denial still revokes a conflicting loop directive",
          denied_loop_contract.get("mode") == EXPLAIN
          and denied_loop_contract.get("lifecycle_operation") == "none"),
+        ("sentence-boundary resume intent outranks maintenance wording",
+         post_sentence_resume_contract.get("mode") == INTENT_PENDING
+         and post_sentence_resume_contract.get("maintenance_intent") is None
+         and post_sentence_resume_contract.get("intent_resolution")
+             == "model_candidate_pending"),
         ("runtime lifecycle hook exceptions surface a stable fail-closed diagnostic",
          lifecycle_failure_code == 2
          and lifecycle_failure_diagnostic.startswith(
@@ -13024,11 +13330,23 @@ def _selftest() -> int:
          unselected_prompt_url_blocked),
         ("natural-language setup authorizes one unique URL source",
          natural_single_url_authorized),
+        ("scheme-less host paths preserve their exact path and query",
+         bare_host_path_preserved),
+        ("natural-language setup authorizes one exact local file source",
+         natural_local_source_authorized),
+        ("relative local source paths cannot degrade into bare-host URLs",
+         relative_local_path_not_host),
+        ("natural language cannot infer an extensionless local source path",
+         extensionless_local_not_inferred),
         ("natural-language setup with multiple URLs fails closed as ambiguous",
          natural_multi_url_fails_closed),
         ("negated and interrogative create intents remain read-only",
          denied_and_question_intents_are_read_only),
         ("negated resume intent remains read-only", negated_resume_is_read_only),
+        ("sentence-relative resume denials remain read-only",
+         sentence_negated_resume_is_read_only),
+        ("a session-ended contract cannot require a new transition claim",
+         session_ended_requires_no_transition_claim),
         ("quoted/code-fenced /loop text cannot mint lifecycle authority",
          quoted_loop_data_cannot_mint_authority),
         ("indented /loop plus explicit analysis remains read-only",
@@ -13207,6 +13525,14 @@ def _selftest() -> int:
         ("wrong contract schema is rejected", wrong_schema_rejected),
         ("cross-session contract reuse is rejected", wrong_session_rejected),
         ("stale contract is rejected", stale_contract_rejected),
+        ("contract without updated_at is rejected",
+         missing_updated_at_contract_rejected),
+        ("turn contract rejects unknown, missing, and half-group drift",
+         structural_drift_rejected),
+        ("derived run status has an independent closed schema",
+         status_schema_is_independent),
+        ("transition claim has an independent exact revoked-state schema",
+         transition_claim_schema_is_independent),
         ("active-run transition preserves the current contract and run status",
          transfer_preserves_contract),
         ("serial override requires current operator prompt", override.get("fanout_override") is True),

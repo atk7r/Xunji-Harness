@@ -1,9 +1,15 @@
 # 独立复审机制 —— 防 AI 自主任务"过早收口 / 自评偏见"的可移植方案
 
+> **定位：可移植概念说明，不是当前 Xunji 的操作手册。** Xunji 的现行 owner 是
+> `CLAUDE.md`、`docs/WORKFLOW.md` / `docs/WORKFLOW-reference.md`、`tools/peer_review.py`、
+> `tools/workers.py` 与 `tools/check_run.py`，并由 content-addressed ReviewReceipt、review
+> disposition、ledger 和 closure gate 共同执行。仅复制本文 prompt、添加一个人工标题，或让
+> 作者自审，都不能满足当前复审/提交门；具体 backend 与作者矩阵以当前 owner 文档为准。
+
 > 这是一套让"AI 自主驱动的长任务"在宣布完成前，被**独立第三方视角**强制审一遍的机制。
 > 解决的核心问题：**驱动任务的 AI 会通过自己的复审来合理化自己的草率结论**。
 > 适用于任何 AI agent 长任务（渗透/调研/数据处理/代码审查…），与具体框架无关。
-> 自包含，照搬即可。
+> 概念自包含；接入具体框架前仍要适配该框架的 canonical state、receipt 与 closure contract。
 
 ---
 

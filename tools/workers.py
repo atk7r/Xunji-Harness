@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import agent_instruction_bundle as _instruction_bundle
+import contract_schema
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
@@ -742,7 +743,7 @@ def _target_egress_denied_for_plan(run_dir: Path) -> bool:
     except Exception:
         return True
     if not isinstance(value, dict) \
-            or value.get("schema") != "xunji.turn_contract.v1":
+            or contract_schema.turn_contract_errors(value, allow_legacy=True):
         return True
     return value.get("target_egress_denied") is True
 
@@ -2520,9 +2521,15 @@ _EVIDENCE_REF_RE = re.compile(
     r"[A-Za-z0-9._/-]+)"
 )
 
+_FROZEN_ARTIFACT_HEADING_PHRASE = (
+    r"(?:Artifacts?\b|Evidence paths?\b|Artifact/receipt pointers?\b|"
+    r"Exact evidence paths?\b)"
+)
 _FROZEN_ARTIFACT_HEADING_RE = re.compile(
-    r"(?:\bArtifacts?\b|\bEvidence paths?\b|\bArtifact/receipt pointers?\b|"
-    r"\bExact evidence path set\b)",
+    rf"\b{_FROZEN_ARTIFACT_HEADING_PHRASE}", re.I,
+)
+_FROZEN_ARTIFACT_HEADING_START_RE = re.compile(
+    rf"^\s*(?:#{{1,6}}\s+|\*\*|{_FROZEN_ARTIFACT_HEADING_PHRASE})",
     re.I,
 )
 _FROZEN_ARTIFACT_FIELD_RE = re.compile(r"^\s*\*\*[^*\n]{1,120}:\*\*", re.I)
@@ -2642,11 +2649,7 @@ def _frozen_artifact_references(
     for line in normalized.splitlines():
         heading = bool(
             _FROZEN_ARTIFACT_HEADING_RE.search(line)
-            and re.match(
-                r"(?i)^\s*(?:#{1,6}\s+|\*\*|Artifacts?\b|Evidence paths?\b|"
-                r"Artifact/receipt pointers?\b|Exact evidence path set\b)",
-                line,
-            )
+            and _FROZEN_ARTIFACT_HEADING_START_RE.match(line)
         )
         if heading:
             in_artifacts = True
@@ -3078,6 +3081,14 @@ def _record_review_disposition_locked(run_dir: Path, *, target: str, reviewer: s
     receipt["receipt_hash"] = hashlib.sha256(json.dumps(
         receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
+    receipt_errors = contract_schema.named_schema_errors(
+        receipt, "review-disposition.v1.schema.json",
+    )
+    if receipt_errors:
+        raise ValueError(
+            "review disposition violates its formal contract: "
+            + "; ".join(receipt_errors[:4])
+        )
     # Every accepted enum is a completed review of these exact frozen bytes.
     # needs-control/retry describe the evidence-supported Root disposition and
     # successor work; leaving the review itself action_required deadlocks the
@@ -5053,9 +5064,23 @@ def print_merge_constraints(run_dir: Path) -> int:
 def _selftest() -> int:
     from concurrent.futures import ThreadPoolExecutor
     import threading
+    import turn_contract as _turn_contract
     from unittest import mock
 
     d = Path(tempfile.mkdtemp())
+
+    def fixture_turn_contract(
+        run_dir: Path,
+        session_id: str,
+        *,
+        prompt: str = "继续执行当前 run",
+        transcript_path: str = "",
+    ) -> dict:
+        return _turn_contract._contract_from_event({
+            "session_id": session_id,
+            "transcript_path": transcript_path,
+            "prompt": prompt,
+        }, run_name=run_dir.name)
     artifact_review_run = d / "artifact-review"
     (artifact_review_run / "evidence").mkdir(parents=True)
     artifact_paths: list[Path] = []
@@ -5084,6 +5109,17 @@ def _selftest() -> int:
         target_row={"effect": "target"},
         target_text=frozen_artifact_text,
         reviewer_text=frozen_artifact_text,
+        disposition="accept-candidate",
+    )
+    exact_paths_from_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=frozen_artifact_text,
+        reviewer_text=(
+            "Exact evidence paths from the frozen Hunter result "
+            "(all four verified present and matching):\n"
+            + "".join(f"- {path.resolve()}\n" for path in artifact_paths)
+        ),
         disposition="accept-candidate",
     )
     root_body = artifact_review_run / "evidence" / "root.html"
@@ -5423,11 +5459,9 @@ def _selftest() -> int:
         "# Target\n- Authorized scope: a.example b.example c.example\n",
         encoding="utf-8",
     )
-    (run / "state" / "turn_contract.json").write_text(json.dumps({
-        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
-        "session_id": "planner-fixture", "prompt_sha256": "a" * 64,
-        "updated_at": time.time(), "fanout_override": False,
-    }), encoding="utf-8")
+    (run / "state" / "turn_contract.json").write_text(json.dumps(
+        fixture_turn_contract(run, "planner-fixture")
+    ), encoding="utf-8")
     empty_run = d / "empty"
     empty_run.mkdir()
     legacy_assignment_run = d / "legacy-assignment"
@@ -5484,15 +5518,11 @@ def _selftest() -> int:
     for name in ("coverage.json", "frontier.md"):
         (offline_plan_run / name).write_bytes((run / name).read_bytes())
     (offline_plan_run / "state" / "turn_contract.json").write_text(
-        json.dumps({
-            "schema": "xunji.turn_contract.v1",
-            "mode": "EXECUTE",
-            "target_egress_denied": True,
-            "session_id": "offline-planner-fixture",
-            "prompt_sha256": "b" * 64,
-            "updated_at": time.time(),
-            "fanout_override": False,
-        }),
+        json.dumps(fixture_turn_contract(
+            offline_plan_run,
+            "offline-planner-fixture",
+            prompt="继续执行本地分析，但禁止访问目标并禁止使用 WebFetch",
+        )),
         encoding="utf-8",
     )
     offline_planned_lanes = lane_suggestions(offline_plan_run, limit=1)
@@ -5898,6 +5928,12 @@ def _selftest() -> int:
         full_merge.get("coverage_merge_satisfied") is True
         and set((full_merge.get("coverage_merge") or {}).get("assets", {}))
         == {"alpha.example", "bravo.example"}
+        and all(
+            item.get("canonical_promotion") == "pending_root_synthesis"
+            and set(item) == {"target_actions", "canonical_promotion"}
+            for item in (full_merge.get("coverage_merge") or {})
+                .get("assets", {}).values()
+        )
     )
 
     # Delegate must consume the actual scheduler selection.  The first ready
@@ -5919,11 +5955,7 @@ def _selftest() -> int:
         "- Current depth: shallow\n",
         encoding="utf-8",
     )
-    budget_contract = {
-        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
-        "session_id": "budget-session", "prompt_sha256": "e" * 64,
-        "updated_at": time.time(), "fanout_override": False,
-    }
+    budget_contract = fixture_turn_contract(budget_run, "budget-session")
     _atomic_write(
         budget_run / "state" / "turn_contract.json",
         json.dumps(budget_contract, ensure_ascii=False, indent=2) + "\n",
@@ -6042,13 +6074,11 @@ def _selftest() -> int:
             "- Barrier class: none\n- Current depth: shallow\n",
             encoding="utf-8",
         )
-        contract = {
-            "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
-            "session_id": f"transaction-{token}",
-            "prompt_sha256": token * 64,
-            "updated_at": time.time(), "fanout_override": False,
-            "transcript_path": str(parent_transcript.resolve()),
-        }
+        contract = fixture_turn_contract(
+            transaction_run,
+            f"transaction-{token}",
+            transcript_path=str(parent_transcript.resolve()),
+        )
         _atomic_write(
             transaction_run / "state" / "turn_contract.json",
             json.dumps(contract, ensure_ascii=False, indent=2) + "\n",
@@ -7073,11 +7103,7 @@ def _selftest() -> int:
         "- Claim: frozen offline result for fixture.example\n",
         encoding="utf-8",
     )
-    planned_contract = {
-        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
-        "session_id": "planned-session", "prompt_sha256": "d" * 64,
-        "updated_at": time.time(), "fanout_override": False,
-    }
+    planned_contract = fixture_turn_contract(planned_run, "planned-session")
     _atomic_write(
         planned_run / "state" / "turn_contract.json",
         json.dumps(planned_contract, ensure_ascii=False, indent=2) + "\n",
@@ -7851,6 +7877,27 @@ def _selftest() -> int:
     def cloned(value: object) -> object:
         return json.loads(json.dumps(value))
 
+    current_target_merge_schema_row = cloned(merged_schema_row)
+    current_target_merge_schema_row["effect"] = "target"
+    current_target_merge_schema_row["coverage_merge"] = {
+        "satisfied": True,
+        "validated_at": "2026-07-22T00:00:00Z",
+        "assets": {
+            asset: {
+                "target_actions": 1,
+                "canonical_promotion": "pending_root_synthesis",
+            }
+            for asset in current_target_merge_schema_row["assets"]
+        },
+    }
+    legacy_target_merge_schema_row = cloned(current_target_merge_schema_row)
+    for item in legacy_target_merge_schema_row["coverage_merge"]["assets"].values():
+        item.pop("canonical_promotion")
+        item["canonical_evidence"] = True
+    mixed_target_merge_schema_row = cloned(current_target_merge_schema_row)
+    for item in mixed_target_merge_schema_row["coverage_merge"]["assets"].values():
+        item["canonical_evidence"] = True
+
     assignment_unknown = cloned(assigned_schema_row)
     assignment_unknown["untrusted_extra"] = True
     assignment_missing = cloned(assigned_schema_row)
@@ -7947,11 +7994,9 @@ def _selftest() -> int:
         )
         _atomic_write(
             proposal_run / "state" / "turn_contract.json",
-            json.dumps({
-                "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
-                "session_id": f"{name}-session", "prompt_sha256": "e" * 64,
-                "updated_at": time.time(), "fanout_override": False,
-            }, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(fixture_turn_contract(
+                proposal_run, f"{name}-session",
+            ), ensure_ascii=False, indent=2) + "\n",
         )
         return proposal_run
 
@@ -8045,6 +8090,10 @@ def _selftest() -> int:
          len(validated_artifact_receipts) == 4
          and sum(item.get("response", {}).get("status") == 200
                  for item in validated_artifact_receipts) == 2),
+        ("Reviewer exact-paths-from heading admits its following exact list",
+         len(exact_paths_from_receipts) == 4
+         and sum(item["path"].endswith(".replay.json")
+                 for item in exact_paths_from_receipts) == 2),
         ("legacy exact-directory plus basename artifact pairs normalize narrowly",
          len(legacy_under_receipts) == 4
          and sum(item["path"].endswith(".replay.json")
@@ -8289,6 +8338,11 @@ def _selftest() -> int:
          len(plan_bound_assignment_rows) >= 3
          and all(not assignment_schema_errors(item)
                  for item in plan_bound_assignment_rows)),
+        ("target merge schema accepts exact current and legacy promotion receipts",
+         not assignment_schema_errors(current_target_merge_schema_row)
+         and not assignment_schema_errors(legacy_target_merge_schema_row)),
+        ("target merge schema rejects mixed promotion receipts",
+         bool(assignment_schema_errors(mixed_target_merge_schema_row))),
         ("working heartbeat preserves and conforms with the authentic running attempt",
          planned_working_row.get("status") == "working"
          and len(planned_working_row.get("attempts", [])) == 1

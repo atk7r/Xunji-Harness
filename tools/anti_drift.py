@@ -43,6 +43,8 @@ import sys
 import time
 from pathlib import Path
 
+import contract_schema
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - Windows fallback remains process-local
@@ -308,7 +310,8 @@ def validate_reason_pass_receipt(
         return ["receipt is not an object"]
     if receipt.get("schema") != REASON_PASS_SCHEMA:
         return [f"unknown reason-pass schema: {receipt.get('schema')!r}"]
-    errors: list[str] = []
+    errors: list[str] = contract_schema.named_schema_errors(
+        receipt, "reason-pass-receipt.v1.schema.json")
     keys = set(receipt)
     missing = sorted(_REASON_PASS_FIELDS - keys)
     extra = sorted(keys - _REASON_PASS_FIELDS)

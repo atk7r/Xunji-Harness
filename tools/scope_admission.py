@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import re
 import shlex
@@ -21,6 +22,8 @@ import tempfile
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+
+import contract_schema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +80,50 @@ def _atomic_json(path: Path, value: dict) -> None:
     _atomic_bytes(path, json.dumps(
         value, ensure_ascii=False, indent=2, sort_keys=True,
     ).encode("utf-8") + b"\n")
+
+
+def receipt_errors(value: object) -> list[str]:
+    """Validate the formal receipt plus canonical semantic relationships."""
+    errors = contract_schema.named_schema_errors(
+        value, "scope-admission.v1.schema.json",
+    )
+    if errors or not isinstance(value, dict):
+        return errors
+    assets = value.get("assets") if isinstance(value.get("assets"), list) else []
+    try:
+        normalized = sorted(normalize_asset(str(item)) for item in assets)
+    except ScopeAdmissionError:
+        errors.append("$.assets: invalid canonical asset")
+        normalized = []
+    if assets != normalized:
+        errors.append("$.assets: assets are not canonical and sorted")
+    prepared_at = value.get("prepared_at")
+    committed_at = value.get("committed_at")
+    if not isinstance(prepared_at, (int, float)) \
+            or isinstance(prepared_at, bool) or not math.isfinite(prepared_at) \
+            or prepared_at <= 0:
+        errors.append("$.prepared_at: invalid timestamp")
+    prepared_valid = bool(
+        isinstance(prepared_at, (int, float))
+        and not isinstance(prepared_at, bool)
+        and math.isfinite(prepared_at)
+        and prepared_at > 0
+    )
+    if committed_at is not None and (
+            not isinstance(committed_at, (int, float))
+            or isinstance(committed_at, bool)
+            or not math.isfinite(committed_at)
+            or not prepared_valid
+            or committed_at < prepared_at):
+        errors.append("$.committed_at: precedes prepare or is invalid")
+    return errors
+
+
+def _require_receipt(value: object, *, code: str) -> dict:
+    errors = receipt_errors(value)
+    if errors or not isinstance(value, dict):
+        raise ScopeAdmissionError(code, "; ".join(errors[:4] or ["invalid receipt"]))
+    return value
 
 
 def normalize_asset(value: str) -> str:
@@ -288,6 +335,9 @@ def write_hook_claim(
     run_dir: Path, contract: dict, *, claims_dir: Path | None = None,
 ) -> dict:
     """Persist the hook-authorized exact admission; callers must be PreToolUse."""
+    if contract_schema.turn_contract_errors(contract, allow_legacy=False):
+        raise ScopeAdmissionError(
+            "invalid_contract", "turn contract violates its formal contract")
     assets = [str(item) for item in (contract.get("scope_admission_assets") or [])]
     session_id = str(contract.get("session_id") or "")
     prompt_sha = str(contract.get("prompt_sha256") or "")
@@ -321,6 +371,9 @@ def _load_json(path: Path, *, code: str) -> dict:
 
 def _consume_claim(run_dir: Path, assets: list[str], claims_dir: Path) -> tuple[dict, Path]:
     contract = _load_json(run_dir / "state" / "turn_contract.json", code="invalid_contract")
+    if contract_schema.turn_contract_errors(contract, allow_legacy=False):
+        raise ScopeAdmissionError(
+            "invalid_contract", "turn contract violates its formal contract")
     candidates: list[tuple[Path, dict]] = []
     if claims_dir.is_dir():
         for path in claims_dir.glob("*.json"):
@@ -479,8 +532,10 @@ def verify_admitted_host(run_dir: Path, rows: list[dict], host: str) -> tuple[bo
             receipt = json.loads(receipt_path.read_text(encoding="utf-8", errors="strict"))
         except Exception:
             return False, "scope admission receipt is missing or unreadable"
+        if receipt_errors(receipt):
+            return False, "scope admission receipt violates its formal contract"
         assets = receipt.get("assets") if isinstance(receipt, dict) else None
-        if not isinstance(assets, list) or receipt.get("schema") != RECEIPT_SCHEMA \
+        if not isinstance(assets, list) \
                 or receipt.get("status") != "committed" or receipt.get("run_name") != run_dir.name \
                 or receipt.get("admission_id") != admission_id \
                 or receipt.get("prompt_sha256") != prompt_sha or normalized not in assets:
@@ -556,7 +611,8 @@ def _apply_admission_locked(
         admission_id = next(iter(recovery_id))
         receipt_path = run_dir / "state" / "scope_admissions" / f"{admission_id}.json"
         receipt = _load_json(receipt_path, code="invalid_recovery")
-        if receipt.get("schema") != RECEIPT_SCHEMA or receipt.get("status") != "prepared" \
+        _require_receipt(receipt, code="invalid_recovery")
+        if receipt.get("status") != "prepared" \
                 or receipt.get("admission_id") != admission_id \
                 or receipt.get("run_name") != run_dir.name \
                 or receipt.get("assets") != normalized_assets \
@@ -591,6 +647,7 @@ def _apply_admission_locked(
         receipt["recovery_prompt_sha256"] = claim["prompt_sha256"]
         receipt["recovery_reason_sha256"] = claim["reason_sha256"]
         receipt["committed_at"] = time.time()
+        _require_receipt(receipt, code="invalid_recovery")
         _atomic_json(receipt_path, receipt)
         _cleanup_consumed_claims(claims_dir, run_dir.name, normalized_assets)
         return receipt
@@ -647,6 +704,7 @@ def _apply_admission_locked(
         "zero_probe": True,
         "recovered": False,
     }
+    _require_receipt(receipt, code="invalid_prepare")
     _atomic_json(receipt_path, receipt)
     if fault == "after_prepare":
         raise ScopeAdmissionError("fault_injected", "fault after prepared receipt")
@@ -660,6 +718,7 @@ def _apply_admission_locked(
         raise ScopeAdmissionError("fault_injected", "fault after derived ledger")
     receipt["status"] = "committed"
     receipt["committed_at"] = time.time()
+    _require_receipt(receipt, code="invalid_commit")
     _atomic_json(receipt_path, receipt)
     derived_rows = [row for row in data.get("rows", []) if isinstance(row, dict)]
     for asset in normalized_assets:
@@ -708,6 +767,7 @@ def _selftest() -> int:
     import shutil
     import setup_normalizer
     import setup_source
+    import turn_contract
 
     root = Path(tempfile.mkdtemp())
     runs = root / "runs"
@@ -779,13 +839,11 @@ def _selftest() -> int:
         except ScopeAdmissionError:
             pass
     claims = root / "claims"
-    prompt_sha = _sha256(directive.encode())
-    contract = {
-        "schema": "xunji.turn_contract.v1", "session_id": "session-one",
-        "prompt_sha256": prompt_sha, "scope_admission_run": run.name,
-        "scope_admission_assets": ["one.example.test"],
-        "scope_admission_reason_sha256": parsed["reason_sha256"] if parsed else "",
-    }
+    contract = turn_contract._contract_from_event({
+        "session_id": "session-one",
+        "transcript_path": str(root / "scope-session.jsonl"),
+        "prompt": directive,
+    }, run_name=run.name)
     (run / "state" / "turn_contract.json").write_text(json.dumps(contract), encoding="utf-8")
     no_claim_blocked = False
     try:
@@ -842,14 +900,11 @@ def _selftest() -> int:
         f"{DIRECTIVE} --run runs/{crash_run.name} --assets two.example.test "
         '--reason "operator confirmed second asset"'
     )
-    crash_parsed, _ = parse_operator_directive(crash_directive, root=root, runs_root=runs)
-    crash_contract = {
-        **contract,
-        "prompt_sha256": _sha256(crash_directive.encode()),
-        "scope_admission_run": crash_run.name,
-        "scope_admission_assets": ["two.example.test"],
-        "scope_admission_reason_sha256": crash_parsed["reason_sha256"],
-    }
+    crash_contract = turn_contract._contract_from_event({
+        "session_id": "session-one",
+        "transcript_path": str(root / "scope-session.jsonl"),
+        "prompt": crash_directive,
+    }, run_name=crash_run.name)
     (crash_run / "state" / "turn_contract.json").write_text(json.dumps(crash_contract), encoding="utf-8")
     write_hook_claim(crash_run, crash_contract, claims_dir=claims)
     fault_blocked = False
@@ -868,14 +923,11 @@ def _selftest() -> int:
         f"{DIRECTIVE} --run runs/{crash_run.name} --assets two.example.test "
         '--reason "operator retries interrupted admission"'
     )
-    recovery_parsed, _ = parse_operator_directive(
-        recovery_directive, root=root, runs_root=runs,
-    )
-    recovery_contract = {
-        **crash_contract,
-        "prompt_sha256": _sha256(recovery_directive.encode()),
-        "scope_admission_reason_sha256": recovery_parsed["reason_sha256"],
-    }
+    recovery_contract = turn_contract._contract_from_event({
+        "session_id": "session-one",
+        "transcript_path": str(root / "scope-session.jsonl"),
+        "prompt": recovery_directive,
+    }, run_name=crash_run.name)
     (crash_run / "state" / "turn_contract.json").write_text(
         json.dumps(recovery_contract), encoding="utf-8",
     )
@@ -897,6 +949,14 @@ def _selftest() -> int:
     recovered_verified, _ = verify_admitted_host(
         crash_run, recovered_rows, "two.example.test",
     )
+    unknown_receipt = json.loads(json.dumps(receipt))
+    unknown_receipt["untrusted_extra"] = True
+    missing_receipt = json.loads(json.dumps(receipt))
+    missing_receipt.pop("coverage_before_sha256")
+    partial_recovery_receipt = json.loads(json.dumps(recovered_receipt))
+    partial_recovery_receipt.pop("recovery_reason_sha256")
+    prepared_with_commit = json.loads(json.dumps(receipt))
+    prepared_with_commit["status"] = "prepared"
     import setup_transaction  # noqa: WPS433
     activation_lock_serializes = False
     activation_lock = pointer.parent / setup_transaction.ACTIVATION_LOCK_NAME
@@ -952,6 +1012,13 @@ def _selftest() -> int:
         ("new exact operator claim recovers interrupted admission",
          recovery_fault_blocked and recovered_receipt.get("recovered") is True
          and recovered_verified),
+        ("scope receipt contract rejects unknown, missing, and half-version fields",
+         not receipt_errors(receipt)
+         and not receipt_errors(recovered_receipt)
+         and bool(receipt_errors(unknown_receipt))
+         and bool(receipt_errors(missing_receipt))
+         and bool(receipt_errors(partial_recovery_receipt))
+         and bool(receipt_errors(prepared_with_commit))),
         ("scope commit shares the pointer-owner activation lock",
          activation_lock_serializes),
         ("missing active-run path fails before creating state or locks",

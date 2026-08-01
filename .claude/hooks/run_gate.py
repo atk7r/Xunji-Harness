@@ -1977,6 +1977,8 @@ def _selftest() -> int:
     (ab_run8 / "state").mkdir(exist_ok=True)
     (ab_run8 / "state" / "turn_contract.json").write_text(json.dumps({
         "schema": "xunji.turn_contract.v1", "mode": "EXECUTE", "session_id": "s-override",
+        "transcript_path": "", "prompt_sha256": "a" * 64,
+        "prompt_excerpt": "明确允许串行", "memory_approved": False,
         "fanout_override": True, "updated_at": time.time(),
     }), encoding="utf-8")
     mode8, _ = _check_agent_board(ab_run8)

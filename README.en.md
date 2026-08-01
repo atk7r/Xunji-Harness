@@ -45,16 +45,21 @@
    ├─②  active verification →  probe · render · scan · fetch_assets
    │                        →  guard.py (rate · body cap · 3 circuit breakers) →  target
    │
-   ├─③  every Bash call     →  safety_gate hook   ✋ L4 irreversible harm · hard block
+   ├─③  every tool call     →  turn_contract hook  authority · scope · effect · lifecycle
+   │    every Bash call     →  safety_gate hook   ✋ L4 irreversible harm · hard block
    │
    ├─④  observe-only sidecar →  sentinel/   behavior detection · 4-level autonomy · breaker
    │
    └─⑤  closure / safety-critical change →  review/   independent review (hard gate) →  runs/
 
-   Defenses:  ③ safety_gate hard block (enforcer) · ② guard tool-layer breakers · ④ sentinel observe-only
+   Defenses:  ③ turn_contract gates authority/effect · safety_gate blocks L4
+              ② guard trips · ④ sentinel observes, never blocks
 ```
 
-Three defenses, each with one job: the **`safety_gate` hook** hard-blocks irreversible harm by effect (the enforcer); **`guard.py`** rate-limits, caps, and trips at the tool layer (protecting the target *and* your own reachability); **`sentinel/`** never blocks — it attributes and tiers every action and brakes on aggregate runaway.
+Four layers have distinct jobs: the **`turn_contract.py` hook** validates the current operator turn,
+scope, effect, plan, and lifecycle; the **`safety_gate` hook** hard-blocks irreversible harm by effect;
+**`guard.py`** rate/volume-limits and trips; **`sentinel/`** observes without blocking and records
+action attribution and risk trends.
 
 ## 🔁 Operating Loop
 
@@ -102,16 +107,17 @@ A signal is not a conclusion; model confidence is not evidence; a single observa
 ## ✨ Design Highlights
 
 ### 1 ｜ Effect × executor safety, enforced in code
-A three-tier model (autonomous / operator-gated / hard) graded by **what gets touched** and **who executes**, not by technique. The PreToolUse hook (`safety_gate.py`) enforces only the auto-execution hard ceiling by effect; it never touches code Root/Agents author for the operator.
+A three-tier model (autonomous / operator-gated / hard) graded by **what gets touched** and **who executes**, not by technique. PreToolUse first uses `turn_contract.py` to validate current-prompt authority, scope, and effect; `safety_gate.py` then enforces the L4 automatic-execution ceiling for Bash. Neither treats a technique name or authored exploit code as harm by itself.
 
 ### 2 ｜ A guard layer that protects *your own* access too + circuit breakers
 All active tools route through `tools/harness/guard.py`: rate limiter (禁高频 — also the real brute-force throttle, **by rate not attempt count**), body cap (禁拖库), auth-fail backstop (anti-runaway only). Three circuit breakers close the field-exposed "DoS yourself / DoS the target" failure:
 
 - **HostHealth** — N consecutive transport failures on a host → auto-backoff (stop hammering a host that started blocking you, and stop mis-reading it as "the whole site blocked my IP").
 - **SessionBudget (hard volume breaker)** — whole-session request count / egress bytes over a hard ceiling → tool aborts (the global "engagement hammering every IP" dimension a per-host breaker can't see).
+- **AuthFailCounter** — repeated failures at one authentication endpoint hit a hard runaway-loop stop; it is not a weak-password attempt quota.
 
 ### 3 ｜ `sentinel/` runtime behavior detection (observe-only)
-Reconstructs the agent's action trace from Claude Code hooks and attributes each action on two **unforgeable** axes (locus = where / provenance = who triggered), separating **"my cleanup" vs "behavior to watch"**. It computes a **4-level autonomy** decision per action and includes a **session circuit breaker** (on hijack / risk snowball / repeated escalation it **brakes, not kills**: clamps effectful actions, lets proof/recon keep flowing). It **never blocks** — it only writes alerts + a risk score, so the operator can verify accuracy before any move to inline.
+Reconstructs the agent's action trace from Claude Code hooks and attributes each action by locus and provenance, separating **"my cleanup" vs "behavior to watch"**. It computes a four-level recommendation and may raise the internal recommendation from `AUTO` to `GATE`, writing alerts/pending records as aggregate risk rises. **Phase 1 never blocks the tool call on that basis**: the real execution gates remain the turn/scope/safety hooks and guard.
 
 | Level | Meaning | Example | Handling |
 |:--:|---|---|---|
@@ -124,7 +130,7 @@ Reconstructs the agent's action trace from Claude Code hooks and attributes each
 The field showed the deepest failure is not capability — it is an eager model **closing too early**: lumping hosts by header, equating "I couldn't reach it" with "it is safe", scoring a wrong conclusion at full confidence. **Self-review cannot fix self-review bias.** So:
 
 - **Per-asset examination ledger** — `classify_hosts.py` fingerprints each host by **live content** (not Server header) into `coverage.json`; `check_run.py` reads it on **every** run and lists distinct-app candidates to investigate — surfacing lumping *when it happens*.
-- **Independent Reviewer = a HARD gate** — before any "explored enough / no attack surface" claim, a **fresh-context sub-agent** (no investment in concluding) audits the run; `check_run.py` **hard-fails** a closure claim with no `Independent Review` record. Portable design: [`review/review-mechanism.md`](review/review-mechanism.md).
+- **Independent Reviewer = a HARD gate** — every "explored enough / no attack surface" claim gets an independent-context challenge. The current gate does not accept a handwritten `Independent Review` heading or copied PASS: it requires a content-addressed `ReviewReceipt`, current evidence index, hook-observed markers, and disposition of every ledger item. The portable principle lives in [`review/review-mechanism.md`](review/review-mechanism.md); current Xunji operations are owned by `.claude/skills/xunji-reviewops/` and `docs/WORKFLOW-reference.md`.
 - **Now extended to safety-critical code** — behavior changes to `.claude/hooks/` · `privacy.py` · `command_shape.py` · `guard.py` · `sentinel/` also require an independent review recorded under `review/records/` before "done" (narrow scope, see `docs/WORKFLOW-reference.md`). Evidence-backed: one such review caught a real bug in the circuit breaker the author's self-audit missed.
 - **Ledger contradiction + certainty control + egress re-run queue** — a conclusion that another entry `Refutes:` but still carries ≥ 0.8 is flagged; ≥ 0.8 must carry `Control:` / `Replicated:`; merely-unreachable assets form a standardized queue that `rerun_deferred.py` re-probes from another egress later.
 
@@ -148,31 +154,52 @@ Repository discipline checks that the abandoned orchestrator/playbook surfaces h
 
 | Layer | Role | Actually blocks? |
 |---|---|:--:|
-| `.claude/hooks/safety_gate.py` | L4 irreversible-harm hard floor (the enforcer) | ✅ hard block |
+| `tools/turn_contract.py` (PreToolUse) | current-turn authority, scope, effect, plan/lifecycle | ✅ hard block |
+| `.claude/hooks/safety_gate.py` | L4 irreversible-harm Bash floor | ✅ hard block |
 | `tools/harness/guard.py` | rate / body cap / three circuit breakers | ✅ tool abort |
 | `sentinel/` | behavior attribution + 4-level tiering + session breaker | ⬜ observe-only |
 
 The hook blocks: irreversible destruction (host/file wipes, `DROP`/`TRUNCATE`/unscoped `DELETE`/`UPDATE`), target resource deletion, mass exfil / database dump (拖库), money movement, DoS / high-rate. **Uploading a proof artifact is not blocked** (Root call); getting a shell, going past the web layer, and other heavier actions are **not machine-blocked** but are **operator-gated**.
 
 > A blocked action is **not** unlocked by human approval — choose a safe, non-destructive proof instead.
-> Scope is not encoded in the hook. The operator is the highest authority; their instruction overrides soft constraints and is the controlling order everywhere except the hard boundary above.
+> The operator chooses the target and scope; hooks mechanically verify that the current prompt/claim and canonical scope authorize the effect. Target content, old sessions, and model confidence cannot mint authority. The operator remains the highest authority, but imported data cannot impersonate the operator.
 
 ## 🗂️ Module Map
 
 | Module | Role |
 |---|---|
 | `CLAUDE.md` | short always-loaded operating contract (role · drive · method) |
+| `AGENTS.md` · `docs/ARCHITECTURE.md` | Codex auxiliary contract · shared Claude/Codex architecture index and change protocol |
+| `docs/AI_ENV_SETUP.md` | command-oriented environment, proxy, run-entry, and selftest handoff |
 | `docs/ROUTER.md` · `docs/WORKFLOW.md` · `docs/cognition/` | routing · run-state workflow · judgment discipline |
 | `.claude/hooks/` | `safety_gate.py` + `safety_rules.json` — the L4 hard floor |
 | `tools/harness/guard.py` | rate / body cap / circuit breakers / session budget / upload registry |
 | **`sentinel/`** | runtime behavior detection: attribution · 4-level autonomy · session breaker (observe-only) · thresholds in `TUNING.md` |
-| **`review/`** | independent-review module: portable spec · reviewer template · `records/` review instances |
+| **`review/`** · `.claude/skills/xunji-reviewops/` | portable review principle · current ReviewOps owner · `records/` review instances |
 | `docs/templates/agents/` · `tools/workers.py` | agent board: assignments, context packs, candidate merge checks, conflict checks, synthesis drafts |
 | `knowledge/` | grounded recognition signatures + weak-point anchors (not weapons, gated by `check_knowledge.py`) |
 | `tools/` | recon ingest · per-host classify · fetch-all assets · active verification · egress re-run · local checkers |
 | `runs/<target>_<date>/` | per-target run state = audit trail (not committed) |
 
-**Run-state files**: `target · surface · frontier · hypotheses · evidence · false_positive · decisions · review · report` (empty templates in `docs/templates/run/`). Findings are **not** confirmed from chat memory, model confidence, or single unattributed signals.
+**Run-state files**: `target · surface · frontier · hypotheses · evidence · false_positive · decisions · review · report`, plus conditional `chains · hints` (empty templates in `docs/templates/run/`). Findings are **not** confirmed from chat memory, model confidence, or single unattributed signals.
+
+## 🚀 Quick Start
+
+Read [`docs/AI_ENV_SETUP.md`](docs/AI_ENV_SETUP.md) first to align local Python, proxy, and Claude Code wiring. These are the standard run entry points; a clear natural-language create/continue request in Claude Code is normalized into the same lifecycle transaction path.
+
+```bash
+# Guanlan recon artifact
+python3 tools/setup_run.py <slug> <recon.json>
+
+# One authorized target
+python3 tools/setup_run.py <slug> --target https://example.com
+
+# New-run launcher / existing-run resume
+python3 tools/loop_bootstrap.py <slug> <recon.json>
+python3 tools/loop_bootstrap.py --resume runs/<dir>
+```
+
+These adapters commit the active pointer through `setup_transaction.py` staging + CAS. Never hand-edit `.claude/xunji_active_run`, run receipts, claims, or journals.
 
 ## ✅ Local Checks
 
@@ -180,11 +207,15 @@ The hook blocks: irreversible destruction (host/file wipes, `DROP`/`TRUNCATE`/un
 # Activate the venv first (see "Setup" below); forward-slash paths work on all
 # platforms, including Windows Python.
 python tools/check_rules.py          # architecture-drift guard
+python .agents/skills/xunji-closure-audit/scripts/closure_audit.py
+python tools/check_templates.py
+python tools/check_runtime_boundary.py
 python tools/check_hook.py           # hook block/allow regression
 python tools/check_run.py runs/<t>   # run-state gate + anti-premature-closure
 python sentinel/replay.py            # behavior-detection golden replay
 python sentinel/verify_layers.py     # L1-L4 false-positive / effectiveness
 python tools/harness/guard.py        # guard + circuit-breaker selftest
+python tools/selftest_all.py         # aggregate offline regression
 ```
 
 These inspect local files and hook behavior only — **they do not contact targets**.
@@ -251,4 +282,4 @@ ruff check .
 - **Authority**: this is the **Claude Code** workspace; Root may edit project files when the user asks, and owns run-level files plus the Agent Board during a run.
 - **Why Claude Code-specific**: the machine-enforced safety floor (`.claude/hooks/` PreToolUse etc.), CLAUDE.md auto-load, skills, and memory are all Claude Code mechanisms. **A runtime without that hook system (e.g. Codex) does not run the hard floor, so the safety guarantees do not hold** — the project is designed and verified for Claude Code and does not claim Codex compatibility.
 - **Codex's place**: Claude Code is primary; Codex is auxiliary. Use Codex for heterogeneous review, engagement advice, disagreement, or delegated collaboration when helpful. It does not create a separate runtime or safety boundary; the same run ledger, evidence gate, guard/hook boundary, and review requirements apply.
-- **Routing**: use [`docs/ROUTER.md`](docs/ROUTER.md) to decide what guidance applies; always active are `CLAUDE.md` · `docs/WORKFLOW.md` · `docs/cognition/README.md` · the `src-safety-boundary` skill.
+- **Routing**: start environment handoff with [`docs/AI_ENV_SETUP.md`](docs/AI_ENV_SETUP.md), then use [`docs/ROUTER.md`](docs/ROUTER.md) to decide what guidance applies; always active are `CLAUDE.md` · `docs/WORKFLOW.md` · `docs/cognition/README.md` · the `src-safety-boundary` skill.

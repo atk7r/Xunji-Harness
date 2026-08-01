@@ -470,13 +470,26 @@
               "minProperties": 1,
               "maxProperties": 64,
               "additionalProperties": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["target_actions", "canonical_evidence"],
-                "properties": {
-                  "target_actions": {"type": "integer", "minimum": 1},
-                  "canonical_evidence": {"const": true}
-                }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["target_actions", "canonical_evidence"],
+                    "properties": {
+                      "target_actions": {"type": "integer", "minimum": 1},
+                      "canonical_evidence": {"const": true}
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["target_actions", "canonical_promotion"],
+                    "properties": {
+                      "target_actions": {"type": "integer", "minimum": 1},
+                      "canonical_promotion": {"const": "pending_root_synthesis"}
+                    }
+                  }
+                ]
               }
             }
           }

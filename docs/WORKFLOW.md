@@ -286,9 +286,11 @@ When no run exists, an EXECUTE prompt is held briefly in the hook-owned
 `loop_bootstrap.py --source/--resume`, and a prompt-named `xunji_statusline.py --set-active`
 all delegate activation to `setup_transaction.commit_activation_cas()`; it
 consumes/copies the contract before atomically changing `.claude/xunji_active_run`.
-The pointer is the personal operator's persistent current-run selection. Claude
-session lifecycle hooks do not clear or restore it; adapters and the statusline
-never write it directly.
+The pointer is the personal operator's persistent current-run selection. SessionEnd
+preserves it but retires that session's visible binding; startup, clear, and compact
+do not restore it. Only an exact resume lifecycle event may restore its matching
+selection through the transaction owner and an EXPLAIN-only barrier. Adapters and
+the statusline never write the pointer directly.
 Claude never calls the owner's private transaction APIs through `python -c`, stdin,
 or imports; `XUNJI_E_LIFECYCLE_PRIVATE_API` requires repair and exact retry of the
 public adapter.
@@ -316,12 +318,15 @@ instead of silently skipping identity binding. Existing pointer targets must sta
 under `runs/`; a present but malformed/mismatched setup receipt is not treated as
 a legacy missing receipt and blocks activation before pointer mutation. Direct
 pointer Write/Edit/removal and hook-driven `--clear-active` are forbidden.
-`SessionEnd` preserves the selection and `SessionStart` performs no selection
-recovery. A fresh top-level prompt from any local Claude session binds the existing
-valid pointer and replaces the turn contract; session/transcript metadata remains
-for causal receipt correlation and stale-effect rejection, not operator ACL. A
-public setup/resume/set-active transaction is the only way to select a different
-run. Canonical run state, evidence, journals, and setup receipts remain unchanged.
+`SessionEnd` preserves the selection while retiring that session's visible binding.
+Startup, clear, and compact perform no selection recovery; exact resume may restore
+only its matching selection through the public lifecycle path and writes an
+EXPLAIN-only barrier first. A fresh top-level prompt from any local Claude session
+binds the existing valid pointer and replaces the turn contract; session/transcript
+metadata remains for causal receipt correlation, display binding, and stale-effect
+rejection, not operator ACL. A public setup/resume/set-active transaction is the
+only way to select a different run. Canonical run state, evidence, journals, and
+setup receipts remain unchanged.
 Setup/resume and documented local
 state/journal commands are lifecycle control, so an old run's Agent Board cannot
 mistake them for target work. Contract hooks never fall back to a recently modified
@@ -519,17 +524,19 @@ cycle merely because the current planner wave is offline.
 Claude Code statusline uses `tools/xunji_statusline.py` from the project
 `.claude/settings.json`. It is a read-only, two-second display containing only
 `[Xunji-status] [<phase>] <run>`。Claude 未提供明确的 Xunji workspace，或该
-workspace 尚未选择 active run 时，statusline 输出为空。当前 renderer 不检查 payload 的
-session/transcript，也不读取 turn contract；session-bound display 仍是独立 target，不是本轮
-current claim。它只读取 `.claude/xunji_active_run`、阶段派生状态和
-`state/loop_journal.jsonl`；不会读取 selection receipt、恢复状态、刷新状态、选择工作、写证据
+workspace 尚未选择 active run、payload 缺少非空 session id，或当前 run 的 turn contract
+不精确绑定该 session 时，statusline 输出为空；客户端提供 transcript path 时也必须 exact
+match，省略该字段的客户端保留 session-only 兼容路径。这个 display binding 不是本轮 target
+claim。它只读取 `.claude/xunji_active_run`、当前 turn contract、阶段派生状态和
+`state/loop_journal.jsonl`；不会消费 selection receipt、恢复状态、刷新状态、选择工作、写证据
 或执行阶段约束。active-run pointer 是本地运行态，
 只由 `tools/setup_transaction.py` 的 typed CAS ports 更新；`setup_run.py`、
 `loop_bootstrap.py`、set-active、原样送达的 recurring `/loop` 与 client-safe
 named-run 单周期入口只是适配层。
-pointer 是个人操作者的持久当前选择；`SessionEnd` 不清空，`SessionStart` 不恢复。新的
-Claude session 直接沿用该选择，并由首个真实 prompt 写入 fresh turn contract；session/
-transcript 只用于因果回执关联，不决定 statusline 是否显示。
+pointer 是个人操作者的持久当前选择；`SessionEnd` 不清空，但会退休当前 session 的可见绑定；
+startup、clear、compact 不恢复，只有 exact resume 可经公开 lifecycle 路径恢复，并先进入
+EXPLAIN-only barrier。新的 Claude session 可由首个真实 prompt 为现有选择写入 fresh turn
+contract；session/transcript 用于因果回执关联、显示绑定与 stale-effect 拒绝，不是用户 ACL。
 Anti-drift 与 Stop hooks 只解析这个显式指针；文件新旧永远不是 run authority，
 因此无关 run 不能接收或逃逸另一个 run 的流程门。
 `Paused` / `Interrupted` 可作为 phase tag 显示；缓存健康、阻断和下一步等详细
@@ -807,6 +814,12 @@ auth-bypass, IDOR on/off), `tools/probe.py DIFF <urlA> <urlB>` produces it in on
 — it reports `reliable_differential` only when each side is stable *and* the two differ
 (`--samples N` raises the stability bar): the purpose-built control, not a hand-rolled
 second probe. Rationale + the `evidence.md` template: reference.
+
+For `probe --save` output, `Artifacts` lists the saved response body and its
+`.replay.json` as two separate, concrete run-local paths. `Replay` is reserved for
+adjudication prose after DIVERGED or SKIPPED-PRIVACY-REDACTED; it is not parsed as
+an artifact-list continuation, and directory/basename or suffix shorthand is not
+valid new ledger output.
 
 ## Operator Hints (`hints.md`, conditional)
 

@@ -1682,7 +1682,10 @@ def _selftest() -> int:
     (live_run / "state").mkdir(exist_ok=True)
     (live_run / "state" / "turn_contract.json").write_text(json.dumps({
         "schema": "xunji.turn_contract.v1", "mode": "EXPLAIN_ONLY",
-        "session_id": "s-explain", "updated_at": time.time(),
+        "session_id": "s-explain", "transcript_path": "",
+        "prompt_sha256": "a" * 64, "prompt_excerpt": "explain fixture",
+        "memory_approved": False, "fanout_override": False,
+        "updated_at": time.time(),
     }), encoding="utf-8")
     explain_proc = subprocess.run(
         [sys.executable, str(Path(__file__).resolve())],
@@ -1736,6 +1739,11 @@ def _selftest() -> int:
             "schema": "xunji.turn_contract.v1",
             "mode": mode,
             "session_id": "s-terminal",
+            "transcript_path": str(terminal_transcript),
+            "prompt_sha256": "b" * 64,
+            "prompt_excerpt": f"{mode.lower()} fixture",
+            "memory_approved": False,
+            "fanout_override": False,
             "updated_at": updated_at,
         }), encoding="utf-8")
 

@@ -2,9 +2,10 @@
 """Claude Code statusline for Xunji.
 
 This script is display-only during normal statusline use. It prints nothing until
-Claude provides an explicit Xunji workspace and that workspace has an active run.
-For an active run it renders only the current phase and run name. It never refreshes
-cache files, mutates run evidence, or drives an engagement.
+Claude provides an explicit Xunji workspace whose current session matches the
+active run's display binding. For a matching active run it renders only the current
+phase and run name. It never refreshes cache files, mutates run evidence, restores
+a selection, grants authority, or drives an engagement.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import status_style  # noqa: E402
+import contract_schema  # noqa: E402
 
 ACTIVE_RUN = ROOT / ".claude" / "xunji_active_run"
 RUNS_ROOT = ROOT / "runs"
@@ -131,6 +133,7 @@ def set_active_run(raw: str) -> bool:
 
         setup_transaction.activate_existing_run(
             run_dir,
+            operation=setup_transaction.OP_STATUSLINE_SET_ACTIVE,
             root=ROOT,
             runs_root=RUNS_ROOT,
             pointer=ACTIVE_RUN,
@@ -165,6 +168,37 @@ def active_run() -> Path | None:
     except Exception:
         return None
     return _resolve_run(raw)
+
+
+def _payload_matches_run_session(payload: dict, run_dir: Path) -> bool:
+    """Return whether the status payload matches the run's display binding.
+
+    This read-only check never grants authority or restores ownership. A missing
+    session identity therefore renders nothing. Claude versions that omit a
+    transcript path remain compatible through the session binding; when Claude
+    supplies a transcript path, the turn contract must bind that exact path too.
+    """
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return False
+    contract = _load_json(run_dir / "state" / "turn_contract.json", {})
+    if contract_schema.turn_contract_errors(contract, allow_legacy=True) \
+            or contract.get("session_id") != session_id \
+            or contract.get("bound_run") != run_dir.name \
+            or str(contract.get("authority_state") or "") not in {
+                "", "resume_barrier",
+            }:
+        return False
+    transcript_path = payload.get("transcript_path")
+    if transcript_path is None or transcript_path == "":
+        return True
+    return bool(
+        isinstance(transcript_path, str)
+        and transcript_path
+        and isinstance(contract.get("transcript_path"), str)
+        and contract.get("transcript_path")
+        and contract.get("transcript_path") == transcript_path
+    )
 
 
 def _journal_summary(run_dir: Path) -> dict:
@@ -210,7 +244,8 @@ def _event_age_seconds(journal: dict) -> float | None:
 
 def _phase(loop_data: dict, journal: dict, run_dir: Path) -> str:
     status = _load_json(run_dir / "state" / "run_status.json", {})
-    if str(status.get("status") or "") == "paused_by_operator":
+    if not contract_schema.run_status_errors(status, allow_legacy=True) \
+            and str(status.get("status") or "") == "paused_by_operator":
         return "Paused"
     open_phase = str(journal.get("open_phase") or "").strip()
     if open_phase:
@@ -263,6 +298,8 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)
     run_dir = active_run()
     if run_dir is None:
         return ""
+    if not _payload_matches_run_session(payload, run_dir):
+        return ""
 
     stale = _state_stale(run_dir)
     loop_data = _load_json(run_dir / "state" / "loop_state.json", {})
@@ -289,10 +326,16 @@ def _selftest() -> int:
         except FileNotFoundError:
             return False, b"", 0
 
-    root_current = {"workspace": {"current_dir": str(ROOT)}}
     tmp_root = RUNS_ROOT
     tmp_root.mkdir(exist_ok=True)
     temp = Path(tempfile.mkdtemp(dir=tmp_root))
+    statusline_session = "statusline-session-end"
+    statusline_transcript = str(temp / "statusline-session.jsonl")
+    root_current = {
+        "session_id": statusline_session,
+        "transcript_path": statusline_transcript,
+        "workspace": {"current_dir": str(ROOT)},
+    }
     run = temp / "run"
     run.mkdir()
     (run / "target.md").write_text("# Target\n", encoding="utf-8")
@@ -332,6 +375,7 @@ def _selftest() -> int:
         # claim directories, so this renderer test cannot consume a real Claude
         # bootstrap claim or introduce a second pointer-writer pattern.
         import setup_transaction  # noqa: WPS433
+        import turn_contract  # noqa: WPS433
 
         setup_transaction.activate_existing_run(
             run,
@@ -341,24 +385,71 @@ def _selftest() -> int:
             pending_dir=temp / ".pending",
             claims_dir=temp / ".claims",
         )
-        assert set_active_run(str(run))
+        statusline_operations: list[str] = []
+        original_activate_existing = setup_transaction.activate_existing_run
+
+        def capture_activate_existing(run_dir: Path, **kwargs):
+            statusline_operations.append(str(kwargs.get("operation") or ""))
+            return original_activate_existing(run_dir, **kwargs)
+
+        setup_transaction.activate_existing_run = capture_activate_existing
+        try:
+            assert set_active_run(str(run))
+        finally:
+            setup_transaction.activate_existing_run = original_activate_existing
+        active_contract = turn_contract._contract_from_event({
+            "session_id": statusline_session,
+            "transcript_path": statusline_transcript,
+            "prompt": f"/loop runs/{run.name}",
+        }, run_name=run.name)
+        turn_contract._atomic_json(
+            turn_contract.contract_path(run), active_contract)
         watched = [
             ACTIVE_RUN,
+            turn_contract.contract_path(run),
             run / "state" / "loop_state.json",
             run / "state" / "controller.shadow.json",
             run / "state" / "assignments.json",
             run / "state" / "asset_ledger.json",
             run / "state" / "loop_journal.jsonl",
         ]
-        before_render = {p: p.stat().st_mtime_ns for p in watched}
+        before_render = {p: fingerprint(p) for p in watched}
+        before_render_entries = sorted(
+            path.relative_to(run).as_posix() for path in run.rglob("*"))
+        before_control_entries = sorted(
+            path.relative_to(temp).as_posix() for path in temp.rglob("*"))
         plain = render_statusline(root_current, color=False)
         colored = render_statusline(root_current, color=True)
+        session_only = render_statusline({
+            "session_id": statusline_session,
+            "workspace": {"current_dir": str(ROOT)},
+        }, color=False)
+        missing_session = render_statusline({
+            "workspace": {"current_dir": str(ROOT)},
+        }, color=False)
+        different_session = render_statusline({
+            "session_id": "ordinary-new-session",
+            "transcript_path": statusline_transcript,
+            "workspace": {"current_dir": str(ROOT)},
+        }, color=False)
+        different_transcript = render_statusline({
+            "session_id": statusline_session,
+            "transcript_path": str(temp / "different-session.jsonl"),
+            "workspace": {"current_dir": str(ROOT)},
+        }, color=False)
+        malformed_transcript = render_statusline({
+            "session_id": statusline_session,
+            "transcript_path": [statusline_transcript],
+            "workspace": {"current_dir": str(ROOT)},
+        }, color=False)
         unspecified = render_statusline({}, color=False)
         cwd_only = render_statusline({"cwd": str(ROOT)}, color=False)
         empty_workspace = render_statusline(
-            {"workspace": {"current_dir": ""}}, color=False)
-        nested_workspace = render_statusline(
-            {"workspace": {"current_dir": str(ROOT / "tools")}}, color=False)
+            {**root_current, "workspace": {"current_dir": ""}}, color=False)
+        nested_workspace = render_statusline({
+            **root_current,
+            "workspace": {"current_dir": str(ROOT / "tools")},
+        }, color=False)
         env = dict(os.environ)
         env["XUNJI_COLOR"] = "1"
         env.pop("NO_COLOR", None)
@@ -380,27 +471,118 @@ def _selftest() -> int:
             timeout=10,
         )
         cli_colored = cli_proc.stdout
-        after_render = {p: p.stat().st_mtime_ns for p in watched}
-        (run / "state" / "turn_contract.json").write_text(json.dumps({
-            "schema": "xunji.turn_contract.v1",
-            "mode": "EXECUTE",
+        after_render = {p: fingerprint(p) for p in watched}
+        after_render_entries = sorted(
+            path.relative_to(run).as_posix() for path in run.rglob("*"))
+        after_control_entries = sorted(
+            path.relative_to(temp).as_posix() for path in temp.rglob("*"))
+        session_end_visible = render_statusline(root_current, color=False)
+        preserved_run_files = {
+            path: fingerprint(path)
+            for path in (run / "target.md", run / "frontier.md")
+        }
+        selection_dir = temp / ".session-end-selections"
+        session_end_cleared = turn_contract.cleanup_session_end({
+            "hook_event_name": "SessionEnd",
+            "session_id": statusline_session,
+            "transcript_path": statusline_transcript,
+            "reason": "prompt_input_exit",
+        }, root=ROOT, runs_root=RUNS_ROOT, pointer=ACTIVE_RUN,
+           pending_dir=temp / ".session-end-pending",
+           claims_dir=temp / ".session-end-claims",
+           selection_dir=selection_dir)
+        session_end_empty = render_statusline(root_current, color=False)
+        session_ended_contract_hidden = not _payload_matches_run_session(
+            root_current, run)
+        startup_event = {
+            "hook_event_name": "SessionStart",
+            "source": "startup",
+            "session_id": statusline_session,
+            "transcript_path": statusline_transcript,
+            "workspace": {"current_dir": str(ROOT)},
+        }
+        startup_restored = turn_contract.restore_session_start(
+            startup_event,
+            root=ROOT,
+            runs_root=RUNS_ROOT,
+            pointer=ACTIVE_RUN,
+            selection_dir=selection_dir,
+        )
+        startup_after_end = render_statusline(startup_event, color=False)
+        clear_event = {
+            "hook_event_name": "SessionStart",
+            "source": "clear",
+            "session_id": statusline_session,
+            "transcript_path": statusline_transcript,
+            "workspace": {"current_dir": str(ROOT)},
+        }
+        clear_restored = turn_contract.restore_session_start(
+            clear_event,
+            root=ROOT,
+            runs_root=RUNS_ROOT,
+            pointer=ACTIVE_RUN,
+            selection_dir=selection_dir,
+        )
+        clear_after_end = render_statusline(clear_event, color=False)
+        session_end_preserved_run = preserved_run_files == {
+            path: fingerprint(path) for path in preserved_run_files
+        }
+        resume_event = {
+            "hook_event_name": "SessionStart",
+            "source": "resume",
+            "session_id": statusline_session,
+            "transcript_path": statusline_transcript,
+            "workspace": {"current_dir": str(ROOT)},
+        }
+        exact_resume_restored = turn_contract.restore_session_start(
+            resume_event,
+            root=ROOT,
+            runs_root=RUNS_ROOT,
+            pointer=ACTIVE_RUN,
+            selection_dir=selection_dir,
+        )
+        exact_resume_visible = render_statusline(resume_event, color=False)
+        resume_contract = _load_json(turn_contract.contract_path(run), {})
+        unknown_authority_contract = dict(resume_contract)
+        unknown_authority_contract["authority_state"] = "future-unknown"
+        turn_contract._atomic_json(
+            turn_contract.contract_path(run), unknown_authority_contract)
+        unknown_authority_hidden = render_statusline(
+            resume_event, color=False) == ""
+        turn_contract._atomic_json(
+            turn_contract.contract_path(run), resume_contract)
+
+        transition_transcript = str(temp / "statusline-transition.jsonl")
+        transition_current = {
             "session_id": "statusline-transition",
-            "updated_at": time.time(),
-        }), encoding="utf-8")
+            "transcript_path": transition_transcript,
+            "workspace": {"current_dir": str(ROOT)},
+        }
+        transition_contract = turn_contract._contract_from_event({
+            "session_id": "statusline-transition",
+            "transcript_path": transition_transcript,
+            "prompt": "恢复 run runs/missing-cache-run",
+        }, run_name=run.name)
+        turn_contract._atomic_json(
+            turn_contract.contract_path(run), transition_contract)
         (run / "state" / "run_status.json").write_text(json.dumps({
+            "schema": "xunji.run-status.v1",
             "status": "paused_by_operator",
+            "session_id": "statusline-transition",
+            "updated_at": float(transition_contract["updated_at"]),
+            "reason": "operator requested pause",
         }), encoding="utf-8")
-        paused_plain = render_statusline(root_current, color=False)
+        paused_plain = render_statusline(transition_current, color=False)
         (run / "state" / "run_status.json").unlink()
         (run / "state" / "loop_journal.jsonl").write_text("", encoding="utf-8")
         (run / "state" / "loop_state.json").write_text(json.dumps({
             "phase": "Reviewer",
         }), encoding="utf-8")
-        cached_plain = render_statusline(root_current, color=False)
+        cached_plain = render_statusline(transition_current, color=False)
         (run / "state" / "loop_state.json").write_text(json.dumps({
             "phase": "Setup",
         }), encoding="utf-8")
-        setup_plain = render_statusline(root_current, color=False)
+        setup_plain = render_statusline(transition_current, color=False)
         (run / "state" / "loop_journal.jsonl").write_text(json.dumps({
             "cycle": 2,
             "event": "phase_start",
@@ -408,13 +590,13 @@ def _selftest() -> int:
             "note": "",
             "ts": "2000-01-01T00:00:00Z",
         }) + "\n", encoding="utf-8")
-        interrupted_plain = render_statusline(root_current, color=False)
+        interrupted_plain = render_statusline(transition_current, color=False)
         outside_dir = Path(tempfile.mkdtemp())
         unknown_phase = _phase_tag("Unexpected Phase", color=True)
         invalid_rejected = set_active_run(str(outside_dir)) is False
         outside = render_statusline({"workspace": {"current_dir": str(outside_dir)}}, color=False)
         clear_ok = clear_active_run()
-        no_active = render_statusline(root_current, color=False)
+        no_active = render_statusline(transition_current, color=False)
         setup_transaction.activate_existing_run(
             run,
             root=ROOT,
@@ -439,18 +621,42 @@ def _selftest() -> int:
             + json.dumps({"cycle": 1, "event": "phase_end", "data": {"phase": "Setup"}, "note": "run prepared; next phase=Root Orchestrator (/loop runs/missing-cache-run)"}, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        assert set_active_run(str(missing_cache))
+        switch_claims = temp / ".statusline-switch-claims"
+        switch_pending = temp / ".statusline-switch-pending"
+        switch_profile = setup_transaction.lifecycle_effect_profile(
+            setup_transaction.OP_STATUSLINE_SET_ACTIVE, missing_cache.name)
+        turn_contract.write_transition_claim(
+            missing_cache.name,
+            transition_contract,
+            origin_run=run.name,
+            claims_dir=switch_claims,
+            effect=setup_transaction.transition_effect(
+                "activate", missing_cache.name, profile=switch_profile),
+        )
+        original_activate_existing = setup_transaction.activate_existing_run
+
+        def isolated_activate_existing(run_dir: Path, **kwargs):
+            kwargs.setdefault("pending_dir", switch_pending)
+            kwargs.setdefault("claims_dir", switch_claims)
+            return original_activate_existing(run_dir, **kwargs)
+
+        setup_transaction.activate_existing_run = isolated_activate_existing
+        try:
+            assert set_active_run(str(missing_cache))
+        finally:
+            setup_transaction.activate_existing_run = original_activate_existing
         inherited_contract = _load_json(
             missing_cache / "state" / "turn_contract.json", {})
         source_contract_after = _load_json(
             run / "state" / "turn_contract.json", {})
         missing_before = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
-        missing_plain = render_statusline(root_current, color=False)
+        missing_plain = render_statusline(transition_current, color=False)
         missing_after = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
         original_derived_state = _derived_loop_state
         try:
             globals()["_derived_loop_state"] = lambda _run_dir: (None, "RuntimeError")
-            failed_derive_plain = render_statusline(root_current, color=False)
+            failed_derive_plain = render_statusline(
+                transition_current, color=False)
         finally:
             globals()["_derived_loop_state"] = original_derived_state
     finally:
@@ -461,6 +667,16 @@ def _selftest() -> int:
     checks = [
         ("plain statusline contains only status phase and run",
          plain == f"[Xunji-status] [Hunter｜验证] {run.name}"),
+        ("session-only payload remains compatible",
+         session_only == f"[Xunji-status] [Hunter｜验证] {run.name}"),
+        ("payload without a session id cannot inherit the pointer",
+         missing_session == ""),
+        ("ordinary new session cannot inherit another session's pointer",
+         different_session == ""),
+        ("mismatched transcript cannot inherit the pointer",
+         different_transcript == ""),
+        ("malformed transcript identity fails closed",
+         malformed_transcript == ""),
         ("populated legacy summary state cannot leak fields", " | " not in plain),
         ("operator pause is visible without extra fields",
          paused_plain == f"[Xunji-status] [Paused｜已暂停] {run.name}"),
@@ -472,7 +688,26 @@ def _selftest() -> int:
          interrupted_plain == f"[Xunji-status] [Interrupted｜中断待恢复] {run.name}"),
         ("colored statusline has ansi", "\033[" in colored and "[Hunter｜验证]" in colored),
         ("unknown phase fallback is styled", "\033[" in unknown_phase and "[Unexpected Phase]" in unknown_phase),
-        ("normal render is read-only", before_render == after_render),
+        ("normal render is read-only",
+         before_render == after_render
+         and before_render_entries == after_render_entries
+         and before_control_entries == after_control_entries),
+        ("SessionEnd clears the visible statusline selection",
+         session_end_cleared
+         and session_end_visible == f"[Xunji-status] [Hunter｜验证] {run.name}"
+         and session_end_empty == ""),
+        ("startup and clear cannot restore an ended selection",
+         not startup_restored and not clear_restored
+         and startup_after_end == "" and clear_after_end == ""),
+        ("session-ended contract cannot satisfy the display binding",
+         session_ended_contract_hidden),
+        ("exact resumed session and transcript can render a restored pointer",
+         exact_resume_restored
+         and exact_resume_visible
+         == f"[Xunji-status] [Hunter｜验证] {run.name}"),
+        ("unknown authority state hides instead of guessing",
+         unknown_authority_hidden),
+        ("SessionEnd preserves canonical run files", session_end_preserved_run),
         ("unspecified workspace prints nothing", unspecified == ""),
         ("top-level cwd alone does not select a workspace", cwd_only == ""),
         ("empty workspace prints nothing", empty_workspace == ""),
@@ -498,6 +733,8 @@ def _selftest() -> int:
         ("failed live derivation stays concise",
          failed_derive_plain == f"[Xunji-status] [Idle｜空闲] {missing_cache.name}"),
         ("invalid outside run pointer is rejected", invalid_rejected),
+        ("set-active adapter binds its canonical lifecycle operation",
+         statusline_operations == [setup_transaction.OP_STATUSLINE_SET_ACTIVE]),
         ("outside Xunji prints nothing", outside == ""),
         ("selftest uses an isolated active-run pointer",
          ACTIVE_RUN == real_active_pointer

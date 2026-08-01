@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_journal  # noqa: E402
 import run_model  # noqa: E402
+import contract_schema  # noqa: E402
 from harness import capability_registry  # noqa: E402
 
 
@@ -275,7 +276,8 @@ def _load_turn_contract(run_dir: Path) -> dict:
         value = json.loads(path.read_text(encoding="utf-8", errors="strict"))
     except Exception as exc:
         raise PlanError("WORK_PLAN_TURN_CONTRACT_MISSING") from exc
-    if not isinstance(value, dict) or value.get("schema") != "xunji.turn_contract.v1":
+    if not isinstance(value, dict) \
+            or contract_schema.turn_contract_errors(value, allow_legacy=True):
         raise PlanError("WORK_PLAN_TURN_CONTRACT_INVALID")
     if value.get("mode") != "EXECUTE":
         raise PlanError("WORK_PLAN_EXECUTE_REQUIRED")
@@ -705,6 +707,8 @@ def _plan_digest(value: dict) -> str:
 def validate_plan(value: object, *, run_dir: str | Path | None = None,
                   contract: dict | None = None, check_inputs: bool = False) -> dict:
     if not isinstance(value, dict) or value.get("schema") != SCHEMA:
+        raise PlanError("WORK_PLAN_SCHEMA_INVALID")
+    if contract_schema.named_schema_errors(value, "work-plan.v1.schema.json"):
         raise PlanError("WORK_PLAN_SCHEMA_INVALID")
     allowed = {
         "schema", "plan_id", "cycle_id", "macro_stage", "objective",
@@ -1937,7 +1941,10 @@ def _selftest_legacy() -> int:
         "schema": "xunji.turn_contract.v1",
         "mode": "EXECUTE",
         "session_id": "session-work-plan",
+        "transcript_path": str(run / "work-plan-transcript.jsonl"),
         "prompt_sha256": "a" * 64,
+        "prompt_excerpt": "work plan fixture",
+        "memory_approved": False,
         "updated_at": time.time(),
         "fanout_override": False,
     }
@@ -2238,7 +2245,11 @@ def _selftest() -> int:
         )
         contract = {
             "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
-            "session_id": f"session-{name}", "prompt_sha256": "a" * 64,
+            "session_id": f"session-{name}",
+            "transcript_path": str(run / "work-plan-transcript.jsonl"),
+            "prompt_sha256": "a" * 64,
+            "prompt_excerpt": "work plan fixture",
+            "memory_approved": False,
             "updated_at": time.time(), "fanout_override": False,
         }
         _atomic_json(run / "state" / "turn_contract.json", contract)

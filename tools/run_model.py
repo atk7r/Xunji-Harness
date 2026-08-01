@@ -18,6 +18,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+import contract_schema
+
 
 OPEN_STATUSES = {"open", "probing", "working", "blocked_type_a"}
 TERMINAL_STATUSES = {
@@ -28,6 +30,7 @@ TRIVIAL_BARRIERS = {"", "none", "unknown", "n/a", "-"}
 HWS = r"[^\S\n]"
 MACRO_STAGES = ("S1", "S2", "S3")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
+_HEX40 = re.compile(r"[0-9a-f]{40}")
 _LANE_ID = re.compile(r"L-[A-Za-z0-9._-]+")
 _ASSIGNMENT_ID = re.compile(r"A-[A-Za-z0-9._-]+")
 _TERMINAL_ROOT_DISPOSITIONS = {"merged", "blocked", "failed", "abandoned"}
@@ -41,6 +44,10 @@ _REVIEW_RECEIPT_FIELDS = _REVIEW_RECEIPT_REQUIRED_FIELDS | {"artifact_validation
 _REVIEW_DISPOSITIONS = {
     "accept-candidate", "needs-control", "duplicate", "refute",
     "out-of-scope", "retry", "blocked",
+}
+_REPLAY_RESPONSE_LEGACY_FIELDS = {"status", "len", "sha1"}
+_REPLAY_RESPONSE_V2_FIELDS = _REPLAY_RESPONSE_LEGACY_FIELDS | {
+    "saved_len", "saved_sha1", "truncated", "wire_verified",
 }
 _MERGE_DRAFT_FIELDS = {
     "schema", "assignment", "role", "front", "assets", "effect", "plan_id",
@@ -406,6 +413,9 @@ def _runtime_records(run: Path) -> tuple[list[dict], list[dict], list[str], obje
 
 
 def _receipt_hash_valid(receipt: object) -> bool:
+    if contract_schema.named_schema_errors(
+            receipt, "review-disposition.v1.schema.json"):
+        return False
     if not isinstance(receipt, dict) \
             or not _REVIEW_RECEIPT_REQUIRED_FIELDS.issubset(receipt) \
             or not set(receipt).issubset(_REVIEW_RECEIPT_FIELDS):
@@ -439,18 +449,37 @@ def _receipt_hash_valid(receipt: object) -> bool:
         if "request" in item:
             request = item.get("request")
             response = item.get("response")
+            response_fields = set(response) if isinstance(response, dict) else set()
             if not isinstance(request, dict) or set(request) != {"method", "url"} \
                     or not all(isinstance(request.get(key), str) and request.get(key)
                                for key in ("method", "url")) \
                     or not isinstance(response, dict) \
-                    or set(response) != {"status", "len", "sha1"} \
+                    or response_fields not in (
+                        _REPLAY_RESPONSE_LEGACY_FIELDS,
+                        _REPLAY_RESPONSE_V2_FIELDS,
+                    ) \
+                    or isinstance(response.get("status"), bool) \
                     or not isinstance(response.get("status"), int) \
+                    or isinstance(response.get("len"), bool) \
                     or not isinstance(response.get("len"), int) \
                     or response["len"] < 0 \
                     or not isinstance(response.get("sha1"), str) \
+                    or not _HEX40.fullmatch(response["sha1"]) \
                     or not isinstance(item.get("saved_body"), str) \
                     or not item["saved_body"].startswith("evidence/"):
                 return False
+            if response_fields == _REPLAY_RESPONSE_V2_FIELDS:
+                saved_len = response.get("saved_len")
+                truncated = response.get("truncated")
+                if isinstance(saved_len, bool) or not isinstance(saved_len, int) \
+                        or saved_len < 0 or saved_len > response["len"] \
+                        or not isinstance(response.get("saved_sha1"), str) \
+                        or not _HEX40.fullmatch(response["saved_sha1"]) \
+                        or not isinstance(truncated, bool) \
+                        or not isinstance(response.get("wire_verified"), bool) \
+                        or truncated != (saved_len < response["len"]) \
+                        or (not truncated and response["saved_sha1"] != response["sha1"]):
+                    return False
     for field, maximum in (
         ("reviewer_agent_id", 1024), ("reviewer_tool_use_id", 1024),
         ("note", 2048), ("recorded_at", 128),
@@ -474,6 +503,9 @@ def _receipt_hash_valid(receipt: object) -> bool:
 def _draft_result_valid(run: Path, draft: object, *, assignment: str,
                         plan_digest: str, lane_id: str, runtime_state: str,
                         runtime_record: dict) -> tuple[bool, str]:
+    if contract_schema.named_schema_errors(
+            draft, "merge-draft.v1.schema.json"):
+        return False, "merge-draft-schema-invalid"
     if not isinstance(draft, dict) or set(draft) != _MERGE_DRAFT_FIELDS \
             or draft.get("schema") != "xunji.merge-draft.v1" \
             or draft.get("assignment") != assignment \
@@ -1161,6 +1193,54 @@ def _selftest() -> int:
         "recorded_at": "2026-07-17T00:00:00Z",
     }
     valid_receipt["receipt_hash"] = _sha256_json(valid_receipt)
+    valid_v2_receipt = dict(valid_receipt)
+    valid_v2_receipt["artifact_validation"] = [
+        {
+            "path": "evidence/root.html",
+            "sha256": "4" * 64,
+            "size": 5,
+        },
+        {
+            "path": "evidence/root.html.replay.json",
+            "sha256": "5" * 64,
+            "size": 120,
+            "request": {"method": "GET", "url": "https://app.example/"},
+            "response": {
+                "status": 200,
+                "len": 5,
+                "sha1": "6" * 40,
+                "saved_len": 5,
+                "saved_sha1": "6" * 40,
+                "truncated": False,
+                "wire_verified": True,
+            },
+            "saved_body": "evidence/root.html",
+        },
+    ]
+    valid_v2_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in valid_v2_receipt.items()
+        if key != "receipt_hash"
+    })
+    valid_legacy_artifact_receipt = json.loads(json.dumps(valid_v2_receipt))
+    valid_legacy_artifact_receipt["artifact_validation"][1]["response"] = {
+        "status": 200, "len": 5, "sha1": "6" * 40,
+    }
+    valid_legacy_artifact_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in valid_legacy_artifact_receipt.items()
+        if key != "receipt_hash"
+    })
+    partial_v2_receipt = json.loads(json.dumps(valid_v2_receipt))
+    partial_v2_receipt["artifact_validation"][1]["response"].pop("saved_sha1")
+    partial_v2_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in partial_v2_receipt.items()
+        if key != "receipt_hash"
+    })
+    inconsistent_v2_receipt = json.loads(json.dumps(valid_v2_receipt))
+    inconsistent_v2_receipt["artifact_validation"][1]["response"]["truncated"] = True
+    inconsistent_v2_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in inconsistent_v2_receipt.items()
+        if key != "receipt_hash"
+    })
     invalid_enum_receipt = dict(valid_receipt, disposition="approve")
     invalid_enum_receipt["receipt_hash"] = _sha256_json({
         key: value for key, value in invalid_enum_receipt.items()
@@ -1264,6 +1344,12 @@ def _selftest() -> int:
          == open_stage["readiness"]["S3"]["blockers"]),
         ("review receipt accepts only its exact typed self-hashed schema",
          _receipt_hash_valid(valid_receipt)),
+        ("review receipt projection accepts complete legacy and v2 replay metadata",
+         _receipt_hash_valid(valid_legacy_artifact_receipt)
+         and _receipt_hash_valid(valid_v2_receipt)),
+        ("review receipt projection rejects partial or inconsistent v2 metadata",
+         not _receipt_hash_valid(partial_v2_receipt)
+         and not _receipt_hash_valid(inconsistent_v2_receipt)),
         ("review receipt rejects unknown disposition even with a fresh self-hash",
          not _receipt_hash_valid(invalid_enum_receipt)),
         ("review receipt rejects extra fields and stale self-hashes",

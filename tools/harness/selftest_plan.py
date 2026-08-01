@@ -111,7 +111,10 @@ def seed_current_plan(
         "schema": "xunji.turn_contract.v1",
         "mode": "EXECUTE",
         "session_id": f"session-{run.name}",
+        "transcript_path": str(run / "selftest-transcript.jsonl"),
         "prompt_sha256": "a" * 64,
+        "prompt_excerpt": "selftest execute turn",
+        "memory_approved": False,
         "updated_at": time.time(),
         "fanout_override": False,
     }

@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import contract_schema
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS_ROOT = ROOT / "runs"
@@ -950,6 +952,14 @@ def validate_manifest(
         raise SetupSourceError("invalid_source_manifest", "AI extractor metadata must be all-or-none")
     if not populated_ai and extractor["ai_backend"] is not None:
         raise SetupSourceError("invalid_source_manifest", "AI backend metadata is incomplete")
+    formal_errors = contract_schema.named_schema_errors(
+        manifest, "setup-source.v1.schema.json")
+    if formal_errors:
+        raise SetupSourceError(
+            "invalid_source_manifest",
+            "source manifest violates its formal contract: "
+            + "; ".join(formal_errors[:4]),
+        )
     return manifest
 
 

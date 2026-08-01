@@ -394,7 +394,7 @@ authority 等工作不重新伪装成未完成计划；发现回归时按其现�
 
 ### 5.5 文档、模板与 backlog 真值
 
-- [ ] 清理 ROADMAP/selftest 中已过时的“无法度量/尚未落地”叙述；区分 scorer 已存在与
+- [x] 清理 ROADMAP/selftest 中已过时的“无法度量/尚未落地”叙述；区分 scorer 已存在与
   fixture/A-B 仍不足。未实现 adapter 不得写成稳定入口。
 - [x] Agent instruction 垂直切片：versioned manifest、common+role delta+scaffold 组合、
   assignment bundle，以及 source/artifact SHA drift gate。

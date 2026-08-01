@@ -51,6 +51,7 @@ DEFAULT_EXACT = {
     "tools/check_templates.py",
     "tools/classify_hosts.py",
     "tools/context_pack.py",
+    "tools/contract_schema.py",
     "tools/coverage_matrix.py",
     "tools/evidence_parse.py",
     "tools/exploit.py",

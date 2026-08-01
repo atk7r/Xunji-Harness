@@ -50,6 +50,24 @@ def _one_line(value: str | None, default: str = "-") -> str:
     return clean if clean else default
 
 
+def _artifact_values(args: argparse.Namespace) -> list[str]:
+    """Return exact artifact tokens without flattening them into prose.
+
+    ``--artifacts`` is retained as the legacy one-value spelling.  New callers
+    use repeatable ``--artifact`` so the producer emits the same per-path shape
+    consumed by evidence_parse and the review gate.
+    """
+    values: list[str] = []
+    for raw in [getattr(args, "artifacts", None), *(getattr(args, "artifact", []) or [])]:
+        if raw is None:
+            continue
+        for line in str(raw).splitlines():
+            value = line.strip()
+            if value and value not in values:
+                values.append(value)
+    return values
+
+
 def _resolve_run_dir(raw: str) -> Path:
     run_dir = Path(raw)
     if not run_dir.is_absolute():
@@ -113,7 +131,7 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("certainty >= 0.8 requires maturity=finding")
     if maturity == "finding" and not confirmed:
         raise ValueError("maturity=finding requires certainty >= 0.8")
-    if confirmed and (not args.artifacts or not args.replicated_control):
+    if confirmed and (not _artifact_values(args) or not args.replicated_control):
         raise ValueError(
             "confirmed evidence requires --artifacts and --replicated-control"
         )
@@ -187,7 +205,6 @@ def _format_block(entry_id: str, args: argparse.Namespace) -> str:
     ]
     if args.replicated_control:
         fields.append(("Replicated / Control", args.replicated_control))
-    fields.append(("Artifacts", args.artifacts or "none"))
     fields += [
         ("Supports", args.supports),
         ("Refutes", args.refutes),
@@ -197,7 +214,15 @@ def _format_block(entry_id: str, args: argparse.Namespace) -> str:
     fields.append(("Next", _default_next(args)))
 
     lines = [f"## {entry_id} - {title}", ""]
-    lines.extend(f"- {name}: {_one_line(value)}" for name, value in fields)
+    lines.extend(f"- {name}: {_one_line(value)}" for name, value in fields[:])
+    artifacts = _artifact_values(args)
+    insert_at = next(
+        index for index, line in enumerate(lines)
+        if line.startswith("- Supports:")
+    )
+    artifact_lines = ["- Artifacts:"] + [f"  - {_one_line(value)}" for value in artifacts] \
+        if artifacts else ["- Artifacts: none"]
+    lines[insert_at:insert_at] = artifact_lines
     return "\n".join(lines) + "\n"
 
 
@@ -241,7 +266,14 @@ def _parser() -> argparse.ArgumentParser:
         help="benign/confounding explanation to preserve in the evidence entry",
     )
     ap.add_argument("--replicated-control", help="required for confirmed evidence")
-    ap.add_argument("--artifacts", help="saved artifact path(s), required for confirmed evidence")
+    ap.add_argument(
+        "--artifacts",
+        help="legacy single saved artifact value (repeatable --artifact is preferred)",
+    )
+    ap.add_argument(
+        "--artifact", action="append", default=[],
+        help="one exact saved artifact path; repeat for every body and replay sidecar",
+    )
     ap.add_argument("--supports", default="-", help="IDs this entry supports")
     ap.add_argument("--refutes", default="-", help="IDs this entry refutes")
     ap.add_argument("--unlocks", help="optional F-id unlocked by this confirmed fact")
@@ -299,7 +331,8 @@ def _template_text() -> str:
 - Alternative explanation:
 - Certainty:
 - Replicated / Control: (conditional)
-- Artifacts: (conditional)
+- Replay: (conditional adjudication prose; not an artifact path list)
+- Artifacts: (conditional; list each concrete path separately, including both a probe body and its .replay.json)
 - Supports:
 - Refutes:
 - Unlocks: (conditional)
@@ -351,6 +384,10 @@ def _selftest() -> int:
 
     proof = Path(tempfile.mkdtemp())
     (proof / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    (proof / "evidence").mkdir()
+    (proof / "evidence" / "proof.html").write_text("proof", encoding="utf-8")
+    (proof / "evidence" / "proof.html.replay.json").write_text(
+        "{}", encoding="utf-8")
     rc4 = run_cli([
         "--run", str(proof),
         "--source", "target-session-artifact",
@@ -361,11 +398,17 @@ def _selftest() -> int:
         "--maturity", "finding",
         "--reportable", "yes",
         "--replicated-control", "baseline and mutant differ stably",
-        "--artifacts", "evidence/proof.html",
+        "--artifact", "evidence/proof.html",
+        "--artifact", "evidence/proof.html.replay.json",
     ])
     proof_rec = parse_evidence(proof)[0]
     checks.append(("target artifact default trust is untrusted", proof_rec["trust"] == "untrusted"))
     checks.append(("non-web confirmed entry can be recorded with proof fields", rc4 == 0))
+    checks.append(("repeatable artifact producer preserves exact body/sidecar paths",
+                   proof_rec["artifacts"] == [
+                       "evidence/proof.html",
+                       "evidence/proof.html.replay.json",
+                   ]))
 
     rc5 = run_cli(base + ["--date", "yesterday"])
     checks.append(("malformed date is rejected", rc5 == 2))

@@ -53,6 +53,14 @@
   },
   "allOf": [
     {
+      "if": {
+        "properties": {"subagent_type": {"const": "xunji-reviewer"}},
+        "required": ["subagent_type"]
+      },
+      "then": {"required": ["result_digest_binding"]},
+      "else": {"not": {"required": ["result_digest_binding"]}}
+    },
+    {
       "if": {"properties": {"state": {"const": "running"}}, "required": ["state"]},
       "then": {
         "properties": {

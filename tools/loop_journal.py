@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import status_style  # noqa: E402
+import contract_schema  # noqa: E402
 
 SCHEMA = "xunji.loop_journal.v1"
 JOURNAL = "loop_journal.jsonl"
@@ -687,6 +688,13 @@ def _validate_typed_envelope(record: dict) -> dict:
         _contract_error("CYCLE_EVENT_NAME_INVALID", f"invalid typed event name: {event!r}")
     cycle = record.get("cycle")
     validate_typed_event_data(event, record.get("data"), cycle=cycle)
+    formal_errors = contract_schema.named_schema_errors(
+        record, "cycle-event.v1.schema.json")
+    if formal_errors:
+        _contract_error(
+            "CYCLE_EVENT_ENVELOPE_INVALID",
+            "formal schema mismatch: " + "; ".join(formal_errors[:4]),
+        )
     return record
 
 
@@ -1978,6 +1986,30 @@ def _selftest() -> int:
                    and set(review_schema.get("required", []))
                    == expected_review_required_fields
                    and set(review_schema.get("properties", {})) == expected_review_fields))
+    replay_response_schema = (
+        review_schema.get("properties", {})
+        .get("artifact_validation", {})
+        .get("items", {})
+        .get("oneOf", [{}, {}])[1]
+        .get("properties", {})
+        .get("response", {})
+    )
+    legacy_response = {"status": 200, "len": 5, "sha1": "1" * 40}
+    v2_response = {
+        **legacy_response,
+        "saved_len": 5,
+        "saved_sha1": "1" * 40,
+        "truncated": False,
+        "wire_verified": True,
+    }
+    partial_response = {**legacy_response, "saved_len": 5}
+    checks.append(("review response schema admits only exact legacy or complete v2",
+                   not contract_schema.schema_errors(
+                       legacy_response, replay_response_schema, root=review_schema)
+                   and not contract_schema.schema_errors(
+                       v2_response, replay_response_schema, root=review_schema)
+                   and bool(contract_schema.schema_errors(
+                       partial_response, replay_response_schema, root=review_schema))))
     checks.append(("typed cycle schema names only the reserved event subset",
                    cycle_schema.get("$id", "").endswith("cycle-event.v1.schema.json")
                    and set(TYPED_CYCLE_EVENTS) == {

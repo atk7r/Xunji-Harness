@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import agent_instruction_bundle as _instruction_bundle
+import contract_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 HWS = r"[^\S\n]"
@@ -97,6 +98,13 @@ DEFAULT_OPERATOR_PROFILE = {
         "consolidate closure blockers proactively instead of leaving orphaned agent output",
     ],
 }
+
+
+def _turn_contract(run_dir: Path) -> dict:
+    value = _load_json(run_dir / "state" / "turn_contract.json")
+    if contract_schema.turn_contract_errors(value, allow_legacy=True):
+        return {}
+    return value
 
 _FRONT_PROFILE_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("closure_review", re.compile(r"\b(closure|review|report|merge|synthesi[sz]e)\b", re.I)),
@@ -294,7 +302,7 @@ def _prepared_action_lines(run_dir: Path, *, effect: str, target: str,
     except ValueError:
         return []
     run_ref = _profile_rel(run_dir)
-    contract = _load_json(run_dir / "state" / "turn_contract.json")
+    contract = _turn_contract(run_dir)
     prefix = (
         "XUNJI_PROXY_REQUIRED=0 "
         if contract.get("direct_egress_approved") is True else ""
@@ -320,7 +328,7 @@ def _egress_contract_lines(run_dir: Path, *, effect: str) -> list[str]:
     """Expose the frozen route choice without minting authority."""
     if effect != "target":
         return []
-    contract = _load_json(run_dir / "state" / "turn_contract.json")
+    contract = _turn_contract(run_dir)
     if contract.get("direct_egress_approved") is True:
         return [
             "## Frozen Egress Route",
@@ -767,9 +775,23 @@ def _selftest() -> int:
         },
         "retrospective_lessons": ["custom lesson"]
     }), encoding="utf-8")
+    now = time.time()
     (d / "state" / "turn_contract.json").write_text(json.dumps({
-        "schema": 1,
+        "schema": "xunji.turn_contract.v1",
+        "mode": "EXECUTE",
+        "session_id": "context-pack-session",
+        "transcript_path": str(d / "context-pack-transcript.jsonl"),
+        "prompt_sha256": "a" * 64,
+        "prompt_excerpt": "operator explicitly approved direct egress",
+        "memory_approved": False,
         "direct_egress_approved": True,
+        "fanout_override": False,
+        "origin_run": d.name,
+        "bound_run": d.name,
+        "updated_at": now,
+        "coordination_signature": "b" * 64,
+        "fanout_epoch_started_at": now,
+        "fanout_epoch_id": "c" * 16,
     }), encoding="utf-8")
     pack = build_pack(d, front="F-001", role="web-auth", agent="A-web-auth-001",
                       kb_dir=kb, xday_dir=xday, weap_dir=weap)
