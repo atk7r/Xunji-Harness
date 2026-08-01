@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji ReviewOps"
+  short_description: "Evidence-bound review closure discipline"
+  default_prompt: "Use $xunji-reviewops to review a Xunji run, resolve peer-review ledger items, or audit safety-critical code changes before closure."

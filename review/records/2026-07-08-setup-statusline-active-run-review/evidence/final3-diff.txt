@@ -1,0 +1,180 @@
+diff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md
+index b58bb86..806a963 100644
+--- a/.claude/skills/xunji-run-lifecycle/SKILL.md
++++ b/.claude/skills/xunji-run-lifecycle/SKILL.md
+@@ -102,7 +102,12 @@ Create a new run in one shot:
+ python tools/setup_run.py <slug> [recon.json]
+ ```
+
+-Use `--classify` only for an authorized current egress recheck:
++`setup_run.py` sets `.claude/xunji_active_run` to the newly created run as local
++statusline display state. This does not enter `/loop`, choose a front, or make any
++evidence/closure decision.
++
++Use `--classify` only while creating a new run, and only when an authorized
++current egress recheck is allowed. It is not an existing-run refresh mode:
+
+ ```bash
+ python tools/setup_run.py <slug> <recon.json> --classify
+diff --git a/.claude/skills/xunji-setup-ingest/SKILL.md b/.claude/skills/xunji-setup-ingest/SKILL.md
+index 0646b9d..13087af 100644
+--- a/.claude/skills/xunji-setup-ingest/SKILL.md
++++ b/.claude/skills/xunji-setup-ingest/SKILL.md
+@@ -36,7 +36,9 @@ With recon, setup should:
+ - write `knowledge_hits.md` when local signatures match.
+
+ `setup_run.py` prepares the workbench. It does not pick fronts, decide findings,
+-or attack the target.
++or attack the target. After the run skeleton exists, it also sets
++`.claude/xunji_active_run` so the Claude Code statusline points at the new run;
++that pointer is local display state only.
+
+ ## Scope And Coverage
+
+@@ -48,7 +50,8 @@ or attack the target.
+   That bakes driver selection bias into the run.
+ - Do not bulk-run `classify_hosts` just to rebuild Guanlan coverage.
+
+-Use active egress recheck only when authorized:
++Use active egress recheck only while creating a new run, and only when
++authorized. `--classify` is not an existing-run refresh mode:
+
+ ```bash
+ python tools/setup_run.py <slug> <recon.json> --classify
+diff --git a/docs/ROUTER.md b/docs/ROUTER.md
+index 39ff146..a40fbfb 100644
+--- a/docs/ROUTER.md
++++ b/docs/ROUTER.md
+@@ -146,7 +146,9 @@ Output:
+   root cause: 30+ assets silently un-examined, 6 operator nudges).
+ - **Coverage is built FOR you, zero re-probe**: Guanlan already did dedup / wildcard-fold
+   / liveness / ownership, so **do NOT bulk-run `classify_hosts` to rebuild it (= re-OSINT,
+-  the time-sink)** — that tool is opt-in for a your-own-egress recheck only. `check_run`
++  the time-sink)** — that tool is opt-in for a your-own-egress recheck only. In
++  `setup_run.py`, `--classify` is still a one-shot new-run setup option, not an
++  existing-run refresh mode. `check_run`
+   hard-fails a final report that cited a recon but never built `coverage.json`.
+ - **Threat-triage each distinct-app cluster**: after `coverage.json` is built, assign a
+   `Threat role` (admin-mgmt / identity-auth / data-pii / transaction / content-cms /
+@@ -313,8 +315,9 @@ Project-discipline and run-structure checks in `tools/`:
+   from the Guanlan recon with ZERO re-probe** (Guanlan already did dedup / wildcard-fold /
+   liveness / ownership — do NOT bulk-run classify_hosts to rebuild it = re-OSINT).
+   `reachable=True` only for Guanlan-confirmed ∩ in-scope → the gate demands verdicts for
+-  the genuinely-reachable subset. `--classify` is opt-in (re-probe from your own egress
+-  only when you need your-vantage liveness, e.g. after the proxy is up). **Start every run
++  the genuinely-reachable subset. `--classify` is opt-in during new-run setup
++  (re-probe from your own egress only when you need your-vantage liveness, e.g.
++  after the proxy is up), not an existing-run refresh mode. **Start every run
+   with this**; never hand-curate surface.md (selection bias → blind spots). Builds the
+   workbench; makes no front choices.
+ - `python tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index f661ebe..fd01092 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -96,8 +96,8 @@ current Router phase, run name, pending verification entries, aggregated Agent
+ state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_run`
+ plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
+ state, choose work, write evidence, or enforce phase discipline. The active-run
+-pointer is local runtime state and is updated by `loop_bootstrap.py` and the fixed
+-`/loop runs/<dir>` protocol.
++pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
++and the fixed `/loop runs/<dir>` protocol.
+
+ 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
+ phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a
+diff --git a/tools/setup_run.py b/tools/setup_run.py
+index b1eb21e..00514bd 100644
+--- a/tools/setup_run.py
++++ b/tools/setup_run.py
+@@ -70,6 +70,19 @@ def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:
+         print(f"[setup] phase journal skipped: {exc}", file=sys.stderr)
+
+
++def _set_active_run(run_dir: Path) -> None:
++    """Best-effort statusline pointer update. It is display state, not evidence."""
++    try:
++        import xunji_statusline  # noqa: E402
++
++        if xunji_statusline.set_active_run(str(run_dir)):
++            print(f"[setup] statusline active run: runs/{run_dir.name}")
++        else:
++            print(f"[setup] statusline active run skipped: {run_dir}", file=sys.stderr)
++    except Exception as exc:
++        print(f"[setup] statusline active run skipped: {exc}", file=sys.stderr)
++
++
+ def scaffold(run_dir: Path) -> list[str]:
+     """从模板建齐必需文件 + evidence/ scripts/ 子目录(含 .gitkeep)。不覆盖已存在目录。"""
+     run_dir.mkdir(parents=True, exist_ok=False)   # exist_ok=False -> 已存在则 FileExistsError
+@@ -400,6 +413,9 @@ def main() -> int:
+     made = scaffold(run_dir)
+     print(_phase_banner("start", "Setup", run_dir=run_dir, note="prepare authorized run workbench"))
+     _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
++    # This CLI creates a new run. Future existing-run modes should not pass through
++    # this branch unless they intentionally want to select that run in the statusline.
++    _set_active_run(run_dir)
+     print(f"[setup] 建 run 骨架 {run_dir}")
+     print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
+     coverage_ready = False
+@@ -562,6 +578,60 @@ def _selftest() -> int:
+          and target_cov["assets"][0]["port"] == 8080),
+     ]
+
++    tmp_root = ROOT / "tmp"
++    tmp_root.mkdir(exist_ok=True)
++    import xunji_statusline  # noqa: E402
++
++    active_parent = Path(tempfile.mkdtemp(dir=tmp_root))
++    active_rd = active_parent / "run"
++    active_pointer = active_parent / ".claude" / "xunji_active_run"
++    original_active_pointer = xunji_statusline.ACTIVE_RUN
++    real_active_before = original_active_pointer.read_text(encoding="utf-8", errors="replace") \
++        if original_active_pointer.exists() else None
++    try:
++        scaffold(active_rd)
++        xunji_statusline.ACTIVE_RUN = active_pointer
++        _set_active_run(active_rd)
++        active = xunji_statusline.active_run()
++    finally:
++        xunji_statusline.ACTIVE_RUN = original_active_pointer
++        shutil.rmtree(active_parent, ignore_errors=True)
++    real_active_after = original_active_pointer.read_text(encoding="utf-8", errors="replace") \
++        if original_active_pointer.exists() else None
++    checks += [
++        ("setup writes statusline active run pointer", active == active_rd.resolve()),
++        ("setup active-run selftest restores module pointer",
++         xunji_statusline.ACTIVE_RUN == original_active_pointer),
++        ("setup active-run selftest leaves real pointer untouched",
++         real_active_after == real_active_before),
++        ("setup active-run selftest cleans temp dir", not active_parent.exists()),
++    ]
++
++    original_set_active_run = xunji_statusline.set_active_run
++    try:
++        xunji_statusline.set_active_run = lambda _raw: False
++        try:
++            _set_active_run(rd3)
++            false_ok = True
++        except Exception:
++            false_ok = False
++
++        def _raise_set_active(_raw: str) -> bool:
++            raise RuntimeError("selftest boom")
++
++        xunji_statusline.set_active_run = _raise_set_active
++        try:
++            _set_active_run(rd3)
++            exception_ok = True
++        except Exception:
++            exception_ok = False
++    finally:
++        xunji_statusline.set_active_run = original_set_active_run
++    checks += [
++        ("active-run helper tolerates rejected pointer", false_ok),
++        ("active-run helper tolerates pointer exception", exception_ok),
++    ]
++
+     bad = [n for n, ok in checks if not ok]
+     for n, ok in checks:
+         print(("ok   " if ok else "FAIL ") + n)

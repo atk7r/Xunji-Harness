@@ -1,0 +1,129 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-07-record-evidence-closure",
+  "files": {
+    "report.md": {
+      "sha1": "59a61a470ed4bfa92c3e7beeccb47822b0a350d8",
+      "size": 534
+    },
+    "evidence.md": {
+      "sha1": "0a890f0cb7cd0a449e48608c4c9355c868b91264",
+      "size": 1462
+    },
+    "frontier.md": {
+      "sha1": "adad3bbde45195364e8be38d77985ba44f103ceb",
+      "size": 373
+    },
+    "decisions.md": {
+      "sha1": "b1d345652f05bd570a9b0ec339eeec06873fb862",
+      "size": 473
+    },
+    "hypotheses.md": {
+      "sha1": "70388327ab5daa0368ecf5f051bc53f3ecdea894",
+      "size": 423
+    },
+    "false_positive.md": {
+      "sha1": "292dd75111fcc3c8a0b5b448b454a90c3f4f3ecb",
+      "size": 410
+    },
+    "surface.md": {
+      "sha1": "354828c4fab3d63e6040949aae421f94d6a4367a",
+      "size": 120
+    },
+    "review.md": {
+      "sha1": "c19440f67e9b9136e87c62684fd2c96247bea4e8",
+      "size": 261
+    },
+    "target.md": {
+      "sha1": "2e8632be72fba025c1f713e9ab582eb873f8af61",
+      "size": 606
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 - Claude-side web-research skills referenced a missing evidence recorder;",
+        "maturity": "finding",
+        "certainties": [
+          0.8
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "H-001"
+        ],
+        "refutes": [],
+        "refutes_any": true,
+        "artifacts": [
+          {
+            "token": "evidence/check_rules.txt",
+            "path": "evidence/check_rules.txt",
+            "exists": true,
+            "size": 18,
+            "sha1": "6e4be8266323611639310b21bc51562d32574dfc",
+            "excerpt": "rule check passed\n"
+          },
+          {
+            "token": "evidence/closure_scan.txt",
+            "path": "evidence/closure_scan.txt",
+            "exists": true,
+            "size": 72,
+            "sha1": "705aa9d217b245f2b011519685e1ae67fc82a5fc",
+            "excerpt": "all_doc_python_commands 160 missing 0\nall_selftests 42 not_registered 0\n"
+          },
+          {
+            "token": "evidence/diff.patch",
+            "path": "evidence/diff.patch",
+            "exists": true,
+            "size": 22724,
+            "sha1": "e240c754b409c32040706bfb1aa3383765e1ef35"
+          },
+          {
+            "token": "evidence/git_diff_check.txt",
+            "path": "evidence/git_diff_check.txt",
+            "exists": true,
+            "size": 24,
+            "sha1": "8f44e0030c8ac2f8e23e5e5cb3a9fa9fb550400e",
+            "excerpt": "git diff --check passed\n"
+          },
+          {
+            "token": "evidence/py_compile.txt",
+            "path": "evidence/py_compile.txt",
+            "exists": true,
+            "size": 43,
+            "sha1": "feded1795909282569827cf7452ea75d89c2031c",
+            "excerpt": "py_compile tools/record_evidence.py passed\n"
+          },
+          {
+            "token": "evidence/selftest_all.txt",
+            "path": "evidence/selftest_all.txt",
+            "exists": true,
+            "size": 352,
+            "sha1": "3967f9dfd9b34d5bb81cecd8adde1b82cc23b676",
+            "excerpt": "running 4 selftest suite(s) with /Library/Developer/CommandLineTools/usr/bin/python3\n\n  PASS  check_run          0.1s  evidence gate + closure\n  PASS  peer_review        0.1s  heterogeneous review\n  PASS  timestamp_gate     0.0s  web research time gate\n  PASS  record_evidence    0.0s  web research -> evidence ledger\n\n4 passed, 0 failed  (0.3s total)\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "09866dfafe393b0e9d920ca9c410195dc70e044a"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Maintenance Report\n\n## Confirmed Findings\n\n### Web research evidence recording closure\n\n- Evidence IDs: E-001\n- Summary: The Claude-side web research protocol now has a real local recorder for canonical evidence ledger entries. The tool replaces the stock `E-001` template on first write, appends subsequent entries with stable numbering, defaults web research to low-maturity evidence, blocks direct web-research promotion to `finding`, and is included in `tools/selftest_all.py`.\n\n## Candidate / Phenomena\n\n- None currently open.\n",
+    "frontier.md": "# Frontier\n\n## Open Fronts\n\n- None for this maintenance record.\n\n## Deferred Fronts\n\n- None.\n\n## Closed Fronts\n\n### F-001 web-research evidence recorder\n\n- Status: closed\n- Barrier class: documentation/tooling closure\n- Failure budget: n/a\n- Result: `tools/record_evidence.py` implemented, documented from Claude-side web research skills, and covered by `selftest_all.py`.\n",
+    "decisions.md": "# Decisions\n\n## D-001\n\n- Loaded rule files this cycle: `AGENTS.md`, `xunji-web-research-sync`, `xunji-peer-review-panel`\n- Chosen front: F-001 web-research evidence recorder\n- Why this is worth pursuing now: `.claude/skills/web-research` made recording evidence the completion condition, but the referenced recorder did not exist.\n- Decision: implement the recorder, update Claude-side skills, add aggregate selftest coverage, and record an independent maintenance review.\n",
+    "review.md": "# Review\n\n- Shallow work smells: addressed by command-reference scan and targeted selftests.\n- Repeated-barrier loops: none.\n- Failure-budget triggers: n/a.\n- Next autonomous front: run independent review for this Codex-authored maintenance diff before commit.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 180000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "480872302f5e2187ddcb6e8d197239e6b6c0e588"
+}

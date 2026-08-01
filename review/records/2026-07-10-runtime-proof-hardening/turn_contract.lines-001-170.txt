@@ -1,0 +1,170 @@
+     1	#!/usr/bin/env python3
+     2	"""Claude Code turn-mode and PreToolUse contract for active Xunji runs.
+     3	
+     4	The user's current prompt decides whether this turn executes, explains, or pauses.
+     5	Stop hooks consume the same state, so an explanation is not forced to fabricate a
+     6	Coda and a pause is not mistaken for closure.
+     7	"""
+     8	from __future__ import annotations
+     9	
+    10	import argparse
+    11	import hashlib
+    12	import json
+    13	import os
+    14	import re
+    15	import shlex
+    16	import sys
+    17	import tempfile
+    18	import time
+    19	from datetime import datetime, timezone
+    20	from pathlib import Path
+    21	
+    22	
+    23	ROOT = Path(__file__).resolve().parents[1]
+    24	RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
+    25	sys.path.insert(0, str(ROOT / "tools"))
+    26	
+    27	import run_model  # noqa: E402
+    28	import runtime_receipts  # noqa: E402
+    29	from anti_drift import find_active_run  # noqa: E402
+    30	
+    31	
+    32	SCHEMA = "xunji.turn_contract.v1"
+    33	EXECUTE = "EXECUTE"
+    34	EXPLAIN = "EXPLAIN_ONLY"
+    35	PAUSE = "PAUSED_BY_OPERATOR"
+    36	NORMAL = "NORMAL"
+    37	STALE_SECONDS = 6 * 60 * 60
+    38	COMPLETION_CHECKS = (
+    39	    "report_parity", "severity_artifacts", "reachable_frontier", "review_ledger",
+    40	)
+    41	CONTROL_SCRIPTS = {
+    42	    (ROOT / "tools" / name).resolve()
+    43	    for name in ("workers.py", "run_model.py", "loop_state.py")
+    44	}
+    45	
+    46	EXPLAIN_RE = re.compile(
+    47	    r"告诉我(?:原因|为什么|想法)|为什么|不用修改|不要修改|无需修改|别修改|"
+    48	    r"不用做|不要做|先别做|只(?:告诉|回答|分析|解释|说明)|无需执行|"
+    49	    r"tell me why|explain only|do not (?:change|modify|act)|no changes",
+    50	    re.I,
+    51	)
+    52	PAUSE_RE = re.compile(
+    53	    r"停止\s*(?:loop|循环|渗透|运行)|渗透结束|暂停\s*(?:loop|循环|渗透|运行)|"
+    54	    r"先停(?:止|下)|stop\s+(?:the\s+)?(?:loop|run|testing)|pause\s+(?:the\s+)?(?:loop|run)",
+    55	    re.I,
+    56	)
+    57	EXECUTE_RE = re.compile(
+    58	    r"(?:^|\s)/loop\b|继续(?:执行|推进|修复|运行|渗透)?|恢复(?:执行|运行|loop)?|"
+    59	    r"修复|实现|落实|执行|修改|彻底解决|开始(?:运行|渗透)|"
+    60	    r"resume|continue|implement|fix|execute|apply",
+    61	    re.I,
+    62	)
+    63	MEMORY_APPROVAL_RE = re.compile(r"(?:明确|现在)?(?:写入|保存|更新)(?:长期)?记忆|approve memory|write (?:to )?memory", re.I)
+    64	INTERNAL_PROMPT_RE = re.compile(
+    65	    r"^\s*<(?:task-notification|system-reminder|local-command-caveat)\b",
+    66	    re.I,
+    67	)
+    68	MEMORY_PATH_RE = re.compile(
+    69	    r"(?:^|[/\\\s\"'=])\.claude(?:[/\\].*)?[/\\](?:memory|memories)(?:[/\\]|$)|"
+    70	    r"(?:^|[/\\\s\"'=])MEMORY\.md(?=[\"'\s;|&}]|$)",
+    71	    re.I,
+    72	)
+    73	BACKGROUND_REVIEW_RE = re.compile(
+    74	    r"(?s)(?:\bnohup\b.*?peer_review\.py|peer_review\.py.*?(?<![>&])&(?![>&]))",
+    75	    re.I,
+    76	)
+    77	PROTECTED_RUNTIME_RE = re.compile(
+    78	    r"(?:runtime_events\.jsonl|\.runtime_events\.lock|turn_contract\.json|run_status\.json|"
+    79	    r"assignments\.json|review[/\\]receipts[/\\][0-9a-f]{64}\.json)"
+    80	    r"(?=[\"'\s;|&}]|$)",
+    81	    re.I,
+    82	)
+    83	
+    84	
+    85	def _atomic_json(path: Path, value: dict) -> None:
+    86	    path.parent.mkdir(parents=True, exist_ok=True)
+    87	    fd, raw = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    88	    try:
+    89	        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+    90	            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    91	            handle.write("\n")
+    92	        os.chmod(raw, 0o600)
+    93	        os.replace(raw, path)
+    94	    finally:
+    95	        try:
+    96	            os.unlink(raw)
+    97	        except FileNotFoundError:
+    98	            pass
+    99	
+   100	
+   101	def contract_path(run_dir: Path) -> Path:
+   102	    return run_dir / "state" / "turn_contract.json"
+   103	
+   104	
+   105	def run_status_path(run_dir: Path) -> Path:
+   106	    return run_dir / "state" / "run_status.json"
+   107	
+   108	
+   109	def classify_prompt(prompt: str, *, active_run: bool = True) -> str:
+   110	    prompt = prompt or ""
+   111	    if not active_run:
+   112	        return NORMAL
+   113	    if PAUSE_RE.search(prompt):
+   114	        return PAUSE
+   115	    if EXPLAIN_RE.search(prompt):
+   116	        return EXPLAIN
+   117	    if EXECUTE_RE.search(prompt):
+   118	        return EXECUTE
+   119	    if re.search(r"[?？]\s*$", prompt) or re.match(r"^\s*(?:怎么|如何|是否|什么|哪|谁)", prompt):
+   120	        return EXPLAIN
+   121	    return EXPLAIN
+   122	
+   123	
+   124	def write_contract(run_dir: Path, event: dict) -> dict:
+   125	    prompt = str(event.get("prompt") or "")
+   126	    mode = classify_prompt(prompt, active_run=True)
+   127	    now = time.time()
+   128	    contract = {
+   129	        "schema": SCHEMA,
+   130	        "mode": mode,
+   131	        "session_id": str(event.get("session_id") or ""),
+   132	        "transcript_path": str(event.get("transcript_path") or ""),
+   133	        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8", "replace")).hexdigest(),
+   134	        "prompt_excerpt": prompt[:500],
+   135	        "memory_approved": bool(MEMORY_APPROVAL_RE.search(prompt)),
+   136	        "fanout_override": bool(re.search(r"(?:明确)?允许串行|不要使用\s*(?:Agent|子代理)|serial override", prompt, re.I)),
+   137	        "updated_at": now,
+   138	    }
+   139	    _atomic_json(contract_path(run_dir), contract)
+   140	    if mode == PAUSE:
+   141	        _atomic_json(run_status_path(run_dir), {
+   142	            "schema": SCHEMA,
+   143	            "status": "paused_by_operator",
+   144	            "session_id": contract["session_id"],
+   145	            "updated_at": now,
+   146	            "reason": "operator prompt requested pause; open fronts remain open",
+   147	        })
+   148	    elif mode == EXECUTE:
+   149	        _atomic_json(run_status_path(run_dir), {
+   150	            "schema": SCHEMA,
+   151	            "status": "active",
+   152	            "session_id": contract["session_id"],
+   153	            "updated_at": now,
+   154	            "reason": "operator prompt requested execution/resume",
+   155	        })
+   156	    return contract
+   157	
+   158	
+   159	def load_contract(run_dir: Path, *, session_id: str = "") -> dict:
+   160	    try:
+   161	        data = json.loads(contract_path(run_dir).read_text(encoding="utf-8", errors="replace"))
+   162	    except Exception:
+   163	        return {}
+   164	    if data.get("schema") != SCHEMA:
+   165	        return {}
+   166	    if session_id and str(data.get("session_id") or "") != session_id:
+   167	        return {}
+   168	    try:
+   169	        if time.time() - float(data.get("updated_at") or 0) > STALE_SECONDS:
+   170	            return {}

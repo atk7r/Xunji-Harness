@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/root-action-receipt.v1.schema.json",
+  "title": "Xunji Plan-bound Root Action Receipt v1",
+  "description": "A self-hashed projection of one exact ROOT_DIRECT capability claim and its transcript-backed terminal runtime event. It proves only the mechanical tool outcome; it is not evidence, review, finding, exit-gate satisfaction, or closure authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "parent_run",
+    "plan_id",
+    "plan_digest",
+    "cycle_id",
+    "lane_id",
+    "capability_id",
+    "capability_effect",
+    "session_id",
+    "prompt_sha256",
+    "tool_use_id",
+    "action_sha256",
+    "claim_event_seq",
+    "claim_event_hash",
+    "runtime_event_seq",
+    "runtime_event_hash",
+    "outcome",
+    "response_sha256",
+    "recorded_at",
+    "receipt_hash"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.root-action-receipt.v1"},
+    "parent_run": {"type": "string", "minLength": 1, "maxLength": 255},
+    "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "cycle_id": {"type": "integer", "minimum": 1},
+    "lane_id": {
+      "type": "string",
+      "pattern": "^L-[A-Za-z0-9._-]+$",
+      "maxLength": 256
+    },
+    "capability_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)*$"
+    },
+    "capability_effect": {
+      "enum": ["local_read", "local_verify"]
+    },
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "tool_use_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "action_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claim_event_seq": {"type": "integer", "minimum": 1},
+    "claim_event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runtime_event_seq": {"type": "integer", "minimum": 2},
+    "runtime_event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "outcome": {"enum": ["succeeded", "failed"]},
+    "response_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{3})?Z$",
+      "maxLength": 24
+    },
+    "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

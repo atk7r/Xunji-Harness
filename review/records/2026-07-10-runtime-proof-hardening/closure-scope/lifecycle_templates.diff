@@ -1,0 +1,92 @@
+diff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md
+index 8de9e4b..176661c 100644
+--- a/docs/templates/loop_prompt.md
++++ b/docs/templates/loop_prompt.md
+@@ -9,2 +9,5 @@ You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.
+-Run exactly one autonomous iteration. Until the run has a valid completion
+-marker, end with exactly one final Coda line: `下一行动: <object + concrete
++Run one **material** autonomous iteration: state pass, required Agent execution,
++merge/verification, canonical writes, and refreshed gates. Planning, one request,
++one file edit, or satisfying a hook format is not an iteration result. Until the
++run has a valid completion marker, an `EXECUTE` turn ends with exactly one final
++Coda line: `下一行动: <object + concrete
+@@ -49,0 +53,7 @@ finishes. Do not impose this rule on normal chat outside `/loop`.
++Material floor: do not end after the first response or local gate repair. When
++fan-out is required, wait for at least two disjoint Agent results, adjudicate both,
++and merge/refute their candidate material before ending. Otherwise continue the
++selected front through a saved result plus control/pivot, or through an
++evidence-backed barrier/failure-budget decision. A Coda is the final projection of
++that work, never the work product itself.
++
+@@ -112 +121,0 @@ Guard-routed tools only.
+-{{PYTHON}} tools/workers.py heartbeat "{{RUN_DIR}}" A-web-hunter-001 --status running --note "Agent tool started"
+@@ -122 +131,12 @@ Guard-routed tools only.
+-If `state/loop_state.json` says `gates.fanout_required=true`, use the Agent Board: assign at least two disjoint lanes unless a concrete shared barrier or request budget reason is recorded. Agents produce candidates/refutations only; the Single Synthesizer promotes findings.
++If `state/loop_state.json` says `gates.fanout_required=true`, assign at least two
++disjoint lanes and actually invoke two Claude Agents in this turn. Each Agent prompt
++must carry `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. Only current-turn
++transcript-backed receipts count; planning files, heartbeat, old receipts, and
++model-written budget reasons do not. The only bypass is an explicit serial override
++in the operator's current prompt. Agents produce candidates/refutations only; the
++Single Synthesizer promotes findings.
++
++After adjudicating each Agent, run `workers.py finish`: use `--status merged` with
++`--note "Evidence: E-xxx; Front: F-xxx; <disposition>"`, or a non-success terminal
++status with `--note "Reason: <why>; Front: F-xxx"`. `done` without this anchored
++disposition is deliberately blocked at Stop.
+@@ -167,0 +188 @@ Only when the controller and run files show a closure-review candidate:
++{{PYTHON}} tools/check_run.py "{{RUN_DIR}}"
+@@ -170 +191,9 @@ Only when the controller and run files show a closure-review candidate:
+-Closure still requires: no hard `check_run` gates, independent review resolved, retrospective.md with real Self and Framework/tooling sections, no unresolved PR ledger items, and `GHOST_COMPLETE` written only after those pass. In the same turn as writing `GHOST_COMPLETE` or `NORMAL_COMPLETE`, cancel the active scheduled `/loop` job if one exists and record the result in `state/loop_journal.jsonl` with `cron_cancelled=<job-id|none>`.
++Closure still requires: no hard `check_run` gates, a current content-addressed
++ReviewReceipt, independent review ledger resolved, retrospective.md with real Self
++and Framework/tooling sections, and no unresolved PR items. Invoke the completion
++Agent with `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
++CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`. Require
++`XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all four checks in its response,
++then record its substantive section before writing a completion marker. In that same
++turn, CronList, delete only the listed job for this run, CronList again, and record
++`cron_cancelled=<job-id|none>` in the journal end event.
+@@ -214 +243 @@ After Markdown/state files are updated and refreshed, append:
+-Run one iteration only. Before ending normally, append:
++End only after the material floor above is met. Before ending normally, append:
+diff --git a/docs/templates/run/review.md b/docs/templates/run/review.md
+index c2df477..3fa7a76 100644
+--- a/docs/templates/run/review.md
++++ b/docs/templates/run/review.md
+@@ -5,9 +5,4 @@
+-> 独立复审记录。仅有本标题或下方占位符不算完成；check_run 要求真实 Reviewer/Backend
+-> 身份与明确 Verdict，或一份有具体发现和裁定的实质 free-form 复审。peer_review.py 成功后
+-> 自动写入；后端不可达时可由 fresh-context reviewer 手工填写，但不能由 driver 自评冒充。
+-
+-- Reviewer: (codex / arkcli-panel / manual-driver)
+-- Time: (ISO timestamp)
+-- Verdict: (PASS / WARN / BLOCKER)
+-- BundleHash: (review_bundle hash, if produced)
+-- EvidenceIndexHash: (content-addressed evidence_index hash, if produced)
++> 本节不能手填。请前台运行 `tools/peer_review.py runs/<dir> --into-run`；工具会追加
++> Reviewer/Backend、Verdict、BundleHash、EvidenceIndexHash 和 content-addressed
++> ReviewReceipt。标题、复制输出、manual-driver/fresh-context 自填或无回执 PASS 均不算完成。
++> 后端不可用时保留 limitation，run 不得收口。
+@@ -21 +16 @@
+-## R-001
++## Driver Review Notes (not independent)
+diff --git a/docs/templates/worker.md b/docs/templates/worker.md
+index 8fe3e0b..378433d 100644
+--- a/docs/templates/worker.md
++++ b/docs/templates/worker.md
+@@ -70,3 +70,4 @@ rate-limit pressure, and past worker hit rate.
+-- Root must record Agent lifecycle in `state/assignments.json`: heartbeat after
+-  the Claude Agent starts or makes material progress, and finish when it returns,
+-  blocks, fails, or is abandoned. A non-terminal Agent blocks closure.
++- The Agent-tool prompt must carry its assignment/front tokens so hooks can record
++  a transcript-backed execution receipt. `heartbeat`/`finish` remain lifecycle
++  display state only; they cannot prove the Agent ran. A non-terminal Agent blocks
++  closure.
+@@ -112,3 +113,3 @@ Discipline:
+-- Root will record `workers.py heartbeat` when this Agent starts and
+-  `workers.py finish` when it returns; include a concise coda summary so Root can
+-  finish the lifecycle entry truthfully.
++- Your Agent-tool prompt includes `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...` so
++  the hook can prove this call ran. Root may mirror lifecycle with
++  `workers.py heartbeat/finish`; that prose is not runtime proof.

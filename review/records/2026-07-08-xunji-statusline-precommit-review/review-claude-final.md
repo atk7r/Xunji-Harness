@@ -1,0 +1,27 @@
+# Peer Review — 2026-07-08-xunji-statusline-precommit-review
+
+_backend: claude:code-cli · 2026-07-08T08:52Z_
+> 候选, 非裁决。driver 须逐条过证据门: 不盲从(驳工具/语境误报), 不忽视(采纳真盲补)。
+
+## Verdict: WARN
+
+_backend: claude:code-cli_  
+_brain: codex_  
+_bundle_hash: 4f623e8325bb2e98ad362ac0d9b8da87e5957c22_  
+_evidence_index_hash: d873f9131898762085aefe9dda483a82419d88a0_  
+
+## Findings
+- (none)
+
+## Blind-spot check
+- **`_journal_summary` interruption detection is cycle-gated, not stateful**: The `interrupted` flag at line 202 checks only whether the current cycle's events contain an `"interrupt"` event. If a process is hard-killed (SIGKILL) while in the middle of a phase, no `interrupt` event is ever written, so the statusline would not display "中断待续". The `open_phase` detection (unclosed `phase_start` without matching `phase_end`) partially compensates, but the two are independent signals that don't cross-reference. A more robust detection would also treat an unclosed `phase_start` as an interruption.
+- **`_load_json` type-guard is fragile for non-dict defaults**: `isinstance(data, type(default))` at line 69 works correctly for `default={}` (dict check) but would reject valid data if a future caller passes `default=[]` (list check). All current callers use `{}`, but the function is a utility that could be reused.
+- **The official docs excerpts contain heavy CSS/JS noise**: `evidence/official-docs/claude-code-settings-excerpt.txt` excerpts 3 and beyond are mostly React JSX and CSS implementation code from the docs website, not actual documentation content. The key evidence (excerpts 1-2) does correctly confirm `statusLine` as the key name, but the artifact curation is noisy — a human reader has to hunt through 12 excerpts to find the 2 that matter. This doesn't invalidate the evidence but reduces its auditability.
+- **No test for the `/loop` template rendering path**: The `loop_prompt.md` patch adds `{{PYTHON}} tools/xunji_statusline.py --set-active "{{RUN_DIR}}"` before the journal start. There is no test that `{{PYTHON}}` and `{{RUN_DIR}}` expand correctly — the bootstrap tests cover `cmd_new`/`cmd_resume` but not the explicit `/loop` template path.
+- **`_last_plan_note` cleanup regex hardcodes Chinese prefixes**: The fallback `re.sub(r"^(即将执行|结果已写入运行文件|已选择目标=)", "", note)` at line 261 hardcodes three specific prefixes from `loop_journal.py`. If new note prefix patterns are introduced there, the statusline will display internal metadata verbatim. This coupling is not documented.
+
+## Context-limit notes
+- This is a maintenance diff review, not a web pentest — the rubric items about recon assets, coverage ledgers, and exploit depth are largely not applicable. The "frontier" is 4 review fronts (F-001 through F-004), all at "open-for-review" status, and all are supported by evidence entries.
+- I cannot access the live repository to verify `status_style.py` internals (particularly `color_enabled()` and whether `tag()` accepts `"white"` as color), whether `ROOT/tmp/` is in `.gitignore`, or the full `selftest_all.py` suite. These cross-checks rely solely on the patch evidence in the bundle. The selftest passes all checks including `"unknown phase fallback is styled"` which verifies that the `status_style.tag("Unexpected Phase", "white", enabled=True)` call produces ANSI output — so `"white"` IS a valid color in practice.
+- I read Chinese content throughout (journal notes, documentation, statusline labels) and may miss subtle semantic alignment issues between what `loop_journal.py` writes and what the statusline extracts, particularly in the `_last_plan_note` regex patterns and `ACTION_LABELS` mapping.
+- The `statusLine` key was confirmed as correct (camelCase) by the official documentation excerpt in E-006, which was the single most impactful uncertainty in prior review rounds. The excerpt at `claude-code-settings-excerpt.txt` lines 14-16 shows: `"statusLine Configure a custom status line to display context..."` — confirming the exact camelCase spelling used in `.claude/settings.json`.

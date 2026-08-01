@@ -1,0 +1,33 @@
+# Diff Summary
+
+Functional diff fingerprint: `d0a4c06ecafe953e`.
+
+Fingerprint scope excludes `review/records/` review artifacts and includes:
+`AGENTS.md`, `.claude/skills/xunji-agent-board/SKILL.md`, `docs/WORKFLOW-reference.md`,
+`docs/templates/agents/`, `docs/templates/run/operator_profile.json`,
+`tools/context_pack.py`, `tools/setup_run.py`, and `tools/workers.py`.
+
+Changed files:
+
+- `tools/context_pack.py`: adds default operator profile, per-run profile loading/merge, role/front budget resolution, and `Operator Profile / Personalized RDT` context-pack injection.
+- `tools/workers.py`: adds personalized-RDT scaffold fields, resolved loop budget in assignments, RDT controls in new Agent files, marker-gated `agent-check` validation, and selftests.
+- `tools/setup_run.py`: scaffolds `state/operator_profile.json` from the run template and tests it.
+- `docs/templates/run/operator_profile.json`: default per-run profile template.
+- `docs/templates/agents/*.md`: adds personalized RDT loop contract and coda check.
+- `docs/WORKFLOW-reference.md`: documents profile purpose and boundary.
+- `.claude/skills/xunji-agent-board/SKILL.md`: documents the Claude Root workflow for checking/editing the profile before assignment, verifying generated Agent/context fields after assignment, and not treating `.agents/skills/` as Root guidance.
+- `AGENTS.md`: documents the default edit target boundary for Codex so ambiguous framework/Root/subagent/skills requests default to Claude primary-driver guidance and `.claude/skills/`.
+
+Representative implementation points:
+
+- OpenMythos is not imported or executed. The default style string is `openmythos-inspired` and the context text states "reasoning pattern only; no OpenMythos runtime dependency".
+- `resolve_rdt_profile()` picks the max of role budget and inferred front budget, with role defaults such as web-auth=6, web-hunter=5, verify=5, review=8.
+- Malformed numeric values in `state/operator_profile.json` use safe defaults instead of crashing profile resolution.
+- `agent-check` validates RDT fields only when a file declares `personalized-rdt`, `Loop budget`, `Operator profile`, or the RDT controls section.
+- Every new scaffolded `### Step 1` contains Original front, Known E-ids, Constraint / ruled-out shape, Last action, Last outcome, Control / alternative, Drop condition, and Next hypothesis.
+
+Raw support artifacts added after first arkcli review:
+
+- `implementation-grep.txt`: command output showing no `OpenMythos` import or `kyegomez` dependency in the in-scope implementation files; only the explanatory runtime-boundary strings are present.
+- `raw-test-transcript.txt`: combined local test transcript from targeted suites.
+- `scaffold-context-sample.txt`: executable sample showing a custom web-auth profile resolving to loop budget 7 in both the agent scaffold and context pack.

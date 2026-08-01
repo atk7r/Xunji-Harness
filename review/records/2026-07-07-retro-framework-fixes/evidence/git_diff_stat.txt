@@ -1,0 +1,9 @@
+ docs/templates/run/evidence.md |  10 +--
+ tools/check_knowledge.py       |  87 ++++++++++++++++++++++-
+ tools/check_run.py             |  65 +++++++++++++++--
+ tools/coverage_matrix.py       | 158 ++++++++++++++++++++++++++++++++++++++++-
+ tools/evidence_parse.py        |  33 +++++++--
+ tools/probe.py                 |  59 +++++++++++++--
+ tools/selftest_all.py          |   2 +-
+ tools/workers.py               | 103 ++++++++++++++++++++++++++-
+ 8 files changed, 494 insertions(+), 23 deletions(-)

@@ -1,0 +1,27 @@
+diff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md
+index 7ee87ec..528dbcb 100644
+--- a/docs/WORKFLOW-reference.md
++++ b/docs/WORKFLOW-reference.md
+@@ -18,7 +18,8 @@ runs/<slug>_<date>/
+   graph.json        derived state graph (graph.py writes it)
+   state/            derived caches: projection.json · events.jsonl ·
+                     workflow_checkpoint.json · coverage_matrix.* · loop_state.* ·
+-                    progress_ledger.* · controller.shadow.json · controller_diff.md
++                    progress_ledger.* · controller.shadow.json · controller_diff.md ·
++                    loop_journal.jsonl
+   evidence/         sensor proof artifacts: *.html, *.replay.json, render_<host>/, screenshots
+   classify/         classify_hosts output: coverage.json + per-host bodies
+   scripts/          PoC / helper scripts (author-and-handoff)
+@@ -496,6 +497,12 @@ It is advisory only: it never chooses exploit steps, promotes evidence, or grant
+ `GHOST_COMPLETE`. Its `can_stop` field is intentionally false in shadow mode;
+ only hard closure gates plus Root adjudication can authorize a stop.
+ 
++`tools/loop_journal.py` writes `<run>/state/loop_journal.jsonl`. It is an
++append-only interruption journal for explicit `/loop` cycles: start, plan, action,
++write-result, interrupt, and end. It helps resume after a broken loop turn, but it
++is not evidence and never replaces `decisions.md`, `evidence.md`, or
++`session_handoff.md`.
++
+ ## Agent Board
+ 
+ The run directory is a blackboard. Collaboration is now Root Orchestrator +

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/review-disposition.v1.schema.json",
+  "title": "Xunji Review Disposition v1",
+  "description": "A Reviewer disposition over the exact frozen Agent result bytes. This receipt is derived review state; it grants no authority and is not evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "target_assignment",
+    "target_result_digest",
+    "reviewer_assignment",
+    "reviewer_agent_id",
+    "reviewer_tool_use_id",
+    "reviewer_result_digest",
+    "plan_digest",
+    "target_lane_id",
+    "reviewer_lane_id",
+    "disposition",
+    "note",
+    "recorded_at",
+    "receipt_hash"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.review-disposition.v1"},
+    "target_assignment": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$"},
+    "target_result_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reviewer_assignment": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$"},
+    "reviewer_agent_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "reviewer_tool_use_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "reviewer_result_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "target_lane_id": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"},
+    "reviewer_lane_id": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"},
+    "disposition": {
+      "enum": [
+        "accept-candidate",
+        "needs-control",
+        "duplicate",
+        "refute",
+        "out-of-scope",
+        "retry",
+        "blocked"
+      ]
+    },
+    "note": {"type": "string", "minLength": 1, "maxLength": 2048},
+    "artifact_validation": {
+      "description": "Optional deterministic validation of the exact run-local artifact set named by both frozen target and Reviewer results. Empty for non-target or non-accept dispositions.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "size"],
+            "properties": {
+              "path": {"type": "string", "pattern": "^evidence/"},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "size": {"type": "integer", "minimum": 0}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "size", "request", "response", "saved_body"],
+            "properties": {
+              "path": {"type": "string", "pattern": "^evidence/.*\\.replay\\.json$"},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "size": {"type": "integer", "minimum": 0},
+              "request": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["method", "url"],
+                "properties": {
+                  "method": {"type": "string", "minLength": 1},
+                  "url": {"type": "string", "minLength": 1}
+                }
+              },
+              "response": {
+                "oneOf": [
+                  {"$ref": "#/$defs/legacyReplayResponse"},
+                  {"$ref": "#/$defs/v2ReplayResponse"}
+                ]
+              },
+              "saved_body": {"type": "string", "pattern": "^evidence/"}
+            }
+          }
+        ]
+      }
+    },
+    "recorded_at": {"type": "string", "minLength": 1, "maxLength": 128},
+    "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "legacyReplayResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "len", "sha1"],
+      "properties": {
+        "status": {"type": "integer"},
+        "len": {"type": "integer", "minimum": 0},
+        "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "v2ReplayResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "len",
+        "sha1",
+        "saved_len",
+        "saved_sha1",
+        "truncated",
+        "wire_verified"
+      ],
+      "properties": {
+        "status": {"type": "integer"},
+        "len": {"type": "integer", "minimum": 0},
+        "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "saved_len": {"type": "integer", "minimum": 0},
+        "saved_sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "truncated": {"type": "boolean"},
+        "wire_verified": {"type": "boolean"}
+      }
+    }
+  }
+}

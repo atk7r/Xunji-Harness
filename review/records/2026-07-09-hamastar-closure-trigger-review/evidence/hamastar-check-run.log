@@ -1,0 +1,5 @@
+warnings
+- 覆盖矩阵: 下列漏洞类别在本 run 的适用资产上整列未见测试记录 —— Misconfig(applicable=4)。这通常表示方向跑偏; 收口前应确认是无适用信号, 还是缺前沿/缺 E-entry。
+- 覆盖矩阵: 下列资产的适用类别大多仍为空 —— apc-magicweb.hamastar.com.tw(0/3 tested), fubonweb.hamastar.com.tw(0/3 tested), jobooks-mgr.hamastar.com.tw(0/3 tested)。这说明资产可能没被测透, 或 frontier 未记录 Vectors tried。
+- surface.md 未填充: Assets 部分仍为空(模板存在但未被 driver 填充) —— surface.md 模板已建, 将攻击过程中发现的 distinct app、入口点路径写入对应部分。攻击面记录 = 攻击过程的自然产物, 不是独立文档工作。
+run check passed

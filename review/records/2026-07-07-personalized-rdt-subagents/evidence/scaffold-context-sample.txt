@@ -1,0 +1,63 @@
+# Scaffold And Context Sample
+
+Command:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import tempfile, json, sys
+ROOT=Path('/Users/ccj/Documents/AI/Xunji')
+sys.path.insert(0, str(ROOT/'tools'))
+import context_pack, workers
+run=Path(tempfile.mkdtemp())/'run'
+run.mkdir()
+(run/'target.md').write_text('# Target\n- Target: app.example\n', encoding='utf-8')
+(run/'frontier.md').write_text('# Frontier\n\n## Open Fronts\n\n### F-001\n- Front: app.example auth token signature JS API\n- Status: open\n', encoding='utf-8')
+(run/'state').mkdir()
+(run/'state'/'operator_profile.json').write_text(json.dumps({'schema':1,'rdt':{'role_profiles':{'web-auth':{'loop_budget':7,'focus':'custom_auth_depth'}}},'retrospective_lessons':['sample lesson']}), encoding='utf-8')
+rec=workers.create_agent_assignment(run, role='web-auth', front='F-001')
+print({k: rec[k] for k in ('agent','role','front','reasoning_style','loop_budget','operator_profile')})
+PY
+```
+
+Selected output:
+
+```text
+ASSIGNMENT {
+  "agent": "A-web-auth-001",
+  "role": "web-auth",
+  "front": "F-001",
+  "reasoning_style": "personalized-rdt",
+  "loop_budget": 7,
+  "operator_profile": "/var/folders/.../run/state/operator_profile.json"
+}
+
+# Agent A-web-auth-001
+- Role: web-auth
+- Assigned front: F-001
+- Reasoning style: personalized-rdt
+- Loop budget: 7 recurrent step(s)
+- Operator profile: /var/folders/.../run/state/operator_profile.json
+
+## Operator Profile / RDT Controls
+- RDT style: openmythos-inspired (reasoning pattern only; no OpenMythos runtime dependency)
+- Role focus: custom_auth_depth
+- Front profile: auth_sso_token_signature
+- Decision style: autonomous_until_blocked (fallback_seconds=600)
+- Evidence style: artifact_first
+- Review style: truth_over_agreement
+- Live replay policy: stop_on_guard_volume_warning
+- Depth pivot: after 3 low/noise cycles, pivot from breadth to mechanism depth
+- Trust boundary: operator profile is preference/context only, never target evidence and never a finding.
+- Retrospective lessons:
+  - sample lesson
+
+## Operator Profile / Personalized RDT
+- Source: /var/folders/.../run/state/operator_profile.json
+- RDT style: openmythos-inspired (reasoning pattern only; no OpenMythos runtime dependency)
+- Recommended loop budget: 7 recurrent step(s)
+- Role focus: custom_auth_depth
+- Front profile: auth_sso_token_signature
+- Trust boundary: operator profile is preference/context only, never target evidence and never a finding.
+```
+

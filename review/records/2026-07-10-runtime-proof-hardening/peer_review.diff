@@ -1,0 +1,147 @@
+diff --git a/tools/peer_review.py b/tools/peer_review.py
+index a1efa97..679f3a7 100644
+--- a/tools/peer_review.py
++++ b/tools/peer_review.py
+@@ -6 +6 @@
+-    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 三模型 panel;
++    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 双模型 panel;
+@@ -79 +79 @@ DEFAULT_CONFIG: dict = {
+-        "max_bundle_chars": 180_000,
++        "max_bundle_chars": 110_000,
+@@ -85 +85 @@ DEFAULT_CONFIG: dict = {
+-        # arkcli 外部异构补盲团: 三模型独立审同一冻结 bundle, 聚合成候选 finding。
++        # arkcli 外部异构补盲团: 双模型独立审同一冻结 bundle, 聚合成候选 finding。
+@@ -90 +89,0 @@ DEFAULT_CONFIG: dict = {
+-                       {"id": "minimax-m3"},
+@@ -184 +183,3 @@ ARTIFACT_EXCERPT_CAP = 24_000
+-BUNDLE_CHAR_CAP = 180_000
++# Keep the frozen JSON plus rubric below the narrowest default panel context.
++# Full artifact hashes remain in the bundle when excerpts are reduced.
++BUNDLE_CHAR_CAP = 110_000
+@@ -232,0 +234 @@ class ReviewResult:
++    runtime_receipt_id: str = field(default="", repr=False)
+@@ -447 +449,8 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,
+-    payload["sha1"] = _sha1_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
++    digest_entries = json.loads(json.dumps(entries, ensure_ascii=False))
++    for entry in digest_entries:
++        for artifact in entry.get("artifacts", []):
++            for key in ("excerpt", "excerpt_truncated_chars", "diff_summary"):
++                artifact.pop(key, None)
++    digest_payload = {"schema": "xunji.evidence_index.v1", "entries": digest_entries}
++    payload["sha1"] = _sha1_bytes(json.dumps(
++        digest_payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+@@ -540 +549 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,
+-    for _ in range(6):
++    for _ in range(16):
+@@ -578,0 +588,6 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,
++def _bundle_context(bundle: dict) -> str:
++    """Serialize exactly as the bundle cap is measured; never pretty-print then cut."""
++    return json.dumps(
++        bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
++
++
+@@ -853 +868 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,
+-    context = json.dumps(bundle or build_review_bundle(
++    context = _bundle_context(bundle or build_review_bundle(
+@@ -857,2 +872 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,
+-        max_bundle_chars=max_bundle_chars),
+-                         ensure_ascii=False, indent=2)
++        max_bundle_chars=max_bundle_chars))
+@@ -961 +975 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
+-    context = json.dumps(bundle or build_review_bundle(
++    context = _bundle_context(bundle or build_review_bundle(
+@@ -965,2 +979 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
+-        max_bundle_chars=max_bundle_chars),
+-                         ensure_ascii=False, indent=2)
++        max_bundle_chars=max_bundle_chars))
+@@ -1048 +1061 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,
+-    context = json.dumps(bundle or build_review_bundle(
++    context = _bundle_context(bundle or build_review_bundle(
+@@ -1052,2 +1065 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,
+-        max_bundle_chars=max_bundle_chars),
+-                         ensure_ascii=False, indent=2)
++        max_bundle_chars=max_bundle_chars))
+@@ -1476 +1488,27 @@ def _strip_template_review_placeholders(text: str) -> str:
+-def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
++def _write_review_receipt(run_dir: Path, result: ReviewResult, review_kind: str) -> str:
++    """Persist the machine provenance that Markdown review prose cannot prove."""
++    payload = {
++        "schema": "xunji.peer_review_receipt.v1",
++        "generated_at": datetime.now(timezone.utc).isoformat(),
++        "review_kind": review_kind,
++        "result": result.as_dict(),
++    }
++    receipt_id = hashlib.sha256(json.dumps(
++        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
++    ).encode("utf-8")).hexdigest()
++    record = dict(payload)
++    record["receipt_id"] = receipt_id
++    out = run_dir / "review" / "receipts" / f"{receipt_id}.json"
++    out.parent.mkdir(parents=True, exist_ok=True)
++    tmp = out.with_name(out.name + f".tmp-{os.getpid()}")
++    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
++                   encoding="utf-8")
++    os.replace(tmp, out)
++    try:
++        os.chmod(out, 0o600)
++    except OSError:
++        pass
++    return receipt_id
++
++
++def _append_run_review(run_dir: Path, result: ReviewResult) -> str:
+@@ -1487,0 +1526,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
++    receipt_id = _write_review_receipt(run_dir, result, review_kind)
++    result.runtime_receipt_id = receipt_id
+@@ -1494,0 +1535 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
++              f"- ReviewReceipt: {receipt_id}",
+@@ -1496,0 +1538,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
++    used_ids = set(re.findall(r"(?m)^###\s+(PR-\d+)\b", existing))
++    next_pr = max((int(item.split("-")[1]) for item in used_ids), default=0) + 1
+@@ -1498,3 +1541,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
+-        for i, f in enumerate(result.findings, 1):
+-            if not f.id:
+-                f.id = f"PR-{i:03d}"
++        for f in result.findings:
++            if not f.id or f.id in used_ids or not re.fullmatch(r"PR-\d+", f.id):
++                while f"PR-{next_pr:03d}" in used_ids:
++                    next_pr += 1
++                f.id = f"PR-{next_pr:03d}"
++                next_pr += 1
++            used_ids.add(f.id)
+@@ -1517,0 +1565 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:
++    return receipt_id
+@@ -1606 +1654 @@ def _selftest() -> int:
+-                   == ["kimi-k2.7-code", "minimax-m3", "glm-5.2"]))
++                   == ["kimi-k2.7-code", "glm-5.2"]))
+@@ -1752,2 +1800,2 @@ def _selftest() -> int:
+-        ["minimax-m3: timeout >1s"],
+-        "arkcli:glm-5.2+kimi-k2.7-code+minimax-m3")
++        ["kimi-k2.7-code: timeout >1s"],
++        "arkcli:kimi-k2.7-code+glm-5.2")
+@@ -1839 +1887 @@ def _selftest() -> int:
+-    _append_run_review(d_run, ReviewResult(verdict="PASS", backend_used="arkcli:glm-5.2+kimi-k2.7-code+minimax-m3"))
++    _append_run_review(d_run, ReviewResult(verdict="PASS", backend_used="arkcli:kimi-k2.7-code+glm-5.2"))
+@@ -1840,0 +1889,7 @@ def _selftest() -> int:
++    _append_run_review(d_run, ReviewResult(
++        verdict="WARN", findings=[Finding("WARN", "second", "E-001", "check")],
++        backend_used="arkcli:glm-5.2", bundle_hash=b_run["sha1"],
++        evidence_index_hash=b_run["evidence_index"]["sha1"],
++    ))
++    rv3 = (d_run / "review.md").read_text(encoding="utf-8")
++    receipt_ids = re.findall(r"(?m)^- ReviewReceipt: ([0-9a-f]{64})$", rv3)
+@@ -1854,0 +1910,5 @@ def _selftest() -> int:
++        ("into_run writes content-addressed receipt files",
++         len(receipt_ids) == 3 and all((d_run / "review" / "receipts" / f"{rid}.json").is_file()
++                                       for rid in receipt_ids)),
++        ("repeated reviews allocate globally unique PR ids",
++         rv3.count("### PR-001") == 1 and rv3.count("### PR-002") == 1),
+@@ -1877,0 +1938,4 @@ def _selftest() -> int:
++        ("backend bundle context uses the capped compact serialization",
++         _bundle_context(b_long) == json.dumps(
++             b_long, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
++         and "\n" not in _bundle_context(b_long)),
+@@ -2054,0 +2119,3 @@ def main() -> int:
++    if args.into_run and r.runtime_receipt_id:
++        print(f"XUNJI_REVIEW_RECEIPT={r.runtime_receipt_id}")
++        print(f"XUNJI_REVIEW_BUNDLE={r.bundle_hash}")

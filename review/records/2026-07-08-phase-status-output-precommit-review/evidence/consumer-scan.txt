@@ -1,0 +1,18 @@
+docs/ROUTER.md:370:  `state/controller.shadow.json` and `state/controller_diff.md` with advisory
+docs/ROUTER.md:404:- Phase:
+docs/templates/loop_prompt.md:49:Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent evidence.md, hints.md if present, state/assignments.json, state/conflicts.json, and state/loop_state.md.
+docs/WORKFLOW-reference.md:21:                    progress_ledger.* · controller.shadow.json · controller_diff.md ·
+docs/WORKFLOW-reference.md:482:and `<run>/state/loop_state.md`. This is the per-cycle closed-loop snapshot:
+docs/WORKFLOW-reference.md:494:and `<run>/state/controller_diff.md`. It consumes loop/progress state and reports
+docs/ANTI-DRIFT-DECAY.md:378:- Phase: <Driver / Hunter / Reviewer>
+tools/run_controller.py:231:    _write(run_dir / "state" / "controller_diff.md", render_markdown(data, color=False))
+tools/run_controller.py:260:    persisted_diff = (run / "state" / "controller_diff.md").read_text(encoding="utf-8", errors="replace")
+tools/run_controller.py:298:         and (run / "state" / "controller_diff.md").exists()
+tools/run_controller.py:324:    ap.add_argument("--shadow", action="store_true", help="write state/controller.shadow.json and controller_diff.md")
+tools/cross_run.py:516:            print(f"  Phase: {e['phase']}")
+tools/cross_run.py:580:            print(f"  Phase: {r['phase']}")
+tools/loop_state.py:675:    _write(state / "loop_state.md", render_markdown(data, color=False))
+tools/loop_state.py:731:    persisted_md = (run / "state" / "loop_state.md").read_text(encoding="utf-8", errors="replace")
+tools/loop_state.py:931:        ("writes loop state markdown", (run / "state" / "loop_state.md").exists()),
+tools/loop_bootstrap.py:255:        status_style.field("运行态文件", f"cat {run_dir}/state/loop_state.md", "gray", enabled=status_style.color_enabled()),
+tools/loop_bootstrap.py:256:        status_style.field("控制面文件", f"cat {run_dir}/state/controller_diff.md", "gray", enabled=status_style.color_enabled()),

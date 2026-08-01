@@ -1,0 +1,28 @@
+ok   anchor non-empty
+ok   anchor carries binding rules
+ok   anchor is compact (<3KB)
+ok   drift patterns non-empty
+ok   stage Detection exists
+ok   find_active_run picks recent
+ok   stale window -> none
+ok   no runs dir -> none
+ok   session_state missing -> {}
+ok   session_state reads drift_flags
+ok   session_state corrupt -> {}
+ok   get_drift_flags returns list
+ok   anchor injects protocol_violation warning
+ok   anchor injects frontier_stale warning
+ok   anchor still has Tier-1 rules
+ok   anchor has self-check section when drift
+ok   anchor no drift_block reference
+ok   stale session_state auto-reset
+ok   agent board: <4 open fronts -> not needed
+ok   agent board: shared barrier -> not needed
+ok   agent board: shared barrier group detected
+ok   agent board: diverse barriers -> needed
+ok   agent board: no shared group in diverse
+ok   agent board: all none/unknown -> needed
+ok   agent board: none/unknown not grouped
+ok   agent board: anchor injects reminder
+ok   agent board: no frontier.md -> not needed
+anti_drift selftest passed

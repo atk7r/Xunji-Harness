@@ -1,0 +1,63 @@
+{
+  "schema": "xunji.guard-host-health-fixtures.v1",
+  "breaker_cases": [
+    {
+      "name": "target reset isolates one host",
+      "route": "direct",
+      "host": "a.example",
+      "error_class": "target_reset",
+      "failures": 3,
+      "blocked_hosts": ["a.example"],
+      "allowed_hosts": ["b.example"],
+      "expected_scope": "target"
+    },
+    {
+      "name": "target TLS isolates one host",
+      "route": "direct",
+      "host": "tls.example",
+      "error_class": "target_tls",
+      "failures": 3,
+      "blocked_hosts": ["tls.example"],
+      "allowed_hosts": ["other.example"],
+      "expected_scope": "target"
+    },
+    {
+      "name": "proxy connect pauses the whole route",
+      "route": "proxy:socks5h:0123456789abcdef",
+      "host": "a.example",
+      "error_class": "proxy_connect",
+      "failures": 3,
+      "blocked_hosts": ["a.example", "b.example"],
+      "allowed_routes": ["direct"],
+      "expected_scope": "route"
+    },
+    {
+      "name": "proxy TLS pauses the whole route",
+      "route": "proxy:https:fedcba9876543210",
+      "host": "a.example",
+      "error_class": "proxy_tls",
+      "failures": 3,
+      "blocked_hosts": ["a.example", "b.example"],
+      "allowed_routes": ["direct"],
+      "expected_scope": "route"
+    },
+    {
+      "name": "local DNS pauses the current route",
+      "route": "direct",
+      "host": "a.example",
+      "error_class": "local_dns",
+      "failures": 3,
+      "blocked_hosts": ["a.example", "b.example"],
+      "allowed_routes": ["proxy:http:0011223344556677"],
+      "expected_scope": "route"
+    }
+  ],
+  "classification_cases": [
+    {"name": "direct DNS", "exception": "gaierror", "route": "direct", "expect": "local_dns"},
+    {"name": "direct TLS", "exception": "ssl", "route": "direct", "expect": "target_tls"},
+    {"name": "direct reset", "exception": "reset", "route": "direct", "expect": "target_reset"},
+    {"name": "proxy TLS", "exception": "ssl", "route": "proxy:https:fedcba9876543210", "expect": "proxy_tls"},
+    {"name": "proxy reset", "exception": "reset", "route": "proxy:socks5h:0123456789abcdef", "expect": "proxy_connect"},
+    {"name": "legacy reset", "exception": "reset", "route": "legacy", "expect": "unattributed_transport"}
+  ]
+}

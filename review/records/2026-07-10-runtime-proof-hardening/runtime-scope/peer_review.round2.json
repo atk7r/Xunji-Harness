@@ -1,0 +1,80 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "BLOCKER",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "2008bcd1ba4385fb7c964c9b567d9f551eb07191",
+  "evidence_index_hash": "2d245e84e8c156866d2f76ea41b42674419aa7a1",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "BLOCKER",
+      "category": "evidence_gate",
+      "claim": "E-003 'Installed runtime observation' is marked confirmed (certainty 0.8) but is supported only by the single environment-provided artifact installed-settings.json and must be downgraded to tentative.",
+      "evidence": "evidence.md:E-003, installed-settings.json (sha1:3b0e2cb0accd1601c284e3ca000aed700a5795ef)",
+      "affected_eids": [
+        "E-003"
+      ],
+      "recommended_action": "Downgrade E-003 to certainty <=0.5 and collect corroborating runtime receipts (e.g., a PostToolUse/PreToolUse transcript event or runtime_events.jsonl entry) before reporting it as confirmed.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The run rules explicitly state that single observations and environment-provided artifacts are never confirmation on their own. The evidence_index lists only one artifact for E-003 and rates it confirmed at 0.8, which violates the evidence gate.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "missed_surface",
+      "claim": "turn_contract.py provides a _selftest routine, but installed-settings.json does not invoke it at SessionStart; only safety_gate, run_gate, output_gate, ip_blacklist, and sentinel/hook selftests are wired.",
+      "evidence": "installed-settings.json:SessionStart, turn_contract.lines-341-end.txt:338",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add a SessionStart selftest hook for python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\" --selftest so a broken contract module is caught before the first PreToolUse.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] PreToolUse fail-closed catches internal exceptions, but a syntax/import error would still block benign reads and degrade availability. The other gates follow the SessionStart selftest pattern, so turn_contract should too.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "E-001 and E-002 are code-change findings supported by diffs and source excerpts, but no live runtime receipts or transcript tool_use_id matches prove the modified hooks were actually exercised in this run.",
+      "evidence": "evidence.md:E-001, evidence.md:E-002, output_gate.diff, run_gate.hunks-01.diff, runtime_receipts.lines-001-150.txt",
+      "affected_eids": [
+        "E-001",
+        "E-002"
+      ],
+      "recommended_action": "Capture at least one current-session PostToolUse/PreToolUse event in runtime_events.jsonl (with matching transcript tool_use_id) for the new hooks, or constrain report language to 'source changes present' rather than 'runtime active'.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The evidence ledger records the modifications but not an execution trace. For a runtime-scope run, claim integrity requires separating code-review findings from live-runtime activation.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "glm-5.2: parse error; output tail: look at the `installed-settings.json` more carefully. It shows the hooks are wired in the settings. But:\n- The `turn_contract.py` hook is wired to PreToolUse (global), PostToolUse (Agent|CronCreate|CronDelete|CronList), PostToolUseFailure, SubagentStart, SubagentStop\n- But the `settings.diff` shows additional wiring that should be present\n\nComparing `settings.diff` with `installed-settings.json`:\n- settings.diff adds UserPromptSubmit hook for turn_contract.py - present in installed-settings.json",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[claude] **[BLIND-SPOT] The `review.md` was committed as a pre-written template that claims evidence not yet generated.** The pattern of writing \"is stored as `peer_review.md`\" before the independent reviewer has produced output is a process hazard — if the reviewer's output were lost, the run would appear to have passed independent review based on a false claim. The review.md should describe what is EXPECTED (future tense) or be written AFTER the review completes.",
+    "[claude] **[BLIND-SPOT] `runtime_observation.py:16` computes `ROOT = Path(__file__).resolve().parents[3]`** — from its frozen location at `review/records/2026-07-10-runtime-proof-hardening/runtime-scope/runtime_observation.py`, this resolves to `review/` rather than the repository root. The script's import of `TOOLS = ROOT / \"tools\"` (line 17) would fail if executed from its archived path. The observation output was generated when the script lived at a different location. This means the frozen `.py` artifact is not independently reproducible from its recorded location — you would need to move it to the repo root or adjust the path. The observation JSON output is the true evidentiary artifact, not the script.",
+    "[claude] **[BLIND-SPOT] The `probing`/`working` status expansion to active fronts is technically correct** (excluding them allows relabel evasion, as `context.md:12-14` explains), but it's a **silent operator-facing behavioral change**. An operator who marks a front `probing` to indicate \"exploring, not actively pushing\" would be surprised when it triggers Agent Board fanout requirements. The rationale is in `context.md` and `evidence.md:8` but nowhere in settings or hook messages is this semantic change surfaced to the operator at runtime. The statusline/anti_drift reminder reads the same regardless.",
+    "[claude] **[BLIND-SPOT] The fail-closed shift removes a safety net but adds a sharp edge.** `disposition.md:36-38` explicitly rejects automatic fail-open recovery: \"Automatic fail-open is intentionally rejected: it converts hook breakage into an unobserved process bypass.\" This is a defensible security posture, but it means: if a Python dependency update breaks `turn_contract.py` import, every subsequent Claude session with an active run will be blocked by output_gate and run_gate with no automatic path to recovery. The operator must manually deactivate the active run or fix the hook. The disposition acknowledges this as an explicit design choice (\"Recovery is an explicit operator/local-maintenance action\"), which is fair but worth flagging as an operational risk.",
+    "[claude] **[BLIND-SPOT] The 57/57 selftest pass in `selftest_all.log` confirms no regressions**, but the `output_gate` selftest (0.4s) and `run_gate` selftest (1.2s) test logic in isolation — they don't verify the hooks actually fire correctly within a real Claude Code session. The `runtime_observation.py` partially fills this gap by calling `turn_contract.py` as a subprocess with Claude-shaped events, but it still runs in a temp directory. A live Claude Code session with the installed hooks remains the final integration test.",
+    "[claude] **[BLIND-SPOT] The evidence ledger has no negative results.** Every entry is confirmed with certainty ≥ 0.8, and every `supports`/`refutes` array is empty. This is unusual in a security review — real hardening work typically has some \"we tested X, it didn't work, here's why\" entries. The absence of negative evidence doesn't invalidate the positive evidence, but it suggests the review focused exclusively on confirming expected behavior rather than actively searching for bypasses that the code changes DON'T catch. For example: does the hook wiring handle hook execution ordering? Does the PreToolUse contract fire before the safety_gate? What happens if a tool call name doesn't match the matcher regex? These negative-path tests don't appear in the evidence."
+  ],
+  "context_limits": [
+    "[arkcli] glm-5.2: parse error; output tail: look at the `installed-settings.json` more carefully. It shows the hooks are wired in the settings. But:\n- The `turn_contract.py` hook is wired to PreToolUse (global), PostToolUse (Agent|CronCreate|CronDelete|CronList), PostToolUseFailure, SubagentStart, SubagentStop\n- But the `settings.diff` shows additional wiring that should be present\n\nComparing `settings.diff` with `installed-settings.json`:\n- settings.diff adds UserPromptSubmit hook for turn_contract.py - present in installed-settings.json",
+    "[claude] I reviewed only the frozen artifacts in the review bundle, not the live source files at `.claude/hooks/output_gate.py`, `.claude/hooks/run_gate.py`, etc. The diffs may or may not represent the current state of those files on disk. I cannot verify that the diffs apply cleanly to the current HEAD (`0447297` per context.md).",
+    "[claude] The Chinese-language hook messages and operator workflow conventions (Coda format, 收口 closure gates, Agent Board 强制门) are project-specific idioms I interpret through CLAUDE.md. I may miss nuances in how \"Coda\" enforcement interacts with the new turn-mode exemption paths.",
+    "[claude] `context.md:8-9` mentions \"repairs round-one PR-001/PR-002/PR-005\" — I have the round-1 review (`peer_review.round1.md`) and disposition, but I do not have the original evidence bundle from round 1 to verify what the original evidence looked like before the repairs.",
+    "[claude] The `runtime_observation.py` uses `importlib.util` (line 5) but never actually calls it — this appears to be a leftover import that doesn't affect functionality.",
+    "[claude] `selftest_all.log:1` says 77.3s total while `evidence.md:38` says \"76.2 seconds\" — a minor discrepancy likely from re-running or rounding. Not meaningful.",
+    "[claude] `evidence.md:31` lists `runtime_observation.py` as artifact but `evidence.json` does not — I classify this as WARN (see above), but it's possible the evidence.json intentionally excludes source files and only tracks output artifacts. The `.py` file IS the source, not the output — the `.lines-*.txt` files are the output. This could be deliberate policy: source == not an \"artifact\" in the strict sense. Still worth harmonizing."
+  ],
+  "error": ""
+}

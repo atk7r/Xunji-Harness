@@ -1,0 +1,15 @@
+diff --git a/.claude/settings.json b/.claude/settings.json
+index 27fe1a8..d459ea0 100644
+--- a/.claude/settings.json
++++ b/.claude/settings.json
+@@ -1,4 +1,10 @@
+ {
++  "statusLine": {
++    "type": "command",
++    "command": "XUNJI_COLOR=1 python3 \"$CLAUDE_PROJECT_DIR/tools/xunji_statusline.py\"",
++    "refreshInterval": 2,
++    "padding": 0
++  },
+   "hooks": {
+     "SessionStart": [
+       {

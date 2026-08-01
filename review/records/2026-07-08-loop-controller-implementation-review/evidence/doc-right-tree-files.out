@@ -1,0 +1,17 @@
+.claude/skills/xunji-agent-board/SKILL.md
+.claude/skills/xunji-run-lifecycle/SKILL.md
+CLAUDE.md
+docs/ROUTER.md
+docs/WORKFLOW-reference.md
+docs/WORKFLOW.md
+docs/templates/agents/code-audit.md
+docs/templates/agents/exploit.md
+docs/templates/agents/report.md
+docs/templates/agents/review.md
+docs/templates/agents/surface.md
+docs/templates/agents/synthesizer.md
+docs/templates/agents/verify.md
+docs/templates/agents/web-hunter.md
+docs/templates/loop_prompt.md
+docs/templates/run/hypotheses.md
+docs/templates/run/surface.md

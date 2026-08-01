@@ -1,0 +1,701 @@
+diff --git a/tools/runtime_receipts.py b/tools/runtime_receipts.py
+index aac0184..ac85c63 100644
+--- a/tools/runtime_receipts.py
++++ b/tools/runtime_receipts.py
+@@ -28,6 +28,9 @@ except ImportError:  # pragma: no cover - Windows fallback remains atomic per wr
+ SCHEMA = "xunji.runtime_receipt.v1"
+ EVENTS = "runtime_events.jsonl"
+ MAX_EXCERPT = 6000
++PROJECTION_ERROR = "runtime_projection_error.json"
++NONTERMINAL_ASSIGNMENT_STATUSES = {"assigned", "starting", "running", "working", "?", ""}
++TERMINAL_ASSIGNMENT_STATUSES = {"done", "merged", "blocked", "failed", "abandoned"}
+ 
+ 
+ def _json_bytes(value: object) -> bytes:
+@@ -55,6 +58,10 @@ def _lock_path(run_dir: Path) -> Path:
+     return run_dir / "state" / ".runtime_events.lock"
+ 
+ 
++def _projection_error_path(run_dir: Path) -> Path:
++    return run_dir / "state" / PROJECTION_ERROR
++
++
+ @contextlib.contextmanager
+ def _locked(run_dir: Path):
+     lock = _lock_path(run_dir)
+@@ -100,9 +107,32 @@ def _excerpt(value: object) -> str:
+ 
+ def _input_text(event: dict) -> str:
+     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+-    return "\n".join(str(tool_input.get(key) or "") for key in (
++    text = "\n".join(str(tool_input.get(key) or "") for key in (
+         "prompt", "description", "command", "job_id", "id",
+     ))
++    if text.strip():
++        return text
++    return str(event.get("input_excerpt") or "")
++
++
++def _mapping(value: object) -> dict:
++    if isinstance(value, dict):
++        return value
++    if isinstance(value, str):
++        try:
++            parsed = json.loads(value)
++        except Exception:
++            return {}
++        return parsed if isinstance(parsed, dict) else {}
++    return {}
++
++
++def _agent_launch_fields(value: object) -> tuple[str, bool, str]:
++    response = _mapping(value)
++    agent_id = str(response.get("agentId") or response.get("agent_id") or "").strip()
++    status = str(response.get("status") or "").strip().lower()
++    is_async = bool(response.get("isAsync")) or status in {"async_launched", "running"}
++    return agent_id, is_async, status
+ 
+ 
+ def _assignment_fields(text: str) -> tuple[str, str]:
+@@ -114,6 +144,19 @@ def _assignment_fields(text: str) -> tuple[str, str]:
+     )
+ 
+ 
++def _assignment_assets(text: str) -> list[str]:
++    match = re.search(r"(?im)\bXUNJI_ASSETS\s*=\s*([^\s]+)", text)
++    if not match:
++        return []
++    out: list[str] = []
++    for raw in match.group(1).split(","):
++        value = raw.strip().strip("[]{}'\"").lower().rstrip(".")
++        value = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", value).split("/", 1)[0]
++        if value and value not in out:
++            out.append(value)
++    return out
++
++
+ def _evidence_hash(text: str) -> str:
+     match = re.search(r"(?i)\bEVIDENCE_INDEX\s*=\s*([0-9a-f]{40,64})\b", text)
+     return match.group(1).lower() if match else ""
+@@ -180,6 +223,7 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
+     input_text = _input_text(event)
+     assignment, front = _assignment_fields(input_text)
+     response = event.get("tool_response")
++    launched_agent_id, agent_is_async, agent_status = _agent_launch_fields(response)
+     record = {
+         "schema": SCHEMA,
+         "ts": time.time(),
+@@ -195,6 +239,7 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
+         "target_action": bool(event.get("xunji_target_action")),
+         "assignment": assignment,
+         "front": front,
++        "assignment_assets": _assignment_assets(input_text),
+         "input_excerpt": _excerpt(event.get("tool_input") or {}),
+         "input_sha256": _hash(event.get("tool_input") or {}),
+         "action_sha256": _action_hash(tool, event.get("tool_input") or {}),
+@@ -202,6 +247,9 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
+         "response_excerpt": _excerpt(response),
+         "agent_id": str(event.get("agent_id") or ""),
+         "agent_type": str(event.get("agent_type") or ""),
++        "launched_agent_id": launched_agent_id,
++        "agent_is_async": agent_is_async,
++        "agent_status": agent_status,
+         "job_id": _job_id(response) or _job_id(event.get("tool_input") or {}),
+         "job_ids": _job_ids(response) or _job_ids(event.get("tool_input") or {}),
+         "listed_run_job_ids": _run_job_ids(response, run.name) if tool == "CronList" else [],
+@@ -212,6 +260,140 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
+     return record
+ 
+ 
++def _iso_timestamp(value: float) -> str:
++    return datetime.fromtimestamp(value, timezone.utc).isoformat(timespec="milliseconds").replace(
++        "+00:00", "Z")
++
++
++def _atomic_json(path: Path, value: dict) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    fd, raw = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
++    try:
++        with os.fdopen(fd, "w", encoding="utf-8") as handle:
++            json.dump(value, handle, ensure_ascii=False, indent=2)
++            handle.write("\n")
++        os.replace(raw, path)
++    finally:
++        try:
++            os.unlink(raw)
++        except FileNotFoundError:
++            pass
++
++
++def _project_agent_lifecycle(run_dir: Path, record: dict) -> None:
++    """Project trusted hook lifecycle into assignment attempts.
++
++    Agent PostToolUse is a launch acknowledgement when Claude returns
++    ``status=async_launched``.  It must never be projected as completion.  The
++    matching SubagentStop is the return boundary.
++    """
++    path = run_dir / "state" / "assignments.json"
++    if not path.exists():
++        return
++    try:
++        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
++    except Exception as exc:
++        raise RuntimeError("cannot parse assignments.json for runtime projection") from exc
++    rows = data.get("assignments") if isinstance(data, dict) else None
++    if not isinstance(rows, list):
++        raise RuntimeError("assignments.json has no valid assignments list")
++
++    hook = str(record.get("hook_event_name") or "")
++    changed = False
++    stamp = _iso_timestamp(float(record.get("ts") or time.time()))
++    if hook == "PostToolUse" and record.get("tool_name") == "Agent" \
++            and record.get("success") is True:
++        assignment = str(record.get("assignment") or "")
++        front = str(record.get("front") or "")
++        launched_id = str(record.get("launched_agent_id") or "")
++        attempt_id = launched_id or str(record.get("tool_use_id") or "")
++        if not assignment or not front or not attempt_id:
++            return
++        derived = next((item for item in agent_attempts(run_dir)
++                        if str(item.get("tool_use_id") or "")
++                        == str(record.get("tool_use_id") or "")), {})
++        derived_returned_at = float(derived.get("returned_at") or 0.0)
++        projected_state = (
++            "returned" if derived_returned_at or not record.get("agent_is_async") else "running"
++        )
++        for row in rows:
++            if not isinstance(row, dict) or str(row.get("agent") or "") != assignment:
++                continue
++            if str(row.get("front") or "").upper() != front.upper():
++                raise RuntimeError(
++                    f"assignment/front mismatch for {assignment}: "
++                    f"receipt={front} state={row.get('front') or '(missing)'}"
++                )
++            expected_assets = _assignment_assets(
++                "XUNJI_ASSETS=" + ",".join(str(item) for item in row.get("assets", [])))
++            receipt_assets = [str(item) for item in record.get("assignment_assets", [])]
++            if receipt_assets != expected_assets:
++                raise RuntimeError(
++                    f"assignment asset mismatch for {assignment}: "
++                    f"receipt={receipt_assets} state={expected_assets}"
++                )
++            attempts = row.setdefault("attempts", [])
++            if not isinstance(attempts, list):
++                attempts = []
++                row["attempts"] = attempts
++            if not any(str(item.get("attempt_id") or "") == attempt_id
++                       for item in attempts if isinstance(item, dict)):
++                attempt = {
++                    "attempt_id": attempt_id,
++                    "agent_id": launched_id,
++                    "tool_use_id": str(record.get("tool_use_id") or ""),
++                    "session_id": str(record.get("session_id") or ""),
++                    "launched_at": stamp,
++                    "state": projected_state,
++                }
++                if projected_state == "returned":
++                    attempt["returned_at"] = _iso_timestamp(derived_returned_at) \
++                        if derived_returned_at else stamp
++                attempts.append(attempt)
++            row["current_attempt"] = attempt_id
++            row["runtime_agent_id"] = launched_id
++            row["updated_at"] = stamp
++            current = str(row.get("status") or "").strip().lower()
++            if current in NONTERMINAL_ASSIGNMENT_STATUSES:
++                row["status"] = "running" if projected_state == "running" else "done"
++                row["last_note"] = (
++                    f"runtime launch: attempt={attempt_id}"
++                    if projected_state == "running"
++                    else f"runtime return: attempt={attempt_id}; disposition pending"
++                )
++            changed = True
++            break
++    elif hook == "SubagentStop":
++        stopped_id = str(record.get("agent_id") or "")
++        if not stopped_id:
++            return
++        for row in rows:
++            if not isinstance(row, dict):
++                continue
++            attempts = row.get("attempts")
++            if not isinstance(attempts, list):
++                continue
++            matched = False
++            for attempt in attempts:
++                if not isinstance(attempt, dict) or str(attempt.get("agent_id") or "") != stopped_id:
++                    continue
++                if str(attempt.get("state") or "") != "returned":
++                    attempt["state"] = "returned"
++                    attempt["returned_at"] = stamp
++                    matched = True
++            if not matched:
++                continue
++            row["updated_at"] = stamp
++            row["last_seen_at"] = stamp
++            current = str(row.get("status") or "").strip().lower()
++            if current in NONTERMINAL_ASSIGNMENT_STATUSES:
++                row["status"] = "done"
++                row["last_note"] = f"runtime return: attempt={stopped_id}; disposition pending"
++            changed = True
++    if changed:
++        _atomic_json(path, data)
++
++
+ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
+     run = Path(run_dir).resolve()
+     record = normalize_hook_event(run, event)
+@@ -229,6 +411,26 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
+             os.chmod(path, 0o600)
+         except OSError:
+             pass
++    needs_projection = (
++        (record.get("hook_event_name") == "PostToolUse" and record.get("tool_name") == "Agent")
++        or record.get("hook_event_name") == "SubagentStop"
++    )
++    if needs_projection:
++        try:
++            with _locked(run):
++                _project_agent_lifecycle(run, record)
++                _projection_error_path(run).unlink(missing_ok=True)
++        except Exception as exc:
++            # The immutable receipt remains authoritative. Persist projection
++            # drift explicitly so status/check tools and reviewers can diagnose it.
++            with _locked(run):
++                _atomic_json(_projection_error_path(run), {
++                    "schema": "xunji.runtime_projection_error.v1",
++                    "recorded_at": _iso_timestamp(time.time()),
++                    "event_seq": int(record.get("seq") or 0),
++                    "event_hash": str(record.get("receipt_hash") or ""),
++                    "error": f"{exc.__class__.__name__}: {exc}",
++                })
+     return record
+ 
+ 
+@@ -284,6 +486,40 @@ def valid_tool_events(
+     ]
+ 
+ 
++def valid_lifecycle_events(
++    run_dir: str | Path,
++    *,
++    session_id: str = "",
++    since: float = 0.0,
++) -> list[dict]:
++    """Return transcript-backed SubagentStart/SubagentStop hook receipts."""
++    events, errors = validate_chain(run_dir)
++    if errors:
++        return []
++    transcript_cache: dict[str, str] = {}
++    out: list[dict] = []
++    for event in events:
++        if event.get("hook_event_name") not in {"SubagentStart", "SubagentStop"}:
++            continue
++        if session_id and str(event.get("session_id") or "") != session_id:
++            continue
++        if since and float(event.get("ts") or 0.0) < since:
++            continue
++        agent_id = str(event.get("agent_id") or "")
++        transcript_path = str(event.get("transcript_path") or "")
++        if not agent_id or not transcript_path:
++            continue
++        if transcript_path not in transcript_cache:
++            try:
++                transcript_cache[transcript_path] = Path(transcript_path).read_text(
++                    encoding="utf-8", errors="replace")
++            except Exception:
++                transcript_cache[transcript_path] = ""
++        if agent_id in transcript_cache[transcript_path]:
++            out.append(event)
++    return out
++
++
+ def denied_tool_events(
+     run_dir: str | Path,
+     *,
+@@ -334,29 +570,151 @@ def unresolved_target_denials(
+     return unresolved
+ 
+ 
++def _launch_from_record(event: dict) -> tuple[str, bool, str]:
++    launched = str(event.get("launched_agent_id") or "")
++    is_async = bool(event.get("agent_is_async"))
++    status = str(event.get("agent_status") or "")
++    if launched or is_async or status:
++        return launched, is_async, status
++    return _agent_launch_fields(event.get("response_excerpt") or "")
++
++
++def agent_attempts(
++    run_dir: str | Path,
++    *,
++    session_id: str = "",
++    since: float = 0.0,
++) -> list[dict]:
++    """Build assignment attempts from launch acknowledgements and SubagentStop."""
++    launches = valid_tool_events(run_dir, "Agent", session_id=session_id, since=since)
++    lifecycle = valid_lifecycle_events(run_dir, session_id=session_id, since=since)
++    stops: dict[str, list[float]] = {}
++    starts: dict[str, list[float]] = {}
++    for event in lifecycle:
++        agent_id = str(event.get("agent_id") or "")
++        if not agent_id:
++            continue
++        if event.get("hook_event_name") == "SubagentStop":
++            stops.setdefault(agent_id, []).append(float(event.get("ts") or 0.0))
++        elif event.get("hook_event_name") == "SubagentStart":
++            starts.setdefault(agent_id, []).append(float(event.get("ts") or 0.0))
++    attempts: list[dict] = []
++    for event in launches:
++        assignment = str(event.get("assignment") or "")
++        front = str(event.get("front") or "")
++        kind = "assignment"
++        if event.get("completion_review"):
++            assignment = "XUNJI-COMPLETION"
++            front = "REVIEW"
++            kind = "completion_review"
++        if not assignment or not front:
++            continue
++        launched_id, is_async, status = _launch_from_record(event)
++        attempt_id = launched_id or str(event.get("tool_use_id") or "")
++        launched_at = float(event.get("ts") or 0.0)
++        returned_at = 0.0
++        started_at = 0.0
++        if is_async:
++            # Agent ids are unique attempt identities. The closest matching
++            # Start is causal even when queueing or hook delivery exceeds an
++            # arbitrary wall-clock window.
++            matching_starts = starts.get(launched_id, [])
++            if matching_starts:
++                started_at = min(matching_starts, key=lambda ts: abs(ts - launched_at))
++            lifecycle_floor = started_at or launched_at
++            later_stops = [ts for ts in stops.get(launched_id, []) if ts >= lifecycle_floor]
++            returned_at = min(later_stops) if later_stops else 0.0
++        else:
++            returned_at = launched_at
++        attempts.append({
++            "attempt_id": attempt_id,
++            "assignment": assignment,
++            "front": front,
++            "agent_id": launched_id,
++            "actor_agent_id": str(event.get("agent_id") or ""),
++            "session_id": str(event.get("session_id") or ""),
++            "tool_use_id": str(event.get("tool_use_id") or ""),
++            "launched_at": launched_at,
++            "started_at": started_at,
++            "returned_at": returned_at,
++            "state": "returned" if returned_at else "running",
++            "is_async": is_async,
++            "launch_status": status,
++            "kind": kind,
++        })
++    return attempts
++
++
++def agent_actor(run_dir: str | Path, agent_id: str, *, since: float = 0.0) -> dict:
++    """Resolve a Claude subagent id to its exact assignment attempt."""
++    if not agent_id:
++        return {}
++    matches = [a for a in agent_attempts(run_dir, since=since) if a.get("agent_id") == agent_id]
++    if not matches:
++        return {}
++    return max(matches, key=lambda item: float(item.get("launched_at") or 0.0))
++
++
++def agent_asset_activity(run_dir: str | Path, assignment: str) -> dict[str, int]:
++    """Count successful target actions by the assignment's concrete assets."""
++    run = Path(run_dir)
++    try:
++        data = json.loads((run / "state" / "assignments.json").read_text(
++            encoding="utf-8", errors="replace"))
++    except Exception:
++        return {}
++    row = next((item for item in data.get("assignments", [])
++                if isinstance(item, dict) and str(item.get("agent") or "") == assignment), {})
++    assets = [str(item).strip().lower() for item in row.get("assets", []) if str(item).strip()]
++    if not assets:
++        return {}
++    attempts = [a for a in agent_attempts(run) if a.get("assignment") == assignment]
++    actor_ids = {str(a.get("agent_id") or "") for a in attempts if a.get("agent_id")}
++    if not actor_ids:
++        return {asset: 0 for asset in assets}
++    first_launch = min(float(a.get("launched_at") or 0.0) for a in attempts)
++    events = [event for event in valid_tool_events(run, since=first_launch)
++              if event.get("target_action") is True
++              and str(event.get("agent_id") or "") in actor_ids]
++    counts = {asset: 0 for asset in assets}
++    for event in events:
++        text = _input_text(event).lower()
++        for asset in assets:
++            host = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", asset).split("/", 1)[0]
++            if host and re.search(r"(?<![\w.\-])" + re.escape(host) + r"(?![\w.\-])", text):
++                counts[asset] += 1
++    return counts
++
++
+ def agent_fanout(run_dir: str | Path, *, session_id: str = "", since: float = 0.0) -> dict:
+-    events = valid_tool_events(run_dir, "Agent", session_id=session_id, since=since)
+-    assignments = sorted({str(event.get("assignment")) for event in events if event.get("assignment")})
+-    fronts = sorted({str(event.get("front")) for event in events if event.get("front")})
++    attempts = [item for item in agent_attempts(
++        run_dir, session_id=session_id, since=since)
++                if item.get("kind") == "assignment"]
++    assignments = sorted({str(item.get("assignment")) for item in attempts if item.get("assignment")})
++    fronts = sorted({str(item.get("front")) for item in attempts if item.get("front")})
+     return {
+         "assignments": assignments,
+         "fronts": fronts,
++        "attempts": attempts,
++        "running": sorted({str(item.get("assignment")) for item in attempts
++                           if item.get("state") == "running"}),
++        "returned": sorted({str(item.get("assignment")) for item in attempts
++                            if item.get("state") == "returned"}),
+         "count": len(assignments),
+         "satisfied": len(assignments) >= 2 and len(fronts) >= 2,
+     }
+ 
+ 
+ def agent_disposition(run_dir: str | Path, *, session_id: str = "", since: float = 0.0) -> dict:
+-    """Require every observed assignment to be explicitly merged or adjudicated."""
++    """Require only returned attempts to be explicitly merged or adjudicated."""
+     run = Path(run_dir)
+     receipts = agent_fanout(run, session_id=session_id, since=since)
+-    agent_events = valid_tool_events(run, "Agent", session_id=session_id, since=since)
+-    latest_receipt_ts: dict[str, float] = {}
+-    for event in agent_events:
+-        assignment = str(event.get("assignment") or "")
+-        if assignment:
+-            latest_receipt_ts[assignment] = max(
+-                latest_receipt_ts.get(assignment, 0.0), float(event.get("ts") or 0.0))
++    latest_return_ts: dict[str, float] = {}
++    for attempt in receipts.get("attempts", []):
++        assignment = str(attempt.get("assignment") or "")
++        returned_at = float(attempt.get("returned_at") or 0.0)
++        if assignment and returned_at:
++            latest_return_ts[assignment] = max(latest_return_ts.get(assignment, 0.0), returned_at)
+     try:
+         data = json.loads((run / "state" / "assignments.json").read_text(
+             encoding="utf-8", errors="replace"))
+@@ -372,7 +730,7 @@ def agent_disposition(run_dir: str | Path, *, session_id: str = "", since: float
+         if path.exists()
+     )
+     pending: list[str] = []
+-    for assignment in receipts.get("assignments", []):
++    for assignment in sorted(latest_return_ts):
+         row = rows.get(assignment, {})
+         status = str(row.get("status") or "").strip().lower()
+         note = str(row.get("last_note") or "").strip()
+@@ -381,14 +739,16 @@ def agent_disposition(run_dir: str | Path, *, session_id: str = "", since: float
+             updated_at = datetime.fromisoformat(updated_raw.replace("Z", "+00:00")).timestamp()
+         except Exception:
+             updated_at = 0.0
+-        if updated_at < latest_receipt_ts.get(assignment, 0.0):
+-            pending.append(f"{assignment}: disposition 早于本轮 Agent 返回")
++        if updated_at < latest_return_ts.get(assignment, 0.0):
++            pending.append(f"{assignment}: disposition 早于真实 SubagentStop 返回")
+             continue
+         anchors = re.findall(r"\b[EDF]-\d+\b", note, re.I)
+         anchors_exist = bool(anchors) and all(anchor.upper() in canonical.upper() for anchor in anchors)
+         if status == "merged":
+             if not re.search(r"(?i)\b(Evidence|Front|Decision|Refuted|Barrier)\s*[:：]", note) or not anchors_exist:
+                 pending.append(f"{assignment}: merged 缺 canonical E/F/D 处置锚点")
++            if row.get("assets") and row.get("coverage_merge_satisfied") is not True:
++                pending.append(f"{assignment}: merged 未通过逐资产动作 + canonical E-entry 验收")
+         elif status in {"blocked", "failed", "abandoned"}:
+             if not re.search(r"(?i)\bReason\s*[:：]", note) or not re.search(r"\bF-\d+\b", note, re.I) or not anchors_exist:
+                 pending.append(f"{assignment}: {status} 缺 Reason + canonical Front 锚点")
+@@ -562,6 +922,8 @@ def _write_transcript(path: Path, *tool_ids: str) -> None:
+ 
+ 
+ def _selftest() -> int:
++    from unittest import mock
++
+     run = Path(tempfile.mkdtemp()) / "run"
+     (run / "state").mkdir(parents=True)
+     transcript = run.parent / "transcript.jsonl"
+@@ -690,6 +1052,152 @@ def _selftest() -> int:
+     tampered_lines[0] = json.dumps(tampered_first, ensure_ascii=False, sort_keys=True)
+     _event_path(tampered).write_text("\n".join(tampered_lines) + "\n", encoding="utf-8")
+     tampered_fanout = agent_fanout(tampered)
++
++    async_run = run.parent / "async-run"
++    (async_run / "state").mkdir(parents=True)
++    async_transcript = run.parent / "async-transcript.jsonl"
++    _write_transcript(async_transcript, "async-launch-1", "async-launch-2", "child-action-1",
++                      "child-agent-1", "child-agent-2")
++    (async_run / "frontier.md").write_text(
++        "# Frontier\n## Open Fronts\n### F-001\n- Status: open\n"
++        "### F-002\n- Status: open\n", encoding="utf-8")
++    (async_run / "evidence.md").write_text("# Evidence\n", encoding="utf-8")
++    (async_run / "state" / "assignments.json").write_text(json.dumps({"assignments": [
++        {"agent": "A-async-001", "front": "F-001", "status": "assigned",
++         "assets": ["a.example"]},
++        {"agent": "A-async-002", "front": "F-002", "status": "assigned",
++         "assets": ["b.example"]},
++    ]}), encoding="utf-8")
++
++    def async_launch(tool_id: str, assignment: str, front: str, asset: str,
++                     child_id: str) -> None:
++        append_hook_event(async_run, {
++            "hook_event_name": "PostToolUse", "session_id": "async-session",
++            "transcript_path": str(async_transcript), "tool_name": "Agent",
++            "tool_use_id": tool_id,
++            "tool_input": {"prompt": (
++                f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front} XUNJI_ASSETS={asset}"
++            )},
++            "tool_response": {"agentId": child_id, "isAsync": True,
++                              "status": "async_launched"},
++        })
++
++    async_launch("async-launch-1", "A-async-001", "F-001", "a.example", "child-agent-1")
++    async_launch("async-launch-2", "A-async-002", "F-002", "b.example", "child-agent-2")
++    async_running_fanout = agent_fanout(async_run)
++    async_running_disposition = agent_disposition(async_run)
++    async_state = json.loads((async_run / "state" / "assignments.json").read_text(encoding="utf-8"))
++    append_hook_event(async_run, {
++        "hook_event_name": "PostToolUse", "session_id": "async-session",
++        "transcript_path": str(async_transcript), "tool_name": "Bash",
++        "tool_use_id": "child-action-1", "agent_id": "child-agent-1",
++        "tool_input": {"command": "python3 tools/probe.py GET https://a.example"},
++        "tool_response": {"stdout": "ok"}, "xunji_target_action": True,
++    })
++    async_activity = agent_asset_activity(async_run, "A-async-001")
++    append_hook_event(async_run, {
++        "hook_event_name": "SubagentStop", "session_id": "async-session",
++        "transcript_path": str(async_transcript), "agent_id": "child-agent-1",
++        "agent_type": "general-purpose",
++    })
++    async_after_stop = agent_disposition(async_run)
++    async_state_after_stop = json.loads(
++        (async_run / "state" / "assignments.json").read_text(encoding="utf-8"))
++    async_state_after_stop["assignments"][0].update({
++        "status": "blocked", "last_note": "Reason: auth barrier; Front: F-001",
++        "updated_at": datetime.now(timezone.utc).isoformat(),
++    })
++    (async_run / "state" / "assignments.json").write_text(
++        json.dumps(async_state_after_stop), encoding="utf-8")
++    async_one_return_disposed = agent_disposition(async_run)
++
++    race_run = run.parent / "stop-before-launch-run"
++    (race_run / "state").mkdir(parents=True)
++    race_transcript = run.parent / "stop-before-launch-transcript.jsonl"
++    _write_transcript(race_transcript, "race-launch", "race-child")
++    (race_run / "state" / "assignments.json").write_text(json.dumps({"assignments": [
++        {"agent": "A-race-001", "front": "F-001", "status": "assigned"},
++    ]}), encoding="utf-8")
++    for hook in ("SubagentStart", "SubagentStop"):
++        append_hook_event(race_run, {
++            "hook_event_name": hook, "session_id": "race-session",
++            "transcript_path": str(race_transcript), "agent_id": "race-child",
++            "agent_type": "general-purpose",
++        })
++    append_hook_event(race_run, {
++        "hook_event_name": "PostToolUse", "session_id": "race-session",
++        "transcript_path": str(race_transcript), "tool_name": "Agent",
++        "tool_use_id": "race-launch",
++        "tool_input": {"prompt": "XUNJI_ASSIGNMENT=A-race-001 XUNJI_FRONT=F-001"},
++        "tool_response": {"agentId": "race-child", "isAsync": True,
++                          "status": "async_launched"},
++    })
++    race_attempts = agent_attempts(race_run)
++    race_state = json.loads(
++        (race_run / "state" / "assignments.json").read_text(encoding="utf-8"))
++
++    delayed_run = run.parent / "delayed-stop-before-launch-run"
++    (delayed_run / "state").mkdir(parents=True)
++    delayed_transcript = run.parent / "delayed-stop-before-launch-transcript.jsonl"
++    _write_transcript(delayed_transcript, "delayed-launch", "delayed-child")
++    (delayed_run / "state" / "assignments.json").write_text(json.dumps({"assignments": [
++        {"agent": "A-delayed-001", "front": "F-001", "status": "assigned"},
++    ]}), encoding="utf-8")
++    with mock.patch.object(time, "time", side_effect=[100.0, 105.0, 140.0]):
++        for hook in ("SubagentStart", "SubagentStop"):
++            append_hook_event(delayed_run, {
++                "hook_event_name": hook, "session_id": "delayed-session",
++                "transcript_path": str(delayed_transcript), "agent_id": "delayed-child",
++                "agent_type": "general-purpose",
++            })
++        append_hook_event(delayed_run, {
++            "hook_event_name": "PostToolUse", "session_id": "delayed-session",
++            "transcript_path": str(delayed_transcript), "tool_name": "Agent",
++            "tool_use_id": "delayed-launch",
++            "tool_input": {
++                "prompt": "XUNJI_ASSIGNMENT=A-delayed-001 XUNJI_FRONT=F-001"},
++            "tool_response": {"agentId": "delayed-child", "isAsync": True,
++                              "status": "async_launched"},
++        })
++    delayed_attempts = agent_attempts(delayed_run)
++
++    projection_error_run = run.parent / "projection-error-run"
++    (projection_error_run / "state").mkdir(parents=True)
++    projection_error_transcript = run.parent / "projection-error-transcript.jsonl"
++    _write_transcript(projection_error_transcript, "projection-error-launch")
++    (projection_error_run / "state" / "assignments.json").write_text(
++        "{broken", encoding="utf-8")
++    append_hook_event(projection_error_run, {
++        "hook_event_name": "PostToolUse", "session_id": "projection-error-session",
++        "transcript_path": str(projection_error_transcript), "tool_name": "Agent",
++        "tool_use_id": "projection-error-launch",
++        "tool_input": {"prompt": "XUNJI_ASSIGNMENT=A-error-001 XUNJI_FRONT=F-001"},
++        "tool_response": {"agentId": "projection-error-child", "isAsync": True,
++                          "status": "async_launched"},
++    })
++    projection_error = json.loads(
++        _projection_error_path(projection_error_run).read_text(encoding="utf-8"))
++    asset_error_run = run.parent / "projection-asset-error-run"
++    (asset_error_run / "state").mkdir(parents=True)
++    asset_error_transcript = run.parent / "projection-asset-error-transcript.jsonl"
++    _write_transcript(asset_error_transcript, "projection-asset-error-launch")
++    (asset_error_run / "state" / "assignments.json").write_text(json.dumps({
++        "schema": 2,
++        "assignments": [{"agent": "A-asset-error-001", "front": "F-001",
++                         "status": "assigned", "assets": ["a.example"]}],
++    }), encoding="utf-8")
++    append_hook_event(asset_error_run, {
++        "hook_event_name": "PostToolUse", "session_id": "projection-asset-error-session",
++        "transcript_path": str(asset_error_transcript), "tool_name": "Agent",
++        "tool_use_id": "projection-asset-error-launch",
++        "tool_input": {"prompt": (
++            "XUNJI_ASSIGNMENT=A-asset-error-001 XUNJI_FRONT=F-001 "
++            "XUNJI_ASSETS=b.example")},
++        "tool_response": {"agentId": "projection-asset-error-child", "isAsync": True,
++                          "status": "async_launched"},
++    })
++    asset_projection_error = json.loads(
++        _projection_error_path(asset_error_run).read_text(encoding="utf-8"))
+     checks = [
+         ("hash chain validates", not chain_errors and len(events) == 14),
+         ("two real Agent receipts satisfy fanout", agent_fanout(run)["satisfied"]),
+@@ -711,6 +1219,33 @@ def _selftest() -> int:
+         ("bare PASS cannot satisfy completion review", not weak_completion),
+         ("structured evidence-bound completion receipt passes", structured_completion),
+         ("tampered receipt chain cannot satisfy Agent fanout", not tampered_fanout["satisfied"]),
++        ("async launch receipts satisfy fanout without pretending return",
++         async_running_fanout["satisfied"]
++         and set(async_running_fanout["running"]) == {"A-async-001", "A-async-002"}
++         and async_running_fanout["returned"] == []),
++        ("running async Agents do not create post-return disposition deadlock",
++         async_running_disposition["disposition_satisfied"]),
++        ("async launch projects assignments to running attempts",
++         all(item.get("status") == "running" and item.get("attempts")
++             for item in async_state["assignments"])),
++        ("child target receipt is attributed to its assigned asset",
++         async_activity.get("a.example") == 1),
++        ("SubagentStop alone creates a disposition obligation",
++         not async_after_stop["disposition_satisfied"]
++         and any("A-async-001" in item for item in async_after_stop["pending"])),
++        ("returned assignment may be adjudicated while peer Agent is still running",
++         async_one_return_disposed["disposition_satisfied"]
++         and async_one_return_disposed["running"] == ["A-async-002"]),
++        ("SubagentStop recorded before launch acknowledgement still closes the attempt",
++         race_attempts and race_attempts[0]["state"] == "returned"
++         and race_state["assignments"][0]["status"] == "done"),
++        ("delayed reverse lifecycle events match by unique agent id without time window",
++         delayed_attempts and delayed_attempts[0]["state"] == "returned"),
++        ("runtime projection failure is persisted instead of swallowed",
++         projection_error.get("event_seq") == 1
++         and "cannot parse assignments.json" in projection_error.get("error", "")),
++        ("runtime projection revalidates the exact assignment asset package",
++         "assignment asset mismatch" in asset_projection_error.get("error", "")),
+         ("target denial is transcript-backed", len(denied_target) == 1),
+         ("target denial remains unresolved without a retry", len(unresolved_before) == 1),
+         ("failed identical retry does not resolve denial", len(unresolved_after_failure) == 1),

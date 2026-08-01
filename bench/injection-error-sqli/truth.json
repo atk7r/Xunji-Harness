@@ -1,0 +1,12 @@
+{
+  "name": "injection-error-sqli",
+  "run": "sample_run",
+  "note": "Synthetic injection fixture for evidence and certainty calibration.",
+  "expected_findings": [
+    {"id": "error-sqli", "markers": ["sql injection", "database error", "control"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "generic-500", "markers": ["generic 500"]}
+  ],
+  "budget": {"max_requests": 6}
+}

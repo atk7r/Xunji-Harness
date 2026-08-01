@@ -1,0 +1,44 @@
+Observed live-failure facts (read-only diagnosis)
+=================================================
+
+- Assignment: A-review-012, role=review, state=running.
+- Physical Reviewer Start: runtime seq=835, append succeeded.
+- Parent Agent tool use: call_00_Ct7UpCUMvLfGXhn22mxE7459.
+- Parent terminal: exactly one "[Request interrupted by user for tool use]".
+- Exact child sidechain: first user prompt matched the frozen Reviewer prompt.
+- Child activity: repeated hook_cancelled records for
+  SubagentStart:xunji-reviewer at the 600-second hook timeout; no assistant
+  message, tool use, tool result, Stop, or admitted terminal.
+- Parent transcript size: approximately 25 MB.
+- Root cause: append_hook_event persisted Start, then reconcile repeatedly rebuilt
+  every attempt and rescanned the large parent transcript for individual tokens.
+  The hook exceeded its foreground timeout after the immutable Start but before
+  the Reviewer model began.
+
+Isolated observed-size replay
+=============================
+
+- Runtime events: 1008.
+- Lifecycle records: 68.
+- Parent transcript: 25 MB.
+- Real owner command: `tools/workers.py delegate` with the frozen capacity.
+- Typed recovery elapsed time: 1.61 seconds under `/usr/bin/time -p`.
+- Result: A-review-012 returned to assigned with attempts=[]; one
+  xunji.interrupted-reviewer-start.v1 receipt was published.
+- Physical runtime_events.jsonl remained append-only.
+- The command then failed closed with WORK_PLAN_TRANSACTION_JOURNAL_DIVERGED
+  because the copied work-plan transaction retained its original absolute run_dir.
+  This post-recovery fixture error is expected and is not counted as delegation
+  success.
+
+First real-driver attempt (not counted as end-to-end success)
+============================================================
+
+- Session: e3cd5f1b-e42c-41cd-ad86-9162c261e7af.
+- Fixture: relocated copy of the affected live run in an isolated worktree.
+- Recovery itself succeeded and A-review-012 became assigned/no-attempt.
+- The following delegation step failed closed with
+  WORK_PLAN_TRANSACTION_JOURNAL_DIVERGED because the copied work-plan journal
+  retained the original absolute run_dir binding.
+- Disposition: fixture relocation failure. The binding was not weakened or edited.
+  A fresh path-native targetless fixture was used for the decisive driver run.

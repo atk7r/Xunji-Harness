@@ -1,0 +1,31 @@
+Source: /Users/ccj/.local/share/claude/versions/2.1.201
+Claude Code version: 2.1.201
+Local inspection method: rg -a for the embedded statusLine schema and payload constructor.
+
+Embedded statusLine schema excerpt:
+  "cwd": "string",         // Current working directory
+  "workspace": {
+    "current_dir": "string",  // Current working directory path
+    "project_dir": "string",  // Project root directory path
+    "added_dirs": ["string"]  // Directories added via /add-dir
+  }
+
+Runtime constructor excerpt, de-minified for readability:
+  return {
+    ...base,
+    cwd: current_dir,
+    model: {...},
+    workspace: {
+      current_dir: current_dir,
+      project_dir: project_root,
+      added_dirs: added_dirs,
+      ...optional_worktree,
+      ...optional_repo
+    },
+    version: "2.1.201",
+    ...
+  }
+
+Conclusion: Claude Code v2.1.201 always supplies workspace.current_dir to the
+statusLine command. Xunji can require the workspace object and return empty for
+missing/blank workspace without relying on PWD, os.getcwd(), or top-level cwd.

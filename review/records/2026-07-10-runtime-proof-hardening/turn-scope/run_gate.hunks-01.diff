@@ -1,0 +1,173 @@
+diff --git a/.claude/hooks/run_gate.py b/.claude/hooks/run_gate.py
+index f8994cd..b1c2ddb 100644
+--- a/.claude/hooks/run_gate.py
++++ b/.claude/hooks/run_gate.py
+@@ -20,2 +20,2 @@ Phase 架构:
+-  - run_gate 是【流程提醒】, 不防危害、只防遗漏, 必须 FAIL-OPEN: 自身任何异常(读不到事件 /
+-    找不到 run / check_run 报错 / 超时)都【静默放行 exit 0】, 绝不因为一个提醒器而卡死会话。
++  - run_gate 的通知路径可降级；active run 的 Agent/Cron/收口客观硬门 FAIL-CLOSED。
++    只有事件无法解析或确实没有 active run 时静默放行。
+@@ -36,0 +37 @@ import time
++from datetime import datetime, timezone
+@@ -54,0 +56,8 @@ except Exception:
++try:
++    import turn_contract as _turn_contract
++except Exception:
++    _turn_contract = None
++try:
++    import runtime_receipts as _runtime_receipts
++except Exception:
++    _runtime_receipts = None
+@@ -468,9 +477,2 @@ def _check_replay_quality(run_dir: Path) -> tuple[str | None, str]:
+-def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
+-    """Phase 5: Agent Board 强制门 — open fronts >= 4 且 barrier 多样时必须使用 Agent Board。
+-
+-    如果 frontier.md 中 open fronts >= 4 且 barrier classes 不共享(无 SharedBarrier group),
+-    则检查 state/assignments.json 或 agents/ 目录是否存在且有内容。
+-    未检测到 agent 使用 → block; 存在 shared barrier 或 open < 4 → 静默放行。
+-
+-    FAIL-OPEN: 解析失败静默放行。
+-    """
++def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str | None, str]:
++    """Require planned lanes plus two transcript-backed Agents in this execute turn."""
+@@ -479,2 +481,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
+-    except Exception:
+-        return None, ""
++    except Exception as exc:
++        return "block", f"Agent Board 状态解析器不可用，按 fail-closed 阻断: {type(exc).__name__}"
+@@ -484,2 +486,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
+-    except Exception:
+-        return None, ""
++    except Exception as exc:
++        return "block", f"Agent Board 状态解析失败，按 fail-closed 阻断: {type(exc).__name__}"
+@@ -490,6 +492,7 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
+-    decisions = run_dir / "decisions.md"
+-    try:
+-        dtext = decisions.read_text(encoding="utf-8", errors="replace") if decisions.exists() else ""
+-    except Exception:
+-        dtext = ""
+-    if re.search(r"(?im)^\s*-\s*Agent Board (?:budget reason|fanout override)\s*[:：]\s*\S", dtext):
++    if contract is None and _turn_contract is not None:
++        try:
++            contract = _turn_contract.load_contract(run_dir)
++        except Exception:
++            contract = {}
++    contract = contract or {}
++    if contract.get("fanout_override"):
+@@ -521,11 +524,22 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
+-    started = []
+-    for a in assignments:
+-        status = str(a.get("status") or "").strip().lower()
+-        try:
+-            hb = int(a.get("heartbeat_count") or 0)
+-        except Exception:
+-            hb = 0
+-        if hb > 0 or status in {"running", "working", "done", "merged", "blocked", "failed", "abandoned"}:
+-            started.append(str(a.get("agent") or "?"))
+-    if len(started) < min(2, len(assignments)):
+-        problems.append("assignment 刚创建但未记录 heartbeat/start; spawn 后需 workers.py heartbeat --status running")
++    receipt_state = _runtime_receipts.agent_fanout(
++        run_dir,
++        session_id=str(contract.get("session_id") or ""),
++        since=float(contract.get("updated_at") or 0.0),
++    ) if _runtime_receipts is not None else {
++        "satisfied": False, "assignments": [], "fronts": [],
++    }
++    if not receipt_state.get("satisfied"):
++        problems.append(
++            "当前执行回合缺少两个真实 Agent PostToolUse 回执（必须带 transcript 中存在的 tool_use_id，"
++            "并覆盖不同 assignment/front）；手写 heartbeat/status 不算")
++    elif _runtime_receipts is not None:
++        disposition = _runtime_receipts.agent_disposition(
++            run_dir,
++            session_id=str(contract.get("session_id") or ""),
++            since=float(contract.get("updated_at") or 0.0),
++        )
++        if not disposition.get("disposition_satisfied"):
++            problems.append(
++                "本轮 Agent 结果尚未逐条 merge/adjudicate: "
++                + "; ".join(disposition.get("pending", [])[:5])
++                + "；done/展示摘要不算落实，必须用 workers.py finish 写 canonical E/F/D/Reason 锚点")
+@@ -537,2 +551,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:
+-            + "。请用 workers.py assign 分配 >=2 条不重叠 front lane，并在 Agent 启动时记录 heartbeat；"
+-              "若确因预算/外部依赖不能 fanout，在 decisions.md 写 `Agent Board budget reason:`。"
++            + "。请用 workers.py assign 分配 >=2 条不重叠 front lane，并真实调用 Agent；"
++              "只有操作者当前 prompt 明确 `允许串行` 才可形成一次性 override。"
+@@ -716 +730 @@ def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -
+-def _has_completed_independent_review(review_text: str) -> bool:
++def _has_completed_independent_review(review_text: str, run_dir: Path | None = None) -> bool:
+@@ -719 +733 @@ def _has_completed_independent_review(review_text: str) -> bool:
+-            return bool(_cr.has_completed_independent_review(review_text))
++            return bool(_cr.has_completed_independent_review(review_text, run_dir))
+@@ -727 +741 @@ def _has_completed_independent_review(review_text: str) -> bool:
+-def _has_codex_completion_review(decisions_text: str) -> bool:
++def _has_codex_completion_review(decisions_text: str, run_dir: Path | None = None) -> bool:
+@@ -730 +744 @@ def _has_codex_completion_review(decisions_text: str) -> bool:
+-            return bool(_cr.has_codex_completion_review(decisions_text))
++            return bool(_cr.has_codex_completion_review(decisions_text, run_dir))
+@@ -736 +750,2 @@ def _has_codex_completion_review(decisions_text: str) -> bool:
+-def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:
++def _normal_closure_prerequisite(review_text: str, decisions_text: str,
++                                 run_dir: Path | None = None) -> str:
+@@ -738 +753 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:
+-    if not _has_completed_independent_review(review_text):
++    if not _has_completed_independent_review(review_text, run_dir):
+@@ -744 +759 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:
+-    if not _has_codex_completion_review(decisions_text):
++    if not _has_codex_completion_review(decisions_text, run_dir):
+@@ -763,0 +779 @@ def main() -> None:
++    active_run = None
+@@ -766,0 +783,27 @@ def main() -> None:
++        turn_mode = "EXECUTE"
++        contract: dict = {}
++        if active_run is not None and _turn_contract is not None:
++            try:
++                contract = _turn_contract.load_contract(
++                    active_run, session_id=str(event.get("session_id") or ""))
++                turn_mode = str(contract.get("mode") or "EXECUTE")
++            except Exception:
++                turn_mode = "EXECUTE"
++        if turn_mode == "EXPLAIN_ONLY":
++            sys.exit(0)
++        if turn_mode == "PAUSED_BY_OPERATOR":
++            if _runtime_receipts is None:
++                print(json.dumps({"decision": "block", "reason":
++                    "[暂停事务] runtime_receipts 不可用，无法确认 Cron 已停止。"}, ensure_ascii=False))
++                sys.exit(0)
++            cron_ok, cron_note = _runtime_receipts.cron_quiescent(
++                active_run,
++                session_id=str(contract.get("session_id") or ""),
++                since=float(contract.get("updated_at") or 0.0),
++            )
++            if not cron_ok:
++                print(json.dumps({"decision": "block", "reason":
++                    "[暂停事务] 保留 open fronts，不得写 completion marker。先执行 CronList，"
++                    "如有本 run 任务则 CronDelete，再次 CronList 确认消失。" + cron_note},
++                    ensure_ascii=False))
++            sys.exit(0)
+@@ -810 +853 @@ def main() -> None:
+-            ab_mode, ab_msg = _check_agent_board(active_run)
++            ab_mode, ab_msg = _check_agent_board(active_run, contract)
+@@ -832 +875 @@ def main() -> None:
+-                prerequisite_block = _normal_closure_prerequisite(rv, dc_text)
++                prerequisite_block = _normal_closure_prerequisite(rv, dc_text, run_dir)
+@@ -839,2 +882,7 @@ def main() -> None:
+-            except Exception:
+-                pass  # FAIL-OPEN: decisions.md / review.md 读失败放行
++            except Exception as exc:
++                print(json.dumps({
++                    "decision": "block",
++                    "reason": "[Normal 收口 fail-closed] 无法验证独立复审/CompletionReview："
++                              + type(exc).__name__,
++                }, ensure_ascii=False))
++                sys.exit(0)
+@@ -857,2 +905,7 @@ def main() -> None:
+-    except Exception:
+-        # FAIL-OPEN 兜底: 提醒器自身的任何故障都不得卡死会话。
++    except Exception as exc:
++        if active_run is not None:
++            print(json.dumps({
++                "decision": "block",
++                "reason": "[运行流程 fail-closed] active run 的 run_gate 内部异常："
++                          + type(exc).__name__ + "。先修 hook/selftest，再继续执行。",
++            }, ensure_ascii=False))

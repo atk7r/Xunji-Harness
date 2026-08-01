@@ -1,0 +1,32 @@
+ok   检出: sqli(确认1.0 含 markers) 命中
+ok   校准: sqli cert 1.0>=0.8 calibrated
+ok   漏检: xss 只 0.5 未确认 -> 不算检出
+ok   检出率 1/2
+ok   误报: 'login page present' 在 E-002 但 E-002 是纯 Refutes negative -> 不算确认正向, 不应误报
+ok   _is_clean: 有漏检 -> 非 clean(退出码1)
+ok   全检出+校准+零误报 -> clean(退出码0)
+ok   欠证: xss 0.9<1.0 -> detected 但非 calibrated
+ok   过程: knowledge_match 留痕 -> fired
+ok   过程: fetch_assets 无痕 -> not fired
+ok   过程门: must 断言未全触发 -> 非 clean(尽管全检出)
+ok   过程门: optional 未触发不破 clean
+ok   纯负向 fixture: 无 expected_findings 且零误报 -> clean
+ok   时间线: time-to-first-evidence 从 events.jsonl 计算
+ok   时间线: state/events.jsonl 优先
+ok   时间线: legacy events.jsonl 标记 fallback
+ok   收口: 无正向发现 + Independent Review + markers -> clean
+ok   汇总: 2 fixture clean 且 closure 计数正确
+ok   协作: high-value front 被合适 role 覆盖
+ok   协作: candidate/refutation-to-finding conversion 记录
+ok   协作: resolved conflict 不破门
+ok   协作: request budget by agent 记录且未超 cap
+ok   协作: time-to-first-evidence by mode 记录
+ok   协作: false-positive suppression 记录 pure negative confirmed event
+ok   协作门: checks 全绿 -> clean
+ok   协作门: high-value miss / unresolved conflict / over cap -> 非 clean
+ok   协作门: 要求 per-agent budget 但缺 events -> skipped 且非 clean
+ok   协作汇总: failed checks / missed high / unresolved conflict 可见
+ok   compare: unchanged metrics exit 0
+ok   compare: worse metrics exit 1
+ok   checked-in ultra-agent-collab fixture stays clean
+bench selftest passed

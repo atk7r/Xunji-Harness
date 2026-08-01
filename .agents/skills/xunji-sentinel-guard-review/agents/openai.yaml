@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Sentinel Guard Review"
+  short_description: "Review Xunji safety boundary code"
+  default_prompt: "Use $xunji-sentinel-guard-review to maintain or review Xunji hook, guard, or sentinel changes."

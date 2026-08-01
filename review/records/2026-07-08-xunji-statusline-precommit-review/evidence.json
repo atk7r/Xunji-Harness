@@ -1,0 +1,243 @@
+{
+  "total": 6,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004",
+    "E-005",
+    "E-006"
+  ],
+  "confirmed_findings": [],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/patches/tools__xunji_statusline_py.patch.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/patches/tools__xunji_statusline_py.patch.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002",
+        "F-004"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/patches/_claude__settings_json.patch.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/patches/_claude__settings_json.patch.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/patches/tools__loop_bootstrap_py.patch.txt",
+        "evidence/patches/docs__templates__loop_prompt_md.patch.txt",
+        "evidence/patches/_gitignore.patch.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/patches/tools__loop_bootstrap_py.patch.txt",
+        "evidence/patches/docs__templates__loop_prompt_md.patch.txt",
+        "evidence/patches/_gitignore.patch.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-002",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "repository diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "repository diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/patches/CLAUDE_md.patch.txt",
+        "evidence/patches/_claude__skills__xunji-run-lifecycle__SKILL_md.patch.txt",
+        "evidence/patches/docs__WORKFLOW_md.patch.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/patches/CLAUDE_md.patch.txt",
+        "evidence/patches/_claude__skills__xunji-run-lifecycle__SKILL_md.patch.txt",
+        "evidence/patches/docs__WORKFLOW_md.patch.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local command output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local command output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/patches/tools__selftest_all_py.patch.txt",
+        "evidence/test-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/patches/tools__selftest_all_py.patch.txt",
+        "evidence/test-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-004"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-006",
+      "head": "## E-006",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "official documentation",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "official documentation",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/official-docs/claude-code-statusline-excerpt.txt",
+        "evidence/official-docs/claude-code-settings-excerpt.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/official-docs/claude-code-statusline-excerpt.txt",
+        "evidence/official-docs/claude-code-settings-excerpt.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

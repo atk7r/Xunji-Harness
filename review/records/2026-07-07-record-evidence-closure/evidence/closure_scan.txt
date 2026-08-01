@@ -1,0 +1,2 @@
+all_doc_python_commands 160 missing 0
+all_selftests 42 not_registered 0

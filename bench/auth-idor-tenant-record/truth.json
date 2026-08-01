@@ -1,0 +1,12 @@
+{
+  "name": "auth-idor-tenant-record",
+  "run": "sample_run",
+  "note": "Synthetic tenant isolation fixture.",
+  "expected_findings": [
+    {"id": "tenant-record-idor", "markers": ["idor", "tenant", "record_id"], "min_certainty": 0.8}
+  ],
+  "must_not_flag": [
+    {"id": "empty-list", "markers": ["empty list"]}
+  ],
+  "budget": {"max_requests": 10}
+}

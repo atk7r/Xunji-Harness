@@ -1,0 +1,50 @@
+{
+  "total": 1,
+  "confirmed": [
+    "E-001"
+  ],
+  "confirmed_findings": [
+    "E-001"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local tool selftests and run compatibility smoke tests",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local tool selftests and run compatibility smoke tests",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/test-summary.txt",
+        "evidence/diff-summary.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/test-summary.txt",
+        "evidence/diff-summary.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001",
+        "F-002"
+      ],
+      "refutes": [],
+      "refutes_any": true,
+      "superseded": false
+    }
+  ]
+}

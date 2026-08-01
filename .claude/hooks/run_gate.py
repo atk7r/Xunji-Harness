@@ -1,0 +1,1996 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Stop hook: 收口闸门提醒器 —— 把"收口"从聊天里的口头宣布拉回 run 文件过闸门。
+
+背景(hamastar run 教训): check_run 是 driver 主动跑的结构闸门; 我那次在【聊天里】宣布
+"测完了/adequately probed"、却没跑 check_run, 工具链整段没启动 → 覆盖台账缺建 + 假证据
+全部静默放行。根因: 闸门被动, 只在 driver 主动调用且 report 写了收口措辞时才硬审。
+
+本 hook 在 Claude 每次停止响应时触发: 若存在【刚刚改动过的、且已写成实质终版报告的】run,
+  就替 driver 跑一遍 check_run; 首次没过返回 decision=block, 把硬门结果怼回 driver 面前,
+逼它去建覆盖台账/补真产物/派独立复审, 而不是就此收工。
+
+Phase 架构:
+  Phase 3 — 漂移提醒(D1: notify, 从 session_state 读取, 不再使用 drift_block.json)
+  Phase 4 — 证据严重度闸门(block: 无数据 HIGH/CRITICAL → 要求补证据)
+  Phase 2 — session 超时检测(block: 超时+漂移信号 → 要求重启会话)
+
+与 safety_gate 的根本区别(复审重点):
+  - safety_gate 拦【不可逆危害】, 必须 FAIL-CLOSED(读不到事件就拒绝)。
+  - run_gate 的首次 Agent/Cron/收口客观硬门 FAIL-CLOSED；Claude Code 标记
+    stop_hook_active 的重入调用必须幂等放行，canonical run 状态不会因此变成完成。
+    只有事件无法解析或确实没有 active run 时静默放行。
+防循环: 首次 Stop 保持硬拦；Claude Code 因任一 Stop hook 发起重入后，所有 Stop hook
+必须返回成功，否则客户端最终会在阻断上限后强制结束。重入放行只结束当前聊天回合，
+不写 completion marker、不改变 check_run 结果，也不关闭任何 front。
+
+Protocol: 读 stdin 的 Stop 事件; 仅在需要时往 stdout 写 {"decision":"block","reason":...}
+(拦) 或 {"systemMessage":...}(提示)。其余 exit 0 静默。纯 stdlib。
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
+ACTIVE_WINDOW_SEC = 900   # 调用兼容参数；run 选择只认显式 pointer，不认 mtime
+DRIFT_TIMEOUT_WINDOW_SEC = 6 * 60 * 60   # 调用兼容参数；漂移年龄由 session_state 自身时间戳判断
+SESSION_TIMEOUT_SEC = 30 * 60   # Phase 2: 超过 30 分钟未更新 + 有漂移信号 → 阻断
+
+sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
+try:
+    import output_gate as _output_gate
+except Exception:
+    _output_gate = None
+
+sys.path.insert(0, str(ROOT / "tools"))
+try:
+    import check_run as _cr   # 复用收口判定, 与 check_run 的 closure gate 一致
+except Exception:
+    _cr = None
+
+try:
+    import loop_state as _loop_state
+except Exception:
+    _loop_state = None
+try:
+    import turn_contract as _turn_contract
+except Exception:
+    _turn_contract = None
+try:
+    import runtime_receipts as _runtime_receipts
+except Exception:
+    _runtime_receipts = None
+try:
+    import work_plan as _work_plan
+except Exception:
+    _work_plan = None
+try:
+    import run_model as _run_model
+except Exception:
+    _run_model = None
+try:
+    import agent_settlement as _agent_settlement
+except Exception:
+    _agent_settlement = None
+try:
+    import loop_journal as _loop_journal
+except Exception:
+    _loop_journal = None
+
+try:
+    from anti_drift import (
+        find_active_run as _shared_find_active_run,
+        is_dev_mode as _is_dev_mode,
+        is_normal_mode as _is_normal_mode,
+        _valid_ts,
+        SessionStateManager,
+    )
+except Exception:
+    _shared_find_active_run = None
+
+    def _is_dev_mode() -> bool:
+        return False
+
+    def _is_normal_mode() -> bool:
+        return False
+
+    def _valid_ts(value, now: float) -> float:
+        try:
+            ts = float(value)
+        except Exception:
+            return 0.0
+        if ts < 0 or ts > now + 60:
+            return 0.0
+        return ts
+
+    class SessionStateManager:
+        @staticmethod
+        def path(run_dir, *, for_write=False):
+            state_path = Path(run_dir) / "state" / "session_state.json"
+            legacy_path = Path(run_dir) / "session_state.json"
+            if for_write:
+                return state_path
+            if state_path.exists() or not legacy_path.exists():
+                return state_path
+            return legacy_path
+        @staticmethod
+        def load(run_dir):
+            return {}
+        @staticmethod
+        def save(run_dir, state):
+            pass
+        @staticmethod
+        def get_drift_flags(run_dir):
+            return []
+        @staticmethod
+        def reset_if_stale(run_dir, hard_block_active=False):
+            return {}
+
+
+# ---- Field boundary constants (kept in sync with evidence format) ----
+_RESULT_TERMINATORS = (
+    "- Time:", "- Source:", "- Certainty:", "- Severity:", "- Next:",
+    "- Caused", "- Alternative:", "- Supports:", "- Refutes:",
+    "- Replicated:", "- Artifacts:",
+)
+_SUBFIELDS = ("Observed", "DataObtained", "Mechanism", "SeverityBasis")
+
+
+def find_active_run(
+    runs_root: Path,
+    within_sec: int = ACTIVE_WINDOW_SEC,
+    *,
+    active_pointer: Path | None = None,
+) -> Path | None:
+    """Return only the explicitly selected run; never infer authority by mtime."""
+    if _shared_find_active_run is not None:
+        try:
+            return _shared_find_active_run(
+                runs_root, within_sec=within_sec, active_pointer=active_pointer)
+        except Exception:
+            return None
+    # Import failure is fail-open. Guessing a recent run can bind another run's
+    # Stop gate and is less safe than returning no active run.
+    return None
+
+
+def report_is_final(run_dir: Path) -> bool:
+    """复用 check_run._report_is_final: report.md 引用了已确认(>=0.8)发现 = 实质终版报告。
+    check_run 不可用时返回 False(fail-open: 拿不准就不介入)。"""
+    if _cr is None:
+        return False
+    try:
+        return bool(_cr._report_is_final(run_dir))
+    except Exception:
+        return False
+
+
+def closure_gate_active(run_dir: Path) -> bool:
+    """复用 check_run._closure_gate_active, 避免 hook 与手动 check_run 的收口判定分裂。"""
+    if _cr is None:
+        return report_is_final(run_dir)
+    try:
+        return bool(_cr._closure_gate_active(run_dir))
+    except Exception:
+        return report_is_final(run_dir)
+
+
+def gate_skipped(run_dir: Path) -> bool:
+    """操作者显式豁免: report.md 含 `run-gate: skip` 标记 = 已知此 run 不追求收尾(教学样本 /
+    egress-deferred 中止), Stop hook 不再主动提醒。**只让提醒器闭嘴, 不豁免 check_run 本身**——
+    手动跑 check_run 仍如实 fail, 故不构成绕过硬门的后门(防"标注一下就过闸门"的滥用)。"""
+    try:
+        return "run-gate: skip" in (run_dir / "report.md").read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return False
+
+
+def _check_session_timeout(
+    runs_root: Path,
+    active_run: Path | None = None,
+) -> tuple[str | None, str]:
+    """Phase 2 fail-safe: check ONLY the active run's session_state.json for timeout + drift signals.
+    Fixes cross-run contamination — stale session no longer blocks other runs.
+    Uses drift_started_at when available so output_gate can refresh state before run_gate
+    without erasing the age of an unresolved drift streak."""
+    active_run = active_run or find_active_run(runs_root, within_sec=DRIFT_TIMEOUT_WINDOW_SEC)
+    if active_run is None:
+        return None, ""
+    try:
+        sf = SessionStateManager.path(active_run)
+    except Exception:
+        sf = active_run / "state" / "session_state.json"
+        if not sf.exists():
+            sf = active_run / "session_state.json"
+    if not sf.exists():
+        return None, ""
+    now = time.time()
+    try:
+        sf_mtime = sf.stat().st_mtime
+        state = json.loads(sf.read_text(encoding="utf-8"))
+        drift_flags = state.get("drift_flags", [])
+        if not isinstance(drift_flags, list) or not drift_flags:
+            return None, ""
+        drift_started_at = _valid_ts(state.get("drift_started_at"), now)
+        updated_at = _valid_ts(state.get("updated_at"), now)
+        last_touch = drift_started_at or max(updated_at, sf_mtime)
+        timeout_sec = SESSION_TIMEOUT_SEC
+        timeout_min = timeout_sec // 60
+        if now - last_touch <= timeout_sec:
+            return None, ""
+        flags_str = ", ".join(str(f) for f in drift_flags)
+        return "block", (
+            f"[会话超时] 当前 active run runs/{active_run.name} 的 session_state.json "
+            f"漂移信号({flags_str})已持续超过{timeout_min}分钟。"
+            f"请写 session_handoff.md 后重启新会话。"
+        )
+    except Exception:
+        return None, ""
+    return None, ""
+
+
+DRIFT_HARD_FLAGS = {"protocol_violation", "option_list"}
+DRIFT_BLOCK_THRESHOLD = 2
+DRIFT_HANDOFF_THRESHOLD = 4
+
+
+def _check_drift_session(
+    active_run: Path | None = None,
+) -> tuple[str | None, str]:
+    """Phase 3: check fresh session drift state.
+
+    Low-count drift remains advisory. Repeated protocol/autonomy drift becomes
+    a hard gate before the older 30-minute timeout backstop.
+    """
+    if active_run is None:
+        return None, ""
+    drift_flags = SessionStateManager.get_drift_flags(active_run)
+    if not drift_flags:
+        return None, ""
+    state = SessionStateManager.load(active_run)
+    if not state:
+        return None, ""
+    # Only notify if session is fresh (updated within timeout window)
+    now = time.time()
+    updated_at = _valid_ts(state.get("updated_at"), now)
+    timeout_sec = SESSION_TIMEOUT_SEC
+    if updated_at and now - updated_at > timeout_sec:
+        return None, ""  # stale = Phase 2 handles it
+    try:
+        drift_count = int(state.get("drift_block_count", 1) or 1)
+    except Exception:
+        drift_count = 1
+    flags_str = ", ".join(str(f) for f in drift_flags)
+    hard_flags = [f for f in drift_flags if f in DRIFT_HARD_FLAGS]
+    if hard_flags and drift_count >= DRIFT_HANDOFF_THRESHOLD:
+        return "block", (
+            f"[漂移硬拦 Phase 3] 检测到连续 {drift_count} 次协议/自主性漂移({flags_str})。"
+            f"请写 session_handoff.md 后重启新会话。"
+        )
+    if hard_flags and drift_count >= DRIFT_BLOCK_THRESHOLD:
+        return "block", (
+            f"[漂移硬拦 Phase 3] 检测到连续 {drift_count} 次协议/自主性漂移({flags_str})。"
+            f"请 Read CLAUDE.md / WORKFLOW.md / frontier.md, 修正输出为「下一行动:」或「BLOCKED:」后继续。"
+        )
+    msg = (
+        f"[漂移提醒 Phase 3] 检测到漂移信号({flags_str}, x{drift_count})。"
+        f"请 Read CLAUDE.md / WORKFLOW.md / frontier.md 完成自检后继续。"
+    )
+    return "notify", msg
+
+
+def _check_evidence_severity(run_dir: Path) -> tuple[str | None, str]:
+    """Phase 4: 证据严重度闸门 — 结构化字段强制校验。
+
+    要求 Result 段按 Observed / DataObtained / Mechanism / SeverityBasis 四个子字段
+    输出, 禁止将推测与事实混在散文段落中。这是 E-013 事件的结构性修复:
+    散文格式让推测词("若获得凭据…")隐藏在事实描述中, 无法被词表扫描拦截。
+
+    规则(从硬到软):
+    1. Result 段缺少 Observed / DataObtained / Mechanism / SeverityBasis → BLOCK
+    2. Observed 含推测词 → BLOCK
+    3. DataObtained:none + Severity: HIGH/CRITICAL → BLOCK
+    4. SeverityBasis 引用 DataObtained:none → BLOCK
+
+    FAIL-OPEN: 解析失败静默放行。
+    """
+    evidence_file = run_dir / "evidence.md"
+    if not evidence_file.exists():
+        return None, ""
+
+    try:
+        text = evidence_file.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None, ""
+
+    REQUIRED_SUBFIELDS = ["Observed", "DataObtained", "Mechanism", "SeverityBasis"]
+    SPECULATION_IN_OBSERVED = [
+        "若获得凭据", "一旦拿到账号", "若成功利用", "可被利用", "降低攻击成本",
+    ]
+
+    warns = []   # 格式建议, 不阻塞
+    blocks = []  # 严重度欺诈, 阻塞
+    sections = text.split("\n## E-")
+    for sec in sections:
+        if not sec.strip():
+            continue
+
+        eid = sec.strip().split("\n")[0].strip() if sec.strip() else "?"
+        if not eid.startswith("E-"):
+            eid = "E-?" + eid[:30]
+
+        # 检查是否有 >= 0.8 的 certainty
+        has_certainty_08 = False
+        for line in sec.split("\n"):
+            s = line.strip()
+            if s.startswith("- Certainty:") and "0.8" in s:
+                has_certainty_08 = True
+                break
+            if s.startswith("- Certainty:") and ("0.9" in s or "1.0" in s):
+                has_certainty_08 = True
+                break
+        if not has_certainty_08:
+            continue  # only check confirmed entries
+
+        # 提取 severity
+        sev_line = _extract_field(sec, "Severity")
+        sev_upper = sev_line.upper() if sev_line else ""
+        is_high_crit = "HIGH" in sev_upper or "CRITICAL" in sev_upper
+
+        # 提取 Result 段完整文本
+        result_text = _extract_result_block(sec)
+        if not result_text:
+            if is_high_crit:
+                blocks.append(f"{eid}: Result 段缺失或为空但 Severity={sev_line.strip()} — 无证据不得定 HIGH/CRITICAL")
+            continue
+
+        # === 格式检查: 缺少子字段 → 仅对 HIGH/CRITICAL 做关键词兜底检查 ===
+        missing_fields = []
+        for field in REQUIRED_SUBFIELDS:
+            if f"- {field}:" not in result_text:
+                missing_fields.append(field)
+        if missing_fields:
+            # 旧格式条目: 静默跳过(不产生噪音)。若为 HIGH/CRITICAL, 用关键词做兜底检查
+            if is_high_crit:
+                _check_old_format_severity(eid, result_text, sev_line, blocks)
+            continue  # 老格式无法解析子字段, 跳过结构化深度检查
+
+        # 提取子字段值
+        observed = _extract_subfield(result_text, "Observed")
+        data_obtained = _extract_subfield(result_text, "DataObtained")
+        mechanism = _extract_subfield(result_text, "Mechanism")
+        severity_basis = _extract_subfield(result_text, "SeverityBasis")
+
+        # === Observed 推测词 → BLOCK (所有 >=0.8 条目) ===
+        spec_in_obs = [w for w in SPECULATION_IN_OBSERVED if w in observed]
+        if spec_in_obs:
+            blocks.append(
+                f"{eid}: Observed 含推测词({', '.join(spec_in_obs)})。"
+                f"Observed 只能描述事实, 禁止推测。"
+            )
+
+        # === 严重度检查 (仅 HIGH/CRITICAL) ===
+        if not is_high_crit:
+            continue
+
+        # DataObtained:none + HIGH/CRITICAL → BLOCK
+        dobj_stripped = data_obtained.strip().lower()
+        if dobj_stripped.startswith("none") or dobj_stripped == "none":
+            blocks.append(
+                f"{eid}: DataObtained=none 但 Severity={sev_line.strip()}。"
+                f"零数据 → 最高 MEDIUM。"
+            )
+
+        # SeverityBasis 引用 DataObtained:none → BLOCK
+        if "dataobtained:none" in severity_basis.lower() or "dataobtained: none" in severity_basis.lower():
+            blocks.append(
+                f"{eid}: SeverityBasis 引用了 DataObtained:none。"
+                f"不得以'没有数据'作为定级依据。"
+            )
+
+        # Mechanism:none + HIGH/CRITICAL → BLOCK
+        mech_stripped = mechanism.strip().lower()
+        if mech_stripped.startswith("none") or mech_stripped == "none":
+            blocks.append(
+                f"{eid}: Mechanism=none 但 Severity={sev_line.strip()}。"
+                f"无利用机制 → 最高 MEDIUM。"
+            )
+
+        # CodexReview is a legacy storage field; the review owner selects the backend.
+        if "- CodexReview:" not in result_text:
+            blocks.append(
+                f"{eid}: Severity={sev_line.strip()} 但缺少 CodexReview 字段。"
+                f"HIGH/CRITICAL 定级前请加载 xunji-reviewops，按其当前 fresh-context route 审查本条目，"
+                f"并将有界裁决写入 legacy CodexReview 字段；字段名不代表 backend。"
+            )
+
+        # CodexCriticalReview: CRITICAL 条目在 NORMAL 模式必须经过暂停前复审
+        is_critical = "CRITICAL" in sev_upper
+        if is_critical and _is_normal_mode() and "- CodexCriticalReview:" not in result_text:
+            blocks.append(
+                f"{eid}: Severity=CRITICAL 但缺少 CodexCriticalReview 字段。"
+                f"NORMAL 模式暂停 #1 前请加载 xunji-reviewops，按其 current fresh-context route "
+                f"独立复审 CRITICAL 定级，并将裁决写入 legacy CodexCriticalReview 字段；"
+                f"字段名不代表 backend。"
+            )
+
+    # 组装输出: blocks 阻止, warns 仅提示
+    if not blocks and not warns:
+        return None, ""
+
+    parts = []
+    if blocks:
+        parts.append("[证据严重度闸门] BLOCK — 以下条目严重度与证据不匹配:\n\n"
+                     + "\n".join(f"  • {b}" for b in blocks))
+    if warns:
+        parts.append("[证据严重度闸门] WARN — 格式建议:\n\n"
+                     + "\n".join(f"  • {w}" for w in warns))
+
+    msg = "\n\n".join(parts)
+    msg += ("\n\n新格式: - Result:\n"
+            "    - Observed: <仅事实>\n"
+            "    - DataObtained: <none | N条-TYPE>\n"
+            "    - Mechanism: <利用机制 | none>\n"
+            "    - SeverityBasis: <从Observed推导>")
+
+    # 有 blocks → block; 只有 warns → 仅提示(不阻塞)
+    mode = "block" if blocks else "notify"
+    return mode, msg
+
+
+def _check_replay_quality(run_dir: Path) -> tuple[str | None, str]:
+    """Phase 6: 证据回放质量门 — certainty >= 0.8 的条目必须引用真实存在的 .replay.json。
+
+    codex 复审反复发现: driver 用 Python script 确认了行为, 但 probe.py --save 没录 replay。
+    导致声称 certainty 0.8 的 confirmed finding 在 codex 审计时无法复核。
+
+    规则: 对每条 certainty >= 0.8 的条目, 检查 Artifacts 字段是否引用了 run 目录下真实存在
+    的 .replay.json 文件。缺失的条目 → 持续 block, 要求补 artifact 或降级。
+
+    FAIL-OPEN: 解析失败/evidence.md 不存在静默放行。
+    """
+    try:
+        from evidence_parse import parse_evidence
+    except Exception:
+        return None, ""
+
+    try:
+        recs = parse_evidence(run_dir)
+    except Exception:
+        return None, ""
+
+    missing = []
+    for rec in recs:
+        if not (rec.get("confirmed") and str(rec.get("id", "")).startswith("E-")):
+            continue
+        present_replay = [
+            a for a in rec.get("artifacts_present", [])
+            if str(a).lower().endswith(".replay.json")
+        ]
+        if not present_replay:
+            missing.append(str(rec.get("id", "E-?")))
+
+    if not missing:
+        return None, ""
+
+    msg = (
+        "[证据回放质量门] 以下 confirmed 条目缺少 .replay.json 产物:\n\n"
+        + "\n".join(f"  • {e}" for e in missing)
+        + "\n\n用 probe.py --save 补录 replay, 或在 evidence.md 中将 Certainty 降级到 0.5 "
+          "并标注原因(codex BLOCKER: artifact 采集有时序问题)。"
+    )
+    return "block", msg
+
+
+def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str | None, str]:
+    """Require current plan closure, then retain the legacy breadth safety net.
+
+    A committed SERIAL/PARALLEL plan is an explicit control-plane obligation even
+    for one front.  The historical >=4-front rule remains a mandatory breadth
+    fallback, but can no longer make unassigned or unreviewed plan lanes vanish.
+    """
+    plan_path = run_dir / "state" / "work_plan.json"
+    if plan_path.exists():
+        if _work_plan is None or _run_model is None or _loop_journal is None:
+            return "block", "Agent plan 状态解析器不可用，按 fail-closed 阻断。"
+        try:
+            raw_plan = json.loads(plan_path.read_text(
+                encoding="utf-8", errors="strict"))
+            plan = _work_plan.validate_plan(raw_plan)
+            projection = _run_model.plan_cycle_projection(run_dir, plan=plan)
+            cycle_ended = _loop_journal.plan_cycle_ended(
+                _loop_journal.load_events(run_dir),
+                str(plan.get("plan_digest") or ""),
+            )
+        except Exception as exc:
+            return "block", (
+                "Agent plan 无法验证，不能在派发/回执债务未知时结束回合："
+                f"{type(exc).__name__}: {exc}"
+            )
+        # A plan is an open Stop obligation until its exact typed cycle_end is
+        # present.  This includes ROOT_DIRECT: it must never bypass the plan
+        # ledger merely because there are no Agent lanes to count.
+        if not cycle_ended:
+            pending_lanes = [
+                f"{item.get('lane_id') or '(missing)'}:"
+                f"{item.get('runtime_state') or 'invalid'}"
+                for item in projection.get("lane_states", [])
+                if isinstance(item, dict) and item.get("complete") is not True
+            ]
+            debt = projection.get("debt") \
+                if isinstance(projection.get("debt"), dict) else {}
+            merge_debt = [str(item) for item in debt.get("merge", [])]
+            review_debt = [str(item) for item in debt.get("review", [])]
+            details = ["cycle_end=missing"]
+            if pending_lanes:
+                details.append("lane=" + ", ".join(pending_lanes[:8]))
+            if merge_debt:
+                details.append("merge=" + ", ".join(merge_debt[:8]))
+            if review_debt:
+                details.append("review=" + ", ".join(review_debt[:8]))
+            mode = str(plan.get("execution_mode") or "")
+            if mode == "ROOT_DIRECT":
+                next_step = (
+                    "补齐 typed ROOT_DIRECT action receipt 后由 loop_journal end "
+                    "推导 cycle_end"
+                )
+            else:
+                recovery = _agent_settlement.stale_recovery_action(
+                    run_dir, plan, projection=projection,
+                ) if _agent_settlement is not None else {}
+                recovery_action = str(recovery.get("action") or "")
+                recovery_items = recovery.get("items") \
+                    if isinstance(recovery.get("items"), list) else []
+                recovery_first = recovery_items[0] \
+                    if recovery_items and isinstance(recovery_items[0], dict) \
+                    else {}
+                reviewer = str(recovery_first.get("assignment") or "")
+                if recovery_action == getattr(
+                        _agent_settlement,
+                        "RECOVERY_REPLAY_ASSIGNED_REVIEWER", ""):
+                    next_step = (
+                        f"Reviewer {reviewer} 已 assigned/no-attempt；重跑 exact "
+                        "workers.py delegate --limit 1 幂等取回 durable launch "
+                        "contract，真实完成 Reviewer 与 Root merge，再由 "
+                        "loop_journal end 推导 cycle_end"
+                    )
+                elif recovery_action == getattr(
+                        _agent_settlement, "RECOVERY_HARD_INVALID", ""):
+                    next_step = (
+                        "Reviewer settlement identity 无法安全分类；修复 owner "
+                        "invariant，禁止取消 Reviewer、删除 ledger/journal 或绕过 "
+                        "assignment debt replan"
+                    )
+                else:
+                    next_step = (
+                        "按 dependency 继续 workers.py delegate，完成真实 return、"
+                        "Reviewer、Root merge，再由 loop_journal end 推导 cycle_end"
+                    )
+            return "block", (
+                "[Agent plan debt] 当前 work plan 尚无有效 typed cycle_end；"
+                + "；".join(details)
+                + "。" + next_step + "；done/PASS 文本不能清债。"
+            )
+
+    try:
+        from anti_drift import _check_agent_board_needed as _ab_needed
+    except Exception as exc:
+        return "block", f"Agent Board 状态解析器不可用，按 fail-closed 阻断: {type(exc).__name__}"
+
+    try:
+        should_remind, open_count, _bg = _ab_needed(run_dir)
+    except Exception as exc:
+        return "block", f"Agent Board 状态解析失败，按 fail-closed 阻断: {type(exc).__name__}"
+
+    if not should_remind:
+        return None, ""
+
+    if contract is None and _turn_contract is not None:
+        try:
+            contract = _turn_contract.load_contract(run_dir)
+        except Exception:
+            contract = {}
+    contract = contract or {}
+    if contract.get("fanout_override"):
+        return None, ""
+
+    agents_dir_path = run_dir / "agents"
+    assignments_path = run_dir / "state" / "assignments.json"
+    try:
+        data = json.loads(assignments_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        data = {}
+    assignments = [a for a in data.get("assignments", []) if isinstance(a, dict)] \
+        if isinstance(data.get("assignments"), list) else []
+
+    agents = {p.stem for p in agents_dir_path.glob("A-*.md")} if agents_dir_path.is_dir() else set()
+    problems: list[str] = []
+    if len(assignments) < 2:
+        problems.append(f"只记录了 {len(assignments)} 个 assignment, 需要 >=2")
+
+    fronts = {str(a.get("front") or "").strip() for a in assignments}
+    fronts.discard("")
+    if len(fronts) < 2:
+        problems.append("assignment 未覆盖至少两个不同 front")
+
+    missing_files = [str(a.get("agent") or "?") for a in assignments if str(a.get("agent") or "") not in agents]
+    if missing_files:
+        problems.append("缺少 agents/A-*.md 文件: " + ", ".join(missing_files[:5]))
+
+    epoch = _turn_contract.coordination_epoch(run_dir, contract) \
+        if _turn_contract is not None else {"valid": False, "since": 0.0}
+    if not epoch.get("valid"):
+        problems.append(
+            "coordination_signature + fanout_epoch_started_at 缺失、伪造或已因 material "
+            "front/coverage 变化失效")
+    receipt_state = _runtime_receipts.agent_fanout(
+        run_dir,
+        since=float(epoch.get("since") or 0.0),
+    ) if _runtime_receipts is not None and epoch.get("valid") else {
+        "satisfied": False, "assignments": [], "fronts": [],
+    }
+    if not receipt_state.get("satisfied"):
+        problems.append(
+            "当前执行回合缺少两个真实 Agent PostToolUse 回执（必须带 transcript 中存在的 tool_use_id，"
+            "并覆盖不同 assignment/front）；手写 heartbeat/status 不算")
+    elif _runtime_receipts is not None:
+        disposition = _runtime_receipts.agent_disposition(
+            run_dir,
+            since=float(epoch.get("since") or 0.0),
+        )
+        if not disposition.get("disposition_satisfied"):
+            problems.append(
+                "本轮 Agent 结果尚未逐条 merge/adjudicate: "
+                + "; ".join(disposition.get("pending", [])[:5])
+                + "；done/展示摘要不算落实。加载 xunji-agent-board，完成 digest-bound Reviewer "
+                  "return/disposition 后再由 Root 按 owner 的 exact settlement 写 canonical E/F/D/Reason 锚点")
+
+    if problems:
+        return "block", (
+            f"open fronts={open_count} 且 barrier 多样, Agent Board 不能全串行。"
+            + "；".join(problems)
+            + "。请加载 xunji-agent-board，提交 >=2 条 ready disjoint lanes 并 delegate，"
+              "再按 owner 的 exact contract 分消息错峰真实调用 Agent；"
+              "只有操作者当前 prompt 明确 `允许串行` 才可形成一次性 override。"
+        )
+
+    return None, ""
+
+
+def _extract_field(section: str, field_name: str) -> str:
+    """提取 - FieldName: value 行。"""
+    for line in section.split("\n"):
+        s = line.strip()
+        if s.startswith(f"- {field_name}:") or s.startswith(f"{field_name}:"):
+            return s
+    return ""
+
+
+def _extract_result_block(section: str) -> str:
+    """提取 Result 段到下一个顶级字段(- Xxx:)或下一个 ## 条目。"""
+    lines = section.split("\n")
+    result_lines = []
+    in_result = False
+    for line in lines:
+        s = line.strip()
+        if s.startswith("- Result:") or s.startswith("Result:"):
+            in_result = True
+            result_lines.append(line)
+            continue
+        if in_result:
+            # 下一个顶级字段 (- Time: / - Source: / - Certainty: / - Severity: / ## E-)
+            if any(s.startswith(t) for t in _RESULT_TERMINATORS):
+                break
+            # 子字段 (- Observed: / - DataObtained: 等) 或续行都收集
+            result_lines.append(line)
+    return "\n".join(result_lines)
+
+
+def _check_old_format_severity(eid: str, result_text: str, sev_line: str, blocks: list) -> None:
+    """旧格式条目的关键词兜底检查 — 仅对 HIGH/CRITICAL 条目执行。"""
+    HARM = ["提取了", "获取了", "返回数据", "绕过了", "bypass", "执行了", "RCE", "shell", "上传了"]
+    SPEC = ["若获得", "若拿到", "一旦获得", "则可", "即可", "潜在", "攻击面", "需凭据", "需认证", "需账号"]
+    EXPOSURE = ["暴露", "可见", "模板", "端点名称", "端点清单", "标签", "字段名", "页面结构"]
+
+    has_harm = any(w in result_text for w in HARM)
+    has_spec = any(w in result_text for w in SPEC)
+    only_exposure = any(w in result_text for w in EXPOSURE) and not has_harm
+
+    if has_spec and not has_harm:
+        blocks.append(f"{eid} [旧格式]: 含推测词({', '.join(w for w in SPEC if w in result_text)[:60]})且无危害证据 → 降级或补充证明")
+    elif only_exposure:
+        blocks.append(f"{eid} [旧格式]: 仅结构暴露(页面/端点/标签)但 Severity={sev_line.strip()} → 最高 MEDIUM")
+
+
+def _extract_subfield(result_block: str, field_name: str) -> str:
+    """从 Result 段提取 - FieldName: value。跨行收集直到下一个子字段或结束。"""
+    lines = result_block.split("\n")
+    value_parts = []
+    in_field = False
+    prefix = f"- {field_name}:"
+    for line in lines:
+        s = line.strip()
+        if s.startswith(prefix):
+            in_field = True
+            # 取冒号后的值
+            val = s[len(prefix):].strip()
+            value_parts.append(val)
+            continue
+        if in_field:
+            # 遇到下一个子字段则停止
+            if any(s.strip().startswith(f"- {sf}:") for sf in _SUBFIELDS):
+                break
+            # 遇到顶级字段则停止
+            if any(s.startswith(t) for t in _RESULT_TERMINATORS):
+                break
+            if s:
+                value_parts.append(line)
+    return " ".join(value_parts).strip()
+
+
+def run_check(run_dir: Path) -> tuple[int, str]:
+    """subprocess 跑 check_run, 返回 (returncode, 合并输出)。隔离执行, 不耦合内部 API。
+    check_run 是纯本地静态解析(无网络), 正常 <1s; 30s 上限足够。超时/异常 → 当作放行
+    (rc=0): 提醒器绝不让会话停顿超过 30s, 也绝不因 check_run 故障而卡死(fail-open)。"""
+    cmd = [sys.executable, str(ROOT / "tools" / "check_run.py"), str(run_dir)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=30)
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+    except Exception:
+        return 0, ""   # SHOULD-FIX-1: 超时/异常不阻塞会话, 按放行处理
+
+
+def decide(is_final: bool, check_rc: int, stop_hook_active: bool):
+    """纯决策(便于自测): 返回 'block' / 'notify' / None(放行)。
+    - 非终版报告 → 放行(还没收尾, 别打扰)。
+    - check_run 通过 → 放行。
+    - check_run 未过 → 首次 block；Stop 重入只放行聊天回合，canonical gate 仍失败。"""
+    if not is_final:
+        return None
+    if check_rc == 0:
+        return None
+    if stop_hook_active:
+        return "notify"
+    return "block"
+
+
+def decide_closure(is_final: bool, check_rc: int, open_fronts: int, stop_hook_active: bool):
+    """FINAL closure decision matrix.
+
+    Open fronts are a closure hard stop even if a broken or stale check_run would
+    otherwise return rc=0. Non-FINAL sessions stay quiet; FINAL sessions never
+    downgrade a failed structural check to notify.
+    """
+    if not is_final:
+        return None
+    if open_fronts > 0:
+        return "notify" if stop_hook_active else "block"
+    return decide(is_final, check_rc, stop_hook_active)
+
+
+def _fallback_status_is_active(status: str) -> bool:
+    """Classify the canonical leading status without reading historical notes."""
+    primary = re.split(r"[,;；(（]", status.lower().replace("-", "_"), maxsplit=1)[0]
+    tokens = set(re.findall(r"[a-z0-9_]+", primary))
+    return bool(tokens & {"open", "probing", "working", "blocked_type_a"})
+
+
+def _count_open_fronts(run_dir: Path) -> int:
+    """Count every active status using the same parser as the loop controller."""
+    if _loop_state is not None:
+        try:
+            data = _loop_state.derive(run_dir, write=False)
+            fronts = data.get("fronts") if isinstance(data.get("fronts"), dict) else {}
+            return int(fronts.get("open_count", 0) or 0)
+        except Exception:
+            pass
+    fr = run_dir / "frontier.md"
+    if not fr.exists():
+        return 0
+    try:
+        text = fr.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return 0
+    import re as _re_of
+    count = 0
+    for block in _re_of.split(r"(?=^###\s+F-\d+)", text, flags=_re_of.MULTILINE):
+        if not _re_of.match(r"^###\s+F-\d+", block.lstrip()):
+            continue
+        sm = _re_of.search(r"(?im)^\s*-?\s*Status\s*[:：]\s*(.+)$", block)
+        status = sm.group(1).strip().lower() if sm else ""
+        if _fallback_status_is_active(status):
+            count += 1
+    return count
+
+
+def build_message(run_dir: Path, check_out: str) -> str:
+    tail = check_out.strip()
+    if len(tail) > 1600:
+        tail = tail[-1600:]
+    return ("[收口闸门] 你似乎在收尾 runs/" + run_dir.name + ", 但 check_run 未通过。"
+            "收口不是在聊天里宣布'测完了', 而是 run 文件过闸门。"
+            "同一回合内读取下面的硬门、修 run 文件/工具问题、重跑 check_run, 直到通过或确认外部 Type A 阻断。"
+            "先处理下面的硬门再收尾"
+            "(覆盖台账缺建→按 setup/coverage owner 修 baseline/ledger，只有当前显式授权才做 exact egress recheck; "
+            "假证据→补真产物或降级; 缺独立复审→加载 xunji-reviewops，Agent Reviewer/手填 review.md 不满足):\n\n" + tail)
+
+
+def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -> str:
+    msg = (
+        f"[收口闸门] 你似乎在收尾 runs/{run_dir.name}, "
+        f"但 frontier.md 仍有 {open_fronts} 个 active front(open/probing/blocked_type_a)。"
+        "FINAL 必须同时满足 active fronts=0 且 check_run 通过; "
+        "请在同一回合继续推进、降级或写入证据化 deferred/closed 理由, 然后重跑 check_run。"
+    )
+    if check_out.strip():
+        tail = check_out.strip()
+        msg += "\n\ncheck_run:\n" + (tail[-1200:] if len(tail) > 1200 else tail)
+    return msg
+
+
+def _has_completed_independent_review(review_text: str, run_dir: Path | None = None) -> bool:
+    if _cr is not None and callable(getattr(_cr, "has_completed_independent_review", None)):
+        try:
+            return bool(_cr.has_completed_independent_review(review_text, run_dir))
+        except Exception:
+            return False
+    # Closure is the wrong place to degrade to a weaker parser. If the canonical
+    # structured predicate is unavailable, keep the run open until it is repaired.
+    return False
+
+
+def _has_codex_completion_review(decisions_text: str, run_dir: Path | None = None) -> bool:
+    if _cr is not None and callable(getattr(_cr, "has_codex_completion_review", None)):
+        try:
+            return bool(_cr.has_codex_completion_review(decisions_text, run_dir))
+        except Exception:
+            return False
+    return False
+
+
+def _normal_closure_prerequisite(review_text: str, decisions_text: str,
+                                 run_dir: Path | None = None) -> str:
+    """Return a hard-block reason for missing Normal-mode closure prerequisites."""
+    if not _has_completed_independent_review(review_text, run_dir):
+        return (
+            "[Normal 收口] report 已终版但缺独立复审。"
+            "请加载 xunji-reviewops，取得当前 fingerprint-bound ReviewReceipt 并处理全部 finding → "
+            "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
+        )
+    if not _has_codex_completion_review(decisions_text, run_dir):
+        return (
+            "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
+            "NORMAL 模式暂停 #2 前请加载 xunji-agent-board 与 "
+            "docs/WORKFLOW-reference.md 的 assignment-free global completion owner，"
+            "使用 formatter 产出的完整 contract 完成真实 same-session Reviewer Start/Stop。"
+            "请将其裁决写入 decisions.md 的 "
+            "CodexCompletionReview 兼容字段；该挑战不替代 peer_review ReviewReceipt。"
+        )
+    return ""
+
+
+def main() -> None:
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
+    # FAIL-OPEN 起手: 读不到/解析不了事件就放行(这是提醒器, 不是安全拦截)。
+    try:
+        raw = sys.stdin.buffer.read()
+        event = json.loads(raw.decode("utf-8", "replace") or "{}")
+    except Exception:
+        sys.exit(0)
+    stop_active = bool(event.get("stop_hook_active"))
+    # Claude Code sets this after any Stop hook has already blocked once. Blocking
+    # again creates an unsupported retry loop and is eventually overridden by the
+    # client. Canonical files and gates remain unchanged, so ending this chat turn
+    # is not equivalent to run completion.
+    if stop_active:
+        sys.exit(0)
+    active_run = None
+    try:
+        # ---- Phase 3: drift session check (soft first, hard on repeated protocol drift) ----
+        active_run = find_active_run(RUNS)
+        turn_mode = "EXECUTE"
+        contract: dict = {}
+        if active_run is not None and _turn_contract is not None:
+            try:
+                contract = _turn_contract.load_contract(
+                    active_run, session_id=str(event.get("session_id") or ""))
+                turn_mode = str(contract.get("mode") or "EXECUTE")
+            except Exception:
+                turn_mode = "EXECUTE"
+        if turn_mode == "EXPLAIN_ONLY":
+            sys.exit(0)
+        if turn_mode == "MAINTENANCE":
+            # output_gate already checked unsupported maintenance-success prose.
+            # Local maintenance does not enter run drift/Agent/closure gates.
+            sys.exit(0)
+        if turn_mode == "PAUSED_BY_OPERATOR":
+            if _runtime_receipts is None:
+                print(json.dumps({"decision": "block", "reason":
+                    "[暂停事务] runtime_receipts 不可用，无法确认 Cron 已停止。"}, ensure_ascii=False))
+                sys.exit(0)
+            cron_ok, cron_note = _runtime_receipts.cron_quiescent(
+                active_run,
+                session_id=str(contract.get("session_id") or ""),
+                since=float(contract.get("updated_at") or 0.0),
+            )
+            if not cron_ok:
+                print(json.dumps({"decision": "block", "reason":
+                    "[暂停事务] 保留 open fronts，不得写 completion marker。先执行 CronList，"
+                    "如有本 run 任务则 CronDelete，再次 CronList 确认消失。" + cron_note},
+                    ensure_ascii=False))
+            sys.exit(0)
+        msg = event.get("last_assistant_message") or ""
+        if active_run is not None and isinstance(msg, str) and _output_gate is not None:
+            fixed_kind = _output_gate.validated_fixed_stop_kind(
+                msg,
+                active_run,
+                session_id=str(event.get("session_id") or ""),
+                since=float(contract.get("updated_at") or 0.0),
+            )
+            if fixed_kind == _output_gate.TARGET_DENIED:
+                # The output truth gate has a receipt-backed terminal envelope.
+                # After the pause/Cron transaction above, ordinary drift,
+                # Agent, and closure validators must not reinterpret it as Coda.
+                sys.exit(0)
+        # Dev mode: skip Phase 3 notification (drift detection still runs in output_gate)
+        if not _is_dev_mode():
+            drift_mode, drift_msg = _check_drift_session(active_run)
+            if drift_mode is not None:
+                if drift_mode == "block":
+                    print(json.dumps({"decision": "block", "reason": drift_msg}, ensure_ascii=False))
+                    sys.exit(0)
+                print(json.dumps({"systemMessage": drift_msg}, ensure_ascii=False))
+                # Fall through — allow other checks to run
+
+        # ---- Phase 4 (NEW): evidence severity gate — 防无数据支撑的 HIGH/CRITICAL 定级 ----
+        if active_run is not None:
+            sev_mode, sev_msg = _check_evidence_severity(active_run)
+            if sev_mode is not None:
+                if sev_mode == "block":
+                    print(json.dumps({"decision": "block", "reason": sev_msg}, ensure_ascii=False))
+                    sys.exit(0)
+                else:
+                    print(json.dumps({"systemMessage": sev_msg}, ensure_ascii=False))
+                    # fall through — notify only, don't block further checks
+
+        # ---- Phase 2: session timeout check ----
+        timeout_mode, timeout_msg = _check_session_timeout(RUNS, active_run)
+        if timeout_mode is not None:
+            if timeout_mode == "block":
+                print(json.dumps({"decision": "block", "reason": timeout_msg}, ensure_ascii=False))
+                sys.exit(0)
+            else:
+                print(json.dumps({"systemMessage": timeout_msg}, ensure_ascii=False))
+                # fall through — don't exit; allow existing gate checks to also run
+
+        # ---- Phase 6 (NEW): 证据回放质量门 — certainty>=0.8 必须引用 .replay.json 产物 ----
+        if active_run is not None:
+            rq_mode, rq_msg = _check_replay_quality(active_run)
+            if rq_mode is not None:
+                if rq_mode == "block":
+                    print(json.dumps({"decision": "block", "reason": rq_msg}, ensure_ascii=False))
+                    sys.exit(0)
+                else:
+                    print(json.dumps({"systemMessage": rq_msg}, ensure_ascii=False))
+
+        # ---- Phase 5 (NEW): Agent Board 强制门 — open fronts >= 4 且 barrier 多样时禁止全串行 ----
+        if active_run is not None:
+            ab_mode, ab_msg = _check_agent_board(active_run, contract)
+            if ab_mode is not None:
+                if ab_mode == "block":
+                    print(json.dumps({"decision": "block", "reason": ab_msg}, ensure_ascii=False))
+                    sys.exit(0)
+                else:
+                    print(json.dumps({"systemMessage": ab_msg}, ensure_ascii=False))
+                    # fall through
+
+        # ---- Existing closure gate ----
+        run_dir = active_run
+        if run_dir is None or not closure_gate_active(run_dir):
+            sys.exit(0)
+        # NORMAL mode closure: 独立复审 + CodexCompletionReview
+        if _is_normal_mode() and not gate_skipped(run_dir):
+            try:
+                import re as _re
+                rv = (run_dir / "review.md").read_text(encoding="utf-8", errors="replace") \
+                    if (run_dir / "review.md").exists() else ""
+                dc = run_dir / "decisions.md"
+                dc_text = dc.read_text(encoding="utf-8", errors="replace") if dc.exists() else ""
+
+                prerequisite_block = _normal_closure_prerequisite(rv, dc_text, run_dir)
+                if prerequisite_block:
+                    print(json.dumps(
+                        {"decision": "block", "reason": prerequisite_block},
+                        ensure_ascii=False,
+                    ))
+                    sys.exit(0)
+            except Exception as exc:
+                print(json.dumps({
+                    "decision": "block",
+                    "reason": "[Normal 收口 fail-closed] 无法验证独立复审/CompletionReview："
+                              + type(exc).__name__,
+                }, ensure_ascii=False))
+                sys.exit(0)
+        if gate_skipped(run_dir):
+            sys.exit(0)   # 操作者已认可此 run 不收尾(教学样本/中止) → 不主动提醒
+        open_fronts = _count_open_fronts(run_dir)
+        rc, out = run_check(run_dir)
+        mode = decide_closure(True, rc, open_fronts, stop_active)
+        if mode is None:
+            sys.exit(0)
+        if open_fronts > 0:
+            msg = build_open_fronts_message(run_dir, open_fronts, out)
+        else:
+            msg = build_message(run_dir, out)
+        if mode == "block":
+            print(json.dumps({"decision": "block", "reason": msg}, ensure_ascii=False))
+        else:
+            print(json.dumps({"systemMessage": msg}, ensure_ascii=False))
+        sys.exit(0)
+    except Exception as exc:
+        if active_run is not None:
+            print(json.dumps({
+                "decision": "block",
+                "reason": "[运行流程 fail-closed] active run 的 run_gate 内部异常："
+                          + type(exc).__name__ + "。先修 hook/selftest，再继续执行。",
+            }, ensure_ascii=False))
+        sys.exit(0)
+
+
+def _selftest() -> int:
+    import tempfile
+    from harness.selftest_plan import seed_current_plan
+    checks: list[tuple[str, bool]] = []
+    # decide 真值表
+    checks.append(("not final -> pass", decide(False, 1, False) is None))
+    checks.append(("final + check pass -> pass", decide(True, 0, False) is None))
+    checks.append(("final + check fail -> block", decide(True, 1, False) == "block"))
+    checks.append(("final + fail + stop_active -> notify (no Stop retry loop)",
+                   decide(True, 1, True) == "notify"))
+    checks.append(("closure matrix: non-final + check fail -> pass",
+                   decide_closure(False, 1, 0, False) is None))
+    checks.append(("closure matrix: final + open fronts + check pass -> block",
+                   decide_closure(True, 0, 1, False) == "block"))
+    checks.append(("closure matrix: final + open fronts + check fail -> block",
+                   decide_closure(True, 1, 2, False) == "block"))
+    checks.append(("closure matrix: final + no open fronts + check fail -> block",
+                   decide_closure(True, 1, 0, False) == "block"))
+    checks.append(("closure matrix: final + no open fronts + check pass -> pass",
+                   decide_closure(True, 0, 0, False) is None))
+    normal_run = Path(tempfile.mkdtemp())
+    (normal_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+    valid_normal_review = ""
+    if _cr is not None and _runtime_receipts is not None:
+        import peer_review as _peer_review_test
+        bundle = _peer_review_test.build_review_bundle(normal_run, write=True)
+        result = _peer_review_test.ReviewResult(
+            verdict="PASS", backend_used="codex", driver="claude", brain="codex",
+            bundle_hash=bundle["sha1"], evidence_index_hash=bundle["evidence_index"]["sha1"],
+        )
+        _peer_review_test._append_run_review(normal_run, result)
+        normal_transcript = normal_run / "transcript.jsonl"
+        normal_transcript.write_text("tool-normal-review\ntool-normal-completion\n", encoding="utf-8")
+        _runtime_receipts.append_hook_event(normal_run, {
+            "hook_event_name": "PostToolUse", "session_id": "s-normal",
+            "transcript_path": str(normal_transcript), "tool_name": "Bash",
+            "tool_use_id": "tool-normal-review",
+            "tool_input": {"command": f"python tools/peer_review.py {normal_run} --into-run"},
+            "tool_response": {"stdout": (
+                f"XUNJI_REVIEW_RECEIPT={result.runtime_receipt_id}\n"
+                f"XUNJI_REVIEW_BUNDLE={result.bundle_hash}\nreview completed"
+            )},
+        })
+        seed_current_plan(normal_run, stage="S3")
+        completion_state = _runtime_receipts.completion_review_state(
+            normal_run, require_current_inputs=True)
+        completion_prompt = _runtime_receipts.completion_review_prompt(normal_run)
+        completion_result = _runtime_receipts.completion_review_result_envelope(
+            normal_run.name,
+            completion_state["evidence_index_hash"],
+            completion_state["completion_bundle_hash"],
+        )
+        with normal_transcript.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": "tool-normal-completion",
+                    "name": "Agent", "input": {
+                        "prompt": completion_prompt,
+                        "subagent_type": "xunji-reviewer",
+                    },
+                }]},
+            }) + "\n")
+        _runtime_receipts.append_hook_event(normal_run, {
+            "hook_event_name": "PostToolUse", "session_id": "s-normal",
+            "transcript_path": str(normal_transcript), "tool_name": "Agent",
+            "tool_use_id": "tool-normal-completion",
+            "tool_input": {
+                "prompt": completion_prompt,
+                "subagent_type": "xunji-reviewer",
+            },
+            "tool_response": {
+                "agentId": "normal-completion-child", "isAsync": True,
+                "status": "async_launched",
+            },
+        })
+        _runtime_receipts.append_hook_event(normal_run, {
+            "hook_event_name": "SubagentStart", "session_id": "s-normal",
+            "transcript_path": str(normal_transcript),
+            "agent_id": "normal-completion-child",
+            "agent_type": "xunji-reviewer",
+        })
+        _runtime_receipts.append_hook_event(normal_run, {
+            "hook_event_name": "SubagentStop", "session_id": "s-normal",
+            "transcript_path": str(normal_transcript),
+            "agent_id": "normal-completion-child",
+            "agent_type": "xunji-reviewer",
+            "last_assistant_message": completion_result,
+        })
+        valid_normal_review = (normal_run / "review.md").read_text(encoding="utf-8")
+    normal_decisions = (
+        "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
+        "- Summary: report coverage, severity support, and reachable assets were independently checked.\n")
+    missing_review_message = _normal_closure_prerequisite("# Review\n", "# Decisions\n")
+    checks.append(("normal closure: missing independent review hard-blocks",
+                   "缺独立复审" in missing_review_message
+                   and "xunji-reviewops" in missing_review_message
+                   and "请运行 peer_review" not in missing_review_message))
+    generic_closure_message = build_message(normal_run, "fixture hard gate")
+    checks.append(("generic closure remediation does not prescribe live classify",
+                   "classify_hosts" not in generic_closure_message
+                   and "fresh-context reviewer" not in generic_closure_message
+                   and "setup/coverage owner" in generic_closure_message))
+    missing_completion_message = _normal_closure_prerequisite(
+        valid_normal_review, "# Decisions\n", normal_run)
+    checks.append(("normal closure: missing completion review hard-blocks",
+                   "CodexCompletionReview" in missing_completion_message))
+    checks.append(("completion remediation routes canonical formatter owner",
+                   "assignment-free global completion owner" in missing_completion_message
+                   and "formatter 产出的完整 contract" in missing_completion_message
+                   and "subagent_type=" not in missing_completion_message))
+    checks.append(("normal closure: both prerequisites pass",
+                   _normal_closure_prerequisite(
+                       valid_normal_review, normal_decisions, normal_run) == ""))
+    checks.append(("normal closure: review prose mention does not satisfy gate",
+                   not _has_completed_independent_review(
+                       "# Review\nWe still need an Independent Review before closing.\n")))
+    checks.append(("normal closure: review template placeholders do not satisfy gate",
+                   not _has_completed_independent_review(
+                       "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
+                       "- Verdict: (PASS / WARN / BLOCKER)\n")))
+    original_check_run = globals().get("_cr")
+    try:
+        globals()["_cr"] = None
+        fallback_review_rejected = not _has_completed_independent_review(
+            "## Independent Review\n- Reviewer: fake\n- Verdict: PASS\n")
+    finally:
+        globals()["_cr"] = original_check_run
+    checks.append(("normal closure: unavailable canonical review parser fails closed",
+                   fallback_review_rejected))
+    checks.append(("normal closure: completion prose mention does not satisfy gate",
+                   not _has_codex_completion_review(
+                       "CodexCompletionReview is still missing and must be added.\n")))
+    original_check_run = globals().get("_cr")
+    try:
+        globals()["_cr"] = None
+        fallback_completion_rejected = not _has_codex_completion_review(
+            "## CodexCompletionReview\n- Reviewer: fake\n- Verdict: PASS\n"
+            "- Summary: fake but long enough to resemble a completed review record.\n")
+    finally:
+        globals()["_cr"] = original_check_run
+    checks.append(("normal closure: unavailable completion parser fails closed",
+                   fallback_completion_rejected))
+    checks.append(("fallback status parser ignores historical type-a note on closed status",
+                   not _fallback_status_is_active("closed_type_b (was blocked_type_a)")))
+    checks.append(("fallback status parser keeps canonical type-a active",
+                   _fallback_status_is_active("blocked_type_a (auth dependency)")))
+    rd_open = Path(tempfile.mkdtemp()) / "open_run"
+    rd_open.mkdir()
+    (rd_open / "frontier.md").write_text(
+        "# Frontier\n## Open Fronts\n"
+        "### F-001\n- Status: open\n\n"
+        "### F-002\n- Status: probing\n\n"
+        "### F-004\n- Status: blocked_type_a\n\n"
+        "## Deferred Fronts\n### F-003\n- Status: deferred\n",
+        encoding="utf-8")
+    open_msg = build_open_fronts_message(rd_open, _count_open_fronts(rd_open), "check failed")
+    checks.append(("closure path: active-front counter includes open/probing/type-a",
+                   _count_open_fronts(rd_open) == 3))
+    checks.append(("closure path: open-front message is blocking-readable",
+                   "3 个 active front" in open_msg and "check failed" in open_msg))
+
+    d = Path(tempfile.mkdtemp())
+    runs = d / "runs"
+    runs.mkdir()
+    r1 = runs / "a_20260101"
+    r1.mkdir()
+    (r1 / "report.md").write_text("# Report\n", encoding="utf-8")
+    (r1 / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
+    r_norpt = runs / "z_20260101"   # 无 report.md → 还没收尾 → 不该被选
+    r_norpt.mkdir()
+    (r_norpt / "f.md").write_text("x", encoding="utf-8")
+    checks.append(("find_active_run never guesses the most-recent run",
+                   find_active_run(runs, within_sec=900) is None))
+    active_pointer = d / "active-run"
+    active_pointer.write_text(str(r1), encoding="utf-8")
+    checks.append(("find_active_run honors the explicit pointer",
+                   find_active_run(runs, active_pointer=active_pointer) == r1.resolve()))
+    active_pointer.write_text(str(d / "outside"), encoding="utf-8")
+    checks.append(("find_active_run rejects an outside pointer",
+                   find_active_run(runs, active_pointer=active_pointer) is None))
+    checks.append(("no runs dir -> none", find_active_run(d / "nope") is None))
+
+    # report_is_final via check_run import (终版 vs 存根)
+    if _cr is not None:
+        checks.append(("check_run closure predicate is callable", callable(getattr(_cr, "_closure_gate_active", None))))
+        rd = runs / "b_20260101"
+        rd.mkdir()
+        (rd / "ev.html").write_text("x" * 10, encoding="utf-8")
+        (rd / "evidence.md").write_text(
+            "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n",
+            encoding="utf-8")
+        (rd / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+        rd2 = runs / "c_20260101"
+        rd2.mkdir()
+        (rd2 / "report.md").write_text("# Report\nEvidence IDs:\n", encoding="utf-8")
+        checks.append(("report_is_final TRUE on confirmed report", report_is_final(rd) is True))
+        checks.append(("report_is_final FALSE on stub", report_is_final(rd2) is False))
+        rd_retro = runs / "retro_20260101"
+        rd_retro.mkdir()
+        (rd_retro / "report.md").write_text("# Report\nEvidence IDs:\n", encoding="utf-8")
+        (rd_retro / "retrospective.md").write_text("# Retrospective\n- Verdict: FINAL\n", encoding="utf-8")
+        checks.append(("closure_gate_active TRUE on retrospective FINAL", closure_gate_active(rd_retro) is True))
+        rd3 = runs / "d_20260101"
+        rd3.mkdir()
+        (rd3 / "report.md").write_text(
+            "# Report\nEvidence IDs: E-001\n<!-- run-gate: skip (teaching sample) -->\n", encoding="utf-8")
+        checks.append(("gate_skipped TRUE on skip marker", gate_skipped(rd3) is True))
+        checks.append(("gate_skipped FALSE without marker", gate_skipped(rd) is False))
+    else:
+        print("[selftest] WARN: check_run not importable; skipped report_is_final checks", file=sys.stderr)
+
+    # Phase 2: session timeout detection
+    sdir = runs / "session_test"
+    sdir.mkdir()
+    # no session_state.json -> pass
+    mode_none, _ = _check_session_timeout(runs)
+    checks.append(("session timeout: no file -> pass", mode_none is None))
+    # fresh session_state.json with drift -> pass (within timeout window)
+    (sdir / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"], "updated_at": time.time()}), encoding="utf-8")
+    mode_fresh, _ = _check_session_timeout(runs)
+    checks.append(("session timeout: fresh file -> pass", mode_fresh is None))
+    # stale session_state.json with empty drift_flags -> pass
+    old_time = time.time() - SESSION_TIMEOUT_SEC - 60
+    os.utime(str(sdir / "session_state.json"), (old_time, old_time))
+    (sdir / "session_state.json").write_text(
+        json.dumps({"drift_flags": [], "updated_at": old_time}), encoding="utf-8")
+    mode_empty, _ = _check_session_timeout(runs)
+    checks.append(("session timeout: stale but no drift -> pass", mode_empty is None))
+    # stale session_state.json with non-empty drift_flags -> block (new API: needs active_run)
+    (sdir / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["frontier_stale"], "updated_at": old_time}), encoding="utf-8")
+    os.utime(str(sdir / "session_state.json"), (old_time, old_time))
+    mode_block, msg_block = _check_session_timeout(runs, active_run=sdir)
+    checks.append(("session timeout: stale + drift -> block", mode_block == "block"))
+    checks.append(("session timeout: message mentions run", "session_test" in msg_block))
+    # corrupt session_state.json -> pass (fail-open)
+    (sdir / "session_state.json").write_text("not json{{{", encoding="utf-8")
+    os.utime(str(sdir / "session_state.json"), (old_time, old_time))
+    mode_corrupt, _ = _check_session_timeout(runs)
+    checks.append(("session timeout: corrupt file -> pass", mode_corrupt is None))
+    # drift_flags is not a list -> pass
+    (sdir / "session_state.json").write_text(
+        json.dumps({"drift_flags": "not_a_list", "updated_at": old_time}), encoding="utf-8")
+    os.utime(str(sdir / "session_state.json"), (old_time, old_time))
+    mode_badtype, _ = _check_session_timeout(runs)
+    checks.append(("session timeout: drift_flags not list -> pass", mode_badtype is None))
+    # Phase 2 uses a longer candidate window than ordinary active-run gates.
+    timeout_runs = d / "timeout_runs"
+    timeout_runs.mkdir()
+    timeout_candidate = timeout_runs / "timeout_candidate"
+    timeout_candidate.mkdir()
+    old_timeout_touch = time.time() - SESSION_TIMEOUT_SEC - 60
+    (timeout_candidate / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
+    (timeout_candidate / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"],
+                    "drift_started_at": old_timeout_touch,
+                    "updated_at": old_timeout_touch}), encoding="utf-8")
+    os.utime(str(timeout_candidate / "frontier.md"), (old_timeout_touch, old_timeout_touch))
+    os.utime(str(timeout_candidate / "session_state.json"), (old_timeout_touch, old_timeout_touch))
+    mode_long_window, _ = _check_session_timeout(
+        timeout_runs, active_run=timeout_candidate)
+    checks.append(("session timeout: explicit >15m drift run still blocks",
+                   mode_long_window == "block"))
+
+    # Phase 3: drift session check (notify first, then hard block repeated protocol drift)
+    import tempfile as _tempfile_mod
+    test_ds_dir = Path(_tempfile_mod.mkdtemp())
+    # No active_run → pass
+    d3_mode_none, _ = _check_drift_session(active_run=None)
+    checks.append(("drift session: no active_run -> pass", d3_mode_none is None))
+    # Active run with no session_state.json → pass
+    ds_run = test_ds_dir / "ds_run"
+    ds_run.mkdir()
+    d3_mode_nostate, _ = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: no session_state -> pass", d3_mode_nostate is None))
+    # Fresh session_state with drift_flags → notify
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"], "drift_block_count": 1,
+                     "updated_at": time.time()}), encoding="utf-8")
+    d3_mode_notify, d3_msg = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: drift flags -> notify", d3_mode_notify == "notify"))
+    checks.append(("drift session: message mentions drift", "漂移提醒" in (d3_msg or "")))
+    # Repeated protocol/autonomy drift -> hard block
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"], "drift_block_count": 2,
+                    "updated_at": time.time()}), encoding="utf-8")
+    d3_mode_block, d3_msg_block = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: protocol count 2 -> block", d3_mode_block == "block"))
+    checks.append(("drift session: block asks reread", "Read CLAUDE.md" in (d3_msg_block or "")))
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["option_list"], "drift_block_count": 4,
+                    "updated_at": time.time()}), encoding="utf-8")
+    d3_mode_handoff, d3_msg_handoff = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: option count 4 -> block", d3_mode_handoff == "block"))
+    checks.append(("drift session: handoff message", "session_handoff.md" in (d3_msg_handoff or "")))
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["frontier_stale"], "drift_block_count": 4,
+                    "updated_at": time.time()}), encoding="utf-8")
+    d3_mode_frontier, _ = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: frontier-only count 4 stays notify", d3_mode_frontier == "notify"))
+    # Stale session_state with drift_flags → pass (Phase 2 handles stale)
+    old_drift = time.time() - SESSION_TIMEOUT_SEC - 120
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["frontier_stale"], "drift_block_count": 1,
+                     "updated_at": old_drift}), encoding="utf-8")
+    os.utime(str(ds_run / "session_state.json"), (old_drift, old_drift))
+    d3_mode_stale, _ = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: stale drift -> pass", d3_mode_stale is None))
+    # Empty drift_flags → pass
+    (ds_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": [], "updated_at": time.time()}), encoding="utf-8")
+    d3_mode_empty, _ = _check_drift_session(active_run=ds_run)
+    checks.append(("drift session: empty flags -> pass", d3_mode_empty is None))
+
+    # Phase 2: session timeout with active_run binding + updated_at
+    sdir2 = Path(_tempfile_mod.mkdtemp())
+    # No active_run → pass
+    mode_none2, _ = _check_session_timeout(sdir2)
+    checks.append(("session timeout: no active_run -> pass", mode_none2 is None))
+    # Stale session_state on non-active run → not checked (only checks active_run)
+    stale_run = sdir2 / "stale_run"
+    stale_run.mkdir()
+    old2 = time.time() - SESSION_TIMEOUT_SEC - 120
+    (stale_run / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"], "updated_at": old2}), encoding="utf-8")
+    os.utime(str(stale_run / "session_state.json"), (old2, old2))
+    mode_stale_inactive, _ = _check_session_timeout(sdir2, active_run=stale_run)
+    checks.append(("session timeout: stale active -> block", mode_stale_inactive == "block"))
+    # updated_at fresh but file mtime stale → pass (anti_drift touched JSON)
+    half_stale = sdir2 / "half_stale"
+    half_stale.mkdir()
+    sf_path = half_stale / "session_state.json"
+    sf_path.write_text(
+        json.dumps({"drift_flags": ["protocol_violation"], "updated_at": time.time()}), encoding="utf-8")
+    old_mtime = time.time() - SESSION_TIMEOUT_SEC - 120
+    os.utime(str(sf_path), (old_mtime, old_mtime))
+    mode_fresh_json, _ = _check_session_timeout(sdir2, active_run=half_stale)
+    checks.append(("session timeout: fresh updated_at + stale mtime -> pass", mode_fresh_json is None))
+    # Both stale → block
+    both_stale = sdir2 / "both_stale"
+    both_stale.mkdir()
+    sf2 = both_stale / "session_state.json"
+    sf2.write_text(
+        json.dumps({"drift_flags": ["protocol_violation"], "updated_at": old2}), encoding="utf-8")
+    os.utime(str(sf2), (old2, old2))
+    mode_both, _ = _check_session_timeout(sdir2, active_run=both_stale)
+    checks.append(("session timeout: both stale -> block", mode_both == "block"))
+    # Fresh file writes from output_gate must not erase an old unresolved drift streak.
+    old_started = time.time() - SESSION_TIMEOUT_SEC - 120
+    fresh_file_old_drift = sdir2 / "fresh_file_old_drift"
+    fresh_file_old_drift.mkdir()
+    (fresh_file_old_drift / "session_state.json").write_text(
+        json.dumps({"drift_flags": ["protocol_violation"],
+                    "drift_started_at": old_started,
+                    "updated_at": time.time()}), encoding="utf-8")
+    mode_old_drift, msg_old_drift = _check_session_timeout(sdir2, active_run=fresh_file_old_drift)
+    checks.append(("session timeout: old drift_started_at despite fresh file -> block", mode_old_drift == "block"))
+    checks.append(("session timeout: old drift message mentions 持续", "持续" in (msg_old_drift or "")))
+
+    # SPECULATION_IN_OBSERVED precision tests (Decision 4)
+    import tempfile as _tm_spec
+    spec_dir = Path(_tm_spec.mkdtemp())
+    # True positive: "若获得凭据" in Observed → should block
+    (spec_dir / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Severity: HIGH
+- Result:
+    - Observed: 若获得凭据即可访问管理后台
+    - DataObtained: 1条-页面响应
+    - Mechanism: 凭证填充攻击
+    - SeverityBasis: 若获得凭据可导致未授权访问
+    - CodexReview: confirmed HIGH
+""", encoding="utf-8")
+    sev_spec1, sev_spec_msg1 = _check_evidence_severity(spec_dir)
+    checks.append(("spec word: 若获得凭据 detected", sev_spec1 == "block"))
+    checks.append(("spec word: block mentions Observed 含推测词", "Observed 含推测词" in (sev_spec_msg1 or "")))
+    # False positive: "若服务器返回200" in Observed → should NOT block (not in spec list)
+    spec_dir2 = Path(_tm_spec.mkdtemp())
+    (spec_dir2 / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Severity: HIGH
+- Result:
+    - Observed: 若服务器返回200状态码且响应体含admin字段
+    - DataObtained: 2条-HTTP响应
+    - Mechanism: 路径枚举发现管理端点
+    - SeverityBasis: 未授权访问管理界面
+    - CodexReview: confirmed HIGH
+""", encoding="utf-8")
+    sev_spec2, _ = _check_evidence_severity(spec_dir2)
+    checks.append(("spec word: 若服务器返回200 NOT blocked", sev_spec2 is None))
+    # False positive: "若" alone in Observed → should NOT block (removed from list)
+    spec_dir3 = Path(_tm_spec.mkdtemp())
+    (spec_dir3 / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Severity: HIGH
+- Result:
+    - Observed: 若输入特殊字符服务器返回错误页面
+    - DataObtained: 1条-错误页面HTML
+    - Mechanism: 反射型XSS
+    - SeverityBasis: 未过滤用户输入导致脚本执行
+    - CodexReview: confirmed HIGH
+""", encoding="utf-8")
+    sev_spec3, _ = _check_evidence_severity(spec_dir3)
+    checks.append(("spec word: 若 alone NOT blocked", sev_spec3 is None))
+
+    # Phase 6: replay quality gate requires a real replay artifact in Artifacts:
+    import tempfile as _tm_replay
+    replay_missing = Path(_tm_replay.mkdtemp())
+    (replay_missing / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Artifacts: proof.html
+""", encoding="utf-8")
+    rq_missing, rq_missing_msg = _check_replay_quality(replay_missing)
+    checks.append(("replay quality: confirmed without replay -> block", rq_missing == "block"))
+    checks.append(("replay quality: message names E-001", "E-001" in (rq_missing_msg or "")))
+
+    replay_ok = Path(_tm_replay.mkdtemp())
+    (replay_ok / "proof.html.replay.json").write_text("{}", encoding="utf-8")
+    (replay_ok / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Artifacts: proof.html.replay.json
+""", encoding="utf-8")
+    rq_ok, _ = _check_replay_quality(replay_ok)
+    checks.append(("replay quality: existing replay artifact -> pass", rq_ok is None))
+
+    replay_prose = Path(_tm_replay.mkdtemp())
+    (replay_prose / "proof.html").write_text("x", encoding="utf-8")
+    (replay_prose / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Artifacts: proof.html
+- Note: should add proof.html.replay.json later
+""", encoding="utf-8")
+    rq_prose, _ = _check_replay_quality(replay_prose)
+    checks.append(("replay quality: prose mention is not enough", rq_prose == "block"))
+
+    replay_missing_file = Path(_tm_replay.mkdtemp())
+    (replay_missing_file / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Artifacts: proof.html.replay.json
+""", encoding="utf-8")
+    rq_missing_file, _ = _check_replay_quality(replay_missing_file)
+    checks.append(("replay quality: missing replay file -> block", rq_missing_file == "block"))
+
+    replay_low_cert = Path(_tm_replay.mkdtemp())
+    (replay_low_cert / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.5
+- Artifacts: proof.html
+""", encoding="utf-8")
+    rq_low_cert, _ = _check_replay_quality(replay_low_cert)
+    checks.append(("replay quality: low certainty without replay -> pass", rq_low_cert is None))
+
+    # Phase 4: CodexCriticalReview — NORMAL 模式 CRITICAL 定级必须经暂停前复审
+    _orig_normal_mode = globals().get("_is_normal_mode")
+    # Temporarily force NORMAL mode for these tests
+    globals()["_is_normal_mode"] = lambda: True
+    try:
+        import tempfile as _tm4
+        # Test 1: CRITICAL with CodexReview but missing CodexCriticalReview → block
+        ev1 = Path(_tm4.mkdtemp())
+        (ev1 / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Severity: CRITICAL
+- Result:
+    - Observed: 未授权访问数据库
+    - DataObtained: 5条-用户表记录
+    - Mechanism: SQL注入绕过认证
+    - SeverityBasis: 获取了数据库内容可导致数据泄露
+    - CodexReview: confirmed CRITICAL
+""", encoding="utf-8")
+        sev_mode1, sev_msg1 = _check_evidence_severity(ev1)
+        checks.append(("CodexCriticalReview: CRITICAL missing field -> block", sev_mode1 == "block"))
+        checks.append(("CodexCriticalReview: block message mentions field", "CodexCriticalReview" in (sev_msg1 or "")))
+        checks.append(("severity remediation routes ReviewOps without stale codex spawn",
+                       "xunji-reviewops" in (sev_msg1 or "")
+                       and "spawn" not in (sev_msg1 or "").lower()
+                       and "字段名不代表 backend" in (sev_msg1 or "")))
+
+        # Test 2: CRITICAL with both CodexReview and CodexCriticalReview → pass
+        ev2 = Path(_tm4.mkdtemp())
+        (ev2 / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Severity: CRITICAL
+- Result:
+    - Observed: 未授权访问数据库
+    - DataObtained: 5条-用户表记录
+    - Mechanism: SQL注入绕过认证
+    - SeverityBasis: 获取了数据库内容可导致数据泄露
+    - CodexReview: confirmed CRITICAL
+    - CodexCriticalReview: confirmed CRITICAL for pause gate
+""", encoding="utf-8")
+        sev_mode2, sev_msg2 = _check_evidence_severity(ev2)
+        checks.append(("CodexCriticalReview: CRITICAL with field -> pass", sev_mode2 is None))
+
+        # Test 3: HIGH with CodexReview, no CodexCriticalReview needed → pass
+        ev3 = Path(_tm4.mkdtemp())
+        (ev3 / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Severity: HIGH
+- Result:
+    - Observed: 反射型XSS
+    - DataObtained: 1条-弹窗回显
+    - Mechanism: 未过滤用户输入
+    - SeverityBasis: 可执行脚本导致会话劫持
+    - CodexReview: confirmed HIGH
+""", encoding="utf-8")
+        sev_mode3, _ = _check_evidence_severity(ev3)
+        checks.append(("CodexCriticalReview: HIGH without field -> pass", sev_mode3 is None))
+
+        # Test 4: CRITICAL without certainty 0.8 → not checked (below gate threshold)
+        ev4 = Path(_tm4.mkdtemp())
+        (ev4 / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.5
+- Severity: CRITICAL
+- Result:
+    - Observed: 可能的注入点
+    - DataObtained: none
+    - Mechanism: none
+    - SeverityBasis: 推测
+""", encoding="utf-8")
+        sev_mode4, _ = _check_evidence_severity(ev4)
+        checks.append(("CodexCriticalReview: <0.8 certainty -> not checked", sev_mode4 is None))
+    finally:
+        if _orig_normal_mode is not None:
+            globals()["_is_normal_mode"] = _orig_normal_mode
+        else:
+            globals().pop("_is_normal_mode", None)
+
+    # NORMAL mode closure: CodexCompletionReview in decisions.md
+    globals()["_is_normal_mode"] = lambda: True
+    try:
+        ev5 = Path(_tm4.mkdtemp())
+        (ev5 / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+        (ev5 / "evidence.md").write_text("""# Evidence
+## E-001
+- Certainty: 0.8
+- Severity: HIGH
+- Result:
+    - Observed: XSS
+    - DataObtained: 1条-alert
+    - Mechanism: 反射型XSS
+    - SeverityBasis: 脚本执行
+    - CodexReview: confirmed HIGH
+""", encoding="utf-8")
+        # decisions.md 缺 CodexCompletionReview → 应阻断
+        (ev5 / "decisions.md").write_text("# Decisions\n- chose F-001 first\n", encoding="utf-8")
+        dc_text = (ev5 / "decisions.md").read_text(encoding="utf-8", errors="replace")
+        checks.append(("CodexCompletionReview: missing -> detected",
+                       "CodexCompletionReview" not in dc_text))
+
+        # decisions.md 含 CodexCompletionReview → 应放行
+        (ev5 / "decisions.md").write_text(
+            "# Decisions\n- chose F-001 first\n- CodexCompletionReview: confirmed complete\n",
+            encoding="utf-8")
+        dc_text2 = (ev5 / "decisions.md").read_text(encoding="utf-8", errors="replace")
+        checks.append(("CodexCompletionReview: present -> detected",
+                       "CodexCompletionReview" in dc_text2))
+    finally:
+        globals().pop("_is_normal_mode", None)
+
+    # Phase 5: Agent Board 强制门 selftest
+    import tempfile as _tm_ab
+    ab_test = Path(_tm_ab.mkdtemp())
+
+    # Case 1: no frontier.md -> pass (silent)
+    ab_run1 = ab_test / "no_frontier"
+    ab_run1.mkdir()
+    mode1, _ = _check_agent_board(ab_run1)
+    checks.append(("agent board gate: no frontier.md -> pass", mode1 is None))
+
+    # Case 2: < 4 active fronts (probing counts) -> pass
+    ab_run2 = ab_test / "few_fronts"
+    ab_run2.mkdir()
+    (ab_run2 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: none\n\n"
+        "### F-002\n- Status: open\n- Barrier class: none\n\n"
+        "### F-003\n- Status: probing\n- Barrier class: WAF\n",
+        encoding="utf-8")
+    mode2, _ = _check_agent_board(ab_run2)
+    checks.append(("agent board gate: <4 active fronts -> pass", mode2 is None))
+
+    # Case 3: >= 4 open fronts with shared barrier -> pass
+    ab_run3 = ab_test / "shared_barrier"
+    ab_run3.mkdir()
+    (ab_run3 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-002\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-003\n- Status: open\n- Barrier class: WAF-rate-limit\n\n"
+        "### F-004\n- Status: probing\n- Barrier class: WAF-rate-limit\n",
+        encoding="utf-8")
+    mode3, _ = _check_agent_board(ab_run3)
+    checks.append(("agent board gate: shared barrier -> pass", mode3 is None))
+
+    # Case 3b: a committed Agent plan is debt-bearing even with one front.  The
+    # legacy breadth threshold must not erase a concrete unassigned lane.
+    ab_run3b = ab_test / "single_front_planned_lane"
+    (ab_run3b / "state").mkdir(parents=True)
+    (ab_run3b / "target.md").write_text(
+        "# Target\n- Authorized scope: one.example\n", encoding="utf-8")
+    (ab_run3b / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "one.example", "examined": False}],
+    }), encoding="utf-8")
+    (ab_run3b / "frontier.md").write_text(
+        "# Frontier\n## Open\n### F-001\n- Status: open\n"
+        "- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    planned_contract = {
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+        "session_id": "single-plan", "prompt_sha256": "a" * 64,
+        "updated_at": time.time(), "fanout_override": False,
+    }
+    if _work_plan is not None:
+        _work_plan.commit_plan(
+            ab_run3b, macro_stage="S2", objective="exercise one planned lane",
+            mode="SERIAL_AGENT", reason="one complex lane",
+            exit_gate="return, review, and merge", contract=planned_contract,
+            lanes=[{
+                "id": "L-F001-HUNTER", "role": "web-hunter",
+                "front": "F-001", "effect": "local_read", "assets": [],
+                "dependencies": [], "expected_evidence": "candidate or refutation",
+                "expected_information_gain": "medium",
+                "stop_condition": "lane settled", "request_cost": 0,
+                "request_budget": 0, "merge_cost": 5, "atomic": False,
+            }, {
+                "id": "L-F001-REVIEW", "role": "review",
+                "front": "F-001", "effect": "local_verify", "assets": [],
+                "dependencies": ["L-F001-HUNTER"],
+                "expected_evidence": "digest-bound review",
+                "expected_information_gain": "medium",
+                "stop_condition": "exact result reviewed", "request_cost": 0,
+                "request_budget": 0, "merge_cost": 5, "atomic": False,
+            }],
+        )
+    mode3b, msg3b = _check_agent_board(ab_run3b, planned_contract)
+    checks.append(("agent board gate: single-front unassigned plan lane blocks",
+                   _work_plan is None or (
+                       mode3b == "block" and "L-F001-HUNTER:unassigned" in msg3b)))
+    if _work_plan is not None and _agent_settlement is not None:
+        original_stale_recovery_action = (
+            _agent_settlement.stale_recovery_action)
+        try:
+            _agent_settlement.stale_recovery_action = (
+                lambda *_args, **_kwargs: {
+                    "action": (
+                        _agent_settlement
+                        .RECOVERY_REPLAY_ASSIGNED_REVIEWER),
+                    "items": [{
+                        "assignment": "A-review-007",
+                        "lane_id": "L-F001-REVIEW",
+                    }],
+                })
+            mode3b_replay, msg3b_replay = _check_agent_board(
+                ab_run3b, planned_contract)
+        finally:
+            _agent_settlement.stale_recovery_action = (
+                original_stale_recovery_action)
+        checks.append((
+            "agent board gate: assigned Reviewer debt routes to durable replay",
+            mode3b_replay == "block"
+            and "A-review-007" in msg3b_replay
+            and "workers.py delegate --limit 1" in msg3b_replay
+            and "durable launch contract" in msg3b_replay
+            and "取消 Reviewer" not in msg3b_replay,
+        ))
+
+    # Case 3c: ROOT_DIRECT is still a plan-cycle obligation.  Stop cannot fall
+    # through merely because the plan has no Agent delegation wave.
+    ab_run3c = ab_test / "root_direct_without_cycle_end"
+    (ab_run3c / "state").mkdir(parents=True)
+    (ab_run3c / "target.md").write_text(
+        "# Target\n- Authorized scope: direct.example\n", encoding="utf-8")
+    (ab_run3c / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "direct.example", "examined": False}],
+    }), encoding="utf-8")
+    (ab_run3c / "frontier.md").write_text(
+        "# Frontier\n## Open\n### F-001\n- Status: open\n"
+        "- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8")
+    direct_contract = dict(
+        planned_contract, session_id="root-direct-plan", updated_at=time.time())
+    if _work_plan is not None:
+        _work_plan.commit_plan(
+            ab_run3c, macro_stage="S1", objective="one bounded local read",
+            mode="ROOT_DIRECT", reason="mechanically atomic local action",
+            exit_gate="typed action receipt and cycle_end", contract=direct_contract,
+            lanes=[{
+                "id": "L-DIRECT", "role": "verify", "front": "F-001",
+                "effect": "local_read", "assets": [], "dependencies": [],
+                "capability_id": "read.timestamp-gate",
+                "expected_evidence": "typed local action receipt",
+                "expected_information_gain": "low",
+                "stop_condition": "receipt recorded", "request_cost": 0,
+                "request_budget": 0, "merge_cost": 1, "atomic": True,
+            }],
+        )
+    mode3c, msg3c = _check_agent_board(ab_run3c, direct_contract)
+    checks.append(("agent board gate: ROOT_DIRECT without typed cycle_end blocks Stop",
+                   _work_plan is None or (
+                       mode3c == "block" and "cycle_end=missing" in msg3c
+                       and "root-action-pending:no-claim" in msg3c)))
+
+    # Case 4: >= 4 open fronts diverse, no agents -> block
+    ab_run4 = ab_test / "diverse_no_agents"
+    ab_run4.mkdir()
+    (ab_run4 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
+        "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
+        "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
+        "### F-004\n- Status: open\n- Barrier class: file-upload\n",
+        encoding="utf-8")
+    mode4, msg4 = _check_agent_board(ab_run4)
+    checks.append(("agent board gate: diverse no agents -> block", mode4 == "block"))
+    checks.append(("agent board gate: block message readable", "Agent Board" in (msg4 or "")))
+
+    # Case 5: >= 4 open fronts diverse, has only agents/ dir -> block
+    ab_run5 = ab_test / "diverse_with_agents"
+    ab_run5.mkdir()
+    (ab_run5 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
+        "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
+        "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
+        "### F-004\n- Status: open\n- Barrier class: file-upload\n",
+        encoding="utf-8")
+    (ab_run5 / "agents").mkdir()
+    (ab_run5 / "agents" / "A-web-hunter-001.md").write_text("# Agent\n", encoding="utf-8")
+    mode5, _ = _check_agent_board(ab_run5)
+    checks.append(("agent board gate: diverse with only an agent file -> block", mode5 == "block"))
+
+    # Case 6: >= 4 open fronts diverse, has one assignment.json -> block
+    ab_run6 = ab_test / "diverse_with_assignments"
+    ab_run6.mkdir()
+    (ab_run6 / "frontier.md").write_text(
+        "# Frontier\n## Open\n"
+        "### F-001\n- Status: open\n- Barrier class: SQL-injection\n\n"
+        "### F-002\n- Status: open\n- Barrier class: XSS-filter\n\n"
+        "### F-003\n- Status: open\n- Barrier class: auth-bypass\n\n"
+        "### F-004\n- Status: open\n- Barrier class: file-upload\n",
+        encoding="utf-8")
+    (ab_run6 / "state").mkdir(parents=True)
+    (ab_run6 / "state" / "assignments.json").write_text(
+        json.dumps({"schema": 1, "assignments": [{"agent": "A-web-hunter-001", "front": "F-001", "status": "assigned"}]}),
+        encoding="utf-8")
+    mode6, msg6 = _check_agent_board(ab_run6)
+    checks.append(("agent board gate: diverse with one assignment -> block", mode6 == "block"))
+    checks.append(("agent board remediation routes typed owner without legacy assign",
+                   "xunji-agent-board" in msg6
+                   and "workers.py assign" not in msg6
+                   and "delegate" in msg6))
+
+    # Case 7: editable heartbeat fields alone do not pass; real Agent receipts do.
+    ab_run7 = ab_test / "diverse_with_two_started_lanes"
+    ab_run7.mkdir()
+    (ab_run7 / "frontier.md").write_text((ab_run6 / "frontier.md").read_text(encoding="utf-8"), encoding="utf-8")
+    (ab_run7 / "agents").mkdir()
+    for aid in ("A-web-hunter-001", "A-web-hunter-002"):
+        (ab_run7 / "agents" / f"{aid}.md").write_text("# Agent\n", encoding="utf-8")
+    (ab_run7 / "state").mkdir(parents=True)
+    (ab_run7 / "state" / "assignments.json").write_text(
+        json.dumps({"schema": 1, "assignments": [
+            {"agent": "A-web-hunter-001", "front": "F-001", "role": "web-hunter", "status": "running", "heartbeat_count": 1},
+            {"agent": "A-web-hunter-002", "front": "F-002", "role": "auth-reviewer", "status": "running", "heartbeat_count": 1},
+        ]}),
+        encoding="utf-8")
+    mode7_manual, _ = _check_agent_board(ab_run7)
+    checks.append(("agent board gate: hand-written heartbeat does not prove Agent use",
+                   mode7_manual == "block"))
+    transcript = ab_test / "agent-transcript.jsonl"
+    transcript.write_text("", encoding="utf-8")
+
+    def append_returned_agent(*, tool_id: str, assignment: str, front: str,
+                              session_id: str, child_id: str) -> None:
+        prompt = f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front}"
+        with transcript.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": tool_id, "name": "Agent",
+                    "input": {
+                        "prompt": prompt,
+                        "subagent_type": "xunji-hunter",
+                    },
+                }]},
+            }) + "\n")
+        if _runtime_receipts is not None:
+            _runtime_receipts.append_hook_event(ab_run7, {
+                "hook_event_name": "PostToolUse", "session_id": session_id,
+                "transcript_path": str(transcript), "tool_name": "Agent",
+                "tool_use_id": tool_id,
+                "tool_input": {
+                    "prompt": prompt,
+                    "subagent_type": "xunji-hunter",
+                },
+                "tool_response": {"agentId": child_id, "isAsync": True,
+                                  "status": "async_launched"},
+            })
+            _runtime_receipts.append_hook_event(ab_run7, {
+                "hook_event_name": "SubagentStart", "session_id": session_id,
+                "transcript_path": str(transcript), "agent_id": child_id,
+                "agent_type": "xunji-hunter",
+            })
+            _runtime_receipts.append_hook_event(ab_run7, {
+                "hook_event_name": "SubagentStop", "session_id": session_id,
+                "transcript_path": str(transcript), "agent_id": child_id,
+                "agent_type": "xunji-hunter",
+                "last_assistant_message": "candidate completed",
+            })
+
+    for tool_id, aid, fid, child_id in (
+        ("tool-real-1", "A-web-hunter-001", "F-001", "child-real-1"),
+        ("tool-real-2", "A-web-hunter-002", "F-002", "child-real-2"),
+    ):
+        append_returned_agent(
+            tool_id=tool_id, assignment=aid, front=fid,
+            session_id="s-agent", child_id=child_id)
+    epoch_started = time.time() - 60
+    epoch_signature = _turn_contract._coordination_signature(ab_run7) \
+        if _turn_contract is not None else ""
+    epoch_contract = {
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE",
+        "session_id": "s-agent", "updated_at": time.time(),
+        "coordination_signature": epoch_signature,
+        "fanout_epoch_started_at": epoch_started,
+        "fanout_epoch_id": "0123456789abcdef",
+    }
+    mode7, _ = _check_agent_board(ab_run7, epoch_contract)
+    disposition7 = _runtime_receipts.agent_disposition(
+        ab_run7, since=epoch_started) if _runtime_receipts is not None else {}
+    checks.append(("agent board gate: Agent receipts without merge disposition still block",
+                   _runtime_receipts is None or (
+                       mode7 == "block"
+                       and {"A-web-hunter-001", "A-web-hunter-002"}
+                       <= {item.split(":", 1)[0]
+                           for item in disposition7.get("pending", [])})))
+    assignment_data = json.loads((ab_run7 / "state" / "assignments.json").read_text(encoding="utf-8"))
+    for item in assignment_data["assignments"]:
+        item.update({
+            "status": "merged",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "last_note": f"Front: {item['front']} candidate adjudicated",
+        })
+    (ab_run7 / "state" / "assignments.json").write_text(
+        json.dumps(assignment_data), encoding="utf-8")
+    mode7_merged, _ = _check_agent_board(ab_run7, epoch_contract)
+    checks.append(("agent board gate: real receipts plus anchored disposition -> pass",
+                   _runtime_receipts is None or mode7_merged is None))
+    current_contract = dict(
+        epoch_contract, session_id="s-current", updated_at=time.time())
+    mode7_old_turn, _ = _check_agent_board(ab_run7, current_contract)
+    checks.append(("agent board gate: stable epoch survives bare continue across sessions",
+                   _runtime_receipts is None or mode7_old_turn is None))
+    assignment_data = json.loads(
+        (ab_run7 / "state" / "assignments.json").read_text(encoding="utf-8"))
+    new_assignments = (
+        ("A-web-hunter-003", "F-003", "tool-current-1", "child-current-1"),
+        ("A-web-hunter-004", "F-004", "tool-current-2", "child-current-2"),
+    )
+    for aid, fid, _tool_id, _child_id in new_assignments:
+        (ab_run7 / "agents" / f"{aid}.md").write_text("# Agent\n", encoding="utf-8")
+        assignment_data["assignments"].append({
+            "agent": aid, "front": fid, "role": "web-hunter",
+            "status": "assigned", "heartbeat_count": 0,
+        })
+    (ab_run7 / "state" / "assignments.json").write_text(
+        json.dumps(assignment_data), encoding="utf-8")
+    for aid, fid, tool_id, child_id in new_assignments:
+        append_returned_agent(
+            tool_id=tool_id, assignment=aid, front=fid,
+            session_id="s-current", child_id=child_id)
+    mode7_current, _ = _check_agent_board(ab_run7, current_contract)
+    disposition7_current = _runtime_receipts.agent_disposition(
+        ab_run7, since=epoch_started) if _runtime_receipts is not None else {}
+    current_pending = {
+        item.split(":", 1)[0] for item in disposition7_current.get("pending", [])
+    }
+    checks.append(("agent board gate: old disposition cannot settle new Agent calls",
+                   _runtime_receipts is None or (
+                       mode7_current == "block"
+                       and {item[0] for item in new_assignments} <= current_pending
+                       and not {"A-web-hunter-001", "A-web-hunter-002"}
+                           & current_pending)))
+    assignment_data = json.loads(
+        (ab_run7 / "state" / "assignments.json").read_text(encoding="utf-8"))
+    new_assignment_ids = {item[0] for item in new_assignments}
+    for item in assignment_data["assignments"]:
+        if item.get("agent") in new_assignment_ids:
+            item.update({
+                "status": "merged",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "last_note": f"Front: {item['front']} current-turn candidate adjudicated",
+            })
+    (ab_run7 / "state" / "assignments.json").write_text(
+        json.dumps(assignment_data), encoding="utf-8")
+    mode7_current_merged, _ = _check_agent_board(ab_run7, current_contract)
+    checks.append(("agent board gate: current receipts plus current disposition -> pass",
+                   _runtime_receipts is None or mode7_current_merged is None))
+    (ab_run7 / "frontier.md").write_text(
+        (ab_run7 / "frontier.md").read_text(encoding="utf-8")
+        + "\n### F-005\n- Status: open\n- Barrier class: new-layer\n"
+          "- Current depth: shallow\n",
+        encoding="utf-8",
+    )
+    mode7_changed, _ = _check_agent_board(ab_run7, current_contract)
+    checks.append(("agent board gate: material signature change invalidates old epoch",
+                   _runtime_receipts is None or mode7_changed == "block"))
+
+    # Case 8: free-text budget reason no longer bypasses; current operator prompt can.
+    ab_run8 = ab_test / "diverse_with_budget_reason"
+    ab_run8.mkdir()
+    (ab_run8 / "frontier.md").write_text((ab_run6 / "frontier.md").read_text(encoding="utf-8"), encoding="utf-8")
+    (ab_run8 / "decisions.md").write_text("# Decisions\n- Agent Board budget reason: single safe lane left in scope\n", encoding="utf-8")
+    mode8_text, _ = _check_agent_board(ab_run8)
+    checks.append(("agent board gate: decisions.md budget prose cannot bypass", mode8_text == "block"))
+    (ab_run8 / "state").mkdir(exist_ok=True)
+    (ab_run8 / "state" / "turn_contract.json").write_text(json.dumps({
+        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE", "session_id": "s-override",
+        "transcript_path": "", "prompt_sha256": "a" * 64,
+        "prompt_excerpt": "明确允许串行", "memory_approved": False,
+        "fanout_override": True, "updated_at": time.time(),
+    }), encoding="utf-8")
+    mode8, _ = _check_agent_board(ab_run8)
+    checks.append(("agent board gate: current operator prompt override -> pass", mode8 is None))
+
+    bad = [n for n, ok in checks if not ok]
+    # 输出到 stderr(与 safety_gate 一致): SessionStart 接线时不刷 context, 手动跑仍可见。
+    for n, ok in checks:
+        print(("ok   " if ok else "FAIL ") + n, file=sys.stderr)
+    print("run_gate selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"), file=sys.stderr)
+    return 0 if not bad else 1
+
+
+if __name__ == "__main__":
+    main()

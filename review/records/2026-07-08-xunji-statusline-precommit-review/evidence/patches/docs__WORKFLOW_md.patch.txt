@@ -1,0 +1,20 @@
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index 7c2514a..bafe908 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -82,6 +82,15 @@ journal for interruption recovery. It records explicit `/loop` cycle start, plan
+ action, write-result, interrupt, and end events. It is not evidence and does not
+ replace `decisions.md` or `session_handoff.md`.
+ 
++Claude Code statusline uses `tools/xunji_statusline.py` from the project
++`.claude/settings.json`. It is a read-only, two-second display of the active run:
++current Router phase, run name, pending verification entries, aggregated Agent
++state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_run`
++plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
++state, choose work, write evidence, or enforce phase discipline. The active-run
++pointer is local runtime state and is updated by `loop_bootstrap.py` and the fixed
++`/loop runs/<dir>` protocol.
++
+ 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
+ phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a
+ clear Chinese phase marker and, once a run directory exists, record it in the

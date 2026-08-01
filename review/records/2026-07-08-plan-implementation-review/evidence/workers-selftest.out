@@ -1,0 +1,49 @@
+[agent-board check] clean: no Agent discipline issues found.
+ok   suggest returns open/probing before bad deferred
+ok   suggest excludes closed
+ok   fanout verdict recommends with 3 mapped fronts
+ok   scan sees two done workers
+ok   empty run suggest returns []
+ok   asset suggestions live in workers not graph
+ok   plan with no strong candidate exits 1
+ok   merge-check clean path exits 0
+ok   created worker scans assigned front
+ok   field parser does not cross newline on empty value
+ok   empty Claim does not swallow next line
+ok   empty Control does not swallow following text
+ok   plan --limit uses full pool verdict source
+ok   merge-check catches missing control
+ok   merge-check catches duplicate candidate
+ok   merge-check catches conflicting candidate certainty
+ok   merge-check catches done-but-unmerged
+ok   legacy main list exits 0
+ok   legacy main --new exits 0
+ok   assign command exits 0
+ok   status command exits 0
+ok   agent-check empty run exits 0
+ok   agent-check clean scaffold has no issues
+ok   agent scaffold includes personalized RDT controls
+ok   merge-threats writes Root-owned hypothesis
+ok   merge-threats skips duplicate suggestions
+ok   agent-check catches bad threat hypothesis fields
+ok   agent-check catches incomplete personalized RDT step
+ok   status sync: complete file flips assignment to done
+ok   status sync: Findings section flips assignment to done
+ok   status sync: empty Findings section stays assigned
+ok   status sync: negative Findings summary flips assignment to done
+ok   status sync: investigatory placeholder stays assigned
+ok   role alias web uses web-hunter template
+ok   agent assignment writes context pack
+ok   assignments.json records agent
+ok   agent-check catches missing loop/safety sections
+ok   agent-check catches non-synthesizer finding/closure
+ok   agent-check catches high-confidence candidate missing control/artifact
+ok   conflicts detects support/refute contradiction
+ok   direct contradiction alone does not create confidence mismatch
+ok   conflicts detects same-polarity duplicate
+ok   conflicts detects same-polarity confidence mismatch
+ok   conflicts detects same-polarity artifact mismatch
+ok   synthesis draft is advisory not canonical
+ok   synthesis treats placeholder control as missing
+ok   synthesis carries unresolved conflicts
+workers selftest passed

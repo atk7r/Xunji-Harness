@@ -1,0 +1,179 @@
+{
+  "total": 5,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004",
+    "E-005"
+  ],
+  "confirmed_findings": [],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 — active behavior diff under review",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": "artifact",
+      "maturity_unknown": true,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/active-diff.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/active-diff.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 — full local regression battery passed",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": "verification",
+      "maturity_unknown": true,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/selftest-all-final-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/selftest-all-final-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 — safety boundary explicit checks passed",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": "verification",
+      "maturity_unknown": true,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/safety-boundary-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/safety-boundary-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004 — referenced scshr run is structurally passable but not auto-complete",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": "verification",
+      "maturity_unknown": true,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/scshr-state-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/scshr-state-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005 — staged diff whitespace check passed",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": "verification",
+      "maturity_unknown": true,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/diff-check-log.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/diff-check-log.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

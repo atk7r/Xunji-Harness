@@ -1,0 +1,16 @@
+{
+  "schema": "xunji.maintenance-driver-excerpt.v1",
+  "attempt": 1,
+  "session_id": "329f3cbb-22af-4c35-a88c-394f209ace7a",
+  "candidate_state": {
+    "mode": "EXECUTE",
+    "loop_requested": true,
+    "loop_source_kind": "file",
+    "lifecycle_operation": "source",
+    "origin_run": "driver-origin_20260729"
+  },
+  "observed_pointer_after": "runs/driver-origin_20260729",
+  "verdict": "failed",
+  "root_cause": "The lexical /tmp source did not equal RUNS.resolve() under /private/tmp, so the first implementation did not strip attached prose.",
+  "disposition": "Accepted as a failed real-driver test; not counted as validation."
+}

@@ -1,0 +1,6 @@
+warnings
+- Metacog pass(软门): report 已触发收口/终版报告, 但 decisions.md 未记录 Metacog pass。收口前应做一次第二系统发散, 找盲区并提出可验证动作; 它只打开/重排前沿, 不确认、不关门。
+- report 含强收口断言(如'无攻击面/探尽/打不动'), 但本 run 无逐资产按内容分类记录(classify_hosts.py 的 classify.txt) —— 资产可能只按 server 头/recon lump, 未逐个看内容。收口前请跑 `python tools/classify_hosts.py`。
+- frontier Closed Front '### F-003 — MVC TestLogin (2019yles-mgr) — DEFER': 以屏障(blocked)关门却无 Refutes/正面证据 —— '我够不着'应记 deferred 而非 closed(它安全)。
+- frontier Closed Front '### F-004 — fubonebook2 (富邦電子書城) — DEFERRED (bac': 以屏障(WAF)关门却无 Refutes/正面证据 —— '我够不着'应记 deferred 而非 closed(它安全)。
+run check passed

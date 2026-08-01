@@ -1,0 +1,35 @@
+# Peer Review Panel — 2026-07-29-interrupted-reviewer-recovery
+
+_backend: panel:arkcli+claude · 2026-07-29T07:35Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: WARN
+
+_backend: panel:arkcli+claude_
+_brain: codex_
+_bundle_hash: 67d61a07e5dd1bafcdbeda1334b2acda9c243752_
+_evidence_index_hash: 13bc81967de573895d77359c4d1bfc6ce3f5b4ab_
+
+## Findings
+- [WARN] PR-001 arkcli panel had backend errors; review is partial | Evidence: glm-5.2: parse error; output tail: ized by runtime lock." The test "interrupted Reviewer recovery serializes a concurrent runtime writer" passes. But does this actually prove the lock ordering is correct? The ARCHITECTURE.md diff mentions that only cancellation and interrupted-Reviewer recovery transactions allow runtime->assignment lock ordering nesting. This is a new lock ordering that could potentially introduce deadlocks if not carefully managed.
+
+9. **The report's claim about "69 passed, 0 failed"** - Looking at test-results | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+- [WARN] PR-002 F-004 split evidence gap | Evidence: frontier.md:15-18, report.md:28-35, E-003: evidence/performance-benchmark.txt, E-004: evidence/driver-adjudication.json | Why: [panel:claude] F-004 closure claim is supported by split evidence rather than a unified end-to-end test on the real high-load asset. E-003 proves recovery on the real 25 MB A-review-012 data. E-004 proves the full lifecycle on a synthetic targetless fixture. The two are never composed into a single high-stress run, making the closure language stronger than the unified evidence set.
+- [WARN] PR-003 Rigid interrupted-start schema evolution | Evidence: E-001: evidence/reviewed.diff (INTERRUPTED_REVIEWER_START_REASON), contracts/interrupted-reviewer-start.v1.schema.json | Why: [panel:claude] The receipt schema validates the exact `subagent_start_hook_cancelled_before_assistant` reason string. Future interruption variants (OOM, SIGKILL, network timeout) will fail this check and be non-recoverable. The rigidity is correct for safety, but the lack of documented evolution strategy is a maintenance exposure.
+
+## Blind-spot check
+- [claude] The author split proof across two disparate artifacts (E-003 real-data recovery, E-004 synthetic lifecycle) but labeled F-004 as fully closed without flagging the gap. An unskeptical reader assumes a single end-to-end stress test was run, but the real data path (25 MB) was never combined with the full lifecycle path (recovery → replay → launch → settlement → cycle_end).
+- [claude] The schema is tightly coupled to one specific interruption cause (client tool-use interruption producing a clean `interrupted` parent terminal + `hook_cancelled` child sidechain). Any other pre-model failure silently leaves the reviewer `running`. The author correctly calls this "fail‑closed by design" but does not document it as a known coverage gap for non-tool-use interruption mechanisms (OOM, network partition, process kill).
+
+## Context-limit notes
+- [arkcli] glm-5.2: parse error; output tail: ized by runtime lock." The test "interrupted Reviewer recovery serializes a concurrent runtime writer" passes. But does this actually prove the lock ordering is correct? The ARCHITECTURE.md diff mentions that only cancellation and interrupted-Reviewer recovery transactions allow runtime->assignment lock ordering nesting. This is a new lock ordering that could potentially introduce deadlocks if not carefully managed.
+
+9. **The report's claim about "69 passed, 0 failed"** - Looking at test-results
+- [arkcli] arkcli succeeded after 2 attempt(s); previous failures: attempt 1: arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: writer" as a passing test. But is there an artifact for this concurrent fixture? It appears to only be in the selftest, not as a separate artifact. This might be sufficient but worth noting.
+
+i) **The report mentions "Independent review remains a separate gate"** - this is appropriate hedging.
+
+j) **Missing from evidence**: The report mentions "Focused runtime, workers, turn-contract, rule, compile, and diff checks pass." The evidence shows runtime_receipts, workers, and turn_contract selftests.
+- [claude] `evidence/reviewed.diff` (81k) is excerpted to 55k chars; the last ~26k of the diff are not directly verifiable from this bundle. The excerpt covers all new functions and test output, so the risk is low.
+- [claude] Chinese documentation within the diff was reviewed. It precisely mirrors the English invariants and introduces no detectable blind spot.
+- [claude] The entire bundle is a self-review (Codex is author and review target). The external review matrix is pending; this review cannot treat Codex as independent.

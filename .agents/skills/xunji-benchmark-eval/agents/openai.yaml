@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Benchmark Eval"
+  short_description: "Maintain Xunji benchmark evaluation"
+  default_prompt: "Use $xunji-benchmark-eval to maintain or audit Xunji benchmark evaluation."

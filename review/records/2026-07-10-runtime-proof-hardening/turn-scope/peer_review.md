@@ -1,0 +1,58 @@
+# Peer Review Panel — turn-scope
+
+_backend: panel:arkcli+claude · 2026-07-10T22:32Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: WARN
+
+_backend: panel:arkcli+claude_  
+_brain: codex_  
+_bundle_hash: 84c8e93a62d8bc6fe8b594c59f873bde9e1daeca_  
+_evidence_index_hash: 40c6253bea8ba1df75c354d1204570fbab7e5af7_  
+
+## Findings
+- [WARN] PR-001 In `_fanout_control_bash`, only the basename of the invoked Python script is checked; an arbitrary script named workers.py/run_model.py/loop_state.py anywhere on disk satisfies the pre-fanout Bash allow-list, permitting arbitrary code execution before Agent Board fanout. | Evidence: turn_contract.lines-171-340.txt:217-228 | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The function whitelists python[3] calls whose second argument basename is in {workers.py, run_model.py, loop_state.py}. Because it uses Path(...).name, `python3 /tmp/workers.py` or any symlink/file named workers.py passes. This contradicts the intent that only official control-plane tooling may run before two real Agent receipts cover distinct fronts.
+- [WARN] PR-002 The `_readonly_shell` read-only grammar permits file-mutating sed/find constructs (`sed -n -i`, `sed -n 'w /path'`, `find ... -fprint/-fls/-fprintf`), allowing file mutations in EXPLAIN_ONLY turns. | Evidence: turn_contract.lines-171-340.txt:190-214, turn_contract.lines-171-340.txt:283-289 | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] EXPLAIN_ONLY is documented as prohibiting modifications, yet the Bash allow-list treats `sed -n` and `find` without -delete/-exec as read-only. Standard sed in-place/write commands and find output-to-file flags write to arbitrary paths, so a model in explain mode can still mutate state.
+- [WARN] PR-003 arkcli panel had backend errors; review is partial | Evidence: minimax-m3: parse error; output tail: _pretool_first` - is the turn contract always the FIRST global PreToolUse hook? If a malicious or buggy hook is added before it, could the hook output be modified? The selftest does check `global_pretool_first` - good.
+
+10. **The `disabled_modes` or `bypass` question**: Is there any way to bypass the turn contract? The selftest covers many cases but does it cover all? For example, what if a Bash command uses stdin redirection? The selftest blocks `>` in readonly_shell. What about encoded network; glm-5.2: parse error; output tail: anges and selftest additions. ✓
+   - `run_gate.hunks-01.diff`: Shows the fail-closed changes to run_gate.py. ✓
+   - `run_gate.hunks-02.diff`: Shows the selftest additions for run_gate.py. ✓
+   - `settings.diff`: Shows the hook wiring additions. ✓
+   - `turn_contract.lines-*.txt`: Shows the full turn_contract.py source. ✓
+
+19. **The report claims "No external target was engaged"** - this is consistent with the evidence, which is all about internal framework controls.
+
+20. **Claim integrity**: The | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+- [WARN] PR-004 The `_DENIED_ONLY_RE` regex in `output_gate.diff` matches an exact Chinese string with `\A...\Z` anchors — no tolerance for whitespace variation, encoding drift, or documentation sync. If the exact wording of the denied envelope ever changes (e.g. in CLAUDE.md or a hook message), this regex silently stops matching and all unresolved-denial claims bypass the gate. | Evidence: `output_gate.diff` lines ~15-18 (`_DENIED_ONLY_RE` compile block) | Why: [panel:claude] Single-point fragility — the gate's correctness depends on a string literal staying byte-identical across files; a routine wording tweak would break enforcement with no selftest alarm unless the selftest string is also updated.
+- [WARN] PR-005 The `adversarial_selftests.summary.json` artifact contains only a binary `"passed": true` plus six command names — it does not enumerate which adversarial scenarios were tested, what the expected outcomes were, or how many individual checks ran. While the source-code excerpts in the evidence bundle (turn_contract selftest, output_gate selftest, run_gate selftest) contain detailed check lists, the summary artifact that E-001 cites as proof cannot be independently cross-checked against the named adversarial-log items in the report without reading the source excerpts. | Evidence: `adversarial_selftests.summary.json` (6 command entries, no scenario enumeration) vs report claim "Its named adversarial log covers missing, malformed, wrong-schema, stale, and cross-session contracts..." | Why: [panel:claude] The claim that the selftests "cover" 10+ adversarial scenarios rests on reading source code, not on the summary artifact itself. This is a documentation/auditability gap, not a correctness issue.
+- [WARN] PR-006 The report states "Automatic fail-open is intentionally excluded because it would restore the process bypass this work removes." The `output_gate.diff` exception handler shows: `except Exception as exc: if run_dir is not None and turn_mode not in {"EXPLAIN_ONLY", "PAUSED_BY_OPERATOR"}: ... block`. This means the fail-closed behavior is gated on `run_dir is not None` — if `find_active_run()` returns None inside the exception handler (e.g. the active-run file was deleted mid-session), the exception is silently swallowed and the session proceeds without a Coda. This is a narrow edge case but contradicts the "always fail-closed for active runs" claim since the active-run detection itself can race. | Evidence: `output_gate.diff` exception handler block (the `if run_dir is not None` guard) | Why: [panel:claude] The claim of "always fail-closed" has a silent-fail-open path when `run_dir` becomes None mid-handler.
+
+## Blind-spot check
+- [arkcli] [kimi-k2.7-code] Static selftests and code diffs are the only evidence; no live adversarial prompt was exercised against a real Claude instance in this scope, so classification-regex and hook-interaction bypasses cannot be empirically ruled out.
+- [arkcli] [kimi-k2.7-code] The fail-closed exception handlers in output_gate.py/run_gate.py only block after run_dir/active_run is resolved; an exception thrown during the initial active-run lookup still fails open, and the selftests do not appear to cover that window.
+- [arkcli] [kimi-k2.7-code] installed-runtime-manifest.json certifies its own file hashes but is produced by the same tooling it attests; there is no independent runtime invocation log proving those exact files were loaded by Claude Code at hook time.
+- [arkcli] [kimi-k2.7-code] The selftest summary is a single 'passed' JSON without line-level stdout; regressions not covered by the selftest code are invisible.
+- [claude] **Static-only evidence cannot detect hook-chain ordering bugs.** The selftests run in a controlled subprocess with a constructed event JSON piped to stdin. They cannot reproduce the actual Claude Code hook execution order (UserPromptSubmit → PreToolUse → PostToolUse → Stop), environment variable propagation, or race conditions between `turn_contract.py` writing state and `output_gate.py` reading it in the same hook chain. The `live-scope` separation is explicitly documented, but the turn-scope's certainty=1.0 should be understood as "the code logic is correct in isolation" — not "the hook chain behaves correctly end-to-end."
+- [claude] **`turn_contract.py` import-failure fallback behavior in `output_gate.py`**: When `_turn_contract` is None (import failed), `turn_mode` defaults to `"EXECUTE"` and `protocol_exempt = False`. This means all protocol blocks still fire — correct fail-closed behavior. But it also means EXPLAIN_ONLY mode is silently lost (the user's read-only prompt would be treated as EXECUTE with full Coda enforcement). This is a design tradeoff (better to over-enforce than under-enforce) that the report doesn't discuss.
+- [claude] **`run_gate.py` selftest's agent board Case 7 creates temp directories and mutates `assignments.json`** — the test writes real receipt events via `runtime_receipts.append_hook_event`. If the selftest crashes mid-way, it could leave stale receipt entries in the temp directory. This is harmless (temp dirs are cleaned up), but the test's statefulness could cause flaky failures if run in parallel. Not a security issue, just an observation on test robustness.
+- [claude] **The `installed-runtime-manifest.json` captures file hashes at a point in time** — it doesn't prove those files haven't changed since the manifest was created. The manifest itself is part of the evidence bundle with its own sha1, but there's no chain of custody from the manifest creation time to the review time. For a maintenance review this is acceptable (the files are in the same repo), but the evidence model conflates "file hash at capture time" with "file currently on disk."
+- [claude] **`review.md` PR-004 notes that minimax/glm JSON parse failures are "not treated as PASS"** — this is correctly conservative, but it also means the arkcli panel's review coverage is incomplete. The review ledger shows 9 PR items resolved, but two of them (PR-004, PR-009) are recorded as limitations rather than verified passes. The distinction is clearly documented, so this is transparency rather than a gap.
+
+## Context-limit notes
+- [arkcli] minimax-m3: parse error; output tail: _pretool_first` - is the turn contract always the FIRST global PreToolUse hook? If a malicious or buggy hook is added before it, could the hook output be modified? The selftest does check `global_pretool_first` - good.
+
+10. **The `disabled_modes` or `bypass` question**: Is there any way to bypass the turn contract? The selftest covers many cases but does it cover all? For example, what if a Bash command uses stdin redirection? The selftest blocks `>` in readonly_shell. What about encoded network
+- [arkcli] glm-5.2: parse error; output tail: anges and selftest additions. ✓
+   - `run_gate.hunks-01.diff`: Shows the fail-closed changes to run_gate.py. ✓
+   - `run_gate.hunks-02.diff`: Shows the selftest additions for run_gate.py. ✓
+   - `settings.diff`: Shows the hook wiring additions. ✓
+   - `turn_contract.lines-*.txt`: Shows the full turn_contract.py source. ✓
+
+19. **The report claims "No external target was engaged"** - this is consistent with the evidence, which is all about internal framework controls.
+
+20. **Claim integrity**: The
+- [claude] All Chinese strings in the code (denial messages, Coda format, protocol block reasons) were read as-is. I may miss subtle semantic issues in Chinese error messages (e.g., the exact meaning of "未执行目标动作；不存在该动作的实测结果" in the denied envelope) that a native speaker would catch.
+- [claude] The project conventions (Xunji run lifecycle, Agent Board mechanics, Worker assignment model) were derived from the bundle and CLAUDE.md context. I may misinterpret project-specific idioms that aren't fully explained in the reviewed files.
+- [claude] CNVD/CVE knowledge entries referenced in CLAUDE.md are not relevant to this code-review scope. No target-specific vulnerability context applies.
+- [claude] The `review.md` mentions "arkcli panel" with models kimi-k2.7-code + minimax-m3 + glm-5.2 — I take these as given without independent evaluation of those models' review quality.

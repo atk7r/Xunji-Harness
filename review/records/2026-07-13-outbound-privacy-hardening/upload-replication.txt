@@ -1,0 +1,13 @@
+E-005 replication adjudication
+
+Current-schema run 1 marker/filename/boundary core: proof-20260713-e5f6a7b8[.txt]
+Run 1 result: HTTP 201; server-observed wire saved in upload-wire-5.txt.
+
+Current-schema run 2 marker/filename/boundary core: proof-20260713-f6a7b8c9[.txt]
+Run 2 result: HTTP 201; server-observed wire saved in upload-wire-6.txt.
+
+The sensor result files preserve the generic per-run instruction to repeat before
+certainty >=0.8. That instruction was satisfied by the second fresh-marker run;
+this note binds both current dated-boundary result/wire pairs as the replication
+control. In each current run, the boundary is `----` plus the exact upload marker.
+Earlier wire artifacts remain historical review inputs but are not cited by E-005.

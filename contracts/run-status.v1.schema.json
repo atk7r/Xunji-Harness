@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/run-status.v1.schema.json",
+  "title": "Xunji derived run status projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "session_id", "updated_at", "reason"],
+  "properties": {
+    "schema": {"const": "xunji.run-status.v1"},
+    "status": {
+      "enum": [
+        "active",
+        "paused_by_operator",
+        "maintenance",
+        "intent_pending"
+      ]
+    },
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "updated_at": {"type": "number", "exclusiveMinimum": 0},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 512}
+  }
+}

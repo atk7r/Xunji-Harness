@@ -1,0 +1,47 @@
+# Peer Review Panel — 2026-07-10-runtime-proof-hardening
+
+_backend: panel:arkcli+claude · 2026-07-10T13:43Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: BLOCKER
+
+_backend: panel:arkcli+claude_  
+_brain: codex_  
+_bundle_hash: d417cae149be0b6548afec59e8b6dc4df8301a79_  
+_evidence_index_hash: 4ea5627e7800d6da56fcbfaf52b295fbbad2dbce_  
+
+## Findings
+- [BLOCKER] PR-001 Confirmed findings E-001 and E-002 cite complete, reproducible source-change artifacts, but the part-ab diff files are fragments with inconsistent diff_summary metadata (0 changed files, 0 hunks) despite non-empty content. | Evidence: evidence_index:E-001:artifacts:turn_contract.part-ab.diff (size=11390, sha1=c322d27bc6ab7cfedb2b59b954ceac3ab16b21f0, diff_summary changed_files_count=0/hunk_count=0), evidence_index:E-002:artifacts:runtime_receipts.part-ab.diff (size=11712, sha1=4435109b4c807a598efd1a020beaed2e114c4227, diff_summary changed_files_count=0/hunk_count=0), evidence_index:E-001:artifacts:hooks.part-ab.diff (diff_summary lists '(unknown)' changed files) | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] A .diff with zero hunks cannot encode the claimed changes; cross-checking against the actual file system would fail. The evidence_index therefore overstates reproducibility.
+- [BLOCKER] PR-002 Operational effectiveness of the new runtime-proof controls is reported as confirmed, but the run provides only static source diffs and no runtime observation that the gates actually execute. | Evidence: run audit trail files list (no runtime_events.jsonl, no state/, no review/receipts/), evidence_index:E-001 through E-003 artifacts are all .diff files or code excerpts, evidence_index:E-001 has_control=true but no control execution log | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] For a runtime-proof hardening run, code existence is necessary but not sufficient. The discipline requires observed behavior; unexecuted diffs are single-observation static artifacts.
+- [WARN] PR-003 report.md (591 bytes) is too small to carry all confirmed evidence entries and their citations for this run. | Evidence: report.md size=591, sha1=fae4234d1b5e3871a4763662e74e22476fff8f6b, evidence.md size=3233, sha1=092477b8aa62f63111e893ca4e35f8208c338bb3, evidence_index contains at least E-001, E-002, E-003 (and inferred E-004/E-005 from supports relations) | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] A 591-byte report cannot plausibly contain the required claim ledger for five confirmed findings plus cross-citations.
+- [WARN] PR-004 review.md and completion-review provenance are not substantiated in the run audit trail despite E-003 adding review-receipt validation logic. | Evidence: review.md size=171, sha1=8afa07d434d618a71eb46d2ccc78105fd6f88428, run files list lacks review_bundle.json and review/receipts/*.json, evidence_index:E-003 artifact check_run.part-aa.diff is truncated in the bundle | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The new gate requires a hook-backed receipt; the run directory does not contain one, so any 'review completed' claim is a report claim without matching artifact.
+- [WARN] PR-005 There is no installed-state artifact verifying that .claude/settings.json was actually updated with the new hooks. | Evidence: evidence_index:E-001:artifacts:hooks.part-ab.diff (settings.json changes excerpt), run files list does not include .claude/settings.json | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] A diff proves intent; an installed snapshot proves the control plane is actually wired.
+- [WARN] PR-006 arkcli panel had backend errors; review is partial | Evidence: glm-5.2: parse error; output tail: n_dir = find_active_run(RUNS)
+            except Exception:
+                run_dir = None
+        if run_dir is not None and turn_mode not in {"EXPLAIN_ONLY", "PAUSED_BY_OPERATOR"}:
+            print(json.dumps({...block...}))
+        sys.exit(0)
+```
+
+So when run_dir can't be found, it still exits 0 (fail-open). But the rationale is "if there's no active run, there's nothing to protect." This is actually reasonable - if there's no active run, the gate shouldn't block. But it means a broken find | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+
+## Blind-spot check
+- [claude] **Documentation drift is the primary unexamined risk.** The hardening moves process trust from editable Markdown to hook-owned runtime receipts, but the parallel documentation changes (CLAUDE.md, skills, templates, WORKFLOW) redefine what the model believes the rules ARE. If any old bypass language survived (e.g., "manual-driver review counts when codex is unavailable" still appears in a skill the diff missed), the model could follow stale instructions while the hooks correctly block — or worse, the model could follow new doc instructions that the hook code doesn't actually enforce yet. Cross-referencing every doc change against every code enforcement point would be the next logical verification step.
+- [claude] **The consolidated full diffs (`hooks.diff`, `state.diff`, `runtime_receipts.diff`, `turn_contract.diff`, `check_run.full.diff`) are unreferenced artifacts.** While their content is distributed across the evidenced part-diffs, the existence of unreferenced files in the review directory creates a provenance gap — if a part-diff is truncated or split incorrectly, the full diff is the ground truth, but it's not tracked.
+- [claude] **Review receipt chaining doesn't guard against same-session forgery.** The `runtime_events.jsonl` hash chain proves sequential integrity, and transcript-backed verification proves the tool-use ID existed. But a malicious same-user process WITH transcript access could inject fabricated events into the chain (same user, same filesystem, same transcript). The design correctly scopes this: "Are the receipts strong enough for a lazy model without claiming resistance to a fully malicious same-user process?" — context.md line 37-38. This is the right threat model for the feature's purpose. The blind spot is that context.md poses the question but neither evidence nor selftest explicitly validates the answer.
+- [claude] **`classify_hosts` selftest takes 39.9s** (selftest_all.log line 4) — by far the slowest test. While not a correctness issue, a 40-second DNS-dependent test in the regression suite is fragile and could cause CI flakiness in network-constrained environments. The evidence doesn't note this as a risk.
+
+## Context-limit notes
+- [arkcli] glm-5.2: parse error; output tail: n_dir = find_active_run(RUNS)
+            except Exception:
+                run_dir = None
+        if run_dir is not None and turn_mode not in {"EXPLAIN_ONLY", "PAUSED_BY_OPERATOR"}:
+            print(json.dumps({...block...}))
+        sys.exit(0)
+```
+
+So when run_dir can't be found, it still exits 0 (fail-open). But the rationale is "if there's no active run, there's nothing to protect." This is actually reasonable - if there's no active run, the gate shouldn't block. But it means a broken find
+- [claude] I am reviewing diff EXCERPTS with hunk summaries, not full original files. I cannot verify that the excerpt in the bundle exactly matches the on-disk diff file content byte-for-byte. The excerpt truncation (truncated in the review bundle at ~24000 chars) means I may be missing edge hunks.
+- [claude] The Chinese technical terminology (e.g., "收口硬门", "输出协议", "暂停事务") carries nuanced process semantics; my interpretation may miss domain-specific meanings that a Chinese-native reviewer would catch.
+- [claude] I have not verified the `turn_contract.py` selftest actually exercises every hook wiring path in `settings.json` — the selftest checks `wired()` for each event name but I can't run the actual hook infrastructure.

@@ -1,0 +1,32 @@
+{
+  "schema": "xunji.setup-source-conformance.v1",
+  "canonical_schema": "xunji.setup-source.v1",
+  "legacy_schemas": ["xunji.setup_source.v1"],
+  "max_source_bytes": 16777216,
+  "route_cases": [
+    {"name": "existing run", "type": "auto", "input_kind": "run", "expect": "run"},
+    {"name": "file inside existing run", "type": "auto", "input_kind": "run-file", "expect": "run"},
+    {"name": "domain URL", "type": "auto", "input": "https://example.test/path?key=opaque#frag", "expect": "url"},
+    {"name": "IPv4 URL", "type": "url", "input": "http://192.0.2.10:8080/a", "expect": "url"},
+    {"name": "IPv6 URL", "type": "url", "input": "https://[2001:db8::1]:8443/a", "expect": "url"},
+    {"name": "IDN URL", "type": "url", "input": "https://例子.test/a", "expect": "url"},
+    {"name": "recon by content", "type": "auto", "input_kind": "recon-json", "expect": "recon-json"},
+    {"name": "recon explicit", "type": "recon-json", "input_kind": "recon-json", "expect": "recon-json"},
+    {"name": "ordinary JSON candidate route", "type": "auto", "input_kind": "ordinary-json", "expect": "json"},
+    {"name": "Markdown candidate route by content", "type": "auto", "input_kind": "markdown", "expect": "markdown"}
+  ],
+  "deny_cases": [
+    {"name": "userinfo URL", "type": "url", "input": "https://user:secret@example.test/", "error": "url_userinfo_forbidden"},
+    {"name": "bad port", "type": "url", "input": "https://example.test:99999/", "error": "invalid_url"},
+    {"name": "missing host", "type": "url", "input": "https:///path", "error": "invalid_url"},
+    {"name": "unsupported scheme", "type": "url", "input": "file:///tmp/report", "error": "invalid_url"},
+    {"name": "unknown explicit type", "type": "intel-url", "input": "https://example.test/", "error": "invalid_source_type"},
+    {"name": "oversized source", "type": "auto", "input_kind": "oversized", "error": "source_too_large"},
+    {"name": "missing path", "type": "auto", "input_kind": "missing", "error": "missing_source"}
+  ],
+  "authority_cases": [
+    {"name": "source cannot mint operator authority", "authority": "operator", "prompt_sha256": "", "valid": false},
+    {"name": "bound operator authority", "authority": "operator", "prompt_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "valid": true},
+    {"name": "source data claim", "authority": "source-data", "prompt_sha256": "", "valid": true}
+  ]
+}

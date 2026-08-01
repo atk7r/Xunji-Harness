@@ -1,0 +1,21 @@
+ok   only reachable/unknown rows are included
+ok   auth vector fills Auth cell
+ok   api vectors fill Injection and IDOR
+ok   url-fetch asset exposes empty SSRF column
+ok   profile does not trigger file-download keyword
+ok   free-text title does not create applicability
+ok   explicit Assets field attributes front to asset
+ok   explicit Targets field accepts URL host:port
+ok   evidence-derived auth test fills matrix without Vectors tried
+ok   bare HTTP status text does not fill Auth coverage
+ok   low-certainty evidence does not fill Auth coverage
+ok   confounder note does not fill Injection coverage
+ok   corrupt primary coverage warns while using nested coverage
+ok   structured coverage waiver marks cell waived
+ok   structured coverage waiver renders reason
+ok   check reports warnings only
+ok   closure check upgrades matrix gaps to errors
+ok   state outputs are written
+ok   sync coverage marks touched assets examined
+ok   sync coverage only writes terminal verdicts
+coverage_matrix selftest passed

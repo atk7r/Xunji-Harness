@@ -1,0 +1,133 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "3c70efb9e34f24b0d642ad3ebddc8f78eb0d6d42",
+  "evidence_index_hash": "5b0dbb00f9e8fc00d8f5ca4d0ffc83508021429d",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "E-002 protected_non_target_denials count is inconsistent with hook_counts.protected_state_denials",
+      "evidence": "live_fanout_flow.summary.json",
+      "affected_eids": [
+        "E-002"
+      ],
+      "recommended_action": "Reconcile the two counts by exposing runtime_receipts.py filter logic or raw denied_tool_events; clarify whether protected_state_denials includes non-target events or multiple sessions.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The summary reports protected_non_target_denials=1 while hook_counts.protected_state_denials=8. If both measure the same control-plane denial set, one figure is incorrect and weakens confidence in the disposition ledger.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "E-004 Cron ownership claim overstates the enforcement mechanism",
+      "evidence": "live_pause_flow.summary.json",
+      "affected_eids": [
+        "E-004"
+      ],
+      "recommended_action": "Scope the finding to 'hook-observed run jobs' rather than 'ownership'; add a probe where a foreign-run job is observed but still rejected.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The denial reason is that the job was 'not observed as a task for run pause_run', not a true ownership check. Enforcement is limited to the hook's own observation window.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "methodology",
+      "claim": "All live tests disable Claude's native permissions with --dangerously-skip-permissions",
+      "evidence": "live_claude_smoke.source.txt:165, live_fanout_flow.source.txt:107, live_tool_surface.source.txt:106, live_pause_flow.source.txt:69",
+      "affected_eids": [
+        "E-001",
+        "E-002",
+        "E-003",
+        "E-004"
+      ],
+      "recommended_action": "Add a caveat to the report that findings characterize hook behavior in isolation, not the combined hook + native-permission defense.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The flag removes Claude's own permission layer, so the results do not validate real-world defense-in-depth.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "missed_surface",
+      "claim": "E-003 non-Bash tool surface coverage is narrow",
+      "evidence": "live_tool_surface.source.txt:62-93",
+      "affected_eids": [
+        "E-003"
+      ],
+      "recommended_action": "Extend probing to Read, Glob, Grep, LSP, Task, and any other available non-Bash tools to verify PreToolUse/PostToolUse hook coverage.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Only WebFetch, Write, and Edit are tested, leaving other tool surfaces unverified.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "shallow_closure",
+      "claim": "No adversarial or negative tests attempt to bypass hook decisions",
+      "evidence": "live_claude_smoke.source.txt:80-84, live_fanout_flow.source.txt:93-101, live_tool_surface.source.txt:98-101, live_pause_flow.source.txt:94-100",
+      "affected_eids": [
+        "E-001",
+        "E-002",
+        "E-003",
+        "E-004"
+      ],
+      "recommended_action": "Add adversarial probes: prompt injection against hooks, tool substitution, and instructions to ignore or override the hook.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Current prompts instruct Claude to cooperate, so the tests do not characterize behavior under real adversarial pressure.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "artifact_cross_check",
+      "claim": "Review bundle does not include full raw replay/streams for independent artifact verification",
+      "evidence": "evidence_index entries E-001 through E-004",
+      "affected_eids": [
+        "E-001",
+        "E-002",
+        "E-003",
+        "E-004"
+      ],
+      "recommended_action": "Provide raw .replay.json or full stream-json recordings in the bundle so reviewers can independently verify hook event timing and Claude outputs.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The report requires binding source, summary, runtime effects, and manifest rather than trusting prose, but the bundle only contains excerpts and summaries.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-007",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "minimax-m3: parse error; output tail: ing-sources local` flag** - this means the test only uses local settings (the one in the temp dir), not user/project settings. This is correct for isolation.\n\n4. **The tests don't validate that the hooks are NOT also running in user/project settings** - they only test the local temp settings. If a developer's user settings also have hooks, those would also fire. The test doesn't check for this.\n\n5. **Cron fixtures persist beyond the test** - the test creates real Cron jobs and then deletes them.",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [glm-5.2] <things the author likely overlooked>",
+    "[claude] **Task-notification injection**: The most significant blind spot. No test injects a synthetic `<task-notification>` or verifies the contract remains stable across such events. The author may have assumed task notifications are untestable; they could at minimum verify that the runtime_receipts chain is not corrupted by simulating one.",
+    "[claude] **Cron execution interference**: E-004 verifies Cron CRUD ownership, but does not verify what happens if a Cron job actually fires mid-session. If a scheduled `/loop` fires while an EXECUTE turn is active, does it corrupt the contract?",
+    "[claude] **Concurrent hook events**: All tests use sequential single-tool calls. No test exercises overlapping PreToolUse/PostToolUse events, rapid-fire denials, or PostToolUseFailure racing with PostToolUse success. Real Claude Code sessions trigger hooks concurrently.",
+    "[claude] **Settings.json substitution attack**: The tests use `--setting-sources local` with known-good settings. No test verifies that a malicious or corrupted settings.json (e.g., hooks removed, different hook command) is detected or fails safely.",
+    "[claude] **Symlink/TOCTOU on state files**: The protected-files test (E-003) guards against Write/Edit, but a symlink swap of `frontier.md` or `runtime_events.jsonl` before a hook reads them is untested."
+  ],
+  "context_limits": [
+    "[arkcli] [glm-5.2] <where you are unsure or might be wrong due to Chinese-language or local (CNVD / Taiwan) context you do not fully grasp>",
+    "[arkcli] [glm-5.2] Status: REVIEW",
+    "[arkcli] [glm-5.2] Author: Codex",
+    "[arkcli] [glm-5.2] Kind: safety-critical integration validation",
+    "[arkcli] [glm-5.2] Evidence IDs: E-001, E-002, E-003, E-004",
+    "[arkcli] [glm-5.2] Treat a missing requested tool call as an inconclusive harness failure, not an enforcement failure.",
+    "[arkcli] [glm-5.2] Require real PreToolUse/PostToolUse/Stop events and state effects for PASS.",
+    "[arkcli] [glm-5.2] Require Cron cleanup and a final quiescent List so no scheduler fixture remains.",
+    "[arkcli] minimax-m3: parse error; output tail: ing-sources local` flag** - this means the test only uses local settings (the one in the temp dir), not user/project settings. This is correct for isolation.\n\n4. **The tests don't validate that the hooks are NOT also running in user/project settings** - they only test the local temp settings. If a developer's user settings also have hooks, those would also fire. The test doesn't check for this.\n\n5. **Cron fixtures persist beyond the test** - the test creates real Cron jobs and then deletes them.",
+    "[claude] The test prompts are in Chinese (e.g., \"彻底执行验证。必须调用 Bash 一次\"). I parsed them as explicit action directives — they appear well-formed for the controlled test purpose. If there are nuances in the Chinese phrasing that affect how Claude Code interprets \"must call\" vs. \"should call,\" I may have missed them.",
+    "[claude] CNVD/local vulnerability context is not applicable — this is an internal safety-validation scope, not an external target assessment.",
+    "[claude] The review bundle uses egress-redacted excerpts (24000 chars per artifact). I cannot verify the FULL raw Claude session streams — only the source code and summary JSONs. The `raw_sha256` fields in summaries (e.g., `1eda55bb…` for E-001) are integrity claims I cannot independently verify without access to the untruncated bundle.",
+    "[claude] I am reviewing as a different model from the Codex author; my perspective is strong on gaps but I share certain architectural blind spots with other LLMs (e.g., assuming test coverage implies absence of bugs in the covered paths)."
+  ],
+  "error": ""
+}

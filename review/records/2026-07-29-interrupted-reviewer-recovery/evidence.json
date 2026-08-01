@@ -1,0 +1,293 @@
+{
+  "total": 4,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 — Exact candidate diff",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/reviewed.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifact_manifests": [
+        {
+          "token": "evidence/reviewed.diff",
+          "path": "evidence/reviewed.diff",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 83755,
+          "sha1": "0a560c533ce0931cbf4f9f8e79303f2eb157d2d8"
+        }
+      ],
+      "artifacts_present": [
+        "evidence/reviewed.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 — Focused and full framework verification",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/test-results.txt",
+        "evidence/test-summary.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifact_manifests": [
+        {
+          "token": "evidence/test-results.txt",
+          "path": "evidence/test-results.txt",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 50767,
+          "sha1": "c94cda1028ba6df100f6ebea8d8df119726983fd"
+        },
+        {
+          "token": "evidence/test-summary.txt",
+          "path": "evidence/test-summary.txt",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 2411,
+          "sha1": "17784dd058118c51b5362e10da11dad665067b62"
+        }
+      ],
+      "artifacts_present": [
+        "evidence/test-results.txt",
+        "evidence/test-summary.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 — Reproduction and projection performance",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/reproduction.txt",
+        "evidence/performance-benchmark.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifact_manifests": [
+        {
+          "token": "evidence/reproduction.txt",
+          "path": "evidence/reproduction.txt",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 2326,
+          "sha1": "ee0577c91c291e9b9b45a33aa6adfff0dcf91ed4"
+        },
+        {
+          "token": "evidence/performance-benchmark.txt",
+          "path": "evidence/performance-benchmark.txt",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 1088,
+          "sha1": "10574efb47cf83f264e61cd529c1f6a64776eb42"
+        }
+      ],
+      "artifacts_present": [
+        "evidence/reproduction.txt",
+        "evidence/performance-benchmark.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004 — Successful real Claude Code primary-driver path",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/driver-adjudication.json",
+        "evidence/driver-runtime-events.jsonl",
+        "evidence/driver-loop-journal.jsonl",
+        "evidence/driver-assignments.json",
+        "evidence/driver-recovery-receipt.json",
+        "evidence/driver-session-transcript.jsonl",
+        "evidence/driver-reviewer-transcript.jsonl",
+        "evidence/post-driver-inspection.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifact_manifests": [
+        {
+          "token": "evidence/driver-adjudication.json",
+          "path": "evidence/driver-adjudication.json",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 3001,
+          "sha1": "d58eb9fdc63637a46c48e5562dbcd8d9d30628bf"
+        },
+        {
+          "token": "evidence/driver-runtime-events.jsonl",
+          "path": "evidence/driver-runtime-events.jsonl",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 77779,
+          "sha1": "9dd6e8599f019d1ec960c259ff211ef8502b3fd2"
+        },
+        {
+          "token": "evidence/driver-loop-journal.jsonl",
+          "path": "evidence/driver-loop-journal.jsonl",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 3487,
+          "sha1": "575ddb4bc04a90085603b7333f36643d732fb48d"
+        },
+        {
+          "token": "evidence/driver-assignments.json",
+          "path": "evidence/driver-assignments.json",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 11387,
+          "sha1": "b4dc52c61f825946545ea9051576c97e4ac58e68"
+        },
+        {
+          "token": "evidence/driver-recovery-receipt.json",
+          "path": "evidence/driver-recovery-receipt.json",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 1208,
+          "sha1": "778faa569729b422e2e06874a119a3d75d019fc9"
+        },
+        {
+          "token": "evidence/driver-session-transcript.jsonl",
+          "path": "evidence/driver-session-transcript.jsonl",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 352272,
+          "sha1": "cf332f8a24f5f1e874a36299a7ce108a864a8dca"
+        },
+        {
+          "token": "evidence/driver-reviewer-transcript.jsonl",
+          "path": "evidence/driver-reviewer-transcript.jsonl",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 73186,
+          "sha1": "bd86b85fa1d1f62ecc3eb55a52b2e832692d398d"
+        },
+        {
+          "token": "evidence/post-driver-inspection.txt",
+          "path": "evidence/post-driver-inspection.txt",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 4205,
+          "sha1": "f9bdc4395693980a76f5207c1551e57a4e213593"
+        }
+      ],
+      "artifacts_present": [
+        "evidence/driver-adjudication.json",
+        "evidence/driver-runtime-events.jsonl",
+        "evidence/driver-loop-journal.jsonl",
+        "evidence/driver-assignments.json",
+        "evidence/driver-recovery-receipt.json",
+        "evidence/driver-session-transcript.jsonl",
+        "evidence/driver-reviewer-transcript.jsonl",
+        "evidence/post-driver-inspection.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

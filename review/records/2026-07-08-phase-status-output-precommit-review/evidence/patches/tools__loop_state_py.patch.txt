@@ -1,0 +1,254 @@
+diff --git a/tools/loop_state.py b/tools/loop_state.py
+index dba485d..dd69d0b 100644
+--- a/tools/loop_state.py
++++ b/tools/loop_state.py
+@@ -14,6 +14,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import json
++import os
+ import re
+ import sys
+ import tempfile
+@@ -33,12 +34,27 @@ import coverage_matrix  # noqa: E402
+ import graph  # noqa: E402
+ import saturation  # noqa: E402
+ import state_project  # noqa: E402
++import status_style  # noqa: E402
+ import workers  # noqa: E402
+ 
+ SCHEMA = "xunji.loop_state.v1"
+ CONFIRMED = 0.8
+ PYTHON_CMD = sys.executable or "python3"
+ OPEN_STATUS_TOKENS = {"open", "probing", "working", "blocked_type_a"}
++ACTION_TEXT_CN = {
++    "Resolve Agent Board conflicts before promotion or closure.": "先解决 Agent Board 冲突，再考虑提升证据或收口。",
++    "Run workers.py suggest/plan and assign at least two disjoint Agent lanes.": "运行 workers.py suggest/plan，并分派至少两条不重叠 Agent 线路。",
++    "Reopen or re-adjudicate fronts that are closed but unlocked by confirmed evidence.": "重开或重新裁定那些已关闭但被确认型证据重新解锁的前线。",
++    "Activate deferred fronts unlocked by confirmed evidence.": "激活被确认型证据解锁的延后前线。",
++    "Expand or justify low-saturation fronts before any explored-enough claim.": "在声称探索充分前，扩展低饱和前线或写明不继续的理由。",
++    "Update fronts/evidence for coverage matrix empty columns or sparse rows.": "根据覆盖矩阵空列或稀疏行补 frontier/evidence。",
++    "Fix unclassified front statuses before closure review.": "先修正未分类前线状态，再进入收口复核。",
++    "Coda convergence: record a trajectory review, pivot/continue rationale, or review/surface Agent assignment; this is not a closure signal by itself.": "Coda 已收敛：记录轨迹复盘、换路/继续理由，或分派复审/面扩 Agent；这本身不是收口信号。",
++    "Closure review candidate: run hard closure gates, replay verification, independent review, and retrospective before any pause.": "收口复核候选：暂停前必须跑硬收口闸门、replay 核实、独立复审和复盘。",
++    "No open front visible, but closure blockers remain; reopen or justify missing work before closure.": "当前看不到开放前线，但仍有收口阻断项；收口前必须重开或解释缺失工作。",
++    "No open front visible; run review/closure checks or reopen missing work.": "当前看不到开放前线；运行复审/收口检查，或重开缺失工作。",
++    "Choose the next front from actionable/open fronts and record a Root graph pass.": "从可行动/开放前线中选择下一条，并记录 Root graph pass。",
++}
+ 
+ 
+ def _strip_fenced_code(text: str) -> str:
+@@ -291,15 +307,37 @@ def _progress(previous: dict, evidence: dict, coverage: dict) -> dict:
+ 
+ 
+ def _phase(fronts: dict, progress: dict) -> str:
++    """Return the visible Router phase best inferred from canonical run files.
++
++    Hunter is a transient action phase and is marked by loop_journal phase events;
++    it is not safely inferable from static Markdown after the fact.
++    """
+     if fronts["open_count"]:
+-        return "Driver"
++        return "Root Orchestrator"
+     if fronts["deferred_count"] or progress["confirmed_evidence"]:
+         return "Reviewer"
+     if fronts["closed_count"]:
+-        return "Closure"
++        return "Report"
+     return "Setup"
+ 
+ 
++def _phase_display(phase: str, *, color: bool | None = None) -> str:
++    return status_style.phase_display(phase, enabled=color)
++
++
++def _yes_no(value: object) -> str:
++    return "是" if value else "否"
++
++
++def _action_display(action: str, *, color: bool | None = None) -> str:
++    cn = ACTION_TEXT_CN.get(action)
++    return f"{cn} {status_style.tag(action, 'gray', enabled=color)}" if cn else action
++
++
++def _pretty_block(title: str, rows: list[str], *, color: str = "cyan", enabled: bool | None = None) -> str:
++    return status_style.box(title, rows, color=color, enabled=enabled)
++
++
+ def _gates(fronts: dict, agents: dict, progress: dict, coverage: dict) -> dict:
+     fanout_required = fronts["open_count"] >= 4 and fronts["diverse_barriers"]
+     needs_conflict_resolution = agents["unresolved_conflicts"] > 0
+@@ -561,41 +599,71 @@ def derive(run_dir: Path, *, write: bool = False) -> dict:
+     }
+ 
+ 
+-def render_markdown(data: dict) -> str:
++def render_markdown(data: dict, *, color: bool | None = None) -> str:
+     progress = data["progress"]
+     fronts = data["fronts"]
+     agents = data["agents"]
+     gates = data["gates"]
++    blockers = gates.get("closure_blockers", [])
++    blocker_color = "red" if blockers else "green"
++    panel = _pretty_block("运行态快照", [
++        status_style.field("当前阶段", _phase_display(data["phase"], color=color), "blue", enabled=color),
++        status_style.field("前线状态", f"开放 {fronts['open_count']} / 延后 {fronts['deferred_count']} / 已关闭 {fronts['closed_count']}", "white", enabled=color),
++        status_style.field("证据变化", f"总计 {progress['evidence_total']}；本轮新增 {len(progress['new_evidence_ids'])}；置信提升 {len(progress['certainty_upgrades'])}", "white", enabled=color),
++        status_style.field("覆盖进展", f"已测 {progress['coverage_tested_cell_count']}；本轮新增 {len(progress['coverage_new_tested_cells'])}；未测 {progress['coverage_untested_cell_count']}", "white", enabled=color),
++        status_style.field("无进展轮数", f"{progress['no_progress_cycles']}（{'需要轨迹复盘/换路' if progress['coda_converged'] else '继续推进'}）", "yellow" if progress["coda_converged"] else "green", enabled=color),
++        status_style.field("Agent 状态", f"任务 {agents['assignment_count']}；未解决冲突 {agents['unresolved_conflicts']}", "purple" if agents["unresolved_conflicts"] else "white", enabled=color),
++        status_style.field("需要并行分派", _yes_no(gates["fanout_required"]), "yellow" if gates["fanout_required"] else "green", enabled=color),
++        status_style.field("接近收口复核", _yes_no(gates["completion_pause_candidate"]), "purple" if gates["completion_pause_candidate"] else "gray", enabled=color),
++        status_style.field("收口阻断项", str(len(blockers)) + (f"（{', '.join(blockers[:4])}）" if blockers else ""), blocker_color, enabled=color),
++    ], color="cyan", enabled=color)
++    front_counts = f"{fronts['open_count']} / {fronts['deferred_count']} / {fronts['closed_count']}"
++    evidence_line = (
++        f"{progress['evidence_total']} total; 本轮新增: {len(progress['new_evidence_ids'])}; "
++        f"置信提升: {len(progress['certainty_upgrades'])}"
++    )
++    coverage_line = (
++        f"{progress['coverage_tested_cell_count']} tested cells; "
++        f"本轮新增: {len(progress['coverage_new_tested_cells'])}; "
++        f"未测适用单元: {progress['coverage_untested_cell_count']}"
++    )
++    no_progress_line = (
++        f"{progress['no_progress_cycles']} "
++        f"({'Coda converged / 需要换路' if progress['coda_converged'] else 'continue / 继续'})"
++    )
++    agents_line = f"{agents['assignment_count']} assignments; 未解决冲突: {agents['unresolved_conflicts']}"
+     lines = [
+-        "# Loop State",
++        "# Xunji 运行态快照",
+         "",
+-        f"- Phase: {data['phase']}",
+-        f"- Open/deferred/closed fronts: {fronts['open_count']} / {fronts['deferred_count']} / {fronts['closed_count']}",
+-        f"- Evidence: {progress['evidence_total']} total; new this cycle: {len(progress['new_evidence_ids'])}; certainty upgrades: {len(progress['certainty_upgrades'])}",
+-        f"- Coverage: {progress['coverage_tested_cell_count']} tested cells; new this cycle: {len(progress['coverage_new_tested_cells'])}; untested applicable cells: {progress['coverage_untested_cell_count']}",
+-        f"- No-progress cycles: {progress['no_progress_cycles']} ({'Coda converged' if progress['coda_converged'] else 'continue'})",
+-        f"- Agents: {agents['assignment_count']} assignments; unresolved conflicts: {agents['unresolved_conflicts']}",
+-        f"- Fan-out required: {'yes' if gates['fanout_required'] else 'no'}",
+-        f"- Closure review candidate: {'yes' if gates['completion_pause_candidate'] else 'no'}",
++        panel,
+         "",
+-        "## Next Actions",
++        f"- {status_style.field('当前阶段', _phase_display(data['phase'], color=color), 'blue', enabled=color)}",
++        f"- {status_style.field('开放/延后/关闭前线', front_counts, 'white', enabled=color)}",
++        f"- {status_style.field('证据', evidence_line, 'white', enabled=color)}",
++        f"- {status_style.field('覆盖', coverage_line, 'white', enabled=color)}",
++        f"- {status_style.field('无进展轮数', no_progress_line, 'yellow' if progress['coda_converged'] else 'green', enabled=color)}",
++        f"- {status_style.field('Agents', agents_line, 'purple' if agents['unresolved_conflicts'] else 'white', enabled=color)}",
++        f"- {status_style.field('需要并行分派', _yes_no(gates['fanout_required']), 'yellow' if gates['fanout_required'] else 'green', enabled=color)}",
++        f"- {status_style.field('收口复核候选', _yes_no(gates['completion_pause_candidate']), 'purple' if gates['completion_pause_candidate'] else 'gray', enabled=color)}",
++        "",
++        "## 下一步建议 (Next Actions)",
+         "",
+     ]
+-    lines.extend(f"- {a}" for a in data.get("next_actions", []))
++    lines.extend(f"- {_action_display(a, color=color)}" for a in data.get("next_actions", []))
+     if data.get("mentor_hints"):
+-        lines.extend(["", "## Mentor Hints", ""])
++        lines.extend(["", "## 导师提示 (Mentor Hints)", ""])
+         for item in data["mentor_hints"]:
+             lines.append(
+-                f"- {item['kind']}: {item['reason']} Suggested: {item['suggested_action']} (advisory only)"
++                f"- {item['kind']}: {item['reason']} 建议: {item['suggested_action']} (advisory only)"
+             )
+     if fronts.get("low_saturation"):
+-        lines.extend(["", "## Low Saturation", ""])
++        lines.extend(["", "## 低饱和前线 (Low Saturation)", ""])
+         for item in fronts["low_saturation"]:
+             lines.append(
+                 f"- {item['front']}: ratio={item['ratio']} tried={item['tried']} untried={item['untried']}"
+             )
+     if data["coverage"].get("empty_columns"):
+-        lines.extend(["", "## Coverage Empty Columns", ""])
++        lines.extend(["", "## 覆盖空列 (Coverage Empty Columns)", ""])
+         lines.extend(f"- {c}" for c in data["coverage"]["empty_columns"])
+     return "\n".join(lines) + "\n"
+ 
+@@ -604,7 +672,7 @@ def write_outputs(run_dir: Path) -> dict:
+     data = derive(run_dir, write=True)
+     state = _resolve_run_dir(run_dir) / "state"
+     _write(state / "loop_state.json", json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+-    _write(state / "loop_state.md", render_markdown(data))
++    _write(state / "loop_state.md", render_markdown(data, color=False))
+     return data
+ 
+ 
+@@ -657,6 +725,14 @@ def _selftest() -> int:
+     first = write_outputs(run)
+     second = write_outputs(run)
+     third = write_outputs(run)
++    old_color = os.environ.get("XUNJI_COLOR")
++    os.environ["XUNJI_COLOR"] = "1"
++    write_outputs(run)
++    persisted_md = (run / "state" / "loop_state.md").read_text(encoding="utf-8", errors="replace")
++    if old_color is None:
++        os.environ.pop("XUNJI_COLOR", None)
++    else:
++        os.environ["XUNJI_COLOR"] = old_color
+     (run / "evidence.md").write_text(
+         "# Evidence Ledger\n\n"
+         "## E-001\n"
+@@ -814,9 +890,52 @@ def _selftest() -> int:
+     (type_b_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+     type_b_state = write_outputs(type_b_run)
+ 
++    setup_phase_run = d / "setup_phase_run"
++    setup_phase_run.mkdir()
++    (setup_phase_run / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
++    (setup_phase_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    (setup_phase_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
++    (setup_phase_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
++    setup_phase_state = write_outputs(setup_phase_run)
++
++    reviewer_phase_run = d / "reviewer_phase_run"
++    reviewer_phase_run.mkdir()
++    (reviewer_phase_run / "frontier.md").write_text(
++        "# Frontier\n\n## Deferred Fronts\n\n"
++        "### F-001\n"
++        "- Status: deferred\n"
++        "- Barrier class: auth-layer\n",
++        encoding="utf-8",
++    )
++    (reviewer_phase_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    (reviewer_phase_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
++    (reviewer_phase_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
++    reviewer_phase_state = write_outputs(reviewer_phase_run)
++
++    report_phase_run = d / "report_phase_run"
++    report_phase_run.mkdir()
++    (report_phase_run / "frontier.md").write_text(
++        "# Frontier\n\n## Closed Fronts\n\n"
++        "### F-001\n"
++        "- Status: closed\n"
++        "- Barrier class: none\n",
++        encoding="utf-8",
++    )
++    (report_phase_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    (report_phase_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
++    (report_phase_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
++    report_phase_state = write_outputs(report_phase_run)
++
+     checks = [
+         ("writes loop state json", (run / "state" / "loop_state.json").exists()),
+         ("writes loop state markdown", (run / "state" / "loop_state.md").exists()),
++        ("open fronts render Root Orchestrator phase", first["phase"] == "Root Orchestrator"),
++        ("empty run renders Setup phase", setup_phase_state["phase"] == "Setup"),
++        ("deferred fronts render Reviewer phase", reviewer_phase_state["phase"] == "Reviewer"),
++        ("closed fronts render Report phase", report_phase_state["phase"] == "Report"),
++        ("markdown includes Chinese status panel", "Xunji 运行态快照" in render_markdown(first)
++         and "[当前阶段] [Root Orchestrator｜主驾驶调度]" in render_markdown(first)),
++        ("persisted markdown does not contain ANSI even when color forced", "\033[" not in persisted_md),
+         ("fanout required with four diverse open fronts", first["gates"]["fanout_required"]),
+         ("coverage attention is surfaced", first["gates"]["needs_coverage_attention"]),
+         ("first snapshot does not count existing evidence as new", first["progress"]["new_evidence_ids"] == []),
+@@ -896,7 +1015,7 @@ def main(argv: list[str] | None = None) -> int:
+     if args.json:
+         print(json.dumps(data, ensure_ascii=False, indent=2))
+     else:
+-        print(render_markdown(data), end="")
++        print(render_markdown(data, color=status_style.color_enabled()), end="")
+     return 0
+ 
+ 

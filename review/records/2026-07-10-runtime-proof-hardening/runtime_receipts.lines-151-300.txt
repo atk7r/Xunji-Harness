@@ -1,0 +1,150 @@
+   151	        for child in value:
+   152	            found.extend(_job_ids(child))
+   153	    return list(dict.fromkeys(found))
+   154	
+   155	
+   156	def _run_job_ids(value: object, run_name: str) -> list[str]:
+   157	    """Extract IDs only from the smallest structured task objects naming this run."""
+   158	    found: list[str] = []
+   159	    if isinstance(value, dict):
+   160	        direct = ""
+   161	        for key in ("id", "job_id", "jobId", "task_id"):
+   162	            raw = value.get(key)
+   163	            if isinstance(raw, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{6,64}", raw):
+   164	                direct = raw
+   165	                break
+   166	        if direct and run_name and run_name.lower() in _excerpt(value).lower():
+   167	            found.append(direct)
+   168	        for child in value.values():
+   169	            found.extend(_run_job_ids(child, run_name))
+   170	    elif isinstance(value, list):
+   171	        for child in value:
+   172	            found.extend(_run_job_ids(child, run_name))
+   173	    return list(dict.fromkeys(found))
+   174	
+   175	
+   176	def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
+   177	    run = Path(run_dir).resolve()
+   178	    hook = str(event.get("hook_event_name") or "")
+   179	    tool = str(event.get("tool_name") or "")
+   180	    input_text = _input_text(event)
+   181	    assignment, front = _assignment_fields(input_text)
+   182	    response = event.get("tool_response")
+   183	    record = {
+   184	        "schema": SCHEMA,
+   185	        "ts": time.time(),
+   186	        "run_dir": str(run),
+   187	        "session_id": str(event.get("session_id") or ""),
+   188	        "transcript_path": str(event.get("transcript_path") or ""),
+   189	        "hook_event_name": hook,
+   190	        "tool_name": tool,
+   191	        "tool_use_id": str(event.get("tool_use_id") or ""),
+   192	        "success": hook in {"PostToolUse", "SubagentStart", "SubagentStop"},
+   193	        "decision": str(event.get("xunji_decision") or ""),
+   194	        "decision_reason": _excerpt(event.get("xunji_reason") or ""),
+   195	        "target_action": bool(event.get("xunji_target_action")),
+   196	        "assignment": assignment,
+   197	        "front": front,
+   198	        "input_excerpt": _excerpt(event.get("tool_input") or {}),
+   199	        "input_sha256": _hash(event.get("tool_input") or {}),
+   200	        "action_sha256": _action_hash(tool, event.get("tool_input") or {}),
+   201	        "response_sha256": _hash(response or {}),
+   202	        "response_excerpt": _excerpt(response),
+   203	        "agent_id": str(event.get("agent_id") or ""),
+   204	        "agent_type": str(event.get("agent_type") or ""),
+   205	        "job_id": _job_id(response) or _job_id(event.get("tool_input") or {}),
+   206	        "job_ids": _job_ids(response) or _job_ids(event.get("tool_input") or {}),
+   207	        "listed_run_job_ids": _run_job_ids(response, run.name) if tool == "CronList" else [],
+   208	        "completion_review": "XUNJI_COMPLETION_REVIEW" in input_text.upper(),
+   209	        "evidence_index_hash": _evidence_hash(input_text),
+   210	        "run_mentioned": run.name.lower() in input_text.lower(),
+   211	    }
+   212	    return record
+   213	
+   214	
+   215	def append_hook_event(run_dir: str | Path, event: dict) -> dict:
+   216	    run = Path(run_dir).resolve()
+   217	    record = normalize_hook_event(run, event)
+   218	    with _locked(run):
+   219	        events = load_events(run)
+   220	        record["seq"] = len(events) + 1
+   221	        record["previous_hash"] = str(events[-1].get("receipt_hash") or "") if events else ""
+   222	        unsigned = dict(record)
+   223	        record["receipt_hash"] = _hash(unsigned)
+   224	        path = _event_path(run)
+   225	        path.parent.mkdir(parents=True, exist_ok=True)
+   226	        with path.open("a", encoding="utf-8") as handle:
+   227	            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+   228	        try:
+   229	            os.chmod(path, 0o600)
+   230	        except OSError:
+   231	            pass
+   232	    return record
+   233	
+   234	
+   235	def validate_chain(run_dir: str | Path) -> tuple[list[dict], list[str]]:
+   236	    events = load_events(run_dir)
+   237	    errors: list[str] = []
+   238	    previous = ""
+   239	    for index, record in enumerate(events, 1):
+   240	        claimed = str(record.get("receipt_hash") or "")
+   241	        unsigned = dict(record)
+   242	        unsigned.pop("receipt_hash", None)
+   243	        if record.get("schema") != SCHEMA:
+   244	            errors.append(f"event {index}: wrong schema")
+   245	        if int(record.get("seq", 0) or 0) != index:
+   246	            errors.append(f"event {index}: non-contiguous seq")
+   247	        if str(record.get("previous_hash") or "") != previous:
+   248	            errors.append(f"event {index}: previous_hash mismatch")
+   249	        if claimed != _hash(unsigned):
+   250	            errors.append(f"event {index}: receipt_hash mismatch")
+   251	        previous = claimed
+   252	    return events, errors
+   253	
+   254	
+   255	def _transcript_has(record: dict) -> bool:
+   256	    tool_use_id = str(record.get("tool_use_id") or "")
+   257	    transcript = Path(str(record.get("transcript_path") or ""))
+   258	    if not tool_use_id or not transcript.is_file():
+   259	        return False
+   260	    try:
+   261	        return tool_use_id in transcript.read_text(encoding="utf-8", errors="replace")
+   262	    except Exception:
+   263	        return False
+   264	
+   265	
+   266	def valid_tool_events(
+   267	    run_dir: str | Path,
+   268	    tool_name: str | None = None,
+   269	    *,
+   270	    session_id: str = "",
+   271	    since: float = 0.0,
+   272	) -> list[dict]:
+   273	    events, errors = validate_chain(run_dir)
+   274	    if errors:
+   275	        return []
+   276	    return [
+   277	        event for event in events
+   278	        if event.get("success") is True
+   279	        and event.get("hook_event_name") == "PostToolUse"
+   280	        and (tool_name is None or event.get("tool_name") == tool_name)
+   281	        and (not session_id or str(event.get("session_id") or "") == session_id)
+   282	        and (not since or float(event.get("ts") or 0.0) >= since)
+   283	        and _transcript_has(event)
+   284	    ]
+   285	
+   286	
+   287	def denied_tool_events(
+   288	    run_dir: str | Path,
+   289	    *,
+   290	    session_id: str = "",
+   291	    since: float = 0.0,
+   292	    target_only: bool = False,
+   293	) -> list[dict]:
+   294	    """Return transcript-backed denials emitted by the trusted PreToolUse hook."""
+   295	    events, errors = validate_chain(run_dir)
+   296	    if errors:
+   297	        return []
+   298	    return [
+   299	        event for event in events
+   300	        if event.get("hook_event_name") == "PreToolUseDenied"

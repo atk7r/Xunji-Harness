@@ -1,0 +1,131 @@
+diff --git a/.agents/skills/xunji-peer-review-panel/SKILL.md b/.agents/skills/xunji-peer-review-panel/SKILL.md
+index 795d47f..6f3c205 100644
+--- a/.agents/skills/xunji-peer-review-panel/SKILL.md
++++ b/.agents/skills/xunji-peer-review-panel/SKILL.md
+@@ -73,2 +73 @@ The default arkcli panel models are:
+-2. `minimax-m3`
+-3. `glm-5.2`
++2. `glm-5.2`
+@@ -135 +134 @@ Then grep for stale claims:
+-rg -n "arkcli panel|kimi-k2.7-code|minimax-m3|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
++rg -n "arkcli panel|kimi-k2.7-code|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
+diff --git a/.claude/skills/xunji-agent-board/SKILL.md b/.claude/skills/xunji-agent-board/SKILL.md
+index 021538b..8fc1263 100644
+--- a/.claude/skills/xunji-agent-board/SKILL.md
++++ b/.claude/skills/xunji-agent-board/SKILL.md
+@@ -37,2 +37,4 @@ must not be treated as the Root driver's instruction source.
+-  When Root actually starts a Claude Agent tool, record
+-  `workers.py heartbeat <run> <agent> --status running --note "<started>"`.
++  When Root actually starts a Claude Agent tool, its prompt must include
++  `XUNJI_ASSIGNMENT=A-... XUNJI_FRONT=F-...`. The hook records the real
++  transcript-backed receipt automatically. `heartbeat` is optional display state
++  and never proves execution.
+@@ -137 +138,0 @@ Stay serial when:
+-- Request budget, WAF pressure, auth fragility, or host health is tight.
+@@ -139,0 +141,6 @@ Stay serial when:
++When at least four active fronts do not all share one concrete barrier, every
++`EXECUTE` turn must actually invoke two Agents on disjoint assignment/front pairs.
++Only the operator's current prompt may grant a one-turn serial override. Old
++receipts, `heartbeat`, Agent files, model-claimed budgets, and decisions prose do
++not bypass this rule.
++
+@@ -158 +164,0 @@ python tools/workers.py assign runs/<dir> --role web-hunter --front F-001
+-python tools/workers.py heartbeat runs/<dir> A-web-hunter-001 --status running --note "Agent tool started"
+@@ -162,0 +169,16 @@ rg -n "Reasoning style|Loop budget|Operator Profile" runs/<dir>/agents/A-web-hun
++Then invoke the Claude `Agent` tool with
++`XUNJI_ASSIGNMENT=A-web-hunter-001 XUNJI_FRONT=F-001` in its prompt. Repeat for a
++second disjoint lane when fan-out is required. After the real call, `heartbeat`
++may mirror progress for humans, but it is not a gate credential.
++
++After Root adjudicates the result, close the assignment with an auditable note:
++
++```bash
++python tools/workers.py finish runs/<dir> A-web-hunter-001 --status merged --note "Evidence: E-007; Front: F-001; candidate merged"
++python tools/workers.py finish runs/<dir> A-web-hunter-002 --status blocked --note "Reason: shared auth barrier; Front: F-002"
++```
++
++`done` means the Agent returned but Root still owes merge/refute/adjudication; it
++does not satisfy the execute-turn Stop gate. The disposition timestamp must be
++newer than that Agent's current-turn receipt.
++
+@@ -208,0 +231,3 @@ python tools/workers.py --selftest
++python tools/run_model.py --selftest
++python tools/runtime_receipts.py --selftest
++python tools/turn_contract.py --selftest
+diff --git a/.claude/skills/xunji-peer-review-panel/SKILL.md b/.claude/skills/xunji-peer-review-panel/SKILL.md
+index a4e6e7b..e8d8bcc 100644
+--- a/.claude/skills/xunji-peer-review-panel/SKILL.md
++++ b/.claude/skills/xunji-peer-review-panel/SKILL.md
+@@ -46,2 +46,3 @@ For Claude Code live runs and Claude-authored code/report/closure review:
+-- Neither Codex nor arkcli: fresh-context Claude same-family fallback only
+-  transparently; it reduces bias but not shared blind spots.
++- Neither Codex nor arkcli: record `NEEDS_DRIVER`/backend limitation and keep
++  closure open. A fresh-context Claude same-family pass may advise the driver but
++  cannot become the independent closure receipt.
+@@ -89,2 +90 @@ The default arkcli panel models are:
+-2. `minimax-m3`
+-3. `glm-5.2`
++2. `glm-5.2`
+@@ -130,2 +130,3 @@ python3 tools/peer_review.py --selftest
+-  content to external model providers; use bundle-only or fresh-context local
+-  review when egress is not accepted.
++  content to external model providers. Use bundle-only for inspection when egress
++  is not accepted; a local same-family review is advisory and does not close the
++  independent-review gate.
+@@ -145 +146 @@ Then grep for stale claims:
+-rg -n "arkcli panel|kimi-k2.7-code|minimax-m3|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
++rg -n "arkcli panel|kimi-k2.7-code|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
+diff --git a/.claude/skills/xunji-reviewops/SKILL.md b/.claude/skills/xunji-reviewops/SKILL.md
+index 6449e23..8107ba1 100644
+--- a/.claude/skills/xunji-reviewops/SKILL.md
++++ b/.claude/skills/xunji-reviewops/SKILL.md
+@@ -64,2 +64,2 @@ run:
+-   falls back to a fresh-context Claude Code same-family reviewer. The arkcli
+-   panel is Kimi-K2.7-Code + MiniMax-M3 + GLM-5.2.
++   leaves closure incomplete. A same-family pass can advise but is not an
++   independent vote. The arkcli panel is Kimi-K2.7-Code + GLM-5.2 only.
+@@ -74,0 +75,5 @@ is correct. Keep hunting if the evidence graph still exposes a live front.
++The independent-review gate additionally requires the latest content-addressed
++ReviewReceipt to match the current evidence index and a transcript-observed
++foreground invocation with matching receipt and bundle-hash output markers.
++Historical receipts remain audit history; only the latest
++hash is freshness-bearing, while every unresolved historical BLOCKER still matters.
+diff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md
+index 965fdd7..e3e5ed5 100644
+--- a/.claude/skills/xunji-run-lifecycle/SKILL.md
++++ b/.claude/skills/xunji-run-lifecycle/SKILL.md
+@@ -186,0 +187,6 @@ Interpretation:
++- A denied target action remains unresolved until the hook ledger contains a
++  later successful receipt for the same tool and identical execution-relevant
++  input. Descriptive tool metadata does not count. Do not turn a
++  denial into a result, even by paraphrase. Retry after fixing the prerequisite;
++  if that is impossible, use only the exact three-line denial envelope required
++  by `output_gate.py`.
+@@ -191,0 +198,5 @@ Interpretation:
++- `state/runtime_events.jsonl`, `state/turn_contract.json`, and
++  `state/run_status.json` are hook-owned process records. Never edit them directly.
++- `EXPLAIN_ONLY` is read-only and has no Coda. `PAUSED_BY_OPERATOR` keeps active
++  fronts intact, stops the current run task through bound CronList/Delete/List,
++  and is not a completion action. A later execute/resume prompt starts a new turn.
+@@ -215 +226 @@ python tools/peer_review.py runs/<dir> --into-run
+-python tools/check_run.py runs/<dir> --auto-peer-review --review-driver claude
++python tools/check_run.py runs/<dir>
+@@ -220,4 +231,4 @@ Closure gates:
+-- `review.md` must contain a completed `Independent Review` record with a real
+-  reviewer/backend and block-scoped verdict. A heading,
+-  prose mention, or untouched template choices do not count; self-review does
+-  not cure self-review bias.
++- `review.md` must contain a current content-addressed `ReviewReceipt` generated
++  by a transcript-observed foreground peer-review invocation whose output has
++  matching receipt and bundle-hash markers. A heading, copied
++  output, manual reviewer prose, or untouched template does not count.
+@@ -238,0 +250,5 @@ Closure gates:
++- Before the marker, invoke a completion Agent with
++  `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1>
++  CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`.
++  Require `XUNJI_COMPLETION_VERDICT=PASS`, the same hash, and all four checks in
++  the response, then record substantive cross-check results in `decisions.md`.
+@@ -240 +256,2 @@ Closure gates:
+-  `/loop` job in the same turn and append an `end` loop journal note containing
++  `/loop` job in the same turn: current-turn CronList, delete only the observed
++  current-run job, then CronList again. Append an `end` loop journal note containing

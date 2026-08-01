@@ -1,0 +1,21 @@
+[project]
+name = "Xunji"
+version = "0.1.0"
+description = "Claude Code penetration-testing and red-team harness with deterministic safety and evidence boundaries."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.5",
+]
+browser = [
+    "playwright>=1.40",
+]
+socks = [
+    "PySocks>=1.7",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

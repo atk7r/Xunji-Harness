@@ -1,0 +1,83 @@
+== bench: auth-idor-profile ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 2 recorded requests / 8 max  (lower bound: saved replay or recorded events)
+  first-evidence: 2.0s
+    ✓ profile-idor [E-001] cert=0.9≥0.8
+== bench: auth-idor-tenant-record ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 3 recorded requests / 10 max  (lower bound: saved replay or recorded events)
+  first-evidence: 1.8s
+    ✓ tenant-record-idor [E-001] cert=1.0≥0.8
+== bench: example-dvwa-sqli ==
+  detection : 2/2 (100%)   calibrated 2/2
+  false-pos : 0   (confirmed entries total: 3)
+  budget    : 0 recorded requests / 100 max  (lower bound: saved replay or recorded events)
+    ✓ sqli-union [E-001] cert=1.0≥0.8
+    ✓ xss-reflected [E-003] cert=0.9≥0.8
+== bench: injection-error-sqli ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 1)
+  budget    : 2 recorded requests / 6 max  (lower bound: saved replay or recorded events)
+  first-evidence: 1.1s
+    ✓ error-sqli [E-001] cert=0.8≥0.8
+== bench: injection-nosql-filter ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 2 recorded requests / 8 max  (lower bound: saved replay or recorded events)
+  first-evidence: 1.5s
+    ✓ nosql-filter-injection [E-001] cert=0.9≥0.8
+== bench: path-normalization-bypass ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 3 recorded requests / 10 max  (lower bound: saved replay or recorded events)
+  first-evidence: 2.0s
+    ✓ path-normalization-bypass [E-001] cert=0.9≥0.8
+== bench: path-traversal-download ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 2 recorded requests / 8 max  (lower bound: saved replay or recorded events)
+  first-evidence: 1.4s
+    ✓ download-path-traversal [E-001] cert=1.0≥0.8
+== bench: recorded-closure-static-site ==
+  detection : 0/0   calibrated 0/0
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 2 recorded requests / 6 max  (lower bound: saved replay or recorded events)
+  first-evidence: 2.0s
+  closure   : ✓ markers=True review=True no_positive=True
+== bench: ultra-agent-collab ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 3 recorded requests / 6 max  (lower bound: saved replay or recorded events)
+  first-evidence: 2.5s
+    ✓ profile-idor [E-001] cert=0.8≥0.8
+  agents    : 2 agents / 2 assignments; high fronts 1/1 assigned
+  conversion: 1/2 candidate/refutation agents -> findings (50%)
+  conflicts : 1 total; 0 unresolved
+  agent budget: {'A-web-auth-001': 2, 'A-verify-001': 1}
+  agent first-evidence: {'A-web-auth-001': 2.5, 'A-verify-001': 1.0}
+== bench: upload-mime-bypass ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 2 recorded requests / 12 max  (lower bound: saved replay or recorded events)
+  first-evidence: 3.0s
+    ✓ upload-mime-bypass [E-001] cert=0.9≥0.8
+== bench: upload-path-control ==
+  detection : 1/1 (100%)   calibrated 1/1
+  false-pos : 0   (confirmed entries total: 2)
+  budget    : 2 recorded requests / 12 max  (lower bound: saved replay or recorded events)
+  first-evidence: 2.5s
+    ✓ upload-path-control [E-001] cert=0.8≥0.8
+== bench summary ==
+  fixtures  : 11/11 clean
+  detection : 11/11 (100%)
+  calibration: 11/11 (100%)
+  false-pos : 0 (mean trap rate 0%)
+  budget    : 23 recorded; 0 fixture(s) over max
+  first-evidence avg: 1.98s
+  closure   : 1/1 correct
+  agents    : 2 agents / 2 assignments; missed-high=0 role-mismatch=0
+  conflicts : 0 unresolved; collab-check-fail=0
+  fp-suppression: 11 negative confirmed events
+  agent first-evidence avg: 1.75s

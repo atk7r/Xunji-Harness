@@ -1,0 +1,131 @@
+{
+  "total": 3,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-002",
+    "E-003"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 - Closure and maturity gates",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "check_run.hunks-01.diff",
+        "check_run.hunks-02.diff",
+        "check_run.hunks-03.diff",
+        "check_run.hunks-04.diff",
+        "test_registry.diff",
+        "selftest_all.log",
+        "closure_selftests.summary.json",
+        "closure-source-manifest.json"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "check_run.hunks-01.diff",
+        "check_run.hunks-02.diff",
+        "check_run.hunks-03.diff",
+        "check_run.hunks-04.diff",
+        "test_registry.diff",
+        "selftest_all.log",
+        "closure_selftests.summary.json",
+        "closure-source-manifest.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 - Peer-review provenance",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "peer_review.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "peer_review.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 - Canonical projections and statusline",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "canonical_consumers.diff",
+        "status_journal.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "canonical_consumers.diff",
+        "status_journal.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

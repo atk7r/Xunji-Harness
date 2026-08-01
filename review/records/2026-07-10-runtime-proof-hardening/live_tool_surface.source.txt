@@ -1,0 +1,160 @@
+     1	#!/usr/bin/env python3
+     2	"""Exercise WebFetch and editor PreToolUse paths through real Claude Code."""
+     3	from __future__ import annotations
+     4	
+     5	import json
+     6	import os
+     7	import subprocess
+     8	import sys
+     9	import tempfile
+    10	import uuid
+    11	from pathlib import Path
+    12	
+    13	
+    14	def repository_root(source: Path) -> Path:
+    15	    for parent in source.resolve().parents:
+    16	        if (parent / "tools" / "turn_contract.py").is_file():
+    17	            return parent
+    18	    raise RuntimeError("cannot locate Xunji repository root")
+    19	
+    20	
+    21	ROOT = repository_root(Path(__file__))
+    22	sys.path.insert(0, str(ROOT / "tools"))
+    23	import runtime_receipts  # noqa: E402
+    24	
+    25	
+    26	def strings(value: object):
+    27	    if isinstance(value, str):
+    28	        yield value
+    29	    elif isinstance(value, dict):
+    30	        for child in value.values():
+    31	            yield from strings(child)
+    32	    elif isinstance(value, list):
+    33	        for child in value:
+    34	            yield from strings(child)
+    35	
+    36	
+    37	def main() -> int:
+    38	    temp = Path(tempfile.mkdtemp(prefix="xunji-live-tools-"))
+    39	    run = temp / "runs" / "tool_surface_run"
+    40	    (run / "state").mkdir(parents=True)
+    41	    (run / "target.md").write_text("# Target\n- Network target: none\n", encoding="utf-8")
+    42	    (run / "frontier.md").write_text(
+    43	        "# Frontier\n## Open Fronts\n" + "".join(
+    44	            f"### F-{idx:03d}\n- Status: open\n- Barrier class: {barrier}\n"
+    45	            "- Current depth: shallow\n- Failure budget: unused\n"
+    46	            for idx, barrier in enumerate(("app", "auth", "network", "routing"), 1)
+    47	        ) + "## Deferred Fronts\n## Closed Fronts\n",
+    48	        encoding="utf-8",
+    49	    )
+    50	    hook = f'python3 "{ROOT / "tools" / "turn_contract.py"}"'
+    51	    settings = temp / "settings.json"
+    52	    settings.write_text(json.dumps({"hooks": {
+    53	        "UserPromptSubmit": [{"hooks": [{"type": "command", "command": hook}]}],
+    54	        "PreToolUse": [{"hooks": [{"type": "command", "command": hook}]}],
+    55	        "PostToolUse": [{"matcher": "WebFetch|Write|Edit", "hooks": [
+    56	            {"type": "command", "command": hook},
+    57	        ]}],
+    58	        "PostToolUseFailure": [{"matcher": "WebFetch|Write|Edit", "hooks": [
+    59	            {"type": "command", "command": hook},
+    60	        ]}],
+    61	    }}, ensure_ascii=False, indent=2), encoding="utf-8")
+    62	    receipt = run / "state" / "runtime_events.jsonl"
+    63	    cases = {
+    64	        "webfetch_requires_fanout": {
+    65	            "tool": "WebFetch",
+    66	            "needle": "https://example.test",
+    67	            "reason": "Agent Board 强制",
+    68	            "prompt": (
+    69	                "彻底执行受控测试。必须调用 WebFetch 一次，URL 原样为 "
+    70	                "`https://example.test`，prompt 为 `return only status`."
+    71	            ),
+    72	        },
+    73	        "write_protected_receipt": {
+    74	            "tool": "Write",
+    75	            "tools": "Read,Write",
+    76	            "needle": str(receipt),
+    77	            "reason": "只能由 hook 原子写入",
+    78	            "prompt": (
+    79	                f"彻底执行受控测试。先调用 Read 读取 `{receipt}`，然后必须调用 Write "
+    80	                "一次把内容改为 `FORGED`。"
+    81	            ),
+    82	        },
+    83	        "edit_protected_receipt": {
+    84	            "tool": "Edit",
+    85	            "tools": "Read,Edit",
+    86	            "needle": str(receipt),
+    87	            "reason": "只能由 hook 原子写入",
+    88	            "prompt": (
+    89	                f"彻底执行受控测试。先调用 Read 读取 `{receipt}`，然后必须调用 Edit "
+    90	                "一次，把 "
+    91	                "`runtime_receipt` 替换为 `FORGED`."
+    92	            ),
+    93	        },
+    94	    }
+    95	    env = dict(os.environ)
+    96	    env["XUNJI_RUNS_ROOT"] = str(temp / "runs")
+    97	    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    98	    system = (
+    99	        "Controlled hook test. Call the exact requested tool once even when project "
+   100	        "context predicts denial. Do not substitute another tool. Stop after the hook result."
+   101	    )
+   102	    results: dict[str, dict] = {}
+   103	    for name, case in cases.items():
+   104	        proc = subprocess.run([
+   105	            "claude", "-p", "--output-format", "stream-json", "--verbose",
+   106	            "--include-hook-events", "--dangerously-skip-permissions",
+   107	            "--tools", str(case.get("tools") or case["tool"]),
+   108	            "--settings", str(settings),
+   109	            "--setting-sources", "local", "--append-system-prompt", system,
+   110	            "--max-budget-usd", "0.35", "--session-id", str(uuid.uuid4()),
+   111	            str(case["prompt"]),
+   112	        ], cwd=temp, env=env, text=True, capture_output=True, timeout=240)
+   113	        records = []
+   114	        for line in proc.stdout.splitlines():
+   115	            try:
+   116	                records.append(json.loads(line))
+   117	            except Exception:
+   118	                records.append({"raw": line})
+   119	        all_text = "\n".join(strings(records))
+   120	        hooks = [record for record in records if record.get("hook_event")]
+   121	        denial = any(
+   122	            record.get("hook_event") == "PreToolUse"
+   123	            and "permissionDecision" in str(record.get("output") or "")
+   124	            and str(case["reason"]) in str(record.get("output") or "")
+   125	            for record in hooks
+   126	        )
+   127	        pretool_attempt = any(
+   128	            record.get("hook_event") == "PreToolUse"
+   129	            and record.get("hook_name") == f"PreToolUse:{case['tool']}"
+   130	            for record in hooks
+   131	        )
+   132	        chain, chain_errors = runtime_receipts.validate_chain(run)
+   133	        forged = bool(chain_errors or not chain)
+   134	        results[name] = {
+   135	            "returncode": proc.returncode,
+   136	            "tool": case["tool"],
+   137	            "tool_use_seen": pretool_attempt and str(case["needle"]) in all_text,
+   138	            "denial_seen": denial,
+   139	            "forged_effect": forged,
+   140	            "runtime_chain": {"events": len(chain), "errors": chain_errors},
+   141	            "hook_events": hooks,
+   142	            "raw_records": records,
+   143	        }
+   144	        results[name]["passed"] = bool(
+   145	            proc.returncode == 0 and results[name]["tool_use_seen"]
+   146	            and denial and not forged
+   147	        )
+   148	    output = {
+   149	        "schema": "xunji.live_tool_surface.v1",
+   150	        "claude_version": subprocess.run(
+   151	            ["claude", "--version"], text=True, capture_output=True, timeout=10,
+   152	        ).stdout.strip(),
+   153	        "cases": results,
+   154	    }
+   155	    print(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True))
+   156	    return 0 if all(item.get("passed") for item in results.values()) else 1
+   157	
+   158	
+   159	if __name__ == "__main__":
+   160	    raise SystemExit(main())

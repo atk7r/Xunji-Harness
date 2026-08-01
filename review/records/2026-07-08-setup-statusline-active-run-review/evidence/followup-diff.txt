@@ -1,0 +1,109 @@
+diff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md
+index b58bb86..d5a3f95 100644
+--- a/.claude/skills/xunji-run-lifecycle/SKILL.md
++++ b/.claude/skills/xunji-run-lifecycle/SKILL.md
+@@ -102,6 +102,10 @@ Create a new run in one shot:
+ python tools/setup_run.py <slug> [recon.json]
+ ```
+
++`setup_run.py` sets `.claude/xunji_active_run` to the newly created run as local
++statusline display state. This does not enter `/loop`, choose a front, or make any
++evidence/closure decision.
++
+ Use `--classify` only for an authorized current egress recheck:
+
+ ```bash
+diff --git a/.claude/skills/xunji-setup-ingest/SKILL.md b/.claude/skills/xunji-setup-ingest/SKILL.md
+index 0646b9d..674f1c6 100644
+--- a/.claude/skills/xunji-setup-ingest/SKILL.md
++++ b/.claude/skills/xunji-setup-ingest/SKILL.md
+@@ -36,7 +36,9 @@ With recon, setup should:
+ - write `knowledge_hits.md` when local signatures match.
+
+ `setup_run.py` prepares the workbench. It does not pick fronts, decide findings,
+-or attack the target.
++or attack the target. After the run skeleton exists, it also sets
++`.claude/xunji_active_run` so the Claude Code statusline points at the new run;
++that pointer is local display state only.
+
+ ## Scope And Coverage
+
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index f661ebe..fd01092 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -96,8 +96,8 @@ current Router phase, run name, pending verification entries, aggregated Agent
+ state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_run`
+ plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
+ state, choose work, write evidence, or enforce phase discipline. The active-run
+-pointer is local runtime state and is updated by `loop_bootstrap.py` and the fixed
+-`/loop runs/<dir>` protocol.
++pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
++and the fixed `/loop runs/<dir>` protocol.
+
+ 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
+ phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a
+diff --git a/tools/setup_run.py b/tools/setup_run.py
+index b1eb21e..9d8f26c 100644
+--- a/tools/setup_run.py
++++ b/tools/setup_run.py
+@@ -45,6 +45,7 @@ REQUIRED = ["target.md", "surface.md", "frontier.md", "hypotheses.md", "evidence
+ sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+ import loop_journal  # noqa: E402
++import xunji_statusline  # noqa: E402
+
+
+ def _today() -> str:
+@@ -70,6 +71,17 @@ def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:
+         print(f"[setup] phase journal skipped: {exc}", file=sys.stderr)
+
+
++def _set_active_run(run_dir: Path) -> None:
++    """Best-effort statusline pointer update. It is display state, not evidence."""
++    try:
++        if xunji_statusline.set_active_run(str(run_dir)):
++            print(f"[setup] statusline active run: runs/{run_dir.name}")
++        else:
++            print(f"[setup] statusline active run skipped: {run_dir}", file=sys.stderr)
++    except Exception as exc:
++        print(f"[setup] statusline active run skipped: {exc}", file=sys.stderr)
++
++
+ def scaffold(run_dir: Path) -> list[str]:
+     """从模板建齐必需文件 + evidence/ scripts/ 子目录(含 .gitkeep)。不覆盖已存在目录。"""
+     run_dir.mkdir(parents=True, exist_ok=False)   # exist_ok=False -> 已存在则 FileExistsError
+@@ -400,6 +412,7 @@ def main() -> int:
+     made = scaffold(run_dir)
+     print(_phase_banner("start", "Setup", run_dir=run_dir, note="prepare authorized run workbench"))
+     _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
++    _set_active_run(run_dir)
+     print(f"[setup] 建 run 骨架 {run_dir}")
+     print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
+     coverage_ready = False
+@@ -562,6 +575,25 @@ def _selftest() -> int:
+          and target_cov["assets"][0]["port"] == 8080),
+     ]
+
++    tmp_root = ROOT / "tmp"
++    tmp_root.mkdir(exist_ok=True)
++    active_parent = Path(tempfile.mkdtemp(dir=tmp_root))
++    active_rd = active_parent / "run"
++    active_pointer = active_parent / ".claude" / "xunji_active_run"
++    original_active_pointer = xunji_statusline.ACTIVE_RUN
++    try:
++        scaffold(active_rd)
++        xunji_statusline.ACTIVE_RUN = active_pointer
++        _set_active_run(active_rd)
++        active = xunji_statusline.active_run()
++    finally:
++        xunji_statusline.ACTIVE_RUN = original_active_pointer
++        shutil.rmtree(active_parent, ignore_errors=True)
++    checks += [
++        ("setup writes statusline active run pointer", active == active_rd.resolve()),
++        ("setup active-run selftest cleans temp dir", not active_parent.exists()),
++    ]
++
+     bad = [n for n, ok in checks if not ok]
+     for n, ok in checks:
+         print(("ok   " if ok else "FAIL ") + n)

@@ -1,0 +1,40 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "NEEDS_DRIVER",
+  "backend_used": "panel:claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "bc4a288450100f046684bf303dee667627083da8",
+  "evidence_index_hash": "9b02e9a525091a81053daf1183b0d4099a8ea396",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "review panel had backend errors; aggregation is partial",
+      "evidence": "arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: ld not match because `.` is not in the lookahead. But `.claude/xunji_active_run` at end of string would match. The `.gitignore` shows `.claude/xunji_active_run.*.tmp` exists, so temp files with dots are expected but not protected.\n\nActually wait, let me reconsider. The regex `xunji_active_run` would match the substring within `.claude/xunji_active_run.bak`. The regex engine would try to match `xunji_active_run` at position where that text appears, then check the lookahead at the position after `",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "At least one requested heterogeneous reviewer failed or was unavailable.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[claude] **`_control_invocation` strips `2>&1` and `2>/dev/null` suffix but not other fd redirect positions**: The function only strips trailing ` 2>&1` and ` 2>/dev/null`. A command like `python3 tools/setup_run.py --selftest 2>&1` would have the suffix stripped, but `python3 2>/dev/null tools/setup_run.py` would NOT (redirect before script path) and would be caught by the shell metacharacter check. This is correct behavior but the asymmetry could surprise. Similarly, `1>&2` (redirect stdout to stderr) is not stripped and would be caught by the metacharacter check — which is safe but might reject a legitimate invocation pattern.",
+    "[claude] **`_DENIED_ONLY_RE` now accepts `frontier.md` unconditionally**: The regex change from `F-\\d{3}` to `(?:F-\\d{3}|frontier\\.md)` means any denial envelope ending with `frontier.md` is accepted, even when active fronts DO exist and a real F-id should be used. However, `_denied_result_claim_reason()` computes the anchor from `_active_protocol_fronts(run_dir)`, so when fronts exist the returned denial reason uses an F-id, not `frontier.md`. The regex expansion only matters for the no-front case. Still, a model that hardcodes `frontier.md` in its denial output while fronts exist would pass the regex but fail the computed-anchor check — a subtle interaction worth documenting.",
+    "[claude] **`run_gate.py` early exit at line 783 fires before `active_run` is resolved**: The `if stop_active: sys.exit(0)` check happens BEFORE `active_run` resolution (Phase 1). This means on retry, run_gate never even reads the active pointer. If the first Stop was blocked for a reason unrelated to the active run (e.g., event parsing failure at the top-level try/except), the retry also exits silently without re-evaluating. The comment justifies this (\"canonical files and gates remain unchanged\") but the path is unconditional — even a transient hook parsing error on the first call that would succeed on retry gets swallowed.",
+    "[claude] **`xunji_statusline.py` selftest creates a turn_contract.json but doesn't test that `set_active_run` transfers it TO the target**: The selftest at `evidence/transition-core.diff:807-831` creates a contract in the source run's state dir, then calls `set_active_run(str(missing_cache))` and checks `inherited_contract.get(\"session_id\") == \"statusline-transition\"`. This verifies the contract EXISTS in the target run after the switch, but doesn't verify the `origin_run` and `bound_run` fields were set correctly by `transfer_contract`, nor that the source run's contract was preserved (not consumed/deleted like a pending contract would be).",
+    "[claude] **The git status at conversation start shows ALL changed files as working-tree modifications (M), not committed**: The 4 tool files and 2 hook files are listed as `M` (modified, not staged) in the working tree. The evidence/ directory is `??` (untracked). This means the diff artifacts represent working-tree state, not committed state. If the working tree is accidentally reset or overwritten, the evidence artifacts become the sole record of the changes. This is not a review blocker but means the evidence bundle is the authoritative record, not git history.",
+    "[claude] **`_control_invocation` does not validate argument count or types**: The function returns `(script, tokens[2:])` without checking whether the arguments are valid for that script. For example, `python3 tools/xunji_statusline.py --set-active /etc/passwd` would pass the control-script check and the prompt-name check (if \"passwd\" is in the prompt), but `xunji_statusline.py`'s own `_resolve_run()` would reject the path. This is defense-in-depth (each script validates its own args), but the gate layer trusts the script to do so."
+  ],
+  "context_limits": [
+    "[claude] I could not read the live `.claude/hooks/output_gate.py` or `.claude/hooks/run_gate.py` files directly — the guard layer denied access. My analysis is based entirely on the diff artifacts in `evidence/stop-hooks.diff` and `evidence/transition-core.diff`. If there are uncommitted changes to these files beyond what the diffs capture, I would have missed them.",
+    "[claude] I could not Grep the repository to verify that `explicit_active_run`, `_active_protocol_fronts`, `_emit_gate_violation`, and `write_pending_contract` exist in the current working tree. My verification relies on the diff artifacts and the selftest log showing all 57 suites pass, which implies these functions are present and working.",
+    "[claude] The Chinese-language documentation and comments (e.g., in `.claude/hooks/run_gate.py` header block, `_denied_result_claim_reason` messages) are clear to me, but I may miss subtle semantic nuances in the policy language that a native Chinese-speaking reviewer would catch.",
+    "[claude] The `cqytxy_20260702` run referenced in the old run_gate.py comment (\"cqytxy_20260702 证明'最多拦一次'会把硬门退化成提醒\") is cited as evidence for why stop_hook_active must not downgrade gates. I cannot verify this retrospective reference without access to that run directory.",
+    "[claude] The `.claude/hooks/run_gate.py` header block was modified (diff shows Chinese text changes about stop_hook_active semantics). I trust the diff accurately reflects the file content since selftests pass, but the guard layer prevents direct file verification.",
+    "arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: ld not match because `.` is not in the lookahead. But `.claude/xunji_active_run` at end of string would match. The `.gitignore` shows `.claude/xunji_active_run.*.tmp` exists, so temp files with dots are expected but not protected.\n\nActually wait, let me reconsider. The regex `xunji_active_run` would match the substring within `.claude/xunji_active_run.bak`. The regex engine would try to match `xunji_active_run` at position where that text appears, then check the lookahead at the position after `",
+    "panel completed 1/2 required heterogeneous backends"
+  ],
+  "error": "arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: ld not match because `.` is not in the lookahead. But `.claude/xunji_active_run` at end of string would match. The `.gitignore` shows `.claude/xunji_active_run.*.tmp` exists, so temp files with dots are expected but not protected.\n\nActually wait, let me reconsider. The regex `xunji_active_run` would match the substring within `.claude/xunji_active_run.bak`. The regex engine would try to match `xunji_active_run` at position where that text appears, then check the lookahead at the position after `"
+}

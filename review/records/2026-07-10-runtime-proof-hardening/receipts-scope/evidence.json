@@ -1,0 +1,65 @@
+{
+  "total": 1,
+  "confirmed": [
+    "E-001"
+  ],
+  "confirmed_findings": [
+    "E-001"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 - Receipt implementation invariants",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "runtime_receipts.lines-001-150.txt",
+        "runtime_receipts.lines-151-300.txt",
+        "runtime_receipts.lines-301-450.txt",
+        "runtime_receipts.lines-451-600.txt",
+        "runtime_receipts.lines-601-750.txt",
+        "runtime_receipts.lines-751-end.txt",
+        "workers.diff",
+        "settings.diff",
+        "installed-runtime-manifest.json",
+        "adversarial_selftests.summary.json",
+        "selftest_all.log"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "runtime_receipts.lines-001-150.txt",
+        "runtime_receipts.lines-151-300.txt",
+        "runtime_receipts.lines-301-450.txt",
+        "runtime_receipts.lines-451-600.txt",
+        "runtime_receipts.lines-601-750.txt",
+        "runtime_receipts.lines-751-end.txt",
+        "workers.diff",
+        "settings.diff",
+        "installed-runtime-manifest.json",
+        "adversarial_selftests.summary.json",
+        "selftest_all.log"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

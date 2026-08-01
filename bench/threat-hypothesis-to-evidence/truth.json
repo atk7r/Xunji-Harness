@@ -1,0 +1,32 @@
+{
+  "name": "threat-hypothesis-to-evidence",
+  "run": "sample_run",
+  "expected_findings": [
+    {
+      "id": "hypothesis-linked-refutation",
+      "markers": ["Threat hypothesis H-001", "Linked IS/C/E: IS-001", "replay rejected"],
+      "min_certainty": 0.8
+    }
+  ],
+  "expected_process": [
+    {
+      "id": "agent-produced-new-threat-hypothesis",
+      "signals": ["New Threat Hypotheses", "Linked IS/C/E: IS-001", "Next action"],
+      "in": ["agents/A-web-hunter-001.md"],
+      "must": true
+    },
+    {
+      "id": "root-merged-threat-hypothesis",
+      "signals": ["Threat hypothesis:", "Asset/role/input:", "Expected signal:", "Refutation/control:"],
+      "in": ["hypotheses.md"],
+      "must": true
+    },
+    {
+      "id": "evidence-linked-back-to-hypothesis",
+      "signals": ["H-001", "IS-001", "replay rejected"],
+      "in": ["evidence.md"],
+      "must": true
+    }
+  ],
+  "budget": {"max_requests": 3}
+}

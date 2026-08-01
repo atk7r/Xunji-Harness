@@ -1,0 +1,52 @@
+# Peer Review Panel — 2026-07-13-outbound-privacy-hardening
+
+_backend: panel:arkcli+claude · 2026-07-12T19:38Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: WARN
+
+_backend: panel:arkcli+claude_
+_brain: codex_
+_bundle_hash: 886e653d7bcd548815139403dabdb2f34ae9c1b8_
+_evidence_index_hash: 33242669cbf9e53ce6f8852c6d00620d491fe1ba_
+
+## Findings
+- [WARN] PR-001 E-006 redirect credential behavior is only a candidate, not a confirmed finding, and the artifact is a synthesized hop summary rather than a raw replay or server-side wire log. | Evidence: evidence_index:E-006, redirect-wire.json, report.md:claim-2 | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] E-006 is marked candidate with certainty 0.5 and its only artifact is a JSON boolean summary. The evidence discipline forbids treating a single candidate summary as confirmation.
+- [WARN] PR-002 privacy.py internal patterns _LOCAL_PATH_RE and the runs/ directory regex are overly broad and will false-block legitimate target paths such as /home/dashboard, /Users/settings, or /runs/list. | Evidence: privacy.py.txt:_LOCAL_PATH_RE, privacy.py.txt:_INTERNAL_PATTERNS, safety_gate.py:must_pass_selftests | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The local-path regex matches any /home/<segment> or /Users/<segment>, not only the real home, and the run-directory regex matches any /runs/<slug>. This contradicts the stated rule that operator-supplied target paths are scope-exempt unless they contain generated markers.
+- [WARN] PR-003 Confirmed replay-redaction finding E-004 rests on a single local loopback sample covering only Cookie/Set-Cookie. | Evidence: privacy-replay-sample.txt.replay.json, privacy-replay-verdict.txt, evidence_index:E-004 | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The artifact contents match the prose, but one sample cannot independently prove the redaction path is hit for URL userinfo, Authorization, response previews, or non-Cookie PII classes.
+- [WARN] PR-004 The review bundle omits surface.md and the full evidence.md/target.md text, so the coverage ledger cannot be audited against recon assets. | Evidence: review_bundle.files, frontier.md:F-001 | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The rubric requires checking that the coverage/classify ledger is a subset of recon assets; without the surface files this reconciliation is impossible.
+- [WARN] PR-005 No end-to-end proof shows that a non-Bash tool path (e.g., Python tool using socket/requests) is blocked or inspected before I/O. | Evidence: safety_gate.py:TARGET_URL_RE, report.md:reviewer-focus, CLAUDE.md:target-facing-privacy-boundary | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The gate's fail-closed import-failure path only blocks URL-bearing Bash command strings. A Python-tool invocation whose command string does not contain a URL could still egress private data, and the report acknowledges this as author-and-handoff rather than hook-verifiable.
+- [WARN] PR-006 arkcli panel had backend errors; review is partial | Evidence: glm-5.2: parse error; output tail: op1": {"cookie": true, "authorization": true},
+    "hop2": {"cookie": false, "authorization": false},
+    "hop3": {"cookie": false, "authorization": false}
+  },
+  "control": "hop1 must receive auth; hop2 and hop3 must not"
+}
+```
+This artifact literally proves the redirect behavior! Why is E-006 certainty 0.5? The evidence_index says `certainties: [0.5], confirmed: false, maturity: candidate`. The artifact contains the exact markers to confirm the redirect credential stripping. If the artifact is | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+
+## Blind-spot check
+- [claude] **Encoding-defense token limit:** `_decoded_variants` caps base64 and hex candidate detection at 32 tokens each. A crafted payload with 33+ base64-like strings where the 33rd encodes a project marker would bypass detection. Extremely low practical risk (normal requests don't carry 32+ base64 tokens) but the boundary is untested and undocumented. Prior round-2 blind-spots noted this; it remains unaddressed.
+- [claude] **Response-body snippet redaction:** `privacy-replay-sample.txt.replay.json` stores `"snippet": "privacy-replay-ok"` — the snippet happens to be harmless here, but the privacy module's `redact_body` function is not exercised through the replay recording path in any artifact. The final-round PR-003 claims response-preview redaction was fixed, but no artifact proves a response body containing PII is actually redacted in the replay JSON snippet. The mechanism exists in code; it's untested in the evidence bundle.
+- [claude] **`saved_body` relative path fragility:** The replay JSON stores `"saved_body": "review/records/2026-07-13-outbound-privacy-hardening/privacy-replay-sample.txt"` — a relative path that depends on CWD at replay time. If the replay tool resolves this from a different working directory, the body won't be findable. This is a tooling robustness concern, not a privacy defect.
+- [claude] **Cross-origin redirect response body leakage:** E-006 confirms Cookie/Authorization headers are stripped across origins, but redirect response bodies (e.g., 302 with HTML body containing session tokens in JavaScript `window.location` assignments) are not tested. Similarly, redirect target URL query parameters carrying auth-derived data are not tested.
+- [claude] **`check_run.py` SKIPPED-PRIVACY-REDACTED hard closure error:** The docs state an unaddressed privacy-redacted replay is a hard closure error, but no test artifact proves `check_run.py` actually enforces this. The code in the diff shows `check_run.py` changes in the replay verification path, but there's no end-to-end test with a confirmed finding backed only by a privacy-redacted replay.
+- [claude] **Nested encoding beyond 2-pass percent decode:** `_decoded_variants` loops percent-decoding at most 2 times (`for _ in range(2)`). Triple-encoded strings (`%2525...`) would only be partially decoded. This is extremely theoretical — triple-encoding in real HTTP payloads is vanishingly unlikely.
+- [claude] **`redirect-wire.json` is server-side assertion, not wire capture:** The three hop servers share the same test harness and report booleans. Without raw tcpdump-style capture, there's no independent verification that headers were actually on the wire vs. only reported by the shared harness. E-006 is correctly graded at 0.5/candidate, so this is a documentation note, not a certainty concern.
+
+## Context-limit notes
+- [arkcli] glm-5.2: parse error; output tail: op1": {"cookie": true, "authorization": true},
+    "hop2": {"cookie": false, "authorization": false},
+    "hop3": {"cookie": false, "authorization": false}
+  },
+  "control": "hop1 must receive auth; hop2 and hop3 must not"
+}
+```
+This artifact literally proves the redirect behavior! Why is E-006 certainty 0.5? The evidence_index says `certainties: [0.5], confirmed: false, maturity: candidate`. The artifact contains the exact markers to confirm the redirect credential stripping. If the artifact is
+- [claude] I am a different model from the author (the author is Claude), but I am still a Claude-family model evaluating Claude-authored code. The heterogeneity is real (fresh context, different invocation) but there is inherent overlap in reasoning patterns and blind spots. The arkcli panel (kimi-k2.7-code + glm-5.2) provides the strongest heterogeneity signal in this review record.
+- [claude] I did not have direct filesystem access to read `tools/harness/guard.py` or `.claude/hooks/safety_gate.py` from the main repository. My analysis of these files relies on `reviewed.diff` hunks and the `privacy.py.txt` excerpt. Pre-existing functions not modified in the diff could contain integration points I can't see.
+- [claude] The `privacy.py.txt` excerpt is truncated at 21,651 of 45,653 bytes. Functions including `outbound_command_privacy_reason`, `sanitize_text_for_log`, `redact_url`, `sanitize_request_record`, and the complete selftest suite are in the truncated portion. I can see their call sites and partial implementations from prior review rounds, but cannot independently verify their complete logic.
+- [claude] Chinese-language content in `evidence.md`, `target.md`, `disposition.md`, and denial messages appears syntactically consistent with the privacy module's intent. I may miss subtle semantic nuances in Chinese error messages or documentation.
+- [claude] The CN phone/ID regexes cover standard mainland China formats. Hong Kong (8-digit), Macau (8-digit), and Taiwan (10-character new-format) ID numbers are not matched — this is an acknowledged scope limitation documented in prior reviews.
+- [claude] I cannot independently recompute the SHA-1 hashes cited in the evidence index; I rely on the bundle's hash claims. All artifacts I directly read match their described content.
+- [claude] This review does NOT constitute the protocol-required independent review for safety-critical code closure. The `decisions.md` D-001 requires "arkcli panel plus fresh-context Claude Code," and the current `disposition.md:201-203` says "A new frozen diff and heterogeneous rereview are required before closure." This is that rereview.

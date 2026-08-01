@@ -1,0 +1,105 @@
+diff --git a/tools/coverage_matrix.py b/tools/coverage_matrix.py
+index 682ea97..a1405e5 100644
+--- a/tools/coverage_matrix.py
++++ b/tools/coverage_matrix.py
+@@ -658,8 +658,8 @@ def sync_coverage_json(run_dir: Path) -> dict:
+     cycle the canonical records are still frontier/evidence/report, but leaving
+     coverage at examined=0 makes reviewers think assets were never touched. This
+     sync marks an asset examined only when its host is explicitly mentioned in a
+-    canonical run file. It writes a verdict only when a terminal front or evidence
+-    status is visible; open/probing fronts remain verdict=None.
++    canonical run file. It writes a verdict only from a terminal front status;
++    evidence/report mentions alone are touch signals, not dispositions.
+     """
+     cov_path, cov, warnings = _load_coverage(run_dir)
+     if cov_path is None or not isinstance(cov, dict):
+@@ -702,17 +702,39 @@ def sync_coverage_json(run_dir: Path) -> dict:
+                 verdict = "closed"
+             elif "deferred" in statuses:
+                 verdict = "deferred"
+-        if not verdict and evidence_touched:
+-            verdict = "evidence-recorded"
+-        if not verdict and report_touched:
+-            verdict = "reported"
+-        if verdict and asset.get("verdict") != verdict:
+-            asset["verdict"] = verdict
++        current_verdict = str(asset.get("verdict") or "").strip()
++        verdict_source = str(asset.get("verdict_source") or "").strip()
++        # ac01b30 briefly emitted these mention-only pseudo-verdicts. They were
++        # never part of the coverage schema and suppress workers that correctly
++        # look for reachable assets with verdict=None, so migrate them away.
++        if current_verdict in {"evidence-recorded", "reported"}:
++            asset["verdict"] = None
++            asset.pop("verdict_source", None)
++            current_verdict = ""
++            verdict_source = ""
++            changed += 1
++            warnings.append(
++                f"{name}: removed legacy mention-only verdict; terminal frontier disposition still required")
++        if verdict and (not current_verdict or verdict_source == "coverage_matrix_sync"):
++            if current_verdict != verdict or verdict_source != "coverage_matrix_sync":
++                asset["verdict"] = verdict
++                asset["verdict_source"] = "coverage_matrix_sync"
++                changed += 1
++        elif not verdict and verdict_source == "coverage_matrix_sync":
++            asset["verdict"] = None
++            asset.pop("verdict_source", None)
+             changed += 1
+ 
+         tested_groups = sorted(row.get("tested") or []) if row else []
+-        if tested_groups and asset.get("tested_groups") != tested_groups:
+-            asset["tested_groups"] = tested_groups
++        tested_source = str(asset.get("tested_groups_source") or "").strip()
++        if tested_groups:
++            if asset.get("tested_groups") != tested_groups or tested_source != "coverage_matrix_sync":
++                asset["tested_groups"] = tested_groups
++                asset["tested_groups_source"] = "coverage_matrix_sync"
++                changed += 1
++        elif tested_source == "coverage_matrix_sync":
++            asset.pop("tested_groups", None)
++            asset.pop("tested_groups_source", None)
+             changed += 1
+ 
+     if changed:
+@@ -832,6 +854,9 @@ def _selftest() -> int:
+         {"host": "open.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+         {"host": "done.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+         {"host": "typeb.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
++        {"host": "evidence-touch.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
++        {"host": "report-touch.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
++        {"host": "legacy-touch.example", "reachable": True, "examined": True, "flags": ["LOGIN"], "verdict": "reported"},
+         {"host": "quiet.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+     ]}), encoding="utf-8")
+     (sync_run / "frontier.md").write_text(
+@@ -852,6 +877,13 @@ def _selftest() -> int:
+         "- Status: closed_type_b\n"
+         "- Vectors tried: auth-bypass\n",
+         encoding="utf-8")
++    (sync_run / "evidence.md").write_text(
++        "# Evidence Ledger\n\n## E-001\n- Action: fetched evidence-touch.example landing page\n"
++        "- Result: generic page only\n- Certainty: 0.3\n",
++        encoding="utf-8")
++    (sync_run / "report.md").write_text(
++        "# Report\n\nInventory note: report-touch.example was seen but has no terminal disposition.\n",
++        encoding="utf-8")
+     sync_info = sync_coverage_json(sync_run)
+     sync_cov = json.loads((sync_run / "coverage.json").read_text(encoding="utf-8"))
+     sync_by_host = {a["host"]: a for a in sync_cov["assets"]}
+@@ -906,7 +938,16 @@ def _selftest() -> int:
+         ("sync coverage only writes terminal verdicts",
+          sync_by_host["open.example"].get("verdict") is None
+          and sync_by_host["done.example"].get("verdict") == "deferred"
+-         and sync_by_host["typeb.example"].get("verdict") == "closed"),
++         and sync_by_host["typeb.example"].get("verdict") == "closed"
++         and sync_by_host["done.example"].get("verdict_source") == "coverage_matrix_sync"),
++        ("evidence/report mentions mark examined but never invent verdicts",
++         sync_by_host["evidence-touch.example"]["examined"] is True
++         and sync_by_host["evidence-touch.example"].get("verdict") is None
++         and sync_by_host["report-touch.example"]["examined"] is True
++         and sync_by_host["report-touch.example"].get("verdict") is None),
++        ("legacy mention-only pseudo-verdict is migrated away",
++         sync_by_host["legacy-touch.example"].get("verdict") is None
++         and any("legacy mention-only verdict" in w for w in sync_info["warnings"])),
+     ]
+     bad = [name for name, ok in checks if not ok]
+     for name, ok in checks:

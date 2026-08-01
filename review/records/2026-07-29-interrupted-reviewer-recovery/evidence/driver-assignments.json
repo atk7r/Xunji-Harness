@@ -1,0 +1,248 @@
+{
+  "schema": 3,
+  "assignments": [
+    {
+      "schema": "xunji.assignment.v1",
+      "agent": "A-verify-001",
+      "role": "verify",
+      "front": "F-001",
+      "front_title": "F-001 — selftest front 1",
+      "plan_id": "WP-1-966e49bf",
+      "plan_digest": "966e49bf141a7cde9f0da9811d59dd28b34dba29c861f7fb8c287bd193fa9c8a",
+      "lane_id": "L-F001-EXEC",
+      "effect": "local_verify",
+      "assignment_attempt": 1,
+      "assets": [],
+      "asset_ids": [],
+      "coverage_before": {},
+      "scope": "run target scope",
+      "status": "merged",
+      "reasoning_style": "personalized-rdt",
+      "loop_budget": 5,
+      "tool_call_limit": 24,
+      "request_budget": 0,
+      "operator_profile": "built-in defaults (state/operator_profile.json missing)",
+      "context": "runs/driver-reviewer-recovery_20260729/context/A-verify-001.F-001.4f53cda18c2b.attempt-001.md",
+      "agent_file": "runs/driver-reviewer-recovery_20260729/agents/A-verify-001.md",
+      "instruction_bundle": {
+        "schema": "xunji.agent-instruction-bundle.v1",
+        "assignment": "A-verify-001",
+        "plan_digest": "966e49bf141a7cde9f0da9811d59dd28b34dba29c861f7fb8c287bd193fa9c8a",
+        "lane_id": "L-F001-EXEC",
+        "role": "verify",
+        "subagent_type": "xunji-hunter",
+        "role_contract": {
+          "schema": "xunji.agent-role-contract.v1",
+          "manifest": {
+            "path": "contracts/agent-instruction-sources.v1.json",
+            "version": "xunji.agent-instruction-sources.v1",
+            "length": 2255,
+            "sha256": "6eee63e9fd4283bdffc46d97eb797c9420d5f5a4bdf67188b3368bc4d4a00dec"
+          },
+          "common": {
+            "path": "docs/templates/agents/common.v1.md",
+            "version": "xunji.agent-role-common.v1",
+            "length": 1815,
+            "sha256": "d21fa02c9cfa3da6917ecae0079a786a29bbb69222304d1f0dcd7a7c0f394a75"
+          },
+          "role": {
+            "id": "verify",
+            "path": "docs/templates/agents/verify.md",
+            "version": "xunji.agent-role-delta.v1",
+            "length": 874,
+            "sha256": "1766819c084ef6cd6d5c18eaad726cc7bc5e62ee5b050431c0878a81f3e0080c",
+            "assignable": true
+          },
+          "subagent_type": "xunji-hunter",
+          "live_agent": {
+            "path": ".claude/agents/xunji-hunter.md",
+            "version": "xunji.live-agent.hunter.v1",
+            "length": 3834,
+            "sha256": "1752953effe8bd9a37b4746c2f35e8a447973c65d677b7c487c6830c0aaed790"
+          },
+          "composed_length": 2658,
+          "composed_sha256": "1cac925e8adfd7927b5ba01e061b16d045064afa21f60b0f6a947495c6872071"
+        },
+        "scaffold_source": {
+          "path": "docs/templates/agents/scaffold.v1.md",
+          "version": "xunji.agent-scaffold.v1",
+          "length": 2100,
+          "sha256": "71573d37c3bfd100bbe85cc59b0879a0341034aab80c3739f1d54750f06e6c3c"
+        },
+        "context": {
+          "path": "runs/driver-reviewer-recovery_20260729/context/A-verify-001.F-001.4f53cda18c2b.attempt-001.md",
+          "length": 6769,
+          "sha256": "0129100cf0234a9c5306d87aff9857718e92bf1580644a9c3bf78111bc68efad"
+        },
+        "agent_file": {
+          "path": "runs/driver-reviewer-recovery_20260729/agents/A-verify-001.md",
+          "length": 3540,
+          "sha256": "cc4bab1d241534179c4b1c8216431573aa7d9a2841a963ad80c1904015f2dbd6"
+        }
+      },
+      "instruction_bundle_sha256": "f75f6fb713c2c5b0c97b08251006f5c60aa7463cb9476664a4222996495a2f5a",
+      "created_at": "2026-07-29T06:49:21Z",
+      "updated_at": "2026-07-29T06:54:17.076Z",
+      "attempts": [
+        {
+          "schema": "xunji.agent-receipt.v1",
+          "parent_run": "driver-reviewer-recovery_20260729",
+          "assignment": "A-verify-001",
+          "attempt_id": "prep-hunter-child",
+          "agent_id": "prep-hunter-child",
+          "tool_use_id": "prep-hunter-tool",
+          "session_id": "prep-hunter-session",
+          "lane_id": "L-F001-EXEC",
+          "plan_digest": "966e49bf141a7cde9f0da9811d59dd28b34dba29c861f7fb8c287bd193fa9c8a",
+          "launch_prompt_sha256": "8f8be326eef8c7320af6f6c7c96fa57deccfa33bb70e128a46dedffb9ad7bc23",
+          "subagent_type": "xunji-hunter",
+          "assets": [],
+          "result_snapshot": {
+            "path": "/private/tmp/xunji-reviewer-driver.U0x4in/repo/runs/driver-reviewer-recovery_20260729/state/merge_results/A-verify-001/prep-hunter-child-080b7448fd155aaeee535d6f7cb0f2080a27d456ab19ec919149b484c37967aa.json",
+            "length": 67,
+            "sha256": "080b7448fd155aaeee535d6f7cb0f2080a27d456ab19ec919149b484c37967aa",
+            "missing": false,
+            "source": "subagent_stop_response"
+          },
+          "launched_at": "2026-07-29T06:49:21.102Z",
+          "state": "returned",
+          "returned_at": "2026-07-29T06:49:21.108Z"
+        }
+      ],
+      "reviews_assignments": [],
+      "coverage_merge_satisfied": true,
+      "current_attempt": "prep-hunter-child",
+      "runtime_agent_id": "prep-hunter-child",
+      "last_note": "Front: F-001; Decision: accepted fixture candidate via review-disposition accept-candidate; Barrier: none; Evidence: none (zero-request local_verify fixture with assets: none); Refuted: none",
+      "last_seen_at": "2026-07-29T06:54:17.076Z",
+      "heartbeat_count": 1,
+      "finished_at": "2026-07-29T06:54:17.076Z",
+      "root_disposition_review_receipt_hash": "8a6081670bcc9467d41d132eac9a684b7769f55a26d210c42491daddf2bdbc4a",
+      "root_disposition_at": "2026-07-29T06:54:17.076Z",
+      "coverage_merge": {
+        "satisfied": true,
+        "legacy_or_non_target": true,
+        "assets": {}
+      }
+    },
+    {
+      "schema": "xunji.assignment.v1",
+      "agent": "A-review-001",
+      "role": "review",
+      "front": "F-001",
+      "front_title": "F-001 — selftest front 1",
+      "plan_id": "WP-1-966e49bf",
+      "plan_digest": "966e49bf141a7cde9f0da9811d59dd28b34dba29c861f7fb8c287bd193fa9c8a",
+      "lane_id": "L-F001-REVIEW",
+      "effect": "local_verify",
+      "assignment_attempt": 1,
+      "assets": [],
+      "asset_ids": [],
+      "coverage_before": {},
+      "scope": "run target scope",
+      "status": "reviewed",
+      "reasoning_style": "personalized-rdt",
+      "loop_budget": 8,
+      "tool_call_limit": 24,
+      "request_budget": 0,
+      "operator_profile": "built-in defaults (state/operator_profile.json missing)",
+      "context": "runs/driver-reviewer-recovery_20260729/context/A-review-001.F-001.4f53cda18c2b.attempt-001.md",
+      "agent_file": "runs/driver-reviewer-recovery_20260729/agents/A-review-001.md",
+      "instruction_bundle": {
+        "schema": "xunji.agent-instruction-bundle.v1",
+        "assignment": "A-review-001",
+        "plan_digest": "966e49bf141a7cde9f0da9811d59dd28b34dba29c861f7fb8c287bd193fa9c8a",
+        "lane_id": "L-F001-REVIEW",
+        "role": "review",
+        "subagent_type": "xunji-reviewer",
+        "role_contract": {
+          "schema": "xunji.agent-role-contract.v1",
+          "manifest": {
+            "path": "contracts/agent-instruction-sources.v1.json",
+            "version": "xunji.agent-instruction-sources.v1",
+            "length": 2255,
+            "sha256": "6eee63e9fd4283bdffc46d97eb797c9420d5f5a4bdf67188b3368bc4d4a00dec"
+          },
+          "common": {
+            "path": "docs/templates/agents/common.v1.md",
+            "version": "xunji.agent-role-common.v1",
+            "length": 1815,
+            "sha256": "d21fa02c9cfa3da6917ecae0079a786a29bbb69222304d1f0dcd7a7c0f394a75"
+          },
+          "role": {
+            "id": "review",
+            "path": "docs/templates/agents/review.md",
+            "version": "xunji.agent-role-delta.v1",
+            "length": 974,
+            "sha256": "ae4a044cef62d3121d02e8c7900f314b20016d0b0e66343057de08b02fbcc603",
+            "assignable": true
+          },
+          "subagent_type": "xunji-reviewer",
+          "live_agent": {
+            "path": ".claude/agents/xunji-reviewer.md",
+            "version": "xunji.live-agent.reviewer.v1",
+            "length": 5369,
+            "sha256": "87707e265d49d50ba95022d6f0fac64ad54abc542f227304db9a83ad420f263b"
+          },
+          "composed_length": 2758,
+          "composed_sha256": "d16a64f593a0ee32ae24b1a804365b26682afdbd6396060f2c2389a2a1cf42b2"
+        },
+        "scaffold_source": {
+          "path": "docs/templates/agents/scaffold.v1.md",
+          "version": "xunji.agent-scaffold.v1",
+          "length": 2100,
+          "sha256": "71573d37c3bfd100bbe85cc59b0879a0341034aab80c3739f1d54750f06e6c3c"
+        },
+        "context": {
+          "path": "runs/driver-reviewer-recovery_20260729/context/A-review-001.F-001.4f53cda18c2b.attempt-001.md",
+          "length": 7121,
+          "sha256": "1dff82c9511f4ae3b5ea57c6077baca76d0af9d0d0b1cb91195c118fd1d910e5"
+        },
+        "agent_file": {
+          "path": "runs/driver-reviewer-recovery_20260729/agents/A-review-001.md",
+          "length": 3547,
+          "sha256": "3259a48c63c0a54445ba24b8a16c20fd2167f8482499405593a6cf0a0d580978"
+        }
+      },
+      "instruction_bundle_sha256": "75dc222c8d7649e590088de260d5faa01581c8df9edcfcca044a71d6b7ad0aaf",
+      "created_at": "2026-07-29T06:49:21Z",
+      "updated_at": "2026-07-29T06:53:53.892Z",
+      "attempts": [
+        {
+          "schema": "xunji.agent-receipt.v1",
+          "parent_run": "driver-reviewer-recovery_20260729",
+          "assignment": "A-review-001",
+          "attempt_id": "ae500ae8c6e829370",
+          "agent_id": "ae500ae8c6e829370",
+          "tool_use_id": "call_00_xO61taQGflaN35J9xqoT3109",
+          "session_id": "e459e35b-e576-4596-a689-3f1724fa0efa",
+          "lane_id": "L-F001-REVIEW",
+          "plan_digest": "966e49bf141a7cde9f0da9811d59dd28b34dba29c861f7fb8c287bd193fa9c8a",
+          "launch_prompt_sha256": "1051fe7371229b361abbb07db6ff6bd00600dfc138dae785a38c081c4b9dfb69",
+          "subagent_type": "xunji-reviewer",
+          "result_digest_binding": "080b7448fd155aaeee535d6f7cb0f2080a27d456ab19ec919149b484c37967aa",
+          "assets": [],
+          "result_snapshot": {
+            "path": "/private/tmp/xunji-reviewer-driver.U0x4in/repo/runs/driver-reviewer-recovery_20260729/state/merge_results/A-review-001/ae500ae8c6e829370-cf981a897b44e50e9983c740c5540eeddb874fa3c8df37079ac20c0590032e41.json",
+            "length": 4126,
+            "sha256": "cf981a897b44e50e9983c740c5540eeddb874fa3c8df37079ac20c0590032e41",
+            "missing": false,
+            "source": "subagent_stop_response"
+          },
+          "launched_at": "2026-07-29T06:51:23.519Z",
+          "state": "returned",
+          "returned_at": "2026-07-29T06:52:32.286Z"
+        }
+      ],
+      "reviews_assignments": [
+        "A-verify-001"
+      ],
+      "review_result_digest": "080b7448fd155aaeee535d6f7cb0f2080a27d456ab19ec919149b484c37967aa",
+      "coverage_merge_satisfied": false,
+      "current_attempt": "ae500ae8c6e829370",
+      "runtime_agent_id": "ae500ae8c6e829370",
+      "last_note": "Review: A-verify-001 Disposition: accept-candidate Result: 080b7448fd15 Note: Reviewer verified envelope bindings, frozen source paths, result digest SHA-256 match, and zero security claims. Candidate disposition: accept-candidate. No evidence paths or target assets to verify.",
+      "finished_at": "2026-07-29T06:53:53.892Z"
+    }
+  ]
+}

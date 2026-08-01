@@ -1,0 +1,170 @@
+   511	            for idx, barrier in enumerate(("app", "auth", "network", "none"), 1)
+   512	        ), encoding="utf-8")
+   513	    (run / "agents" / "A-web-001.md").write_text("# Agent\n", encoding="utf-8")
+   514	    (run / "agents" / "A-auth-001.md").write_text("# Agent\n", encoding="utf-8")
+   515	    (run / "state" / "assignments.json").write_text(json.dumps({"assignments": [
+   516	        {"agent": "A-web-001", "front": "F-001"},
+   517	        {"agent": "A-auth-001", "front": "F-002"},
+   518	    ]}), encoding="utf-8")
+   519	    explain = classify_prompt("为什么不用 Agent？只告诉我原因，不用修改")
+   520	    history_only = classify_prompt("这是这几次的历史，你来看看还有什么问题")
+   521	    ambiguous = classify_prompt("这是最新状态")
+   522	    pause = classify_prompt("停止loop，渗透结束")
+   523	    execute = classify_prompt("彻底修复所有问题")
+   524	    indirect_english = classify_prompt("Please deploy the prepared workflow")
+   525	    contract = {"mode": EXECUTE, "session_id": "s", "updated_at": time.time()}
+   526	    target_event = {"tool_name": "Bash", "tool_input": {"command": "python tools/probe.py https://example.test"}}
+   527	    encoded_target = {"tool_name": "Bash", "tool_input": {
+   528	        "command": "python3 -c 'import socket; socket.create_connection((\"example.test\",443))'"}}
+   529	    renamed_target = {"tool_name": "Bash", "tool_input": {"command": "python3 /tmp/check.py"}}
+   530	    workers_control = {"tool_name": "Bash", "tool_input": {
+   531	        "command": f"python3 {ROOT / 'tools' / 'workers.py'} list {run}"}}
+   532	    fake_workers_control = {"tool_name": "Bash", "tool_input": {
+   533	        "command": "python3 /tmp/workers.py list runs/x"}}
+   534	    safe_sed_read = {"tool_name": "Bash", "tool_input": {
+   535	        "command": "sed -n '1,10p' frontier.md"}}
+   536	    sed_in_place = {"tool_name": "Bash", "tool_input": {
+   537	        "command": "sed -n -i '1,10p' frontier.md"}}
+   538	    sed_write_command = {"tool_name": "Bash", "tool_input": {
+   539	        "command": "sed -n 'w /tmp/forged' frontier.md"}}
+   540	    find_file_output = {"tool_name": "Bash", "tool_input": {
+   541	        "command": "find . -type f -fprint /tmp/forged"}}
+   542	    agent_bad = {"tool_name": "Agent", "tool_input": {"prompt": "work F-001"}}
+   543	    agent_good = {"tool_name": "Agent", "tool_input": {
+   544	        "prompt": "XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001",
+   545	    }}
+   546	    completion_bad = {"tool_name": "Agent", "tool_input": {
+   547	        "prompt": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=" + "a" * 40,
+   548	    }}
+   549	    completion_good = {"tool_name": "Agent", "tool_input": {
+   550	        "prompt": "XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=" + "a" * 40
+   551	                  + " CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger",
+   552	    }}
+   553	    before_fanout = "真实 Agent 回执" in evaluate_pretool(run, target_event, contract)
+   554	    encoded_before_fanout = bool(evaluate_pretool(run, encoded_target, contract))
+   555	    renamed_before_fanout = bool(evaluate_pretool(run, renamed_target, contract))
+   556	    workers_allowed_before_fanout = not bool(evaluate_pretool(run, workers_control, contract))
+   557	    fake_workers_blocked_before_fanout = bool(evaluate_pretool(
+   558	        run, fake_workers_control, contract))
+   559	    safe_sed_allowed_before_fanout = not bool(evaluate_pretool(
+   560	        run, safe_sed_read, contract))
+   561	    sed_in_place_blocked = bool(evaluate_pretool(run, sed_in_place, contract))
+   562	    sed_write_blocked = bool(evaluate_pretool(run, sed_write_command, contract))
+   563	    find_file_output_blocked = bool(evaluate_pretool(run, find_file_output, contract))
+   564	    protected_write = {
+   565	        "tool_name": "Bash",
+   566	        "tool_input": {"command": "printf forged > state/runtime_events.jsonl"},
+   567	    }
+   568	    protected_reason = evaluate_pretool(run, protected_write, contract)
+   569	    protected_denial_not_target = not _denial_is_target_action(
+   570	        protected_write, protected_reason)
+   571	    transcript = root / "transcript.jsonl"
+   572	    transcript.write_text("old-agent-1\nold-agent-2\ncurrent-agent-1\ncurrent-agent-2\ncurrent-cron-list\n",
+   573	                          encoding="utf-8")
+   574	
+   575	    def receipt(tool_id: str, session: str, assignment: str, front: str) -> None:
+   576	        runtime_receipts.append_hook_event(run, {
+   577	            "hook_event_name": "PostToolUse", "session_id": session,
+   578	            "transcript_path": str(transcript), "tool_name": "Agent",
+   579	            "tool_use_id": tool_id,
+   580	            "tool_input": {"prompt": f"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front}"},
+   581	            "tool_response": {"result": "done"},
+   582	        })
+   583	
+   584	    receipt("old-agent-1", "old-session", "A-web-001", "F-001")
+   585	    receipt("old-agent-2", "old-session", "A-auth-001", "F-002")
+   586	    old_fanout_still_blocked = bool(evaluate_pretool(run, target_event, contract))
+   587	    receipt("current-agent-1", "s", "A-web-001", "F-001")
+   588	    receipt("current-agent-2", "s", "A-auth-001", "F-002")
+   589	    receipts_without_disposition_block = bool(evaluate_pretool(run, target_event, contract))
+   590	    (run / "evidence.md").write_text("# Evidence\n## E-001 - merged candidate\n", encoding="utf-8")
+   591	    assignment_state = json.loads((run / "state" / "assignments.json").read_text(encoding="utf-8"))
+   592	    for item in assignment_state["assignments"]:
+   593	        item.update({
+   594	            "status": "merged",
+   595	            "updated_at": datetime.now(timezone.utc).isoformat(),
+   596	            "last_note": f"Evidence: E-001 merged for Front: {item['front']}",
+   597	        })
+   598	    (run / "state" / "assignments.json").write_text(
+   599	        json.dumps(assignment_state), encoding="utf-8")
+   600	    current_fanout_allows = evaluate_pretool(run, target_event, contract) == ""
+   601	    missing_contract_blocks = bool(evaluate_pretool(run, target_event, {}))
+   602	    original_frontier = (run / "frontier.md").read_text(encoding="utf-8")
+   603	    (run / "frontier.md").write_text("# Frontier\n## Open Fronts\nmalformed\n", encoding="utf-8")
+   604	    malformed_frontier_blocks = "canonical frontier" in evaluate_pretool(
+   605	        run, target_event, contract)
+   606	    (run / "frontier.md").write_text(original_frontier, encoding="utf-8")
+   607	    (run / "frontier.md").unlink()
+   608	    missing_frontier_blocks = "canonical frontier" in evaluate_pretool(
+   609	        run, target_event, contract)
+   610	    (run / "frontier.md").write_text(original_frontier, encoding="utf-8")
+   611	    cron_create = {"tool_name": "CronCreate", "tool_input": {"prompt": f"/loop {run.name}"}}
+   612	    cron_before_list = bool(evaluate_pretool(run, cron_create, contract))
+   613	    runtime_receipts.append_hook_event(run, {
+   614	        "hook_event_name": "PostToolUse", "session_id": "s",
+   615	        "transcript_path": str(transcript), "tool_name": "CronList",
+   616	        "tool_use_id": "current-cron-list", "tool_input": {},
+   617	        "tool_response": {"tasks": []},
+   618	    })
+   619	    cron_after_list = evaluate_pretool(run, cron_create, contract) == ""
+   620	    empty_runs = root / "empty-runs"
+   621	    empty_runs.mkdir()
+   622	    env = dict(os.environ)
+   623	    env["XUNJI_RUNS_ROOT"] = str(empty_runs)
+   624	    no_run_cron = subprocess.run(
+   625	        [sys.executable, str(Path(__file__).resolve())],
+   626	        input=json.dumps({
+   627	            "hook_event_name": "PreToolUse", "session_id": "s",
+   628	            "tool_name": "CronCreate", "tool_input": {"prompt": "/loop future-run"},
+   629	        }),
+   630	        text=True, capture_output=True, env=env, timeout=10,
+   631	    )
+   632	    settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+   633	    hooks = settings.get("hooks", {})
+   634	
+   635	    state_path = contract_path(run)
+   636	    state_path.write_text("{broken", encoding="utf-8")
+   637	    malformed_contract_rejected = load_contract(run, session_id="s") == {}
+   638	    _atomic_json(state_path, {
+   639	        "schema": "wrong", "mode": EXECUTE, "session_id": "s",
+   640	        "updated_at": time.time(),
+   641	    })
+   642	    wrong_schema_rejected = load_contract(run, session_id="s") == {}
+   643	    _atomic_json(state_path, {
+   644	        "schema": SCHEMA, "mode": EXECUTE, "session_id": "other",
+   645	        "updated_at": time.time(),
+   646	    })
+   647	    wrong_session_rejected = load_contract(run, session_id="s") == {}
+   648	    _atomic_json(state_path, {
+   649	        "schema": SCHEMA, "mode": EXECUTE, "session_id": "s",
+   650	        "updated_at": time.time() - STALE_SECONDS - 1,
+   651	    })
+   652	    stale_contract_rejected = load_contract(run, session_id="s") == {}
+   653	    override = write_contract(run, {
+   654	        "prompt": "继续执行，明确允许串行", "session_id": "s",
+   655	        "transcript_path": str(transcript),
+   656	    })
+   657	    operator_contract_raw = state_path.read_text(encoding="utf-8")
+   658	    operator_contract = json.loads(operator_contract_raw)
+   659	    internal_response = handle_event({
+   660	        "hook_event_name": "UserPromptSubmit",
+   661	        "session_id": "s",
+   662	        "prompt": "<task-notification><status>completed</status></task-notification>",
+   663	    }, run)
+   664	    internal_notification_preserves_contract = (
+   665	        state_path.read_text(encoding="utf-8") == operator_contract_raw
+   666	        and load_contract(run, session_id="s") == operator_contract
+   667	        and isinstance(internal_response, dict)
+   668	    )
+   669	
+   670	    def wired(event_name: str) -> bool:
+   671	        return any(
+   672	            "tools/turn_contract.py" in str(hook.get("command") or "")
+   673	            for group in hooks.get(event_name, []) if isinstance(group, dict)
+   674	            for hook in group.get("hooks", []) if isinstance(hook, dict)
+   675	        )
+   676	
+   677	    session_start_selftest = any(
+   678	        "tools/turn_contract.py" in str(hook.get("command") or "")
+   679	        and "--selftest" in str(hook.get("command") or "")
+   680	        for group in hooks.get("SessionStart", []) if isinstance(group, dict)

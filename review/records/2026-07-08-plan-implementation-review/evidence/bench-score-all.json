@@ -1,0 +1,1041 @@
+{
+  "summary": {
+    "fixtures": 18,
+    "clean": 18,
+    "detection_rate": 1.0,
+    "calibration_rate": 1.0,
+    "false_positives": 0,
+    "false_positive_rate_mean": 0.0,
+    "request_budget_over": 0,
+    "request_budget_total": 23,
+    "time_to_first_evidence_avg_sec": 1.98,
+    "closure_correct": 1,
+    "closure_expected": 1,
+    "agent_assignments": 2,
+    "agent_count": 4,
+    "missed_high_value_fronts": 0,
+    "role_mismatched_fronts": 0,
+    "conflicts_unresolved": 0,
+    "collaboration_checks_failed": 0,
+    "false_positive_suppression_events": 14,
+    "agent_first_evidence_avg_sec": 1.75,
+    "total_expected_findings": 18,
+    "total_detected_findings": 18,
+    "total_calibrated_findings": 18
+  },
+  "scores": [
+    {
+      "fixture": "auth-idor-profile",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 2,
+      "budget_max": 8,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 2.0,
+      "closure": null,
+      "findings": [
+        {
+          "id": "profile-idor",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.9,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 2,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "auth-idor-tenant-record",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 3,
+      "budget_max": 10,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 1.8,
+      "closure": null,
+      "findings": [
+        {
+          "id": "tenant-record-idor",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 1.0,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 2,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "example-dvwa-sqli",
+      "expected": 2,
+      "detected": 2,
+      "detection_rate": 1.0,
+      "calibrated": 2,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 3,
+      "recorded_requests": 0,
+      "budget_max": 100,
+      "over_budget": false,
+      "time_to_first_evidence_sec": null,
+      "closure": null,
+      "findings": [
+        {
+          "id": "sqli-union",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 1.0,
+          "calibrated": true
+        },
+        {
+          "id": "xss-reflected",
+          "detected": true,
+          "matched_eid": "E-003",
+          "min_certainty": 0.8,
+          "got_certainty": 0.9,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 3,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "existing-mechanism-consumption",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 1,
+      "recorded_requests": 0,
+      "budget_max": 4,
+      "over_budget": false,
+      "time_to_first_evidence_sec": null,
+      "closure": null,
+      "findings": [
+        {
+          "id": "hidden-export-idor",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [
+        {
+          "id": "consumed-surface-discovery-channels",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "JS refs consumed",
+            "Source JS/artifact: evidence/app.bundle.js"
+          ]
+        },
+        {
+          "id": "consumed-frontier-unruled-out",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Unruled out consumed: exportId owner check"
+          ]
+        },
+        {
+          "id": "consumed-loop-state-hint",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Mentor Hints",
+            "no-progress-pivot consumed"
+          ]
+        }
+      ],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 1,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 1,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": 1.0,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 0,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "injection-error-sqli",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 1,
+      "recorded_requests": 2,
+      "budget_max": 6,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 1.1,
+      "closure": null,
+      "findings": [
+        {
+          "id": "error-sqli",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 0,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "injection-nosql-filter",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 2,
+      "budget_max": 8,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 1.5,
+      "closure": null,
+      "findings": [
+        {
+          "id": "nosql-filter-injection",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.9,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 2,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "js-hidden-api-threat",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 1,
+      "recorded_requests": 0,
+      "budget_max": 4,
+      "over_budget": false,
+      "time_to_first_evidence_sec": null,
+      "closure": null,
+      "findings": [
+        {
+          "id": "hidden-admin-role-diff",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [
+        {
+          "id": "js-inventory-produced-input-shape",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "JS Inventory",
+            "IS-CAND-001",
+            "Candidate Threat Hypotheses"
+          ]
+        },
+        {
+          "id": "surface-recorded-js-source",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Source JS/artifact: evidence/app.js",
+            "Role or permission hint: admin/management route"
+          ]
+        }
+      ],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 0,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "mentor-no-progress-pivot",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 1,
+      "recorded_requests": 0,
+      "budget_max": 2,
+      "over_budget": false,
+      "time_to_first_evidence_sec": null,
+      "closure": null,
+      "findings": [
+        {
+          "id": "pivot-produced-refutation",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [
+        {
+          "id": "mentor-hint-visible",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Mentor Hints",
+            "no-progress-pivot",
+            "advisory only"
+          ]
+        },
+        {
+          "id": "root-recorded-pivot",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "no-progress-pivot consumed",
+            "materially different mechanism"
+          ]
+        }
+      ],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "path-normalization-bypass",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 3,
+      "budget_max": 10,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 2.0,
+      "closure": null,
+      "findings": [
+        {
+          "id": "path-normalization-bypass",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.9,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 2,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "path-traversal-download",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 2,
+      "budget_max": 8,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 1.4,
+      "closure": null,
+      "findings": [
+        {
+          "id": "download-path-traversal",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 1.0,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 2,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "permission-matrix-idor",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 1,
+      "recorded_requests": 0,
+      "budget_max": 5,
+      "over_budget": false,
+      "time_to_first_evidence_sec": null,
+      "closure": null,
+      "findings": [
+        {
+          "id": "cross-role-idor",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [
+        {
+          "id": "conditional-permission-matrix-used",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Permission / State Working Matrix",
+            "Role B observed E-id",
+            "Next control"
+          ]
+        },
+        {
+          "id": "matrix-linked-to-evidence-not-closure",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "E-001",
+            "replay with victim-owned id"
+          ]
+        }
+      ],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 0,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "recorded-closure-static-site",
+      "expected": 0,
+      "detected": 0,
+      "detection_rate": null,
+      "calibrated": 0,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 2,
+      "budget_max": 6,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 2.0,
+      "closure": {
+        "expected": true,
+        "correct": true,
+        "markers_ok": true,
+        "review_ok": true,
+        "no_positive_findings": true
+      },
+      "findings": [],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 2,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 2,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "signed-client-param",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 1,
+      "recorded_requests": 0,
+      "budget_max": 3,
+      "over_budget": false,
+      "time_to_first_evidence_sec": null,
+      "closure": null,
+      "findings": [
+        {
+          "id": "signature-bound-refutation",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [
+        {
+          "id": "surface-recorded-signature-logic",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Client-side signature/token/nonce logic",
+            "Source JS/artifact: evidence/order.js"
+          ]
+        },
+        {
+          "id": "hypothesis-has-refutation-control",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Refutation/control: tampered owner id rejected",
+            "Linked IS/C/E: IS-001"
+          ]
+        }
+      ],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "state-machine-skip",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 1,
+      "recorded_requests": 0,
+      "budget_max": 4,
+      "over_budget": false,
+      "time_to_first_evidence_sec": null,
+      "closure": null,
+      "findings": [
+        {
+          "id": "workflow-skip",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [
+        {
+          "id": "state-edge-recorded",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "State transition: draft -> approved",
+            "State edge"
+          ]
+        },
+        {
+          "id": "state-control-linked",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Linked threat hypothesis: H-001",
+            "E-001"
+          ]
+        }
+      ],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 0,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "threat-hypothesis-to-evidence",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 1,
+      "recorded_requests": 0,
+      "budget_max": 3,
+      "over_budget": false,
+      "time_to_first_evidence_sec": null,
+      "closure": null,
+      "findings": [
+        {
+          "id": "hypothesis-linked-refutation",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [
+        {
+          "id": "agent-produced-new-threat-hypothesis",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "New Threat Hypotheses",
+            "Linked IS/C/E: IS-001",
+            "Next action"
+          ]
+        },
+        {
+          "id": "root-merged-threat-hypothesis",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "Threat hypothesis:",
+            "Asset/role/input:",
+            "Expected signal:",
+            "Refutation/control:"
+          ]
+        },
+        {
+          "id": "evidence-linked-back-to-hypothesis",
+          "fired": true,
+          "must": true,
+          "signals": [
+            "H-001",
+            "IS-001",
+            "replay rejected"
+          ]
+        }
+      ],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 1,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "ultra-agent-collab",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 3,
+      "budget_max": 6,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 2.5,
+      "closure": null,
+      "findings": [
+        {
+          "id": "profile-idor",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 2,
+        "agents": 2,
+        "high_value_fronts": 1,
+        "assigned_high_value_fronts": 1,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 2,
+        "confirmed_findings": 1,
+        "candidate_to_finding_conversion": 0.5,
+        "conflicts_total": 1,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": true,
+        "request_budget_by_agent": {
+          "A-web-auth-001": 2,
+          "A-verify-001": 1
+        },
+        "time_to_first_evidence_by_mode_sec": {
+          "A-web-auth-001": 2.5,
+          "A-verify-001": 1.0
+        },
+        "false_positive_suppression_events": 1,
+        "checks": [
+          {
+            "id": "agent-coverage",
+            "ok": true
+          },
+          {
+            "id": "conflicts-resolved",
+            "ok": true
+          },
+          {
+            "id": "request-budget-by-agent",
+            "ok": true
+          },
+          {
+            "id": "missed-high-value-front",
+            "ok": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture": "upload-mime-bypass",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 2,
+      "budget_max": 12,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 3.0,
+      "closure": null,
+      "findings": [
+        {
+          "id": "upload-mime-bypass",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.9,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 2,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    },
+    {
+      "fixture": "upload-path-control",
+      "expected": 1,
+      "detected": 1,
+      "detection_rate": 1.0,
+      "calibrated": 1,
+      "calibration_rate": 1.0,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "confirmed_total": 2,
+      "recorded_requests": 2,
+      "budget_max": 12,
+      "over_budget": false,
+      "time_to_first_evidence_sec": 2.5,
+      "closure": null,
+      "findings": [
+        {
+          "id": "upload-path-control",
+          "detected": true,
+          "matched_eid": "E-001",
+          "min_certainty": 0.8,
+          "got_certainty": 0.8,
+          "calibrated": true
+        }
+      ],
+      "fp_detail": [],
+      "process": [],
+      "collaboration": {
+        "assignments": 0,
+        "agents": 0,
+        "high_value_fronts": 0,
+        "assigned_high_value_fronts": 0,
+        "missed_high_value_fronts": [],
+        "role_mismatched_fronts": [],
+        "candidate_agents": 0,
+        "confirmed_findings": 2,
+        "candidate_to_finding_conversion": null,
+        "conflicts_total": 0,
+        "conflicts_unresolved": 0,
+        "conflict_resolution_correct": null,
+        "request_budget_by_agent": {},
+        "time_to_first_evidence_by_mode_sec": {},
+        "false_positive_suppression_events": 1,
+        "checks": []
+      }
+    }
+  ]
+}

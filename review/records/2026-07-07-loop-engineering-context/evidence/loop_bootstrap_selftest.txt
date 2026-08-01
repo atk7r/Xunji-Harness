@@ -1,0 +1,28 @@
+[loop_state] run directory does not exist: /private/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/tmpwv503kst/missing-run
+[bootstrap] loop_state 刷新失败
+ok   template exists
+ok   prompt non-empty
+ok   prompt has run path
+ok   no template var left
+ok   python var replaced
+ok   session_state written
+ok   loop_state refresh ok
+ok   loop_state refresh fails closed
+ok   validate run ok
+ok   validate non-run fails
+loop_bootstrap selftest passed
+# Loop State
+
+- Phase: Driver
+- Open/deferred/closed fronts: 1 / 0 / 0
+- Evidence: 0 total; new this cycle: 0; certainty upgrades: 0
+- Coverage: 0 tested cells; new this cycle: 0; untested applicable cells: 0
+- No-progress cycles: 0 (continue)
+- Agents: 0 assignments; unresolved conflicts: 0
+- Fan-out required: no
+- Completion pause candidate: no
+
+## Next Actions
+
+- Choose the next front from actionable/open fronts and record a Root graph pass.
+[bootstrap] loop state: /var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/tmpwv503kst/state/loop_state.json

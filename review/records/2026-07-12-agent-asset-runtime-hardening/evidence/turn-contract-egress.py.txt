@@ -1,0 +1,392 @@
+def _event_destinations(event: dict) -> set[str]:
+    """Extract explicit network destinations without treating artifact paths as hosts."""
+    text = _tool_text(event)
+    destinations: set[str] = set()
+    for raw_url in re.findall(r"(?i)\b(?:https?|wss?)://[^\s\"'<>]+", text):
+        try:
+            host = urlsplit(raw_url.rstrip(",);]}")).hostname or ""
+        except ValueError:
+            host = ""
+        host = host.strip().lower().rstrip(".")
+        if host:
+            destinations.add(host)
+
+    command = str((event.get("tool_input") or {}).get("command") or "") \
+        if isinstance(event.get("tool_input"), dict) else ""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = []
+    file_suffixes = {
+        ".diff", ".gif", ".html", ".json", ".jsonl", ".log", ".md",
+        ".png", ".py", ".replay", ".txt", ".yaml", ".yml",
+    }
+    bare_host = re.compile(
+        r"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+        r"[a-z]{2,63}(?::\d+)?(?:/.*)?$"
+    )
+    for token in tokens:
+        candidate = token.strip("[](),;\"'")
+        if not candidate or "://" in candidate or "/" in candidate:
+            continue
+        host_candidate = candidate.rsplit(":", 1)[0] if candidate.count(":") == 1 else candidate
+        try:
+            destinations.add(str(ipaddress.ip_address(host_candidate)).lower())
+            continue
+        except ValueError:
+            pass
+        if Path(host_candidate).suffix.lower() in file_suffixes or not bare_host.fullmatch(candidate):
+            continue
+        try:
+            host = urlsplit("//" + candidate).hostname or ""
+        except ValueError:
+            host = ""
+        if host:
+            destinations.add(host.lower().rstrip("."))
+    return destinations
+
+
+def _unassigned_assets(run_dir: Path) -> tuple[list[str], str]:
+    try:
+        import coverage_matrix  # noqa: WPS433
+        data = coverage_matrix.derive(run_dir)
+    except Exception as exc:
+        return [], f"{exc.__class__.__name__}: coverage derivation failed"
+    if any(run_dir.glob("**/coverage.json")) and not data.get("rows"):
+        return [], "coverage file exists but no valid asset rows were derived"
+    return ([str(item.get("asset") or "") for item in data.get("accounting_gaps", [])
+             if str(item.get("asset") or "")], "")
+
+
+def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
+    """Deny target egress paths that cannot prove use of the engagement proxy."""
+    tool = str(event.get("tool_name") or "")
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    command = str(tool_input.get("command") or "")
+    if tool == "Bash" and RAW_NETWORK_CLIENT_RE.search(command):
+        return (
+            "交战代理硬门：active run 禁止使用裸 curl/wget/httpx/nuclei/sqlmap/requests/urllib/socket；"
+            "请走项目的 proxy-aware guarded tools。"
+        )
+    touched, coverage_error = _event_known_hosts(run_dir, event)
+    if coverage_error:
+        return "资产覆盖硬门：无法派生目标资产账本，拒绝在未知 scope/代理状态下执行：" + coverage_error
+    if tool == "WebFetch":
+        return (
+            "交战代理硬门：active run 中 WebFetch 无法证明经过 XUNJI_PROXY，且未知目标会"
+            "绕过资产账本；目标请求必须改用 tools/probe.py/render.py/scan.py，公共资料研究"
+            "使用 WebSearch/知识工具。"
+        )
+    if tool != "Bash":
+        if touched or _event_destinations(event):
+            return (
+                "交战代理硬门：该非 Bash 网络工具无法证明经过 XUNJI_PROXY；"
+                "目标请求必须改用 proxy-aware project tools。"
+            )
+        return ""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return "交战代理硬门：无法解析目标命令，拒绝可能的直连出口。"
+    approved = False
+    for token in tokens:
+        if not token.endswith(".py"):
+            continue
+        path = Path(token)
+        if not path.is_absolute():
+            path = ROOT / path
+        try:
+            approved = path.resolve() in PROXY_AWARE_TARGET_TOOLS
+        except Exception:
+            approved = False
+        if approved:
+            break
+    if approved:
+        rows, inventory_error = _coverage_rows(run_dir)
+        if inventory_error:
+            return "资产覆盖硬门：无法派生目标资产账本：" + inventory_error
+        if not rows:
+            return "资产覆盖硬门：proxy-aware 目标工具执行前必须先建立 coverage/asset ledger。"
+        destinations = _event_destinations(event)
+        unknown = sorted(destinations - _coverage_hostnames(rows))
+        if unknown:
+            return (
+                "资产覆盖硬门：proxy-aware 目标工具只能访问 coverage ledger 已声明的 host/IP；"
+                "未知目标: " + ", ".join(unknown)
+            )
+    if not approved:
+        if not touched:
+            return ""
+        return (
+            "交战代理硬门：该目标命令未绑定项目的 proxy-aware 工具，无法证明出口代理；"
+            "改用 tools/probe.py、render.py 或 scan.py。"
+        )
+    return ""
+
+
+def _is_target_action(event: dict) -> bool:
+    tool = str(event.get("tool_name") or "")
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    command = str(tool_input.get("command") or "")
+    if tool == "WebFetch" or (tool == "Bash" and not _fanout_control_bash(command)):
+        return True
+    if tool in NON_EGRESS_TOOLS:
+        return False
+    return bool(_event_destinations(event))
+
+
+def _denial_is_target_action(event: dict, reason: str) -> bool:
+    """Separate target-result denials from local control-plane policy denials."""
+    local_policy_markers = (
+        "active-run 指针",
+        "清除 active-run 指针必须由当前操作者 prompt 明确授权",
+        "长期记忆写入需要操作者",
+        "peer_review 不得后台运行",
+    )
+    return _is_target_action(event) and not any(
+        marker in reason for marker in local_policy_markers)
+
+
+def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
+    tool = str(event.get("tool_name") or "")
+    text = _tool_text(event)
+    mode = str(contract.get("mode") or "")
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    command = str(tool_input.get("command") or "")
+    tool_env = tool_input.get("env") if isinstance(tool_input.get("env"), dict) else {}
+    direct_env_opt_out = str(tool_env.get("XUNJI_PROXY_REQUIRED") or "").strip().lower() \
+        in {"0", "false", "no", "off"}
+
+    protected_reason = _protected_control_reason(event)
+    if protected_reason:
+        return protected_reason
+
+    invocation = _control_invocation(command) if tool == "Bash" else None
+    prompt_excerpt = str(contract.get("prompt_excerpt") or "")
+    resume_allowed = False
+    if invocation and invocation[0].name == "loop_bootstrap.py" \
+            and "--resume" in invocation[1]:
+        try:
+            resume_arg = invocation[1][invocation[1].index("--resume") + 1]
+        except (ValueError, IndexError):
+            resume_arg = ""
+        resume_allowed = bool(
+            re.search(r"(?:继续|恢复|续接|resume|continue)", prompt_excerpt, re.I)
+            or (resume_arg and (
+                resume_arg.lower() in prompt_excerpt.lower()
+                or Path(resume_arg).name.lower() in prompt_excerpt.lower()
+            )))
+    if invocation and invocation[0].name in {"setup_run.py", "loop_bootstrap.py"} \
+            and not ({"--selftest", "--help", "-h"} & set(invocation[1])) \
+            and not RUN_TRANSITION_RE.search(prompt_excerpt) \
+            and not resume_allowed:
+        return "setup/resume run 转换必须由当前操作者 prompt 明确要求；不得借切换 run 规避当前回合约束。"
+    if invocation and invocation[0].name == "xunji_statusline.py" \
+            and "--set-active" in invocation[1]:
+        try:
+            target_arg = invocation[1][invocation[1].index("--set-active") + 1]
+        except (ValueError, IndexError):
+            return "--set-active 缺少 run 路径。"
+        target_name = Path(target_arg).name.lower()
+        if target_name not in prompt_excerpt.lower() and target_arg.lower() not in prompt_excerpt.lower():
+            return "--set-active 目标必须由当前操作者 prompt 明确点名；不得切换到无关 run。"
+    if invocation and invocation[0].name == "xunji_statusline.py" \
+            and "--clear-active" in invocation[1] \
+            and not CLEAR_ACTIVE_RE.search(str(contract.get("prompt_excerpt") or "")):
+        return "清除 active-run 指针必须由当前操作者 prompt 明确授权；切换 run 请使用受控 --set-active/setup/resume。"
+
+    if MEMORY_PATH_RE.search(text) and not contract.get("memory_approved"):
+        memory_read = tool in {"Read", "Grep", "Glob"} or (
+            tool == "Bash" and _readonly_shell(command)
+        )
+        if not memory_read:
+            return "长期记忆写入需要操作者在当前 prompt 明确批准；retrospective 不能自行升级为 memory。"
+    if tool == "Bash" and BACKGROUND_REVIEW_RE.search(command):
+        return "peer_review 不得后台运行并与可变 evidence 并发；请前台冻结快照后完成复审。"
+    if tool == "Bash" and (DIRECT_EGRESS_ENV_RE.search(text) or direct_env_opt_out) \
+            and not contract.get("direct_egress_approved"):
+        return (
+            "交战代理硬门：XUNJI_PROXY_REQUIRED=0 只能由当前操作者 prompt 明确批准直连；"
+            "模型或历史环境变量不能自行关闭 fail-closed。"
+        )
+
+    if mode == EXPLAIN:
+        if tool not in {"Read", "Grep", "Glob", "WebSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"}:
+            return "当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。"
+        return ""
+    if mode == PAUSE:
+        if tool not in {"Read", "Grep", "Glob", "CronList", "CronDelete"}:
+            return "当前回合是 PAUSED_BY_OPERATOR：只允许读取状态并执行 CronList/CronDelete；不得继续目标动作或改写前沿。"
+        if tool == "CronDelete":
+            job = runtime_receipts._job_id(tool_input)
+            ok, note = runtime_receipts.cron_delete_allowed(
+                run_dir, job,
+                session_id=str(contract.get("session_id") or ""),
+                since=float(contract.get("updated_at") or 0.0),
+            )
+            if not ok:
+                return "暂停事务只可删除当前 CronList 观察到的本 run job：" + note
+        return ""
+    if not contract:
+        if tool not in {"Read", "Grep", "Glob", "WebSearch", "CronList", "CronDelete"}:
+            return "缺少当前 session 的 turn contract；先由 UserPromptSubmit 记录 EXECUTE/EXPLAIN/PAUSE 模式。"
+        return ""
+
+    if tool == "CronCreate":
+        if RUN_TRANSITION_RE.search(prompt_excerpt) \
+                and str(contract.get("bound_run") or run_dir.name) == str(
+                    contract.get("origin_run") or run_dir.name):
+            return "Cron 单实例门：当前 prompt 要求创建新 run；先完成 setup 并切换 contract，再对新 run 执行 CronList/CronCreate。"
+        cron_ok, cron_note = runtime_receipts.cron_quiescent(
+            run_dir,
+            session_id=str(contract.get("session_id") or ""),
+            since=float(contract.get("updated_at") or 0.0),
+        )
+        if not cron_ok:
+            return "Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。" + cron_note
+        if run_dir.name.lower() not in text.lower():
+            return "Cron 单实例门：CronCreate prompt 必须显式包含当前 run 目录名。"
+        return ""
+
+    if tool == "CronDelete":
+        job = runtime_receipts._job_id(tool_input)
+        ok, note = runtime_receipts.cron_delete_allowed(
+            run_dir, job,
+            session_id=str(contract.get("session_id") or ""),
+            since=float(contract.get("updated_at") or 0.0),
+        )
+        if not ok:
+            return "CronDelete 只可删除当前 CronList 观察到的本 run job：" + note
+        return ""
+
+    state, _ = _safe_run_summary(run_dir)
+    frontier_exists = (run_dir / "frontier.md").exists()
+    state_invalid = not frontier_exists or (
+        not state.get("fronts") or bool(state.get("schema_errors"))
+    )
+    if state_invalid and (
+        tool == "WebFetch" or (tool == "Bash" and not _fanout_control_bash(command))
+    ):
+        return (
+            "canonical frontier 状态缺失或有 schema error；active run 按 fail-closed "
+            "禁止目标动作，先修复 frontier.md 的 Status/Barrier class/Current depth。"
+        )
+    if _is_target_action(event):
+        proxy_reason = _proxy_egress_reason(run_dir, event)
+        if proxy_reason:
+            return proxy_reason
+        unassigned_assets, coverage_error = _unassigned_assets(run_dir)
+        touched_hosts, host_error = _event_known_hosts(run_dir, event)
+        if coverage_error or host_error:
+            return "资产覆盖硬门：账本派生失败，拒绝 fail-open：" + (coverage_error or host_error)
+        if touched_hosts and unassigned_assets:
+            shown = ", ".join(unassigned_assets[:8])
+            return (
+                f"资产覆盖硬门：仍有 {len(unassigned_assets)} 个 reachable/unknown 范围内资产未映射到"
+                f"任何 front/assignment（{shown}{' …' if len(unassigned_assets) > 8 else ''}）。"
+                "先在 frontier.md 逐资产点名；宽泛 F-id 不能代替资产账本。"
+            )
+    actor_agent_id = str(event.get("agent_id") or "").strip()
+    if actor_agent_id:
+        if tool == "Agent":
+            return "Agent Board 强制：只有 Root 可派 Agent；子 Agent 不得嵌套派生新 Agent。"
+        actor = runtime_receipts.agent_actor(run_dir, actor_agent_id)
+        if not actor:
+            return "Agent Board 强制：当前子 Agent 没有 transcript-backed assignment attempt，拒绝执行。"
+        if actor.get("state") != "running":
+            return "Agent Board 强制：该子 Agent attempt 已返回，不能在 SubagentStop 后继续执行。"
+        if actor.get("kind") == "completion_review":
+            if tool in {"Read", "Grep", "Glob"} or (
+                    tool == "Bash" and _readonly_shell(command)):
+                return ""
+            return "Completion review Agent 只允许读取冻结的 run 状态；不得修改、探测或再派 Agent。"
+        rec = _assignment_record(
+            run_dir, str(actor.get("assignment") or ""), str(actor.get("front") or ""))
+        if not rec:
+            return "Agent Board 强制：子 Agent attempt 对应的 assignment/front 已失效。"
+        assigned_assets = set(_normalized_assets(rec.get("assets")))
+        if _is_target_action(event) and not assigned_assets:
+            return (
+                "Agent Board 资产边界：legacy/空资产 assignment 不具备目标执行权限；"
+                "Root 必须创建带显式 asset package 的新 assignment。"
+            )
+        if _is_target_action(event):
+            touched, coverage_error = _event_known_hosts(run_dir, event)
+            if coverage_error:
+                return "Agent Board 资产边界：无法派生资产账本，拒绝 fail-open：" + coverage_error
+            outside = sorted(touched - assigned_assets)
+            if outside:
+                return (
+                    "Agent Board 资产边界：子 Agent 只能操作 assignment 的显式资产包；越界资产: "
+                    + ", ".join(outside)
+                )
+        # Child Agents run their own assigned lane. Global Root fan-out and
+        # post-return disposition must never block their probe/control actions.
+        return ""
+    if tool == "Agent":
+        raw_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+        prompt = str(raw_input.get("prompt") or raw_input.get("description") or "")
+        if "XUNJI_COMPLETION_REVIEW" in prompt.upper():
+            missing = [item for item in COMPLETION_CHECKS if item not in prompt.lower()]
+            if not runtime_receipts._evidence_hash(prompt) or missing:
+                return (
+                    "Completion Agent prompt 必须包含 EVIDENCE_INDEX=<current sha1> 和 "
+                    "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger；缺少: "
+                    + ", ".join(missing or ["EVIDENCE_INDEX"]))
+            return ""
+        assignment, front = runtime_receipts._assignment_fields(prompt)
+        if not assignment or not front:
+            return "Agent Board 强制：Agent prompt 必须包含 XUNJI_ASSIGNMENT=A-... 和 XUNJI_FRONT=F-...。"
+        rec = _assignment_record(run_dir, assignment, front)
+        if not rec:
+            return "Agent Board 强制：Agent token 未绑定 workers.py 生成的 assignment/front。"
+        status = str(rec.get("status") or "").strip().lower()
+        if status not in {"assigned", "starting"}:
+            return (
+                f"Agent Board attempt 唯一性：{assignment} status={status or '(missing)'}，"
+                "只有 assigned/starting assignment 可启动；重试或续派必须创建新 assignment。"
+            )
+        expected_assets = _normalized_assets(rec.get("assets"))
+        prompt_assets = runtime_receipts._assignment_assets(prompt)
+        if expected_assets and prompt_assets != expected_assets:
+            return (
+                "Agent Board 资产绑定：prompt 必须包含与 assignment 完全一致的 "
+                f"XUNJI_ASSETS={','.join(expected_assets)}。"
+            )
+        return ""
+    if not state.get("fanout_required") or contract.get("fanout_override"):
+        return ""
+    epoch_since = float(contract.get("fanout_epoch_started_at")
+                        or contract.get("updated_at") or 0.0)
+    fanout = runtime_receipts.agent_fanout(
+        run_dir,
+        since=epoch_since,
+    )
+    if fanout.get("satisfied"):
+        if tool == "Bash" and _fanout_control_bash(command):
+            return ""
+        if tool == "WebFetch" or tool == "Bash":
+            disposition = runtime_receipts.agent_disposition(
+                run_dir,
+                since=epoch_since,
+            )
+            if not disposition.get("disposition_satisfied"):
+                return (
+                    "真实 SubagentStop 已返回但尚未完成 post-return disposition；先用 workers.py "
+                    "把每个 assignment 更新为带 canonical E/F/D 锚点的 merged/blocked/failed，"
+                    "且更新时间必须晚于 Agent 返回。"
+                )
+        return ""
+    if tool == "Bash":
+        if not _fanout_control_bash(command):
+            return (
+                "Agent Board 强制：当前至少 4 个独立 active fronts"
+                "（open/probing/working/type-A）；真实 Agent 回执覆盖两个不同 front 前，"
+                "Root Bash 只允许只读命令和 workers/run_model/loop_state 控制面命令。"
+            )
+    if tool in {"WebFetch"}:
+        return "Agent Board 强制：真实 Agent 回执覆盖两个不同 front 前，Root 不得继续目标 WebFetch。"
+    return ""
+
+
+def _context_message(contract: dict, run_dir: Path) -> str:

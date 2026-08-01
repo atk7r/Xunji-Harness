@@ -1,0 +1,310 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-08-loop-controller-implementation-review",
+  "files": {
+    "report.md": {
+      "sha1": "f45153e4fdab5d3c7ff2acd8d7b32e02aeb9e36d",
+      "size": 6546
+    },
+    "evidence.md": {
+      "sha1": "174b17ee31ef67384acf7ae1d989421e40e011f7",
+      "size": 4093
+    },
+    "decisions.md": {
+      "sha1": "993f75eb921a660586222ccf431553ab0ce64764",
+      "size": 1213
+    },
+    "review.md": {
+      "sha1": "195f7c4c0e0f8fb815327d1df96c351e08013c90",
+      "size": 1344
+    },
+    "target.md": {
+      "sha1": "022dd19c649fc2a207dd0f8c3395311ae589c34f",
+      "size": 234
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001",
+        "maturity": "phenomenon",
+        "certainties": [
+          0.3
+        ],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/implementation.diff",
+            "path": "evidence/implementation.diff",
+            "exists": true,
+            "size": 119987,
+            "sha1": "054d501a4506467f78420327cc6d0ade743b4659"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/loop-state-selftest-detailed.out",
+            "path": "evidence/loop-state-selftest-detailed.out",
+            "exists": true,
+            "size": 984,
+            "sha1": "3a14d203627113d4a8a33e26d65a45cd12b7f274"
+          },
+          {
+            "token": "evidence/selftest-loop-controller.out",
+            "path": "evidence/selftest-loop-controller.out",
+            "exists": true,
+            "size": 365,
+            "sha1": "f04fde9d8688211c663d8758ad0de2e0203a3eeb"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/anti-drift-selftest.out",
+            "path": "evidence/anti-drift-selftest.out",
+            "exists": true,
+            "size": 1046,
+            "sha1": "b1e814759d48d4bbc8d7a4485fcb2fc46c50033f"
+          },
+          {
+            "token": "evidence/check-rules.out",
+            "path": "evidence/check-rules.out",
+            "exists": true,
+            "size": 18,
+            "sha1": "6e4be8266323611639310b21bc51562d32574dfc"
+          },
+          {
+            "token": "evidence/check-run-selftest.out",
+            "path": "evidence/check-run-selftest.out",
+            "exists": true,
+            "size": 8351,
+            "sha1": "e1932bc16f8c2ebfc3cb13a86d7a2feba8addb39"
+          },
+          {
+            "token": "evidence/check-templates.out",
+            "path": "evidence/check-templates.out",
+            "exists": true,
+            "size": 22,
+            "sha1": "8dcf38ce1d69c8bcb94effec805965fd44aa3ea5"
+          },
+          {
+            "token": "evidence/git-diff-check.out",
+            "path": "evidence/git-diff-check.out",
+            "exists": true,
+            "size": 32,
+            "sha1": "f5f336a22ba7cd08381483bfb2d46a5035d73b80"
+          },
+          {
+            "token": "evidence/py-compile.out",
+            "path": "evidence/py-compile.out",
+            "exists": true,
+            "size": 121,
+            "sha1": "ec9603bac27be982bfc402035c03b7725a3957cf"
+          },
+          {
+            "token": "evidence/session-handoff-selftest.out",
+            "path": "evidence/session-handoff-selftest.out",
+            "exists": true,
+            "size": 415,
+            "sha1": "618ad4faeb31968dc3cdb829e64c12128a28f277"
+          },
+          {
+            "token": "evidence/setup-run-selftest.out",
+            "path": "evidence/setup-run-selftest.out",
+            "exists": true,
+            "size": 935,
+            "sha1": "57090d84f98fbe10d141103d3d6105545f99a154"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/scshr-frontier-status-lines.out",
+            "path": "evidence/scshr-frontier-status-lines.out",
+            "exists": true,
+            "size": 332,
+            "sha1": "e6fed09eaf49897784d7f2ef65bb20787d64de7f"
+          },
+          {
+            "token": "evidence/scshr-real-run-validation.json",
+            "path": "evidence/scshr-real-run-validation.json",
+            "exists": true,
+            "size": 1304,
+            "sha1": "01ff71343b45942b4ec3f483029295af8e449fb3",
+            "excerpt": "{\n  \"loop_state\": {\n    \"open\": [\n      \"F-001\",\n      \"F-005\",\n      \"F-002\",\n      \"F-003\"\n    ],\n    \"open_count\": 4,\n    \"blocked_type_a\": [\n      \"F-001\",\n      \"F-005\",\n      \"F-002\",\n      \"F-003\"\n    ],\n    \"deferred\": [\n      \"F-006\",\n      \"F-007\"\n    ],\n    \"closed\": [\n      \"F-004\"\n    ],\n    \"unclassified_status\": [],\n    \"completion_pause_candidate\": false,\n    \"closure_blockers\": [\n      \"open_fronts_present\",\n      \"saturation_attention_required\"\n    ]\n  },\n  \"controller\": {\n    \"state\": \"NEEDS_AGENT_FANOUT\",\n    \"advisory_only\": true,\n    \"can_stop\": false,\n    \"can_stop_reason\": \"shadow controller never grants stop; only hard closure gates plus Root adjudication can do that\",\n    \"stop_blockers\": [\n      \"open_fronts_present\",\n      \"saturation_attention_required\"\n    ],\n    \"next_required_action\": \"assign_at_least_two_disjoint_agent_lanes_or_record_a_budget_reason\",\n    \"signals\": {\n      \"open_fronts\": [\n        \"F-001\",\n        \"F-005\",\n        \"F-002\",\n        \"F-003\"\n      ],\n      \"blocked_type_a\": [\n        \"F-001\",\n        \"F-005\",\n        \"F-002\",\n        \"F-003\"\n      ],\n      \"coda_converged\": false,\n      \"material_progress\": true,\n      \"artifact_backed_progress\": false,\n      \"fanout_required\": true,\n      \"closure_review_candidate\": false\n    }\n  }\n}\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-005",
+        "head": "## E-005",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/doc-right-tree-files.out",
+            "path": "evidence/doc-right-tree-files.out",
+            "exists": true,
+            "size": 519,
+            "sha1": "9a3c4b5b9359d9a5faba98359334a5be4d5c96ab"
+          },
+          {
+            "token": "evidence/stale-wording-scan.out",
+            "path": "evidence/stale-wording-scan.out",
+            "exists": true,
+            "size": 546,
+            "sha1": "64581982129f698ca739653c25e6fd5b9a8e8716"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-006",
+        "head": "## E-006",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/run-controller-advisory-audit.out",
+            "path": "evidence/run-controller-advisory-audit.out",
+            "exists": true,
+            "size": 813,
+            "sha1": "a0a6510961cc55a606d1488396695143a77a8748"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-007",
+        "head": "## E-007",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/adversarial-type-a-coda.json",
+            "path": "evidence/adversarial-type-a-coda.json",
+            "exists": true,
+            "size": 2336,
+            "sha1": "75191949351c80611e4ab6a0d351f6a2b98f894e",
+            "excerpt": "{\n  \"input_frontier\": \"# Frontier\\n\\n## Open Fronts\\n\\n### F-001 Login\\n- Status: open, blocked_type_a (auth-layer: credentials unknown)\\n- Barrier class: auth-layer\\n- Vectors tried: enum\\n- Untried classes: default-creds\\n\\n### F-002 API\\n- Status: working (blocked-type-a: route gate)\\n- Barrier class: routing-layer\\n- Vectors tried: IDOR\\n- Untried classes: SSRF\\n\",\n  \"loop_state_sequence\": [\n    {\n      \"no_progress_cycles\": 0,\n      \"coda_converged\": false\n    },\n    {\n      \"no_progress_cycles\": 1,\n      \"coda_converged\": false\n    },\n    {\n      \"no_progress_cycles\": 2,\n      \"coda_converged\": true\n    }\n  ],\n  \"final_loop_state\": {\n    \"open\": [\n      \"F-001\",\n      \"F-002\"\n    ],\n    \"open_count\": 2,\n    \"blocked_type_a\": [\n      \"F-001\",\n      \"F-002\"\n    ],\n    \"coda_converged\": true,\n    \"completion_pause_candidate\": false,\n    \"closure_blockers\": [\n      \"open_fronts_present\",\n      \"saturation_attention_required\"\n    ],\n    \"next_actions\": [\n      \"Expand or justify low-saturation fronts before any explored-enough claim.\",\n      \"Coda convergence: record a trajectory review, pivot/continue rationale, or review/surface Agent assignment; this is not a closure signal by itself.\",\n      \"Choose the next front from actionable/open fronts and record a Root graph pass.\"\n    ]\n  },\n  \"progress_ledger\": {\n    \"material_progress\": false,\n    \"artifact_backed_progress\": false,\n    \"new_evidence\": [],\n    \"certainty_upgrades\": [],\n    \"coverage_new_tested_cells\": [],\n    \"no_progress_cycles\": 2,\n    \"coda_converged\": true,\n    \"warnings\": []\n  },\n  \"controller\": {\n    \"state\": \"NEEDS_PIVOT\",\n    \"advisory_only\": true,\n    \"can_stop\": false,\n    \"can_stop_reason\": \"shadow controller never grants stop; only hard closure gates plus Root adjudication can do that\",\n    \"stop_blockers\": [\n      \"open_fronts_present\",\n      \"saturation_attention_required\"\n    ],\n    \"next_required_action\": \"record_trajectory_review_then_pivot_continue_or_assign_review_surface_agent\",\n    \"signals\": {\n      \"open_fronts\": [\n        \"F-001\",\n        \"F-002\"\n      ],\n      \"blocked_type_a\": [\n        \"F-001\",\n        \"F-002\"\n      ],\n      \"coda_converged\": true,\n      \"material_progress\": false,\n      \"artifact_backed_progress\": false,\n      \"fanout_required\": false,\n      \"closure_review_candidate\": false\n    }\n  }\n}\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-008",
+        "head": "## E-008",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/loop-state-postfix-audit.out",
+            "path": "evidence/loop-state-postfix-audit.out",
+            "exists": true,
+            "size": 783,
+            "sha1": "d85c4914ee14069c882b52305f3c6ff186075bac"
+          },
+          {
+            "token": "evidence/loop-state-selftest-detailed.out",
+            "path": "evidence/loop-state-selftest-detailed.out",
+            "exists": true,
+            "size": 984,
+            "sha1": "3a14d203627113d4a8a33e26d65a45cd12b7f274"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "aef38ec658adb469d9ee78c32d04bc48fad00e90"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Maintenance Review Brief\n\n## Objective\n\nReview the Codex-authored implementation that fixes the `/loop` control-plane bug where Coda/no-progress and Type A blocked fronts could be interpreted as a Completion pause. Judge whether the diff keeps Claude Code as the primary driver, preserves Markdown as the source of truth, and makes autonomous vulnerability discovery less likely to stop prematurely.\n\n## Main Changes\n\n- `tools/loop_state.py`: parse status tokens so `open, blocked_type_a`, `open (blocked_type_a: ...)`, `working (blocked_type_a)`, and plain `blocked_type_a` remain open/stop-blocking; Coda convergence now produces pivot/review guidance instead of a closure candidate.\n- `tools/loop_state.py`: section fallback ignores fenced-code example F-IDs, filters projection fronts back to real canonical frontier headings, and emits an advisory hint if Agent discipline audit is unavailable instead of failing silently.\n- `tools/progress_ledger.py`: new derived progress ledger that records material progress and artifact-backed progress from loop state plus `evidence.md`.\n- `tools/run_controller.py --shadow`: new advisory controller writing only `state/controller.shadow.json` and `state/controller_diff.md`; it reports stop blockers and next required lifecycle action but never chooses exploit steps, promotes evidence, or grants closure.\n- `tools/loop_bootstrap.py`: refreshes loop state, progress ledger, and shadow controller before printing `/loop` launch instructions.\n- Claude primary-driver docs updated: `CLAUDE.md`, `docs/templates/loop_prompt.md`, `.claude/skills/xunji-run-lifecycle/SKILL.md`, `docs/WORKFLOW*.md`, and `docs/ROUTER.md`.\n- `tools/selftest_all.py`: registers `progress_ledger` and `run_controller` suites.\n\n## Adjacent Scope In This Diff\n\nThis maintenance diff also includes the earlier autonomous-discovery optimization work that the same review bundle covers:\n\n- Agent Board threat-hypothesis and candidate-evidence discipline updates in `.claude/skills/xunji-agent-board/SKILL.md`, `tools/workers.py`, and agent templates.\n- Input Shape Catalog, Permission/State Working Matrix, and threat-hypothesis fields in `docs/WORKFLOW-reference.md`, `docs/templates/run/surface.md`, and `docs/templates/run/hypotheses.md`.\n- `tools/js_inventory.py` plus `selftest_all.py` registration for read-only JavaScript inventory.\n- Benchmark canaries under `bench/` for threat modeling, hidden JS APIs, permission/state reasoning, state-machine skip, mentor no-progress pivot, and existing-mechanism consumption.\n\nThese adjacent changes are reviewed as control-plane and canary improvements. They do not prove higher real-target finding yield by themselves.\n\n## Review Questions\n\n1. Does any new tool become a second source of truth or an orchestrator?\n2. Does Coda convergence still accidentally trigger Completion pause while Type A/open fronts remain?\n3. Are Claude primary-driver rules updated in the right tree (`.claude/skills`, not `.agents/skills`)?\n4. Are bootstrap and aggregate selftests wired so the behavior does not rot?\n5. Does the implementation improve vulnerability discovery behavior by preventing premature stop and forcing pivot/fanout/review?\n\n## Driver Answers\n\nThese are maintenance-review answers, not confirmed vulnerability findings. The evidence ledger deliberately keeps the supporting artifacts at phenomenon/candidate certainty because they are local diffs, selftests, smoke checks, and source audits.\n\n1. Second source of truth/orchestrator: the review bundle supports \"not in the covered code paths.\" `loop_state.py`, `progress_ledger.py`, and `run_controller.py --shadow` are intended to write only derived `state/` outputs, and E-006 audits that boundary. This is not a proof against future code paths or every CLI misuse.\n2. Coda versus Completion pause: the covered regression evidence supports \"fixed for the exercised cases.\" E-007 exercises `coda_converged=true` with open Type A fronts and observes `completion_pause_candidate=false`, `NEEDS_PIVOT`, and `can_stop=false`.\n3. Claude primary-driver tree: the staged diff and wording scan support \"updated in the intended tree for this maintenance change.\" The change touches `CLAUDE.md`, `.claude/skills/xunji-run-lifecycle/SKILL.md`, and shared docs/templates; `.agents/skills` is not treated as the Root driver's instruction source.\n4. Selftest wiring: the covered commands support \"registered and passing for the selected suites.\" Bootstrap refreshes the derived caches, and `selftest_all.py` includes `loop_state`, `progress_ledger`, `run_controller`, and `loop_bootstrap`.\n5. Vulnerability discovery behavior: the evidence supports only a directional control-plane improvement. The change reduces one premature-stop path and redirects the Root toward pivot/review/fanout; it does not prove higher real-target finding yield.\n\n## Verification Already Run\n\n- `python3 -m py_compile tools/loop_state.py tools/progress_ledger.py tools/run_controller.py tools/loop_bootstrap.py`\n- `python3 tools/selftest_all.py --only loop_state,progress_ledger,run_controller,loop_bootstrap`\n- `python3 tools/loop_state.py --selftest` with code-block and blocked_type_b regression coverage\n- `python3 tools/check_rules.py`\n- `python3 tools/check_templates.py`\n- `python3 tools/check_run.py --selftest`\n- `python3 tools/session_handoff.py --selftest`\n- `python3 tools/setup_run.py --selftest`\n- `python3 tools/anti_drift.py --selftest`\n- Real run smoke: a no-write snapshot of `runs/scshr_20260708` now reports 4 open `blocked_type_a` fronts and `can_stop=false` for that representative mixed status format.\n- Adversarial regression: a synthetic run forced `coda_converged=true` while two Type A fronts remained open; loop state refused closure and the shadow controller returned `NEEDS_PIVOT`, `advisory_only=true`, and `can_stop=false`.\n\n## Frozen Artifacts\n\n- `evidence/implementation.diff`\n- `evidence/selftest-loop-controller.out`\n- `evidence/loop-state-selftest-detailed.out`\n- `evidence/py-compile.out`\n- `evidence/check-rules.out`\n- `evidence/check-templates.out`\n- `evidence/git-diff-check.out`\n- `evidence/check-run-selftest.out`\n- `evidence/session-handoff-selftest.out`\n- `evidence/setup-run-selftest.out`\n- `evidence/anti-drift-selftest.out`\n- `evidence/run-controller-advisory-audit.out`\n- `evidence/loop-state-postfix-audit.out`\n- `evidence/doc-right-tree-files.out`\n- `evidence/scshr-real-run-validation.json`\n- `evidence/scshr-frontier-status-lines.out`\n- `evidence/adversarial-type-a-coda.json`\n- `evidence/stale-wording-scan.out`\n",
+    "decisions.md": "# Decisions\n\n## D-001 Post-Fix Evidence Strength\n\n- Decision: Treat the loop/controller artifacts as maintenance candidate evidence, not confirmed vulnerability findings or confirmed real-target yield.\n- Rationale: The supporting artifacts are local diffs, selftests, source audits, bundle review, and no-write smoke checks with certainty 0.3-0.5.\n- Consequence: `report.md` Driver Answers are bounded to covered code paths and exercised regressions.\n\n## D-002 Post-Fix Reviewer Blocker\n\n- Decision: Accept the post-fix PR-001 BLOCKER and change categorical Yes/No answers into bounded maintenance-review conclusions.\n- Rationale: The evidence ledger contains no confirmed entries, so categorical claims overstated what the review bundle could prove.\n- Consequence: The follow-up rerun reached WARN with no BLOCKER.\n\n## D-003 Adjacent Optimization Scope\n\n- Decision: Keep the adjacent Agent Board, threat-hypothesis, `js_inventory`, and benchmark canary changes in the same maintenance commit.\n- Rationale: They are part of the same autonomous discovery control-plane improvement, but they are not proof of higher real-target finding yield.\n- Consequence: The report now calls out this adjacent scope explicitly.\n",
+    "review.md": "# Review\n\n## Independent Review Records\n\n- Initial loop/controller panel: `../2026-07-08-loop-controller-implementation-peer-review.md`\n- Rerun after evidence-context fix: `../2026-07-08-loop-controller-implementation-peer-review-rerun.md`\n- Final pre-postfix panel: `../2026-07-08-loop-controller-implementation-peer-review-final.md`\n- Post-fix blocker review: `../2026-07-08-loop-controller-implementation-peer-review-postfix.md`\n- Post-fix rerun: `../2026-07-08-loop-controller-implementation-peer-review-postfix-rerun.md`\n\n## Current Ledger\n\n- PR-001 post-fix BLOCKER: accepted; fixed by downgrading categorical Driver Answers to bounded maintenance-review conclusions.\n- PR-002 no confirmed evidence: accepted as residual scope; this maintenance record does not claim confirmed vulnerability findings or real-target yield.\n- PR-003 missing separate review/decisions trail: fixed by adding this file and `decisions.md`.\n- PR-004 partial arkcli panel: recorded; completed reviewers returned WARN with no BLOCKER.\n- PR-005 py-compile artifact missing/empty: fixed by making `evidence/py-compile.out` non-empty and regenerating the evidence index.\n- PR-006 stale wording command irreproducible: fixed by recording the concrete `rg` command.\n- PR-007 adjacent scope under-described: fixed by adding explicit adjacent-scope text to `report.md`.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 180000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "c8d97dd2e3b4181d594c855e3ca1280ea8983184"
+}

@@ -1,0 +1,55 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "claude:code-cli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "6d852579aabe35495821ce64bd79f0d48a3ef688",
+  "evidence_index_hash": "48087a68a3db7683bed884b4918a1b23dbbc392f",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "E-002, E-003, E-004 have zero captured artifacts; evidence is ephemeral prose",
+      "evidence": "`evidence.md:9-19`",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "Three of four evidence entries describe command output (selftest results, statusline render, diff check) without saving that output to the run directory. The run's audit trail is incomplete — a future reviewer cannot independently verify these claims.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Journal note filtering uses fragile English-string heuristics with no regression guard",
+      "evidence": "`evidence/active-diff.txt:46-51`",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "The `_last_plan_note` filter matches three hardcoded English substrings (`\"run prepared\"`, `\"prepare authorized run workbench\"`, `\"next phase=root orchestrator\"`). Minor changes to journal note text (capitalization, spacing, Chinese localization) would cause silent regression to stale display text.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`except Exception: return None` in `_derived_state` silently swallows genuine bugs",
+      "evidence": "`evidence/active-diff.txt:34-35`",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "A broad except clause masks all errors from `loop_state.derive()` and `run_controller.derive()`, including `AttributeError` from API mismatches and `TypeError` from schema drift. Failed derivation degrades silently to the old broken behavior with no diagnostic.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "The fix assumes `loop_state.derive(write=False)` and `run_controller.derive(run_dir, loop_data=loop_data)` have stable, matching signatures. Neither module is visible in the run artifacts. If either function's API changes, the statusline silently degrades.",
+    "The `_state_stale()` function is called unconditionally before the live-derivation guard. If it crashes on edge cases (e.g., `(run_dir / \"state\")` is a file instead of a directory, or permissions deny listing), the fallback derivation is never reached. The selftest only exercises clean directories.",
+    "The report.md `## Verification` section claims specific output strings for the hamastar run (`[Root｜调度] ... 待验证入口 5 个 ... 阻断 3 个 ... 下一步 分派子任务`), but these strings are part of the operator-facing claim, not backed by a captured artifact. The actual statusline output may have slightly different formatting (e.g., ANSI escapes, whitespace) that was trimmed in the report."
+  ],
+  "context_limits": [
+    "I could not read `tools/xunji_statusline.py` directly (permission denied in this non-interactive session) to verify the full `_state_stale` implementation or the `_phase`/`_blocker_summary` functions. My analysis relies on the diff artifact and review bundle JSON. If `_state_stale` has edge-case guards not visible in the diff, my concern about the unconditional call may be unfounded.",
+    "I could not verify that `loop_state.derive()` and `run_controller.derive()` exist with the exact signatures used. The selftest passing is indirect evidence they do, but I cannot independently confirm.",
+    "This is a code-maintenance run, not a web-pentest run. The standard pentest rubric categories (false positives, coverage ledger vs recon assets, artifact artifacts like `probe_*.html` or `.replay.json`) do not apply. I adapted the rubric to the code-review context."
+  ],
+  "error": ""
+}

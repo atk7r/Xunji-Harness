@@ -1,0 +1,118 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "BLOCKER",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "69e80fd14d4a7121131aff951ac3e565e221fde0",
+  "evidence_index_hash": "3e0c690718b7f2f08361c39b3ee89d7b1fca8da6",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "BLOCKER",
+      "category": "evidence_gate",
+      "claim": "All five Driver Answers in report.md are stated as categorical Yes/No conclusions, but every evidence_index entry supporting them is unconfirmed (certainties 0.3–0.5).",
+      "evidence": "evidence_index:E-001 (certainty 0.3, phenomenon, no control), evidence_index:E-002 (certainty 0.5, candidate), evidence_index:E-003 (certainty 0.5, candidate), evidence_index:E-004 (certainty 0.5, candidate), evidence_index:E-005 (certainty 0.5, candidate), evidence_index:E-006 (certainty 0.5, candidate), evidence_index:E-007 (certainty 0.5, candidate), report.md:Driver Answers",
+      "affected_eids": [
+        "E-001",
+        "E-002",
+        "E-003",
+        "E-004",
+        "E-005",
+        "E-006",
+        "E-007"
+      ],
+      "recommended_action": "Either add independent audit/replay evidence entries with certainty >= 0.8, or rephrase every Driver Answer with qualifiers such as 'selftests suggest' / 'not confirmed'.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Xunji evidence discipline requires certainty >= 0.8 for confirmed claims. The report's No/Yes answers are therefore unsupported by the provided ledger.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "The 66 KB implementation diff is only recorded as phenomenon-level evidence (E-001, 0.3) and is not accompanied by a line-by-line audit artifact verifying the token-parsing fix.",
+      "evidence": "evidence_index:E-001, evidence/implementation.diff:sha1=93b9fd380f2717d4427c276ce799eafc6afe5449",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Produce a diff-review note that walks through tools/loop_state.py status-token regexes, the pivot/review logic, and run_controller.py --shadow write restrictions, then promote to >= 0.8.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Selftests alone do not demonstrate that the code handles edge cases or that the shadow controller truly cannot write canonical files.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "artifact_cross_check",
+      "claim": "Real-run smoke (E-004) is a static no-write JSON snapshot of runs/scshr_20260708, not a live controller invocation with request/response replay.",
+      "evidence": "evidence_index:E-004, evidence/scshr-real-run-validation.json:sha1=01ff71343b45942b4ec3f483029295af8e449fb3, evidence/scshr-frontier-status-lines.out:sha1=e6fed09eaf49897784d7f2ef65bb20787d64de7f",
+      "affected_eids": [
+        "E-004"
+      ],
+      "recommended_action": "Capture a .replay.json or live controller shadow output showing the same run state being read and the controller producing can_stop=false, with SHA verification.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] A static snapshot cannot prove dynamic behavior; it could be hand-constructed and does not show state transitions.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "Documentation update claims (CLAUDE.md, .claude/skills, docs/templates, etc.) are not backed by file-diff or hash evidence; only a stale-wording scan (E-005) is provided.",
+      "evidence": "evidence_index:E-005, evidence/stale-wording-scan.out:sha1=889d39bcee37bd74529a1cd03caeabb56297f2c2, report.md:Main Changes",
+      "affected_eids": [
+        "E-005"
+      ],
+      "recommended_action": "Add evidence entries containing the actual updated file hashes or a docs-only diff, and verify each named file appears in the tree.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] A stale-wording scan detects phrases, not presence/correctness of updates, and cannot confirm the claimed right-tree placement.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "shallow_closure",
+      "claim": "Selftest artifacts for the new tools are small and do not demonstrate adversarial or negative-case coverage for status-token parsing.",
+      "evidence": "evidence_index:E-002, evidence_index:E-003, evidence/selftest-loop-controller.out:sha1=f04fde9d8688211c663d8758ad0de2e0203a3eeb, evidence/check-run-selftest.out:sha1=e1932bc16f8c2ebfc3cb13a86d7a2feba8addb39",
+      "affected_eids": [
+        "E-002",
+        "E-003"
+      ],
+      "recommended_action": "Extend selftests with malformed front status lines, mixed 'open, blocked_type_a' plus extra tokens, empty barrier class, and lines that previously triggered the completion-pause bug.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The reported fix hinges on parsing subtle status tokens; shallow happy-path selftests leave regression paths uncovered.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "glm-5.2: parse error; output tail:  (E-001). There's no evidence that the diff was actually applied or that the files currently contain the claimed content. The `git-diff-check.out` (E-003, 24 bytes) is too small to contain meaningful output — what does it actually say?\n\n6. **The report claims selftests passed** but the selftest output artifacts (E-002 at 365 bytes, various E-003 files at 18-8351 bytes) are small. The report doesn't cite which evidence entry corresponds to which verification step. We can't verify that all claimed",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [kimi-k2.7-code] The author treated self-test PASS output and synthetic adversarial JSON as verification, missing that the evidence ledger never reaches the confirmed threshold.",
+    "[arkcli] [kimi-k2.7-code] No independent model review of the 66 KB diff; parse-token regex edge cases and pivot logic are not exercised.",
+    "[arkcli] [kimi-k2.7-code] No live execution/replay artifact; static snapshots and selftests cannot demonstrate runtime orchestrator behavior.",
+    "[arkcli] [kimi-k2.7-code] No negative test or before/after comparison for the exact completion-pause regression.",
+    "[arkcli] [kimi-k2.7-code] No evidence that the shadow controller refuses to write canonical files under adversarial CLI invocation; E-006 is only 813 bytes and its contents were not excerpted.",
+    "[arkcli] [kimi-k2.7-code] No file-level evidence for doc updates; stale-wording scan is not a diff.",
+    "[arkcli] [kimi-k2.7-code] Real target yield is not measured; the report correctly caveats this, but the control-plane fix could still have unintended side effects on agent fanout decisions.",
+    "[claude] **The `_mentor_hints()` function silently couples to `workers.agent_discipline_issues()`**: At `implementation.diff:665` — the call is wrapped in bare `try/except` with no logging of the exception. If `workers.py` changes its API, the \"done-agent-without-artifact-control\" mentor hint silently disappears with no diagnostic. The reviewer didn't flag this coupling or the silent-fail pattern.",
+    "[claude] **`_front_section_statuses` regex could match F-IDs inside Markdown code blocks**: At `implementation.diff:437` — `re.finditer(r\"(?m)^###[ \\t]+(F-\\d+)\\b\", m.group(1))` does not exclude fenced code blocks. If `frontier.md` contains example F-IDs in code blocks (e.g., in a template or documentation section), they'd be incorrectly parsed as real fronts. The reviewer didn't flag this.",
+    "[claude] **The `_field()` parser only matches single-line field values**: At `implementation.diff:568-570` — the regex `r\"(?im)^\\s*[-*]?\\s*{re.escape(name)}\\s*[:：]\\s*([^\\n]*)$` uses `$` to anchor, meaning multi-line field values won't be captured. Fields like `Vectors tried` or `Untried classes` that might span multiple lines in real frontier.md entries would only capture the first line. The reviewer didn't flag this.",
+    "[claude] **No test case for \"all fronts are `blocked_type_b`\"**: The selftest covers `blocked_type_a`, open, closed, deferred, hyphenated, unclassified, and conflicting statuses — but never a run where ALL fronts are `blocked_type_b` (the \"explored enough\" category). In such a run, `open_count=0`, `deferred_count=0`, `closed_count=0`, and `blocked_type_b` fronts are excluded from `unclassified_status`. This would make `completion_pause_candidate=true` but `near_closure=false` (since there's no confirmed evidence + no closed/deferred fronts). The behavior is technically correct, but the reviewer didn't analyze this state.",
+    "[claude] **The reviewer didn't check whether any other tool in `tools/` reads `state/loop_state.json` and gates on `coda_converged` with the old semantics**: Only user-facing docs and the loop tools were scanned. Other tools like `workers.py`, `context_pack.py`, or `saturation.py` might consume loop state and have stale assumptions about what `coda_converged=true` means. The check-run selftest passed, which provides partial coverage.",
+    "[claude] **The CLAUDE.md change is surgical — only the Convergence Gate paragraph**: While the stale wording scan found no remaining old wording, the reviewer didn't explicitly verify that CLAUDE.md's Pause 2 section (`report.md` line range not shown in diff) doesn't also reference Coda convergence. From the current CLAUDE.md (provided in context), Pause 2 correctly triggers on \"all open fronts are adjudicated AND check_run passes AND independent review is complete\" — consistent with the fix. But the reviewer didn't call this out explicitly.",
+    "[claude] **The implementation diff includes changes beyond what the report's \"Main Changes\" section lists**: The diff also adds `docs/WORKFLOW-reference.md` changes (Input Shape Catalog template `IS-001`, Permission/State Working Matrix template, hypotheses.md field additions, `js_inventory.py` documentation, Agent threat hypothesis workflow). The report groups these under \"Claude primary-driver docs updated\" which is accurate but underspecified — some of these are significant template additions, not just wording fixes. The reviewer might have missed that the `js_inventory.py` selftest registration (`diff:878`) is also included, which is a new tool registration unrelated to the loop controller."
+  ],
+  "context_limits": [
+    "[arkcli] glm-5.2: parse error; output tail:  (E-001). There's no evidence that the diff was actually applied or that the files currently contain the claimed content. The `git-diff-check.out` (E-003, 24 bytes) is too small to contain meaningful output — what does it actually say?\n\n6. **The report claims selftests passed** but the selftest output artifacts (E-002 at 365 bytes, various E-003 files at 18-8351 bytes) are small. The report doesn't cite which evidence entry corresponds to which verification step. We can't verify that all claimed",
+    "[claude] The review bundle provided a complete snapshot of all files and artifacts; I did not need to access the live repository. All artifact hashes matched the bundle's `evidence_index`.",
+    "[claude] The Chinese content in `check-run-selftest.out` (ev_*.html file naming, 漏报/漏测 gate descriptions) was fully readable. Chinese field labels in code comments (`## Open Fronts`, `## Deferred Fronts`, `## Closed Fronts`) are correctly handled by the `_front_section_statuses` regex which uses `re.escape(section)` for exact matching.",
+    "[claude] I did not inspect the live `tools/loop_state.py`, `tools/progress_ledger.py`, `tools/run_controller.py`, or `tools/loop_bootstrap.py` source files — my analysis is based entirely on the frozen `implementation.diff` artifact (sha1: `93b9fd38`). If the diff is incomplete or was applied with merge conflicts not shown, I would not detect it.",
+    "[claude] The `scshr_20260708` real run used for E-004 validation is not in the review bundle — I relied on the captured JSON output, not the original run directory. I cannot verify the original frontier.md had the exact status lines shown in `scshr-frontier-status-lines.out`."
+  ],
+  "error": ""
+}

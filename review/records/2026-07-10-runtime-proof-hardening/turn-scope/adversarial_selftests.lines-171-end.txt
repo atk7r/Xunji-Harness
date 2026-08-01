@@ -1,0 +1,148 @@
+   171	ok   two executable clauses separated by comma are rejected
+   172	ok   one scan action may contain multiple port parameters
+   173	ok   single action may contain conjunction inside one front
+   174	ok   single English action may contain joined objects
+   175	ok   no proper close: prose
+   176	ok   no proper close: question
+   177	ok   no proper close: empty
+   178	ok   no proper close: mid-sentence only
+   179	ok   option list detected
+   180	ok   option list with paren
+   181	ok   option list with Chinese
+   182	ok   single option only
+   183	ok   no option list
+   184	ok   proper close with zero-width
+   185	ok   drift detect with zero-width
+   186	ok   option list with zero-width
+   187	ok   strip_invisible removes zwsp
+   188	ok   strip_invisible no-op
+   189	ok   session_state roundtrip
+   190	ok   session_state missing -> {}
+   191	ok   drift count first hit -> 1
+   192	ok   drift count increments on drift
+   193	ok   drift count resets on clean
+   194	ok   drift count bad prior -> 1
+   195	ok   drift started first hit -> now
+   196	ok   drift started preserves streak
+   197	ok   drift started resets on clean
+   198	ok   drift started bad prior -> now
+   199	ok   valid_ts valid
+   200	ok   valid_ts negative -> 0
+   201	ok   valid_ts future -> 0
+   202	ok   valid_ts zero -> 0
+   203	ok   valid_ts non-numeric -> 0
+   204	ok   protocol fronts detect open run
+   205	ok   protocol fronts ignore closed run
+   206	ok   open run without 下一行动 hard-blocks
+   207	ok   Coda correction does not inject stale strategy advice
+   208	ok   open run with 下一行动 passes protocol
+   209	ok   closed but incomplete run still requires closure action
+   210	ok   closed run with concrete closure action passes
+   211	ok   closed incomplete run rejects generic action
+   212	ok   closure candidate cannot use BLOCKED as a pause
+   213	ok   closure candidate rejects arbitrary front id
+   214	ok   completion marker releases output protocol
+   215	ok   active front cannot use BLOCKED coda
+   216	ok   wrong active front id is rejected
+   217	ok   active run requires front id or control-plane object
+   218	ok   explicit control-plane action may omit front id
+   219	ok   bare Agent token is not a control-plane bypass
+   220	ok   loop_state failure keeps fallback active-front Coda enforcement
+   221	ok   fallback parser accepts labeled F-id headings
+   222	ok   empty protocol state fails closed
+   223	ok   hook subprocess honors explicit active pointer and blocks open front
+   224	ok   EXPLAIN_ONLY response is not forced to add Coda
+   225	ok   explicit-pointer Stop pipeline: output Coda passes then closure gate blocks
+   226	output_gate selftest passed
+   227	
+   228	$ /opt/homebrew/opt/python@3.14/bin/python3.14 .claude/hooks/run_gate.py --selftest
+   229	ok   not final -> pass
+   230	ok   final + check pass -> pass
+   231	ok   final + check fail -> block
+   232	ok   final + fail + stop_active -> block (强制, 不降级)
+   233	ok   closure matrix: non-final + check fail -> pass
+   234	ok   closure matrix: final + open fronts + check pass -> block
+   235	ok   closure matrix: final + open fronts + check fail -> block
+   236	ok   closure matrix: final + no open fronts + check fail -> block
+   237	ok   closure matrix: final + no open fronts + check pass -> pass
+   238	ok   normal closure: missing independent review hard-blocks
+   239	ok   normal closure: missing completion review hard-blocks
+   240	ok   normal closure: both prerequisites pass
+   241	ok   normal closure: review prose mention does not satisfy gate
+   242	ok   normal closure: review template placeholders do not satisfy gate
+   243	ok   normal closure: unavailable canonical review parser fails closed
+   244	ok   normal closure: completion prose mention does not satisfy gate
+   245	ok   normal closure: unavailable completion parser fails closed
+   246	ok   fallback status parser ignores historical type-a note on closed status
+   247	ok   fallback status parser keeps canonical type-a active
+   248	ok   closure path: active-front counter includes open/probing/type-a
+   249	ok   closure path: open-front message is blocking-readable
+   250	ok   find_active_run picks most-recent run with *.md
+   251	ok   find_active_run picks runs even without report.md
+   252	ok   stale run -> none
+   253	ok   no runs dir -> none
+   254	ok   check_run closure predicate is callable
+   255	ok   report_is_final TRUE on confirmed report
+   256	ok   report_is_final FALSE on stub
+   257	ok   closure_gate_active TRUE on retrospective FINAL
+   258	ok   gate_skipped TRUE on skip marker
+   259	ok   gate_skipped FALSE without marker
+   260	ok   session timeout: no file -> pass
+   261	ok   session timeout: fresh file -> pass
+   262	ok   session timeout: stale but no drift -> pass
+   263	ok   session timeout: stale + drift -> block
+   264	ok   session timeout: message mentions run
+   265	ok   session timeout: corrupt file -> pass
+   266	ok   session timeout: drift_flags not list -> pass
+   267	ok   session timeout: >15m drift candidate still blocks
+   268	ok   drift session: no active_run -> pass
+   269	ok   drift session: no session_state -> pass
+   270	ok   drift session: drift flags -> notify
+   271	ok   drift session: message mentions drift
+   272	ok   drift session: protocol count 2 -> block
+   273	ok   drift session: block asks reread
+   274	ok   drift session: option count 4 -> block
+   275	ok   drift session: handoff message
+   276	ok   drift session: frontier-only count 4 stays notify
+   277	ok   drift session: stale drift -> pass
+   278	ok   drift session: empty flags -> pass
+   279	ok   session timeout: no active_run -> pass
+   280	ok   session timeout: stale active -> block
+   281	ok   session timeout: fresh updated_at + stale mtime -> pass
+   282	ok   session timeout: both stale -> block
+   283	ok   session timeout: old drift_started_at despite fresh file -> block
+   284	ok   session timeout: old drift message mentions 持续
+   285	ok   spec word: 若获得凭据 detected
+   286	ok   spec word: block mentions Observed 含推测词
+   287	ok   spec word: 若服务器返回200 NOT blocked
+   288	ok   spec word: 若 alone NOT blocked
+   289	ok   replay quality: confirmed without replay -> block
+   290	ok   replay quality: message names E-001
+   291	ok   replay quality: existing replay artifact -> pass
+   292	ok   replay quality: prose mention is not enough
+   293	ok   replay quality: missing replay file -> block
+   294	ok   replay quality: low certainty without replay -> pass
+   295	ok   CodexCriticalReview: CRITICAL missing field -> block
+   296	ok   CodexCriticalReview: block message mentions field
+   297	ok   CodexCriticalReview: CRITICAL with field -> pass
+   298	ok   CodexCriticalReview: HIGH without field -> pass
+   299	ok   CodexCriticalReview: <0.8 certainty -> not checked
+   300	ok   CodexCompletionReview: missing -> detected
+   301	ok   CodexCompletionReview: present -> detected
+   302	ok   agent board gate: no frontier.md -> pass
+   303	ok   agent board gate: <4 active fronts -> pass
+   304	ok   agent board gate: shared barrier -> pass
+   305	ok   agent board gate: diverse no agents -> block
+   306	ok   agent board gate: block message readable
+   307	ok   agent board gate: diverse with only an agent file -> block
+   308	ok   agent board gate: diverse with one assignment -> block
+   309	ok   agent board gate: hand-written heartbeat does not prove Agent use
+   310	ok   agent board gate: Agent receipts without merge disposition still block
+   311	ok   agent board gate: real receipts plus anchored disposition -> pass
+   312	ok   agent board gate: previous-turn receipts do not bypass current turn
+   313	ok   agent board gate: old disposition cannot settle new Agent calls
+   314	ok   agent board gate: current receipts plus current disposition -> pass
+   315	ok   agent board gate: decisions.md budget prose cannot bypass
+   316	ok   agent board gate: current operator prompt override -> pass
+   317	run_gate selftest passed
+   318	

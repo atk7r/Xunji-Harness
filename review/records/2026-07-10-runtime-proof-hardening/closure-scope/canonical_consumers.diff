@@ -1,0 +1,160 @@
+diff --git a/tools/coverage_matrix.py b/tools/coverage_matrix.py
+index a1405e5..ce227e1 100644
+--- a/tools/coverage_matrix.py
++++ b/tools/coverage_matrix.py
+@@ -44,0 +45,2 @@ except Exception:  # pragma: no cover - defensive fallback for broken imports
++import run_model
++
+@@ -291,24 +293,6 @@ def _parse_front_blocks(run_dir: Path) -> list[dict]:
+-    fr = run_dir / "frontier.md"
+-    if not fr.exists():
+-        return []
+-    text = fr.read_text(encoding="utf-8", errors="replace")
+-    blocks: list[dict] = []
+-    for section, body in _front_sections(text):
+-        sec_low = section.lower()
+-        if sec_low.startswith("open"):
+-            section_status = "open"
+-        elif sec_low.startswith("deferred"):
+-            section_status = "deferred"
+-        elif sec_low.startswith("closed"):
+-            section_status = "closed"
+-        else:
+-            section_status = "unknown"
+-        for m in re.finditer(r"(?ms)^###[ \t]+(F-\d+).*?(?=^###[ \t]+F-\d+|\Z)", body):
+-            block_text = m.group(0)
+-            blocks.append({
+-                "id": m.group(1),
+-                "status": (_field(block_text, "Status") or section_status).lower(),
+-                "section": section,
+-                "text": block_text,
+-            })
+-    return blocks
++    return [{
++        "id": front.id,
++        "status": front.status,
++        "section": front.section,
++        "text": front.text,
++    } for front in run_model.parse_fronts(run_dir)]
+diff --git a/tools/graph.py b/tools/graph.py
+index e9432b6..a5257a4 100644
+--- a/tools/graph.py
++++ b/tools/graph.py
+@@ -16 +16,2 @@
+-前沿状态由它所在的 ## Open/Deferred/Closed Fronts 区段决定。已确认 Fact = E 且 certainty>=0.8。
++前沿状态由 `tools/run_model.py` 统一解析 canonical `Status:`；章节只用于发现
++格式冲突。已确认 Fact = E 且 certainty>=0.8。
+@@ -38,0 +40,2 @@ CONFIRMED = 0.8  # certainty 门: >= 此值才算 Fact(已确认)
++sys.path.insert(0, str(ROOT / "tools"))
++import run_model  # noqa: E402
+@@ -83,15 +86,6 @@ def build_graph(run_dir: Path) -> dict:
+-    fr = run_dir / "frontier.md"
+-    if fr.exists():
+-        ftext = fr.read_text(encoding="utf-8", errors="replace")
+-        for sec, status in (("Open Fronts", "open"),
+-                            ("Deferred Fronts", "deferred"),
+-                            ("Closed Fronts", "closed")):
+-            m = re.search(rf"##\s*{sec}(.*?)(?=^##\s|\Z)", ftext, re.S | re.MULTILINE)
+-            if not m:
+-                continue
+-            for fid, b in _blocks(m.group(1), r"###\s+(F-\d+)"):
+-                nodes[fid] = {"type": "front", "status": status}
+-                for h in _ids(b, "Linked hypotheses", "H"):
+-                    edges.append({"src": fid, "dst": h, "rel": "tests"})
+-                for e in _ids(b, "Unlocked-by", "E"):
+-                    edges.append({"src": e, "dst": fid, "rel": "unlocks"})
++    for front in run_model.parse_fronts(run_dir):
++        nodes[front.id] = {"type": "front", "status": front.status}
++        for h in _ids(front.text, "Linked hypotheses", "H"):
++            edges.append({"src": front.id, "dst": h, "rel": "tests"})
++        for e in _ids(front.text, "Unlocked-by", "E"):
++            edges.append({"src": e, "dst": front.id, "rel": "unlocks"})
+@@ -128 +122 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:
+-            elif fn["status"] == "closed":
++            elif fn["status"] in run_model.TERMINAL_STATUSES - {"deferred"}:
+@@ -140 +134,2 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:
+-        {fid for fid, n in nodes.items() if n["type"] == "front" and n["status"] == "open"}
++        {fid for fid, n in nodes.items()
++         if n["type"] == "front" and n["status"] in run_model.OPEN_STATUSES}
+@@ -230 +225 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:
+-                   if nd.get("type") == "front" and nd.get("status") in ("open", "probing")]
++                   if nd.get("type") == "front" and nd.get("status") in run_model.OPEN_STATUSES]
+@@ -236 +231,2 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:
+-                     if nd.get("type") == "front" and nd.get("status") == "closed"]
++                     if nd.get("type") == "front"
++                     and nd.get("status") in run_model.TERMINAL_STATUSES - {"deferred"}]
+diff --git a/tools/loop_state.py b/tools/loop_state.py
+index c700550..6d6b37c 100644
+--- a/tools/loop_state.py
++++ b/tools/loop_state.py
+@@ -38,0 +39 @@ import workers  # noqa: E402
++import run_model  # noqa: E402
+@@ -180,6 +181,17 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
+-    real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}
+-    fronts = [
+-        f for f in projection.get("fronts", [])
+-        if str(f.get("id", "")).startswith("F-")
+-        and (not real_front_ids or str(f.get("id")) in real_front_ids)
+-    ]
++    canonical = run_model.parse_fronts(run_dir)
++    canonical_used = bool(canonical)
++    if canonical:
++        fronts = [{
++            "id": front.id,
++            "status": front.status,
++            "barrier": front.barrier,
++            "depth": front.depth,
++            "schema_errors": list(front.schema_errors),
++        } for front in canonical]
++    else:
++        real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}
++        fronts = [
++            f for f in projection.get("fronts", [])
++            if str(f.get("id", "")).startswith("F-")
++            and (not real_front_ids or str(f.get("id")) in real_front_ids)
++        ]
+@@ -190 +202 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
+-        if raw.lower() in {"", "unknown"}:
++        if not canonical_used and raw.lower() in {"", "unknown"}:
+@@ -219,0 +232,4 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
++    barrier_counts = {barrier: barriers.count(barrier) for barrier in unique_barriers}
++    all_share_one_barrier = bool(open_fronts) and any(
++        count == len(open_fronts) for count in barrier_counts.values()
++    )
+@@ -248 +264 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:
+-        "diverse_barriers": len(unique_barriers) >= 2,
++        "diverse_barriers": not all_share_one_barrier,
+diff --git a/tools/state_project.py b/tools/state_project.py
+index 2be6750..00d7574 100644
+--- a/tools/state_project.py
++++ b/tools/state_project.py
+@@ -19,0 +20 @@ from evidence_parse import parse_evidence  # noqa: E402
++import run_model  # noqa: E402
+@@ -37,18 +38,9 @@ def parse_fronts(run_dir: Path) -> list[dict]:
+-    text = _read(run_dir / "frontier.md")
+-    fronts: list[dict] = []
+-    for m in re.finditer(rf"(?ms)^###{HWS}+((?:F|H)-\d+)(.*?)(?=^###{HWS}+(?:F|H)-\d+|\Z)", text):
+-        block = m.group(0)
+-        head = block.splitlines()[0].strip()
+-        status = (_field(block, "Status") or "unknown").lower()
+-        barrier = (_field(block, "Barrier class") or "unknown").lower()
+-        depth = (_field(block, "Current depth") or _field(block, "Depth") or "unknown").lower()
+-        fronts.append({
+-            "id": m.group(1),
+-            "title": re.sub(r"^###\s*", "", head),
+-            "status": status,
+-            "barrier": barrier,
+-            "depth": depth,
+-            "same_barrier_failures": len(re.findall(r"same[- ]barrier|同一屏障", block, re.I)),
+-            "text": block,
+-        })
+-    return fronts
++    return [{
++        "id": front.id,
++        "title": front.title,
++        "status": front.status,
++        "barrier": front.barrier,
++        "depth": front.depth,
++        "same_barrier_failures": len(re.findall(r"same[- ]barrier|同一屏障", front.text, re.I)),
++        "text": front.text,
++    } for front in run_model.parse_fronts(run_dir)]

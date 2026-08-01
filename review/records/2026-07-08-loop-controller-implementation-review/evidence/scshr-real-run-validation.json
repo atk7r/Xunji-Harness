@@ -1,0 +1,60 @@
+{
+  "loop_state": {
+    "open": [
+      "F-001",
+      "F-005",
+      "F-002",
+      "F-003"
+    ],
+    "open_count": 4,
+    "blocked_type_a": [
+      "F-001",
+      "F-005",
+      "F-002",
+      "F-003"
+    ],
+    "deferred": [
+      "F-006",
+      "F-007"
+    ],
+    "closed": [
+      "F-004"
+    ],
+    "unclassified_status": [],
+    "completion_pause_candidate": false,
+    "closure_blockers": [
+      "open_fronts_present",
+      "saturation_attention_required"
+    ]
+  },
+  "controller": {
+    "state": "NEEDS_AGENT_FANOUT",
+    "advisory_only": true,
+    "can_stop": false,
+    "can_stop_reason": "shadow controller never grants stop; only hard closure gates plus Root adjudication can do that",
+    "stop_blockers": [
+      "open_fronts_present",
+      "saturation_attention_required"
+    ],
+    "next_required_action": "assign_at_least_two_disjoint_agent_lanes_or_record_a_budget_reason",
+    "signals": {
+      "open_fronts": [
+        "F-001",
+        "F-005",
+        "F-002",
+        "F-003"
+      ],
+      "blocked_type_a": [
+        "F-001",
+        "F-005",
+        "F-002",
+        "F-003"
+      ],
+      "coda_converged": false,
+      "material_progress": true,
+      "artifact_backed_progress": false,
+      "fanout_required": true,
+      "closure_review_candidate": false
+    }
+  }
+}

@@ -1,0 +1,67 @@
+# Peer Review Panel — live-scope
+
+_backend: panel:claude · 2026-07-10T22:58Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: NEEDS_DRIVER
+
+_backend: panel:claude_  
+_brain: codex_  
+_bundle_hash: 00ccc0c02a1a01c61545be487a71cca31a244989_  
+_evidence_index_hash: 27ae8744b984cc7845409447b86982d0112b7d3f_  
+
+## Findings
+- [WARN] PR-001 review panel had backend errors; aggregation is partial | Evidence: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; minimax-m3: parse error; output tail: to check if certainty >= 0.8 findings are truly supported. Let me do that systematically:
+
+**E-001: Turn modes and post-denial truth**
+- 8 cases, all passed
+- Each has hook_decisions with the expected reason strings
+- post_denial_fabrication_blocked shows stop_truth_block_seen: true, denial_envelope_seen: true
+- memory_read_allowed shows the allow path works
+- All claims are backed by the summary
+
+**E-002: Agent fan-out**
+- 2 agents, both with merged status
+- Disposition satisfied
+- All required; glm-5.2: parse error; output tail: sue 3: The live_pause_flow test invokes `claude` with `--dangerously-skip-permissions` AND `--setting-sources local` AND `--settings <cleanup_settings>` for the "native_create" call. The cleanup_settings is `"{}"` (empty), meaning NO hooks are active for the native_create call. But this native_create call creates a cron job in the SAME session_id. The fact that it succeeded (native_create returncode 0, other_ids found) shows that without Xunji hooks, Claude Code would just create cron jobs - but | Why: At least one requested heterogeneous reviewer failed or was unavailable.
+
+## Blind-spot check
+- [claude] **PostToolUse vs PreToolUse asymmetry**: The most architecturally significant blind spot I see is that no test verifies the PostToolUse hook path for any non-Bash tool. PreToolUse hooks fire globally (no matcher in E-003's settings, line 54 of that source), so they cover all tools. PostToolUse hooks require matchers. If a PostToolUse matcher regex is wrong (e.g., typo, case sensitivity), the hook silently doesn't fire, and the runtime_events.jsonl would be missing records. The tests would PASS because they only check denial at PreToolUse. This is a design-level coverage gap, not just a test gap.
+- [claude] **Contract-mode interaction matrix is untested**: The code supports EXECUTE × PAUSE × EXPLAIN_ONLY modes, with Agent Board conditions, memory-write protection, state-file protection, and Cron binding all layered on top. Each test case exercises exactly one interaction (e.g., "EXECUTE + Agent Board → deny Bash"). The combinatorial space of mode × condition × tool is never explored: what happens with EXPLAIN_ONLY + Agent Board fronts? PAUSE + memory-write attempt? EXECUTE with NO active fronts (serial mode allowed)? The single-instance-per-mode design can't characterize these interactions.
+- [claude] **TOCTOU on the memory_read_allowed sentinel check**: In `live_claude_smoke.source.txt:249-252`, the pass condition re-reads the sentinel file AFTER the Claude session to verify it wasn't changed. If the file were modified between session end and the check (by a concurrent process, temp cleaner, or Cron job), the test would produce a false negative. Low probability in a temp directory but worth noting.
+- [claude] **The installed-runtime-manifest.json is scoped to E-001 but applies globally**: The manifest lists all hook and tool files (output_gate.py, run_gate.py, turn_contract.py, workers.py, anti_drift.py, etc.) that are the actual code under test. It is listed as an E-001 artifact only, but its contents are equally relevant to E-002, E-003, and E-004 — they all exercise the same installed hooks. This is a documentation concern, not a factual error.
+- [claude] **E-004's cleanup has a potential retry race**: The source at line 157-160 retries Cron cleanup if the first attempt didn't achieve quiescence. If the retry also fails, the test would FAIL (line 195: `quiescent` must be True). But if the Cron job fires BETWEEN the two cleanup attempts and re-creates a deleted job, the quiescence check could fail spuriously. The test has no handling for this race.
+
+## Context-limit notes
+- [claude] The test prompts are in Chinese (e.g., "彻底执行验证。必须调用 Bash 一次，命令原样为..."). I parsed them as explicit mandatory directives. If the Chinese phrasing "必须调用...一次" carries a nuance (e.g., strong suggestion vs. hard requirement) that Claude Code interprets differently from the English "must call exactly once," I may have missed a subtle mismatch in how Claude processes the instruction.
+- [claude] CNVD/local vulnerability context is not applicable to this scope — this is internal safety-critical framework validation, not external target assessment.
+- [claude] I cannot verify the `raw_sha256` integrity claims without the untruncated stream-json recordings. The bundle uses egress redaction with 24000-char excerpt limits. My artifact cross-check is bounded by what's present in the summaries and source code.
+- [claude] I am reviewing as DeepSeek-V4, a different model from the Codex author and from the prior Claude reviewer. My value-add is catching structural coverage gaps that both Claude instances may share as architectural blind spots (e.g., combinatorial interaction coverage, hook-path asymmetry). I do not have special insight into Chinese-language prompt semantics or CNVD context that Claude would miss.
+- arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; minimax-m3: parse error; output tail: to check if certainty >= 0.8 findings are truly supported. Let me do that systematically:
+
+**E-001: Turn modes and post-denial truth**
+- 8 cases, all passed
+- Each has hook_decisions with the expected reason strings
+- post_denial_fabrication_blocked shows stop_truth_block_seen: true, denial_envelope_seen: true
+- memory_read_allowed shows the allow path works
+- All claims are backed by the summary
+
+**E-002: Agent fan-out**
+- 2 agents, both with merged status
+- Disposition satisfied
+- All required; glm-5.2: parse error; output tail: sue 3: The live_pause_flow test invokes `claude` with `--dangerously-skip-permissions` AND `--setting-sources local` AND `--settings <cleanup_settings>` for the "native_create" call. The cleanup_settings is `"{}"` (empty), meaning NO hooks are active for the native_create call. But this native_create call creates a cron job in the SAME session_id. The fact that it succeeded (native_create returncode 0, other_ids found) shows that without Xunji hooks, Claude Code would just create cron jobs - but
+- panel completed 1/2 required heterogeneous backends
+
+> ERROR: arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; minimax-m3: parse error; output tail: to check if certainty >= 0.8 findings are truly supported. Let me do that systematically:
+
+**E-001: Turn modes and post-denial truth**
+- 8 cases, all passed
+- Each has hook_decisions with the expected reason strings
+- post_denial_fabrication_blocked shows stop_truth_block_seen: true, denial_envelope_seen: true
+- memory_read_allowed shows the allow path works
+- All claims are backed by the summary
+
+**E-002: Agent fan-out**
+- 2 agents, both with merged status
+- Disposition satisfied
+- All required; glm-5.2: parse error; output tail: sue 3: The live_pause_flow test invokes `claude` with `--dangerously-skip-permissions` AND `--setting-sources local` AND `--settings <cleanup_settings>` for the "native_create" call. The cleanup_settings is `"{}"` (empty), meaning NO hooks are active for the native_create call. But this native_create call creates a cron job in the SAME session_id. The fact that it succeeded (native_create returncode 0, other_ids found) shows that without Xunji hooks, Claude Code would just create cron jobs - but

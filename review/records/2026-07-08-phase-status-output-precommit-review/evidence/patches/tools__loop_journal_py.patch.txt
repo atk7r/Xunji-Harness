@@ -1,0 +1,354 @@
+diff --git a/tools/loop_journal.py b/tools/loop_journal.py
+new file mode 100644
+index 0000000..2883a2c
+--- /dev/null
++++ b/tools/loop_journal.py
+@@ -0,0 +1,348 @@
++#!/usr/bin/env python3
++"""Append-only loop-cycle journal for interrupted Claude Code loops.
++
++The journal is a derived audit trail at `state/loop_journal.jsonl`. Canonical run
++truth remains Markdown (`frontier.md`, `decisions.md`, `evidence.md`, `review.md`).
++The journal only helps a resumed session tell whether the last loop iteration
++started, planned, acted, wrote results, ended, or was interrupted. It can also
++record visible phase-start / phase-end markers for the human operator.
++"""
++from __future__ import annotations
++
++import argparse
++import json
++import sys
++import tempfile
++import time
++from pathlib import Path
++
++try:
++    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
++except Exception:
++    pass
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / "tools"))
++
++import status_style  # noqa: E402
++
++SCHEMA = "xunji.loop_journal.v1"
++JOURNAL = "loop_journal.jsonl"
++PHASE_EVENTS = {"phase_start", "phase_end"}
++EVENT_CN = {
++    "cycle_start": "循环开始",
++    "plan": "计划确定",
++    "action": "动作执行",
++    "write_result": "结果写入",
++    "cycle_end": "循环结束",
++    "interrupt": "中断记录",
++    "resume": "恢复准备",
++    "phase_start": "阶段开始",
++    "phase_end": "阶段结束",
++}
++
++
++def _resolve_run_dir(path: str | Path) -> Path:
++    p = Path(path)
++    return (p if p.is_absolute() else ROOT / p).resolve()
++
++
++def _journal_path(run_dir: Path) -> Path:
++    return run_dir / "state" / JOURNAL
++
++
++def _looks_like_scope_dir(run_dir: Path) -> bool:
++    markers = (
++        "target.md",
++        "surface.md",
++        "frontier.md",
++        "hypotheses.md",
++        "evidence.md",
++        "false_positive.md",
++        "decisions.md",
++        "review.md",
++        "report.md",
++        "retrospective.md",
++    )
++    return any((run_dir / marker).exists() for marker in markers)
++
++
++def load_events(run_dir: str | Path) -> list[dict]:
++    run_dir = _resolve_run_dir(run_dir)
++    path = _journal_path(run_dir)
++    if not path.exists():
++        return []
++    out: list[dict] = []
++    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
++        if not line.strip():
++            continue
++        try:
++            item = json.loads(line)
++            if isinstance(item, dict):
++                out.append(item)
++        except Exception:
++            out.append({"schema": SCHEMA, "event": "corrupt_line", "raw": line[:200]})
++    return out
++
++
++def _next_cycle(events: list[dict], event: str) -> int:
++    cycles = [int(e.get("cycle", 0) or 0) for e in events if isinstance(e.get("cycle"), int)]
++    current = max(cycles) if cycles else 0
++    return current + 1 if event == "cycle_start" else max(current, 1)
++
++
++def append_event(run_dir: str | Path, event: str, *, note: str = "", data: dict | None = None) -> dict:
++    run_dir = _resolve_run_dir(run_dir)
++    if not run_dir.is_dir():
++        raise FileNotFoundError(f"run directory does not exist: {run_dir}")
++    if not _looks_like_scope_dir(run_dir):
++        raise ValueError(f"directory does not look like a Xunji run/review scope: {run_dir}")
++    event = event.strip().lower().replace("-", "_")
++    events = load_events(run_dir)
++    rec = {
++        "schema": SCHEMA,
++        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
++        "run_dir": str(run_dir),
++        "cycle": _next_cycle(events, event),
++        "event": event,
++        "note": note,
++        "data": data or {},
++        "canonical": "Markdown run files remain source of truth; this journal is derived.",
++    }
++    path = _journal_path(run_dir)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with path.open("a", encoding="utf-8") as f:
++        f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
++    return rec
++
++
++def summarize(run_dir: str | Path) -> dict:
++    run_dir = _resolve_run_dir(run_dir)
++    events = load_events(run_dir)
++    last_cycle = max([int(e.get("cycle", 0) or 0) for e in events], default=0)
++    current = [e for e in events if int(e.get("cycle", 0) or 0) == last_cycle]
++    event_names = [str(e.get("event", "")) for e in current]
++    incomplete = bool(last_cycle and "cycle_start" in event_names and "cycle_end" not in event_names)
++    interrupted = "interrupt" in event_names
++    open_phase = ""
++    phase_events = [e for e in current if str(e.get("event", "")) in PHASE_EVENTS]
++    for rec in phase_events:
++        phase = str((rec.get("data") or {}).get("phase") or "").strip()
++        if rec.get("event") == "phase_start":
++            open_phase = phase
++        elif rec.get("event") == "phase_end" and phase == open_phase:
++            open_phase = ""
++    return {
++        "schema": SCHEMA,
++        "run_dir": str(run_dir),
++        "path": str(_journal_path(run_dir)),
++        "event_count": len(events),
++        "last_cycle": last_cycle,
++        "last_cycle_events": event_names,
++        "last_cycle_phase_events": [
++            {
++                "event": e.get("event"),
++                "phase": (e.get("data") or {}).get("phase", ""),
++                "note": e.get("note", ""),
++            }
++            for e in phase_events
++        ],
++        "open_phase": open_phase,
++        "incomplete_cycle": incomplete,
++        "interrupted": interrupted,
++        "last_event": events[-1] if events else None,
++    }
++
++
++def phase_display(phase: str) -> str:
++    raw = status_style.phase_display(phase, enabled=False, bracket=False)
++    if "｜" in raw:
++        name, cn = raw.split("｜", 1)
++        return f"{name}（{cn}）"
++    return raw
++
++
++def _event_display(event: str) -> str:
++    event = str(event or "").strip()
++    cn = EVENT_CN.get(event)
++    return f"{cn}({event})" if cn else event
++
++
++def _pretty_block(title: str, rows: list[str], *, color: str = "cyan", enabled: bool | None = None) -> str:
++    return status_style.box(title, rows, color=color, enabled=enabled) + "\n"
++
++
++def render_phase_banner(rec: dict, *, color: bool | None = None) -> str:
++    phase = str((rec.get("data") or {}).get("phase") or "unknown").strip()
++    is_start = rec.get("event") == "phase_start"
++    title = "阶段开始" if is_start else "阶段结束"
++    marker = "XUNJI PHASE START" if is_start else "XUNJI PHASE END"
++    note = str(rec.get("note") or "").strip()
++    theme = status_style.PHASE_COLOR.get(phase, "green" if is_start else "yellow")
++    rows = [
++        status_style.field("阶段", status_style.phase_display(phase, enabled=color), theme, enabled=color),
++        status_style.field("运行目录", rec.get("run_dir"), "gray", enabled=color),
++        status_style.field("循环编号", rec.get("cycle"), "gray", enabled=color),
++        status_style.field("机器标记", status_style.tag(marker, theme, enabled=color), "gray", enabled=color),
++    ]
++    if note:
++        rows.append(status_style.field("说明", note, "blue", enabled=color))
++    return _pretty_block(title, rows, color=theme, enabled=color)
++
++
++def render_markdown(data: dict, *, color: bool | None = None) -> str:
++    event_names = [_event_display(e) for e in data.get("last_cycle_events", [])]
++    lines = [
++        "# 循环日志状态",
++        "",
++        _pretty_block("循环日志", [
++            status_style.field("事件总数", data["event_count"], "gray", enabled=color),
++            status_style.field("最近循环", data["last_cycle"], "gray", enabled=color),
++            status_style.field("循环未收尾", "是" if data["incomplete_cycle"] else "否", "yellow" if data["incomplete_cycle"] else "green", enabled=color),
++            status_style.field("发生中断", "是" if data["interrupted"] else "否", "red" if data["interrupted"] else "green", enabled=color),
++            status_style.field(
++                "当前打开阶段",
++                status_style.phase_display(data.get("open_phase"), enabled=color) if data.get("open_phase") else status_style.tag("无", "gray", enabled=color),
++                "cyan",
++                enabled=color,
++            ),
++            status_style.field("日志路径", data["path"], "gray", enabled=color),
++        ], color="cyan", enabled=color).rstrip(),
++    ]
++    if data.get("last_cycle_events"):
++        lines.append("- " + status_style.field("最近循环事件", "，".join(event_names), "blue", enabled=color))
++    if data.get("last_cycle_phase_events"):
++        rendered = [
++            f"{_event_display(p['event'])}:{status_style.phase_display(p['phase'], enabled=color)}"
++            for p in data["last_cycle_phase_events"]
++        ]
++        lines.append("- " + status_style.field("最近阶段事件", "，".join(rendered), "purple", enabled=color))
++    if data.get("last_event"):
++        lines.append("- " + status_style.field("最近事件", _event_display(data["last_event"].get("event")), "blue", enabled=color))
++    return "\n".join(lines) + "\n"
++
++
++def _selftest() -> int:
++    d = Path(tempfile.mkdtemp())
++    run = d / "run"
++    run.mkdir()
++    (run / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
++    (run / "state").mkdir()
++    checks: list[tuple[str, bool]] = []
++    start = append_event(run, "cycle_start", note="begin")
++    append_event(run, "plan", note="F-001")
++    append_event(run, "action", note="probe")
++    append_event(run, "phase_start", note="choose next front", data={"phase": "Root Orchestrator"})
++    phase_open = summarize(run)
++    append_event(run, "phase_end", note="front chosen", data={"phase": "Root Orchestrator"})
++    phase_closed = summarize(run)
++    append_event(run, "write_result", note="decision updated")
++    mid = summarize(run)
++    append_event(run, "cycle_end", note="done")
++    done = summarize(run)
++    append_event(run, "cycle_start", note="next")
++    append_event(run, "interrupt", note="tool failure")
++    interrupted = summarize(run)
++    plain_dir = d / "plain"
++    plain_dir.mkdir()
++    rejected_plain_dir = False
++    try:
++        append_event(plain_dir, "cycle_start")
++    except ValueError:
++        rejected_plain_dir = True
++    evidence_only_dir = d / "evidence_only"
++    (evidence_only_dir / "evidence").mkdir(parents=True)
++    rejected_evidence_only_dir = False
++    try:
++        append_event(evidence_only_dir, "cycle_start")
++    except ValueError:
++        rejected_evidence_only_dir = True
++
++    checks.append(("journal file exists", _journal_path(run).exists()))
++    checks.append(("cycle starts at one", start["cycle"] == 1))
++    checks.append(("mid cycle incomplete", mid["incomplete_cycle"] is True))
++    checks.append(("phase start is visible", phase_open["open_phase"] == "Root Orchestrator"))
++    checks.append(("phase end closes phase", phase_closed["open_phase"] == ""))
++    checks.append(("phase banner renders Chinese", "[Xunji] [阶段开始]" in render_phase_banner({
++        "event": "phase_start",
++        "run_dir": str(run),
++        "cycle": 1,
++        "note": "test",
++        "data": {"phase": "Root Orchestrator"},
++    }) and "[Root Orchestrator｜主驾驶调度]" in render_phase_banner({
++        "event": "phase_start",
++        "run_dir": str(run),
++        "cycle": 1,
++        "note": "test",
++        "data": {"phase": "Root Orchestrator"},
++    })))
++    checks.append(("phase end banner renders Chinese", "[Xunji] [阶段结束]" in render_phase_banner({
++        "event": "phase_end",
++        "run_dir": str(run),
++        "cycle": 1,
++        "note": "test",
++        "data": {"phase": "Root Orchestrator"},
++    })))
++    checks.append(("cycle end completes", done["incomplete_cycle"] is False))
++    checks.append(("interrupt visible", interrupted["interrupted"] is True and interrupted["incomplete_cycle"] is True))
++    checks.append(("load events", len(load_events(run)) == 9))
++    checks.append(("plain directory is rejected", rejected_plain_dir))
++    checks.append(("evidence-only directory is rejected", rejected_evidence_only_dir))
++    bad = [n for n, ok in checks if not ok]
++    for n, ok in checks:
++        print(("ok   " if ok else "FAIL ") + n)
++    print("loop_journal selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
++    return 0 if not bad else 1
++
++
++def main(argv: list[str] | None = None) -> int:
++    ap = argparse.ArgumentParser(description="append/read Xunji loop interruption journal")
++    ap.add_argument("run_dir", nargs="?")
++    ap.add_argument("event", nargs="?", choices=[
++        "start", "plan", "action", "write-result", "interrupt", "resume", "end", "status",
++        "phase-start", "phase-end",
++    ])
++    ap.add_argument("--phase", default="", help="phase name for phase-start / phase-end")
++    ap.add_argument("--note", default="")
++    ap.add_argument("--json", action="store_true")
++    ap.add_argument("--selftest", action="store_true")
++    args = ap.parse_args(argv)
++
++    if args.selftest:
++        return _selftest()
++    if not args.run_dir or not args.event:
++        ap.error("run_dir and event are required")
++
++    event_map = {
++        "start": "cycle_start",
++        "write-result": "write_result",
++        "end": "cycle_end",
++        "phase-start": "phase_start",
++        "phase-end": "phase_end",
++    }
++    if args.event == "status":
++        data = summarize(args.run_dir)
++    else:
++        event = event_map.get(args.event, args.event)
++        if event in PHASE_EVENTS and not args.phase.strip():
++            ap.error("--phase is required for phase-start / phase-end")
++        payload = {"phase": args.phase.strip()} if event in PHASE_EVENTS else {}
++        try:
++            rec = append_event(args.run_dir, event, note=args.note, data=payload)
++        except (FileNotFoundError, ValueError) as e:
++            print(f"[loop_journal] {e}", file=sys.stderr)
++            return 1
++        data = {"appended": rec, "status": summarize(args.run_dir)}
++    if args.json:
++        print(json.dumps(data, ensure_ascii=False, indent=2))
++    else:
++        color = status_style.color_enabled()
++        rec = data.get("appended") if isinstance(data, dict) else None
++        if isinstance(rec, dict) and rec.get("event") in PHASE_EVENTS:
++            print(render_phase_banner(rec, color=color), end="")
++        print(render_markdown(data.get("status", data), color=color), end="")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

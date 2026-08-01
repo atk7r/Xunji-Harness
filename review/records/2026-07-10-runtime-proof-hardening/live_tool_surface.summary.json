@@ -1,0 +1,55 @@
+{
+  "cases": {
+    "edit_protected_receipt": {
+      "denial_seen": true,
+      "forged_effect": false,
+      "hook_decisions": [
+        "{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。 fanout_required=true (open/probing/working/type-A 均为 active); 先真实调用至少两个不同 front 的 Agent。\"}}",
+        "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"运行时回执/回合状态只能由 hook 原子写入；Claude 工具不得直接修改这些控制面文件。\"}}"
+      ],
+      "passed": true,
+      "returncode": 0,
+      "runtime_chain": {
+        "errors": [],
+        "events": 6
+      },
+      "tool": "Edit",
+      "tool_use_seen": true
+    },
+    "webfetch_requires_fanout": {
+      "denial_seen": true,
+      "forged_effect": false,
+      "hook_decisions": [
+        "{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。 fanout_required=true (open/probing/working/type-A 均为 active); 先真实调用至少两个不同 front 的 Agent。\"}}",
+        "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"Agent Board 强制：真实 Agent 回执覆盖两个不同 front 前，Root 不得继续目标 WebFetch。\"}}"
+      ],
+      "passed": true,
+      "returncode": 0,
+      "runtime_chain": {
+        "errors": [],
+        "events": 4
+      },
+      "tool": "WebFetch",
+      "tool_use_seen": true
+    },
+    "write_protected_receipt": {
+      "denial_seen": true,
+      "forged_effect": false,
+      "hook_decisions": [
+        "{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。 fanout_required=true (open/probing/working/type-A 均为 active); 先真实调用至少两个不同 front 的 Agent。\"}}",
+        "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"运行时回执/回合状态只能由 hook 原子写入；Claude 工具不得直接修改这些控制面文件。\"}}"
+      ],
+      "passed": true,
+      "returncode": 0,
+      "runtime_chain": {
+        "errors": [],
+        "events": 5
+      },
+      "tool": "Write",
+      "tool_use_seen": true
+    }
+  },
+  "claude_version": "2.1.201 (Claude Code)",
+  "raw_sha256": "9d45b7b8c235a8b2e8571e60f21c397d62882e2e8512b0b3a96aa6e0ee228c99",
+  "schema": "xunji.live_tool_surface.summary.v1"
+}

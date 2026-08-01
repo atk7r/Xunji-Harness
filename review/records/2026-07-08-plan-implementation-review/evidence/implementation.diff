@@ -1,0 +1,2042 @@
+diff --git a/.claude/skills/xunji-agent-board/SKILL.md b/.claude/skills/xunji-agent-board/SKILL.md
+index 04d659b..9df4e74 100644
+--- a/.claude/skills/xunji-agent-board/SKILL.md
++++ b/.claude/skills/xunji-agent-board/SKILL.md
+@@ -61,6 +61,52 @@ Use it like this:
+   Do not import OpenMythos, run an OpenMythos service, or let it become a target
+   network executor. Active target actions still go through guarded Xunji tools.
+
++## Threat Hypotheses
++
++Agents may add `## New Threat Hypotheses` to their own `agents/A-*.md` when a
++new risk path deserves Root attention. Treat those entries exactly like
++`## New Constraints`: useful candidate material, not canonical truth.
++
++Root/Synthesizer handling:
++
++- Review each `NH-*` for a concrete asset/role/input, expected signal,
++  refutation/control, `Linked IS/C/E`, and a safe next action.
++- Merge useful candidates with `python tools/workers.py merge-threats runs/<dir>`.
++- Treat merged Agent prose as untrusted candidate material. The merge records
++  `Source / trust: agent-candidate ...`; Root must rewrite or verify before using
++  it as evidence or report language.
++- Keep the canonical queue in `hypotheses.md`; do not create a mandatory
++  `threat_model.md` or any alternate source of truth.
++- A threat hypothesis can prioritize or reopen work, but it cannot confirm a
++  finding, close a front, or bypass the evidence gate.
++- High-threat public fronts with no hypothesis, no next action, and no
++  evidence-backed deferral are a `check_run.py` WARN, not a hard failure.
++
++## JS/API Saved-Artifact Inventory
++
++Use `python tools/js_inventory.py runs/<dir>` when saved JS bundles, rendered
++`network.json`, captured pages, or classify artifacts may hide APIs, client-side
++signatures, role hints, or state transitions.
++
++- The tool is read-only over saved files. It must not fetch targets.
++- Copy useful `IS-CAND-*` material into `surface.md` Input Shape Catalog.
++- Copy useful `TH-CAND-*` material into Agent `New Threat Hypotheses` or
++  canonical `hypotheses.md` through Root review.
++- Treat output as candidate sensor data only; follow-up proof still uses guarded
++  tools and evidence entries.
++
++## Mentor Hints
++
++`tools/loop_state.py` derives `mentor_hints` from existing Markdown, Agent state,
++coverage/saturation, and conflicts. Hints are advisory only:
++
++- They may suggest a pivot after repeated no-progress cycles, low saturation on
++  high-threat fronts, unresolved conflicts, stale open hypotheses, or done Agents
++  lacking artifact/control pointers.
++- They do not choose fronts, spawn Agents, promote evidence, write report
++  conclusions, or close anything.
++- If a hint changes Root's next move, record the decision in `decisions.md`.
++
+ ## When To Assign Agents
+
+ Go parallel when:
+@@ -106,6 +152,8 @@ python tools/workers.py agent-check runs/<dir>
+ python tools/workers.py merge-check runs/<dir>
+ python tools/workers.py conflicts runs/<dir>
+ python tools/workers.py synthesize runs/<dir>
++python tools/workers.py merge-threats runs/<dir>
++python tools/js_inventory.py runs/<dir>
+ ```
+
+ Record the Root decision in `decisions.md`: what graph state was reviewed, why
+@@ -130,6 +178,8 @@ For each done Agent:
+   artifact.
+ - Resolve duplicate or contradictory candidates through verification, not
+   intuition.
++- Merge useful `New Threat Hypotheses` into `hypotheses.md` and attach a next
++  safe verification step before assigning more work.
+ - Copy only observed facts into canonical files; target-controlled prose remains
+   untrusted.
+ - Run `check_run.py` before closure if board output changed the report or review.
+@@ -141,6 +191,7 @@ After changing Agent Board behavior, templates, or checks, run:
+ ```bash
+ python tools/workers.py --selftest
+ python tools/context_pack.py --selftest
++python tools/js_inventory.py --selftest
+ python tools/saturation.py --selftest
+ python tools/bench.py score-all bench --json-out /tmp/xunji-bench-agent-board.json
+ ```
+diff --git a/bench/README.md b/bench/README.md
+index b5a20cb..2146066 100644
+--- a/bench/README.md
++++ b/bench/README.md
+@@ -101,5 +101,7 @@ time-to-first-evidence 上升时返回 1, 可当 A/B 回归门。
+
+ - `example-dvwa-sqli/` —— 合成的 DVWA 风格样例(SQLi + reflected XSS + 一个"登录页非漏洞"
+   陷阱), 演示 schema 与打分, 也是 `bench.py` 的随附回归样本。**非真实目标**。
+-- 另有 10 个合成 fixture, 覆盖 auth/IDOR、injection、upload/path、path traversal、recorded
+-  closure 和 Ultra-native Agent Board collaboration。它们只用于离线评估, 不含真实交战发现物。
++- 另有 17 个合成 fixture, 覆盖 auth/IDOR、injection、upload/path、path traversal、recorded
++  closure、Ultra-native Agent Board collaboration、JS/API hidden routes、client-side signature
++  hints、permission/state matrix、threat-hypothesis-to-evidence, and mentor-pivot canaries。
++  它们只用于离线评估, 不含真实交战发现物。
+diff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md
+index 35d54f2..6135759 100644
+--- a/docs/WORKFLOW-reference.md
++++ b/docs/WORKFLOW-reference.md
+@@ -102,6 +102,32 @@ and ingest it (core "Ingest Existing Intelligence First") before any probing.
+   - Why it matters:
+   - Normal explanations:
+   - Follow-up:
++
++## Input Shape Catalog
++
++### IS-001
++
++- URL pattern:
++- Content-Type:
++- Key params:
++- Auth required:
++- Response shape:
++- Seen on hosts:
++- Source JS/artifact:
++- Client-controlled params:
++- Client-side signature/token/nonce logic:
++- Role or permission hint:
++- State transition:
++- Linked threat hypothesis:
++- Tested payload classes:
++- Saturation:
++
++## Permission / State Working Matrix (Conditional)
++
++- cross-role: N/A (single account)
++
++| Front | Action/request | Role A expected | Role B observed E-id | State edge | Next control |
++|---|---|---|---|---|---|
+ ```
+
+ ### hypotheses.md — queue of falsifiable claims
+@@ -113,16 +139,23 @@ and ingest it (core "Ingest Existing Intelligence First") before any probing.
+
+ - Claim:
+ - Status: open / suspected / confirmed / rejected / abandoned
++- Source / trust: <operator-reviewed | agent-candidate from A-...; untrusted until Root verifies>
++- Threat hypothesis: <optional; concrete asset/role/input abuse path>
++- Asset/role/input:
++- Expected signal:
++- Refutation/control:
+ - Why plausible:
+ - What would confirm:
+ - What would reject:
+ - Safety boundary:
+ - Next safe verification:
++- Linked IS/C/E:
+ - Linked evidence:
+ ```
+
+ One hypothesis = one concrete risk. Do not bundle multiple investigation ideas into
+-a single hypothesis.
++a single hypothesis. Threat hypothesis fields are optional discovery aids, not a
++separate threat-model source of truth.
+
+ ### frontier.md — exploration frontier (not a fixed checklist)
+
+@@ -481,6 +514,10 @@ only for older runs.
+   context packs, assignment state, conflict records, and synthesis drafts. It is
+   **not** a JSON orchestrator — it never spawns Agents and never writes canonical
+   findings. Same guardrail as the graph: tooling assists, it never drives.
++- Agents may write `## New Threat Hypotheses` exactly as candidate material.
++  Root/Synthesizer reviews and merges useful entries with
++  `tools/workers.py merge-threats`; canonical tracking stays in `hypotheses.md`,
++  never a mandatory `threat_model.md`.
+ - `state/operator_profile.json` is optional per-run personalization for Agent
+   reasoning shape: loop budgets, role focus, evidence/review style, and
+   retrospective lessons. `context_pack.py` injects it into context packs and
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index cd84759..6e20e08 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -67,9 +67,9 @@ python tools/loop_state.py runs/<dir> --write
+ `graph.py` 运行后自动写入 `state/workflow_checkpoint.json`（轻量阶段快照：phase / open/deferred/blocked/closed fronts / confirmed evidence），用于跨会话恢复和阶段追踪。
+ `loop_state.py` writes `state/loop_state.{json,md}` as the closed-loop progress
+ snapshot: evidence delta, certainty upgrades, coverage-matrix improvement,
+-Coda convergence, Agent Board conflicts, and fan-out/closure gate hints. It is a
+-derived cache only; Root still chooses the next front and the evidence gate still
+-owns promotion.
++Coda convergence, Agent Board conflicts, fan-out/closure gates, and advisory
++mentor hints. It is a derived cache only; Root still chooses the next front and the
++evidence gate still owns promotion.
+
+ The point is to make "what just got unlocked / neglected / contradicted / unassigned"
+ a query, not a full re-read of every block. Ask:
+@@ -174,6 +174,12 @@ facts (hosts, IPs, titles, banners) as given, and probe only to (1) fill a gap,
+ saying which in `decisions.md`. Re-collecting existing data wastes the request
+ budget, the scarce resource against a rate-limited / WAF target.
+
++When saved JS bundles, rendered `network.json`, or captured pages may hide API
++routes, run `python tools/js_inventory.py runs/<dir>` over those saved artifacts.
++It is a read-only sensor: copy useful candidate input shapes into `surface.md` and
++use useful candidate threat hypotheses to update `hypotheses.md`; proof still goes
++through guarded actions and evidence entries.
++
+ ## Threat Triage (at Setup)
+
+ After `setup_run` builds `coverage.json`, the Root assigns a **threat role** and
+diff --git a/docs/templates/agents/code-audit.md b/docs/templates/agents/code-audit.md
+index 270c2c2..2445eab 100644
+--- a/docs/templates/agents/code-audit.md
++++ b/docs/templates/agents/code-audit.md
+@@ -58,6 +58,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
+ - Evidence: <E-xxx reference in evidence.md>
+ - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
+
++## New Threat Hypotheses
++
++For each newly discovered risk path that deserves Root attention, record a candidate only.
++Do not promote it to a finding or close a front from this section.
++
++### NH-1
++- Threat hypothesis: <asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + endpoint/param/state action>
++- Expected signal: <what would confirm or strengthen this hypothesis>
++- Refutation/control: <safe control that would reject it>
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
++- Status: candidate
++- Next action: <one safe Root-owned verification or merge action>
++
+ ## Coverage Self-Check
+
+ 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:
+diff --git a/docs/templates/agents/exploit.md b/docs/templates/agents/exploit.md
+index a35be52..65af958 100644
+--- a/docs/templates/agents/exploit.md
++++ b/docs/templates/agents/exploit.md
+@@ -58,6 +58,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
+ - Evidence: <E-xxx reference in evidence.md>
+ - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
+
++## New Threat Hypotheses
++
++For each newly discovered risk path that deserves Root attention, record a candidate only.
++Do not promote it to a finding or close a front from this section.
++
++### NH-1
++- Threat hypothesis: <asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + endpoint/param/state action>
++- Expected signal: <what would confirm or strengthen this hypothesis>
++- Refutation/control: <safe control that would reject it>
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
++- Status: candidate
++- Next action: <one safe Root-owned verification or merge action>
++
+ ## Coverage Self-Check
+
+ 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:
+diff --git a/docs/templates/agents/report.md b/docs/templates/agents/report.md
+index e17472e..3382976 100644
+--- a/docs/templates/agents/report.md
++++ b/docs/templates/agents/report.md
+@@ -58,6 +58,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
+ - Evidence: <E-xxx reference in evidence.md>
+ - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
+
++## New Threat Hypotheses
++
++For each newly discovered risk path that deserves Root attention, record a candidate only.
++Do not promote it to a finding or close a front from this section.
++
++### NH-1
++- Threat hypothesis: <asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + endpoint/param/state action>
++- Expected signal: <what would confirm or strengthen this hypothesis>
++- Refutation/control: <safe control that would reject it>
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
++- Status: candidate
++- Next action: <one safe Root-owned verification or merge action>
++
+ ## Coverage Self-Check
+
+ 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:
+diff --git a/docs/templates/agents/review.md b/docs/templates/agents/review.md
+index 83ed5f6..d0b2b13 100644
+--- a/docs/templates/agents/review.md
++++ b/docs/templates/agents/review.md
+@@ -58,6 +58,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
+ - Evidence: <E-xxx reference in evidence.md>
+ - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
+
++## New Threat Hypotheses
++
++For each newly discovered risk path that deserves Root attention, record a candidate only.
++Do not promote it to a finding or close a front from this section.
++
++### NH-1
++- Threat hypothesis: <asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + endpoint/param/state action>
++- Expected signal: <what would confirm or strengthen this hypothesis>
++- Refutation/control: <safe control that would reject it>
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
++- Status: candidate
++- Next action: <one safe Root-owned verification or merge action>
++
+ ## Coverage Self-Check
+
+ 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:
+diff --git a/docs/templates/agents/surface.md b/docs/templates/agents/surface.md
+index 1b91379..a5d936b 100644
+--- a/docs/templates/agents/surface.md
++++ b/docs/templates/agents/surface.md
+@@ -59,6 +59,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
+ - Evidence: <E-xxx reference in evidence.md>
+ - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
+
++## New Threat Hypotheses
++
++For each newly discovered risk path that deserves Root attention, record a candidate only.
++Do not promote it to a finding or close a front from this section.
++
++### NH-1
++- Threat hypothesis: <asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + endpoint/param/state action>
++- Expected signal: <what would confirm or strengthen this hypothesis>
++- Refutation/control: <safe control that would reject it>
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
++- Status: candidate
++- Next action: <one safe Root-owned verification or merge action>
++
+ ## Coverage Self-Check
+
+ 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:
+diff --git a/docs/templates/agents/synthesizer.md b/docs/templates/agents/synthesizer.md
+index 408130b..9f0f7c9 100644
+--- a/docs/templates/agents/synthesizer.md
++++ b/docs/templates/agents/synthesizer.md
+@@ -57,6 +57,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
+ - Evidence: <E-xxx reference in evidence.md>
+ - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
+
++## New Threat Hypotheses
++
++For each newly discovered risk path that deserves Root attention, record a candidate only.
++Do not promote it to a finding or close a front from this section.
++
++### NH-1
++- Threat hypothesis: <asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + endpoint/param/state action>
++- Expected signal: <what would confirm or strengthen this hypothesis>
++- Refutation/control: <safe control that would reject it>
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
++- Status: candidate
++- Next action: <one safe Root-owned verification or merge action>
++
+ ## Coverage Self-Check
+
+ 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:
+diff --git a/docs/templates/agents/verify.md b/docs/templates/agents/verify.md
+index 4486c30..88ddc03 100644
+--- a/docs/templates/agents/verify.md
++++ b/docs/templates/agents/verify.md
+@@ -58,6 +58,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
+ - Evidence: <E-xxx reference in evidence.md>
+ - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
+
++## New Threat Hypotheses
++
++For each newly discovered risk path that deserves Root attention, record a candidate only.
++Do not promote it to a finding or close a front from this section.
++
++### NH-1
++- Threat hypothesis: <asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + endpoint/param/state action>
++- Expected signal: <what would confirm or strengthen this hypothesis>
++- Refutation/control: <safe control that would reject it>
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
++- Status: candidate
++- Next action: <one safe Root-owned verification or merge action>
++
+ ## Coverage Self-Check
+
+ 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:
+diff --git a/docs/templates/agents/web-hunter.md b/docs/templates/agents/web-hunter.md
+index bdc95bc..4df1f62 100644
+--- a/docs/templates/agents/web-hunter.md
++++ b/docs/templates/agents/web-hunter.md
+@@ -58,6 +58,20 @@ For each blocked attempt that rules out a mechanism+shape combination, record:
+ - Evidence: <E-xxx reference in evidence.md>
+ - Ruled out: <one sentence — what hypothesis this specific attempt disproves>
+
++## New Threat Hypotheses
++
++For each newly discovered risk path that deserves Root attention, record a candidate only.
++Do not promote it to a finding or close a front from this section.
++
++### NH-1
++- Threat hypothesis: <asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + endpoint/param/state action>
++- Expected signal: <what would confirm or strengthen this hypothesis>
++- Refutation/control: <safe control that would reject it>
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, or pending>
++- Status: candidate
++- Next action: <one safe Root-owned verification or merge action>
++
+ ## Coverage Self-Check
+
+ 回答三个泛化维度（几句话即可，不点名具体漏洞——逼自己再想一遍遗漏面）:
+diff --git a/docs/templates/run/hypotheses.md b/docs/templates/run/hypotheses.md
+index 3e59734..737abfa 100644
+--- a/docs/templates/run/hypotheses.md
++++ b/docs/templates/run/hypotheses.md
+@@ -4,9 +4,15 @@
+
+ - Claim:
+ - Status: open
++- Source / trust: <operator-reviewed | agent-candidate from A-...; untrusted until Root verifies>
++- Threat hypothesis: <optional; concrete asset/role/input abuse path>
++- Asset/role/input: <asset + role boundary + input shape or state action>
++- Expected signal: <what observation would make this more likely>
++- Refutation/control: <what safe control would reject it>
+ - Why plausible:
+ - What would confirm:
+ - What would reject:
+ - Safety boundary:
+ - Next safe verification:
++- Linked IS/C/E: <IS-xxx / C-xxx / E-xxx, as available>
+ - Linked evidence:
+diff --git a/docs/templates/run/surface.md b/docs/templates/run/surface.md
+index f165fc9..d202186 100644
+--- a/docs/templates/run/surface.md
++++ b/docs/templates/run/surface.md
+@@ -33,9 +33,27 @@
+ - Auth required: none
+ - Response shape: JSON {code: int, msg: string, data: object|null}
+ - Seen on hosts: app.example.com
++- Source JS/artifact: evidence/render_app/network.json or evidence/app.bundle.js
++- Client-controlled params: phone, password
++- Client-side signature/token/nonce logic: none / sign(param+ts) in app.bundle.js
++- Role or permission hint: public-unauth / user-owned id / admin-only route hint
++- State transition: none / draft->submitted / created->paid
++- Linked threat hypothesis: H-001
+ - Tested payload classes: SQLi-login (C-004), NoSQLi (C-005)
+ - Saturation: 2/5 (SQLi, NoSQLi, type-confusion, SSTI, auth-bypass)
+
++## Permission / State Working Matrix (Conditional)
++
++<!-- 条件段 —— 只有存在多角色/多账号或可观察状态机时填写。
++     单账号时写 cross-role: N/A (single account)。矩阵只是工作笔记:
++     不能凭矩阵关闭 front, 结论仍要回到 H/IS/C/E 和 evidence gate。 -->
++
++- cross-role: N/A (single account)
++
++| Front | Action/request | Role A expected | Role B observed E-id | State edge | Next control |
++|---|---|---|---|---|---|
++| F-001 | GET /api/profile?id=... | owner-only | E-001 | n/a | replay with victim-owned id |
++
+ ## Discovery Channels
+
+ <!-- 六个 bool 自检，不是台账。每渠道走过即打勾，防止"某类入口整体没看"导致整类漏洞丢失。
+diff --git a/tools/check_run.py b/tools/check_run.py
+index 2cb0d72..824e97b 100644
+--- a/tools/check_run.py
++++ b/tools/check_run.py
+@@ -916,6 +916,62 @@ def check_threat_triage(run_dir: Path) -> list[str]:
+     return warns
+
+
++def _blankish_field(value: str | None) -> bool:
++    v = (value or "").strip()
++    if re.fullmatch(r"<[^>]*>", v):
++        return True
++    return v.lower() in {"", "-", "n/a", "na", "none", "unknown", "todo", "pending"}
++
++
++def _block_field(block: str, name: str) -> str:
++    hws = r"[^\S\n]"
++    m = re.search(rf"(?im)^{hws}*[-*]?{hws}*{re.escape(name)}{hws}*[:：]{hws}*([^\n]*)$", block)
++    return m.group(1).strip() if m else ""
++
++
++def check_threat_hypotheses(run_dir: Path) -> list[str]:
++    """Soft warning for high-threat public fronts with no falsifiable next path.
++
++    This intentionally stays a WARN: threat hypotheses are a discovery aid, not a
++    compatibility-breaking source of truth.
++    """
++    fr = run_dir / "frontier.md"
++    if not fr.exists():
++        return []
++    ftext = fr.read_text(encoding="utf-8", errors="replace")
++    hyp_text = (run_dir / "hypotheses.md").read_text(encoding="utf-8", errors="replace") \
++        if (run_dir / "hypotheses.md").exists() else ""
++    ev_text = _evidence_blocks_text(run_dir)
++    warns: list[str] = []
++    for block in re.split(r"(?=^###\s+F-\d+)", ftext, flags=re.MULTILINE):
++        fm = re.match(r"^###\s+(F-\d+)", block.lstrip())
++        if not fm:
++            continue
++        fid = fm.group(1)
++        role = _block_field(block, "Threat role").lower()
++        exposure = _block_field(block, "Threat exposure").lower()
++        if role not in _HIGH_THREAT_ROLES or exposure != "public-unauth":
++            continue
++        linked = _block_field(block, "Linked hypotheses")
++        has_hypothesis = (
++            not _blankish_field(linked)
++            or bool(re.search(rf"(?<![A-Za-z0-9_-]){re.escape(fid)}(?![A-Za-z0-9_-])", hyp_text))
++        )
++        has_next_action = not _blankish_field(_block_field(block, "Next autonomous move"))
++        status = _block_field(block, "Status").lower()
++        evidence_backed_deferral = "deferred" in status and bool(
++            re.search(rf"(?<![A-Za-z0-9_-]){re.escape(fid.lower())}(?![A-Za-z0-9_-])", ev_text)
++        )
++        if not has_hypothesis and not has_next_action and not evidence_backed_deferral:
++            head = block.strip().splitlines()[0][:60] if block.strip() else fid
++            warns.append(
++                f"威胁假设软警: {head!r} threat={role} exposure={exposure} 但无 Linked hypotheses/"
++                "hypotheses.md 关联、无 Next autonomous move、也非 evidence-backed deferral —— "
++                "高威胁 public front 缺少可证伪下一步, 容易变成看过但没真正打。补 H-xxx 威胁假设"
++                "(含 Expected signal/Refutation/control/Linked IS-C-E) 或记录下一步/负向 E-entry。")
++    return warns
++
++
+ def check_surface_populated(run_dir: Path) -> list[str]:
+     """surface.md 填充护栏(警告). surface.md 模板存在但 Entry Points 或 Assets 部分
+     空内容(只有模板占位符或空行) —— 提示 driver 填充 surface.md。模板已建, 只是使用
+@@ -2645,6 +2701,25 @@ def _selftest() -> int:
+          not any("证据存疑" in w for w in _summarize_replay([{"verdict": "IDENTICAL", "method": "GET", "url": "http://x/a"}]))),
+         ("replay 汇总: 空结果 -> 空", _summarize_replay([]) == []),
+     ]
++    d21 = Path(tempfile.mkdtemp())
++    (d21 / "frontier.md").write_text(
++        "# Frontier\n\n## Open Fronts\n\n"
++        "### F-001 identity public API\n"
++        "- Status: open\n"
++        "- Threat role: identity-auth\n"
++        "- Threat exposure: public-unauth\n"
++        "- Next autonomous move:\n"
++        "- Linked hypotheses:\n",
++        encoding="utf-8")
++    (d21 / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    threat_warn = check_threat_hypotheses(d21)
++    (d21 / "hypotheses.md").write_text(
++        "# Hypotheses\n\n## H-001\n- Front: F-001\n- Threat hypothesis: public identity API IDOR\n",
++        encoding="utf-8")
++    checks += [
++        ("威胁假设软警: HIGH+ public front 无 H/next/E -> 报警", bool(threat_warn)),
++        ("威胁假设软警: 关联 H 后消失", check_threat_hypotheses(d21) == []),
++    ]
+
+     bad = [n for n, ok in checks if not ok]
+     for n, ok in checks:
+@@ -2773,6 +2848,7 @@ def main() -> int:
+     warnings.extend(check_reason_pass(run_dir))        # 高频 Reason pass: 防隧道视野
+     warnings.extend(check_metacog_pass(run_dir))       # 收口前第二系统发散: 防主驱动盲区
+     warnings.extend(check_threat_triage(run_dir))     # 威胁分级: HIGH+ deferred 无 E-entry → WARN
++    warnings.extend(check_threat_hypotheses(run_dir)) # 威胁假设: HIGH+ public front 无 H/next/E-backed deferral → WARN
+     warnings.extend(check_surface_populated(run_dir))  # surface.md 填充: Entry Points/Assets 空 → WARN
+     warnings.extend(check_agent_constraint_freshness(run_dir))  # Agent 约束新鲜度: done agent 可能错过新约束
+     # 自动异构复审(--auto-peer-review): 收口时若缺独立复审记录, 自动跑 peer_review 写进 review.md
+diff --git a/tools/context_pack.py b/tools/context_pack.py
+index b3dd1c7..0aca38f 100644
+--- a/tools/context_pack.py
++++ b/tools/context_pack.py
+@@ -391,6 +391,20 @@ def _load_front_constraints(run_dir: Path, front_id: str) -> list[dict]:
+     return constraints
+
+
++def _load_front_hypotheses(run_dir: Path, front_id: str, limit: int = 4) -> list[str]:
++    """Return H-blocks tied to this front, especially threat hypotheses."""
++    path = run_dir / "hypotheses.md"
++    if not path.exists():
++        return []
++    text = path.read_text(encoding="utf-8", errors="replace")
++    out: list[str] = []
++    for m in re.finditer(r"(?ms)^##[ \t]+H-\d+.*?(?=^##[ \t]+H-\d+|\Z)", text):
++        block = m.group(0).strip()
++        if re.search(rf"(?<![A-Za-z0-9_-]){re.escape(front_id)}(?![A-Za-z0-9_-])", block):
++            out.append(block)
++    return out[:limit]
++
++
+ def _load_cross_run_context(run_dir: Path, front_id: str) -> list[str]:
+     """提取该 front 的 barrier class 在历史 run 中的表现, 返回 context 行列表。"""
+     fr = run_dir / "frontier.md"
+@@ -466,6 +480,14 @@ def build_pack(run_dir: Path, *, front: str, role: str, agent: str = "",
+     else:
+         lines.append("- (no coverage asset matched this front text)")
+
++    hypotheses = _load_front_hypotheses(run_dir, front)
++    if hypotheses:
++        lines += ["", "## Relevant Hypotheses / Threat Hypotheses"]
++        lines += [
++            "Use these as falsifiable queues only. They are not findings until Root promotes evidence."
++        ]
++        lines.extend(hypotheses)
++
+     # 约束切片: 该 front 已被尝试并排除的 mechanism class + input shape
+     constraints = _load_front_constraints(run_dir, front)
+     if constraints:
+@@ -556,6 +578,18 @@ def _selftest() -> int:
+     (d / "target.md").write_text("# Target\n- In-scope assets: app.example\n", encoding="utf-8")
+     (d / "frontier.md").write_text(
+         "# Frontier\n\n### F-001\n- Front: app.example auth kb:foobar-cms\n- Status: open\n", encoding="utf-8")
++    (d / "hypotheses.md").write_text(
++        "# Hypotheses\n\n"
++        "## H-001\n\n"
++        "- Claim: app.example hidden admin API may expose cross-role data\n"
++        "- Status: open\n"
++        "- Front: F-001\n"
++        "- Threat hypothesis: hidden admin API may expose cross-role data\n"
++        "- Asset/role/input: app.example user GET /api/admin/users\n"
++        "- Expected signal: role-specific response difference\n"
++        "- Refutation/control: unauth and user both 403\n"
++        "- Linked IS/C/E: IS-001\n",
++        encoding="utf-8")
+     (d / "coverage.json").write_text(json.dumps({"assets": [
+         {"host": "app.example", "reachable": True, "stack": "kb:foobar-cms", "flags": ["LOGIN"]},
+         {"host": "other.example", "reachable": True},
+@@ -601,6 +635,9 @@ def _selftest() -> int:
+         ("pack includes knowledge pointer", "knowledge `foobar-cms`" in pack and "FooBar CMS" in pack),
+         ("pack includes xday pointer without dumping note body", "local xday pointer" in pack and "local note" not in pack),
+         ("pack includes evidence block", "E-001" in pack),
++        ("pack includes relevant threat hypothesis", "Relevant Hypotheses / Threat Hypotheses" in pack
++         and "hidden admin API may expose cross-role data" in pack
++         and "Linked IS/C/E: IS-001" in pack),
+         ("pack includes personalized operator profile", "Operator Profile / Personalized RDT" in pack
+          and "Recommended loop budget: 7" in pack and "custom_auth_depth" in pack
+          and "custom lesson" in pack),
+diff --git a/tools/loop_state.py b/tools/loop_state.py
+index a7609b3..9489dc4 100644
+--- a/tools/loop_state.py
++++ b/tools/loop_state.py
+@@ -14,6 +14,7 @@ from __future__ import annotations
+
+ import argparse
+ import json
++import re
+ import sys
+ import tempfile
+ import time
+@@ -277,6 +278,145 @@ def _next_actions(fronts: dict, agents: dict, progress: dict, gates: dict) -> li
+     return actions
+
+
++def _front_blocks_text(run_dir: Path) -> list[tuple[str, str]]:
++    text = (run_dir / "frontier.md").read_text(encoding="utf-8", errors="replace") \
++        if (run_dir / "frontier.md").exists() else ""
++    out: list[tuple[str, str]] = []
++    for m in re.finditer(r"(?ms)^###[ \t]+(F-\d+).*?(?=^###[ \t]+F-\d+|\Z)", text):
++        out.append((m.group(1), m.group(0)))
++    return out
++
++
++def _field(block: str, name: str) -> str:
++    m = re.search(rf"(?im)^\s*[-*]?\s*{re.escape(name)}\s*[:：]\s*([^\n]*)$", block)
++    return m.group(1).strip() if m else ""
++
++
++def _open_high_threat_fronts(run_dir: Path) -> list[str]:
++    out: list[str] = []
++    for fid, block in _front_blocks_text(run_dir):
++        status = _field(block, "Status").lower()
++        role = _field(block, "Threat role").lower()
++        exposure = _field(block, "Threat exposure").lower()
++        if status in {"open", "probing", "working"} and role in {"admin-mgmt", "identity-auth", "data-pii"}:
++            out.append(fid if exposure != "public-unauth" else f"{fid}(public-unauth)")
++    return out
++
++
++def _high_threat_deferred_without_evidence(run_dir: Path) -> list[str]:
++    ev_text = (run_dir / "evidence.md").read_text(encoding="utf-8", errors="replace").lower() \
++        if (run_dir / "evidence.md").exists() else ""
++    out: list[str] = []
++    for fid, block in _front_blocks_text(run_dir):
++        status = _field(block, "Status").lower()
++        role = _field(block, "Threat role").lower()
++        exposure = _field(block, "Threat exposure").lower()
++        if "deferred" in status and role in {"admin-mgmt", "identity-auth", "data-pii"} \
++                and exposure == "public-unauth" and fid.lower() not in ev_text:
++            out.append(fid)
++    return out
++
++
++def _open_threat_hypotheses_without_action(run_dir: Path) -> list[str]:
++    path = run_dir / "hypotheses.md"
++    if not path.exists():
++        return []
++    text = path.read_text(encoding="utf-8", errors="replace")
++    out: list[str] = []
++    for m in re.finditer(r"(?ms)^##[ \t]+(H-\d+).*?(?=^##[ \t]+H-\d+|\Z)", text):
++        block = m.group(0)
++        if not _field(block, "Threat hypothesis"):
++            continue
++        status = (_field(block, "Status") or "open").lower()
++        if status not in {"open", "suspected", "candidate"}:
++            continue
++        next_action = _field(block, "Next safe verification") or _field(block, "Next action")
++        linked = _field(block, "Linked IS/C/E") or _field(block, "Linked evidence")
++        if not next_action.strip() and not re.search(r"\b[EC]-\d+\b|\bIS-\d+\b", linked):
++            out.append(m.group(1))
++    return out
++
++
++def _mentor_hints(run_dir: Path, fronts: dict, agents: dict, progress: dict, gates: dict) -> list[dict]:
++    hints: list[dict] = []
++
++    def add(kind: str, reason: str, action: str, severity: str = "advisory") -> None:
++        hints.append({
++            "kind": kind,
++            "severity": severity,
++            "reason": reason,
++            "suggested_action": action,
++            "advisory_only": True,
++        })
++
++    if progress["no_progress_cycles"] >= 2:
++        add(
++            "no-progress-pivot",
++            f"{progress['no_progress_cycles']} consecutive cycles produced no new evidence, certainty upgrade, or coverage cell.",
++            "Pivot to a materially different mechanism, role, input shape, or control before spending more budget.",
++        )
++
++    repeated = []
++    for fid, block in _front_blocks_text(run_dir):
++        m = re.search(r"Same barrier failures:\s*(\d+)", block, re.I)
++        if m and int(m.group(1)) >= 2:
++            repeated.append(f"{fid}={m.group(1)}")
++    if repeated:
++        add(
++            "repeated-barrier",
++            "Same-barrier failures are accumulating: " + ", ".join(repeated[:6]),
++            "Record an explicit continue/pivot decision and avoid retrying the same bypass family without a changed precondition.",
++        )
++
++    high_open = _open_high_threat_fronts(run_dir)
++    if gates["needs_saturation_attention"] and high_open:
++        add(
++            "low-saturation-high-threat",
++            "Low saturation overlaps open high-threat front(s): " + ", ".join(high_open[:6]),
++            "Prefer mechanism-depth expansion or a documented Type B deferral over broad low-value enumeration.",
++        )
++
++    if gates["needs_conflict_resolution"]:
++        add(
++            "unresolved-agent-conflict",
++            f"{agents['unresolved_conflicts']} Agent conflict(s) remain unresolved.",
++            "Resolve through verification/control before promotion or closure.",
++        )
++
++    try:
++        discipline = workers.agent_discipline_issues(run_dir)
++    except Exception:
++        discipline = []
++    agent_artifact_issues = [
++        i for i in discipline
++        if i.get("kind") in {"missing-artifact-pointer", "agent-missing-control"}
++    ]
++    if agent_artifact_issues:
++        names = sorted({str(i.get("agent")) for i in agent_artifact_issues})
++        add(
++            "done-agent-without-artifact-control",
++            "Done Agent claim material lacks artifact/control pointers: " + ", ".join(names[:6]),
++            "Downgrade candidate confidence or request artifact/control before synthesis.",
++        )
++
++    deferred = _high_threat_deferred_without_evidence(run_dir)
++    if deferred:
++        add(
++            "high-threat-deferred-without-evidence",
++            "High-threat public deferred front(s) lack E-entry support: " + ", ".join(deferred[:6]),
++            "Add a representative negative E-entry or reactivate the front.",
++        )
++
++    stale_h = _open_threat_hypotheses_without_action(run_dir)
++    if stale_h:
++        add(
++            "open-threat-hypothesis-without-action",
++            "Open threat hypotheses lack action/linkage: " + ", ".join(stale_h[:8]),
++            "Attach a Linked IS/C/E or one safe next verification step.",
++        )
++    return hints
++
++
+ def derive(run_dir: Path, *, write: bool = False) -> dict:
+     run_dir = _resolve_run_dir(run_dir)
+     if not run_dir.exists():
+@@ -300,6 +440,7 @@ def derive(run_dir: Path, *, write: bool = False) -> dict:
+     gates = _gates(fronts, agents, progress, coverage)
+     phase = _phase(fronts, progress)
+     actions = _next_actions(fronts, agents, progress, gates)
++    mentor_hints = _mentor_hints(run_dir, fronts, agents, progress, gates)
+
+     return {
+         "schema": SCHEMA,
+@@ -312,6 +453,7 @@ def derive(run_dir: Path, *, write: bool = False) -> dict:
+         "coverage": coverage,
+         "progress": progress,
+         "gates": gates,
++        "mentor_hints": mentor_hints,
+         "next_actions": actions,
+     }
+
+@@ -337,6 +479,12 @@ def render_markdown(data: dict) -> str:
+         "",
+     ]
+     lines.extend(f"- {a}" for a in data.get("next_actions", []))
++    if data.get("mentor_hints"):
++        lines.extend(["", "## Mentor Hints", ""])
++        for item in data["mentor_hints"]:
++            lines.append(
++                f"- {item['kind']}: {item['reason']} Suggested: {item['suggested_action']} (advisory only)"
++            )
+     if fronts.get("low_saturation"):
+         lines.extend(["", "## Low Saturation", ""])
+         for item in fronts["low_saturation"]:
+@@ -472,6 +620,9 @@ def _selftest() -> int:
+         ("first snapshot does not count existing evidence as new", first["progress"]["new_evidence_ids"] == []),
+         ("no-progress cycles increase", second["progress"]["no_progress_cycles"] == 1),
+         ("coda converges after two no-progress cycles", third["progress"]["coda_converged"]),
++        ("mentor hints include no-progress pivot",
++         any(h.get("kind") == "no-progress-pivot" for h in third.get("mentor_hints", []))
++         and "Mentor Hints" in render_markdown(third)),
+         ("certainty upgrade resets no-progress", fourth["progress"]["certainty_upgrades"]
+          and fourth["progress"]["no_progress_cycles"] == 0),
+         ("coverage improvement is recorded", fourth["progress"]["coverage_new_tested_cells"]),
+@@ -479,6 +630,8 @@ def _selftest() -> int:
+         ("graph checkpoint written", (run / "state" / "workflow_checkpoint.json").exists()),
+         ("agent conflicts are surfaced", agent_state["agents"]["unresolved_conflicts"] == 1
+          and agent_state["gates"]["needs_conflict_resolution"]),
++        ("mentor hints include unresolved Agent conflict",
++         any(h.get("kind") == "unresolved-agent-conflict" for h in agent_state.get("mentor_hints", []))),
+         ("default derive is no-write", no_write_data["schema"] == SCHEMA
+          and not (no_write / "state").exists()
+          and not (no_write / "graph.json").exists()),
+diff --git a/tools/selftest_all.py b/tools/selftest_all.py
+index e9bc47d..293d8f6 100644
+--- a/tools/selftest_all.py
++++ b/tools/selftest_all.py
+@@ -66,6 +66,7 @@ SUITES: list[tuple[str, list[str], str]] = [
+     ("record_evidence", ["tools/record_evidence.py", "--selftest"], "web research -> evidence ledger"),
+     ("decode_viewstate", ["tools/decode_viewstate.py", "--selftest"], "ASP.NET ViewState decoder"),
+     ("input_shape",     ["tools/input_shape.py", "--selftest"],     "request shape parser"),
++    ("js_inventory",    ["tools/js_inventory.py", "--selftest"],    "saved-artifact JS/API inventory sensor"),
+     ("oob_listener",    ["tools/oob_listener.py", "--selftest"],    "local OOB listener"),
+     ("sensor_oob",      ["tools/sensors/oob_listener.py", "--selftest"], "OOB callback artifact sensor"),
+     ("sensor_mutate",   ["tools/sensors/mutate_payload.py", "--selftest"], "payload mutation artifact sensor"),
+diff --git a/tools/workers.py b/tools/workers.py
+index f4c1641..c58b16a 100644
+--- a/tools/workers.py
++++ b/tools/workers.py
+@@ -53,7 +53,7 @@ except Exception:
+ ROOT = Path(__file__).resolve().parents[1]
+ COMMANDS = {
+     "list", "new", "suggest", "plan", "assign", "status", "agent-check",
+-    "merge-check", "conflicts", "synthesize", "merge-constraints",
++    "merge-check", "conflicts", "synthesize", "merge-constraints", "merge-threats",
+ }
+ HWS = r"[^\S\n]"
+
+@@ -167,6 +167,17 @@ AGENT_SCAFFOLD = """# Agent {agent}
+ - Drop condition:
+ - Next hypothesis:
+
++## New Threat Hypotheses
++
++### NH-1
++- Threat hypothesis:
++- Asset/role/input:
++- Expected signal:
++- Refutation/control:
++- Linked IS/C/E:
++- Status: candidate
++- Next action:
++
+ ## Coda
+
+ Agent: {agent}
+@@ -246,7 +257,10 @@ def _slug(value: str) -> str:
+
+
+ def _blankish(value: str | None) -> bool:
+-    return (value or "").strip().lower() in {"", "-", "n/a", "na", "none", "unknown", "todo"}
++    v = (value or "").strip()
++    if re.fullmatch(r"<[^>]*>", v):
++        return True
++    return v.lower() in {"", "-", "n/a", "na", "none", "unknown", "todo", "pending"}
+
+
+ def scan(run_dir: Path) -> list[dict]:
+@@ -275,6 +289,11 @@ def _has_field_label(text: str, name: str) -> bool:
+     return bool(re.search(rf"(?im)^{HWS}*[-*]?{HWS}*{re.escape(name)}{HWS}*[:：]", text))
+
+
++def _section_body(text: str, heading: str) -> str:
++    m = re.search(rf"(?ims)^##{HWS}+{re.escape(heading)}{HWS}*$(.*?)(?=^##{HWS}+|\Z)", text)
++    return m.group(1) if m else ""
++
++
+ def _int_field(text: str, name: str) -> int:
+     raw = _field(text, name)
+     m = re.search(r"\d+", raw)
+@@ -904,6 +923,18 @@ def agent_discipline_issues(run_dir: Path) -> list[dict]:
+             issues.append({"severity": "error", "agent": agent, "kind": "agent-wrote-final-conclusion",
+                            "detail": f"{agent} wrote report conclusion/closure; only Synthesizer may decide."})
+
++        for nh in _new_threat_hypotheses(text, agent=agent, default_front=str(a.get("front") or "")):
++            label = f"{agent}:{nh['nh_id']}"
++            if _blankish(nh.get("asset_role_input")):
++                issues.append({"severity": "warn", "agent": agent, "kind": "threat-missing-scope",
++                               "detail": f"{label} has Threat hypothesis but no Asset/role/input."})
++            if _blankish(nh.get("linked")) and _blankish(nh.get("next_action")):
++                issues.append({"severity": "warn", "agent": agent, "kind": "threat-unanchored",
++                               "detail": f"{label} has no Linked IS/C/E and no Next action for Root."})
++            if role != "synthesizer" and str(nh.get("status") or "").strip().lower() in {"finding", "confirmed"}:
++                issues.append({"severity": "error", "agent": agent, "kind": "agent-promoted-threat",
++                               "detail": f"{label} sets threat Status={nh.get('status')}; Agents must leave it candidate/open."})
++
+         confidence_raw = _field(text, "Confidence")
+         cm = re.search(r"[01]\.\d+", confidence_raw)
+         confidence = float(cm.group(0)) if cm else None
+@@ -1207,6 +1238,145 @@ def print_merge_check(run_dir: Path) -> int:
+     return rc
+
+
++def _new_threat_hypotheses(text: str, *, agent: str, default_front: str = "") -> list[dict]:
++    body = _section_body(text, "New Threat Hypotheses")
++    if not body:
++        return []
++    out: list[dict] = []
++    for m in re.finditer(r"(?ms)^###[ \t]+(NH-\d+).*?(?=^###[ \t]+NH-\d+|\Z)", body):
++        block = m.group(0)
++        threat = _field(block, "Threat hypothesis") or _field(block, "Claim")
++        if _blankish(threat):
++            continue
++        out.append({
++            "agent": agent,
++            "nh_id": m.group(1),
++            "front": _field(block, "Front") or default_front,
++            "threat_hypothesis": threat,
++            "asset_role_input": _field(block, "Asset/role/input"),
++            "expected_signal": _field(block, "Expected signal"),
++            "refutation_control": _field(block, "Refutation/control"),
++            "linked": _field(block, "Linked IS/C/E") or _field(block, "Linked evidence"),
++            "status": _field(block, "Status") or "candidate",
++            "next_action": _field(block, "Next action"),
++            "block": block,
++        })
++    return out
++
++
++def _collect_agent_threats(run_dir: Path) -> list[dict]:
++    out: list[dict] = []
++    for f in sorted(agents_dir(run_dir).glob("A-*.md")) if agents_dir(run_dir).exists() else []:
++        text = f.read_text(encoding="utf-8", errors="replace")
++        out.extend(_new_threat_hypotheses(
++            text,
++            agent=f.stem,
++            default_front=_field(text, "Assigned front"),
++        ))
++    return out
++
++
++def _normalize_threat_key(item: dict) -> tuple[str, str, str]:
++    def norm(value: str) -> str:
++        return re.sub(r"\s+", " ", str(value or "").strip().lower())
++    return (
++        norm(item.get("front", "")),
++        norm(item.get("threat_hypothesis", "")),
++        norm(item.get("asset_role_input", "")),
++    )
++
++
++def _existing_hypothesis_keys(text: str) -> tuple[set[tuple[str, str, str]], set[str]]:
++    keys: set[tuple[str, str, str]] = set()
++    ids: set[str] = set()
++    for m in re.finditer(r"(?ms)^##[ \t]+(H-\d+).*?(?=^##[ \t]+H-\d+|\Z)", text):
++        block = m.group(0)
++        ids.add(m.group(1))
++        keys.add(_normalize_threat_key({
++            "front": _field(block, "Front"),
++            "threat_hypothesis": _field(block, "Threat hypothesis") or _field(block, "Claim"),
++            "asset_role_input": _field(block, "Asset/role/input"),
++        }))
++    return keys, ids
++
++
++def merge_threats(run_dir: Path) -> dict:
++    """Merge Agent `## New Threat Hypotheses` candidates into hypotheses.md.
++
++    This is deliberately weaker than evidence promotion: it creates falsifiable
++    Root-owned hypotheses, not findings, facts, or closure decisions.
++    """
++    suggestions = _collect_agent_threats(run_dir)
++    if not suggestions:
++        return {"new": 0, "duplicate": 0, "summary": "无 agents/*.md 中的 New Threat Hypotheses 块"}
++
++    hyp_path = run_dir / "hypotheses.md"
++    if hyp_path.exists():
++        text = hyp_path.read_text(encoding="utf-8", errors="replace")
++    else:
++        text = "# Hypotheses\n"
++    existing_keys, existing_ids = _existing_hypothesis_keys(text)
++
++    next_n = 1
++    while f"H-{next_n:03d}" in existing_ids:
++        next_n += 1
++
++    new_entries: list[dict] = []
++    duplicate = 0
++    for s in suggestions:
++        key = _normalize_threat_key(s)
++        if key in existing_keys or any(_normalize_threat_key(n) == key for n in new_entries):
++            duplicate += 1
++            continue
++        s = dict(s)
++        s["hid"] = f"H-{next_n:03d}"
++        next_n += 1
++        new_entries.append(s)
++        existing_keys.add(key)
++
++    if not new_entries:
++        return {"new": 0, "duplicate": duplicate, "summary": f"无新威胁假设（{duplicate} 条重复跳过）"}
++
++    if not text.endswith("\n"):
++        text += "\n"
++    chunks = [text.rstrip(), ""]
++    for s in new_entries:
++        chunks.extend([
++            f"## {s['hid']}",
++            "",
++            f"- Claim: {s['threat_hypothesis']}",
++            "- Status: open",
++            f"- Source / trust: agent-candidate from {s['agent']}#{s['nh_id']}; untrusted until Root verifies",
++            f"- Front: {s['front']}",
++            f"- Threat hypothesis: {s['threat_hypothesis']}",
++            f"- Asset/role/input: {s['asset_role_input']}",
++            f"- Expected signal: {s['expected_signal']}",
++            f"- Refutation/control: {s['refutation_control']}",
++            f"- Why plausible: suggested by {s['agent']}#{s['nh_id']}",
++            f"- What would confirm: {s['expected_signal']}",
++            f"- What would reject: {s['refutation_control']}",
++            "- Safety boundary: use guarded proof-level checks only",
++            f"- Next safe verification: {s['next_action']}",
++            f"- Linked IS/C/E: {s['linked']}",
++            f"- Linked evidence: {s['linked']}",
++            "",
++        ])
++    _atomic_write(hyp_path, "\n".join(chunks).rstrip() + "\n")
++    return {
++        "new": len(new_entries),
++        "duplicate": duplicate,
++        "summary": f"新增 {len(new_entries)} 条威胁假设, {duplicate} 条重复跳过",
++    }
++
++
++def print_merge_threats(run_dir: Path) -> int:
++    result = merge_threats(run_dir)
++    print(f"[workers merge-threats] {result['summary']}")
++    if result["new"] > 0:
++        print(f"  威胁假设已写入 {display_path(run_dir / 'hypotheses.md')}")
++    return 0
++
++
+ def _normalize_input_shape(shape: str) -> str:
+     """归一化 input shape: 小写、去首尾空白、压缩内部连续空白。"""
+     if not shape:
+@@ -1425,6 +1595,48 @@ def _selftest() -> int:
+     agent_clean_file = ROOT / agent_clean_rec["agent_file"] if not Path(agent_clean_rec["agent_file"]).is_absolute() else Path(agent_clean_rec["agent_file"])
+     agent_clean_text = agent_clean_file.read_text(encoding="utf-8")
+     agent_clean_issues = agent_discipline_issues(agent_clean)
++    threat_run = d / "threat_run"
++    threat_run.mkdir()
++    (threat_run / "agents").mkdir()
++    (threat_run / "agents" / "A-web-hunter-001.md").write_text(
++        "# Agent A-web-hunter-001\n"
++        "- Role: web-hunter\n- Assigned front: F-001\n- Status: done\n\n"
++        "## New Threat Hypotheses\n\n"
++        "### NH-1\n"
++        "- Threat hypothesis: signed client param can be replayed across users\n"
++        "- Asset/role/input: app.example user POST /api/order sign, uid\n"
++        "- Expected signal: same signed body accepted for a different user-owned order id\n"
++        "- Refutation/control: replay with owner id and tampered uid rejects equally\n"
++        "- Linked IS/C/E: IS-001\n"
++        "- Status: candidate\n"
++        "- Next action: Root records H and runs guarded replay control\n",
++        encoding="utf-8")
++    threat_merge = merge_threats(threat_run)
++    threat_merge_dup = merge_threats(threat_run)
++    threat_hyp_text = (threat_run / "hypotheses.md").read_text(encoding="utf-8")
++    threat_bad = d / "threat_bad"
++    threat_bad.mkdir()
++    (threat_bad / "agents").mkdir()
++    (threat_bad / "state").mkdir()
++    (threat_bad / "state" / "assignments.json").write_text(json.dumps({
++        "assignments": [{"agent": "A-web-hunter-001", "role": "web-hunter", "front": "F-001"}]
++    }), encoding="utf-8")
++    (threat_bad / "agents" / "A-web-hunter-001.md").write_text(
++        "# Agent A-web-hunter-001\n"
++        "- Role: web-hunter\n- Assigned front: F-001\n- Status: done\n\n"
++        "## Prelude\n\n## Recurrent Loop\n\n## Safety / Guard Invariants\n"
++        "- guard\n- request budget\n- untrusted\n\n"
++        "## New Threat Hypotheses\n\n"
++        "### NH-1\n"
++        "- Threat hypothesis: admin API hidden in JS\n"
++        "- Asset/role/input:\n"
++        "- Expected signal: /api/admin/users returns role-specific difference\n"
++        "- Refutation/control: unauth and user replay both 403\n"
++        "- Linked IS/C/E:\n"
++        "- Status: confirmed\n"
++        "- Next action:\n",
++        encoding="utf-8")
++    threat_bad_issues = agent_discipline_issues(threat_bad)
+     agent_rdt_bad = d / "agent_rdt_bad"
+     agent_rdt_bad.mkdir()
+     rdt_bad_rec = create_agent_assignment(agent_rdt_bad, role="web-hunter", front="F-001")
+@@ -1536,7 +1748,17 @@ def _selftest() -> int:
+          "Loop budget:" in agent_clean_text
+          and "Operator Profile / RDT Controls" in agent_clean_text
+          and "Original front:" in agent_clean_text
++         and "New Threat Hypotheses" in agent_clean_text
+          and agent_clean_rec.get("reasoning_style") == "personalized-rdt"),
++        ("merge-threats writes Root-owned hypothesis",
++         threat_merge["new"] == 1
++         and "Threat hypothesis: signed client param can be replayed across users" in threat_hyp_text
++         and "Linked IS/C/E: IS-001" in threat_hyp_text),
++        ("merge-threats skips duplicate suggestions", threat_merge_dup["new"] == 0),
++        ("agent-check catches bad threat hypothesis fields",
++         any(i["kind"] == "threat-missing-scope" for i in threat_bad_issues)
++         and any(i["kind"] == "threat-unanchored" for i in threat_bad_issues)
++         and any(i["kind"] == "agent-promoted-threat" for i in threat_bad_issues)),
+         ("agent-check catches incomplete personalized RDT step",
+          any(i["kind"] == "missing-rdt-step-field" for i in rdt_bad_issues)),
+         ("status sync: complete file flips assignment to done",
+@@ -1639,6 +1861,8 @@ def main(argv: list[str] | None = None) -> int:
+             return print_synthesize(run_dir)
+         if cmd == "merge-constraints":
+             return print_merge_constraints(run_dir)
++        if cmd == "merge-threats":
++            return print_merge_threats(run_dir)
+
+     ap = argparse.ArgumentParser(
+         description="并行 worker 脚手架 + 合并台账(不编排)",
+
+diff --git a/bench/existing-mechanism-consumption/sample_run/agents/A-web-hunter-001.md b/bench/existing-mechanism-consumption/sample_run/agents/A-web-hunter-001.md
+new file mode 100644
+--- /dev/null
++++ b/bench/existing-mechanism-consumption/sample_run/agents/A-web-hunter-001.md
++# Agent A-web-hunter-001
++
++- Role: web-hunter
++- Assigned front: F-001
++- Status: done
++- Maturity: candidate
++- Supports: hidden tenant export owner check
++- Confidence: 0.8
++- Artifacts: evidence/export-owner-control.html
++- Control: baseline tenant replay
++
++## Coda
++
++- JS refs consumed from surface.md.
++- Source JS/artifact: evidence/app.bundle.js
++- Unruled out consumed: exportId owner check
++- no-progress-pivot consumed from loop_state Mentor Hints.
+
+diff --git a/bench/existing-mechanism-consumption/sample_run/evidence.md b/bench/existing-mechanism-consumption/sample_run/evidence.md
+new file mode 100644
+--- /dev/null
++++ b/bench/existing-mechanism-consumption/sample_run/evidence.md
++# Evidence Ledger
++
++## E-001
++
++- Maturity: finding
++- Certainty: 0.8
++- Control: owner tenant export denied for baseline tenant; victim-owned id differs
++- Artifacts: evidence/export-owner-control.html
++- Result: hidden tenant export IDOR confirmed after surface js refs and loop_state no-progress pivot were consumed.
++- Supports: F-001, H-001
+
+diff --git a/bench/existing-mechanism-consumption/sample_run/frontier.md b/bench/existing-mechanism-consumption/sample_run/frontier.md
+new file mode 100644
+--- /dev/null
++++ b/bench/existing-mechanism-consumption/sample_run/frontier.md
++# Frontier
++
++## Open Fronts
++
++### F-001
++
++- Front: tenant export endpoint
++- Status: open
++- Threat role: data-pii
++- Threat exposure: login-gated
++- Unruled out: exportId owner check
++- Linked hypotheses: H-001
+
+diff --git a/bench/existing-mechanism-consumption/sample_run/state/loop_state.md b/bench/existing-mechanism-consumption/sample_run/state/loop_state.md
+new file mode 100644
+--- /dev/null
++++ b/bench/existing-mechanism-consumption/sample_run/state/loop_state.md
++# Loop State
++
++## Mentor Hints
++
++- no-progress-pivot: repeated broad API checks produced no new evidence; pivot to hidden export owner control. (advisory only)
+
+diff --git a/bench/existing-mechanism-consumption/sample_run/surface.md b/bench/existing-mechanism-consumption/sample_run/surface.md
+new file mode 100644
+--- /dev/null
++++ b/bench/existing-mechanism-consumption/sample_run/surface.md
++# Surface
++
++## Input Shape Catalog
++
++### IS-001
++
++- URL pattern: GET /api/tenant/export?exportId=...
++- Source JS/artifact: evidence/app.bundle.js
++- Client-controlled params: exportId
++- Role or permission hint: tenant-owned object id
++- Linked threat hypothesis: H-001
++
++## Discovery Channels
++
++- JS refs consumed by Agent: yes
+
+diff --git a/bench/existing-mechanism-consumption/truth.json b/bench/existing-mechanism-consumption/truth.json
+new file mode 100644
+--- /dev/null
++++ b/bench/existing-mechanism-consumption/truth.json
++{
++  "name": "existing-mechanism-consumption",
++  "run": "sample_run",
++  "expected_findings": [
++    {
++      "id": "hidden-export-idor",
++      "markers": ["hidden tenant export", "surface js refs", "loop_state no-progress pivot"],
++      "min_certainty": 0.8
++    }
++  ],
++  "expected_process": [
++    {
++      "id": "consumed-surface-discovery-channels",
++      "signals": ["JS refs consumed", "Source JS/artifact: evidence/app.bundle.js"],
++      "in": ["agents/A-web-hunter-001.md", "surface.md"],
++      "must": true
++    },
++    {
++      "id": "consumed-frontier-unruled-out",
++      "signals": ["Unruled out consumed: exportId owner check"],
++      "in": ["agents/A-web-hunter-001.md"],
++      "must": true
++    },
++    {
++      "id": "consumed-loop-state-hint",
++      "signals": ["Mentor Hints", "no-progress-pivot consumed"],
++      "in": ["state/loop_state.md", "agents/A-web-hunter-001.md"],
++      "must": true
++    }
++  ],
++  "budget": {"max_requests": 4}
++}
+
+diff --git a/bench/js-hidden-api-threat/sample_run/evidence.md b/bench/js-hidden-api-threat/sample_run/evidence.md
+new file mode 100644
+--- /dev/null
++++ b/bench/js-hidden-api-threat/sample_run/evidence.md
++# Evidence Ledger
++
++## E-001
++
++- Maturity: finding
++- Certainty: 0.8
++- Control: normal user receives 403 while admin fixture receives user list shape
++- Artifacts: evidence/admin-users-role-diff.html
++- Result: hidden admin api from Source JS/artifact produced role-specific response difference.
++- Supports: H-001
+
+diff --git a/bench/js-hidden-api-threat/sample_run/review.md b/bench/js-hidden-api-threat/sample_run/review.md
+new file mode 100644
+--- /dev/null
++++ b/bench/js-hidden-api-threat/sample_run/review.md
++# Review
++
++## JS Inventory
++
++- IS-CAND-001: GET /api/admin/users found in saved JS only.
++- Candidate Threat Hypotheses: admin route may expose role-specific response difference.
+
+diff --git a/bench/js-hidden-api-threat/sample_run/surface.md b/bench/js-hidden-api-threat/sample_run/surface.md
+new file mode 100644
+--- /dev/null
++++ b/bench/js-hidden-api-threat/sample_run/surface.md
++# Surface
++
++## Input Shape Catalog
++
++### IS-001
++
++- URL pattern: GET /api/admin/users
++- Source JS/artifact: evidence/app.js
++- Client-controlled params: page, size
++- Role or permission hint: admin/management route
++- Linked threat hypothesis: H-001
+
+diff --git a/bench/js-hidden-api-threat/truth.json b/bench/js-hidden-api-threat/truth.json
+new file mode 100644
+--- /dev/null
++++ b/bench/js-hidden-api-threat/truth.json
++{
++  "name": "js-hidden-api-threat",
++  "run": "sample_run",
++  "expected_findings": [
++    {
++      "id": "hidden-admin-role-diff",
++      "markers": ["hidden admin api", "role-specific response difference", "Source JS/artifact"],
++      "min_certainty": 0.8
++    }
++  ],
++  "expected_process": [
++    {
++      "id": "js-inventory-produced-input-shape",
++      "signals": ["JS Inventory", "IS-CAND-001", "Candidate Threat Hypotheses"],
++      "in": ["review.md"],
++      "must": true
++    },
++    {
++      "id": "surface-recorded-js-source",
++      "signals": ["Source JS/artifact: evidence/app.js", "Role or permission hint: admin/management route"],
++      "in": ["surface.md"],
++      "must": true
++    }
++  ],
++  "budget": {"max_requests": 4}
++}
+
+diff --git a/bench/mentor-no-progress-pivot/sample_run/decisions.md b/bench/mentor-no-progress-pivot/sample_run/decisions.md
+new file mode 100644
+--- /dev/null
++++ b/bench/mentor-no-progress-pivot/sample_run/decisions.md
++# Decisions
++
++## D-003
++
++- Reason: no-progress-pivot consumed; switch to materially different mechanism instead of retrying the same broad enumeration.
+
+diff --git a/bench/mentor-no-progress-pivot/sample_run/evidence.md b/bench/mentor-no-progress-pivot/sample_run/evidence.md
+new file mode 100644
+--- /dev/null
++++ b/bench/mentor-no-progress-pivot/sample_run/evidence.md
++# Evidence Ledger
++
++## E-001
++
++- Maturity: finding
++- Certainty: 0.8
++- Control: materially different control checked signed owner binding
++- Artifacts: evidence/pivot-control.html
++- Result: mentor no-progress-pivot led to materially different control and refuted the broad IDOR hypothesis.
++- Refutes: H-001
+
+diff --git a/bench/mentor-no-progress-pivot/sample_run/state/loop_state.md b/bench/mentor-no-progress-pivot/sample_run/state/loop_state.md
+new file mode 100644
+--- /dev/null
++++ b/bench/mentor-no-progress-pivot/sample_run/state/loop_state.md
++# Loop State
++
++## Mentor Hints
++
++- no-progress-pivot: 2 consecutive cycles produced no new evidence. Suggested: pivot to a materially different control. (advisory only)
+
+diff --git a/bench/mentor-no-progress-pivot/truth.json b/bench/mentor-no-progress-pivot/truth.json
+new file mode 100644
+--- /dev/null
++++ b/bench/mentor-no-progress-pivot/truth.json
++{
++  "name": "mentor-no-progress-pivot",
++  "run": "sample_run",
++  "expected_findings": [
++    {
++      "id": "pivot-produced-refutation",
++      "markers": ["mentor no-progress-pivot", "materially different control", "refuted"],
++      "min_certainty": 0.8
++    }
++  ],
++  "expected_process": [
++    {
++      "id": "mentor-hint-visible",
++      "signals": ["Mentor Hints", "no-progress-pivot", "advisory only"],
++      "in": ["state/loop_state.md"],
++      "must": true
++    },
++    {
++      "id": "root-recorded-pivot",
++      "signals": ["no-progress-pivot consumed", "materially different mechanism"],
++      "in": ["decisions.md"],
++      "must": true
++    }
++  ],
++  "budget": {"max_requests": 2}
++}
+
+diff --git a/bench/permission-matrix-idor/sample_run/evidence.md b/bench/permission-matrix-idor/sample_run/evidence.md
+new file mode 100644
+--- /dev/null
++++ b/bench/permission-matrix-idor/sample_run/evidence.md
++# Evidence Ledger
++
++## E-001
++
++- Maturity: finding
++- Certainty: 0.8
++- Control: owner project id returns 200 for owner and 403 for unrelated baseline endpoint
++- Artifacts: evidence/project-idor.html
++- Result: permission matrix showed cross-role idor; Role B observed E-id: E-001.
++- Supports: F-001
+
+diff --git a/bench/permission-matrix-idor/sample_run/surface.md b/bench/permission-matrix-idor/sample_run/surface.md
+new file mode 100644
+--- /dev/null
++++ b/bench/permission-matrix-idor/sample_run/surface.md
++# Surface
++
++## Permission / State Working Matrix
++
++| Front | Action/request | Role A expected | Role B observed E-id | State edge | Next control |
++|---|---|---|---|---|---|
++| F-001 | GET /api/project?id=victimProject | owner-only | Role B observed E-id: E-001 | n/a | replay with victim-owned id |
+
+diff --git a/bench/permission-matrix-idor/truth.json b/bench/permission-matrix-idor/truth.json
+new file mode 100644
+--- /dev/null
++++ b/bench/permission-matrix-idor/truth.json
++{
++  "name": "permission-matrix-idor",
++  "run": "sample_run",
++  "expected_findings": [
++    {
++      "id": "cross-role-idor",
++      "markers": ["permission matrix", "Role B observed E-id: E-001", "cross-role idor"],
++      "min_certainty": 0.8
++    }
++  ],
++  "expected_process": [
++    {
++      "id": "conditional-permission-matrix-used",
++      "signals": ["Permission / State Working Matrix", "Role B observed E-id", "Next control"],
++      "in": ["surface.md"],
++      "must": true
++    },
++    {
++      "id": "matrix-linked-to-evidence-not-closure",
++      "signals": ["E-001", "replay with victim-owned id"],
++      "in": ["surface.md", "evidence.md"],
++      "must": true
++    }
++  ],
++  "budget": {"max_requests": 5}
++}
+
+diff --git a/bench/signed-client-param/sample_run/evidence.md b/bench/signed-client-param/sample_run/evidence.md
+new file mode 100644
+--- /dev/null
++++ b/bench/signed-client-param/sample_run/evidence.md
++# Evidence Ledger
++
++## E-001
++
++- Maturity: finding
++- Certainty: 0.8
++- Control: nonce and owner-bound sign replay control
++- Artifacts: evidence/order-sign-control.html
++- Result: client-side signature uses nonce; tampered owner id rejected.
++- Refutes: H-001
+
+diff --git a/bench/signed-client-param/sample_run/hypotheses.md b/bench/signed-client-param/sample_run/hypotheses.md
+new file mode 100644
+--- /dev/null
++++ b/bench/signed-client-param/sample_run/hypotheses.md
++# Hypotheses
++
++## H-001
++
++- Threat hypothesis: client-side signature may be replayable with a different owner id
++- Asset/role/input: POST /api/order/confirm uid/orderId/sign/nonce
++- Expected signal: tampered owner id accepted with replayed sign
++- Refutation/control: tampered owner id rejected
++- Linked IS/C/E: IS-001, E-001
+
+diff --git a/bench/signed-client-param/sample_run/surface.md b/bench/signed-client-param/sample_run/surface.md
+new file mode 100644
+--- /dev/null
++++ b/bench/signed-client-param/sample_run/surface.md
++# Surface
++
++## Input Shape Catalog
++
++### IS-001
++
++- URL pattern: POST /api/order/confirm
++- Source JS/artifact: evidence/order.js
++- Client-controlled params: orderId, uid, sign, nonce
++- Client-side signature/token/nonce logic: md5(uid + orderId + nonce)
++- State transition: order pending -> confirmed
++- Linked threat hypothesis: H-001
+
+diff --git a/bench/signed-client-param/truth.json b/bench/signed-client-param/truth.json
+new file mode 100644
+--- /dev/null
++++ b/bench/signed-client-param/truth.json
++{
++  "name": "signed-client-param",
++  "run": "sample_run",
++  "expected_findings": [
++    {
++      "id": "signature-bound-refutation",
++      "markers": ["client-side signature", "nonce", "tampered owner id rejected"],
++      "min_certainty": 0.8
++    }
++  ],
++  "expected_process": [
++    {
++      "id": "surface-recorded-signature-logic",
++      "signals": ["Client-side signature/token/nonce logic", "Source JS/artifact: evidence/order.js"],
++      "in": ["surface.md"],
++      "must": true
++    },
++    {
++      "id": "hypothesis-has-refutation-control",
++      "signals": ["Refutation/control: tampered owner id rejected", "Linked IS/C/E: IS-001"],
++      "in": ["hypotheses.md"],
++      "must": true
++    }
++  ],
++  "budget": {"max_requests": 3}
++}
+
+diff --git a/bench/state-machine-skip/sample_run/evidence.md b/bench/state-machine-skip/sample_run/evidence.md
+new file mode 100644
+--- /dev/null
++++ b/bench/state-machine-skip/sample_run/evidence.md
++# Evidence Ledger
++
++## E-001
++
++- Maturity: finding
++- Certainty: 0.8
++- Control: normal submit flow remains draft; direct status update changes draft -> approved
++- Artifacts: evidence/workflow-skip.html
++- Result: state transition draft -> approved allowed skip review.
++- Supports: H-001
+
+diff --git a/bench/state-machine-skip/sample_run/hypotheses.md b/bench/state-machine-skip/sample_run/hypotheses.md
+new file mode 100644
+--- /dev/null
++++ b/bench/state-machine-skip/sample_run/hypotheses.md
++# Hypotheses
++
++## H-001
++
++- Threat hypothesis: submitter can skip review by setting approved state directly
++- Linked IS/C/E: IS-001, E-001
+
+diff --git a/bench/state-machine-skip/sample_run/surface.md b/bench/state-machine-skip/sample_run/surface.md
+new file mode 100644
+--- /dev/null
++++ b/bench/state-machine-skip/sample_run/surface.md
++# Surface
++
++## Input Shape Catalog
++
++### IS-001
++
++- URL pattern: POST /api/workflow/approve
++- Client-controlled params: docId, status
++- State transition: draft -> approved
++- Linked threat hypothesis: H-001
++
++## Permission / State Working Matrix
++
++| Front | Action/request | Role A expected | Role B observed E-id | State edge | Next control |
++|---|---|---|---|---|---|
++| F-001 | POST /api/workflow/approve status=approved | reviewer-only | E-001 | State edge: draft -> approved | replay as submitter |
+
+diff --git a/bench/state-machine-skip/truth.json b/bench/state-machine-skip/truth.json
+new file mode 100644
+--- /dev/null
++++ b/bench/state-machine-skip/truth.json
++{
++  "name": "state-machine-skip",
++  "run": "sample_run",
++  "expected_findings": [
++    {
++      "id": "workflow-skip",
++      "markers": ["state transition", "draft -> approved", "skip review"],
++      "min_certainty": 0.8
++    }
++  ],
++  "expected_process": [
++    {
++      "id": "state-edge-recorded",
++      "signals": ["State transition: draft -> approved", "State edge"],
++      "in": ["surface.md"],
++      "must": true
++    },
++    {
++      "id": "state-control-linked",
++      "signals": ["Linked threat hypothesis: H-001", "E-001"],
++      "in": ["surface.md", "hypotheses.md", "evidence.md"],
++      "must": true
++    }
++  ],
++  "budget": {"max_requests": 4}
++}
+
+diff --git a/bench/threat-hypothesis-to-evidence/sample_run/agents/A-web-hunter-001.md b/bench/threat-hypothesis-to-evidence/sample_run/agents/A-web-hunter-001.md
+new file mode 100644
+--- /dev/null
++++ b/bench/threat-hypothesis-to-evidence/sample_run/agents/A-web-hunter-001.md
++# Agent A-web-hunter-001
++
++- Role: web-hunter
++- Assigned front: F-001
++- Status: done
++
++## New Threat Hypotheses
++
++### NH-1
++- Threat hypothesis: signed order replay may allow cross-user order read
++- Asset/role/input: app.example user GET /api/order?id=...&sign=...
++- Expected signal: victim order id returns to attacker when sign is reused
++- Refutation/control: replay rejected when id/sign owner binding is changed
++- Linked IS/C/E: IS-001
++- Status: candidate
++- Next action: Root records H-001 and runs guarded replay control
+
+diff --git a/bench/threat-hypothesis-to-evidence/sample_run/evidence.md b/bench/threat-hypothesis-to-evidence/sample_run/evidence.md
+new file mode 100644
+--- /dev/null
++++ b/bench/threat-hypothesis-to-evidence/sample_run/evidence.md
++# Evidence Ledger
++
++## E-001
++
++- Maturity: finding
++- Certainty: 0.8
++- Control: owner-bound signature control
++- Artifacts: evidence/order-sign-replay.html
++- Result: Threat hypothesis H-001 replay rejected; Linked IS/C/E: IS-001; signature is bound to owner id.
++- Refutes: H-001
+
+diff --git a/bench/threat-hypothesis-to-evidence/sample_run/hypotheses.md b/bench/threat-hypothesis-to-evidence/sample_run/hypotheses.md
+new file mode 100644
+--- /dev/null
++++ b/bench/threat-hypothesis-to-evidence/sample_run/hypotheses.md
++# Hypotheses
++
++## H-001
++
++- Claim: signed order replay may allow cross-user order read
++- Status: rejected
++- Front: F-001
++- Threat hypothesis: signed order replay may allow cross-user order read
++- Asset/role/input: app.example user GET /api/order?id=...&sign=...
++- Expected signal: victim order id returns to attacker when sign is reused
++- Refutation/control: replay rejected when id/sign owner binding is changed
++- Next safe verification: guarded replay control
++- Linked IS/C/E: IS-001, E-001
++- Linked evidence: E-001
+
+diff --git a/bench/threat-hypothesis-to-evidence/truth.json b/bench/threat-hypothesis-to-evidence/truth.json
+new file mode 100644
+--- /dev/null
++++ b/bench/threat-hypothesis-to-evidence/truth.json
++{
++  "name": "threat-hypothesis-to-evidence",
++  "run": "sample_run",
++  "expected_findings": [
++    {
++      "id": "hypothesis-linked-refutation",
++      "markers": ["Threat hypothesis H-001", "Linked IS/C/E: IS-001", "replay rejected"],
++      "min_certainty": 0.8
++    }
++  ],
++  "expected_process": [
++    {
++      "id": "agent-produced-new-threat-hypothesis",
++      "signals": ["New Threat Hypotheses", "Linked IS/C/E: IS-001", "Next action"],
++      "in": ["agents/A-web-hunter-001.md"],
++      "must": true
++    },
++    {
++      "id": "root-merged-threat-hypothesis",
++      "signals": ["Threat hypothesis:", "Asset/role/input:", "Expected signal:", "Refutation/control:"],
++      "in": ["hypotheses.md"],
++      "must": true
++    },
++    {
++      "id": "evidence-linked-back-to-hypothesis",
++      "signals": ["H-001", "IS-001", "replay rejected"],
++      "in": ["evidence.md"],
++      "must": true
++    }
++  ],
++  "budget": {"max_requests": 3}
++}
+
+diff --git a/tools/js_inventory.py b/tools/js_inventory.py
+new file mode 100644
+--- /dev/null
++++ b/tools/js_inventory.py
++#!/usr/bin/env python3
++"""Read-only JS/API inventory over saved Xunji artifacts.
++
++This is a sensor, not a target executor. It reads files already present under a
++run directory (or explicit paths inside that run), extracts likely API calls and
++client-side signing/role/state hints, and prints candidate input shapes/threat
++hypotheses for Root to merge manually.
++"""
++from __future__ import annotations
++
++import argparse
++import json
++import re
++import sys
++import tempfile
++from pathlib import Path
++from urllib.parse import parse_qsl, urlparse
++
++try:
++    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
++except Exception:
++    pass
++
++ROOT = Path(__file__).resolve().parents[1]
++MAX_FILE_BYTES = 2_000_000
++SCAN_SUFFIXES = {".js", ".mjs", ".html", ".htm", ".json", ".txt"}
++
++
++def _resolve_run_dir(path: str | Path) -> Path:
++    p = Path(path)
++    return (p if p.is_absolute() else ROOT / p).resolve()
++
++
++def _inside(root: Path, path: Path) -> bool:
++    try:
++        path.resolve().relative_to(root.resolve())
++        return True
++    except Exception:
++        return False
++
++
++def _rel(root: Path, path: Path) -> str:
++    try:
++        return path.resolve().relative_to(root.resolve()).as_posix()
++    except Exception:
++        return str(path)
++
++
++def _read_text(path: Path) -> str:
++    if not path.exists() or not path.is_file():
++        return ""
++    try:
++        if path.stat().st_size > MAX_FILE_BYTES:
++            return path.read_text(encoding="utf-8", errors="replace")[:MAX_FILE_BYTES]
++        return path.read_text(encoding="utf-8", errors="replace")
++    except Exception:
++        return ""
++
++
++def _candidate_files(run_dir: Path, explicit: list[str] | None = None) -> list[Path]:
++    if explicit:
++        files: list[Path] = []
++        for raw in explicit:
++            p = Path(raw)
++            p = p if p.is_absolute() else run_dir / p
++            p = p.resolve()
++            if not _inside(run_dir, p):
++                raise ValueError(f"path outside run_dir is not allowed: {raw}")
++            if p.is_file():
++                files.append(p)
++        return sorted(set(files))
++
++    roots = [run_dir / "evidence", run_dir / "classify", run_dir]
++    files = []
++    seen: set[Path] = set()
++    for root in roots:
++        if not root.exists():
++            continue
++        for p in root.rglob("*"):
++            if p in seen or not p.is_file():
++                continue
++            seen.add(p)
++            if p.suffix.lower() in SCAN_SUFFIXES:
++                files.append(p.resolve())
++    return sorted(files)
++
++
++def _extract_urls_from_json(text: str) -> list[dict]:
++    try:
++        data = json.loads(text)
++    except Exception:
++        return []
++    out: list[dict] = []
++
++    def walk(obj) -> None:
++        if isinstance(obj, dict):
++            url = obj.get("url") or obj.get("requestUrl") or obj.get("href")
++            if isinstance(url, str) and re.search(r"/|\?", url):
++                method = str(obj.get("method") or obj.get("requestMethod") or "").upper()
++                out.append({"method": method or "GET", "url": url, "source": "json"})
++            for value in obj.values():
++                walk(value)
++        elif isinstance(obj, list):
++            for item in obj:
++                walk(item)
++
++    walk(data)
++    return out
++
++
++_STRING = r"['\"]([^'\"]{1,400})['\"]"
++
++
++def _extract_calls(text: str, suffix: str) -> list[dict]:
++    calls: list[dict] = []
++    if suffix == ".json":
++        calls.extend(_extract_urls_from_json(text))
++
++    patterns = [
++        (re.compile(rf"\bfetch\(\s*{_STRING}", re.I), "GET"),
++        (re.compile(rf"\baxios\.(get|delete|post|put|patch)\(\s*{_STRING}", re.I), None),
++        (re.compile(rf"\baxios\(\s*\{{[^}}]*\burl\s*:\s*{_STRING}[^}}]*\bmethod\s*:\s*{_STRING}", re.I | re.S), None),
++        (re.compile(rf"\.open\(\s*{_STRING}\s*,\s*{_STRING}", re.I), None),
++        (re.compile(rf"\burl\s*:\s*{_STRING}", re.I), "GET"),
++        (re.compile(rf"\baction\s*=\s*{_STRING}", re.I), "GET"),
++    ]
++    for rx, default_method in patterns:
++        for m in rx.finditer(text):
++            groups = [g for g in m.groups() if g is not None]
++            method = default_method or "GET"
++            url = ""
++            if rx.pattern.startswith("\\baxios\\."):
++                method = groups[0].upper()
++                url = groups[1]
++            elif ".open" in rx.pattern:
++                method = groups[0].upper()
++                url = groups[1]
++            elif "method" in rx.pattern and len(groups) >= 2:
++                url = groups[0]
++                method = groups[1].upper()
++            elif groups:
++                url = groups[-1]
++            if url and re.search(r"^https?://|^/|api|rest|graphql|\\.do|\\.json|\\?", url, re.I):
++                calls.append({"method": method, "url": url, "source": "text"})
++    return calls
++
++
++def _params(url: str, nearby: str = "") -> list[str]:
++    parsed = urlparse(url)
++    params = [k for k, _v in parse_qsl(parsed.query, keep_blank_values=True)]
++    if nearby:
++        for key in re.findall(r"['\"]([A-Za-z_][A-Za-z0-9_]{1,40})['\"]\s*:", nearby):
++            if key not in params:
++                params.append(key)
++    return params[:12]
++
++
++def _signature_hint(text: str, url: str) -> str:
++    hay = f"{url}\n{text}"
++    hits = []
++    for token in ("sign", "signature", "token", "nonce", "timestamp", "hmac", "sha256", "md5", "encrypt"):
++        if re.search(rf"\b{token}\b", hay, re.I):
++            hits.append(token)
++    return ", ".join(hits[:8]) if hits else "none observed"
++
++
++def _role_hint(url: str, text: str) -> str:
++    hay = f"{url}\n{text[:2000]}"
++    for label, rx in [
++        ("admin/management route", r"\b(admin|manage|manager|console|role|permission)\b"),
++        ("tenant/account boundary", r"\b(tenant|org|company|dept|account|uid|userId|owner)\b"),
++        ("identity/auth route", r"\b(auth|login|sso|oauth|token|session)\b"),
++    ]:
++        if re.search(rx, hay, re.I):
++            return label
++    return "unknown"
++
++
++def _state_hint(method: str, url: str, text: str) -> str:
++    hay = f"{method} {url}\n{text[:2000]}"
++    if method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
++        return "state-changing method"
++    for token in ("submit", "approve", "publish", "pay", "create", "delete", "update", "status", "workflow"):
++        if re.search(rf"\b{token}\b", hay, re.I):
++            return f"state keyword: {token}"
++    return "none observed"
++
++
++def inventory(run_dir: Path, explicit_paths: list[str] | None = None) -> dict:
++    run_dir = _resolve_run_dir(run_dir)
++    files = _candidate_files(run_dir, explicit_paths)
++    candidates: list[dict] = []
++    seen: set[tuple[str, str]] = set()
++    for path in files:
++        text = _read_text(path)
++        if not text:
++            continue
++        calls = _extract_calls(text, path.suffix.lower())
++        for call in calls:
++            method = str(call.get("method") or "GET").upper()
++            url = str(call.get("url") or "").strip()
++            key = (method, url)
++            if not url or key in seen:
++                continue
++            seen.add(key)
++            window = text[max(0, text.find(url) - 500): text.find(url) + 1000] if url in text else text[:1500]
++            candidates.append({
++                "method": method,
++                "url": url,
++                "source_artifact": _rel(run_dir, path),
++                "params": _params(url, window),
++                "signature_hint": _signature_hint(window, url),
++                "role_hint": _role_hint(url, window),
++                "state_hint": _state_hint(method, url, window),
++            })
++    return {
++        "schema": "xunji.js_inventory.v1",
++        "run_dir": str(run_dir),
++        "note": "read-only over saved artifacts; no target network requests performed",
++        "scanned_files": [_rel(run_dir, p) for p in files],
++        "candidates": candidates,
++    }
++
++
++def render_markdown(data: dict) -> str:
++    lines = [
++        "# JS Inventory",
++        "",
++        f"- Run dir: {data['run_dir']}",
++        "- Mode: read-only saved artifacts; no target network requests performed.",
++        f"- Files scanned: {len(data.get('scanned_files', []))}",
++        "",
++        "## Candidate Input Shapes",
++        "",
++    ]
++    candidates = data.get("candidates", [])
++    if not candidates:
++        lines.append("- (no API-like calls found in saved artifacts)")
++    for idx, item in enumerate(candidates, start=1):
++        params = ", ".join(item.get("params") or []) or "none observed"
++        lines.extend([
++            f"### IS-CAND-{idx:03d}",
++            f"- URL pattern: {item['method']} {item['url']}",
++            f"- Source JS/artifact: {item['source_artifact']}",
++            f"- Client-controlled params: {params}",
++            f"- Client-side signature/token/nonce logic: {item['signature_hint']}",
++            f"- Role or permission hint: {item['role_hint']}",
++            f"- State transition: {item['state_hint']}",
++            "- Linked threat hypothesis: pending",
++            "",
++        ])
++    lines.extend(["## Candidate Threat Hypotheses", ""])
++    threat_n = 0
++    for item in candidates:
++        if item["role_hint"] == "unknown" and item["signature_hint"] == "none observed" \
++                and item["state_hint"] == "none observed":
++            continue
++        threat_n += 1
++        lines.extend([
++            f"### TH-CAND-{threat_n:03d}",
++            f"- Threat hypothesis: {item['role_hint']} or {item['state_hint']} deserves control on {item['method']} {item['url']}",
++            f"- Asset/role/input: {item['url']} / {item['role_hint']} / params={', '.join(item.get('params') or []) or 'none observed'}",
++            "- Expected signal: response differs by role, owner object, signature freshness, or state transition.",
++            "- Refutation/control: baseline replay with unauthorized role and tampered owner/signature rejects equally.",
++            f"- Linked IS/C/E: source artifact {item['source_artifact']}",
++            "- Status: candidate",
++            "- Next action: Root may merge to hypotheses.md, then run guarded proof-level controls.",
++            "",
++        ])
++    if threat_n == 0:
++        lines.append("- (no role/signature/state hints strong enough for a candidate hypothesis)")
++    return "\n".join(lines).rstrip() + "\n"
++
++
++def _selftest() -> int:
++    d = Path(tempfile.mkdtemp())
++    run = d / "run"
++    (run / "evidence").mkdir(parents=True)
++    (run / "evidence" / "app.js").write_text(
++        "const nonce = Date.now();\n"
++        "function makeSign(uid){ return md5(uid + nonce); }\n"
++        "fetch('/api/admin/users?tenantId=1', {method: 'POST', body: JSON.stringify({uid: uid, sign: makeSign(uid)})});\n"
++        "axios.get('/api/profile?userId=42');\n",
++        encoding="utf-8")
++    (run / "evidence" / "network.json").write_text(json.dumps([
++        {"url": "https://app.example/api/order/status?id=7", "method": "GET"}
++    ]), encoding="utf-8")
++    data = inventory(run)
++    md = render_markdown(data)
++    outside = d / "outside.js"
++    outside.write_text("fetch('/api/x')", encoding="utf-8")
++    outside_blocked = False
++    try:
++        inventory(run, [str(outside)])
++    except ValueError:
++        outside_blocked = True
++    checks = [
++        ("extracts fetch endpoint", any("/api/admin/users" in c["url"] for c in data["candidates"])),
++        ("extracts axios endpoint", any("/api/profile" in c["url"] for c in data["candidates"])),
++        ("extracts saved network json endpoint", any("/api/order/status" in c["url"] for c in data["candidates"])),
++        ("detects signature nonce logic", "sign" in md and "nonce" in md and "md5" in md),
++        ("emits candidate threat hypothesis only", "Candidate Threat Hypotheses" in md and "Status: candidate" in md),
++        ("blocks explicit paths outside run", outside_blocked),
++    ]
++    bad = [name for name, ok in checks if not ok]
++    for name, ok in checks:
++        print(("ok   " if ok else "FAIL ") + name)
++    print("js_inventory selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
++    return 0 if not bad else 1
++
++
++def main(argv: list[str] | None = None) -> int:
++    ap = argparse.ArgumentParser(description="read-only JS/API inventory over saved run artifacts")
++    ap.add_argument("run_dir", nargs="?", type=Path)
++    ap.add_argument("--path", action="append", default=[], help="explicit file path inside run_dir; repeatable")
++    ap.add_argument("--json", action="store_true")
++    ap.add_argument("--selftest", action="store_true")
++    args = ap.parse_args(argv)
++    if args.selftest:
++        return _selftest()
++    if not args.run_dir:
++        ap.error("run_dir is required")
++    try:
++        data = inventory(args.run_dir, args.path or None)
++    except ValueError as e:
++        print(f"[js_inventory] {e}", file=sys.stderr)
++        return 2
++    if args.json:
++        print(json.dumps(data, ensure_ascii=False, indent=2))
++    else:
++        print(render_markdown(data), end="")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

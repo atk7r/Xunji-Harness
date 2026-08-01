@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "assignment-cancellation.v1.schema.json",
+  "title": "Xunji unlaunched assignment cancellation receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "cancellation_id", "status", "plan_id", "plan_digest",
+    "plan_inputs_digest", "observed_inputs_digest", "lane_id", "assignment",
+    "assignment_attempt", "role", "front", "effect", "assets", "reason",
+    "cancelled_at", "turn_binding", "assignment_row_sha256",
+    "delegate_transaction_id", "delegate_receipt_digest", "agent_artifact",
+    "context_artifact", "receipt_digest"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.assignment-cancellation.v1"},
+    "cancellation_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"const": "cancelled-unlaunched"},
+    "plan_id": {"type": "string", "minLength": 1},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "plan_inputs_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "observed_inputs_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "lane_id": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"},
+    "assignment": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$"},
+    "assignment_attempt": {"type": "integer", "minimum": 1},
+    "role": {"type": "string", "minLength": 1},
+    "front": {"type": "string", "minLength": 1},
+    "effect": {"type": "string", "minLength": 1},
+    "assets": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "cancelled_at": {"type": "string", "minLength": 1},
+    "turn_binding": {"$ref": "#/$defs/turnBinding"},
+    "assignment_row_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "delegate_transaction_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "delegate_receipt_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "agent_artifact": {"$ref": "#/$defs/artifact"},
+    "context_artifact": {"$ref": "#/$defs/artifact"},
+    "receipt_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "turnBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id", "prompt_sha256", "contract_updated_at", "transcript_path",
+        "transcript_length", "transcript_prefix_sha256"
+      ],
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "contract_updated_at": {"type": "number", "exclusiveMinimum": 0},
+        "transcript_path": {"type": "string", "minLength": 1},
+        "transcript_length": {"type": "integer", "minimum": 0},
+        "transcript_prefix_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "resolved_path", "length", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "resolved_path": {"type": "string", "minLength": 1},
+        "length": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

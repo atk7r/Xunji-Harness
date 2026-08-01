@@ -1,0 +1,26 @@
+{
+  "name": "permission-matrix-idor",
+  "run": "sample_run",
+  "expected_findings": [
+    {
+      "id": "cross-role-idor",
+      "markers": ["permission matrix", "Role B observed E-id: E-001", "cross-role idor"],
+      "min_certainty": 0.8
+    }
+  ],
+  "expected_process": [
+    {
+      "id": "conditional-permission-matrix-used",
+      "signals": ["Permission / State Working Matrix", "Role B observed E-id", "Next control"],
+      "in": ["surface.md"],
+      "must": true
+    },
+    {
+      "id": "matrix-linked-to-evidence-not-closure",
+      "signals": ["E-001", "replay with victim-owned id"],
+      "in": ["surface.md", "evidence.md"],
+      "must": true
+    }
+  ],
+  "budget": {"max_requests": 5}
+}

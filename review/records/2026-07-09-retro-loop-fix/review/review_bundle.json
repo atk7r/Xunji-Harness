@@ -1,0 +1,644 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-09-retro-loop-fix",
+  "files": {
+    "report.md": {
+      "sha1": "282a8a69c9899c3f0b355c7144212b1703c1afe4",
+      "size": 3308
+    },
+    "evidence.md": {
+      "sha1": "0970d01a32dc9f453ed8843d7b5cdc1864f4932e",
+      "size": 3638
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 — Reviewed staged diff",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "reviewed.diff",
+            "path": "reviewed.diff",
+            "exists": true,
+            "size": 93331,
+            "sha1": "fc7a30240695e36e0f336d2e5ae24c1edf8fd63a",
+            "diff_summary": {
+              "changed_files_count": 20,
+              "changed_files": [
+                ".claude/hooks/output_gate.py",
+                ".claude/skills/captcha-solve/SKILL.md",
+                ".claude/skills/xunji-peer-review-panel/SKILL.md",
+                ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                "docs/WORKFLOW-reference.md",
+                "docs/WORKFLOW.md",
+                "docs/templates/loop_prompt.md",
+                "docs/templates/run/retrospective.md",
+                "knowledge/hamastar-cms.md",
+                "knowledge/soarcloud-ais-hr.md",
+                "knowledge/weak-credentials-captcha.md",
+                "tools/captcha_ocr.py",
+                "tools/check_run.py",
+                "tools/coverage_matrix.py",
+                "tools/evidence_parse.py",
+                "tools/loop_state.py",
+                "tools/peer_review.py",
+                "tools/probe.py",
+                "tools/saturation.py",
+                "tools/selftest_all.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 83,
+              "hunks": [
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -20,13 +20,14 @@ Usage:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -75,6 +76,11 @@ except Exception:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -140,6 +146,39 @@ def _next_drift_started_at(prev_state: dict, drift_flags: list[str], now: float)"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -208,6 +247,8 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -223,6 +264,9 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -255,6 +299,8 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -341,6 +387,57 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/skills/captcha-solve/SKILL.md",
+                  "header": "@@ -48,6 +48,8 @@ load page (acquire its JS + cookies)"
+                },
+                {
+                  "file": ".claude/skills/xunji-peer-review-panel/SKILL.md",
+                  "header": "@@ -52,6 +52,11 @@ Use the default Claude-driver command for run closure:"
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -145,6 +145,7 @@ python tools/graph.py runs/<dir>"
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -215,7 +216,9 @@ Closure gates:"
+                },
+                {
+                  "file": ".claude/skills/xunji-run-lifecycle/SKILL.md",
+                  "header": "@@ -230,6 +233,12 @@ Closure gates:"
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -627,18 +627,20 @@ gate, guard/hook boundary, and review requirements still apply."
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -69,7 +69,7 @@ python tools/workers.py status runs/<dir>"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -411,7 +411,7 @@ assets were only header / recon-classified, never examined. Before any such clai"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -454,7 +454,8 @@ assets were only header / recon-classified, never examined. Before any such clai"
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -60,7 +60,7 @@ Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent"
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -109,6 +109,7 @@ Guard-routed tools only."
+                },
+                {
+                  "file": "docs/templates/run/retrospective.md",
+                  "header": "@@ -13,7 +13,16 @@"
+                },
+                {
+                  "file": "knowledge/hamastar-cms.md",
+                  "header": "@@ -22,6 +22,8 @@ Product/framework signatures are public; specific customer instances are NOT nam"
+                },
+                {
+                  "file": "knowledge/hamastar-cms.md",
+                  "header": "@@ -76,6 +78,10 @@ Product/framework signatures are public; specific customer instances are NOT nam"
+                },
+                {
+                  "file": "knowledge/hamastar-cms.md",
+                  "header": "@@ -85,6 +91,9 @@ Product/framework signatures are public; specific customer instances are NOT nam"
+                },
+                {
+                  "file": "knowledge/soarcloud-ais-hr.md",
+                  "header": "@@ -79,7 +79,7 @@ No payloads/PoC. Seeded from a real run (see runs/<run>/ in workspace, not here)"
+                },
+                {
+                  "file": "knowledge/weak-credentials-captcha.md",
+                  "header": "@@ -39,6 +39,10 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs"
+                },
+                {
+                  "file": "knowledge/weak-credentials-captcha.md",
+                  "header": "@@ -81,8 +85,9 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs"
+                },
+                {
+                  "file": "knowledge/weak-credentials-captcha.md",
+                  "header": "@@ -100,6 +105,9 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs"
+                },
+                {
+                  "file": "tools/captcha_ocr.py",
+                  "header": "@@ -0,0 +1,158 @@"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -110,6 +110,25 @@ OPTIONAL_MARKERS = {"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -168,14 +187,30 @@ def current_evidence_index_hash(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -279,6 +314,14 @@ def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1699,6 +1742,32 @@ def _retro_section_filled(body: str | None) -> bool:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1714,11 +1783,17 @@ def check_retrospective(run_dir: Path) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2142,6 +2217,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2169,12 +2245,15 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2197,6 +2276,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2463,16 +2544,23 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2495,7 +2583,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2544,7 +2633,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2558,6 +2648,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2775,7 +2867,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3103,12 +3196,28 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -314,6 +314,18 @@ def _parse_front_blocks(run_dir: Path) -> list[dict]:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -639,6 +651,86 @@ def write_outputs(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -734,6 +826,35 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -776,6 +897,16 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -790,6 +921,8 @@ def main(argv: list[str] | None = None) -> int:"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -802,6 +935,8 @@ def main(argv: list[str] | None = None) -> int:"
+                },
+                {
+                  "file": "tools/evidence_parse.py",
+                  "header": "@@ -17,7 +17,7 @@ from pathlib import Path"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -83,7 +83,13 @@ def _write(path: Path, text: str) -> None:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -906,6 +912,9 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -1034,6 +1043,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -62,6 +62,16 @@ DEFAULT_CONFIG: dict = {"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -312,6 +322,55 @@ def _redact_text(text: str) -> str:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -342,10 +401,13 @@ def _artifact_record(run_dir: Path, token: str, *, redact: bool = False,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1033,6 +1095,84 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1074,40 +1214,50 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1125,7 +1275,8 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1441,6 +1592,9 @@ def resolve_finding(run_dir: Path, pr_id: str, status: str, resolution: str) ->"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1520,6 +1674,31 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1601,8 +1780,6 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1629,6 +1806,24 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1669,6 +1864,12 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -24,14 +24,16 @@ import contextlib"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -251,6 +253,148 @@ def _header_value(headers: dict, name: str) -> str | None:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -446,6 +590,16 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -489,6 +643,16 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -560,6 +724,29 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -647,6 +834,16 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -686,6 +883,7 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -703,6 +901,12 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -744,6 +948,8 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -236,6 +236,59 @@ def _parse_list_field(text: str, name: str) -> list[str]:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -349,8 +402,9 @@ def compute(front_block: str, constraints: list[dict]) -> dict:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -359,24 +413,26 @@ def compute(front_block: str, constraints: list[dict]) -> dict:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -387,6 +443,8 @@ def compute(front_block: str, constraints: list[dict]) -> dict:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -400,9 +458,12 @@ def compute(front_block: str, constraints: list[dict]) -> dict:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -527,11 +588,14 @@ def _print_full_report(run_dir: Path) -> int:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -555,6 +619,7 @@ def _print_front_detail(run_dir: Path, front_id: str) -> int:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -566,6 +631,12 @@ def _print_front_detail(run_dir: Path, front_id: str) -> int:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -669,6 +740,12 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -699,6 +776,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/saturation.py",
+                  "header": "@@ -718,6 +796,9 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/selftest_all.py",
+                  "header": "@@ -65,6 +65,7 @@ SUITES: list[tuple[str, list[str], str]] = ["
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/.claude/hooks/output_gate.py b/.claude/hooks/output_gate.py\nindex 6e9d92a..f9b70bd 100644\n--- a/.claude/hooks/output_gate.py\n+++ b/.claude/hooks/output_gate.py\n@@ -20,13 +20,14 @@ Usage:\n from __future__ import annotations\n \n import json\n+import os\n import re\n import sys\n import time\n from pathlib import Path\n \n ROOT = Path(__file__).resolve().parents[2]\n-RUNS = ROOT / \"runs\"\n+RUNS = Path(os.environ.get(\"XUNJI_RUNS_ROOT\", str(ROOT / \"runs\")))\n SESSION_STATE_STALE_SEC = 50 * 60  # session timeout 50 min\n INVISIBLE_RE = re.compile(r\"[​‌‍⁠﻿ ]\")\n sys.path.insert(0, str(ROOT / \"tools\"))\n@@ -75,6 +76,11 @@ except Exception:\n         def reset_if_stale(run_dir, hard_block_active=False):\n             return {}\n \n+try:\n+    import loop_state as _loop_state\n+except Exception:\n+    _loop_state = None\n+\n \n def _strip_invisible(s: str) -> str:\n     \"\"\"Remove zero-width and invisible characters from string.\"\"\"\n@@ -140,6 +146,39 @@ def _next_drift_started_at(prev_state: dict, drift_flags: list[str], now: float)\n     return now\n \n \n+def _active_protocol_fronts(run_dir: Path) -> list[str]:\n+    \"\"\"Return fronts that still require an action-bearing turn ending.\n+\n+    This is read-only. If derived state is unavailable, fail open: output_gate is\n+    process discipline, not the safety boundary.\n+    \"\"\"\n+    if _loop_state is None:\n+        return []\n+    try:\n+        data = _loop_state.derive(run_dir, write=False)\n+    except Exception:\n+        return []\n+    fronts = data.get(\"fronts\") if isinstance(data.get(\"fronts\"), dict) else {}\n+    active = set()\n+    for key in (\"open\", \"blocked_type_a\"):\n+        values = fronts.get(key) if isinstance(fronts.get(key), list) else []\n+        active.update(str(x) for x in values if str(x).strip())\n+    return sorted(active)\n+\n+\n+def _protocol_block_reason(msg: str, run_dir: Path) -> str:\n+    active = _active_protocol_fronts(run_dir)\n+    if not active or _tail_has_proper_close(msg):\n+        return \"\"\n+    sample = \", \".join(active[:6])\n+    more = \"\" if len(active) <= 6 else f\" 等 {len(active)} 个\"\n+    return (\n+        \"[输出协议硬拦] 当前 run 仍有 open/probing/blocked_type_a 前沿\"\n+        f\"({sample}{more})，本轮输出必须以单一 `下一行动: <具体 action>` 或 \"\n+        \"`BLOCKED: <外部依赖>` 结尾。请删掉摘要/多选/询问式结尾，补一个可执行下一行动。\"\n+    )\n+\n+\n def main() -> None:\n     if \"--selftest\" in sys.argv:\n         sys.exit(_selftest())\n@@ -208,6 +247,8 @@ def main() -> None:\n             else:\n                 frontier_mtime = 0.0\n \n+            protocol_block = _protocol_block_reason(msg, run_dir)\n+\n             # ---- Escalation tracking: consecutive drift count ----\n             drift_count = _next_drift_count(prev_state, drift_flags)\n             drift_started_at = _next_drift_started_at(prev_state, drift_flags, now)\n@@ -223,6 +264,9 @@ def main() -> None:\n                 \"frontier_alerted_at\": _frontier_alerted if _frontier_alerted > 0 else prev_state.get(\"frontier_alerted_at\", 0),\n             }\n             SessionStateManager.save(run_dir, state)\n+            if protocol_block:\n+                print(json.dumps({\"decision\": \"block\", \"reason\": protocol_block}, ensure_ascii=False))\n+                sys.exit(0)\n \n         # ---- Drift notification: systemMessage only (no drift_block.json, Decision 2) ----\n         if drift_flags:\n@@ -255,6 +299,8 @@ def main() -> None:\n \n def _selftest() -> int:\n     \"\"\"Regression tests. Returns 0 if healthy.\"\"\"\n+    import os as _os\n+    import subprocess\n     import tempfile\n \n     checks: list[tuple[str, bool]] = []\n@@ -341,6 +387,57 @@ def _selftest() -> int:\n     checks.append((\"valid_ts zero -> 0\", _valid_ts(0, now_ts) == 0.0))\n     checks.append((\"valid_ts non-numeric -> 0\", _valid_ts(\"abc\", now_ts) == 0.0))\n \n+    open_run = d / \"open_run\"\n+    open_run.mkdir()\n+    (open_run / \"frontier.md\").write_text(\n+        \"# Frontier\\n\\n## Open Fronts\\n\\n### F-001\\n- Status: open\\n- Barrier class: auth-layer\\n\",\n+        encoding=\"utf-8\")\n+    (open_run / \"evidence.md\").write_text(\"# Evidence Ledger\\n\", encoding=\"utf-8\")\n+    (open_run / \"decisions.md\").write_text(\"# Decisions\\n\", encoding=\"utf-8\")\n+    (open_run / \"hypotheses.md\").write_text(\"# Hypotheses\\n\", encoding=\"utf-8\")\n+    closed_run = d / \"closed_run\"\n+    closed_run.mkdir()\n+    (closed_run / \"frontier.md\").write_text(\n+        \"# Frontier\\n\\n## Closed Fronts\\n\\n### F-001\\n- Status: closed\\n- Barrier class: none\\n\",\n+        encoding=\"utf-8\")\n+    (closed_run / \"evidence.md\").write_text(\"# Evidence Ledger\\n\", encoding=\"utf-8\")\n+    (closed_run / \"decisions.md\").write_text(\"# Decisions\\n\", encoding=\"utf-8\")\n+    (closed_run / \"hypotheses.md\").write_text(\"# Hypotheses\\n\", encoding=\"utf-8\")\n+    checks.append((\"protocol fronts detect open run\", _active_protocol_fronts(open_run) == [\"F-001\"]))\n+    checks.append((\"protocol fronts ignore closed run\", _active_protocol_fronts(closed_run) == []))\n+    checks.append((\"open run without 下一行动 hard-blocks\",\n+                   \"输出协议硬拦\" in _protocol_block_reason(\"本轮完成，继续。\", open_run)))\n+    checks.append((\"open run with 下一行动 passes protocol\",\n+                   _protocol_block_reason(\"下一行动: F-001 尝试登录错误页对照\", open_run) == \"\"))\n+    checks.append((\"closed run without 下一行动 passes protocol\",\n+                   _protocol_block_reason(\"收口检查完成。\", closed_run) == \"\"))\n+\n+    runs_root = d / \"runs\"\n+    live_run = runs_root / \"live_run\"\n+    live_run.mkdir(parents=True)\n+    (live_run / \"frontier.md\").write_text(\n+        \"# Frontier\\n\\n## Open Fronts\\n\\n### F-900\\n- Status: open\\n- Barrier class: auth-layer\\n\",\n+        encoding=\"utf-8\")\n+    (live_run / \"evidence.md\").write_text(\"# Evidence Ledger\\n\", encoding=\"utf-8\")\n+    (live_run / \"decisions.md\").write_text(\"# Decisions\\n\", encoding=\"utf-8\")\n+    (live_run / \"hypotheses.md\").write_text(\"# Hypotheses\\n\", encoding=\"utf-8\")\n+    event = {\"last_assistant_message\": \"本轮完成，继续。\"}\n+    env = dict(_os.environ)\n+    env[\"XUNJI_RUNS_ROOT\"] = str(runs_root)\n+    proc = subprocess.run(\n+        [sys.executable, str(Path(__file__).resolve())],\n+        input=json.dumps(event, ensure_ascii=False),\n+        text=True,\n+        capture_output=True,\n+        encoding=\"utf-8\",\n+        errors=\"replace\",\n+        env=env,\n+        timeout=10,\n+    )\n+    checks.append((\"hook subprocess blocks real run root with open front\",\n+                   proc.returncode == 0 and '\"decision\": \"block\"' in (proc.stdout or \"\")\n+                   and \"F-900\" in (proc.stdout or \"\")))\n+\n     bad = [n for n, ok in checks if not ok]\n     for n, ok in checks:\n         print((\"ok   \" if ok else \"FAIL \") + n, file=sys.stderr)\ndiff --git a/.claude/skills/captcha-solve/SKILL.md b/.claude/skills/captcha-solve/SKILL.md\nindex 3596fdb..cd299ab 100644\n--- a/.claude/skills/captcha-solve/SKILL.md\n+++ b/.claude/skills/captcha-solve/SKILL.md\n@@ -48,6 +48,8 @@ load page (acquire its JS + cookies)\n   of 360 or a pixel offset the page's JS maps to an angle).\n - **Text / distorted**: out of scope for in-page solving; if needed, hand the\n   image to an OCR/solver step — keep it a separate tool, not baked in here.\n+  Use `tools/captcha_ocr.py` for bounded local OCR diagnostics; after 3-5 empty\n+  attempts, record an OCR barrier / Type B condition instead of blind guessing.\n \n ## Gotchas (learned the hard way; generalize, don't hardcode)\n \ndiff --git a/.claude/skills/xunji-peer-review-panel/SKILL.md b/.claude/skills/xunji-peer-review-panel/SKILL.md\nindex 94a26ae..a4e6e7b 100644\n--- a/.claude/skills/xunji-peer-review-panel/SKILL.md\n+++ b/.claude/skills/xunji-peer-review-panel/SKILL.md\n@@ -52,6 +52,11 @@ Use the default Claude-driver command for run closure:\n python3 tools/peer_review.py runs/<dir> --into-run\n ```\n \n+The default path retries transient/empty-output backend failures, then falls\n+through to the next independent backend in the active matrix. A Codex timeout\n+should therefore become arkcli panel review when arkcli is available, not a\n+silent manual-review shortcut.\n+\n Use bundle-only when egress is not yet accepted or the operator wants to inspect\n the review material first:\n \ndiff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md\nindex 53aa399..9928f56 100644\n--- a/.claude/skills/xunji-run-lifecycle/SKILL.md\n+++ b/.claude/skills/xunji-run-lifecycle/SKILL.md\n@@ -145,6 +145,7 @@ python tools/graph.py runs/<dir>\n python tools/workers.py status runs/<dir>\n python tools/workers.py conflicts runs/<dir>\n python tools/saturation.py runs/<dir>\n+python tools/coverage_matrix.py runs/<dir> --write --sync-coverage\n ```\n \n Read `hints.md` every cycle when it exists. If the operator gives a directive,\n@@ -215,7 +216,9 @@ Closure gates:\n   cure self-review bias.\n - Resolve `PR-xxx` review ledger blockers before closure.\n - `retrospective.md` must honestly fill the Self problems and Framework/tooling\n-  problems sections.\n+  problems sections. Framework/tooling lessons must include a repair status such\n+  as `- Status: fixed|open|deferred` plus the fix/verification or residual risk;\n+  unstatused lessons are not closed-loop and fail closure.\n - `report.md` may list only finding-maturity evidence in `Evidence IDs:`.\n - Confirmed entries need the canonical certainty scale, saved artifacts, and\n   Replicated or Control rationale.\n@@ -230,6 +233,12 @@ Closure gates:\n   `cron_cancelled=<job-id|none>`. `check_run.py` hard-fails a completion marker\n   without that auditable cron disposition.\n \n+Probe chain note:\n+\n+- For token/cookie flows, keep evidence inside `probe.py`: use\n+  `--preflight-get`, `--extract-csrf`, `--csrf-field`, `--cookie-jar`, and\n+  `--preflight-save` instead of hand-running curl outside the replay chain.\n+\n ## Tool Selftests\n \n After editing lifecycle tools or templates, run:\ndiff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md\nindex 336ffc6..f7295e8 100644\n--- a/docs/WORKFLOW-reference.md\n+++ b/docs/WORKFLOW-reference.md\n@@ -627,18 +627,20 @@ gate, guard/hook boundary, and review requirements still apply.\n own dedicated proxy channel (`tools/harness/codex_proxy.py`, configured via `CODEX_PROXY`\n env or `tools/harness/codex_proxy.conf`), isolated from the engagement proxy\n (`XUNJI_PROXY`) and the model-API direct channel. Without it, codex is unreachable and\n-peer_review falls through to the arkcli panel, then the Claude fallback. See\n-`review/independent-reviewer.md` \"Codex 代理（必须）\".\n+peer_review retries transient/empty-output failures, then falls through to the arkcli\n+panel; Claude fallback is recorded as same-family unless the active driver matrix\n+allows it. See `review/independent-reviewer.md` \"Codex 代理（必须）\".\n \n **Mandatory retrospective before closure — procedure.** Every pentest closes with an honest\n `retrospective.md` (scaffolded from `docs/templates/run/retrospective.md`): what *I* (the\n driver) got wrong/slow/missed (wrong calls, tunnel vision, premature closure, evidence-gate\n slips) and where the *framework/tooling* (tools/, hooks, guard, knowledge base, docs) held\n the run back — the basis for the next run being stronger, not a disclaimer. `check_run.py`\n-HARD-fails closure if `retrospective.md` is missing or its **Self problems** / **Framework\n-problems** sections are empty placeholders. Retrospective `Status:` / `Verdict:`\n-values such as `FINAL` activate closure gates, but they are not completion\n-actions.\n+HARD-fails closure if `retrospective.md` is missing, its **Self problems** /\n+**Framework problems** sections are empty placeholders, or Framework/tooling\n+lessons lack a repair status (`fixed|open|deferred`, with fix/verification or\n+residual risk). Retrospective `Status:` / `Verdict:` values such as `FINAL`\n+activate closure gates, but they are not completion actions.\n \n **Completion marker and scheduled-loop disposition.** `GHOST_COMPLETE` /\n `NORMAL_COMPLETE` belongs only in `decisions.md` and only after closure gates pass.\ndiff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md\nindex bc4a1a4..8a65ed7 100644\n--- a/docs/WORKFLOW.md\n+++ b/docs/WORKFLOW.md\n@@ -69,7 +69,7 @@ python tools/workers.py status runs/<dir>\n python tools/workers.py lifecycle-check runs/<dir>\n python tools/workers.py conflicts runs/<dir>\n python tools/saturation.py runs/<dir>\n-python tools/coverage_matrix.py runs/<dir> --write\n+python tools/coverage_matrix.py runs/<dir> --write --sync-coverage\n python tools/loop_journal.py runs/<dir> status\n python tools/loop_state.py runs/<dir> --write\n python tools/progress_ledger.py runs/<dir> --write\n@@ -411,7 +411,7 @@ assets were only header / recon-classified, never examined. Before any such clai\n   name the signal that made each relevant; a negative/deferred record states the barrier\n   or why the class did not apply; no fixed payload list (payloads stay local/operator-chosen);\n   the gate wants evidence of *reasoning/attack attempt*, not exhaustive exploitation.\n-  Run `python tools/coverage_matrix.py runs/<dir> --write` before closure or Coda\n+  Run `python tools/coverage_matrix.py runs/<dir> --write --sync-coverage` before closure or Coda\n   trajectory-review checks to see the derived asset×vuln-family view. `□` means the\n   category is signal-justified for that asset but no test record is visible; `·`\n   means no current surface signal. Whole empty columns and sparse rows are review\n@@ -454,7 +454,8 @@ assets were only header / recon-classified, never examined. Before any such clai\n   honest `retrospective.md` — what *I* got wrong/slow/missed (wrong calls, tunnel vision,\n   premature closure, evidence slips) + where the framework/tooling held the run back; the\n   basis for a stronger next run, not a disclaimer. `check_run.py` **hard-fails** closure if\n-  it's missing or its **Self problems** / **Framework problems** are empty stubs. Procedure:\n+  it's missing, its **Self problems** / **Framework problems** are empty stubs, or\n+  Framework/tooling lessons lack a repair status (`fixed|open|deferred`). Procedure:\n   reference \"Run-closure detail\".\n \n - **Closure signals vs completion actions.** A final report, `decisions.md`\ndiff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md\nindex a40179a..d796c71 100644\n--- a/docs/templates/loop_prompt.md\n+++ b/docs/templates/loop_prompt.md\n@@ -60,7 +60,7 @@ Read frontier.md (all open/deferred/closed fronts), recent decisions.md, recent\n {{PYTHON}} tools/workers.py lifecycle-check \"{{RUN_DIR}}\"\n {{PYTHON}} tools/workers.py conflicts \"{{RUN_DIR}}\"\n {{PYTHON}} tools/saturation.py \"{{RUN_DIR}}\"\n-{{PYTHON}} tools/coverage_matrix.py \"{{RUN_DIR}}\" --write\n+{{PYTHON}} tools/coverage_matrix.py \"{{RUN_DIR}}\" --write --sync-coverage\n {{PYTHON}} tools/loop_state.py \"{{RUN_DIR}}\" --write\n {{PYTHON}} tools/progress_ledger.py \"{{RUN_DIR}}\" --write\n {{PYTHON}} tools/run_controller.py \"{{RUN_DIR}}\" --shadow\n@@ -109,6 +109,7 @@ Guard-routed tools only.\n {{PYTHON}} tools/probe.py GET \"https://target/large-doc\" --save NAME --run \"{{RUN_DIR}}\" --save-chunks\n {{PYTHON}} tools/probe.py GET \"https://target/path\" -H \"K: V\" --save NAME --run \"{{RUN_DIR}}\"\n {{PYTHON}} tools/probe.py POST \"https://target/path\" --data '{\"k\":\"v\"}' -H \"Content-Type: application/json\" --save NAME --run \"{{RUN_DIR}}\"\n+{{PYTHON}} tools/probe.py POST \"https://target/path\" --preflight-get \"https://target/form\" --extract-csrf 'name=\"__RequestVerificationToken\" value=\"([^\"]+)\"' --cookie-jar \"{{RUN_DIR}}/state/probe-cookies.json\" --preflight-save FORM --data 'field=value' --save NAME --run \"{{RUN_DIR}}\"\n {{PYTHON}} tools/scan.py sqlmap \"https://target/path?id=1\"\n {{PYTHON}} tools/scan.py nuclei \"https://target/\"\n ```\ndiff --git a/docs/templates/run/retrospective.md b/docs/templates/run/retrospective.md\nindex 7afac78..e2784a9 100644\n--- a/docs/templates/run/retrospective.md\n+++ b/docs/templates/run/retrospective.md\n@@ -13,7 +13,16 @@\n \n ## Framework / tooling problems / 框架与工具问题\n <tools/ hooks guard 知识库 文档 哪里拖了本 run 后腿: 缺能力、误报闸门、消息误导、\n-知识陈旧、模板不顺手。诚实写明确无也可, 但先认真想过。>\n+知识陈旧、模板不顺手。每条问题必须带 `- Status: fixed|open|deferred`\n+或明确写 no framework/tooling issue。>\n+\n+### FW-001\n+\n+- Problem:\n+- Status: <fixed|open|deferred>\n+- Fixed by:\n+- Verification:\n+- Residual risk:\n \n ## Improvements / 改进项\n <具体可落地的下一步: 要改的文件/工具/知识条目, 或确无则写 none。>\ndiff --git a/knowledge/hamastar-cms.md b/knowledge/hamastar-cms.md\nindex 75dd993..b6e4f52 100644\n--- a/knowledge/hamastar-cms.md\n+++ b/knowledge/hamastar-cms.md\n@@ -22,6 +22,8 @@ Product/framework signatures are public; specific customer instances are NOT nam\n   (the `_v4.5` suffix is the framework generation marker); hidden fields\n   `__VIEWSTATE` / `__VIEWSTATEGENERATOR` / `__EVENTVALIDATION` + ScriptManager;\n   login fields `txtAccount` / `txtPW` / `txtVali` with captcha `Common/CheckCode.aspx?t=<hex>`;\n+  the observed text captcha may be a small noisy GIF where local OCR returns empty\n+  across bounded PSM attempts;\n   inline `var lang = {…}` multi-language JSON; fancybox + `vue.min.js` + `jquery.min.js`;\n   buttons `btnApplyAccount` (apply account) / `btnForgotPasswd` / `btnICLogin` (natural-person cert);\n   banner `登入錯誤 3 次後…帳號即被鎖定`.\n@@ -76,6 +78,10 @@ Product/framework signatures are public; specific customer instances are NOT nam\n   shell) under the same gate — confirms the route-coverage hole. Do not submit changes or\n   touch admin data.\n - Open redirect: confirm `ReturnUrl` reflected into the form action; do not actually phish.\n+- Captcha barrier: if `Common/CheckCode.aspx` returns a small noisy GIF and 3-5 bounded\n+  OCR attempts through `tools/captcha_ocr.py` all return empty, record the OCR barrier\n+  and switch to server-side captcha-enforcement or post-captcha boundary evidence. Do\n+  not continue blind captcha guessing.\n - Hard stops (confidentiality / availability / integrity): prove existence only — no data\n   pull, no database dump, no tamper, no persistence. One probe per finding, proof-level.\n \n@@ -85,6 +91,9 @@ Product/framework signatures are public; specific customer instances are NOT nam\n   real login. It is a route-coverage gap, not an auth bypass; grade it as such.\n - A 500 may mean the feature is simply unconfigured (e.g. forgot-password not wired up), not\n   an exploitable flaw — the info-disclosure stands, RCE does not follow from it.\n+- OCR failure on this captcha shape is not evidence of a bypass or password [REDACTED]; it is\n+  a testing barrier unless the captcha answer leaks client-side or the server accepts a\n+  controlled post-captcha request.\n - Customer sites share the framework, but each instance must be verified on its own (same\n   framework ≠ same config / same patch level).\n \ndiff --git a/knowledge/soarcloud-ais-hr.md b/knowledge/soarcloud-ais-hr.md\nindex 64b87a8..7c446f2 100644\n--- a/knowledge/soarcloud-ais-hr.md\n+++ b/knowledge/soarcloud-ais-hr.md\n@@ -79,7 +79,7 @@ No payloads/PoC. Seeded from a real run (see runs/<run>/ in workspace, not here)\n     function. This is destructive; do not auto-execute delete proofs.\n   - CVE-2025-48784 / ZA-2025-09: missing authorization allowing system-setting\n     modification. Treat setting changes as operator-gated state changes.\n-  - References: ZUSO ART advisories ZA-2025-04..09; NVD CVE-2025-5192,\n+  - Reference: ZUSO ART advisories ZA-2025-04..09; NVD CVE-2025-5192,\n     CVE-2025-48780..48784.\n   - source: public-advisory\n \ndiff --git a/knowledge/weak-credentials-captcha.md b/knowledge/weak-credentials-captcha.md\nindex a3e7dbf..298f621 100644\n--- a/knowledge/weak-credentials-captcha.md\n+++ b/knowledge/weak-credentials-captcha.md\n@@ -39,6 +39,10 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs\n   or reversibly encoded; slider captcha where the target position is sent\n   client-side; arithmetic captcha with simple expression. \"Click to verify\"\n   behavioral captcha with no server-side validation.\n+- Signature (captcha OCR barrier): small noisy text captcha where bounded local\n+  OCR attempts return empty across several PSM modes. This is a testing barrier,\n+  not a bypass signal; record it as Type B/OCR barrier unless another server-side\n+  weakness is proven.\n - Signature (user enumeration): different error messages for \"user not found\"\n   vs \"wrong password\"; different response times for valid vs invalid users;\n   password reset flow confirms/denies user existence.\n@@ -81,8 +85,9 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs\n - Existence proof: test password policy by submitting a weak password and\n   observing the error message. Test rate limiting by sending 5-10 rapid login\n   attempts and observing response status/timing. Test captcha by inspecting\n-  the captcha response for leaked answers. Test user enumeration by comparing\n-  login errors for known-valid vs known-invalid usernames.\n+  the captcha response for leaked answers. If using OCR, bound it to 3-5 attempts\n+  and record `tools/captcha_ocr.py` output when all attempts are empty. Test user\n+  enumeration by comparing login errors for known-valid vs known-invalid usernames.\n - Hard stops: confirm the weakness exists. Do NOT run a full brute-force\n   attack (even with a small wordlist) — that is operator-gated. Do NOT use\n   discovered valid usernames to attempt login. The finding is the weakness\n@@ -100,6 +105,9 @@ attempts), mokwon run (student:12345678 weak password), DVWA runs\n - Captcha that appears weak may still have server-side replay protection or\n   HMAC signing — test that the extracted answer actually works on a real\n   request before concluding bypass.\n+- Captcha that defeats OCR is not evidence that the target is secure; it only\n+  supports a barrier/deferred decision unless paired with server-side enforcement\n+  evidence.\n - Some systems use adaptive rate limiting (increasing delays) rather than\n   hard cutoffs — a consistent ~2s response time after rapid attempts is a\n   rate limit (just a subtle one).\ndiff --git a/tools/captcha_ocr.py b/tools/captcha_ocr.py\nnew file mode 100644\nindex 0000000..e24b93c\n--- /dev/null\n+++ b/tools/captcha_ocr.py\n@@ -0,0 +1,158 @@\n+#!/usr/bin/env python3\n+\"\"\"Small, auditable wrapper for text captcha OCR attempts.\n+\n+This tool is deliberately limited: it invokes local tesseract with argv lists\n+only, records empty results clearly, and never decides that a captcha is bypassed.\n+Use it to gather a few proof-level OCR attempts before declaring an OCR barrier.\n+\"\"\"\n+from __future__ import annotations\n+\n+import argparse\n+import json\n+import shutil\n+import subprocess\n+import sys\n+import tempfile\n+from pathlib import Path\n+\n+try:\n+    sys.stdout.reconfigure(encoding=\"utf-8\")  # type: ignore[attr-defined]\n+except Exception:\n+    pass\n+\n+\n+DEFAULT_PSMS = [7, 8, 13]\n+\n+\n+def _resolve_image(path: str | Path) -> tuple[Path | None, str]:\n+    p = Path(path).expanduser()\n+    try:\n+        p = p.resolve(strict=True)\n+    except FileNotFoundError:\n+        return None, f\"image not found: {p}\"\n+    except OSError as e:\n+        return None, f\"image path error: {e}\"\n+    if not p.is_file():\n+        return None, f\"image is not a file: {p}\"\n+    return p, \"\"\n+\n+\n+def _build_cmd(tesseract: str, image: Path, *, psm: int, lang: str) -> list[str]:\n+    return [tesseract, str(image), \"stdout\", \"--psm\", str(psm), \"-l\", lang]\n+\n+\n+def run_ocr(image_path: str | Path, *, tesseract: str | None = None,\n+            psms: list[int] | None = None, lang: str = \"eng\",\n+            timeout: int = 10) -> dict:\n+    image, err = _resolve_image(image_path)\n+    if err:\n+        return {\"ok\": False, \"error\": err, \"attempts\": []}\n+    exe = tesseract or shutil.which(\"tesseract\")\n+    if not exe:\n+        return {\n+            \"ok\": False,\n+            \"error\": \"tesseract not found; install it or pass --tesseract /absolute/path\",\n+            \"image\": str(image),\n+            \"attempts\": [],\n+        }\n+    if not shutil.which(exe) and not Path(exe).expanduser().is_file():\n+        return {\n+            \"ok\": False,\n+            \"error\": f\"tesseract not found: {exe}\",\n+            \"image\": str(image),\n+            \"attempts\": [],\n+        }\n+    attempts = []\n+    for psm in (psms or DEFAULT_PSMS):\n+        cmd",
+            "excerpt_truncated_chars": 66413
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002 — Full selftest output",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "selftest_all.log",
+            "path": "selftest_all.log",
+            "exists": true,
+            "size": 3431,
+            "sha1": "dbf6d420d2b75d9c3b5c9a856de2d243ff508efe",
+            "excerpt": "running 54 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14\n\n  PASS  check_run          0.1s  evidence gate + closure\n  PASS  classify_hosts    39.7s  recon -> coverage\n  PASS  scope              0.0s  run scope derive/match\n  PASS  peer_review        0.1s  heterogeneous review\n  PASS  probe              7.6s  active HTTP sensor\n  PASS  render             0.1s  headless browser + --eval replay\n  PASS  anti_drift         3.4s  anti-drift anchor (rules+process re-inject)\n  PASS  proxy              0.1s  engagement egress proxy (渗透走/模型不走)\n  PASS  codex_proxy        0.0s  Codex review proxy hygiene\n  PASS  replay            13.6s  evidence replay\n  PASS  setup_run          0.1s  run scaffolding\n  PASS  ingest_recon       0.0s  Guanlan recon adapter\n  PASS  bench              0.1s  R-1 self-eval scorer\n  PASS  check_knowledge    0.0s  public knowledge grounding structure\n  PASS  local_hygiene      0.1s  local/publication hygiene guard\n  PASS  runtime_boundary   0.0s  Codex hooks absence guard\n  PASS  check_templates    0.0s  template/reference drift guard\n  PASS  knowledge_match    0.0s  fingerprint→knowledge retrieval\n  PASS  xday_match         0.0s  fingerprint→local xday retrieval\n  PASS  knowledge_seed     0.0s  fingerprint→knowledge write-back\n  PASS  timestamp_gate     0.0s  web research time gate\n  PASS  record_evidence    0.0s  web research -> evidence ledger\n  PASS  decode_viewstate   0.0s  ASP.NET ViewState decoder\n  PASS  captcha_ocr        0.1s  bounded captcha OCR wrapper\n  PASS  input_shape        0.0s  request shape parser\n  PASS  js_inventory       0.0s  saved-artifact JS/API inventory sensor\n  PASS  oob_listener       1.0s  local OOB listener\n  PASS  sensor_oob         0.2s  OOB callback artifact sensor\n  PASS  sensor_mutate      0.1s  payload mutation artifact sensor\n  PASS  sensor_blind_diff   1.1s  blind differential artifact sensor\n  PASS  sensor_upload      1.2s  harmless upload proof sensor\n  PASS  sensor_client_graybox   0.1s  client graybox phenomenon sensor\n  PASS  state_project      0.0s  markdown-derived run state projection\n  PASS  context_pack       0.0s  minimal subagent context pack\n  PASS  loop_state         0.1s  closed-loop progress and gate snapshot\n  PASS  status_style       0.0s  operator-facing colored status panels\n  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline\n  PASS  progress_ledger    0.1s  material-progress ledger\n  PASS  run_controller     0.1s  advisory shadow run controller\n  PASS  loop_journal       0.0s  loop interruption journal\n  PASS  loop_bootstrap     0.5s  autonomous loop launcher\n  PASS  session_handoff    0.1s  session handoff tool\n  PASS  deferred_queue     0.0s  deferred asset retry manager\n  PASS  workers            0.2s  fan-out worker planning helpers\n  PASS  saturation         0.0s  front saturation scoring\n  PASS  coverage_matrix    0.0s  asset x vuln-family coverage matrix\n  PASS  safety_gate        0.0s  hard-boundary gate\n  PASS  ip_blacklist       0.0s  local IP/domain deny hook\n  PASS  output_gate        0.1s  output drift Stop gate\n  PASS  run_gate           1.2s  coverage/depth Stop gate\n  PASS  check_hook         2.8s  safety_gate live-fire\n  PASS  sentinel_replay    0.0s  behavior detectors 26-case\n  PASS  verify_layers      1.1s  safety-floor coverage\n  PASS  guard_smoke        0.0s  guard rate/cap/breaker smoke\n\n54 passed, 0 failed  (75.7s total)\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003 — Latest run structural check",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "check_run_hamastar.log",
+            "path": "check_run_hamastar.log",
+            "exists": true,
+            "size": 927,
+            "sha1": "81e3169f8221f97d8c5a7dc10e16828d1047ce3a",
+            "excerpt": "warnings\n- Metacog pass(软门): report 已触发收口/终版报告, 但 decisions.md 未记录 Metacog pass。收口前应做一次第二系统发散, 找盲区并提出可验证动作; 它只打开/重排前沿, 不确认、不关门。\n- report 含强收口断言(如'无攻击面/探尽/打不动'), 但本 run 无逐资产按内容分类记录(classify_hosts.py 的 classify.txt) —— 资产可能只按 server 头/recon lump, 未逐个看内容。收口前请跑 `python tools/classify_hosts.py`。\n- frontier Closed Front '### F-003 — MVC TestLogin (2019yles-mgr) — DEFER': 以屏障(blocked)关门却无 Refutes/正面证据 —— '我够不着'应记 deferred 而非 closed(它安全)。\n- frontier Closed Front '### F-004 — fubonebook2 (富邦電子書城) — DEFERRED (bac': 以屏障(WAF)关门却无 Refutes/正面证据 —— '我够不着'应记 deferred 而非 closed(它安全)。\nrun check passed\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004 — Framework/knowledge/template checks",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "framework_checks.log",
+            "path": "framework_checks.log",
+            "exists": true,
+            "size": 196,
+            "sha1": "f9e34ecda2455371323971cea76ca44a79f6062d",
+            "excerpt": "knowledge check passed (40 file(s))\ntemplate check passed\nruntime boundary check passed\npython_command_refs total=305 missing=0\nselftest_entrypoints total=50 not_registered=0\nclosure_audit passed\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-005",
+        "head": "## E-005 — Git whitespace checks",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "diff_check.log",
+            "path": "diff_check.log",
+            "exists": true,
+            "size": 59,
+            "sha1": "16cc619a38992d1169a3b8515f7393cb24c4bb12",
+            "excerpt": "git diff --check: passed\ngit diff --cached --check: passed\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-006",
+        "head": "## E-006 — Output gate real-run subprocess regression",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "output_gate_selftest.log",
+            "path": "output_gate_selftest.log",
+            "exists": true,
+            "size": 1596,
+            "sha1": "5f58ddce33cceebd611634e56e20dc957196ae39",
+            "excerpt": "ok   empty -> []\nok   clean -> []\nok   BLOCKED ok\nok   是否继续 detected\nok   要不要继续 detected\nok   你决定 detected\nok   English detected\nok   DRIFT_PATTERNS non-empty\nok   deep pattern not in tail\nok   tail ? detected\nok   tail ? detected (ASCII)\nok   no question mark\nok   empty no question\nok   proper close: 下一行动\nok   proper close: BLOCKED\nok   proper close: trailing space\nok   no proper close: prose\nok   no proper close: question\nok   no proper close: empty\nok   no proper close: mid-sentence only\nok   option list detected\nok   option list with paren\nok   option list with Chinese\nok   single option only\nok   no option list\nok   proper close with zero-width\nok   drift detect with zero-width\nok   option list with zero-width\nok   strip_invisible removes zwsp\nok   strip_invisible no-op\nok   session_state roundtrip\nok   session_state missing -> {}\nok   drift count first hit -> 1\nok   drift count increments on drift\nok   drift count resets on clean\nok   drift count bad prior -> 1\nok   drift started first hit -> now\nok   drift started preserves streak\nok   drift started resets on clean\nok   drift started bad prior -> now\nok   valid_ts valid\nok   valid_ts negative -> 0\nok   valid_ts future -> 0\nok   valid_ts zero -> 0\nok   valid_ts non-numeric -> 0\nok   protocol fronts detect open run\nok   protocol fronts ignore closed run\nok   open run without 下一行动 hard-blocks\nok   open run with 下一行动 passes protocol\nok   closed run without 下一行动 passes protocol\nok   hook subprocess blocks real run root with open front\noutput_gate selftest passed\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-007",
+        "head": "## E-007 — check_run retrospective/status gate regression",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "check_run_selftest.log",
+            "path": "check_run_selftest.log",
+            "exists": true,
+            "size": 9685,
+            "sha1": "3a1805d4b7287997e812ea3c0126ac64729f352f",
+            "excerpt": "ok   preamble not counted\nok   report Evidence IDs parser accepts bullet form\nok   split certainty -> confirmed\nok   off-doctrine 0.9 -> confirmed (C1)\nok   downgrade w/ grid nums in note -> NOT confirmed (the 2026-06-17 fix)\nok   multi-line split certainty -> confirmed (N2 regression)\nok   certainty value inside parens -> confirmed (S1 fix)\nok   explicit maturity parsed\nok   legacy confirmed entry infers finding\nok   provenance parsed from Source/Trust\nok   provenance inference is not overbroad\nok   Artifacts label may carry parenthetical metadata\nok   artifact footnote asterisk does not hide concrete token\nok   artifact shorthand/glob notes are not dead refs\nok   diff artifact parses for maintenance review\nok   dangling citation detected\nok   prose filenames not cited\nok   inline Next:(E-002) not swept into Refutes\nok   real refute detected\nok   dangling warns for E-002 only\nok   no-control entry flagged (E-003)\nok   control entries not flagged\nok   非标准 certainty -> hard error (E-004=0.9)\nok   contradiction: refuted-but-confirmed E-001\nok   no confirmed-missing-artifact FP\nok   maturity parser: phenomenon\nok   maturity parser: candidate\nok   maturity parser: unknown defaults to candidate and records raw\nok   report maturity gate: candidate in Evidence IDs hard error\nok   report maturity gate: high-cert candidate still triggers final report\nok   report maturity gate: phenomenon in body soft warn\nok   report maturity gate: inline code E-id ignored\nok   report maturity gate: lower-maturity sections are explicit context\nok   maturity consistency: unknown warns\nok   maturity consistency: finding below gate warns\nok   maturity consistency: candidate above gate warns\nok   evidence index keeps legacy confirmed and adds confirmed_findings\nok   untrusted content closure review warning\nok   untrusted content handled in review clears closure warning\nok   untrusted content suspect instruction wording warns\nok   recon cited + no coverage -> warn\nok   real report (confirmed E-id) -> final (state-trigger)\nok   final report + no coverage -> closure HARD error\nok   coverage built -> coverage warn clears\nok   coverage built -> closure coverage error clears\nok   防lump: unknown and actionable LOGIN remain candidates\nok   防lump: stub/403-only assets are not independent-app candidates\nok   no recon cited -> no coverage gate (no FP)\nok   loop_state closure blockers are check_run hard-gated\nok   shallow-close w/o Vectors tried -> warn (F-001)\nok   shallow-close WITH Vectors tried -> no warn (F-002)\nok   deep-close -> no warn (F-003)\nok   recon template placeholder -> not cited (no FP)\nok   Type B closure without E-id -> hard gate message\nok   Type B closure with E-id -> no hard gate message\nok   front verification: version-only close hard-fails\nok   front verification: 403/error close without bypass hard-fails\nok   front verification: E-backed payload/bypass records clear\nok   missing Fingerprints captured -> hard error\nok   Fingerprints captured filled -> no fp hard error\nok   '无新指纹' + candidates -> soft warn\nok   '无…' WITH knowledge path -> no soft warn (S1)\nok   Fingerprints only in comment -> hard error (S2)\nok   retrospective missing -> hard error\nok   retrospective placeholder-only -> both sections error\nok   retrospective half-filled -> framework section error only\nok   retrospective framework issue without status -> hard error\nok   retrospective both filled -> no error\nok   retrospective nested subsections count as filled\nok   closure trigger + no retrospective -> closure carries 复盘 error\nok   retrospective Verdict: FINAL activates closure gate\nok   retrospective FINAL + report stub hard-fails report gate\nok   retrospective FINAL activates coverage closure mode\nok   report stub gate accepts Chinese 确认发现 section\nok   retrospective prose mentioning GHOST_COMPLETE does not trigger closure\nok   completion marker without cron_cancelled record hard-fails\nok   completion marker ignores cron_cancelled on non-end journal event\nok   completion marker with cron_cancelled=none clears cron gate\nok   completion marker with cron_cancelled=<id> clears cron gate\nok   closure trigger + non-terminal agent -> lifecycle hard error\nok   finished agent clears lifecycle hard error\nok   coverage subset (50/100) -> warn\nok   coverage full (95/100) -> no warn\nok   coverage guanlan scoped adapter subset -> no warn\nok   coverage guanlan source without provenance -> warn\nok   recon path non-JSON -> skip (no FP)\nok   漏报: confirmed positive 缺失 -> 含 E-200\nok   漏报: refutes-only(无Supports) 豁免 E-201\nok   漏报: report 正文引用豁免 E-202\nok   漏报: 已降级豁免 E-203\nok   漏报: 代码块引用不算(bypass) E-204\nok   漏报: 注释引用不算(bypass) E-205\nok   漏报: mixed Supports+Refutes 不豁免 E-206\nok   漏报: header 变体(空格/ID(s))被剥, E-302 正文保留\nok   漏报门触发一次\nok   auto-review 幂等: 已有独立复审 -> review.md 不变\nok   auto-review: 未收口 -> 不触发(不建 review.md)\nok   Metacog: draft report -> no warn\nok   Metacog: _closure_claimed path triggers\nok   Metacog: decisions Status CLOSING path triggers\nok   Metacog: final report missing pass -> warn\nok   Metacog: partial pass -> missing fields warn\nok   Metacog: full contract -> no warn\nok   peer_review ledger: pending BLOCKER hard fails\nok   peer_review ledger: resolved BLOCKER clears pending gate\nok   peer_review ledger: invalid status hard fails\nok   peer_review ledger: resolution needs audit anchor\nok   peer_review ledger: evidence hash drift hard fails\nok   conflict gate: unresolved conflict before closure -> warning\nok   conflict gate: medium finding unresolved conflict is not hard fail\nok   conflict gate: HIGH finding unresolved conflict -> hard fail\nok   conflict gate: HIGH hard fail does not also warn\nok   conflict gate: CRITICAL finding unresolved conflict -> hard fail\nok   conflict gate: resolved conflicts -> silent\nok   conflict gate: bad conflicts.json -> projection warning, not hard fail\nok   intermediate coverage: stale examined=false ignored when E/front touched hosts\nok   intermediate review: 独立复审 header counts when review is fresh\nok   intermediate review: evidence newer than review makes review stale\nok   intermediate same-barrier: closed/deferred fronts skipped, open/probing still warn\nok   录像软警: html-only confirmed -> 提示 E-300\nok   录像软警: 有 .replay.json 不提示 E-301\nok   录像软警: negative 不提示 E-302\nok   布局漂移检测: 抓到散落 ev_loose.html/shot.png\nok   布局漂移检测: 不误报白名单 evidence.json/coverage.json\nok   布局漂移检测: evidence/ 子目录内文件不算散落\nok   布局漂移: 无终版报告时静默(降噪)\nok   布局漂移: 终版报告产出后散落 -> WARN\nok   replay 绑定(真实命名 .html.replay.json 能绑上, 非 owner=None 漏掉): 只报 E-2\nok   replay 绑定: E-1 自身 `- Replay:` -> 不报(别处/模板 Replay 不误清, 非全局计数)\nok   replay 绑定: 无 E- 支撑的分歧不拦(非承重)\nok   replay 绑定: 无 DIVERGED -> 空(opt-in/目标变更不罚)\nok   replay 绑定: bare-stem shot ↔ shot.replay.json 也绑上\nok   漏测门: 未点到的可达资产被报\nok   漏测门: 已点到(测/defer)不报\nok   漏测门: 不可达资产不计入\nok   漏测门: IP 子串假阳已修(点 1.2.3.10 ≠ 1.2.3.1)\nok   漏测门: 域名前缀子串假阳已修(点 data.com ≠ a.com)\nok   漏测门: 域名后缀子串假阳已修(点 sub.ex.com ≠ ex.com)\nok   漏测门: 单标签 host 已修(https://h1:8443→h1, 点 h1 算测过)\nok   漏测门: host 规整(去 scheme/port)→ https://norm.example:8443 算点到\nok   漏测门: 可达资产全点到 → 不报\nok   漏测门: 无 coverage → 不报(不强加)\nok   ① 簇裁决: *.vpn.corp.example 顶通配成员(0.vpn/1a2b.vpn 不报)\nok   ① 簇裁决: 簇外可达 app.corp.example 仍报(没被簇洗白)\nok   ① 安全界: *.<apex顶域> 太宽不算簇 → app.corp.example 仍被报(防偷懒洞)\nok   ① 安全界硬化: 跨域时 *.<整注册域> 不算簇(registrable 判) → a.target.edu.cn 仍被报\nok   ① 簇 glob 覆盖严格子域 node1.gw.corp.example(不报)\nok   ① Codex#1: 簇头 gw.corp.example 自身不被 *.gw.corp.example 洗白(仍报)\nok   _norm_host 括号IPv6取内\nok   _norm_host 单冒号去port\nok   _norm_host 裸IPv6不截断\nok   深度门: 攻击过(E块内点到)的登录面不报\nok   深度门: 未打(evidence 无)的登录面被报\nok   深度门: 仅文件头提及(非E块)登录面仍被报\nok   深度门: 非规范 ### E-9 头不算 E 块(锚定)\nok   深度门: DYN-only(无攻击面)不要求攻击记录\nok   深度门: 非登录攻击面 SURFACE:API 未打也被报(不只LOGIN, Codex#4)\nok   深度门: 不可达登录面不计入\nok   review资产门: 高价值/管理面可达资产无 E-entry -> 报 login2.example\nok   review资产门: 普通低价值资产不报\nok   深度门: 登录面都进 E 块 → 不报\nok   review资产门: 高价值/管理面都进 E 块 → 不报\nok   深度门: 无 coverage → 不报(不强加)\nok   深度门/漏测门: 非dict coverage 不崩\nok   replay 绑定: sqli.replay.json 不误绑 sqli.json 发现(防 false-fail)\nok   布局漂移: 收口且根目录干净 -> 静默\nok   replay 汇总: DIVERGED 升显著警告\nok   replay 汇总: 含计数汇总行\nok   replay 汇总: 全 IDENTICAL 无 DIVERGED 警告\nok   replay 汇总: 空结果 -> 空\nok   replay preflight SystemExit becomes hard gate\nok   威胁假设软警: HIGH+ public front 无 H/next/E -> 报警\nok   威胁假设软警: 关联 H 后消失\ncheck_run selftest passed\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-008",
+        "head": "## E-008 — Captcha OCR real sample smoke",
+        "maturity": "phenomenon",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "captcha_ocr_sample.json",
+            "path": "captcha_ocr_sample.json",
+            "exists": true,
+            "size": 629,
+            "sha1": "3095f4e31dbb8d6f58a60e315be641c0035aac21",
+            "excerpt": "{\n  \"ok\": true,\n  \"image\": \"/Users/ccj/Documents/AI/Xunji/captcha-ocr.gif\",\n  \"tesseract\": \"/opt/homebrew/bin/tesseract\",\n  \"attempts\": [\n    {\n      \"psm\": 7,\n      \"ok\": true,\n      \"returncode\": 0,\n      \"text\": \"axad\",\n      \"empty\": false,\n      \"stderr_tail\": \"\"\n    },\n    {\n      \"psm\": 8,\n      \"ok\": true,\n      \"returncode\": 0,\n      \"text\": \"axad ;\",\n      \"empty\": false,\n      \"stderr_tail\": \"\"\n    },\n    {\n      \"psm\": 13,\n      \"ok\": true,\n      \"returncode\": 0,\n      \"text\": \"axad ;\",\n      \"empty\": false,\n      \"stderr_tail\": \"\"\n    }\n  ],\n  \"best_text\": \"axad\",\n  \"all_empty\": false,\n  \"barrier_hint\": \"\"\n}\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-009",
+        "head": "## E-009 — Latest run loop-state/statusline source snapshot",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "loop_state_hamastar.log",
+            "path": "loop_state_hamastar.log",
+            "exists": true,
+            "size": 1449,
+            "sha1": "42234b8e9d7cad55bd4cff293de96ab7f078665a",
+            "excerpt": "# Xunji 运行态快照\n\n╭─ [Xunji] [运行态快照] ────────────────────────────────────────────────────────\n│ [当前阶段] [Reviewer｜复审把关]\n│ [前线状态] 开放 0 / 延后 6 / 已关闭 4\n│ [证据变化] 总计 17；本轮新增 0；置信提升 0\n│ [覆盖进展] 已测 27；本轮新增 0；未测 1\n│ [无进展轮数] 1（继续推进）\n│ [Agent 状态] 任务 0；未解决冲突 0\n│ [需要并行分派] 否\n│ [Loop 已完成] 否\n│ [接近收口复核] 是\n│ [收口阻断项] 0\n╰────────────────────────────────────────────────────────\n\n- [当前阶段] [Reviewer｜复审把关]\n- [开放/延后/关闭前线] 0 / 6 / 4\n- [证据] 17 total; 本轮新增: 0; 置信提升: 0\n- [覆盖] 27 tested cells; 本轮新增: 0; 未测适用单元: 1\n- [无进展轮数] 1 (continue / 继续)\n- [Agents] 0 assignments; 未解决冲突: 0\n- [需要并行分派] 否\n- [Loop 已完成] 否\n- [收口复核候选] 是\n\n## 下一步建议 (Next Actions)\n\n- 收口复核候选：暂停前必须跑硬收口闸门、replay 核实、独立复审和复盘。 [Closure review candidate: run hard closure gates, replay verification, independent review, and retrospective before any pause.]\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-010",
+        "head": "## E-010 — Coverage sync closed_type_b regression",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "coverage_matrix_selftest.log",
+            "path": "coverage_matrix_selftest.log",
+            "exists": true,
+            "size": 1010,
+            "sha1": "59579fc907d07413672990e191d339aa89e5d0dc",
+            "excerpt": "ok   only reachable/unknown rows are included\nok   auth vector fills Auth cell\nok   api vectors fill Injection and IDOR\nok   url-fetch asset exposes empty SSRF column\nok   profile does not trigger file-download keyword\nok   free-text title does not create applicability\nok   explicit Assets field attributes front to asset\nok   explicit Targets field accepts URL host:port\nok   evidence-derived auth test fills matrix without Vectors tried\nok   bare HTTP status text does not fill Auth coverage\nok   low-certainty evidence does not fill Auth coverage\nok   confounder note does not fill Injection coverage\nok   corrupt primary coverage warns while using nested coverage\nok   structured coverage waiver marks cell waived\nok   structured coverage waiver renders reason\nok   check reports warnings only\nok   closure check upgrades matrix gaps to errors\nok   state outputs are written\nok   sync coverage marks touched assets examined\nok   sync coverage only writes terminal verdicts\ncoverage_matrix selftest passed\n"
+          },
+          {
+            "token": "coverage_sync_hamastar.json",
+            "path": "coverage_sync_hamastar.json",
+            "exists": true,
+            "size": 21437,
+            "sha1": "07b50c0fc3eb58d39cf170c20df20fe4421dcffd",
+            "excerpt": "{\n  \"schema\": \"xunji.coverage_matrix.v1\",\n  \"source\": \"classify/coverage.json\",\n  \"groups\": [\n    \"Auth\",\n    \"Injection\",\n    \"IDOR\",\n    \"Misconfig\",\n    \"InfoLeak\",\n    \"SSRF\",\n    \"PathTraversal\",\n    \"XXE\",\n    \"Upload\",\n    \"Logic\"\n  ],\n  \"rows\": [\n    {\n      \"asset\": \"2015yilan.hamastar.com.tw\",\n      \"tokens\": [\n        \"2015yilan.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"2017wda.hamastar.com.tw\",\n      \"tokens\": [\n        \"2017wda.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"2019cyc-mgr.hamastar.com.tw\",\n      \"tokens\": [\n        \"2019cyc-mgr.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"Auth\",\n        \"InfoLeak\",\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-002\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"tested\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"tested\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"2019wdaph-mgr.hamastar.com.tw\",\n      \"tokens\": [\n        \"2019wdaph-mgr.hamastar.com.tw\"\n      ],\n      \"applicable\": [\n        \"Auth\",\n        \"InfoLeak\",\n        \"Misconfig\"\n      ],\n      \"tested\": [\n        \"Auth\",\n        \"InfoLeak\",\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-002\",\n        \"F-006\",\n        \"F-010\"\n      ],\n      \"status\": \"unknown\",\n      \"flags\": [\n        \"SURFACE:ADMIN\"\n      ],\n      \"cells\": {\n        \"Auth\": \"tested\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"untested\",\n        \"InfoLeak\": \"tested\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"2019wdaph.hamastar.com.tw\",\n      \"tokens\": [\n        \"2019wdaph.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-006\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"2019yles-mgr.hamastar.com.tw\",\n      \"tokens\": [\n        \"2019yles-mgr.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\",\n        \"Upload\"\n      ],\n      \"fronts\": [\n        \"F-003\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"tested\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"2019ylweb.hamastar.com.tw\",\n      \"tokens\": [\n        \"2019ylweb.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-006\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"2022wdakys.hamastar.com.tw\",\n      \"tokens\": [\n        \"2022wdakys.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-006\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"2024childcare.hamastar.com.tw\",\n      \"tokens\": [\n        \"2024childcare.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-006\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"61.71.173.8\",\n      \"tokens\": [\n        \"61.71.173.8\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"auden-esgp.hamastar.com.tw\",\n      \"tokens\": [\n        \"auden-esgp.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-006\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"azmeeting.hamastar.com.tw\",\n      \"tokens\": [\n        \"azmeeting.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"bocach.hamastar.com.tw\",\n      \"tokens\": [\n        \"bocach.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"Auth\",\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-008\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"tested\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"d2.hamastar.com.tw\",\n      \"tokens\": [\n        \"d2.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"ebooks.hamastar.com.tw\",\n      \"tokens\": [\n        \"ebooks.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"Auth\",\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-007\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"tested\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"ebooks.kpvs.hamastar.com.tw\",\n      \"tokens\": [\n        \"ebooks.kpvs.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"en.hamastar.com.tw\",\n      \"tokens\": [\n        \"en.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"fubonebook2.hamastar.com.tw\",\n      \"tokens\": [\n        \"fubonebook2.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"InfoLeak\",\n        \"Misconfig\",\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-004\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"tested\",\n        \"InfoLeak\": \"tested\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"fubonvideo2.hamastar.com.tw\",\n      \"tokens\": [\n        \"fubonvideo2.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"hscp-ws2.hamastar.com.tw\",\n      \"tokens\": [\n        \"hscp-ws2.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"imocloud.hamastar.com.tw\",\n      \"tokens\": [\n        \"imocloud.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"isharing.hamastar.com.tw\",\n      \"tokens\": [\n        \"isharing.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"jobooks.hamastar.com.tw\",\n      \"tokens\": [\n        \"jobooks.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-006\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"k12test.hamastar.com.tw\",\n      \"tokens\": [\n        \"k12test.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-009\"\n      ],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"kcglandp.hamastar.com.tw\",\n      \"tokens\": [\n        \"kcglandp.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"land.hamastar.com.tw\",\n      \"tokens\": [\n        \"land.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [],\n      \"fronts\": [],\n      \"status\": \"unknown\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"not_applicable\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"mainsaylingwen.hamastar.com.tw\",\n      \"tokens\": [\n        \"mainsaylingwen.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-005\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"simmagic.hamastar.com.tw\",\n      \"tokens\": [\n        \"simmagic.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"IDOR\",\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-001\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"tested\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"writesaylingwen01.hamastar.com.tw\",\n      \"tokens\": [\n        \"writesaylingwen01.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-005\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    },\n    {\n      \"asset\": \"www.hamastar.com.tw\",\n      \"tokens\": [\n        \"www.hamastar.com.tw\"\n      ],\n      \"applicable\": [],\n      \"tested\": [\n        \"PathTraversal\"\n      ],\n      \"fronts\": [\n        \"F-006\"\n      ],\n      \"status\": \"True\",\n      \"flags\": [],\n      \"cells\": {\n        \"Auth\": \"not_applicable\",\n        \"Injection\": \"not_applicable\",\n        \"IDOR\": \"not_applicable\",\n        \"Misconfig\": \"not_applicable\",\n        \"InfoLeak\": \"not_applicable\",\n        \"SSRF\": \"not_applicable\",\n        \"PathTraversal\": \"tested\",\n        \"XXE\": \"not_applicable\",\n        \"Upload\": \"not_applicable\",\n        \"Logic\": \"not_applicable\"\n      }\n    }\n  ],\n  \"column_stats\": {\n    \"Auth\": {\n      \"tested\": 4,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 4,\n      \"actionable\": 4\n    },\n    \"Injection\": {\n      \"tested\": 0,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 0,\n      \"actionable\": 0\n    },\n    \"IDOR\": {\n      \"tested\": 1,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 1,\n      \"actionable\": 1\n    },\n    \"Misconfig\": {\n      \"tested\": 1,\n      \"untested\": 1,\n      \"waived\": 0,\n      \"applicable\": 2,\n      \"actionable\": 2\n    },\n    \"InfoLeak\": {\n      \"tested\": 3,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 3,\n      \"actionable\": 3\n    },\n    \"SSRF\": {\n      \"tested\": 0,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 0,\n      \"actionable\": 0\n    },\n    \"PathTraversal\": {\n      \"tested\": 17,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 17,\n      \"actionable\": 17\n    },\n    \"XXE\": {\n      \"tested\": 0,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 0,\n      \"actionable\": 0\n    },\n    \"Upload\": {\n      \"tested\": 1,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 1,\n      \"actionable\": 1\n    },\n    \"Logic\": {\n      \"tested\": 0,\n      \"untested\": 0,\n      \"waived\": 0,\n      \"applicable\": 0,\n      \"actionable\": 0\n    }\n  },\n  \"empty_columns\": [],\n  \"row_gaps\": [],\n  \"waivers\": [],\n  \"warnings\": [],\n  \"legend\": {\n    \"tested\": \"✓\",\n    \"untested\": \"□\",\n    \"waived\": \"~\",\n    \"not_applicable\": \"·\"\n  },\n  \"coverage_sync\": {\n    \"path\": \"/Users/ccj/Documents/AI/Xunji/runs/hamastar_20260709-test1_20260709/classify/coverage.json\",\n    \"changed\": 0,\n    \"examined\": 20,\n    \"total\": 80,\n    \"warnings\": []\n  }\n}\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "05d08bca11a9f6828de10aed15d6655821cf3973"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Retrospective Loop Fix Review Scope\n\nReview `reviewed.diff` in this directory. The change is a Codex-authored\nmaintenance diff for Xunji's Claude-primary run lifecycle, output hook, review\navailability, probe evidence capture, saturation, coverage sync, OCR barrier\nrecording, and retrospective closure gates.\n\nPrimary risk areas:\n\n- `.claude/hooks/output_gate.py` is behavior-changing and must not over-block\n  closed runs or weaken existing safety behavior.\n- `tools/peer_review.py` fallback must not create a fake independent-review pass.\n- `tools/coverage_matrix.py --sync-coverage` must not overclaim asset verdicts.\n- `tools/probe.py` preflight/cookie/CSRF support must preserve existing probe behavior.\n- New retrospective gates should prevent repeated framework lessons without\n  excessive false positives.\n\nVerification already run:\n\n- `python3 tools/selftest_all.py --timeout 600` -> 54 passed, 0 failed.\n- `python3 tools/check_run.py runs/hamastar_20260709-test1_20260709` -> passed with warnings only.\n- `python3 tools/check_knowledge.py && python3 tools/check_templates.py && python3 tools/check_runtime_boundary.py && python3 .agents/skills/xunji-closure-audit/scripts/closure_audit.py`.\n- `git diff --check`.\n\nRaw verification artifacts are recorded in `evidence.md` as E-002 through E-010.\n\nIndependent review WARN disposition:\n\n- PR-001 was accepted as a real residual latest-run risk signal: the\n  `check_run_hamastar.log` warnings remain present-tense follow-up work for that\n  run (Metacog pass, classify_hosts content classification, and F-003/F-004\n  barrier-closure wording). This maintenance diff fixes the framework recurrence\n  path but does not rewrite those run facts.\n- PR-002 is addressed by committing `peer_review.md` and `peer_review.json` as\n  review artifacts in this record; the review verdict is WARN, not PASS.\n- PR-003 was addressed by adding structural file/hunk summaries for `.diff` and\n  `.patch` artifacts in `tools/peer_review.py`; reviewers no longer have to rely\n  on a truncated excerpt to verify scope. The targeted behavior is also covered\n  by `peer_review.py --selftest` inside full selftest.\n- PR-004 is addressed in risk assessment by recording `loop_state_hamastar.log`\n  and `coverage_sync_hamastar.json`; latest run still has deferred fronts and one\n  untested applicable cell, so it is a closure-review candidate, not a magically\n  closed run.\n- Output-gate review concern was addressed by adding an `output_gate.py --selftest` subprocess case\n  against a temporary real runs root with an open front.\n- Captcha OCR concern is partially addressed: a real local captcha sample OCR smoke is recorded in\n  `captcha_ocr_sample.json`, and the all-empty barrier branch is covered by the\n  `captcha_ocr` selftest included in full selftest output. The real sample did\n  not produce all-empty OCR, so no false barrier claim is made.\n- Coverage reviewer blind spot was accepted and fixed after review:\n  `tools/coverage_matrix.py` now maps `closed_type_b` to `closed`, with\n  `coverage_matrix_selftest.log` covering that regression.\n- PR-005 remains an arkcli backend partial-review limitation; final disposition\n  treats the independent review as WARN with adopted fixes, not as a clean PASS.\n\nDiff artifact SHA1: `fc7a30240695e36e0f336d2e5ae24c1edf8fd63a`.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 180000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "0fb317935fcbc0057310548d928060798095f23a"
+}

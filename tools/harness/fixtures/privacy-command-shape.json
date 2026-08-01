@@ -1,0 +1,396 @@
+{
+  "schema": "xunji.privacy-command-shape.v1",
+  "cases": [
+    {
+      "name": "exact setup target metadata",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target 'https://example.test/path?key=opaque' --date 20260714",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "quoted ampersand and semicolon are data",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target 'https://example.test/path?note=a&semi=one;two'",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "exact loop source URL metadata",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source 'https://example.test/path?note=a&semi=one;two' --type auto",
+      "shell_control": false,
+      "local_setup": true,
+      "shape_issue": "",
+      "privacy": "allow"
+    },
+    {
+      "name": "escaped URL question mark remains exact literal data",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/path\\?key=opaque --type auto",
+      "shell_control": false,
+      "local_setup": true,
+      "shape_issue": "",
+      "privacy": "allow"
+    },
+    {
+      "name": "unquoted URL question mark is pathname expansion",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/path?key=opaque --type auto",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "unquoted URL star is pathname expansion",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/* --type auto",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "unquoted URL bracket expression is pathname expansion",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/[ab] --type auto",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "loop source stderr merge requires exact argv retry",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source 'https://example.test/path?key=opaque' --type auto 2>&1",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "stderr-merge",
+      "privacy": "deny"
+    },
+    {
+      "name": "loop source read filter requires exact argv retry",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source 'https://example.test/path?key=opaque' --type auto 2>&1 | head -30",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "output-filter",
+      "privacy": "deny"
+    },
+    {
+      "name": "setup read filter requires exact argv retry",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ | tail -n 20",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "output-filter",
+      "privacy": "deny"
+    },
+    {
+      "name": "exact loop Markdown deterministic normalizer",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source '/tmp/setup source.md' --type file --ai off",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "exact loop external normalizer prepare",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --type file --ai external --ai-provider claude-code --ai-model model-v1 --prepare-normalizer",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "exact loop external reference candidate",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --type file --ai external --ai-provider claude-code --ai-model model-v1 --candidate-json '{\"schema\":\"setup-normalizer-candidate.v1\",\"request_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"redacted_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"target_token\":\"T-0001\",\"asset_tokens\":[],\"entry_tokens\":[],\"scope_refs\":[],\"authorization_refs\":[],\"signal_refs\":[],\"unresolved\":[]}'",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "external normalizer missing provider identity",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --ai external --ai-model model-v1 --prepare-normalizer",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "allow"
+    },
+    {
+      "name": "candidate is forbidden with AI off",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --ai off --candidate-json '{}' ",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "allow"
+    },
+    {
+      "name": "unregistered local AI mode is not exempted",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/source.md --ai local",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "allow"
+    },
+    {
+      "name": "loop source unknown option",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --future yes",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "loop source URL userinfo is never local metadata",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source 'https://user:secret@example.test/' --type url",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "loop source repeated source is ambiguous",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --source https://other.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "setup unknown option",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ --future-mode yes",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "setup classify is active egress",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ --classify",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "unquoted source glob changes argv",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source /tmp/audit-*.json --type auto",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "allow"
+    },
+    {
+      "name": "quoted source glob remains literal data",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source '/tmp/audit-*.json' --type auto",
+      "shell_control": false,
+      "local_setup": true,
+      "privacy": "allow"
+    },
+    {
+      "name": "unquoted brace expansion changes argv",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/{one,two}",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "unquoted tilde expansion changes argv",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source ~/source.json --type auto",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "allow"
+    },
+    {
+      "name": "unquoted zsh equals expansion changes argv",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source =python3 --type file",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "allow"
+    },
+    {
+      "name": "empty quoted prefix cannot hide zsh equals expansion",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source ''=python3 --type file",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "allow"
+    },
+    {
+      "name": "escaped leading equals remains literal data",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source \\=python3 --type file",
+      "shell_control": false,
+      "local_setup": true,
+      "shape_issue": "",
+      "privacy": "allow"
+    },
+    {
+      "name": "quoted leading equals remains literal data",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source '=python3' --type file",
+      "shell_control": false,
+      "local_setup": true,
+      "shape_issue": "",
+      "privacy": "allow"
+    },
+    {
+      "name": "backslash newline continuation changes shell argv",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source \\\nhttps://example.test/ --type auto",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "arbitrary absolute python basename cannot impersonate interpreter",
+      "command": "/private/tmp/python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "workspace relative python basename cannot impersonate interpreter",
+      "command": "./python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "compound semicolon",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ ; python3 custom_sender.py https://target.test/",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "compound and",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ && node sender.js https://target.test/",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "compound pipe",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ | ruby sender.rb https://target.test/",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "subshell",
+      "command": "(python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/)",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "command substitution",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target $(printf https://example.test/)",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "backtick substitution",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target `printf https://example.test/`",
+      "shell_control": true,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "output redirection",
+      "command": "python3 {ROOT}/tools/setup_run.py alpha --target https://example.test/ > setup.log",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "append redirection remains opaque",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --type auto >> setup.log",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "stderr file redirection remains opaque",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --type auto 2> setup.err",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "observational wrapper plus file write remains opaque",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --type auto 2>&1 | head -30 > setup.log",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "multiple output filters remain opaque",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --type auto | head -30 | tail -10",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "stateful tail option remains opaque",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --type auto | tail -f",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "background lifecycle command remains opaque",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --type auto &",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "loop source tee remains opaque",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --type auto 2>&1 | tee setup.log",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "leading pipe cannot impersonate lifecycle prefix",
+      "command": "echo data | python3 {ROOT}/tools/loop_bootstrap.py --source https://example.test/ --type auto",
+      "shell_control": true,
+      "local_setup": false,
+      "shape_issue": "",
+      "privacy": "deny"
+    },
+    {
+      "name": "loop bootstrap is not a network tool",
+      "command": "python3 {ROOT}/tools/loop_bootstrap.py alpha https://example.test/recon.json",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "loop journal is not a network tool",
+      "command": "python3 {ROOT}/tools/loop_journal.py https://example.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "statusline is not a network tool",
+      "command": "python3 {ROOT}/tools/xunji_statusline.py --set-active https://example.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "absolute custom sender",
+      "command": "/tmp/custom_sender https://target.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    },
+    {
+      "name": "absolute Python custom sender",
+      "command": "/usr/bin/python3 custom_sender.py https://target.test/",
+      "shell_control": false,
+      "local_setup": false,
+      "privacy": "deny"
+    }
+  ]
+}

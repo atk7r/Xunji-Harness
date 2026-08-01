@@ -1,0 +1,26 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "claude:code-cli",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "f290818ef205ec372e4682be72aeb32b273aeeec",
+  "evidence_index_hash": "382fa64963e2d7cf1b91c1c694df123301e0a9cb",
+  "findings": [],
+  "blind_spots": [
+    "**Date-boundary race in `_lifecycle_target_name`**: The hook computes the default date at time T1 (e.g., 23:59:59 → `20260711`), writes a transition claim for `slug_20260711`. The tool executes at time T2 (00:00:01 → `20260712`), creating a run at `slug_20260712`. `claim_pending_contract` cannot find a claim for `slug_20260712` → fails closed. The run is created but the contract is not bound. This is fail-safe but the operator gets an opaque failure. This was noted in the final6 blind-spot check but not dispositioned.",
+    "**`prompt_sha256` integrity chain depends on upstream provision**: `_contract_from_event` reads `prompt_sha256` from the event as-is: `str(event.get(\"prompt_sha256\") or \"\")`. If Claude Code's hook system omits this field (empty string), the transition claim's prompt-hash check becomes `\"\" == \"\"` → always true. The exact target/session/prompt-hash binding that the GLM reasoning identified as the fix for session-selection weakness degrades to target/session-only when `prompt_sha256` is absent. Without live hook event inspection, I cannot verify whether Claude Code always populates this field.",
+    "**`CLEAR_ACTIVE_RE` regex greediness across `.` boundary**: The regex `(?:clear|remove|unset).{0,20}active[ -]?run` uses `.` which matches any character INCLUDING newlines in the `re.I` flag context. A prompt like \"clean up evidence and restart the active run\" contains \"clean\" within 20 chars of \"active run\" (through `.` matching) — but \"clean\" ≠ \"clear\" so this specific example doesn't match. However, \"remove all old evidence and switch the active run\" does match — \"remove\" within 20 chars of \"active run\". The `.` wildcard creates false-positive matches in prompts that are clearly about cleanup/reorganization rather than clearing the pointer.",
+    "**The `_active_protocol_fronts` union logic has no selftest for the canonical-parse fallback path**: The function unions derived state with a `_fallback_protocol_state` canonical Markdown parse. The selftest tests the combined result but never tests what happens when `_fallback_protocol_state` fails (corrupt frontier.md, parse error). If it raises, the caller in `_denied_result_claim_reason` would propagate the exception.",
+    "**`run_gate.py` main() still reads `ACTIVE_WINDOW_SEC` as a module-level constant** — the comment was updated to \"调用兼容参数；run 选择只认显式 pointer\" but the constant value (900) is still defined and passed to `find_active_run`. It's dead code in the new design, which is fine, but the comment \"调用兼容参数\" is misleading — it's a vestigial parameter, not a compatibility parameter.",
+    "**No test for `loop_bootstrap.py cmd_new` through the pending-contract path**: The tests cover `setup_run.py` through the pending bootstrap (the subprocess test at lines 965-976), and they cover `loop_bootstrap.py --resume` through `_lifecycle_target_name`. But `loop_bootstrap.py cmd_new <slug> <recon>` (without `--resume`) is not tested through the full PreToolUse chain with a pending contract. The positional parsing would work correctly (same logic as setup_run.py), but the integration is untested.",
+    "**Cross-session pending contract collision**: If Claude Code reuses session IDs across processes, two sessions with the same `session_id` would share a pending contract. The `sha256(session_id)` key in `_pending_path` makes this deterministic — the second session would overwrite the first's pending contract, and the first's transition claim would refer to a contract whose `prompt_sha256` no longer matches. This is fail-closed (the claim would fail hash verification) but the error message would be misleading (\"transition claim has no matching pending contract\" or \"transition claim prompt hash mismatch\")."
+  ],
+  "context_limits": [
+    "**Live source verification unavailable**: The Read tool was denied for live repository files (`tools/turn_contract.py`, `.claude/hooks/output_gate.py`, `.claude/hooks/run_gate.py`). All analysis is based on the diff artifacts in the evidence directory. I cannot verify that the working tree matches the diffs or that no additional uncommitted changes exist.",
+    "**`_fallback_protocol_state` function implementation not visible**: This function is called in `_active_protocol_fronts` but its implementation is not in any diff. I assume it pre-exists in `output_gate.py` and works correctly (the final6 review noted this same limitation).",
+    "**Chinese-language semantic nuance**: The denial envelope text \"未执行目标动作；不存在该动作的实测结果\" and the contract phrases are clear, but I may miss subtle authority-gradient distinctions (e.g., \"当前操作者\" vs \"当前 session\" vs \"当前 prompt\" in the Chinese policy language).",
+    "**Git working-tree vs committed state**: The git status shows all changed files as unstaged modifications (`M`), not commits. The evidence diffs represent working-tree state. If the tree is reset, these diffs become the sole record."
+  ],
+  "error": ""
+}

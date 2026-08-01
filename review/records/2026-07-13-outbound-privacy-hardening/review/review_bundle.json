@@ -1,0 +1,748 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-13-outbound-privacy-hardening",
+  "files": {
+    "report.md": {
+      "sha1": "9ad31853b1ac0a8ccd4d7257cb2209633f7fe8d0",
+      "size": 2326
+    },
+    "evidence.md": {
+      "sha1": "cdb8dd9c57198e7883b60264394c4a4d516b9453",
+      "size": 5266
+    },
+    "frontier.md": {
+      "sha1": "559913b31ecfde00bf1399ee8aea308b82a9666d",
+      "size": 358
+    },
+    "decisions.md": {
+      "sha1": "6c2787394b3fe1c208913e32a1ffa50435a3c4d6",
+      "size": 903
+    },
+    "surface.md": {
+      "sha1": "22f904c9eb01da2e70189da889fa098fc406c2e8",
+      "size": 332
+    },
+    "review.md": {
+      "sha1": "0000b19e73da0a71866e45c02750c26de6d5b4f0",
+      "size": 121
+    },
+    "target.md": {
+      "sha1": "43c73113b5b1738b5152de820c2152aedea6d783",
+      "size": 505
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 — Frozen Codex-authored maintenance diff",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-001"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "privacy.py.txt",
+            "path": "privacy.py.txt",
+            "exists": true,
+            "size": 46949,
+            "sha1": "39a7519fb9be3a3a80ef54a148aa162390654507",
+            "excerpt": "#!/usr/bin/env python3\n\"\"\"Target-facing privacy guard and evidence redaction helpers.\n\nThe live Claude driver may send arbitrary exploit *methods*, but it must not\nidentify the operator, this framework, a run, or an Agent in target-facing\nbytes.  Proof writes use neutral, collision-resistant names.  Necessary\nauthentication data is allowed to the intended target, but evidence records\nstore redacted hashes rather than reusable secrets.\n\nPure stdlib.  Active request tools call :func:`validate_outbound_request`\nimmediately before network I/O; the PreToolUse hook calls\n:func:`outbound_command_privacy_reason` for inspectable raw commands.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport datetime as _datetime\nimport base64\nimport html\nfrom email.header import decode_header\nimport getpass\nimport hashlib\nimport json\nimport os\nimport re\nimport secrets\nimport shlex\nimport socket\nimport tempfile\nimport unicodedata\nfrom pathlib import Path\nfrom urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit\n\n\nclass OutboundPrivacyError(ValueError):\n    \"\"\"Raised before I/O when target-facing bytes violate the privacy policy.\"\"\"\n\n\nNEUTRAL_PREFIXES = (\"tmp\", \"diag\", \"proof\")\nNEUTRAL_MARKER_RE = re.compile(\n    r\"^(?:tmp|diag|proof)-\\d{8}-[a-f0-9]{6,12}$\", re.IGNORECASE\n)\nNEUTRAL_ARTIFACT_RE = re.compile(\n    r\"^(?:tmp|diag|proof)-\\d{8}-[a-f0-9]{6,12}(?:\\.[a-z0-9][a-z0-9._-]{0,31})?$\",\n    re.IGNORECASE,\n)\n\n_INTERNAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (\n    (\"project identifier\", re.compile(r\"\\bxunji(?:[_-][a-z0-9._-]+)?\\b\", re.IGNORECASE)),\n    (\"run directory identifier\", re.compile(\n        r\"(?:^|[\\\\/])runs[\\\\/][a-z0-9._-]*_\\d{8}(?:[_-][a-z0-9._-]+)?(?:[\\\\/]|$)\",\n        re.IGNORECASE,\n    )),\n    (\"Claude internal path\", re.compile(r\"(?:^|[\\\\/])\\.claude(?:[\\\\/]|$)\", re.IGNORECASE)),\n    (\"Agent internal path\", re.compile(r\"(?:^|[\\\\/])\\.agents(?:[\\\\/]|$)\", re.IGNORECASE)),\n    (\"driver coordination marker\", re.compile(\n        r\"\\bXUNJI_(?:ASSIGNMENT|FRONT|ASSETS|REVIEW_RECEIPT|REVIEW_BUNDLE|COMPLETION_[A-Z_]+)\\b\",\n        re.IGNORECASE,\n    )),\n)\n_EMAIL_RE = re.compile(r\"(?<![\\w.+-])([\\w.!#$%&'*+/=?^`{|}~-]+)@([a-z0-9.-]+\\.[a-z]{2,})(?![\\w.-])\", re.IGNORECASE)\n_CN_PHONE_RE = re.compile(r\"(?<!\\d)(?:\\+?86[- ]?)?1[3-9]\\d{9}(?!\\d)\")\n_CN_ID_RE = re.compile(r\"(?<!\\d)\\d{6}(?:19|20)\\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\\d|3[01])\\d{3}[0-9Xx](?!\\d)\")\n_RESERVED_EMAIL_DOMAINS = (\"example.com\", \"example.net\", \"example.org\", \"example.invalid\", \"example.test\")\n\nAUTH_HEADER_NAMES = frozenset({\n    \"authorization\", \"proxy-authorization\", \"cookie\", \"x-api-key\",\n    \"x-auth-token\", \"x-csrf-token\", \"x-xsrf-token\",\n})\n_SENSITIVE_HEADER_NAMES = AUTH_HEADER_NAMES | frozenset({\"set-cookie\"})\n_SENSITIVE_KEY_RE = re.compile(\n    r\"(?:pass(?:word|wd)?|secret|token|api[_-]?key|auth(?:orization)?|cookie|session|csrf|xsrf|\"\n    r\"email|e-mail|phone|mobile|id[_-]?card|identity|real[_-]?name|full[_-]?name)\",\n    re.IGNORECASE,\n)\n_AUTH_BODY_SECRET_RE = re.compile(\n    r\"(?:^|[?&,{;\\s])(?:pass(?:word|wd)?|secret)\\s*[:=]\",\n    re.IGNORECASE,\n)\n_RAW_SECRET_VALUE_RE = re.compile(\n    r\"(?P<prefix>\\b(?:pass(?:word|wd)?|secret|token|api[_-]?key|session|csrf|xsrf)\\s*[:=]\\s*)\"\n    r\"(?P<value>\\\"[^\\\"]*\\\"|'[^']*'|[^&\\s,;}]+)\",\n    re.IGNORECASE,\n)\n_REDACTION_RE = re.compile(r\"<redacted:[a-z0-9_-]+:[a-f0-9]{12}>\", re.IGNORECASE)\n_LEGACY_ARTIFACT_RE = re.compile(\n    r\"\\bxunji(?:_[a-z0-9]{2,24}){1,4}\\.(?:txt|ini|conf|config|aspx|ashx|php|jsp|jspx|tmp|html|log)\\b\",\n    re.IGNORECASE,\n)\n_DECODE_LIMIT_SENTINEL = \"__outbound_privacy_nested_encoding_limit__\"\n\n_PAYLOAD_FLAGS = frozenset({\n    \"-d\", \"--data\", \"--data-raw\", \"--data-binary\", \"--data-urlencode\", \"--json\",\n    \"-H\", \"--header\", \"-F\", \"--form\", \"--form-string\", \"--marker\", \"--filename\", \"--cmd\",\n    \"-b\", \"--cookie\", \"-u\", \"--user\", \"--oauth2-bearer\",\n})\n_AUTH_CLI_FLAGS = frozenset({\"-b\", \"--cookie\", \"-u\", \"--user\", \"--oauth2-bearer\"})\n_NETWORK_TOOL_RE = re.compile(\n    r\"(?:^|[;&|\\s])(?:curl|wget|http|xh|websocat|wscat)(?:\\s|$)|\"\n    r\"tools/(?:probe|render|scan|exploit)\\.py|tools/sensors/[a-z0-9_-]+\\.py\",\n    re.IGNORECASE,\n)\n_CUSTOM_NETWORK_EXEC_RE = re.compile(\n    r\"(?:^|[;&|\\s])(?:python(?:3(?:\\.\\d+)?)?|node|ruby|perl|php|bash|sh|zsh|pwsh|powershell|\\./[^\\s]+)(?:\\s|$)\",\n    re.IGNORECASE,\n)\n\n\ndef _digest(value: str | bytes) -> str:\n    raw = value if isinstance(value, bytes) else value.encode(\"utf-8\", \"replace\")\n    return hashlib.sha256(raw).hexdigest()[:12]\n\n\ndef _redaction(kind: str, value: str | bytes) -> str:\n    return f\"<redacted:{kind}:{_digest(value)}>\"\n\n\ndef neutral_marker(prefix: str = \"proof\", *, date: str | None = None,\n                   nonce: str | None = None) -> str:\n    \"\"\"Return a neutral unique marker suitable for target-side proof data.\"\"\"\n    prefix = prefix.lower()\n    if prefix not in NEUTRAL_PREFIXES:\n        raise ValueError(f\"prefix must be one of {', '.join(NEUTRAL_PREFIXES)}\")\n    date = date or _datetime.datetime.now(_datetime.timezone.utc).strftime(\"%Y%m%d\")\n    nonce = (nonce or secrets.token_hex(4)).lower()\n    marker = f\"{prefix}-{date}-{nonce}\"\n    if not NEUTRAL_MARKER_RE.fullmatch(marker):\n        raise ValueError(\"neutral marker requires YYYYMMDD and 6-12 lowercase hex characters\")\n    return marker\n\n\ndef neutral_artifact_name(prefix: str = \"proof\", suffix: str = \".txt\", **kwargs) -> str:\n    \"\"\"Return a neutral unique target-side artifact basename.\"\"\"\n    suffix = suffix or \"\"\n    if suffix and not suffix.startswith(\".\"):\n        suffix = \".\" + suffix\n    name = neutral_marker(prefix, **kwargs) + suffix.lower()\n    validate_neutral_artifact_name(name)\n    return name\n\n\ndef validate_neutral_marker(value: str) -> None:\n    if not NEUTRAL_MARKER_RE.fullmatch(str(value or \"\")):\n        raise OutboundPrivacyError(\n            \"target proof content must use tmp/diag/proof-YYYYMMDD-<6-12hex>\"\n        )\n\n\ndef validate_neutral_artifact_name(value: str) -> None:\n    \"\"\"Validate the transmitted basename, allowing traversal prefixes for PoCs.\"\"\"\n    normalized = str(value or \"\").replace(\"\\\\\", \"/\").rstrip(\"/\")\n    basename = normalized.rsplit(\"/\", 1)[-1]\n    if not NEUTRAL_ARTIFACT_RE.fullmatch(basename):\n        raise OutboundPrivacyError(\n            \"target artifact basename must use tmp/diag/proof-YYYYMMDD-<6-12hex>[.<safe-ext>]\"\n        )\n\n\ndef _configured_sensitive_values() -> list[str]:\n    raw = os.environ.get(\"OUTBOUND_PRIVACY_DENY_VALUES\", \"\")\n    return [v.strip() for v in raw.splitlines() if len(v.strip()) >= 3]\n\n\ndef _local_home_values() -> list[str]:\n    values = [str(Path.home()), str(os.environ.get(\"USERPROFILE\", \"\"))]\n    return list(dict.fromkeys(\n        value.rstrip(\"/\\\\\") for value in values\n        if value and value not in {\"/\", \".\", \"\\\\\"}\n    ))\n\n\ndef _local_identity_values() -> list[str]:\n    values: list[str] = _local_home_values()\n    for value in (getpass.getuser(), os.environ.get(\"USER\", \"\"), os.environ.get(\"LOGNAME\", \"\"), socket.gethostname()):\n        value = str(value or \"\").strip()\n        if len(value) >= 3 and value.lower() not in {\"root\", \"user\", \"admin\", \"localhost\"}:\n            values.append(value)\n    return list(dict.fromkeys(values))\n\n\ndef _decoded_variants(value: str) -> list[str]:\n    \"\"\"Bounded common-decoding pass so percent/base64/hex is not a bypass.\"\"\"\n    variants = [value]\n    normalized = unicodedata.normalize(\"NFKC\", value)\n    if normalized != value:\n        variants.append(normalized)\n    no_zero_width = re.sub(r\"[\\u200b-\\u200f\\u2060\\ufeff]\", \"\", normalized)\n    if no_zero_width != normalized:\n        variants.append(no_zero_width)\n    entity_decoded = html.unescape(value)\n    if entity_decoded != value:\n        variants.append(entity_decoded)\n    if re.search(r\"\\\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|[0-7]{1,3})\", value):\n        try:\n            escaped = value.encode(\"utf-8\").decode(\"unicode_escape\")\n            if escaped != value:\n                variants.append(escaped)\n        except (UnicodeDecodeError, ValueError):\n            pass\n    if \"=?\" in value and \"?=\" in value:\n        try:\n            mime = \"\".join(\n                part.decode(charset or \"utf-8\", \"replace\") if isinstance(part, bytes) else part\n                for part, charset in decode_header(value)\n            )\n            if mime != value:\n                variants.append(mime)\n        except Exception:\n            pass\n    current = value\n    for _ in range(8):\n        decoded = unquote_plus(current)\n        if decoded == current:\n            break\n        variants.append(decoded)\n        current = decoded\n    else:\n        if unquote_plus(current) != current:\n            variants.append(_DECODE_LIMIT_SENTINEL)\n    stripped = value.strip()\n    if stripped.startswith((\"{\", \"[\", '\"')):\n        try:\n            variants.append(json.dumps(json.loads(stripped), ensure_ascii=False))\n        except (json.JSONDecodeError, TypeError):\n            pass\n    tokens = re.findall(r\"(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{6,}={0,2}(?![A-Za-z0-9+/_-])\", value)\n    for token in tokens:\n        try:\n            raw = base64.b64decode(token, validate=True)\n            decoded = raw.decode(\"utf-8\")\n            if decoded and sum(ch.isprintable() for ch in decoded) / len(decoded) >= 0.8:\n                variants.append(decoded)\n        except Exception:\n            try:\n                padded = token + \"=\" * (-len(token) % 4)\n                raw = base64.urlsafe_b64decode(padded)\n                decoded = raw.decode(\"utf-8\")\n                if decoded and sum(ch.isprintable() for ch in decoded) / len(decoded) >= 0.8:\n                    variants.append(decoded)\n            except Exception:\n                pass\n    for token in re.findall(r\"(?<![0-9a-fA-F])[0-9a-fA-F]{8,}(?![0-9a-fA-F])\", value):\n        if len(token) % 2:\n            continue\n        try:\n            decoded = bytes.fromhex(token).decode(\"utf-8\")\n            if decoded and sum(ch.isprintable() for ch in decoded) / len(decoded) >= 0.8:\n                variants.append(decoded)\n        except Exception:\n            pass\n    return list(dict.fromkeys(variants))\n\n\ndef privacy_reason(text: str | bytes | None, *, allow_generic_pii: bool = False) -> str:\n    \"\"\"Return a category-only reason; never echo the sensitive matched value.\"\"\"\n    if text is None:\n        return \"\"\n    value = text.decode(\"utf-8\", \"ignore\") if isinstance(text, bytes) else str(text)\n    if not value:\n        return \"\"\n    for candidate in _decoded_variants(value):\n        if candidate == _DECODE_LIMIT_SENTINEL:\n            return \"nested encoding exceeds privacy inspection limit\"\n        for label, pattern in _INTERNAL_PATTERNS:\n            if pattern.search(candidate):\n                return label\n        for home in _local_home_values():\n            if home.casefold() in candidate.casefold():\n                return \"local user path\"\n        for item in _local_identity_values() + _configured_sensitive_values():\n            if (item.casefold() in candidate.casefold() if \"/\" in item or \"\\\\\" in item\n                    else re.search(rf\"(?<![a-z0-9]){re.escape(item)}(?![a-z0-9])\", candidate, re.IGNORECASE)):\n                return \"configured or local identity value\"\n        if allow_generic_pii:\n            continue\n        for match in _EMAIL_RE.finditer(candidate):\n            domain = match.group(2).lower().rstrip(\".\")\n            if not any(domain == d or domain.endswith(\".\" + d) for d in _RESERVED_EMAIL_DOMAINS):\n                return \"email address\"\n        if _CN_PHONE_RE.search(candidate):\n            return \"phone number\"\n        if _CN_ID_RE.search(candidate):\n            return \"identity-card-shaped value\"\n    return \"\"\n\n\ndef _raise_if_private(value: str | bytes | None, location: str, *, allow_generic_pii: bool = False) -> None:\n    reason = privacy_reason(value, allow_generic_pii=allow_generic_pii)\n    if reason:\n        raise OutboundPrivacyError(f\"outbound privacy blocked {location}: {reason}\")\n\n\ndef validate_outbound_request(method: str, url: str, headers: dict | None,\n                              body: bytes | str | None, *,\n                              allow_sensitive_auth: bool = False,\n                              allow_legacy_cleanup: bool = False) -> None:\n    \"\"\"Fail before network I/O when generated request fields leak identity/PII.\n\n    The destination host itself is operator-supplied scope and is not treated as\n    a generated marker.  Path/query, non-auth headers, and request bodies are.\n    Opaque authentication headers are allowed to the intended target, but are\n    still checked for internal project/local identity markers.  A body carrying\n    necessary login PII requires the explicit ``allow_sensitive_auth`` flag.\n    \"\"\"\n    legacy_cleanup = allow_legacy_cleanup and method.upper() in {\"POST\", \"PUT\", \"PATCH\", \"DELETE\"}\n    def without_legacy(value):\n        if not legacy_cleanup or value is None:\n            return value\n        if isinstance(value, bytes):\n            return _LEGACY_ARTIFACT_RE.sub(\"legacy-proof.txt\", value.decode(\"utf-8\", \"ignore\"))\n        return _LEGACY_ARTIFACT_RE.sub(\"legacy-proof.txt\", str(value))\n\n    parsed = urlsplit(str(url or \"\"))\n    if parsed.username is not None:\n        if parsed.password is not None and not allow_sensitive_auth:\n            raise OutboundPrivacyError(\n                \"outbound privacy blocked URL userinfo: authentication secret \"\n                \"[REDACTED] explicit auth exception\"\n            )\n        _raise_if_private(parsed.username, \"URL userinfo username\",\n                          allow_generic_pii=allow_sensitive_auth)\n        if parsed.password is not None:\n            _raise_if_private(parsed.password, \"URL userinfo password\",\n                              allow_generic_pii=True)\n    _raise_if_private(without_legacy(parsed.path), \"URL path\", allow_generic_pii=allow_sensitive_auth)\n    for key, value in parse_qsl(parsed.query, keep_blank_values=True):\n        _raise_if_private(key, \"query key\", allow_generic_pii=True)\n        _raise_if_private(value, \"query value\", allow_generic_pii=allow_sensitive_auth)\n    for key, value in (headers or {}).items():\n        name = str(key)\n        _raise_if_private(name, \"header name\", allow_generic_pii=True)\n        auth_header = (name.lower().strip() in AUTH_HEADER_NAMES\n                       or bool(_SENSITIVE_KEY_RE.search(name)))\n        _raise_if_private(value, f\"header {name}\",\n                          allow_generic_pii=auth_header or allow_sensitive_auth)\n    body_text = (body.decode(\"utf-8\", \"ignore\") if isinstance(body, bytes)\n                 else str(body or \"\"))\n    for head, _sep, _payload in _multipart_parts(body_text, headers or {}):\n        filename = _multipart_filename(head)\n        if not filename:\n            continue\n        validate_neutral_artifact_name(filename)\n        _raise_if_private(filename, \"multipart filename\")\n    multipart_secret = _multipart_has_auth_secret(body_text, headers or {})\n    if (body_text and (_AUTH_BODY_SECRET_RE.search(unquote_plus(body_text)) or multipart_secret)\n            and not allow_sensitive_auth):\n        raise OutboundPrivacyError(\n            \"outbound privacy blocked request body: authentication secret field requires explicit auth exception\"\n        )\n    _raise_if_private(without_legacy(body), \"request body\", allow_generic_pii=allow_sensitive_auth)\n\n\ndef _redact_text(value: str, *, kind: str = \"pii\") -> tuple[str, bool]:\n    changed = False\n    out = value\n    for _label, pattern in _INTERNAL_PATTERNS:\n        out, n = pattern.subn(lambda m: _redaction(\"internal\", m.group(0)), out)\n        changed = changed or bool(n)\n    for home in _local_home_values():\n        out, n = re.subn(re.escape(home), lambda m: _redaction(\"local_path\", m.group(0)),\n                         out, flags=re.IGNORECASE)\n        changed = changed or bool(n)\n    for item in _local_identity_values() + _configured_sensitive_values():\n        if \"/\" in item or \"\\\\\" in item:\n            pattern = re.compile(re.escape(item), re.IGNORECASE)\n        else:\n            pattern = re.compile(rf\"(?<![a-z0-9]){re.escape(item)}(?![a-z0-9])\", re.IGNORECASE)\n        out, n = pattern.subn(lambda m: _redaction(\"identity\", m.group(0)), out)\n        changed = changed or bool(n)\n\n    def email_repl(match: re.Match[str]) -> str:\n        nonlocal changed\n        domain = match.group(2).lower().rstrip(\".\")\n        if any(domain == d or domain.endswith(\".\" + d) for d in _RESERVED_EMAIL_DOMAINS):\n            return match.group(0)\n        changed = True\n        return _redaction(\"email\", match.group(0))\n\n    out = _EMAIL_RE.sub(email_repl, out)\n    out, n = _CN_PHONE_RE.subn(lambda m: _redaction(\"phone\", m.group(0)), out)\n    changed = changed or bool(n)\n    out, n = _CN_ID_RE.subn(lambda m: _redaction(\"identity\", m.group(0)), out)\n    changed = changed or bool(n)\n    # If a bounded decode exposed a sensitive value that was not visible in the\n    # raw representation, redact the whole encoded field rather than preserve a\n    # reusable encoding of private data.\n    if not changed and privacy_reason(value):\n        return _redaction(kind, value), True\n    return out, changed\n\n\ndef redact_headers(headers: dict | None) -> tuple[dict, list[str]]:\n    out: dict = {}\n    redactions: list[str] = []\n    for key, value in (headers or {}).items():\n        name = str(key)\n        lowered = name.lower().strip()\n        if lowered in _SENSITIVE_HEADER_NAMES or _SENSITIVE_KEY_RE.search(name):\n            out[name] = _redaction(\"header\", str(value))\n            redactions.append(f\"header:{name.lower()}\")\n        elif lowered in {\"location\", \"content-location\"}:\n            safe, url_redactions = redact_url(str(value))\n            out[name] = safe\n            if url_redactions:\n                redactions.append(f\"header:{name.lower()}\")\n        else:\n            safe, changed = _redact_text(str(value))\n            out[name] = safe\n            if changed:\n                redactions.append(f\"header:{name.lower()}\")\n    return out, redactions\n\n\ndef _redact_json(value, path: str, redactions: list[str]):\n    if isinstance(value, dict):\n        out = {}\n        for key, item in value.items():\n            child = f\"{path}.{key}\"\n            if _SENSITIVE_KEY_RE.search(str(key)):\n                raw = json.dumps(item, ensure_ascii=False, sort_keys=True) if not isinstance(item, str) else item\n                out[key] = _redaction(\"field\", raw)\n                redactions.append(child)\n            else:\n                out[key] = _redact_json(item, child, redactions)\n        return out\n    if isinstance(value, list):\n        return [_redact_json(item, f\"{path}[{idx}]\", redactions) for idx, item in enumerate(value)]\n    if isinstance(value, str):\n        safe, changed = _redact_text(value)\n        if changed:\n            redactions.append(path)\n        return safe\n    return value\n\n\ndef _content_type(headers: dict | None) -> str:\n    for key, value in (headers or {}).items():\n        if str(key).lower() == \"content-type\":\n            return str(value)\n    return \"\"\n\n\ndef _multipart_boundary(headers: dict | None) -> str:\n    ctype = _content_type(headers)\n    if \"multipart/form-data\" not in ctype.lower():\n        return \"\"\n    match = re.search(r\"boundary\\s*=\\s*(?:\\\"([^\\\"]+)\\\"|([^;\\s]+))\", ctype, re.IGNORECASE)\n    return (match.group(1) or match.group(2)) if match else \"\"\n\n\ndef _multipart_parts(text: str, headers: dict | None) -> list[tuple[str, str, str]]:\n    boundary = _multipart_boundary(headers)\n    if not boundary:\n        return []\n    out: list[tuple[str, str, str]] = []\n    for raw_part in text.split(\"--\" + boundary):\n        if \"\\r\\n\\r\\n\" in raw_part:\n            head, payload = raw_part.split(\"\\r\\n\\r\\n\", 1)\n            sep = \"\\r\\n\\r\\n\"\n        elif \"\\n\\n\" in raw_part:\n            head, payload = raw_part.split(\"\\n\\n\", 1)\n            sep = \"\\n\\n\"\n        else:\n            continue\n        out.append((head, sep, payload))\n    return out\n\n\ndef _multipart_field_name(head: str) -> str:\n    match = re.search(r\"\\bname\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|([^;\\s]+))\", head, re.IGNORECASE)\n    return (match.group(1) or match.group(2) or \"\") if match else \"\"\n\n\ndef _multipart_filename(head: str) -> str:\n    match = re.search(r\"\\bfilename\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|([^;\\s]+))\", head, re.IGNORECASE)\n    return (match.group(1) or match.group(2) or \"\") if match else \"\"\n\n\ndef _redact_multipart_head(head: str, redactions: list[str], field: str) -> str:\n    \"\"\"Sanitize part headers, always hashing the transmitted filename value.\"\"\"\n    def filename_repl(match: re.Match[str]) -> str:\n        raw = match.group(1) if match.group(1) is not None else match.group(2)\n        quote = '\"' if match.group(1) is not None else \"\"\n        redactions.append(f\"body.{field or 'multipart'}.filename\")\n        return f\"filename={quote}{_redaction('filename', raw)}{quote}\"\n\n    safe = re.sub(\n        r\"\\bfilename\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|([^;\\s]+))\",\n        filename_repl,\n        head,\n        flags=re.IGNORECASE,\n    )\n    safe, changed = _redact_text(safe)\n    if changed:\n        redactions.append(f\"body.{field or 'multipart'}.headers\")\n    return safe\n\n\ndef _multipart_has_auth_secret(text: str, headers: dict | None) -> bool:\n    return any(\n        bool(_AUTH_BODY_SECRET_RE.search(f\" { _multipart_field_name(head) }=\"))\n        for head, _sep, _payload in _multipart_parts(text, headers)\n    )\n\n\ndef _redact_multipart(text: str, headers: dict | None) -> tuple[str, list[str]]:\n    boundary = _multipart_boundary(headers)\n    if not boundary:\n        return text, []\n    redactions: list[str] = []\n    rendered: list[str] = []\n    safe_boundary, boundary_changed = _redact_text(boundary)\n    if boundary_changed:\n        redactions.append(\"body.multipart.boundary\")\n    delimiter = \"--\" + boundary\n    safe_delimiter = \"--\" + safe_boundary\n    for raw_part in text.split(delimiter):\n        if \"\\r\\n\\r\\n\" in raw_part:\n            head, payload = raw_part.split(\"\\r\\n\\r\\n\", 1)\n            sep = \"\\r\\n\\r\\n\"\n        elif \"\\n\\n\" in raw_part:\n            head, payload = raw_part.split(\"\\n\\n\", 1)\n            sep = \"\\n\\n\"\n        else:\n            rendered.append(raw_part)\n            continue\n        field = _multipart_field_name(head)\n        trailing = \"\\r\\n\" if payload.endswith(\"\\r\\n\") else (\"\\n\" if payload.endswith(\"\\n\") else \"\")\n        content = payload[:-len(trailing)] if trailing else payload\n        if field and _SENSITIVE_KEY_RE.search(field):\n            content = _redaction(\"field\", content)\n            redactions.append(f\"body.{field}\")\n        else:\n            content, secret_count = _RAW_SECRET_VALUE_RE.subn(\n                lambda m: m.group(\"prefix\") + _redaction(\"field\", m.group(\"value\")),\n                content,\n            )\n            if secret_count:\n                redactions.append(f\"body.{field or 'multipart'}.secret-field\")\n            safe, changed = _redact_text(content)\n            content = safe\n            if changed:\n                redactions.append(f\"body.{field or 'multipart'}\")\n        safe_head = _redact_multipart_head(head, redactions, field)\n        rendered.append(safe_head + sep + content + trailing)\n    return safe_delimiter.join(rendered), redactions\n\n\ndef redact_body(body: bytes | str | None, headers: dict | None = None) -> tuple[str | None, list[str]]:\n    if body is None:\n        return None, []\n    text = body.decode(\"utf-8\", \"replace\") if isinstance(body, bytes) else str(body)\n    redactions: list[str] = []\n    ctype = _content_type(headers).lower()\n    if \"multipart/form-data\" in ctype:\n        return _redact_multipart(text, headers)\n    if \"json\" in ctype or text.lstrip().startswith((\"{\", \"[\")):\n        try:\n            parsed = json.loads(text)\n            safe = _redact_json(parsed, \"body\", redactions)\n            return json.dumps(safe, ensure_ascii=False, separators=(\",\", \":\")), redactions\n        except (json.JSONDecodeError, TypeError):\n            pass\n    if \"application/x-www-form-urlencoded\" in ctype:\n        pairs = []\n        for key, val",
+            "excerpt_truncated_chars": 22947
+          },
+          {
+            "token": "reviewed.diff",
+            "path": "reviewed.diff",
+            "exists": true,
+            "size": 147342,
+            "sha1": "1dd922dba8fc55c941358bebae012efdcf09322a",
+            "diff_summary": {
+              "changed_files_count": 34,
+              "changed_files": [
+                ".claude/hooks/safety_gate.py",
+                ".claude/skills/src-safety-boundary/SKILL.md",
+                ".claude/skills/xunji-agent-board/SKILL.md",
+                ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
+                "CLAUDE.md",
+                "docs/WORKFLOW-reference.md",
+                "docs/WORKFLOW.md",
+                "docs/templates/agents/code-audit.md",
+                "docs/templates/agents/exploit.md",
+                "docs/templates/agents/report.md",
+                "docs/templates/agents/review.md",
+                "docs/templates/agents/surface.md",
+                "docs/templates/agents/synthesizer.md",
+                "docs/templates/agents/verify.md",
+                "docs/templates/agents/web-hunter.md",
+                "docs/templates/loop_prompt.md",
+                "docs/templates/run/evidence.md",
+                "docs/templates/worker.md",
+                "sentinel/replay.py",
+                "sentinel/verify_layers.py",
+                "tools/check_hook.py",
+                "tools/check_run.py",
+                "tools/exploit.py",
+                "tools/harness/guard.py",
+                "tools/probe.py",
+                "tools/render.py",
+                "tools/replay.py",
+                "tools/scan.py",
+                "tools/selftest_all.py",
+                "tools/sensors/README.md",
+                "tools/sensors/client_graybox.py",
+                "tools/sensors/upload_probe.py",
+                "tools/workers.py",
+                "tools/harness/privacy.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 98,
+              "hunks": [
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -22,6 +22,15 @@ import re"
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -38,7 +47,7 @@ DEFAULT_RULES = ["
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -147,6 +156,15 @@ def extract_command(event: dict) -> str:"
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -154,8 +172,9 @@ def audit(category: str, reason: str, command: str, decision: str = \"DENY\") -> N"
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -199,6 +218,20 @@ def cleanup_requires_ask(command: str) -> str:"
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -218,6 +251,11 @@ def selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -226,6 +264,14 @@ def selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -239,6 +285,8 @@ def selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -263,6 +311,35 @@ def selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/safety_gate.py",
+                  "header": "@@ -303,6 +380,20 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/skills/src-safety-boundary/SKILL.md",
+                  "header": "@@ -91,6 +91,13 @@ against the three factors:"
+                },
+                {
+                  "file": ".claude/skills/src-safety-boundary/SKILL.md",
+                  "header": "@@ -117,6 +124,11 @@ against the three factors:"
+                },
+                {
+                  "file": ".claude/skills/src-safety-boundary/SKILL.md",
+                  "header": "@@ -136,5 +148,12 @@ Reports must cite evidence. Signals are not conclusions. Model confidence is not"
+                },
+                {
+                  "file": ".claude/skills/xunji-agent-board/SKILL.md",
+                  "header": "@@ -43,6 +43,11 @@ must not be treated as the Root driver's instruction source."
+                },
+                {
+                  "file": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
+                  "header": "@@ -17,10 +17,15 @@ evidence grounded in saved target responses and safe replays, not prose."
+                },
+                {
+                  "file": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
+                  "header": "@@ -60,6 +65,10 @@ Replay rules:"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -85,6 +85,37 @@"
+                },
+                {
+                  "file": "CLAUDE.md",
+                  "header": "@@ -92,6 +123,19 @@"
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -288,6 +288,13 @@ only — `POST`/`PUT` need `--force`, `DELETE` is never replayed; host must be i"
+                },
+                {
+                  "file": "docs/WORKFLOW-reference.md",
+                  "header": "@@ -606,10 +613,17 @@ and harmless upload proof objects. They write JSON artifacts under"
+                },
+                {
+                  "file": "docs/WORKFLOW.md",
+                  "header": "@@ -24,6 +24,36 @@ runs/<target_slug>_<YYYYMMDD>/"
+                },
+                {
+                  "file": "docs/templates/agents/code-audit.md",
+                  "header": "@@ -36,6 +36,7 @@ Audit source, diffs, dependencies, configuration, routes, and authorization boun"
+                },
+                {
+                  "file": "docs/templates/agents/exploit.md",
+                  "header": "@@ -36,6 +36,7 @@ Adapt payloads or draft author-and-handoff PoC code for a candidate. Do not auto"
+                },
+                {
+                  "file": "docs/templates/agents/report.md",
+                  "header": "@@ -36,6 +36,7 @@ Draft report skeletons and consistency checks from already gated evidence. Do no"
+                },
+                {
+                  "file": "docs/templates/agents/review.md",
+                  "header": "@@ -36,6 +36,7 @@ Clean-context review of evidence, closure, or safety-critical code changes. Find"
+                },
+                {
+                  "file": "docs/templates/agents/surface.md",
+                  "header": "@@ -37,6 +37,7 @@ Convert recon, coverage, fingerprints, and threat roles into attack-surface cand"
+                },
+                {
+                  "file": "docs/templates/agents/synthesizer.md",
+                  "header": "@@ -35,6 +35,7 @@ The sole integrator. Merge subagent candidates, resolve conflicts, apply the evi"
+                },
+                {
+                  "file": "docs/templates/agents/verify.md",
+                  "header": "@@ -36,6 +36,7 @@ Replicate, replay, control, falsify, and calibrate candidate evidence, especiall"
+                },
+                {
+                  "file": "docs/templates/agents/web-hunter.md",
+                  "header": "@@ -36,6 +36,7 @@ Explore one assigned web front with proof-level actions. You may produce candida"
+                },
+                {
+                  "file": "docs/templates/loop_prompt.md",
+                  "header": "@@ -122,6 +122,13 @@ skip Hunter and enter the appropriate phase instead."
+                },
+                {
+                  "file": "docs/templates/run/evidence.md",
+                  "header": "@@ -20,6 +20,7 @@"
+                },
+                {
+                  "file": "docs/templates/worker.md",
+                  "header": "@@ -64,6 +64,10 @@ rate-limit pressure, and past worker hit rate."
+                },
+                {
+                  "file": "sentinel/replay.py",
+                  "header": "@@ -101,7 +101,8 @@ CASES = ["
+                },
+                {
+                  "file": "sentinel/verify_layers.py",
+                  "header": "@@ -73,7 +73,8 @@ BENIGN = ["
+                },
+                {
+                  "file": "sentinel/verify_layers.py",
+                  "header": "@@ -116,6 +117,15 @@ DANGEROUS = ["
+                },
+                {
+                  "file": "sentinel/verify_layers.py",
+                  "header": "@@ -177,6 +187,13 @@ def run() -> int:"
+                },
+                {
+                  "file": "sentinel/verify_layers.py",
+                  "header": "@@ -196,6 +213,7 @@ def run() -> int:"
+                },
+                {
+                  "file": "tools/check_hook.py",
+                  "header": "@@ -78,12 +78,32 @@ BLOCKED_COMMANDS = ["
+                },
+                {
+                  "file": "tools/check_hook.py",
+                  "header": "@@ -131,12 +151,20 @@ ALLOWED_COMMANDS = ["
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -258,22 +258,32 @@ def _summarize_replay(results: list[dict]) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -293,15 +303,17 @@ def _artifact_keys(rec: dict) -> set:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -316,8 +328,8 @@ def _replay_unacked_findings(run_dir: Path, results: list[dict]) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -339,13 +351,24 @@ def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3466,6 +3489,12 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3621,6 +3650,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3639,6 +3669,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/exploit.py",
+                  "header": "@@ -38,6 +38,7 @@ from typing import Protocol"
+                },
+                {
+                  "file": "tools/exploit.py",
+                  "header": "@@ -224,6 +225,23 @@ PLUGINS: dict[str, IExploitPlugin] = {"
+                },
+                {
+                  "file": "tools/exploit.py",
+                  "header": "@@ -248,9 +266,9 @@ def _save_evidence(run_dir: str, plugin_name: str, result: dict) -> Path:"
+                },
+                {
+                  "file": "tools/exploit.py",
+                  "header": "@@ -260,7 +278,12 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/harness/guard.py",
+                  "header": "@@ -24,6 +24,11 @@ import os"
+                },
+                {
+                  "file": "tools/harness/guard.py",
+                  "header": "@@ -445,15 +450,19 @@ class RequestRecorder:"
+                },
+                {
+                  "file": "tools/harness/guard.py",
+                  "header": "@@ -462,6 +471,16 @@ class RequestRecorder:"
+                },
+                {
+                  "file": "tools/harness/guard.py",
+                  "header": "@@ -493,16 +512,26 @@ class RequestRecorder:"
+                },
+                {
+                  "file": "tools/harness/guard.py",
+                  "header": "@@ -522,8 +551,15 @@ if __name__ == \"__main__\":"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -43,6 +43,8 @@ from harness.guard import (RateLimiter, AuthFailCounter, cap_body,  # noqa: E402"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -98,7 +100,40 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -106,6 +141,11 @@ def _opener(no_redirect: bool = False) -> urllib.request.OpenerDirector:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -457,7 +497,19 @@ def send(method: str, url: str, headers: dict, data: bytes | None,"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -467,15 +519,16 @@ def send(method: str, url: str, headers: dict, data: bytes | None,"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -500,6 +553,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -594,20 +649,32 @@ def send(method: str, url: str, headers: dict, data: bytes | None,"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -641,6 +708,42 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -695,6 +798,14 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -746,9 +857,25 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -971,6 +1098,12 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -1043,7 +1176,8 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -1078,7 +1212,9 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/probe.py",
+                  "header": "@@ -1089,6 +1225,8 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/render.py",
+                  "header": "@@ -45,6 +45,7 @@ from urllib.parse import urlparse"
+                },
+                {
+                  "file": "tools/render.py",
+                  "header": "@@ -106,6 +107,16 @@ def build_cookies(url: str, headers: list[str], cfile: str | None) -> list[dict]"
+                },
+                {
+                  "file": "tools/render.py",
+                  "header": "@@ -141,12 +152,15 @@ def _extract_scripts_and_forms(page) -> tuple[list[str], list[dict], str]:"
+                },
+                {
+                  "file": "tools/render.py",
+                  "header": "@@ -167,6 +181,31 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,"
+                },
+                {
+                  "file": "tools/render.py",
+                  "header": "@@ -255,6 +294,8 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,"
+                },
+                {
+                  "file": "tools/render.py",
+                  "header": "@@ -305,6 +346,17 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/render.py",
+                  "header": "@@ -383,6 +435,9 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/render.py",
+                  "header": "@@ -414,11 +469,14 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/replay.py",
+                  "header": "@@ -36,6 +36,7 @@ _here = Path(__file__).resolve()"
+                },
+                {
+                  "file": "tools/replay.py",
+                  "header": "@@ -86,6 +87,18 @@ def replay_one(rec_path, *, force: bool = False, timeout: int = 20,"
+                },
+                {
+                  "file": "tools/replay.py",
+                  "header": "@@ -247,6 +260,15 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/scan.py",
+                  "header": "@@ -30,21 +30,62 @@ from urllib.parse import urlparse"
+                },
+                {
+                  "file": "tools/scan.py",
+                  "header": "@@ -99,14 +140,23 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/selftest_all.py",
+                  "header": "@@ -48,6 +48,9 @@ SUITES: list[tuple[str, list[str], str]] = ["
+                },
+                {
+                  "file": "tools/sensors/README.md",
+                  "header": "@@ -19,4 +19,7 @@ Tools:"
+                },
+                {
+                  "file": "tools/sensors/client_graybox.py",
+                  "header": "@@ -100,10 +100,10 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -11,7 +11,6 @@ import argparse"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -24,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -71,8 +71,11 @@ def _headers(items: list[str]) -> dict:"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -86,7 +89,11 @@ def multipart(field: str, filename: str, content: bytes, content_type: str) -> t"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -111,7 +118,8 @@ def cleanup(cleanup_url: str, method: str, headers: dict, timeout: int, proxy: s"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -129,6 +137,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -145,8 +154,10 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -158,7 +169,14 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/sensors/upload_probe.py",
+                  "header": "@@ -191,8 +209,13 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -185,6 +185,10 @@ AGENT_SCAFFOLD = \"\"\"# Agent {agent}"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -1286,6 +1290,7 @@ def agent_discipline_issues(run_dir: Path) -> list[dict]:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -2325,6 +2330,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/harness/privacy.py",
+                  "header": "@@ -0,0 +1,1009 @@"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/.claude/hooks/safety_gate.py b/.claude/hooks/safety_gate.py\nindex 1a04fd3..34e34b5 100644\n--- a/.claude/hooks/safety_gate.py\n+++ b/.claude/hooks/safety_gate.py\n@@ -22,6 +22,15 @@ import re\n import sys\n from pathlib import Path\n \n+ROOT = Path(__file__).resolve().parents[2]\n+sys.path.insert(0, str(ROOT / \"tools\"))\n+try:\n+    from harness import privacy as privacymod\n+    _PRIVACY_IMPORT_ERROR = \"\"\n+except Exception as _privacy_error:  # fail closed for target network commands below\n+    privacymod = None  # type: ignore[assignment]\n+    _PRIVACY_IMPORT_ERROR = type(_privacy_error).__name__\n+\n RULES_PATH = Path(__file__).with_name(\"safety_rules.json\")\n \n # Built-in fallback used if safety_rules.json is missing or unreadable, so the\n@@ -38,7 +47,7 @@ DEFAULT_RULES = [\n     {\"category\": \"payment_transfer\", \"pattern\": r\"(-X\\s*(POST|PUT|PATCH)|--data|\\s-d\\s)[^|;\\n]*\\b(transfer|withdraw|refund|payout)\\b\", \"reason\": \"money-movement request\"},\n ]\n \n-TARGET_URL_RE = re.compile(r\"(?:https?|ftp)://\", re.IGNORECASE)\n+TARGET_URL_RE = re.compile(r\"(?:https?|wss?|ftp)://\", re.IGNORECASE)\n \n # Neutral target-side temporary artifacts created by this framework must use this\n # shape. It gives the hook something precise to recognize without leaking project,\n@@ -147,6 +156,15 @@ def extract_command(event: dict) -> str:\n     return \" \\n \".join(parts)\n \n \n+def _safe_audit_command(command: str) -> str:\n+    try:\n+        return (privacymod.sanitize_text_for_log(command)\n+                if privacymod is not None else \"<command redaction unavailable>\")\n+    except Exception:\n+        # Preserve the event without raw bytes if redaction itself breaks.\n+        return \"<command omitted: redaction failed>\"\n+\n+\n def audit(category: str, reason: str, command: str, decision: str = \"DENY\") -> None:\n     \"\"\"Append a HARD_STOP hit to the audit log. Best-effort: never let logging\n     break the gate (a failed write must not change the deny decision).\"\"\"\n@@ -154,8 +172,9 @@ def audit(category: str, reason: str, command: str, decision: str = \"DENY\") -> N\n         log = Path(__file__).resolve().parents[2] / \"tools\" / \"harness\" / \".state\" / \"audit.log\"\n         log.parent.mkdir(parents=True, exist_ok=True)\n         ts = datetime.datetime.now().isoformat(timespec=\"seconds\")\n+        safe_command = _safe_audit_command(command)\n         with log.open(\"a\", encoding=\"utf-8\") as fh:\n-            fh.write(f\"{ts} | {decision} | {category} | {reason} | {command[:120]}\\n\")\n+            fh.write(f\"{ts} | {decision} | {category} | {reason} | {safe_command[:120]}\\n\")\n     except Exception:\n         pass\n \n@@ -199,6 +218,20 @@ def cleanup_requires_ask(command: str) -> str:\n     )\n \n \n+def outbound_privacy_reason(command: str, *, allow_legacy_cleanup: bool = False) -> str:\n+    \"\"\"Return a category-only reason without echoing the matched private value.\"\"\"\n+    if privacymod is not None:\n+        return privacymod.outbound_command_privacy_reason(\n+            command, allow_legacy_cleanup=allow_legacy_cleanup\n+        )\n+    # If the shared privacy module cannot load, URL-bearing Bash actions are\n+    # categorically uninspectable.  Fail closed instead of maintaining a second,\n+    # inevitably incomplete list of network tools here.\n+    if TARGET_URL_RE.search(command):\n+        return f\"privacy guard unavailable ({_PRIVACY_IMPORT_ERROR or 'unknown import error'})\"\n+    return \"\"\n+\n+\n def selftest() -> int:\n     \"\"\"Fail-closed self-check: prove the gate still denies known-bad commands and\n     stays silent on known-good ones. Returns 0 if healthy, 1 if the gate is broken.\n@@ -218,6 +251,11 @@ def selftest() -> int:\n         '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf /var/lib/mysql\"}}',\n         '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"sqlmap -u http://t/ --dump\"}}',\n         '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"mysql -e \\'DROP DATABASE prod\\'\"}}',\n+        '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl https://t/ -d \\'marker=xunji-proof\\'\"}}',\n+        '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"python tools/probe.py POST https://t/ --data \\'mobile=13800138000\\'\"}}',\n+        json.dumps({\"tool_name\": \"Bash\", \"tool_input\": {\n+            \"command\": f\"curl https://t/ -H 'X-Note: {Path.home()}/run.txt'\"\n+        }}),\n     ]\n     must_pass = [\n         '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl -s https://t/api/x\"}}',\n@@ -226,6 +264,14 @@ def selftest() -> int:\n         '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf tmp/build\"}}',\n         '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -f runs/old/cookies.txt\"}}',\n         '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl https://t/ # cleanup tmp-20260708-a1b2c3d4.txt\"}}',\n+        '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"XUNJI_PROXY=socks5h://127.0.0.1:1080 python tools/probe.py GET https://t/\"}}',\n+        '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"python tools/probe.py POST https://t/login --data \\'email=person@real.example.cn\\' --allow-sensitive-auth\"}}',\n+        # The operator-supplied destination may itself contain the project word;\n+        # it is not generated proof data and must not be rewritten.\n+        '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl https://xunji.example.test/\"}}',\n+        '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl https://t/home/dashboard\"}}',\n+        '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl https://t/Users/settings\"}}',\n+        '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl https://t/runs/list\"}}',\n     ]\n     must_ask = [\n         '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl -X DELETE https://t/uploads/tmp-20260708-a1b2c3d4.txt\"}}',\n@@ -239,6 +285,8 @@ def selftest() -> int:\n     def classify(ev_text: str) -> str:\n         cmd = extract_command(json.loads(ev_text))\n         cleanup_reason = cleanup_requires_ask(cmd)\n+        if outbound_privacy_reason(cmd, allow_legacy_cleanup=bool(cleanup_reason)):\n+            return \"deny\"\n         for r in rules:\n             if not _safe_pattern(r[\"pattern\"]):\n                 continue\n@@ -263,6 +311,35 @@ def selftest() -> int:\n         if classify(ev) != \"pass\":\n             print(f\"[selftest] FAIL: should allow -> {ev}\", file=sys.stderr)\n             ok = False\n+    # Simulate the shared privacy module being unavailable: every URL-bearing\n+    # command must fail closed, including custom/heredoc-style executors.\n+    global privacymod, _PRIVACY_IMPORT_ERROR\n+    saved_privacy, saved_error = privacymod, _PRIVACY_IMPORT_ERROR\n+    try:\n+        privacymod = None\n+        _PRIVACY_IMPORT_ERROR = \"SelftestImportError\"\n+        if not outbound_privacy_reason(\"python custom_sender.py https://t/\"):\n+            print(\"[selftest] FAIL: missing privacy module did not fail closed on custom URL command\",\n+                  file=sys.stderr)\n+            ok = False\n+        if outbound_privacy_reason(\"echo local-only\"):\n+            print(\"[selftest] FAIL: missing privacy module blocked URL-free local command\",\n+                  file=sys.stderr)\n+            ok = False\n+    finally:\n+        privacymod, _PRIVACY_IMPORT_ERROR = saved_privacy, saved_error\n+    if privacymod is not None:\n+        saved_sanitizer = privacymod.sanitize_text_for_log\n+        try:\n+            def _broken_sanitizer(_command: str) -> str:\n+                raise ValueError(\"selftest redaction failure\")\n+            privacymod.sanitize_text_for_log = _broken_sanitizer\n+            if _safe_audit_command(\"private-value\") != \"<command omitted: redaction failed>\":\n+                print(\"[selftest] FAIL: audit redaction failure did not preserve an omitted event\",\n+                      file=sys.stderr)\n+                ok = False\n+        finally:\n+            privacymod.sanitize_text_for_log = saved_sanitizer\n     print(\"[selftest] safety gate healthy\" if ok else \"[selftest] safety gate BROKEN\",\n           file=sys.stderr)\n     return 0 if ok else 1\n@@ -303,6 +380,20 @@ def main() -> None:\n         sys.exit(0)\n \n     cleanup_reason = cleanup_requires_ask(command)\n+    privacy_reason = outbound_privacy_reason(\n+        command, allow_legacy_cleanup=bool(cleanup_reason)\n+    )\n+    if privacy_reason:\n+        audit(\"outbound_privacy\", privacy_reason, \"<target command redacted>\")\n+        deny(\n+            f\"[safety-boundary] BLOCKED (outbound_privacy): {privacy_reason}. \"\n+            \"Target-facing URL payloads, headers, bodies, multipart filenames/content, \"\n+            \"and proof writes must not contain project/run/Agent/operator identity or \"\n+            \"real personal data. Use neutral tmp/diag/proof-YYYYMMDD-<hex> values. \"\n+            \"Necessary personal data in an authentication body is allowed only through \"\n+            \"the guarded probe --allow-sensitive-auth exception; internal identity markers \"\n+            \"remain forbidden. Do not bypass or encode around this check.\"\n+        )\n     for rule in load_rules():\n         try:\n             m = re.search(rule[\"pattern\"], command, re.IGNORECASE)\ndiff --git a/.claude/skills/src-safety-boundary/SKILL.md b/.claude/skills/src-safety-boundary/SKILL.md\nindex 53230ac..15c7ac4 100644\n--- a/.claude/skills/src-safety-boundary/SKILL.md\n+++ b/.claude/skills/src-safety-boundary/SKILL.md\n@@ -91,6 +91,13 @@ against the three factors:\n \n ### Confidentiality\n \n+- Target-facing bytes generated by Root or Agents must not identify this project,\n+  a run, an Agent, the operator, or a local machine/user, and must not contain\n+  real personal data used as proof material. Use neutral synthetic values.\n+  Required authentication Cookie/Authorization values may go only to their\n+  intended target; personal fields in an auth body require the guarded explicit\n+  auth exception. This protects identity/PII and does not restrict exploit\n+  methods or operator-supplied target addresses.\n - Unauthorized access / privilege escalation: once the logic is demonstrated, the driver does not\n   itself go on to retrieve or retain user or system data. (database dump is hard-blocked\n   regardless of who would run it as an auto-action.)\n@@ -117,6 +124,11 @@ against the three factors:\n   `proof-YYYYMMDD-<6-12hex>` name and record it. Never use project/run/Agent/vuln\n   labels in target-side names. Cleanup is operator-gated: ask first, and only run\n   the exact cleanup after the operator answers `yes`.\n+- Use a fixed neutral naming format plus a fresh 6-12 hex suffix, not one shared\n+  constant name. All uploaded marker content, transmitted filenames, and multipart\n+  boundaries must also use the dated neutral marker shape (the HTTP boundary may\n+  prepend hyphens and should derive from the same per-upload marker); raw\n+  uninspectable file-backed uploads are not auto-executed.\n - Weaponized tampering or persistence is **authored and handed off**, not\n   auto-run.\n \n@@ -136,5 +148,12 @@ Reports must cite evidence. Signals are not conclusions. Model confidence is not\n evidence. Single observations and environment-provided artifacts are not enough\n to confirm a finding.\n \n+Replay records redact reusable authentication headers, URL userinfo, personal\n+fields, response headers, and bounded response previews. URL userinfo credentials\n+require the same explicit sensitive-auth exception as login-body PII. A\n+`SKIPPED-PRIVACY-REDACTED` verdict proves only that the record is intentionally\n+non-replayable; it never counts as target verification. Re-acquire the intended\n+session, perform a fresh guarded replication, and record the control/rationale.\n+\n Use the run workflow in `docs/WORKFLOW.md` to maintain the evidence ledger and\n false-positive checks.\ndiff --git a/.claude/skills/xunji-agent-board/SKILL.md b/.claude/skills/xunji-agent-board/SKILL.md\nindex 5ffca02..9e6912a 100644\n--- a/.claude/skills/xunji-agent-board/SKILL.md\n+++ b/.claude/skills/xunji-agent-board/SKILL.md\n@@ -43,6 +43,11 @@ must not be treated as the Root driver's instruction source.\n   `workers.py finish <run> <agent> --status <done|blocked|failed|abandoned>`.\n   Closure is blocked while any assigned Agent remains non-terminal.\n - All Agents share the same hook, guard state, request budget, and host breakers.\n+- Root and Agents must keep generated project/run/Agent/operator identity and real\n+  personal data out of outbound URL payloads, headers, bodies, multipart\n+  names/content, and target writes. Use neutral synthetic values. Required auth\n+  Cookie/Authorization is destination-bound; personal auth-body fields require\n+  the guarded explicit auth exception.\n - Target-side temp artifacts created by Root or Agents must use neutral\n   `tmp-YYYYMMDD-<6-12hex>`, `diag-YYYYMMDD-<6-12hex>`, or\n   `proof-YYYYMMDD-<6-12hex>` names. Never include `xunji`, run dirs, Agent ids,\ndiff --git a/.claude/skills/xunji-evidence-replay-gate/SKILL.md b/.claude/skills/xunji-evidence-replay-gate/SKILL.md\nindex aacd4e9..c29240b 100644\n--- a/.claude/skills/xunji-evidence-replay-gate/SKILL.md\n+++ b/.claude/skills/xunji-evidence-replay-gate/SKILL.md\n@@ -17,10 +17,15 @@ evidence grounded in saved target responses and safe replays, not prose.\n - A confirmed entry needs `Artifacts:` plus `Replicated / Control:`.\n - Script output is not proof by itself. If a script performed the proof, preserve\n   the request/response with recorder or re-run the proof with `probe --save`.\n+- Saved replay URLs, request fields, response headers, and bounded response previews\n+  must contain only hashed redactions for authentication or personal values; never\n+  retain URL userinfo or returned token/PII values verbatim in the replay JSON.\n - **Agent-originated entries MUST carry `Maturity: candidate`.** An agent's\n   certainty claim without a `.replay.json` artifact is NOT canonical evidence\n-  certainty — the Synthesizer must run `replay.py` verification (IDENTICAL or\n-  CONSISTENT verdict) before promoting to `Maturity: finding` with final certainty.\n+  certainty. The Synthesizer must independently re-verify it: use replay when the\n+  request is replayable (`IDENTICAL` or content-checked `CONSISTENT`), or for an\n+  authenticated privacy-redacted request perform a fresh guarded replication\n+  with a second saved artifact and explicit Control/Replicated evidence.\n   When the driver writes an evidence entry based on agent output that has not been\n   re-verified via `probe.py --save`, the entry stays at `Maturity: candidate`,\n   `Certainty: <= 0.5`.\n@@ -60,6 +65,10 @@ Replay rules:\n   new content is still the vulnerable response.\n - `DIVERGED` means re-adjudicate: downgrade the finding, refresh evidence, or add\n   a `- Replay:` explanation to the affected `E-xxx`.\n+- `SKIPPED-PRIVACY-REDACTED` means Cookie/token/PII was deliberately replaced by\n+  a hash placeholder. Never send the placeholder or call it verified; reacquire\n+  the intended session, perform a fresh guarded replication, cite the new\n+  artifact/control, and add the per-entry `- Replay:` explanation.\n - `UNREACHABLE` is inconclusive; \"could not reach\" is not \"safe\".\n \n ## Closure Gate\ndiff --git a/CLAUDE.md b/CLAUDE.md\nindex fea6f71..770542f 100644\n--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -85,6 +85,37 @@\n   pending verification entries, aggregated subagent state, blockers, and next action.\n   It never replaces visible phase markers or\n   `loop_journal.py` phase-start/phase-end records.\n+- **Target-facing privacy boundary:** Root and every Agent must keep generated\n+  project/run/Agent/operator identity and real personal data out of outbound URL\n+  paths/queries, headers, bodies, multipart names/content, and target writes. Use\n+  neutral synthetic values. The operator-supplied destination hostname itself is\n+  scope, not a generated marker; opaque Cookie/Authorization values required by that\n+  destination are allowed but are redacted from replay evidence. Personal data\n+  required in an authentication body needs the guarded explicit\n+  `--allow-sensitive-auth` exception; URL userinfo credentials require the same\n+  exception and are always hash-redacted in replay URLs. Replay response headers\n+  and bounded response previews are also redacted before recording. Internal control names such as\n+  `XUNJI_PROXY` may remain local; they must never be copied into request bytes.\n+  Put operator/org-specific names or identifiers that have no reliable generic\n+  shape in newline-separated `OUTBOUND_PRIVACY_DENY_VALUES`; the guard compares\n+  them in memory and reports only the category, never the matched value.\n+  Guarded redirects revalidate every hop and strip Cookie/Authorization whenever\n+  scheme, host, or port changes. Raw redirect-following commands with auth are\n+  blocked; use `probe`/`render` instead.\n+  `scan.py` fixes a neutral browser User-Agent, checks target/extra arguments,\n+  disables sqlmap redirects, and refuses custom nuclei templates/user-data because\n+  the Python wrapper cannot inspect every request generated inside an external\n+  scanner process.\n+  The command gate covers HTTP(S), WebSocket(S), and FTP URL-bearing actions.\n+  `XUNJI_PROXY` is operator-controlled trusted egress: the guard validates\n+  driver-originated bytes before proxying, but a proxy that independently\n+  rewrites/injects bytes must be audited or replaced rather than assumed safe.\n+  If a target-native path/body legitimately contains a denied identity token,\n+  do not encode around the rule: use an equivalent neutral route/proof or\n+  author-and-handoff that exact exceptional request to the operator.\n+  Generic target routes such as `/home/dashboard`, `/Users/settings`, and\n+  `/runs/list` are not identity by shape alone; only the actual local home,\n+  configured identity values, and dated framework-run identifiers are blocked.\n - **Target-side proof artifact naming / cleanup:** If a proof action must create\n   a target-side temporary file or resource, use the neutral form\n   `tmp-YYYYMMDD-<6-12hex>.<safe-ext>`, `diag-YYYYMMDD-<6-12hex>.<safe-ext>`, or\n@@ -92,6 +123,19 @@\n   names, Agent ids, worker ids, vuln names, exploit names, tool names, or internal\n   project labels in target-side filenames/paths. Record the path/resource and\n   creation evidence in the run state before relying on it.\n+- Use a fixed **format**, not one constant filename: the random 6-12 hex suffix\n+  prevents collisions and accidental overwrite. Raw file-backed curl uploads\n+  whose bytes cannot be inspected are blocked; use `tools/sensors/upload_probe.py`\n+  for driver auto-execution. URL-bearing custom target scripts are\n+  author-and-handoff because a hook cannot prove a named validation function is\n+  actually called before every socket write; merely mentioning\n+  `RequestRecorder.validate(...)` never unlocks auto-execution.\n+  `tools/exploit.py` performs all HTTP through guarded `probe.send`; the optional\n+  `client_graybox.py` sensor is passive local-file/port-list ingestion and emits no\n+  target traffic.\n+  `.replay.json` stores hashed redactions rather than reusable auth/PII; a\n+  `SKIPPED-PRIVACY-REDACTED` replay is not verification and needs a fresh guarded\n+  replication plus an evidence-level `Replay:` explanation before final closure.\n - Cleanup is a state-changing target action. Deleting, overwriting, truncating,\n   or hiding a target-side artifact/resource is never automatic: stop and ask the\n   operator for explicit `yes`, then run only the exact cleanup that was approved.\ndiff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md\nindex 3c0fca1..c98316b 100644\n--- a/docs/WORKFLOW-reference.md\n+++ b/docs/WORKFLOW-reference.md\n@@ -288,6 +288,13 @@ only — `POST`/`PUT` need `--force`, `DELETE` is never replayed; host must be i\n longer matches reality — the target was fixed/changed, or the finding was shaky —\n and the driver must re-adjudicate before reporting it. `UNREACHABLE` is not a failure\n (can't-reach ≠ false). Replay stays **opt-in** (live traffic, slow) — *not* running\n+`SKIPPED-PRIVACY-REDACTED` means the recorder correctly removed reusable\n+Cookie/token/PII. It must never send placeholders or count that result as a\n+verification. Re-acquire the intended session, perform a fresh guarded\n+replication, cite the new artifact/control, and add a per-entry `- Replay:` note.\n+At a final report an unaddressed privacy-redacted replay supporting a confirmed\n+finding is a hard closure error, just like an ignored load-bearing divergence.\n+\n `--replay-verify` never fails a run, and the gate never forces you to run it. But once\n you **do** run it at a **final** report, a `DIVERGED` you leave **unaddressed** hard-fails\n the closure gate: re-adjudicate each one — downgrade the finding, or add a `- Replay:`\n@@ -606,10 +613,17 @@ and harmless upload proof objects. They write JSON artifacts under\n `<run>/evidence/sensors/` when `--run` is supplied. A sensor artifact is still a\n candidate input: the Synthesizer must copy only supported facts into `evidence.md`, set\n the correct `Maturity:`, attach Control/Replicated, and apply the certainty scale.\n+`upload_probe.py` generates a neutral unique marker, filename, and multipart\n+boundary. Custom marker/filename inputs must use the same\n+`proof-YYYYMMDD-<6-12hex>[.ext]` shape; project/run/Agent/operator labels and real\n+personal data are rejected before the upload is sent.\n \n `client_graybox.py` is separate from the web-first main loop. Use it only when the\n engagement includes client/code artifacts; its ASAR/config/IPC/custom-protocol/local\n port observations default to `Maturity: phenomenon` until active proof upgrades them.\n+It only reads local artifacts and supplied port listings; it does not send requests.\n+`tools/exploit.py` is active, but its registered HTTP plugin routes through guarded\n+`probe.send`, including the per-request privacy validator and redirect policy.\n \n ## Closure gate — `check_run.py` mechanics\n \ndiff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md\nindex c83a2de..7a5f089 100644\n--- a/docs/WORKFLOW.md\n+++ b/docs/WORKFLOW.md\n@@ -24,6 +24,36 @@ runs/<target_slug>_<YYYYMMDD>/\n Short slugs. Do not store secrets, tokens, real personal data, or unnecessary\n sensitive content in the run directory. Field templates for each file: reference.\n \n+Target-facing privacy is fail-closed in guarded tools. Generated URL payloads,\n+headers, bodies, multipart names/content, and target writes must not contain\n+project/run/Agent/operator identity or real personal data. Use neutral synthetic\n+`tmp/diag/proof-YYYYMMDD-<6-12hex>` values. Required auth secrets are\n+destination-bound; personal auth-body fields need `--allow-sensitive-auth`, and\n+URL userinfo credentials need the same explicit exception. Both are hash-redacted\n+from replay evidence; bounded response previews and response headers are sanitized\n+before recording as well. A privacy-redacted request replay is not a\n+successful verification. Add unstructured operator/org-specific names to the\n+newline-separated `OUTBOUND_PRIVACY_DENY_VALUES` environment variable; guard\n+errors and audit logs do not echo the matched private value.\n+Guarded redirects revalidate each hop and remove authentication headers across\n+origin changes; raw redirect-following commands with authentication are refused.\n+The scanner wrapper uses a fixed neutral User-Agent and vetted default templates;\n+custom nuclei templates/user-data are refused because external scanner-generated\n+requests cannot be inspected individually by the Python guard.\n+The command boundary includes HTTP(S), WebSocket(S), and FTP URL-bearing actions.\n+The engagement proxy is operator-controlled trusted infrastructure: driver bytes\n+are checked before proxying; proxy-side rewriting/header injection needs its own\n+audit and is not silently certified by this guard.\n+The operator-supplied destination hostname is scope-exempt, but generated or\n+target-native path/body bytes are not. If a legitimate target route conflicts\n+with a denied token, use an equivalent neutral proof or author-and-handoff the\n+exact exceptional request; never add a silent bypass.\n+Do not infer identity from generic target routes alone: `/home/dashb",
+            "excerpt_truncated_chars": 120275
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002 — Full regression battery",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [
+          "F-001"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "verification.txt",
+            "path": "verification.txt",
+            "exists": true,
+            "size": 3802,
+            "sha1": "c0c5fb379157d379335bcaf31eee63cdef9a9fff",
+            "excerpt": "Verification summary for frozen outbound-privacy maintenance diff\n\n1. python3 tools/check_rules.py\n   result: rule check passed\n\n2. python3 tools/selftest_all.py\n   pre-review result: 58 passed, 0 failed (83.8s total)\n   post-round-1-fix result: 58 passed, 0 failed (85.0s total)\n   final post-round-2 result: 59 passed, 0 failed (84.7s total)\n   post-round-3 WebSocket/encoding result: 59 passed, 0 failed (84.0s total)\n   post-final-review fixes result: 60 passed, 0 failed (85.2s total)\n   post-final-3 false-positive/decoder fixes result: 60 passed, 0 failed (84.7s total)\n   includes: outbound_privacy, safety_gate, check_hook, probe, render, replay,\n   check_run, exploit, workers, sensor_upload, sensor_client_graybox,\n   sentinel_replay, verify_layers, guard_smoke\n\n3. Loopback-only Playwright integration\n   fixture: page executes fetch('/api', {method:'POST', body:'marker=xunji-proof'})\n   server POST count: 0\n   render error: outbound privacy blocked request body: project identifier\n\n4. git diff --check\n   result: passed before review scope creation\n\n5. Encoding/custom/file path cases in `tools/harness/privacy.py`\n   result: percent, base64, hex, case and NFKC project markers blocked;\n   unguarded custom URL script blocked; guarded custom script allowed;\n   inspectable neutral raw upload allowed; private-content and missing raw uploads blocked.\n\n6. Redirect controls in `tools/probe.py`\n   result: same-origin auth preserved; cross-origin auth stripped; a second\n   cross-origin hop could not regain Cookie/Authorization; redirect URL privacy\n   was revalidated before I/O.\n\n7. Loopback upload wire capture\n   result: HTTP 201, 200 multipart body bytes, no project identifier; exact\n   Content-Type/body saved as upload-wire.txt and sensor result as upload-result.json.\n\n8. Final-review privacy surfaces\n   result: URL userinfo requires an explicit auth exception and is hash-redacted;\n   multipart filenames require neutral unique proof names and replay records hash\n   filenames/private boundaries; response headers and bounded previews redact\n   token/PII fields; exploit.py proves its ViewState HTTP path inherits probe's\n   pre-I/O guard; client_graybox remains passive and performs no network I/O.\n\n9. git diff --check\n   result: passed after final-review fixes.\n\n10. Runtime response replay replication\n    result: two fresh loopback responses used distinct JSON token/email values,\n    X-Session-ID values and Location query secrets. Both replay JSON artifacts\n    contain field-class hash redactions and none of the eight raw values.\n\n11. False-positive controls\n    result: generic `/home/dashboard`, `/Users/settings`, and `/runs/list` target\n    routes pass at both validator and hook levels; actual local-home and dated\n    framework-run values remain denied.\n\n12. Cookie/Set-Cookie replay replication\n    result: two fresh loopback ports used different client Cookie, server\n    Set-Cookie and response-body values. Both replay records contain distinct\n    request/response header hashes and no reusable values; two separate replay\n    invocations returned SKIPPED-PRIVACY-REDACTED.\n\n13. Dated multipart boundary and current replay schema\n    result: upload sensor boundaries now use `----proof-YYYYMMDD-<8hex>`; two\n    fresh 201 wire captures use the dated shape. E-004 cites two fresh recorder\n    artifacts that both use `privacy.response_redactions`.\n\n14. Final post-boundary regression\n    result: rule check passed; 60 selftest suites passed, 0 failed in 84.7s.\n\n15. Marker-derived boundary follow-up\n    result: boundary now derives from the same upload marker, eliminating UTC vs\n    explicit-date divergence. Two fresh 201 captures show exact marker/filename/\n    boundary-core equality. Final rule check passed and 60 suites passed, 0 failed\n    in 85.3s.\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003 — Browser pre-I/O integration",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [
+          "F-001"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "browser-integration.txt",
+            "path": "browser-integration.txt",
+            "exists": true,
+            "size": 322,
+            "sha1": "f31c753480a81b2073f7c45c84fe0d5bd7b61e1d",
+            "excerpt": "Loopback Playwright pre-I/O privacy integration\n\nFixture behavior:\n  fetch('/api', {method:'POST', body:'marker=xunji-proof'})\n\nObserved server POST count: 0\nObserved render error: outbound privacy blocked request body: project identifier\n\nControl: the HTTP server's POST counter is independent of the browser exception.\n\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004 — Runtime replay redaction and non-replay verdict",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-001"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "privacy-replay-sample-2.txt.replay.json",
+            "path": "privacy-replay-sample-2.txt.replay.json",
+            "exists": true,
+            "size": 1037,
+            "sha1": "4fae7036f59b63c82ddd11d03ddd0fb68389ffc5",
+            "excerpt": "{\n  \"ts\": \"2026-07-12T20:17:10Z\",\n  \"request\": {\n    \"method\": \"GET\",\n    \"url\": \"http://127.0.0.1:58867/\",\n    \"headers\": {\n      \"User-Agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\",\n      \"Cookie\": \"<redacted:header:c5480857b25e>\"\n    },\n    \"body\": null\n  },\n  \"response\": {\n    \"status\": 200,\n    \"len\": 19,\n    \"sha1\": \"bd65501fee9d0b0b6c9585927899d6d54010e6ae\",\n    \"ctype\": \"text/plain\",\n    \"headers\": {\n      \"Server\": \"BaseHTTP/0.6 Python/3.9.6\",\n      \"Date\": \"Sun, 12 Jul 2026 20:17:10 GMT\",\n      \"Content-Type\": \"text/plain\",\n      \"Set-Cookie\": \"<redacted:header:be6472c6f9b4>\",\n      \"Content-Length\": \"19\"\n    },\n    \"snippet\": \"privacy-replay-ok-2\"\n  },\n  \"privacy\": {\n    \"schema\": \"outbound-privacy.v1\",\n    \"redacted_fields\": [\n      \"header:cookie\"\n    ],\n    \"replayable\": false,\n    \"auth_exception\": false,\n    \"response_redactions\": [\n      \"response.header:set-cookie\"\n    ]\n  },\n  \"saved_body\": \"<ephemeral-loopback-body-removed>\"\n}\n"
+          },
+          {
+            "token": "privacy-replay-sample-3.txt.replay.json",
+            "path": "privacy-replay-sample-3.txt.replay.json",
+            "exists": true,
+            "size": 1037,
+            "sha1": "9f1b6698cc81aa83d18755f15d25fa3d975e404e",
+            "excerpt": "{\n  \"ts\": \"2026-07-12T20:35:08Z\",\n  \"request\": {\n    \"method\": \"GET\",\n    \"url\": \"http://127.0.0.1:59969/\",\n    \"headers\": {\n      \"User-Agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\",\n      \"Cookie\": \"<redacted:header:6054be573689>\"\n    },\n    \"body\": null\n  },\n  \"response\": {\n    \"status\": 200,\n    \"len\": 19,\n    \"sha1\": \"a033c31c183fe206cbd9a26add2e2346ced1530d\",\n    \"ctype\": \"text/plain\",\n    \"headers\": {\n      \"Server\": \"BaseHTTP/0.6 Python/3.9.6\",\n      \"Date\": \"Sun, 12 Jul 2026 20:35:08 GMT\",\n      \"Content-Type\": \"text/plain\",\n      \"Set-Cookie\": \"<redacted:header:44d5e67fe404>\",\n      \"Content-Length\": \"19\"\n    },\n    \"snippet\": \"privacy-replay-ok-3\"\n  },\n  \"privacy\": {\n    \"schema\": \"outbound-privacy.v1\",\n    \"redacted_fields\": [\n      \"header:cookie\"\n    ],\n    \"replayable\": false,\n    \"auth_exception\": false,\n    \"response_redactions\": [\n      \"response.header:set-cookie\"\n    ]\n  },\n  \"saved_body\": \"<ephemeral-loopback-body-removed>\"\n}\n"
+          },
+          {
+            "token": "privacy-replay-verdict-2.txt",
+            "path": "privacy-replay-verdict-2.txt",
+            "exists": true,
+            "size": 421,
+            "sha1": "1957ec6aeccf96d5814263a74c598b763f69a740",
+            "excerpt": "Command:\n  python3 tools/replay.py review/records/2026-07-13-outbound-privacy-hardening/privacy-replay-sample-2.txt.replay.json --scope 127.0.0.1\n\nResult:\n  [SKIPPED-PRIVACY-REDACTED] GET http://127.0.0.1:58867/\n  \n  汇总: SKIPPED-PRIVACY-REDACTED=1\n\nControl:\n  The second replay contains distinct request/response header hashes from a fresh\n  loopback port and neither fresh reusable Cookie value appears in the file.\n"
+          },
+          {
+            "token": "privacy-replay-verdict-3.txt",
+            "path": "privacy-replay-verdict-3.txt",
+            "exists": true,
+            "size": 391,
+            "sha1": "32e5b46b821db90acd64af8d331de183aa194993",
+            "excerpt": "Command:\n  python3 tools/replay.py review/records/2026-07-13-outbound-privacy-hardening/privacy-replay-sample-3.txt.replay.json --scope 127.0.0.1\n\nResult:\n  [SKIPPED-PRIVACY-REDACTED] GET http://127.0.0.1:59969/\n  \n  汇总: SKIPPED-PRIVACY-REDACTED=1\n\nControl:\n  This current-schema replay uses a third fresh Cookie/Set-Cookie pair and port;\n  neither reusable value appears in the record.\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-005",
+        "head": "## E-005 — Actual neutral upload wire bytes",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-001"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "upload-replication.txt",
+            "path": "upload-replication.txt",
+            "exists": true,
+            "size": 753,
+            "sha1": "40426c26961e0828078bef718826731be1aa0d78",
+            "excerpt": "E-005 replication adjudication\n\nCurrent-schema run 1 marker/filename/boundary core: proof-20260713-e5f6a7b8[.txt]\nRun 1 result: HTTP 201; server-observed wire saved in upload-wire-5.txt.\n\nCurrent-schema run 2 marker/filename/boundary core: proof-20260713-f6a7b8c9[.txt]\nRun 2 result: HTTP 201; server-observed wire saved in upload-wire-6.txt.\n\nThe sensor result files preserve the generic per-run instruction to repeat before\ncertainty >=0.8. That instruction was satisfied by the second fresh-marker run;\nthis note binds both current dated-boundary result/wire pairs as the replication\ncontrol. In each current run, the boundary is `----` plus the exact upload marker.\nEarlier wire artifacts remain historical review inputs but are not cited by E-005.\n"
+          },
+          {
+            "token": "upload-result-5.json",
+            "path": "upload-result-5.json",
+            "exists": true,
+            "size": 979,
+            "sha1": "bc4d525a736392ae5579f3c86984a508941e4e89",
+            "excerpt": "{\n  \"candidate\": true,\n  \"upload\": {\n    \"method\": \"POST\",\n    \"url\": \"http://127.0.0.1:62927/upload\",\n    \"status\": 201,\n    \"len\": 2,\n    \"truncated\": false,\n    \"sha1\": \"7a85f4764bbd\",\n    \"sha1_full\": \"7a85f4764bbd6daf1c3545efbbf0f279a6dc0beb\",\n    \"ctype\": \"\",\n    \"server\": \"BaseHTTP/0.6 Python/3.9.6\",\n    \"snippet\": \"b2s=\",\n    \"snippet_encoding\": \"base64\",\n    \"transport_error\": false,\n    \"application_error\": false,\n    \"auth_failure\": false,\n    \"blocked_by_policy\": false,\n    \"cdn_tls_reject\": false,\n    \"headers\": {\n      \"Server\": \"BaseHTTP/0.6 Python/3.9.6\",\n      \"Date\": \"Sun, 12 Jul 2026 21:18:59 GMT\",\n      \"Content-Length\": \"2\"\n    },\n    \"set_cookies\": []\n  },\n  \"marker\": \"proof-20260713-e5f6a7b8\",\n  \"filename\": \"proof-20260713-e5f6a7b8.txt\",\n  \"field\": \"file\",\n  \"control\": \"Marker content is harmless and unique; compare with a disallowed or safe baseline if claiming bypass.\",\n  \"replicated\": \"Repeat with a fresh marker before certainty >=0.8.\"\n}\n"
+          },
+          {
+            "token": "upload-result-6.json",
+            "path": "upload-result-6.json",
+            "exists": true,
+            "size": 979,
+            "sha1": "860f0ab7ef4cb74964922b4f5a2a46f1ce93a126",
+            "excerpt": "{\n  \"candidate\": true,\n  \"upload\": {\n    \"method\": \"POST\",\n    \"url\": \"http://127.0.0.1:62929/upload\",\n    \"status\": 201,\n    \"len\": 2,\n    \"truncated\": false,\n    \"sha1\": \"7a85f4764bbd\",\n    \"sha1_full\": \"7a85f4764bbd6daf1c3545efbbf0f279a6dc0beb\",\n    \"ctype\": \"\",\n    \"server\": \"BaseHTTP/0.6 Python/3.9.6\",\n    \"snippet\": \"b2s=\",\n    \"snippet_encoding\": \"base64\",\n    \"transport_error\": false,\n    \"application_error\": false,\n    \"auth_failure\": false,\n    \"blocked_by_policy\": false,\n    \"cdn_tls_reject\": false,\n    \"headers\": {\n      \"Server\": \"BaseHTTP/0.6 Python/3.9.6\",\n      \"Date\": \"Sun, 12 Jul 2026 21:19:00 GMT\",\n      \"Content-Length\": \"2\"\n    },\n    \"set_cookies\": []\n  },\n  \"marker\": \"proof-20260713-f6a7b8c9\",\n  \"filename\": \"proof-20260713-f6a7b8c9.txt\",\n  \"field\": \"file\",\n  \"control\": \"Marker content is harmless and unique; compare with a disallowed or safe baseline if claiming bypass.\",\n  \"replicated\": \"Repeat with a fresh marker before certainty >=0.8.\"\n}\n"
+          },
+          {
+            "token": "upload-wire-5.txt",
+            "path": "upload-wire-5.txt",
+            "exists": true,
+            "size": 256,
+            "sha1": "43ffd27ea7d0d4e90b9fee44bc360a1ac29c58a2",
+            "excerpt": "multipart/form-data; boundary=----proof-20260713-e5f6a7b8\n\n------proof-20260713-e5f6a7b8\nContent-Disposition: form-data; name=\"file\"; filename=\"proof-20260713-e5f6a7b8.txt\"\nContent-Type: text/plain\n\nproof-20260713-e5f6a7b8\n------proof-20260713-e5f6a7b8--\n\n"
+          },
+          {
+            "token": "upload-wire-6.txt",
+            "path": "upload-wire-6.txt",
+            "exists": true,
+            "size": 256,
+            "sha1": "92db93effd3c43f18568d2db3ae54d11e69c6a0c",
+            "excerpt": "multipart/form-data; boundary=----proof-20260713-f6a7b8c9\n\n------proof-20260713-f6a7b8c9\nContent-Disposition: form-data; name=\"file\"; filename=\"proof-20260713-f6a7b8c9.txt\"\nContent-Type: text/plain\n\nproof-20260713-f6a7b8c9\n------proof-20260713-f6a7b8c9--\n\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-006",
+        "head": "## E-006 — Loopback three-origin redirect credential candidate",
+        "maturity": "candidate",
+        "certainties": [
+          0.5
+        ],
+        "confirmed": false,
+        "has_control": true,
+        "supports": [
+          "F-001"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "redirect-wire.json",
+            "path": "redirect-wire.json",
+            "exists": true,
+            "size": 315,
+            "sha1": "e308220b8b437187e20756cf18eb1bd8d806d7fe",
+            "excerpt": "{\n  \"status\": 200,\n  \"hops\": {\n    \"hop1\": {\n      \"cookie\": true,\n      \"authorization\": true\n    },\n    \"hop2\": {\n      \"cookie\": false,\n      \"authorization\": false\n    },\n    \"hop3\": {\n      \"cookie\": false,\n      \"authorization\": false\n    }\n  },\n  \"control\": \"hop1 must receive auth; hop2 and hop3 must not\"\n}"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-007",
+        "head": "## E-007 — Runtime response replay redaction",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "F-001"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "response-redaction-runtime-2.replay.json",
+            "path": "response-redaction-runtime-2.replay.json",
+            "exists": true,
+            "size": 1227,
+            "sha1": "218cd96b465736a007cfa1a64049f09e4fbbc75f",
+            "excerpt": "{\n  \"ts\": \"2026-07-12T19:50:39Z\",\n  \"request\": {\n    \"method\": \"GET\",\n    \"url\": \"http://127.0.0.1:56648/response\",\n    \"headers\": {\n      \"User-Agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\"\n    },\n    \"body\": null\n  },\n  \"response\": {\n    \"status\": 200,\n    \"len\": 64,\n    \"sha1\": \"04b06adcf1e0bb1c762c9975bfa32fce158bb371\",\n    \"ctype\": \"application/json\",\n    \"headers\": {\n      \"Server\": \"BaseHTTP/0.6 Python/3.9.6\",\n      \"Date\": \"Sun, 12 Jul 2026 19:50:39 GMT\",\n      \"Content-Type\": \"application/json\",\n      \"X-Session-ID\": \"<redacted:header:1c136c44259d>\",\n      \"Location\": \"/callback?access_token=%3Credacted%3Aquery%3Aed2801c9b9d1%3E\",\n      \"Content-Length\": \"64\"\n    },\n    \"snippet\": \"{\\\"token\\\":\\\"<redacted:field:630218bbae7c>\\\",\\\"email\\\":\\\"<redacted:field:3dac8607ccd8>\\\"}\"\n  },\n  \"privacy\": {\n    \"schema\": \"outbound-privacy.v1\",\n    \"redacted_fields\": [],\n    \"replayable\": true,\n    \"auth_exception\": false,\n    \"response_redactions\": [\n      \"response.body.email\",\n      \"response.body.token\",\n      \"response.header:location\",\n      \"response.header:x-session-id\"\n    ]\n  },\n  \"saved_body\": \"<ephemeral-loopback-body-removed>\"\n}\n"
+          },
+          {
+            "token": "response-redaction-runtime.replay.json",
+            "path": "response-redaction-runtime.replay.json",
+            "exists": true,
+            "size": 1227,
+            "sha1": "0f3efae3fe106d4d7cab9313780aeffaa49235b7",
+            "excerpt": "{\n  \"ts\": \"2026-07-12T19:50:07Z\",\n  \"request\": {\n    \"method\": \"GET\",\n    \"url\": \"http://127.0.0.1:56614/response\",\n    \"headers\": {\n      \"User-Agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\"\n    },\n    \"body\": null\n  },\n  \"response\": {\n    \"status\": 200,\n    \"len\": 60,\n    \"sha1\": \"29ba6b607136cfe95651363c17794f70566c61a4\",\n    \"ctype\": \"application/json\",\n    \"headers\": {\n      \"Server\": \"BaseHTTP/0.6 Python/3.9.6\",\n      \"Date\": \"Sun, 12 Jul 2026 19:50:07 GMT\",\n      \"Content-Type\": \"application/json\",\n      \"X-Session-ID\": \"<redacted:header:dce7455e5b31>\",\n      \"Location\": \"/callback?access_token=%3Credacted%3Aquery%3A97a6d17f9545%3E\",\n      \"Content-Length\": \"60\"\n    },\n    \"snippet\": \"{\\\"token\\\":\\\"<redacted:field:132e43c0f4ba>\\\",\\\"email\\\":\\\"<redacted:field:5e9b4cb37055>\\\"}\"\n  },\n  \"privacy\": {\n    \"schema\": \"outbound-privacy.v1\",\n    \"redacted_fields\": [],\n    \"replayable\": true,\n    \"auth_exception\": false,\n    \"response_redactions\": [\n      \"response.body.email\",\n      \"response.body.token\",\n      \"response.header:location\",\n      \"response.header:x-session-id\"\n    ]\n  },\n  \"saved_body\": \"<ephemeral-loopback-body-removed>\"\n}\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "d9dd228f38a48aa4f180019be0a1f9c83295900b"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Independent Maintenance Review Request\n\nThis is a frozen Codex-authored framework diff, not a live target report.\n\n## Claims To Challenge\n\n1. Guarded framework execution paths reject project/run/Agent/operator identity or obvious real PII in generated target-facing fields; Agent prose instructions alone are not claimed as hard enforcement.\n2. Necessary authentication data remains usable only through explicit/destination-bound paths. Guarded redirect code revalidates hops and strips cross-origin auth; its loopback behavior remains candidate evidence rather than a raw-wire claim. Request/response authentication or PII fields are redacted from replay evidence.\n3. Neutral proof names use a fixed format plus a random nonce; the upload sensor emits no project label in filename, content, or multipart boundary.\n4. Covered raw uninspectable file-upload and redirect-following auth command forms fail before I/O; URL-hidden custom network scripts remain author-and-handoff rather than claimed as hook-verifiable.\n5. Privacy-redacted replay cannot be sent or counted as verification; final confirmed evidence requires a per-entry replay disposition and fresh guarded replication.\n6. Claude Root, Agent templates, loop prompt, workflow docs, hook, guard, probe, render, scan, replay, closure and sentinel layers remain consistent.\n\n## Reviewer Focus\n\n- Look for bypasses through percent/base64/hex encoding, file-backed payloads, headers, redirects, browser XHR/fetch, custom scripts, and legacy cleanup.\n- Re-check URL userinfo/fragment handling, multipart filename/boundary recording,\n  response Location/custom-auth headers, and response-preview redaction.\n- Verify that `tools/exploit.py` really inherits guarded HTTP and that\n  `client_graybox.py` has no active egress path.\n- Look for false positives that would block ordinary target paths, query payloads, proof methods, target-provided destination names, or necessary auth.\n- Check whether logs/replay retain reusable secrets or whether redaction breaks evidence semantics silently.\n- Check fail-open behavior if the privacy module cannot import.\n- Check tests for circular assumptions and missing end-to-end proof.\n\n- Evidence IDs: E-001, E-004, E-005, E-007\n- Candidate validation context: E-002, E-003, E-006\n- Fingerprints captured: none; local maintenance only\n",
+    "frontier.md": "# Frontier\n\n## Open Fronts\n\n### F-001 Outbound privacy boundary correctness\n\n- Status: review\n- Threat role: framework-maintenance\n- Threat exposure: repository-local\n- Goal: find false allows, false blocks, secret [REDACTED], redirect leakage, replay overclaim, and Claude/Agent instruction drift.\n- Evidence: E-001, E-002, E-003, E-004, E-005, E-006, E-007\n",
+    "decisions.md": "# Review Decisions\n\n## D-001\n\n- Decision: Treat this as Codex-authored safety-critical maintenance.\n- Rationale: the diff changes `.claude/hooks/safety_gate.py`, `tools/harness/guard.py`, replay closure behavior, browser/probe/scan request paths, and sentinel cross-layer tests.\n- Required review: arkcli panel plus fresh-context Claude Code when available; Codex self-review is not an independent vote.\n- Status: marker-derived-boundary-fixed; final-scoped-rereview-pending\n\n## D-002\n\n- Decision: accept PR-004 as a real fail-closed coverage defect.\n- Resolution: when `privacy.py` cannot import, every URL-bearing Bash action now fails closed; with the module available, URL-bearing custom Python/shell executors must visibly call `validate_outbound_request` or `RequestRecorder.validate` before I/O.\n- Evidence: revised `reviewed.diff` and privacy/safety-gate selftests.\n- Status: fixed-and-reviewed\n",
+    "review.md": "# Review\n\nIndependent reviewer output is generated by `tools/peer_review.py`; this placeholder is not a review verdict.\n\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 110000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "1614558ae7113248cf98d1f2ecb30c309a802937"
+}

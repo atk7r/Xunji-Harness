@@ -1,0 +1,1776 @@
+diff --git a/.claude/hooks/output_gate.py b/.claude/hooks/output_gate.py
+index f9b70bd..9df33a1 100644
+--- a/.claude/hooks/output_gate.py
++++ b/.claude/hooks/output_gate.py
+@@ -30,6 +30,27 @@ ROOT = Path(__file__).resolve().parents[2]
+ RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
+ SESSION_STATE_STALE_SEC = 50 * 60  # session timeout 50 min
+ INVISIBLE_RE = re.compile(r"[​‌‍⁠﻿ ]")
++CODA_RE = re.compile(
++    r"(?im)^[^\S\n]*(下一行动|BLOCKED)[^\S\n]*[:：][^\S\n]*(.*?)[^\S\n]*$"
++)
++_ACTION_WORDS_ZH = (
++    r"运行|执行|检查|验证|更新|记录|分派|读取|修复|重跑|测试|扫描|探测|复审|回放|"
++    r"保存|写入|提交|创建|生成|删除|关闭|打开|调用|发送|汇总|同步|标记|裁定|重试|"
++    r"继续|尝试|对照|分析|调查|确认|解析|抓取|请求|枚举|注入|绕过|检索|搜索|刷新|"
++    r"迁移|清理|构建|审计"
++)
++_ACTION_WORDS_EN = (
++    r"run|execute|check|verify|update|record|assign|read|fix|test|scan|review|replay|"
++    r"save|write|commit|create|generate|delete|close|open|call|send|summarize|sync|mark|"
++    r"adjudicate|retry|continue|try|compare|analyze|investigate|confirm|parse|fetch|request|"
++    r"enumerate|inject|bypass|search|refresh|migrate|clean|build|audit"
++)
++_ACTION_RE = re.compile(rf"(?:{_ACTION_WORDS_ZH})|\b(?:{_ACTION_WORDS_EN})\b", re.I)
++_TOOL_RE = re.compile(
++    r"\b(?:check_run|peer_review|workers|coverage_matrix|probe|render|loop_state)"
++    r"(?:\.py)?\b",
++    re.I,
++)
+ sys.path.insert(0, str(ROOT / "tools"))
+ 
+ try:
+@@ -103,15 +124,69 @@ def _tail_has_question(msg: str) -> bool:
+     return bool(re.search(r'[?？]|[吗呢吧啊][\s。！,，]*$', tail))
+ 
+ 
++def _turn_coda(msg: str) -> tuple[str, str, str]:
++    """Return ``(kind, detail, error)`` for one concrete final Coda line."""
++    clean = _strip_invisible(msg or "").rstrip()
++    matches = list(CODA_RE.finditer(clean))
++    if not matches:
++        return "", "", "缺少回合 Coda"
++    if len(matches) != 1:
++        return "", "", "只能有一个回合 Coda"
++    match = matches[0]
++    if match.end() != len(clean):
++        return "", "", "Coda 必须是最后一个非空行"
++    kind = match.group(1).upper()
++    detail = match.group(2).strip()
++    compact = re.sub(r"[\s`*_#<>。，、:：;；,.!?！？()（）\[\]-]", "", detail)
++    if len(compact) < 4 or re.search(r"<[^>]*>|\b(?:TODO|TBD)\b", detail, re.I):
++        return "", "", "Coda 内容为空、过短或仍是占位符"
++    vague = re.sub(r"[\s。！!，,；;]", "", detail).lower()
++    vague_only = {
++        "继续", "继续分析", "继续测试", "继续验证", "继续推进", "按流程继续",
++        "处理问题", "执行下一步", "等待", "等待用户", "later", "continue",
++    }
++    if vague in vague_only:
++        return "", "", "Coda 必须写清对象和动作，不能只写泛泛的继续/处理"
++    vague_phrase = re.search(
++        r"(?:根据|按照)(?:前面|上述|以上|之前|当前).*(?:继续|下一步)|"
++        r"继续(?:做|执行)?(?:下一步|后续工作|相关工作|剩余工作)|"
++        r"按(?:既定|上述|当前)?流程继续|进一步(?:分析|处理|推进)(?:问题|工作|流程)?$",
++        detail,
++        re.I,
++    )
++    concrete_anchor = re.search(
++        r"\bF-\d+\b|\b(?:python\d*|render|probe|check_run|peer_review|workers)\b|"
++        r"[A-Za-z0-9_.-]+\.(?:py|md|json|html)\b",
++        detail,
++        re.I,
++    )
++    if vague_phrase and not concrete_anchor:
++        return "", "", "Coda 是换一种说法的泛泛继续，仍缺具体对象和动作"
++    if len(set(re.findall(r"\bF-\d+\b", detail, re.I))) > 1:
++        return "", "", "Coda 只能推进一个 F-id，不能把多个前沿打包"
++    if kind != "BLOCKED" and not (_ACTION_RE.search(detail) or _TOOL_RE.search(detail)):
++        return "", "", "下一行动必须包含明确的可执行动作"
++    if _has_multiple_action_clauses(detail):
++        return "", "", "Coda 只能写一个动作，不能把动作清单塞进一行"
++    return kind, detail, ""
++
++
++def _has_multiple_action_clauses(detail: str) -> bool:
++    """Distinguish multiple executable clauses from one action with many parameters."""
++    parts = re.split(
++        r"(?:&&|\s+\+\s+|[，,；;、]|\s+/\s+|以及|并且|然后|随后|再去|接着|同时|"
++        rf"和|与|及|或|并(?=(?:{_ACTION_WORDS_ZH})|\b(?:{_ACTION_WORDS_EN})\b)|"
++        r"\b(?:and\s+then|and|or)\b)",
++        detail,
++        flags=re.I,
++    )
++    actionable = [part for part in parts if _ACTION_RE.search(part) or _TOOL_RE.search(part)]
++    return len(actionable) > 1
++
++
+ def _tail_has_proper_close(msg: str) -> bool:
+-    """Check if the tail (last 500 chars) ends with proper protocol close:
+-    '下一行动:' / 'BLOCKED:' (allow trailing whitespace)."""
+-    if not msg:
+-        return False
+-    tail = msg[-500:] if len(msg) > 500 else msg
+-    # Strip trailing whitespace and zero-width chars for comparison
+-    tail_clean = _strip_invisible(tail).rstrip()
+-    return bool(re.search(r'(下一行动\s*:.*|BLOCKED\s*:.*)$', tail_clean, re.IGNORECASE))
++    """Whether the message has exactly one concrete final Coda line."""
++    return not _turn_coda(msg)[2]
+ 
+ 
+ def detect_option_list(msg: str) -> bool:
+@@ -146,36 +221,123 @@ def _next_drift_started_at(prev_state: dict, drift_flags: list[str], now: float)
+     return now
+ 
+ 
+-def _active_protocol_fronts(run_dir: Path) -> list[str]:
+-    """Return fronts that still require an action-bearing turn ending.
+-
+-    This is read-only. If derived state is unavailable, fail open: output_gate is
+-    process discipline, not the safety boundary.
++def _fallback_protocol_state(run_dir: Path, error: str = "") -> dict:
++    """Keep the Coda gate alive when the richer loop-state projection fails."""
++    active: set[str] = set()
++    blocked_a: set[str] = set()
++    try:
++        text = (run_dir / "frontier.md").read_text(encoding="utf-8", errors="replace")
++        for match in re.finditer(
++            r"(?ms)^#{2,6}[ \t]+[^\n]*?\b(F-\d+)\b.*?(?=^#{2,6}[ \t]+[^\n]*?\bF-\d+\b|\Z)",
++            text,
++        ):
++            block = match.group(0)
++            status_match = re.search(r"(?im)^\s*[-*]?\s*Status\s*[:：]\s*([^\n]+)", block)
++            status = status_match.group(1).lower().replace("-", "_") if status_match else ""
++            primary = re.split(r"[,;；(（]", status, maxsplit=1)[0]
++            tokens = set(re.findall(r"[a-z0-9_]+", primary))
++            if tokens & {"open", "probing", "working", "blocked_type_a"}:
++                active.add(match.group(1))
++            if "blocked_type_a" in tokens:
++                blocked_a.add(match.group(1))
++    except Exception:
++        pass
++    loop_complete = False
++    try:
++        decisions = (run_dir / "decisions.md").read_text(encoding="utf-8", errors="replace")
++        loop_complete = bool(re.search(
++            r"(?<![A-Z0-9_])(?:GHOST_COMPLETE|NORMAL_COMPLETE)(?![A-Z0-9_])",
++            decisions,
++        ))
++    except Exception:
++        pass
++    return {
++        "active_fronts": sorted(active),
++        "blocked_type_a": sorted(blocked_a),
++        "loop_complete": loop_complete,
++        "next_actions": [
++            "Repair/read canonical frontier state, then continue the active run"
++            + (f" ({error})" if error else "")
++        ],
++        "fallback": True,
++    }
++
++
++def _protocol_state(run_dir: Path) -> dict:
++    """Return the read-only run state needed for output protocol enforcement.
++
++    This is read-only. If derived state is unavailable, fall back to canonical
++    Markdown parsing so the Coda contract remains enforceable without pretending
++    the process hook is a safety boundary.
+     """
+     if _loop_state is None:
+-        return []
++        return _fallback_protocol_state(run_dir, "loop_state import unavailable")
+     try:
+         data = _loop_state.derive(run_dir, write=False)
+-    except Exception:
+-        return []
++    except Exception as exc:
++        return _fallback_protocol_state(run_dir, exc.__class__.__name__)
+     fronts = data.get("fronts") if isinstance(data.get("fronts"), dict) else {}
+-    active = set()
+-    for key in ("open", "blocked_type_a"):
+-        values = fronts.get(key) if isinstance(fronts.get(key), list) else []
+-        active.update(str(x) for x in values if str(x).strip())
+-    return sorted(active)
++    active = {str(x) for x in (fronts.get("open") or []) if str(x).strip()}
++    blocked_a = {str(x) for x in (fronts.get("blocked_type_a") or []) if str(x).strip()}
++    gates = data.get("gates") if isinstance(data.get("gates"), dict) else {}
++    return {
++        "active_fronts": sorted(active),
++        "blocked_type_a": sorted(blocked_a),
++        "loop_complete": bool(gates.get("loop_complete")),
++        "next_actions": [str(x) for x in (data.get("next_actions") or []) if str(x).strip()],
++    }
++
++
++def _active_protocol_fronts(run_dir: Path) -> list[str]:
++    """Compatibility helper used by focused tests and callers."""
++    return list(_protocol_state(run_dir).get("active_fronts") or [])
+ 
+ 
+ def _protocol_block_reason(msg: str, run_dir: Path) -> str:
+-    active = _active_protocol_fronts(run_dir)
+-    if not active or _tail_has_proper_close(msg):
++    state = _protocol_state(run_dir)
++    if not state:
++        return (
++            "[输出协议硬拦] 无法解析 active run 状态；先修复/读取 frontier.md，"
++            "并以唯一具体的 `下一行动:` 结尾。"
++        )
++    if state.get("loop_complete"):
++        return ""
++    active = list(state.get("active_fronts") or [])
++    kind, detail, coda_error = _turn_coda(msg)
++    if not coda_error and kind == "BLOCKED":
++        coda_error = (
++            "active run 尚未完成时不能用 BLOCKED 停止；应写一个能推进、"
++            "转向、记录外部依赖或形成证据化裁定的下一行动"
++        )
++    cited_fronts = set(re.findall(r"\bF-\d+\b", detail, re.I))
++    if not coda_error and active and cited_fronts and not (cited_fronts & set(active)):
++        coda_error = "Coda 引用的 F-id 不属于当前 active 前沿"
++    if not coda_error and not active and cited_fronts:
++        coda_error = "当前没有 active 前沿，Coda 不得引用不存在的活动 F-id"
++    process_anchor = re.search(
++        r"(?:check_run|classify_hosts|workers\.py|coverage_matrix\.py|frontier\.md|"
++        r"evidence\.md|report\.md|decisions\.md|retrospective\.md|hints\.md|"
++        r"surface\.md|conflicts?|冲突|子任务|subagent|Agent Board|分派|复审|"
++        r"peer_review|收口|覆盖台账)",
++        detail,
++        re.I,
++    )
++    if not coda_error and active and not cited_fronts and not process_anchor:
++        coda_error = "存在 active 前沿时，Coda 必须引用一个 active F-id 或明确的控制面对象"
++    if not coda_error and not active and not cited_fronts and not process_anchor:
++        coda_error = "当前没有 active 前沿，Coda 必须指向明确的收口或控制面对象"
++    if not coda_error:
+         return ""
+     sample = ", ".join(active[:6])
+     more = "" if len(active) <= 6 else f" 等 {len(active)} 个"
++    scope = f"active 前沿({sample}{more})" if active else "尚未完成的 active run"
++    suggested = (state.get("next_actions") or [""])[0]
++    suggestion = f" 当前控制面建议: {suggested}" if suggested else ""
+     return (
+-        "[输出协议硬拦] 当前 run 仍有 open/probing/blocked_type_a 前沿"
+-        f"({sample}{more})，本轮输出必须以单一 `下一行动: <具体 action>` 或 "
+-        "`BLOCKED: <外部依赖>` 结尾。请删掉摘要/多选/询问式结尾，补一个可执行下一行动。"
++        f"[输出协议硬拦] 当前 {scope}；{coda_error}。"
++        "本轮必须以唯一且具体的 `下一行动: <对象 + 可执行动作>` 结尾。"
++        "空值、占位符、泛泛“继续分析”、多动作/多 F-id、多个 Coda、错误 F-id 或 BLOCKED 均不放行。"
++        f"{suggestion}"
+     )
+ 
+ 
+@@ -331,6 +493,39 @@ def _selftest() -> int:
+     checks.append(("proper close: 下一行动", _tail_has_proper_close("下一行动: F-001 扫描端口") is True))
+     checks.append(("proper close: BLOCKED", _tail_has_proper_close("BLOCKED: 网络不可达") is True))
+     checks.append(("proper close: trailing space", _tail_has_proper_close("BLOCKED: 外部依赖  ") is True))
++    checks.append(("empty coda rejected", _tail_has_proper_close("下一行动:") is False))
++    checks.append(("placeholder coda rejected", _tail_has_proper_close("下一行动: <具体 action>") is False))
++    checks.append(("vague coda rejected", _tail_has_proper_close("下一行动: 继续分析") is False))
++    checks.append(("paraphrased vague coda rejected",
++                   _tail_has_proper_close("下一行动: 根据前面的分析继续做下一步") is False))
++    checks.append(("front id without executable action is rejected",
++                   _tail_has_proper_close("下一行动: F-001 登录入口") is False))
++    checks.append(("prior-result wording with concrete front and tool passes syntax",
++                   _tail_has_proper_close("下一行动: 根据前面的结果继续用 render 验证 F-001") is True))
++    checks.append(("multiple codas rejected",
++                   _tail_has_proper_close("下一行动: F-001 检查登录\n下一行动: F-002 检查接口") is False))
++    checks.append(("multiple front ids rejected",
++                   _tail_has_proper_close("下一行动: 检查 F-001 + F-002") is False))
++    checks.append(("multiple actions rejected",
++                   _tail_has_proper_close("下一行动: 运行 check_run、回放验证和独立复审") is False))
++    checks.append(("two tools joined by conjunction are multiple actions",
++                   _tail_has_proper_close("下一行动: 运行 check_run 与 peer_review") is False))
++    checks.append(("two tools joined by 和 are multiple actions",
++                   _tail_has_proper_close("下一行动: 运行 check_run 和 peer_review") is False))
++    checks.append(("two English actions joined by bare and are rejected",
++                   _tail_has_proper_close("下一行动: run check_run and review evidence.md") is False))
++    checks.append(("two Chinese actions joined by 并 are rejected",
++                   _tail_has_proper_close("下一行动: 读取 frontier.md 并更新 evidence.md") is False))
++    checks.append(("save verb cannot hide a second action",
++                   _tail_has_proper_close("下一行动: 运行 check_run 和保存结果") is False))
++    checks.append(("two executable clauses separated by comma are rejected",
++                   _tail_has_proper_close("下一行动: 读取 frontier.md，更新 evidence.md") is False))
++    checks.append(("one scan action may contain multiple port parameters",
++                   _tail_has_proper_close("下一行动: 扫描 F-001 的 80，443 端口") is True))
++    checks.append(("single action may contain conjunction inside one front",
++                   _tail_has_proper_close("下一行动: 验证 F-001 登录和会话边界") is True))
++    checks.append(("single English action may contain joined objects",
++                   _tail_has_proper_close("下一行动: scan F-001 headers and cookies") is True))
+     checks.append(("no proper close: prose", _tail_has_proper_close("继续分析结果") is False))
+     checks.append(("no proper close: question", _tail_has_proper_close("是否继续测试？") is False))
+     checks.append(("no proper close: empty", _tail_has_proper_close("") is False))
+@@ -409,8 +604,65 @@ def _selftest() -> int:
+                    "输出协议硬拦" in _protocol_block_reason("本轮完成，继续。", open_run)))
+     checks.append(("open run with 下一行动 passes protocol",
+                    _protocol_block_reason("下一行动: F-001 尝试登录错误页对照", open_run) == ""))
+-    checks.append(("closed run without 下一行动 passes protocol",
++    checks.append(("closed but incomplete run still requires closure action",
++                   "输出协议硬拦" in _protocol_block_reason("收口检查完成。", closed_run)))
++    checks.append(("closed run with concrete closure action passes",
++                   _protocol_block_reason("下一行动: 运行 check_run 收口检查", closed_run) == ""))
++    checks.append(("closed incomplete run rejects generic action",
++                   "必须指向明确的收口或控制面对象" in _protocol_block_reason(
++                       "下一行动: 分析其他问题", closed_run)))
++    checks.append(("closure candidate cannot use BLOCKED as a pause",
++                   "不能用 BLOCKED" in _protocol_block_reason("BLOCKED: 等待操作者继续", closed_run)))
++    checks.append(("closure candidate rejects arbitrary front id",
++                   "当前没有 active 前沿" in _protocol_block_reason(
++                       "下一行动: F-999 检查另一个入口", closed_run)))
++    (closed_run / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
++    checks.append(("completion marker releases output protocol",
+                    _protocol_block_reason("收口检查完成。", closed_run) == ""))
++    checks.append(("active front cannot use BLOCKED coda",
++                   "不能用 BLOCKED" in _protocol_block_reason("BLOCKED: 等待外部凭据到位", open_run)))
++    checks.append(("wrong active front id is rejected",
++                   "不属于当前 active" in _protocol_block_reason(
++                       "下一行动: F-999 检查另一个入口", open_run)))
++    checks.append(("active run requires front id or control-plane object",
++                   "必须引用一个 active F-id" in _protocol_block_reason(
++                       "下一行动: 检查登录错误页响应差异", open_run)))
++    checks.append(("explicit control-plane action may omit front id",
++                   _protocol_block_reason("下一行动: 运行 workers.py 分派子任务", open_run) == ""))
++    checks.append(("bare Agent token is not a control-plane bypass",
++                   "必须引用一个 active F-id" in _protocol_block_reason(
++                       "下一行动: 运行 Agent 完成工作", open_run)))
++    original_loop_state = globals().get("_loop_state")
++    fallback_heading_run = d / "fallback_heading_run"
++    fallback_heading_run.mkdir()
++    (fallback_heading_run / "frontier.md").write_text(
++        "# Frontier\n\n## Front F-002 — login\n- Status: working\n",
++        encoding="utf-8",
++    )
++    (fallback_heading_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
++    try:
++        globals()["_loop_state"] = None
++        fallback_state = _protocol_state(open_run)
++        fallback_heading_state = _protocol_state(fallback_heading_run)
++        fallback_block = _protocol_block_reason("本轮先停在这里。", open_run)
++        fallback_pass = _protocol_block_reason("下一行动: F-001 检查登录错误页", open_run)
++    finally:
++        globals()["_loop_state"] = original_loop_state
++    checks.append(("loop_state failure keeps fallback active-front Coda enforcement",
++                   fallback_state.get("fallback") is True
++                   and fallback_state.get("active_fronts") == ["F-001"]
++                   and "输出协议硬拦" in fallback_block
++                   and fallback_pass == ""))
++    checks.append(("fallback parser accepts labeled F-id headings",
++                   fallback_heading_state.get("active_fronts") == ["F-002"]))
++    original_protocol_state = globals().get("_protocol_state")
++    try:
++        globals()["_protocol_state"] = lambda _run_dir: {}
++        empty_state_block = _protocol_block_reason("下一行动: F-001 检查入口", open_run)
++    finally:
++        globals()["_protocol_state"] = original_protocol_state
++    checks.append(("empty protocol state fails closed",
++                   "无法解析 active run 状态" in empty_state_block))
+ 
+     runs_root = d / "runs"
+     live_run = runs_root / "live_run"
+@@ -421,9 +673,18 @@ def _selftest() -> int:
+     (live_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
+     (live_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+     (live_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
++    decoy_run = runs_root / "newer_but_not_active"
++    decoy_run.mkdir()
++    (decoy_run / "frontier.md").write_text(
++        "# Frontier\n\n## Closed Fronts\n\n### F-901\n- Status: closed\n",
++        encoding="utf-8")
++    (decoy_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    pointer = d / "active_run_pointer"
++    pointer.write_text(str(live_run), encoding="utf-8")
+     event = {"last_assistant_message": "本轮完成，继续。"}
+     env = dict(_os.environ)
+     env["XUNJI_RUNS_ROOT"] = str(runs_root)
++    env["XUNJI_ACTIVE_RUN_FILE"] = str(pointer)
+     proc = subprocess.run(
+         [sys.executable, str(Path(__file__).resolve())],
+         input=json.dumps(event, ensure_ascii=False),
+@@ -434,10 +695,36 @@ def _selftest() -> int:
+         env=env,
+         timeout=10,
+     )
+-    checks.append(("hook subprocess blocks real run root with open front",
++    checks.append(("hook subprocess honors explicit active pointer and blocks open front",
+                    proc.returncode == 0 and '"decision": "block"' in (proc.stdout or "")
+                    and "F-900" in (proc.stdout or "")))
+ 
++    closure_run = runs_root / "closure_run"
++    closure_run.mkdir()
++    (closure_run / "frontier.md").write_text(
++        "# Frontier\n\n## Closed Fronts\n\n### F-902\n- Status: closed\n",
++        encoding="utf-8")
++    (closure_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    (closure_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
++    (closure_run / "retrospective.md").write_text(
++        "# Retrospective\n\n- Verdict: FINAL\n", encoding="utf-8")
++    pointer.write_text(str(closure_run), encoding="utf-8")
++    proper_event = {"last_assistant_message": "下一行动: 运行 check_run 收口检查"}
++    output_proc = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps(proper_event, ensure_ascii=False), text=True, capture_output=True,
++        encoding="utf-8", errors="replace", env=env, timeout=10,
++    )
++    run_proc = subprocess.run(
++        [sys.executable, str(ROOT / ".claude" / "hooks" / "run_gate.py")],
++        input=json.dumps(proper_event, ensure_ascii=False), text=True, capture_output=True,
++        encoding="utf-8", errors="replace", env=env, timeout=15,
++    )
++    checks.append(("explicit-pointer Stop pipeline: output Coda passes then closure gate blocks",
++                   not (output_proc.stdout or "").strip()
++                   and '"decision": "block"' in (run_proc.stdout or "")
++                   and "缺独立复审" in (run_proc.stdout or "")))
++
+     bad = [n for n, ok in checks if not ok]
+     for n, ok in checks:
+         print(("ok   " if ok else "FAIL ") + n, file=sys.stderr)
+diff --git a/.claude/hooks/run_gate.py b/.claude/hooks/run_gate.py
+index 94dd934..f8994cd 100644
+--- a/.claude/hooks/run_gate.py
++++ b/.claude/hooks/run_gate.py
+@@ -37,7 +37,7 @@ import time
+ from pathlib import Path
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+-RUNS = ROOT / "runs"
++RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
+ ACTIVE_WINDOW_SEC = 900   # 只对最近 15 分钟内改动过的 run 介入(= 当前正在做的那个)
+ DRIFT_TIMEOUT_WINDOW_SEC = 6 * 60 * 60   # Phase 2 单独长窗口, 用于抓住超过 30 分钟的未解漂移
+ SESSION_TIMEOUT_SEC = 30 * 60   # Phase 2: 超过 30 分钟未更新 + 有漂移信号 → 阻断
+@@ -48,6 +48,11 @@ try:
+ except Exception:
+     _cr = None
+ 
++try:
++    import loop_state as _loop_state
++except Exception:
++    _loop_state = None
++
+ try:
+     from anti_drift import (
+         find_active_run as _shared_find_active_run,
+@@ -648,9 +653,22 @@ def decide_closure(is_final: bool, check_rc: int, open_fronts: int, stop_hook_ac
+     return decide(is_final, check_rc, stop_hook_active)
+ 
+ 
++def _fallback_status_is_active(status: str) -> bool:
++    """Classify the canonical leading status without reading historical notes."""
++    primary = re.split(r"[,;；(（]", status.lower().replace("-", "_"), maxsplit=1)[0]
++    tokens = set(re.findall(r"[a-z0-9_]+", primary))
++    return bool(tokens & {"open", "probing", "working", "blocked_type_a"})
++
++
+ def _count_open_fronts(run_dir: Path) -> int:
+-    """Count fronts in frontier.md with Status: open (not probing/blocked_type_b/deferred/closed).
+-    Returns 0 if frontier.md is missing or unparseable."""
++    """Count every active status using the same parser as the loop controller."""
++    if _loop_state is not None:
++        try:
++            data = _loop_state.derive(run_dir, write=False)
++            fronts = data.get("fronts") if isinstance(data.get("fronts"), dict) else {}
++            return int(fronts.get("open_count", 0) or 0)
++        except Exception:
++            pass
+     fr = run_dir / "frontier.md"
+     if not fr.exists():
+         return 0
+@@ -665,7 +683,7 @@ def _count_open_fronts(run_dir: Path) -> int:
+             continue
+         sm = _re_of.search(r"(?im)^\s*-?\s*Status\s*[:：]\s*(.+)$", block)
+         status = sm.group(1).strip().lower() if sm else ""
+-        if status == "open":
++        if _fallback_status_is_active(status):
+             count += 1
+     return count
+ 
+@@ -685,8 +703,8 @@ def build_message(run_dir: Path, check_out: str) -> str:
+ def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -> str:
+     msg = (
+         f"[收口闸门] 你似乎在收尾 runs/{run_dir.name}, "
+-        f"但 frontier.md 仍有 {open_fronts} 个 open front。"
+-        "FINAL 必须同时满足 open fronts=0 且 check_run 通过; "
++        f"但 frontier.md 仍有 {open_fronts} 个 active front(open/probing/blocked_type_a)。"
++        "FINAL 必须同时满足 active fronts=0 且 check_run 通过; "
+         "请在同一回合继续推进、降级或写入证据化 deferred/closed 理由, 然后重跑 check_run。"
+     )
+     if check_out.strip():
+@@ -695,6 +713,44 @@ def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -
+     return msg
+ 
+ 
++def _has_completed_independent_review(review_text: str) -> bool:
++    if _cr is not None and callable(getattr(_cr, "has_completed_independent_review", None)):
++        try:
++            return bool(_cr.has_completed_independent_review(review_text))
++        except Exception:
++            return False
++    # Closure is the wrong place to degrade to a weaker parser. If the canonical
++    # structured predicate is unavailable, keep the run open until it is repaired.
++    return False
++
++
++def _has_codex_completion_review(decisions_text: str) -> bool:
++    if _cr is not None and callable(getattr(_cr, "has_codex_completion_review", None)):
++        try:
++            return bool(_cr.has_codex_completion_review(decisions_text))
++        except Exception:
++            return False
++    return False
++
++
++def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:
++    """Return a hard-block reason for missing Normal-mode closure prerequisites."""
++    if not _has_completed_independent_review(review_text):
++        return (
++            "[Normal 收口] report 已终版但缺独立复审。"
++            "请运行 peer_review 独立复审并处理全部 finding → "
++            "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
++        )
++    if not _has_codex_completion_review(decisions_text):
++        return (
++            "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
++            "NORMAL 模式暂停 #2 前必须经 codex agent 复审完整 run。"
++            "请 spawn fresh-context codex agent 审查完整 run, "
++            "将其裁决写入 decisions.md 的 CodexCompletionReview 字段。"
++        )
++    return ""
++
++
+ def main() -> None:
+     if "--selftest" in sys.argv:
+         sys.exit(_selftest())
+@@ -773,25 +829,12 @@ def main() -> None:
+                 dc = run_dir / "decisions.md"
+                 dc_text = dc.read_text(encoding="utf-8", errors="replace") if dc.exists() else ""
+ 
+-                # Check 1: independent review
+-                if not _re.search(r"Independent Review|独立复审", rv):
+-                    closure_msg = (
+-                        "[Normal 收口] report 已终版但缺独立复审。"
+-                        "请 spawn codex reviewer 完成独立复审 → "
+-                        "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
+-                    )
+-                    print(json.dumps({"systemMessage": closure_msg}, ensure_ascii=False))
+-                    sys.exit(0)
+-
+-                # Check 2: CodexCompletionReview
+-                if "CodexCompletionReview" not in dc_text:
+-                    cc_msg = (
+-                        "[Normal 收口] report 已终版但 decisions.md 缺少 CodexCompletionReview。"
+-                        "NORMAL 模式暂停 #2 前必须经 codex agent 复审完整 run。"
+-                        "请 spawn fresh-context codex agent 审查完整 run, "
+-                        "将其裁决写入 decisions.md 的 CodexCompletionReview 字段。"
+-                    )
+-                    print(json.dumps({"decision": "block", "reason": cc_msg}, ensure_ascii=False))
++                prerequisite_block = _normal_closure_prerequisite(rv, dc_text)
++                if prerequisite_block:
++                    print(json.dumps(
++                        {"decision": "block", "reason": prerequisite_block},
++                        ensure_ascii=False,
++                    ))
+                     sys.exit(0)
+             except Exception:
+                 pass  # FAIL-OPEN: decisions.md / review.md 读失败放行
+@@ -834,18 +877,63 @@ def _selftest() -> int:
+                    decide_closure(True, 1, 0, False) == "block"))
+     checks.append(("closure matrix: final + no open fronts + check pass -> pass",
+                    decide_closure(True, 0, 0, False) is None))
++    checks.append(("normal closure: missing independent review hard-blocks",
++                   "缺独立复审" in _normal_closure_prerequisite("# Review\n", "# Decisions\n")))
++    checks.append(("normal closure: missing completion review hard-blocks",
++                   "CodexCompletionReview" in _normal_closure_prerequisite(
++                       "## Independent Review\n- Reviewer: test\n- Verdict: PASS\n", "# Decisions\n")))
++    checks.append(("normal closure: both prerequisites pass",
++                   _normal_closure_prerequisite(
++                       "## Independent Review\n- Reviewer: test\n- Verdict: PASS\n",
++                       "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
++                       "- Summary: report coverage, severity support, and reachable assets were independently checked.\n") == ""))
++    checks.append(("normal closure: review prose mention does not satisfy gate",
++                   not _has_completed_independent_review(
++                       "# Review\nWe still need an Independent Review before closing.\n")))
++    checks.append(("normal closure: review template placeholders do not satisfy gate",
++                   not _has_completed_independent_review(
++                       "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
++                       "- Verdict: (PASS / WARN / BLOCKER)\n")))
++    original_check_run = globals().get("_cr")
++    try:
++        globals()["_cr"] = None
++        fallback_review_rejected = not _has_completed_independent_review(
++            "## Independent Review\n- Reviewer: fake\n- Verdict: PASS\n")
++    finally:
++        globals()["_cr"] = original_check_run
++    checks.append(("normal closure: unavailable canonical review parser fails closed",
++                   fallback_review_rejected))
++    checks.append(("normal closure: completion prose mention does not satisfy gate",
++                   not _has_codex_completion_review(
++                       "CodexCompletionReview is still missing and must be added.\n")))
++    original_check_run = globals().get("_cr")
++    try:
++        globals()["_cr"] = None
++        fallback_completion_rejected = not _has_codex_completion_review(
++            "## CodexCompletionReview\n- Reviewer: fake\n- Verdict: PASS\n"
++            "- Summary: fake but long enough to resemble a completed review record.\n")
++    finally:
++        globals()["_cr"] = original_check_run
++    checks.append(("normal closure: unavailable completion parser fails closed",
++                   fallback_completion_rejected))
++    checks.append(("fallback status parser ignores historical type-a note on closed status",
++                   not _fallback_status_is_active("closed_type_b (was blocked_type_a)")))
++    checks.append(("fallback status parser keeps canonical type-a active",
++                   _fallback_status_is_active("blocked_type_a (auth dependency)")))
+     rd_open = Path(tempfile.mkdtemp()) / "open_run"
+     rd_open.mkdir()
+     (rd_open / "frontier.md").write_text(
+         "# Frontier\n## Open Fronts\n"
+         "### F-001\n- Status: open\n\n"
+-        "### F-002\n- Status: open\n\n"
++        "### F-002\n- Status: probing\n\n"
++        "### F-004\n- Status: blocked_type_a\n\n"
+         "## Deferred Fronts\n### F-003\n- Status: deferred\n",
+         encoding="utf-8")
+     open_msg = build_open_fronts_message(rd_open, _count_open_fronts(rd_open), "check failed")
+-    checks.append(("closure path: open-front counter sees only open", _count_open_fronts(rd_open) == 2))
++    checks.append(("closure path: active-front counter includes open/probing/type-a",
++                   _count_open_fronts(rd_open) == 3))
+     checks.append(("closure path: open-front message is blocking-readable",
+-                   "2 个 open front" in open_msg and "check failed" in open_msg))
++                   "3 个 active front" in open_msg and "check failed" in open_msg))
+ 
+     d = Path(tempfile.mkdtemp())
+     runs = d / "runs"
+diff --git a/.claude/skills/xunji-run-lifecycle/SKILL.md b/.claude/skills/xunji-run-lifecycle/SKILL.md
+index 9928f56..965fdd7 100644
+--- a/.claude/skills/xunji-run-lifecycle/SKILL.md
++++ b/.claude/skills/xunji-run-lifecycle/SKILL.md
+@@ -148,6 +148,11 @@ python tools/saturation.py runs/<dir>
+ python tools/coverage_matrix.py runs/<dir> --write --sync-coverage
+ ```
+ 
++`--sync-coverage` treats evidence/report host mentions as examination signals
++only. It writes a coverage `verdict` only when the canonical frontier has a
++terminal status, so prose cannot make unfinished work disappear from worker
++suggestions or closure review.
++
+ Read `hints.md` every cycle when it exists. If the operator gives a directive,
+ constraint, or lead in chat, write or update `hints.md` before choosing the next
+ front. Leads are not facts; verify them through the evidence gate.
+@@ -212,13 +217,16 @@ python tools/check_run.py runs/<dir> --auto-peer-review --review-driver claude
+ 
+ Closure gates:
+ 
+-- `review.md` must contain an `Independent Review` record; self-review does not
+-  cure self-review bias.
++- `review.md` must contain a completed `Independent Review` record with a real
++  reviewer/backend and block-scoped verdict. A heading,
++  prose mention, or untouched template choices do not count; self-review does
++  not cure self-review bias.
+ - Resolve `PR-xxx` review ledger blockers before closure.
+ - `retrospective.md` must honestly fill the Self problems and Framework/tooling
+-  problems sections. Framework/tooling lessons must include a repair status such
+-  as `- Status: fixed|open|deferred` plus the fix/verification or residual risk;
+-  unstatused lessons are not closed-loop and fail closure.
++  problems sections. Every Framework/tooling lesson needs its own repair status
++  such as `- Status: fixed|open|deferred`; fixed items also need `Fixed by` +
++  `Verification`, and open/deferred items need `Residual risk`. One section-wide
++  status cannot close multiple lessons.
+ - `report.md` may list only finding-maturity evidence in `Evidence IDs:`.
+ - Confirmed entries need the canonical certainty scale, saved artifacts, and
+   Replicated or Control rationale.
+diff --git a/CLAUDE.md b/CLAUDE.md
+index f104b2b..ee1b212 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -121,6 +121,12 @@ observe -> update state graph -> decompose fronts
+ 
+ - While safe fronts remain, **don't ask the operator which class to test next**;
+   choose it yourself, record why in `decisions.md`.
++- **Stop Coda is mechanically enforced.** While `.claude/xunji_active_run`
++  points to a run without a valid completion marker, the last non-empty output
++  line must be the only Coda line and must name one concrete object plus one
++  executable action: `下一行动: ...`. Empty/template values, generic "continue",
++  multiple actions/F-ids/Coda lines, an unrelated F-id, or `BLOCKED:` before the
++  active run has completed are rejected by `output_gate.py`.
+ - **TaskCreate discipline for `/loop`:** An explicit `/loop runs/<dir>` iteration
+   must maintain a Claude Code TaskCreate/TaskUpdate task list before selecting
+   the next action. Use it for the current iteration's assets, vectors, Agent
+@@ -283,7 +289,8 @@ Only two pauses; each requires a codex gate before the pause:
+   (a) no confirmed findings are missing from `report.md`, (b) no evidence entries
+   have severity unsupported by their artifacts, (c) no reachable asset is
+   unaccounted-for in the frontier verdict. Record the codex verdict in
+-  `- CodexCompletionReview:` in `decisions.md`. Only if codex confirms completion
++  a substantive `## CodexCompletionReview` section with Reviewer, Verdict, and
++  concrete cross-check results in `decisions.md`. Only if codex confirms completion
+   may the Root pause and deliver the report.
+ 
+ - If codex rejects the pause reason, the Root MUST continue — fix the issue
+diff --git a/docs/WORKFLOW-reference.md b/docs/WORKFLOW-reference.md
+index f7295e8..af1aa35 100644
+--- a/docs/WORKFLOW-reference.md
++++ b/docs/WORKFLOW-reference.md
+@@ -583,7 +583,10 @@ IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
+ (`GHOST_COMPLETE` / `NORMAL_COMPLETE`) in `decisions.md`, or explicit
+ `retrospective.md` `Status:` / `Verdict:` final/complete values.
+ 
+-- **HARD FAIL** if `review.md` has no `Independent Review` record. Self-review does
++- **HARD FAIL** if `review.md` has no completed `Independent Review` record.
++  A heading, prose mention, or untouched Reviewer/Verdict choices do not count;
++  the record needs a real reviewer/backend identity and a block-scoped verdict.
++  Long legacy prose without reviewer identity does
+   not fix self-review bias, so the independent reviewer is a hard requirement to
+   close — not a suggestion. (a real engagement showed that even after this guard was built, the
+   driver still tried to close prematurely twice; a soft warning does not hold.)
+@@ -615,8 +618,10 @@ needs to verify that such a diff has a review record and does not treat Codex
+ self-review as an independent vote.
+ Absent egress consent, the fresh-context sub-agent is the always-available,
+ egress-free fallback. Standing authorization granted for the sub-agent — do it
+-without re-asking. `check_run.py` HARD-fails a closure claim with no
+-`Independent Review` record.
++without re-asking. `check_run.py` HARD-fails a closure claim with no completed
++`Independent Review` record, and Normal-mode Stop also requires a structured
++substantive `## CodexCompletionReview` section rather than accepting a prose mention
++or a self-asserted single-line field.
+ 
+ Claude Code is primary and Codex is auxiliary: Codex commonly appears here as a
+ heterogeneous review backend, but it can also provide advice or delegated help when
+@@ -637,13 +642,18 @@ driver) got wrong/slow/missed (wrong calls, tunnel vision, premature closure, ev
+ slips) and where the *framework/tooling* (tools/, hooks, guard, knowledge base, docs) held
+ the run back — the basis for the next run being stronger, not a disclaimer. `check_run.py`
+ HARD-fails closure if `retrospective.md` is missing, its **Self problems** /
+-**Framework problems** sections are empty placeholders, or Framework/tooling
+-lessons lack a repair status (`fixed|open|deferred`, with fix/verification or
+-residual risk). Retrospective `Status:` / `Verdict:` values such as `FINAL`
++**Framework problems** sections are empty placeholders, or any individual
++Framework/tooling lesson lacks its own repair status (`fixed|open|deferred`). A
++fixed item also needs non-empty `Fixed by` + `Verification`; an open/deferred
++item needs `Residual risk`. One status line for the whole section does not close
++multiple lessons. Retrospective `Status:` / `Verdict:` values such as `FINAL`
+ activate closure gates, but they are not completion actions.
+ 
+ **Completion marker and scheduled-loop disposition.** `GHOST_COMPLETE` /
+ `NORMAL_COMPLETE` belongs only in `decisions.md` and only after closure gates pass.
++`check_run.py` also requires a substantive `## CodexCompletionReview` section with
++Reviewer + Verdict + concrete cross-check detail at that point. A single-line
++field, prose mention, or "still missing" note does not count.
+ In the same turn, cancel the active scheduled `/loop` job if one exists, then
+ append a loop journal `end` record (`cycle_end`) with
+ `cron_cancelled=<job-id|none>` in the note. `check_run.py` HARD-fails a completion
+diff --git a/docs/WORKFLOW.md b/docs/WORKFLOW.md
+index 8a65ed7..ef710fc 100644
+--- a/docs/WORKFLOW.md
++++ b/docs/WORKFLOW.md
+@@ -119,7 +119,9 @@ state, blockers, and the next action in Chinese. It reads `.claude/xunji_active_
+ plus derived `state/*.json` / `state/loop_journal.jsonl` only; it does not refresh
+ state, choose work, write evidence, or enforce phase discipline. The active-run
+ pointer is local runtime state and is updated by `setup_run.py`, `loop_bootstrap.py`,
+-and the fixed `/loop runs/<dir>` protocol.
++and the fixed `/loop runs/<dir>` protocol. Anti-drift and Stop hooks resolve this
++same explicit pointer before recent-file fallback, so a newer unrelated run cannot
++receive or escape the active run's process gates.
+ 
+ 阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router
+ phases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a
+@@ -416,7 +418,10 @@ assets were only header / recon-classified, never examined. Before any such clai
+   category is signal-justified for that asset but no test record is visible; `·`
+   means no current surface signal. Whole empty columns and sparse rows are review
+   signals during ordinary cycles, and `check_run.py` upgrades them to closure
+-  blockers once any canonical closure signal is present.
++  blockers once any canonical closure signal is present. Sync may mark an asset
++  `examined` from an explicit canonical mention, but writes `verdict` only from a
++  terminal frontier status; an evidence/report mention alone never invents a
++  disposition or suppresses remaining work.
+ - **"Can't reach" ≠ "is safe".** A WAF / throttle / timeout / login-gate stop is a
+   `deferred` (Type A), **not** a `closed` (Type B). A `closed` front needs positive
+   evidence (a `Refutes:` or a proof), not a barrier. When egress changes (cooldown,
+@@ -448,21 +453,27 @@ assets were only header / recon-classified, never examined. Before any such clai
+   (`review/independent-reviewer.md`), record under `## Independent Review` in `review.md`,
+   resolve every finding. Standing-authorized (no re-asking); prefer a heterogeneous reviewer
+   (`tools/peer_review.py --into-run`) when egress is consented. `check_run.py` **hard-fails** a
+-  closure with no `Independent Review` record. Procedure: reference "Run-closure detail".
++  closure with no completed `Independent Review` record. A heading, prose mention, or untouched
++  template choices do not count; a real reviewer/backend plus a block-scoped verdict
++  is required. Procedure: reference "Run-closure detail".
+ 
+ - **Mandatory retrospective before closure (HARD gate).** Close every pentest with an
+   honest `retrospective.md` — what *I* got wrong/slow/missed (wrong calls, tunnel vision,
+   premature closure, evidence slips) + where the framework/tooling held the run back; the
+   basis for a stronger next run, not a disclaimer. `check_run.py` **hard-fails** closure if
+   it's missing, its **Self problems** / **Framework problems** are empty stubs, or
+-  Framework/tooling lessons lack a repair status (`fixed|open|deferred`). Procedure:
++  any individual Framework/tooling lesson lacks its own repair status
++  (`fixed|open|deferred`), or a fixed item lacks `Fixed by` + `Verification` /
++  an open or deferred item lacks `Residual risk`. Procedure:
+   reference "Run-closure detail".
+ 
+ - **Closure signals vs completion actions.** A final report, `decisions.md`
+   `Status: CLOSING/FINAL`, and `retrospective.md` `Status:` / `Verdict:` values
+   such as `FINAL` all activate closure gates. They are not loop completion by
+   themselves. Only `GHOST_COMPLETE` / `NORMAL_COMPLETE` in `decisions.md` are
+-  completion actions.
++  completion actions, and `check_run.py` accepts them only with a substantive
++  `## CodexCompletionReview` section containing Reviewer + Verdict + cross-check
++  detail, not a prose keyword mention or single self-asserted field.
+ 
+ - **Ghost mode closure:** When all closure gates pass (check_run HARD gates green,
+   independent review resolved, retrospective written), write `GHOST_COMPLETE` at
+diff --git a/docs/templates/loop_prompt.md b/docs/templates/loop_prompt.md
+index d796c71..8de9e4b 100644
+--- a/docs/templates/loop_prompt.md
++++ b/docs/templates/loop_prompt.md
+@@ -6,8 +6,13 @@ This is the fixed Claude Code `/loop` protocol. Do not copy/paste it through
+ this repository.
+ 
+ You are the Xunji Root Orchestrator. Persist state in `{{RUN_DIR}}/`, not chat.
+-Run exactly one autonomous iteration. End each turn with `下一行动: <action>` or
+-`BLOCKED: <reason>`. Do not treat derived state as canonical evidence.
++Run exactly one autonomous iteration. Until the run has a valid completion
++marker, end with exactly one final Coda line: `下一行动: <object + concrete
++action>`. Empty/template values, generic "continue", multiple Coda lines, and an
++unrelated or multiple F-id/action list are invalid. `BLOCKED:` cannot discharge
++an unfinished active run; record the external dependency in canonical state and
++make that record or the next viable pivot the single next action. Do not treat
++derived state as canonical evidence.
+ 
+ ## Phase Markers
+ 
+diff --git a/docs/templates/run/retrospective.md b/docs/templates/run/retrospective.md
+index e2784a9..09b54cf 100644
+--- a/docs/templates/run/retrospective.md
++++ b/docs/templates/run/retrospective.md
+@@ -13,8 +13,9 @@
+ 
+ ## Framework / tooling problems / 框架与工具问题
+ <tools/ hooks guard 知识库 文档 哪里拖了本 run 后腿: 缺能力、误报闸门、消息误导、
+-知识陈旧、模板不顺手。每条问题必须带 `- Status: fixed|open|deferred`
+-或明确写 no framework/tooling issue。>
++知识陈旧、模板不顺手。每条问题必须单独带 `- Status: fixed|open|deferred`；
++不能用整节共用的一个 Status 蒙混。fixed 必须填 Fixed by + Verification，
++open/deferred 必须填 Residual risk；或明确写 no framework/tooling issue。>
+ 
+ ### FW-001
+ 
+diff --git a/docs/templates/run/review.md b/docs/templates/run/review.md
+index 45cb2ff..c2df477 100644
+--- a/docs/templates/run/review.md
++++ b/docs/templates/run/review.md
+@@ -2,8 +2,9 @@
+ 
+ ## Independent Review
+ 
+-> 独立复审记录。check_run 识别此标记 + 时间戳作为有效复审。peer_review.py 成功后自动写入。
+-> 当 codex API 不可达时，driver 可手工填写此节。
++> 独立复审记录。仅有本标题或下方占位符不算完成；check_run 要求真实 Reviewer/Backend
++> 身份与明确 Verdict，或一份有具体发现和裁定的实质 free-form 复审。peer_review.py 成功后
++> 自动写入；后端不可达时可由 fresh-context reviewer 手工填写，但不能由 driver 自评冒充。
+ 
+ - Reviewer: (codex / arkcli-panel / manual-driver)
+ - Time: (ISO timestamp)
+diff --git a/tools/anti_drift.py b/tools/anti_drift.py
+index fb72371..2cab3e1 100644
+--- a/tools/anti_drift.py
++++ b/tools/anti_drift.py
+@@ -25,6 +25,7 @@ Usage:
+ from __future__ import annotations
+ 
+ import json
++import os
+ import sys
+ import time
+ from pathlib import Path
+@@ -36,6 +37,8 @@ except Exception:
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ RUNS = ROOT / "runs"
++ACTIVE_RUN_POINTER = Path(os.environ.get(
++    "XUNJI_ACTIVE_RUN_FILE", str(ROOT / ".claude" / "xunji_active_run")))
+ CONFIG_INI = ROOT / "config.ini"
+ CONFIG_EXAMPLE_INI = ROOT / "config.example.ini"
+ ACTIVE_WINDOW_SEC = 6 * 3600   # a run that saw any file change in the last 6h = the one in flight
+@@ -85,7 +88,7 @@ def is_normal_mode() -> bool:
+ BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
+     "自主驱动: safe 前沿还在就别停下问(会话长/已解决障碍/选下一类 都不是停止理由)",
+     "Reason pass: 每轮先重读整个 frontier.md(所有 open+deferred 前沿)再选 — 防隧道视野",
+-    "回合协议: 结尾只允许「下一行动: <具体action>」或「BLOCKED: <外部依赖>」; 禁止 ? / 是否 / 继续还是",
++    "回合协议: active run 未完成时结尾必须且只能有一个「下一行动: <一个对象+一个具体动作>」; 空值/占位/泛泛继续/多动作/多F-id/错误F-id/BLOCKED都会被 Stop hook 硬拦",
+     "联网检索前先跑 timestamp_gate: 每次 WebSearch/WebFetch 前必须先 python tools/timestamp_gate.py --search-hint --kind vuln 获取当前时间并逐条执行其输出的约束; 非 CVE/CNVD 检索用 --kind generic",
+     "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮执行 timestamp_gate --kind vuln → knowledge/xday → WebSearch/WebFetch, 再决定关闭或定级",
+     "操作者约束持久化: 收到 directive/constraint 后先更新 hints.md(HINT-xxx, Kind=directive/constraint, Status=pending) 再继续; 每轮 Reason pass 无条件 Read hints.md —— constraint 是全 run 级原则非当前前沿上下文, 跨轮有效直到操作者显式解除",
+@@ -185,8 +188,45 @@ class SessionStateManager:
+         return state
+ 
+ 
+-def find_active_run(runs_root: Path, within_sec: int = ACTIVE_WINDOW_SEC) -> Path | None:
+-    """Most recently touched run dir (any *.md changed within the window). Cheap: one glob."""
++def _run_from_pointer(runs_root: Path, pointer: Path = ACTIVE_RUN_POINTER) -> Path | None:
++    """Resolve the explicit statusline/run-lifecycle pointer inside ``runs_root``.
++
++    The pointer is authoritative when valid. Restricting it to ``runs_root`` keeps
++    temp selftests and stale/edited pointer files from selecting an arbitrary path.
++    """
++    try:
++        raw = pointer.read_text(encoding="utf-8", errors="replace").strip()
++    except Exception:
++        return None
++    if not raw:
++        return None
++    value = Path(raw).expanduser()
++    candidates = [value] if value.is_absolute() else [ROOT / value, runs_root / value]
++    root = runs_root.resolve()
++    for candidate in candidates:
++        try:
++            run_dir = candidate.resolve()
++            run_dir.relative_to(root)
++        except (OSError, ValueError):
++            continue
++        if run_dir.is_dir() and any(
++            (run_dir / marker).exists()
++            for marker in ("target.md", "frontier.md", "evidence.md", "decisions.md", "review.md")
++        ):
++            return run_dir
++    return None
++
++
++def find_active_run(
++    runs_root: Path,
++    within_sec: int = ACTIVE_WINDOW_SEC,
++    *,
++    active_pointer: Path | None = None,
++) -> Path | None:
++    """Return the explicit active run, then fall back to recent Markdown activity."""
++    pointed = _run_from_pointer(runs_root, active_pointer or ACTIVE_RUN_POINTER)
++    if pointed is not None:
++        return pointed
+     if not runs_root.is_dir():
+         return None
+     best: Path | None = None
+@@ -491,8 +531,8 @@ def build_anchor(
+         lines.append("")
+         lines.append("【输出前自检 —— 生成回复前必须逐条确认】")
+         if "protocol_violation" in drift_flags:
+-            lines.append("  □ 结尾是否【仅】为「下一行动: <action>」或「BLOCKED: <reason>」？")
+-            lines.append("    → 不含 ? ？吗 呢 吧 | 不含 是否/继续/你决定/等待用户/你觉得/怎么看")
++            lines.append("  □ 最后一个非空行是否【唯一】的「下一行动: <对象+具体动作>」？")
++            lines.append("    → 不含空值/占位/泛泛继续/多动作/多F-id/错误F-id；未完成 run 不得用 BLOCKED 逃避")
+         if "frontier_stale" in drift_flags:
+             lines.append("  □ 已 Read frontier.md 【并 EDIT 更新】状态了吗？(只读不改 = mtime 不变 = 下轮仍提醒)")
+         if "option_list" in drift_flags:
+@@ -525,6 +565,19 @@ def _selftest() -> int:
+     checks.append(("find_active_run picks recent", find_active_run(runs) == runs / "a_x"))
+     checks.append(("stale window -> none", find_active_run(runs, within_sec=-1) is None))
+     checks.append(("no runs dir -> none", find_active_run(d / "nope") is None))
++    pointed = runs / "pointed"
++    pointed.mkdir()
++    (pointed / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
++    pointer = d / "active_run"
++    pointer.write_text(str(pointed), encoding="utf-8")
++    checks.append(("explicit pointer wins over newer run",
++                   find_active_run(runs, active_pointer=pointer) == pointed.resolve()))
++    outside = d / "outside"
++    outside.mkdir()
++    (outside / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
++    pointer.write_text(str(outside), encoding="utf-8")
++    checks.append(("outside pointer is ignored",
++                   find_active_run(runs, active_pointer=pointer) == pointed))
+ 
+     # SessionStateManager tests
+     time.sleep(1.1)  # ensure mtime is later than a_x/report.md created above
+diff --git a/tools/check_run.py b/tools/check_run.py
+index 28371e2..58f2ecb 100644
+--- a/tools/check_run.py
++++ b/tools/check_run.py
+@@ -1306,6 +1306,81 @@ def check_surface_populated(run_dir: Path) -> list[str]:
+     return warns
+ 
+ 
++_INDEPENDENT_REVIEW_HEADING_RE = re.compile(
++    r"(?im)^##\s+[^\n]*(?:Independent Review|Independent Reviewer|独立复审)[^\n]*$"
++)
++
++
++def has_completed_independent_review(review_text: str) -> bool:
++    """Reject template/prose mentions while accepting structured or substantive reviews."""
++    matches = list(_INDEPENDENT_REVIEW_HEADING_RE.finditer(review_text or ""))
++    for match in matches:
++        heading = match.group(0)
++        if re.search(r"\b(?:pending|status|template|待复审|待填写)\b", heading, re.I):
++            continue
++        tail = review_text[match.end():]
++        h2 = list(re.finditer(r"(?m)^##\s+[^\n]+$", tail))
++        end = h2[0].start() if h2 else len(tail)
++        # peer_review.py writes `## Verdict:` immediately after the Independent
++        # Review preface. Include that one generated section, but stop before any
++        # later H2 so a filled self-review cannot make an untouched template pass.
++        if h2 and re.match(r"##\s+Verdict\s*[:：]", h2[0].group(0), re.I):
++            end = h2[1].start() if len(h2) > 1 else len(tail)
++        block = heading + tail[:end]
++        clean = re.sub(r"<!--.*?-->|<[^>]*>", "", block, flags=re.S)
++        verdict_match = re.search(
++            r"(?im)^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?Verdict\s*[:：]\s*"
++            r"(PASS|WARN|BLOCKER|PASSED|CONFIRMED)\b",
++            clean,
++        )
++        reviewer = _block_field(clean, "Reviewer")
++        backend = _block_field(clean, "Backend")
++        backend_meta = re.search(r"(?im)^_backend\s*[:：]\s*([^_\n]+)_", clean)
++        reviewer_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", reviewer, re.I))
++        backend_placeholder = bool(re.search(r"codex\s*/\s*arkcli|manual-driver\)", backend, re.I))
++        identity_ok = (
++            (not _blankish_field(reviewer) and not reviewer_placeholder)
++            or (not _blankish_field(backend) and not backend_placeholder)
++            or (backend_meta is not None and (
++                "heterogeneous peer_review" in heading.lower()
++                or "same-family peer_review fallback" in heading.lower()
++            ))
++        )
++        if verdict_match and identity_ok:
++            return True
++    return False
++
++
++def has_codex_completion_review(decisions_text: str) -> bool:
++    """Require a structured completion-review result, not a prose keyword mention."""
++    heading = re.search(r"(?im)^#{2,6}\s+CodexCompletionReview\b[^\n]*$", decisions_text or "")
++    if not heading:
++        return False
++    tail = decisions_text[heading.end():]
++    next_heading = re.search(r"(?m)^#{1,2}\s+", tail)
++    block = tail[:next_heading.start()] if next_heading else tail
++    reviewer = re.search(r"(?im)^\s*[-*]\s*Reviewer\s*[:：]\s*(\S.+)$", block)
++    verdict = re.search(
++        r"(?im)^\s*[-*]\s*Verdict\s*[:：]\s*\**(PASS|WARN|CONFIRMED)\b",
++        block,
++    )
++    return bool(reviewer and verdict and len(re.sub(r"\s+", "", block)) >= 80)
++
++
++def check_codex_completion_review(run_dir: Path) -> list[str]:
++    if not _completion_marker_claimed(run_dir):
++        return []
++    decisions = run_dir / "decisions.md"
++    text = decisions.read_text(encoding="utf-8", errors="replace") if decisions.exists() else ""
++    if has_codex_completion_review(text):
++        return []
++    return [
++        "收口硬门(CodexCompletionReview): decisions.md 已有 completion marker, 但缺真实"
++        "结构化 completion review。关键词/单行字段/待办散文不算；需要含 Reviewer + Verdict + "
++        "实质内容的 `## CodexCompletionReview` 小节。"
++    ]
++
++
+ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
+     errors: list[str] = []
+     warns: list[str] = []
+@@ -1318,9 +1393,7 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:
+ 
+     review_path = run_dir / "review.md"
+     review_text = review_path.read_text(encoding="utf-8", errors="replace") if review_path.exists() else ""
+-    independent_reviews = list(re.finditer(r"(?im)^##\s+(?:Independent Review|独立复审)\b", review_text))
+-    last_independent_review = independent_reviews[-1] if independent_reviews else None
+-    has_independent_review = last_independent_review is not None
++    has_independent_review = has_completed_independent_review(review_text)
+     evidence_path = run_dir / "evidence.md"
+     review_stale = False
+     if has_independent_review and evidence_path.exists() and review_path.exists():
+@@ -1742,16 +1815,35 @@ def _retro_section_filled(body: str | None) -> bool:
+     return len("".join(kept)) >= MIN_RETRO_CHARS
+ 
+ 
+-def _retro_framework_statused(body: str | None) -> bool:
+-    """Framework/tooling lessons must say whether the framework is fixed/open/deferred.
++_RETRO_STATUS_RE = re.compile(
++    r"(?im)^\s*(?:[-*]\s*)?(?:Current\s+status|Fix\s+status|Status|状态|当前状态|修复状态)"
++    r"\s*[:：]\s*(fixed|open|deferred|已修|已修复|未修|待修|开放|延后)"
++    r"(?:\s|$|[;；,，。])"
++)
++
++
++def _retro_framework_items(body: str) -> list[str]:
++    """Split common numbered or heading-based framework issue records."""
++    problem_starts = list(re.finditer(r"(?im)^\s*[-*]\s*Problem\s*[:：]", body))
++    starts = problem_starts or list(re.finditer(r"(?m)^(?:#{3,6}\s+|\d+[.)、]\s+)", body))
++    if not starts:
++        return [body]
++    return [
++        body[m.start(): starts[i + 1].start() if i + 1 < len(starts) else len(body)]
++        for i, m in enumerate(starts)
++    ]
++
++
++def _retro_framework_status_errors(body: str | None) -> list[str]:
++    """Validate every framework lesson, including its repair proof or residual risk.
+ 
+     A retrospective is allowed to say there were no framework issues, but if it
+-    names tools/hooks/docs problems it must leave a repair status the next run can
+-    consume. Otherwise the same lesson can reappear forever without becoming a
+-    gate or backlog item.
++    names multiple tools/hooks/docs problems, one status line cannot discharge the
++    whole section. Fixed items need a concrete fix pointer and verification; open
++    or deferred items need an explicit residual risk.
+     """
+     if body is None:
+-        return False
++        return ["framework section missing"]
+     b = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+     b = re.sub(r"<[^>]*>", "", b)
+     if re.search(
+@@ -1759,13 +1851,32 @@ def _retro_framework_statused(body: str | None) -> bool:
+         r"no framework issue|no tooling issue|no framework/tooling issue|none)\s*[。.]?\s*$",
+         b,
+     ):
+-        return True
+-    return bool(re.search(
+-        r"(?im)^\s*(?:[-*]\s*)?(?:Current\s+status|Fix\s+status|Status|状态|当前状态|修复状态)"
+-        r"\s*[:：]\s*(fixed|open|deferred|accepted|已修|已修复|未修|待修|开放|延后|接受|无|none|n/a)"
+-        r"(?:\s|$|[;；,，。])",
+-        b,
+-    ))
++        return []
++    errors: list[str] = []
++    for index, item in enumerate(_retro_framework_items(b), 1):
++        label = item.strip().splitlines()[0][:80] if item.strip() else f"item {index}"
++        status_match = _RETRO_STATUS_RE.search(item)
++        if not status_match:
++            errors.append(f"{label}: missing Status")
++            continue
++        status = status_match.group(1).lower()
++        if status in {"fixed", "已修", "已修复"}:
++            fixed_by = _block_field(item, "Fixed by") or _block_field(item, "修复方式")
++            verification = _block_field(item, "Verification") or _block_field(item, "验证")
++            if _blankish_field(fixed_by):
++                errors.append(f"{label}: fixed but missing Fixed by")
++            if _blankish_field(verification):
++                errors.append(f"{label}: fixed but missing Verification")
++        else:
++            residual = _block_field(item, "Residual risk") or _block_field(item, "残余风险")
++            if _blankish_field(residual):
++                errors.append(f"{label}: {status} but missing Residual risk")
++    return errors
++
++
++def _retro_framework_statused(body: str | None) -> bool:
++    """Compatibility predicate for callers that only need pass/fail."""
++    return not _retro_framework_status_errors(body)
+ 
+ 
+ def check_retrospective(run_dir: Path) -> list[str]:
+@@ -1789,11 +1900,17 @@ def check_retrospective(run_dir: Path) -> list[str]:
+             "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】节缺失或仍是"
+             "空占位 —— 写清 tools/hooks/guard/知识库/文档 哪里拖了本 run 后腿(缺能力/误报闸门/消息误导/"
+             "知识陈旧), 或诚实写明确无。")
+-    elif not _retro_framework_statused(framework_body):
+-        errors.append(
+-            "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】节已写问题"
+-            "但缺修复状态字段 —— 每个框架教训至少写 `- Status: fixed|open|deferred` 或明确写 no framework/tooling issue。"
+-            "否则它只会在复盘里重复出现, 不能进入工具/模板/知识库闭环。")
++    else:
++        framework_status_errors = _retro_framework_status_errors(framework_body)
++        if framework_status_errors:
++            details = "; ".join(framework_status_errors[:5])
++            more = " …" if len(framework_status_errors) > 5 else ""
++            errors.append(
++                "收口硬门(强制复盘): retrospective.md 的【框架/工具问题 / Framework problems】"
++                "未逐条闭环 —— 每条问题都要有 `Status: fixed|open|deferred`; fixed 还要有非空 "
++                "`Fixed by` + `Verification`, open/deferred 还要有 `Residual risk`。"
++                f"具体缺口: {details}{more}"
++            )
+     return errors
+ 
+ 
+@@ -2152,11 +2269,12 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:
+     # 硬门: 收口前必须有独立 Reviewer 复审记录
+     review = run_dir / "review.md"
+     rv = review.read_text(encoding="utf-8", errors="replace") if review.exists() else ""
+-    if not re.search(r"Independent Review|独立复审", rv):
++    if not has_completed_independent_review(rv):
+         errors.append(
+             "收口硬门(P0-1): report 含强收口断言, 但 review.md 无【独立复审 / Independent "
+             "Review】记录。自评治不了自评偏见; 收口前【必须】派独立 Reviewer 子代理(常驻授权, "
+             "见 review/independent-reviewer.md)并落 review.md。撤回收口措辞或补复审后再过。")
++    errors.extend(check_codex_completion_review(run_dir))
+     ledger_errors, ledger_warns = check_peer_review_ledger(run_dir)
+     errors.extend(ledger_errors)
+     warns.extend(ledger_warns)
+@@ -2213,6 +2331,12 @@ def _selftest() -> int:
+     consume it). Mirrors check_hook's self-testing pattern. No network, no run dir."""
+     import os
+     import tempfile
++    valid_review_text = (
++        "# Review\n\n## Independent Review\n"
++        "- Reviewer: selftest-fresh-context\n"
++        "- Time: 2026-01-01T00:00:00Z\n"
++        "- Verdict: PASS\n"
++    )
+     d = Path(tempfile.mkdtemp())
+     (d / "ev_real.html").write_text("x" * 10, encoding="utf-8")
+     (d / "ev_real.html.replay.json").write_text("{}", encoding="utf-8")
+@@ -2254,6 +2378,41 @@ def _selftest() -> int:
+     byid = {r["id"]: r for r in recs}
+     checks = [
+         ("preamble not counted", len(recs) == 10),
++        ("completed independent review requires real identity and verdict",
++         has_completed_independent_review(valid_review_text)),
++        ("independent review prose mention does not satisfy gate",
++         not has_completed_independent_review(
++             "# Review\nIndependent Review is still required before closure.\n")),
++        ("independent review template placeholders do not satisfy gate",
++         not has_completed_independent_review(
++             "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
++             "- Verdict: (PASS / WARN / BLOCKER)\n")),
++        ("filled self-review after untouched independent template cannot satisfy gate",
++         not has_completed_independent_review(
++             "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
++             "- Verdict: (PASS / WARN / BLOCKER)\n\n## R-001 Self review\n"
++             + ("- Findings: driver checked its own evidence and claims PASS.\n" * 30))),
++        ("peer_review generated backend/verdict satisfies gate",
++         has_completed_independent_review(
++             "## Independent Review (same-family peer_review fallback)\n"
++             "_backend: claude_\n## Verdict: WARN\n")),
++        ("generic peer_review label cannot spoof generated review identity",
++         not has_completed_independent_review(
++             "## Independent Review (peer_review)\n"
++             "_backend: claude_\n## Verdict: WARN\n")),
++        ("fresh-context heading alone cannot spoof reviewer identity",
++         not has_completed_independent_review(
++             "## Independent Review (fresh-context self-review by driver)\n"
++             "## Verdict: PASS\n")),
++        ("completion review prose mention does not satisfy gate",
++         not has_codex_completion_review(
++             "CodexCompletionReview is still missing and must be added.\n")),
++        ("single completion review field does not satisfy gate",
++         not has_codex_completion_review("- CodexCompletionReview: CONFIRMED by fresh reviewer\n")),
++        ("substantive completion review section satisfies gate",
++         has_codex_completion_review(
++             "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
++             "- Summary: report coverage, evidence severity, and reachable assets were independently checked.\n")),
+         ("report Evidence IDs parser accepts bullet form",
+          _report_evidence_ids("- Evidence IDs: E-001, E-002") == {"E-001", "E-002"}),
+         ("split certainty -> confirmed", byid["E-002"]["confirmed"] is True),
+@@ -2501,7 +2660,7 @@ def _selftest() -> int:
+     (d6 / "ev.html").write_text("x" * 10, encoding="utf-8")
+     (d6 / "evidence.md").write_text(
+         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
+-    (d6 / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d6 / "review.md").write_text(valid_review_text, encoding="utf-8")
+     (d6 / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+     (d6 / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+     fp_err_missing, _ = check_closure_discipline(d6)
+@@ -2552,7 +2711,7 @@ def _selftest() -> int:
+     (d_retro / "retrospective.md").write_text(  # 两节都填了真实内容
+         "# Retrospective\n\n## 自身问题 / Self problems\n- 过早把 SSRF 前沿当不可达关闭, 漏看一个回连载体。\n\n"
+         "## 框架与工具问题 / Framework problems\n- probe.py 对 302 链跟随不透明, 误把跳转当原响应, 浪费两轮。\n"
+-        "- Status: open\n",
++        "- Status: open\n- Residual risk: redirect-chain evidence can still be misread until probe is fixed.\n",
+         encoding="utf-8")
+     retro_ok = check_retrospective(d_retro)
+     (d_retro / "retrospective.md").write_text(
+@@ -2560,15 +2719,30 @@ def _selftest() -> int:
+         "### 1. Tunnel vision\n- Spent all cycles on one front while other reachable assets stayed shallow.\n\n"
+         "## Framework / tooling problems / 框架与工具问题\n\n"
+         "### 1. Agent lifecycle\n- workers.py had no heartbeat or closure blocker for live agents.\n"
+-        "- Status: open\n",
++        "- Status: open\n- Residual risk: stale live agents can still be omitted at closure.\n",
+         encoding="utf-8")
+     retro_nested_ok = check_retrospective(d_retro)
++    (d_retro / "retrospective.md").write_text(
++        "# Retrospective\n\n## Self problems\n- Closed too early and skipped a control request.\n\n"
++        "## Framework problems\n"
++        "1. First tool issue\n- Status: fixed\n- Fixed by: tools/a.py\n- Verification: a selftest passed\n\n"
++        "2. Second tool issue\n- Residual risk: remains visible in the backlog\n",
++        encoding="utf-8")
++    retro_multi_missing = check_retrospective(d_retro)
++    (d_retro / "retrospective.md").write_text(
++        "# Retrospective\n\n## Self problems\n- Closed too early and skipped a control request.\n\n"
++        "## Framework problems\n"
++        "- Problem: first parser issue\n- Status: fixed\n- Fixed by: tools/a.py\n"
++        "- Verification: parser selftest\n\n"
++        "- Problem: second parser issue\n- Residual risk: still visible\n",
++        encoding="utf-8")
++    retro_problem_missing = check_retrospective(d_retro)
+     # 整合: 终版报告(触发收口) + 无 retrospective → check_closure_discipline 带出复盘硬错
+     d_retro2 = Path(tempfile.mkdtemp())
+     (d_retro2 / "ev.html").write_text("x" * 10, encoding="utf-8")
+     (d_retro2 / "evidence.md").write_text(
+         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
+-    (d_retro2 / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_retro2 / "review.md").write_text(valid_review_text, encoding="utf-8")
+     (d_retro2 / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+     (d_retro2 / "report.md").write_text(
+         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
+@@ -2577,7 +2751,7 @@ def _selftest() -> int:
+     (d_retro_final / "ev.html").write_text("x" * 10, encoding="utf-8")
+     (d_retro_final / "evidence.md").write_text(
+         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
+-    (d_retro_final / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_retro_final / "review.md").write_text(valid_review_text, encoding="utf-8")
+     (d_retro_final / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+     (d_retro_final / "report.md").write_text("# Report\n\n## Summary\n- Status:\n\n## Confirmed Findings\n", encoding="utf-8")
+     (d_retro_final / "retrospective.md").write_text(
+@@ -2612,6 +2786,7 @@ def _selftest() -> int:
+         encoding="utf-8")
+     d_cron = Path(tempfile.mkdtemp())
+     (d_cron / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
++    completion_review_missing = check_codex_completion_review(d_cron)
+     cron_missing = check_completion_cron_record(d_cron)
+     (d_cron / "state").mkdir()
+     (d_cron / "state" / "loop_journal.jsonl").write_text(
+@@ -2623,11 +2798,17 @@ def _selftest() -> int:
+     (d_cron / "state" / "loop_journal.jsonl").write_text(
+         '{"event":"cycle_end","note":"closure complete; cron_cancelled=2218d35d"}\n', encoding="utf-8")
+     cron_id = check_completion_cron_record(d_cron)
++    (d_cron / "decisions.md").write_text(
++        "# Decisions\n\n- GHOST_COMPLETE\n\n## CodexCompletionReview\n"
++        "- Reviewer: codex-fresh\n- Verdict: PASS\n"
++        "- Summary: report coverage, severity support, and reachable assets were independently checked.\n",
++        encoding="utf-8")
++    completion_review_ok = check_codex_completion_review(d_cron)
+     d_lifecycle = Path(tempfile.mkdtemp())
+     (d_lifecycle / "ev.html").write_text("x" * 10, encoding="utf-8")
+     (d_lifecycle / "evidence.md").write_text(
+         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
+-    (d_lifecycle / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_lifecycle / "review.md").write_text(valid_review_text, encoding="utf-8")
+     (d_lifecycle / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+     (d_lifecycle / "report.md").write_text(
+         "# Report\nEvidence IDs: E-001\nFingerprints captured: 无新指纹\n", encoding="utf-8")
+@@ -2649,9 +2830,13 @@ def _selftest() -> int:
+         ("retrospective half-filled -> framework section error only", len(retro_half) == 1
+             and any("Framework" in e for e in retro_half)),
+         ("retrospective framework issue without status -> hard error",
+-            any("修复状态" in e for e in retro_no_status)),
++            any("逐条闭环" in e for e in retro_no_status)),
+         ("retrospective both filled -> no error", retro_ok == []),
+         ("retrospective nested subsections count as filled", retro_nested_ok == []),
++        ("retrospective each framework item needs its own status",
++            any("Second tool issue: missing Status" in e for e in retro_multi_missing)),
++        ("retrospective repeated Problem fields are validated independently",
++            any("Problem: second parser issue: missing Status" in e for e in retro_problem_missing)),
+         ("closure trigger + no retrospective -> closure carries 复盘 error",
+             any("强制复盘" in e for e in retro_closure_err)),
+         ("retrospective Verdict: FINAL activates closure gate",
+@@ -2669,6 +2854,10 @@ def _selftest() -> int:
+             any("cycle_end/end" in e for e in cron_non_end)),
+         ("completion marker with cron_cancelled=none clears cron gate", cron_none == []),
+         ("completion marker with cron_cancelled=<id> clears cron gate", cron_id == []),
++        ("completion marker without structured completion review hard-fails",
++            any("CodexCompletionReview" in e for e in completion_review_missing)),
++        ("structured completion review clears completion-review gate",
++            completion_review_ok == []),
+         ("closure trigger + non-terminal agent -> lifecycle hard error",
+          _workers is None or any("Agent 生命周期" in e for e in lifecycle_err)),
+         ("finished agent clears lifecycle hard error",
+@@ -2754,7 +2943,7 @@ def _selftest() -> int:
+     d10 = Path(tempfile.mkdtemp())
+     (d10 / "report.md").write_text(
+         "# Report\nEvidence IDs: E-001\n## 确认发现\n- 证据: E-001\n", encoding="utf-8")
+-    (d10 / "review.md").write_text("# Review\n## Independent Review\n- done\n", encoding="utf-8")
++    (d10 / "review.md").write_text(valid_review_text, encoding="utf-8")
+     rv_before = (d10 / "review.md").read_text(encoding="utf-8")
+     _maybe_auto_peer_review(d10)   # 幂等: 已有独立复审记录 -> 直接 return, 不改 review.md/不调模型
+     rv_after = (d10 / "review.md").read_text(encoding="utf-8")
+@@ -2863,7 +3052,7 @@ def _selftest() -> int:
+     d_conf = Path(tempfile.mkdtemp())
+     (d_conf / "state").mkdir()
+     (d_conf / "ev.html").write_text("x" * 10, encoding="utf-8")
+-    (d_conf / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_conf / "review.md").write_text(valid_review_text, encoding="utf-8")
+     (d_conf / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
+     (d_conf / "retrospective.md").write_text(
+         "# Retrospective\n\n## 自身问题 / Self problems\n- conflict gate selftest filled.\n\n"
+@@ -2929,14 +3118,16 @@ def _selftest() -> int:
+     (d_mid_cov / "frontier.md").write_text(
+         "# Frontier\n### F-001\n- Status: open\n- charlie login gate\n", encoding="utf-8")
+     (d_mid_cov / "decisions.md").write_text(_five_decisions, encoding="utf-8")
+-    (d_mid_cov / "review.md").write_text("# Review\n## Independent Review\n- ok\n", encoding="utf-8")
++    (d_mid_cov / "review.md").write_text(valid_review_text, encoding="utf-8")
+     mid_cov_e, mid_cov_w = check_intermediate_gates(d_mid_cov)
+ 
+     d_mid_fresh = Path(tempfile.mkdtemp())
+     evp = d_mid_fresh / "evidence.md"
+     rvp = d_mid_fresh / "review.md"
+     evp.write_text("# Evidence Ledger\n## E-001\n- Certainty: 1.0\n", encoding="utf-8")
+-    rvp.write_text("# Review\n## 独立复审\n- ok\n", encoding="utf-8")
++    rvp.write_text(
++        "# Review\n## 独立复审\n- Reviewer: selftest\n- Verdict: PASS\n",
++        encoding="utf-8")
+     (d_mid_fresh / "decisions.md").write_text(_five_decisions, encoding="utf-8")
+     os.utime(evp, (1000, 1000))
+     os.utime(rvp, (1010, 1010))
+@@ -2946,7 +3137,7 @@ def _selftest() -> int:
+     evp2 = d_mid_stale / "evidence.md"
+     rvp2 = d_mid_stale / "review.md"
+     evp2.write_text("# Evidence Ledger\n## E-001\n- Certainty: 1.0\n", encoding="utf-8")
+-    rvp2.write_text("# Review\n## Independent Review\n- old\n", encoding="utf-8")
++    rvp2.write_text(valid_review_text, encoding="utf-8")
+     (d_mid_stale / "decisions.md").write_text(_five_decisions, encoding="utf-8")
+     os.utime(rvp2, (1000, 1000))
+     os.utime(evp2, (1010, 1010))
+@@ -3257,7 +3448,7 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:
+         return  # 未收口 -> 不触发
+     rv_path = run_dir / "review.md"
+     rv = rv_path.read_text(encoding="utf-8", errors="replace") if rv_path.exists() else ""
+-    if re.search(r"Independent Review|独立复审", rv):
++    if has_completed_independent_review(rv):
+         return  # 幂等: 已有独立复审记录 -> 不重跑
+     try:
+         import peer_review  # 同目录(sys.path 已插入 tools/)
+diff --git a/tools/coverage_matrix.py b/tools/coverage_matrix.py
+index 682ea97..a1405e5 100644
+--- a/tools/coverage_matrix.py
++++ b/tools/coverage_matrix.py
+@@ -658,8 +658,8 @@ def sync_coverage_json(run_dir: Path) -> dict:
+     cycle the canonical records are still frontier/evidence/report, but leaving
+     coverage at examined=0 makes reviewers think assets were never touched. This
+     sync marks an asset examined only when its host is explicitly mentioned in a
+-    canonical run file. It writes a verdict only when a terminal front or evidence
+-    status is visible; open/probing fronts remain verdict=None.
++    canonical run file. It writes a verdict only from a terminal front status;
++    evidence/report mentions alone are touch signals, not dispositions.
+     """
+     cov_path, cov, warnings = _load_coverage(run_dir)
+     if cov_path is None or not isinstance(cov, dict):
+@@ -702,17 +702,39 @@ def sync_coverage_json(run_dir: Path) -> dict:
+                 verdict = "closed"
+             elif "deferred" in statuses:
+                 verdict = "deferred"
+-        if not verdict and evidence_touched:
+-            verdict = "evidence-recorded"
+-        if not verdict and report_touched:
+-            verdict = "reported"
+-        if verdict and asset.get("verdict") != verdict:
+-            asset["verdict"] = verdict
++        current_verdict = str(asset.get("verdict") or "").strip()
++        verdict_source = str(asset.get("verdict_source") or "").strip()
++        # ac01b30 briefly emitted these mention-only pseudo-verdicts. They were
++        # never part of the coverage schema and suppress workers that correctly
++        # look for reachable assets with verdict=None, so migrate them away.
++        if current_verdict in {"evidence-recorded", "reported"}:
++            asset["verdict"] = None
++            asset.pop("verdict_source", None)
++            current_verdict = ""
++            verdict_source = ""
++            changed += 1
++            warnings.append(
++                f"{name}: removed legacy mention-only verdict; terminal frontier disposition still required")
++        if verdict and (not current_verdict or verdict_source == "coverage_matrix_sync"):
++            if current_verdict != verdict or verdict_source != "coverage_matrix_sync":
++                asset["verdict"] = verdict
++                asset["verdict_source"] = "coverage_matrix_sync"
++                changed += 1
++        elif not verdict and verdict_source == "coverage_matrix_sync":
++            asset["verdict"] = None
++            asset.pop("verdict_source", None)
+             changed += 1
+ 
+         tested_groups = sorted(row.get("tested") or []) if row else []
+-        if tested_groups and asset.get("tested_groups") != tested_groups:
+-            asset["tested_groups"] = tested_groups
++        tested_source = str(asset.get("tested_groups_source") or "").strip()
++        if tested_groups:
++            if asset.get("tested_groups") != tested_groups or tested_source != "coverage_matrix_sync":
++                asset["tested_groups"] = tested_groups
++                asset["tested_groups_source"] = "coverage_matrix_sync"
++                changed += 1
++        elif tested_source == "coverage_matrix_sync":
++            asset.pop("tested_groups", None)
++            asset.pop("tested_groups_source", None)
+             changed += 1
+ 
+     if changed:
+@@ -832,6 +854,9 @@ def _selftest() -> int:
+         {"host": "open.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+         {"host": "done.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+         {"host": "typeb.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
++        {"host": "evidence-touch.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
++        {"host": "report-touch.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
++        {"host": "legacy-touch.example", "reachable": True, "examined": True, "flags": ["LOGIN"], "verdict": "reported"},
+         {"host": "quiet.example", "reachable": True, "examined": False, "flags": ["LOGIN"], "verdict": None},
+     ]}), encoding="utf-8")
+     (sync_run / "frontier.md").write_text(
+@@ -852,6 +877,13 @@ def _selftest() -> int:
+         "- Status: closed_type_b\n"
+         "- Vectors tried: auth-bypass\n",
+         encoding="utf-8")
++    (sync_run / "evidence.md").write_text(
++        "# Evidence Ledger\n\n## E-001\n- Action: fetched evidence-touch.example landing page\n"
++        "- Result: generic page only\n- Certainty: 0.3\n",
++        encoding="utf-8")
++    (sync_run / "report.md").write_text(
++        "# Report\n\nInventory note: report-touch.example was seen but has no terminal disposition.\n",
++        encoding="utf-8")
+     sync_info = sync_coverage_json(sync_run)
+     sync_cov = json.loads((sync_run / "coverage.json").read_text(encoding="utf-8"))
+     sync_by_host = {a["host"]: a for a in sync_cov["assets"]}
+@@ -906,7 +938,16 @@ def _selftest() -> int:
+         ("sync coverage only writes terminal verdicts",
+          sync_by_host["open.example"].get("verdict") is None
+          and sync_by_host["done.example"].get("verdict") == "deferred"
+-         and sync_by_host["typeb.example"].get("verdict") == "closed"),
++         and sync_by_host["typeb.example"].get("verdict") == "closed"
++         and sync_by_host["done.example"].get("verdict_source") == "coverage_matrix_sync"),
++        ("evidence/report mentions mark examined but never invent verdicts",
++         sync_by_host["evidence-touch.example"]["examined"] is True
++         and sync_by_host["evidence-touch.example"].get("verdict") is None
++         and sync_by_host["report-touch.example"]["examined"] is True
++         and sync_by_host["report-touch.example"].get("verdict") is None),
++        ("legacy mention-only pseudo-verdict is migrated away",
++         sync_by_host["legacy-touch.example"].get("verdict") is None
++         and any("legacy mention-only verdict" in w for w in sync_info["warnings"])),
+     ]
+     bad = [name for name, ok in checks if not ok]
+     for name, ok in checks:
+diff --git a/tools/probe.py b/tools/probe.py
+index 4504aac..3240809 100644
+--- a/tools/probe.py
++++ b/tools/probe.py
+@@ -31,6 +31,8 @@ import sys
+ import tempfile
+ import time
+ import urllib.request
++from datetime import timezone
++from email.utils import parsedate_to_datetime
+ from http.cookies import SimpleCookie
+ from pathlib import Path
+ from urllib.parse import parse_qsl, urlencode, urlparse
+@@ -275,8 +277,20 @@ def _cookie_dict_from_header(value: str | None) -> dict[str, str]:
+     return out
+ 
+ 
+-def _cookie_dict_from_set_cookies(values: list[str]) -> dict[str, str]:
+-    out: dict[str, str] = {}
++def _cookie_expired(expires: str, *, now: float | None = None) -> bool:
++    """Interpret timezone-less legacy dates as UTC, matching HTTP-date semantics."""
++    try:
++        expires_at = parsedate_to_datetime(expires)
++        if expires_at.tzinfo is None:
++            expires_at = expires_at.replace(tzinfo=timezone.utc)
++        return expires_at.timestamp() <= (time.time() if now is None else now)
++    except (TypeError, ValueError, OverflowError):
++        return False
++
++
++def _cookie_dict_from_set_cookies(values: list[str]) -> dict[str, str | None]:
++    """Parse Set-Cookie updates; ``None`` means the server deleted the cookie."""
++    out: dict[str, str | None] = {}
+     for raw in values:
+         c = SimpleCookie()
+         try:
+@@ -284,8 +298,16 @@ def _cookie_dict_from_set_cookies(values: list[str]) -> dict[str, str]:
+         except Exception:
+             continue
+         for name, morsel in c.items():
+-            if morsel.value:
+-                out[name] = morsel.value
++            expired = False
++            expires = str(morsel["expires"] or "").strip()
++            if expires:
++                expired = _cookie_expired(expires)
++            deleted = (
++                not morsel.value
++                or str(morsel["max-age"] or "").strip() == "0"
++                or expired
++            )
++            out[name] = None if deleted else morsel.value
+     return out
+ 
+ 
+@@ -299,7 +321,11 @@ def _load_cookie_jar(path: str | None) -> dict[str, str]:
+     data = json.loads(Path(path).read_text(encoding="utf-8", errors="replace"))
+     if not isinstance(data, dict):
+         raise ValueError(f"cookie jar must be a JSON object: {path}")
+-    return {str(k): str(v) for k, v in data.items() if str(k).strip() and str(v)}
++    return {
++        str(k): str(v)
++        for k, v in data.items()
++        if str(k).strip() and v is not None and str(v)
++    }
+ 
+ 
+ def _save_cookie_jar(path: str | None, cookies: dict[str, str]) -> None:
+@@ -307,12 +333,25 @@ def _save_cookie_jar(path: str | None, cookies: dict[str, str]) -> None:
+         return
+     p = Path(path)
+     p.parent.mkdir(parents=True, exist_ok=True)
+-    p.write_text(json.dumps(cookies, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+-
+-
+-def _merge_cookies_into_headers(headers: dict, cookies: dict[str, str]) -> dict:
+-    merged = _cookie_dict_from_header(_header_value(headers, "Cookie"))
+-    merged.update(cookies)
++    tmp_name = ""
++    with tempfile.NamedTemporaryFile(
++        "w", delete=False, dir=p.parent, prefix=p.name + ".", suffix=".tmp", encoding="utf-8"
++    ) as f:
++        tmp_name = f.name
++        f.write(json.dumps(cookies, ensure_ascii=False, indent=2) + "\n")
++    os.chmod(tmp_name, 0o600)
++    Path(tmp_name).replace(p)
++
++
++def _merge_cookies_into_headers(
++    headers: dict,
++    cookies: dict[str, str],
++    *,
++    prefer_cookies: bool = False,
++) -> dict:
++    explicit = _cookie_dict_from_header(_header_value(headers, "Cookie"))
++    merged = dict(explicit) if prefer_cookies else dict(cookies)
++    merged.update(cookies if prefer_cookies else explicit)
+     if merged:
+         _set_header(headers, "Cookie", _cookie_header(merged))
+     return headers
+@@ -352,6 +391,7 @@ def _apply_preflight(args, headers: dict, data: bytes | None, json_body: bool) -
+     """GET a form/bootstrap page, merge cookies, and inject an extracted CSRF token."""
+     meta: dict = {}
+     jar = _load_cookie_jar(getattr(args, "cookie_jar", None))
++    original_explicit_cookies = _cookie_dict_from_header(_header_value(headers, "Cookie"))
+     _merge_cookies_into_headers(headers, jar)
+     preflight_url = getattr(args, "preflight_get", None)
+     if not preflight_url:
+@@ -362,37 +402,54 @@ def _apply_preflight(args, headers: dict, data: bytes | None, json_body: bool) -
+     if getattr(args, "extract_csrf", None) and not preflight_save:
+         tmp_save = str(Path(tempfile.mkdtemp()) / "preflight.html")
+         preflight_save = tmp_save
+-    pre = send(
+-        "GET", preflight_url, headers.copy(), None, None, args.timeout,
+-        save=preflight_save, retry=args.retry, retry_wait=args.retry_wait,
+-        want_headers=True, no_redirect=args.no_redirect,
+-    )
+-    new_cookies = _cookie_dict_from_set_cookies(pre.get("set_cookies", []))
+-    if new_cookies:
+-        jar.update(new_cookies)
+-        _save_cookie_jar(getattr(args, "cookie_jar", None), jar)
+-        _merge_cookies_into_headers(headers, jar)
+-    meta = {
+-        "url": preflight_url,
+-        "status": pre.get("status"),
+-        "cookies": sorted(new_cookies),
+-    }
+-    if getattr(args, "extract_csrf", None):
+-        if not preflight_save or not Path(preflight_save).exists():
+-            raise ValueError("--extract-csrf requires a readable preflight body")
+-        token = _extract_csrf_token(Path(preflight_save).read_bytes(), args.extract_csrf)
+-        field = args.csrf_field or "__RequestVerificationToken"
+-        data, json_body = _inject_csrf(data, json_body=json_body, field=field, token=token)
+-        if not json_body and not _header_value(headers, "Content-Type"):
+-            _set_header(headers, "Content-Type", "application/x-www-form-urlencoded")
+-        meta.update({"csrf_field": field, "csrf_extracted": True})
+-    if tmp_save:
+-        for p in (Path(tmp_save), Path(tmp_save + ".replay.json")):
+-            try:
+-                p.unlink()
+-            except OSError:
+-                pass
+-    return headers, data, json_body, meta
++    try:
++        pre = send(
++            "GET", preflight_url, headers.copy(), None, None, args.timeout,
++            save=preflight_save, retry=args.retry, retry_wait=args.retry_wait,
++            want_headers=True, no_redirect=args.no_redirect,
++        )
++        cookie_updates = _cookie_dict_from_set_cookies(pre.get("set_cookies", []))
++        if cookie_updates:
++            for name, value in cookie_updates.items():
++                if value is None:
++                    jar.pop(name, None)
++                else:
++                    jar[name] = value
++            _save_cookie_jar(getattr(args, "cookie_jar", None), jar)
++            # A fresh Set-Cookie is the browser-equivalent update and therefore
++            # wins over a same-name Cookie supplied for the initial GET. Build
++            # from the original explicit header so deleted jar cookies cannot
++            # survive through the already-merged preflight request header.
++            post_cookies = dict(jar)
++            post_cookies.update(original_explicit_cookies)
++            for name, value in cookie_updates.items():
++                if value is None:
++                    post_cookies.pop(name, None)
++                else:
++                    post_cookies[name] = value
++            _set_header(headers, "Cookie", _cookie_header(post_cookies))
++        meta = {
++            "url": preflight_url,
++            "status": pre.get("status"),
++            "cookies": sorted(cookie_updates),
++        }
++        if getattr(args, "extract_csrf", None):
++            if not preflight_save or not Path(preflight_save).exists():
++                raise ValueError("--extract-csrf requires a readable preflight body")
++            token = _extract_csrf_token(Path(preflight_save).read_bytes(), args.extract_csrf)
++            field = args.csrf_field or "__RequestVerificationToken"
++            data, json_body = _inject_csrf(data, json_body=json_body, field=field, token=token)
++            if not json_body and not _header_value(headers, "Content-Type"):
++                _set_header(headers, "Content-Type", "application/x-www-form-urlencoded")
++            meta.update({"csrf_field": field, "csrf_extracted": True})
++        return headers, data, json_body, meta
++    finally:
++        if tmp_save:
++            for p in (Path(tmp_save), Path(tmp_save + ".replay.json")):
++                try:
++                    p.unlink()
++                except OSError:
++                    pass
+ 
+ 
+ def send(method: str, url: str, headers: dict, data: bytes | None,
+@@ -596,6 +653,11 @@ def _selftest() -> int:
+                     self.send_response(200)
+                     self.send_header("Content-Type", "text/html")
+                     self.send_header("Set-Cookie", "csrf_session=ABC; path=/; httponly")
++                    self.send_header("Set-Cookie", "stale_session=; max-age=0; path=/")
++                    self.send_header(
++                        "Set-Cookie",
++                        "expired_session=STALE; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/",
++                    )
+                     self.send_header("Content-Length", str(len(b)))
+                     self.end_headers()
+                     self.wfile.write(b)
+@@ -725,6 +787,11 @@ def _selftest() -> int:
+                            rr2.get("status") == 206 and rr2.get("snippet") == "2345"
+                            and rr2.get("range") == "bytes=2-5"))
+             jar = Path(tempfile.mkdtemp()) / "cookies.json"
++            _save_cookie_jar(str(jar), {
++                "csrf_session": "JAR_OLD",
++                "stale_session": "OLD",
++                "expired_session": "OLD",
++            })
+             chain_args = argparse.Namespace(
+                 preflight_get=f"http://127.0.0.1:{port}/csrf",
+                 preflight_save=None,
+@@ -736,7 +803,12 @@ def _selftest() -> int:
+                 retry_wait=1.5,
+                 no_redirect=False,
+             )
+-            ch_headers, ch_data, ch_json, ch_meta = _apply_preflight(chain_args, {}, b"u=a", False)
++            ch_headers, ch_data, ch_json, ch_meta = _apply_preflight(
++                chain_args,
++                {"Cookie": "csrf_session=EXPLICIT_OLD; explicit_only=KEEP"},
++                b"u=a",
++                False,
++            )
+             csrf_post = send("POST", f"http://127.0.0.1:{port}/submit",
+                              ch_headers, ch_data, None, 5)
+             jar_data = json.loads(jar.read_text(encoding="utf-8")) if jar.exists() else {}
+@@ -745,7 +817,14 @@ def _selftest() -> int:
+                            and ch_meta.get("csrf_extracted") is True and ch_json is False))
+             checks.append(("--preflight-get merges Set-Cookie into final request",
+                            "csrf_session=ABC" in ch_headers.get("Cookie", "")
+-                           and jar_data.get("csrf_session") == "ABC"))
++                           and "explicit_only=KEEP" in ch_headers.get("Cookie", "")
++                           and "stale_session=" not in ch_headers.get("Cookie", "")
++                           and "expired_session=" not in ch_headers.get("Cookie", "")
++                           and jar_data.get("csrf_session") == "ABC"
++                           and "stale_session" not in jar_data
++                           and "expired_session" not in jar_data))
++            checks.append(("cookie jar is owner-only",
++                           jar.exists() and (jar.stat().st_mode & 0o077) == 0))
+             checks.append(("preflight chained POST succeeds", csrf_post.get("status") == 200))
+         finally:
+             srv.shutdown()
+@@ -754,6 +833,18 @@ def _selftest() -> int:
+     checks.append(("--run + 裸名 -> <run>/evidence/", Path(ps_bare) == Path("runs/t_20260101/evidence/ev_x.html")))
+     checks.append(("--run + 显式路径 -> 原样尊重", _place_save("sub/ev.html", "runs/t") == "sub/ev.html"))
+     checks.append(("无 --run -> 原样", _place_save("ev.html", None) == "ev.html"))
++    cookie_headers = {"Cookie": "same=explicit; explicit_only=1"}
++    _merge_cookies_into_headers(cookie_headers, {"same": "jar", "jar_only": "1"})
++    checks.append(("explicit Cookie overrides loaded jar before preflight",
++                   "same=explicit" in cookie_headers["Cookie"]
++                   and "jar_only=1" in cookie_headers["Cookie"]))
++    malformed_jar = Path(tempfile.mkdtemp()) / "cookies.json"
++    malformed_jar.write_text('{"drop": null, "keep": "v"}', encoding="utf-8")
++    checks.append(("cookie jar ignores JSON null deletion markers",
++                   _load_cookie_jar(str(malformed_jar)) == {"keep": "v"}))
++    checks.append(("timezone-less Expires values are interpreted as UTC",
++                   not _cookie_expired("Thu, 01 Jan 1970 01:00:00", now=0)
++                   and _cookie_expired("Wed, 31 Dec 1969 23:00:00", now=0)))
+     # #3: 无扩展名裸名补 .html(dogfood: --save tomcat9 存成裸名, driver 以为 .html 报错)
+     checks.append(("--run + 无扩展名裸名 -> 补 .html 落 evidence/",
+                    Path(_place_save("tomcat9", "runs/t")) == Path("runs/t/evidence/tomcat9.html")))

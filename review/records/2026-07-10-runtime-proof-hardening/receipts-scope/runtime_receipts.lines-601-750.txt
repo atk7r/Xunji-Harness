@@ -1,0 +1,150 @@
+   601	    disposition_before = agent_disposition(run)
+   602	    data = json.loads((run / "state" / "assignments.json").read_text(encoding="utf-8"))
+   603	    data["assignments"][1].update({
+   604	        "status": "blocked", "last_note": "Reason: no credential; Front: F-002 remains open",
+   605	        "updated_at": datetime.now(timezone.utc).isoformat(),
+   606	    })
+   607	    (run / "state" / "assignments.json").write_text(json.dumps(data), encoding="utf-8")
+   608	    disposition_after = agent_disposition(run)
+   609	    append_hook_event(run, event("CronList", ids[2], {}, {"tasks": []}))
+   610	    before, _ = cron_quiescent(run)
+   611	    append_hook_event(run, event("CronCreate", ids[3], {"prompt": f"/loop {run.name}"}, {"id": "deadbeef"}))
+   612	    active, _ = cron_quiescent(run)
+   613	    append_hook_event(run, event("CronList", ids[4], {}, {
+   614	        "tasks": [{"id": "deadbeef", "prompt": f"/loop {run.name}"}],
+   615	    }))
+   616	    delete_ok, _ = cron_delete_allowed(run, "deadbeef")
+   617	    prefix_delete, _ = cron_delete_allowed(run, "deadbe")
+   618	    wrong_delete, _ = cron_delete_allowed(run, "otherjob")
+   619	    append_hook_event(run, event("CronDelete", ids[5], {"id": "deadbeef"}, {"deleted": True}))
+   620	    stale, _ = cron_quiescent(run)
+   621	    append_hook_event(run, event("CronList", ids[6], {}, {"tasks": []}))
+   622	    after, _ = cron_quiescent(run)
+   623	    current_turn, _ = cron_quiescent(run, session_id="different-session", since=time.time() - 30)
+   624	    review_generated = datetime.now(timezone.utc).isoformat()
+   625	    review_receipt = "c" * 64
+   626	    review_bundle = "d" * 40
+   627	    append_hook_event(run, event("Bash", ids[7], {
+   628	        "command": f"python3 tools/peer_review.py {run} --into-run",
+   629	    }, {"stdout": (
+   630	        f"XUNJI_REVIEW_RECEIPT={review_receipt}\n"
+   631	        f"XUNJI_REVIEW_BUNDLE={review_bundle}\n## Verdict: PASS"
+   632	    )}))
+   633	    review_ok = review_invocation_valid(
+   634	        run, review_generated, receipt_id=review_receipt, bundle_hash=review_bundle)
+   635	    wrong_marker_review = review_invocation_valid(
+   636	        run, review_generated, receipt_id="e" * 64, bundle_hash=review_bundle)
+   637	    stale_review = review_invocation_valid(
+   638	        run, "2000-01-01T00:00:00+00:00",
+   639	        receipt_id=review_receipt, bundle_hash=review_bundle)
+   640	    completion_hash = "b" * 40
+   641	    completion_prompt = (
+   642	        f"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={completion_hash} "
+   643	        "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger")
+   644	    append_hook_event(run, event("Agent", ids[8], {"prompt": completion_prompt}, {
+   645	        "result": "PASS",
+   646	    }))
+   647	    weak_completion = completion_review_valid(run, completion_hash)
+   648	    append_hook_event(run, event("Agent", ids[9], {"prompt": completion_prompt}, {
+   649	        "result": f"XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX={completion_hash} "
+   650	                  "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger",
+   651	    }))
+   652	    structured_completion = completion_review_valid(run, completion_hash)
+   653	    append_hook_event(run, {
+   654	        "hook_event_name": "PreToolUseDenied", "session_id": "s1",
+   655	        "transcript_path": str(transcript), "tool_name": "Bash",
+   656	        "tool_use_id": ids[10],
+   657	        "tool_input": {"command": "python3 tools/probe.py GET https://example.test"},
+   658	        "xunji_decision": "deny", "xunji_reason": "Agent Board required",
+   659	        "xunji_target_action": True,
+   660	    })
+   661	    denied_target = denied_tool_events(run, session_id="s1", target_only=True)
+   662	    unresolved_before = unresolved_target_denials(run, session_id="s1")
+   663	    failed_target = event("Bash", ids[11], {
+   664	        "command": "python3 tools/probe.py GET https://example.test",
+   665	        "description": "first retry with changed metadata",
+   666	    }, {"error": "controlled failure"})
+   667	    failed_target["hook_event_name"] = "PostToolUseFailure"
+   668	    failed_target["xunji_target_action"] = True
+   669	    append_hook_event(run, failed_target)
+   670	    unresolved_after_failure = unresolved_target_denials(run, session_id="s1")
+   671	    other_target = event("Bash", ids[12], {
+   672	        "command": "python3 tools/probe.py GET https://other.example.test",
+   673	    }, {"stdout": "different command success"})
+   674	    other_target["xunji_target_action"] = True
+   675	    append_hook_event(run, other_target)
+   676	    unresolved_after_other = unresolved_target_denials(run, session_id="s1")
+   677	    successful_target = event("Bash", ids[13], {
+   678	        "command": "python3 tools/probe.py GET https://example.test",
+   679	        "description": "successful retry with different metadata",
+   680	    }, {"stdout": "controlled success"})
+   681	    successful_target["xunji_target_action"] = True
+   682	    append_hook_event(run, successful_target)
+   683	    unresolved_after_success = unresolved_target_denials(run, session_id="s1")
+   684	    events, chain_errors = validate_chain(run)
+   685	    tampered = run.parent / "tampered"
+   686	    (tampered / "state").mkdir(parents=True)
+   687	    tampered_lines = _event_path(run).read_text(encoding="utf-8").splitlines()
+   688	    tampered_first = json.loads(tampered_lines[0])
+   689	    tampered_first["response_excerpt"] = "forged candidate"
+   690	    tampered_lines[0] = json.dumps(tampered_first, ensure_ascii=False, sort_keys=True)
+   691	    _event_path(tampered).write_text("\n".join(tampered_lines) + "\n", encoding="utf-8")
+   692	    tampered_fanout = agent_fanout(tampered)
+   693	    checks = [
+   694	        ("hash chain validates", not chain_errors and len(events) == 14),
+   695	        ("two real Agent receipts satisfy fanout", agent_fanout(run)["satisfied"]),
+   696	        ("done Agent remains unmerged", not disposition_before["disposition_satisfied"]),
+   697	        ("anchored merged/blocked dispositions satisfy", disposition_after["disposition_satisfied"]),
+   698	        ("CronList with no jobs is quiescent", before),
+   699	        ("created run job is active", not active),
+   700	        ("CronDelete binds to listed run job", delete_ok),
+   701	        ("CronDelete rejects response-substring job prefix", not prefix_delete),
+   702	        ("CronDelete rejects unlisted job", not wrong_delete),
+   703	        ("post-delete CronList is still required", not stale),
+   704	        ("post-delete CronList proves quiescence", after),
+   705	        ("old-session CronList cannot satisfy current turn", not current_turn),
+   706	        ("foreground review receipt is time-bound", review_ok),
+   707	        ("review receipt requires exact output marker", not wrong_marker_review),
+   708	        ("shell-decorated review command is rejected", not _peer_review_command_matches(
+   709	            f"echo fake; python3 tools/peer_review.py {run} --into-run", run)),
+   710	        ("unrelated later invocation cannot validate stale review", not stale_review),
+   711	        ("bare PASS cannot satisfy completion review", not weak_completion),
+   712	        ("structured evidence-bound completion receipt passes", structured_completion),
+   713	        ("tampered receipt chain cannot satisfy Agent fanout", not tampered_fanout["satisfied"]),
+   714	        ("target denial is transcript-backed", len(denied_target) == 1),
+   715	        ("target denial remains unresolved without a retry", len(unresolved_before) == 1),
+   716	        ("failed identical retry does not resolve denial", len(unresolved_after_failure) == 1),
+   717	        ("different successful command does not resolve denial", len(unresolved_after_other) == 1),
+   718	        ("successful same command resolves despite description drift", not unresolved_after_success),
+   719	        ("Bash environment participates in action hash", _action_hash(
+   720	            "Bash", {"command": "probe", "env": {"TOKEN": "one"}}) != _action_hash(
+   721	            "Bash", {"command": "probe", "env": {"TOKEN": "two"}})),
+   722	        ("WebFetch extended parameters participate in action hash", _action_hash(
+   723	            "WebFetch", {"url": "https://example.test", "prompt": "inspect", "headers": {"X": "1"}})
+   724	            != _action_hash(
+   725	                "WebFetch", {"url": "https://example.test", "prompt": "inspect", "headers": {"X": "2"}})),
+   726	    ]
+   727	    bad = [name for name, ok in checks if not ok]
+   728	    for name, ok in checks:
+   729	        print(("ok   " if ok else "FAIL ") + name)
+   730	    print("runtime_receipts selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+   731	    return 0 if not bad else 1
+   732	
+   733	
+   734	def main() -> int:
+   735	    parser = argparse.ArgumentParser(description="validate Xunji hook-derived runtime receipts")
+   736	    parser.add_argument("run_dir", nargs="?")
+   737	    parser.add_argument("--selftest", action="store_true")
+   738	    args = parser.parse_args()
+   739	    if args.selftest:
+   740	        return _selftest()
+   741	    if not args.run_dir:
+   742	        parser.error("run_dir is required")
+   743	    _, errors = validate_chain(args.run_dir)
+   744	    fanout = agent_fanout(args.run_dir)
+   745	    cron_ok, cron_note = cron_quiescent(args.run_dir)
+   746	    print(json.dumps({"errors": errors, "fanout": fanout, "cron_quiescent": cron_ok,
+   747	                      "cron_note": cron_note}, ensure_ascii=False, indent=2))
+   748	    return 1 if errors else 0
+   749	
+   750	

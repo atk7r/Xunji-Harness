@@ -1,0 +1,217 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "fe0961e99b0677b31528199c413f23e189c15101",
+  "evidence_index_hash": "4dca901385f1d8fa675fe666cf90ede357835d09",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Report claim 4 (raw uninspectable uploads / raw redirect-following auth commands fail before I/O) is not yet confirmed by certainty>=0.8 evidence.",
+      "evidence": "evidence_index:E-002 certainties=[0.5], verification.txt, E-005 upload-result.json/upload-wire.txt, reviewed.diff",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] E-005 only proves the allowed neutral-upload path; the blocked raw-upload and raw-redirect cases live in candidate E-002 and lack replay/json artifacts. Do not treat claim 4 as closed until a confirmed blocked-case artifact exists.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Claim 1 (Root/Agents no longer emit identity/PII in generated target-facing fields) is broader than the confirmed evidence base.",
+      "evidence": "evidence_index:E-003 certainties=[0.5], browser-integration.txt, E-004, E-005, E-006",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Confirmed coverage is limited to one upload sensor run, one replay sample, and one redirect fixture. Browser XHR/fetch, custom scripts, and end-to-end Agent paths are only candidate-level. Claim 1 should be downgraded to partially validated.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Privacy guard may false-block legitimate target paths/queries/bodies containing the literal token \"xunji\" or configured deny values, with no documented exception path.",
+      "evidence": "privacy.py.txt _INTERNAL_PATTERNS, privacy.py.txt privacy_reason, CLAUDE.md",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The destination host is scope-exempt, but a target path or body that legitimately contains \"xunji\" would be blocked. Add regression tests and an escalation workflow for target-native strings.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "scan.py custom-template refusal and neutral User-Agent assertion are not confirmed by runtime evidence.",
+      "evidence": "reviewed.diff (scan.py hunks), evidence_index:E-001",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] Only diff hunks are provided; no wire capture or replay artifact proves that custom nuclei templates/user-data are rejected or that the fixed User-Agent is what leaves the host.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "No confirmed evidence verifies that internal control names (XUNJI_*) and proxy environment variables stay out of target-facing bytes.",
+      "evidence": "CLAUDE.md, privacy.py.txt, evidence_index:E-002",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The docs state XUNJI_PROXY must remain local, but the ledger lacks a controlled run showing these values do not leak into headers, bodies, or URLs across probe/render/scan.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "BLOCKER",
+      "category": "general",
+      "claim": "E-005 is marked confirmed/certainty 1.0, but its own artifact `upload-result.json` explicitly states `\"replicated\": \"Repeat with a fresh marker before certainty >=0.8.\"` — the evidence contradicts its own certainty grade.",
+      "evidence": "upload-result.json (sha1 b0f9976c2777f402046c6befbe2383caad84635e)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:glm-5.2] The artifact self-describes a single-observation result requiring replication before high certainty; no second upload artifact exists in the bundle. The evidence_index must downgrade this to certainty 0.5 / candidate, or provide a second fresh-marker upload result.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-007",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "E-006 (\"Live three-origin redirect credential control\", certainty 1.0) is backed only by `redirect-wire.json`, a 315-byte summary JSON with boolean hop flags. There are no per-hop raw request/response artifacts, no `.replay.json` for any hop, and no saved HTTP wire captures showing the actual Authorization/Cookie headers present at hop1 and absent at hop2/hop3.",
+      "evidence": "redirect-wire.json (sha1 e308220b8b437187e20756cf18eb1bd8d806d7fe)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:glm-5.2] A summary JSON without underlying wire artifacts is insufficient to confirm at certainty 1.0. This is the same class of evidence weakness the report itself warns against (\"Single observations and environment-provided artifacts are not enough to confirm a finding\"). Downgrade to 0.5 or produce raw per-hop captures.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-008",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "E-004 replay artifact `privacy-replay-sample.txt.replay.json` stores the response body SHA1 and a plaintext snippet (`privacy-replay-ok`) alongside redacted request Cookie. The SKIPPED-PRIVACY-REDACTED verdict is correct, but the evidence claims `has_control: true` — no control artifact demonstrates that a fresh guarded replication was performed against the same endpoint with reacquired auth. The report.md claim 5 requires \"fresh guarded replication\" but no second replay artifact exists.",
+      "evidence": "privacy-replay-sample.txt.replay.json (sha1 cf51435e3b34cfa057631d090b7cfeabb1e03e5f), privacy-replay-verdict.txt (sha1 b2387eb27d7144de6e0a96e0a43bfaad58460e4b)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:glm-5.2] The redaction mechanism is confirmed, but the replication control required by the report's own closure rule is absent from the bundle.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-009",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "E-003 browser integration (`browser-integration.txt`) is a 322-byte prose summary asserting \"Observed server POST count: 0\" with no Playwright trace, HAR file, or server log artifact. Correctly graded at 0.5/candidate, but the report.md reviewer-focus asks to \"Look for bypasses through browser XHR/fetch\" — no raw browser-side evidence was captured.",
+      "evidence": "browser-integration.txt (sha1 f31c753480a81b2073f7c45c84fe0d5bd7b61e1d)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:arkcli] [arkcli:glm-5.2] The integration test result is unverified by any machine-capturable artifact; a passing prose summary from the same model that wrote the code is not independent evidence.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-010",
+      "severity": "WARN",
+      "category": "shallow_closure",
+      "claim": "All confirmed evidence artifacts (E-004, E-005, E-006) are loopback-only; proxy-integration, HTTPS, and real-world redirect paths are completely untested.",
+      "evidence": "evidence_index:E-004, evidence_index:E-005, evidence_index:E-006, privacy-replay-sample.txt.replay.json (127.0.0.1), upload-wire.txt (127.0.0.1), redirect-wire.json (loopback booleans)",
+      "affected_eids": [
+        "E-004",
+        "E-005",
+        "E-006"
+      ],
+      "recommended_action": "Add at least one artifact exercising the privacy guard through the proxy path (XUNJI_PROXY/proxy.conf), one HTTPS/TLS artifact, and one non-loopback redirect chain test before final closure.",
+      "why": "[panel:claude] CLAUDE.md declares proxy fail-closed as the default egress path. Every guarded tool reads XUNJI_PROXY or tools/harness/proxy.conf. Zero artifacts exercise the privacy guard through the proxy path. If the proxy rewrites URLs or injects headers, the guard may see bytes that differ from what was tested. The production path has no artifact coverage. Similarly, HTTPS/TLS paths and real redirect chains are untested.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-011",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "E-006 described as 'Live three-origin redirect credential control' but redirect-wire.json is structured server-side booleans from a single author's test harness, not raw wire capture.",
+      "evidence": "evidence.md:58 ('Live'), evidence.md:65 ('three independent server-side header booleans'), redirect-wire.json (structured JSON booleans)",
+      "affected_eids": [
+        "E-006"
+      ],
+      "recommended_action": "Clarify in evidence.md that this is a loopback functional test with author-controlled servers, not a live real-world redirect chain capture. Consider adding a tcpdump-style raw capture for at least one hop to prove the headers were actually sent on the wire rather than only recorded by server-side code.",
+      "why": "[panel:claude] The three hop servers share the same test harness design and were written by the same author. The term 'Live' in the evidence head overstates the scope (loopback only). 'Independent' is overstated when the author controls all three server implementations and their shared verification logic.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-012",
+      "severity": "WARN",
+      "category": "shallow_closure",
+      "claim": "Encoding bypass defense relies on the privacy module's own selftest; URL-safe base64, MIME encoded-words, decimal/octal encoding, HTML entities, and nested percent encoding are not independently verified.",
+      "evidence": "privacy.py.txt:_decoded_variants, disposition.md:42-44 (PR-003 partially dismissed — encoding tests exist in selftest only)",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add independent cross-tool encoding tests (e.g., a check_hook.py test case or a dedicated probe.py negative test) that sends known-encoded project identifiers through at least one guarded path and verifies blocking. Consider expanding _decoded_variants to handle URL-safe base64, MIME encoded-words, decimal/octal escapes, and HTML entities if those are realistic bypass vectors.",
+      "why": "[panel:claude] _decoded_variants handles percent/base64/hex/NFKC and the selftest confirms basic cases. But URL-safe base64 (-_ vs +/), MIME encoded-words (=?utf-8?B?...?=), decimal/octal encoding (\\170\\165\\156\\152\\151), HTML entities (&#120;), and nested percent encoding (%25%37%35) are neither tested nor explicitly ruled out. The 32-token detection limit for base64/hex is an untested edge condition. The author's own selftest code verifying the author's code is not independent confirmation.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-013",
+      "severity": "WARN",
+      "category": "missed_surface",
+      "claim": "Command-level privacy check does not match WebSocket URLs (ws://, wss://), creating a gap for custom WebSocket commands.",
+      "evidence": "privacy.py.txt:outbound_command_privacy_reason URL regex '(?:https?|ftp)://'",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add ws:// and wss:// to the URL matching pattern in outbound_command_privacy_reason, or document the gap and ensure the guard-level per-request check covers all protocol paths.",
+      "why": "[panel:claude] If a Bash command uses a WebSocket URL (e.g., websocat ws://target/), the hook-level outbound_command_privacy_reason returns '' (no URL detected) and the command passes without privacy inspection. The guard-level per-request check in probe.py handles HTTP only. Custom WebSocket commands would have zero privacy enforcement at either level.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-014",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "Agent template privacy instructions are prose-only, not hard enforcement; the claim that agents 'no longer emit' identity depends on model instruction-following.",
+      "evidence": "reviewed.diff (7 agent template files each add one prose instruction line), report.md claim 1, CLAUDE.md target-facing privacy section",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Document the gap explicitly: agent prose instructions are a defense-in-depth layer, not a hard boundary. Consider adding a periodic agent-output sampling check (e.g., a check_hook.py test that searches for project markers in agent-written request artifacts) to detect template drift.",
+      "why": "[panel:claude] The hooks+guard provide hard enforcement for framework tools (probe, render, scan, sensors), but report claim 1 depends on the agent model reading and following prose instructions. Under context pressure, creative exploit generation, or future template updates that lose this line, an agent could still generate project-identifying request bytes. The framework-tool enforcement path is strong; the prose-instruction path is inherently soft.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-015",
+      "severity": "WARN",
+      "category": "shallow_closure",
+      "claim": "Single privacy.py module is sole enforcement source for both hook-level and guard-level checks; no cross-layer concurrent-failure test exists.",
+      "evidence": "safety_gate.py _PRIVACY_IMPORT_ERROR, guard.py RequestRecorder importing privacy helpers, reviewed.diff selftest hunk (only tests hook-level fail-closed, not guard-level)",
+      "affected_eids": [
+        "E-001",
+        "E-002"
+      ],
+      "recommended_action": "Add a cross-layer test that simulates privacy.py unavailability and verifies BOTH the hook and guard.py fail closed concurrently, preventing inconsistent enforcement states.",
+      "why": "[panel:claude] The hook selftest simulates module absence with privacymod = None and verifies fail-closed for CLI commands. But guard.py's RequestRecorder also depends on importing privacy helpers. No test proves both layers fail closed simultaneously. If one path fails and the other does not, enforcement becomes inconsistent — allowing commands through the hook while blocking per-request, or vice versa.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [kimi-k2.7-code] No end-to-end test that an actual Agent/worker run produces neutral target-facing bytes; only static templates and the hook were updated.",
+    "[arkcli] [kimi-k2.7-code] No negative multipart test: E-005 is the happy path; there is no confirmed artifact showing rejection of a project-labeled filename, content, or boundary.",
+    "[arkcli] [kimi-k2.7-code] No test for redirect request/response bodies carrying auth secrets or PII; only header stripping is confirmed.",
+    "[arkcli] [kimi-k2.7-code] No confirmed exercise of `OUTBOUND_PRIVACY_DENY_VALUES` with real operator/org identifiers.",
+    "[arkcli] [kimi-k2.7-code] No evidence that `check_run.py` treats an unaddressed `SKIPPED-PRIVACY-REDACTED` replay as a hard closure error.",
+    "[arkcli] [kimi-k2.7-code] Encoding bypass coverage stops at percent/base64/hex; no confirmed tests for JSON-escaped Unicode, HTML entities, IDNA/punycode, case/NFKC edge cases, or zero-width characters.",
+    "[arkcli] [kimi-k2.7-code] A custom script can still perform network I/O if its command line hides the URL (e.g., via environment variables or internal constants); the hook only inspects the visible command string.",
+    "[claude] Proxy path entirely unverified: XUNJI_PROXY/proxy.conf referenced in every guarded tool but no artifact exercises privacy guard through proxy. Proxy could rewrite URLs/inject headers/modify boundaries unseen by selftests.",
+    "[claude] HTTPS/TLS path unverified: all artifacts target http://127.0.0.1:PORT/. TLS handshake/SNI-related header injection untested.",
+    "[claude] --allow-sensitive-auth round-trip unverified: no artifact showing auth body passes guard while password/secret fields are redacted in resulting .replay.json.",
+    "[claude] Agent output sampling: no sampled real agent-generated outbound text to validate the prose-instruction claim. Template instructions are advisory; actual agent behavior under target conditions never sampled.",
+    "[claude] Multipart boundary collision: ----proof-<hex> prefix is constant 14 bytes. If upload content contains this string, server-side MIME parser could split incorrectly — theoretical but unhandled.",
+    "[claude] Scan.py external scanner path: sqlmap --tamper scripts and nuclei built-in template requests are not tested for privacy content, even with custom templates refused."
+  ],
+  "context_limits": [
+    "[arkcli] [kimi-k2.7-code] Chinese-language files (target.md, evidence.md) are not excerpted in the bundle; this review relies on their hashes and the evidence_index summaries.",
+    "[arkcli] [kimi-k2.7-code] CN phone / ID regexes are present but cannot be validated against Taiwan or regional-specific identifier formats without external reference data.",
+    "[arkcli] [kimi-k2.7-code] Artifact SHA-1 hashes are taken from the bundle; this is a read-only review and did not independently recompute file digests.",
+    "[claude] Could not read tools/harness/privacy.py directly from main repo (Read permission denied). Analysis based on privacy.py.txt bundle excerpt and reviewed.diff hunks.",
+    "[claude] Could not read tools/harness/guard.py directly to verify RequestRecorder.validate integration with privacy module. Analysis based on diff hunks and bundle excerpts.",
+    "[claude] Cannot independently verify cleanup_requires_ask actual matching scope — this function is not modified in the diff. Cleanup-bypass fix severity assessment depends on the diff's claim about the fix.",
+    "[claude] Chinese-language content in denial messages, WORKFLOW docs, and sentinel tests appears syntactically consistent; may miss subtle semantic nuances.",
+    "[claude] CN ID regex covers standard mainland China format only. HK/Macau/TW ID numbers and non-Chinese PII formats not covered — acknowledged scope limitation."
+  ],
+  "error": ""
+}

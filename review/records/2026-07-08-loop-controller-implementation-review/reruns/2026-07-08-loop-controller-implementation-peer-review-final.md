@@ -1,0 +1,51 @@
+# Peer Review Panel — 2026-07-08-loop-controller-implementation-review
+
+_backend: panel:arkcli+claude · 2026-07-08T02:46Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: WARN
+
+_backend: panel:arkcli+claude_
+_brain: codex_
+_bundle_hash: 79040d2b781b1b757336bd266660c08a51aacc5f_
+_evidence_index_hash: 914f326d8da249c1d616518b03ce1b3d1aae2cd9_
+
+## Findings
+- [WARN] PR-001 No claim in report.md is confirmed; every evidence_index entry is phenomenon (0.3) or candidate (≤0.5), so the 'Verification Already Run' narrative is advisory only. | Evidence: evidence_index:E-001 certainties [0.3], evidence_index:E-002 certainties [0.5], evidence_index:E-003 certainties [0.5], evidence_index:E-004 certainties [0.5], evidence_index:E-005 certainties [0.5], evidence_index:E-006 certainties [0.5], evidence_index:E-007 certainties [0.5] | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The review rubric states only certainty ≥0.8 may be reported as confirmed; all supplied evidence is below that threshold.
+- [WARN] PR-002 Artifact cross-check is incomplete because the bundle only includes snippets/excerpts, not full artifact contents. | Evidence: bundle.egress_redaction include_artifacts=snippets, evidence_index:E-004 excerpt, evidence_index:E-007 excerpt | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] Excerpts appear consistent with report.md, but excerpts alone cannot support certainty ≥0.8.
+- [WARN] PR-003 The review omits a security/threat-model assessment of the new control-plane tools themselves: loop_state parser, progress_ledger evidence.md ingestion, run_controller file writes, and shadow controller advisory-only enforcement. | Evidence: report.md Main Changes, evidence_index:E-001 artifact evidence/implementation.diff size 63243 bytes, evidence_index:E-006 evidence/run-controller-advisory-audit.out | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] A control-plane fix can become a new source of risk if its parser or state writer is manipulated; functional selftests do not cover this.
+- [WARN] PR-004 High-value stop/continue logic (status-token parser and Coda/Type-A closure decision) was validated only with author-written selftests and one synthetic regression. | Evidence: evidence_index:E-002 evidence/selftest-loop-controller.out size 365, evidence_index:E-003 evidence/check-run-selftest.out / anti-drift-selftest.out / setup-run-selftest.out, evidence_index:E-007 evidence/adversarial-type-a-coda.json | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The parser that decides whether open fronts exist is a single point of failure; shallow testing is inadequate for a stop/continue gate.
+- [WARN] PR-005 The report asserts the change 'fixes the /loop control-plane bug' but provides no baseline evidence comparing pre-fix and post-fix behavior on the same triggering input. | Evidence: report.md Objective, evidence_index:E-001 evidence/implementation.diff, evidence_index:E-007 evidence/adversarial-type-a-coda.json | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] Without a before/after comparison, the claim of a fix is only a candidate conclusion derived from self-generated tests.
+- [WARN] PR-006 The 'real run smoke' and adversarial regression artifacts are produced by the same code under test, so they confirm intended behavior but do not provide independent ground truth. | Evidence: evidence_index:E-004 evidence/scshr-real-run-validation.json, evidence_index:E-007 evidence/adversarial-type-a-coda.json | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] Self-generated artifacts can encode the same assumptions as the implementation and mask parser or logic bugs.
+- [WARN] PR-007 arkcli panel had backend errors; review is partial | Evidence: minimax-m3: parse error; output tail: erning - what's it diffing? And the shadow JSON could be mistakenly consumed by a future tool as authoritative.
+
+**WARN**: E-001 (implementation.diff) is at phenomenon level (0.3) - the primary evidence for the implementation is at the lowest certainty level. The selftest outputs are at 0.5 (candidate with control). This means the actual correctness of the implementation is not strongly supported.
+
+**WARN**: The selftest for loop_controller is 365 bytes (E-002) and the audit is 813 bytes (E-006); glm-5.2: parse error; output tail:  this be downgraded? The rules say "ONLY certainty >= 0.8 may be reported as confirmed." The report doesn't use the word "confirmed" but presents these as definitive statements.
+
+Let me also think about the context: this is a maintenance review of a code fix, not a pentest. The evidence discipline rules about "single observations, redirects, block pages, timeouts" are pentest-specific. But the certainty rules still apply.
+
+Now, let me also look at the scshr-frontier-status-lines.out artifact (E- | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+
+## Blind-spot check
+- [claude] **The `_is_open_status` exclusion logic is correct but `_is_deferred_status` and `_is_closed_status` lack mutual exclusion**: `_is_open_status` explicitly excludes `closed`/`deferred` tokens before checking `OPEN_STATUS_TOKENS`. But `_is_deferred_status` and `_is_closed_status` only check for their respective tokens without cross-exclusion. A malformed status like `closed, deferred` would appear in BOTH `closed_fronts` and `deferred_fronts`. This is unlikely in practice but represents an asymmetry in the defensive coding pattern.
+- [claude] **The report claims `Verification Already Run` includes 8 selftest/check commands, but only 4 output artifacts are filed under E-003**: The report lists `py_compile`, `selftest_all.py --only loop_state,...`, `check_rules.py`, `check_templates.py`, `check_run.py --selftest`, `session_handoff.py --selftest`, `setup_run.py --selftest`, and `anti_drift.py --selftest`. But `E-003`'s artifacts bundle `evidence/static-checks.out` and `evidence/lifecycle-selftests.out` which are NOT listed as individual artifacts in `evidence.md` E-003 — E-003 only lists the 8 individual `.out` files. The `static-checks.out` and `lifecycle-selftests.out` files exist on disk but are NOT cross-referenced in `evidence.md`. The evidence ledger is slightly incomplete.
+- [claude] **`progress_ledger.py` silently truncates history to 50 cycles**: `cycles[-50:]` at `implementation.diff:990`. For any run exceeding 50 cycles, the earliest progress records are silently dropped. This is not documented in the report, evidence, or code comments. While 50 cycles is generous, the truncation behavior could surprise operators doing post-mortem analysis on very long runs.
+- [claude] **The new `loop_prompt.md` text says "If `state/controller.shadow.json` gives a `next_required_action`, follow it unless you record a concrete evidence-bound reason to override it"**: This creates a soft compulsion for the Root to follow the controller's advice. Combined with the fact that the shadow controller can produce `next_required_action` values like `assign_at_least_two_disjoint_agent_lanes_or_record_a_budget_reason`, this introduces a behavioral nudge that the Root might mechanically follow rather than critically evaluate. The "unless you record a reason to override" escape hatch is present, but the framing favors compliance over judgment — a subtle shift in the Root's autonomy.
+- [claude] **The report asks 5 review questions but answers none of them**: The "Review Questions" section poses 5 questions about whether the implementation is correct. The "Verification Already Run" section describes tests that were run but doesn't answer any of the questions explicitly. The report assumes the tests passing = the questions are answered affirmatively, but this is an implicit leap. Question 5 ("Does the implementation improve vulnerability discovery behavior...") is particularly subjective and not answerable by selftest pass/fail alone.
+
+## Context-limit notes
+- [arkcli] minimax-m3: parse error; output tail: erning - what's it diffing? And the shadow JSON could be mistakenly consumed by a future tool as authoritative.
+
+**WARN**: E-001 (implementation.diff) is at phenomenon level (0.3) - the primary evidence for the implementation is at the lowest certainty level. The selftest outputs are at 0.5 (candidate with control). This means the actual correctness of the implementation is not strongly supported.
+
+**WARN**: The selftest for loop_controller is 365 bytes (E-002) and the audit is 813 bytes (E-006)
+- [arkcli] glm-5.2: parse error; output tail:  this be downgraded? The rules say "ONLY certainty >= 0.8 may be reported as confirmed." The report doesn't use the word "confirmed" but presents these as definitive statements.
+
+Let me also think about the context: this is a maintenance review of a code fix, not a pentest. The evidence discipline rules about "single observations, redirects, block pages, timeouts" are pentest-specific. But the certainty rules still apply.
+
+Now, let me also look at the scshr-frontier-status-lines.out artifact (E-
+- [claude] I reviewed the full 1343-line implementation diff, all 7 evidence entries, all 15 artifact files (selftest outputs, validation JSON, adversarial test outputs, static check results), and the adversarial test run's full state directory. No Chinese-language gaps affected my analysis — I read all Chinese text in status lines, comments, and documentation.
+- [claude] I did NOT have access to the actual source files (`tools/loop_state.py`, `tools/progress_ledger.py`, `tools/run_controller.py`, `tools/loop_bootstrap.py`) in their post-change state — I only reviewed the diff. If the diff was incomplete (e.g., omitted hunks due to size), I would miss those changes. The diff appears complete based on the file structure.
+- [claude] The `js_inventory.py` file is not included in the review bundle. I cannot verify whether it exists, has a working `--selftest` mode, or was part of a separate change merged into this diff. The reference in `WORKFLOW.md:222-227` describes it as a "read-only sensor" but the implementation is absent from evidence.
+- [claude] This is a maintenance code review (not a penetration test), so rubric items about coverage ledger, false positives in vuln findings, and artifact cross-check of probe outputs are largely N/A — I applied the rubric's spirit (verification rigor, evidence consistency) to the code review context.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Run Lifecycle"
+  short_description: "Manage Xunji run setup and closure"
+  default_prompt: "Use $xunji-run-lifecycle to set up, resume, audit, or close a Xunji run."

@@ -1,0 +1,126 @@
+diff --git a/tools/anti_drift.py b/tools/anti_drift.py
+index 2cab3e1..050d04a 100644
+--- a/tools/anti_drift.py
++++ b/tools/anti_drift.py
+@@ -309,2 +309,2 @@ def _check_drift_alert(run_dir: Path) -> list[str]:
+-def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
+-    """Check if Agent Board is mandatory: open fronts >= 4 and barrier classes are diverse
++def _check_agent_board_needed(run_dir: Path, _model=None) -> tuple[bool, int, dict]:
++    """Check if Agent Board is mandatory: active fronts >= 4 and barriers are diverse
+@@ -312,3 +311,0 @@ def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
+-    frontier = run_dir / "frontier.md"
+-    if not frontier.exists():
+-        return False, 0, {}
+@@ -316,2 +313,8 @@ def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
+-        text = frontier.read_text(encoding="utf-8", errors="replace")
+-    except Exception:
++        if _model is None:
++            import run_model as model
++        else:
++            model = _model
++        data = model.summary(run_dir)
++    except Exception as exc:
++        if (run_dir / "frontier.md").exists():
++            return True, 4, {"state-parser-failure": [type(exc).__name__]}
+@@ -319,27 +321,0 @@ def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
+-
+-    import re as _re_ab
+-
+-    # Find all ### F-xxx blocks, extract Status + Barrier class
+-    open_fronts: list[str] = []
+-    barrier_by_front: dict[str, str] = {}
+-    for m in _re_ab.finditer(r"(?ms)^###[ \t]+(F-\d+).*?(?=^###[ \t]+|\Z)", text):
+-        block = m.group(0)
+-        fid = m.group(1)
+-        st_match = _re_ab.search(rf"(?im)^\s*-?\s*Status\s*[:：]\s*([^\n]+)", block)
+-        status = st_match.group(1).strip().lower() if st_match else ""
+-        # Only count genuinely open fronts — exclude probing, blocked_type_b, deferred,
+-        # and closed. Type B candidates and low-value fronts (e.g. user enumeration) should
+-        # not force unnecessary agent spawning. (retrospective puffts P4)
+-        if status != "open":
+-            continue
+-        bc_match = _re_ab.search(rf"(?im)^\s*-?\s*Barrier class\s*[:：]\s*([^\n]+)", block)
+-        barrier = bc_match.group(1).strip().lower() if bc_match else "unknown"
+-        open_fronts.append(fid)
+-        barrier_by_front[fid] = barrier
+-
+-    open_count = len(open_fronts)
+-    if open_count < 4:
+-        return False, open_count, {}
+-
+-    # Build barrier groups — exclude trivial barriers from grouping
+-    trivial = {"", "none", "unknown", "n/a"}
+@@ -347,3 +323,2 @@ def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
+-    for fid in open_fronts:
+-        bc = barrier_by_front[fid]
+-        if bc in trivial:
++    for front in data.get("fronts", []):
++        if front.get("id") not in data.get("open", []):
+@@ -351,7 +326,5 @@ def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:
+-        barrier_groups.setdefault(bc, []).append(fid)
+-
+-    # SharedBarrierGroup exists if any barrier class has >= 2 fronts
+-    has_shared = any(len(fronts) >= 2 for fronts in barrier_groups.values())
+-    # Agent Board needed when barriers are diverse (no shared group)
+-    should_remind = not has_shared
+-    return should_remind, open_count, barrier_groups
++        barrier = str(front.get("barrier") or "unknown")
++        if barrier in {"", "none", "unknown", "n/a", "-"}:
++            continue
++        barrier_groups.setdefault(barrier, []).append(str(front.get("id")))
++    return bool(data.get("fanout_required")), int(data.get("open_count", 0)), barrier_groups
+@@ -464 +437 @@ def build_anchor(
+-    # Agent Board 强制检查: open fronts >= 4 且无共享 barrier → 必须并行
++    # Agent Board 强制检查: active fronts >= 4 且无共享 barrier -> 必须并行
+@@ -468 +441 @@ def build_anchor(
+-            lines.append("  · Agent Board 强制: open fronts ≥ 4 且无共享 barrier → 本轮必须 spawn ≥ 2 个 subagent (通过 workers.py assign), 禁止 Root 全串行。")
++            lines.append("  · Agent Board 强制: active(open/probing/working/type-A) fronts ≥ 4 且无共享 barrier → 本轮必须 spawn ≥ 2 个 subagent (通过 workers.py assign), 禁止 Root 全串行。")
+@@ -655 +628 @@ def _selftest() -> int:
+-    checks.append(("agent board: <4 open fronts -> not needed", not needed_lt4 and n_lt4 == 2))
++    checks.append(("agent board: <4 active fronts -> not needed", not needed_lt4 and n_lt4 == 3))
+@@ -692,0 +666,10 @@ def _selftest() -> int:
++    class _BrokenRunModel:
++        @staticmethod
++        def summary(_run):
++            raise RuntimeError("parser unavailable")
++
++    parser_fail = _check_agent_board_needed(ab_dir, _model=_BrokenRunModel())
++    checks.append(("agent board: parser failure with frontier -> fail closed",
++                   parser_fail[0] and parser_fail[1] >= 4
++                   and "state-parser-failure" in parser_fail[2]))
++
+diff --git a/tools/workers.py b/tools/workers.py
+index f159c4b..5c1d976 100644
+--- a/tools/workers.py
++++ b/tools/workers.py
+@@ -40 +39,0 @@ import argparse
+-import calendar
+@@ -49,0 +49 @@ import time
++from datetime import datetime, timezone
+@@ -77,0 +78,4 @@ except Exception:
++try:
++    import run_model as _run_model
++except Exception:
++    _run_model = None
+@@ -369,0 +374,15 @@ def parse_frontiers(run_dir: Path) -> list[dict]:
++    if _run_model is not None:
++        rows: list[dict] = []
++        for front in _run_model.parse_fronts(run_dir):
++            rows.append({
++                "id": front.id,
++                "section": front.section,
++                "status": front.status,
++                "barrier": front.barrier,
++                "depth": front.depth,
++                "title": front.title,
++                "same_barrier_failures": _int_field(front.text, "Same barrier failures"),
++                "text": front.text,
++                "schema_errors": list(front.schema_errors),
++            })
++        return rows
+@@ -866 +885 @@ def _now_iso() -> str:
+-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
++    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+@@ -873 +892 @@ def _parse_iso(ts: str | None) -> float | None:
+-        return float(calendar.timegm(time.strptime(ts.strip(), "%Y-%m-%dT%H:%M:%SZ")))
++        return datetime.fromisoformat(ts.strip().replace("Z", "+00:00")).timestamp()

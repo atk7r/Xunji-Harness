@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/reason-pass-receipt.v1.schema.json",
+  "title": "Xunji Reason-pass Receipt v1",
+  "description": "Derived claim that the Root read and adjudicated one stable canonical run snapshot. This receipt does not replace canonical Markdown, grant authority, promote evidence, or authorize closure.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_id",
+    "cycle_id",
+    "frontier_digest",
+    "evidence_digest",
+    "coverage_digest",
+    "decision_digest",
+    "graph_digest",
+    "read_at",
+    "chosen_front",
+    "reason",
+    "previous_receipt_hash",
+    "receipt_hash"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.reason-pass.v1"},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 255},
+    "cycle_id": {"type": "integer", "minimum": 1},
+    "frontier_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "coverage_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "decision_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "graph_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "read_at": {"type": "number", "exclusiveMinimum": 0},
+    "chosen_front": {"type": "string", "pattern": "^(?:F-[0-9]+[A-Za-z]*|NONE)$"},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "previous_receipt_hash": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+    "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

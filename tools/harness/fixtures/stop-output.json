@@ -1,0 +1,103 @@
+{
+  "schema": "xunji.stop-output-fixtures.v1",
+  "valid_records": [
+    {
+      "name": "normal concrete Coda",
+      "record": {
+        "schema": "xunji.stop-output.v1",
+        "type": "NORMAL_CODA",
+        "coda_kind": "NEXT_ACTION",
+        "next_action": "F-001 检查登录边界"
+      }
+    },
+    {
+      "name": "target command-shape alternative is frozen for future receipt integration",
+      "record": {
+        "schema": "xunji.stop-output.v1",
+        "type": "TARGET_DENIED",
+        "error": "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED",
+        "recovery": "SAME_TURN_ALTERNATIVE",
+        "executed": false,
+        "next_action": "F-001 以替代 argv 形状重试同一目标动作"
+      }
+    }
+  ],
+  "invalid_records": [
+    {
+      "name": "union variants cannot be mixed",
+      "record": {
+        "schema": "xunji.stop-output.v1",
+        "type": "TARGET_DENIED",
+        "blocker_class": "MAINTENANCE",
+        "error": "XUNJI_E_TARGET_ACTION_DENIED",
+        "recovery": "SAME_TURN_RETRY",
+        "executed": false,
+        "next_action": "F-001 完成前置条件后重试同一目标动作"
+      }
+    },
+    {
+      "name": "unknown recovery fails closed",
+      "record": {
+        "schema": "xunji.stop-output.v1",
+        "type": "TARGET_DENIED",
+        "error": "XUNJI_E_TARGET_ACTION_DENIED",
+        "recovery": "TRY_SOMETHING",
+        "executed": false,
+        "next_action": "F-001 完成前置条件后重试同一目标动作"
+      }
+    }
+  ],
+  "fixed_envelope_lines": {
+    "TARGET_DENIED": [
+      "XUNJI_EXECUTION_STATUS=DENIED",
+      "XUNJI_STOP_TYPE=TARGET_DENIED",
+      "XUNJI_ERROR=",
+      "XUNJI_RECOVERY=",
+      "未执行目标动作；不存在该动作的实测结果。",
+      "下一行动: "
+    ]
+  },
+  "coda_cases": [
+    {
+      "name": "missing Coda",
+      "message": "本轮先到这里。",
+      "expected_error": "CODA_MISSING"
+    },
+    {
+      "name": "trailing Markdown fence",
+      "message": "```text\n下一行动: F-001 检查登录边界\n```",
+      "expected_error": "CODA_TRAILING_FENCE"
+    },
+    {
+      "name": "multiple executable actions",
+      "message": "下一行动: 运行 check_run、回放验证和独立复审",
+      "expected_error": "CODA_MULTIPLE_ACTIONS"
+    }
+  ],
+  "structured_projection_cases": [
+    {
+      "name": "exact receipt projection",
+      "receipt_next_action": "分析登录响应差异",
+      "message": "下一行动: 分析登录响应差异",
+      "expected_error": ""
+    },
+    {
+      "name": "receipt projection mismatch",
+      "receipt_next_action": "分析登录响应差异",
+      "message": "下一行动: F-001 检查登录错误页",
+      "expected_error": "CODA_STRUCTURED_PROJECTION_MISMATCH"
+    },
+    {
+      "name": "receipt projection missing",
+      "receipt_next_action": "分析登录响应差异",
+      "message": "本轮完成。",
+      "expected_error": "CODA_STRUCTURED_PROJECTION_MISSING"
+    },
+    {
+      "name": "invisible text is not an exact projection",
+      "receipt_next_action": "分析登录响应差异",
+      "message": "下一行动: 分析登录响应差异\u200b",
+      "expected_error": "CODA_STRUCTURED_PROJECTION_MISMATCH"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "input_frontier": "# Frontier\n\n## Open Fronts\n\n### F-001 Login\n- Status: open, blocked_type_a (auth-layer: credentials unknown)\n- Barrier class: auth-layer\n- Vectors tried: enum\n- Untried classes: default-creds\n\n### F-002 API\n- Status: working (blocked-type-a: route gate)\n- Barrier class: routing-layer\n- Vectors tried: IDOR\n- Untried classes: SSRF\n",
+  "loop_state_sequence": [
+    {
+      "no_progress_cycles": 0,
+      "coda_converged": false
+    },
+    {
+      "no_progress_cycles": 1,
+      "coda_converged": false
+    },
+    {
+      "no_progress_cycles": 2,
+      "coda_converged": true
+    }
+  ],
+  "final_loop_state": {
+    "open": [
+      "F-001",
+      "F-002"
+    ],
+    "open_count": 2,
+    "blocked_type_a": [
+      "F-001",
+      "F-002"
+    ],
+    "coda_converged": true,
+    "completion_pause_candidate": false,
+    "closure_blockers": [
+      "open_fronts_present",
+      "saturation_attention_required"
+    ],
+    "next_actions": [
+      "Expand or justify low-saturation fronts before any explored-enough claim.",
+      "Coda convergence: record a trajectory review, pivot/continue rationale, or review/surface Agent assignment; this is not a closure signal by itself.",
+      "Choose the next front from actionable/open fronts and record a Root graph pass."
+    ]
+  },
+  "progress_ledger": {
+    "material_progress": false,
+    "artifact_backed_progress": false,
+    "new_evidence": [],
+    "certainty_upgrades": [],
+    "coverage_new_tested_cells": [],
+    "no_progress_cycles": 2,
+    "coda_converged": true,
+    "warnings": []
+  },
+  "controller": {
+    "state": "NEEDS_PIVOT",
+    "advisory_only": true,
+    "can_stop": false,
+    "can_stop_reason": "shadow controller never grants stop; only hard closure gates plus Root adjudication can do that",
+    "stop_blockers": [
+      "open_fronts_present",
+      "saturation_attention_required"
+    ],
+    "next_required_action": "record_trajectory_review_then_pivot_continue_or_assign_review_surface_agent",
+    "signals": {
+      "open_fronts": [
+        "F-001",
+        "F-002"
+      ],
+      "blocked_type_a": [
+        "F-001",
+        "F-002"
+      ],
+      "coda_converged": true,
+      "material_progress": false,
+      "artifact_backed_progress": false,
+      "fanout_required": false,
+      "closure_review_candidate": false
+    }
+  }
+}

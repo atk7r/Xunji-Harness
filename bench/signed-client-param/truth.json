@@ -1,0 +1,26 @@
+{
+  "name": "signed-client-param",
+  "run": "sample_run",
+  "expected_findings": [
+    {
+      "id": "signature-bound-refutation",
+      "markers": ["client-side signature", "nonce", "tampered owner id rejected"],
+      "min_certainty": 0.8
+    }
+  ],
+  "expected_process": [
+    {
+      "id": "surface-recorded-signature-logic",
+      "signals": ["Client-side signature/token/nonce logic", "Source JS/artifact: evidence/order.js"],
+      "in": ["surface.md"],
+      "must": true
+    },
+    {
+      "id": "hypothesis-has-refutation-control",
+      "signals": ["Refutation/control: tampered owner id rejected", "Linked IS/C/E: IS-001"],
+      "in": ["hypotheses.md"],
+      "must": true
+    }
+  ],
+  "budget": {"max_requests": 3}
+}

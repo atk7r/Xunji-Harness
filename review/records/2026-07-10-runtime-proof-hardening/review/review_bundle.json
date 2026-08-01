@@ -1,0 +1,1085 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-10-runtime-proof-hardening",
+  "files": {
+    "report.md": {
+      "sha1": "fae4234d1b5e3871a4763662e74e22476fff8f6b",
+      "size": 591
+    },
+    "evidence.md": {
+      "sha1": "29f1cf7c162b522accdfe860a551776327f2066a",
+      "size": 3871
+    },
+    "frontier.md": {
+      "sha1": "e6407c85bee7e471a5ceb3bfddc438dcd8341e40",
+      "size": 501
+    },
+    "review.md": {
+      "sha1": "8afa07d434d618a71eb46d2ccc78105fd6f88428",
+      "size": 171
+    },
+    "target.md": {
+      "sha1": "909d6583ccd5b15d62013981fc3199d0a817a113",
+      "size": 268
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 - Turn mode and pause transaction",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "E-005"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "installed-settings.json",
+            "path": "installed-settings.json",
+            "exists": true,
+            "size": 4270,
+            "sha1": "3b0e2cb0accd1601c284e3ca000aed700a5795ef",
+            "excerpt": "{\n  \"statusLine\": {\n    \"type\": \"command\",\n    \"command\": \"XUNJI_COLOR=1 python3 \\\"$CLAUDE_PROJECT_DIR/tools/xunji_statusline.py\\\"\",\n    \"refreshInterval\": 2,\n    \"padding\": 0\n  },\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\\\" --selftest\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\\\" --selftest\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\\\" --selftest\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\" --selftest\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\"\n          }\n        ]\n      }\n    ],\n    \"PreToolUse\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n          }\n        ]\n      },\n      {\n        \"matcher\": \"Bash\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\\\"\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\"\n          }\n        ]\n      },\n      {\n        \"matcher\": \"WebSearch\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\"\n          }\n        ]\n      },\n      {\n        \"matcher\": \"WebFetch\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\"\n          }\n        ]\n      }\n    ],\n    \"PostToolUse\": [\n      {\n        \"matcher\": \"Agent|CronCreate|CronDelete|CronList\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n          }\n        ]\n      },\n      {\n        \"matcher\": \"Bash\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\"\n          }\n        ]\n      }\n    ],\n    \"PostToolUseFailure\": [\n      {\n        \"matcher\": \"Agent|CronCreate|CronDelete|CronList|Bash\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n          }\n        ]\n      }\n    ],\n    \"SubagentStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n          }\n        ]\n      }\n    ],\n    \"SubagentStop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/anti_drift.py\\\"\"\n          }\n        ]\n      }\n    ],\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\\\"\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\\\"\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+          },
+          {
+            "token": "output_gate.diff",
+            "path": "output_gate.diff",
+            "exists": true,
+            "size": 3074,
+            "sha1": "7857277b9181cd97f6307b223ab81cf219c37abe",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                ".claude/hooks/output_gate.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 9,
+              "hunks": [
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -103,0 +104,4 @@ except Exception:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -354,0 +359,2 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -359,0 +366,10 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -361 +377 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -382 +398 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -386,2 +401,0 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -412 +426 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -457,2 +471,12 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/output_gate.py",
+                  "header": "@@ -700,0 +725,14 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/.claude/hooks/output_gate.py b/.claude/hooks/output_gate.py\nindex 9df33a1..69cdebc 100644\n--- a/.claude/hooks/output_gate.py\n+++ b/.claude/hooks/output_gate.py\n@@ -103,0 +104,4 @@ except Exception:\n+try:\n+    import turn_contract as _turn_contract\n+except Exception:\n+    _turn_contract = None\n@@ -354,0 +359,2 @@ def main() -> None:\n+    run_dir = None\n+    turn_mode = \"EXECUTE\"\n@@ -359,0 +366,10 @@ def main() -> None:\n+        run_dir = find_active_run(RUNS)\n+        if run_dir is not None and _turn_contract is not None:\n+            try:\n+                contract = _turn_contract.load_contract(\n+                    run_dir, session_id=str(event.get(\"session_id\") or \"\"))\n+                turn_mode = str(contract.get(\"mode\") or \"EXECUTE\")\n+            except Exception:\n+                turn_mode = \"EXECUTE\"\n+        protocol_exempt = turn_mode in {\"EXPLAIN_ONLY\", \"PAUSED_BY_OPERATOR\"}\n+\n@@ -361 +377 @@ def main() -> None:\n-        hits = detect_drift(msg)\n+        hits = [] if protocol_exempt else detect_drift(msg)\n@@ -382 +398 @@ def main() -> None:\n-        if detect_option_list(msg):\n+        if not protocol_exempt and detect_option_list(msg):\n@@ -386,2 +401,0 @@ def main() -> None:\n-        run_dir = find_active_run(RUNS)\n-\n@@ -412 +426 @@ def main() -> None:\n-            protocol_block = _protocol_block_reason(msg, run_dir)\n+            protocol_block = \"\" if protocol_exempt else _protocol_block_reason(msg, run_dir)\n@@ -457,2 +471,12 @@ def main() -> None:\n-    except Exception:\n-        # FAIL-OPEN 兜底: 本 gate 自身任何故障不卡会话\n+    except Exception as exc:\n+        if run_dir is None:\n+            try:\n+                run_dir = find_active_run(RUNS)\n+            except Exception:\n+                run_dir = None\n+        if run_dir is not None and turn_mode not in {\"EXPLAIN_ONLY\", \"PAUSED_BY_OPERATOR\"}:\n+            print(json.dumps({\n+                \"decision\": \"block\",\n+                \"reason\": \"[输出协议 fail-closed] active run 的 output_gate 内部异常：\"\n+                          + type(exc).__name__ + \"。先修 hook/selftest，不得无 Coda 静默结束。\",\n+            }, ensure_ascii=False))\n@@ -700,0 +725,14 @@ def _selftest() -> int:\n+    (live_run / \"state\").mkdir(exist_ok=True)\n+    (live_run / \"state\" / \"turn_contract.json\").write_text(json.dumps({\n+        \"schema\": \"xunji.turn_contract.v1\", \"mode\": \"EXPLAIN_ONLY\",\n+        \"session_id\": \"s-explain\", \"updated_at\": time.time(),\n+    }), encoding=\"utf-8\")\n+    explain_proc = subprocess.run(\n+        [sys.executable, str(Path(__file__).resolve())],\n+        input=json.dumps({\"session_id\": \"s-explain\", \"last_assistant_message\":\n+                          \"原因是 Agent Board 过去只在 Stop 阶段检查。\"}, ensure_ascii=False),\n+        text=True, capture_output=True, encoding=\"utf-8\", errors=\"replace\",\n+        env=env, timeout=10,\n+    )\n+    checks.append((\"EXPLAIN_ONLY response is not forced to add Coda\",\n+                   explain_proc.returncode == 0 and not (explain_proc.stdout or \"\").strip()))\n"
+          },
+          {
+            "token": "run_gate.hunks-01.diff",
+            "path": "run_gate.hunks-01.diff",
+            "exists": true,
+            "size": 9374,
+            "sha1": "c5318afb5ec8405d689d2e84580f757e9e53b025",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                ".claude/hooks/run_gate.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 21,
+              "hunks": [
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -20,2 +20,2 @@ Phase 架构:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -36,0 +37 @@ import time"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -54,0 +56,8 @@ except Exception:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -468,9 +477,2 @@ def _check_replay_quality(run_dir: Path) -> tuple[str | None, str]:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -479,2 +481,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -484,2 +486,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -490,6 +492,7 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -521,11 +524,22 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -537,2 +551,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -716 +730 @@ def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -719 +733 @@ def _has_completed_independent_review(review_text: str) -> bool:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -727 +741 @@ def _has_completed_independent_review(review_text: str) -> bool:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -730 +744 @@ def _has_codex_completion_review(decisions_text: str) -> bool:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -736 +750,2 @@ def _has_codex_completion_review(decisions_text: str) -> bool:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -738 +753 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -744 +759 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -763,0 +779 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -766,0 +783,27 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -810 +853 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -832 +875 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -839,2 +882,7 @@ def main() -> None:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/.claude/hooks/run_gate.py b/.claude/hooks/run_gate.py\nindex f8994cd..9675a60 100644\n--- a/.claude/hooks/run_gate.py\n+++ b/.claude/hooks/run_gate.py\n@@ -20,2 +20,2 @@ Phase 架构:\n-  - run_gate 是【流程提醒】, 不防危害、只防遗漏, 必须 FAIL-OPEN: 自身任何异常(读不到事件 /\n-    找不到 run / check_run 报错 / 超时)都【静默放行 exit 0】, 绝不因为一个提醒器而卡死会话。\n+  - run_gate 的通知路径可降级；active run 的 Agent/Cron/收口客观硬门 FAIL-CLOSED。\n+    只有事件无法解析或确实没有 active run 时静默放行。\n@@ -36,0 +37 @@ import time\n+from datetime import datetime, timezone\n@@ -54,0 +56,8 @@ except Exception:\n+try:\n+    import turn_contract as _turn_contract\n+except Exception:\n+    _turn_contract = None\n+try:\n+    import runtime_receipts as _runtime_receipts\n+except Exception:\n+    _runtime_receipts = None\n@@ -468,9 +477,2 @@ def _check_replay_quality(run_dir: Path) -> tuple[str | None, str]:\n-def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:\n-    \"\"\"Phase 5: Agent Board 强制门 — open fronts >= 4 且 barrier 多样时必须使用 Agent Board。\n-\n-    如果 frontier.md 中 open fronts >= 4 且 barrier classes 不共享(无 SharedBarrier group),\n-    则检查 state/assignments.json 或 agents/ 目录是否存在且有内容。\n-    未检测到 agent 使用 → block; 存在 shared barrier 或 open < 4 → 静默放行。\n-\n-    FAIL-OPEN: 解析失败静默放行。\n-    \"\"\"\n+def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str | None, str]:\n+    \"\"\"Require planned lanes plus two transcript-backed Agents in this execute turn.\"\"\"\n@@ -479,2 +481,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:\n-    except Exception:\n-        return None, \"\"\n+    except Exception as exc:\n+        return \"block\", f\"Agent Board 状态解析器不可用，按 fail-closed 阻断: {type(exc).__name__}\"\n@@ -484,2 +486,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:\n-    except Exception:\n-        return None, \"\"\n+    except Exception as exc:\n+        return \"block\", f\"Agent Board 状态解析失败，按 fail-closed 阻断: {type(exc).__name__}\"\n@@ -490,6 +492,7 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:\n-    decisions = run_dir / \"decisions.md\"\n-    try:\n-        dtext = decisions.read_text(encoding=\"utf-8\", errors=\"replace\") if decisions.exists() else \"\"\n-    except Exception:\n-        dtext = \"\"\n-    if re.search(r\"(?im)^\\s*-\\s*Agent Board (?:budget reason|fanout override)\\s*[:：]\\s*\\S\", dtext):\n+    if contract is None and _turn_contract is not None:\n+        try:\n+            contract = _turn_contract.load_contract(run_dir)\n+        except Exception:\n+            contract = {}\n+    contract = contract or {}\n+    if contract.get(\"fanout_override\"):\n@@ -521,11 +524,22 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:\n-    started = []\n-    for a in assignments:\n-        status = str(a.get(\"status\") or \"\").strip().lower()\n-        try:\n-            hb = int(a.get(\"heartbeat_count\") or 0)\n-        except Exception:\n-            hb = 0\n-        if hb > 0 or status in {\"running\", \"working\", \"done\", \"merged\", \"blocked\", \"failed\", \"abandoned\"}:\n-            started.append(str(a.get(\"agent\") or \"?\"))\n-    if len(started) < min(2, len(assignments)):\n-        problems.append(\"assignment 刚创建但未记录 heartbeat/start; spawn 后需 workers.py heartbeat --status running\")\n+    receipt_state = _runtime_receipts.agent_fanout(\n+        run_dir,\n+        session_id=str(contract.get(\"session_id\") or \"\"),\n+        since=float(contract.get(\"updated_at\") or 0.0),\n+    ) if _runtime_receipts is not None else {\n+        \"satisfied\": False, \"assignments\": [], \"fronts\": [],\n+    }\n+    if not receipt_state.get(\"satisfied\"):\n+        problems.append(\n+            \"当前执行回合缺少两个真实 Agent PostToolUse 回执（必须带 transcript 中存在的 tool_use_id，\"\n+            \"并覆盖不同 assignment/front）；手写 heartbeat/status 不算\")\n+    elif _runtime_receipts is not None:\n+        disposition = _runtime_receipts.agent_disposition(\n+            run_dir,\n+            session_id=str(contract.get(\"session_id\") or \"\"),\n+            since=float(contract.get(\"updated_at\") or 0.0),\n+        )\n+        if not disposition.get(\"disposition_satisfied\"):\n+            problems.append(\n+                \"本轮 Agent 结果尚未逐条 merge/adjudicate: \"\n+                + \"; \".join(disposition.get(\"pending\", [])[:5])\n+                + \"；done/展示摘要不算落实，必须用 workers.py finish 写 canonical E/F/D/Reason 锚点\")\n@@ -537,2 +551,2 @@ def _check_agent_board(run_dir: Path) -> tuple[str | None, str]:\n-            + \"。请用 workers.py assign 分配 >=2 条不重叠 front lane，并在 Agent 启动时记录 heartbeat；\"\n-              \"若确因预算/外部依赖不能 fanout，在 decisions.md 写 `Agent Board budget reason:`。\"\n+            + \"。请用 workers.py assign 分配 >=2 条不重叠 front lane，并真实调用 Agent；\"\n+              \"只有操作者当前 prompt 明确 `允许串行` 才可形成一次性 override。\"\n@@ -716 +730 @@ def build_open_fronts_message(run_dir: Path, open_fronts: int, check_out: str) -\n-def _has_completed_independent_review(review_text: str) -> bool:\n+def _has_completed_independent_review(review_text: str, run_dir: Path | None = None) -> bool:\n@@ -719 +733 @@ def _has_completed_independent_review(review_text: str) -> bool:\n-            return bool(_cr.has_completed_independent_review(review_text))\n+            return bool(_cr.has_completed_independent_review(review_text, run_dir))\n@@ -727 +741 @@ def _has_completed_independent_review(review_text: str) -> bool:\n-def _has_codex_completion_review(decisions_text: str) -> bool:\n+def _has_codex_completion_review(decisions_text: str, run_dir: Path | None = None) -> bool:\n@@ -730 +744 @@ def _has_codex_completion_review(decisions_text: str) -> bool:\n-            return bool(_cr.has_codex_completion_review(decisions_text))\n+            return bool(_cr.has_codex_completion_review(decisions_text, run_dir))\n@@ -736 +750,2 @@ def _has_codex_completion_review(decisions_text: str) -> bool:\n-def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:\n+def _normal_closure_prerequisite(review_text: str, decisions_text: str,\n+                                 run_dir: Path | None = None) -> str:\n@@ -738 +753 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:\n-    if not _has_completed_independent_review(review_text):\n+    if not _has_completed_independent_review(review_text, run_dir):\n@@ -744 +759 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str) -> str:\n-    if not _has_codex_completion_review(decisions_text):\n+    if not _has_codex_completion_review(decisions_text, run_dir):\n@@ -763,0 +779 @@ def main() -> None:\n+    active_run = None\n@@ -766,0 +783,27 @@ def main() -> None:\n+        turn_mode = \"EXECUTE\"\n+        contract: dict = {}\n+        if active_run is not None and _turn_contract is not None:\n+            try:\n+                contract = _turn_contract.load_contract(\n+                    active_run, session_id=str(event.get(\"session_id\") or \"\"))\n+                turn_mode = str(contract.get(\"mode\") or \"EXECUTE\")\n+            except Exception:\n+                turn_mode = \"EXECUTE\"\n+        if turn_mode == \"E",
+            "excerpt_truncated_chars": 1714
+          },
+          {
+            "token": "run_gate.hunks-02.diff",
+            "path": "run_gate.hunks-02.diff",
+            "exists": true,
+            "size": 8985,
+            "sha1": "487bb6f4fd37928b67bbd435ad6839671985b50c",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                ".claude/hooks/run_gate.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 12,
+              "hunks": [
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -857,2 +905,7 @@ def main() -> None:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -879,0 +933,33 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -884 +970 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -887,3 +973 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -1349 +1433 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -1359 +1443 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -1420 +1504 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -1433,0 +1518,17 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -1435 +1536,48 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -1437 +1585 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -1441,0 +1590,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": ".claude/hooks/run_gate.py",
+                  "header": "@@ -1443 +1598 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/.claude/hooks/run_gate.py b/.claude/hooks/run_gate.py\nindex f8994cd..9675a60 100644\n--- a/.claude/hooks/run_gate.py\n+++ b/.claude/hooks/run_gate.py\n@@ -857,2 +905,7 @@ def main() -> None:\n-    except Exception:\n-        # FAIL-OPEN 兜底: 提醒器自身的任何故障都不得卡死会话。\n+    except Exception as exc:\n+        if active_run is not None:\n+            print(json.dumps({\n+                \"decision\": \"block\",\n+                \"reason\": \"[运行流程 fail-closed] active run 的 run_gate 内部异常：\"\n+                          + type(exc).__name__ + \"。先修 hook/selftest，再继续执行。\",\n+            }, ensure_ascii=False))\n@@ -879,0 +933,33 @@ def _selftest() -> int:\n+    normal_run = Path(tempfile.mkdtemp())\n+    (normal_run / \"evidence.md\").write_text(\"# Evidence Ledger\\n\", encoding=\"utf-8\")\n+    valid_normal_review = \"\"\n+    if _cr is not None and _runtime_receipts is not None:\n+        import peer_review as _peer_review_test\n+        bundle = _peer_review_test.build_review_bundle(normal_run, write=True)\n+        result = _peer_review_test.ReviewResult(\n+            verdict=\"PASS\", backend_used=\"codex\", driver=\"claude\", brain=\"codex\",\n+            bundle_hash=bundle[\"sha1\"], evidence_index_hash=bundle[\"evidence_index\"][\"sha1\"],\n+        )\n+        _peer_review_test._append_run_review(normal_run, result)\n+        normal_transcript = normal_run / \"transcript.jsonl\"\n+        normal_transcript.write_text(\"tool-normal-review\\ntool-normal-completion\\n\", encoding=\"utf-8\")\n+        _runtime_receipts.append_hook_event(normal_run, {\n+            \"hook_event_name\": \"PostToolUse\", \"session_id\": \"s-normal\",\n+            \"transcript_path\": str(normal_transcript), \"tool_name\": \"Bash\",\n+            \"tool_use_id\": \"tool-normal-review\",\n+            \"tool_input\": {\"command\": f\"python tools/peer_review.py {normal_run} --into-run\"},\n+            \"tool_response\": {\"stdout\": \"review completed\"},\n+        })\n+        evidence_hash = _cr.current_evidence_index_hash(normal_run)\n+        _runtime_receipts.append_hook_event(normal_run, {\n+            \"hook_event_name\": \"PostToolUse\", \"session_id\": \"s-normal\",\n+            \"transcript_path\": str(normal_transcript), \"tool_name\": \"Agent\",\n+            \"tool_use_id\": \"tool-normal-completion\",\n+            \"tool_input\": {\"prompt\":\n+                f\"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={evidence_hash} run={normal_run.name}\"},\n+            \"tool_response\": {\"result\": \"PASS: evidence and closure cross-check complete\"},\n+        })\n+        valid_normal_review = (normal_run / \"review.md\").read_text(encoding=\"utf-8\")\n+    normal_decisions = (\n+        \"## CodexCompletionReview\\n- Reviewer: codex-fresh\\n- Verdict: PASS\\n\"\n+        \"- Summary: report coverage, severity support, and reachable assets were independently checked.\\n\")\n@@ -884 +970 @@ def _selftest() -> int:\n-                       \"## Independent Review\\n- Reviewer: test\\n- Verdict: PASS\\n\", \"# Decisions\\n\")))\n+                       valid_normal_review, \"# Decisions\\n\", normal_run)))\n@@ -887,3 +973 @@ def _selftest() -> int:\n-                       \"## Independent Review\\n- Reviewer: test\\n- Verdict: PASS\\n\",\n-                       \"## CodexCompletionReview\\n- Reviewer: codex-fresh\\n- Verdict: PASS\\n\"\n-                       \"- Summary: report coverage, severity support, and reachable assets were independently checked.\\n\") == \"\"))\n+                       valid_normal_review, normal_decisions, normal_run) == \"\"))\n@@ -1349 +1433 @@ def _selftest() -> int:\n-    # Case 2: < 4 open fronts (probing not counted) -> pass\n+    # Case 2: < 4 active fronts (probing counts) -> pass\n@@ -1359 +1443 @@ def _selftest() -> int:\n-    checks.append((\"agent board gate: <4 open fronts (probing excluded) -> pass\", mode2 is None))\n+    checks.append((\"agent board gate: <4 active fronts -> pass\", mode2 is None))\n@@ -1420 +1504 @@ def _selftest() -> int:\n-    # Case 7: >= 4 open fronts diverse, two started disjoint lanes -> pass\n+    # Case 7: editable heartbeat fields alone do not pass; real Agent receipts do.\n@@ -1433,0 +1518,17 @@ def _selftest() -> int:\n+    mode7_manual, _ = _check_agent_board(ab_run7)\n+    checks.append((\"agent board gate: hand-written heartbeat does not prove Agent use\",\n+                   mode7_manual == \"block\"))\n+    if _runtime_receipts is not None:\n+        transcript = ab_test / \"agent-transcript.jsonl\"\n+        transcript.write_text(\"tool-real-1\\ntool-real-2\\n\", encoding=\"utf-8\")\n+        for tool_id, aid, fid in (\n+            (\"tool-real-1\", \"A-web-hunter-001\", \"F-001\"),\n+            (\"tool-real-2\", \"A-web-hunter-002\", \"F-002\"),\n+        ):\n+            _runtime_receipts.append_hook_event(ab_run7, {\n+                \"hook_event_name\": \"PostToolUse\", \"session_id\": \"s-agent\",\n+                \"transcript_path\": str(transcript), \"tool_name\": \"Agent\",\n+                \"tool_use_id\": tool_id,\n+                \"tool_input\": {\"prompt\": f\"XUNJI_ASSIGNMENT={aid} XUNJI_FRONT={fid}\"},\n+                \"tool_response\": {\"result\": \"candidate completed\"},\n+            })\n@@ -1435 +1536,48 @@ def _selftest() -> int:\n-    checks.append((\"agent board gate: two started disjoint lanes -> pass\", mode7 is None))\n+    checks.append((\"agent board gate: Agent receipts without merge disposition still block\",\n+                   _runtime_receipts is None or mode7 == \"block\"))\n+    assignment_data = json.loads((ab_run7 / \"state\" / \"assignments.json\").read_text(encoding=\"utf-8\"))\n+    for item in assignment_data[\"assignments\"]:\n+        item.update({\n+            \"status\": \"merged\",\n+            \"updated_at\": datetime.now(timezone.utc).isoformat(),\n+            \"last_note\": f\"Front: {item['front']} candidate adjudicated\",\n+        })\n+    (ab_run7 / \"state\" / \"assignments.json\").write_text(\n+        json.dumps(assignment_data), encoding=\"utf-8\")\n+    mode7_merged, _ = _check_agent_board(ab_run7)\n+    checks.append((\"agent board gate: real receipts plus anchored disposition -> pass\",\n+                   _runtime_receipts is None or mode7_merged is None))\n+    current_contract = {\n+        \"mode\": \"EXECUTE\", \"session_id\": \"s-current\", \"updated_at\": time.time() - 1,\n+    }\n+    mode7_old_turn, _ = _check_agent_board(ab_run7, current_contract)\n+    checks.append((\"agent board gate: previous-turn receipts do not bypass current turn\",\n+                   _runtime_receipts is None or mode7_old_turn == \"block\"))\n+    if _runtime_receipts is not None:\n+        with transcript.open(\"a\", encoding=\"utf-8\") as handle:\n+            handle.write(\"tool-current-1\\ntool-current-2\\n\")\n+        for tool_id, aid, fid in (\n+            (\"tool-current-1\", \"A-web-hunter-001\", \"F-001\"),\n+            (\"tool-current-2\", \"A-web-hunter-002\", \"F-002\"),\n+        ):\n+            _runtime_receipts.append_hook_event(ab_run7, {\n+                \"hook_event_name\": \"PostToolUse\", \"session_id\": \"s-current\",\n+                \"transcript_path\": str(transcript), \"tool_name\": \"Agent\",\n+ ",
+            "excerpt_truncated_chars": 2001
+          },
+          {
+            "token": "run_model.diff",
+            "path": "run_model.diff",
+            "exists": true,
+            "size": 9980,
+            "sha1": "f0229af8fce139f7877f096a1fb7c0b1e2843f39",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/run_model.py\t2026-07-10 20:54:06"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 1,
+              "hunks": [
+                {
+                  "file": "tools/run_model.py\t2026-07-10 20:54:06",
+                  "header": "@@ -0,0 +1,247 @@"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "--- /dev/null\t2026-07-10 21:11:01\n+++ tools/run_model.py\t2026-07-10 20:54:06\n@@ -0,0 +1,247 @@\n+#!/usr/bin/env python3\n+\"\"\"Canonical parser for Xunji run control-plane state.\n+\n+Markdown remains the operator-readable source of truth, but every consumer must\n+interpret it through this module.  Keeping status/barrier parsing here prevents\n+the loop controller, Agent gate, workers, and statusline from disagreeing about\n+the same front.\n+\"\"\"\n+from __future__ import annotations\n+\n+import argparse\n+import re\n+import tempfile\n+from dataclasses import asdict, dataclass\n+from pathlib import Path\n+\n+\n+OPEN_STATUSES = {\"open\", \"probing\", \"working\", \"blocked_type_a\"}\n+TERMINAL_STATUSES = {\n+    \"closed\", \"closing\", \"final\", \"done\", \"complete\", \"completed\",\n+    \"blocked_type_b\", \"deferred\",\n+}\n+TRIVIAL_BARRIERS = {\"\", \"none\", \"unknown\", \"n/a\", \"-\"}\n+HWS = r\"[^\\S\\n]\"\n+\n+\n+@dataclass(frozen=True)\n+class Front:\n+    id: str\n+    title: str\n+    section: str\n+    status: str\n+    status_raw: str\n+    barrier: str\n+    depth: str\n+    text: str\n+    schema_errors: tuple[str, ...]\n+\n+    @property\n+    def is_open(self) -> bool:\n+        return self.status in OPEN_STATUSES\n+\n+    @property\n+    def is_deferred(self) -> bool:\n+        return self.status == \"deferred\"\n+\n+    @property\n+    def is_closed(self) -> bool:\n+        return self.status in TERMINAL_STATUSES - {\"deferred\"}\n+\n+\n+def _field(block: str, name: str) -> str:\n+    match = re.search(\n+        rf\"(?im)^{HWS}*[-*]?{HWS}*{re.escape(name)}{HWS}*[:：]{HWS}*([^\\n]*)$\",\n+        block,\n+    )\n+    return match.group(1).strip() if match else \"\"\n+\n+\n+def normalize_status(raw: object) -> str:\n+    \"\"\"Return one canonical status from a field value or section label.\"\"\"\n+    value = str(raw or \"\").strip().lower().replace(\"-\", \"_\")\n+    tokens = set(re.findall(r\"[a-z0-9_]+\", value))\n+    if \"closed_type_b\" in tokens:\n+        tokens.add(\"closed\")\n+    terminal = tokens & TERMINAL_STATUSES\n+    if \"deferred\" in terminal and terminal - {\"deferred\"}:\n+        return \"unknown\"\n+    if \"blocked_type_b\" in tokens:\n+        return \"blocked_type_b\"\n+    for preferred in (\"closing\", \"final\", \"completed\", \"complete\", \"done\", \"closed\"):\n+        if preferred in tokens:\n+            return preferred\n+    if \"deferred\" in tokens:\n+        return \"deferred\"\n+    if \"blocked_type_a\" in tokens:\n+        return \"blocked_type_a\"\n+    for preferred in (\"probing\", \"working\", \"open\"):\n+        if preferred in tokens:\n+            return preferred\n+    primary = re.split(r\"[|,;；(（]\", value, maxsplit=1)[0].strip()\n+    return primary or \"unknown\"\n+\n+\n+def _inline_component(raw: str, name: str) -> str:\n+    match = re.search(rf\"(?i)(?:^|\\|)\\s*{re.escape(name)}\\s*[:：]\\s*([^|]+)\", raw)\n+    return match.group(1).strip() if match else \"\"\n+\n+\n+def _sections(text: str) -> list[tuple[str, str]]:\n+    out: list[tuple[str, str]] = []\n+    matches = list(re.finditer(r\"(?m)^##[ \\t]+([^#\\n]+?)[ \\t]*$\", text))\n+    if not matches:\n+        return [(\"Unknown\", text)]\n+    prefix = text[:matches[0].start()]\n+    if re.search(r\"(?m)^###[ \\t]+F-\\d+\\b\", prefix):\n+        out.append((\"Unknown\", prefix))\n+    for idx, match in enumerate(matches):\n+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)\n+        out.append((match.group(1).strip(), text[match.end():end]))\n+    return out\n+\n+\n+def parse_fronts(run_dir: str | Path) -> list[Front]:\n+    run = Path(run_dir)\n+    path = run / \"frontier.md\"\n+    if not path.exists():\n+        return []\n+    text = path.read_text(encoding=\"utf-8\", errors=\"replace\")\n+    text = re.sub(r\"(?ms)^(```|~~~)[^\\n]*\\n.*?^\\1[ \\t]*\\n?\", \"\", text)\n+    fronts: list[Front] = []\n+    for section, body in _sections(text):\n+        blocks = list(re.finditer(r\"(?ms)^###[ \\t]+(F-\\d+)\\b([^\\n]*)(.*?)(?=^###[ \\t]+F-\\d+\\b|\\Z)\", body))\n+        for match in blocks:\n+            fid = match.group(1)\n+            title = (fid + match.group(2)).strip(\" -—\\t\")\n+            block = match.group(0)\n+            raw_status = _field(block, \"Status\")\n+            section_status = (\n+                \"open\" if section.lower().startswith(\"open\")\n+                else \"deferred\" if section.lower().startswith(\"deferred\")\n+                else \"closed\" if section.lower().startswith(\"closed\")\n+                else \"unknown\"\n+            )\n+            status = normalize_status(raw_status or section_status)\n+            barrier = _field(block, \"Barrier class\")\n+            depth = _field(block, \"Current depth\")\n+            errors: list[str] = []\n+            if not raw_status:\n+                errors.append(\"missing canonical `Status:` field\")\n+            if raw_status and section_status != \"unknown\":\n+                section_open = section_status == \"open\"\n+                if section_open != (status in OPEN_STATUSES):\n+                    errors.append(\n+                        f\"Status `{status}` conflicts with `{section}` section\")\n+            if not barrier:\n+                barrier = _inline_component(raw_status, \"Barrier\") or \"unknown\"\n+                errors.append(\"missing canonical `Barrier class:` field\")\n+            if not depth:\n+                depth = _inline_component(raw_status, \"Depth\") or \"unknown\"\n+                errors.append(\"missing canonical `Current depth:` field\")\n+            if \"|\" in raw_status:\n+                errors.append(\"compound `Status:` line must be split into canonical fields\")\n+            if status == \"unknown\":\n+                errors.append(\"unclassified Status\")\n+            fronts.append(Front(\n+                id=fid,\n+                title=title or fid,\n+                section=section,\n+                status=status,\n+                status_raw=raw_status,\n+                barrier=barrier.strip().lower().replace(\" \", \"_\"),\n+                depth=depth.strip().lower(),\n+                text=block,\n+                schema_errors=tuple(dict.fromkeys(errors)),\n+            ))\n+    return fronts\n+\n+\n+def summary(run_dir: str | Path) -> dict:\n+    fronts = parse_fronts(run_dir)\n+    opened = [front for front in fronts if front.is_open]\n+    barriers = sorted({front.barrier for front in opened if front.barrier not in TRIVIAL_BARRIERS})\n+    barrier_counts = {\n+        barrier: sum(1 for front in opened if front.barrier == barrier)\n+        for barrier in barriers\n+    }\n+    all_share_one_barrier = bool(opened) and any(\n+        count == len(opened) for count in barrier_counts.values()\n+    )\n+    fanout_required = len(opened) >= 4 and not all_share_one_barrier\n+    schema_errors = [\n+        f\"{front.id}: {error}\"\n+        for front in fronts\n+        for error in front.schema_errors\n+    ]\n+    ids = [front.id for front in fronts]\n+    for duplicate in sorted({fid for fid in ids if ids.count(fid) > 1}):\n+        schema_errors.append(f\"{duplicate}: duplicate front id\")\n+    return {\n+        \"fronts\": [asdict(fron",
+            "excerpt_truncated_chars": 3062
+          },
+          {
+            "token": "settings.diff",
+            "path": "settings.diff",
+            "exists": true,
+            "size": 1685,
+            "sha1": "6528963c1c674eedcf7ef9047beed85f6d6db493",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                ".claude/settings.json"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 5,
+              "hunks": [
+                {
+                  "file": ".claude/settings.json",
+                  "header": "@@ -35,0 +36,8 @@"
+                },
+                {
+                  "file": ".claude/settings.json",
+                  "header": "@@ -72,0 +81,9 @@"
+                },
+                {
+                  "file": ".claude/settings.json",
+                  "header": "@@ -75,0 +93,4 @@"
+                },
+                {
+                  "file": ".claude/settings.json",
+                  "header": "@@ -82,0 +104,31 @@"
+                },
+                {
+                  "file": ".claude/settings.json",
+                  "header": "@@ -85,0 +138,4 @@"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/.claude/settings.json b/.claude/settings.json\nindex d459ea0..f1d582c 100644\n--- a/.claude/settings.json\n+++ b/.claude/settings.json\n@@ -35,0 +36,8 @@\n+      {\n+        \"hooks\": [\n+          {\n+            \"type\": \"command\",\n+            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n+          }\n+        ]\n+      },\n@@ -72,0 +81,9 @@\n+      {\n+        \"matcher\": \"Agent|CronCreate|CronDelete|CronList\",\n+        \"hooks\": [\n+          {\n+            \"type\": \"command\",\n+            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n+          }\n+        ]\n+      },\n@@ -75,0 +93,4 @@\n+          {\n+            \"type\": \"command\",\n+            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n+          },\n@@ -82,0 +104,31 @@\n+    \"PostToolUseFailure\": [\n+      {\n+        \"matcher\": \"Agent|CronCreate|CronDelete|CronList|Bash\",\n+        \"hooks\": [\n+          {\n+            \"type\": \"command\",\n+            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n+          }\n+        ]\n+      }\n+    ],\n+    \"SubagentStart\": [\n+      {\n+        \"hooks\": [\n+          {\n+            \"type\": \"command\",\n+            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n+          }\n+        ]\n+      }\n+    ],\n+    \"SubagentStop\": [\n+      {\n+        \"hooks\": [\n+          {\n+            \"type\": \"command\",\n+            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n+          }\n+        ]\n+      }\n+    ],\n@@ -85,0 +138,4 @@\n+          {\n+            \"type\": \"command\",\n+            \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\"\n+          },\n"
+          },
+          {
+            "token": "turn_contract.lines-001-170.txt",
+            "path": "turn_contract.lines-001-170.txt",
+            "exists": true,
+            "size": 7114,
+            "sha1": "66403e9bffcd9f553fa0209daea6064321b2b36c",
+            "excerpt": "     1\t#!/usr/bin/env python3\n     2\t\"\"\"Claude Code turn-mode and PreToolUse contract for active Xunji runs.\n     3\t\n     4\tThe user's current prompt decides whether this turn executes, explains, or pauses.\n     5\tStop hooks consume the same state, so an explanation is not forced to fabricate a\n     6\tCoda and a pause is not mistaken for closure.\n     7\t\"\"\"\n     8\tfrom __future__ import annotations\n     9\t\n    10\timport argparse\n    11\timport hashlib\n    12\timport json\n    13\timport os\n    14\timport re\n    15\timport sys\n    16\timport tempfile\n    17\timport time\n    18\tfrom pathlib import Path\n    19\t\n    20\t\n    21\tROOT = Path(__file__).resolve().parents[1]\n    22\tRUNS = Path(os.environ.get(\"XUNJI_RUNS_ROOT\", str(ROOT / \"runs\")))\n    23\tsys.path.insert(0, str(ROOT / \"tools\"))\n    24\t\n    25\timport run_model  # noqa: E402\n    26\timport runtime_receipts  # noqa: E402\n    27\tfrom anti_drift import find_active_run  # noqa: E402\n    28\t\n    29\t\n    30\tSCHEMA = \"xunji.turn_contract.v1\"\n    31\tEXECUTE = \"EXECUTE\"\n    32\tEXPLAIN = \"EXPLAIN_ONLY\"\n    33\tPAUSE = \"PAUSED_BY_OPERATOR\"\n    34\tNORMAL = \"NORMAL\"\n    35\tSTALE_SECONDS = 30 * 60\n    36\t\n    37\tEXPLAIN_RE = re.compile(\n    38\t    r\"告诉我(?:原因|为什么|想法)|为什么|不用修改|不要修改|无需修改|别修改|\"\n    39\t    r\"不用做|不要做|先别做|只(?:告诉|回答|分析|解释|说明)|无需执行|\"\n    40\t    r\"tell me why|explain only|do not (?:change|modify|act)|no changes\",\n    41\t    re.I,\n    42\t)\n    43\tPAUSE_RE = re.compile(\n    44\t    r\"停止\\s*(?:loop|循环|渗透|运行)|渗透结束|暂停\\s*(?:loop|循环|渗透|运行)|\"\n    45\t    r\"先停(?:止|下)|stop\\s+(?:the\\s+)?(?:loop|run|testing)|pause\\s+(?:the\\s+)?(?:loop|run)\",\n    46\t    re.I,\n    47\t)\n    48\tEXECUTE_RE = re.compile(\n    49\t    r\"(?:^|\\s)/loop\\b|继续(?:执行|推进|修复|运行|渗透)?|恢复(?:执行|运行|loop)?|\"\n    50\t    r\"修复|实现|落实|执行|修改|彻底解决|开始(?:运行|渗透)|\"\n    51\t    r\"resume|continue|implement|fix|execute|apply\",\n    52\t    re.I,\n    53\t)\n    54\tMEMORY_APPROVAL_RE = re.compile(r\"(?:明确|现在)?(?:写入|保存|更新)(?:长期)?记忆|approve memory|write (?:to )?memory\", re.I)\n    55\tMEMORY_PATH_RE = re.compile(r\"(?:^|[/\\\\])\\.claude(?:[/\\\\].*)?[/\\\\](?:memory|memories)(?:[/\\\\]|$)|MEMORY\\.md$\", re.I)\n    56\tTARGET_BASH_RE = re.compile(\n    57\t    r\"(?:^|[\\s/])(?:probe|render|replay|classify_hosts|exploit)\\.py\\b|\"\n    58\t    r\"\\b(?:curl|wget|httpx|nmap|nikto|sqlmap)\\b|\"\n    59\t    r\"\\b(?:requests|urllib3?|http\\.client)\\s*\\.\",\n    60\t    re.I,\n    61\t)\n    62\tBACKGROUND_REVIEW_RE = re.compile(\n    63\t    r\"(?s)(?:\\bnohup\\b.*?peer_review\\.py|peer_review\\.py.*?(?<![>&])&(?![>&]))\",\n    64\t    re.I,\n    65\t)\n    66\tPROTECTED_RUNTIME_RE = re.compile(\n    67\t    r\"(?:runtime_events\\.jsonl|\\.runtime_events\\.lock|turn_contract\\.json|run_status\\.json|\"\n    68\t    r\"assignments\\.json|review[/\\\\]receipts[/\\\\][0-9a-f]{64}\\.json)\"\n    69\t    r\"(?=[\\\"'\\s;|&}]|$)\",\n    70\t    re.I,\n    71\t)\n    72\t\n    73\t\n    74\tdef _atomic_json(path: Path, value: dict) -> None:\n    75\t    path.parent.mkdir(parents=True, exist_ok=True)\n    76\t    fd, raw = tempfile.mkstemp(prefix=path.name + \".\", suffix=\".tmp\", dir=path.parent)\n    77\t    try:\n    78\t        with os.fdopen(fd, \"w\", encoding=\"utf-8\") as handle:\n    79\t            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)\n    80\t            handle.write(\"\\n\")\n    81\t        os.chmod(raw, 0o600)\n    82\t        os.replace(raw, path)\n    83\t    finally:\n    84\t        try:\n    85\t            os.unlink(raw)\n    86\t        except FileNotFoundError:\n    87\t            pass\n    88\t\n    89\t\n    90\tdef contract_path(run_dir: Path) -> Path:\n    91\t    return run_dir / \"state\" / \"turn_contract.json\"\n    92\t\n    93\t\n    94\tdef run_status_path(run_dir: Path) -> Path:\n    95\t    return run_dir / \"state\" / \"run_status.json\"\n    96\t\n    97\t\n    98\tdef classify_prompt(prompt: str, *, active_run: bool = True) -> str:\n    99\t    prompt = prompt or \"\"\n   100\t    if not active_run:\n   101\t        return NORMAL\n   102\t    if PAUSE_RE.search(prompt):\n   103\t        return PAUSE\n   104\t    if EXPLAIN_RE.search(prompt):\n   105\t        return EXPLAIN\n   106\t    if EXECUTE_RE.search(prompt):\n   107\t        return EXECUTE\n   108\t    if re.search(r\"[?？]\\s*$\", prompt) or re.match(r\"^\\s*(?:怎么|如何|是否|什么|哪|谁)\", prompt):\n   109\t        return EXPLAIN\n   110\t    return EXPLAIN\n   111\t\n   112\t\n   113\tdef write_contract(run_dir: Path, event: dict) -> dict:\n   114\t    prompt = str(event.get(\"prompt\") or \"\")\n   115\t    mode = classify_prompt(prompt, active_run=True)\n   116\t    now = time.time()\n   117\t    contract = {\n   118\t        \"schema\": SCHEMA,\n   119\t        \"mode\": mode,\n   120\t        \"session_id\": str(event.get(\"session_id\") or \"\"),\n   121\t        \"transcript_path\": str(event.get(\"transcript_path\") or \"\"),\n   122\t        \"prompt_sha256\": hashlib.sha256(prompt.encode(\"utf-8\", \"replace\")).hexdigest(),\n   123\t        \"prompt_excerpt\": prompt[:500],\n   124\t        \"memory_approved\": bool(MEMORY_APPROVAL_RE.search(prompt)),\n   125\t        \"fanout_override\": bool(re.search(r\"(?:明确)?允许串行|不要使用\\s*(?:Agent|子代理)|serial override\", prompt, re.I)),\n   126\t        \"updated_at\": now,\n   127\t    }\n   128\t    _atomic_json(contract_path(run_dir), contract)\n   129\t    if mode == PAUSE:\n   130\t        _atomic_json(run_status_path(run_dir), {\n   131\t            \"schema\": SCHEMA,\n   132\t            \"status\": \"paused_by_operator\",\n   133\t            \"session_id\": contract[\"session_id\"],\n   134\t            \"updated_at\": now,\n   135\t            \"reason\": \"operator prompt requested pause; open fronts remain open\",\n   136\t        })\n   137\t    elif mode == EXECUTE:\n   138\t        _atomic_json(run_status_path(run_dir), {\n   139\t            \"schema\": SCHEMA,\n   140\t            \"status\": \"active\",\n   141\t            \"session_id\": contract[\"session_id\"],\n   142\t            \"updated_at\": now,\n   143\t            \"reason\": \"operator prompt requested execution/resume\",\n   144\t        })\n   145\t    return contract\n   146\t\n   147\t\n   148\tdef load_contract(run_dir: Path, *, session_id: str = \"\") -> dict:\n   149\t    try:\n   150\t        data = json.loads(contract_path(run_dir).read_text(encoding=\"utf-8\", errors=\"replace\"))\n   151\t    except Exception:\n   152\t        return {}\n   153\t    if data.get(\"schema\") != SCHEMA:\n   154\t        return {}\n   155\t    if session_id and str(data.get(\"session_id\") or \"\") != session_id:\n   156\t        return {}\n   157\t    try:\n   158\t        if time.time() - float(data.get(\"updated_at\") or 0) > STALE_SECONDS:\n   159\t            return {}\n   160\t    except Exception:\n   161\t        return {}\n   162\t    return data\n   163\t\n   164\t\n   165\tdef _tool_text(event: dict) -> str:\n   166\t    value = event.get(\"tool_input\") if isinstance(event.get(\"tool_input\"), dict) else {}\n   167\t    try:\n   168\t        return json.dumps(value, ensure_ascii=False, sort_keys=True)\n   169\t    except Exception:\n   170\t        return str(value)\n"
+          },
+          {
+            "token": "turn_contract.lines-171-340.txt",
+            "path": "turn_contract.lines-171-340.txt",
+            "exists": true,
+            "size": 9519,
+            "sha1": "b553906bec51a80aba4daf21af115998b93b3004",
+            "excerpt": "   171\t\n   172\t\n   173\tdef _deny(reason: str) -> dict:\n   174\t    return {\n   175\t        \"hookSpecificOutput\": {\n   176\t            \"hookEventName\": \"PreToolUse\",\n   177\t            \"permissionDecision\": \"deny\",\n   178\t            \"permissionDecisionReason\": reason,\n   179\t        }\n   180\t    }\n   181\t\n   182\t\n   183\tdef _assignment_exists(run_dir: Path, assignment: str, front: str) -> bool:\n   184\t    try:\n   185\t        data = json.loads((run_dir / \"state\" / \"assignments.json\").read_text(encoding=\"utf-8\", errors=\"replace\"))\n   186\t    except Exception:\n   187\t        return False\n   188\t    for item in data.get(\"assignments\", []) if isinstance(data, dict) else []:\n   189\t        if not isinstance(item, dict):\n   190\t            continue\n   191\t        if str(item.get(\"agent\") or \"\") == assignment and str(item.get(\"front\") or \"\").upper() == front:\n   192\t            return (run_dir / \"agents\" / f\"{assignment}.md\").exists()\n   193\t    return False\n   194\t\n   195\t\n   196\tdef evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:\n   197\t    tool = str(event.get(\"tool_name\") or \"\")\n   198\t    text = _tool_text(event)\n   199\t    mode = str(contract.get(\"mode\") or \"\")\n   200\t    tool_input = event.get(\"tool_input\") if isinstance(event.get(\"tool_input\"), dict) else {}\n   201\t    command = str(tool_input.get(\"command\") or \"\")\n   202\t\n   203\t    if PROTECTED_RUNTIME_RE.search(text) and (\n   204\t        tool in {\"Write\", \"Edit\", \"Update\", \"MultiEdit\", \"NotebookEdit\"} or tool == \"Bash\"\n   205\t    ):\n   206\t        return \"运行时回执/回合状态只能由 hook 原子写入；Claude 工具不得直接修改这些控制面文件。\"\n   207\t\n   208\t    if MEMORY_PATH_RE.search(text) and not contract.get(\"memory_approved\"):\n   209\t        return \"长期记忆写入需要操作者在当前 prompt 明确批准；retrospective 不能自行升级为 memory。\"\n   210\t    if tool == \"Bash\" and BACKGROUND_REVIEW_RE.search(command):\n   211\t        return \"peer_review 不得后台运行并与可变 evidence 并发；请前台冻结快照后完成复审。\"\n   212\t\n   213\t    if mode == EXPLAIN:\n   214\t        if tool not in {\"Read\", \"Grep\", \"Glob\", \"WebSearch\", \"ListMcpResourcesTool\", \"ReadMcpResourceTool\"}:\n   215\t            return \"当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。\"\n   216\t        return \"\"\n   217\t    if mode == PAUSE:\n   218\t        if tool not in {\"Read\", \"Grep\", \"Glob\", \"CronList\", \"CronDelete\"}:\n   219\t            return \"当前回合是 PAUSED_BY_OPERATOR：只允许读取状态并执行 CronList/CronDelete；不得继续目标动作或改写前沿。\"\n   220\t        if tool == \"CronDelete\":\n   221\t            job = runtime_receipts._job_id(tool_input)\n   222\t            ok, note = runtime_receipts.cron_delete_allowed(\n   223\t                run_dir, job,\n   224\t                session_id=str(contract.get(\"session_id\") or \"\"),\n   225\t                since=float(contract.get(\"updated_at\") or 0.0),\n   226\t            )\n   227\t            if not ok:\n   228\t                return \"暂停事务只可删除当前 CronList 观察到的本 run job：\" + note\n   229\t        return \"\"\n   230\t    if not contract:\n   231\t        if tool not in {\"Read\", \"Grep\", \"Glob\", \"WebSearch\", \"CronList\", \"CronDelete\"}:\n   232\t            return \"缺少当前 session 的 turn contract；先由 UserPromptSubmit 记录 EXECUTE/EXPLAIN/PAUSE 模式。\"\n   233\t        return \"\"\n   234\t\n   235\t    if tool == \"CronCreate\":\n   236\t        cron_ok, cron_note = runtime_receipts.cron_quiescent(\n   237\t            run_dir,\n   238\t            session_id=str(contract.get(\"session_id\") or \"\"),\n   239\t            since=float(contract.get(\"updated_at\") or 0.0),\n   240\t        )\n   241\t        if not cron_ok:\n   242\t            return \"Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。\" + cron_note\n   243\t        if run_dir.name.lower() not in text.lower():\n   244\t            return \"Cron 单实例门：CronCreate prompt 必须显式包含当前 run 目录名。\"\n   245\t        return \"\"\n   246\t\n   247\t    if tool == \"CronDelete\":\n   248\t        job = runtime_receipts._job_id(tool_input)\n   249\t        ok, note = runtime_receipts.cron_delete_allowed(\n   250\t            run_dir, job,\n   251\t            session_id=str(contract.get(\"session_id\") or \"\"),\n   252\t            since=float(contract.get(\"updated_at\") or 0.0),\n   253\t        )\n   254\t        if not ok:\n   255\t            return \"CronDelete 只可删除当前 CronList 观察到的本 run job：\" + note\n   256\t        return \"\"\n   257\t\n   258\t    state = run_model.summary(run_dir)\n   259\t    if not state.get(\"fanout_required\") or contract.get(\"fanout_override\"):\n   260\t        return \"\"\n   261\t    if tool == \"Agent\":\n   262\t        raw_input = event.get(\"tool_input\") if isinstance(event.get(\"tool_input\"), dict) else {}\n   263\t        prompt = str(raw_input.get(\"prompt\") or raw_input.get(\"description\") or \"\")\n   264\t        if \"XUNJI_COMPLETION_REVIEW\" in prompt.upper():\n   265\t            return \"\"\n   266\t        assignment, front = runtime_receipts._assignment_fields(prompt)\n   267\t        if not assignment or not front:\n   268\t            return \"Agent Board 强制：Agent prompt 必须包含 XUNJI_ASSIGNMENT=A-... 和 XUNJI_FRONT=F-...。\"\n   269\t        if not _assignment_exists(run_dir, assignment, front):\n   270\t            return \"Agent Board 强制：Agent token 未绑定 workers.py 生成的 assignment/front。\"\n   271\t        return \"\"\n   272\t    if runtime_receipts.agent_fanout(\n   273\t        run_dir,\n   274\t        session_id=str(contract.get(\"session_id\") or \"\"),\n   275\t        since=float(contract.get(\"updated_at\") or 0.0),\n   276\t    ).get(\"satisfied\"):\n   277\t        return \"\"\n   278\t    if tool == \"Bash\":\n   279\t        if TARGET_BASH_RE.search(command):\n   280\t            return \"Agent Board 强制：当前至少 4 个独立 active fronts；真实 Agent 回执覆盖两个不同 front 前，Root 不得继续目标探测。\"\n   281\t    if tool in {\"WebFetch\"}:\n   282\t        return \"Agent Board 强制：真实 Agent 回执覆盖两个不同 front 前，Root 不得继续目标 WebFetch。\"\n   283\t    return \"\"\n   284\t\n   285\t\n   286\tdef _context_message(contract: dict, run_dir: Path) -> str:\n   287\t    mode = contract.get(\"mode\")\n   288\t    if mode == EXPLAIN:\n   289\t        return \"[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。\"\n   290\t    if mode == PAUSE:\n   291\t        return \"[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。\"\n   292\t    state = run_model.summary(run_dir)\n   293\t    fanout = \" fanout_required=true; 先真实调用至少两个不同 front 的 Agent。\" if state.get(\"fanout_required\") else \"\"\n   294\t    return \"[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。\" + fanout\n   295\t\n   296\t\n   297\tdef handle_event(event: dict, run_dir: Path | None = None) -> dict | None:\n   298\t    run_dir = run_dir or find_active_run(RUNS, within_sec=6 * 60 * 60)\n   299\t    if run_dir is None:\n   300\t        if str(event.get(\"hook_event_name\") or \"\") == \"PreToolUse\" \\\n   301\t                and str(event.get(\"tool_name\") or \"\") == \"CronCreate\":\n   302\t            return _deny(\"Xunji CronCreate 前必须先 setup/set-active 一个 run，再用当前回合 CronList 证明单实例。\")\n   303\t        return None\n   304\t    hook = str(event.get(\"hook_event_name\") or \"\")\n   305\t   ",
+            "excerpt_truncated_chars": 1819
+          },
+          {
+            "token": "turn_contract.lines-341-end.txt",
+            "path": "turn_contract.lines-341-end.txt",
+            "exists": true,
+            "size": 9062,
+            "sha1": "224cb0439234f97fd113fdb3d072f8efab4ce017",
+            "excerpt": "   341\t    (run / \"agents\" / \"A-web-001.md\").write_text(\"# Agent\\n\", encoding=\"utf-8\")\n   342\t    (run / \"agents\" / \"A-auth-001.md\").write_text(\"# Agent\\n\", encoding=\"utf-8\")\n   343\t    (run / \"state\" / \"assignments.json\").write_text(json.dumps({\"assignments\": [\n   344\t        {\"agent\": \"A-web-001\", \"front\": \"F-001\"},\n   345\t        {\"agent\": \"A-auth-001\", \"front\": \"F-002\"},\n   346\t    ]}), encoding=\"utf-8\")\n   347\t    explain = classify_prompt(\"为什么不用 Agent？只告诉我原因，不用修改\")\n   348\t    history_only = classify_prompt(\"这是这几次的历史，你来看看还有什么问题\")\n   349\t    ambiguous = classify_prompt(\"这是最新状态\")\n   350\t    pause = classify_prompt(\"停止loop，渗透结束\")\n   351\t    execute = classify_prompt(\"彻底修复所有问题\")\n   352\t    contract = {\"mode\": EXECUTE, \"session_id\": \"s\", \"updated_at\": time.time()}\n   353\t    target_event = {\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"python tools/probe.py https://example.test\"}}\n   354\t    agent_bad = {\"tool_name\": \"Agent\", \"tool_input\": {\"prompt\": \"work F-001\"}}\n   355\t    agent_good = {\"tool_name\": \"Agent\", \"tool_input\": {\n   356\t        \"prompt\": \"XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001\",\n   357\t    }}\n   358\t    before_fanout = \"真实 Agent 回执\" in evaluate_pretool(run, target_event, contract)\n   359\t    transcript = root / \"transcript.jsonl\"\n   360\t    transcript.write_text(\"old-agent-1\\nold-agent-2\\ncurrent-agent-1\\ncurrent-agent-2\\ncurrent-cron-list\\n\",\n   361\t                          encoding=\"utf-8\")\n   362\t\n   363\t    def receipt(tool_id: str, session: str, assignment: str, front: str) -> None:\n   364\t        runtime_receipts.append_hook_event(run, {\n   365\t            \"hook_event_name\": \"PostToolUse\", \"session_id\": session,\n   366\t            \"transcript_path\": str(transcript), \"tool_name\": \"Agent\",\n   367\t            \"tool_use_id\": tool_id,\n   368\t            \"tool_input\": {\"prompt\": f\"XUNJI_ASSIGNMENT={assignment} XUNJI_FRONT={front}\"},\n   369\t            \"tool_response\": {\"result\": \"done\"},\n   370\t        })\n   371\t\n   372\t    receipt(\"old-agent-1\", \"old-session\", \"A-web-001\", \"F-001\")\n   373\t    receipt(\"old-agent-2\", \"old-session\", \"A-auth-001\", \"F-002\")\n   374\t    old_fanout_still_blocked = bool(evaluate_pretool(run, target_event, contract))\n   375\t    receipt(\"current-agent-1\", \"s\", \"A-web-001\", \"F-001\")\n   376\t    receipt(\"current-agent-2\", \"s\", \"A-auth-001\", \"F-002\")\n   377\t    current_fanout_allows = evaluate_pretool(run, target_event, contract) == \"\"\n   378\t    cron_create = {\"tool_name\": \"CronCreate\", \"tool_input\": {\"prompt\": f\"/loop {run.name}\"}}\n   379\t    cron_before_list = bool(evaluate_pretool(run, cron_create, contract))\n   380\t    runtime_receipts.append_hook_event(run, {\n   381\t        \"hook_event_name\": \"PostToolUse\", \"session_id\": \"s\",\n   382\t        \"transcript_path\": str(transcript), \"tool_name\": \"CronList\",\n   383\t        \"tool_use_id\": \"current-cron-list\", \"tool_input\": {},\n   384\t        \"tool_response\": {\"tasks\": []},\n   385\t    })\n   386\t    cron_after_list = evaluate_pretool(run, cron_create, contract) == \"\"\n   387\t    empty_runs = root / \"empty-runs\"\n   388\t    empty_runs.mkdir()\n   389\t    env = dict(os.environ)\n   390\t    env[\"XUNJI_RUNS_ROOT\"] = str(empty_runs)\n   391\t    no_run_cron = subprocess.run(\n   392\t        [sys.executable, str(Path(__file__).resolve())],\n   393\t        input=json.dumps({\n   394\t            \"hook_event_name\": \"PreToolUse\", \"session_id\": \"s\",\n   395\t            \"tool_name\": \"CronCreate\", \"tool_input\": {\"prompt\": \"/loop future-run\"},\n   396\t        }),\n   397\t        text=True, capture_output=True, env=env, timeout=10,\n   398\t    )\n   399\t    settings = json.loads((ROOT / \".claude\" / \"settings.json\").read_text(encoding=\"utf-8\"))\n   400\t    hooks = settings.get(\"hooks\", {})\n   401\t\n   402\t    def wired(event_name: str) -> bool:\n   403\t        return any(\n   404\t            \"tools/turn_contract.py\" in str(hook.get(\"command\") or \"\")\n   405\t            for group in hooks.get(event_name, []) if isinstance(group, dict)\n   406\t            for hook in group.get(\"hooks\", []) if isinstance(hook, dict)\n   407\t        )\n   408\t    checks = [\n   409\t        (\"explain overrides action words\", explain == EXPLAIN),\n   410\t        (\"history/audit prompt without execute verb is read-only\", history_only == EXPLAIN),\n   411\t        (\"ambiguous active-run prompt defaults read-only\", ambiguous == EXPLAIN),\n   412\t        (\"operator stop maps to pause\", pause == PAUSE),\n   413\t        (\"repair request maps to execute\", execute == EXECUTE),\n   414\t        (\"target action blocked before real fanout\", before_fanout),\n   415\t        (\"old-session Agent receipts do not satisfy this turn\", old_fanout_still_blocked),\n   416\t        (\"current-turn Agent receipts satisfy this turn\", current_fanout_allows),\n   417\t        (\"Agent without binding tokens blocked\", \"必须包含\" in evaluate_pretool(run, agent_bad, contract)),\n   418\t        (\"bound Agent call allowed\", evaluate_pretool(run, agent_good, contract) == \"\"),\n   419\t        (\"explain mode blocks Bash\", bool(evaluate_pretool(run, target_event, {\"mode\": EXPLAIN}))),\n   420\t        (\"pause mode allows CronList\", evaluate_pretool(run, {\"tool_name\": \"CronList\", \"tool_input\": {}}, {\"mode\": PAUSE}) == \"\"),\n   421\t        (\"CronCreate requires current-turn CronList\", cron_before_list),\n   422\t        (\"CronCreate allowed after current-turn empty CronList\", cron_after_list),\n   423\t        (\"CronCreate without an active run is blocked\",\n   424\t         '\"permissionDecision\": \"deny\"' in (no_run_cron.stdout or \"\")),\n   425\t        (\"settings wires UserPromptSubmit contract\", wired(\"UserPromptSubmit\")),\n   426\t        (\"settings wires global PreToolUse contract\", wired(\"PreToolUse\")),\n   427\t        (\"settings wires Agent/Cron PostToolUse receipts\", wired(\"PostToolUse\")),\n   428\t        (\"settings wires failed tool receipts\", wired(\"PostToolUseFailure\")),\n   429\t        (\"settings wires Subagent lifecycle receipts\",\n   430\t         wired(\"SubagentStart\") and wired(\"SubagentStop\")),\n   431\t        (\"CronDelete rejects job not listed for this run\", bool(evaluate_pretool(\n   432\t            run, {\"tool_name\": \"CronDelete\", \"tool_input\": {\"id\": \"otherjob\"}}, contract))),\n   433\t        (\"memory write needs explicit approval\", bool(evaluate_pretool(\n   434\t            run, {\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"/tmp/.claude/x/memory/MEMORY.md\"}},\n   435\t            {\"mode\": EXECUTE}))),\n   436\t        (\"background review is blocked\", bool(evaluate_pretool(\n   437\t            run, {\"tool_name\": \"Bash\", \"tool_input\": {\n   438\t                \"command\": \"python tools/peer_review.py runs/x > /tmp/review.log 2>&1 & echo started\"}},\n   439\t            contract))),\n   440\t        (\"foreground review redirection is allowed\", not bool(evaluate_pretool(\n   441\t            run, {\"tool_name\": \"Bash\", \"tool_input\": {\n   442\t                \"command\": \"python tools/peer_review.py runs/x > /tmp/revie",
+            "excerpt_truncated_chars": 2010
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002 - Agent and Cron runtime authenticity",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "E-005"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "runtime_observation.lines-001-190.txt",
+            "path": "runtime_observation.lines-001-190.txt",
+            "exists": true,
+            "size": 8603,
+            "sha1": "cdbd92213ace15a8bc73928e0dd9f0fe6f0ae3ba",
+            "excerpt": "     1\t{\n     2\t  \"checks\": {\n     3\t    \"cron_allows_after_empty_list\": true,\n     4\t    \"cron_final_quiescent\": true,\n     5\t    \"cron_requires_list\": true,\n     6\t    \"duplicate_cron_denied\": true,\n     7\t    \"execute_status_active\": true,\n     8\t    \"explain_denies_bash\": true,\n     9\t    \"listed_delete_allowed\": true,\n    10\t    \"merged_agents_accepted\": true,\n    11\t    \"pause_denies_edit\": true,\n    12\t    \"post_agent_target_allowed\": true,\n    13\t    \"pre_agent_target_denied\": true,\n    14\t    \"receipt_chain_valid\": true,\n    15\t    \"review_invocation_time_bound\": true,\n    16\t    \"unmerged_agents_detected\": true,\n    17\t    \"unrelated_delete_denied\": true\n    18\t  },\n    19\t  \"observations\": {\n    20\t    \"agent_after_disposition\": {\n    21\t      \"assignments\": [\n    22\t        \"A-auth-001\",\n    23\t        \"A-web-001\"\n    24\t      ],\n    25\t      \"count\": 2,\n    26\t      \"disposition_satisfied\": true,\n    27\t      \"fronts\": [\n    28\t        \"F-001\",\n    29\t        \"F-002\"\n    30\t      ],\n    31\t      \"pending\": [],\n    32\t      \"satisfied\": true\n    33\t    },\n    34\t    \"agent_before_disposition\": {\n    35\t      \"assignments\": [\n    36\t        \"A-auth-001\",\n    37\t        \"A-web-001\"\n    38\t      ],\n    39\t      \"count\": 2,\n    40\t      \"disposition_satisfied\": false,\n    41\t      \"fronts\": [\n    42\t        \"F-001\",\n    43\t        \"F-002\"\n    44\t      ],\n    45\t      \"pending\": [\n    46\t        \"A-auth-001: disposition 早于本轮 Agent 返回\",\n    47\t        \"A-web-001: disposition 早于本轮 Agent 返回\"\n    48\t      ],\n    49\t      \"satisfied\": true\n    50\t    },\n    51\t    \"cron_create_after_empty_list\": {},\n    52\t    \"cron_create_before_list\": {\n    53\t      \"hookSpecificOutput\": {\n    54\t        \"hookEventName\": \"PreToolUse\",\n    55\t        \"permissionDecision\": \"deny\",\n    56\t        \"permissionDecisionReason\": \"Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。missing successful CronList receipt\"\n    57\t      }\n    58\t    },\n    59\t    \"cron_quiescent\": [\n    60\t      true,\n    61\t      \"latest successful CronList proves no active run job\"\n    62\t    ],\n    63\t    \"delete_observed_job\": {},\n    64\t    \"delete_unrelated_job\": {\n    65\t      \"hookSpecificOutput\": {\n    66\t        \"hookEventName\": \"PreToolUse\",\n    67\t        \"permissionDecision\": \"deny\",\n    68\t        \"permissionDecisionReason\": \"CronDelete 只可删除当前 CronList 观察到的本 run job：job job-unrelated was not observed as a task for run observed_run\"\n    69\t      }\n    70\t    },\n    71\t    \"duplicate_create_without_relist\": {\n    72\t      \"hookSpecificOutput\": {\n    73\t        \"hookEventName\": \"PreToolUse\",\n    74\t        \"permissionDecision\": \"deny\",\n    75\t        \"permissionDecisionReason\": \"Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。CronList receipt predates latest CronCreate/CronDelete\"\n    76\t      }\n    77\t    },\n    78\t    \"execute_context\": {\n    79\t      \"hookSpecificOutput\": {\n    80\t        \"additionalContext\": \"[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。 fanout_required=true; 先真实调用至少两个不同 front 的 Agent。\",\n    81\t        \"hookEventName\": \"UserPromptSubmit\"\n    82\t      }\n    83\t    },\n    84\t    \"explain_blocks_bash\": {\n    85\t      \"hookSpecificOutput\": {\n    86\t        \"hookEventName\": \"PreToolUse\",\n    87\t        \"permissionDecision\": \"deny\",\n    88\t        \"permissionDecisionReason\": \"当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。\"\n    89\t      }\n    90\t    },\n    91\t    \"explain_context\": {\n    92\t      \"hookSpecificOutput\": {\n    93\t        \"additionalContext\": \"[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。\",\n    94\t        \"hookEventName\": \"UserPromptSubmit\"\n    95\t      }\n    96\t    },\n    97\t    \"foreground_review_observed\": true,\n    98\t    \"pause_blocks_edit\": {\n    99\t      \"hookSpecificOutput\": {\n   100\t        \"hookEventName\": \"PreToolUse\",\n   101\t        \"permissionDecision\": \"deny\",\n   102\t        \"permissionDecisionReason\": \"当前回合是 PAUSED_BY_OPERATOR：只允许读取状态并执行 CronList/CronDelete；不得继续目标动作或改写前沿。\"\n   103\t      }\n   104\t    },\n   105\t    \"pause_context\": {\n   106\t      \"hookSpecificOutput\": {\n   107\t        \"additionalContext\": \"[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。\",\n   108\t        \"hookEventName\": \"UserPromptSubmit\"\n   109\t      }\n   110\t    },\n   111\t    \"pre_A-auth-001\": {},\n   112\t    \"pre_A-web-001\": {},\n   113\t    \"run_status\": {\n   114\t      \"reason\": \"operator prompt requested execution/resume\",\n   115\t      \"schema\": \"xunji.turn_contract.v1\",\n   116\t      \"session_id\": \"s-exec\",\n   117\t      \"status\": \"active\",\n   118\t      \"updated_at\": 1783691619.7712672\n   119\t    },\n   120\t    \"runtime_chain\": {\n   121\t      \"errors\": [],\n   122\t      \"events\": 8\n   123\t    },\n   124\t    \"target_after_agents\": {},\n   125\t    \"target_before_agents\": {\n   126\t      \"hookSpecificOutput\": {\n   127\t        \"hookEventName\": \"PreToolUse\",\n   128\t        \"permissionDecision\": \"deny\",\n   129\t        \"permissionDecisionReason\": \"Agent Board 强制：当前至少 4 个独立 active fronts；真实 Agent 回执覆盖两个不同 front 前，Root 不得继续目标探测。\"\n   130\t      }\n   131\t    }\n   132\t  },\n   133\t  \"runtime_events\": [\n   134\t    {\n   135\t      \"agent_id\": \"\",\n   136\t      \"agent_type\": \"\",\n   137\t      \"assignment\": \"A-web-001\",\n   138\t      \"completion_review\": false,\n   139\t      \"evidence_index_hash\": \"\",\n   140\t      \"front\": \"F-001\",\n   141\t      \"hook_event_name\": \"PostToolUse\",\n   142\t      \"input_excerpt\": \"{\\\"prompt\\\": \\\"XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001\\\"}\",\n   143\t      \"input_sha256\": \"684514f5d8841c1362d49f899bc33a5e815da61a86e6aa730956f3776714dbc7\",\n   144\t      \"job_id\": \"\",\n   145\t      \"job_ids\": [],\n   146\t      \"listed_run_job_ids\": [],\n   147\t      \"previous_hash\": \"\",\n   148\t      \"receipt_hash\": \"982cc619ba6496f28741875d3789419695f567f6f54f0f0ddf15f334e1f6d565\",\n   149\t      \"response_excerpt\": \"{\\\"result\\\": \\\"candidate for F-001\\\"}\",\n   150\t      \"response_sha256\": \"9c71627b250a7fee0793bf0809f0e8cf523c85e7cb6fb8fbcae07224bbc723d6\",\n   151\t      \"run_dir\": \"/private/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/runs/observed_run\",\n   152\t      \"run_mentioned\": false,\n   153\t      \"schema\": \"xunji.runtime_receipt.v1\",\n   154\t      \"seq\": 1,\n   155\t      \"session_id\": \"s-exec\",\n   156\t      \"success\": true,\n   157\t      \"tool_name\": \"Agent\",\n   158\t      \"tool_use_id\": \"agent-tool-1\",\n   159\t      \"transcript_path\": \"/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/transcript.jsonl\",\n   160\t      \"ts\": 1783691619.8887308\n   161\t    },\n   162\t    {\n   163\t      \"agent_id\": \"\",\n   164\t      \"agent_type\": \"\",\n   165\t      \"assignment\": \"A-auth-001\",\n   166\t      \"completion_review\": false,\n   167\t      \"evidence_index_hash\": \"\",\n   168\t      \"front\": \"F-002\",\n   169\t      \"hook_event_name\": \"PostToolUse\",\n   170\t      \"input_excerpt\"",
+            "excerpt_truncated_chars": 1223
+          },
+          {
+            "token": "runtime_observation.lines-191-end.txt",
+            "path": "runtime_observation.lines-191-end.txt",
+            "exists": true,
+            "size": 9095,
+            "sha1": "6d9d785791d160ce8760dba6526e0ed2b00f8c6d",
+            "excerpt": "   191\t      \"agent_id\": \"\",\n   192\t      \"agent_type\": \"\",\n   193\t      \"assignment\": \"\",\n   194\t      \"completion_review\": false,\n   195\t      \"evidence_index_hash\": \"\",\n   196\t      \"front\": \"\",\n   197\t      \"hook_event_name\": \"PostToolUse\",\n   198\t      \"input_excerpt\": \"{}\",\n   199\t      \"input_sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\n   200\t      \"job_id\": \"\",\n   201\t      \"job_ids\": [],\n   202\t      \"listed_run_job_ids\": [],\n   203\t      \"previous_hash\": \"29becb3b269308910be62a2ef8e670af0abb1667825e1316610bee4e94c200df\",\n   204\t      \"receipt_hash\": \"24d8b991a1a96fd1b3d1dc082b126e879f3c900d06c902a5d01c4fbd32296320\",\n   205\t      \"response_excerpt\": \"{\\\"tasks\\\": []}\",\n   206\t      \"response_sha256\": \"b8cce95f94bb3842447a35cad31d68789df636e11353ab4a75179d86761d804c\",\n   207\t      \"run_dir\": \"/private/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/runs/observed_run\",\n   208\t      \"run_mentioned\": false,\n   209\t      \"schema\": \"xunji.runtime_receipt.v1\",\n   210\t      \"seq\": 3,\n   211\t      \"session_id\": \"s-exec\",\n   212\t      \"success\": true,\n   213\t      \"tool_name\": \"CronList\",\n   214\t      \"tool_use_id\": \"cron-list-1\",\n   215\t      \"transcript_path\": \"/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/transcript.jsonl\",\n   216\t      \"ts\": 1783691620.085643\n   217\t    },\n   218\t    {\n   219\t      \"agent_id\": \"\",\n   220\t      \"agent_type\": \"\",\n   221\t      \"assignment\": \"\",\n   222\t      \"completion_review\": false,\n   223\t      \"evidence_index_hash\": \"\",\n   224\t      \"front\": \"\",\n   225\t      \"hook_event_name\": \"PostToolUse\",\n   226\t      \"input_excerpt\": \"{\\\"prompt\\\": \\\"/loop observed_run\\\"}\",\n   227\t      \"input_sha256\": \"375f1960ae0639b6f57bdb11982279ef24f166d2f011607abb657108f5c87b39\",\n   228\t      \"job_id\": \"job-observed-1\",\n   229\t      \"job_ids\": [\n   230\t        \"job-observed-1\"\n   231\t      ],\n   232\t      \"listed_run_job_ids\": [],\n   233\t      \"previous_hash\": \"24d8b991a1a96fd1b3d1dc082b126e879f3c900d06c902a5d01c4fbd32296320\",\n   234\t      \"receipt_hash\": \"4692ce50868147d3f05543b43e320f942043acc17068d9cab3697207d306ce6b\",\n   235\t      \"response_excerpt\": \"{\\\"id\\\": \\\"job-observed-1\\\"}\",\n   236\t      \"response_sha256\": \"18d93c396a4c84393ee8d18500c92e54c93fc12a5402b0a76b4320b7d1abcaf8\",\n   237\t      \"run_dir\": \"/private/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/runs/observed_run\",\n   238\t      \"run_mentioned\": true,\n   239\t      \"schema\": \"xunji.runtime_receipt.v1\",\n   240\t      \"seq\": 4,\n   241\t      \"session_id\": \"s-exec\",\n   242\t      \"success\": true,\n   243\t      \"tool_name\": \"CronCreate\",\n   244\t      \"tool_use_id\": \"cron-create-1\",\n   245\t      \"transcript_path\": \"/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/transcript.jsonl\",\n   246\t      \"ts\": 1783691620.163987\n   247\t    },\n   248\t    {\n   249\t      \"agent_id\": \"\",\n   250\t      \"agent_type\": \"\",\n   251\t      \"assignment\": \"\",\n   252\t      \"completion_review\": false,\n   253\t      \"evidence_index_hash\": \"\",\n   254\t      \"front\": \"\",\n   255\t      \"hook_event_name\": \"PostToolUse\",\n   256\t      \"input_excerpt\": \"{}\",\n   257\t      \"input_sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\n   258\t      \"job_id\": \"job-observed-1\",\n   259\t      \"job_ids\": [\n   260\t        \"job-observed-1\"\n   261\t      ],\n   262\t      \"listed_run_job_ids\": [\n   263\t        \"job-observed-1\"\n   264\t      ],\n   265\t      \"previous_hash\": \"4692ce50868147d3f05543b43e320f942043acc17068d9cab3697207d306ce6b\",\n   266\t      \"receipt_hash\": \"2cae66d196103c768466184573cffdc096cc2275064e87c429d7d1e70a7f4bd0\",\n   267\t      \"response_excerpt\": \"{\\\"tasks\\\": [{\\\"id\\\": \\\"job-observed-1\\\", \\\"prompt\\\": \\\"/loop observed_run\\\"}]}\",\n   268\t      \"response_sha256\": \"9864dc2076de0e8106240dd0ce9b21a03e9bf56dbb11b82089bdbe6c3511c0bd\",\n   269\t      \"run_dir\": \"/private/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/runs/observed_run\",\n   270\t      \"run_mentioned\": false,\n   271\t      \"schema\": \"xunji.runtime_receipt.v1\",\n   272\t      \"seq\": 5,\n   273\t      \"session_id\": \"s-exec\",\n   274\t      \"success\": true,\n   275\t      \"tool_name\": \"CronList\",\n   276\t      \"tool_use_id\": \"cron-list-2\",\n   277\t      \"transcript_path\": \"/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/transcript.jsonl\",\n   278\t      \"ts\": 1783691620.242646\n   279\t    },\n   280\t    {\n   281\t      \"agent_id\": \"\",\n   282\t      \"agent_type\": \"\",\n   283\t      \"assignment\": \"\",\n   284\t      \"completion_review\": false,\n   285\t      \"evidence_index_hash\": \"\",\n   286\t      \"front\": \"\",\n   287\t      \"hook_event_name\": \"PostToolUse\",\n   288\t      \"input_excerpt\": \"{\\\"id\\\": \\\"job-observed-1\\\"}\",\n   289\t      \"input_sha256\": \"18d93c396a4c84393ee8d18500c92e54c93fc12a5402b0a76b4320b7d1abcaf8\",\n   290\t      \"job_id\": \"job-observed-1\",\n   291\t      \"job_ids\": [\n   292\t        \"job-observed-1\"\n   293\t      ],\n   294\t      \"listed_run_job_ids\": [],\n   295\t      \"previous_hash\": \"2cae66d196103c768466184573cffdc096cc2275064e87c429d7d1e70a7f4bd0\",\n   296\t      \"receipt_hash\": \"bceefd3b10565a01f99f1bde64cfe071d6d3d5fd94870a947e9728576d8df0ff\",\n   297\t      \"response_excerpt\": \"{\\\"deleted\\\": true}\",\n   298\t      \"response_sha256\": \"1b70b1c98c544d975c39049311ab1d24ed1d87aedc2874bdc946d39bd421b4b8\",\n   299\t      \"run_dir\": \"/private/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/runs/observed_run\",\n   300\t      \"run_mentioned\": false,\n   301\t      \"schema\": \"xunji.runtime_receipt.v1\",\n   302\t      \"seq\": 6,\n   303\t      \"session_id\": \"s-exec\",\n   304\t      \"success\": true,\n   305\t      \"tool_name\": \"CronDelete\",\n   306\t      \"tool_use_id\": \"cron-delete-1\",\n   307\t      \"transcript_path\": \"/var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/xunji-runtime-observation-q_c4zhuy/transcript.jsonl\",\n   308\t      \"ts\": 1783691620.375041\n   309\t    },\n   310\t    {\n   311\t      \"agent_id\": \"\",\n   312\t      \"agent_type\": \"\",\n   313\t      \"assignment\": \"\",\n   314\t      \"completion_review\": false,\n   315\t      \"evidence_index_hash\": \"\",\n   316\t      \"front\": \"\",\n   317\t      \"hook_event_name\": \"PostToolUse\",\n   318\t      \"input_excerpt\": \"{}\",\n   319\t      \"input_sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\n   320\t      \"job_id\": \"\",\n   321\t      \"job_ids\": [],\n   322\t      \"listed_run_job_ids\": [],\n   323\t      \"previous_hash\": \"bceefd3b10565a01f99f1bde64cfe071d6d3d5fd94870a947e9728576d8df0ff\",\n   324\t      \"receipt_hash\": \"6876f00f349006e131fd126a2b928b5b3e789719c3ed614afb2ffea5702a2c2e\",\n   325\t      \"response_excerpt\": \"{\\\"tasks\\\": []}\",\n   326\t      \"response_sha256\": \"b8cce95f94bb3842447a35cad31d68789df636e11353ab4a75179d86761d804c\",\n   327\t      \"run_dir\": \"/private/var/folders/tp/lv",
+            "excerpt_truncated_chars": 2191
+          },
+          {
+            "token": "runtime_receipts.lines-001-150.txt",
+            "path": "runtime_receipts.lines-001-150.txt",
+            "exists": true,
+            "size": 5628,
+            "sha1": "1f44b39b0acf2e86d3eaea95cd6faa27586214c9",
+            "excerpt": "     1\t#!/usr/bin/env python3\n     2\t\"\"\"Hook-derived runtime receipts for Agent, Cron, and completion events.\n     3\t\n     4\tCanonical findings still live in Markdown.  Runtime facts do not: an Agent spawn,\n     5\tCron deletion, or completion review is true only when a Claude Code hook observed\n     6\tthe tool event and the referenced tool-use id exists in the session transcript.\n     7\t\"\"\"\n     8\tfrom __future__ import annotations\n     9\t\n    10\timport argparse\n    11\timport contextlib\n    12\timport hashlib\n    13\timport json\n    14\timport os\n    15\timport re\n    16\timport tempfile\n    17\timport time\n    18\tfrom datetime import datetime, timezone\n    19\tfrom pathlib import Path\n    20\t\n    21\ttry:\n    22\t    import fcntl\n    23\texcept ImportError:  # pragma: no cover - Windows fallback remains atomic per write\n    24\t    fcntl = None\n    25\t\n    26\t\n    27\tSCHEMA = \"xunji.runtime_receipt.v1\"\n    28\tEVENTS = \"runtime_events.jsonl\"\n    29\tMAX_EXCERPT = 6000\n    30\t\n    31\t\n    32\tdef _json_bytes(value: object) -> bytes:\n    33\t    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\")).encode(\"utf-8\")\n    34\t\n    35\t\n    36\tdef _hash(value: object) -> str:\n    37\t    return hashlib.sha256(_json_bytes(value)).hexdigest()\n    38\t\n    39\t\n    40\tdef _event_path(run_dir: Path) -> Path:\n    41\t    return run_dir / \"state\" / EVENTS\n    42\t\n    43\t\n    44\tdef _lock_path(run_dir: Path) -> Path:\n    45\t    return run_dir / \"state\" / \".runtime_events.lock\"\n    46\t\n    47\t\n    48\t@contextlib.contextmanager\n    49\tdef _locked(run_dir: Path):\n    50\t    lock = _lock_path(run_dir)\n    51\t    lock.parent.mkdir(parents=True, exist_ok=True)\n    52\t    with lock.open(\"a+\", encoding=\"utf-8\") as handle:\n    53\t        if fcntl is not None:\n    54\t            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)\n    55\t        try:\n    56\t            yield\n    57\t        finally:\n    58\t            if fcntl is not None:\n    59\t                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)\n    60\t\n    61\t\n    62\tdef load_events(run_dir: str | Path) -> list[dict]:\n    63\t    path = _event_path(Path(run_dir))\n    64\t    if not path.exists():\n    65\t        return []\n    66\t    out: list[dict] = []\n    67\t    for line in path.read_text(encoding=\"utf-8\", errors=\"replace\").splitlines():\n    68\t        try:\n    69\t            item = json.loads(line)\n    70\t        except Exception:\n    71\t            continue\n    72\t        if isinstance(item, dict):\n    73\t            out.append(item)\n    74\t    return out\n    75\t\n    76\t\n    77\tdef _excerpt(value: object) -> str:\n    78\t    if value is None:\n    79\t        return \"\"\n    80\t    if isinstance(value, str):\n    81\t        text = value\n    82\t    else:\n    83\t        try:\n    84\t            text = json.dumps(value, ensure_ascii=False, sort_keys=True)\n    85\t        except Exception:\n    86\t            text = str(value)\n    87\t    text = re.sub(r\"(?i)(bearer\\s+)[A-Za-z0-9._~+/=-]{12,}\", r\"\\1[REDACTED]\", text)\n    88\t    return text[:MAX_EXCERPT]\n    89\t\n    90\t\n    91\tdef _input_text(event: dict) -> str:\n    92\t    tool_input = event.get(\"tool_input\") if isinstance(event.get(\"tool_input\"), dict) else {}\n    93\t    return \"\\n\".join(str(tool_input.get(key) or \"\") for key in (\n    94\t        \"prompt\", \"description\", \"command\", \"job_id\", \"id\",\n    95\t    ))\n    96\t\n    97\t\n    98\tdef _assignment_fields(text: str) -> tuple[str, str]:\n    99\t    assignment = re.search(r\"(?i)\\bXUNJI_ASSIGNMENT\\s*=\\s*(A-[A-Za-z0-9._-]+)\", text)\n   100\t    front = re.search(r\"(?i)\\bXUNJI_FRONT\\s*=\\s*(F-\\d+)\", text)\n   101\t    return (\n   102\t        assignment.group(1) if assignment else \"\",\n   103\t        front.group(1).upper() if front else \"\",\n   104\t    )\n   105\t\n   106\t\n   107\tdef _evidence_hash(text: str) -> str:\n   108\t    match = re.search(r\"(?i)\\bEVIDENCE_INDEX\\s*=\\s*([0-9a-f]{40,64})\\b\", text)\n   109\t    return match.group(1).lower() if match else \"\"\n   110\t\n   111\t\n   112\tdef _job_id(value: object) -> str:\n   113\t    if isinstance(value, dict):\n   114\t        for key in (\"id\", \"job_id\", \"jobId\", \"task_id\"):\n   115\t            raw = value.get(key)\n   116\t            if isinstance(raw, str) and re.fullmatch(r\"[A-Za-z0-9_.:-]{6,64}\", raw):\n   117\t                return raw\n   118\t        for child in value.values():\n   119\t            found = _job_id(child)\n   120\t            if found:\n   121\t                return found\n   122\t    if isinstance(value, list):\n   123\t        for child in value:\n   124\t            found = _job_id(child)\n   125\t            if found:\n   126\t                return found\n   127\t    text = _excerpt(value)\n   128\t    match = re.search(r\"(?i)\\b(?:job|task)?[_ -]?id\\s*[:=]\\s*([A-Za-z0-9_.:-]{6,64})\", text)\n   129\t    return match.group(1) if match else \"\"\n   130\t\n   131\t\n   132\tdef _job_ids(value: object) -> list[str]:\n   133\t    found: list[str] = []\n   134\t    if isinstance(value, dict):\n   135\t        direct = _job_id({key: value.get(key) for key in (\"id\", \"job_id\", \"jobId\", \"task_id\")})\n   136\t        if direct:\n   137\t            found.append(direct)\n   138\t        for child in value.values():\n   139\t            found.extend(_job_ids(child))\n   140\t    elif isinstance(value, list):\n   141\t        for child in value:\n   142\t            found.extend(_job_ids(child))\n   143\t    return list(dict.fromkeys(found))\n   144\t\n   145\t\n   146\tdef _run_job_ids(value: object, run_name: str) -> list[str]:\n   147\t    \"\"\"Extract IDs only from the smallest structured task objects naming this run.\"\"\"\n   148\t    found: list[str] = []\n   149\t    if isinstance(value, dict):\n   150\t        direct = \"\"\n"
+          },
+          {
+            "token": "runtime_receipts.lines-151-300.txt",
+            "path": "runtime_receipts.lines-151-300.txt",
+            "exists": true,
+            "size": 7259,
+            "sha1": "1ff9e84ff6bcaf584036e026ce2e44ec78b4845e",
+            "excerpt": "   151\t        for key in (\"id\", \"job_id\", \"jobId\", \"task_id\"):\n   152\t            raw = value.get(key)\n   153\t            if isinstance(raw, str) and re.fullmatch(r\"[A-Za-z0-9_.:-]{6,64}\", raw):\n   154\t                direct = raw\n   155\t                break\n   156\t        if direct and run_name and run_name.lower() in _excerpt(value).lower():\n   157\t            found.append(direct)\n   158\t        for child in value.values():\n   159\t            found.extend(_run_job_ids(child, run_name))\n   160\t    elif isinstance(value, list):\n   161\t        for child in value:\n   162\t            found.extend(_run_job_ids(child, run_name))\n   163\t    return list(dict.fromkeys(found))\n   164\t\n   165\t\n   166\tdef normalize_hook_event(run_dir: str | Path, event: dict) -> dict:\n   167\t    run = Path(run_dir).resolve()\n   168\t    hook = str(event.get(\"hook_event_name\") or \"\")\n   169\t    tool = str(event.get(\"tool_name\") or \"\")\n   170\t    input_text = _input_text(event)\n   171\t    assignment, front = _assignment_fields(input_text)\n   172\t    response = event.get(\"tool_response\")\n   173\t    record = {\n   174\t        \"schema\": SCHEMA,\n   175\t        \"ts\": time.time(),\n   176\t        \"run_dir\": str(run),\n   177\t        \"session_id\": str(event.get(\"session_id\") or \"\"),\n   178\t        \"transcript_path\": str(event.get(\"transcript_path\") or \"\"),\n   179\t        \"hook_event_name\": hook,\n   180\t        \"tool_name\": tool,\n   181\t        \"tool_use_id\": str(event.get(\"tool_use_id\") or \"\"),\n   182\t        \"success\": hook in {\"PostToolUse\", \"SubagentStart\", \"SubagentStop\"},\n   183\t        \"assignment\": assignment,\n   184\t        \"front\": front,\n   185\t        \"input_excerpt\": _excerpt(event.get(\"tool_input\") or {}),\n   186\t        \"input_sha256\": _hash(event.get(\"tool_input\") or {}),\n   187\t        \"response_sha256\": _hash(response or {}),\n   188\t        \"response_excerpt\": _excerpt(response),\n   189\t        \"agent_id\": str(event.get(\"agent_id\") or \"\"),\n   190\t        \"agent_type\": str(event.get(\"agent_type\") or \"\"),\n   191\t        \"job_id\": _job_id(response) or _job_id(event.get(\"tool_input\") or {}),\n   192\t        \"job_ids\": _job_ids(response) or _job_ids(event.get(\"tool_input\") or {}),\n   193\t        \"listed_run_job_ids\": _run_job_ids(response, run.name) if tool == \"CronList\" else [],\n   194\t        \"completion_review\": \"XUNJI_COMPLETION_REVIEW\" in input_text.upper(),\n   195\t        \"evidence_index_hash\": _evidence_hash(input_text),\n   196\t        \"run_mentioned\": run.name.lower() in input_text.lower(),\n   197\t    }\n   198\t    return record\n   199\t\n   200\t\n   201\tdef append_hook_event(run_dir: str | Path, event: dict) -> dict:\n   202\t    run = Path(run_dir).resolve()\n   203\t    record = normalize_hook_event(run, event)\n   204\t    with _locked(run):\n   205\t        events = load_events(run)\n   206\t        record[\"seq\"] = len(events) + 1\n   207\t        record[\"previous_hash\"] = str(events[-1].get(\"receipt_hash\") or \"\") if events else \"\"\n   208\t        unsigned = dict(record)\n   209\t        record[\"receipt_hash\"] = _hash(unsigned)\n   210\t        path = _event_path(run)\n   211\t        path.parent.mkdir(parents=True, exist_ok=True)\n   212\t        with path.open(\"a\", encoding=\"utf-8\") as handle:\n   213\t            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + \"\\n\")\n   214\t        try:\n   215\t            os.chmod(path, 0o600)\n   216\t        except OSError:\n   217\t            pass\n   218\t    return record\n   219\t\n   220\t\n   221\tdef validate_chain(run_dir: str | Path) -> tuple[list[dict], list[str]]:\n   222\t    events = load_events(run_dir)\n   223\t    errors: list[str] = []\n   224\t    previous = \"\"\n   225\t    for index, record in enumerate(events, 1):\n   226\t        claimed = str(record.get(\"receipt_hash\") or \"\")\n   227\t        unsigned = dict(record)\n   228\t        unsigned.pop(\"receipt_hash\", None)\n   229\t        if record.get(\"schema\") != SCHEMA:\n   230\t            errors.append(f\"event {index}: wrong schema\")\n   231\t        if int(record.get(\"seq\", 0) or 0) != index:\n   232\t            errors.append(f\"event {index}: non-contiguous seq\")\n   233\t        if str(record.get(\"previous_hash\") or \"\") != previous:\n   234\t            errors.append(f\"event {index}: previous_hash mismatch\")\n   235\t        if claimed != _hash(unsigned):\n   236\t            errors.append(f\"event {index}: receipt_hash mismatch\")\n   237\t        previous = claimed\n   238\t    return events, errors\n   239\t\n   240\t\n   241\tdef _transcript_has(record: dict) -> bool:\n   242\t    tool_use_id = str(record.get(\"tool_use_id\") or \"\")\n   243\t    transcript = Path(str(record.get(\"transcript_path\") or \"\"))\n   244\t    if not tool_use_id or not transcript.is_file():\n   245\t        return False\n   246\t    try:\n   247\t        return tool_use_id in transcript.read_text(encoding=\"utf-8\", errors=\"replace\")\n   248\t    except Exception:\n   249\t        return False\n   250\t\n   251\t\n   252\tdef valid_tool_events(\n   253\t    run_dir: str | Path,\n   254\t    tool_name: str | None = None,\n   255\t    *,\n   256\t    session_id: str = \"\",\n   257\t    since: float = 0.0,\n   258\t) -> list[dict]:\n   259\t    events, errors = validate_chain(run_dir)\n   260\t    if errors:\n   261\t        return []\n   262\t    return [\n   263\t        event for event in events\n   264\t        if event.get(\"success\") is True\n   265\t        and event.get(\"hook_event_name\") == \"PostToolUse\"\n   266\t        and (tool_name is None or event.get(\"tool_name\") == tool_name)\n   267\t        and (not session_id or str(event.get(\"session_id\") or \"\") == session_id)\n   268\t        and (not since or float(event.get(\"ts\") or 0.0) >= since)\n   269\t        and _transcript_has(event)\n   270\t    ]\n   271\t\n   272\t\n   273\tdef agent_fanout(run_dir: str | Path, *, session_id: str = \"\", since: float = 0.0) -> dict:\n   274\t    events = valid_tool_events(run_dir, \"Agent\", session_id=session_id, since=since)\n   275\t    assignments = sorted({str(event.get(\"assignment\")) for event in events if event.get(\"assignment\")})\n   276\t    fronts = sorted({str(event.get(\"front\")) for event in events if event.get(\"front\")})\n   277\t    return {\n   278\t        \"assignments\": assignments,\n   279\t        \"fronts\": fronts,\n   280\t        \"count\": len(assignments),\n   281\t        \"satisfied\": len(assignments) >= 2 and len(fronts) >= 2,\n   282\t    }\n   283\t\n   284\t\n   285\tdef agent_disposition(run_dir: str | Path, *, session_id: str = \"\", since: float = 0.0) -> dict:\n   286\t    \"\"\"Require every observed assignment to be explicitly merged or adjudicated.\"\"\"\n   287\t    run = Path(run_dir)\n   288\t    receipts = agent_fanout(run, session_id=session_id, since=since)\n   289\t    agent_events = valid_tool_events(run, \"Agent\", session_id=session_id, since=since)\n   290\t    latest_receipt_ts: dict[str, float] = {}\n   291\t    for event in agent_events:\n   292\t        assignment = str(event.get(\"assignment\") or \"\")\n   293\t        if assignment:\n  ",
+            "excerpt_truncated_chars": 355
+          },
+          {
+            "token": "runtime_receipts.lines-301-450.txt",
+            "path": "runtime_receipts.lines-301-450.txt",
+            "exists": true,
+            "size": 7912,
+            "sha1": "b2d73600c4ad704d0df9e3ddb7c7f22822d2eefa",
+            "excerpt": "   301\t    rows = {\n   302\t        str(item.get(\"agent\") or \"\"): item\n   303\t        for item in data.get(\"assignments\", []) if isinstance(item, dict)\n   304\t    } if isinstance(data, dict) and isinstance(data.get(\"assignments\"), list) else {}\n   305\t    canonical = \"\\n\".join(\n   306\t        path.read_text(encoding=\"utf-8\", errors=\"replace\")\n   307\t        for path in (run / \"evidence.md\", run / \"frontier.md\", run / \"decisions.md\")\n   308\t        if path.exists()\n   309\t    )\n   310\t    pending: list[str] = []\n   311\t    for assignment in receipts.get(\"assignments\", []):\n   312\t        row = rows.get(assignment, {})\n   313\t        status = str(row.get(\"status\") or \"\").strip().lower()\n   314\t        note = str(row.get(\"last_note\") or \"\").strip()\n   315\t        updated_raw = str(row.get(\"updated_at\") or row.get(\"finished_at\") or \"\")\n   316\t        try:\n   317\t            updated_at = datetime.fromisoformat(updated_raw.replace(\"Z\", \"+00:00\")).timestamp()\n   318\t        except Exception:\n   319\t            updated_at = 0.0\n   320\t        if updated_at < latest_receipt_ts.get(assignment, 0.0):\n   321\t            pending.append(f\"{assignment}: disposition 早于本轮 Agent 返回\")\n   322\t            continue\n   323\t        anchors = re.findall(r\"\\b[EDF]-\\d+\\b\", note, re.I)\n   324\t        anchors_exist = bool(anchors) and all(anchor.upper() in canonical.upper() for anchor in anchors)\n   325\t        if status == \"merged\":\n   326\t            if not re.search(r\"(?i)\\b(Evidence|Front|Decision|Refuted|Barrier)\\s*[:：]\", note) or not anchors_exist:\n   327\t                pending.append(f\"{assignment}: merged 缺 canonical E/F/D 处置锚点\")\n   328\t        elif status in {\"blocked\", \"failed\", \"abandoned\"}:\n   329\t            if not re.search(r\"(?i)\\bReason\\s*[:：]\", note) or not re.search(r\"\\bF-\\d+\\b\", note, re.I) or not anchors_exist:\n   330\t                pending.append(f\"{assignment}: {status} 缺 Reason + canonical Front 锚点\")\n   331\t        else:\n   332\t            pending.append(f\"{assignment}: status={status or '(missing)'} 尚未 merge/adjudicate\")\n   333\t    return {\n   334\t        **receipts,\n   335\t        \"pending\": pending,\n   336\t        \"disposition_satisfied\": bool(receipts.get(\"satisfied\")) and not pending,\n   337\t    }\n   338\t\n   339\t\n   340\tdef completion_review_valid(run_dir: str | Path, evidence_index_hash: str) -> bool:\n   341\t    for event in reversed(valid_tool_events(run_dir, \"Agent\")):\n   342\t        if not event.get(\"completion_review\"):\n   343\t            continue\n   344\t        if str(event.get(\"evidence_index_hash\") or \"\") != evidence_index_hash:\n   345\t            continue\n   346\t        if re.search(r\"(?i)\\b(PASS|WARN|CONFIRMED)\\b\", str(event.get(\"response_excerpt\") or \"\")):\n   347\t            return True\n   348\t    return False\n   349\t\n   350\t\n   351\tdef review_invocation_valid(run_dir: str | Path, generated_at: str) -> bool:\n   352\t    \"\"\"Require the review receipt to originate from a real foreground Bash tool call.\"\"\"\n   353\t    try:\n   354\t        parsed = datetime.fromisoformat(generated_at.replace(\"Z\", \"+00:00\"))\n   355\t        if parsed.tzinfo is None:\n   356\t            parsed = parsed.replace(tzinfo=timezone.utc)\n   357\t        generated_ts = parsed.timestamp()\n   358\t    except Exception:\n   359\t        generated_ts = 0.0\n   360\t    run_name = Path(run_dir).name.lower()\n   361\t    for event in reversed(valid_tool_events(run_dir, \"Bash\")):\n   362\t        command = str(event.get(\"input_excerpt\") or \"\")\n   363\t        if \"peer_review.py\" not in command or \"--into-run\" not in command:\n   364\t            continue\n   365\t        if run_name not in command.lower():\n   366\t            continue\n   367\t        event_ts = float(event.get(\"ts\") or 0)\n   368\t        if generated_ts and generated_ts - 5 <= event_ts <= generated_ts + 120:\n   369\t            return True\n   370\t    return False\n   371\t\n   372\t\n   373\tdef cron_quiescent(\n   374\t    run_dir: str | Path,\n   375\t    *,\n   376\t    session_id: str = \"\",\n   377\t    since: float = 0.0,\n   378\t) -> tuple[bool, str]:\n   379\t    events = valid_tool_events(run_dir, session_id=session_id, since=since)\n   380\t    cron = [event for event in events if str(event.get(\"tool_name\") or \"\").startswith(\"Cron\")]\n   381\t    listed = [event for event in cron if event.get(\"tool_name\") == \"CronList\"]\n   382\t    if not listed:\n   383\t        return False, \"missing successful CronList receipt\"\n   384\t    latest_list = listed[-1]\n   385\t    last_mutation = max(\n   386\t        (int(event.get(\"seq\", 0) or 0) for event in cron if event.get(\"tool_name\") in {\"CronCreate\", \"CronDelete\"}),\n   387\t        default=0,\n   388\t    )\n   389\t    if int(latest_list.get(\"seq\", 0) or 0) < last_mutation:\n   390\t        return False, \"CronList receipt predates latest CronCreate/CronDelete\"\n   391\t\n   392\t    active: dict[str, dict] = {}\n   393\t    for event in cron:\n   394\t        tool = event.get(\"tool_name\")\n   395\t        job = str(event.get(\"job_id\") or \"\")\n   396\t        if tool == \"CronCreate\" and event.get(\"run_mentioned\") and job:\n   397\t            active[job] = event\n   398\t        elif tool == \"CronDelete\" and job:\n   399\t            active.pop(job, None)\n   400\t    response = str(latest_list.get(\"response_excerpt\") or \"\").lower()\n   401\t    run_name = Path(run_dir).name.lower()\n   402\t    if active:\n   403\t        return False, \"active run Cron job receipt(s): \" + \", \".join(sorted(active))\n   404\t    listed_run_jobs = [str(job) for job in latest_list.get(\"listed_run_job_ids\", []) if job]\n   405\t    if listed_run_jobs:\n   406\t        return False, \"latest CronList contains active run job(s): \" + \", \".join(listed_run_jobs)\n   407\t    if run_name and run_name in response:\n   408\t        return False, \"latest CronList still mentions the active run\"\n   409\t    return True, \"latest successful CronList proves no active run job\"\n   410\t\n   411\t\n   412\tdef cron_delete_allowed(\n   413\t    run_dir: str | Path,\n   414\t    job_id: str,\n   415\t    *,\n   416\t    session_id: str = \"\",\n   417\t    since: float = 0.0,\n   418\t) -> tuple[bool, str]:\n   419\t    \"\"\"Bind CronDelete to a run job observed by a current CronList/Create receipt.\"\"\"\n   420\t    if not job_id:\n   421\t        return False, \"CronDelete has no parseable job id\"\n   422\t    events = valid_tool_events(run_dir, session_id=session_id, since=since)\n   423\t    cron = [event for event in events if str(event.get(\"tool_name\") or \"\").startswith(\"Cron\")]\n   424\t    listed = [event for event in cron if event.get(\"tool_name\") == \"CronList\"]\n   425\t    if not listed:\n   426\t        return False, \"missing successful current-turn CronList receipt\"\n   427\t    latest = listed[-1]\n   428\t    observed = {str(item) for item in latest.get(\"listed_run_job_ids\", []) if item}\n   429\t    response = str(latest.get(\"response_excerpt\") or \"\")\n   430\t    run_name = Path(run_dir).name.lower()\n   431\t    if run_name in response.lower() and jo",
+            "excerpt_truncated_chars": 972
+          },
+          {
+            "token": "runtime_receipts.lines-451-end.txt",
+            "path": "runtime_receipts.lines-451-end.txt",
+            "exists": true,
+            "size": 5905,
+            "sha1": "624e3b8a926c7f70c690dd5a0d57ebbc37cfc774",
+            "excerpt": "   451\t        \"tool-list-active\", \"tool-delete-1\", \"tool-list-2\", \"tool-review-1\",\n   452\t    )\n   453\t    _write_transcript(transcript, *ids)\n   454\t\n   455\t    def event(tool: str, tool_id: str, tool_input: dict, response: object) -> dict:\n   456\t        return {\n   457\t            \"hook_event_name\": \"PostToolUse\", \"session_id\": \"s1\",\n   458\t            \"transcript_path\": str(transcript), \"tool_name\": tool,\n   459\t            \"tool_use_id\": tool_id, \"tool_input\": tool_input,\n   460\t            \"tool_response\": response,\n   461\t        }\n   462\t\n   463\t    append_hook_event(run, event(\"Agent\", ids[0], {\n   464\t        \"prompt\": \"XUNJI_ASSIGNMENT=A-web-001 XUNJI_FRONT=F-001\",\n   465\t    }, {\"result\": \"candidate done\"}))\n   466\t    append_hook_event(run, event(\"Agent\", ids[1], {\n   467\t        \"prompt\": \"XUNJI_ASSIGNMENT=A-auth-001 XUNJI_FRONT=F-002\",\n   468\t    }, {\"result\": \"candidate done\"}))\n   469\t    (run / \"frontier.md\").write_text(\"# Frontier\\n## Open Fronts\\n### F-001\\n- Status: open\\n### F-002\\n- Status: open\\n\",\n   470\t                                      encoding=\"utf-8\")\n   471\t    (run / \"evidence.md\").write_text(\"# Evidence\\n## E-001\\n\", encoding=\"utf-8\")\n   472\t    (run / \"state\" / \"assignments.json\").write_text(json.dumps({\"assignments\": [\n   473\t        {\"agent\": \"A-web-001\", \"front\": \"F-001\", \"status\": \"merged\",\n   474\t         \"updated_at\": datetime.now(timezone.utc).isoformat(),\n   475\t         \"last_note\": \"Evidence: E-001 merged for Front: F-001\"},\n   476\t        {\"agent\": \"A-auth-001\", \"front\": \"F-002\", \"status\": \"done\",\n   477\t         \"updated_at\": datetime.now(timezone.utc).isoformat(),\n   478\t         \"last_note\": \"candidate returned\"},\n   479\t    ]}), encoding=\"utf-8\")\n   480\t    disposition_before = agent_disposition(run)\n   481\t    data = json.loads((run / \"state\" / \"assignments.json\").read_text(encoding=\"utf-8\"))\n   482\t    data[\"assignments\"][1].update({\n   483\t        \"status\": \"blocked\", \"last_note\": \"Reason: no credential; Front: F-002 remains open\",\n   484\t        \"updated_at\": datetime.now(timezone.utc).isoformat(),\n   485\t    })\n   486\t    (run / \"state\" / \"assignments.json\").write_text(json.dumps(data), encoding=\"utf-8\")\n   487\t    disposition_after = agent_disposition(run)\n   488\t    append_hook_event(run, event(\"CronList\", ids[2], {}, {\"tasks\": []}))\n   489\t    before, _ = cron_quiescent(run)\n   490\t    append_hook_event(run, event(\"CronCreate\", ids[3], {\"prompt\": f\"/loop {run.name}\"}, {\"id\": \"deadbeef\"}))\n   491\t    active, _ = cron_quiescent(run)\n   492\t    append_hook_event(run, event(\"CronList\", ids[4], {}, {\n   493\t        \"tasks\": [{\"id\": \"deadbeef\", \"prompt\": f\"/loop {run.name}\"}],\n   494\t    }))\n   495\t    delete_ok, _ = cron_delete_allowed(run, \"deadbeef\")\n   496\t    wrong_delete, _ = cron_delete_allowed(run, \"otherjob\")\n   497\t    append_hook_event(run, event(\"CronDelete\", ids[5], {\"id\": \"deadbeef\"}, {\"deleted\": True}))\n   498\t    stale, _ = cron_quiescent(run)\n   499\t    append_hook_event(run, event(\"CronList\", ids[6], {}, {\"tasks\": []}))\n   500\t    after, _ = cron_quiescent(run)\n   501\t    current_turn, _ = cron_quiescent(run, session_id=\"different-session\", since=time.time() - 30)\n   502\t    review_generated = datetime.now(timezone.utc).isoformat()\n   503\t    append_hook_event(run, event(\"Bash\", ids[7], {\n   504\t        \"command\": f\"python3 tools/peer_review.py {run} --into-run\",\n   505\t    }, {\"stdout\": \"## Verdict: PASS\"}))\n   506\t    review_ok = review_invocation_valid(run, review_generated)\n   507\t    stale_review = review_invocation_valid(run, \"2000-01-01T00:00:00+00:00\")\n   508\t    events, chain_errors = validate_chain(run)\n   509\t    checks = [\n   510\t        (\"hash chain validates\", not chain_errors and len(events) == 8),\n   511\t        (\"two real Agent receipts satisfy fanout\", agent_fanout(run)[\"satisfied\"]),\n   512\t        (\"done Agent remains unmerged\", not disposition_before[\"disposition_satisfied\"]),\n   513\t        (\"anchored merged/blocked dispositions satisfy\", disposition_after[\"disposition_satisfied\"]),\n   514\t        (\"CronList with no jobs is quiescent\", before),\n   515\t        (\"created run job is active\", not active),\n   516\t        (\"CronDelete binds to listed run job\", delete_ok),\n   517\t        (\"CronDelete rejects unlisted job\", not wrong_delete),\n   518\t        (\"post-delete CronList is still required\", not stale),\n   519\t        (\"post-delete CronList proves quiescence\", after),\n   520\t        (\"old-session CronList cannot satisfy current turn\", not current_turn),\n   521\t        (\"foreground review receipt is time-bound\", review_ok),\n   522\t        (\"unrelated later invocation cannot validate stale review\", not stale_review),\n   523\t    ]\n   524\t    bad = [name for name, ok in checks if not ok]\n   525\t    for name, ok in checks:\n   526\t        print((\"ok   \" if ok else \"FAIL \") + name)\n   527\t    print(\"runtime_receipts selftest \" + (\"passed\" if not bad else f\"FAILED ({len(bad)})\"))\n   528\t    return 0 if not bad else 1\n   529\t\n   530\t\n   531\tdef main() -> int:\n   532\t    parser = argparse.ArgumentParser(description=\"validate Xunji hook-derived runtime receipts\")\n   533\t    parser.add_argument(\"run_dir\", nargs=\"?\")\n   534\t    parser.add_argument(\"--selftest\", action=\"store_true\")\n   535\t    args = parser.parse_args()\n   536\t    if args.selftest:\n   537\t        return _selftest()\n   538\t    if not args.run_dir:\n   539\t        parser.error(\"run_dir is required\")\n   540\t    _, errors = validate_chain(args.run_dir)\n   541\t    fanout = agent_fanout(args.run_dir)\n   542\t    cron_ok, cron_note = cron_quiescent(args.run_dir)\n   543\t    print(json.dumps({\"errors\": errors, \"fanout\": fanout, \"cron_quiescent\": cron_ok,\n   544\t                      \"cron_note\": cron_note}, ensure_ascii=False, indent=2))\n   545\t    return 1 if errors else 0\n   546\t\n   547\t\n   548\tif __name__ == \"__main__\":\n   549\t    raise SystemExit(main())\n"
+          },
+          {
+            "token": "workers.diff",
+            "path": "workers.diff",
+            "exists": true,
+            "size": 4906,
+            "sha1": "8fb007a4802dc87a57a9642bc5190773147c534f",
+            "diff_summary": {
+              "changed_files_count": 2,
+              "changed_files": [
+                "tools/anti_drift.py",
+                "tools/workers.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 8,
+              "hunks": [
+                {
+                  "file": "tools/anti_drift.py",
+                  "header": "@@ -311,48 +311,16 @@ def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:"
+                },
+                {
+                  "file": "tools/anti_drift.py",
+                  "header": "@@ -654,3 +622,3 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -39,3 +39,2 @@ from __future__ import annotations"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -49,2 +48,3 @@ import tempfile"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -77,2 +77,6 @@ except Exception:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -369,2 +373,17 @@ def _front_sections(text: str) -> list[tuple[str, str]]:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -865,3 +884,3 @@ def agent_status_rows(run_dir: Path) -> list[dict]:"
+                },
+                {
+                  "file": "tools/workers.py",
+                  "header": "@@ -872,3 +891,3 @@ def _parse_iso(ts: str | None) -> float | None:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/anti_drift.py b/tools/anti_drift.py\nindex 2cab3e1..4643322 100644\n--- a/tools/anti_drift.py\n+++ b/tools/anti_drift.py\n@@ -311,48 +311,16 @@ def _check_agent_board_needed(run_dir: Path) -> tuple[bool, int, dict]:\n     (no SharedBarrierGroup). Returns (should_remind, open_count, barrier_groups).\"\"\"\n-    frontier = run_dir / \"frontier.md\"\n-    if not frontier.exists():\n-        return False, 0, {}\n     try:\n-        text = frontier.read_text(encoding=\"utf-8\", errors=\"replace\")\n+        import run_model\n+        data = run_model.summary(run_dir)\n     except Exception:\n         return False, 0, {}\n-\n-    import re as _re_ab\n-\n-    # Find all ### F-xxx blocks, extract Status + Barrier class\n-    open_fronts: list[str] = []\n-    barrier_by_front: dict[str, str] = {}\n-    for m in _re_ab.finditer(r\"(?ms)^###[ \\t]+(F-\\d+).*?(?=^###[ \\t]+|\\Z)\", text):\n-        block = m.group(0)\n-        fid = m.group(1)\n-        st_match = _re_ab.search(rf\"(?im)^\\s*-?\\s*Status\\s*[:：]\\s*([^\\n]+)\", block)\n-        status = st_match.group(1).strip().lower() if st_match else \"\"\n-        # Only count genuinely open fronts — exclude probing, blocked_type_b, deferred,\n-        # and closed. Type B candidates and low-value fronts (e.g. user enumeration) should\n-        # not force unnecessary agent spawning. (retrospective puffts P4)\n-        if status != \"open\":\n-            continue\n-        bc_match = _re_ab.search(rf\"(?im)^\\s*-?\\s*Barrier class\\s*[:：]\\s*([^\\n]+)\", block)\n-        barrier = bc_match.group(1).strip().lower() if bc_match else \"unknown\"\n-        open_fronts.append(fid)\n-        barrier_by_front[fid] = barrier\n-\n-    open_count = len(open_fronts)\n-    if open_count < 4:\n-        return False, open_count, {}\n-\n-    # Build barrier groups — exclude trivial barriers from grouping\n-    trivial = {\"\", \"none\", \"unknown\", \"n/a\"}\n     barrier_groups: dict[str, list[str]] = {}\n-    for fid in open_fronts:\n-        bc = barrier_by_front[fid]\n-        if bc in trivial:\n+    for front in data.get(\"fronts\", []):\n+        if front.get(\"id\") not in data.get(\"open\", []):\n             continue\n-        barrier_groups.setdefault(bc, []).append(fid)\n-\n-    # SharedBarrierGroup exists if any barrier class has >= 2 fronts\n-    has_shared = any(len(fronts) >= 2 for fronts in barrier_groups.values())\n-    # Agent Board needed when barriers are diverse (no shared group)\n-    should_remind = not has_shared\n-    return should_remind, open_count, barrier_groups\n+        barrier = str(front.get(\"barrier\") or \"unknown\")\n+        if barrier in {\"\", \"none\", \"unknown\", \"n/a\", \"-\"}:\n+            continue\n+        barrier_groups.setdefault(barrier, []).append(str(front.get(\"id\")))\n+    return bool(data.get(\"fanout_required\")), int(data.get(\"open_count\", 0)), barrier_groups\n \n@@ -654,3 +622,3 @@ def _selftest() -> int:\n     needed_lt4, n_lt4, _ = _check_agent_board_needed(ab_dir)\n-    checks.append((\"agent board: <4 open fronts -> not needed\", not needed_lt4 and n_lt4 == 2))\n+    checks.append((\"agent board: <4 active fronts -> not needed\", not needed_lt4 and n_lt4 == 3))\n \ndiff --git a/tools/workers.py b/tools/workers.py\nindex f159c4b..5c1d976 100644\n--- a/tools/workers.py\n+++ b/tools/workers.py\n@@ -39,3 +39,2 @@ from __future__ import annotations\n import argparse\n-import calendar\n import contextlib\n@@ -49,2 +48,3 @@ import tempfile\n import time\n+from datetime import datetime, timezone\n from pathlib import Path\n@@ -77,2 +77,6 @@ except Exception:\n     _context_pack = None\n+try:\n+    import run_model as _run_model\n+except Exception:\n+    _run_model = None\n \n@@ -369,2 +373,17 @@ def _front_sections(text: str) -> list[tuple[str, str]]:\n def parse_frontiers(run_dir: Path) -> list[dict]:\n+    if _run_model is not None:\n+        rows: list[dict] = []\n+        for front in _run_model.parse_fronts(run_dir):\n+            rows.append({\n+                \"id\": front.id,\n+                \"section\": front.section,\n+                \"status\": front.status,\n+                \"barrier\": front.barrier,\n+                \"depth\": front.depth,\n+                \"title\": front.title,\n+                \"same_barrier_failures\": _int_field(front.text, \"Same barrier failures\"),\n+                \"text\": front.text,\n+                \"schema_errors\": list(front.schema_errors),\n+            })\n+        return rows\n     path = run_dir / \"frontier.md\"\n@@ -865,3 +884,3 @@ def agent_status_rows(run_dir: Path) -> list[dict]:\n def _now_iso() -> str:\n-    return time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime())\n+    return datetime.now(timezone.utc).isoformat(timespec=\"milliseconds\").replace(\"+00:00\", \"Z\")\n \n@@ -872,3 +891,3 @@ def _parse_iso(ts: str | None) -> float | None:\n     try:\n-        return float(calendar.timegm(time.strptime(ts.strip(), \"%Y-%m-%dT%H:%M:%SZ\")))\n+        return datetime.fromisoformat(ts.strip().replace(\"Z\", \"+00:00\")).timestamp()\n     except Exception:\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003 - Review and completion provenance",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "E-005"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "check_run.early-01.diff",
+            "path": "check_run.early-01.diff",
+            "exists": true,
+            "size": 5390,
+            "sha1": "bcfea1b5734c7b940e77fc92a13eaf4e966fb7c0",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/check_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 6,
+              "hunks": [
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -36,0 +37,8 @@ except Exception:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -184,0 +193,4 @@ def current_evidence_index_hash(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -380,0 +393,10 @@ def check_certainty_scale(run_dir: Path) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -461,0 +484,43 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -762,0 +828,8 @@ def check_completion_cron_record(run_dir: Path) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -943,0 +1017,24 @@ def check_agent_lifecycle(run_dir: Path, *, closure: bool = False) -> tuple[list"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/check_run.py b/tools/check_run.py\nindex 58f2ecb..3d13d0b 100644\n--- a/tools/check_run.py\n+++ b/tools/check_run.py\n@@ -36,0 +37,8 @@ except Exception:\n+try:\n+    import run_model as _run_model\n+except Exception:\n+    _run_model = None\n+try:\n+    import runtime_receipts as _runtime_receipts\n+except Exception:\n+    _runtime_receipts = None\n@@ -184,0 +193,4 @@ def current_evidence_index_hash(run_dir: Path) -> str:\n+    for entry in entries:\n+        for artifact in entry.get(\"artifacts\", []):\n+            for key in (\"excerpt\", \"excerpt_truncated_chars\", \"diff_summary\"):\n+                artifact.pop(key, None)\n@@ -380,0 +393,10 @@ def check_certainty_scale(run_dir: Path) -> list[str]:\n+def check_front_schema(run_dir: Path) -> list[str]:\n+    if _run_model is None:\n+        return [\"frontier 状态模型不可用：tools/run_model.py import 失败。\"]\n+    try:\n+        errors = _run_model.summary(run_dir).get(\"schema_errors\", [])\n+    except Exception as exc:\n+        return [f\"frontier 状态模型解析失败: {exc}\"]\n+    return [f\"frontier canonical schema: {error}\" for error in errors]\n+\n+\n@@ -461,0 +484,43 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:\n+def check_chain_maturity(run_dir: Path) -> list[str]:\n+    \"\"\"A confirmed composed chain cannot be stronger than its weakest E-id.\"\"\"\n+    path = run_dir / \"chains.md\"\n+    if not path.exists():\n+        return []\n+    text = path.read_text(encoding=\"utf-8\", errors=\"replace\")\n+    records = {record[\"id\"]: record for record in parse_evidence(run_dir)}\n+    errors: list[str] = []\n+    for match in re.finditer(r\"(?ms)^##\\s+(C-\\d+)\\b(.*?)(?=^##\\s+C-\\d+\\b|\\Z)\", text):\n+        cid, block = match.group(1), match.group(2)\n+        status = _block_field(block, \"Status\").lower()\n+        if \"confirmed\" not in status:\n+            continue\n+        eids = sorted(set(re.findall(r\"\\bE-\\d+[a-z]*\\b\", block)))\n+        if not eids:\n+            errors.append(f\"组合链硬门: {cid} 标为 confirmed 但 Hops 没有 E-id。\")\n+            continue\n+        invalid: list[str] = []\n+        certs: list[float] = []\n+        for eid in eids:\n+            record = records.get(eid)\n+            if not record:\n+                invalid.append(f\"{eid}=missing\")\n+                continue\n+            values = record.get(\"certainties\") or []\n+            cert = max(values) if values else 0.0\n+            certs.append(cert)\n+            if (record.get(\"maturity\") != \"finding\" or not record.get(\"confirmed\")\n+                    or record.get(\"superseded\")):\n+                invalid.append(f\"{eid}={record.get('maturity')}/{cert:g}\")\n+        if invalid:\n+            errors.append(\n+                f\"组合链硬门: {cid} 仍写 confirmed，但弱跳未达 finding/0.8: \"\n+                + \", \".join(invalid) + \"。证据降级必须立即使整条链变 suspected。\")\n+        weakest_raw = _block_field(block, \"Weakest hop certainty\")\n+        weakest_match = re.search(r\"[01](?:\\.\\d+)?\", weakest_raw)\n+        if certs and (not weakest_match or abs(float(weakest_match.group(0)) - min(certs)) > 1e-9):\n+            errors.append(\n+                f\"组合链硬门: {cid} Weakest hop certainty 必须等于当前 E-id 最低 certainty \"\n+                f\"({min(certs):g})，不能手填更高值。\")\n+    return errors\n+\n+\n@@ -762,0 +828,8 @@ def check_completion_cron_record(run_dir: Path) -> list[str]:\n+    if _runtime_receipts is None:\n+        return [\n+            \"收口硬门(loop cron): runtime_receipts 不可用，无法验证真实 CronList/CronDelete。\"]\n+    cron_ok, cron_note = _runtime_receipts.cron_quiescent(run_dir)\n+    if not cron_ok:\n+        return [\n+            \"收口硬门(loop cron receipt): 不能用 journal 自述证明定时任务已停止。\"\n+            \"必须执行 CronList；如仍有本 run job，先 CronDelete，再次 CronList。\" + cron_note]\n@@ -943,0 +1017,24 @@ def check_agent_lifecycle(run_dir: Path, *, closure: bool = False) -> tuple[list\n+    if _runtime_receipts is not None:\n+        try:\n+            planned = [\n+                str(item.get(\"agent\") or \"\")\n+                for item in _workers.load_assignments(run_dir).get(\"assignments\", [])\n+                if isinstance(item, dict) and str(item.get(\"agent\") or \"\")\n+            ]\n+            real = set(_runtime_receipts.agent_fanout(run_dir).get(\"assignments\", []))\n+            missing = sorted(set(planned) - real)\n+            if missing:\n+                msg = (\n+                    \"Agent 运行真实性: assignment 缺 transcript-backed Agent PostToolUse 回执: \"\n+                    + \", \".join(missing)\n+                    + \"。手写 heartbeat/status/finished_at 不算真实运行。\")\n+                (errors if closure else warns).append(msg)\n+            disposition = _runtime_receipts.agent_disposition(run_dir)\n+            if disposition.get(\"pending\"):\n+                msg = (\n+                    \"Agent 结果落实: \" + \"; \".join(disposition.get(\"pending\", [])[:8])\n+                    + \"。每个真实 Agent 返回后必须 merge/adjudicate；done 或旧处置不能替代本次整合。\")\n+                (errors if closure else warns).append(msg)\n+        except Exception:\n+            if closure:\n+                errors.append(\"Agent 运行真实性: 无法验证 runtime receipt，收口保持阻断。\")\n"
+          },
+          {
+            "token": "check_run.early-02.diff",
+            "path": "check_run.early-02.diff",
+            "exists": true,
+            "size": 7126,
+            "sha1": "b05ab0df2fb33c08242678583956a987d51b54db",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/check_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 5,
+              "hunks": [
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1314,38 +1411,50 @@ _INDEPENDENT_REVIEW_HEADING_RE = re.compile("
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1354,2 +1463,2 @@ def has_completed_independent_review(review_text: str) -> bool:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1367 +1476,5 @@ def has_codex_completion_review(decisions_text: str) -> bool:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1375 +1488 @@ def check_codex_completion_review(run_dir: Path) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1396,11 +1509,3 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/check_run.py b/tools/check_run.py\nindex 58f2ecb..3d13d0b 100644\n--- a/tools/check_run.py\n+++ b/tools/check_run.py\n@@ -1314,38 +1411,50 @@ _INDEPENDENT_REVIEW_HEADING_RE = re.compile(\n-def has_completed_independent_review(review_text: str) -> bool:\n-    \"\"\"Reject template/prose mentions while accepting structured or substantive reviews.\"\"\"\n-    matches = list(_INDEPENDENT_REVIEW_HEADING_RE.finditer(review_text or \"\"))\n-    for match in matches:\n-        heading = match.group(0)\n-        if re.search(r\"\\b(?:pending|status|template|待复审|待填写)\\b\", heading, re.I):\n-            continue\n-        tail = review_text[match.end():]\n-        h2 = list(re.finditer(r\"(?m)^##\\s+[^\\n]+$\", tail))\n-        end = h2[0].start() if h2 else len(tail)\n-        # peer_review.py writes `## Verdict:` immediately after the Independent\n-        # Review preface. Include that one generated section, but stop before any\n-        # later H2 so a filled self-review cannot make an untouched template pass.\n-        if h2 and re.match(r\"##\\s+Verdict\\s*[:：]\", h2[0].group(0), re.I):\n-            end = h2[1].start() if len(h2) > 1 else len(tail)\n-        block = heading + tail[:end]\n-        clean = re.sub(r\"<!--.*?-->|<[^>]*>\", \"\", block, flags=re.S)\n-        verdict_match = re.search(\n-            r\"(?im)^\\s*(?:#{1,6}\\s*)?(?:[-*]\\s*)?Verdict\\s*[:：]\\s*\"\n-            r\"(PASS|WARN|BLOCKER|PASSED|CONFIRMED)\\b\",\n-            clean,\n-        )\n-        reviewer = _block_field(clean, \"Reviewer\")\n-        backend = _block_field(clean, \"Backend\")\n-        backend_meta = re.search(r\"(?im)^_backend\\s*[:：]\\s*([^_\\n]+)_\", clean)\n-        reviewer_placeholder = bool(re.search(r\"codex\\s*/\\s*arkcli|manual-driver\\)\", reviewer, re.I))\n-        backend_placeholder = bool(re.search(r\"codex\\s*/\\s*arkcli|manual-driver\\)\", backend, re.I))\n-        identity_ok = (\n-            (not _blankish_field(reviewer) and not reviewer_placeholder)\n-            or (not _blankish_field(backend) and not backend_placeholder)\n-            or (backend_meta is not None and (\n-                \"heterogeneous peer_review\" in heading.lower()\n-                or \"same-family peer_review fallback\" in heading.lower()\n-            ))\n-        )\n-        if verdict_match and identity_ok:\n-            return True\n-    return False\n+def _review_receipt_ids(review_text: str) -> list[str]:\n+    return re.findall(r\"(?im)^\\s*-\\s*ReviewReceipt\\s*[:：]\\s*([0-9a-f]{64})\\s*$\", review_text or \"\")\n+\n+\n+def validate_independent_review_receipt(run_dir: Path, review_text: str) -> tuple[bool, str]:\n+    \"\"\"Validate tool provenance, frozen evidence, and content-addressed receipt.\"\"\"\n+    receipt_ids = _review_receipt_ids(review_text)\n+    if not receipt_ids:\n+        return False, \"review.md has no ReviewReceipt generated by peer_review.py\"\n+    receipt_id = receipt_ids[-1]\n+    path = run_dir / \"review\" / \"receipts\" / f\"{receipt_id}.json\"\n+    try:\n+        record = json.loads(path.read_text(encoding=\"utf-8\", errors=\"replace\"))\n+    except Exception:\n+        return False, f\"missing/corrupt review receipt {receipt_id}\"\n+    claimed = str(record.pop(\"receipt_id\", \"\"))\n+    actual = hashlib.sha256(json.dumps(\n+        record, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"),\n+    ).encode(\"utf-8\")).hexdigest()\n+    if claimed != receipt_id or actual != receipt_id:\n+        return False, \"review receipt content hash mismatch\"\n+    if record.get(\"schema\") != \"xunji.peer_review_receipt.v1\":\n+        return False, \"review receipt schema mismatch\"\n+    result = record.get(\"result\") if isinstance(record.get(\"result\"), dict) else {}\n+    if str(result.get(\"verdict\") or \"\") not in {\"PASS\", \"WARN\", \"BLOCKER\", \"CONFIRMED\", \"PASSED\"}:\n+        return False, \"review receipt has no completed verdict\"\n+    backend = str(result.get(\"backend_used\") or \"\")\n+    if _blankish_field(backend) or backend.lower() in {\"operator\", \"manual\", \"n/a\"}:\n+        return False, \"review receipt has no independent backend\"\n+    current_hash = current_evidence_index_hash(run_dir)\n+    if str(result.get(\"evidence_index_hash\") or \"\") != current_hash:\n+        return False, \"review receipt evidence_index hash is stale\"\n+    bundle_path = run_dir / \"review\" / \"review_bundle.json\"\n+    try:\n+        bundle = json.loads(bundle_path.read_text(encoding=\"utf-8\", errors=\"replace\"))\n+    except Exception:\n+        return False, \"review bundle missing/corrupt\"\n+    if str(result.get(\"bundle_hash\") or \"\") != str(bundle.get(\"sha1\") or \"\"):\n+        return False, \"review receipt bundle hash mismatch\"\n+    if _runtime_receipts is None or not _runtime_receipts.review_invocation_valid(\n+        run_dir, str(record.get(\"generated_at\") or \"\")):\n+        return False, \"no transcript-backed foreground peer_review.py --into-run invocation\"\n+    return True, \"\"\n+\n+\n+def has_completed_independent_review(review_text: str, run_dir: Path | None = None) -> bool:\n+    \"\"\"Only a current hook-backed peer-review receipt satisfies the gate.\"\"\"\n+    if run_dir is None:\n+        return False\n+    return validate_independent_review_receipt(run_dir, review_text)[0]\n@@ -1354,2 +1463,2 @@ def has_completed_independent_review(review_text: str) -> bool:\n-def has_codex_completion_review(decisions_text: str) -> bool:\n-    \"\"\"Require a structured completion-review result, not a prose keyword mention.\"\"\"\n+def has_codex_completion_review(decisions_text: str, run_dir: Path | None = None) -> bool:\n+    \"\"\"Require structured prose plus a real current Agent tool review receipt.\"\"\"\n@@ -1367 +1476,5 @@ def has_codex_completion_review(decisions_text: str) -> bool:\n-    return bool(reviewer and verdict and len(re.sub(r\"\\s+\", \"\", block)) >= 80)\n+    structured = bool(reviewer and verdict and len(re.sub(r\"\\s+\", \"\", block)) >= 80)\n+    if not structured or run_dir is None or _runtime_receipts is None:\n+        return False\n+    return _runtime_receipts.completion_review_valid(\n+        run_dir, current_evidence_index_hash(run_dir))\n@@ -1375 +1488 @@ def check_codex_completion_review(run_dir: Path) -> list[str]:\n-    if has_codex_completion_review(text):\n+    if has_codex_completion_review(text, run_dir):\n@@ -1396,11 +1509,3 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:\n-    has_independent_review = has_completed_independent_review(review_text)\n-    evidence_path = run_dir / \"evidence.md\"\n-    review_stale = False\n-    if has_independent_review and evidence_path.exists() and review_path.exists():\n-        try:\n-            review_stale = evidence_path.stat().st_mtime > review_path.stat().st_mtime\n-        except OSError:\n-            review_stale = False\n-    has_fresh_independent_review = has_independent_review and not review_stale\n-    review_gap = (\"without fresh independent review (evidence.md newer than review.md)\"\n-                  if review_stale else \"without independent review\")\n+    has_independent_re",
+            "excerpt_truncated_chars": 202
+          },
+          {
+            "token": "check_run.early-03.diff",
+            "path": "check_run.early-03.diff",
+            "exists": true,
+            "size": 2338,
+            "sha1": "a393996dcd0e0d73e0dac42c30018ec4271d445f",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/check_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 6,
+              "hunks": [
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1492,2 +1597,6 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1496 +1605 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1498 +1607,13 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1500 +1621 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2272 +2393 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2333,0 +2455 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/check_run.py b/tools/check_run.py\nindex 58f2ecb..3d13d0b 100644\n--- a/tools/check_run.py\n+++ b/tools/check_run.py\n@@ -1492,2 +1597,6 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:\n-    for hm in re.finditer(r\"(?im)^\\s*-\\s*EvidenceIndexHash\\s*[:：]\\s*([0-9a-f]{40}|\\(missing\\))\", text):\n-        seen = hm.group(1)\n+    seen_hashes = re.findall(\n+        r\"(?im)^\\s*-\\s*EvidenceIndexHash\\s*[:：]\\s*([0-9a-f]{40}|\\(missing\\))\",\n+        text,\n+    )\n+    if seen_hashes:\n+        seen = seen_hashes[-1]\n@@ -1496 +1605 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:\n-                \"复审硬门(evidence_index 已变): review.md 的 EvidenceIndexHash \"\n+                \"复审硬门(evidence_index 已变): review.md 最新 ReviewReceipt 的 EvidenceIndexHash \"\n@@ -1498 +1607,13 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:\n-                \"裁决失效, 需重新跑 `python tools/peer_review.py --into-run runs/<dir>` 或写新的证据化裁决。\")\n+                \"裁决失效, 需重新跑 `python tools/peer_review.py --into-run runs/<dir>`。\"\n+                \"更早的历史 receipt 保留审计价值，不再反向污染最新裁决。\")\n+\n+    finding_blocks = list(re.finditer(\n+        r\"(?ms)^###\\s+(PR-\\d+)\\s+—\\s+(BLOCKER|WARN)\\b(.*?)(?=^###\\s+PR-\\d+\\s+—|^##\\s|\\Z)\",\n+        text,\n+    ))\n+    ids = [match.group(1) for match in finding_blocks]\n+    duplicates = sorted({prid for prid in ids if ids.count(prid) > 1})\n+    if duplicates:\n+        errors.append(\n+            \"复审硬门(PR id 重复): \" + \", \".join(duplicates)\n+            + \" 在多个 review ledger 中重复，无法可靠 resolve；重新复审时必须分配全局唯一 PR id。\")\n@@ -1500 +1621 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:\n-    for m in re.finditer(r\"(?ms)^###\\s+(PR-\\d+)\\s+—\\s+(BLOCKER|WARN)\\b(.*?)(?=^###\\s+PR-\\d+\\s+—|^##\\s|\\Z)\", text):\n+    for m in finding_blocks:\n@@ -2272 +2393 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:\n-    if not has_completed_independent_review(rv):\n+    if not has_completed_independent_review(rv, run_dir):\n@@ -2333,0 +2455 @@ def _selftest() -> int:\n+    import peer_review as _peer_review_test\n"
+          },
+          {
+            "token": "check_run.hunks-02.diff",
+            "path": "check_run.hunks-02.diff",
+            "exists": true,
+            "size": 11284,
+            "sha1": "7f111c0024052aa499752e54e3aee38cb5d03584",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/check_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 31,
+              "hunks": [
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2378,0 +2501,25 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2381,2 +2528,5 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2395,2 +2545,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2398 +2548 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2412,2 +2562,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2415 +2565 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2496,0 +2647,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2517,0 +2676,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2788,0 +2949 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2793,0 +2955,10 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2805,0 +2977,10 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2823,0 +3005,12 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2824,0 +3018,4 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2826 +3023 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2852,0 +3050,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2863,2 +3062,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2946 +3151 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3037,0 +3243,20 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3048,0 +3274,4 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3121 +3350 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3128,3 +3357 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3133 +3359,0 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3140 +3366 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3142,2 +3368 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3157 +3382 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3159 +3384 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3451 +3676 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3514,0 +3740 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3551 +3777,5 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3578,0 +3809 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3595 +3826 @@ def main() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/check_run.py b/tools/check_run.py\nindex 58f2ecb..3d13d0b 100644\n--- a/tools/check_run.py\n+++ b/tools/check_run.py\n@@ -2378,0 +2501,25 @@ def _selftest() -> int:\n+\n+    def _install_valid_review(run: Path) -> str:\n+        bundle = _peer_review_test.build_review_bundle(run, write=True)\n+        result = _peer_review_test.ReviewResult(\n+            verdict=\"PASS\", backend_used=\"codex\", driver=\"claude\", brain=\"codex\",\n+            bundle_hash=bundle[\"sha1\"],\n+            evidence_index_hash=bundle[\"evidence_index\"][\"sha1\"],\n+        )\n+        _peer_review_test._append_run_review(run, result)\n+        transcript = run / \"review-transcript.jsonl\"\n+        tool_id = \"tool-review-\" + hashlib.sha1(str(run).encode()).hexdigest()[:12]\n+        transcript.write_text(tool_id + \"\\n\", encoding=\"utf-8\")\n+        if _runtime_receipts is not None:\n+            _runtime_receipts.append_hook_event(run, {\n+                \"hook_event_name\": \"PostToolUse\", \"session_id\": \"selftest-review\",\n+                \"transcript_path\": str(transcript), \"tool_name\": \"Bash\",\n+                \"tool_use_id\": tool_id,\n+                \"tool_input\": {\"command\": f\"python tools/peer_review.py {run} --into-run\"},\n+                \"tool_response\": {\"stdout\": \"review completed\", \"stderr\": \"\"},\n+            })\n+        return (run / \"review.md\").read_text(encoding=\"utf-8\", errors=\"replace\")\n+\n+    receipt_review_text = _install_valid_review(d)\n+    receipt_review_valid, receipt_review_reason = validate_independent_review_receipt(\n+        d, receipt_review_text)\n@@ -2381,2 +2528,5 @@ def _selftest() -> int:\n-        (\"completed independent review requires real identity and verdict\",\n-         has_completed_independent_review(valid_review_text)),\n+        (\"manual reviewer identity/verdict cannot satisfy gate\",\n+         not has_completed_independent_review(valid_review_text, d)),\n+        (\"tool-backed current review receipt satisfies gate\"\n+         + (f\" ({receipt_review_reason})\" if receipt_review_reason else \"\"),\n+         receipt_review_valid and has_completed_independent_review(receipt_review_text, d)),\n@@ -2395,2 +2545,2 @@ def _selftest() -> int:\n-        (\"peer_review generated backend/verdict satisfies gate\",\n-         has_completed_independent_review(\n+        (\"peer_review-looking prose without receipt cannot satisfy gate\",\n+         not has_completed_independent_review(\n@@ -2398 +2548 @@ def _selftest() -> int:\n-             \"_backend: claude_\\n## Verdict: WARN\\n\")),\n+             \"_backend: claude_\\n## Verdict: WARN\\n\", d)),\n@@ -2412,2 +2562,2 @@ def _selftest() -> int:\n-        (\"substantive completion review section satisfies gate\",\n-         has_codex_completion_review(\n+        (\"substantive completion prose without Agent receipt cannot satisfy gate\",\n+         not has_codex_completion_review(\n@@ -2415 +2565 @@ def _selftest() -> int:\n-             \"- Summary: report coverage, evidence severity, and reachable assets were independently checked.\\n\")),\n+             \"- Summary: report coverage, evidence severity, and reachable assets were independently checked.\\n\", d)),\n@@ -2496,0 +2647,8 @@ def _selftest() -> int:\n+    d_chain = Path(tempfile.mkdtemp())\n+    (d_chain / \"evidence.md\").write_text(\n+        \"# Evidence Ledger\\n## E-019\\n- Maturity: candidate\\n- Certainty: 0.5\\n\",\n+        encoding=\"utf-8\")\n+    (d_chain / \"chains.md\").write_text(\n+        \"# Chains\\n## C-001\\n- Hops: E-019\\n- Weakest hop certainty: 0.8\\n\"\n+        \"- Terminal node: schema disclosure\\n- Status: confirmed\\n\", encoding=\"utf-8\")\n+    chain_errors = check_chain_maturity(d_chain)\n@@ -2517,0 +2676,2 @@ def _selftest() -> int:\n+        (\"confirmed chain rejects candidate weakest hop\",\n+         any(\"E-019=candidate/0.5\" in e for e in chain_errors)),\n@@ -2788,0 +2949 @@ def _selftest() -> int:\n+    (d_cron / \"evidence.md\").write_text(\"# Evidence Ledger\\n\", encoding=\"utf-8\")\n@@ -2793,0 +2955,10 @@ def _selftest() -> int:\n+    cron_non_end_without_receipt = check_completion_cron_record(d_cron)\n+    cron_transcript = d_cron / \"cron-transcript.jsonl\"\n+    cron_transcript.write_text(\"tool-cron-list\\ntool-completion-review\\n\", encoding=\"utf-8\")\n+    if _runtime_receipts is not None:\n+        _runtime_receipts.append_hook_event(d_cron, {\n+            \"hook_event_name\": \"PostToolUse\", \"session_id\": \"selftest-cron\",\n+            \"transcript_path\": str(cron_transcript), \"tool_name\": \"CronList\",\n+            \"tool_use_id\": \"tool-cron-list\", \"tool_input\": {},\n+            \"tool_response\": {\"tasks\": []},\n+        })\n@@ -2805,0 +2977,10 @@ def _selftest() -> int:\n+    completion_hash = current_evidence_index_hash(d_cron)\n+    if _runtime_receipts is not None:\n+        _runtime_receipts.append_hook_event(d_cron, {\n+            \"hook_event_name\": \"PostToolUse\", \"session_id\": \"selftest-completion\",\n+            \"transcript_path\": str(cron_transcript), \"tool_name\": \"Agent\",\n+            \"tool_use_id\": \"tool-completion-review\",\n+            \"tool_input\": {\"prompt\":\n+                f\"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={completion_hash} run={d_cron.name}\"},\n+            \"tool_response\": {\"result\": \"PASS: coverage, severity, evidence and report checked\"},\n+        })\n@@ -2823,0 +3005,12 @@ def _selftest() -> int:\n+        lifecycle_manual_done_err, _ = check_closure_discipline(d_lifecycle)\n+        life_transcript = d_lifecycle / \"agent-transcript.jsonl\"\n+        life_transcript.write_text(\"tool-life-agent\\n\", encoding=\"utf-8\")\n+        if _runtime_receipts is not None:\n+            _runtime_receipts.append_hook_event(d_lifecycle, {\n+                \"hook_event_name\": \"PostToolUse\", \"session_id\": \"selftest-agent\",\n+                \"transcript_path\": str(life_transcript), \"tool_name\": \"Agent\",\n+                \"tool_use_id\": \"tool-life-agent\",\n+                \"tool_input\": {\"prompt\":\n+                    f\"XUNJI_ASSIGNMENT={life_rec['agent']} XUNJI_FRONT=F-001\"},\n+                \"tool_response\": {\"result\": \"candidate complete\"},\n+            })\n@@ -2824,0 +3018,4 @@ def _selftest() -> int:\n+        _workers.update_agent_lifecycle(\n+            d_lifecycle, life_rec[\"agent\"], status=\"merged\",\n+            note=\"Evidence: E-001 result adjudicated\", terminal=True)\n+        lifecycle_merged_err, _ = check_closure_discipline(d_lifecycle)\n@@ -2826 +3023 @@ def _selftest() -> int:\n-        lifecycle_err, lifecycle_done_err = [], []\n+        lifecycle_err, lifecycle_manual_done_err, lifecycle_done_err, lifecycle_merged_err = [], [], [], []\n@@ -2852,0 +3050,2 @@ def _selftest() -> int:\n+        (\"journal cron text without runtime receipt hard-fails\",\n+            any(\"receipt\" in e for e in cron_non_end_without_receipt)),\n@@ -2863,2 +3062,8 @@ def _selftest() -> int:\n-        (\"finished agent clears lifecycle hard error\",\n-         _workers is None or not any(\"Agent 生命周期\" in e for e in lifecycle_done_err)),\n+        (\"hand-written fini",
+            "excerpt_truncated_chars": 4272
+          },
+          {
+            "token": "disposition.md",
+            "path": "disposition.md",
+            "exists": true,
+            "size": 3047,
+            "sha1": "1565ec5625011557238cef9f99c9dbe83465f0d4",
+            "excerpt": "# Independent Review Round 1 Disposition\n\n## PR-001 - Invalid byte-split diff fragments\n\n- Status: accepted\n- Resolution: The byte-split fragments were removed. Hook changes now use one complete valid diff per file; `check_run.py` uses two hunk-boundary patches, each with a repeated file header and each verified by `git apply --check --reverse --unidiff-zero`.\n- Evidence: `output_gate.diff`, `run_gate.diff`, `settings.diff`, `check_run.hunks-01.diff`, `check_run.hunks-02.diff`.\n\n## PR-002 - No runtime execution observation\n\n- Status: accepted\n- Resolution: Added and executed an isolated installed-entrypoint observation. All 15 checks pass: explain/pause write denial, pre-Agent target denial, unmerged disposition denial, post-merge target allowance, Cron list/create/delete/list ownership, foreground review timing, and an eight-event valid receipt chain.\n- Evidence: `runtime_observation.py`, `runtime_observation.lines-001-190.txt`, `runtime_observation.lines-191-end.txt`.\n\n## PR-003 - Review report is intentionally concise\n\n- Status: dismissed\n- Resolution: Reason: this is a maintenance review scope, not a vulnerability deliverable. `report.md` is a scope/index; detailed claims and artifacts live in `evidence.md`, `context.md`, and independent review records. No confirmed claim is omitted from the evidence ledger.\n\n## PR-004 - Review provenance absent before first review\n\n- Status: accepted\n- Resolution: The first independent panel's raw Markdown and JSON are retained in this review record; this second round reviews the repaired package. Live-run closure receipt semantics are separately exercised in the runtime-observation artifacts and full selftests.\n- Evidence: `peer_review.round1.md`, `peer_review.round1.json`, `runtime_observation.lines-001-190.txt`, `runtime_observation.lines-191-end.txt`.\n\n## PR-005 - No installed settings snapshot\n\n- Status: accepted\n- Resolution: Added an exact post-change snapshot and runtime wiring checks for UserPromptSubmit, global PreToolUse, PostToolUse, PostToolUseFailure, SubagentStart, and SubagentStop.\n- Evidence: `installed-settings.json`, `settings.diff`, `runtime_observation.lines-001-190.txt`, `runtime_observation.lines-191-end.txt`, `selftest_all.log`.\n\n## PR-006 - Partial arkcli panel\n\n- Status: accepted\n- Resolution: Round one is retained as partial and non-final. The heterogeneous panel is rerun after all evidence repairs; any remaining backend limitation will stay explicit.\n\n## Blind Spots\n\n- Same-user malicious forgery is explicitly outside this feature's threat claim. Receipts constrain a lazy/noncompliant model and provide audit evidence; they are not a privileged OS attestation service.\n- Documentation drift was searched after edits; stale manual-review, budget-reason, and heartbeat-as-proof language was removed from the primary Claude rules, skills, workflow, and templates. `check_templates` and the full suite pass.\n- The slow `classify_hosts` selftest is pre-existing and outside this process-hardening change; it passed twice in the full suite.\n"
+          },
+          {
+            "token": "peer_review.diff",
+            "path": "peer_review.diff",
+            "exists": true,
+            "size": 4519,
+            "sha1": "0eeab5d9e2ff6a328870a750e49118577a991bd3",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/peer_review.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 6,
+              "hunks": [
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -446,3 +446,10 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1475,2 +1482,28 @@ def _strip_template_review_placeholders(text: str) -> str:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1487,2 +1520,3 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1494,8 +1528,15 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1840,2 +1881,9 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1854,2 +1902,7 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/peer_review.py b/tools/peer_review.py\nindex a1efa97..79b4bd5 100644\n--- a/tools/peer_review.py\n+++ b/tools/peer_review.py\n@@ -446,3 +446,10 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,\n     payload = {\"schema\": \"xunji.evidence_index.v1\", \"entries\": entries}\n-    payload[\"sha1\"] = _sha1_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(\"utf-8\"))\n+    digest_entries = json.loads(json.dumps(entries, ensure_ascii=False))\n+    for entry in digest_entries:\n+        for artifact in entry.get(\"artifacts\", []):\n+            for key in (\"excerpt\", \"excerpt_truncated_chars\", \"diff_summary\"):\n+                artifact.pop(key, None)\n+    digest_payload = {\"schema\": \"xunji.evidence_index.v1\", \"entries\": digest_entries}\n+    payload[\"sha1\"] = _sha1_bytes(json.dumps(\n+        digest_payload, ensure_ascii=False, sort_keys=True).encode(\"utf-8\"))\n     return payload\n@@ -1475,2 +1482,28 @@ def _strip_template_review_placeholders(text: str) -> str:\n \n+def _write_review_receipt(run_dir: Path, result: ReviewResult, review_kind: str) -> str:\n+    \"\"\"Persist the machine provenance that Markdown review prose cannot prove.\"\"\"\n+    payload = {\n+        \"schema\": \"xunji.peer_review_receipt.v1\",\n+        \"generated_at\": datetime.now(timezone.utc).isoformat(),\n+        \"review_kind\": review_kind,\n+        \"result\": result.as_dict(),\n+    }\n+    receipt_id = hashlib.sha256(json.dumps(\n+        payload, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"),\n+    ).encode(\"utf-8\")).hexdigest()\n+    record = dict(payload)\n+    record[\"receipt_id\"] = receipt_id\n+    out = run_dir / \"review\" / \"receipts\" / f\"{receipt_id}.json\"\n+    out.parent.mkdir(parents=True, exist_ok=True)\n+    tmp = out.with_name(out.name + f\".tmp-{os.getpid()}\")\n+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + \"\\n\",\n+                   encoding=\"utf-8\")\n+    os.replace(tmp, out)\n+    try:\n+        os.chmod(out, 0o600)\n+    except OSError:\n+        pass\n+    return receipt_id\n+\n+\n def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n@@ -1487,2 +1520,3 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n     review_kind = \"same-family peer_review fallback\" if same_family_fallback else \"heterogeneous peer_review\"\n+    receipt_id = _write_review_receipt(run_dir, result, review_kind)\n     if same_family_fallback:\n@@ -1494,8 +1528,15 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n     ledger = [\"## Review Finding Ledger\",\n+              f\"- ReviewReceipt: {receipt_id}\",\n               f\"- BundleHash: {result.bundle_hash or '(missing)'}\",\n               f\"- EvidenceIndexHash: {result.evidence_index_hash or '(missing)'}\"]\n+    used_ids = set(re.findall(r\"(?m)^###\\s+(PR-\\d+)\\b\", existing))\n+    next_pr = max((int(item.split(\"-\")[1]) for item in used_ids), default=0) + 1\n     if result.findings:\n-        for i, f in enumerate(result.findings, 1):\n-            if not f.id:\n-                f.id = f\"PR-{i:03d}\"\n+        for f in result.findings:\n+            if not f.id or f.id in used_ids or not re.fullmatch(r\"PR-\\d+\", f.id):\n+                while f\"PR-{next_pr:03d}\" in used_ids:\n+                    next_pr += 1\n+                f.id = f\"PR-{next_pr:03d}\"\n+                next_pr += 1\n+            used_ids.add(f.id)\n             ledger += [\n@@ -1840,2 +1881,9 @@ def _selftest() -> int:\n     rv2 = (d_run / \"review.md\").read_text(encoding=\"utf-8\")\n+    _append_run_review(d_run, ReviewResult(\n+        verdict=\"WARN\", findings=[Finding(\"WARN\", \"second\", \"E-001\", \"check\")],\n+        backend_used=\"arkcli:glm-5.2\", bundle_hash=b_run[\"sha1\"],\n+        evidence_index_hash=b_run[\"evidence_index\"][\"sha1\"],\n+    ))\n+    rv3 = (d_run / \"review.md\").read_text(encoding=\"utf-8\")\n+    receipt_ids = re.findall(r\"(?m)^- ReviewReceipt: ([0-9a-f]{64})$\", rv3)\n     d_tpl = Path(tempfile.mkdtemp())\n@@ -1854,2 +1902,7 @@ def _selftest() -> int:\n         (\"into_run 写 PR pending ledger\", \"Review Finding Ledger\" in rv1 and \"Status: pending\" in rv1),\n+        (\"into_run writes content-addressed receipt files\",\n+         len(receipt_ids) == 3 and all((d_run / \"review\" / \"receipts\" / f\"{rid}.json\").is_file()\n+                                       for rid in receipt_ids)),\n+        (\"repeated reviews allocate globally unique PR ids\",\n+         rv3.count(\"### PR-001\") == 1 and rv3.count(\"### PR-002\") == 1),\n         (\"into_run strips old blank PR template before appending\",\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004 - Canonical state and operator visibility",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "E-005"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "canonical_consumers.diff",
+            "path": "canonical_consumers.diff",
+            "exists": true,
+            "size": 7825,
+            "sha1": "bd77f928db1ab7c0aaf897eb1699d0634fa68442",
+            "diff_summary": {
+              "changed_files_count": 4,
+              "changed_files": [
+                "tools/coverage_matrix.py",
+                "tools/graph.py",
+                "tools/loop_state.py",
+                "tools/state_project.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 16,
+              "hunks": [
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -44,0 +45,2 @@ except Exception:  # pragma: no cover - defensive fallback for broken imports"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -291,24 +293,6 @@ def _parse_front_blocks(run_dir: Path) -> list[dict]:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -16 +16,2 @@"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -38,0 +40,2 @@ CONFIRMED = 0.8  # certainty 门: >= 此值才算 Fact(已确认)"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -83,15 +86,6 @@ def build_graph(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -128 +122 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -140 +134,2 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -230 +225 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -236 +231,2 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -38,0 +39 @@ import workers  # noqa: E402"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -180,6 +181,17 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -190 +202 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -219,0 +232,4 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -248 +264 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:"
+                },
+                {
+                  "file": "tools/state_project.py",
+                  "header": "@@ -19,0 +20 @@ from evidence_parse import parse_evidence  # noqa: E402"
+                },
+                {
+                  "file": "tools/state_project.py",
+                  "header": "@@ -37,18 +38,9 @@ def parse_fronts(run_dir: Path) -> list[dict]:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/coverage_matrix.py b/tools/coverage_matrix.py\nindex a1405e5..ce227e1 100644\n--- a/tools/coverage_matrix.py\n+++ b/tools/coverage_matrix.py\n@@ -44,0 +45,2 @@ except Exception:  # pragma: no cover - defensive fallback for broken imports\n+import run_model\n+\n@@ -291,24 +293,6 @@ def _parse_front_blocks(run_dir: Path) -> list[dict]:\n-    fr = run_dir / \"frontier.md\"\n-    if not fr.exists():\n-        return []\n-    text = fr.read_text(encoding=\"utf-8\", errors=\"replace\")\n-    blocks: list[dict] = []\n-    for section, body in _front_sections(text):\n-        sec_low = section.lower()\n-        if sec_low.startswith(\"open\"):\n-            section_status = \"open\"\n-        elif sec_low.startswith(\"deferred\"):\n-            section_status = \"deferred\"\n-        elif sec_low.startswith(\"closed\"):\n-            section_status = \"closed\"\n-        else:\n-            section_status = \"unknown\"\n-        for m in re.finditer(r\"(?ms)^###[ \\t]+(F-\\d+).*?(?=^###[ \\t]+F-\\d+|\\Z)\", body):\n-            block_text = m.group(0)\n-            blocks.append({\n-                \"id\": m.group(1),\n-                \"status\": (_field(block_text, \"Status\") or section_status).lower(),\n-                \"section\": section,\n-                \"text\": block_text,\n-            })\n-    return blocks\n+    return [{\n+        \"id\": front.id,\n+        \"status\": front.status,\n+        \"section\": front.section,\n+        \"text\": front.text,\n+    } for front in run_model.parse_fronts(run_dir)]\ndiff --git a/tools/graph.py b/tools/graph.py\nindex e9432b6..a5257a4 100644\n--- a/tools/graph.py\n+++ b/tools/graph.py\n@@ -16 +16,2 @@\n-前沿状态由它所在的 ## Open/Deferred/Closed Fronts 区段决定。已确认 Fact = E 且 certainty>=0.8。\n+前沿状态由 `tools/run_model.py` 统一解析 canonical `Status:`；章节只用于发现\n+格式冲突。已确认 Fact = E 且 certainty>=0.8。\n@@ -38,0 +40,2 @@ CONFIRMED = 0.8  # certainty 门: >= 此值才算 Fact(已确认)\n+sys.path.insert(0, str(ROOT / \"tools\"))\n+import run_model  # noqa: E402\n@@ -83,15 +86,6 @@ def build_graph(run_dir: Path) -> dict:\n-    fr = run_dir / \"frontier.md\"\n-    if fr.exists():\n-        ftext = fr.read_text(encoding=\"utf-8\", errors=\"replace\")\n-        for sec, status in ((\"Open Fronts\", \"open\"),\n-                            (\"Deferred Fronts\", \"deferred\"),\n-                            (\"Closed Fronts\", \"closed\")):\n-            m = re.search(rf\"##\\s*{sec}(.*?)(?=^##\\s|\\Z)\", ftext, re.S | re.MULTILINE)\n-            if not m:\n-                continue\n-            for fid, b in _blocks(m.group(1), r\"###\\s+(F-\\d+)\"):\n-                nodes[fid] = {\"type\": \"front\", \"status\": status}\n-                for h in _ids(b, \"Linked hypotheses\", \"H\"):\n-                    edges.append({\"src\": fid, \"dst\": h, \"rel\": \"tests\"})\n-                for e in _ids(b, \"Unlocked-by\", \"E\"):\n-                    edges.append({\"src\": e, \"dst\": fid, \"rel\": \"unlocks\"})\n+    for front in run_model.parse_fronts(run_dir):\n+        nodes[front.id] = {\"type\": \"front\", \"status\": front.status}\n+        for h in _ids(front.text, \"Linked hypotheses\", \"H\"):\n+            edges.append({\"src\": front.id, \"dst\": h, \"rel\": \"tests\"})\n+        for e in _ids(front.text, \"Unlocked-by\", \"E\"):\n+            edges.append({\"src\": e, \"dst\": front.id, \"rel\": \"unlocks\"})\n@@ -128 +122 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:\n-            elif fn[\"status\"] == \"closed\":\n+            elif fn[\"status\"] in run_model.TERMINAL_STATUSES - {\"deferred\"}:\n@@ -140 +134,2 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:\n-        {fid for fid, n in nodes.items() if n[\"type\"] == \"front\" and n[\"status\"] == \"open\"}\n+        {fid for fid, n in nodes.items()\n+         if n[\"type\"] == \"front\" and n[\"status\"] in run_model.OPEN_STATUSES}\n@@ -230 +225 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:\n-                   if nd.get(\"type\") == \"front\" and nd.get(\"status\") in (\"open\", \"probing\")]\n+                   if nd.get(\"type\") == \"front\" and nd.get(\"status\") in run_model.OPEN_STATUSES]\n@@ -236 +231,2 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:\n-                     if nd.get(\"type\") == \"front\" and nd.get(\"status\") == \"closed\"]\n+                     if nd.get(\"type\") == \"front\"\n+                     and nd.get(\"status\") in run_model.TERMINAL_STATUSES - {\"deferred\"}]\ndiff --git a/tools/loop_state.py b/tools/loop_state.py\nindex c700550..6d6b37c 100644\n--- a/tools/loop_state.py\n+++ b/tools/loop_state.py\n@@ -38,0 +39 @@ import workers  # noqa: E402\n+import run_model  # noqa: E402\n@@ -180,6 +181,17 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n-    real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}\n-    fronts = [\n-        f for f in projection.get(\"fronts\", [])\n-        if str(f.get(\"id\", \"\")).startswith(\"F-\")\n-        and (not real_front_ids or str(f.get(\"id\")) in real_front_ids)\n-    ]\n+    canonical = run_model.parse_fronts(run_dir)\n+    canonical_used = bool(canonical)\n+    if canonical:\n+        fronts = [{\n+            \"id\": front.id,\n+            \"status\": front.status,\n+            \"barrier\": front.barrier,\n+            \"depth\": front.depth,\n+            \"schema_errors\": list(front.schema_errors),\n+        } for front in canonical]\n+    else:\n+        real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}\n+        fronts = [\n+            f for f in projection.get(\"fronts\", [])\n+            if str(f.get(\"id\", \"\")).startswith(\"F-\")\n+            and (not real_front_ids or str(f.get(\"id\")) in real_front_ids)\n+        ]\n@@ -190 +202 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n-        if raw.lower() in {\"\", \"unknown\"}:\n+        if not canonical_used and raw.lower() in {\"\", \"unknown\"}:\n@@ -219,0 +232,4 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n+    barrier_counts = {barrier: barriers.count(barrier) for barrier in unique_barriers}\n+    all_share_one_barrier = bool(open_fronts) and any(\n+        count == len(open_fronts) for count in barrier_counts.values()\n+    )\n@@ -248 +264 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n-        \"diverse_barriers\": len(unique_barriers) >= 2,\n+        \"diverse_barriers\": not all_share_one_barrier,\ndiff --git a/tools/state_project.py b/tools/state_project.py\nindex 2be6750..00d7574 100644\n--- a/tools/state_project.py\n+++ b/tools/state_project.py\n@@ -19,0 +20 @@ from evidence_parse import parse_evidence  # noqa: E402\n+import run_model  # noqa: E402\n@@ -37,18 +38,9 @@ def parse_fronts(run_dir: Path) -> list[dict]:\n-    text = _read(run_dir / \"frontier.md\")\n-    fronts: list[dict] = []\n-    for m in re.finditer(rf\"(?ms)^###{HWS}+((?:F|H)-\\d+)(.*?)(?=^###{HWS}+(?:F|H)-\\d+|\\Z)\", text):\n-        block = m.group(0)\n-        head = block.splitlines()[0].strip()\n-        status = (_field(block, \"Status\") or \"unknown\").lower()\n-        barrier = (_field(block, \"Barrier class\") or \"unknown\").lower()",
+            "excerpt_truncated_chars": 797
+          },
+          {
+            "token": "status_journal.diff",
+            "path": "status_journal.diff",
+            "exists": true,
+            "size": 7225,
+            "sha1": "e0c85db971ef1838fc3708947eadb31caaa74c57",
+            "diff_summary": {
+              "changed_files_count": 3,
+              "changed_files": [
+                "tools/loop_journal.py",
+                "tools/selftest_all.py",
+                "tools/xunji_statusline.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 18,
+              "hunks": [
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -12,0 +13,2 @@ import argparse"
+                },
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -13,0 +16 @@ import json"
+                },
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -18,0 +22,5 @@ from pathlib import Path"
+                },
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -53,0 +62,14 @@ def _journal_path(run_dir: Path) -> Path:"
+                },
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -101,15 +123,24 @@ def append_event(run_dir: str | Path, event: str, *, note: str = \"\", data: dict"
+                },
+                {
+                  "file": "tools/selftest_all.py",
+                  "header": "@@ -77,0 +78,3 @@ SUITES: list[tuple[str, list[str], str]] = ["
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -12,0 +13 @@ import argparse"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -18,0 +20 @@ import tempfile"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -38,0 +41,2 @@ PHASE_LABELS = {"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -46,0 +51,2 @@ PHASE_COLOR = {"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -207 +213,16 @@ def _agent_summary(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -208,0 +230,5 @@ def _agent_summary(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -232 +258,13 @@ def _front_summary(loop_data: dict) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -234,0 +273,3 @@ def _phase(loop_data: dict, journal: dict) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -350 +391 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -392,2 +433,4 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -408,0 +452,5 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -464 +512,2 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/loop_journal.py b/tools/loop_journal.py\nindex 2883a2c..0bf5e8e 100644\n--- a/tools/loop_journal.py\n+++ b/tools/loop_journal.py\n@@ -12,0 +13,2 @@ import argparse\n+import contextlib\n+import hashlib\n@@ -13,0 +16 @@ import json\n+import os\n@@ -18,0 +22,5 @@ from pathlib import Path\n+try:\n+    import fcntl\n+except ImportError:  # pragma: no cover\n+    fcntl = None\n+\n@@ -53,0 +62,14 @@ def _journal_path(run_dir: Path) -> Path:\n+@contextlib.contextmanager\n+def _journal_lock(run_dir: Path):\n+    path = run_dir / \"state\" / \".loop_journal.lock\"\n+    path.parent.mkdir(parents=True, exist_ok=True)\n+    with path.open(\"a+\", encoding=\"utf-8\") as handle:\n+        if fcntl is not None:\n+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)\n+        try:\n+            yield\n+        finally:\n+            if fcntl is not None:\n+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)\n+\n+\n@@ -101,15 +123,24 @@ def append_event(run_dir: str | Path, event: str, *, note: str = \"\", data: dict\n-    events = load_events(run_dir)\n-    rec = {\n-        \"schema\": SCHEMA,\n-        \"ts\": time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime()),\n-        \"run_dir\": str(run_dir),\n-        \"cycle\": _next_cycle(events, event),\n-        \"event\": event,\n-        \"note\": note,\n-        \"data\": data or {},\n-        \"canonical\": \"Markdown run files remain source of truth; this journal is derived.\",\n-    }\n-    path = _journal_path(run_dir)\n-    path.parent.mkdir(parents=True, exist_ok=True)\n-    with path.open(\"a\", encoding=\"utf-8\") as f:\n-        f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + \"\\n\")\n+    with _journal_lock(run_dir):\n+        events = load_events(run_dir)\n+        rec = {\n+            \"schema\": SCHEMA,\n+            \"ts\": time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime()),\n+            \"run_dir\": str(run_dir),\n+            \"cycle\": _next_cycle(events, event),\n+            \"event\": event,\n+            \"note\": note,\n+            \"data\": data or {},\n+            \"previous_event_hash\": str(events[-1].get(\"event_hash\") or \"\") if events else \"\",\n+            \"canonical\": \"Markdown run files remain source of truth; this journal is derived.\",\n+        }\n+        rec[\"event_hash\"] = hashlib.sha256(json.dumps(\n+            rec, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"),\n+        ).encode(\"utf-8\")).hexdigest()\n+        path = _journal_path(run_dir)\n+        path.parent.mkdir(parents=True, exist_ok=True)\n+        with path.open(\"a\", encoding=\"utf-8\") as f:\n+            f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + \"\\n\")\n+        try:\n+            os.chmod(path, 0o600)\n+        except OSError:\n+            pass\ndiff --git a/tools/selftest_all.py b/tools/selftest_all.py\nindex 6bcb036..5bfe18a 100644\n--- a/tools/selftest_all.py\n+++ b/tools/selftest_all.py\n@@ -77,0 +78,3 @@ SUITES: list[tuple[str, list[str], str]] = [\n+    (\"run_model\",       [\"tools/run_model.py\", \"--selftest\"], \"canonical front/status parser\"),\n+    (\"runtime_receipts\", [\"tools/runtime_receipts.py\", \"--selftest\"], \"hook-derived Agent/Cron receipts\"),\n+    (\"turn_contract\",   [\"tools/turn_contract.py\", \"--selftest\"], \"execute/explain/pause turn modes\"),\ndiff --git a/tools/xunji_statusline.py b/tools/xunji_statusline.py\nindex 75c60b7..65451df 100644\n--- a/tools/xunji_statusline.py\n+++ b/tools/xunji_statusline.py\n@@ -12,0 +13 @@ import argparse\n+import calendar\n@@ -18,0 +20 @@ import tempfile\n+import time\n@@ -38,0 +41,2 @@ PHASE_LABELS = {\n+    \"Paused\": \"Paused｜已暂停\",\n+    \"Interrupted\": \"Interrupted｜中断待恢复\",\n@@ -46,0 +51,2 @@ PHASE_COLOR = {\n+    \"Paused\": \"gray\",\n+    \"Interrupted\": \"red\",\n@@ -207 +213,16 @@ def _agent_summary(run_dir: Path) -> str:\n-    if not isinstance(assignments, list) or not assignments:\n+    planned = len(assignments) if isinstance(assignments, list) else 0\n+    current_turn = False\n+    try:\n+        import runtime_receipts  # noqa: WPS433\n+        import turn_contract  # noqa: WPS433\n+        contract = turn_contract.load_contract(run_dir)\n+        current_turn = str(contract.get(\"mode\") or \"\") == \"EXECUTE\"\n+        real = runtime_receipts.agent_fanout(\n+            run_dir,\n+            session_id=str(contract.get(\"session_id\") or \"\") if current_turn else \"\",\n+            since=float(contract.get(\"updated_at\") or 0.0) if current_turn else 0.0,\n+        )\n+        real_count = int(real.get(\"count\", 0) or 0)\n+    except Exception:\n+        real_count = 0\n+    if not planned and not real_count:\n@@ -208,0 +230,5 @@ def _agent_summary(run_dir: Path) -> str:\n+    real_label = \"本轮真实\" if current_turn else \"真实\"\n+    if planned and real_count < planned:\n+        return f\"子任务 计划{planned}/{real_label}{real_count}\"\n+    if real_count:\n+        return f\"子任务 {real_count} 个{real_label}回执\"\n@@ -232 +258,13 @@ def _front_summary(loop_data: dict) -> str:\n-def _phase(loop_data: dict, journal: dict) -> str:\n+def _event_age_seconds(journal: dict) -> float | None:\n+    event = journal.get(\"last_event\") if isinstance(journal.get(\"last_event\"), dict) else {}\n+    raw = str(event.get(\"ts\") or \"\")\n+    try:\n+        return max(0.0, time.time() - calendar.timegm(time.strptime(raw, \"%Y-%m-%dT%H:%M:%SZ\")))\n+    except Exception:\n+        return None\n+\n+\n+def _phase(loop_data: dict, journal: dict, run_dir: Path) -> str:\n+    status = _load_json(run_dir / \"state\" / \"run_status.json\", {})\n+    if str(status.get(\"status\") or \"\") == \"paused_by_operator\":\n+        return \"Paused\"\n@@ -234,0 +273,3 @@ def _phase(loop_data: dict, journal: dict) -> str:\n+        age = _event_age_seconds(journal)\n+        if age is None or age > 5 * 60:\n+            return \"Interrupted\"\n@@ -350 +391 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)\n-    phase = _phase(loop_data, journal)\n+    phase = _phase(loop_data, journal, run_dir)\n@@ -392,2 +433,4 @@ def _selftest() -> int:\n-        json.dumps({\"cycle\": 1, \"event\": \"phase_start\", \"data\": {\"phase\": \"Hunter\"}, \"note\": \"\"}, ensure_ascii=False) + \"\\n\"\n-        + json.dumps({\"cycle\": 1, \"event\": \"plan\", \"data\": {}, \"note\": \"目标=F-004; 原因=接口枚举\"}, ensure_ascii=False) + \"\\n\",\n+        json.dumps({\"cycle\": 1, \"event\": \"phase_start\", \"data\": {\"phase\": \"Hunter\"}, \"note\": \"\",\n+                    \"ts\": time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime())}, ensure_ascii=False) + \"\\n\"\n+        + json.dumps({\"cycle\": 1, \"event\": \"plan\", \"data\": {}, \"note\": \"目标=F-004; 原因=接口枚举\",\n+                      \"ts\": time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime())}, ensure_ascii=False) + \"\\n\",\n@@ -408,0 +452,5 @@ def _selftest() -> int:\n+        (run / \"state\" / \"run_status.json\").write_text(json.dumps({\n+            \"status\": \"paused_by_operator\",\n+        }), encoding=\"utf-8\")\n+        paused_plain = render_statusline(root_current, color=False)\n+        (run / \"state\" / \"run_status.json\").unlink()\n@@ -464 +512,2 @@ def _selftest() -> int:\n-        (\"sub",
+            "excerpt_truncated_chars": 199
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-005",
+        "head": "## E-005 - Full regression",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [
+          "E-001",
+          "E-002",
+          "E-003",
+          "E-004"
+        ],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "selftest_all.log",
+            "path": "selftest_all.log",
+            "exists": true,
+            "size": 3626,
+            "sha1": "3fc43bb99eb36c89421dc1eee42ae65311b020d3",
+            "excerpt": "running 57 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14\n\n  PASS  check_run          0.2s  evidence gate + closure\n  PASS  classify_hosts    39.9s  recon -> coverage\n  PASS  scope              0.0s  run scope derive/match\n  PASS  peer_review        0.1s  heterogeneous review\n  PASS  probe              7.6s  active HTTP sensor\n  PASS  render             0.1s  headless browser + --eval replay\n  PASS  anti_drift         3.4s  anti-drift anchor (rules+process re-inject)\n  PASS  proxy              0.1s  engagement egress proxy (渗透走/模型不走)\n  PASS  codex_proxy        0.0s  Codex review proxy hygiene\n  PASS  replay            13.7s  evidence replay\n  PASS  setup_run          0.1s  run scaffolding\n  PASS  ingest_recon       0.0s  Guanlan recon adapter\n  PASS  bench              0.0s  R-1 self-eval scorer\n  PASS  check_knowledge    0.0s  public knowledge grounding structure\n  PASS  local_hygiene      0.1s  local/publication hygiene guard\n  PASS  runtime_boundary   0.0s  Codex hooks absence guard\n  PASS  check_templates    0.0s  template/reference drift guard\n  PASS  knowledge_match    0.0s  fingerprint→knowledge retrieval\n  PASS  xday_match         0.0s  fingerprint→local xday retrieval\n  PASS  knowledge_seed     0.0s  fingerprint→knowledge write-back\n  PASS  timestamp_gate     0.0s  web research time gate\n  PASS  record_evidence    0.0s  web research -> evidence ledger\n  PASS  decode_viewstate   0.0s  ASP.NET ViewState decoder\n  PASS  captcha_ocr        0.1s  bounded captcha OCR wrapper\n  PASS  input_shape        0.0s  request shape parser\n  PASS  js_inventory       0.0s  saved-artifact JS/API inventory sensor\n  PASS  oob_listener       1.0s  local OOB listener\n  PASS  sensor_oob         0.2s  OOB callback artifact sensor\n  PASS  sensor_mutate      0.1s  payload mutation artifact sensor\n  PASS  sensor_blind_diff   1.1s  blind differential artifact sensor\n  PASS  sensor_upload      1.2s  harmless upload proof sensor\n  PASS  sensor_client_graybox   0.1s  client graybox phenomenon sensor\n  PASS  state_project      0.0s  markdown-derived run state projection\n  PASS  run_model          0.0s  canonical front/status parser\n  PASS  runtime_receipts   0.0s  hook-derived Agent/Cron receipts\n  PASS  turn_contract      0.1s  execute/explain/pause turn modes\n  PASS  context_pack       0.0s  minimal subagent context pack\n  PASS  loop_state         0.1s  closed-loop progress and gate snapshot\n  PASS  status_style       0.0s  operator-facing colored status panels\n  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline\n  PASS  progress_ledger    0.0s  material-progress ledger\n  PASS  run_controller     0.1s  advisory shadow run controller\n  PASS  loop_journal       0.0s  loop interruption journal\n  PASS  loop_bootstrap     0.4s  autonomous loop launcher\n  PASS  session_handoff    0.1s  session handoff tool\n  PASS  deferred_queue     0.0s  deferred asset retry manager\n  PASS  workers            0.2s  fan-out worker planning helpers\n  PASS  saturation         0.0s  front saturation scoring\n  PASS  coverage_matrix    0.0s  asset x vuln-family coverage matrix\n  PASS  safety_gate        0.0s  hard-boundary gate\n  PASS  ip_blacklist       0.0s  local IP/domain deny hook\n  PASS  output_gate        0.4s  output drift Stop gate\n  PASS  run_gate           1.2s  coverage/depth Stop gate\n  PASS  check_hook         2.6s  safety_gate live-fire\n  PASS  sentinel_replay    0.0s  behavior detectors 26-case\n  PASS  verify_layers      1.2s  safety-floor coverage\n  PASS  guard_smoke        0.0s  guard rate/cap/breaker smoke\n\n57 passed, 0 failed  (76.2s total)\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "7de19e3b5e94dea1b2c007ec4bc575c04e6592f3"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Review Scope\n\n- Status: REVIEW\n- Author: Codex\n- Base commit: 0447297683df07ff40d9dba8b59f279c4c3938cb\n- Evidence IDs: E-001, E-002, E-003, E-004, E-005\n\nReview the frozen component diffs and new runtime modules as Codex-authored,\nsafety-critical Xunji framework maintenance. Focus on process bypasses, false\nhard blocks, current-turn identity, transcript provenance, receipt tampering,\nAgent result integration, Cron ownership, review freshness, parser consistency,\nand statusline truthfulness. Do not accept this report as evidence; inspect the\nartifacts and cite concrete files/hunks.\n\n",
+    "frontier.md": "# Review Frontier\n\n## Open Fronts\n\n## Deferred Fronts\n\n## Closed Fronts\n\n### F-001 - Runtime proof hardening diff\n\n- Status: closed\n- Barrier class: none\n- Current depth: deep\n- Failure budget: full focused and repository regression completed\n- Vectors tried: prompt-mode confusion, stale/cross-session Agent receipts, unmerged Agent results, Cron duplication/deletion, stale/manual/background review, parser conflicts, stale statusline, hook exceptions\n- Evidence: E-001, E-002, E-003, E-004, E-005\n\n",
+    "review.md": "# Review\n\nIndependent panel output is written to `peer_review.md` and `peer_review.json`.\nCodex is the author and does not count as an independent reviewer of this diff.\n\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 6904,
+    "max_bundle_chars": 180000,
+    "requested_artifact_excerpt_chars": 24000
+  },
+  "warnings": [
+    "artifact_excerpt_chars reduced from 24000 to 18637 to fit max_bundle_chars=180000",
+    "artifact_excerpt_chars reduced from 18637 to 14463 to fit max_bundle_chars=180000",
+    "artifact_excerpt_chars reduced from 14463 to 11219 to fit max_bundle_chars=180000",
+    "artifact_excerpt_chars reduced from 11219 to 8699 to fit max_bundle_chars=180000",
+    "artifact_excerpt_chars reduced from 8699 to 6904 to fit max_bundle_chars=180000"
+  ],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "e3581ee9198df67cab2e9cf43b5634575f75ff1f"
+}

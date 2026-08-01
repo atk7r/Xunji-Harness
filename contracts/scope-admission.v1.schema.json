@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/scope-admission.v1.schema.json",
+  "title": "Xunji operator-bound zero-probe scope admission receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "admission_id",
+    "run_name",
+    "assets",
+    "session_id",
+    "prompt_sha256",
+    "reason_sha256",
+    "coverage_path",
+    "coverage_before_sha256",
+    "coverage_after_sha256",
+    "projection_before_sha256",
+    "projection_after_sha256",
+    "setup_source_sha256",
+    "prepared_at",
+    "zero_probe",
+    "recovered"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.scope_admission.v1"},
+    "status": {"enum": ["prepared", "committed"]},
+    "admission_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "run_name": {"type": "string", "minLength": 1},
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 253}
+    },
+    "session_id": {"type": "string", "minLength": 1},
+    "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reason_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "coverage_path": {"const": "classify/coverage.json"},
+    "coverage_before_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "coverage_after_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "projection_before_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "projection_after_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "setup_source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "prepared_at": {"type": "number"},
+    "committed_at": {"type": "number"},
+    "zero_probe": {"const": true},
+    "recovered": {"type": "boolean"},
+    "recovery_prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "recovery_reason_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": {"const": "prepared"},
+        "recovered": {"const": false}
+      },
+      "required": ["status", "recovered"],
+      "not": {
+        "anyOf": [
+          {"required": ["committed_at"]},
+          {"required": ["recovery_prompt_sha256"]},
+          {"required": ["recovery_reason_sha256"]}
+        ]
+      }
+    },
+    {
+      "properties": {
+        "status": {"const": "committed"},
+        "recovered": {"const": false}
+      },
+      "required": ["status", "recovered", "committed_at"],
+      "not": {
+        "anyOf": [
+          {"required": ["recovery_prompt_sha256"]},
+          {"required": ["recovery_reason_sha256"]}
+        ]
+      }
+    },
+    {
+      "properties": {
+        "status": {"const": "committed"},
+        "recovered": {"const": true}
+      },
+      "required": [
+        "status",
+        "recovered",
+        "committed_at",
+        "recovery_prompt_sha256",
+        "recovery_reason_sha256"
+      ]
+    }
+  ]
+}

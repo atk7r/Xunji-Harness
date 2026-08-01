@@ -1,0 +1,23 @@
+{
+  "agent_id": "prep-interrupted-reviewer-child",
+  "assignment": "A-review-001",
+  "child_transcript_length": 1141,
+  "child_transcript_sha256": "e697081c8873b91dcc48817d082eb95d8a8b8a926731f59e06a79e78effbb96c",
+  "lane_id": "L-F001-REVIEW",
+  "launch_prompt_sha256": "1051fe7371229b361abbb07db6ff6bd00600dfc138dae785a38c081c4b9dfb69",
+  "observed_head_hash": "2ec775cef704ddd53450de51d3d46fbc28a53e71204822f8d976905d0dec8487",
+  "observed_head_seq": 8,
+  "parent_run": "driver-reviewer-recovery_20260729",
+  "parent_transcript_length": 25154066,
+  "parent_transcript_sha256": "dbc75f4e747a42ba7cdb12cb2cba90f11bbf147cfe4ce2b09909dbd826ca3a93",
+  "plan_digest": "966e49bf141a7cde9f0da9811d59dd28b34dba29c861f7fb8c287bd193fa9c8a",
+  "reason": "subagent_start_hook_cancelled_before_assistant",
+  "receipt_hash": "362c76f25448cc37aaf0b09438810836a94c27af53a1530f1a030d534a3f37ed",
+  "recorded_at": "2026-07-29T06:51:10.526Z",
+  "role": "review",
+  "schema": "xunji.interrupted-reviewer-start.v1",
+  "session_id": "prep-interrupted-reviewer",
+  "start_event_hash": "217f9f0b59e97ca87e8982cf882c076b2a25b92b0104b771b91307fa573635a1",
+  "start_event_seq": 3,
+  "tool_use_id": "prep-interrupted-reviewer-tool"
+}

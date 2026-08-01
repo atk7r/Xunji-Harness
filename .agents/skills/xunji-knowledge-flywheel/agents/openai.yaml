@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Knowledge Flywheel"
+  short_description: "Use Xunji grounding knowledge safely"
+  default_prompt: "Use $xunji-knowledge-flywheel to apply or update Xunji knowledge grounding."

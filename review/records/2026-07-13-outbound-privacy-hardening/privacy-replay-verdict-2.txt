@@ -1,0 +1,11 @@
+Command:
+  python3 tools/replay.py review/records/2026-07-13-outbound-privacy-hardening/privacy-replay-sample-2.txt.replay.json --scope 127.0.0.1
+
+Result:
+  [SKIPPED-PRIVACY-REDACTED] GET http://127.0.0.1:58867/
+
+  汇总: SKIPPED-PRIVACY-REDACTED=1
+
+Control:
+  The second replay contains distinct request/response header hashes from a fresh
+  loopback port and neither fresh reusable Cookie value appears in the file.

@@ -1,0 +1,140 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-09-statusline-live-derive-fix",
+  "files": {
+    "report.md": {
+      "sha1": "b6a34b33b1f17367fb47dfabbd0a46210a9bbacc",
+      "size": 1191
+    },
+    "evidence.md": {
+      "sha1": "0cd8a2dbe12a0826cacc20ce130aa8ccf575485e",
+      "size": 735
+    },
+    "frontier.md": {
+      "sha1": "1091ba82f8a4e7fe01b5e6a573d8f0740d5b2a56",
+      "size": 209
+    },
+    "decisions.md": {
+      "sha1": "28b014533684680a5fb278e25d1b6a2802dc2fd3",
+      "size": 289
+    },
+    "review.md": {
+      "sha1": "82abee0cf6f891f9bce36f3c2a3b657711454a89",
+      "size": 894
+    },
+    "target.md": {
+      "sha1": "e6564e8477ee833ca5edf17078fe0158d7cd9a6d",
+      "size": 199
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 — active diff",
+        "maturity": "candidate",
+        "certainties": [],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/active-diff.txt",
+            "path": "evidence/active-diff.txt",
+            "exists": true,
+            "size": 7120,
+            "sha1": "9a3b1353a6f29153f2034237c15a316e108da020",
+            "excerpt": "diff --git a/tools/xunji_statusline.py b/tools/xunji_statusline.py\nindex a02c5b6..75c60b7 100644\n--- a/tools/xunji_statusline.py\n+++ b/tools/xunji_statusline.py\n@@ -2,8 +2,10 @@\n \"\"\"Claude Code statusline for Xunji.\n \n This script is display-only during normal statusline use. It reads the active run\n-pointer plus derived state files and prints one concise, operator-facing line.\n-It never refreshes loop state, mutates run evidence, or drives an engagement.\n+pointer plus derived state files and prints one concise, operator-facing line. If\n+those derived caches are missing or stale, it falls back to a read-only in-memory\n+derivation so the line does not falsely show Idle/0 fronts. It never refreshes\n+cache files, mutates run evidence, or drives an engagement.\n \"\"\"\n from __future__ import annotations\n \n@@ -263,12 +265,39 @@ def _state_stale(run_dir: Path) -> bool:\n     return latest_md > min(mtimes) + 0.001\n \n \n+def _derived_state(run_dir: Path) -> tuple[dict | None, dict | None, str]:\n+    \"\"\"Read-only fallback for missing/stale cache files.\n+\n+    Statusline must not write run state, but showing Idle/0 fronts when Markdown\n+    has advanced is worse than an in-memory derivation. Import lazily so normal\n+    cached rendering stays cheap.\n+    \"\"\"\n+    try:\n+        import loop_state  # noqa: WPS433\n+        import run_controller  # noqa: WPS433\n+        loop_data = loop_state.derive(run_dir, write=False)\n+        controller = run_controller.derive(run_dir, loop_data=loop_data)\n+    except Exception as exc:\n+        return None, None, exc.__class__.__name__\n+    return loop_data, controller, \"\"\n+\n+\n def _last_plan_note(journal: dict) -> str:\n     last = journal.get(\"last_event\") if isinstance(journal.get(\"last_event\"), dict) else {}\n     note = str(last.get(\"note\") or \"\").strip()\n     event = str(last.get(\"event\") or \"\").strip()\n     if event not in {\"plan\", \"action\", \"write_result\", \"phase_start\", \"phase_end\"}:\n         return \"\"\n+    phase = str((last.get(\"data\") or {}).get(\"phase\") or \"\").strip()\n+    if event in {\"phase_start\", \"phase_end\"} and phase == \"Setup\":\n+        return \"\"\n+    low_note = note.lower()\n+    if event in {\"phase_start\", \"phase_end\"} and (\n+        low_note.startswith(\"run prepared\")\n+        or \"prepare authorized run workbench\" in low_note\n+        or \"next phase=root orchestrator\" in low_note\n+    ):\n+        return \"\"\n     target = \"\"\n     reason = \"\"\n     mt = re.search(r\"目标=([^;；]+)\", note)\n@@ -307,12 +336,23 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)\n     if run_dir is None:\n         return f\"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag('Idle', color=bool(color))} 未选择运行目录\"\n \n+    stale = _state_stale(run_dir)\n     loop_data = _load_json(run_dir / \"state\" / \"loop_state.json\", {})\n     controller = _load_json(run_dir / \"state\" / \"controller.shadow.json\", {})\n+    live_derived = False\n+    derive_error = \"\"\n+    if stale or not loop_data or not controller:\n+        derived_loop, derived_controller, derive_error = _derived_state(run_dir)\n+        if derived_loop is not None and derived_controller is not None:\n+            loop_data, controller = derived_loop, derived_controller\n+            live_derived = True\n     journal = _journal_summary(run_dir)\n     phase = _phase(loop_data, journal)\n     blocker_text, blocker_count = _blocker_summary(controller)\n-    stale_text = \" | 状态待刷新\" if _state_stale(run_dir) else \"\"\n+    stale_text = (\n+        \" | 现场推导\" if live_derived\n+        else (\" | 推导失败\" if derive_error else (\" | 状态待刷新\" if stale else \"\"))\n+    )\n     interrupt = \" | 中断待续\" if journal.get(\"interrupted\") else \"\"\n     line = \" | \".join([\n         f\"{status_style.tag('Xunji-status', 'cyan', enabled=color)} {_phase_tag(phase, color=bool(color))} {run_dir.name}{interrupt}{stale_text}\",\n@@ -387,6 +427,31 @@ def _selftest() -> int:\n         future = max(p.stat().st_mtime for p in watched) + 5\n         os.utime(run / \"frontier.md\", (future, future))\n         stale_plain = render_statusline(root_current, color=False)\n+        missing_cache = temp / \"missing-cache-run\"\n+        missing_cache.mkdir()\n+        (missing_cache / \"frontier.md\").write_text(\n+            \"# Frontier\\n\\n## Open Fronts\\n\\n### F-009 Missing cache\\n- Status: open\\n\",\n+            encoding=\"utf-8\",\n+        )\n+        (missing_cache / \"evidence.md\").write_text(\"# Evidence Ledger\\n\", encoding=\"utf-8\")\n+        (missing_cache / \"decisions.md\").write_text(\"# Decisions\\n\", encoding=\"utf-8\")\n+        (missing_cache / \"hypotheses.md\").write_text(\"# Hypotheses\\n\", encoding=\"utf-8\")\n+        (missing_cache / \"state\").mkdir()\n+        (missing_cache / \"state\" / \"loop_journal.jsonl\").write_text(\n+            json.dumps({\"cycle\": 1, \"event\": \"phase_start\", \"data\": {\"phase\": \"Setup\"}, \"note\": \"prepare authorized run workbench\"}, ensure_ascii=False) + \"\\n\"\n+            + json.dumps({\"cycle\": 1, \"event\": \"phase_end\", \"data\": {\"phase\": \"Setup\"}, \"note\": \"run prepared; next phase=Root Orchestrator (/loop runs/missing-cache-run)\"}, ensure_ascii=False) + \"\\n\",\n+            encoding=\"utf-8\",\n+        )\n+        assert set_active_run(str(missing_cache))\n+        missing_before = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob(\"*\")))\n+        missing_plain = render_statusline(root_current, color=False)\n+        missing_after = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob(\"*\")))\n+        original_derived_state = _derived_state\n+        try:\n+            globals()[\"_derived_state\"] = lambda _run_dir: (None, None, \"RuntimeError\")\n+            failed_derive_plain = render_statusline(root_current, color=False)\n+        finally:\n+            globals()[\"_derived_state\"] = original_derived_state\n     finally:\n         if old_pointer is None:\n             clear_active_run()\n@@ -402,7 +467,11 @@ def _selftest() -> int:\n         (\"XUNJI_COLOR command path has ansi\", proc.returncode == 0 and \"\\033[\" in env_colored and \"[Hunter｜验证]\" in env_colored),\n         (\"unknown phase fallback is styled\", \"\\033[\" in unknown_phase and \"[Unexpected Phase]\" in unknown_phase),\n         (\"normal render is read-only\", before_render == after_render),\n-        (\"stale derived state is visible\", \"状态待刷新\" in stale_plain),\n+        (\"stale cache uses live read-only derivation\", \"现场推导\" in stale_plain and \"状态待刷新\" not in stale_plain),\n+        (\"missing cache does not show false idle\", \"Idle｜空闲\" not in missing_plain and \"待验证入口 1 个\" in missing_plain),\n+        (\"setup journal note does not mask controller action\", \"run prepared\" not in missing_plain and \"下一步 继续验证可行动入口\" in missing_plain),\n+        (\"missing cache live derivation is read-only\", missing_before == missing_after),\n+        (\"failed live derivation is visible\", \"推导失败\" in failed_derive_plain),\n         (\"invalid outside run pointer is rejected\", invalid_rejected),\n         (\"outside Xunji prints nothing\", outside == \"\"),\n     ]\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002 — focused selftests passed",
+        "maturity": "candidate",
+        "certainties": [],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/selftest-log.txt",
+            "path": "evidence/selftest-log.txt",
+            "exists": true,
+            "size": 497,
+            "sha1": "f38a00b2f80f5dadd198c12080ef5d86a4d13dc6",
+            "excerpt": "Command: python3 tools/selftest_all.py --only xunji_statusline,loop_state,run_controller,loop_bootstrap --timeout 300\nExit: 0\n\nrunning 4 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14\n\n  PASS  loop_state         0.1s  closed-loop progress and gate snapshot\n  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline\n  PASS  run_controller     0.1s  advisory shadow run controller\n  PASS  loop_bootstrap     0.6s  autonomous loop launcher\n\n4 passed, 0 failed  (0.9s total)\n\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003 — hamastar active statusline corrected",
+        "maturity": "candidate",
+        "certainties": [],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/statusline-log.txt",
+            "path": "evidence/statusline-log.txt",
+            "exists": true,
+            "size": 199,
+            "sha1": "9edede3079e9c11db31a72da22169de0effe7c02",
+            "excerpt": "Command: python3 tools/xunji_statusline.py\nExit: 0\n\n[Xunji-status] [Root｜调度] hamastar_20260709 | 现场推导 | 待验证入口 5 个 | 无子任务 | 阻断 3 个 | 下一步 分派子任务\n\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-004",
+        "head": "## E-004 — diff check passed",
+        "maturity": "candidate",
+        "certainties": [],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/diff-check-log.txt",
+            "path": "evidence/diff-check-log.txt",
+            "exists": true,
+            "size": 35,
+            "sha1": "a21bbe65003a74f39fdd025ff13148c8793457c6",
+            "excerpt": "Command: git diff --check\nExit: 0\n\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "c6a1bc58a2917a0ea1ab60c2fbc9778a8da37c30"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Statusline Live-Derive Fix\n\n## Problem\n\n`tools/xunji_statusline.py` used cached `state/loop_state.json` and\n`state/controller.shadow.json`. For `runs/hamastar_20260709`, those caches were\nmissing/stale while Markdown files had advanced, so statusline showed:\n\n- `Idle｜空闲`\n- `待验证入口 0 个`\n- `无阻断`\n- stale setup next action text: `run prepared...`\n\n## Fix\n\n- When caches are missing or stale, derive `loop_state` and `run_controller`\n  in memory with write disabled.\n- Keep normal statusline rendering read-only.\n- Show `现场推导` when live fallback is used.\n- Ignore structured Setup `phase_start` / `phase_end` journal notes as\n  next-action candidates, so controller-required action is visible.\n- Render `推导失败` if read-only live derivation fails, instead of silently\n  returning to false idle/zero-front output.\n\n## Verification\n\n- `python3 tools/selftest_all.py --only xunji_statusline,loop_state,run_controller,loop_bootstrap --timeout 300` -> passed.\n- `python3 tools/xunji_statusline.py` on active `runs/hamastar_20260709` -> `[Root｜调度] ... 待验证入口 5 个 ... 阻断 3 个 ... 下一步 分派子任务`.\n- `git diff --check` -> passed.\n",
+    "frontier.md": "# Frontier\n\n## F-001 — statusline stale cache fallback\n\n- Status: closed\n- Evidence: E-001, E-002, E-003, E-004\n- Resolution: statusline now uses read-only live derivation when caches are missing or stale.\n\n",
+    "decisions.md": "# Decisions\n\n- D-001: Do not make statusline write `loop_state.json` or `controller.shadow.json`; preserve read-only rendering.\n- D-002: Use live in-memory derivation only when caches are missing/stale.\n- D-003: Treat setup/bootstrap journal notes as stale display text, not next action.\n\n",
+    "review.md": "# Review\n\n## Claude Code CLI Review\n\n- Command: `python3 tools/peer_review.py review/records/2026-07-09-statusline-live-derive-fix --driver codex --backend claude --out review/records/2026-07-09-statusline-live-derive-fix/review-claude.md --json-out review/records/2026-07-09-statusline-live-derive-fix/review_result-claude.json --timeout 900`\n- Backend: `claude:code-cli`\n- Verdict: WARN\n- Full output: `review-claude.md`\n\nDriver disposition:\n\n- PR-001 accepted: command outputs were prose-only. Added `selftest-log.txt`, `statusline-log.txt`, and `diff-check-log.txt`.\n- PR-002 accepted: setup-note filtering was too string-dependent. Fixed by suppressing structured Setup `phase_start` / `phase_end` journal notes; the English text checks remain only as compatibility fallback.\n- PR-003 accepted: derivation failures were silent. Fixed by rendering `推导失败`; added selftest coverage.\n\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 180000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "f03000d215b887b8e62e9199a2308503846f6929"
+}

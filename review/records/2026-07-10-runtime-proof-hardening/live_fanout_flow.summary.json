@@ -1,0 +1,65 @@
+{
+  "assignment_statuses": {
+    "A-auth-001": {
+      "front": "F-002",
+      "last_note": "Evidence: E-900 merged for Front: F-002",
+      "status": "merged"
+    },
+    "A-web-001": {
+      "front": "F-001",
+      "last_note": "Evidence: E-900 merged for Front: F-001",
+      "status": "merged"
+    }
+  },
+  "claude_version": "2.1.201 (Claude Code)",
+  "disposition": {
+    "assignments": [
+      "A-auth-001",
+      "A-web-001"
+    ],
+    "count": 2,
+    "disposition_satisfied": true,
+    "fronts": [
+      "F-001",
+      "F-002"
+    ],
+    "pending": [],
+    "satisfied": true
+  },
+  "disposition_denial_seen": true,
+  "fanout": {
+    "assignments": [
+      "A-auth-001",
+      "A-web-001"
+    ],
+    "count": 2,
+    "fronts": [
+      "F-001",
+      "F-002"
+    ],
+    "satisfied": true
+  },
+  "final_coda_seen": true,
+  "hook_counts": {
+    "agent_posttool_recorded": 2,
+    "agent_pretool_allowed": 2,
+    "disposition_denials": 3,
+    "protected_state_hook_output_records": 4
+  },
+  "operator_contract_preserved": true,
+  "passed": true,
+  "post_disposition_probe_allowed": true,
+  "protected_non_target_receipts": 0,
+  "raw_sha256": "6cedf42337384e387597c56e197e4e7ed2c3574417276ab9e5ec49a4d362fe2d",
+  "record_count": 1290,
+  "returncode": 0,
+  "runtime_chain": {
+    "errors": [],
+    "events": 19
+  },
+  "schema": "xunji.live_fanout_flow.summary.v1",
+  "sentinel_created": true,
+  "sentinel_value": "released",
+  "stop_hook_events": 6,
+  "unresolved_target_denials": []
+}

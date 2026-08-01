@@ -1,0 +1,77 @@
+# Implementation Grep Artifacts
+
+Command:
+
+```bash
+rg -n "from .*OpenMythos|import .*OpenMythos|kyegomez|OpenMythos" tools docs/templates docs/WORKFLOW-reference.md || true
+```
+
+Output:
+
+```text
+tools/workers.py:650:        f"- RDT style: {profile.get('style')} (reasoning pattern only; no OpenMythos runtime dependency)",
+tools/context_pack.py:217:        f"- RDT style: {rdt['style']} (reasoning pattern only; no OpenMythos runtime dependency)",
+```
+
+Command:
+
+```bash
+rg -n "openmythos-inspired|no OpenMythos runtime|reasoning pattern only|Loop budget|Operator Profile / RDT Controls|missing-rdt-step-field|operator_profile" tools/context_pack.py tools/workers.py tools/setup_run.py docs/templates/agents docs/templates/run/operator_profile.json docs/WORKFLOW-reference.md
+```
+
+Selected output:
+
+```text
+docs/templates/run/operator_profile.json:10:    "style": "openmythos-inspired",
+docs/WORKFLOW-reference.md:473:- `state/operator_profile.json` is optional per-run personalization for Agent
+tools/setup_run.py:70:    profile_src = TPL / "operator_profile.json"
+tools/setup_run.py:72:        shutil.copyfile(profile_src, state / "operator_profile.json")
+tools/context_pack.py:150:def load_operator_profile(run_dir: Path) -> tuple[dict, str]:
+tools/context_pack.py:152:    path = run_dir / "state" / "operator_profile.json"
+tools/context_pack.py:217:        f"- RDT style: {rdt['style']} (reasoning pattern only; no OpenMythos runtime dependency)",
+tools/context_pack.py:482:    lines += ["", *render_operator_profile_lines(run_dir, role=role, front_text=front_text)]
+tools/workers.py:133:- Loop budget: {loop_budget} recurrent step(s)
+tools/workers.py:150:## Operator Profile / RDT Controls
+tools/workers.py:650:        f"- RDT style: {profile.get('style')} (reasoning pattern only; no OpenMythos runtime dependency)",
+tools/workers.py:707:        "operator_profile": rdt_profile["source"],
+tools/workers.py:854:            or re.search(r"(?im)^##\s+Operator Profile / RDT Controls\b", text)
+tools/workers.py:886:                    issues.append({"severity": "warn", "agent": agent, "kind": "missing-rdt-step-field",
+docs/templates/agents/web-hunter.md:28:- Obey the context pack's `Operator Profile / Personalized RDT` and the assignment's `Loop budget`; treat both as operator preference, never target evidence.
+docs/templates/agents/verify.md:28:- Obey the context pack's `Operator Profile / Personalized RDT` and the assignment's `Loop budget`; treat both as operator preference, never target evidence.
+```
+
+Command:
+
+```bash
+rg -n "Personalized RDT|operator_profile|\\.agents/skills|Loop budget|openmythos-inspired|Reasoning style" .claude/skills/xunji-agent-board/SKILL.md
+```
+
+Output:
+
+```text
+.claude/skills/xunji-agent-board/SKILL.md:24:`.agents/skills/` tree is Codex-side guidance for advisory/maintenance work and
+.claude/skills/xunji-agent-board/SKILL.md:38:## Personalized RDT / Operator Profile
+.claude/skills/xunji-agent-board/SKILL.md:40:`state/operator_profile.json` is the per-run preference layer for Agent reasoning
+.claude/skills/xunji-agent-board/SKILL.md:47:- Before assigning Agents, check whether `state/operator_profile.json` exists and
+.claude/skills/xunji-agent-board/SKILL.md:52:  `Reasoning style: personalized-rdt`, `Loop budget`, and `Operator Profile`.
+.claude/skills/xunji-agent-board/SKILL.md:55:- `Loop budget` means reasoning-loop depth for the Agent prompt. It does not
+.claude/skills/xunji-agent-board/SKILL.md:59:- `openmythos-inspired` means use the Prelude -> recurrent loop -> Coda
+.claude/skills/xunji-agent-board/SKILL.md:97:rg -n "Reasoning style|Loop budget|Operator Profile" runs/<dir>/agents/A-web-hunter-001.md runs/<dir>/context/F-001.web-hunter.md
+.claude/skills/xunji-agent-board/SKILL.md:119:- For personalized-RDT Agents, verify `Loop budget`, `Operator Profile`, and
+```
+
+Command:
+
+```bash
+rg -n "Default Edit Target|\\.claude/skills|\\.agents/skills|Claude Code primary driver|Codex-side" AGENTS.md
+```
+
+Output:
+
+```text
+AGENTS.md:12:## Default Edit Target
+AGENTS.md:16:change is for the **Claude Code primary driver**. In that default case:
+AGENTS.md:18:- update `.claude/skills/` for skill/driver guidance;
+AGENTS.md:20:- do **not** treat `.agents/skills/` as the Root driver's instruction source.
+AGENTS.md:22:The `.agents/skills/` tree is for Codex-side auxiliary/advisory/maintenance
+```

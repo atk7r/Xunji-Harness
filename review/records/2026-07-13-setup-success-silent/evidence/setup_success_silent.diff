@@ -1,0 +1,137 @@
+diff --git a/tools/setup_run.py b/tools/setup_run.py
+--- a/tools/setup_run.py
++++ b/tools/setup_run.py
+@@ _set_active_run
+         if xunji_statusline.set_active_run(str(run_dir)):
+-            print(f"[setup] statusline active run: runs/{run_dir.name}")
+             return True
+         print(f"[setup] active run switch failed: {run_dir}", file=sys.stderr)
+
+@@ main: successful setup work
+-    made = scaffold(run_dir)
++    scaffold(run_dir)
+     _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
+-    print(f"[setup] 建 run 骨架 {run_dir}")
+-    print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
+
+@@ main: recon ingestion
+-                info = ingest(rp, run_dir)
+-                print(f"[setup] ingest_recon → {info}; target.md 已记录 recon 路径")
++                ingest(rp, run_dir)
+             except Exception as e:
+                 print(f"[!] ingest_recon 失败(已记录路径, 请手动 ingest): {e}", file=sys.stderr)
+-                sinfo = record_scope(run_dir, rp)
+-                print(f"[setup] {sinfo} → target.md(派生不驱动, 复核/可改)")
++                record_scope(run_dir, rp)
+             except Exception as e:
+                 print(f"[!] scope 派生失败(请手填 target.md In/Out-of-scope): {e}", file=sys.stderr)
+-                cinfo = adapt_coverage(rp, run_dir)
++                adapt_coverage(rp, run_dir)
+                 coverage_ready = _coverage_ready(run_dir)
+-                print(f"[setup] Guanlan→coverage(零重探): {cinfo}")
+             except Exception as e:
+                 print(f"[!] coverage 适配失败(可手跑 classify_hosts 兜底): {e}", file=sys.stderr)
+-                kinfo = knowledge_match(run_dir)
+-                print(f"[setup] knowledge 签名匹配: {kinfo}")
++                knowledge_match(run_dir)
+             except Exception as e:
+                 print(f"[!] knowledge 匹配失败(可手查): {e}", file=sys.stderr)
+
+@@ main: target-derived coverage and optional classify
+-        print("[setup] 无 recon: 从 target.md 推导最小 coverage.json …")
+         try:
+-            cinfo = _derive_coverage_from_target(run_dir)
++            _derive_coverage_from_target(run_dir)
+             coverage_ready = _coverage_ready(run_dir)
+-            label = "target→coverage(最小骨架)" if coverage_ready else "target→coverage"
+-            print(f"[setup] {label}: {cinfo}")
+         except Exception as e:
+             print(f"[!] coverage 自动推导失败(可手建): {e}", file=sys.stderr)
+-        print("[setup] --classify: 跑 classify_hosts 作 egress_recheck 增量...")
+         r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
+-        sys.stdout.write(r.stdout or "")
+         if r.stderr:
+             sys.stderr.write(r.stderr)
+
+@@ main: ledger, journal, and active selection
+-            ledger = coverage_matrix.write_outputs(run_dir)
+-            summary = ledger.get("summary", {})
+-            print("[setup] asset ledger: ...")
++            coverage_matrix.write_outputs(run_dir)
+         except Exception as e:
+             print(f"[!] asset ledger 初始化失败(目标动作前必须修复): {e}", file=sys.stderr)
+-        print("[下一步] ...")
+-    else:
+-        print("[下一步] ...")
+     _phase_journal(run_dir, "phase_end", "Setup", f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})")
+     if not _set_active_run(run_dir):
+         print("[!] run 已建好但未切换 active 指针；旧 run 保持 active，请修复控制面后重试 set-active。",
+               file=sys.stderr)
+         return 1
+
+@@ _selftest: integration contract
++    captured_stdout = io.StringIO()
++    captured_stderr = io.StringIO()
++    with contextlib.redirect_stdout(captured_stdout), contextlib.redirect_stderr(captured_stderr):
++        main_rc = main()
++    checks += [
++        ("full setup main succeeds in isolated root", main_rc == 0),
++        ("full setup main is stdout-silent on success", captured_stdout.getvalue() == ""),
++        ("full setup main has no stderr diagnostics on success", captured_stderr.getvalue() == ""),
++        ("full setup main preserves closed Setup journal cycle",
++         main_phase_events == ["phase_start", "phase_end"] and not main_journal["open_phase"]),
++    ]
+
++    with contextlib.redirect_stdout(help_stdout), contextlib.redirect_stderr(help_stderr):
++        try:
++            main()
++        except SystemExit as exc:
++            help_rc = exc.code
++    checks += [
++        ("explicit --help preserves argparse stdout",
++         help_rc == 0 and "usage:" in help_stdout.getvalue()),
++        ("explicit --help has no stderr diagnostics", help_stderr.getvalue() == ""),
++    ]
+
++    def _fake_classify_run(cmd, **_kwargs):
++        classify_calls.append(list(cmd))
++        return subprocess.CompletedProcess(cmd, 0, stdout="classifier progress\n", stderr="")
++
++    with contextlib.redirect_stdout(classify_stdout), contextlib.redirect_stderr(classify_stderr):
++        classify_rc = main()
++    checks += [
++        ("--classify setup succeeds with isolated classifier", classify_rc == 0),
++        ("--classify executes egress recheck",
++         len(classify_calls) == 1 and "--egress-recheck" in classify_calls[0]),
++        ("--classify progress stdout stays silent", classify_stdout.getvalue() == ""),
++        ("--classify has no stderr diagnostics on success", classify_stderr.getvalue() == ""),
++    ]
+
++    with contextlib.redirect_stdout(active_stdout), contextlib.redirect_stderr(active_stderr):
++        active_switched = _set_active_run(active_rd)
++    checks += [
++        ("active-run success helper is stdout-silent", active_stdout.getvalue() == ""),
++        ("active-run success helper has no stderr diagnostics", active_stderr.getvalue() == ""),
++    ]
+
++    with contextlib.redirect_stdout(rejected_stdout), contextlib.redirect_stderr(rejected_stderr):
++        false_ok = _set_active_run(rd3) is False
++    with contextlib.redirect_stdout(exception_stdout), contextlib.redirect_stderr(exception_stderr):
++        exception_ok = _set_active_run(rd3) is False
++    checks += [
++        ("active-run helper reports rejected pointer on stderr",
++         false_ok and rejected_stdout.getvalue() == ""
++         and "active run switch failed" in rejected_stderr.getvalue()),
++        ("active-run helper reports pointer exception on stderr",
++         exception_ok and exception_stdout.getvalue() == ""
++         and "active run switch failed: selftest boom" in exception_stderr.getvalue()),
++    ]
+
+diff --git a/tools/loop_bootstrap.py b/tools/loop_bootstrap.py
+--- a/tools/loop_bootstrap.py
++++ b/tools/loop_bootstrap.py
+@@ cmd_new
+     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+-    print(r.stdout.rstrip())
++    if r.stdout.strip():
++        print(r.stdout.rstrip())

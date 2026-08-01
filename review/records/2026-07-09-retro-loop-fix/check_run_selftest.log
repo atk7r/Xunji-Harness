@@ -1,0 +1,174 @@
+ok   preamble not counted
+ok   report Evidence IDs parser accepts bullet form
+ok   split certainty -> confirmed
+ok   off-doctrine 0.9 -> confirmed (C1)
+ok   downgrade w/ grid nums in note -> NOT confirmed (the 2026-06-17 fix)
+ok   multi-line split certainty -> confirmed (N2 regression)
+ok   certainty value inside parens -> confirmed (S1 fix)
+ok   explicit maturity parsed
+ok   legacy confirmed entry infers finding
+ok   provenance parsed from Source/Trust
+ok   provenance inference is not overbroad
+ok   Artifacts label may carry parenthetical metadata
+ok   artifact footnote asterisk does not hide concrete token
+ok   artifact shorthand/glob notes are not dead refs
+ok   diff artifact parses for maintenance review
+ok   dangling citation detected
+ok   prose filenames not cited
+ok   inline Next:(E-002) not swept into Refutes
+ok   real refute detected
+ok   dangling warns for E-002 only
+ok   no-control entry flagged (E-003)
+ok   control entries not flagged
+ok   非标准 certainty -> hard error (E-004=0.9)
+ok   contradiction: refuted-but-confirmed E-001
+ok   no confirmed-missing-artifact FP
+ok   maturity parser: phenomenon
+ok   maturity parser: candidate
+ok   maturity parser: unknown defaults to candidate and records raw
+ok   report maturity gate: candidate in Evidence IDs hard error
+ok   report maturity gate: high-cert candidate still triggers final report
+ok   report maturity gate: phenomenon in body soft warn
+ok   report maturity gate: inline code E-id ignored
+ok   report maturity gate: lower-maturity sections are explicit context
+ok   maturity consistency: unknown warns
+ok   maturity consistency: finding below gate warns
+ok   maturity consistency: candidate above gate warns
+ok   evidence index keeps legacy confirmed and adds confirmed_findings
+ok   untrusted content closure review warning
+ok   untrusted content handled in review clears closure warning
+ok   untrusted content suspect instruction wording warns
+ok   recon cited + no coverage -> warn
+ok   real report (confirmed E-id) -> final (state-trigger)
+ok   final report + no coverage -> closure HARD error
+ok   coverage built -> coverage warn clears
+ok   coverage built -> closure coverage error clears
+ok   防lump: unknown and actionable LOGIN remain candidates
+ok   防lump: stub/403-only assets are not independent-app candidates
+ok   no recon cited -> no coverage gate (no FP)
+ok   loop_state closure blockers are check_run hard-gated
+ok   shallow-close w/o Vectors tried -> warn (F-001)
+ok   shallow-close WITH Vectors tried -> no warn (F-002)
+ok   deep-close -> no warn (F-003)
+ok   recon template placeholder -> not cited (no FP)
+ok   Type B closure without E-id -> hard gate message
+ok   Type B closure with E-id -> no hard gate message
+ok   front verification: version-only close hard-fails
+ok   front verification: 403/error close without bypass hard-fails
+ok   front verification: E-backed payload/bypass records clear
+ok   missing Fingerprints captured -> hard error
+ok   Fingerprints captured filled -> no fp hard error
+ok   '无新指纹' + candidates -> soft warn
+ok   '无…' WITH knowledge path -> no soft warn (S1)
+ok   Fingerprints only in comment -> hard error (S2)
+ok   retrospective missing -> hard error
+ok   retrospective placeholder-only -> both sections error
+ok   retrospective half-filled -> framework section error only
+ok   retrospective framework issue without status -> hard error
+ok   retrospective both filled -> no error
+ok   retrospective nested subsections count as filled
+ok   closure trigger + no retrospective -> closure carries 复盘 error
+ok   retrospective Verdict: FINAL activates closure gate
+ok   retrospective FINAL + report stub hard-fails report gate
+ok   retrospective FINAL activates coverage closure mode
+ok   report stub gate accepts Chinese 确认发现 section
+ok   retrospective prose mentioning GHOST_COMPLETE does not trigger closure
+ok   completion marker without cron_cancelled record hard-fails
+ok   completion marker ignores cron_cancelled on non-end journal event
+ok   completion marker with cron_cancelled=none clears cron gate
+ok   completion marker with cron_cancelled=<id> clears cron gate
+ok   closure trigger + non-terminal agent -> lifecycle hard error
+ok   finished agent clears lifecycle hard error
+ok   coverage subset (50/100) -> warn
+ok   coverage full (95/100) -> no warn
+ok   coverage guanlan scoped adapter subset -> no warn
+ok   coverage guanlan source without provenance -> warn
+ok   recon path non-JSON -> skip (no FP)
+ok   漏报: confirmed positive 缺失 -> 含 E-200
+ok   漏报: refutes-only(无Supports) 豁免 E-201
+ok   漏报: report 正文引用豁免 E-202
+ok   漏报: 已降级豁免 E-203
+ok   漏报: 代码块引用不算(bypass) E-204
+ok   漏报: 注释引用不算(bypass) E-205
+ok   漏报: mixed Supports+Refutes 不豁免 E-206
+ok   漏报: header 变体(空格/ID(s))被剥, E-302 正文保留
+ok   漏报门触发一次
+ok   auto-review 幂等: 已有独立复审 -> review.md 不变
+ok   auto-review: 未收口 -> 不触发(不建 review.md)
+ok   Metacog: draft report -> no warn
+ok   Metacog: _closure_claimed path triggers
+ok   Metacog: decisions Status CLOSING path triggers
+ok   Metacog: final report missing pass -> warn
+ok   Metacog: partial pass -> missing fields warn
+ok   Metacog: full contract -> no warn
+ok   peer_review ledger: pending BLOCKER hard fails
+ok   peer_review ledger: resolved BLOCKER clears pending gate
+ok   peer_review ledger: invalid status hard fails
+ok   peer_review ledger: resolution needs audit anchor
+ok   peer_review ledger: evidence hash drift hard fails
+ok   conflict gate: unresolved conflict before closure -> warning
+ok   conflict gate: medium finding unresolved conflict is not hard fail
+ok   conflict gate: HIGH finding unresolved conflict -> hard fail
+ok   conflict gate: HIGH hard fail does not also warn
+ok   conflict gate: CRITICAL finding unresolved conflict -> hard fail
+ok   conflict gate: resolved conflicts -> silent
+ok   conflict gate: bad conflicts.json -> projection warning, not hard fail
+ok   intermediate coverage: stale examined=false ignored when E/front touched hosts
+ok   intermediate review: 独立复审 header counts when review is fresh
+ok   intermediate review: evidence newer than review makes review stale
+ok   intermediate same-barrier: closed/deferred fronts skipped, open/probing still warn
+ok   录像软警: html-only confirmed -> 提示 E-300
+ok   录像软警: 有 .replay.json 不提示 E-301
+ok   录像软警: negative 不提示 E-302
+ok   布局漂移检测: 抓到散落 ev_loose.html/shot.png
+ok   布局漂移检测: 不误报白名单 evidence.json/coverage.json
+ok   布局漂移检测: evidence/ 子目录内文件不算散落
+ok   布局漂移: 无终版报告时静默(降噪)
+ok   布局漂移: 终版报告产出后散落 -> WARN
+ok   replay 绑定(真实命名 .html.replay.json 能绑上, 非 owner=None 漏掉): 只报 E-2
+ok   replay 绑定: E-1 自身 `- Replay:` -> 不报(别处/模板 Replay 不误清, 非全局计数)
+ok   replay 绑定: 无 E- 支撑的分歧不拦(非承重)
+ok   replay 绑定: 无 DIVERGED -> 空(opt-in/目标变更不罚)
+ok   replay 绑定: bare-stem shot ↔ shot.replay.json 也绑上
+ok   漏测门: 未点到的可达资产被报
+ok   漏测门: 已点到(测/defer)不报
+ok   漏测门: 不可达资产不计入
+ok   漏测门: IP 子串假阳已修(点 1.2.3.10 ≠ 1.2.3.1)
+ok   漏测门: 域名前缀子串假阳已修(点 data.com ≠ a.com)
+ok   漏测门: 域名后缀子串假阳已修(点 sub.ex.com ≠ ex.com)
+ok   漏测门: 单标签 host 已修(https://h1:8443→h1, 点 h1 算测过)
+ok   漏测门: host 规整(去 scheme/port)→ https://norm.example:8443 算点到
+ok   漏测门: 可达资产全点到 → 不报
+ok   漏测门: 无 coverage → 不报(不强加)
+ok   ① 簇裁决: *.vpn.corp.example 顶通配成员(0.vpn/1a2b.vpn 不报)
+ok   ① 簇裁决: 簇外可达 app.corp.example 仍报(没被簇洗白)
+ok   ① 安全界: *.<apex顶域> 太宽不算簇 → app.corp.example 仍被报(防偷懒洞)
+ok   ① 安全界硬化: 跨域时 *.<整注册域> 不算簇(registrable 判) → a.target.edu.cn 仍被报
+ok   ① 簇 glob 覆盖严格子域 node1.gw.corp.example(不报)
+ok   ① Codex#1: 簇头 gw.corp.example 自身不被 *.gw.corp.example 洗白(仍报)
+ok   _norm_host 括号IPv6取内
+ok   _norm_host 单冒号去port
+ok   _norm_host 裸IPv6不截断
+ok   深度门: 攻击过(E块内点到)的登录面不报
+ok   深度门: 未打(evidence 无)的登录面被报
+ok   深度门: 仅文件头提及(非E块)登录面仍被报
+ok   深度门: 非规范 ### E-9 头不算 E 块(锚定)
+ok   深度门: DYN-only(无攻击面)不要求攻击记录
+ok   深度门: 非登录攻击面 SURFACE:API 未打也被报(不只LOGIN, Codex#4)
+ok   深度门: 不可达登录面不计入
+ok   review资产门: 高价值/管理面可达资产无 E-entry -> 报 login2.example
+ok   review资产门: 普通低价值资产不报
+ok   深度门: 登录面都进 E 块 → 不报
+ok   review资产门: 高价值/管理面都进 E 块 → 不报
+ok   深度门: 无 coverage → 不报(不强加)
+ok   深度门/漏测门: 非dict coverage 不崩
+ok   replay 绑定: sqli.replay.json 不误绑 sqli.json 发现(防 false-fail)
+ok   布局漂移: 收口且根目录干净 -> 静默
+ok   replay 汇总: DIVERGED 升显著警告
+ok   replay 汇总: 含计数汇总行
+ok   replay 汇总: 全 IDENTICAL 无 DIVERGED 警告
+ok   replay 汇总: 空结果 -> 空
+ok   replay preflight SystemExit becomes hard gate
+ok   威胁假设软警: HIGH+ public front 无 H/next/E -> 报警
+ok   威胁假设软警: 关联 H 后消失
+check_run selftest passed

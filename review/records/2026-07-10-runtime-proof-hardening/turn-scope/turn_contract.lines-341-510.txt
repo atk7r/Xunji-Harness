@@ -1,0 +1,170 @@
+   341	
+   342	    if tool == "CronCreate":
+   343	        cron_ok, cron_note = runtime_receipts.cron_quiescent(
+   344	            run_dir,
+   345	            session_id=str(contract.get("session_id") or ""),
+   346	            since=float(contract.get("updated_at") or 0.0),
+   347	        )
+   348	        if not cron_ok:
+   349	            return "Cron 单实例门：创建 /loop 前必须先 CronList 证明本 run 无现存任务。" + cron_note
+   350	        if run_dir.name.lower() not in text.lower():
+   351	            return "Cron 单实例门：CronCreate prompt 必须显式包含当前 run 目录名。"
+   352	        return ""
+   353	
+   354	    if tool == "CronDelete":
+   355	        job = runtime_receipts._job_id(tool_input)
+   356	        ok, note = runtime_receipts.cron_delete_allowed(
+   357	            run_dir, job,
+   358	            session_id=str(contract.get("session_id") or ""),
+   359	            since=float(contract.get("updated_at") or 0.0),
+   360	        )
+   361	        if not ok:
+   362	            return "CronDelete 只可删除当前 CronList 观察到的本 run job：" + note
+   363	        return ""
+   364	
+   365	    state = run_model.summary(run_dir)
+   366	    frontier_exists = (run_dir / "frontier.md").exists()
+   367	    state_invalid = not frontier_exists or (
+   368	        not state.get("fronts") or bool(state.get("schema_errors"))
+   369	    )
+   370	    if state_invalid and (
+   371	        tool == "WebFetch" or (tool == "Bash" and not _fanout_control_bash(command))
+   372	    ):
+   373	        return (
+   374	            "canonical frontier 状态缺失或有 schema error；active run 按 fail-closed "
+   375	            "禁止目标动作，先修复 frontier.md 的 Status/Barrier class/Current depth。"
+   376	        )
+   377	    if not state.get("fanout_required") or contract.get("fanout_override"):
+   378	        return ""
+   379	    if tool == "Agent":
+   380	        raw_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+   381	        prompt = str(raw_input.get("prompt") or raw_input.get("description") or "")
+   382	        if "XUNJI_COMPLETION_REVIEW" in prompt.upper():
+   383	            missing = [item for item in COMPLETION_CHECKS if item not in prompt.lower()]
+   384	            if not runtime_receipts._evidence_hash(prompt) or missing:
+   385	                return (
+   386	                    "Completion Agent prompt 必须包含 EVIDENCE_INDEX=<current sha1> 和 "
+   387	                    "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger；缺少: "
+   388	                    + ", ".join(missing or ["EVIDENCE_INDEX"]))
+   389	            return ""
+   390	        assignment, front = runtime_receipts._assignment_fields(prompt)
+   391	        if not assignment or not front:
+   392	            return "Agent Board 强制：Agent prompt 必须包含 XUNJI_ASSIGNMENT=A-... 和 XUNJI_FRONT=F-...。"
+   393	        if not _assignment_exists(run_dir, assignment, front):
+   394	            return "Agent Board 强制：Agent token 未绑定 workers.py 生成的 assignment/front。"
+   395	        return ""
+   396	    fanout = runtime_receipts.agent_fanout(
+   397	        run_dir,
+   398	        session_id=str(contract.get("session_id") or ""),
+   399	        since=float(contract.get("updated_at") or 0.0),
+   400	    )
+   401	    if fanout.get("satisfied"):
+   402	        if tool == "Bash" and _fanout_control_bash(command):
+   403	            return ""
+   404	        if tool == "WebFetch" or tool == "Bash":
+   405	            disposition = runtime_receipts.agent_disposition(
+   406	                run_dir,
+   407	                session_id=str(contract.get("session_id") or ""),
+   408	                since=float(contract.get("updated_at") or 0.0),
+   409	            )
+   410	            if not disposition.get("disposition_satisfied"):
+   411	                return (
+   412	                    "Agent receipt 已返回但尚未完成 post-return disposition；先用 workers.py "
+   413	                    "把每个 assignment 更新为带 canonical E/F/D 锚点的 merged/blocked/failed，"
+   414	                    "且更新时间必须晚于 Agent 返回。"
+   415	                )
+   416	        return ""
+   417	    if tool == "Bash":
+   418	        if not _fanout_control_bash(command):
+   419	            return (
+   420	                "Agent Board 强制：当前至少 4 个独立 active fronts"
+   421	                "（open/probing/working/type-A）；真实 Agent 回执覆盖两个不同 front 前，"
+   422	                "Root Bash 只允许只读命令和 workers/run_model/loop_state 控制面命令。"
+   423	            )
+   424	    if tool in {"WebFetch"}:
+   425	        return "Agent Board 强制：真实 Agent 回执覆盖两个不同 front 前，Root 不得继续目标 WebFetch。"
+   426	    return ""
+   427	
+   428	
+   429	def _context_message(contract: dict, run_dir: Path) -> str:
+   430	    mode = contract.get("mode")
+   431	    if mode == EXPLAIN:
+   432	        return "[Xunji turn mode: EXPLAIN_ONLY] 只回答操作者问题；可读文件，不修改、不探测、不派 Agent；本回合无需 Coda。"
+   433	    if mode == PAUSE:
+   434	        return "[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。"
+   435	    state = run_model.summary(run_dir)
+   436	    fanout = (
+   437	        " fanout_required=true (open/probing/working/type-A 均为 active); "
+   438	        "先真实调用至少两个不同 front 的 Agent。"
+   439	        if state.get("fanout_required") else ""
+   440	    )
+   441	    return "[Xunji turn mode: EXECUTE] 按 run 状态推进，最后写唯一具体 Coda。" + fanout
+   442	
+   443	
+   444	def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
+   445	    run_dir = run_dir or find_active_run(RUNS, within_sec=6 * 60 * 60)
+   446	    if run_dir is None:
+   447	        if str(event.get("hook_event_name") or "") == "PreToolUse" \
+   448	                and str(event.get("tool_name") or "") == "CronCreate":
+   449	            return _deny("Xunji CronCreate 前必须先 setup/set-active 一个 run，再用当前回合 CronList 证明单实例。")
+   450	        return None
+   451	    hook = str(event.get("hook_event_name") or "")
+   452	    if hook == "UserPromptSubmit":
+   453	        prompt = str(event.get("prompt") or "")
+   454	        if INTERNAL_PROMPT_RE.search(prompt):
+   455	            contract = load_contract(
+   456	                run_dir, session_id=str(event.get("session_id") or ""))
+   457	            if not contract:
+   458	                return None
+   459	            return {
+   460	                "hookSpecificOutput": {
+   461	                    "hookEventName": "UserPromptSubmit",
+   462	                    "additionalContext": _context_message(contract, run_dir),
+   463	                }
+   464	            }
+   465	        contract = write_contract(run_dir, event)
+   466	        return {
+   467	            "hookSpecificOutput": {
+   468	                "hookEventName": "UserPromptSubmit",
+   469	                "additionalContext": _context_message(contract, run_dir),
+   470	            }
+   471	        }
+   472	    if hook == "PreToolUse":
+   473	        contract = load_contract(run_dir, session_id=str(event.get("session_id") or ""))
+   474	        reason = evaluate_pretool(run_dir, event, contract)
+   475	        if reason:
+   476	            receipt_event = dict(event)
+   477	            receipt_event.update({
+   478	                "hook_event_name": "PreToolUseDenied",
+   479	                "xunji_decision": "deny",
+   480	                "xunji_reason": reason,
+   481	                "xunji_target_action": _denial_is_target_action(event, reason),
+   482	            })
+   483	            runtime_receipts.append_hook_event(run_dir, receipt_event)
+   484	            return _deny(reason)
+   485	        return None
+   486	    if hook in {"PostToolUse", "PostToolUseFailure", "SubagentStart", "SubagentStop"}:
+   487	        tool_name = str(event.get("tool_name") or "")
+   488	        command = str((event.get("tool_input") or {}).get("command") or "") \
+   489	            if isinstance(event.get("tool_input"), dict) else ""
+   490	        target_action = _is_target_action(event)
+   491	        if hook in {"SubagentStart", "SubagentStop"} or tool_name in {
+   492	            "Agent", "CronCreate", "CronDelete", "CronList",
+   493	        } or (tool_name == "Bash" and "peer_review.py" in command) or target_action:
+   494	            receipt_event = dict(event)
+   495	            receipt_event["xunji_target_action"] = target_action
+   496	            runtime_receipts.append_hook_event(run_dir, receipt_event)
+   497	        return None
+   498	    return None
+   499	
+   500	
+   501	def _selftest() -> int:
+   502	    import subprocess
+   503	
+   504	    root = Path(tempfile.mkdtemp())
+   505	    run = root / "run"
+   506	    (run / "state").mkdir(parents=True)
+   507	    (run / "agents").mkdir()
+   508	    (run / "frontier.md").write_text(
+   509	        "# Frontier\n## Open Fronts\n" + "".join(
+   510	            f"### F-{idx:03d}\n- Status: open\n- Barrier class: {barrier}\n- Current depth: shallow\n"

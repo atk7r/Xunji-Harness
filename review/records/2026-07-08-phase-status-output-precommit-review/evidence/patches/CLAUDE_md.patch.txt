@@ -1,0 +1,34 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 8d18b11..547d447 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -46,6 +46,11 @@
+ ## Operating Loop
+ 
+ - For every authorized target, keep a run dir under `runs/` per `docs/WORKFLOW.md`.
++- **Entry boundary:** normal chat stays normal chat. A URL, markdown note, recon
++  path, or existing `runs/<dir>` mentioned in natural language prepares setup,
++  resume, or `hints.md`; it does **not** start autonomous loop. Only an explicit
++  `/loop` token enters loop mode. When unsure, preserve chat/setup/resume
++  semantics and ask only for missing run/target boundary data; never infer loop.
+ - **OSINT = the upstream tool Guanlan** (collect · dedup · fold wildcard DNS ·
+   liveness · ownership). Xunji **consumes the clean inventory and attacks it — it does
+   NOT re-do OSINT.** `setup_run <slug> <recon.json>` builds `coverage.json` with zero
+@@ -60,6 +65,17 @@
+   contradiction between "don't re-OSINT" and "every asset needs a verdict.")
+ - `docs/ROUTER.md` decides which mode guidance to load; deterministic (runtime +
+   phase + run state → files).
++- The five Router phases are `Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`,
++  and `Report`. Whenever one of these phases is entered or left, print an
++  obvious Chinese, box-style operator marker with bracket tags (for example
++  `[Xunji] [阶段开始] [Hunter｜验证挖掘]`) and ANSI color when the terminal supports it.
++  Once a run directory exists, record the same transition with
++  `tools/loop_journal.py phase-start|phase-end --phase ...`.
++  Do not invent markers for lifecycle mechanics such as resume, handoff, drift
++  recovery, `/loop`, or closure gates. Operator-facing lifecycle/status output
++  should be Chinese, keep bracket tags as no-color fallback, and summarize the
++  current phase, run dir, blockers, and next required action before any raw
++  details.
+ - Every cycle, update the written state:
+ 
+ ```text

@@ -1,0 +1,114 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "NEEDS_DRIVER",
+  "backend_used": "panel:claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "a9d24eeb1ed4f40eb0283ecef971033fc46a5a38",
+  "evidence_index_hash": "3e0fb367aa48ce64bc182f94a732fc232628f44b",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Independent review claim in ARCHITECTURE.md is circular and unsubstantiated",
+      "evidence": "05-architecture-workflow.diff (ARCHITECTURE.md checkpoint §12), E-005",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The ARCHITECTURE.md diff claims \"Independent review: VERDICT: PASS\" from session `34786588-ebcf-4102-b1c0-cd506870f591` and points to `review/records/2026-07-27-reviewer-contract-replay/report.md`. That review record is NOT in the evidence index (E-001 through E-005). E-005 only contains `verification.md` which documents running `selftest_all.py` — not an independent review. The code diff reports its own review with no external artifact backing it. This is circular closure language stronger than the recorded work supports.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Certainty 1.0 is over-applied across all five entries",
+      "evidence": "E-001 through E-005",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] Certainty 1.0 requires \"unambiguous, independently verifiable proof.\" E-001 through E-004 are changes that \"were made\" (which the diffs prove factually), but the claims also imply correctness/completeness. E-005 (Verification) claims \"69 passed, 0 failed\" at certainty 1.0, but the bundle does not include the raw test transcript — only the self-reported `verification.md` prose. An environment-provided artifact in a child session is not independently verifiable at certainty 1.0 from this bundle alone; 0.8 would be more appropriate.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "No end-to-end evidence for the core replay feature",
+      "evidence": "01b-workers-reviewer-recovery.diff, E-001",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The central new feature is `_replayable_existing_assignment` and the `stale_recovery_action` classifier — code paths that revalidate a durable assignment row and return the same binary launch contract without mutation. The verification evidence (E-005) only shows `selftest_all.py: 69/69 PASS`. There is no evidence of an actual end-to-end test: a run with an assigned-but-unlaunched Reviewer, a denied parent prompt, `delegate --limit 1` called, the replay contract returned, the review completed. The ARCHITECTURE.md mentions `runs/www-scshr-com_20260723` as a live-reference but includes no evidence artifacts from it (assignment row, journal entries, or delegate output). The feature is tested only via synthetic selftests in temporary directories.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "No negative-testing evidence for replay validation",
+      "evidence": "01b-workers-reviewer-recovery.diff, lines `_replayable_existing_assignment` validation chain",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The function raises specific `ValueError` codes (WORK_PLAN_ASSIGNMENT_REPLAY_STATE_INVALID, _IDENTITY_INVALID, _ROW_AMBIGUOUS, _ROW_INVALID, _BUNDLE_INVALID, etc.) for every integrity failure mode. None of these failure paths are evidenced in the bundle — no selftest that feeds a tampered assignment row, a wrong dependency digest, a missing bundle, or a concurrent-mutation artifact. The evidence only shows the happy path (valid replay). This is shallow coverage for a function that gates binary contract launch.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "The recovery classifier `stale_recovery_action` has a TOCTOU gap not covered by evidence",
+      "evidence": "01a-settlement-owner.diff, `agent_settlement.py` stale_recovery_action",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The function accepts an optional `projection` parameter but falls back to computing it live. The docstring acknowledges \"workers owner performs the stronger assignment-row validation,\" but the classifier's output drives operator-facing recovery hints in `_stale_plan_recovery_hint` and `_check_agent_board`. If the plan state changes between classification and the operator reading the hint, the suggested action may be wrong. No evidence demonstrates this race is handled or that the operator is warned to re-check `status` before acting.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Evidence drift detection in peer review could reject legitimate concurrent updates",
+      "evidence": "02-peer-review-route.diff, `_append_run_review`",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] The new `EVIDENCE_DRIFT` guard compares the frozen evidence-index hash against the current state. This is sound for integrity, but the error message says \"rebuild the bundle and rerun review\" — which is expensive for a large review bundle. No evidence addresses the scenario where evidence changes between bundle freeze and review completion due to legitimate concurrent work (e.g., another Agent completing a different front). The test only covers a synthetic single-file mutation in a temp directory.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-007",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "Coda no-progress cycle change is a significant behavioral shift without migration evidence",
+      "evidence": "04-coda-cycles.diff, `loop_state.py: _progress`",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] Previously, any `loop_state.py --write` run would advance the no-progress counter. Now, only a typed `cycle_end` event in the loop journal advances it. This means the Coda never converges if the loop journal lacks valid `cycle_end` events — a silent behavior change. The ARCHITECTURE.md checkpoint claims \"Live migration: no existing run rewritten,\" but there is no evidence showing what happens to existing runs whose loop journals have no typed `cycle_end` events. The no-progress counter would stay at 0, and `coda_converged` would never trigger, effectively disabling the convergence signal for those runs until they get their first `cycle_end`.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-008",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "review panel had backend errors; aggregation is partial",
+      "evidence": "arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: en\", response.get(\"len\"))` and `response.get(\"wire_sha1\") or response.get(\"sha1\")`. For a true legacy v1 replay, `wire_len`/`wire_sha1` are absent, so it falls back to `len`/`sha1` which were the saved body hash (potentially capped). So for legacy capped bodies, `wire_len` == saved_len and `wire_sha1` == saved_sha1, and `truncated` would be False (saved_len < wire_len is False since equal). This means a legacy capped body is treated as a complete, non-truncated, wire_verified=True body! That's a",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "At least one requested heterogeneous reviewer failed or was unavailable.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[claude] **The evidence set treats code-diff-as-proof-of-correctness.** Every E-ID claims a change was made and verified; none document what was *not* changed or what was deliberately deferred. The checklist of \"Type A barriers\" or \"deferred fronts\" that would be in a pentest coverage ledger is entirely absent because this is structured as code change documentation rather than an audit. That framing itself is a blind spot.",
+    "[claude] **Missing artifact: independent review record.** The ARCHITECTURE.md checkpoint section (05-architecture-workflow.diff) references a concrete review filepath (`review/records/2026-07-27-reviewer-contract-replay/report.md`) and a session UUID. This file is absent from the evidence index. If it exists on disk, it should be included as E-006 or an annex. If it does not exist, the claim of independent review is unsubstantiated.",
+    "[claude] **Missing artifact: live-run evidence.** The checkpoint mentions `runs/www-scshr-com_20260723` to argue the recovery path works in practice. No assignment rows, journal excerpts, or delegate command output from that run are included. Including even a redacted snippet would substantially strengthen the claim of real-world applicability.",
+    "[claude] **The `evidence.md` file at 1127 bytes is barely larger than the index header.** For a change touching 7+ source files, 2 schema files, and 3 documentation files, this is thin. There is no evidence of any auxiliary investigation (cross-referencing capability registry, checking for conflicting assumptions in other tools, reviewing agent-board state-machine consistency).",
+    "[claude] **The reviewer author (original Claude) and the developer (also Claude) sharing the same base model is the exact context the \"heterogeneous\" reviewer role is designed to catch.** The diff comments at `agent_settlement.py:680` say \"This classifier intentionally knows only durable plan/projection roles\" — a claim that the author's own blind spot would make them ill-equipped to verify. A human reviewer would want to check whether the six recovery categories actually partition the state space exhaustively or whether mixed-state plans (e.g., a lane that is both a reviewer in one context and an execution in another) fall through to `MATERIAL_REPLAN` or `HARD_INVALID` incorrectly."
+  ],
+  "context_limits": [
+    "[claude] The bundle is structured as a `review_bundle.v1` with a code-review/architecture-review focus, despite the harness context describing a \"web-pentest run.\" The surface/probe/recon categories from the pentest rubric do not cleanly map onto this content. My analysis necessarily adapts the rubric's intention (closure skepticism, evidence integrity) to the code-review framing.",
+    "[claude] Many identifiers (schema names, session UUIDs, redacted paths) are scrubbed with `<redacted:internal:...>` markers. I cannot verify the actual content of files whose names or schemas are redacted, notably the corpus-level schema identifiers and the capability registry reference in the egress redaction. This may hide important structural assumptions.",
+    "[claude] The bundle includes truncation warnings (artifact_excerpt_chars reduced from 24000 to 11793). My review is based on the provided diff excerpts, not the full files. Key parts of the longer diffs (01b, 03b) were truncated, and I cannot verify the complete validation logic for all edge cases.",
+    "arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: en\", response.get(\"len\"))` and `response.get(\"wire_sha1\") or response.get(\"sha1\")`. For a true legacy v1 replay, `wire_len`/`wire_sha1` are absent, so it falls back to `len`/`sha1` which were the saved body hash (potentially capped). So for legacy capped bodies, `wire_len` == saved_len and `wire_sha1` == saved_sha1, and `truncated` would be False (saved_len < wire_len is False since equal). This means a legacy capped body is treated as a complete, non-truncated, wire_verified=True body! That's a",
+    "panel completed 1/2 required heterogeneous backends"
+  ],
+  "error": "arkcli: ERROR arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail: en\", response.get(\"len\"))` and `response.get(\"wire_sha1\") or response.get(\"sha1\")`. For a true legacy v1 replay, `wire_len`/`wire_sha1` are absent, so it falls back to `len`/`sha1` which were the saved body hash (potentially capped). So for legacy capped bodies, `wire_len` == saved_len and `wire_sha1` == saved_sha1, and `truncated` would be False (saved_len < wire_len is False since equal). This means a legacy capped body is treated as a complete, non-truncated, wire_verified=True body! That's a"
+}

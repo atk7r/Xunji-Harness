@@ -1,0 +1,18 @@
+python3 tools/setup_run.py --selftest
+setup_run selftest passed
+- setup phase journal records start and end
+- full setup main succeeds in isolated root
+- full setup main prints progress without phase box banners
+- full setup main preserves closed Setup journal cycle
+
+python3 tools/selftest_all.py --only setup_run,xunji_statusline,loop_journal,loop_bootstrap
+4 passed, 0 failed (0.8s total)
+
+python3 tools/check_rules.py
+rule check passed
+
+git diff --check
+passed
+
+python3 tools/selftest_all.py
+60 passed, 0 failed (86.7s total)

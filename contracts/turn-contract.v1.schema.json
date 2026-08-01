@@ -1,0 +1,409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/turn-contract.v1.schema.json",
+  "title": "Xunji current operator turn contract v1",
+  "description": "The current writer shape. Historical exact keysets are admitted only by the typed legacy reader, never by this producer schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "mode",
+    "session_id",
+    "reported_session_id",
+    "session_binding_kind",
+    "transcript_path",
+    "prompt_sha256",
+    "prompt_excerpt",
+    "source_sha256s",
+    "source_ambiguous",
+    "source_identity_version",
+    "lifecycle_source_hint",
+    "lifecycle_run_hint",
+    "run_name_sha256s",
+    "run_ambiguous",
+    "slug_sha256s",
+    "slug_ambiguous",
+    "classify_approved",
+    "ai_external_approved",
+    "resume_current_approved",
+    "lifecycle_operation",
+    "intent_resolution",
+    "model_lifecycle_candidate_allowed",
+    "memory_approved",
+    "direct_egress_approved",
+    "target_egress_denied",
+    "web_tools_denied",
+    "lifecycle_scope",
+    "fanout_override",
+    "intent_normalizations",
+    "loop_requested",
+    "loop_source_kind",
+    "run_bind_requested",
+    "run_transition_requested",
+    "origin_run",
+    "bound_run",
+    "updated_at",
+    "operator_intent"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.turn_contract.v1"},
+    "mode": {
+      "enum": [
+        "EXECUTE",
+        "EXPLAIN_ONLY",
+        "PAUSED_BY_OPERATOR",
+        "INTENT_PENDING",
+        "MAINTENANCE"
+      ]
+    },
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "reported_session_id": {"type": "string", "maxLength": 1024},
+    "session_binding_kind": {
+      "enum": ["session_id", "transcript_path", "single_operator"]
+    },
+    "transcript_path": {"type": "string", "maxLength": 4096},
+    "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "prompt_excerpt": {"type": "string", "maxLength": 4096},
+    "source_sha256s": {"$ref": "#/$defs/digestList"},
+    "source_ambiguous": {"type": "boolean"},
+    "source_identity_version": {"const": "canonical-v1"},
+    "lifecycle_source_hint": {"type": "string", "maxLength": 4096},
+    "lifecycle_run_hint": {"type": "string", "maxLength": 255},
+    "run_name_sha256s": {"$ref": "#/$defs/digestList"},
+    "run_ambiguous": {"type": "boolean"},
+    "slug_sha256s": {"$ref": "#/$defs/digestList"},
+    "slug_ambiguous": {"type": "boolean"},
+    "classify_approved": {"type": "boolean"},
+    "ai_external_approved": {"type": "boolean"},
+    "resume_current_approved": {"type": "boolean"},
+    "lifecycle_operation": {
+      "enum": ["none", "resume", "source", "setup", "loop"]
+    },
+    "intent_resolution": {
+      "enum": [
+        "model_candidate_pending",
+        "model_candidate_available",
+        "deterministic_alias",
+        "read_only",
+        "model_tool_candidate"
+      ]
+    },
+    "model_lifecycle_candidate_allowed": {"type": "boolean"},
+    "memory_approved": {"type": "boolean"},
+    "direct_egress_approved": {"type": "boolean"},
+    "target_egress_denied": {"type": "boolean"},
+    "web_tools_denied": {"type": "boolean"},
+    "lifecycle_scope": {"enum": ["normal", "setup_only"]},
+    "fanout_override": {"type": "boolean"},
+    "intent_normalizations": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 128}
+    },
+    "loop_requested": {"type": "boolean"},
+    "loop_source_kind": {"enum": ["none", "url", "file", "run"]},
+    "run_bind_requested": {"type": "boolean"},
+    "run_transition_requested": {"type": "boolean"},
+    "origin_run": {"type": "string", "maxLength": 255},
+    "bound_run": {"type": "string", "maxLength": 255},
+    "updated_at": {"type": "number", "exclusiveMinimum": 0},
+    "operator_intent": {"$ref": "#/$defs/operatorIntent"},
+    "maintenance_intent": {"const": "operator_prompt"},
+    "scope_admission_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+    "scope_admission_assets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 253}
+    },
+    "scope_admission_reason_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "scope_admission_parse_error": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "coordination_signature": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "fanout_epoch_started_at": {"type": "number", "exclusiveMinimum": 0},
+    "fanout_epoch_id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+    "intent_candidate": {"$ref": "#/$defs/intentCandidate"},
+    "intent_candidate_promoted_at": {"type": "number", "exclusiveMinimum": 0},
+    "transitioned_from": {"type": "string", "minLength": 1, "maxLength": 255},
+    "transition_transaction": {"$ref": "#/$defs/transitionTransaction"},
+    "transition_claim": {"$ref": "#/$defs/claimBinding"},
+    "authority_state": {"enum": ["session_ended", "resume_barrier"]},
+    "resume_requires_prompt": {"const": true},
+    "transcript_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ended_from_contract_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "session_end_reason": {"type": "string", "minLength": 1, "maxLength": 128},
+    "session_ended_at": {"type": "number", "exclusiveMinimum": 0},
+    "session_start_source": {"const": "resume"},
+    "resume_selection_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "session_resumed_at": {"type": "number", "exclusiveMinimum": 0}
+  },
+  "allOf": [
+    {
+      "if": {
+        "anyOf": [
+          {"required": ["coordination_signature"]},
+          {"required": ["fanout_epoch_started_at"]},
+          {"required": ["fanout_epoch_id"]}
+        ]
+      },
+      "then": {
+        "required": [
+          "coordination_signature",
+          "fanout_epoch_started_at",
+          "fanout_epoch_id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {"required": ["scope_admission_run"]},
+          {"required": ["scope_admission_assets"]},
+          {"required": ["scope_admission_reason_sha256"]}
+        ]
+      },
+      "then": {
+        "required": [
+          "scope_admission_run",
+          "scope_admission_assets",
+          "scope_admission_reason_sha256"
+        ],
+        "not": {"required": ["scope_admission_parse_error"]}
+      }
+    },
+    {
+      "if": {"required": ["scope_admission_parse_error"]},
+      "then": {
+        "not": {
+          "anyOf": [
+            {"required": ["scope_admission_run"]},
+            {"required": ["scope_admission_assets"]},
+            {"required": ["scope_admission_reason_sha256"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {"required": ["maintenance_intent"]},
+      "then": {"properties": {"mode": {"const": "MAINTENANCE"}}}
+    },
+    {
+      "if": {
+        "properties": {"intent_resolution": {"const": "model_tool_candidate"}},
+        "required": ["intent_resolution"]
+      },
+      "then": {
+        "required": ["intent_candidate", "intent_candidate_promoted_at"]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {"required": ["intent_candidate"]},
+            {"required": ["intent_candidate_promoted_at"]}
+          ]
+        }
+      }
+    }
+  ],
+  "oneOf": [
+    {
+      "not": {
+        "anyOf": [
+          {"required": ["authority_state"]},
+          {"required": ["resume_requires_prompt"]},
+          {"required": ["transcript_sha256"]},
+          {"required": ["ended_from_contract_sha256"]},
+          {"required": ["session_end_reason"]},
+          {"required": ["session_ended_at"]},
+          {"required": ["session_start_source"]},
+          {"required": ["resume_selection_sha256"]},
+          {"required": ["session_resumed_at"]}
+        ]
+      }
+    },
+    {
+      "properties": {"authority_state": {"const": "session_ended"}},
+      "required": [
+        "authority_state",
+        "resume_requires_prompt",
+        "transcript_sha256",
+        "ended_from_contract_sha256",
+        "session_end_reason",
+        "session_ended_at"
+      ],
+      "not": {
+        "anyOf": [
+          {"required": ["session_start_source"]},
+          {"required": ["resume_selection_sha256"]},
+          {"required": ["session_resumed_at"]}
+        ]
+      }
+    },
+    {
+      "properties": {"authority_state": {"const": "resume_barrier"}},
+      "required": [
+        "authority_state",
+        "resume_requires_prompt",
+        "transcript_sha256",
+        "ended_from_contract_sha256",
+        "session_start_source",
+        "resume_selection_sha256",
+        "session_resumed_at"
+      ],
+      "not": {
+        "anyOf": [
+          {"required": ["session_end_reason"]},
+          {"required": ["session_ended_at"]}
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "digestList": {
+      "type": "array",
+      "maxItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "operatorIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "operation",
+        "source_kind",
+        "source_sha256",
+        "run_sha256",
+        "route",
+        "constraints"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.operator_intent.v1"},
+        "operation": {"enum": ["none", "resume", "source", "setup", "loop"]},
+        "source_kind": {"enum": ["none", "url", "file", "run"]},
+        "source_sha256": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "run_sha256": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "route": {"enum": ["offline", "direct", "proxy"]},
+        "constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target_egress_denied",
+            "web_tools_denied",
+            "lifecycle_scope",
+            "framework_mutation"
+          ],
+          "properties": {
+            "target_egress_denied": {"type": "boolean"},
+            "web_tools_denied": {"type": "boolean"},
+            "lifecycle_scope": {"enum": ["normal", "setup_only"]},
+            "framework_mutation": {"const": "maintenance-only"}
+          }
+        }
+      }
+    },
+    "intentCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "prompt_sha256",
+        "operation",
+        "target_run",
+        "effect_sha256",
+        "constraints_sha256",
+        "candidate_sha256"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.lifecycle-intent-candidate.v1"},
+        "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "operation": {"enum": ["resume", "source"]},
+        "target_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "effect_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "constraints_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "candidate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "transitionTransaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transaction_id", "source_sha256", "expected_run"],
+      "properties": {
+        "transaction_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "expected_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"}
+      }
+    },
+    "lifecycleEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "target_run",
+        "input_sha256",
+        "operation",
+        "options_sha256",
+        "effect_sha256"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.lifecycle-effect.v1"},
+        "kind": {"enum": ["create", "activate"]},
+        "target_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "input_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "operation": {"type": "string", "minLength": 1, "maxLength": 128},
+        "options_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "effect_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "claimBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_run",
+        "origin_run",
+        "session_id",
+        "prompt_sha256",
+        "transaction_id",
+        "source_sha256",
+        "expected_run",
+        "effect"
+      ],
+      "properties": {
+        "target_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "origin_run": {"type": "string", "maxLength": 255},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "transaction_id": {"type": "string", "pattern": "^$|^[0-9a-f]{32}$"},
+        "source_sha256": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "expected_run": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "effect": {"$ref": "#/$defs/lifecycleEffect"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "transaction_id": {"const": ""},
+            "source_sha256": {"const": ""}
+          }
+        },
+        {
+          "properties": {
+            "transaction_id": {"pattern": "^[0-9a-f]{32}$"},
+            "source_sha256": {"pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      ]
+    }
+  }
+}

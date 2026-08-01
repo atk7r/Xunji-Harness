@@ -1,0 +1,38 @@
+{
+  "ts": "2026-07-12T20:35:08Z",
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:59969/",
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Cookie": "<redacted:header:6054be573689>"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "len": 19,
+    "sha1": "a033c31c183fe206cbd9a26add2e2346ced1530d",
+    "ctype": "text/plain",
+    "headers": {
+      "Server": "BaseHTTP/0.6 Python/3.9.6",
+      "Date": "Sun, 12 Jul 2026 20:35:08 GMT",
+      "Content-Type": "text/plain",
+      "Set-Cookie": "<redacted:header:44d5e67fe404>",
+      "Content-Length": "19"
+    },
+    "snippet": "privacy-replay-ok-3"
+  },
+  "privacy": {
+    "schema": "outbound-privacy.v1",
+    "redacted_fields": [
+      "header:cookie"
+    ],
+    "replayable": false,
+    "auth_exception": false,
+    "response_redactions": [
+      "response.header:set-cookie"
+    ]
+  },
+  "saved_body": "<ephemeral-loopback-body-removed>"
+}

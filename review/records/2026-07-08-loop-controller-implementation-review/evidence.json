@@ -1,0 +1,294 @@
+{
+  "total": 8,
+  "confirmed": [],
+  "confirmed_findings": [],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001",
+      "certainties": [
+        0.3
+      ],
+      "confirmed": false,
+      "maturity": "phenomenon",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-maintenance-diff",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-maintenance-diff",
+        "trust": "operator-reviewed"
+      },
+      "has_control": false,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/implementation.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/implementation.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/selftest-loop-controller.out",
+        "evidence/loop-state-selftest-detailed.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/selftest-loop-controller.out",
+        "evidence/loop-state-selftest-detailed.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/py-compile.out",
+        "evidence/check-rules.out",
+        "evidence/check-templates.out",
+        "evidence/git-diff-check.out",
+        "evidence/check-run-selftest.out",
+        "evidence/session-handoff-selftest.out",
+        "evidence/setup-run-selftest.out",
+        "evidence/anti-drift-selftest.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/py-compile.out",
+        "evidence/check-rules.out",
+        "evidence/check-templates.out",
+        "evidence/git-diff-check.out",
+        "evidence/check-run-selftest.out",
+        "evidence/session-handoff-selftest.out",
+        "evidence/setup-run-selftest.out",
+        "evidence/anti-drift-selftest.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/scshr-real-run-validation.json",
+        "evidence/scshr-frontier-status-lines.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/scshr-real-run-validation.json",
+        "evidence/scshr-frontier-status-lines.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-005",
+      "head": "## E-005",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-command-output",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-command-output",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/stale-wording-scan.out",
+        "evidence/doc-right-tree-files.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/stale-wording-scan.out",
+        "evidence/doc-right-tree-files.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-006",
+      "head": "## E-006",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-source-audit",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-source-audit",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/run-controller-advisory-audit.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/run-controller-advisory-audit.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-007",
+      "head": "## E-007",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-adversarial-regression",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-adversarial-regression",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/adversarial-type-a-coda.json"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/adversarial-type-a-coda.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-008",
+      "head": "## E-008",
+      "certainties": [
+        0.5
+      ],
+      "confirmed": false,
+      "maturity": "candidate",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "local-source-audit",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "local-source-audit",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/loop-state-postfix-audit.out",
+        "evidence/loop-state-selftest-detailed.out"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/loop-state-postfix-audit.out",
+        "evidence/loop-state-selftest-detailed.out"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

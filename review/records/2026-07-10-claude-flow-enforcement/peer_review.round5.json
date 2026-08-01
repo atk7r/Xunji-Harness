@@ -1,0 +1,159 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "panel:arkcli+claude",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "0d6040039e6234ba47f78025af634cee3f205fa4",
+  "evidence_index_hash": "2942fd19a9dcadf91db70266a8e422219170f0ba",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "evidence_integrity",
+      "claim": "context.md references E-002, run_gate.diff, and selftest_all.log, but none appear in the evidence_index",
+      "evidence": "context.md, evidence_index.json:E-001",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add E-002 with selftest_all.log and run_gate.diff to evidence_index, or remove those references from context.md and report.md.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The canonical evidence ledger lists only E-001. Context.md's claim that the raw selftest log is 'indexed as E-002' and that run_gate changes are reviewed cannot be cross-checked, so artifact verification is incomplete.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "evidence_integrity",
+      "claim": "E-001 bundles all framework changes under a single confirmed finding",
+      "evidence": "evidence_index.json:E-001, reviewed.diff",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Split the framework diff into per-component evidence items (anti_drift, output_gate, run_gate, check_run, coverage_matrix, probe, docs).",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] One evidence ID for 13 changed files and 70 hunks masks which subsystem is verified; a failure in one component would taint the entire confirmed finding.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "false_positive",
+      "claim": "output_gate Coda classifier rejects plausible bullet Codas and its action-verb whitelist is incomplete",
+      "evidence": "output_gate.diff",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add regressions for `- 下一行动:` bullet form and expand the action-verb whitelist (save/write/create/generate) or use a parser that counts executable clauses more robustly.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] CODA_RE requires 下一行动/BLOCKED at line start, so a leading list marker fails syntax; _has_multiple_action_clauses omits common verbs like 保存/save, letting compound actions slip through if the second clause uses only those verbs.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "false_positive",
+      "claim": "probe cookie-deletion relies on parsedate_to_datetime without normalizing timezones",
+      "evidence": "probe.diff",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add a regression for non-GMT / naive Expires strings and ensure the comparison is UTC-normalized before checking time.time().",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] parsedate_to_datetime may return a naive datetime; comparing it to UTC epoch seconds can wrongly treat live cookies as expired or stale cookies as valid.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "cookie jar can serialize None deletion markers while _save_cookie_jar signature still claims dict[str, str]",
+      "evidence": "probe.diff",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Update _save_cookie_jar/_load_cookie_jar type signatures and filter out None values before saving and before merging into headers.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] _cookie_dict_from_set_cookies now returns dict[str, str|None], but _save_cookie_jar is unchanged; a reloaded jar containing JSON nulls could produce Cookie headers like name=None.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-006",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "check_run accepts a self-written 'fresh-context' heading as sufficient independent-review identity",
+      "evidence": "check_run.diff",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Require the fresh-context reviewer to provide a backend meta-field or evidence of heterogeneous reviewer unavailability; do not let the heading label alone satisfy the gate.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] The identity_ok predicate passes if 'fresh-context' appears in the heading, so a same-family model can write its own independent-review heading and close the run.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-007",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "disposition.md and context.md are author-generated synthesis files, not independent evidence",
+      "evidence": "E-001, disposition.md, context.md",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Do not cite disposition.md or context.md as proof of correctness; rely on selftest logs, replay artifacts, and diff hunks instead.",
+      "why": "[panel:arkcli] [arkcli:kimi-k2.7-code] These files are narratives about what was fixed; they cannot verify that the current code actually implements or passes the claimed behavior.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-008",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "minimax-m3: parse error; output tail:  reasonable\n   - The new checks added (vague, multi-action, spoof-resistant) are mechanically implemented\n\nLet me think about what the AUTHOR (Codex, fixing prior issues) likely MISSED:\n\n**Likely blind spots**:\n1. The \"executable clause\" detector passes single-clause multi-verb sentences — this is by design but might allow subtle bypasses\n2. The \"concrete_anchor\" check is OR-based — easy to satisfy with a tool name mention\n3. The \"process_anchor\" list is finite — could be bypassed with synonyms\n; glm-5.2: parse error; output tail: x `CODA_RE` uses `(?im)` which means multiline, so `$` matches end of each line. The check `match.end() != len(clean)` ensures it's the last match that extends to the end of the cleaned message. This seems correct.\n\n5. **Cookie deletion logic edge case** - In probe.py, `_cookie_dict_from_set_cookies` returns `dict[str, str | None]` where None means deleted. But `_merge_cookies_into_headers` still has signature `cookies: dict[str, str]`. When `_apply_preflight` calls `_set_header(headers, \"Cookie",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "[panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-009",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`has_completed_independent_review` \"fresh-context\" identity check is unanchored — any heading containing the literal string \"fresh-context\" passes identity validation without requiring the `_backend:` meta line or exact heading match that the generated `peer_review` paths demand.",
+      "evidence": "`check_run.diff:46` (`or \"fresh-context\" in heading.lower()`), `check_run.diff:12-59` (full function)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] A synthetically crafted heading like `## Independent Review (fresh-context self-review by driver)` would satisfy the `identity_ok` check with no backend verification. This contrasts with the tighter `heterogeneous peer_review` / `same-family peer_review fallback` paths which require both exact heading strings AND `_backend` metadata. Defense-in-depth: run_gate.py's parallel check and the auditable review.md file mitigate the practical risk, but the asymmetry between the two generated-review paths and the fresh-context path is inconsistent. The WORKFLOW.md explicitly permits fresh-context same-family review as an egress-free fallback, so the policy is intentional — the code just doesn't distinguish \"actually a fresh Claude instance\" from \"the same instance claiming to be fresh.\"",
+      "status": "pending"
+    },
+    {
+      "id": "PR-010",
+      "severity": "WARN",
+      "category": "general",
+      "claim": "`_protocol_block_reason` dead-code check: `if not state or state.get(\"loop_complete\")` at `output_gate.diff:194` — the `not state` branch is unreachable with current code paths because `_protocol_state` always returns a populated dict (either from `loop_state.derive()` or `_fallback_protocol_state`).",
+      "evidence": "`output_gate.diff:152-182` (`_protocol_state` always returns a dict), `output_gate.diff:110-149` (`_fallback_protocol_state` always returns a dict)",
+      "affected_eids": [],
+      "recommended_action": "review",
+      "why": "[panel:claude] Dead code that silently returns \"\" (no block) could mask a future regression where `_protocol_state` is modified to return `None` or `{}`. If this happens, the entire Coda enforcement gate would silently disable without any error or log message. This is a maintainability concern, not a current defect.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[arkcli] [kimi-k2.7-code] Evidence_index only contains E-001 while context.md references E-002 and run_gate.diff; the report may silently rely on missing artifacts.",
+    "[arkcli] [kimi-k2.7-code] output_gate's line-start Coda regex and incomplete action-verb whitelist create both false rejections and false acceptances.",
+    "[arkcli] [kimi-k2.7-code] probe cookie handling has timezone-naive expiry comparison and a type-safety gap around None deletion markers.",
+    "[arkcli] [kimi-k2.7-code] check_run's 'fresh-context' heading exception is a same-family closure bypass if written by the model itself.",
+    "[arkcli] [kimi-k2.7-code] The evidence ledger is under-granular for a multi-file framework change; one E-001 collapses independent subsystem claims.",
+    "[arkcli] [kimi-k2.7-code] disposition.md/context.md are being treated as evidence rather than as claims requiring independent proof.",
+    "[claude] **Cross-module active-front count inconsistency on fallback paths**: When `_loop_state` is unavailable, `output_gate.py`'s `_fallback_protocol_state` parses `frontier.md` using `### H3` regex matching (only counts fronts defined as H3-level sections), while `run_gate.py`'s `_count_open_fronts` fallback reads all blocks with `Status:` fields (any section level). They could disagree on active front count if an operator uses H2-level front headings. Both would still block closure (output_gate through Coda enforcement, run_gate through open-front counting), so this creates defense-in-depth rather than a bypass, but the inconsistency is a latent maintenance risk.",
+    "[claude] **Deny-list nature of Coda vague-phrase detection**: The `vague_only` set and `vague_phrase` regex in `_turn_coda` (output_gate.diff lines 36-48) cover common Chinese evasion phrases, but Chinese has many semantically equivalent formulations. Phrases like \"按计划推进\", \"沿当前路径深挖\", \"依照原定方向继续\" could bypass the deny-list while being semantically vague. The concrete_anchor requirement (must reference an F-id, tool, or filename) provides a strong second layer — a vague Coda without a concrete anchor is rejected regardless. This layered approach is well-designed for this inherent limitation.",
+    "[claude] **No adversarial selftests for the `_fallback_protocol_state` frontier parser with unusual heading formats**: The selftest covers `### Front F-002 — login` (output_gate.diff line 321-322) but does not test edge cases like `### F-001 (was F-003)`, `### ## F-001`, or H3 headings where the F-id appears after the first 100 characters. The fallback is only activated when `loop_state` is unavailable, making this a narrow edge case with low exposure.",
+    "[claude] **The `_retro_framework_items` splitter (check_run.diff lines 118-127) correctly handles `Problem:` fields, numbered items, and heading-based items, but the fallback `return [body]` when no structure is found lumps all issues into one item — meaning one Status line discharges an entire free-form section. The disposition.md (lines 42-44) documents this as an intentional template tradeoff. The template now explicitly requires structured format (`docs.diff` retrospective template changes), which shifts enforcement from code to documentation. This is a reasonable design choice but means the gate's effectiveness depends on template compliance."
+  ],
+  "context_limits": [
+    "[arkcli] minimax-m3: parse error; output tail:  reasonable\n   - The new checks added (vague, multi-action, spoof-resistant) are mechanically implemented\n\nLet me think about what the AUTHOR (Codex, fixing prior issues) likely MISSED:\n\n**Likely blind spots**:\n1. The \"executable clause\" detector passes single-clause multi-verb sentences — this is by design but might allow subtle bypasses\n2. The \"concrete_anchor\" check is OR-based — easy to satisfy with a tool name mention\n3. The \"process_anchor\" list is finite — could be bypassed with synonyms\n",
+    "[arkcli] glm-5.2: parse error; output tail: x `CODA_RE` uses `(?im)` which means multiline, so `$` matches end of each line. The check `match.end() != len(clean)` ensures it's the last match that extends to the end of the cleaned message. This seems correct.\n\n5. **Cookie deletion logic edge case** - In probe.py, `_cookie_dict_from_set_cookies` returns `dict[str, str | None]` where None means deleted. But `_merge_cookies_into_headers` still has signature `cookies: dict[str, str]`. When `_apply_preflight` calls `_set_header(headers, \"Cookie",
+    "[claude] This is a framework maintenance diff review, not an external web penetration test. The traditional pentest rubric items (coverage ledger, missed surface, shallow closure of RCE/getshell fronts) are not applicable to this scope.",
+    "[claude] The evidence SHA1 values (E-001: `07b5a9d...`, E-002: `b0eac21...`) are claimed in context.md and the review bundle metadata. I verified file contents match their descriptions but cannot independently recompute SHA1 without shell access.",
+    "[claude] `selftest_all.log` shows 54/0 pass on Python 3.14 on macOS (arm64). Results could differ on other platforms/Python versions, but this is a reasonable single-environment regression baseline for the deployment target.",
+    "[claude] Chinese-language regex patterns in output_gate (vague phrase detection at lines 42-48, multi-action detection at lines 66-72, action verb detection at lines 73-77) are syntactically well-constructed based on my reading. The selftest coverage at lines 238-266 is comprehensive for the documented bypass patterns. A sufficiently creative Chinese rephrasing could produce semantically vague but syntactically valid Codas that bypass the deny-list — this is inherent in any mechanical filter.",
+    "[claude] I do not have access to the `loop_state.py` module source to verify its `derive(run_dir, write=False)` return structure. My analysis treats it as a black box that the hooks depend on, and the selftest coverage provides confidence in the integration.",
+    "[claude] The `check_run.py` `has_completed_independent_review` and `run_gate.py` `_has_codex_completion_review` functions are tested in isolation; the end-to-end `output_gate → run_gate` pipeline is tested in the explicit-pointer regression (`output_gate.diff` lines 354-378), which is the most important integration path.",
+    "[claude] Prior panel reviewers (arkcli) had backend parse errors in all 3 rounds (R2-R4), but the Claude-side reviewers provided independent analysis in each round. My review as a different model family (non-Claude) adds heterogeneity to the panel."
+  ],
+  "error": ""
+}

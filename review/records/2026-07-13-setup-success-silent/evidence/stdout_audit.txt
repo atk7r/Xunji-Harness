@@ -1,0 +1,26 @@
+Command:
+rg -n "print\(|stdout\.write|stderr\.write" tools/setup_run.py
+
+Result (with the line 472 continuation included for stream context):
+60:        print(f"[setup] phase journal skipped: {exc}", file=sys.stderr)
+70:        print(f"[setup] active run switch failed: {run_dir}", file=sys.stderr)
+72:        print(f"[setup] active run switch failed: {exc}", file=sys.stderr)
+405:        print(f"[!] {run_dir} 已存在 —— 不覆盖。换 slug/date 或手动处理。", file=sys.stderr)
+418:            print(f"[!] recon 不存在: {rp}", file=sys.stderr)
+426:                print(f"[!] ingest_recon 失败(已记录路径, 请手动 ingest): {e}", file=sys.stderr)
+430:                print(f"[!] scope 派生失败(请手填 target.md In/Out-of-scope): {e}", file=sys.stderr)
+436:                print(f"[!] coverage 适配失败(可手跑 classify_hosts 兜底): {e}", file=sys.stderr)
+440:                print(f"[!] knowledge 匹配失败(可手查): {e}", file=sys.stderr)
+449:            print(f"[!] coverage 自动推导失败(可手建): {e}", file=sys.stderr)
+457:            sys.stderr.write(r.stderr)
+466:            print(f"[!] asset ledger 初始化失败(目标动作前必须修复): {e}", file=sys.stderr)
+472:        print("[!] run 已建好但未切换 active 指针；旧 run 保持 active，请修复控制面后重试 set-active。",
+473:              file=sys.stderr)
+745:        print(("ok   " if ok else "FAIL ") + n)
+746:    print("setup_run selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+
+Interpretation:
+- Lines 60-472 are normal/error-path implementation sites; every output target
+  is stderr.
+- Lines 745-746 are the explicit --selftest result block.
+- There is no normal-path stdout write site.

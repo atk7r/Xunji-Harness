@@ -1,0 +1,345 @@
+$ python3 -m py_compile tools/xunji_statusline.py tools/loop_bootstrap.py tools/selftest_all.py
+[exit 0]
+
+$ python3 -m json.tool .claude/settings.json
+{
+    "statusLine": {
+        "type": "command",
+        "command": "XUNJI_COLOR=1 python3 \"$CLAUDE_PROJECT_DIR/tools/xunji_statusline.py\"",
+        "refreshInterval": 2,
+        "padding": 0
+    },
+    "hooks": {
+        "SessionStart": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\" --selftest"
+                    },
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\" --selftest"
+                    },
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\" --selftest"
+                    },
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\" --selftest"
+                    },
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
+                    }
+                ]
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\""
+                    },
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\""
+                    },
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
+                    }
+                ]
+            },
+            {
+                "matcher": "WebSearch",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\""
+                    }
+                ]
+            },
+            {
+                "matcher": "WebFetch",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\""
+                    }
+                ]
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
+                    }
+                ]
+            }
+        ],
+        "UserPromptSubmit": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\""
+                    },
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/anti_drift.py\""
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\""
+                    },
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\""
+                    }
+                ]
+            }
+        ]
+    }
+}
+[exit 0]
+
+$ python3 tools/xunji_statusline.py --selftest
+ok   plain statusline is human-readable
+ok   open fronts use pentest wording
+ok   subagents are aggregated
+ok   next action uses plan note
+ok   colored statusline has ansi
+ok   XUNJI_COLOR command path has ansi
+ok   unknown phase fallback is styled
+ok   normal render is read-only
+ok   invalid outside run pointer is rejected
+ok   outside Xunji prints nothing
+xunji_statusline selftest passed
+[exit 0]
+
+$ python3 tools/loop_bootstrap.py --selftest
+[handoff] written: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/session_handoff.md
+[bootstrap] 目标: selftest | recon: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/recon.json
+
+[bootstrap] run 目录: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9
+[bootstrap] 续接 run: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9
+[bootstrap] 续接 run: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9
+# Xunji 运行态快照
+
+╭─ [Xunji] [运行态快照] ────────────────────────────────────────────────────────
+│ [当前阶段] [Root Orchestrator｜主驾驶调度]
+│ [前线状态] 开放 1 / 延后 0 / 已关闭 0
+│ [证据变化] 总计 0；本轮新增 0；置信提升 0
+│ [覆盖进展] 已测 0；本轮新增 0；未测 0
+│ [无进展轮数] 0（继续推进）
+│ [Agent 状态] 任务 0；未解决冲突 0
+│ [需要并行分派] 否
+│ [接近收口复核] 否
+│ [收口阻断项] 1（open_fronts_present）
+╰────────────────────────────────────────────────────────
+
+- [当前阶段] [Root Orchestrator｜主驾驶调度]
+- [开放/延后/关闭前线] 1 / 0 / 0
+- [证据] 0 total; 本轮新增: 0; 置信提升: 0
+- [覆盖] 0 tested cells; 本轮新增: 0; 未测适用单元: 0
+- [无进展轮数] 0 (continue / 继续)
+- [Agents] 0 assignments; 未解决冲突: 0
+- [需要并行分派] 否
+- [收口复核候选] 否
+
+## 下一步建议 (Next Actions)
+
+- 从可行动/开放前线中选择下一条，并记录 Root graph pass。 [Choose the next front from actionable/open fronts and record a Root graph pass.]
+# Progress Ledger
+
+- Material progress: no
+- Artifact-backed progress: no
+- New evidence: 0
+- Certainty upgrades: 0
+- Coverage cells: 0
+- No-progress cycles: 0
+# Xunji 控制面建议
+
+╭─ [Xunji] [控制面建议] ────────────────────────────────────────────────────────
+│ [当前状态] 主驾驶继续推进 (DRIVER_ACTIVE)
+│ [可以停止] 否
+│ [停止原因] 影子控制面永不批准停止；只有硬收口闸门通过并由 Root 判定后才可停止
+│ [下一步必须动作] 继续推进可行动开放前线 (continue_driver_on_actionable_open_front)
+│ [停止阻断项] 1（open_fronts_present）
+│ [性质] 影子控制面，只提醒，不替 Root 选洞、不提升证据、不批准收口
+╰────────────────────────────────────────────────────────
+
+- [状态] 主驾驶继续推进 (DRIVER_ACTIVE)
+- [可以停止] 否
+- [停止原因] 影子控制面永不批准停止；只有硬收口闸门通过并由 Root 判定后才可停止
+- [下一步必须动作] 继续推进可行动开放前线 (continue_driver_on_actionable_open_front)
+
+## 停止阻断项 (Stop Blockers)
+
+- open_fronts_present
+
+## 停止仍需满足 (Stop Requires)
+
+- 开放前线归零，或每个延后/关闭都有证据支撑的理由 (zero open fronts or evidence-backed deferred/closed rationale)
+- 运行结构检查：python tools/check_run.py <run> (python tools/check_run.py <run>)
+- 运行 replay 核实：python tools/check_run.py <run> --replay-verify (python tools/check_run.py <run> --replay-verify)
+- 独立复审已完成且问题已处理 (independent review resolved)
+- retrospective.md 已真实填写 (retrospective.md completed)
+- 只有硬门全部通过后才允许写 GHOST_COMPLETE (GHOST_COMPLETE only after hard gates pass)
+[bootstrap] loop state: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/state/loop_state.json
+[bootstrap] progress ledger: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/state/progress_ledger.json
+[bootstrap] controller shadow: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/state/controller.shadow.json
+╭─ [Xunji] [Xunji 当前状态总览] ────────────────────────────────────────────────────────
+│ [运行目录] /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9
+│ [推断阶段] [Root Orchestrator｜主驾驶调度]
+│ [当前打开阶段] [无]
+│ [前线] 开放 1 / 延后 0 / 已关闭 0
+│ [证据] 总计 0；本轮新增 0；置信提升 0
+│ [覆盖] 已测 0；未测 0
+│ [需要并行分派] 否
+│ [收口复核候选] 否
+│ [控制面状态] 主驾驶继续推进 (DRIVER_ACTIVE)
+│ [下一步必须动作] 继续推进可行动开放前线 (continue_driver_on_actionable_open_front)
+│ [停止阻断项] open_fronts_present
+╰────────────────────────────────────────────────────────
+
+╭─ [Xunji] [Claude Code 启动入口] ────────────────────────────────────────────────────────
+│ [启动命令] /loop /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9
+│ [固定协议] /Users/ccj/Documents/AI/Xunji/docs/templates/loop_prompt.md
+│ [提示] 不生成 per-run loop_prompt.md；Claude Code 在 /loop 中读取固定协议和 run 文件。
+╰────────────────────────────────────────────────────────
+╭─ [Xunji] [常用监控命令] ────────────────────────────────────────────────────────
+│ [日志] /opt/homebrew/opt/python@3.14/bin/python3.14 tools/loop_journal.py /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9 status
+│ [运行态] /opt/homebrew/opt/python@3.14/bin/python3.14 tools/loop_state.py /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9 --write
+│ [进展账本] /opt/homebrew/opt/python@3.14/bin/python3.14 tools/progress_ledger.py /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9 --write
+│ [控制面] /opt/homebrew/opt/python@3.14/bin/python3.14 tools/run_controller.py /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9 --shadow
+│ [结构检查] /opt/homebrew/opt/python@3.14/bin/python3.14 tools/check_run.py /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9
+│ [决策流] tail -f /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/decisions.md
+│ [运行态文件] cat /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/state/loop_state.md
+│ [控制面文件] cat /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/state/controller_diff.md
+╰────────────────────────────────────────────────────────
+# Xunji 运行态快照
+
+╭─ [Xunji] [运行态快照] ────────────────────────────────────────────────────────
+│ [当前阶段] [Root Orchestrator｜主驾驶调度]
+│ [前线状态] 开放 1 / 延后 0 / 已关闭 0
+│ [证据变化] 总计 0；本轮新增 0；置信提升 0
+│ [覆盖进展] 已测 0；本轮新增 0；未测 0
+│ [无进展轮数] 1（继续推进）
+│ [Agent 状态] 任务 0；未解决冲突 0
+│ [需要并行分派] 否
+│ [接近收口复核] 否
+│ [收口阻断项] 1（open_fronts_present）
+╰────────────────────────────────────────────────────────
+
+- [当前阶段] [Root Orchestrator｜主驾驶调度]
+- [开放/延后/关闭前线] 1 / 0 / 0
+- [证据] 0 total; 本轮新增: 0; 置信提升: 0
+- [覆盖] 0 tested cells; 本轮新增: 0; 未测适用单元: 0
+- [无进展轮数] 1 (continue / 继续)
+- [Agents] 0 assignments; 未解决冲突: 0
+- [需要并行分派] 否
+- [收口复核候选] 否
+
+## 下一步建议 (Next Actions)
+
+- 从可行动/开放前线中选择下一条，并记录 Root graph pass。 [Choose the next front from actionable/open fronts and record a Root graph pass.]
+# Progress Ledger
+
+- Material progress: no
+- Artifact-backed progress: no
+- New evidence: 0
+- Certainty upgrades: 0
+- Coverage cells: 0
+- No-progress cycles: 1
+# Xunji 控制面建议
+
+╭─ [Xunji] [控制面建议] ────────────────────────────────────────────────────────
+│ [当前状态] 需要轨迹复盘并换路 (NEEDS_PIVOT)
+│ [可以停止] 否
+│ [停止原因] 影子控制面永不批准停止；只有硬收口闸门通过并由 Root 判定后才可停止
+│ [下一步必须动作] 记录轨迹复盘，然后换机制/继续理由/分派复审或面扩 Agent (record_trajectory_review_then_pivot_continue_or_assign_review_surface_agent)
+│ [停止阻断项] 1（open_fronts_present）
+│ [性质] 影子控制面，只提醒，不替 Root 选洞、不提升证据、不批准收口
+╰────────────────────────────────────────────────────────
+
+- [状态] 需要轨迹复盘并换路 (NEEDS_PIVOT)
+- [可以停止] 否
+- [停止原因] 影子控制面永不批准停止；只有硬收口闸门通过并由 Root 判定后才可停止
+- [下一步必须动作] 记录轨迹复盘，然后换机制/继续理由/分派复审或面扩 Agent (record_trajectory_review_then_pivot_continue_or_assign_review_surface_agent)
+
+## 停止阻断项 (Stop Blockers)
+
+- open_fronts_present
+
+## 停止仍需满足 (Stop Requires)
+
+- 开放前线归零，或每个延后/关闭都有证据支撑的理由 (zero open fronts or evidence-backed deferred/closed rationale)
+- 运行结构检查：python tools/check_run.py <run> (python tools/check_run.py <run>)
+- 运行 replay 核实：python tools/check_run.py <run> --replay-verify (python tools/check_run.py <run> --replay-verify)
+- 独立复审已完成且问题已处理 (independent review resolved)
+- retrospective.md 已真实填写 (retrospective.md completed)
+- 只有硬门全部通过后才允许写 GHOST_COMPLETE (GHOST_COMPLETE only after hard gates pass)
+[bootstrap] loop state: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/state/loop_state.json
+[bootstrap] progress ledger: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/state/progress_ledger.json
+[bootstrap] controller shadow: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/state/controller.shadow.json
+[loop_state] run directory does not exist: /Users/ccj/Documents/AI/Xunji/tmp/tmp4np0eae9/missing-run
+[bootstrap] loop_state 刷新失败
+ok   template exists
+ok   loop command names run
+ok   no per-run prompt before refresh
+ok   active run helper accepts run
+ok   cmd_new invokes active-run hook
+ok   cmd_resume invokes active-run hook
+ok   cmd_resume real set-active renders selected run
+ok   session_state written
+ok   loop_state refresh ok
+ok   progress ledger refresh ok
+ok   controller shadow refresh ok
+ok   loop journal written
+ok   status summary reads refreshed state
+ok   refresh does not create per-run prompt
+ok   loop_state refresh fails closed
+ok   validate run ok
+ok   validate non-run fails
+loop_bootstrap selftest passed
+[exit 0]
+
+$ python3 tools/selftest_all.py --only xunji_statusline,loop_bootstrap,status_style,loop_journal,loop_state,run_controller,check_templates
+running 7 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14
+
+  PASS  check_templates    0.0s  template/reference drift guard
+  PASS  loop_state         0.1s  closed-loop progress and gate snapshot
+  PASS  status_style       0.0s  operator-facing colored status panels
+  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline
+  PASS  run_controller     0.1s  advisory shadow run controller
+  PASS  loop_journal       0.0s  loop interruption journal
+  PASS  loop_bootstrap     0.5s  autonomous loop launcher
+
+7 passed, 0 failed  (0.9s total)
+[exit 0]
+
+$ python3 tools/check_rules.py
+rule check passed
+[exit 0]
+
+$ python3 tools/check_templates.py
+template check passed
+[exit 0]
+
+$ git diff --check
+[exit 0]
+

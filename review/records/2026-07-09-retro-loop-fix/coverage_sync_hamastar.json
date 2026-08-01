@@ -1,0 +1,883 @@
+{
+  "schema": "xunji.coverage_matrix.v1",
+  "source": "classify/coverage.json",
+  "groups": [
+    "Auth",
+    "Injection",
+    "IDOR",
+    "Misconfig",
+    "InfoLeak",
+    "SSRF",
+    "PathTraversal",
+    "XXE",
+    "Upload",
+    "Logic"
+  ],
+  "rows": [
+    {
+      "asset": "2015yilan.hamastar.com.tw",
+      "tokens": [
+        "2015yilan.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "2017wda.hamastar.com.tw",
+      "tokens": [
+        "2017wda.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "2019cyc-mgr.hamastar.com.tw",
+      "tokens": [
+        "2019cyc-mgr.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "Auth",
+        "InfoLeak",
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-002"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "tested",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "tested",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "2019wdaph-mgr.hamastar.com.tw",
+      "tokens": [
+        "2019wdaph-mgr.hamastar.com.tw"
+      ],
+      "applicable": [
+        "Auth",
+        "InfoLeak",
+        "Misconfig"
+      ],
+      "tested": [
+        "Auth",
+        "InfoLeak",
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-002",
+        "F-006",
+        "F-010"
+      ],
+      "status": "unknown",
+      "flags": [
+        "SURFACE:ADMIN"
+      ],
+      "cells": {
+        "Auth": "tested",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "untested",
+        "InfoLeak": "tested",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "2019wdaph.hamastar.com.tw",
+      "tokens": [
+        "2019wdaph.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-006"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "2019yles-mgr.hamastar.com.tw",
+      "tokens": [
+        "2019yles-mgr.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal",
+        "Upload"
+      ],
+      "fronts": [
+        "F-003"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "tested",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "2019ylweb.hamastar.com.tw",
+      "tokens": [
+        "2019ylweb.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-006"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "2022wdakys.hamastar.com.tw",
+      "tokens": [
+        "2022wdakys.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-006"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "2024childcare.hamastar.com.tw",
+      "tokens": [
+        "2024childcare.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-006"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "61.71.173.8",
+      "tokens": [
+        "61.71.173.8"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "auden-esgp.hamastar.com.tw",
+      "tokens": [
+        "auden-esgp.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-006"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "azmeeting.hamastar.com.tw",
+      "tokens": [
+        "azmeeting.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "bocach.hamastar.com.tw",
+      "tokens": [
+        "bocach.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "Auth",
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-008"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "tested",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "d2.hamastar.com.tw",
+      "tokens": [
+        "d2.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "ebooks.hamastar.com.tw",
+      "tokens": [
+        "ebooks.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "Auth",
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-007"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "tested",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "ebooks.kpvs.hamastar.com.tw",
+      "tokens": [
+        "ebooks.kpvs.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "en.hamastar.com.tw",
+      "tokens": [
+        "en.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "fubonebook2.hamastar.com.tw",
+      "tokens": [
+        "fubonebook2.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "InfoLeak",
+        "Misconfig",
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-004"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "tested",
+        "InfoLeak": "tested",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "fubonvideo2.hamastar.com.tw",
+      "tokens": [
+        "fubonvideo2.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "hscp-ws2.hamastar.com.tw",
+      "tokens": [
+        "hscp-ws2.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "imocloud.hamastar.com.tw",
+      "tokens": [
+        "imocloud.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "isharing.hamastar.com.tw",
+      "tokens": [
+        "isharing.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "jobooks.hamastar.com.tw",
+      "tokens": [
+        "jobooks.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-006"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "k12test.hamastar.com.tw",
+      "tokens": [
+        "k12test.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-009"
+      ],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "kcglandp.hamastar.com.tw",
+      "tokens": [
+        "kcglandp.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "land.hamastar.com.tw",
+      "tokens": [
+        "land.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [],
+      "fronts": [],
+      "status": "unknown",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "not_applicable",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "mainsaylingwen.hamastar.com.tw",
+      "tokens": [
+        "mainsaylingwen.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-005"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "simmagic.hamastar.com.tw",
+      "tokens": [
+        "simmagic.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "IDOR",
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-001"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "tested",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "writesaylingwen01.hamastar.com.tw",
+      "tokens": [
+        "writesaylingwen01.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-005"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    },
+    {
+      "asset": "www.hamastar.com.tw",
+      "tokens": [
+        "www.hamastar.com.tw"
+      ],
+      "applicable": [],
+      "tested": [
+        "PathTraversal"
+      ],
+      "fronts": [
+        "F-006"
+      ],
+      "status": "True",
+      "flags": [],
+      "cells": {
+        "Auth": "not_applicable",
+        "Injection": "not_applicable",
+        "IDOR": "not_applicable",
+        "Misconfig": "not_applicable",
+        "InfoLeak": "not_applicable",
+        "SSRF": "not_applicable",
+        "PathTraversal": "tested",
+        "XXE": "not_applicable",
+        "Upload": "not_applicable",
+        "Logic": "not_applicable"
+      }
+    }
+  ],
+  "column_stats": {
+    "Auth": {
+      "tested": 4,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 4,
+      "actionable": 4
+    },
+    "Injection": {
+      "tested": 0,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 0,
+      "actionable": 0
+    },
+    "IDOR": {
+      "tested": 1,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 1,
+      "actionable": 1
+    },
+    "Misconfig": {
+      "tested": 1,
+      "untested": 1,
+      "waived": 0,
+      "applicable": 2,
+      "actionable": 2
+    },
+    "InfoLeak": {
+      "tested": 3,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 3,
+      "actionable": 3
+    },
+    "SSRF": {
+      "tested": 0,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 0,
+      "actionable": 0
+    },
+    "PathTraversal": {
+      "tested": 17,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 17,
+      "actionable": 17
+    },
+    "XXE": {
+      "tested": 0,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 0,
+      "actionable": 0
+    },
+    "Upload": {
+      "tested": 1,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 1,
+      "actionable": 1
+    },
+    "Logic": {
+      "tested": 0,
+      "untested": 0,
+      "waived": 0,
+      "applicable": 0,
+      "actionable": 0
+    }
+  },
+  "empty_columns": [],
+  "row_gaps": [],
+  "waivers": [],
+  "warnings": [],
+  "legend": {
+    "tested": "✓",
+    "untested": "□",
+    "waived": "~",
+    "not_applicable": "·"
+  },
+  "coverage_sync": {
+    "path": "/Users/ccj/Documents/AI/Xunji/runs/hamastar_20260709-test1_20260709/classify/coverage.json",
+    "changed": 0,
+    "examined": 20,
+    "total": 80,
+    "warnings": []
+  }
+}

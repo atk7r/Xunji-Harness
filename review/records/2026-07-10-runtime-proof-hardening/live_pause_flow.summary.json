@@ -1,0 +1,36 @@
+{
+  "claude_version": "2.1.201 (Claude Code)",
+  "cleanup_hook_decisions": [
+    "{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。\"}}"
+  ],
+  "created_ids": [
+    "736bdf28"
+  ],
+  "cron_note": "latest successful CronList proves no active run job",
+  "cron_quiescent": true,
+  "delete_receipts": [
+    "736bdf28"
+  ],
+  "other_ids": [
+    "6a48dd14"
+  ],
+  "passed": true,
+  "raw_sha256": "ee9c86e69201377c7e4232049e0b9bcd4ed1d3f8e8e9500f0b409bcfb13f394a",
+  "returncodes": {
+    "cleanup": 0,
+    "create": 0,
+    "native_cleanup": 0,
+    "native_create": 0,
+    "wrong_delete": 0
+  },
+  "runtime_chain": {
+    "errors": [],
+    "events": 7
+  },
+  "schema": "xunji.live_pause_flow.summary.v1",
+  "wrong_delete_denied": true,
+  "wrong_delete_hook_decisions": [
+    "{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"[Xunji turn mode: PAUSED_BY_OPERATOR] 保留所有 open fronts；先 CronList/CronDelete，禁止继续渗透；本回合无需 Coda，也不得写 completion marker。\"}}",
+    "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"暂停事务只可删除当前 CronList 观察到的本 run job：job 6a48dd14 was not observed as a task for run pause_run\"}}"
+  ]
+}

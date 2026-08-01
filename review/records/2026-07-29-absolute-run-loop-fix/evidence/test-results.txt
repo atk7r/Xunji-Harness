@@ -1,0 +1,34 @@
+Candidate verification on 2026-07-29
+
+1. python3 -m py_compile tools/turn_contract.py
+   exit 0
+
+2. python3 tools/turn_contract.py --selftest
+   exit 0
+   relevant checks:
+   - an attached run path retains its exact named resume identity: ok
+   - an attached absolute run path retains its exact named resume identity: ok
+   - a file inside the current run routes as resume without new-run transition: ok
+   - prompt-named resume is allowed across runs: ok
+
+3. python3 tools/check_rules.py
+   rule check passed
+
+4. git diff --check -- tools/turn_contract.py docs/ARCHITECTURE.md
+   exit 0
+
+5. python3 tools/selftest_all.py
+   interpreter: /opt/homebrew/opt/python@3.14/bin/python3.14
+   69 passed, 0 failed (119.2s total)
+   relevant suites:
+   - peer_review PASS
+   - probe PASS
+   - setup_transaction PASS
+   - work_plan PASS
+   - runtime_receipts PASS
+   - turn_contract PASS
+   - loop_state PASS
+   - run_controller PASS
+   - loop_bootstrap PASS
+   - workers PASS
+   - check_hook PASS

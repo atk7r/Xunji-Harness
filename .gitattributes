@@ -1,0 +1,10 @@
+# Normalize line endings to LF in the repo. Set during the Windows -> macOS
+# port: the checkout pulled in CRLF across many files, which showed as huge
+# whitespace-only diffs. Git will store LF and convert on checkout as needed.
+* text=auto eol=lf
+
+# Review artifacts may intentionally contain raw unified diff context lines or
+# Markdown hard-break spaces copied from reviewer output. Do not treat those
+# as source whitespace errors.
+review/records/**/*.diff -whitespace
+review/records/**/peer_review.md -whitespace

@@ -1,0 +1,71 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "arkcli:kimi-k2.7-code+glm-5.2",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "8787bc6e5db6a6202432f06cc681ed4c1a5001d2",
+  "evidence_index_hash": "43699a337c9d7985731163027f3442b9d64bd2da",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "evidence_gate",
+      "claim": "E-001 documentation-parity finding should not be read as runtime enforcement parity; enforcement truth is not evidenced in this bundle.",
+      "evidence": "installed-runtime-manifest.json, report.md:1-10, evidence_index:E-001",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add hook source excerpts or live runtime receipts for output_gate.py, run_gate.py, and turn_contract.py before claiming enforcement parity; keep E-001 at 0.8 or downgrade unless runtime behavior is evidenced.",
+      "why": "[arkcli:kimi-k2.7-code] The bundle contains documentation diffs, a passing stale-reference audit, and a manifest that hashes but does not display enforcement code. No source or transcript-backed runtime traces are included, so the gap between documented contract and hook behavior remains unverified.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "artifact_cross_check",
+      "claim": "Final post-change file contents are not independently reviewable because only diffs are present in the evidence bundle.",
+      "evidence": "root_rules.diff, primary_skills.diff, lifecycle_templates.diff, workflow_core.diff, workflow_reference.diff, agent_role_templates.diff",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Include full-text artifacts (or content-addressed hashes already in stale_reference_audit.json) of the modified docs/templates, skills, and root-rule files in the evidence_index for direct reviewer cross-check.",
+      "why": "[arkcli:kimi-k2.7-code] Diffs prove that changes occurred but do not let a reviewer verify that final files contain only the intended contract text. Integrity hashes exist, yet content review is impossible from this bundle alone.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "missed_surface",
+      "claim": "stale_reference_audit.json only detects six mapped historical shortcut patterns and cannot catch novel reformulations of the same failures.",
+      "evidence": "stale_reference_audit.json, report.md:1-10",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Supplement the regex audit with a manual review step that checks for novel wording reintroducing the same shortcut semantics, or expand the pattern set as new historical patterns are observed.",
+      "why": "[arkcli:kimi-k2.7-code] The audit is explicitly a regression for known patterns, not a general language-consistency checker. The report acknowledges this limitation, but it is a real blind spot for drift detection.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "glm-5.2: parse error; output tail:  source verification** - historical_failures.md makes specific claims about what `turn_contract.py`, `output_gate.py`, `check_run.py`, `xunji_statusline.py` do. The installed-runtime-manifest.json shows their hashes and sizes but not their contents. The selftests pass, but the selftest results don't prove the specific behavioral claims.\n\n3. **Trace anchors unverified** - historical_failures.md cites specific line numbers in source files that aren't in the evidence bundle. These can't be verified",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[kimi-k2.7-code] Hook source files and live runtime traces are absent; enforcement parity is assumed from hashes, not evidenced.",
+    "[kimi-k2.7-code] Historical source excerpts referenced by line number in historical_failures.md are not supplied for independent verification.",
+    "[kimi-k2.7-code] No artifact confirms review/independent-reviewer.md's final text is solely a deprecation pointer.",
+    "[kimi-k2.7-code] minimax-m3 removal is consistent across diffs but not verified against actual arkcli backend configuration."
+  ],
+  "context_limits": [
+    "glm-5.2: parse error; output tail:  source verification** - historical_failures.md makes specific claims about what `turn_contract.py`, `output_gate.py`, `check_run.py`, `xunji_statusline.py` do. The installed-runtime-manifest.json shows their hashes and sizes but not their contents. The selftests pass, but the selftest results don't prove the specific behavioral claims.\n\n3. **Trace anchors unverified** - historical_failures.md cites specific line numbers in source files that aren't in the evidence bundle. These can't be verified"
+  ],
+  "error": ""
+}

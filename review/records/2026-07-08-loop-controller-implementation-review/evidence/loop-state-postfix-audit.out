@@ -1,0 +1,14 @@
+44:def _strip_fenced_code(text: str) -> str:
+140:    text = _strip_fenced_code(text)
+156:    real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}
+160:        and (not real_front_ids or str(f.get("id")) in real_front_ids)
+177:    blocked_type_b = [
+179:        if "blocked_type_b" in _status_tokens(front_status(f))
+187:            and "blocked_type_b" not in _status_tokens(front_status(f))
+214:        "blocked_type_b": blocked_type_b,
+381:    text = _strip_fenced_code(text)
+489:            "agent-discipline-audit-unavailable",
+808:        "- Status: blocked_type_b\n"
+859:        ("section headings provide deferred/closed fallback status",
+864:        ("blocked type-b is not open or unclassified",
+865:         type_b_state["fronts"]["blocked_type_b"] == ["F-001"]

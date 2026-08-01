@@ -1,0 +1,57 @@
+# Peer Review Panel — 2026-07-13-outbound-privacy-hardening
+
+_backend: panel:arkcli+claude · 2026-07-12T21:17Z_
+> 候选, 非裁决。driver 须逐条过证据门。
+
+## Verdict: WARN
+
+_backend: panel:arkcli+claude_
+_brain: codex_
+_bundle_hash: 5ea2acf7abd5bd6fb43589b8a9ea0194c272e1e5_
+_evidence_index_hash: 950aade47a5f3b783df1bc11bc60b0aebe528fb9_
+
+## Findings
+- [WARN] PR-001 E-005 upload boundary date does not match the marker/filename date (20260712 vs. 20260713), weakening the claim that the sensor emits a consistent `proof-YYYYMMDD-<hex>` boundary/filename/content set. | Evidence: upload-wire-3.txt, upload-wire-4.txt, upload-result-3.json, upload-result-4.json, verification.txt | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] A certainty=1.0 finding requires artifact consistency. The wire captures show `----proof-20260712-...` boundaries while the transmitted filename and content use `proof-20260713-...`. verification.txt asserts the dated boundary shape but does not explain the mismatch, so Claim 3 is not fully evidenced.
+- [WARN] PR-002 Report claims about `tools/exploit.py` guarded HTTP inheritance, `client_graybox.py` passivity, and URL userinfo hash-redaction lack supporting artifacts in the evidence_index. | Evidence: report.md, verification.txt (items 8, 10), reviewed.diff hunk headers, evidence_index | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] These sub-claims appear only as prose or selftest summaries; no code excerpt, replay record, or wire capture is provided. Per the evidence discipline, they should be carried as candidate claims or backed by concrete artifacts before being treated as confirmed.
+- [WARN] PR-003 The privacy decoder covers percent/base64/hex/HTML/MIME/NFKC/unicode_escape but leaves other reversible encodings (base32, base85, rot13, gzip, etc.) as a potential smuggle surface. | Evidence: privacy.py.txt (_decoded_variants) | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] The reviewer focus explicitly asks to check encoding bypasses. The current guard is broad but not exhaustive; an agent could encode an identity marker in a transform not enumerated and have it pass pre-I/O inspection.
+- [WARN] PR-004 E-006 redirect credential stripping remains a single-observation candidate and has not been replicated across 307/308 body-preserving methods or HTTPS/TLS contexts. | Evidence: redirect-wire.json, evidence_index (E-006 certainties 0.5) | Why: [panel:arkcli] [arkcli:kimi-k2.7-code] Redirect auth leakage is a high-value front; one loopback JSON summary is insufficient for confirmation. It should stay candidate until replicated with verb-preserving redirects and, where possible, TLS.
+- [WARN] PR-005 arkcli panel had backend errors; review is partial | Evidence: glm-5.2: parse error; output tail: art_secret = _multipart_has_auth_secret(body_text, headers or {})
+if (body_text and (_AUTH_BODY_SECRET_RE.search(unquote_plus(body_text)) or multipart_secret)
+        and not allow_sensitive_auth):
+    raise OutboundPrivacyError(...)
+```
+
+So `_AUTH_BODY_SECRET_RE.search(unquote_plus(body_text))` searches the URL-decoded body text. In a multipart body, the text includes `Content-Disposition: form-data; name="token"` followed by the value. The regex `(?:^|[?&,{;\s])(?:pass(?:word|wd)?|secret)\s*[: | Why: [panel:arkcli] At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.
+
+## Blind-spot check
+- [arkcli] [kimi-k2.7-code] Fail-closed behavior is proven for Bash-hook URL commands when `harness.privacy` fails to import, but no artifact shows what happens when `probe.py`/`render.py`/`exploit.py` directly fail to import the module (they likely crash, which is safe, but this is not demonstrated).
+- [arkcli] [kimi-k2.7-code] No negative end-to-end artifact demonstrates a custom Python/shell network script containing a project marker being blocked at the Bash hook; only unit/selftest assertions are shown.
+- [arkcli] [kimi-k2.7-code] Response-body redaction depends on JSON/form parsing and `_redact_text`; binary or non-UTF-8 responses may evade the current redactors.
+- [arkcli] [kimi-k2.7-code] The multipart splitter in `_redact_multipart` assumes the boundary string does not appear inside field content; a boundary collision could mis-redact or miss a sensitive field.
+- [arkcli] [kimi-k2.7-code] WebSocket/FTP URL-bearing actions are mentioned as covered by the hook regex, but no replay or wire artifact validates that path.
+- [claude] **No end-to-end test traversing the full stack (hook → guard → probe.send → replay → check_run) with a single instrumented request.** Each layer is tested independently (privacy selftest, safety_gate selftest, probe selftest, replay selftest), but there's no integration test proving that a privacy-violating request is caught by the hook AND that a benign authenticated request flows through probe.send → RequestRecorder → replay JSON without data loss or corruption. The selftest_all.py runs suites in parallel but doesn't do cross-layer chaining.
+- [claude] **The `_decoded_variants` function's 80% printable threshold for hex/base64 decoding (line 232) is a heuristic that could theoretically miss a carefully-crafted payload.** If an attacker embeds `xunji` in a hex string mixed with enough binary garbage to go below 80% printable, the hex decoder would skip it. However, the base64 variant path (lines 226-241) uses the same 80% threshold but a different token-matching regex (`[A-Za-z0-9+/_-]{6,}={0,2}` vs `[0-9a-fA-F]{8,}`), so if one decoder misses, the other might catch it. The NFKC, percent-encoding, and other paths don't have printable-threshold gates. This is defense-in-depth, not a single-point failure.
+- [claude] **The `outbound_command_privacy_reason` function at `privacy.py.txt:681` uses `shlex.split(command, comments=True, posix=True)`.** The `comments=True` flag strips shell comments. If a value containing a project marker appears after an unquoted `#` in a Bash command, shlex would strip it before privacy inspection — but the shell would also strip it before execution, so the marker never reaches the target. This is self-correcting and not a bypass, but it means the hook's audit log would NOT record the denied privacy content (it was stripped before inspection). The hook would allow the command through with the commented portion silently dropped. This is correct behavior: the marker never reaches the target because the shell drops it, but the audit trail loses visibility into what was stripped.
+- [claude] **`validate_outbound_request` checks `parsed.path` and `parsed.query` but not `parsed.fragment`.** Fragments are client-side-only and not sent in HTTP requests, so this is not a real leak. `redact_url` correctly handles fragments for replay records (line 608-613).
+- [claude] **The `redact_body` function at line 557 has a content-type sniffing fallback:** `if "json" in ctype or text.lstrip().startswith(("{", "[")):`. If a non-JSON body happens to start with `{` or `[`, it would be parsed as JSON. If JSON parsing fails, it falls through to URL-encoded or raw handling. This is conservative (JSON parsing would redact more) and the `except (json.JSONDecodeError, TypeError)` at line 562 correctly falls through.
+- [claude] **The `_redact_text` function at line 387 has a fallback that redacts the ENTIRE value when `privacy_reason()` detects sensitive content that individual pattern matchers missed.** This is triggered when encoded variants (base64/hex/NFKC/etc.) contain private data not visible in the raw string. This is correct and conservative behavior.
+
+## Context-limit notes
+- [arkcli] [kimi-k2.7-code] Chinese-language portions of verification.txt/prose were not deeply interpreted; local (CNVD / Taiwan) naming or policy context may affect severity.
+- [arkcli] [kimi-k2.7-code] Line-level citations are approximate because the review_bundle provides excerpts and hashes, not full files; citations are therefore given at filename granularity.
+- [arkcli] [kimi-k2.7-code] The reviewer did not execute the selftests or inspect files outside the provided bundle, so findings rely on the supplied evidence_index and artifact excerpts.
+- [arkcli] glm-5.2: parse error; output tail: art_secret = _multipart_has_auth_secret(body_text, headers or {})
+if (body_text and (_AUTH_BODY_SECRET_RE.search(unquote_plus(body_text)) or multipart_secret)
+        and not allow_sensitive_auth):
+    raise OutboundPrivacyError(...)
+```
+
+So `_AUTH_BODY_SECRET_RE.search(unquote_plus(body_text))` searches the URL-decoded body text. In a multipart body, the text includes `Content-Disposition: form-data; name="token"` followed by the value. The regex `(?:^|[?&,{;\s])(?:pass(?:word|wd)?|secret)\s*[:
+- [arkcli] arkcli succeeded after 2 attempt(s); previous failures: attempt 1: arkcli panel 全部模型失败: kimi-k2.7-code: timeout >300s; glm-5.2: parse error; output tail:  only see the summary text, not the actual test outputs. The claim "60 passed, 0 failed" is asserted but not independently verifiable from artifacts.
+
+8. **Redirect credential stripping (E-006)**: The redirect-wire.json is a summary, not raw wire capture. It claims hop2 and hop3 don't receive cookies/authorization, but there's no actual HTTP request/response artifact showing this. This should remain at candidate level, which it does (0.5).
+
+Now, let me think about what the author (Claude) likely
+- [claude] I've read the full 1009-line `privacy.py.txt` source, 7 evidence entries, all artifact files, and the relevant portions of the ~1400-line diff. I have not read every line of the 34-file diff (particularly the full WORKFLOW.md, WORKFLOW-reference.md, and agent template changes beyond the privacy-related hunks), but the review bundle excerpts cover the privacy-relevant portions.
+- [claude] The `verification.txt` references "post-final-3 false-positive/decoder fixes" — I cannot verify what those fixes were or whether they introduced regressions, as only the final frozen state is in the review record.
+- [claude] The Chinese-language error messages in `check_run.py` (lines 675-703 in the diff) warn about `SKIPPED-PRIVACY-REDACTED` in Chinese. I've verified these match the English equivalents in the report claims.

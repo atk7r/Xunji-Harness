@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Closure Audit"
+  short_description: "Audit Xunji skill/tool closure"
+  default_prompt: "Use $xunji-closure-audit to audit Xunji Claude skills, tools, templates, and selftests for disconnected workflows."

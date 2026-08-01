@@ -1,0 +1,168 @@
+{
+  "total": 4,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 - Agent runtime and assignment enforcement diff",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/runtime-receipts.diff",
+        "evidence/runtime-agent-activity.py.txt",
+        "evidence/turn-contract.diff",
+        "evidence/workers.diff",
+        "evidence/workers-asset-merge.py.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/runtime-receipts.diff",
+        "evidence/runtime-agent-activity.py.txt",
+        "evidence/turn-contract.diff",
+        "evidence/workers.diff",
+        "evidence/workers-asset-merge.py.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-001"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 - Asset ledger and coverage enforcement diff",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/asset-coverage.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/asset-coverage.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-002"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 - Proxy and differential evidence diff",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/proxy-diff-save.diff",
+        "evidence/turn-contract-egress.py.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/proxy-diff-save.diff",
+        "evidence/turn-contract-egress.py.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-003"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004 - Claude driver and documentation diff",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/driver-docs.diff"
+      ],
+      "artifacts_scoped": true,
+      "artifacts_present": [
+        "evidence/driver-docs.diff"
+      ],
+      "artifacts_missing": [],
+      "supports": [
+        "F-004"
+      ],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

@@ -1,0 +1,607 @@
+diff --git a/tools/workers.py b/tools/workers.py
+index 5c1d976..6c336e2 100644
+--- a/tools/workers.py
++++ b/tools/workers.py
+@@ -79,6 +79,10 @@ try:
+     import run_model as _run_model
+ except Exception:
+     _run_model = None
++try:
++    import runtime_receipts as _runtime_receipts
++except Exception:
++    _runtime_receipts = None
+ 
+ SCAFFOLD = """# Worker {wid}
+ 
+@@ -165,6 +169,7 @@ AGENT_SCAFFOLD = """# Agent {agent}
+ 
+ - Role: {role}
+ - Assigned front: {front}
++- Assigned assets: {assets}
+ - Scope: {scope}
+ - Status: assigned
+ - Context pack: {context_rel}
+@@ -188,6 +193,10 @@ AGENT_SCAFFOLD = """# Agent {agent}
+   and run cleanup only after an explicit `yes`.
+ - Produce candidates/refutations only; the Single Synthesizer owns promotion.
+ - Do not add `Closure:` or `Report conclusion:` fields.
++- The Agent launch prompt must include exactly:
++  `XUNJI_ASSIGNMENT={agent} XUNJI_FRONT={front} XUNJI_ASSETS={asset_token}`.
++- Cover every assigned asset. A barrier (login/302/captcha/WAF) is an outcome to
++  investigate and record, not permission to silently drop that asset.
+ 
+ ## Prelude
+ 
+@@ -230,11 +239,16 @@ AGENT_SCAFFOLD = """# Agent {agent}
+ - Status: candidate
+ - Next action:
+ 
++## Asset Outcomes
++
++{asset_outcomes}
++
+ ## Coda
+ 
+ Agent: {agent}
+ Role: {role}
+ Assigned front: {front}
++Assigned assets: {assets}
+ Scope: {scope}
+ Budget used:
+ Loop budget:
+@@ -436,6 +450,67 @@ def _asset_name(asset: dict) -> str:
+     return raw
+ 
+ 
++def _normalize_asset(value: str) -> str:
++    raw = str(value or "").strip().lower().rstrip(".")
++    raw = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", raw).split("/", 1)[0]
++    return raw
++
++
++def _stable_asset_id(host: str) -> str:
++    import hashlib
++    return "ASSET-" + hashlib.sha1(_normalize_asset(host).encode("utf-8")).hexdigest()[:12].upper()
++
++
++def _resolve_assignment_assets(run_dir: Path, front: str, requested: list[str] | None,
++                               role: str) -> tuple[list[str], dict[str, dict]]:
++    inventory = {_normalize_asset(_asset_name(asset)): asset for asset in _load_coverage(run_dir)
++                 if _normalize_asset(_asset_name(asset))}
++    target_roles = {"surface", "web-auth", "web-hunter", "exploit", "verify"}
++    values: list[str] = []
++    for raw in requested or []:
++        for part in re.split(r"[,;，、]+", raw):
++            host = _normalize_asset(part)
++            if host and host not in values:
++                values.append(host)
++    if inventory and role in target_roles and not values:
++        raise ValueError(
++            "target-facing assignment requires explicit --asset HOST (repeatable); "
++            "do not assign only a broad F-id")
++    unknown = [host for host in values if host not in inventory]
++    if unknown:
++        raise ValueError("asset(s) absent from coverage inventory: " + ", ".join(unknown))
++    front_text = _front_text(run_dir, front).lower()
++    unlinked = [host for host in values if not re.search(
++        r"(?<![\w.\-])" + re.escape(host) + r"(?![\w.\-])", front_text)]
++    if unlinked:
++        raise ValueError(
++            "asset(s) are not explicitly named in the selected frontier block: "
++            + ", ".join(unlinked))
++    return values, inventory
++
++
++def _coverage_snapshot(asset: dict) -> dict:
++    return {
++        "examined": bool(asset.get("examined")),
++        "verdict": asset.get("verdict"),
++        "tested_groups": sorted(str(item) for item in (asset.get("tested_groups") or [])),
++    }
++
++
++def _asset_outcomes_scaffold(assets: list[str]) -> str:
++    if not assets:
++        return "- No target asset package (non-target analysis lane)."
++    return "\n".join(
++        f"### {_stable_asset_id(host)} — {host}\n"
++        "- Action receipts:\n"
++        "- Result:\n"
++        "- Barrier / control:\n"
++        "- Artifacts:\n"
++        "- Proposed disposition: tested | barrier | unreachable | deferred"
++        for host in assets
++    )
++
++
+ def _front_assets(front: dict, assets: list[dict]) -> list[dict]:
+     text = front["text"].lower()
+     out: list[dict] = []
+@@ -464,6 +539,30 @@ def _asset_agent_role(asset: dict) -> str:
+ def asset_suggestions(run_dir: Path) -> list[dict]:
+     """Return advisory asset-level suggestions from coverage facts."""
+     items: list[dict] = []
++    try:
++        import coverage_matrix
++        rows = coverage_matrix.derive(run_dir).get("rows", [])
++    except Exception:
++        rows = []
++    if rows:
++        for row in rows:
++            if not isinstance(row, dict) or row.get("reachability") is False:
++                continue
++            disposition = str(row.get("disposition") or "")
++            if disposition not in {"unassigned", "front-linked"}:
++                continue
++            host = str(row.get("asset") or "")
++            source = next((asset for asset in _load_coverage(run_dir)
++                           if _normalize_asset(_asset_name(asset)) == _normalize_asset(host)), {})
++            reasons = [disposition]
++            if source.get("high_value"):
++                reasons.append("high_value")
++            if row.get("reachability") is True:
++                reasons.append("reachable_no_verdict")
++            items.append({"asset": host, "role": _asset_agent_role(source), "reasons": reasons})
++        return sorted(items, key=lambda item: (
++            "high_value" in item["reasons"], "reachable_no_verdict" in item["reasons"], item["asset"]
++        ), reverse=True)
+     for asset in _load_coverage(run_dir):
+         host = _asset_name(asset)
+         if not host or asset.get("examined"):
+@@ -507,6 +606,8 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:
+         matched = _front_assets(f, assets)
+         hosts = [_asset_name(a) for a in matched if _asset_name(a)]
+         reachable = [a for a in matched if a.get("reachable") is True]
++        coverage_debt = [a for a in matched if a.get("reachable") is not False
++                         and not a.get("tested_groups") and not a.get("verdict")]
+         flags = sorted({str(x) for a in matched for x in (a.get("flags") or [])})
+ 
+         if f["status"] in {"open", "probing"}:
+@@ -524,6 +625,9 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:
+         if reachable:
+             score += 1
+             reasons.append(f"{len(reachable)} reachable matched asset(s)")
++        if coverage_debt:
++            score += min(4, len(coverage_debt))
++            reasons.append(f"coverage debt on {len(coverage_debt)} asset(s)")
+         if flags:
+             score += 1
+             reasons.append("surface flags: " + ", ".join(flags[:5]))
+@@ -543,6 +647,7 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:
+             "barrier": f["barrier"],
+             "depth": f["depth"],
+             "assets": hosts,
++            "coverage_debt": [_asset_name(a) for a in coverage_debt if _asset_name(a)],
+             "score": score,
+             "reasons": reasons,
+             "cautions": cautions,
+@@ -579,7 +684,8 @@ def suggest(run_dir: Path, limit: int | None = None) -> list[dict]:
+         if penalty != 0:
+             r["saturation_penalty"] = penalty
+ 
+-    rows.sort(key=lambda r: (r["score"], bool(r["assets"]), r["front"]), reverse=True)
++    rows.sort(key=lambda r: (len(r.get("coverage_debt") or []), r["score"], bool(r["assets"]), r["front"]),
++              reverse=True)
+     return rows[:limit] if limit else rows
+ 
+ 
+@@ -680,9 +786,21 @@ def _assignments_path(run_dir: Path) -> Path:
+ 
+ def load_assignments(run_dir: Path) -> dict:
+     data = _load_json(_assignments_path(run_dir), {})
+-    if not isinstance(data.get("assignments"), list):
+-        data = {"schema": 1, "assignments": []}
+-    data.setdefault("schema", 1)
++    if not isinstance(data, dict) or not isinstance(data.get("assignments"), list):
++        data = {"schema": 2, "assignments": []}
++    try:
++        schema = int(data.get("schema", 1) or 1)
++    except (TypeError, ValueError):
++        schema = 1
++    if schema < 2:
++        for row in data["assignments"]:
++            if not isinstance(row, dict):
++                continue
++            row.setdefault("assets", [])
++            row.setdefault("attempts", [])
++        data["schema"] = 2
++    else:
++        data["schema"] = schema
+     return data
+ 
+ 
+@@ -753,8 +871,28 @@ def _format_rdt_controls(profile: dict) -> str:
+ 
+ 
+ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
+-                            scope: str = "", agent: str | None = None) -> dict:
++                            scope: str = "", agent: str | None = None,
++                            assets: list[str] | None = None) -> dict:
+     role = _role(role)
++    asset_names, inventory = _resolve_assignment_assets(run_dir, front, assets, role)
++    data = load_assignments(run_dir)
++    if role not in {"verify", "review"}:
++        overlaps: list[str] = []
++        for existing in data.get("assignments", []):
++            if not isinstance(existing, dict):
++                continue
++            if _role(str(existing.get("role") or "")) in {"verify", "review"}:
++                continue
++            status = _normalized_agent_status(str(existing.get("status") or ""))
++            if status in TERMINAL_AGENT_STATUSES:
++                continue
++            shared = sorted(set(asset_names) & set(_normalize_asset(a) for a in existing.get("assets", [])))
++            if shared:
++                overlaps.extend(f"{host} ({existing.get('agent')})" for host in shared)
++        if overlaps:
++            raise ValueError(
++                "asset already has a non-terminal assignment; overlap is reserved for verify/review roles: "
++                + ", ".join(overlaps))
+     agent_id = agent or _next_agent_id(run_dir, role)
+     ctx_name = f"{front}.{_slug(role)}.md"
+     ctx_path = context_dir(run_dir) / ctx_name
+@@ -766,12 +904,17 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
+ 
+     created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+     scope_text = scope or "run target scope"
++    assets_text = ", ".join(asset_names) if asset_names else "none (non-target lane)"
++    asset_token = ",".join(asset_names) if asset_names else "none"
+     rdt_profile = _agent_rdt_profile(run_dir, role, front)
+     agent_path = agents_dir(run_dir) / f"{agent_id}.md"
+     _atomic_write(agent_path, AGENT_SCAFFOLD.format(
+         agent=agent_id,
+         role=role,
+         front=front,
++        assets=assets_text,
++        asset_token=asset_token,
++        asset_outcomes=_asset_outcomes_scaffold(asset_names),
+         scope=scope_text,
+         context_rel=display_path(ctx_path),
+         created=created,
+@@ -780,12 +923,16 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
+         rdt_controls=_format_rdt_controls(rdt_profile),
+     ))
+ 
+-    data = load_assignments(run_dir)
+     rec = {
+         "agent": agent_id,
+         "role": role,
+         "front": front,
+         "front_title": _front_title(run_dir, front),
++        "assets": asset_names,
++        "asset_ids": [_stable_asset_id(host) for host in asset_names],
++        "coverage_before": {
++            host: _coverage_snapshot(inventory[host]) for host in asset_names
++        },
+         "scope": scope_text,
+         "status": "assigned",
+         "reasoning_style": "personalized-rdt",
+@@ -795,6 +942,8 @@ def create_agent_assignment(run_dir: Path, *, role: str, front: str,
+         "agent_file": display_path(agent_path),
+         "created_at": created,
+         "updated_at": created,
++        "attempts": [],
++        "coverage_merge_satisfied": False,
+     }
+     data["assignments"] = [a for a in data["assignments"] if a.get("agent") != agent_id]
+     data["assignments"].append(rec)
+@@ -919,6 +1068,49 @@ def _patch_agent_file_lifecycle(path: Path | None, *, status: str, note: str, st
+     _atomic_write(path, text if text.endswith("\n") else text + "\n")
+ 
+ 
++def _canonical_evidence_text(run_dir: Path) -> str:
++    path = run_dir / "evidence.md"
++    if not path.exists():
++        return ""
++    raw = path.read_text(encoding="utf-8", errors="replace")
++    blocks: list[str] = []
++    for block in re.split(r"(?m)^(?=##\s)", raw):
++        head = block.splitlines()[0] if block.strip() else ""
++        if re.search(r"\bE-\d+[a-z]*\b", head, re.I):
++            blocks.append(block.lower())
++    return "\n".join(blocks)
++
++
++def _validate_asset_merge(run_dir: Path, rec: dict) -> dict:
++    assets = [_normalize_asset(item) for item in rec.get("assets", []) if _normalize_asset(item)]
++    if not assets:
++        return {"satisfied": True, "legacy_or_non_target": True, "assets": {}}
++    if _runtime_receipts is None:
++        raise ValueError("runtime_receipts unavailable; cannot prove per-asset Agent activity")
++    attempts = [item for item in _runtime_receipts.agent_attempts(run_dir)
++                if item.get("assignment") == rec.get("agent")]
++    if not any(item.get("state") == "returned" for item in attempts):
++        raise ValueError("merged requires a real returned Agent attempt (SubagentStop)")
++    activity = _runtime_receipts.agent_asset_activity(run_dir, str(rec.get("agent") or ""))
++    no_activity = [host for host in assets if int(activity.get(host, 0) or 0) < 1]
++    evidence = _canonical_evidence_text(run_dir)
++    no_evidence = [host for host in assets if not re.search(
++        r"(?<![\w.\-])" + re.escape(host) + r"(?![\w.\-])", evidence)]
++    errors: list[str] = []
++    if no_activity:
++        errors.append("no successful target-action receipt: " + ", ".join(no_activity))
++    if no_evidence:
++        errors.append("missing canonical E-entry: " + ", ".join(no_evidence))
++    if errors:
++        raise ValueError("per-asset merge gate failed; " + "; ".join(errors))
++    return {
++        "satisfied": True,
++        "validated_at": _now_iso(),
++        "assets": {host: {"target_actions": int(activity.get(host, 0) or 0),
++                           "canonical_evidence": True} for host in assets},
++    }
++
++
+ def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str = "",
+                            terminal: bool = False) -> dict:
+     data = load_assignments(run_dir)
+@@ -934,6 +1126,9 @@ def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str
+             continue
+         if str(rec.get("agent") or "") != agent:
+             continue
++        merge_validation = None
++        if terminal and status_norm == "merged":
++            merge_validation = _validate_asset_merge(run_dir, rec)
+         rec["status"] = status_norm
+         rec["updated_at"] = stamp
+         rec["last_seen_at"] = stamp
+@@ -942,6 +1137,11 @@ def update_agent_lifecycle(run_dir: Path, agent: str, *, status: str, note: str
+         rec["heartbeat_count"] = int(rec.get("heartbeat_count") or 0) + 1
+         if terminal:
+             rec["finished_at"] = stamp
++            if status_norm == "merged":
++                rec["coverage_merge_satisfied"] = True
++                rec["coverage_merge"] = merge_validation
++            else:
++                rec["coverage_merge_satisfied"] = False
+         _patch_agent_file_lifecycle(_agent_file_from_rec(rec), status=status_norm, note=note, stamp=stamp)
+         _atomic_write(_assignments_path(run_dir), json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+         return rec
+@@ -1334,10 +1534,15 @@ def print_plan(run_dir: Path, limit: int) -> int:
+     start = int(next_id(run_dir).split("-", 1)[1])
+     for offset, r in enumerate(selected):
+         wid = f"W-{start + offset:02d}"
++        asset_pack = (r.get("coverage_debt") or r["assets"])[:4]
+         print(f"## {wid} -> {r['front']}")
+         print(f"- Front: {r['title']}")
+-        print(f"- Assets: {', '.join(r['assets']) if r['assets'] else 'not mapped; driver verify disjoint lane'}")
++        print(f"- Assets: {', '.join(asset_pack) if asset_pack else 'not mapped; driver must map before assignment'}")
+         print(f"- Worker file: runs/<dir>/workers/{wid}.md")
++        if asset_pack:
++            flags = " ".join(f"--asset {asset}" for asset in asset_pack)
++            print(f"- Assignment command: python tools/workers.py assign runs/<dir> --role web-hunter "
++                  f"--front {r['front']} {flags}")
+         print("- Prompt seed:")
+         print(f"  You own exactly ONE front: {r['front']} ({r['title']}). "
+               "Write candidates only to your worker file; do not touch canonical run files.\n")
+@@ -1345,10 +1550,16 @@ def print_plan(run_dir: Path, limit: int) -> int:
+     return 0
+ 
+ 
+-def print_assign(run_dir: Path, role: str, front: str, scope: str = "") -> int:
+-    rec = create_agent_assignment(run_dir, role=role, front=front, scope=scope)
++def print_assign(run_dir: Path, role: str, front: str, scope: str = "",
++                 assets: list[str] | None = None) -> int:
++    try:
++        rec = create_agent_assignment(
++            run_dir, role=role, front=front, scope=scope, assets=assets)
++    except Exception as exc:
++        print(f"[agent-board assign] ERROR: {exc}", file=sys.stderr)
++        return 1
+     print(f"[agent-board] assigned {rec['agent']} role={rec['role']} front={rec['front']} "
+-          f"loop_budget={rec.get('loop_budget')}")
++          f"assets={','.join(rec.get('assets') or []) or '-'} loop_budget={rec.get('loop_budget')}")
+     print(f"  agent:  {rec['agent_file']}")
+     print(f"  context:{rec['context']}")
+     print(f"  state:  {display_path(_assignments_path(run_dir))}")
+@@ -1755,10 +1966,19 @@ def _selftest() -> int:
+     run.mkdir()
+     empty_run = d / "empty"
+     empty_run.mkdir()
++    legacy_assignment_run = d / "legacy-assignment"
++    (legacy_assignment_run / "state").mkdir(parents=True)
++    (legacy_assignment_run / "state" / "assignments.json").write_text(json.dumps({
++        "schema": 1,
++        "assignments": [{"agent": "A-legacy-001", "front": "F-001",
++                         "status": "working"}],
++    }), encoding="utf-8")
++    migrated_assignments = load_assignments(legacy_assignment_run)
+     (run / "coverage.json").write_text(json.dumps({"assets": [
+         {"host": "a.example", "reachable": True, "flags": ["LOGIN"]},
+         {"host": "b.example", "reachable": True, "flags": ["SURFACE:API"]},
+         {"host": "c.example", "reachable": True, "flags": ["SURFACE:UPLOAD"]},
++        {"host": "f.example", "reachable": True, "flags": ["SURFACE:API"], "examined": True},
+         {"host": "d.example", "reachable": False, "flags": []},
+         {"host": "e.example", "reachable": True, "high_value": True, "examined": False,
+          "verdict": None, "category": "sso", "flags": []},
+@@ -1767,7 +1987,7 @@ def _selftest() -> int:
+         "# Frontier\n## Open Fronts\n"
+         "### F-001\n- Front: a.example auth boundary\n- Status: open\n- Current depth: shallow\n"
+         "- Barrier class: none\n- Same barrier failures: 0\n\n"
+-        "### F-002\n- Front: b.example API params\n- Status: open\n- Current depth: shallow\n"
++        "### F-002\n- Front: b.example and f.example API params\n- Status: open\n- Current depth: shallow\n"
+         "- Barrier class: none\n- Same barrier failures: 0\n\n"
+         "### F-003\n- Front: c.example upload\n- Status: probing\n- Current depth: shallow\n"
+         "- Barrier class: none\n- Same barrier failures: 1\n\n"
+@@ -1810,7 +2030,8 @@ def _selftest() -> int:
+         clean_exit = print_merge_check(empty_run)
+         legacy_list_exit = main([str(run)])
+         legacy_new_exit = main([str(run), "--new", "F-777"])
+-        assign_cli_exit = main(["assign", str(run), "--role", "web-auth", "--front", "F-001"])
++        assign_cli_exit = main(["assign", str(run), "--role", "review", "--front", "F-001",
++                                "--asset", "a.example"])
+         status_cli_exit = main(["status", str(run)])
+     agent_check_empty_exit = main(["agent-check", str(empty_run)])
+     agent_clean = d / "agent_clean"
+@@ -1919,11 +2140,119 @@ def _selftest() -> int:
+     lifecycle_closed = agent_lifecycle_issues(lifecycle_run, closure=True)
+     lifecycle_file = ROOT / lifecycle_rec["agent_file"] if not Path(lifecycle_rec["agent_file"]).is_absolute() else Path(lifecycle_rec["agent_file"])
+     lifecycle_text = lifecycle_file.read_text(encoding="utf-8")
+-    a_web = create_agent_assignment(run, role="web", front="F-002")
+-    a1 = create_agent_assignment(run, role="web-auth", front="F-001")
+-    a2 = create_agent_assignment(run, role="verify", front="F-001")
+-    a3 = create_agent_assignment(run, role="surface", front="F-002")
+-    a4 = create_agent_assignment(run, role="verify", front="F-002")
++
++    explicit_assets_required = False
++    try:
++        create_agent_assignment(run, role="web-hunter", front="F-001")
++    except ValueError as exc:
++        explicit_assets_required = "explicit --asset" in str(exc)
++
++    def build_merge_gate_run(name: str, assets_for_agent: list[str]) -> tuple[Path, dict, Path, str]:
++        gate_run = d / name
++        (gate_run / "state").mkdir(parents=True)
++        hosts = ", ".join(assets_for_agent)
++        (gate_run / "coverage.json").write_text(json.dumps({"assets": [
++            {"host": host, "reachable": True, "examined": False} for host in assets_for_agent
++        ]}), encoding="utf-8")
++        (gate_run / "frontier.md").write_text(
++            "# Frontier\n## Open Fronts\n### F-001\n"
++            f"- Front: {hosts} bounded lane\n- Status: open\n"
++            "- Barrier class: none\n- Current depth: shallow\n",
++            encoding="utf-8")
++        rec = create_agent_assignment(
++            gate_run, role="web-hunter", front="F-001", assets=assets_for_agent)
++        transcript_path = gate_run / "transcript.jsonl"
++        child_id = "child-" + name
++        transcript_path.write_text(
++            "launch-" + name + "\n" + child_id + "\n"
++            + "\n".join("action-" + host for host in assets_for_agent) + "\n",
++            encoding="utf-8")
++        _runtime_receipts.append_hook_event(gate_run, {
++            "hook_event_name": "PostToolUse", "session_id": name,
++            "transcript_path": str(transcript_path), "tool_name": "Agent",
++            "tool_use_id": "launch-" + name,
++            "tool_input": {"prompt": (
++                f"XUNJI_ASSIGNMENT={rec['agent']} XUNJI_FRONT=F-001 "
++                f"XUNJI_ASSETS={','.join(assets_for_agent)}")},
++            "tool_response": {"agentId": child_id, "isAsync": True,
++                              "status": "async_launched"},
++        })
++        return gate_run, rec, transcript_path, child_id
++
++    zero_run, zero_rec, zero_transcript, zero_child = build_merge_gate_run(
++        "zero-activity", ["zero.example"])
++    (zero_run / "evidence.md").write_text(
++        "# Evidence\n## E-001\n- Action: checked zero.example\n- Result: barrier\n- Certainty: 0.5\n",
++        encoding="utf-8")
++    _runtime_receipts.append_hook_event(zero_run, {
++        "hook_event_name": "SubagentStop", "session_id": "zero-activity",
++        "transcript_path": str(zero_transcript), "agent_id": zero_child,
++    })
++    zero_activity_merge_blocked = False
++    try:
++        update_agent_lifecycle(
++            zero_run, zero_rec["agent"], status="merged",
++            note="Evidence: E-001 Front: F-001", terminal=True)
++    except ValueError as exc:
++        zero_activity_merge_blocked = "no successful target-action receipt" in str(exc)
++
++    partial_run, partial_rec, partial_transcript, partial_child = build_merge_gate_run(
++        "partial-activity", ["one.example", "two.example"])
++    (partial_run / "evidence.md").write_text(
++        "# Evidence\n## E-001\n- Action: checked one.example and two.example\n"
++        "- Result: per-asset controls recorded\n- Certainty: 0.5\n",
++        encoding="utf-8")
++    _runtime_receipts.append_hook_event(partial_run, {
++        "hook_event_name": "PostToolUse", "session_id": "partial-activity",
++        "transcript_path": str(partial_transcript), "tool_name": "Bash",
++        "tool_use_id": "action-one.example", "agent_id": partial_child,
++        "tool_input": {"command": "python3 tools/probe.py GET https://one.example"},
++        "tool_response": {"stdout": "ok"}, "xunji_target_action": True,
++    })
++    _runtime_receipts.append_hook_event(partial_run, {
++        "hook_event_name": "SubagentStop", "session_id": "partial-activity",
++        "transcript_path": str(partial_transcript), "agent_id": partial_child,
++    })
++    partial_asset_merge_blocked = False
++    try:
++        update_agent_lifecycle(
++            partial_run, partial_rec["agent"], status="merged",
++            note="Evidence: E-001 Front: F-001", terminal=True)
++    except ValueError as exc:
++        partial_asset_merge_blocked = "two.example" in str(exc)
++
++    full_run, full_rec, full_transcript, full_child = build_merge_gate_run(
++        "full-activity", ["alpha.example", "bravo.example"])
++    (full_run / "evidence.md").write_text(
++        "# Evidence\n## E-001\n- Action: checked alpha.example and bravo.example\n"
++        "- Result: per-asset controls recorded\n- Certainty: 0.5\n",
++        encoding="utf-8")
++    for host in ("alpha.example", "bravo.example"):
++        _runtime_receipts.append_hook_event(full_run, {
++            "hook_event_name": "PostToolUse", "session_id": "full-activity",
++            "transcript_path": str(full_transcript), "tool_name": "Bash",
++            "tool_use_id": "action-" + host, "agent_id": full_child,
++            "tool_input": {"command": f"python3 tools/probe.py GET https://{host}"},
++            "tool_response": {"stdout": "ok"}, "xunji_target_action": True,
++        })
++    _runtime_receipts.append_hook_event(full_run, {
++        "hook_event_name": "SubagentStop", "session_id": "full-activity",
++        "transcript_path": str(full_transcript), "agent_id": full_child,
++    })
++    full_merge = update_agent_lifecycle(
++        full_run, full_rec["agent"], status="merged",
++        note="Evidence: E-001 Front: F-001", terminal=True)
++    full_asset_merge_allowed = (
++        full_merge.get("coverage_merge_satisfied") is True
++        and set((full_merge.get("coverage_merge") or {}).get("assets", {}))
++        == {"alpha.example", "bravo.example"}
++    )
++
++    a_web = create_agent_assignment(run, role="web", front="F-002", assets=["b.example"])
++    a1 = create_agent_assignment(run, role="web-auth", front="F-001", assets=["a.example"])
++    a2 = create_agent_assignment(run, role="verify", front="F-001", assets=["a.example"])
++    a3 = create_agent_assignment(run, role="surface", front="F-002", assets=["f.example"])
++    a4 = create_agent_assignment(run, role="verify", front="F-002", assets=["b.example"])
+     web_context = Path(a_web["context"]) if Path(a_web["context"]).is_absolute() else ROOT / a_web["context"]
+     (run / a1["agent_file"]).write_text(
+         "# Agent A\n- Role: web-auth\n- Assigned front: F-001\n- Status: done\n"
+@@ -1945,7 +2274,7 @@ def _selftest() -> int:
+         "- Supports: API IDOR\n- Refutes:\n- Confidence: 0.5\n"
+         "- Control: baseline replay\n- Replicated: yes\n- Artifacts: ev-b.html\n",
+         encoding="utf-8")
+-    a5 = create_agent_assignment(run, role="web-hunter", front="F-003")
++    a5 = create_agent_assignment(run, role="web-hunter", front="F-003", assets=["c.example"])
+     (run / a5["agent_file"]).write_text(
+         "# Agent E\n- Role: web-hunter\n- Assigned front: F-003\n- Status: done\n"
+         "- Maturity: finding\n- Supports: upload shell\n- Refutes:\n- Confidence: 0.8\n"
+@@ -1974,9 +2303,19 @@ def _selftest() -> int:
+         ("merge-check catches duplicate candidate", any(i["kind"] == "duplicate-candidate" for i in issues)),
+         ("merge-check catches conflicting candidate certainty", any(i["kind"] == "conflicting-candidate" for i in issues)),
+         ("merge-check catches done-but-unmerged", any(i["kind"] == "done-but-unmerged" for i in issues)),
++        ("schema-v1 assignment rows migrate explicitly to schema-v2 defaults",
++         migrated_assignments.get("schema") == 2
++         and migrated_assignments["assignments"][0].get("assets") == []
++         and migrated_assignments["assignments"][0].get("attempts") == []),
+         ("legacy main list exits 0", legacy_list_exit == 0),
+         ("legacy main --new exits 0", legacy_new_exit == 0),
+         ("assign command exits 0", assign_cli_exit == 0),
++        ("target-facing assignment requires an explicit asset package",
++         explicit_assets_required),
++        ("zero-tool Agent cannot be marked merged", zero_activity_merge_blocked),
++        ("partial asset package cannot be marked merged", partial_asset_merge_blocked),
++        ("every asset action plus canonical E-entry satisfies merge gate",
++         full_asset_merge_allowed),
+         ("status command exits 0", status_cli_exit == 0),
+         ("agent-check empty run exits 0", agent_check_empty_exit == 0),
+         ("agent-check clean scaffold has no issues", agent_clean_issues == []),
+@@ -2076,6 +2415,8 @@ def main(argv: list[str] | None = None) -> int:
+             ap.add_argument("--role", required=True)
+             ap.add_argument("--front", required=True)
+             ap.add_argument("--scope", default="")
++            ap.add_argument("--asset", action="append", default=[],
++                            help="exact coverage asset assigned to this Agent; repeat for a bounded asset pack")
+         elif cmd == "heartbeat":
+             ap.add_argument("run_dir", type=Path)
+             ap.add_argument("agent")
+@@ -2107,7 +2448,7 @@ def main(argv: list[str] | None = None) -> int:
+             print(f"[workers] 新建 {display_path(path)} → 指派 front {args.front}")
+             return 0
+         if cmd == "assign":
+-            return print_assign(run_dir, args.role, args.front, args.scope)
++            return print_assign(run_dir, args.role, args.front, args.scope, args.asset)
+         if cmd == "heartbeat":
+             return print_heartbeat(run_dir, args.agent, args.status, args.note)
+         if cmd == "finish":

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xunji Local Maintenance"
+  short_description: "Guide Xunji repository maintenance"
+  default_prompt: "Use $xunji-local-maintenance to make or review Xunji repository maintenance changes."

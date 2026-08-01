@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/stop-output.v1.schema.json",
+  "title": "Xunji Stop Output v1",
+  "description": "Stop-output decision contract. NORMAL_CODA is the normalized compatibility projection of the text Coda; TARGET_DENIED is the sole receipt-backed fixed envelope. Maintenance failures remain receipts and cannot support success claims, but do not create a terminal variant. This is not a canonical cycle_end receipt and grants no authority.",
+  "oneOf": [
+    {"$ref": "#/$defs/normalCoda"},
+    {"$ref": "#/$defs/targetDenied"}
+  ],
+  "$defs": {
+    "normalCoda": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "type", "coda_kind", "next_action"],
+      "properties": {
+        "schema": {"const": "xunji.stop-output.v1"},
+        "type": {"const": "NORMAL_CODA"},
+        "coda_kind": {"enum": ["NEXT_ACTION", "BLOCKED"]},
+        "next_action": {"type": "string", "minLength": 4, "maxLength": 2048}
+      }
+    },
+    "targetDenied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "type",
+        "error",
+        "recovery",
+        "executed",
+        "next_action"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.stop-output.v1"},
+        "type": {"const": "TARGET_DENIED"},
+        "error": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$"},
+        "recovery": {
+          "enum": [
+            "SAME_TURN_RETRY",
+            "SAME_TURN_ALTERNATIVE",
+            "NEW_OPERATOR_AUTHORITY",
+            "HARD_SAFETY_DENIAL"
+          ]
+        },
+        "executed": {"const": false},
+        "next_action": {"type": "string", "minLength": 4, "maxLength": 2048}
+      }
+    }
+  }
+}

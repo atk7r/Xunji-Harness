@@ -1,0 +1,13 @@
+command: /usr/bin/time -p python3 tools/workers.py delegate /tmp/xunji-reviewer-benchmark.95hQrT/runs/www-scshr-com_20260727 --runtime-slots 1 --request-budget 0 --model-egress-budget 1000 --merge-capacity 1 --limit 1 --tool-call-limit 24
+fixture: isolated byte copy of original live run; original is read-only
+started_utc: 2026-07-29T07:18:31Z
+[workers delegate] ERROR WORK_PLAN_TRANSACTION_JOURNAL_DIVERGED
+real 1.61
+user 1.55
+sys 0.05
+command_exit: 1
+expected_post_recovery_fixture_error: WORK_PLAN_TRANSACTION_JOURNAL_DIVERGED (absolute copied-run binding)
+finished_utc: 2026-07-29T07:18:33Z
+recovery_receipts:        1
+A-review-012 projection: {"agent":"A-review-012","status":"assigned","attempts":[],"updated_at":"2026-07-29T07:18:31.750Z"}
+receipt: {"schema":"xunji.interrupted-reviewer-start.v1","assignment":"A-review-012","agent_id":"a38609f7023deb0e2","start_event_seq":835,"observed_head_seq":1008,"parent_transcript_length":24944129,"reason":"subagent_start_hook_cancelled_before_assistant","receipt_hash":"817260706d0364ae2c952bfae4f5fe8fddc187a50dd0cec343b8ec3828884e43"}

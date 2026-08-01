@@ -1,0 +1,43 @@
+# Xunji 运行态快照
+
+╭─ [Xunji] [运行态快照] ────────────────────────────────────────────────────────
+│ [当前阶段] [Root Orchestrator｜主驾驶调度]
+│ [前线状态] 开放 4 / 延后 4 / 已关闭 1
+│ [证据变化] 总计 22；本轮新增 0；置信提升 0
+│ [覆盖进展] 已测 12；本轮新增 0；未测 11
+│ [无进展轮数] 0（继续推进）
+│ [Agent 状态] 任务 2；未解决冲突 0
+│ [需要并行分派] 否
+│ [Loop 已完成] 否
+│ [接近收口复核] 否
+│ [收口阻断项] 3（open_fronts_present, coverage_attention_required, saturation_attention_required）
+╰────────────────────────────────────────────────────────
+
+- [当前阶段] [Root Orchestrator｜主驾驶调度]
+- [开放/延后/关闭前线] 4 / 4 / 1
+- [证据] 22 total; 本轮新增: 0; 置信提升: 0
+- [覆盖] 12 tested cells; 本轮新增: 0; 未测适用单元: 11
+- [无进展轮数] 0 (continue / 继续)
+- [Agents] 2 assignments; 未解决冲突: 0
+- [需要并行分派] 否
+- [Loop 已完成] 否
+- [收口复核候选] 否
+
+## 下一步建议 (Next Actions)
+
+- 在声称探索充分前，扩展低饱和前线或写明不继续的理由。 [Expand or justify low-saturation fronts before any explored-enough claim.]
+- 根据覆盖矩阵空列或稀疏行补 frontier/evidence。 [Update fronts/evidence for coverage matrix empty columns or sparse rows.]
+- 从可行动/开放前线中选择下一条，并记录 Root graph pass。 [Choose the next front from actionable/open fronts and record a Root graph pass.]
+
+## 低饱和前线 (Low Saturation)
+
+- F-001: ratio=0.571 tried=8 untried=6
+- F-002: ratio=0.545 tried=6 untried=5
+- F-003: ratio=0.5 tried=6 untried=6
+- F-005: ratio=0.4 tried=4 untried=6
+- F-006: ratio=0.0 tried=0 untried=3
+- F-008: ratio=0.0 tried=0 untried=3
+
+## 覆盖空列 (Coverage Empty Columns)
+
+- Misconfig

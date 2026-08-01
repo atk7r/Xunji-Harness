@@ -1,0 +1,210 @@
+{
+  "files": {
+    "tools/check_run.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/check_run.py",
+      "sha256": "4d035d51aecb5166d5b734154e87e583b71686aa4b330969a9236aac7ef7a8ca",
+      "size": 214578
+    },
+    "tools/coverage_matrix.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/coverage_matrix.py",
+      "sha256": "0a8578e34059831f8fe08bca5e5b528e58b4f88b9ba6682d5c559077bf12e2cf",
+      "size": 40985
+    },
+    "tools/graph.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/graph.py",
+      "sha256": "e9011ce56abf882863f81d9264079766c7c11b4f98509cc16b07f02ff91335c9",
+      "size": 11996
+    },
+    "tools/loop_journal.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/loop_journal.py",
+      "sha256": "649a49ed569cd58646ce167f388747e658cb291eb909c3159a1f412d51559fcb",
+      "size": 15085
+    },
+    "tools/loop_state.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/loop_state.py",
+      "sha256": "d8aca70663fe7bfcf50552b924bed8c0ec1c1a20587cf2a42549e2895e23f2b7",
+      "size": 51350
+    },
+    "tools/peer_review.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/peer_review.py",
+      "sha256": "350437a748743a11982aedb89e3d9c6a231be683c6ee023657d970a4f1be069b",
+      "size": 104163
+    },
+    "tools/selftest_all.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/selftest_all.py",
+      "sha256": "053b463f64d434505de192941363c25d0c5ade02312151517dd6f94b4a66335c",
+      "size": 11258
+    },
+    "tools/state_project.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/state_project.py",
+      "sha256": "19d668ed291b402f2ca037c7f03b914fb0129dc54d2c3db385eefac3587a4ea0",
+      "size": 7343
+    },
+    "tools/xunji_statusline.py": {
+      "resolved_path": "/Users/ccj/Documents/AI/Xunji/tools/xunji_statusline.py",
+      "sha256": "8e8e315cd744da661210f706905cf98eaa1b6a5b9be65769748246ca05c09c9b",
+      "size": 22621
+    }
+  },
+  "hook_bindings": [
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\" --selftest",
+      "event": "SessionStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\" --selftest",
+      "event": "SessionStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\" --selftest",
+      "event": "SessionStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\" --selftest",
+      "event": "SessionStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\" --selftest",
+      "event": "SessionStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\"",
+      "event": "SessionStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "PreToolUse",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\"",
+      "event": "PreToolUse",
+      "matcher": "Bash"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\"",
+      "event": "PreToolUse",
+      "matcher": "Bash"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\"",
+      "event": "PreToolUse",
+      "matcher": "Bash"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\"",
+      "event": "PreToolUse",
+      "matcher": "WebSearch"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\"",
+      "event": "PreToolUse",
+      "matcher": "WebFetch"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "PostToolUse",
+      "matcher": "Agent|CronCreate|CronDelete|CronList|WebFetch"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "PostToolUse",
+      "matcher": "Bash"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\"",
+      "event": "PostToolUse",
+      "matcher": "Bash"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "PostToolUseFailure",
+      "matcher": "Agent|CronCreate|CronDelete|CronList|Bash|WebFetch"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "SubagentStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "SubagentStop",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "UserPromptSubmit",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/sentinel/hook.py\"",
+      "event": "UserPromptSubmit",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/anti_drift.py\"",
+      "event": "UserPromptSubmit",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\"",
+      "event": "Stop",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\"",
+      "event": "Stop",
+      "matcher": ""
+    }
+  ],
+  "repository_root": "/Users/ccj/Documents/AI/Xunji",
+  "schema": "xunji.installed_runtime_manifest.v1",
+  "turn_contract_hook_references": [
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\" --selftest",
+      "event": "SessionStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "PreToolUse",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "PostToolUse",
+      "matcher": "Agent|CronCreate|CronDelete|CronList|WebFetch"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "PostToolUse",
+      "matcher": "Bash"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "PostToolUseFailure",
+      "matcher": "Agent|CronCreate|CronDelete|CronList|Bash|WebFetch"
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "SubagentStart",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "SubagentStop",
+      "matcher": ""
+    },
+    {
+      "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\"",
+      "event": "UserPromptSubmit",
+      "matcher": ""
+    }
+  ]
+}

@@ -1,0 +1,1317 @@
+diff --git a/tools/anti_drift.py b/tools/anti_drift.py
+index 050d04a..37b05bd 100644
+--- a/tools/anti_drift.py
++++ b/tools/anti_drift.py
+@@ -223,25 +223,9 @@ def find_active_run(
+     *,
+     active_pointer: Path | None = None,
+ ) -> Path | None:
+-    """Return the explicit active run, then fall back to recent Markdown activity."""
+-    pointed = _run_from_pointer(runs_root, active_pointer or ACTIVE_RUN_POINTER)
+-    if pointed is not None:
+-        return pointed
+-    if not runs_root.is_dir():
+-        return None
+-    best: Path | None = None
+-    best_mt = 0.0
+-    now = time.time()
+-    for md in runs_root.glob("*/*.md"):
+-        try:
+-            mt = md.stat().st_mtime
+-        except Exception:
+-            continue
+-        if mt > best_mt:
+-            best_mt, best = mt, md.parent
+-    if best is not None and (now - best_mt) <= within_sec:
+-        return best
+-    return None
++    """Return only the explicit active run; recency is not run authority."""
++    del within_sec  # retained for caller compatibility
++    return _run_from_pointer(runs_root, active_pointer or ACTIVE_RUN_POINTER)
+ 
+ 
+ def _detect_stage(run_dir: Path) -> str:
+@@ -393,6 +377,8 @@ def _overdue_steps(run_dir: Path) -> list[str]:
+ 
+ def build_anchor(
+     runs_root: Path = RUNS,
++    *,
++    active_pointer: Path | None = None,
+ ) -> str:
+     lines = []
+ 
+@@ -412,7 +398,7 @@ def build_anchor(
+     lines.append("")
+ 
+     # ---- Phase 1: read session_state.json and inject re-read instructions ----
+-    run = find_active_run(runs_root)
++    run = find_active_run(runs_root, active_pointer=active_pointer)
+     drift_flags: list[str] = []
+     if run is not None:
+         SessionStateManager.reset_if_stale(run)
+@@ -529,14 +515,14 @@ def _selftest() -> int:
+     checks.append(("anchor is compact (<3KB)", len(a) < 3072))
+     # drift patterns list
+     checks.append(("drift patterns non-empty", len(DRIFT_PATTERNS) >= 5))
+-    # find_active_run: picks the most-recent run within window, ignores stale
++    # find_active_run: explicit pointer is the only run authority.
+     d = Path(tempfile.mkdtemp())
+     checks.append(("stage Detection exists", _detect_stage(d) == "Setup"))
+     runs = d / "runs"
+     (runs / "a_x").mkdir(parents=True)
+     (runs / "a_x" / "report.md").write_text("# r", encoding="utf-8")
+-    checks.append(("find_active_run picks recent", find_active_run(runs) == runs / "a_x"))
+-    checks.append(("stale window -> none", find_active_run(runs, within_sec=-1) is None))
++    checks.append(("missing pointer never guesses a recent run", find_active_run(runs) is None))
++    checks.append(("recency window cannot authorize a run", find_active_run(runs, within_sec=9999) is None))
+     checks.append(("no runs dir -> none", find_active_run(d / "nope") is None))
+     pointed = runs / "pointed"
+     pointed.mkdir()
+@@ -550,7 +536,7 @@ def _selftest() -> int:
+     (outside / "frontier.md").write_text("# Frontier\n", encoding="utf-8")
+     pointer.write_text(str(outside), encoding="utf-8")
+     checks.append(("outside pointer is ignored",
+-                   find_active_run(runs, active_pointer=pointer) == pointed))
++                   find_active_run(runs, active_pointer=pointer) is None))
+ 
+     # SessionStateManager tests
+     time.sleep(1.1)  # ensure mtime is later than a_x/report.md created above
+@@ -587,7 +573,9 @@ def _selftest() -> int:
+     (test_run / "session_state.json").write_text(
+         json.dumps({"drift_flags": ["protocol_violation", "frontier_stale"], "frontier_mtime": 0.0,
+                      "claude_mtime": 0.0, "updated_at": time.time()}), encoding="utf-8")
+-    anchor_with_drift = build_anchor(runs_root=_tmp_runs)
++    test_pointer = _td / "active-run"
++    test_pointer.write_text(str(test_run), encoding="utf-8")
++    anchor_with_drift = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
+     checks.append(("anchor injects protocol_violation warning",
+                    "先 Read CLAUDE.md — 回合协议违规" in anchor_with_drift))
+     checks.append(("anchor injects frontier_stale warning",
+@@ -607,7 +595,8 @@ def _selftest() -> int:
+     old_stale = time.time() - SESSION_STATE_STALE_SEC - 120
+     (fresh_run / "session_state.json").write_text(
+         json.dumps({"drift_flags": ["protocol_violation"], "updated_at": old_stale}), encoding="utf-8")
+-    anchor_fresh = build_anchor(runs_root=_tmp_runs)
++    test_pointer.write_text(str(fresh_run), encoding="utf-8")
++    anchor_fresh = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
+     checks.append(("stale session_state auto-reset",
+                    "先 Read CLAUDE.md — 回合协议违规" not in anchor_fresh))
+ 
+@@ -674,10 +663,8 @@ def _selftest() -> int:
+                    and "state-parser-failure" in parser_fail[2]))
+ 
+     # Case 5: verify build_anchor injects the reminder
+-    anchor_ab = build_anchor(runs_root=_tmp_runs)
+-    # The anchor should have the reminder because the most recent active run (ab_dir or fresh_run)
+-    # has diverse barriers. But _tmp_runs has other runs too — find_active_run picks the most recent.
+-    # Since ab_dir was touched most recently above, it should be the active run.
++    test_pointer.write_text(str(ab_dir), encoding="utf-8")
++    anchor_ab = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
+     checks.append(("agent board: anchor injects reminder", "Agent Board 强制" in anchor_ab))
+ 
+     # Case 6: missing frontier.md -> not needed
+diff --git a/tools/loop_bootstrap.py b/tools/loop_bootstrap.py
+index fca73e8..5f91e35 100644
+--- a/tools/loop_bootstrap.py
++++ b/tools/loop_bootstrap.py
+@@ -185,13 +185,16 @@ def _journal(run_dir: Path, event: str, note: str) -> None:
+         print(f"[bootstrap] journal write skipped: {e}", file=sys.stderr)
+ 
+ 
+-def _set_active_run(run_dir: Path) -> None:
+-    """Best-effort statusline pointer update. It is local display state only."""
++def _set_active_run(run_dir: Path) -> bool:
++    """Select a prepared run and inherit the current operator turn contract."""
+     try:
+         if not xunji_statusline.set_active_run(str(run_dir)):
+-            print(f"[bootstrap] active run pointer skipped: {run_dir}", file=sys.stderr)
++            print(f"[bootstrap] active run switch failed: {run_dir}", file=sys.stderr)
++            return False
++        return True
+     except Exception as e:
+-        print(f"[bootstrap] active run pointer skipped: {e}", file=sys.stderr)
++        print(f"[bootstrap] active run switch failed: {e}", file=sys.stderr)
++        return False
+ 
+ 
+ # ---- commands ----
+@@ -219,7 +222,8 @@ def cmd_new(slug: str, recon_path: str) -> int:
+     print(f"[bootstrap] run 目录: {run_dir}")
+ 
+     _write_initial_state(run_dir)
+-    _set_active_run(run_dir)
++    if not _set_active_run(run_dir):
++        return 1
+     _journal(run_dir, "bootstrap", f"new run prepared from recon {recon_full}")
+     if not _refresh_loop_state(run_dir):
+         return 1
+@@ -236,7 +240,6 @@ def cmd_resume(run_path: str) -> int:
+         return 1
+ 
+     print(f"[bootstrap] 续接 run: {run_dir}")
+-    _set_active_run(run_dir)
+ 
+     # 写 handoff
+     subprocess.run([PYTHON_CMD, str(ROOT / "tools" / "session_handoff.py"),
+@@ -244,6 +247,8 @@ def cmd_resume(run_path: str) -> int:
+     _journal(run_dir, "resume_prepare", "resume state prepared; loop not started until explicit /loop")
+     if not _refresh_loop_state(run_dir):
+         return 1
++    if not _set_active_run(run_dir):
++        return 1
+ 
+     _print_launch_instructions(run_dir)
+     return 0
+@@ -313,8 +318,9 @@ def _selftest() -> int:
+         stdout = ""
+         stderr = ""
+ 
+-    def fake_set_active(run_dir: Path) -> None:
++    def fake_set_active(run_dir: Path) -> bool:
+         active_hook_calls.append(Path(run_dir).resolve())
++        return True
+ 
+     def fake_run(*_args, **_kwargs) -> _FakeCompleted:
+         return _FakeCompleted()
+diff --git a/tools/setup_run.py b/tools/setup_run.py
+index 00514bd..5541ecf 100644
+--- a/tools/setup_run.py
++++ b/tools/setup_run.py
+@@ -70,17 +70,18 @@ def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:
+         print(f"[setup] phase journal skipped: {exc}", file=sys.stderr)
+ 
+ 
+-def _set_active_run(run_dir: Path) -> None:
+-    """Best-effort statusline pointer update. It is display state, not evidence."""
++def _set_active_run(run_dir: Path) -> bool:
++    """Atomically select a fully prepared run, inheriting any live turn contract."""
+     try:
+         import xunji_statusline  # noqa: E402
+ 
+         if xunji_statusline.set_active_run(str(run_dir)):
+             print(f"[setup] statusline active run: runs/{run_dir.name}")
+-        else:
+-            print(f"[setup] statusline active run skipped: {run_dir}", file=sys.stderr)
++            return True
++        print(f"[setup] active run switch failed: {run_dir}", file=sys.stderr)
+     except Exception as exc:
+-        print(f"[setup] statusline active run skipped: {exc}", file=sys.stderr)
++        print(f"[setup] active run switch failed: {exc}", file=sys.stderr)
++    return False
+ 
+ 
+ def scaffold(run_dir: Path) -> list[str]:
+@@ -413,9 +414,6 @@ def main() -> int:
+     made = scaffold(run_dir)
+     print(_phase_banner("start", "Setup", run_dir=run_dir, note="prepare authorized run workbench"))
+     _phase_journal(run_dir, "phase_start", "Setup", "prepare authorized run workbench")
+-    # This CLI creates a new run. Future existing-run modes should not pass through
+-    # this branch unless they intentionally want to select that run in the statusline.
+-    _set_active_run(run_dir)
+     print(f"[setup] 建 run 骨架 {run_dir}")
+     print(f"        {len(made)} 个核心文件 + evidence/ + scripts/")
+     coverage_ready = False
+@@ -484,6 +482,13 @@ def main() -> int:
+         print(f"[下一步] 先填写 target.md 的 Target/In-scope 并生成 coverage.json; 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}")
+     _phase_journal(run_dir, "phase_end", "Setup", f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})")
+     print(_phase_banner("end", "Setup", run_dir=run_dir, note=f"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})"))
++    # Commit the run transition only after setup has produced its complete local
++    # workbench. set_active_run copies a valid current turn contract before it
++    # atomically replaces the pointer.
++    if not _set_active_run(run_dir):
++        print("[!] run 已建好但未切换 active 指针；旧 run 保持 active，请修复控制面后重试 set-active。",
++              file=sys.stderr)
++        return 1
+     return 0
+ 
+ 
+diff --git a/tools/turn_contract.py b/tools/turn_contract.py
+index 74f38bc..d7246f0 100644
+--- a/tools/turn_contract.py
++++ b/tools/turn_contract.py
+@@ -22,11 +22,17 @@ from pathlib import Path
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ RUNS = Path(os.environ.get("XUNJI_RUNS_ROOT", str(ROOT / "runs")))
++ACTIVE_RUN_POINTER = Path(os.environ.get(
++    "XUNJI_ACTIVE_RUN_FILE", str(ROOT / ".claude" / "xunji_active_run")))
++PENDING_DIR = Path(os.environ.get(
++    "XUNJI_PENDING_TURN_DIR", str(ROOT / ".claude" / "xunji_pending_turns")))
++TRANSITION_CLAIMS_DIR = Path(os.environ.get(
++    "XUNJI_TRANSITION_CLAIMS_DIR",
++    str(ROOT / ".claude" / "xunji_transition_claims")))
+ sys.path.insert(0, str(ROOT / "tools"))
+ 
+ import run_model  # noqa: E402
+ import runtime_receipts  # noqa: E402
+-from anti_drift import find_active_run  # noqa: E402
+ 
+ 
+ SCHEMA = "xunji.turn_contract.v1"
+@@ -35,12 +41,25 @@ EXPLAIN = "EXPLAIN_ONLY"
+ PAUSE = "PAUSED_BY_OPERATOR"
+ NORMAL = "NORMAL"
+ STALE_SECONDS = 6 * 60 * 60
++PENDING_STALE_SECONDS = 15 * 60
+ COMPLETION_CHECKS = (
+     "report_parity", "severity_artifacts", "reachable_frontier", "review_ledger",
+ )
+ CONTROL_SCRIPTS = {
+     (ROOT / "tools" / name).resolve()
+-    for name in ("workers.py", "run_model.py", "loop_state.py")
++    for name in (
++        "graph.py",
++        "loop_bootstrap.py",
++        "loop_journal.py",
++        "loop_state.py",
++        "progress_ledger.py",
++        "run_controller.py",
++        "session_handoff.py",
++        "setup_run.py",
++        "workers.py",
++        "xunji_statusline.py",
++        "run_model.py",
++    )
+ }
+ 
+ EXPLAIN_RE = re.compile(
+@@ -76,8 +95,25 @@ BACKGROUND_REVIEW_RE = re.compile(
+ )
+ PROTECTED_RUNTIME_RE = re.compile(
+     r"(?:runtime_events\.jsonl|\.runtime_events\.lock|turn_contract\.json|run_status\.json|"
+-    r"assignments\.json|review[/\\]receipts[/\\][0-9a-f]{64}\.json)"
+-    r"(?=[\"'\s;|&}]|$)",
++    r"assignments\.json|xunji_active_run|xunji_pending_turns|xunji_transition_claims|"
++    r"review[/\\]receipts[/\\][0-9a-f]{64}\.json)"
++    r"(?=[.\/\\\"'\s;|&}]|$)",
++    re.I,
++)
++CLEAR_ACTIVE_RE = re.compile(
++    r"(?:清除|清空|取消|移除).{0,20}(?:active[ -]?run|运行指针)|"
++    r"(?:clear|remove|unset).{0,20}active[ -]?run",
++    re.I,
++)
++RUN_TRANSITION_RE = re.compile(
++    r"(?:新建|创建|建立|重开|重新开|初始化|启动).{0,24}(?:run|运行)|"
++    r"(?:new|create|setup|start).{0,24}run",
++    re.I,
++)
++RUN_BIND_RE = re.compile(
++    r"(?:/loop\s+[^\n]*runs[/\\]|(?:恢复|续接|resume|continue).{0,24}(?:run|运行)|"
++    r"(?:set-active|setup_run\.py|loop_bootstrap\.py)|"
++    r"(?:设置|切换|选择|绑定|set|switch|select|bind).{0,20}active[ -]?run)",
+     re.I,
+ )
+ 
+@@ -106,6 +142,32 @@ def run_status_path(run_dir: Path) -> Path:
+     return run_dir / "state" / "run_status.json"
+ 
+ 
++def explicit_active_run(
++    runs_root: Path | None = None,
++    pointer: Path | None = None,
++) -> Path | None:
++    """Resolve only the authoritative pointer; contracts must never guess a run."""
++    root = (runs_root or RUNS).resolve()
++    marker = pointer or ACTIVE_RUN_POINTER
++    try:
++        raw = marker.read_text(encoding="utf-8", errors="replace").strip()
++        if not raw:
++            return None
++        candidate = Path(raw).expanduser()
++        if not candidate.is_absolute():
++            candidate = ROOT / candidate
++        candidate = candidate.resolve()
++        candidate.relative_to(root)
++    except Exception:
++        return None
++    if not candidate.is_dir():
++        return None
++    if not any((candidate / name).exists() for name in (
++            "target.md", "frontier.md", "evidence.md", "decisions.md", "review.md")):
++        return None
++    return candidate
++
++
+ def classify_prompt(prompt: str, *, active_run: bool = True) -> str:
+     prompt = prompt or ""
+     if not active_run:
+@@ -114,6 +176,8 @@ def classify_prompt(prompt: str, *, active_run: bool = True) -> str:
+         return PAUSE
+     if EXPLAIN_RE.search(prompt):
+         return EXPLAIN
++    if RUN_TRANSITION_RE.search(prompt) or RUN_BIND_RE.search(prompt):
++        return EXECUTE
+     if EXECUTE_RE.search(prompt):
+         return EXECUTE
+     if re.search(r"[?？]\s*$", prompt) or re.match(r"^\s*(?:怎么|如何|是否|什么|哪|谁)", prompt):
+@@ -121,11 +185,11 @@ def classify_prompt(prompt: str, *, active_run: bool = True) -> str:
+     return EXPLAIN
+ 
+ 
+-def write_contract(run_dir: Path, event: dict) -> dict:
++def _contract_from_event(event: dict, *, run_name: str = "") -> dict:
+     prompt = str(event.get("prompt") or "")
+     mode = classify_prompt(prompt, active_run=True)
+     now = time.time()
+-    contract = {
++    return {
+         "schema": SCHEMA,
+         "mode": mode,
+         "session_id": str(event.get("session_id") or ""),
+@@ -134,9 +198,214 @@ def write_contract(run_dir: Path, event: dict) -> dict:
+         "prompt_excerpt": prompt[:500],
+         "memory_approved": bool(MEMORY_APPROVAL_RE.search(prompt)),
+         "fanout_override": bool(re.search(r"(?:明确)?允许串行|不要使用\s*(?:Agent|子代理)|serial override", prompt, re.I)),
++        "origin_run": run_name,
++        "bound_run": run_name,
+         "updated_at": now,
+     }
++
++
++def write_contract(run_dir: Path, event: dict) -> dict:
++    contract = _contract_from_event(event, run_name=run_dir.name)
+     _atomic_json(contract_path(run_dir), contract)
++    _write_run_status(run_dir, contract)
++    return contract
++
++
++def _pending_path(session_id: str, pending_dir: Path | None = None) -> Path:
++    digest = hashlib.sha256(session_id.encode("utf-8", "replace")).hexdigest()
++    return (pending_dir or PENDING_DIR) / f"{digest}.json"
++
++
++def write_pending_contract(event: dict, *, pending_dir: Path | None = None) -> dict:
++    """Persist a short-lived operator contract while no run exists yet."""
++    session_id = str(event.get("session_id") or "")
++    if not session_id:
++        return {}
++    contract = _contract_from_event(event)
++    prompt = str(contract.get("prompt_excerpt") or "")
++    if contract.get("mode") != EXECUTE or not (
++            RUN_TRANSITION_RE.search(prompt) or RUN_BIND_RE.search(prompt)):
++        return {}
++    _atomic_json(_pending_path(session_id, pending_dir), contract)
++    return contract
++
++
++def load_pending_contract(session_id: str, *, pending_dir: Path | None = None) -> dict:
++    if not session_id:
++        return {}
++    try:
++        data = json.loads(_pending_path(session_id, pending_dir).read_text(
++            encoding="utf-8", errors="replace"))
++        age = time.time() - float(data.get("updated_at") or 0.0)
++    except Exception:
++        return {}
++    if data.get("schema") != SCHEMA or data.get("mode") != EXECUTE:
++        return {}
++    if not str(data.get("session_id") or "") or age < 0 or age > PENDING_STALE_SECONDS:
++        return {}
++    return data
++
++
++def _transition_claim_path(
++    target_name: str,
++    session_id: str,
++    claims_dir: Path | None = None,
++) -> Path:
++    target_digest = hashlib.sha256(
++        target_name.encode("utf-8", "replace")).hexdigest()
++    session_digest = hashlib.sha256(
++        session_id.encode("utf-8", "replace")).hexdigest()
++    return (claims_dir or TRANSITION_CLAIMS_DIR) / f"{target_digest}-{session_digest}.json"
++
++
++def _transition_claim_glob(target_name: str) -> str:
++    digest = hashlib.sha256(target_name.encode("utf-8", "replace")).hexdigest()
++    return f"{digest}-*.json"
++
++
++def write_transition_claim(
++    target_name: str,
++    contract: dict,
++    *,
++    claims_dir: Path | None = None,
++) -> dict:
++    """Bind a no-run lifecycle PreToolUse event to one exact target run name."""
++    session_id = str(contract.get("session_id") or "")
++    prompt_sha = str(contract.get("prompt_sha256") or "")
++    if not target_name or not session_id or not prompt_sha:
++        raise ValueError("transition claim requires target/session/prompt hash")
++    claim = {
++        "schema": SCHEMA,
++        "target_run": target_name,
++        "session_id": session_id,
++        "prompt_sha256": prompt_sha,
++        "updated_at": time.time(),
++    }
++    _atomic_json(_transition_claim_path(target_name, session_id, claims_dir), claim)
++    return claim
++
++
++def _lifecycle_target_name(invocation: tuple[Path, list[str]]) -> str:
++    script, args = invocation
++    if script.name == "xunji_statusline.py" and "--set-active" in args:
++        try:
++            return Path(args[args.index("--set-active") + 1]).name
++        except (ValueError, IndexError):
++            return ""
++    if script.name == "loop_bootstrap.py" and "--resume" in args:
++        try:
++            return Path(args[args.index("--resume") + 1]).name
++        except (ValueError, IndexError):
++            return ""
++    if script.name not in {"setup_run.py", "loop_bootstrap.py"}:
++        return ""
++    value_options = {"--date", "--target"}
++    flag_options = {"--classify"}
++    positionals: list[str] = []
++    date_value = datetime.now().strftime("%Y%m%d")
++    index = 0
++    while index < len(args):
++        token = args[index]
++        if token in value_options:
++            if index + 1 >= len(args):
++                return ""
++            if token == "--date":
++                date_value = args[index + 1]
++            index += 2
++            continue
++        if token in flag_options:
++            index += 1
++            continue
++        if token.startswith("-"):
++            # Fail closed when setup/loop_bootstrap gains a new option. An
++            # unknown value must never be mistaken for the run slug.
++            return ""
++        positionals.append(token)
++        index += 1
++    if not positionals:
++        return ""
++    slug = re.sub(r"[^A-Za-z0-9_-]", "_", positionals[0])
++    return f"{slug}_{date_value}"
++
++
++def claim_pending_contract(
++    target_run: Path,
++    *,
++    pending_dir: Path | None = None,
++    claims_dir: Path | None = None,
++) -> dict:
++    """Consume the exact session contract authorized for this target run."""
++    directory = pending_dir or PENDING_DIR
++    if not directory.is_dir():
++        return {}
++    claim_directory = claims_dir or TRANSITION_CLAIMS_DIR
++    claim_paths = list(claim_directory.glob(_transition_claim_glob(target_run.name))) \
++        if claim_directory.is_dir() else []
++    valid_claims: list[tuple[Path, dict]] = []
++    for candidate in claim_paths:
++        try:
++            item = json.loads(candidate.read_text(encoding="utf-8", errors="replace"))
++            item_age = time.time() - float(item.get("updated_at") or 0.0)
++        except Exception:
++            continue
++        if item.get("schema") == SCHEMA and item.get("target_run") == target_run.name \
++                and str(item.get("session_id") or "") \
++                and 0 <= item_age <= PENDING_STALE_SECONDS:
++            valid_claims.append((candidate, item))
++    if len(valid_claims) > 1:
++        raise RuntimeError("multiple session claims for one target run")
++    try:
++        claim_path, claim = valid_claims[0]
++        claim_age = time.time() - float(claim.get("updated_at") or 0.0)
++    except IndexError:
++        # A normal shell/operator set-active outside Claude has no pending files.
++        fresh_pending = False
++        for path in directory.glob("*.json"):
++            try:
++                data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
++                age = time.time() - float(data.get("updated_at") or 0.0)
++                fresh_pending = fresh_pending or bool(
++                    data.get("schema") == SCHEMA
++                    and data.get("mode") == EXECUTE
++                    and str(data.get("session_id") or "")
++                    and 0 <= age <= PENDING_STALE_SECONDS
++                )
++            except Exception:
++                continue
++        if not fresh_pending:
++            return {}
++        raise RuntimeError("pending contract exists without a target claim")
++    if claim.get("schema") != SCHEMA or claim.get("target_run") != target_run.name \
++            or claim_age < 0 or claim_age > PENDING_STALE_SECONDS:
++        raise RuntimeError("stale or mismatched transition claim")
++    session_id = str(claim.get("session_id") or "")
++    contract = load_pending_contract(session_id, pending_dir=directory)
++    if not contract:
++        raise RuntimeError("transition claim has no matching pending contract")
++    if str(contract.get("prompt_sha256") or "") != str(claim.get("prompt_sha256") or ""):
++        raise RuntimeError("transition claim prompt hash mismatch")
++    if not session_id:
++        return {}
++    contract = dict(contract)
++    contract["bound_run"] = target_run.name
++    contract["transitioned_from"] = "pending:no-active-run"
++    _atomic_json(contract_path(target_run), contract)
++    _write_run_status(target_run, contract)
++    try:
++        _pending_path(session_id, directory).unlink()
++    except FileNotFoundError:
++        pass
++    try:
++        claim_path.unlink()
++    except FileNotFoundError:
++        pass
++    return contract
++
++
++def _write_run_status(run_dir: Path, contract: dict) -> None:
++    """Project a transferred/operator contract into the target run status."""
++    mode = str(contract.get("mode") or "")
++    now = float(contract.get("updated_at") or time.time())
+     if mode == PAUSE:
+         _atomic_json(run_status_path(run_dir), {
+             "schema": SCHEMA,
+@@ -153,7 +422,6 @@ def write_contract(run_dir: Path, event: dict) -> dict:
+             "updated_at": now,
+             "reason": "operator prompt requested execution/resume",
+         })
+-    return contract
+ 
+ 
+ def load_contract(run_dir: Path, *, session_id: str = "") -> dict:
+@@ -173,6 +441,24 @@ def load_contract(run_dir: Path, *, session_id: str = "") -> dict:
+     return data
+ 
+ 
++def transfer_contract(source_run: Path, target_run: Path) -> dict:
++    """Copy the current valid turn contract before an active-run pointer switch."""
++    source_run = source_run.resolve()
++    target_run = target_run.resolve()
++    if source_run == target_run:
++        return load_contract(source_run)
++    source_contract = load_contract(source_run)
++    if not source_contract:
++        return {}
++    contract = dict(source_contract)
++    contract.setdefault("origin_run", source_run.name)
++    contract["bound_run"] = target_run.name
++    contract["transitioned_from"] = source_run.name
++    _atomic_json(contract_path(target_run), contract)
++    _write_run_status(target_run, contract)
++    return contract
++
++
+ def _tool_text(event: dict) -> str:
+     value = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+     try:
+@@ -191,6 +477,18 @@ def _deny(reason: str) -> dict:
+     }
+ 
+ 
++def _protected_control_reason(event: dict) -> str:
++    tool = str(event.get("tool_name") or "")
++    if tool not in {"Write", "Edit", "Update", "MultiEdit", "NotebookEdit", "Bash"}:
++        return ""
++    if PROTECTED_RUNTIME_RE.search(_tool_text(event)):
++        return (
++            "active-run 指针、pending contract、运行时回执和回合状态只能由"
++            "受控工具/hook 原子写入；Claude 不得直接修改这些控制面文件。"
++        )
++    return ""
++
++
+ def _safe_sed(tokens: list[str]) -> bool:
+     scripts: list[str] = []
+     index = 1
+@@ -246,23 +544,36 @@ def _readonly_shell(command: str) -> bool:
+     return True
+ 
+ 
+-def _fanout_control_bash(command: str) -> bool:
+-    if _readonly_shell(command):
+-        return True
+-    if re.search(r"[;&|><`]|\$\(|\$\{|\n|\r", command):
+-        return False
++def _control_invocation(command: str) -> tuple[Path, list[str]] | None:
++    """Parse one exact in-repo Python control command, with benign fd folding."""
++    normalized = command.strip()
++    for suffix in (" 2>&1", " 2>/dev/null"):
++        if normalized.endswith(suffix):
++            normalized = normalized[:-len(suffix)].rstrip()
++            break
++    if re.search(r"[;&|><`]|\$\(|\$\{|\n|\r", normalized):
++        return None
+     try:
+-        tokens = shlex.split(command)
++        tokens = shlex.split(normalized)
+     except ValueError:
+-        return False
++        return None
+     if len(tokens) < 2 or not re.fullmatch(
+-        r"python(?:3(?:\.\d+)?)?", Path(tokens[0]).name
++        r"python(?:3(?:\.\d+){0,2})?", Path(tokens[0]).name
+     ):
+-        return False
++        return None
+     script = Path(tokens[1])
+     if not script.is_absolute():
+         script = ROOT / script
+-    return script.resolve() in CONTROL_SCRIPTS
++    script = script.resolve()
++    if script not in CONTROL_SCRIPTS:
++        return None
++    return script, tokens[2:]
++
++
++def _fanout_control_bash(command: str) -> bool:
++    if _readonly_shell(command):
++        return True
++    return _control_invocation(command) is not None
+ 
+ 
+ def _assignment_exists(run_dir: Path, assignment: str, front: str) -> bool:
+@@ -288,7 +599,8 @@ def _is_target_action(event: dict) -> bool:
+ def _denial_is_target_action(event: dict, reason: str) -> bool:
+     """Separate target-result denials from local control-plane policy denials."""
+     local_policy_markers = (
+-        "运行时回执/回合状态只能由 hook 原子写入",
++        "active-run 指针",
++        "清除 active-run 指针必须由当前操作者 prompt 明确授权",
+         "长期记忆写入需要操作者",
+         "peer_review 不得后台运行",
+     )
+@@ -303,10 +615,43 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
+     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+     command = str(tool_input.get("command") or "")
+ 
+-    if PROTECTED_RUNTIME_RE.search(text) and (
+-        tool in {"Write", "Edit", "Update", "MultiEdit", "NotebookEdit"} or tool == "Bash"
+-    ):
+-        return "运行时回执/回合状态只能由 hook 原子写入；Claude 工具不得直接修改这些控制面文件。"
++    protected_reason = _protected_control_reason(event)
++    if protected_reason:
++        return protected_reason
++
++    invocation = _control_invocation(command) if tool == "Bash" else None
++    prompt_excerpt = str(contract.get("prompt_excerpt") or "")
++    resume_allowed = False
++    if invocation and invocation[0].name == "loop_bootstrap.py" \
++            and "--resume" in invocation[1]:
++        try:
++            resume_arg = invocation[1][invocation[1].index("--resume") + 1]
++        except (ValueError, IndexError):
++            resume_arg = ""
++        resume_allowed = bool(
++            re.search(r"(?:继续|恢复|续接|resume|continue)", prompt_excerpt, re.I)
++            or (resume_arg and (
++                resume_arg.lower() in prompt_excerpt.lower()
++                or Path(resume_arg).name.lower() in prompt_excerpt.lower()
++            )))
++    if invocation and invocation[0].name in {"setup_run.py", "loop_bootstrap.py"} \
++            and not ({"--selftest", "--help", "-h"} & set(invocation[1])) \
++            and not RUN_TRANSITION_RE.search(prompt_excerpt) \
++            and not resume_allowed:
++        return "setup/resume run 转换必须由当前操作者 prompt 明确要求；不得借切换 run 规避当前回合约束。"
++    if invocation and invocation[0].name == "xunji_statusline.py" \
++            and "--set-active" in invocation[1]:
++        try:
++            target_arg = invocation[1][invocation[1].index("--set-active") + 1]
++        except (ValueError, IndexError):
++            return "--set-active 缺少 run 路径。"
++        target_name = Path(target_arg).name.lower()
++        if target_name not in prompt_excerpt.lower() and target_arg.lower() not in prompt_excerpt.lower():
++            return "--set-active 目标必须由当前操作者 prompt 明确点名；不得切换到无关 run。"
++    if invocation and invocation[0].name == "xunji_statusline.py" \
++            and "--clear-active" in invocation[1] \
++            and not CLEAR_ACTIVE_RE.search(str(contract.get("prompt_excerpt") or "")):
++        return "清除 active-run 指针必须由当前操作者 prompt 明确授权；切换 run 请使用受控 --set-active/setup/resume。"
+ 
+     if MEMORY_PATH_RE.search(text) and not contract.get("memory_approved"):
+         memory_read = tool in {"Read", "Grep", "Glob"} or (
+@@ -340,6 +685,10 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
+         return ""
+ 
+     if tool == "CronCreate":
++        if RUN_TRANSITION_RE.search(prompt_excerpt) \
++                and str(contract.get("bound_run") or run_dir.name) == str(
++                    contract.get("origin_run") or run_dir.name):
++            return "Cron 单实例门：当前 prompt 要求创建新 run；先完成 setup 并切换 contract，再对新 run 执行 CronList/CronCreate。"
+         cron_ok, cron_note = runtime_receipts.cron_quiescent(
+             run_dir,
+             session_id=str(contract.get("session_id") or ""),
+@@ -442,13 +791,71 @@ def _context_message(contract: dict, run_dir: Path) -> str:
+ 
+ 
+ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
+-    run_dir = run_dir or find_active_run(RUNS, within_sec=6 * 60 * 60)
++    run_dir = run_dir or explicit_active_run()
++    hook = str(event.get("hook_event_name") or "")
+     if run_dir is None:
+-        if str(event.get("hook_event_name") or "") == "PreToolUse" \
+-                and str(event.get("tool_name") or "") == "CronCreate":
+-            return _deny("Xunji CronCreate 前必须先 setup/set-active 一个 run，再用当前回合 CronList 证明单实例。")
++        if hook == "UserPromptSubmit" and not INTERNAL_PROMPT_RE.search(
++                str(event.get("prompt") or "")):
++            contract = write_pending_contract(event)
++            if contract:
++                return {
++                    "hookSpecificOutput": {
++                        "hookEventName": "UserPromptSubmit",
++                        "additionalContext": (
++                            "[Xunji bootstrap turn] 当前没有 active run；若操作者要求新建/"
++                            "恢复 run，先执行受控 setup/resume。成功 set-active 会原子继承本回合契约。"
++                        ),
++                    }
++                }
++        if hook == "PreToolUse":
++            protected_reason = _protected_control_reason(event)
++            if protected_reason:
++                return _deny(protected_reason)
++            tool = str(event.get("tool_name") or "")
++            if tool == "CronCreate":
++                return _deny("Xunji CronCreate 前必须先 setup/set-active 一个 run，再用当前回合 CronList 证明单实例。")
++            pending = load_pending_contract(str(event.get("session_id") or ""))
++            command = str((event.get("tool_input") or {}).get("command") or "") \
++                if isinstance(event.get("tool_input"), dict) else ""
++            invocation = _control_invocation(command) if tool == "Bash" else None
++            args = invocation[1] if invocation else []
++            script_name = invocation[0].name if invocation else ""
++            inspection_only = bool(
++                invocation
++                and ({"--selftest", "--help", "-h"} & set(args)
++                     or (script_name == "xunji_statusline.py"
++                         and not ({"--set-active", "--clear-active"} & set(args))))
++            )
++            lifecycle = bool(invocation and (
++                script_name in {"setup_run.py", "loop_bootstrap.py"}
++                or (script_name == "xunji_statusline.py"
++                    and bool({"--set-active", "--clear-active"} & set(args)))
++            ) and not inspection_only)
++            if inspection_only:
++                return None
++            if lifecycle:
++                if not pending:
++                    return _deny(
++                        "无 active run 的 setup/resume/set-active 必须绑定当前 session 的"
++                        " operator bootstrap contract；先由 UserPromptSubmit 明确新建/恢复目标。")
++                reason = evaluate_pretool(ROOT, event, pending)
++                if reason:
++                    return _deny(reason)
++                target_name = _lifecycle_target_name(invocation)
++                if not target_name:
++                    return _deny("无法从 lifecycle 命令确定唯一目标 run；拒绝创建 transition claim。")
++                try:
++                    write_transition_claim(target_name, pending)
++                except Exception:
++                    return _deny("无法原子写入当前 session/目标 run 的 transition claim。")
++                return None
++            if pending and tool not in {
++                    "Read", "Grep", "Glob", "WebSearch", "ListMcpResourcesTool",
++                    "ReadMcpResourceTool", "CronList"}:
++                return _deny(
++                    "当前 session 正在 bootstrap run；绑定 active run 前只允许只读动作和"
++                    "受控 setup/resume/set-active，不得先执行目标或任意写操作。")
+         return None
+-    hook = str(event.get("hook_event_name") or "")
+     if hook == "UserPromptSubmit":
+         prompt = str(event.get("prompt") or "")
+         if INTERNAL_PROMPT_RE.search(prompt):
+@@ -522,13 +929,33 @@ def _selftest() -> int:
+     pause = classify_prompt("停止loop，渗透结束")
+     execute = classify_prompt("彻底修复所有问题")
+     indirect_english = classify_prompt("Please deploy the prepared workflow")
+-    contract = {"mode": EXECUTE, "session_id": "s", "updated_at": time.time()}
++    no_run_question = classify_prompt("what runs exist?", active_run=False)
++    active_run_question = classify_prompt("active run 是什么？")
++    active_run_switch = classify_prompt("switch active run to runs/other_20260101")
++    contract = {
++        "mode": EXECUTE,
++        "session_id": "s",
++        "prompt_excerpt": "/loop 重新开一个新 run",
++        "origin_run": run.name,
++        "bound_run": run.name,
++        "updated_at": time.time(),
++    }
+     target_event = {"tool_name": "Bash", "tool_input": {"command": "python tools/probe.py https://example.test"}}
+     encoded_target = {"tool_name": "Bash", "tool_input": {
+         "command": "python3 -c 'import socket; socket.create_connection((\"example.test\",443))'"}}
+     renamed_target = {"tool_name": "Bash", "tool_input": {"command": "python3 /tmp/check.py"}}
+     workers_control = {"tool_name": "Bash", "tool_input": {
+         "command": f"python3 {ROOT / 'tools' / 'workers.py'} list {run}"}}
++    setup_control = {"tool_name": "Bash", "tool_input": {
++        "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} next {root / 'recon.json'} 2>&1"}}
++    journal_control = {"tool_name": "Bash", "tool_input": {
++        "command": f"python3 {ROOT / 'tools' / 'loop_journal.py'} {run} start --note begin"}}
++    clear_active = {"tool_name": "Bash", "tool_input": {
++        "command": f"python3 {ROOT / 'tools' / 'xunji_statusline.py'} --clear-active"}}
++    set_active = {"tool_name": "Bash", "tool_input": {
++        "command": f"python3 {ROOT / 'tools' / 'xunji_statusline.py'} --set-active runs/other_20260101"}}
++    resume_control = {"tool_name": "Bash", "tool_input": {
++        "command": f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} --resume runs/other_20260101"}}
+     fake_workers_control = {"tool_name": "Bash", "tool_input": {
+         "command": "python3 /tmp/workers.py list runs/x"}}
+     safe_sed_read = {"tool_name": "Bash", "tool_input": {
+@@ -554,6 +981,49 @@ def _selftest() -> int:
+     encoded_before_fanout = bool(evaluate_pretool(run, encoded_target, contract))
+     renamed_before_fanout = bool(evaluate_pretool(run, renamed_target, contract))
+     workers_allowed_before_fanout = not bool(evaluate_pretool(run, workers_control, contract))
++    bare_python_control_allowed = _control_invocation(
++        f"python {ROOT / 'tools' / 'loop_state.py'} {run}") is not None
++    micro_python_control_allowed = _control_invocation(
++        f"python3.14.2 {ROOT / 'tools' / 'loop_state.py'} {run}") is not None
++    setup_allowed_before_fanout = not bool(evaluate_pretool(run, setup_control, contract))
++    setup_without_operator_blocked = bool(evaluate_pretool(run, setup_control, {
++        **contract, "prompt_excerpt": "继续当前 run 的 F-001",
++    }))
++    journal_allowed_before_fanout = not bool(evaluate_pretool(run, journal_control, contract))
++    clear_without_operator_blocked = bool(evaluate_pretool(run, clear_active, contract))
++    clear_with_operator_allowed = not bool(evaluate_pretool(run, clear_active, {
++        **contract, "prompt_excerpt": "清除 active run 指针",
++    }))
++    clear_with_english_operator_allowed = not bool(evaluate_pretool(run, clear_active, {
++        **contract, "prompt_excerpt": "clear the active run pointer",
++    }))
++    unrelated_set_active_blocked = bool(evaluate_pretool(run, set_active, contract))
++    named_set_active_allowed = not bool(evaluate_pretool(run, set_active, {
++        **contract, "prompt_excerpt": "/loop runs/other_20260101",
++    }))
++    named_resume_allowed = not bool(evaluate_pretool(run, resume_control, {
++        **contract, "prompt_excerpt": "/loop runs/other_20260101",
++    }))
++    classify_setup_target = _lifecycle_target_name((
++        ROOT / "tools" / "setup_run.py",
++        ["--classify", "classified", str(root / "recon.json"), "--date", "20260101"],
++    ))
++    url_setup_target = _lifecycle_target_name((
++        ROOT / "tools" / "setup_run.py",
++        ["url-target", "--target", "https://example.test:8443", "--date", "20260101"],
++    ))
++    unknown_option_target = _lifecycle_target_name((
++        ROOT / "tools" / "setup_run.py",
++        ["--future-option", "wrong-slug", "real-slug", "--date", "20260101"],
++    ))
++    direct_resume_target = _lifecycle_target_name((
++        ROOT / "tools" / "loop_bootstrap.py",
++        ["--resume", "runs/resume_20260101"],
++    ))
++    direct_set_active_target = _lifecycle_target_name((
++        ROOT / "tools" / "xunji_statusline.py",
++        ["--set-active", "runs/selected_20260101"],
++    ))
+     fake_workers_blocked_before_fanout = bool(evaluate_pretool(
+         run, fake_workers_control, contract))
+     safe_sed_allowed_before_fanout = not bool(evaluate_pretool(
+@@ -568,6 +1038,18 @@ def _selftest() -> int:
+     protected_reason = evaluate_pretool(run, protected_write, contract)
+     protected_denial_not_target = not _denial_is_target_action(
+         protected_write, protected_reason)
++    pointer_write = {
++        "tool_name": "Write",
++        "tool_input": {"file_path": str(ROOT / ".claude" / "xunji_active_run"),
++                       "content": "runs/other\n"},
++    }
++    pointer_shell = {
++        "tool_name": "Bash",
++        "tool_input": {"command": "rm .claude/xunji_active_run"},
++    }
++    pointer_write_blocked = bool(evaluate_pretool(run, pointer_write, contract))
++    pointer_shell_reason = evaluate_pretool(run, pointer_shell, contract)
++    pointer_shell_is_local = not _denial_is_target_action(pointer_shell, pointer_shell_reason)
+     transcript = root / "transcript.jsonl"
+     transcript.write_text("old-agent-1\nold-agent-2\ncurrent-agent-1\ncurrent-agent-2\ncurrent-cron-list\n",
+                           encoding="utf-8")
+@@ -609,18 +1091,170 @@ def _selftest() -> int:
+         run, target_event, contract)
+     (run / "frontier.md").write_text(original_frontier, encoding="utf-8")
+     cron_create = {"tool_name": "CronCreate", "tool_input": {"prompt": f"/loop {run.name}"}}
+-    cron_before_list = bool(evaluate_pretool(run, cron_create, contract))
++    cron_contract = {**contract, "prompt_excerpt": f"/loop {run.name}"}
++    cron_before_list = bool(evaluate_pretool(run, cron_create, cron_contract))
+     runtime_receipts.append_hook_event(run, {
+         "hook_event_name": "PostToolUse", "session_id": "s",
+         "transcript_path": str(transcript), "tool_name": "CronList",
+         "tool_use_id": "current-cron-list", "tool_input": {},
+         "tool_response": {"tasks": []},
+     })
+-    cron_after_list = evaluate_pretool(run, cron_create, contract) == ""
++    cron_after_list = evaluate_pretool(run, cron_create, cron_contract) == ""
++    new_run_cron_blocked_until_transition = "先完成 setup" in evaluate_pretool(
++        run, cron_create, contract)
+     empty_runs = root / "empty-runs"
+     empty_runs.mkdir()
+     env = dict(os.environ)
+     env["XUNJI_RUNS_ROOT"] = str(empty_runs)
++    pending_dir = root / "xunji_pending_turns"
++    claims_dir = root / "xunji_transition_claims"
++    env["XUNJI_PENDING_TURN_DIR"] = str(pending_dir)
++    env["XUNJI_TRANSITION_CLAIMS_DIR"] = str(claims_dir)
++    no_run_prompt = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps({
++            "hook_event_name": "UserPromptSubmit", "session_id": "s-bootstrap",
++            "prompt": "/loop 重新开一个新 run",
++        }),
++        text=True, capture_output=True, env=env, timeout=10,
++    )
++    pending_written = (
++        no_run_prompt.returncode == 0
++        and "Xunji bootstrap turn" in (no_run_prompt.stdout or "")
++        and any(pending_dir.glob("*.json"))
++    )
++    no_run_setup = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps({
++            "hook_event_name": "PreToolUse", "session_id": "s-bootstrap",
++            "tool_name": "Bash", "tool_input": {
++                "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} bootstrap {root / 'recon.json'} --date 20260101 2>&1"},
++        }),
++        text=True, capture_output=True, env=env, timeout=10,
++    )
++    pending_setup_allowed = (
++        no_run_setup.returncode == 0 and not (no_run_setup.stdout or "").strip()
++        and any(claims_dir.glob("*.json")))
++    no_run_probe = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps({
++            "hook_event_name": "PreToolUse", "session_id": "s-bootstrap",
++            "tool_name": "Bash", "tool_input": {
++                "command": "python3 tools/probe.py https://example.test"},
++        }),
++        text=True, capture_output=True, env=env, timeout=10,
++    )
++    pending_target_action_blocked = (
++        '"permissionDecision": "deny"' in (no_run_probe.stdout or "")
++        and "bootstrap run" in (no_run_probe.stdout or ""))
++    no_run_write = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps({
++            "hook_event_name": "PreToolUse", "session_id": "s-bootstrap",
++            "tool_name": "Write", "tool_input": {
++                "file_path": str(root / "target.txt"), "content": "blocked"},
++        }),
++        text=True, capture_output=True, env=env, timeout=10,
++    )
++    pending_arbitrary_write_blocked = (
++        '"permissionDecision": "deny"' in (no_run_write.stdout or "")
++        and "bootstrap run" in (no_run_write.stdout or ""))
++    no_run_unbound_set = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps({
++            "hook_event_name": "PreToolUse", "session_id": "s-no-contract",
++            "tool_name": "Bash", "tool_input": {
++                "command": f"python3 {ROOT / 'tools' / 'xunji_statusline.py'} --set-active runs/ghost_20260101"},
++        }),
++        text=True, capture_output=True, env=env, timeout=10,
++    )
++    unbound_set_active_blocked = (
++        '"permissionDecision": "deny"' in (no_run_unbound_set.stdout or "")
++        and "bootstrap contract" in (no_run_unbound_set.stdout or ""))
++    pending_target = root / "bootstrap_20260101"
++    (pending_target / "state").mkdir(parents=True)
++    claimed_pending = claim_pending_contract(
++        pending_target, pending_dir=pending_dir, claims_dir=claims_dir)
++    pending_claimed_into_run = (
++        claimed_pending.get("session_id") == "s-bootstrap"
++        and load_contract(pending_target, session_id="s-bootstrap").get("bound_run")
++        == pending_target.name
++        and not any(pending_dir.glob("*.json"))
++    )
++    ambiguous_dir = root / "ambiguous-pending"
++    write_pending_contract({
++        "session_id": "ambiguous-a", "prompt": "创建一个新 run alpha",
++    }, pending_dir=ambiguous_dir)
++    write_pending_contract({
++        "session_id": "ambiguous-b", "prompt": "创建一个新 run beta",
++    }, pending_dir=ambiguous_dir)
++    ambiguous_target = root / "neutral_20260101"
++    (ambiguous_target / "state").mkdir(parents=True)
++    try:
++        claim_pending_contract(
++            ambiguous_target, pending_dir=ambiguous_dir,
++            claims_dir=root / "ambiguous-claims")
++        ambiguous_pending_rejected = False
++    except RuntimeError:
++        ambiguous_pending_rejected = True
++    exact_dir = root / "exact-pending"
++    exact_claims = root / "exact-claims"
++    exact_a = write_pending_contract({
++        "session_id": "exact-a", "prompt": "创建一个新 run",
++    }, pending_dir=exact_dir)
++    write_pending_contract({
++        "session_id": "exact-b", "prompt": "创建另一个新 run",
++    }, pending_dir=exact_dir)
++    exact_target = root / "exact_20260101"
++    (exact_target / "state").mkdir(parents=True)
++    write_transition_claim(exact_target.name, exact_a, claims_dir=exact_claims)
++    exact_claimed = claim_pending_contract(
++        exact_target, pending_dir=exact_dir, claims_dir=exact_claims)
++    exact_session_claimed = (
++        exact_claimed.get("session_id") == "exact-a"
++        and load_pending_contract("exact-b", pending_dir=exact_dir).get("session_id") == "exact-b"
++    )
++    race_dir = root / "race-pending"
++    race_claims = root / "race-claims"
++    race_a = write_pending_contract({
++        "session_id": "race-a", "prompt": "创建一个新 run race",
++    }, pending_dir=race_dir)
++    race_b = write_pending_contract({
++        "session_id": "race-b", "prompt": "创建一个新 run race",
++    }, pending_dir=race_dir)
++    race_target = root / "race_20260101"
++    (race_target / "state").mkdir(parents=True)
++    write_transition_claim(race_target.name, race_a, claims_dir=race_claims)
++    write_transition_claim(race_target.name, race_b, claims_dir=race_claims)
++    try:
++        claim_pending_contract(
++            race_target, pending_dir=race_dir, claims_dir=race_claims)
++        same_target_race_rejected = False
++    except RuntimeError:
++        same_target_race_rejected = True
++    unrelated_no_run_prompt = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps({
++            "hook_event_name": "UserPromptSubmit", "session_id": "s-unrelated",
++            "prompt": "修复这段本地代码",
++        }),
++        text=True, capture_output=True, env=env, timeout=10,
++    )
++    unrelated_prompt_not_persisted = (
++        unrelated_no_run_prompt.returncode == 0
++        and not (unrelated_no_run_prompt.stdout or "").strip()
++        and not any(pending_dir.glob("*.json"))
++    )
++    explicit_runs = root / "explicit-runs"
++    explicit_candidate = explicit_runs / "recent_20260101"
++    explicit_candidate.mkdir(parents=True)
++    (explicit_candidate / "target.md").write_text("# Target\n", encoding="utf-8")
++    explicit_pointer = root / "active-pointer"
++    no_pointer_does_not_guess = explicit_active_run(
++        explicit_runs, explicit_pointer) is None
++    explicit_pointer.write_text(str(explicit_candidate), encoding="utf-8")
++    explicit_pointer_selected = explicit_active_run(
++        explicit_runs, explicit_pointer) == explicit_candidate.resolve()
+     no_run_cron = subprocess.run(
+         [sys.executable, str(Path(__file__).resolve())],
+         input=json.dumps({
+@@ -629,6 +1263,26 @@ def _selftest() -> int:
+         }),
+         text=True, capture_output=True, env=env, timeout=10,
+     )
++    no_run_pointer_write = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps({
++            "hook_event_name": "PreToolUse", "session_id": "s",
++            "tool_name": "Write",
++            "tool_input": {"file_path": str(ROOT / ".claude" / "xunji_active_run"),
++                           "content": "runs/forged\n"},
++        }),
++        text=True, capture_output=True, env=env, timeout=10,
++    )
++    no_run_pending_write = subprocess.run(
++        [sys.executable, str(Path(__file__).resolve())],
++        input=json.dumps({
++            "hook_event_name": "PreToolUse", "session_id": "s",
++            "tool_name": "Write",
++            "tool_input": {"file_path": str(pending_dir / "forged.json"),
++                           "content": "{}\n"},
++        }),
++        text=True, capture_output=True, env=env, timeout=10,
++    )
+     settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+     hooks = settings.get("hooks", {})
+ 
+@@ -650,6 +1304,23 @@ def _selftest() -> int:
+         "updated_at": time.time() - STALE_SECONDS - 1,
+     })
+     stale_contract_rejected = load_contract(run, session_id="s") == {}
++    source_run = root / "source-run"
++    target_run = root / "target-run"
++    (source_run / "state").mkdir(parents=True)
++    (target_run / "state").mkdir(parents=True)
++    transferred_source = write_contract(source_run, {
++        "prompt": "/loop 重新开一个新 run", "session_id": "s-transition",
++        "transcript_path": str(transcript),
++    })
++    transferred = transfer_contract(source_run, target_run)
++    transfer_preserves_contract = (
++        transferred.get("prompt_sha256") == transferred_source.get("prompt_sha256")
++        and transferred.get("session_id") == transferred_source.get("session_id")
++        and transferred.get("origin_run") == source_run.name
++        and transferred.get("bound_run") == target_run.name
++        and load_contract(target_run, session_id="s-transition") == transferred
++        and json.loads(run_status_path(target_run).read_text(encoding="utf-8"))["status"] == "active"
++    )
+     override = write_contract(run, {
+         "prompt": "继续执行，明确允许串行", "session_id": "s",
+         "transcript_path": str(transcript),
+@@ -697,10 +1368,40 @@ def _selftest() -> int:
+         ("operator stop maps to pause", pause == PAUSE),
+         ("repair request maps to execute", execute == EXECUTE),
+         ("unrecognized English execution wording defaults read-only", indirect_english == EXPLAIN),
++        ("no-active-run ordinary question stays outside run execution", no_run_question == NORMAL),
++        ("active-run informational question stays read-only", active_run_question == EXPLAIN),
++        ("explicit active-run switch remains executable", active_run_switch == EXECUTE),
+         ("target action blocked before real fanout", before_fanout),
+         ("encoded network command blocked before fanout", encoded_before_fanout),
+         ("renamed unknown script blocked before fanout", renamed_before_fanout),
+         ("workers control command allowed before fanout", workers_allowed_before_fanout),
++        ("bare python control command is recognized", bare_python_control_allowed),
++        ("micro-version Python control command is recognized",
++         micro_python_control_allowed),
++        ("new-run setup command is lifecycle control before old-run fanout",
++         setup_allowed_before_fanout),
++        ("setup cannot be used without current operator run-transition intent",
++         setup_without_operator_blocked),
++        ("documented loop journal command is control before fanout",
++         journal_allowed_before_fanout),
++        ("clear-active needs current operator authorization", clear_without_operator_blocked),
++        ("operator-authorized clear-active is allowed", clear_with_operator_allowed),
++        ("English operator-authorized clear-active is allowed",
++         clear_with_english_operator_allowed),
++        ("set-active cannot switch to a run absent from the operator prompt",
++         unrelated_set_active_blocked),
++        ("prompt-named set-active is allowed", named_set_active_allowed),
++        ("prompt-named resume is allowed across runs", named_resume_allowed),
++        ("setup --classify keeps the following slug positional",
++         classify_setup_target == "classified_20260101"),
++        ("setup --target URL is consumed without replacing the run slug",
++         url_setup_target == "url-target_20260101"),
++        ("unknown lifecycle options fail closed instead of rebinding the slug",
++         unknown_option_target == ""),
++        ("loop bootstrap resume extracts the exact target run",
++         direct_resume_target == "resume_20260101"),
++        ("statusline set-active extracts the exact target run",
++         direct_set_active_target == "selected_20260101"),
+         ("out-of-tree workers.py cannot impersonate control plane",
+          fake_workers_blocked_before_fanout),
+         ("narrow sed print remains read-only before fanout", safe_sed_allowed_before_fanout),
+@@ -709,6 +1410,9 @@ def _selftest() -> int:
+         ("find file-output action blocked before fanout", find_file_output_blocked),
+         ("protected control-plane denial is not a target-result action",
+          protected_denial_not_target),
++        ("direct active-run pointer Write is blocked", pointer_write_blocked),
++        ("active-run pointer shell denial is local, not a target result",
++         pointer_shell_is_local),
+         ("old-session Agent receipts do not satisfy this turn", old_fanout_still_blocked),
+         ("receipts without post-return disposition remain blocked",
+          receipts_without_disposition_block),
+@@ -721,6 +1425,8 @@ def _selftest() -> int:
+         ("wrong contract schema is rejected", wrong_schema_rejected),
+         ("cross-session contract reuse is rejected", wrong_session_rejected),
+         ("stale contract is rejected", stale_contract_rejected),
++        ("active-run transition preserves the current contract and run status",
++         transfer_preserves_contract),
+         ("serial override requires current operator prompt", override.get("fanout_override") is True),
+         ("internal task notification cannot replace operator turn contract",
+          internal_notification_preserves_contract),
+@@ -734,8 +1440,36 @@ def _selftest() -> int:
+         ("pause mode allows CronList", evaluate_pretool(run, {"tool_name": "CronList", "tool_input": {}}, {"mode": PAUSE}) == ""),
+         ("CronCreate requires current-turn CronList", cron_before_list),
+         ("CronCreate allowed after current-turn empty CronList", cron_after_list),
++        ("new-run /loop cannot schedule the origin run before transition",
++         new_run_cron_blocked_until_transition),
+         ("CronCreate without an active run is blocked",
+          '"permissionDecision": "deny"' in (no_run_cron.stdout or "")),
++        ("root control files stay protected with no active run",
++         '"permissionDecision": "deny"' in (no_run_pointer_write.stdout or "")
++         and "active-run" in (no_run_pointer_write.stdout or "")
++         and '"permissionDecision": "deny"' in (no_run_pending_write.stdout or "")),
++        ("no-active-run UserPromptSubmit stores a bootstrap contract", pending_written),
++        ("pending bootstrap allows its authorized setup command",
++         pending_setup_allowed),
++        ("pending bootstrap blocks target execution before run binding",
++         pending_target_action_blocked),
++        ("pending bootstrap blocks arbitrary writes before run binding",
++         pending_arbitrary_write_blocked),
++        ("set-active without a current-session bootstrap contract is blocked",
++         unbound_set_active_blocked),
++        ("first active run consumes and binds the bootstrap contract",
++         pending_claimed_into_run),
++        ("ambiguous pending contracts fail closed instead of crossing sessions",
++         ambiguous_pending_rejected),
++        ("target claim selects the exact session among concurrent pending contracts",
++         exact_session_claimed),
++        ("same-target concurrent session claims fail closed",
++         same_target_race_rejected),
++        ("no-run non-lifecycle prompt does not leave a pending contract",
++         unrelated_prompt_not_persisted),
++        ("turn contracts do not guess a recent run without a pointer",
++         no_pointer_does_not_guess),
++        ("turn contracts bind the explicit active pointer", explicit_pointer_selected),
+         ("settings wires UserPromptSubmit contract", wired("UserPromptSubmit")),
+         ("settings wires global PreToolUse contract", wired("PreToolUse")),
+         ("settings runs turn contract selftest at SessionStart", session_start_selftest),
+@@ -798,7 +1532,7 @@ def main() -> int:
+             print(json.dumps(result, ensure_ascii=False))
+     except Exception as exc:
+         if str(event.get("hook_event_name") or "") == "PreToolUse":
+-            run_dir = find_active_run(RUNS, within_sec=6 * 60 * 60)
++            run_dir = explicit_active_run()
+             if run_dir is not None:
+                 print(json.dumps(_deny(
+                     "Xunji PreToolUse contract 内部异常，active run 按 fail-closed 阻断："
+diff --git a/tools/xunji_statusline.py b/tools/xunji_statusline.py
+index 65451df..a01f564 100644
+--- a/tools/xunji_statusline.py
++++ b/tools/xunji_statusline.py
+@@ -145,6 +145,21 @@ def set_active_run(raw: str) -> bool:
+     run_dir = _resolve_run(raw)
+     if run_dir is None:
+         return False
++    current = active_run()
++    if current != run_dir:
++        try:
++            import turn_contract  # noqa: WPS433
++
++            if current is None:
++                # UserPromptSubmit stores a short-lived pending contract when no
++                # run exists. Claim it before the first pointer is installed.
++                turn_contract.claim_pending_contract(run_dir)
++            else:
++                # A valid current-turn contract belongs to the operator prompt,
++                # not to the old pointer. Copy it before the atomic switch.
++                turn_contract.transfer_contract(current, run_dir)
++        except Exception:
++            return False
+     ACTIVE_RUN.parent.mkdir(parents=True, exist_ok=True)
+     tmp_name = ""
+     with tempfile.NamedTemporaryFile(
+@@ -449,6 +464,12 @@ def _selftest() -> int:
+         before_render = {p: p.stat().st_mtime_ns for p in watched}
+         plain = render_statusline(root_current, color=False)
+         colored = render_statusline(root_current, color=True)
++        (run / "state" / "turn_contract.json").write_text(json.dumps({
++            "schema": "xunji.turn_contract.v1",
++            "mode": "EXECUTE",
++            "session_id": "statusline-transition",
++            "updated_at": time.time(),
++        }), encoding="utf-8")
+         (run / "state" / "run_status.json").write_text(json.dumps({
+             "status": "paused_by_operator",
+         }), encoding="utf-8")
+@@ -491,6 +512,10 @@ def _selftest() -> int:
+             encoding="utf-8",
+         )
+         assert set_active_run(str(missing_cache))
++        inherited_contract = _load_json(
++            missing_cache / "state" / "turn_contract.json", {})
++        source_contract_after = _load_json(
++            run / "state" / "turn_contract.json", {})
+         missing_before = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
+         missing_plain = render_statusline(root_current, color=False)
+         missing_after = sorted((p.relative_to(missing_cache).as_posix() for p in missing_cache.rglob("*")))
+@@ -520,6 +545,11 @@ def _selftest() -> int:
+         ("missing cache does not show false idle", "Idle｜空闲" not in missing_plain and "待验证入口 1 个" in missing_plain),
+         ("setup journal note does not mask controller action", "run prepared" not in missing_plain and "下一步 继续验证可行动入口" in missing_plain),
+         ("missing cache live derivation is read-only", missing_before == missing_after),
++        ("active-run switch inherits current turn contract before pointer update",
++         inherited_contract.get("session_id") == "statusline-transition"
++         and inherited_contract.get("origin_run") == run.name
++         and inherited_contract.get("bound_run") == missing_cache.name
++         and source_contract_after.get("session_id") == "statusline-transition"),
+         ("failed live derivation is visible", "推导失败" in failed_derive_plain),
+         ("invalid outside run pointer is rejected", invalid_rejected),
+         ("outside Xunji prints nothing", outside == ""),

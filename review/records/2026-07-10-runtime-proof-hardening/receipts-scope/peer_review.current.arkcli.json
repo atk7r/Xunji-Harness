@@ -1,0 +1,84 @@
+{
+  "schema": "xunji.peer_review_result.v1",
+  "verdict": "WARN",
+  "backend_used": "arkcli:kimi-k2.7-code+glm-5.2",
+  "driver": "codex",
+  "brain": "codex",
+  "bundle_hash": "23d841ba31a5119f04675844d9a67f031bb7fc80",
+  "evidence_index_hash": "de1e0d14ca8edb640323ceef2a2b06bd62e940bb",
+  "findings": [
+    {
+      "id": "PR-001",
+      "severity": "WARN",
+      "category": "claim_integrity",
+      "claim": "E-001’s 0.8 confirmation rests on synthetic selftest summaries and source excerpts, with no observed runtime hook transcript or runtime_events.jsonl",
+      "evidence": "adversarial_selftests.summary.json, selftest_all.log, runtime_receipts.lines-001-150.txt, installed-runtime-manifest.json",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Carry F-001 into live-scope and capture actual runtime_events.jsonl or hook transcript receipts before treating runtime receipt integrity as observed.",
+      "why": "[arkcli:kimi-k2.7-code] The static/control scope deliberately limits evidence, but F-001 is an open runtime-integrity front. Static selftests validate logic but cannot confirm hooks fired for real Agent/Cron/Bash events in this run.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-002",
+      "severity": "WARN",
+      "category": "artifact_cross_check",
+      "claim": "Hook deployment is inferred from a diff and a manifest, but the actual .claude/settings.json artifact is not present in the bundle",
+      "evidence": "settings.diff, installed-runtime-manifest.json",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Add .claude/settings.json to the bundle and verify its hash against installed-runtime-manifest.json.",
+      "why": "[arkcli:kimi-k2.7-code] The reviewer cannot cross-check that the currently installed settings match the manifest; deployment drift between the diff and the live settings remains possible.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-003",
+      "severity": "WARN",
+      "category": "evidence_gate",
+      "claim": "selftest_all.log is a high-level pass/fail summary without per-suite stderr/stdout attachments",
+      "evidence": "selftest_all.log",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Attach raw per-suite selftest logs or detailed *.selftest.jsonl artifacts for independent replay.",
+      "why": "[arkcli:kimi-k2.7-code] Independent replay of failures or inspection of actual check output is impossible; the evidence is self-reported at the summary level only.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-004",
+      "severity": "WARN",
+      "category": "missed_surface",
+      "claim": "evidence.md exists in the run directory but its content is not exposed in the bundle",
+      "evidence": "files/evidence.md",
+      "affected_eids": [
+        "E-001"
+      ],
+      "recommended_action": "Excerpt or include evidence.md in the review bundle so narrative claims can be cross-checked.",
+      "why": "[arkcli:kimi-k2.7-code] Any additional observations or claims in evidence.md are unavailable to the panel, creating an unreviewed surface gap.",
+      "status": "pending"
+    },
+    {
+      "id": "PR-005",
+      "severity": "WARN",
+      "category": "backend_error",
+      "claim": "arkcli panel had backend errors; review is partial",
+      "evidence": "glm-5.2: arkcli exit 1; stderr/stdout tail: {\n  \"ok\": false,\n  \"error\": {\n    \"type\": \"error\",\n    \"message\": \"arkruntime.create_responses: RequestError code: 500, err: Post \\\"https://ark.cn-beijing.volces.com/api/plan/v3/responses\\\": net/http: TLS handshake timeout, request_id: 2026071108280500007ED8BCB3DFB08A03\"\n  }\n}\n",
+      "affected_eids": [],
+      "recommended_action": "rerun_or_escalate",
+      "why": "At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+      "status": "pending"
+    }
+  ],
+  "blind_spots": [
+    "[kimi-k2.7-code] No live runtime_events.jsonl or hook-transcript artifact was generated for this run; chain validation, fanout, cron-quiescence, and denial-resolution paths have only been exercised in synthetic temp directories.",
+    "[kimi-k2.7-code] The adversarial selftest summary reports per-command output SHA-256s, but the actual selftest output streams are not included, so reviewers must trust the summary generator.",
+    "[kimi-k2.7-code] The full repository regression includes many unrelated suites; while correctly treated as a control artifact, it does not strengthen the receipt-specific claim.",
+    "[kimi-k2.7-code] installed-runtime-manifest.json records local absolute paths; reproducibility would benefit from normalized paths or environment metadata."
+  ],
+  "context_limits": [
+    "glm-5.2: arkcli exit 1; stderr/stdout tail: {\n  \"ok\": false,\n  \"error\": {\n    \"type\": \"error\",\n    \"message\": \"arkruntime.create_responses: RequestError code: 500, err: Post \\\"https://ark.cn-beijing.volces.com/api/plan/v3/responses\\\": net/http: TLS handshake timeout, request_id: 2026071108280500007ED8BCB3DFB08A03\"\n  }\n}\n"
+  ],
+  "error": ""
+}

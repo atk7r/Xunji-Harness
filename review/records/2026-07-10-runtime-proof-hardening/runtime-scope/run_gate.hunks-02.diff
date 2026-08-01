@@ -1,0 +1,143 @@
+diff --git a/.claude/hooks/run_gate.py b/.claude/hooks/run_gate.py
+index f8994cd..b1c2ddb 100644
+--- a/.claude/hooks/run_gate.py
++++ b/.claude/hooks/run_gate.py
+@@ -879,0 +933,39 @@ def _selftest() -> int:
++    normal_run = Path(tempfile.mkdtemp())
++    (normal_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
++    valid_normal_review = ""
++    if _cr is not None and _runtime_receipts is not None:
++        import peer_review as _peer_review_test
++        bundle = _peer_review_test.build_review_bundle(normal_run, write=True)
++        result = _peer_review_test.ReviewResult(
++            verdict="PASS", backend_used="codex", driver="claude", brain="codex",
++            bundle_hash=bundle["sha1"], evidence_index_hash=bundle["evidence_index"]["sha1"],
++        )
++        _peer_review_test._append_run_review(normal_run, result)
++        normal_transcript = normal_run / "transcript.jsonl"
++        normal_transcript.write_text("tool-normal-review\ntool-normal-completion\n", encoding="utf-8")
++        _runtime_receipts.append_hook_event(normal_run, {
++            "hook_event_name": "PostToolUse", "session_id": "s-normal",
++            "transcript_path": str(normal_transcript), "tool_name": "Bash",
++            "tool_use_id": "tool-normal-review",
++            "tool_input": {"command": f"python tools/peer_review.py {normal_run} --into-run"},
++            "tool_response": {"stdout": (
++                f"XUNJI_REVIEW_RECEIPT={result.runtime_receipt_id}\n"
++                f"XUNJI_REVIEW_BUNDLE={result.bundle_hash}\nreview completed"
++            )},
++        })
++        evidence_hash = _cr.current_evidence_index_hash(normal_run)
++        _runtime_receipts.append_hook_event(normal_run, {
++            "hook_event_name": "PostToolUse", "session_id": "s-normal",
++            "transcript_path": str(normal_transcript), "tool_name": "Agent",
++            "tool_use_id": "tool-normal-completion",
++            "tool_input": {"prompt":
++                f"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={evidence_hash} run={normal_run.name} "
++                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
++            "tool_response": {"result":
++                f"XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX={evidence_hash} "
++                "CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger"},
++        })
++        valid_normal_review = (normal_run / "review.md").read_text(encoding="utf-8")
++    normal_decisions = (
++        "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
++        "- Summary: report coverage, severity support, and reachable assets were independently checked.\n")
+@@ -884 +976 @@ def _selftest() -> int:
+-                       "## Independent Review\n- Reviewer: test\n- Verdict: PASS\n", "# Decisions\n")))
++                       valid_normal_review, "# Decisions\n", normal_run)))
+@@ -887,3 +979 @@ def _selftest() -> int:
+-                       "## Independent Review\n- Reviewer: test\n- Verdict: PASS\n",
+-                       "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
+-                       "- Summary: report coverage, severity support, and reachable assets were independently checked.\n") == ""))
++                       valid_normal_review, normal_decisions, normal_run) == ""))
+@@ -1349 +1439 @@ def _selftest() -> int:
+-    # Case 2: < 4 open fronts (probing not counted) -> pass
++    # Case 2: < 4 active fronts (probing counts) -> pass
+@@ -1359 +1449 @@ def _selftest() -> int:
+-    checks.append(("agent board gate: <4 open fronts (probing excluded) -> pass", mode2 is None))
++    checks.append(("agent board gate: <4 active fronts -> pass", mode2 is None))
+@@ -1420 +1510 @@ def _selftest() -> int:
+-    # Case 7: >= 4 open fronts diverse, two started disjoint lanes -> pass
++    # Case 7: editable heartbeat fields alone do not pass; real Agent receipts do.
+@@ -1433,0 +1524,17 @@ def _selftest() -> int:
++    mode7_manual, _ = _check_agent_board(ab_run7)
++    checks.append(("agent board gate: hand-written heartbeat does not prove Agent use",
++                   mode7_manual == "block"))
++    if _runtime_receipts is not None:
++        transcript = ab_test / "agent-transcript.jsonl"
++        transcript.write_text("tool-real-1\ntool-real-2\n", encoding="utf-8")
++        for tool_id, aid, fid in (
++            ("tool-real-1", "A-web-hunter-001", "F-001"),
++            ("tool-real-2", "A-web-hunter-002", "F-002"),
++        ):
++            _runtime_receipts.append_hook_event(ab_run7, {
++                "hook_event_name": "PostToolUse", "session_id": "s-agent",
++                "transcript_path": str(transcript), "tool_name": "Agent",
++                "tool_use_id": tool_id,
++                "tool_input": {"prompt": f"XUNJI_ASSIGNMENT={aid} XUNJI_FRONT={fid}"},
++                "tool_response": {"result": "candidate completed"},
++            })
+@@ -1435 +1542,48 @@ def _selftest() -> int:
+-    checks.append(("agent board gate: two started disjoint lanes -> pass", mode7 is None))
++    checks.append(("agent board gate: Agent receipts without merge disposition still block",
++                   _runtime_receipts is None or mode7 == "block"))
++    assignment_data = json.loads((ab_run7 / "state" / "assignments.json").read_text(encoding="utf-8"))
++    for item in assignment_data["assignments"]:
++        item.update({
++            "status": "merged",
++            "updated_at": datetime.now(timezone.utc).isoformat(),
++            "last_note": f"Front: {item['front']} candidate adjudicated",
++        })
++    (ab_run7 / "state" / "assignments.json").write_text(
++        json.dumps(assignment_data), encoding="utf-8")
++    mode7_merged, _ = _check_agent_board(ab_run7)
++    checks.append(("agent board gate: real receipts plus anchored disposition -> pass",
++                   _runtime_receipts is None or mode7_merged is None))
++    current_contract = {
++        "mode": "EXECUTE", "session_id": "s-current", "updated_at": time.time() - 1,
++    }
++    mode7_old_turn, _ = _check_agent_board(ab_run7, current_contract)
++    checks.append(("agent board gate: previous-turn receipts do not bypass current turn",
++                   _runtime_receipts is None or mode7_old_turn == "block"))
++    if _runtime_receipts is not None:
++        with transcript.open("a", encoding="utf-8") as handle:
++            handle.write("tool-current-1\ntool-current-2\n")
++        for tool_id, aid, fid in (
++            ("tool-current-1", "A-web-hunter-001", "F-001"),
++            ("tool-current-2", "A-web-hunter-002", "F-002"),
++        ):
++            _runtime_receipts.append_hook_event(ab_run7, {
++                "hook_event_name": "PostToolUse", "session_id": "s-current",
++                "transcript_path": str(transcript), "tool_name": "Agent",
++                "tool_use_id": tool_id,
++                "tool_input": {"prompt": f"XUNJI_ASSIGNMENT={aid} XUNJI_FRONT={fid}"},
++                "tool_response": {"result": "candidate completed"},
++            })
++    mode7_current, _ = _check_agent_board(ab_run7, current_contract)
++    checks.append(("agent board gate: old disposition cannot settle new Agent calls",
++                   _runtime_receipts is None or mode7_current == "block"))
++    for item in assignment_data["assignments"]:
++        item.update({
++            "status": "merged",
++            "updated_at": datetime.now(timezone.utc).isoformat(),
++            "last_note": f"Front: {item['front']} current-turn candidate adjudicated",
++        })
++    (ab_run7 / "state" / "assignments.json").write_text(
++        json.dumps(assignment_data), encoding="utf-8")
++    mode7_current_merged, _ = _check_agent_board(ab_run7, current_contract)
++    checks.append(("agent board gate: current receipts plus current disposition -> pass",
++                   _runtime_receipts is None or mode7_current_merged is None))
+@@ -1437 +1591 @@ def _selftest() -> int:
+-    # Case 8: explicit budget reason -> pass without assignments
++    # Case 8: free-text budget reason no longer bypasses; current operator prompt can.
+@@ -1441,0 +1596,7 @@ def _selftest() -> int:
++    mode8_text, _ = _check_agent_board(ab_run8)
++    checks.append(("agent board gate: decisions.md budget prose cannot bypass", mode8_text == "block"))
++    (ab_run8 / "state").mkdir(exist_ok=True)
++    (ab_run8 / "state" / "turn_contract.json").write_text(json.dumps({
++        "schema": "xunji.turn_contract.v1", "mode": "EXECUTE", "session_id": "s-override",
++        "fanout_override": True, "updated_at": time.time(),
++    }), encoding="utf-8")
+@@ -1443 +1604 @@ def _selftest() -> int:
+-    checks.append(("agent board gate: budget reason override -> pass", mode8 is None))
++    checks.append(("agent board gate: current operator prompt override -> pass", mode8 is None))

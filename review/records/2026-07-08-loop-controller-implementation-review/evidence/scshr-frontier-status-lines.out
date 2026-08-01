@@ -1,0 +1,4 @@
+9:- Status: open, blocked_type_a (auth-layer: wp-login 49次 Type B, REST全鉴权, xmlrpc禁用)
+18:- Status: open, blocked_type_a (auth-layer: 24/25爆破失败, 忘记密码未实现)
+26:- Status: open, blocked_type_a (app-layer: 无HTTP API端点)
+34:- Status: blocked_type_a (routing-layer: SharedBarrier, GUID跨主机无效)

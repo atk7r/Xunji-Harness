@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "assignments": [
+    {
+      "agent": "A-web-auth-001",
+      "role": "web-auth",
+      "front": "F-001",
+      "status": "done"
+    },
+    {
+      "agent": "A-verify-001",
+      "role": "verify",
+      "front": "F-001",
+      "status": "done"
+    }
+  ]
+}

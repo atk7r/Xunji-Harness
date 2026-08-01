@@ -1,0 +1,15 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 547d447..2e922ac 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -76,6 +76,10 @@
+   should be Chinese, keep bracket tags as no-color fallback, and summarize the
+   current phase, run dir, blockers, and next required action before any raw
+   details.
++- Claude Code statusline is a read-only dashboard for this project. It shows the
++  active run, current phase, pending verification entries, aggregated subagent
++  state, blockers, and next action. It never replaces visible phase markers or
++  `loop_journal.py` phase-start/phase-end records.
+ - Every cycle, update the written state:
+ 
+ ```text

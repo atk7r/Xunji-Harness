@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "foreign-agent-lifecycle.v1.schema.json",
+  "title": "Xunji foreign Claude lifecycle observation or legacy quarantine receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "parent_run", "disposition", "reason", "hook_event_name",
+    "session_id", "transcript_sha256", "agent_id", "agent_type",
+    "event_identity_sha256", "runtime_event_seq", "runtime_event_hash",
+    "observed_head_seq", "observed_head_hash", "recorded_at", "receipt_hash"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.foreign_agent_lifecycle.v1"},
+    "parent_run": {"type": "string", "minLength": 1, "maxLength": 255},
+    "disposition": {
+      "enum": ["observed_not_admitted", "legacy_quarantined"]
+    },
+    "reason": {"const": "no_xunji_causal_owner"},
+    "hook_event_name": {"const": "SubagentStop"},
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"
+    },
+    "transcript_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the local transcript path identity, not transcript contents"
+    },
+    "agent_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"
+    },
+    "agent_type": {"type": "string", "maxLength": 128},
+    "event_identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runtime_event_seq": {"type": "integer", "minimum": 0},
+    "runtime_event_hash": {
+      "type": "string",
+      "pattern": "^(?:|[0-9a-f]{64})$"
+    },
+    "observed_head_seq": {"type": "integer", "minimum": 0},
+    "observed_head_hash": {
+      "type": "string",
+      "pattern": "^(?:|[0-9a-f]{64})$"
+    },
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

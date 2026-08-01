@@ -1,0 +1,139 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-13-setup-success-silent",
+  "files": {
+    "report.md": {
+      "sha1": "22dddb1701ddf08e32ef2dc563831d7ae0b0f913",
+      "size": 861
+    },
+    "evidence.md": {
+      "sha1": "b5fa0c8e39eb07d5d3ef29826070d9ff5ec93792",
+      "size": 952
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-SILENT-001 — implementation excerpt",
+        "head": "## E-SILENT-001 — implementation excerpt",
+        "maturity": "candidate",
+        "certainties": [],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/setup_success_silent.diff",
+            "path": "evidence/setup_success_silent.diff",
+            "exists": true,
+            "size": 5810,
+            "sha1": "e44bdc239ab1f72a48819ebe3e13cd49dfc228ad",
+            "diff_summary": {
+              "changed_files_count": 2,
+              "changed_files": [
+                "tools/setup_run.py",
+                "tools/loop_bootstrap.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 7,
+              "hunks": [
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ _set_active_run"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ main: successful setup work"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ main: recon ingestion"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ main: target-derived coverage and optional classify"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ main: ledger, journal, and active selection"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ _selftest: integration contract"
+                },
+                {
+                  "file": "tools/loop_bootstrap.py",
+                  "header": "@@ cmd_new"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/setup_run.py b/tools/setup_run.py\n--- a/tools/setup_run.py\n+++ b/tools/setup_run.py\n@@ _set_active_run\n         if xunji_statusline.set_active_run(str(run_dir)):\n-            print(f\"[setup] statusline active run: runs/{run_dir.name}\")\n             return True\n         print(f\"[setup] active run switch failed: {run_dir}\", file=sys.stderr)\n\n@@ main: successful setup work\n-    made = scaffold(run_dir)\n+    scaffold(run_dir)\n     _phase_journal(run_dir, \"phase_start\", \"Setup\", \"prepare authorized run workbench\")\n-    print(f\"[setup] 建 run 骨架 {run_dir}\")\n-    print(f\"        {len(made)} 个核心文件 + evidence/ + scripts/\")\n\n@@ main: recon ingestion\n-                info = ingest(rp, run_dir)\n-                print(f\"[setup] ingest_recon → {info}; target.md 已记录 recon 路径\")\n+                ingest(rp, run_dir)\n             except Exception as e:\n                 print(f\"[!] ingest_recon 失败(已记录路径, 请手动 ingest): {e}\", file=sys.stderr)\n-                sinfo = record_scope(run_dir, rp)\n-                print(f\"[setup] {sinfo} → target.md(派生不驱动, 复核/可改)\")\n+                record_scope(run_dir, rp)\n             except Exception as e:\n                 print(f\"[!] scope 派生失败(请手填 target.md In/Out-of-scope): {e}\", file=sys.stderr)\n-                cinfo = adapt_coverage(rp, run_dir)\n+                adapt_coverage(rp, run_dir)\n                 coverage_ready = _coverage_ready(run_dir)\n-                print(f\"[setup] Guanlan→coverage(零重探): {cinfo}\")\n             except Exception as e:\n                 print(f\"[!] coverage 适配失败(可手跑 classify_hosts 兜底): {e}\", file=sys.stderr)\n-                kinfo = knowledge_match(run_dir)\n-                print(f\"[setup] knowledge 签名匹配: {kinfo}\")\n+                knowledge_match(run_dir)\n             except Exception as e:\n                 print(f\"[!] knowledge 匹配失败(可手查): {e}\", file=sys.stderr)\n\n@@ main: target-derived coverage and optional classify\n-        print(\"[setup] 无 recon: 从 target.md 推导最小 coverage.json …\")\n         try:\n-            cinfo = _derive_coverage_from_target(run_dir)\n+            _derive_coverage_from_target(run_dir)\n             coverage_ready = _coverage_ready(run_dir)\n-            label = \"target→coverage(最小骨架)\" if coverage_ready else \"target→coverage\"\n-            print(f\"[setup] {label}: {cinfo}\")\n         except Exception as e:\n             print(f\"[!] coverage 自动推导失败(可手建): {e}\", file=sys.stderr)\n-        print(\"[setup] --classify: 跑 classify_hosts 作 egress_recheck 增量...\")\n         r = subprocess.run(cmd, capture_output=True, encoding=\"utf-8\", errors=\"replace\")\n-        sys.stdout.write(r.stdout or \"\")\n         if r.stderr:\n             sys.stderr.write(r.stderr)\n\n@@ main: ledger, journal, and active selection\n-            ledger = coverage_matrix.write_outputs(run_dir)\n-            summary = ledger.get(\"summary\", {})\n-            print(\"[setup] asset ledger: ...\")\n+            coverage_matrix.write_outputs(run_dir)\n         except Exception as e:\n             print(f\"[!] asset ledger 初始化失败(目标动作前必须修复): {e}\", file=sys.stderr)\n-        print(\"[下一步] ...\")\n-    else:\n-        print(\"[下一步] ...\")\n     _phase_journal(run_dir, \"phase_end\", \"Setup\", f\"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})\")\n     if not _set_active_run(run_dir):\n         print(\"[!] run 已建好但未切换 active 指针；旧 run 保持 active，请修复控制面后重试 set-active。\",\n               file=sys.stderr)\n         return 1\n\n@@ _selftest: integration contract\n+    captured_stdout = io.StringIO()\n+    captured_stderr = io.StringIO()\n+    with contextlib.redirect_stdout(captured_stdout), contextlib.redirect_stderr(captured_stderr):\n+        main_rc = main()\n+    checks += [\n+        (\"full setup main succeeds in isolated root\", main_rc == 0),\n+        (\"full setup main is stdout-silent on success\", captured_stdout.getvalue() == \"\"),\n+        (\"full setup main has no stderr diagnostics on success\", captured_stderr.getvalue() == \"\"),\n+        (\"full setup main preserves closed Setup journal cycle\",\n+         main_phase_events == [\"phase_start\", \"phase_end\"] and not main_journal[\"open_phase\"]),\n+    ]\n\n+    with contextlib.redirect_stdout(help_stdout), contextlib.redirect_stderr(help_stderr):\n+        try:\n+            main()\n+        except SystemExit as exc:\n+            help_rc = exc.code\n+    checks += [\n+        (\"explicit --help preserves argparse stdout\",\n+         help_rc == 0 and \"usage:\" in help_stdout.getvalue()),\n+        (\"explicit --help has no stderr diagnostics\", help_stderr.getvalue() == \"\"),\n+    ]\n\n+    def _fake_classify_run(cmd, **_kwargs):\n+        classify_calls.append(list(cmd))\n+        return subprocess.CompletedProcess(cmd, 0, stdout=\"classifier progress\\n\", stderr=\"\")\n+\n+    with contextlib.redirect_stdout(classify_stdout), contextlib.redirect_stderr(classify_stderr):\n+        classify_rc = main()\n+    checks += [\n+        (\"--classify setup succeeds with isolated classifier\", classify_rc == 0),\n+        (\"--classify executes egress recheck\",\n+         len(classify_calls) == 1 and \"--egress-recheck\" in classify_calls[0]),\n+        (\"--classify progress stdout stays silent\", classify_stdout.getvalue() == \"\"),\n+        (\"--classify has no stderr diagnostics on success\", classify_stderr.getvalue() == \"\"),\n+    ]\n\ndiff --git a/tools/loop_bootstrap.py b/tools/loop_bootstrap.py\n--- a/tools/loop_bootstrap.py\n+++ b/tools/loop_bootstrap.py\n@@ cmd_new\n     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)\n-    print(r.stdout.rstrip())\n+    if r.stdout.strip():\n+        print(r.stdout.rstrip())\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-SILENT-002 — focused verification",
+        "head": "## E-SILENT-002 — focused verification",
+        "maturity": "candidate",
+        "certainties": [],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/selftest.log",
+            "path": "evidence/selftest.log",
+            "exists": true,
+            "size": 1042,
+            "sha1": "c9efdeb335a709422aac43fa6801bc829422c29a",
+            "excerpt": "python3 -m py_compile tools/setup_run.py\nPASS\n\npython3 tools/setup_run.py --selftest\nsetup_run selftest passed\nKey checks:\n- full setup main succeeds in isolated root\n- full setup main is stdout-silent on success\n- full setup main has no stderr diagnostics on success\n- full setup main preserves closed Setup journal cycle\n- explicit --help preserves argparse stdout\n- explicit --help has no stderr diagnostics\n- --classify setup succeeds with isolated classifier\n- --classify executes egress recheck\n- --classify progress stdout stays silent\n- --classify has no stderr diagnostics on success\n- --classify preserves closed Setup journal cycle\n\npython3 tools/selftest_all.py --only setup_run,xunji_statusline,loop_journal,loop_bootstrap\n4 passed, 0 failed\n\npython3 tools/selftest_all.py\n60 passed, 0 failed\n\npython3 tools/check_rules.py\nrule check passed\n\ngit diff --check\nPASS\n\nstdout audit:\n- Every normal-path print/write in tools/setup_run.py targets stderr.\n- Remaining stdout prints are confined to the explicit --selftest result block.\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-SILENT-003 — Claude-primary policy excerpts",
+        "head": "## E-SILENT-003 — Claude-primary policy excerpts",
+        "maturity": "candidate",
+        "certainties": [],
+        "confirmed": false,
+        "has_control": false,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "evidence/docs.md",
+            "path": "evidence/docs.md",
+            "exists": true,
+            "size": 1326,
+            "sha1": "838ea7cb068b83e0681aa72a78b0f5702a157baa",
+            "excerpt": "# Policy excerpts\n\n`CLAUDE.md`:\n\n> Mechanical Setup inside `setup_run.py` is the one display exception: record\n> its start/end in the journal, but keep a successful setup stdout-silent\n> because the selected-run statusline is the operator-facing display. Keep\n> failures and degraded setup diagnostics on stderr; explicit\n> `--help`/`--selftest` output is not normal setup progress.\n\n`docs/WORKFLOW.md`:\n\n> `setup_run.py` 的机械 Setup 是显示例外：仍写入 Setup 的 `phase_start` /\n> `phase_end` journal 事件，但成功路径不向 stdout 打印进度或 banner，由选中\n> run 的 statusline 承担显示；失败和降级诊断继续写 stderr。显式 `--help` /\n> `--selftest` 不属于普通 setup 进度。其他实际进入的 Router 阶段继续显示\n> start/end marker。\n\n`.claude/skills/xunji-run-lifecycle/SKILL.md`:\n\n> For mechanical `Setup`, `tools/setup_run.py` keeps a successful invocation\n> stdout-silent; the selected-run statusline is its visible state. Failures and\n> degraded setup diagnostics remain on stderr. For `/loop`, follow\n> `docs/templates/loop_prompt.md`: enter Root Orchestrator before the state graph\n> pass, Hunter before proof/verification/Agent action, Reviewer before\n> merge/evidence/closure checks, and Report only when report material is being\n> drafted or finalized.\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "8b23d049826832fbba4f588c6fe094ad1fb22b12"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Review Scope\n\nCodex changed the normal successful path of `tools/setup_run.py` to be silent.\nThe selected-run statusline is now the only normal setup display.\n\nReview questions:\n\n1. Does a successful setup emit nothing on stdout and no diagnostic on stderr?\n2. Are failure and degraded-path messages still visible on stderr?\n3. Are explicit `--help` and `--selftest` outputs intentionally preserved?\n4. Are the Setup `phase_start` / `phase_end` journal events and atomic active-run\n   selection preserved?\n5. Do the Claude-primary instructions describe this narrow mechanical-Setup\n   exception without removing visible markers from later Router phases?\n6. Does `loop_bootstrap.py` avoid printing a blank line when the now-silent\n   setup subprocess returns empty stdout?\n\nThis is repository maintenance only. It does not authorize or perform target\ntraffic.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 110000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "4f5a053be46e661202927b4aee005fea1003b436"
+}

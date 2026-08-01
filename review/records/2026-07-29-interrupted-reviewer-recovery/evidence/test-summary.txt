@@ -1,0 +1,40 @@
+  PASS  timestamp_gate     0.0s  web research time gate
+  PASS  record_evidence    0.1s  web research -> evidence ledger
+  PASS  decode_viewstate   0.0s  ASP.NET ViewState decoder
+  PASS  captcha_ocr        0.1s  bounded captcha OCR wrapper
+  PASS  input_shape        0.0s  request shape parser
+  PASS  js_inventory       0.0s  saved-artifact JS/API inventory sensor
+  PASS  oob_listener       1.0s  local OOB listener
+  PASS  sensor_oob         0.2s  OOB callback artifact sensor
+  PASS  sensor_mutate      0.1s  payload mutation artifact sensor
+  PASS  sensor_blind_diff   1.2s  blind differential artifact sensor
+  PASS  sensor_upload      1.2s  harmless upload proof sensor
+  PASS  sensor_client_graybox   0.1s  client graybox phenomenon sensor
+  PASS  state_project      0.1s  markdown-derived run state projection
+  PASS  run_model          0.1s  canonical front/status parser
+  PASS  work_plan          3.9s  versioned work-plan + delegation contract
+  PASS  runtime_receipts   3.2s  hook-derived Agent/Cron receipts
+  PASS  turn_contract     15.1s  execute/explain/pause/maintenance turn modes
+  PASS  context_pack       0.1s  minimal subagent context pack
+  PASS  loop_state         0.1s  closed-loop progress and gate snapshot
+  PASS  status_style       0.0s  operator-facing colored status panels
+  PASS  xunji_statusline   0.2s  Claude Code Xunji statusline
+  PASS  progress_ledger    0.1s  material-progress ledger
+  PASS  run_controller     0.1s  advisory shadow run controller
+  PASS  loop_journal       0.1s  loop interruption journal
+  PASS  loop_bootstrap     1.0s  autonomous loop launcher
+  PASS  session_handoff    0.1s  session handoff tool
+  PASS  deferred_queue     0.0s  deferred asset retry manager
+  PASS  workers            3.2s  fan-out worker planning helpers
+  PASS  saturation         0.0s  front saturation scoring
+  PASS  coverage_matrix    0.1s  asset x vuln-family coverage matrix
+  PASS  safety_gate        0.1s  hard-boundary gate
+  PASS  ip_blacklist       0.0s  local IP/domain deny hook
+  PASS  output_gate        2.8s  output drift Stop gate
+  PASS  run_gate           0.3s  coverage/depth Stop gate
+  PASS  check_hook         7.9s  safety_gate live-fire
+  PASS  sentinel_replay    0.0s  behavior detectors 26-case
+  PASS  verify_layers      2.8s  safety-floor coverage
+  PASS  guard_smoke        0.1s  guard rate/cap/breaker smoke
+
+69 passed, 0 failed  (118.4s total)

@@ -1,0 +1,12 @@
+[handoff] 不是目录: /nonexistent/path
+ok   write_handoff returns 0
+ok   handoff file exists
+ok   handoff has stage
+ok   handoff has D-001
+ok   handoff has E-001
+ok   no spurious review warning
+ok   pickup non-empty
+ok   pickup mentions run
+ok   bad path returns non-zero
+session_handoff selftest passed
+[handoff] written: /var/folders/tp/lv_gzwfd27z8mw0rs70850cw0000gn/T/tmp8v_3fefz/test_run/session_handoff.md

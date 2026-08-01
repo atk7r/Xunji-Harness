@@ -1,0 +1,194 @@
+{
+  "total": 4,
+  "confirmed": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004"
+  ],
+  "confirmed_findings": [
+    "E-001",
+    "E-002",
+    "E-003",
+    "E-004"
+  ],
+  "dangling_citations": {},
+  "entries": [
+    {
+      "id": "E-001",
+      "head": "## E-001 — candidate diff and authority boundary",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/active-diff.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifact_manifests": [
+        {
+          "token": "evidence/active-diff.txt",
+          "path": "evidence/active-diff.txt",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 1551,
+          "sha1": "299ab1568f8108cacb54fbedbedb5df74c35b236"
+        }
+      ],
+      "artifacts_present": [
+        "evidence/active-diff.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-002",
+      "head": "## E-002 — focused and full selftests",
+      "certainties": [
+        0.8
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/test-results.txt"
+      ],
+      "artifacts_scoped": true,
+      "artifact_manifests": [
+        {
+          "token": "evidence/test-results.txt",
+          "path": "evidence/test-results.txt",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 989,
+          "sha1": "a855c15b0300a2b4773ee60c6b2066487d69aa23"
+        }
+      ],
+      "artifacts_present": [
+        "evidence/test-results.txt"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-003",
+      "head": "## E-003 — failed first real-driver attempt",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/driver-attempt-1.json"
+      ],
+      "artifacts_scoped": true,
+      "artifact_manifests": [
+        {
+          "token": "evidence/driver-attempt-1.json",
+          "path": "evidence/driver-attempt-1.json",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 635,
+          "sha1": "4e14bdacc9022417e3b5bcfee089f867bde215a2"
+        }
+      ],
+      "artifacts_present": [
+        "evidence/driver-attempt-1.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    },
+    {
+      "id": "E-004",
+      "head": "## E-004 — successful isolated Claude primary-driver rerun",
+      "certainties": [
+        1.0
+      ],
+      "confirmed": true,
+      "maturity": "finding",
+      "maturity_explicit": true,
+      "maturity_raw": null,
+      "maturity_unknown": false,
+      "role": "",
+      "source": "evidence-ledger",
+      "trust": "operator-reviewed",
+      "provenance": {
+        "source": "evidence-ledger",
+        "trust": "operator-reviewed"
+      },
+      "has_control": true,
+      "has_replay_ack": false,
+      "artifacts": [
+        "evidence/driver-attempt-2.json"
+      ],
+      "artifacts_scoped": true,
+      "artifact_manifests": [
+        {
+          "token": "evidence/driver-attempt-2.json",
+          "path": "evidence/driver-attempt-2.json",
+          "exists": true,
+          "valid": true,
+          "kind": "file",
+          "size": 1992,
+          "sha1": "03d4ab39625eda6d7c81a5f04305848689b6c85e"
+        }
+      ],
+      "artifacts_present": [
+        "evidence/driver-attempt-2.json"
+      ],
+      "artifacts_missing": [],
+      "supports": [],
+      "refutes": [],
+      "refutes_any": false,
+      "superseded": false
+    }
+  ]
+}

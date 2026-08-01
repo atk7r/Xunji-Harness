@@ -1,0 +1,724 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "closure-scope",
+  "files": {
+    "report.md": {
+      "sha1": "0bc0a7232027f84b6310f1a2f469b50c406794bb",
+      "size": 1075
+    },
+    "evidence.md": {
+      "sha1": "9a6bbfc0ff8737b3c57c3e8fe90cf0afc93fec2a",
+      "size": 1633
+    },
+    "frontier.md": {
+      "sha1": "8351722a973ba5c2843e1b11c28d9b324cf1bf44",
+      "size": 248
+    },
+    "decisions.md": {
+      "sha1": "60df9a552b8f64b7fbb431fd933ae4e454928ed8",
+      "size": 495
+    },
+    "review.md": {
+      "sha1": "4db06ae3986a0a443389f5034ad0e5f305e4bf9a",
+      "size": 1533
+    },
+    "target.md": {
+      "sha1": "7904672e28e88c2600f076405605adea29e3ac8d",
+      "size": 345
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 - Closure and maturity gates",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "check_run.hunks-01.diff",
+            "path": "check_run.hunks-01.diff",
+            "exists": true,
+            "size": 7736,
+            "sha1": "53be63a4541e31f37e03236241d5681776de31bd",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/check_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 7,
+              "hunks": [
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -36,0 +37,8 @@ except Exception:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -184,0 +193,4 @@ def current_evidence_index_hash(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -380,0 +393,10 @@ def check_certainty_scale(run_dir: Path) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -461,0 +484,43 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -762,0 +828,8 @@ def check_completion_cron_record(run_dir: Path) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -943,0 +1017,24 @@ def check_agent_lifecycle(run_dir: Path, *, closure: bool = False) -> tuple[list"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1314,38 +1411,2 @@ _INDEPENDENT_REVIEW_HEADING_RE = re.compile("
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/check_run.py b/tools/check_run.py\nindex 58f2ecb..5cc455d 100644\n--- a/tools/check_run.py\n+++ b/tools/check_run.py\n@@ -36,0 +37,8 @@ except Exception:\n+try:\n+    import run_model as _run_model\n+except Exception:\n+    _run_model = None\n+try:\n+    import runtime_receipts as _runtime_receipts\n+except Exception:\n+    _runtime_receipts = None\n@@ -184,0 +193,4 @@ def current_evidence_index_hash(run_dir: Path) -> str:\n+    for entry in entries:\n+        for artifact in entry.get(\"artifacts\", []):\n+            for key in (\"excerpt\", \"excerpt_truncated_chars\", \"diff_summary\"):\n+                artifact.pop(key, None)\n@@ -380,0 +393,10 @@ def check_certainty_scale(run_dir: Path) -> list[str]:\n+def check_front_schema(run_dir: Path) -> list[str]:\n+    if _run_model is None:\n+        return [\"frontier 状态模型不可用：tools/run_model.py import 失败。\"]\n+    try:\n+        errors = _run_model.summary(run_dir).get(\"schema_errors\", [])\n+    except Exception as exc:\n+        return [f\"frontier 状态模型解析失败: {exc}\"]\n+    return [f\"frontier canonical schema: {error}\" for error in errors]\n+\n+\n@@ -461,0 +484,43 @@ def check_report_maturity(run_dir: Path) -> tuple[list[str], list[str]]:\n+def check_chain_maturity(run_dir: Path) -> list[str]:\n+    \"\"\"A confirmed composed chain cannot be stronger than its weakest E-id.\"\"\"\n+    path = run_dir / \"chains.md\"\n+    if not path.exists():\n+        return []\n+    text = path.read_text(encoding=\"utf-8\", errors=\"replace\")\n+    records = {record[\"id\"]: record for record in parse_evidence(run_dir)}\n+    errors: list[str] = []\n+    for match in re.finditer(r\"(?ms)^##\\s+(C-\\d+)\\b(.*?)(?=^##\\s+C-\\d+\\b|\\Z)\", text):\n+        cid, block = match.group(1), match.group(2)\n+        status = _block_field(block, \"Status\").lower()\n+        if \"confirmed\" not in status:\n+            continue\n+        eids = sorted(set(re.findall(r\"\\bE-\\d+[a-z]*\\b\", block)))\n+        if not eids:\n+            errors.append(f\"组合链硬门: {cid} 标为 confirmed 但 Hops 没有 E-id。\")\n+            continue\n+        invalid: list[str] = []\n+        certs: list[float] = []\n+        for eid in eids:\n+            record = records.get(eid)\n+            if not record:\n+                invalid.append(f\"{eid}=missing\")\n+                continue\n+            values = record.get(\"certainties\") or []\n+            cert = max(values) if values else 0.0\n+            certs.append(cert)\n+            if (record.get(\"maturity\") != \"finding\" or not record.get(\"confirmed\")\n+                    or record.get(\"superseded\")):\n+                invalid.append(f\"{eid}={record.get('maturity')}/{cert:g}\")\n+        if invalid:\n+            errors.append(\n+                f\"组合链硬门: {cid} 仍写 confirmed，但弱跳未达 finding/0.8: \"\n+                + \", \".join(invalid) + \"。证据降级必须立即使整条链变 suspected。\")\n+        weakest_raw = _block_field(block, \"Weakest hop certainty\")\n+        weakest_match = re.search(r\"[01](?:\\.\\d+)?\", weakest_raw)\n+        if certs and (not weakest_match or abs(float(weakest_match.group(0)) - min(certs)) > 1e-9):\n+            errors.append(\n+                f\"组合链硬门: {cid} Weakest hop certainty 必须等于当前 E-id 最低 certainty \"\n+                f\"({min(certs):g})，不能手填更高值。\")\n+    return errors\n+\n+\n@@ -762,0 +828,8 @@ def check_completion_cron_record(run_dir: Path) -> list[str]:\n+    if _runtime_receipts is None:\n+        return [\n+            \"收口硬门(loop cron): runtime_receipts 不可用，无法验证真实 CronList/CronDelete。\"]\n+    cron_ok, cron_note = _runtime_receipts.cron_quiescent(run_dir)\n+    if not cron_ok:\n+        return [\n+            \"收口硬门(loop cron receipt): 不能用 journal 自述证明定时任务已停止。\"\n+            \"必须执行 CronList；如仍有本 run job，先 CronDelete，再次 CronList。\" + cron_note]\n@@ -943,0 +1017,24 @@ def check_agent_lifecycle(run_dir: Path, *, closure: bool = False) -> tuple[list\n+    if _runtime_receipts is not None:\n+        try:\n+            planned = [\n+                str(item.get(\"agent\") or \"\")\n+                for item in _workers.load_assignments(run_dir).get(\"assignments\", [])\n+                if isinstance(item, dict) and str(item.get(\"agent\") or \"\")\n+            ]\n+            real = set(_runtime_receipts.agent_fanout(run_dir).get(\"assignments\", []))\n+            missing = sorted(set(planned) - real)\n+            if missing:\n+                msg = (\n+                    \"Agent 运行真实性: assignment 缺 transcript-backed Agent PostToolUse 回执: \"\n+                    + \", \".join(missing)\n+                    + \"。手写 heartbeat/status/finished_at 不算真实运行。\")\n+                (errors if closure else warns).append(msg)\n+            disposition = _runtime_receipts.agent_disposition(run_dir)\n+            if disposition.get(\"pending\"):\n+                msg = (\n+                    \"Agent 结果落实: \" + \"; \".join(disposition.get(\"pending\", [])[:8])\n+                    + \"。每个真实 Agent 返回后必须 merge/adjudicate；done 或旧处置不能替代本次整合。\")\n+                (errors if closure else warns).append(msg)\n+        except Exception:\n+            if closure:\n+                errors.append(\"Agent 运行真实性: 无法验证 runtime receipt，收口保持阻断。\")\n@@ -1314,38 +1411,2 @@ _INDEPENDENT_REVIEW_HEADING_RE = re.compile(\n-def has_completed_independent_review(review_text: str) -> bool:\n-    \"\"\"Reject template/prose mentions while accepting structured or substantive reviews.\"\"\"\n-    matches = list(_INDEPENDENT_REVIEW_HEADING_RE.finditer(review_text or \"\"))\n-    for match in matches:\n-        heading = match.group(0)\n-        if re.search(r\"\\b(?:pending|status|template|待复审|待填写)\\b\", heading, re.I):\n-            continue\n-        tail = review_text[match.end():]\n-        h2 = list(re.finditer(r\"(?m)^##\\s+[^\\n]+$\", tail))\n-        end = h2[0].start() if h2 else len(tail)\n-        # peer_review.py writes `## Verdict:` immediately after the Independent\n-        # Review preface. Include that one generated section, but stop before any\n-        # later H2 so a filled self-review cannot make an untouched template pass.\n-        if h2 and re.match(r\"##\\s+Verdict\\s*[:：]\", h2[0].group(0), re.I):\n-            end = h2[1].start() if len(h2) > 1 else len(tail)\n-        block = heading + tail[:end]\n-        clean = re.sub(r\"<!--.*?-->|<[^>]*>\", \"\", block, flags=re.S)\n-        verdict_match = re.search(\n-            r\"(?im)^\\s*(?:#{1,6}\\s*)?(?:[-*]\\s*)?Verdict\\s*[:：]\\s*\"\n-            r\"(PASS|WARN|BLOCKER|PASSED|CONFIRMED)\\b\",\n-            clean,\n-        )\n-        reviewer = _block_field(clean, \"Reviewer\")\n-        backend = _block_field(clean, \"Backend\")\n-        backend_meta = re.search(r\"(?im)^_backend\\s*[:：]\\s*([^_\\n]+)_\", clean)\n-        reviewer_placeholder = bool(re.search(r\"codex\\s*/\\s*arkcli|manual-driver\\)\", reviewer, re.I))\n-        backend_placeholder = bool(re.search(r\"codex\\s*/\\s*arkcli|manual-driver\\)\", backend, re.I))\n-        identity_ok = (\n-            (not _blankish_field(reviewer) and not reviewer_placeholder)\n-            or (not _blankish_field(backend) and not backend_placeholder)\n-            or (backend_meta is not None and (\n-                \"heterogeneous peer_review\" in heading.lower()\n-                or \"same-family peer_review fallback\" in heading.lower()\n-            ))\n-        )\n-        if verdict_match and identity_ok:\n-            return True\n-    return False\n+def _review_receipt_ids(review_text: str) -> list[str]:\n+    return re.findall(r\"(?im)^\\s*-\\s*ReviewReceipt\\s*[:：]\\s*([0-9a-f]{64})\\s*$\", review_text or \"\")\n"
+          },
+          {
+            "token": "check_run.hunks-02.diff",
+            "path": "check_run.hunks-02.diff",
+            "exists": true,
+            "size": 7437,
+            "sha1": "e0a51d1d343b3b2806341da6e5821e3c8bae0e5b",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/check_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 11,
+              "hunks": [
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1354,2 +1415,54 @@ def has_completed_independent_review(review_text: str) -> bool:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1367 +1480,5 @@ def has_codex_completion_review(decisions_text: str) -> bool:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1375 +1492 @@ def check_codex_completion_review(run_dir: Path) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1380 +1497,2 @@ def check_codex_completion_review(run_dir: Path) -> list[str]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1396,11 +1514,3 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1492,2 +1602,6 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1496 +1610 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1498 +1612,13 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -1500 +1626 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2272 +2398 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2333,0 +2460 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/check_run.py b/tools/check_run.py\nindex 58f2ecb..5cc455d 100644\n--- a/tools/check_run.py\n+++ b/tools/check_run.py\n@@ -1354,2 +1415,54 @@ def has_completed_independent_review(review_text: str) -> bool:\n-def has_codex_completion_review(decisions_text: str) -> bool:\n-    \"\"\"Require a structured completion-review result, not a prose keyword mention.\"\"\"\n+def validate_independent_review_receipt(run_dir: Path, review_text: str) -> tuple[bool, str]:\n+    \"\"\"Validate tool provenance, frozen evidence, and content-addressed receipt.\"\"\"\n+    receipt_ids = _review_receipt_ids(review_text)\n+    if not receipt_ids:\n+        return False, \"review.md has no ReviewReceipt generated by peer_review.py\"\n+    receipt_id = receipt_ids[-1]\n+    path = run_dir / \"review\" / \"receipts\" / f\"{receipt_id}.json\"\n+    try:\n+        record = json.loads(path.read_text(encoding=\"utf-8\", errors=\"replace\"))\n+    except Exception:\n+        return False, f\"missing/corrupt review receipt {receipt_id}\"\n+    claimed = str(record.pop(\"receipt_id\", \"\"))\n+    actual = hashlib.sha256(json.dumps(\n+        record, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"),\n+    ).encode(\"utf-8\")).hexdigest()\n+    if claimed != receipt_id or actual != receipt_id:\n+        return False, \"review receipt content hash mismatch\"\n+    if record.get(\"schema\") != \"xunji.peer_review_receipt.v1\":\n+        return False, \"review receipt schema mismatch\"\n+    result = record.get(\"result\") if isinstance(record.get(\"result\"), dict) else {}\n+    if str(result.get(\"verdict\") or \"\") not in {\"PASS\", \"WARN\", \"BLOCKER\", \"CONFIRMED\", \"PASSED\"}:\n+        return False, \"review receipt has no completed verdict\"\n+    backend = str(result.get(\"backend_used\") or \"\")\n+    if _blankish_field(backend) or backend.lower() in {\"operator\", \"manual\", \"n/a\"}:\n+        return False, \"review receipt has no independent backend\"\n+    current_hash = current_evidence_index_hash(run_dir)\n+    if str(result.get(\"evidence_index_hash\") or \"\") != current_hash:\n+        return False, \"review receipt evidence_index hash is stale\"\n+    bundle_path = run_dir / \"review\" / \"review_bundle.json\"\n+    try:\n+        bundle = json.loads(bundle_path.read_text(encoding=\"utf-8\", errors=\"replace\"))\n+    except Exception:\n+        return False, \"review bundle missing/corrupt\"\n+    if str(result.get(\"bundle_hash\") or \"\") != str(bundle.get(\"sha1\") or \"\"):\n+        return False, \"review receipt bundle hash mismatch\"\n+    if _runtime_receipts is None or not _runtime_receipts.review_invocation_valid(\n+        run_dir,\n+        str(record.get(\"generated_at\") or \"\"),\n+        receipt_id=receipt_id,\n+        bundle_hash=str(result.get(\"bundle_hash\") or \"\"),\n+    ):\n+        return False, \"no transcript-backed foreground peer_review.py --into-run invocation\"\n+    return True, \"\"\n+\n+\n+def has_completed_independent_review(review_text: str, run_dir: Path | None = None) -> bool:\n+    \"\"\"Only a current hook-backed peer-review receipt satisfies the gate.\"\"\"\n+    if run_dir is None:\n+        return False\n+    return validate_independent_review_receipt(run_dir, review_text)[0]\n+\n+\n+def has_codex_completion_review(decisions_text: str, run_dir: Path | None = None) -> bool:\n+    \"\"\"Require structured prose plus a real current Agent tool review receipt.\"\"\"\n@@ -1367 +1480,5 @@ def has_codex_completion_review(decisions_text: str) -> bool:\n-    return bool(reviewer and verdict and len(re.sub(r\"\\s+\", \"\", block)) >= 80)\n+    structured = bool(reviewer and verdict and len(re.sub(r\"\\s+\", \"\", block)) >= 80)\n+    if not structured or run_dir is None or _runtime_receipts is None:\n+        return False\n+    return _runtime_receipts.completion_review_valid(\n+        run_dir, current_evidence_index_hash(run_dir))\n@@ -1375 +1492 @@ def check_codex_completion_review(run_dir: Path) -> list[str]:\n-    if has_codex_completion_review(text):\n+    if has_codex_completion_review(text, run_dir):\n@@ -1380 +1497,2 @@ def check_codex_completion_review(run_dir: Path) -> list[str]:\n-        \"实质内容的 `## CodexCompletionReview` 小节。\"\n+        \"实质内容的 `## CodexCompletionReview` 小节，以及响应中绑定当前 evidence hash、\"\n+        \"四项 CHECKS 和 `XUNJI_COMPLETION_VERDICT=PASS` 的 Agent runtime receipt。\"\n@@ -1396,11 +1514,3 @@ def check_intermediate_gates(run_dir: Path) -> tuple[list[str], list[str]]:\n-    has_independent_review = has_completed_independent_review(review_text)\n-    evidence_path = run_dir / \"evidence.md\"\n-    review_stale = False\n-    if has_independent_review and evidence_path.exists() and review_path.exists():\n-        try:\n-            review_stale = evidence_path.stat().st_mtime > review_path.stat().st_mtime\n-        except OSError:\n-            review_stale = False\n-    has_fresh_independent_review = has_independent_review and not review_stale\n-    review_gap = (\"without fresh independent review (evidence.md newer than review.md)\"\n-                  if review_stale else \"without independent review\")\n+    has_independent_review = has_completed_independent_review(review_text, run_dir)\n+    has_fresh_independent_review = has_independent_review\n+    review_gap = \"without current transcript-backed independent review receipt\"\n@@ -1492,2 +1602,6 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:\n-    for hm in re.finditer(r\"(?im)^\\s*-\\s*EvidenceIndexHash\\s*[:：]\\s*([0-9a-f]{40}|\\(missing\\))\", text):\n-        seen = hm.group(1)\n+    seen_hashes = re.findall(\n+        r\"(?im)^\\s*-\\s*EvidenceIndexHash\\s*[:：]\\s*([0-9a-f]{40}|\\(missing\\))\",\n+        text,\n+    )\n+    if seen_hashes:\n+        seen = seen_hashes[-1]\n@@ -1496 +1610 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:\n-                \"复审硬门(evidence_index 已变): review.md 的 EvidenceIndexHash \"\n+                \"复审硬门(evidence_index 已变): review.md 最新 ReviewReceipt 的 EvidenceIndexHash \"\n@@ -1498 +1612,13 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:\n-                \"裁决失效, 需重新跑 `python tools/peer_review.py --into-run runs/<dir>` 或写新的证据化裁决。\")\n+                \"裁决失效, 需重新跑 `python tools/peer_review.py --into-run runs/<dir>`。\"\n+                \"更早的历史 receipt 保留审计价值，不再反向污染最新裁决。\")\n+\n+    finding_blocks = list(re.finditer(\n+        r\"(?ms)^###\\s+(PR-\\d+)\\s+—\\s+(BLOCKER|WARN)\\b(.*?)(?=^###\\s+PR-\\d+\\s+—|^##\\s|\\Z)\",\n+        text,\n+    ))\n+    ids = [match.group(1) for match in finding_blocks]\n+    duplicates = sorted({prid for prid in ids if ids.count(prid) > 1})\n+    if duplicates:\n+        errors.append(\n+            \"复审硬门(PR id 重复): \" + \", \".join(duplicates)\n+            + \" 在多个 review ledger 中重复，无法可靠 resolve；重新复审时必须分配全局唯一 PR id。\")\n@@ -1500 +1626 @@ def check_peer_review_ledger(run_dir: Path) -> tuple[list[str], list[str]]:\n-    for m in re.finditer(r\"(?ms)^###\\s+(PR-\\d+)\\s+—\\s+(BLOCKER|WARN)\\b(.*?)(?=^###\\s+PR-\\d+\\s+—|^##\\s|\\Z)\", text):\n+    for m in finding_blocks:\n@@ -2272 +2398 @@ def check_closure_discipline(run_dir: Path) -> tuple[list[str], list[str]]:\n-    if not has_completed_independent_review(rv):\n+    if not has_completed_independent_review(rv, run_dir):\n@@ -2333,0 +2460 @@ def _selftest() -> int:\n+    import peer_review as _peer_review_test\n"
+          },
+          {
+            "token": "check_run.hunks-03.diff",
+            "path": "check_run.hunks-03.diff",
+            "exists": true,
+            "size": 7930,
+            "sha1": "4ce914882c7dead7b26981e2cf0038044ba5b9de",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/check_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 16,
+              "hunks": [
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2378,0 +2506,28 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2381,2 +2536,5 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2395,2 +2553,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2398 +2556 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2412,2 +2570,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2415 +2573 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2496,0 +2655,8 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2517,0 +2684,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2788,0 +2957 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2793,0 +2963,10 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2805,0 +2985,13 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2823,0 +3016,12 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2824,0 +3029,4 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2826 +3034 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2852,0 +3061,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2863,2 +3073,8 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/check_run.py b/tools/check_run.py\nindex 58f2ecb..5cc455d 100644\n--- a/tools/check_run.py\n+++ b/tools/check_run.py\n@@ -2378,0 +2506,28 @@ def _selftest() -> int:\n+\n+    def _install_valid_review(run: Path) -> str:\n+        bundle = _peer_review_test.build_review_bundle(run, write=True)\n+        result = _peer_review_test.ReviewResult(\n+            verdict=\"PASS\", backend_used=\"codex\", driver=\"claude\", brain=\"codex\",\n+            bundle_hash=bundle[\"sha1\"],\n+            evidence_index_hash=bundle[\"evidence_index\"][\"sha1\"],\n+        )\n+        _peer_review_test._append_run_review(run, result)\n+        transcript = run / \"review-transcript.jsonl\"\n+        tool_id = \"tool-review-\" + hashlib.sha1(str(run).encode()).hexdigest()[:12]\n+        transcript.write_text(tool_id + \"\\n\", encoding=\"utf-8\")\n+        if _runtime_receipts is not None:\n+            _runtime_receipts.append_hook_event(run, {\n+                \"hook_event_name\": \"PostToolUse\", \"session_id\": \"selftest-review\",\n+                \"transcript_path\": str(transcript), \"tool_name\": \"Bash\",\n+                \"tool_use_id\": tool_id,\n+                \"tool_input\": {\"command\": f\"python tools/peer_review.py {run} --into-run\"},\n+                \"tool_response\": {\"stdout\": (\n+                    f\"XUNJI_REVIEW_RECEIPT={result.runtime_receipt_id}\\n\"\n+                    f\"XUNJI_REVIEW_BUNDLE={result.bundle_hash}\\nreview completed\"\n+                ), \"stderr\": \"\"},\n+            })\n+        return (run / \"review.md\").read_text(encoding=\"utf-8\", errors=\"replace\")\n+\n+    receipt_review_text = _install_valid_review(d)\n+    receipt_review_valid, receipt_review_reason = validate_independent_review_receipt(\n+        d, receipt_review_text)\n@@ -2381,2 +2536,5 @@ def _selftest() -> int:\n-        (\"completed independent review requires real identity and verdict\",\n-         has_completed_independent_review(valid_review_text)),\n+        (\"manual reviewer identity/verdict cannot satisfy gate\",\n+         not has_completed_independent_review(valid_review_text, d)),\n+        (\"tool-backed current review receipt satisfies gate\"\n+         + (f\" ({receipt_review_reason})\" if receipt_review_reason else \"\"),\n+         receipt_review_valid and has_completed_independent_review(receipt_review_text, d)),\n@@ -2395,2 +2553,2 @@ def _selftest() -> int:\n-        (\"peer_review generated backend/verdict satisfies gate\",\n-         has_completed_independent_review(\n+        (\"peer_review-looking prose without receipt cannot satisfy gate\",\n+         not has_completed_independent_review(\n@@ -2398 +2556 @@ def _selftest() -> int:\n-             \"_backend: claude_\\n## Verdict: WARN\\n\")),\n+             \"_backend: claude_\\n## Verdict: WARN\\n\", d)),\n@@ -2412,2 +2570,2 @@ def _selftest() -> int:\n-        (\"substantive completion review section satisfies gate\",\n-         has_codex_completion_review(\n+        (\"substantive completion prose without Agent receipt cannot satisfy gate\",\n+         not has_codex_completion_review(\n@@ -2415 +2573 @@ def _selftest() -> int:\n-             \"- Summary: report coverage, evidence severity, and reachable assets were independently checked.\\n\")),\n+             \"- Summary: report coverage, evidence severity, and reachable assets were independently checked.\\n\", d)),\n@@ -2496,0 +2655,8 @@ def _selftest() -> int:\n+    d_chain = Path(tempfile.mkdtemp())\n+    (d_chain / \"evidence.md\").write_text(\n+        \"# Evidence Ledger\\n## E-019\\n- Maturity: candidate\\n- Certainty: 0.5\\n\",\n+        encoding=\"utf-8\")\n+    (d_chain / \"chains.md\").write_text(\n+        \"# Chains\\n## C-001\\n- Hops: E-019\\n- Weakest hop certainty: 0.8\\n\"\n+        \"- Terminal node: schema disclosure\\n- Status: confirmed\\n\", encoding=\"utf-8\")\n+    chain_errors = check_chain_maturity(d_chain)\n@@ -2517,0 +2684,2 @@ def _selftest() -> int:\n+        (\"confirmed chain rejects candidate weakest hop\",\n+         any(\"E-019=candidate/0.5\" in e for e in chain_errors)),\n@@ -2788,0 +2957 @@ def _selftest() -> int:\n+    (d_cron / \"evidence.md\").write_text(\"# Evidence Ledger\\n\", encoding=\"utf-8\")\n@@ -2793,0 +2963,10 @@ def _selftest() -> int:\n+    cron_non_end_without_receipt = check_completion_cron_record(d_cron)\n+    cron_transcript = d_cron / \"cron-transcript.jsonl\"\n+    cron_transcript.write_text(\"tool-cron-list\\ntool-completion-review\\n\", encoding=\"utf-8\")\n+    if _runtime_receipts is not None:\n+        _runtime_receipts.append_hook_event(d_cron, {\n+            \"hook_event_name\": \"PostToolUse\", \"session_id\": \"selftest-cron\",\n+            \"transcript_path\": str(cron_transcript), \"tool_name\": \"CronList\",\n+            \"tool_use_id\": \"tool-cron-list\", \"tool_input\": {},\n+            \"tool_response\": {\"tasks\": []},\n+        })\n@@ -2805,0 +2985,13 @@ def _selftest() -> int:\n+    completion_hash = current_evidence_index_hash(d_cron)\n+    if _runtime_receipts is not None:\n+        _runtime_receipts.append_hook_event(d_cron, {\n+            \"hook_event_name\": \"PostToolUse\", \"session_id\": \"selftest-completion\",\n+            \"transcript_path\": str(cron_transcript), \"tool_name\": \"Agent\",\n+            \"tool_use_id\": \"tool-completion-review\",\n+            \"tool_input\": {\"prompt\":\n+                f\"XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX={completion_hash} run={d_cron.name} \"\n+                \"CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger\"},\n+            \"tool_response\": {\"result\":\n+                f\"XUNJI_COMPLETION_VERDICT=PASS EVIDENCE_INDEX={completion_hash} \"\n+                \"CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger\"},\n+        })\n@@ -2823,0 +3016,12 @@ def _selftest() -> int:\n+        lifecycle_manual_done_err, _ = check_closure_discipline(d_lifecycle)\n+        life_transcript = d_lifecycle / \"agent-transcript.jsonl\"\n+        life_transcript.write_text(\"tool-life-agent\\n\", encoding=\"utf-8\")\n+        if _runtime_receipts is not None:\n+            _runtime_receipts.append_hook_event(d_lifecycle, {\n+                \"hook_event_name\": \"PostToolUse\", \"session_id\": \"selftest-agent\",\n+                \"transcript_path\": str(life_transcript), \"tool_name\": \"Agent\",\n+                \"tool_use_id\": \"tool-life-agent\",\n+                \"tool_input\": {\"prompt\":\n+                    f\"XUNJI_ASSIGNMENT={life_rec['agent']} XUNJI_FRONT=F-001\"},\n+                \"tool_response\": {\"result\": \"candidate complete\"},\n+            })\n@@ -2824,0 +3029,4 @@ def _selftest() -> int:\n+        _workers.update_agent_lifecycle(\n+            d_lifecycle, life_rec[\"agent\"], status=\"merged\",\n+            note=\"Evidence: E-001 result adjudicated\", terminal=True)\n+        lifecycle_merged_err, _ = check_closure_discipline(d_lifecycle)\n@@ -2826 +3034 @@ def _selftest() -> int:\n-        lifecycle_err, lifecycle_done_err = [], []\n+        lifecycle_err, lifecycle_manual_done_err, lifecycle_done_err, lifecycle_merged_err = [], [], [], []\n@@ -2852,0 +3061,2 @@ def _selftest() -> int:\n+        (\"journal cron text without runtime receipt hard-fails\",\n+            any(\"receipt\" in e for e in cron_non_end_without_receipt)),\n@@ -2863,2 +3073,8 @@ def _selftest() -> int:\n-        (\"finished agent clears lifecycle hard error\",\n-         _workers is None or not any(\"Agent 生命周期\" in e for e in lifecycle_done_err)),\n+        (\"hand-written finished status does not clear runtime authenticity gate\",\n+         _workers is None or any(\"Agent 运行真实性\" in e for e in lifecycle_manual_done_err)),\n+        (\"real Agent receipt clears lifecycle authenticity error\",\n+         _workers is None or not any(\"Agent 运行真实性\" in e for e in lifecycle_done_err)),\n+        (\"real Agent receipt still requires post-return disposition\",\n+         _workers is None or any(\"Agent 结果落实\" in e for e in lifecycle_done_err)),\n+        (\"anchored post-return merge clears disposition gate\",\n+         _workers is None or not any(\"Agent 结果落实\" in e for e in lifecycle_merged_err)),\n"
+          },
+          {
+            "token": "check_run.hunks-04.diff",
+            "path": "check_run.hunks-04.diff",
+            "exists": true,
+            "size": 3860,
+            "sha1": "3cbf23265f45dcf11b9bf8b629f767c8d916eac2",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/check_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 15,
+              "hunks": [
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -2946 +3162 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3037,0 +3254,20 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3048,0 +3285,4 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3121 +3361 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3128,3 +3368 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3133 +3370,0 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3140 +3377 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3142,2 +3379 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3157 +3393 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3159 +3395 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3451 +3687 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3514,0 +3751 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3551 +3788,5 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3578,0 +3820 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/check_run.py",
+                  "header": "@@ -3595 +3837 @@ def main() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/check_run.py b/tools/check_run.py\nindex 58f2ecb..5cc455d 100644\n--- a/tools/check_run.py\n+++ b/tools/check_run.py\n@@ -2946 +3162 @@ def _selftest() -> int:\n-    (d10 / \"review.md\").write_text(valid_review_text, encoding=\"utf-8\")\n+    _install_valid_review(d10)\n@@ -3037,0 +3254,20 @@ def _selftest() -> int:\n+    pr_current_hash = current_evidence_index_hash(d_pr)\n+    with (d_pr / \"review.md\").open(\"a\", encoding=\"utf-8\") as handle:\n+        handle.write(\n+            \"\\n## Independent Review (heterogeneous peer_review · claude · later)\\n\"\n+            \"## Review Finding Ledger\\n\"\n+            f\"- EvidenceIndexHash: {pr_current_hash}\\n- (none)\\n\")\n+    pr_refreshed_e, _ = check_peer_review_ledger(d_pr)\n+\n+    d_pr_dup = Path(tempfile.mkdtemp())\n+    (d_pr_dup / \"evidence.md\").write_text(\"# Evidence Ledger\\n\", encoding=\"utf-8\")\n+    dup_hash = current_evidence_index_hash(d_pr_dup)\n+    (d_pr_dup / \"review.md\").write_text(\n+        \"# Review\\n## Review Finding Ledger\\n\"\n+        f\"- EvidenceIndexHash: {dup_hash}\\n\"\n+        \"### PR-001 — WARN — first\\n- Status: dismissed\\n- DriverResolution: Reason: fixed\\n\"\n+        \"## Review Finding Ledger\\n\"\n+        f\"- EvidenceIndexHash: {dup_hash}\\n\"\n+        \"### PR-001 — WARN — second\\n- Status: dismissed\\n- DriverResolution: Reason: fixed\\n\",\n+        encoding=\"utf-8\")\n+    pr_dup_e, _ = check_peer_review_ledger(d_pr_dup)\n@@ -3048,0 +3285,4 @@ def _selftest() -> int:\n+        (\"peer_review ledger: latest fresh hash supersedes historical stale hash\",\n+         not any(\"evidence_index 已变\" in e for e in pr_refreshed_e)),\n+        (\"peer_review ledger: duplicate PR ids hard fail\",\n+         any(\"PR id 重复\" in e for e in pr_dup_e)),\n@@ -3121 +3361 @@ def _selftest() -> int:\n-    (d_mid_cov / \"review.md\").write_text(valid_review_text, encoding=\"utf-8\")\n+    _install_valid_review(d_mid_cov)\n@@ -3128,3 +3368 @@ def _selftest() -> int:\n-    rvp.write_text(\n-        \"# Review\\n## 独立复审\\n- Reviewer: selftest\\n- Verdict: PASS\\n\",\n-        encoding=\"utf-8\")\n+    _install_valid_review(d_mid_fresh)\n@@ -3133 +3370,0 @@ def _selftest() -> int:\n-    os.utime(rvp, (1010, 1010))\n@@ -3140 +3377 @@ def _selftest() -> int:\n-    rvp2.write_text(valid_review_text, encoding=\"utf-8\")\n+    _install_valid_review(d_mid_stale)\n@@ -3142,2 +3379 @@ def _selftest() -> int:\n-    os.utime(rvp2, (1000, 1000))\n-    os.utime(evp2, (1010, 1010))\n+    evp2.write_text(\"# Evidence Ledger\\n## E-001\\n- Certainty: 0.8\\n\", encoding=\"utf-8\")\n@@ -3157 +3393 @@ def _selftest() -> int:\n-        (\"intermediate review: 独立复审 header counts when review is fresh\",\n+        (\"intermediate review: current receipt counts when evidence hash matches\",\n@@ -3159 +3395 @@ def _selftest() -> int:\n-        (\"intermediate review: evidence newer than review makes review stale\",\n+        (\"intermediate review: evidence hash change invalidates receipt regardless of mtime\",\n@@ -3451 +3687 @@ def _maybe_auto_peer_review(run_dir: Path, driver: str | None = None) -> None:\n-    if has_completed_independent_review(rv):\n+    if has_completed_independent_review(rv, run_dir):\n@@ -3514,0 +3751 @@ def main() -> int:\n+    errors.extend(check_front_schema(run_dir))\n@@ -3551 +3788,5 @@ def main() -> int:\n-    warnings.extend(check_workers(run_dir))            # 并行 worker: done 未 merge(证据门别跳)\n+    worker_merge_issues = check_workers(run_dir)\n+    if _closure_gate_active(run_dir):\n+        errors.extend(worker_merge_issues)             # 收口时 done 未 merge 是硬门\n+    else:\n+        warnings.extend(worker_merge_issues)\n@@ -3578,0 +3820 @@ def main() -> int:\n+    errors.extend(check_chain_maturity(run_dir))\n@@ -3595 +3837 @@ def main() -> int:\n-    print(\"run check passed\")\n+    print(\"STRUCTURAL_PASS: run structure is consistent; this is not completion proof\")\n"
+          },
+          {
+            "token": "closure-source-manifest.json",
+            "path": "closure-source-manifest.json",
+            "exists": true,
+            "size": 6794,
+            "sha1": "16610b4062de6341013198ed7d386b9a3991129b",
+            "excerpt": "{\n  \"files\": {\n    \"tools/check_run.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/check_run.py\",\n      \"sha256\": \"4d035d51aecb5166d5b734154e87e583b71686aa4b330969a9236aac7ef7a8ca\",\n      \"size\": 214578\n    },\n    \"tools/coverage_matrix.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/coverage_matrix.py\",\n      \"sha256\": \"0a8578e34059831f8fe08bca5e5b528e58b4f88b9ba6682d5c559077bf12e2cf\",\n      \"size\": 40985\n    },\n    \"tools/graph.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/graph.py\",\n      \"sha256\": \"e9011ce56abf882863f81d9264079766c7c11b4f98509cc16b07f02ff91335c9\",\n      \"size\": 11996\n    },\n    \"tools/loop_journal.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/loop_journal.py\",\n      \"sha256\": \"649a49ed569cd58646ce167f388747e658cb291eb909c3159a1f412d51559fcb\",\n      \"size\": 15085\n    },\n    \"tools/loop_state.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/loop_state.py\",\n      \"sha256\": \"d8aca70663fe7bfcf50552b924bed8c0ec1c1a20587cf2a42549e2895e23f2b7\",\n      \"size\": 51350\n    },\n    \"tools/peer_review.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/peer_review.py\",\n      \"sha256\": \"350437a748743a11982aedb89e3d9c6a231be683c6ee023657d970a4f1be069b\",\n      \"size\": 104163\n    },\n    \"tools/selftest_all.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/selftest_all.py\",\n      \"sha256\": \"053b463f64d434505de192941363c25d0c5ade02312151517dd6f94b4a66335c\",\n      \"size\": 11258\n    },\n    \"tools/state_project.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/state_project.py\",\n      \"sha256\": \"19d668ed291b402f2ca037c7f03b914fb0129dc54d2c3db385eefac3587a4ea0\",\n      \"size\": 7343\n    },\n    \"tools/xunji_statusline.py\": {\n      \"resolved_path\": \"/Users/ccj/Documents/AI/Xunji/tools/xunji_statusline.py\",\n      \"sha256\": \"8e8e315cd744da661210f706905cf98eaa1b6a5b9be65769748246ca05c09c9b\",\n      \"size\": 22621\n    }\n  },\n  \"hook_bindings\": [\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"WebSearch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/ip_blacklist.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Agent|CronCreate|CronDelete|CronList|WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUseFailure\",\n      \"matcher\": \"Agent|CronCreate|CronDelete|CronList|Bash|WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"SubagentStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"SubagentStop\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"UserPromptSubmit\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/sentinel/hook.py\\\"\",\n      \"event\": \"UserPromptSubmit\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/anti_drift.py\\\"\",\n      \"event\": \"UserPromptSubmit\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/output_gate.py\\\"\",\n      \"event\": \"Stop\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/.claude/hooks/run_gate.py\\\"\",\n      \"event\": \"Stop\",\n      \"matcher\": \"\"\n    }\n  ],\n  \"repository_root\": \"/Users/ccj/Documents/AI/Xunji\",\n  \"schema\": \"xunji.installed_runtime_manifest.v1\",\n  \"turn_contract_hook_references\": [\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\" --selftest\",\n      \"event\": \"SessionStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PreToolUse\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Agent|CronCreate|CronDelete|CronList|WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUse\",\n      \"matcher\": \"Bash\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"PostToolUseFailure\",\n      \"matcher\": \"Agent|CronCreate|CronDelete|CronList|Bash|WebFetch\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"SubagentStart\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"SubagentStop\",\n      \"matcher\": \"\"\n    },\n    {\n      \"command\": \"python3 \\\"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\\\"\",\n      \"event\": \"UserPromptSubmit\",\n      \"matcher\": \"\"\n    }\n  ]\n}\n"
+          },
+          {
+            "token": "closure_selftests.summary.json",
+            "path": "closure_selftests.summary.json",
+            "exists": true,
+            "size": 22118,
+            "sha1": "74279b31adc54f465286386cdaeafce0b8a8d0db",
+            "excerpt": "{\n  \"commands\": [\n    {\n      \"check_count\": 195,\n      \"checks\": [\n        \"ok   preamble not counted\",\n        \"ok   manual reviewer identity/verdict cannot satisfy gate\",\n        \"ok   tool-backed current review receipt satisfies gate\",\n        \"ok   independent review prose mention does not satisfy gate\",\n        \"ok   independent review template placeholders do not satisfy gate\",\n        \"ok   filled self-review after untouched independent template cannot satisfy gate\",\n        \"ok   peer_review-looking prose without receipt cannot satisfy gate\",\n        \"ok   generic peer_review label cannot spoof generated review identity\",\n        \"ok   fresh-context heading alone cannot spoof reviewer identity\",\n        \"ok   completion review prose mention does not satisfy gate\",\n        \"ok   single completion review field does not satisfy gate\",\n        \"ok   substantive completion prose without Agent receipt cannot satisfy gate\",\n        \"ok   report Evidence IDs parser accepts bullet form\",\n        \"ok   split certainty -> confirmed\",\n        \"ok   off-doctrine 0.9 -> confirmed (C1)\",\n        \"ok   downgrade w/ grid nums in note -> NOT confirmed (the 2026-06-17 fix)\",\n        \"ok   multi-line split certainty -> confirmed (N2 regression)\",\n        \"ok   certainty value inside parens -> confirmed (S1 fix)\",\n        \"ok   explicit maturity parsed\",\n        \"ok   legacy confirmed entry infers finding\",\n        \"ok   provenance parsed from Source/Trust\",\n        \"ok   provenance inference is not overbroad\",\n        \"ok   Artifacts label may carry parenthetical metadata\",\n        \"ok   artifact footnote asterisk does not hide concrete token\",\n        \"ok   artifact shorthand/glob notes are not dead refs\",\n        \"ok   diff artifact parses for maintenance review\",\n        \"ok   dangling citation detected\",\n        \"ok   prose filenames not cited\",\n        \"ok   inline Next:(E-002) not swept into Refutes\",\n        \"ok   real refute detected\",\n        \"ok   dangling warns for E-002 only\",\n        \"ok   no-control entry flagged (E-003)\",\n        \"ok   control entries not flagged\",\n        \"ok   非标准 certainty -> hard error (E-004=0.9)\",\n        \"ok   contradiction: refuted-but-confirmed E-001\",\n        \"ok   no confirmed-missing-artifact FP\",\n        \"ok   maturity parser: phenomenon\",\n        \"ok   maturity parser: candidate\",\n        \"ok   maturity parser: unknown defaults to candidate and records raw\",\n        \"ok   report maturity gate: candidate in Evidence IDs hard error\",\n        \"ok   report maturity gate: high-cert candidate still triggers final report\",\n        \"ok   report maturity gate: phenomenon in body soft warn\",\n        \"ok   report maturity gate: inline code E-id ignored\",\n        \"ok   report maturity gate: lower-maturity sections are explicit context\",\n        \"ok   maturity consistency: unknown warns\",\n        \"ok   maturity consistency: finding below gate warns\",\n        \"ok   maturity consistency: candidate above gate warns\",\n        \"ok   confirmed chain rejects candidate weakest hop\",\n        \"ok   evidence index keeps legacy confirmed and adds confirmed_findings\",\n        \"ok   untrusted content closure review warning\",\n        \"ok   untrusted content handled in review clears closure warning\",\n        \"ok   untrusted content suspect instruction wording warns\",\n        \"ok   recon cited + no coverage -> warn\",\n        \"ok   real report (confirmed E-id) -> final (state-trigger)\",\n        \"ok   final report + no coverage -> closure HARD error\",\n        \"ok   coverage built -> coverage warn clears\",\n        \"ok   coverage built -> closure coverage error clears\",\n        \"ok   防lump: unknown and actionable LOGIN remain candidates\",\n        \"ok   防lump: stub/403-only assets are not independent-app candidates\",\n        \"ok   no recon cited -> no coverage gate (no FP)\",\n        \"ok   loop_state closure blockers are check_run hard-gated\",\n        \"ok   shallow-close w/o Vectors tried -> warn (F-001)\",\n        \"ok   shallow-close WITH Vectors tried -> no warn (F-002)\",\n        \"ok   deep-close -> no warn (F-003)\",\n        \"ok   recon template placeholder -> not cited (no FP)\",\n        \"ok   Type B closure without E-id -> hard gate message\",\n        \"ok   Type B closure with E-id -> no hard gate message\",\n        \"ok   front verification: version-only close hard-fails\",\n        \"ok   front verification: 403/error close without bypass hard-fails\",\n        \"ok   front verification: E-backed payload/bypass records clear\",\n        \"ok   missing Fingerprints captured -> hard error\",\n        \"ok   Fingerprints captured filled -> no fp hard error\",\n        \"ok   '无新指纹' + candidates -> soft warn\",\n        \"ok   '无…' WITH knowledge path -> no soft warn (S1)\",\n        \"ok   Fingerprints only in comment -> hard error (S2)\",\n        \"ok   retrospective missing -> hard error\",\n        \"ok   retrospective placeholder-only -> both sections error\",\n        \"ok   retrospective half-filled -> framework section error only\",\n        \"ok   retrospective framework issue without status -> hard error\",\n        \"ok   retrospective both filled -> no error\",\n        \"ok   retrospective nested subsections count as filled\",\n        \"ok   retrospective each framework item needs its own status\",\n        \"ok   retrospective repeated Problem fields are validated independently\",\n        \"ok   closure trigger + no retrospective -> closure carries 复盘 error\",\n        \"ok   retrospective Verdict: FINAL activates closure gate\",\n        \"ok   retrospective FINAL + report stub hard-fails report gate\",\n        \"ok   retrospective FINAL activates coverage closure mode\",\n        \"ok   report stub gate accepts Chinese 确认发现 section\",\n        \"ok   retrospective prose mentioning GHOST_COMPLETE does not trigger closure\",\n        \"ok   completion marker without cron_cancelled record hard-fails\",\n        \"ok   journal cron text without runtime receipt hard-fails\",\n        \"ok   completion marker ignores cron_cancelled on non-end journal event\",\n        \"ok   completion marker with cron_cancelled=none clears cron gate\",\n        \"ok   completion marker with cron_cancelled=<id> clears cron gate\",\n        \"ok   completion marker without structured completion review hard-fails\",\n        \"ok   structured completion review clears completion-review gate\",\n        \"ok   closure trigger + non-terminal agent -> lifecycle hard error\",\n        \"ok   hand-written finished status does not clear runtime authenticity gate\",\n        \"ok   real Agent receipt clears lifecycle authenticity error\",\n        \"ok   real Agent receipt still requires post-return disposition\",\n        \"ok   anchored post-return merge clears disposition gate\",\n        \"ok   coverage subset (50/100) -> warn\",\n        \"ok   coverage full (95/100) -> no warn\",\n        \"ok   coverage guanlan scoped adapter subset -> no warn\",\n        \"ok   coverage guanlan source without provenance -> warn\",\n        \"ok   recon path non-JSON -> skip (no FP)\",\n        \"ok   漏报: confirmed positive 缺失 -> 含 E-200\",\n        \"ok   漏报: refutes-only(无Supports) 豁免 E-201\",\n        \"ok   漏报: report 正文引用豁免 E-202\",\n        \"ok   漏报: 已降级豁免 E-203\",\n        \"ok   漏报: 代码块引用不算(bypass) E-204\",\n        \"ok   漏报: 注释引用不算(bypass) E-205\",\n        \"ok   漏报: mixed Supports+Refutes 不豁免 E-206\",\n        \"ok   漏报: header 变体(空格/ID(s))被剥, E-302 正文保留\",\n        \"ok   漏报门触发一次\",\n        \"ok   auto-review 幂等: 已有独立复审 -> review.md 不变\",\n        \"ok   auto-review: 未收口 -> 不触发(不建 review.md)\",\n        \"ok   Metacog: draft report -> no warn\",\n        \"ok   Metacog: _closure_claimed path triggers\",\n        \"ok   Metacog: decisions Status CLOSING path triggers\",\n        \"ok   Metacog: final report missing pass -> warn\",\n        \"ok   Metacog: partial pass -> missing fields warn\",\n        \"ok   Metacog: full contract -> no warn\",\n        \"ok   peer_review ledger: pending BLOCKER hard fails\",\n        \"ok   peer_review ledger: resolved BLOCKER clears pending gate\",\n        \"ok   peer_review ledger: invalid status hard fails\",\n        \"ok   peer_review ledger: resolution needs audit anchor\",\n        \"ok   peer_review ledger: evidence hash drift hard fails\",\n        \"ok   peer_review ledger: latest fresh hash supersedes historical stale hash\",\n        \"ok   peer_review ledger: duplicate PR ids hard fail\",\n        \"ok   conflict gate: unresolved conflict before closure -> warning\",\n        \"ok   conflict gate: medium finding unresolved conflict is not hard fail\",\n        \"ok   conflict gate: HIGH finding unresolved conflict -> hard fail\",\n        \"ok   conflict gate: HIGH hard fail does not also warn\",\n        \"ok   conflict gate: CRITICAL finding unresolved conflict -> hard fail\",\n        \"ok   conflict gate: resolved conflicts -> silent\",\n        \"ok   conflict gate: bad conflicts.json -> projection warning, not hard fail\",\n        \"ok   intermediate coverage: stale examined=false ignored when E/front touched hosts\",\n        \"ok   intermediate review: current receipt counts when evidence hash matches\",\n        \"ok   intermediate review: evidence hash change invalidates receipt regardless of mtime\",\n        \"ok   intermediate same-barrier: closed/deferred fronts skipped, open/probing still warn\",\n        \"ok   录像软警: html-only confirmed -> 提示 E-300\",\n        \"ok   录像软警: 有 .replay.json 不提示 E-301\",\n        \"ok   录像软警: negative 不提示 E-302\",\n        \"ok   布局漂移检测: 抓到散落 ev_loose.html/shot.png\",\n        \"ok   布局漂移检测: 不误报白名单 evidence.json/coverage.json\",\n        \"ok   布局漂移检测: evidence/ 子目录内文件不算散落\",\n        \"ok   布局漂移: 无终版报告时静默(降噪)\",\n        \"ok   布局漂移: 终版报告产出后散落 -> WARN\",\n        \"ok   replay 绑定(真实命名 .html.replay.json 能绑上, 非 owner=None 漏掉): 只报 E-2\",\n        \"ok   replay 绑定: E-1 自身 `- Replay:` -> 不报(别处/模板 Replay 不误清, 非全局计数)\",\n        \"ok   replay 绑定: 无 E- 支撑的分歧不拦(非承重)\",\n        \"ok   replay 绑定: 无 DIVERGED -> 空(opt-in/目标变更不罚)\",\n        \"ok   replay 绑定: bare-stem shot ↔ shot.replay.json 也绑上\",\n        \"ok   漏测门: 未点到的可达资产被报\",\n        \"ok   漏测门: 已点到(测/defer)不报\",\n        \"ok   漏测门: 不可达资产不计入\",\n        \"ok   漏测门: IP 子串假阳已修(点 1.2.3.10 ≠ 1.2.3.1)\",\n        \"ok   漏测门: 域名前缀子串假阳已修(点 data.com ≠ a.com)\",\n        \"ok   漏测门: 域名后缀子串假阳已修(点 sub.ex.com ≠ ex.com)\",\n        \"ok   漏测门: 单标签 host 已修(https://h1:8443→h1, 点 h1 算测过)\",\n        \"ok   漏测门: host 规整(去 scheme/port)→ https://norm.example:8443 算点到\",\n        \"ok   漏测门: 可达资产全点到 → 不报\",\n        \"ok   漏测门: 无 coverage → 不报(不强加)\",\n        \"ok   ① 簇裁决: *.vpn.corp.example 顶通配成员(0.vpn/1a2b.vpn 不报)\",\n        \"ok   ① 簇裁决: 簇外可达 app.corp.example 仍报(没被簇洗白)\",\n        \"ok   ① 安全界: *.<apex顶域> 太宽不算簇 → app.corp.example 仍被报(防偷懒洞)\",\n        \"ok   ① 安全界硬化: 跨域时 *.<整注册域> 不算簇(registrable 判) → a.target.edu.cn 仍被报\",\n        \"ok   ① 簇 glob 覆盖严格子域 node1.gw.corp.example(不报)\",\n        \"ok   ① Codex#1: 簇头 gw.corp.example 自身不被 *.gw.corp.example 洗白(仍报)\",\n        \"ok   _norm_host 括号IPv6取内\",\n        \"ok   _norm_host 单冒号去port\",\n        \"ok   _norm_host 裸IPv6不截断\",\n        \"ok   深度门: 攻击过(E块内点到)的登录面不报\",\n        \"ok   深度门: 未打(evidence 无)的登录面被报\",\n        \"ok   深度门: 仅文件头提及(非E块)登录面仍被报\",\n        \"ok   深度门: 非规范 ### E-9 头不算 E 块(锚定)\",\n        \"ok   深度门: DYN-only(无攻击面)不要求攻击记录\",\n        \"ok   深度门: 非登录攻击面 SURFACE:API 未打也被报(不只LOGIN, Codex#4)\",\n        \"ok   深度门: 不可达登录面不计入\",\n        \"ok   review资产门: 高价值/管理面可达资产无 E-entry -> 报 login2.example\",\n        \"ok   review资产门: 普通低价值资产不报\",\n        \"ok   深度门: 登录面都进 E 块 → 不报\",\n        \"ok   review资产门: 高价值/管理面都进 E 块 → 不报\",\n        \"ok   深度门: 无 coverage → 不报(不强加)\",\n        \"ok   深度门/漏测门: 非dict coverage 不崩\",\n        \"ok   replay 绑定: sqli.replay.json 不误绑 sqli.json 发现(防 false-fail)\",\n        \"ok   布局漂移: 收口且根目录干净 -> 静默\",\n        \"ok   replay 汇总: DIVERGED 升显著警告\",\n        \"ok   replay 汇总: 含计数汇总行\",\n        \"ok   replay 汇总: 全 IDENTICAL 无 DIVERGED 警告\",\n        \"ok   replay 汇总: 空结果 -> 空\",\n        \"ok   replay preflight SystemExit becomes hard gate\",\n        \"ok   威胁假设软警: HIGH+ public front 无 H/next/E -> 报警\",\n        \"ok   威胁假设软警: 关联 H 后消失\"\n      ],\n      \"command\": \"/opt/homebrew/opt/python@3.14/bin/python3.14 tools/check_run.py --selftest\",\n      \"failure_count\": 0,\n      \"output_sha256\": \"0f0c538a6735da1a202e564570bfd94ef88ce544bd216cf3dec74a4551df5d8f\",\n      \"result\": \"check_run selftest passed\"\n    },\n    {\n      \"check_count\": 75,\n      \"checks\": [\n        \"ok   默认配置 priority = codex > arkcli > claude\",\n        \"ok   默认 panel min_heterogeneous=auto\",\n        \"ok   默认 arkcli panel 模型顺序\",\n        \"ok   默认 arkcli panel 不禁用 thinking\",\n        \"ok   默认 artifact excerpt cap 覆盖旧 1200 字截断\",\n        \"ok   默认 max_bundle_chars 有效\",\n        \"ok   driver matrix order: claude -> codex,arkcli\",\n        \"ok   driver matrix order: codex -> arkcli,claude\",\n        \"ok   panel auto min: codex+arkcli -> 2\",\n        \"ok   panel auto min: codex-driver arkcli+claude -> 2\",\n        \"ok   panel auto min: only arkcli -> 1\",\n        \"ok   panel auto min: only codex -> 1\",\n        \"ok   panel auto min: no hetero -> 0\",\n        \"ok   panel explicit min overrides auto\",\n        \"ok   driver aliases normalize\",\n        \"ok   matrix brain: full claude driver -> codex\",\n        \"ok   matrix brain: no codex -> arkcli panel\",\n        \"ok   matrix brain: no arkcli -> codex\",\n        \"ok   matrix brain: no hetero -> claude code same-family\",\n        \"ok   matrix brain: codex driver full -> codex\",\n        \"ok   matrix selection ignores inverted priority for claude driver\",\n        \"ok   matrix selection for codex driver is arkcli+claude\",\n        \"ok   无 arkcli 时优先级落到 claude 兜底\",\n        \"ok   --backend 强制存在的后端\",\n        \"ok   --backend 不存在 -> None\",\n        \"ok   claude-code-cli cmd 存在时 available 或可被本地环境决定\",\n        \"ok   arkcli-panel cmd 存在时 available 或可被本地环境决定\",\n        \"ok   single-backend review retries then falls back to next hetero backend\",\n        \"ok   解析 verdict=BLOCKER\",\n        \"ok   解析 2 条 findings\",\n        \"ok   解析 findings severity\",\n        \"ok   解析 evidence 字段\",\n        \"ok   解析 blind-spot 1 条\",\n        \"ok   解析 context-limit 1 条\",\n        \"ok   取最后一个 Verdict 块\",\n        \"ok   解析 JSON verdict=BLOCKER\",\n        \"ok   解析 JSON finding category/action/eid\",\n        \"ok   as_dict emits schema/findings\",\n        \"ok   role rubric appends focus\",\n        \"ok   unknown role rejected\",\n        \"ok   arkcli panel 聚合 WARN + backend_error\",\n        \"ok   arkcli panel PR id 唯一化\",\n        \"ok   as_markdown emits brain\",\n        \"ok   (none) 不计入 findings\",\n        \"ok   (none) 不计入 blind\",\n        \"ok   Claude CLI JSON result parser ignores warning\",\n        \"ok   as_markdown 含 Verdict\",\n        \"ok   as_markdown 含 finding\",\n        \"ok   into_run 写'Independent Review'标记(满足门)\",\n        \"ok   into_run 保留已有内容(追加不覆盖)\",\n        \"ok   into_run 写 verdict/finding\",\n        \"ok   into_run 写 PR pending ledger\",\n        \"ok   into_run writes content-addressed receipt files\",\n        \"ok   repeated reviews allocate globally unique PR ids\",\n        \"ok   into_run strips old blank PR template before appending\",\n        \"ok   resolve_finding 更新 status/resolution\",\n        \"ok   bundle 写入 review/review_bundle.json\",\n        \"ok   bundle redacts obvious bearer token\",\n        \"ok   bundle artifact excerpt keeps evidence after old 1200 char cap\",\n        \"ok   bundle artifact excerpt cap remains configurable\",\n        \"ok   bundle includes diff artifact excerpt for maintenance review\",\n        \"ok   bundle diff artifact includes structural file summary\",\n        \"ok   bundle max_bundle_chars emits warning when exceeded\",\n        \"ok   backend bundle context uses the capped compact serialization\",\n        \"ok   into_run 二次追加不覆盖(两区块)\",\n        \"ok   bundle machine_findings includes missing artifact blocker\",\n        \"ok   review_panel with no backends needs driver\",\n        \"ok   NEEDS_DRIVER into_run writes manual template without completion marker\",\n        \"ok   invalid affected_eids annotated, not silent\",\n        \"ok   heterogeneous: codex/arkcli=True, claude=False\",\n        \"ok   codex driver: codex=self, arkcli/claude=independent\",\n        \"ok   into_run: ERROR verdict 不写 review.md(non-write guard)\",\n        \"ok   require_hetero: 唯一同族 claude -> NEEDS_DRIVER(不跑/不写)\",\n        \"ok   require_hetero: 同族不写 review.md\",\n        \"ok   codex driver 下 Claude 记录为独立复审\"\n      ],\n      \"command\": \"/opt/homebrew/opt/python@3.14/bin/python3.14 tools/peer_review.py --selftest\",\n      \"failure_count\": 0,\n      \"output_sha256\": \"30431c2f50c4addfc6a6d4d14abcdb96d2f6f323fc17c99299b84d7d42f13593\",\n      \"result\": \"peer_review selftest passed (75 checks)\"\n    },\n    {\n      \"check_count\": 6,\n      \"checks\": [\n        \"ok   projection marks markdown canonical\",\n        \"ok   front parsed\",\n        \"ok   evidence projected\",\n        \"ok   events written\",\n        \"ok   load_or_create reads existing projection\",\n        \"ok   load_or_create refreshes stale projection\"\n      ],\n      \"command\": \"/opt/homebrew/opt/python@3.14/bin/python3.14 tools/state_project.py --selftest\",\n      \"failure_count\": 0,\n      \"output_sha256\": \"54099640e32ca4e0ba1ef8f4797555ba267cbcc809377351d51114fca4bbdd69\",\n      \"result\": \"state_project selftest passed\"\n    },\n    {\n      \"check_count\": 30,\n      \"checks\": [\n        \"ok   writes loop state json\",\n        \"ok   writes loop state markdown\",\n        \"ok   open fronts render Root Orchestrator phase\",\n        \"ok   empty run renders Setup phase\",\n        \"ok   deferred fronts render Reviewer phase\",\n        \"ok   closed fronts render Report phase\",\n        \"ok   markdown includes Chinese status panel\",\n        \"ok   persisted markdown does not contain ANSI even when color forced\",\n        \"ok   fanout required with four diverse open fronts\",\n        \"ok   coverage attention is surfaced\",\n        \"ok   first snapshot does not count existing evidence as new\",\n        \"ok   no-progress cycles increase\",\n        \"ok   coda converges after two no-progress cycles\",\n        \"ok   mentor hints include no-progress pivot\",\n        \"ok   certainty upgrade resets no-progress\",\n        \"ok   coverage improvement is recorded\",\n        \"ok   coverage outputs written\",\n        \"ok   graph checkpoint written\",\n        \"ok   agent conflicts are surfaced\",\n        \"ok   mentor hints include unresolved Agent conflict\",\n        \"ok   default derive is no-write\",\n        \"ok   type-a blocked statuses remain open\",\n        \"ok   coda convergence is not closure while type-a fronts are open\",\n        \"ok   hyphenated type-a spelling remains open\",\n        \"ok   unclassified statuses block closure review\",\n        \"ok   conflicting terminal statuses block closure review\",\n        \"ok   section headings provide deferred/closed fallback status\",\n        \"ok   blocked type-b is not open or unclassified\",\n        \"ok   mixed open-closing final status is terminal, not open\",\n        \"ok   completion marker sets loop_complete and stops next-loop scheduling\"\n      ],\n      \"command\": \"/opt/homebrew/opt/python@3.14/bin/python3.14 tools/loop_state.py --selftest\",\n      \"failure_count\": 0,\n      \"output_sha256\": \"772712fb89b1a60a0d519d80d5ec897c207f80d758f9af4dea324b7c40a9655b\",\n      \"result\": \"loop_state selftest passed\"\n    },\n    {\n      \"check_count\": 16,\n      \"checks\": [\n        \"ok   plain statusline is human-readable\",\n        \"ok   open fronts use pentest wording\",\n        \"ok   planned agents are not presented as real\",\n        \"ok   operator pause is visible\",\n        \"ok   next action uses plan note\",\n        \"ok   colored statusline has ansi\",\n        \"ok   XUNJI_COLOR command path has ansi\",\n        \"ok   unknown phase fallback is styled\",\n        \"ok   normal render is read-only\",\n        \"ok   stale cache uses live read-only derivation\",\n        \"ok   missing cache does not show false idle\",\n        \"ok   setup journal note does not mask controller action\",\n        \"ok   missing cache live derivation is read-only\",\n        \"ok   failed live derivation is visible\",\n        \"ok   invalid outside run pointer is rejected\",\n        \"ok   outside Xunji prints nothing\"\n      ],\n      \"command\": \"/opt/homebrew/opt/python@3.14/bin/python3.14 tools/xunji_statusline.py --selftest\",\n      \"failure_count\": 0,\n      \"output_sha256\": \"e77f6db8cbb96413bac2cbc5f124d7c59f61f00cab0f02ca1805fdf41db6f456\",\n      \"result\": \"xunji_statusline selftest passed\"\n    }\n  ],\n  \"passed\": true,\n  \"schema\": \"xunji.adversarial_selftests.summary.v1\",\n  \"source_sha256\": \"e1c2285719ea8276312de2a943fcc759989c6d73b3758b1f12348a539e30a02e\"\n}\n"
+          },
+          {
+            "token": "selftest_all.log",
+            "path": "selftest_all.log",
+            "exists": true,
+            "size": 3626,
+            "sha1": "ccc3d786ec09e01458ac21bdcdb96055b91b3072",
+            "excerpt": "running 57 selftest suite(s) with /opt/homebrew/opt/python@3.14/bin/python3.14\n\n  PASS  check_run          0.2s  evidence gate + closure\n  PASS  classify_hosts    39.8s  recon -> coverage\n  PASS  scope              0.0s  run scope derive/match\n  PASS  peer_review        0.1s  heterogeneous review\n  PASS  probe              7.6s  active HTTP sensor\n  PASS  render             0.1s  headless browser + --eval replay\n  PASS  anti_drift         3.4s  anti-drift anchor (rules+process re-inject)\n  PASS  proxy              0.1s  engagement egress proxy (渗透走/模型不走)\n  PASS  codex_proxy        0.0s  Codex review proxy hygiene\n  PASS  replay            13.6s  evidence replay\n  PASS  setup_run          0.1s  run scaffolding\n  PASS  ingest_recon       0.0s  Guanlan recon adapter\n  PASS  bench              0.1s  R-1 self-eval scorer\n  PASS  check_knowledge    0.0s  public knowledge grounding structure\n  PASS  local_hygiene      0.1s  local/publication hygiene guard\n  PASS  runtime_boundary   0.0s  Codex hooks absence guard\n  PASS  check_templates    0.0s  template/reference drift guard\n  PASS  knowledge_match    0.0s  fingerprint→knowledge retrieval\n  PASS  xday_match         0.0s  fingerprint→local xday retrieval\n  PASS  knowledge_seed     0.0s  fingerprint→knowledge write-back\n  PASS  timestamp_gate     0.0s  web research time gate\n  PASS  record_evidence    0.0s  web research -> evidence ledger\n  PASS  decode_viewstate   0.0s  ASP.NET ViewState decoder\n  PASS  captcha_ocr        0.1s  bounded captcha OCR wrapper\n  PASS  input_shape        0.0s  request shape parser\n  PASS  js_inventory       0.0s  saved-artifact JS/API inventory sensor\n  PASS  oob_listener       1.0s  local OOB listener\n  PASS  sensor_oob         0.2s  OOB callback artifact sensor\n  PASS  sensor_mutate      0.1s  payload mutation artifact sensor\n  PASS  sensor_blind_diff   1.1s  blind differential artifact sensor\n  PASS  sensor_upload      1.1s  harmless upload proof sensor\n  PASS  sensor_client_graybox   0.1s  client graybox phenomenon sensor\n  PASS  state_project      0.0s  markdown-derived run state projection\n  PASS  run_model          0.0s  canonical front/status parser\n  PASS  runtime_receipts   0.1s  hook-derived Agent/Cron receipts\n  PASS  turn_contract      0.1s  execute/explain/pause turn modes\n  PASS  context_pack       0.1s  minimal subagent context pack\n  PASS  loop_state         0.1s  closed-loop progress and gate snapshot\n  PASS  status_style       0.0s  operator-facing colored status panels\n  PASS  xunji_statusline   0.1s  Claude Code Xunji statusline\n  PASS  progress_ledger    0.1s  material-progress ledger\n  PASS  run_controller     0.1s  advisory shadow run controller\n  PASS  loop_journal       0.0s  loop interruption journal\n  PASS  loop_bootstrap     0.6s  autonomous loop launcher\n  PASS  session_handoff    0.1s  session handoff tool\n  PASS  deferred_queue     0.0s  deferred asset retry manager\n  PASS  workers            0.2s  fan-out worker planning helpers\n  PASS  saturation         0.0s  front saturation scoring\n  PASS  coverage_matrix    0.1s  asset x vuln-family coverage matrix\n  PASS  safety_gate        0.0s  hard-boundary gate\n  PASS  ip_blacklist       0.0s  local IP/domain deny hook\n  PASS  output_gate        0.5s  output drift Stop gate\n  PASS  run_gate           1.2s  coverage/depth Stop gate\n  PASS  check_hook         3.1s  safety_gate live-fire\n  PASS  sentinel_replay    0.0s  behavior detectors 26-case\n  PASS  verify_layers      1.3s  safety-floor coverage\n  PASS  guard_smoke        0.0s  guard rate/cap/breaker smoke\n\n57 passed, 0 failed  (77.4s total)\n"
+          },
+          {
+            "token": "test_registry.diff",
+            "path": "test_registry.diff",
+            "exists": true,
+            "size": 517,
+            "sha1": "5e82508325890891afccbbb9881ebca1a560b635",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/selftest_all.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 1,
+              "hunks": [
+                {
+                  "file": "tools/selftest_all.py",
+                  "header": "@@ -77,0 +78,3 @@ SUITES: list[tuple[str, list[str], str]] = ["
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/selftest_all.py b/tools/selftest_all.py\nindex 6bcb036..5bfe18a 100644\n--- a/tools/selftest_all.py\n+++ b/tools/selftest_all.py\n@@ -77,0 +78,3 @@ SUITES: list[tuple[str, list[str], str]] = [\n+    (\"run_model\",       [\"tools/run_model.py\", \"--selftest\"], \"canonical front/status parser\"),\n+    (\"runtime_receipts\", [\"tools/runtime_receipts.py\", \"--selftest\"], \"hook-derived Agent/Cron receipts\"),\n+    (\"turn_contract\",   [\"tools/turn_contract.py\", \"--selftest\"], \"execute/explain/pause turn modes\"),\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002 - Peer-review provenance",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "peer_review.diff",
+            "path": "peer_review.diff",
+            "exists": true,
+            "size": 8161,
+            "sha1": "6307abd68fa5cde625c7cbc87bf4dceb2a92e472",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/peer_review.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 28,
+              "hunks": [
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -6 +6 @@"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -79 +79 @@ DEFAULT_CONFIG: dict = {"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -85 +85 @@ DEFAULT_CONFIG: dict = {"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -90 +89,0 @@ DEFAULT_CONFIG: dict = {"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -184 +183,3 @@ ARTIFACT_EXCERPT_CAP = 24_000"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -232,0 +234 @@ class ReviewResult:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -447 +449,8 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -540 +549 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -578,0 +588,6 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -853 +868 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -857,2 +872 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -961 +975 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -965,2 +979 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1048 +1061 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1052,2 +1065 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1476 +1488,27 @@ def _strip_template_review_placeholders(text: str) -> str:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1487,0 +1526,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1494,0 +1535 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1496,0 +1538,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1498,3 +1541,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1517,0 +1565 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1606 +1654 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1752,2 +1800,2 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1839 +1887 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1840,0 +1889,7 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1854,0 +1910,5 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -1877,0 +1938,4 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/peer_review.py",
+                  "header": "@@ -2054,0 +2119,3 @@ def main() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/peer_review.py b/tools/peer_review.py\nindex a1efa97..679f3a7 100644\n--- a/tools/peer_review.py\n+++ b/tools/peer_review.py\n@@ -6 +6 @@\n-    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 三模型 panel;\n+    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 双模型 panel;\n@@ -79 +79 @@ DEFAULT_CONFIG: dict = {\n-        \"max_bundle_chars\": 180_000,\n+        \"max_bundle_chars\": 110_000,\n@@ -85 +85 @@ DEFAULT_CONFIG: dict = {\n-        # arkcli 外部异构补盲团: 三模型独立审同一冻结 bundle, 聚合成候选 finding。\n+        # arkcli 外部异构补盲团: 双模型独立审同一冻结 bundle, 聚合成候选 finding。\n@@ -90 +89,0 @@ DEFAULT_CONFIG: dict = {\n-                       {\"id\": \"minimax-m3\"},\n@@ -184 +183,3 @@ ARTIFACT_EXCERPT_CAP = 24_000\n-BUNDLE_CHAR_CAP = 180_000\n+# Keep the frozen JSON plus rubric below the narrowest default panel context.\n+# Full artifact hashes remain in the bundle when excerpts are reduced.\n+BUNDLE_CHAR_CAP = 110_000\n@@ -232,0 +234 @@ class ReviewResult:\n+    runtime_receipt_id: str = field(default=\"\", repr=False)\n@@ -447 +449,8 @@ def build_evidence_index(run_dir: Path, *, redact: bool = False,\n-    payload[\"sha1\"] = _sha1_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(\"utf-8\"))\n+    digest_entries = json.loads(json.dumps(entries, ensure_ascii=False))\n+    for entry in digest_entries:\n+        for artifact in entry.get(\"artifacts\", []):\n+            for key in (\"excerpt\", \"excerpt_truncated_chars\", \"diff_summary\"):\n+                artifact.pop(key, None)\n+    digest_payload = {\"schema\": \"xunji.evidence_index.v1\", \"entries\": digest_entries}\n+    payload[\"sha1\"] = _sha1_bytes(json.dumps(\n+        digest_payload, ensure_ascii=False, sort_keys=True).encode(\"utf-8\"))\n@@ -540 +549 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,\n-    for _ in range(6):\n+    for _ in range(16):\n@@ -578,0 +588,6 @@ def build_review_bundle(run_dir: Path, *, write: bool = False,\n+def _bundle_context(bundle: dict) -> str:\n+    \"\"\"Serialize exactly as the bundle cap is measured; never pretty-print then cut.\"\"\"\n+    return json.dumps(\n+        bundle, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"))\n+\n+\n@@ -853 +868 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,\n-    context = json.dumps(bundle or build_review_bundle(\n+    context = _bundle_context(bundle or build_review_bundle(\n@@ -857,2 +872 @@ def _run_openai(scope_dir: Path, rubric: str, b: dict, name: str, timeout: int,\n-        max_bundle_chars=max_bundle_chars),\n-                         ensure_ascii=False, indent=2)\n+        max_bundle_chars=max_bundle_chars))\n@@ -961 +975 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,\n-    context = json.dumps(bundle or build_review_bundle(\n+    context = _bundle_context(bundle or build_review_bundle(\n@@ -965,2 +979 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,\n-        max_bundle_chars=max_bundle_chars),\n-                         ensure_ascii=False, indent=2)\n+        max_bundle_chars=max_bundle_chars))\n@@ -1048 +1061 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,\n-    context = json.dumps(bundle or build_review_bundle(\n+    context = _bundle_context(bundle or build_review_bundle(\n@@ -1052,2 +1065 @@ def _run_claude_cli(scope_dir: Path, rubric: str, b: dict, timeout: int,\n-        max_bundle_chars=max_bundle_chars),\n-                         ensure_ascii=False, indent=2)\n+        max_bundle_chars=max_bundle_chars))\n@@ -1476 +1488,27 @@ def _strip_template_review_placeholders(text: str) -> str:\n-def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+def _write_review_receipt(run_dir: Path, result: ReviewResult, review_kind: str) -> str:\n+    \"\"\"Persist the machine provenance that Markdown review prose cannot prove.\"\"\"\n+    payload = {\n+        \"schema\": \"xunji.peer_review_receipt.v1\",\n+        \"generated_at\": datetime.now(timezone.utc).isoformat(),\n+        \"review_kind\": review_kind,\n+        \"result\": result.as_dict(),\n+    }\n+    receipt_id = hashlib.sha256(json.dumps(\n+        payload, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"),\n+    ).encode(\"utf-8\")).hexdigest()\n+    record = dict(payload)\n+    record[\"receipt_id\"] = receipt_id\n+    out = run_dir / \"review\" / \"receipts\" / f\"{receipt_id}.json\"\n+    out.parent.mkdir(parents=True, exist_ok=True)\n+    tmp = out.with_name(out.name + f\".tmp-{os.getpid()}\")\n+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + \"\\n\",\n+                   encoding=\"utf-8\")\n+    os.replace(tmp, out)\n+    try:\n+        os.chmod(out, 0o600)\n+    except OSError:\n+        pass\n+    return receipt_id\n+\n+\n+def _append_run_review(run_dir: Path, result: ReviewResult) -> str:\n@@ -1487,0 +1526,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+    receipt_id = _write_review_receipt(run_dir, result, review_kind)\n+    result.runtime_receipt_id = receipt_id\n@@ -1494,0 +1535 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+              f\"- ReviewReceipt: {receipt_id}\",\n@@ -1496,0 +1538,2 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+    used_ids = set(re.findall(r\"(?m)^###\\s+(PR-\\d+)\\b\", existing))\n+    next_pr = max((int(item.split(\"-\")[1]) for item in used_ids), default=0) + 1\n@@ -1498,3 +1541,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n-        for i, f in enumerate(result.findings, 1):\n-            if not f.id:\n-                f.id = f\"PR-{i:03d}\"\n+        for f in result.findings:\n+            if not f.id or f.id in used_ids or not re.fullmatch(r\"PR-\\d+\", f.id):\n+                while f\"PR-{next_pr:03d}\" in used_ids:\n+                    next_pr += 1\n+                f.id = f\"PR-{next_pr:03d}\"\n+                next_pr += 1\n+            used_ids.add(f.id)\n@@ -1517,0 +1565 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> None:\n+    return receipt_id\n@@ -1606 +1654 @@ def _selftest() -> int:\n-                   == [\"kimi-k2.7-code\", \"minimax-m3\", \"glm-5.2\"]))\n+                   == [\"kimi-k2.7-code\", \"glm-5.2\"]))\n@@ -1752,2 +1800,2 @@ def _selftest() -> int:\n-        [\"minimax-m3: timeout >1s\"],\n-        \"arkcli:glm-5.2+kimi-k2.7-code+minimax-m3\")\n+        [\"kimi-k2.7-code: timeout >1s\"],\n+        \"arkcli:kimi-k2.7-code+glm-5.2\")\n@@ -1839 +1887 @@ def _selftest() -> int:\n-    _append_run_review(d_run, ReviewResult(verdict=\"PASS\", backend_used=\"arkcli:glm-5.2+kimi-k2.7-code+minimax-m3\"))\n+    _append_run_review(d_run, ReviewResult(verdict=\"PASS\", backend_used=\"arkcli:kimi-k2.7-code+glm-5.2\"))\n@@ -1840,0 +1889,7 @@ def _selftest() -> int:\n+    _append_run_review(d_run, ReviewResult(\n+        verdict=\"WARN\", findings=[Finding(\"WARN\", \"second\", \"E-001\", \"check\")],\n+        backend_used=\"arkcli:glm-5.2\", bundle_hash=b_run[\"sha1\"],\n+        evidence_index_hash=b_run[\"evidence_index\"][\"sha1\"],\n+    ))\n+    rv3 = (d_run / \"review.md\").read_text(encoding=\"utf-8\")\n+    receipt_ids = re.findall(r\"(?m)^- ReviewReceipt: ([0-9a-f]{64})$\", rv3)\n@@ -1854,0 +1910,5 @@ def _selftest() -> int:\n+        (\"into_run writes content-addressed receipt files\",\n+         len(receipt_ids) == 3 and all((d_run / \"review\" / \"receipts\" / f\"{rid}.json\").is_file()\n+                                       for rid in receipt_ids)),\n+        (\"repeated reviews allocate globally unique PR ids\",\n+         rv3.count(\"### PR-001\") == 1 and rv3.count(\"### PR-002\") == 1),\n@@ -1877,0 +1938,4 @@ def _selftest() -> int:\n+        (\"backend bundle context uses the capped compact serialization\",\n+         _bundle_context(b_long) == json.dumps(\n+             b_long, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"))\n+         and \"\\n\" not in _bundle_context(b_long)),\n@@ -2054,0 +2119,3 @@ def main() -> int:\n+    if args.into_run and r.runtime_receipt_id:\n+        print(f\"XUNJI_REVIEW_RECEIPT={r.runtime_receipt_id}\")\n+        print(f\"XUNJI_REVIEW_BUNDLE={r.bundle_hash}\")\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-003",
+        "head": "## E-003 - Canonical projections and statusline",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "canonical_consumers.diff",
+            "path": "canonical_consumers.diff",
+            "exists": true,
+            "size": 7825,
+            "sha1": "bd77f928db1ab7c0aaf897eb1699d0634fa68442",
+            "diff_summary": {
+              "changed_files_count": 4,
+              "changed_files": [
+                "tools/coverage_matrix.py",
+                "tools/graph.py",
+                "tools/loop_state.py",
+                "tools/state_project.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 16,
+              "hunks": [
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -44,0 +45,2 @@ except Exception:  # pragma: no cover - defensive fallback for broken imports"
+                },
+                {
+                  "file": "tools/coverage_matrix.py",
+                  "header": "@@ -291,24 +293,6 @@ def _parse_front_blocks(run_dir: Path) -> list[dict]:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -16 +16,2 @@"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -38,0 +40,2 @@ CONFIRMED = 0.8  # certainty 门: >= 此值才算 Fact(已确认)"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -83,15 +86,6 @@ def build_graph(run_dir: Path) -> dict:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -128 +122 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -140 +134,2 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -230 +225 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:"
+                },
+                {
+                  "file": "tools/graph.py",
+                  "header": "@@ -236 +231,2 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -38,0 +39 @@ import workers  # noqa: E402"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -180,6 +181,17 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -190 +202 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -219,0 +232,4 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:"
+                },
+                {
+                  "file": "tools/loop_state.py",
+                  "header": "@@ -248 +264 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:"
+                },
+                {
+                  "file": "tools/state_project.py",
+                  "header": "@@ -19,0 +20 @@ from evidence_parse import parse_evidence  # noqa: E402"
+                },
+                {
+                  "file": "tools/state_project.py",
+                  "header": "@@ -37,18 +38,9 @@ def parse_fronts(run_dir: Path) -> list[dict]:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/coverage_matrix.py b/tools/coverage_matrix.py\nindex a1405e5..ce227e1 100644\n--- a/tools/coverage_matrix.py\n+++ b/tools/coverage_matrix.py\n@@ -44,0 +45,2 @@ except Exception:  # pragma: no cover - defensive fallback for broken imports\n+import run_model\n+\n@@ -291,24 +293,6 @@ def _parse_front_blocks(run_dir: Path) -> list[dict]:\n-    fr = run_dir / \"frontier.md\"\n-    if not fr.exists():\n-        return []\n-    text = fr.read_text(encoding=\"utf-8\", errors=\"replace\")\n-    blocks: list[dict] = []\n-    for section, body in _front_sections(text):\n-        sec_low = section.lower()\n-        if sec_low.startswith(\"open\"):\n-            section_status = \"open\"\n-        elif sec_low.startswith(\"deferred\"):\n-            section_status = \"deferred\"\n-        elif sec_low.startswith(\"closed\"):\n-            section_status = \"closed\"\n-        else:\n-            section_status = \"unknown\"\n-        for m in re.finditer(r\"(?ms)^###[ \\t]+(F-\\d+).*?(?=^###[ \\t]+F-\\d+|\\Z)\", body):\n-            block_text = m.group(0)\n-            blocks.append({\n-                \"id\": m.group(1),\n-                \"status\": (_field(block_text, \"Status\") or section_status).lower(),\n-                \"section\": section,\n-                \"text\": block_text,\n-            })\n-    return blocks\n+    return [{\n+        \"id\": front.id,\n+        \"status\": front.status,\n+        \"section\": front.section,\n+        \"text\": front.text,\n+    } for front in run_model.parse_fronts(run_dir)]\ndiff --git a/tools/graph.py b/tools/graph.py\nindex e9432b6..a5257a4 100644\n--- a/tools/graph.py\n+++ b/tools/graph.py\n@@ -16 +16,2 @@\n-前沿状态由它所在的 ## Open/Deferred/Closed Fronts 区段决定。已确认 Fact = E 且 certainty>=0.8。\n+前沿状态由 `tools/run_model.py` 统一解析 canonical `Status:`；章节只用于发现\n+格式冲突。已确认 Fact = E 且 certainty>=0.8。\n@@ -38,0 +40,2 @@ CONFIRMED = 0.8  # certainty 门: >= 此值才算 Fact(已确认)\n+sys.path.insert(0, str(ROOT / \"tools\"))\n+import run_model  # noqa: E402\n@@ -83,15 +86,6 @@ def build_graph(run_dir: Path) -> dict:\n-    fr = run_dir / \"frontier.md\"\n-    if fr.exists():\n-        ftext = fr.read_text(encoding=\"utf-8\", errors=\"replace\")\n-        for sec, status in ((\"Open Fronts\", \"open\"),\n-                            (\"Deferred Fronts\", \"deferred\"),\n-                            (\"Closed Fronts\", \"closed\")):\n-            m = re.search(rf\"##\\s*{sec}(.*?)(?=^##\\s|\\Z)\", ftext, re.S | re.MULTILINE)\n-            if not m:\n-                continue\n-            for fid, b in _blocks(m.group(1), r\"###\\s+(F-\\d+)\"):\n-                nodes[fid] = {\"type\": \"front\", \"status\": status}\n-                for h in _ids(b, \"Linked hypotheses\", \"H\"):\n-                    edges.append({\"src\": fid, \"dst\": h, \"rel\": \"tests\"})\n-                for e in _ids(b, \"Unlocked-by\", \"E\"):\n-                    edges.append({\"src\": e, \"dst\": fid, \"rel\": \"unlocks\"})\n+    for front in run_model.parse_fronts(run_dir):\n+        nodes[front.id] = {\"type\": \"front\", \"status\": front.status}\n+        for h in _ids(front.text, \"Linked hypotheses\", \"H\"):\n+            edges.append({\"src\": front.id, \"dst\": h, \"rel\": \"tests\"})\n+        for e in _ids(front.text, \"Unlocked-by\", \"E\"):\n+            edges.append({\"src\": e, \"dst\": front.id, \"rel\": \"unlocks\"})\n@@ -128 +122 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:\n-            elif fn[\"status\"] == \"closed\":\n+            elif fn[\"status\"] in run_model.TERMINAL_STATUSES - {\"deferred\"}:\n@@ -140 +134,2 @@ def derive_view(g: dict, run_dir: Path | None = None) -> dict:\n-        {fid for fid, n in nodes.items() if n[\"type\"] == \"front\" and n[\"status\"] == \"open\"}\n+        {fid for fid, n in nodes.items()\n+         if n[\"type\"] == \"front\" and n[\"status\"] in run_model.OPEN_STATUSES}\n@@ -230 +225 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:\n-                   if nd.get(\"type\") == \"front\" and nd.get(\"status\") in (\"open\", \"probing\")]\n+                   if nd.get(\"type\") == \"front\" and nd.get(\"status\") in run_model.OPEN_STATUSES]\n@@ -236 +231,2 @@ def _write_checkpoint(run_dir: Path, g: dict) -> None:\n-                     if nd.get(\"type\") == \"front\" and nd.get(\"status\") == \"closed\"]\n+                     if nd.get(\"type\") == \"front\"\n+                     and nd.get(\"status\") in run_model.TERMINAL_STATUSES - {\"deferred\"}]\ndiff --git a/tools/loop_state.py b/tools/loop_state.py\nindex c700550..6d6b37c 100644\n--- a/tools/loop_state.py\n+++ b/tools/loop_state.py\n@@ -38,0 +39 @@ import workers  # noqa: E402\n+import run_model  # noqa: E402\n@@ -180,6 +181,17 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n-    real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}\n-    fronts = [\n-        f for f in projection.get(\"fronts\", [])\n-        if str(f.get(\"id\", \"\")).startswith(\"F-\")\n-        and (not real_front_ids or str(f.get(\"id\")) in real_front_ids)\n-    ]\n+    canonical = run_model.parse_fronts(run_dir)\n+    canonical_used = bool(canonical)\n+    if canonical:\n+        fronts = [{\n+            \"id\": front.id,\n+            \"status\": front.status,\n+            \"barrier\": front.barrier,\n+            \"depth\": front.depth,\n+            \"schema_errors\": list(front.schema_errors),\n+        } for front in canonical]\n+    else:\n+        real_front_ids = {fid for fid, _ in _front_blocks_text(run_dir)}\n+        fronts = [\n+            f for f in projection.get(\"fronts\", [])\n+            if str(f.get(\"id\", \"\")).startswith(\"F-\")\n+            and (not real_front_ids or str(f.get(\"id\")) in real_front_ids)\n+        ]\n@@ -190 +202 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n-        if raw.lower() in {\"\", \"unknown\"}:\n+        if not canonical_used and raw.lower() in {\"\", \"unknown\"}:\n@@ -219,0 +232,4 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n+    barrier_counts = {barrier: barriers.count(barrier) for barrier in unique_barriers}\n+    all_share_one_barrier = bool(open_fronts) and any(\n+        count == len(open_fronts) for count in barrier_counts.values()\n+    )\n@@ -248 +264 @@ def _front_summary(run_dir: Path, view: dict, projection: dict) -> dict:\n-        \"diverse_barriers\": len(unique_barriers) >= 2,\n+        \"diverse_barriers\": not all_share_one_barrier,\ndiff --git a/tools/state_project.py b/tools/state_project.py\nindex 2be6750..00d7574 100644\n--- a/tools/state_project.py\n+++ b/tools/state_project.py\n@@ -19,0 +20 @@ from evidence_parse import parse_evidence  # noqa: E402\n+import run_model  # noqa: E402\n@@ -37,18 +38,9 @@ def parse_fronts(run_dir: Path) -> list[dict]:\n-    text = _read(run_dir / \"frontier.md\")\n-    fronts: list[dict] = []\n-    for m in re.finditer(rf\"(?ms)^###{HWS}+((?:F|H)-\\d+)(.*?)(?=^###{HWS}+(?:F|H)-\\d+|\\Z)\", text):\n-        block = m.group(0)\n-        head = block.splitlines()[0].strip()\n-        status = (_field(block, \"Status\") or \"unknown\").lower()\n-        barrier = (_field(block, \"Barrier class\") or \"unknown\").lower()\n-        depth = (_field(block, \"Current depth\") or _field(block, \"Depth\") or \"unknown\").lower()\n-        fronts.append({\n-            \"id\": m.group(1),\n-            \"title\": re.sub(r\"^###\\s*\", \"\", head),\n-            \"status\": status,\n-            \"barrier\": barrier,\n-            \"depth\": depth,\n-            \"same_barrier_failures\": len(re.findall(r\"same[- ]barrier|同一屏障\", block, re.I)),\n-            \"text\": block,\n-        })\n-    return fronts\n+    return [{\n+        \"id\": front.id,\n+        \"title\": front.title,\n+        \"status\": front.status,\n+        \"barrier\": front.barrier,\n+        \"depth\": front.depth,\n+        \"same_barrier_failures\": len(re.findall(r\"same[- ]barrier|同一屏障\", front.text, re.I)),\n+        \"text\": front.text,\n+    } for front in run_model.parse_fronts(run_dir)]\n"
+          },
+          {
+            "token": "status_journal.diff",
+            "path": "status_journal.diff",
+            "exists": true,
+            "size": 6708,
+            "sha1": "fc18b66dc5f9b174bd34d0bf4178a16188ecc136",
+            "diff_summary": {
+              "changed_files_count": 2,
+              "changed_files": [
+                "tools/loop_journal.py",
+                "tools/xunji_statusline.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 17,
+              "hunks": [
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -12,0 +13,2 @@ import argparse"
+                },
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -13,0 +16 @@ import json"
+                },
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -18,0 +22,5 @@ from pathlib import Path"
+                },
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -53,0 +62,14 @@ def _journal_path(run_dir: Path) -> Path:"
+                },
+                {
+                  "file": "tools/loop_journal.py",
+                  "header": "@@ -101,15 +123,24 @@ def append_event(run_dir: str | Path, event: str, *, note: str = \"\", data: dict"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -12,0 +13 @@ import argparse"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -18,0 +20 @@ import tempfile"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -38,0 +41,2 @@ PHASE_LABELS = {"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -46,0 +51,2 @@ PHASE_COLOR = {"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -207 +213,16 @@ def _agent_summary(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -208,0 +230,5 @@ def _agent_summary(run_dir: Path) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -232 +258,13 @@ def _front_summary(loop_data: dict) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -234,0 +273,3 @@ def _phase(loop_data: dict, journal: dict) -> str:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -350 +391 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -392,2 +433,4 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -408,0 +452,5 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/xunji_statusline.py",
+                  "header": "@@ -464 +512,2 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/loop_journal.py b/tools/loop_journal.py\nindex 2883a2c..0bf5e8e 100644\n--- a/tools/loop_journal.py\n+++ b/tools/loop_journal.py\n@@ -12,0 +13,2 @@ import argparse\n+import contextlib\n+import hashlib\n@@ -13,0 +16 @@ import json\n+import os\n@@ -18,0 +22,5 @@ from pathlib import Path\n+try:\n+    import fcntl\n+except ImportError:  # pragma: no cover\n+    fcntl = None\n+\n@@ -53,0 +62,14 @@ def _journal_path(run_dir: Path) -> Path:\n+@contextlib.contextmanager\n+def _journal_lock(run_dir: Path):\n+    path = run_dir / \"state\" / \".loop_journal.lock\"\n+    path.parent.mkdir(parents=True, exist_ok=True)\n+    with path.open(\"a+\", encoding=\"utf-8\") as handle:\n+        if fcntl is not None:\n+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)\n+        try:\n+            yield\n+        finally:\n+            if fcntl is not None:\n+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)\n+\n+\n@@ -101,15 +123,24 @@ def append_event(run_dir: str | Path, event: str, *, note: str = \"\", data: dict\n-    events = load_events(run_dir)\n-    rec = {\n-        \"schema\": SCHEMA,\n-        \"ts\": time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime()),\n-        \"run_dir\": str(run_dir),\n-        \"cycle\": _next_cycle(events, event),\n-        \"event\": event,\n-        \"note\": note,\n-        \"data\": data or {},\n-        \"canonical\": \"Markdown run files remain source of truth; this journal is derived.\",\n-    }\n-    path = _journal_path(run_dir)\n-    path.parent.mkdir(parents=True, exist_ok=True)\n-    with path.open(\"a\", encoding=\"utf-8\") as f:\n-        f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + \"\\n\")\n+    with _journal_lock(run_dir):\n+        events = load_events(run_dir)\n+        rec = {\n+            \"schema\": SCHEMA,\n+            \"ts\": time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime()),\n+            \"run_dir\": str(run_dir),\n+            \"cycle\": _next_cycle(events, event),\n+            \"event\": event,\n+            \"note\": note,\n+            \"data\": data or {},\n+            \"previous_event_hash\": str(events[-1].get(\"event_hash\") or \"\") if events else \"\",\n+            \"canonical\": \"Markdown run files remain source of truth; this journal is derived.\",\n+        }\n+        rec[\"event_hash\"] = hashlib.sha256(json.dumps(\n+            rec, ensure_ascii=False, sort_keys=True, separators=(\",\", \":\"),\n+        ).encode(\"utf-8\")).hexdigest()\n+        path = _journal_path(run_dir)\n+        path.parent.mkdir(parents=True, exist_ok=True)\n+        with path.open(\"a\", encoding=\"utf-8\") as f:\n+            f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + \"\\n\")\n+        try:\n+            os.chmod(path, 0o600)\n+        except OSError:\n+            pass\ndiff --git a/tools/xunji_statusline.py b/tools/xunji_statusline.py\nindex 75c60b7..65451df 100644\n--- a/tools/xunji_statusline.py\n+++ b/tools/xunji_statusline.py\n@@ -12,0 +13 @@ import argparse\n+import calendar\n@@ -18,0 +20 @@ import tempfile\n+import time\n@@ -38,0 +41,2 @@ PHASE_LABELS = {\n+    \"Paused\": \"Paused｜已暂停\",\n+    \"Interrupted\": \"Interrupted｜中断待恢复\",\n@@ -46,0 +51,2 @@ PHASE_COLOR = {\n+    \"Paused\": \"gray\",\n+    \"Interrupted\": \"red\",\n@@ -207 +213,16 @@ def _agent_summary(run_dir: Path) -> str:\n-    if not isinstance(assignments, list) or not assignments:\n+    planned = len(assignments) if isinstance(assignments, list) else 0\n+    current_turn = False\n+    try:\n+        import runtime_receipts  # noqa: WPS433\n+        import turn_contract  # noqa: WPS433\n+        contract = turn_contract.load_contract(run_dir)\n+        current_turn = str(contract.get(\"mode\") or \"\") == \"EXECUTE\"\n+        real = runtime_receipts.agent_fanout(\n+            run_dir,\n+            session_id=str(contract.get(\"session_id\") or \"\") if current_turn else \"\",\n+            since=float(contract.get(\"updated_at\") or 0.0) if current_turn else 0.0,\n+        )\n+        real_count = int(real.get(\"count\", 0) or 0)\n+    except Exception:\n+        real_count = 0\n+    if not planned and not real_count:\n@@ -208,0 +230,5 @@ def _agent_summary(run_dir: Path) -> str:\n+    real_label = \"本轮真实\" if current_turn else \"真实\"\n+    if planned and real_count < planned:\n+        return f\"子任务 计划{planned}/{real_label}{real_count}\"\n+    if real_count:\n+        return f\"子任务 {real_count} 个{real_label}回执\"\n@@ -232 +258,13 @@ def _front_summary(loop_data: dict) -> str:\n-def _phase(loop_data: dict, journal: dict) -> str:\n+def _event_age_seconds(journal: dict) -> float | None:\n+    event = journal.get(\"last_event\") if isinstance(journal.get(\"last_event\"), dict) else {}\n+    raw = str(event.get(\"ts\") or \"\")\n+    try:\n+        return max(0.0, time.time() - calendar.timegm(time.strptime(raw, \"%Y-%m-%dT%H:%M:%SZ\")))\n+    except Exception:\n+        return None\n+\n+\n+def _phase(loop_data: dict, journal: dict, run_dir: Path) -> str:\n+    status = _load_json(run_dir / \"state\" / \"run_status.json\", {})\n+    if str(status.get(\"status\") or \"\") == \"paused_by_operator\":\n+        return \"Paused\"\n@@ -234,0 +273,3 @@ def _phase(loop_data: dict, journal: dict) -> str:\n+        age = _event_age_seconds(journal)\n+        if age is None or age > 5 * 60:\n+            return \"Interrupted\"\n@@ -350 +391 @@ def render_statusline(payload: dict | None = None, *, color: bool | None = None)\n-    phase = _phase(loop_data, journal)\n+    phase = _phase(loop_data, journal, run_dir)\n@@ -392,2 +433,4 @@ def _selftest() -> int:\n-        json.dumps({\"cycle\": 1, \"event\": \"phase_start\", \"data\": {\"phase\": \"Hunter\"}, \"note\": \"\"}, ensure_ascii=False) + \"\\n\"\n-        + json.dumps({\"cycle\": 1, \"event\": \"plan\", \"data\": {}, \"note\": \"目标=F-004; 原因=接口枚举\"}, ensure_ascii=False) + \"\\n\",\n+        json.dumps({\"cycle\": 1, \"event\": \"phase_start\", \"data\": {\"phase\": \"Hunter\"}, \"note\": \"\",\n+                    \"ts\": time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime())}, ensure_ascii=False) + \"\\n\"\n+        + json.dumps({\"cycle\": 1, \"event\": \"plan\", \"data\": {}, \"note\": \"目标=F-004; 原因=接口枚举\",\n+                      \"ts\": time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime())}, ensure_ascii=False) + \"\\n\",\n@@ -408,0 +452,5 @@ def _selftest() -> int:\n+        (run / \"state\" / \"run_status.json\").write_text(json.dumps({\n+            \"status\": \"paused_by_operator\",\n+        }), encoding=\"utf-8\")\n+        paused_plain = render_statusline(root_current, color=False)\n+        (run / \"state\" / \"run_status.json\").unlink()\n@@ -464 +512,2 @@ def _selftest() -> int:\n-        (\"subagents are aggregated\", \"子任务 2 个进行中\" in plain),\n+        (\"planned agents are not presented as real\", \"子任务 计划2/真实0\" in plain),\n+        (\"operator pause is visible\", \"[Paused｜已暂停]\" in paused_plain),\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "8bd478ef64d2fc5b108ee19ac864876d44d2da40"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Closure Review Scope\n\n- Status: REVIEW\n- Author: Codex\n- Kind: safety-critical framework maintenance\n- Evidence IDs: E-001, E-002, E-003\n\nThis scope tests whether closure can be forged with prose, stale evidence,\nduplicate review identities, manually edited state, or a misleading statusline.\nE-001 covers completion and maturity gates; E-002 covers review provenance;\nE-003 covers canonical projections and status rendering. Primary Claude rules,\nskills, and templates are delegated to the separate `docs-scope`; this scope does\nnot claim that review is complete. The 57-suite regression is directly retained\nas `selftest_all.log`, bound to the source set by `closure-source-manifest.json`,\nand used as a control rather than a separate finding. `test_registry.diff`\nproves the new suites are registered; `closure_selftests.summary.json` retains\nnamed per-check results and output hashes; `closure-source-manifest.json` binds\nthe closure/review/projection sources themselves. There is no network\ntarget, so target-vulnerability and HTTP replay evidence are not applicable.\n",
+    "frontier.md": "# Frontier\n\n## Open Fronts\n### F-001 - Closure and state enforcement\n- Status: open\n- Barrier class: none\n- Current depth: deep\n- Failure budget: final independent review pending\n- Evidence: E-001, E-002, E-003\n\n## Deferred Fronts\n## Closed Fronts\n",
+    "decisions.md": "# Decisions\n\n## D-001 - Maintenance review scope\n\n- Status: REVIEW_ONLY\n- Decision: This scope reviews closure enforcement code; it is not a live engagement closure.\n- Completion marker: absent by design\n- Required exit: independent review of the frozen bundle plus full regression\n- Migration: prose-only reviews from older runs intentionally become stale and\n  must be regenerated through the current foreground `peer_review.py --into-run`\n  receipt path; they are not silently grandfathered.\n",
+    "review.md": "# Review\n\nIndependent output will be stored as `peer_review.md` and `peer_review.json`\nafter the frozen bundle is reviewed; this file does not claim a completed review.\nPrior cross-scope findings and their adjudication remain in `disposition.md`.\n\n## Round 1 Driver Disposition\n\n- PR-001 accepted: review wording is now explicitly prospective and does not\n  claim a receipt before the independent review runs.\n- PR-002 accepted: F-001 is open until final review completes.\n- PR-003 accepted: the 57-suite log and installed source manifest are now direct\n  E-001/E-002/E-003 control artifacts.\n- PR-004 retained limitation: two arkcli outputs were unparsable; Kimi and fresh\n  Claude completed and no partial panel is represented as a PASS.\n- Compact bundle serialization is intentional: the egress/backend payload is the\n  capped object; the pretty on-disk copy is an audit artifact, not the transmitted\n  context. Existing prose-only reviews are deliberately invalidated and rerun.\n\n## Final Auditability Disposition\n\n- `test_registry.diff` is now direct evidence for every closure entry.\n- `closure-source-manifest.json` hashes `check_run.py`, `peer_review.py`, the test\n  registry, projections, journal, and statusline sources.\n- `closure_selftests.summary.json` records named checks, counts, failures, and\n  output hashes for closure/review/projection/statusline suites.\n- Old generic `peer_review.md/json` outputs are removed on bundle rebuild so a\n  stale round cannot be mistaken for the current `peer_review.final.*` result.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 110000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "238a7d74ae41bfa531411983c4dff5a5f719c3d4"
+}

@@ -1,0 +1,175 @@
+{
+  "schema": "xunji.review_bundle.v1",
+  "run": "2026-07-13-setup-banner-dedup",
+  "files": {
+    "report.md": {
+      "sha1": "e8f5d098e18c1c7eef7956667e815ab9b47c4ec0",
+      "size": 725
+    },
+    "evidence.md": {
+      "sha1": "1f3b9fb872fdc999be14e0d195e9f96f7e59067e",
+      "size": 904
+    }
+  },
+  "evidence_index": {
+    "schema": "xunji.evidence_index.v1",
+    "entries": [
+      {
+        "id": "E-001",
+        "head": "## E-001 - setup phase banner deduplication",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "docs_excerpt.md",
+            "path": "docs_excerpt.md",
+            "exists": true,
+            "size": 5715,
+            "sha1": "ef6e53bd0634dd2ce581e605f360f209d6fee1b8",
+            "excerpt": "===== CLAUDE.md =====\n- `docs/ROUTER.md` decides which mode guidance to load; deterministic (runtime +\n  phase + run state → files).\n- The five Router phases are `Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`,\n  and `Report`. Whenever one of these phases is entered or left, print an\n  obvious Chinese, box-style operator marker with bracket tags (for example\n  `[Xunji] [阶段开始] [Hunter｜验证挖掘]`) and ANSI color when the terminal supports it.\n  Once a run directory exists, record the same transition with\n  `tools/loop_journal.py phase-start|phase-end --phase ...`.\n  Mechanical Setup inside `setup_run.py` is the one display exception: record its\n  start/end in the journal but do not print separate box banners, because the\n  tool's progress output and selected-run statusline already expose that state.\n  Do not invent markers for lifecycle mechanics such as resume, handoff, drift\n  recovery, `/loop`, or closure gates. Operator-facing lifecycle/status output\n  should be Chinese, keep bracket tags as no-color fallback, and summarize the\n  current phase, run dir, blockers, and next required action before any raw\n  details.\n- Claude Code statusline is a read-only indicator for this project. It prints\n  nothing without an explicit Xunji workspace and active run; otherwise it shows\n  only `[Xunji-status] [<phase>] <run>`. Detailed progress and health remain in\n  visible phase banners and `loop_journal.py` phase-start/phase-end records.\n- **Target-facing privacy boundary:** Root and every Agent must keep generated\n  project/run/Agent/operator identity and real personal data out of outbound URL\n  paths/queries, headers, bodies, multipart names/content, and target writes. Use\n===== docs/WORKFLOW.md =====\n阶段进入/退出必须对操作者可见。When a run enters or leaves one of the Router\nphases (`Setup`, `Root Orchestrator`, `Hunter`, `Reviewer`, `Report`), print a\nclear Chinese phase marker and, once a run directory exists, record it in the\nloop journal:\n\n```bash\npython tools/loop_journal.py runs/<dir> phase-start --phase \"Root Orchestrator\" --note \"why this phase starts\"\npython tools/loop_journal.py runs/<dir> phase-end --phase \"Root Orchestrator\" --note \"result and next phase\"\n```\n\n`setup_run.py` 的机械 Setup 是显示例外：仍写入 Setup 的 `phase_start` / `phase_end`\njournal 事件，但不额外打印 box banner，避免与工具进度及选中 run 的 statusline\n重复。其他实际进入的 Router 阶段继续显示 start/end marker。\n\nOnly mark phases actually entered. `Resume`, `/loop`, handoff, and closure gates\nare lifecycle mechanics, not extra Router phases.\n\nOperator-facing lifecycle output should be Chinese, box-style, and `[标签]`\nbased when possible, with ANSI color as presentation only. Show current phase,\nopen/deferred/closed fronts, evidence delta, coverage delta, Agent conflicts,\nstop blockers, and next required action before detailed raw state.\n\nThe point is to make \"what just got unlocked / neglected / contradicted / unassigned\"\na query, not a full re-read of every block. Ask:\n\n1. Did new evidence **confirm, refute, or unlock** any front?\n===== docs/ROUTER.md =====\n### Phase Start / End Visibility\n\nThe Router phases are exactly: `Setup`, `Root Orchestrator`, `Hunter`,\n`Reviewer`, and `Report`. Each phase that is actually entered must produce a\nChinese, box-style visible start marker and a matching visible end marker. Use\nbracket tags as the no-color fallback and ANSI color when the terminal supports\nit:\n\n```text\n╭─ [Xunji] [阶段开始] [Hunter｜验证挖掘] ...\n...\n╭─ [Xunji] [阶段结束] [Hunter｜验证挖掘] ...\n```\n\nWhen a run directory exists, record the same transition in\n`state/loop_journal.jsonl`:\n\n```bash\npython tools/loop_journal.py runs/<dir> phase-start --phase \"<Phase>\" --note \"<why>\"\npython tools/loop_journal.py runs/<dir> phase-end --phase \"<Phase>\" --note \"<result; next phase>\"\n```\n\nMechanical Setup performed inside `setup_run.py` is the display exception: keep\nits journal start/end events, but do not print separate box banners. The setup\ntool's normal progress output and selected-run statusline already make that state\nvisible. Other Router phases retain their visible start/end markers.\n\nDo not fake markers for phases skipped by the current turn. `Resume`, `/loop`,\nhandoff, drift recovery, and closure gates are lifecycle mechanics, not extra\nRouter phases.\n\nOperator-facing lifecycle/status prints should be Chinese first. Prefer compact\n`[标签]` panels that show current phase, run directory, front counts, evidence\ndelta, stop blockers, and next required action before raw JSON or file paths.\n\n===== .claude/skills/xunji-run-lifecycle/SKILL.md =====\nbeing drafted or finalized. `Resume`, handoff, drift recovery, and closure gates\nare lifecycle mechanics, not extra phases.\n\nOperator-facing lifecycle output should be Chinese first and bracket-tagged.\nDetailed phase banners may summarize front counts, evidence/coverage delta, stop\nblockers, and next actions before raw state paths or JSON; the persistent\nstatusline is intentionally narrower.\n`setup_run.py` keeps Setup start/end in the loop journal but deliberately omits\nits own box banners so setup progress and statusline do not duplicate the phase.\n\nClaude Code's project statusline is enabled for Xunji through\n`.claude/settings.json` and `tools/xunji_statusline.py`. It should stay concise:\n`[Xunji-status] [Hunter｜验证] <run>`. It prints nothing until Claude supplies an\nexplicit Xunji workspace and that workspace has an active run. Treat it as\nread-only display. It does not replace phase markers, `loop_journal.py`, or\nPreToolUse enforcement.\n\n## Setup\n\nCreate a new run in one shot:\n\n"
+          },
+          {
+            "token": "selftest.log",
+            "path": "selftest.log",
+            "exists": true,
+            "size": 465,
+            "sha1": "91c79b1ec063d27621f774839f502c305a3a63a8",
+            "excerpt": "python3 tools/setup_run.py --selftest\nsetup_run selftest passed\n- setup phase journal records start and end\n- full setup main succeeds in isolated root\n- full setup main prints progress without phase box banners\n- full setup main preserves closed Setup journal cycle\n\npython3 tools/selftest_all.py --only setup_run,xunji_statusline,loop_journal,loop_bootstrap\n4 passed, 0 failed (0.8s total)\n\npython3 tools/check_rules.py\nrule check passed\n\ngit diff --check\npassed\n"
+          },
+          {
+            "token": "setup_run.diff",
+            "path": "setup_run.diff",
+            "exists": true,
+            "size": 5299,
+            "sha1": "095ab0f84f4f213dc0cb3aa100eed7e4f78585df",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/setup_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 6,
+              "hunks": [
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -52,17 +52,6 @@ def _today() -> str:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -418,7 +407,6 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -502,7 +490,6 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -525,6 +512,8 @@ def _raises_exist(existing: Path) -> bool:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -532,6 +521,10 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -539,11 +532,47 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/setup_run.py b/tools/setup_run.py\nindex e701159..e4be426 100644\n--- a/tools/setup_run.py\n+++ b/tools/setup_run.py\n@@ -52,17 +52,6 @@ def _today() -> str:\n     return datetime.date.today().strftime(\"%Y%m%d\")\n \n \n-def _phase_banner(kind: str, phase: str, *, run_dir: Path, note: str = \"\") -> str:\n-    event = \"phase_start\" if kind.strip().lower() == \"start\" else \"phase_end\"\n-    return loop_journal.render_phase_banner({\n-        \"event\": event,\n-        \"run_dir\": str(run_dir),\n-        \"cycle\": 0,\n-        \"note\": note,\n-        \"data\": {\"phase\": phase},\n-    }).rstrip()\n-\n-\n def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:\n     \"\"\"Best-effort derived phase marker. Markdown/templates remain canonical.\"\"\"\n     try:\n@@ -418,7 +407,6 @@ def main() -> int:\n         return 1\n \n     made = scaffold(run_dir)\n-    print(_phase_banner(\"start\", \"Setup\", run_dir=run_dir, note=\"prepare authorized run workbench\"))\n     _phase_journal(run_dir, \"phase_start\", \"Setup\", \"prepare authorized run workbench\")\n     print(f\"[setup] 建 run 骨架 {run_dir}\")\n     print(f\"        {len(made)} 个核心文件 + evidence/ + scripts/\")\n@@ -502,7 +490,6 @@ def main() -> int:\n     else:\n         print(f\"[下一步] 先填写 target.md 的 Target/In-scope 并生成 coverage.json; 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}\")\n     _phase_journal(run_dir, \"phase_end\", \"Setup\", f\"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})\")\n-    print(_phase_banner(\"end\", \"Setup\", run_dir=run_dir, note=f\"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})\"))\n     # Commit the run transition only after setup has produced its complete local\n     # workbench. set_active_run copies a valid current turn contract before it\n     # atomically replaces the pointer.\n@@ -525,6 +512,8 @@ def _raises_exist(existing: Path) -> bool:\n \n def _selftest() -> int:\n     \"\"\"纯本地回归: 骨架齐全 / 子目录 / recon 记录与 ingest / 不覆盖守卫。无网络。\"\"\"\n+    import contextlib\n+    import io\n     import tempfile\n     d = Path(tempfile.mkdtemp())\n     rd = d / \"t_20260101\"\n@@ -532,6 +521,10 @@ def _selftest() -> int:\n     _phase_journal(rd, \"phase_start\", \"Setup\", \"selftest\")\n     _phase_journal(rd, \"phase_end\", \"Setup\", \"selftest done\")\n     journal = loop_journal.summarize(rd)\n+    phase_events = [\n+        str(item.get(\"event\") or \"\")\n+        for item in journal[\"last_cycle_phase_events\"]\n+    ]\n     checks = [\n         (\"all required files copied\", all((rd / n).exists() for n in REQUIRED)),\n         (\"evidence/ subdir\", (rd / \"evidence\").is_dir() and (rd / \"evidence\" / \".gitkeep\").exists()),\n@@ -539,11 +532,47 @@ def _selftest() -> int:\n         (\"operator profile scaffolded\", (rd / \"state\" / \"operator_profile.json\").exists()),\n         (\"frontier template has depth field\", \"Current depth\" in (rd / \"frontier.md\").read_text(encoding=\"utf-8\")),\n         (\"no-overwrite guard raises\", _raises_exist(rd)),\n-        (\"setup phase banner is visible\",\n-         \"[Xunji] [阶段开始]\" in _phase_banner(\"start\", \"Setup\", run_dir=rd)\n-         and \"[Setup｜准备运行]\" in _phase_banner(\"start\", \"Setup\", run_dir=rd)),\n-        (\"setup phase journal closes\",\n-         journal[\"last_cycle_phase_events\"][-1][\"event\"] == \"phase_end\" and not journal[\"open_phase\"]),\n+        (\"setup phase journal records start and end\",\n+         phase_events == [\"phase_start\", \"phase_end\"] and not journal[\"open_phase\"]),\n+    ]\n+\n+    main_root = d / \"main-root\"\n+    (main_root / \"runs\").mkdir(parents=True)\n+    main_run = main_root / \"runs\" / \"bannercheck_20260102\"\n+    original_root = ROOT\n+    original_set_active = globals()[\"_set_active_run\"]\n+    original_argv = list(sys.argv)\n+    captured = io.StringIO()\n+    try:\n+        globals()[\"ROOT\"] = main_root\n+        globals()[\"_set_active_run\"] = lambda _run_dir: True\n+        sys.argv = [\n+            \"setup_run.py\", \"bannercheck\", \"--target\", \"https://example.test\",\n+            \"--date\", \"20260102\",\n+        ]\n+        with contextlib.redirect_stdout(captured):\n+            main_rc = main()\n+    finally:\n+        sys.argv = original_argv\n+        globals()[\"_set_active_run\"] = original_set_active\n+        globals()[\"ROOT\"] = original_root\n+    main_output = captured.getvalue()\n+    main_journal = loop_journal.summarize(main_run)\n+    main_phase_events = [\n+        str(item.get(\"event\") or \"\")\n+        for item in main_journal[\"last_cycle_phase_events\"]\n+    ]\n+    checks += [\n+        (\"full setup main succeeds in isolated root\", main_rc == 0),\n+        (\"full setup main prints progress without phase box banners\",\n+         \"[setup] 建 run 骨架\" in main_output\n+         and \"[Xunji] [阶段开始]\" not in main_output\n+         and \"[Xunji] [阶段结束]\" not in main_output\n+         and \"XUNJI PHASE START\" not in main_output\n+         and \"XUNJI PHASE END\" not in main_output),\n+        (\"full setup main preserves closed Setup journal cycle\",\n+         main_phase_events == [\"phase_start\", \"phase_end\"]\n+         and not main_journal[\"open_phase\"]),\n     ]\n     recon = {\"target\": \"t\", \"assets\": [{\"host\": \"a.example\", \"category\": \"c\", \"reachability\": \"confirmed\", \"ownership\": \"core\"}]}\n     rp = d / \"recon.json\"\n"
+          }
+        ],
+        "artifacts_missing": []
+      },
+      {
+        "id": "E-002",
+        "head": "## E-002 - focused regression",
+        "maturity": "finding",
+        "certainties": [
+          1.0
+        ],
+        "confirmed": true,
+        "has_control": true,
+        "supports": [],
+        "refutes": [],
+        "refutes_any": false,
+        "artifacts": [
+          {
+            "token": "selftest.log",
+            "path": "selftest.log",
+            "exists": true,
+            "size": 465,
+            "sha1": "91c79b1ec063d27621f774839f502c305a3a63a8",
+            "excerpt": "python3 tools/setup_run.py --selftest\nsetup_run selftest passed\n- setup phase journal records start and end\n- full setup main succeeds in isolated root\n- full setup main prints progress without phase box banners\n- full setup main preserves closed Setup journal cycle\n\npython3 tools/selftest_all.py --only setup_run,xunji_statusline,loop_journal,loop_bootstrap\n4 passed, 0 failed (0.8s total)\n\npython3 tools/check_rules.py\nrule check passed\n\ngit diff --check\npassed\n"
+          },
+          {
+            "token": "setup_run.diff",
+            "path": "setup_run.diff",
+            "exists": true,
+            "size": 5299,
+            "sha1": "095ab0f84f4f213dc0cb3aa100eed7e4f78585df",
+            "diff_summary": {
+              "changed_files_count": 1,
+              "changed_files": [
+                "tools/setup_run.py"
+              ],
+              "changed_files_truncated": 0,
+              "hunk_count": 6,
+              "hunks": [
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -52,17 +52,6 @@ def _today() -> str:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -418,7 +407,6 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -502,7 +490,6 @@ def main() -> int:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -525,6 +512,8 @@ def _raises_exist(existing: Path) -> bool:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -532,6 +521,10 @@ def _selftest() -> int:"
+                },
+                {
+                  "file": "tools/setup_run.py",
+                  "header": "@@ -539,11 +532,47 @@ def _selftest() -> int:"
+                }
+              ],
+              "hunks_truncated": 0
+            },
+            "excerpt": "diff --git a/tools/setup_run.py b/tools/setup_run.py\nindex e701159..e4be426 100644\n--- a/tools/setup_run.py\n+++ b/tools/setup_run.py\n@@ -52,17 +52,6 @@ def _today() -> str:\n     return datetime.date.today().strftime(\"%Y%m%d\")\n \n \n-def _phase_banner(kind: str, phase: str, *, run_dir: Path, note: str = \"\") -> str:\n-    event = \"phase_start\" if kind.strip().lower() == \"start\" else \"phase_end\"\n-    return loop_journal.render_phase_banner({\n-        \"event\": event,\n-        \"run_dir\": str(run_dir),\n-        \"cycle\": 0,\n-        \"note\": note,\n-        \"data\": {\"phase\": phase},\n-    }).rstrip()\n-\n-\n def _phase_journal(run_dir: Path, event: str, phase: str, note: str) -> None:\n     \"\"\"Best-effort derived phase marker. Markdown/templates remain canonical.\"\"\"\n     try:\n@@ -418,7 +407,6 @@ def main() -> int:\n         return 1\n \n     made = scaffold(run_dir)\n-    print(_phase_banner(\"start\", \"Setup\", run_dir=run_dir, note=\"prepare authorized run workbench\"))\n     _phase_journal(run_dir, \"phase_start\", \"Setup\", \"prepare authorized run workbench\")\n     print(f\"[setup] 建 run 骨架 {run_dir}\")\n     print(f\"        {len(made)} 个核心文件 + evidence/ + scripts/\")\n@@ -502,7 +490,6 @@ def main() -> int:\n     else:\n         print(f\"[下一步] 先填写 target.md 的 Target/In-scope 并生成 coverage.json; 每轮收尾跑: python tools/check_run.py runs/{run_dir.name}\")\n     _phase_journal(run_dir, \"phase_end\", \"Setup\", f\"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})\")\n-    print(_phase_banner(\"end\", \"Setup\", run_dir=run_dir, note=f\"run prepared; next phase=Root Orchestrator (/loop runs/{run_dir.name})\"))\n     # Commit the run transition only after setup has produced its complete local\n     # workbench. set_active_run copies a valid current turn contract before it\n     # atomically replaces the pointer.\n@@ -525,6 +512,8 @@ def _raises_exist(existing: Path) -> bool:\n \n def _selftest() -> int:\n     \"\"\"纯本地回归: 骨架齐全 / 子目录 / recon 记录与 ingest / 不覆盖守卫。无网络。\"\"\"\n+    import contextlib\n+    import io\n     import tempfile\n     d = Path(tempfile.mkdtemp())\n     rd = d / \"t_20260101\"\n@@ -532,6 +521,10 @@ def _selftest() -> int:\n     _phase_journal(rd, \"phase_start\", \"Setup\", \"selftest\")\n     _phase_journal(rd, \"phase_end\", \"Setup\", \"selftest done\")\n     journal = loop_journal.summarize(rd)\n+    phase_events = [\n+        str(item.get(\"event\") or \"\")\n+        for item in journal[\"last_cycle_phase_events\"]\n+    ]\n     checks = [\n         (\"all required files copied\", all((rd / n).exists() for n in REQUIRED)),\n         (\"evidence/ subdir\", (rd / \"evidence\").is_dir() and (rd / \"evidence\" / \".gitkeep\").exists()),\n@@ -539,11 +532,47 @@ def _selftest() -> int:\n         (\"operator profile scaffolded\", (rd / \"state\" / \"operator_profile.json\").exists()),\n         (\"frontier template has depth field\", \"Current depth\" in (rd / \"frontier.md\").read_text(encoding=\"utf-8\")),\n         (\"no-overwrite guard raises\", _raises_exist(rd)),\n-        (\"setup phase banner is visible\",\n-         \"[Xunji] [阶段开始]\" in _phase_banner(\"start\", \"Setup\", run_dir=rd)\n-         and \"[Setup｜准备运行]\" in _phase_banner(\"start\", \"Setup\", run_dir=rd)),\n-        (\"setup phase journal closes\",\n-         journal[\"last_cycle_phase_events\"][-1][\"event\"] == \"phase_end\" and not journal[\"open_phase\"]),\n+        (\"setup phase journal records start and end\",\n+         phase_events == [\"phase_start\", \"phase_end\"] and not journal[\"open_phase\"]),\n+    ]\n+\n+    main_root = d / \"main-root\"\n+    (main_root / \"runs\").mkdir(parents=True)\n+    main_run = main_root / \"runs\" / \"bannercheck_20260102\"\n+    original_root = ROOT\n+    original_set_active = globals()[\"_set_active_run\"]\n+    original_argv = list(sys.argv)\n+    captured = io.StringIO()\n+    try:\n+        globals()[\"ROOT\"] = main_root\n+        globals()[\"_set_active_run\"] = lambda _run_dir: True\n+        sys.argv = [\n+            \"setup_run.py\", \"bannercheck\", \"--target\", \"https://example.test\",\n+            \"--date\", \"20260102\",\n+        ]\n+        with contextlib.redirect_stdout(captured):\n+            main_rc = main()\n+    finally:\n+        sys.argv = original_argv\n+        globals()[\"_set_active_run\"] = original_set_active\n+        globals()[\"ROOT\"] = original_root\n+    main_output = captured.getvalue()\n+    main_journal = loop_journal.summarize(main_run)\n+    main_phase_events = [\n+        str(item.get(\"event\") or \"\")\n+        for item in main_journal[\"last_cycle_phase_events\"]\n+    ]\n+    checks += [\n+        (\"full setup main succeeds in isolated root\", main_rc == 0),\n+        (\"full setup main prints progress without phase box banners\",\n+         \"[setup] 建 run 骨架\" in main_output\n+         and \"[Xunji] [阶段开始]\" not in main_output\n+         and \"[Xunji] [阶段结束]\" not in main_output\n+         and \"XUNJI PHASE START\" not in main_output\n+         and \"XUNJI PHASE END\" not in main_output),\n+        (\"full setup main preserves closed Setup journal cycle\",\n+         main_phase_events == [\"phase_start\", \"phase_end\"]\n+         and not main_journal[\"open_phase\"]),\n     ]\n     recon = {\"target\": \"t\", \"assets\": [{\"host\": \"a.example\", \"category\": \"c\", \"reachability\": \"confirmed\", \"ownership\": \"core\"}]}\n     rp = d / \"recon.json\"\n"
+          }
+        ],
+        "artifacts_missing": []
+      }
+    ],
+    "sha1": "f681217b0a42160a42ceaca39247c964ab230f73"
+  },
+  "machine_findings": [],
+  "claims": {
+    "report.md": "# Review Scope\n\nCodex authored a narrow maintenance change to remove duplicated Setup box banners.\n\nReview questions:\n\n1. Are both setup_run.py banner prints removed, including start and end?\n2. Are Setup phase_start/phase_end journal events preserved?\n3. Does the selftest prevent accidental reintroduction of the banner helper and verify a closed Setup journal cycle?\n4. Do Claude-primary instructions and canonical Router/Workflow docs clearly describe the setup-only display exception without weakening visible markers for Root Orchestrator, Hunter, Reviewer, or Report?\n5. Does the change avoid touching run evidence or target-facing behavior?\n\nThis is repository maintenance only. Do not evaluate live target evidence.\n"
+  },
+  "egress_redaction": {
+    "enabled": true,
+    "include_artifacts": "snippets",
+    "artifact_excerpt_chars": 24000,
+    "max_bundle_chars": 110000
+  },
+  "warnings": [],
+  "note": "claims are reviewer/report narrative; factual arbitration must cite evidence_index/artifact hashes",
+  "sha1": "90edd53574524a6d0472d2a70e7ead6650ff7d98"
+}
