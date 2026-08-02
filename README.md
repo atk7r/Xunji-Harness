@@ -2,7 +2,7 @@
 
 # 寻迹 · Xunji
 
-### 面向 Claude Code 的渗透 / 红队 Harness
+### 面向 Claude Code 的渗透 / 红队 Harness（beta版）
 
 <sub>MODEL-DRIVEN · EFFECT-GATED · EVIDENCE-BOUND</sub>
 
