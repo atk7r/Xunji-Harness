@@ -41,9 +41,13 @@ The scanner wrapper uses a fixed neutral User-Agent and vetted default templates
 custom nuclei templates/user-data are refused because external scanner-generated
 requests cannot be inspected individually by the Python guard.
 The command boundary includes HTTP(S), WebSocket(S), and FTP URL-bearing actions.
-The engagement proxy is operator-controlled trusted infrastructure: driver bytes
-are checked before proxying; proxy-side rewriting/header injection needs its own
-audit and is not silently certified by this guard.
+The engagement proxy is optional, operator-controlled trusted infrastructure.
+The target route defaults to direct; `XUNJI_PROXY`/`proxy.conf` is consumed only
+when the current operator turn explicitly selects proxy. Driver bytes are checked
+before either route; proxy-side rewriting/header injection needs its own audit and
+is not silently certified by this guard. One proxy-attributed transport failure
+pauses that route immediately. Automatic retry/cooldown cannot restart it: a newer
+top-level operator turn must choose default direct or explicitly select proxy again.
 The operator-supplied destination hostname is scope-exempt, but generated or
 target-native path/body bytes are not. If a legitimate target route conflicts
 with a denied token, use an equivalent neutral proof or author-and-handoff the
@@ -466,8 +470,16 @@ New assignments default to 24 calls; a normal delegate omits the override. When 
 frozen target front already selects HTTP GET liveness, its generated context carries
 the exact registered `probe.py` argv so bounded Agents do not inspect framework
 source to discover command grammar. Every target context also freezes the current
-turn's route choice; explicit direct egress uses the exact
-`XUNJI_PROXY_REQUIRED=0` prefix while Hooks retain all outbound validation.
+turn's route choice: default direct uses exact `XUNJI_PROXY_REQUIRED=0`; explicit
+proxy uses exact `XUNJI_PROXY_REQUIRED=1`. Hooks retain all outbound validation.
+Route-less historical contracts do not regain the old proxy default: they remain
+offline until a fresh top-level operator turn. Merely forbidding direct does not
+authorize proxy; proxy still needs affirmative wording.
+If explicit proxy fails, the Agent returns the blocker and stops; it never varies
+argv or waits for a cooldown to retry without a newer operator turn. Browser
+processes discard ambient proxy variables; scanner wrappers preflight the selected
+proxy endpoint and disable scanner-native transport retries. A new confirmation
+closes only the selected proxy route, not every failed proxy route in shared state.
 The conflict projection is strict derived state: its owner serializes
 snapshot/compare/write, rebuilds malformed or non-regular cache files, rejects
 future schemas and unknown fields, and binds an in-run regular file into the work

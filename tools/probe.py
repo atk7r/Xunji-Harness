@@ -132,13 +132,15 @@ class _PrivacyRedirect(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
-def _opener(no_redirect: bool = False, *, allow_sensitive_auth: bool = False,
+def _opener(no_redirect: bool = False, *, selected_proxy: str | None = None,
+            allow_sensitive_auth: bool = False,
             allow_legacy_cleanup: bool = False) -> urllib.request.OpenerDirector:
     # urllib_proxy_handlers 返回【完整连接 handler(含带 _CTX 的 HTTPS handler)】。这里【不要】再自己加
     # HTTPSHandler —— 否则普通 HTTPSHandler 会和 socks handler 抢 https, socks 连不上时悄悄走直连泄真实 IP
-    # (实测坏代理仍回 200 的坑)。_PROXY 仅是 --proxy 覆盖; 内部 resolve() 让 import probe.send 的工具
-    # (classify_hosts/fetch_assets/replay/rerun_deferred)也走交战代理 + required 时 fail-closed。
-    handlers: list = list(proxymod.urllib_proxy_handlers(_PROXY, ssl_context=_CTX))
+    # (实测坏代理仍回 200 的坑)。selected_proxy 已由 resolve() 冻结，避免 route ID、guard 与
+    # opener 在配置并发变化时指向不同出口。
+    handlers: list = list(proxymod.urllib_proxy_handlers(
+        selected_proxy, ssl_context=_CTX))
     if no_redirect:
         handlers.append(_NoRedirect())          # build_opener 用它替换默认 HTTPRedirectHandler
     else:
@@ -511,7 +513,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         allow_legacy_cleanup=allow_legacy_cleanup,
     )
     host = urlparse(url).hostname or "unknown"
-    egress_route = guardmod.egress_route_id(proxymod.engagement_proxy(_PROXY))
+    selected_proxy = proxymod.resolve(_PROXY)
+    egress_route = guardmod.egress_route_id(selected_proxy)
     afc = AuthFailCounter()
     if auth_key:
         afc.check(auth_key)            # anti-runaway: stop once locked
@@ -526,6 +529,7 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         summary["range"] = _header_value(req_headers, "Range")
     opener = _opener(
         no_redirect,
+        selected_proxy=selected_proxy,
         allow_sensitive_auth=allow_sensitive_auth,
         allow_legacy_cleanup=allow_legacy_cleanup,
     )
@@ -570,6 +574,11 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                 print(sb_warn, file=sys.stderr)
             hh.record_error(host, egress_route=egress_route,
                             error_class=error_class, lease=lease)
+            if guardmod.host_error_policy(error_class)["attribution"] == "proxy":
+                # A broken explicit proxy is not a transient target retry. The
+                # first route-attributed failure opens a manual pause; return now
+                # even when --retry was supplied and wait for a newer operator turn.
+                break
             if attempt < retry:
                 time.sleep(retry_wait)     # 瞬时超时/RST 重试(如本次 vpn)
     if last_err is not None:
@@ -585,6 +594,15 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
             "attempt_error_classes": attempt_error_classes,
             "attempts": attempts,
         }
+        if policy["attribution"] == "proxy":
+            out.update({
+                "restart_policy": "operator_confirmation_required",
+                "automatic_retry_stopped": True,
+                "next_action": (
+                    "stop and wait for the operator to choose default direct or "
+                    "explicitly confirm proxy again"
+                ),
+            })
         return out
     # JS/CSS 静态资源 >MIN_STATIC_ASSET_BYTES 不计入 bytes budget(防 JS-heavy SPA 的 chunk 下载触发假熔断);
     # 仍计入 count budget。小于阈值的仍正常计(防大量小文件绕过)。
@@ -1051,6 +1069,18 @@ def _selftest() -> int:
                            and failed.get("breaker_scope") == "target"))
             checks.append(("retry wrapper records exact real request count",
                            failed.get("attempts") == 3 and totals_after - totals_before == 3))
+            globals()["_PROXY"] = f"http://127.0.0.1:{unused_port}"
+            proxy_failed = send(
+                "GET", f"http://127.0.0.1:{port}/", {}, None, None, 1,
+                retry=2, retry_wait=0)
+            globals()["_PROXY"] = None
+            checks.append(("proxy failure stops automatic retry pending operator confirmation",
+                           proxy_failed.get("egress_route", "").startswith("proxy:http:")
+                           and proxy_failed.get("attribution") == "proxy"
+                           and proxy_failed.get("attempts") == 1
+                           and proxy_failed.get("automatic_retry_stopped") is True
+                           and proxy_failed.get("restart_policy")
+                           == "operator_confirmation_required"))
         finally:
             srv.shutdown()
     # 统一布局 _place_save: 裸文件名 + --run -> <run>/evidence/; 显式路径/无 --run 原样
@@ -1186,8 +1216,9 @@ def main() -> int:
                     help="run 目录 runs/<dir>; 给了它且 --save 是裸文件名时, 产物落到 "
                          "<run>/evidence/(统一布局, 防散落根目录; 录像 .replay.json 一并跟随)")
     ap.add_argument("--proxy", default=None,
-                    help="交战代理(http://h:p / socks5h://h:p)；解锁境内资产经中继。"
-                         "未给则走 harness.proxy 解析(XUNJI_PROXY / proxy.conf, 不读 HTTPS_PROXY=模型那条)")
+                    help="显式交战代理(http://h:p / socks5h://h:p)；未给时默认直连。"
+                         "只有 XUNJI_PROXY_REQUIRED=1 才读取 XUNJI_PROXY / proxy.conf；"
+                         "不读 HTTPS_PROXY=模型通道")
     ap.add_argument("--retry", type=int, default=0,
                     help="超时/RST 重试次数(瞬时不可达时用)")
     ap.add_argument("--retry-wait", type=float, default=1.5, help="重试间隔秒")
@@ -1217,7 +1248,7 @@ def main() -> int:
     args.preflight_save = _place_save(args.preflight_save, args.run)
 
     global _PROXY
-    _PROXY = args.proxy   # 仅存 --proxy 覆盖; 真正解析在 _opener(urllib_proxy_handlers), 直跑与 import 都走交战代理
+    _PROXY = args.proxy   # --proxy 显式选代理；否则 proxy.resolve 按 required=0/1 冻结 direct/proxy
 
     headers = {}
     for h in args.header:

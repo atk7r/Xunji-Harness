@@ -183,7 +183,12 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled"] if STEALTH else [])
+            args=["--disable-blink-features=AutomationControlled"] if STEALTH else [],
+            # Chromium must not inherit model/desktop proxy variables. The
+            # engagement proxy, when explicitly selected, is bound below on
+            # the browser context; otherwise the browser route is truly direct.
+            env=proxymod.scrub_proxy_env(),
+        )
         ctx_kwargs = dict(user_agent=UA, ignore_https_errors=True, locale="zh-CN")
         if PROXY:
             ctx_kwargs["proxy"] = {"server": PROXY}
@@ -368,6 +373,8 @@ def _selftest() -> int:
     checks.append(("render accepts screenshot", "screenshot" in sig))
     checks.append(("render accepts wait_sec", "wait_sec" in sig))
     checks.append(("render accepts save_html", "save_html" in sig))
+    checks.append(("browser process strips ambient proxy variables",
+                   "env=proxymod.scrub_proxy_env()" in inspect.getsource(render)))
     checks.append(("provenance marks target content untrusted",
                    provenance()["source"] == "target-content" and provenance()["trust"] == "untrusted"))
     checks.append(("browser route/error provenance is structured",
@@ -458,8 +465,8 @@ def main() -> int:
                     help="minimal anti-automation hardening for authorized access to "
                          "anti-bot-gated pages (does not forge challenge tokens)")
     ap.add_argument("--proxy", default=None,
-                    help="交战代理(http://h:p / socks5h://h:p)；经中继访问境内资产。"
-                         "未给则走 harness.proxy(XUNJI_PROXY / proxy.conf, 不读 HTTPS_PROXY=模型那条)")
+                    help="仅在操作者明确要求时使用交战代理(http://h:p / socks5h://h:p)。"
+                         "未给时默认直连且不读取 XUNJI_PROXY / proxy.conf / HTTPS_PROXY")
     ap.add_argument("--cookie", action="append", default=[],
                     help="注入会话 cookie(认证后页面用),形如 'PHPSESSID=abc; security=low';可重复")
     ap.add_argument("--cookies-file", default=None,
@@ -480,7 +487,8 @@ def main() -> int:
 
     global STEALTH, PROXY
     STEALTH = args.stealth
-    PROXY = proxymod.resolve(args.proxy)   # 交战代理(XUNJI_PROXY/proxy.conf/--proxy); required 时没配 fail-closed
+    # 默认直连；只有冻结路线显式选择代理时才允许 --proxy 或读取专用配置。
+    PROXY = proxymod.resolve(args.proxy)
 
     eval_js = Path(args.eval_file).read_text(encoding="utf-8") if args.eval_file else None
     host = urlparse(args.url).hostname or "page"
@@ -527,6 +535,9 @@ def main() -> int:
         "error_class": res.get("error_class"),
         "attribution": res.get("attribution"),
         "breaker_scope": res.get("breaker_scope"),
+        "restart_policy": res.get("restart_policy"),
+        "automatic_retry_stopped": res.get("automatic_retry_stopped"),
+        "next_action": res.get("next_action"),
         "request_count": res.get("request_count"),
         "final_url": res.get("final_url"),
         "html_bytes": res.get("html_bytes"),

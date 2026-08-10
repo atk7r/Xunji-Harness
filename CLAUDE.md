@@ -665,12 +665,22 @@ replaces the content-addressed independent ReviewReceipt below.
   one-off scripts. Don't reintroduce `apps/` · `schemas/` · `prompts/` · `policies/` ·
   `examples/` or a JSON orchestrator unless the operator explicitly asks to restore the
   old architecture.
-- Target egress is proxy fail-closed by default. `probe.py`/`render.py`/`scan.py` read
-  `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf`; absent proxy configuration
-  rejects target traffic. Only an operator who explicitly accepts direct egress may set
-  `XUNJI_PROXY_REQUIRED=0`, and the turn gate binds that opt-out to the current operator
-  prompt. Target `WebFetch`, raw curl/wget/requests/socket, and other unverified network
-  clients are rejected; a prompt reminder or Agent export is not a security boundary.
+- Target egress is direct by default; proxy is opt-in per current operator turn.
+  Registered target argv use exact `XUNJI_PROXY_REQUIRED=0` for direct and exact
+  `XUNJI_PROXY_REQUIRED=1` (or a registered `--proxy`) only when the operator explicitly
+  requested proxy. A dormant `XUNJI_PROXY`/`proxy.conf` must not silently change a direct
+  turn. A route-less historical contract and a prompt that only forbids direct without
+  affirmatively requesting proxy are offline; both require a fresh operator turn. Explicit
+  proxy with missing configuration fails closed. Browser subprocesses strip ambient proxy
+  variables, and scanner wrappers preflight the selected proxy endpoint with native retries
+  disabled. The first proxy-attributed
+  transport failure pauses that proxy route, stops wrapper retries, and requires a newer
+  top-level operator turn before target traffic restarts; an internal wake or elapsed
+  cooldown is not confirmation. Confirmation binds only the selected credential-free proxy
+  route and never clears another failed proxy. Local settlement/control text that merely mentions either
+  env spelling remains local data. Target `WebFetch`, raw curl/wget/requests/socket, and
+  other unverified network clients remain rejected; route selection never bypasses scope,
+  privacy, guard, budget, or recording.
 - Any new active capability inherits the guard layer (rate limit · body cap ·
   brute-force lock · upload cleanup) and routes through it; the skill + hook define its
   limits.

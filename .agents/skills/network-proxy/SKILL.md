@@ -31,6 +31,16 @@ Do not confuse this with Xunji's active engagement proxy discipline:
 - Active Xunji target-facing tools (`probe.py`, `render.py`, `scan.py`, sensors)
   use `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf` through
   `tools/harness/proxy.py`.
+- Direct is the Claude-primary target default (`XUNJI_PROXY_REQUIRED=0`). The
+  engagement proxy is selected only by an explicit current operator request
+  (`XUNJI_PROXY_REQUIRED=1` or registered `--proxy`); dormant config is inert.
+- A route-less historical contract and a prompt that only forbids direct remain
+  offline. Browser subprocesses strip ambient proxy variables; scanner wrappers
+  preflight the selected proxy and disable native transport retries.
+- A proxy-attributed failure stops automatic retry and remains paused until a
+  newer top-level operator turn chooses direct or explicitly selects proxy again.
+  Confirmation is route-specific. Codex advice must not reinterpret an internal
+  wake or cooldown as confirmation.
 - Codex review traffic uses the dedicated `CODEX_PROXY` /
   `tools/harness/codex_proxy.conf` path.
 - Model/API calls must not be routed through the engagement proxy.
@@ -77,7 +87,7 @@ will not run Xunji active tools or model/API clients afterwards.
 For Xunji active tools, do this instead:
 
 ```bash
-XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
+XUNJI_PROXY_REQUIRED=1 XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
 ```
 
 ## WebFetch / WebSearch failures

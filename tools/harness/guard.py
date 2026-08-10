@@ -313,8 +313,18 @@ def host_error_policy(error_class: str) -> dict:
         attribution, scope = HOST_ERROR_POLICIES[error_class]
     except (KeyError, TypeError) as exc:
         raise GuardStateError(f"unknown host-health error_class: {error_class!r}") from exc
-    return {"error_class": error_class, "attribution": attribution,
-            "breaker_scope": scope}
+    policy = {"error_class": error_class, "attribution": attribution,
+              "breaker_scope": scope}
+    if attribution == "proxy":
+        policy.update({
+            "restart_policy": "operator_confirmation_required",
+            "automatic_retry_stopped": True,
+            "next_action": (
+                "stop and wait for the operator to choose default direct or "
+                "explicitly confirm proxy again"
+            ),
+        })
+    return policy
 
 
 def _exception_chain(error: BaseException) -> list[BaseException]:
@@ -349,7 +359,9 @@ def classify_network_error(error: BaseException, *, egress_route: str) -> str:
     temporary_dns = any(getattr(item, "errno", None) == getattr(socket, "EAI_AGAIN", -3)
                         for item in dns_errors) or "temporary failure in name resolution" in text
     if temporary_dns:
-        return "local_dns"
+        # A proxied opener resolves the proxy endpoint locally. Treat that as a
+        # failed selected proxy route so the one-strike operator pause applies.
+        return "proxy_connect" if route.startswith("proxy:") else "local_dns"
     ambiguous_dns = bool(dns_errors) or any(marker in text for marker in (
         "name or service not known", "nodename nor servname", "getaddrinfo failed",
         "no address associated with hostname", "err_name_not_resolved",
@@ -358,7 +370,7 @@ def classify_network_error(error: BaseException, *, egress_route: str) -> str:
         # With a proxy this is resolution of the route endpoint.  Direct NXDOMAIN
         # is host-specific but not proof of a target transport failure, so keep it
         # unattributed instead of opening either a target or whole-route breaker.
-        return "local_dns" if route.startswith("proxy:") else "unattributed_transport"
+        return "proxy_connect" if route.startswith("proxy:") else "unattributed_transport"
     is_tls = any(isinstance(item, ssl.SSLError) for item in chain) or any(
         marker in text for marker in ("sslerror", "tls", "ssl handshake", "certificate verify failed")
     )
@@ -493,7 +505,9 @@ def _validate_hosthealth_state(data: object) -> dict:
         if not isinstance(item.get("event_id"), str) or not re.fullmatch(r"[0-9a-f]{16}", item["event_id"]):
             raise GuardStateError("host health provenance event id is invalid")
         _finite_number(item.get("ts"), "ts")
-        if item.get("event") not in {"migrated", "error", "success", "opened", "half_open", "recovered"}:
+        if item.get("event") not in {
+                "migrated", "error", "success", "opened", "half_open",
+                "recovered", "operator_confirmed"}:
             raise GuardStateError("host health provenance event is unknown")
         _normalize_route(item.get("egress_route"))
         if item.get("host") != "*":
@@ -608,8 +622,11 @@ class HostHealth:
     Breaker identity includes ``(egress_route, host, error_class)``.  Route
     failures use host ``*`` so one broken proxy/local resolver pauses that route
     across targets.  Only target-attributed classes use a target-host breaker.
-    Cooldown recovery grants one persisted half-open lease; concurrent workers
-    remain blocked until that trial records success/error or the lease expires.
+    Target/local cooldown recovery grants one persisted half-open lease;
+    concurrent workers remain blocked until that trial records success/error or
+    the lease expires. Proxy-attributed route failures are different: the first
+    failure pauses that proxy route until a newer operator turn explicitly
+    selects proxy again. A timer alone never restarts proxy traffic.
     """
 
     def __init__(self, threshold: int = HOST_ERR_THRESHOLD,
@@ -700,6 +717,20 @@ class HostHealth:
                 key=lambda pair: (0 if pair[1]["scope"] == "route" else 1, pair[0]),
             )
             for _, item in matching:
+                if item["attribution"] == "proxy":
+                    if migrated:
+                        _save_hosthealth_state(data)
+                    raise HostBackoff(
+                        f"proxy route paused for route={route} host={host} "
+                        f"error_class={item['error_class']}; a newer operator "
+                        "turn must explicitly select proxy before one guarded retry",
+                        egress_route=route, host=host,
+                        error_class=item["error_class"],
+                        attribution=item["attribution"],
+                        breaker_scope=item["scope"],
+                        phase="operator_confirmation_required",
+                        retry_after=0.0,
+                    )
                 if item["phase"] == "open" and item["until"] > now:
                     if migrated:
                         _save_hosthealth_state(data)
@@ -838,8 +869,9 @@ class HostHealth:
                     item["consecutive"] = 0
                     item["updated_at"] = now
             rearmed: set[str] = set()
+            trip_threshold = 1 if policy["attribution"] == "proxy" else self.threshold
             for key, item in leased:
-                item["consecutive"] = max(item["consecutive"], self.threshold)
+                item["consecutive"] = max(item["consecutive"], trip_threshold)
                 self._arm(item, key, now)
                 rearmed.add(key)
                 _append_hosthealth_event(
@@ -853,11 +885,11 @@ class HostHealth:
             item = data["breakers"].setdefault(key, _new_breaker(route, host, error_class, now))
             item["total_errors"] += count
             if key in rearmed:
-                item["consecutive"] = max(item["consecutive"], self.threshold)
+                item["consecutive"] = max(item["consecutive"], trip_threshold)
             else:
                 item["consecutive"] += count
                 item["updated_at"] = now
-                if item["consecutive"] >= self.threshold:
+                if item["consecutive"] >= trip_threshold:
                     self._arm(item, key, now)
                     _append_hosthealth_event(
                         data, now=now, event="opened", egress_route=route,
@@ -897,6 +929,80 @@ class HostHealth:
             if migrated:
                 _save_hosthealth_state(data)
             return json.loads(json.dumps(data))
+
+    def proxy_confirmation_state(self, *, egress_route: str | None = None) -> dict:
+        """Return the current manual proxy pause without exposing endpoints.
+
+        The projection is read-only. ``latest_updated_at`` is the causal fence
+        used by the turn Hook: a contract created before (or at) that failure
+        cannot confirm its own retry.
+        """
+        selected_route = _normalize_route(egress_route) \
+            if egress_route is not None else None
+        if selected_route is not None and not selected_route.startswith("proxy:"):
+            raise GuardStateError("proxy confirmation route must identify one proxy")
+        snapshot = self.snapshot()
+        pending = [
+            item for item in snapshot["breakers"].values()
+            if item["attribution"] == "proxy" and item["phase"] != "closed"
+            and (selected_route is None or item["egress_route"] == selected_route)
+        ]
+        return {
+            "required": bool(pending),
+            "latest_updated_at": max(
+                (float(item["updated_at"]) for item in pending), default=0.0),
+            "routes": sorted({str(item["egress_route"]) for item in pending}),
+            "error_classes": sorted({str(item["error_class"]) for item in pending}),
+        }
+
+    def acknowledge_proxy_retry(self, *, confirmed_at: float,
+                                egress_route: str) -> bool:
+        """Consume a newer operator proxy choice and permit one fresh attempt.
+
+        This transition is not a health success: provenance records
+        ``operator_confirmed`` and the next proxy error reopens the route on its
+        first observation. The caller must supply a durable turn timestamp newer
+        than the pending failure on that exact credential-free route; stale or
+        racing confirmations fail closed and never clear another proxy route.
+        """
+        confirmed = _finite_number(confirmed_at, "confirmed_at", minimum=0.0)
+        if confirmed <= 0:
+            raise GuardStateError("proxy retry confirmation timestamp is invalid")
+        selected_route = _normalize_route(egress_route)
+        if not selected_route.startswith("proxy:"):
+            raise GuardStateError("proxy retry confirmation must bind one proxy route")
+        now = self._now()
+        with _state_lock():
+            data, _ = _load_hosthealth_state(now)
+            pending = [
+                (key, item) for key, item in data["breakers"].items()
+                if item["attribution"] == "proxy" and item["phase"] != "closed"
+                and item["egress_route"] == selected_route
+            ]
+            if not pending:
+                return False
+            latest = max(float(item["updated_at"]) for _, item in pending)
+            if confirmed <= latest:
+                raise GuardStateError(
+                    "proxy retry requires a newer operator turn than the latest proxy failure")
+            for _, item in pending:
+                item["consecutive"] = 0
+                item["phase"] = "closed"
+                item["until"] = 0.0
+                item["lease_token"] = None
+                item["lease_owner"] = None
+                item["lease_until"] = 0.0
+                item["updated_at"] = now
+                item["backoff_seconds"] = 0.0
+                _append_hosthealth_event(
+                    data, now=now, event="operator_confirmed",
+                    egress_route=item["egress_route"], host=item["host"],
+                    observed_host="operator-confirmed.local",
+                    error_class=item["error_class"],
+                    attribution=item["attribution"], scope=item["scope"],
+                )
+            _save_hosthealth_state(data)
+            return True
 
 
 class SessionBudget:
@@ -1120,7 +1226,11 @@ def _selftest_hosthealth_route_breaker() -> None:
         clock_value[0] = 1000.0
         hh = HostHealth(threshold=3, backoff=10, max_backoff=30,
                         lease_seconds=5, jitter_ratio=0.1, clock=clock)
-        for _ in range(case["failures"]):
+        observed_failures = (
+            1 if host_error_policy(case["error_class"])["attribution"] == "proxy"
+            else case["failures"]
+        )
+        for _ in range(observed_failures):
             hh.record_error(case["host"], egress_route=case["route"],
                             error_class=case["error_class"])
         snap = hh.snapshot()
@@ -1224,6 +1334,66 @@ def _selftest_hosthealth_route_breaker() -> None:
     after = counted.snapshot()["totals"][_total_key("direct", "count.example")]["count"]
     if after != before:
         raise AssertionError("soft warning was counted as a request")
+
+    # Proxy transport failure is a one-strike manual pause. Time alone never
+    # restarts it; only a newer operator-turn timestamp may acknowledge one
+    # fresh attempt, and that acknowledgement is not recorded as route health.
+    state_path.unlink(missing_ok=True)
+    clock_value[0] = 5000.0
+    proxy_route = egress_route_id("socks5h://proxy.example:1080")
+    proxy_health = HostHealth(threshold=3, backoff=10, max_backoff=30,
+                              lease_seconds=5, jitter_ratio=0.1, clock=clock)
+    proxy_health.record_error(
+        "target.example", egress_route=proxy_route,
+        error_class="proxy_connect")
+    proxy_pause = proxy_health.proxy_confirmation_state()
+    if not proxy_pause["required"] or proxy_pause["routes"] != [proxy_route]:
+        raise AssertionError("first proxy failure did not open a route-wide manual pause")
+    clock_value[0] = 9000.0
+    try:
+        proxy_health.check("another.example", egress_route=proxy_route)
+        raise AssertionError("proxy route resumed from cooldown without operator confirmation")
+    except HostBackoff as exc:
+        if exc.phase != "operator_confirmation_required":
+            raise
+    try:
+        proxy_health.acknowledge_proxy_retry(
+            confirmed_at=proxy_pause["latest_updated_at"],
+            egress_route=proxy_route)
+        raise AssertionError("same-turn proxy retry confirmation was accepted")
+    except GuardStateError:
+        pass
+    if not proxy_health.acknowledge_proxy_retry(
+            confirmed_at=proxy_pause["latest_updated_at"] + 1.0,
+            egress_route=proxy_route):
+        raise AssertionError("newer operator proxy confirmation was not consumed")
+    confirmed = proxy_health.snapshot()
+    if proxy_health.check("another.example", egress_route=proxy_route) is not None:
+        raise AssertionError("confirmed proxy retry did not permit one fresh attempt")
+    if not any(item["event"] == "operator_confirmed"
+               for item in confirmed["provenance"]):
+        raise AssertionError("proxy confirmation provenance is missing")
+    # One confirmation is bound to the selected proxy route. It must not clear
+    # an unrelated failed proxy endpoint from the same shared state file.
+    clock_value[0] = 9010.0
+    other_proxy_route = egress_route_id("http://other-proxy.example:8080")
+    proxy_health.record_error(
+        "target.example", egress_route=proxy_route,
+        error_class="proxy_connect")
+    proxy_health.record_error(
+        "target.example", egress_route=other_proxy_route,
+        error_class="proxy_connect")
+    if not proxy_health.acknowledge_proxy_retry(
+            confirmed_at=clock_value[0] + 1.0,
+            egress_route=proxy_route):
+        raise AssertionError("selected proxy route confirmation was not consumed")
+    if proxy_health.proxy_confirmation_state(
+            egress_route=proxy_route)["required"]:
+        raise AssertionError("selected proxy route remained paused after confirmation")
+    other_pause = proxy_health.proxy_confirmation_state(
+        egress_route=other_proxy_route)
+    if not other_pause["required"] or other_pause["routes"] != [other_proxy_route]:
+        raise AssertionError("one confirmation cleared a different proxy route")
 
     # Valid legacy state migrates without losing its cooldown/count.  Unknown
     # legacy/v2 fields are not silently discarded.

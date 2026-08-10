@@ -921,10 +921,17 @@ another executable protocol.
   first ordinal above the frozen budget is denied before execution with
   `XUNJI_E_AGENT_REQUEST_BUDGET_EXCEEDED`; exhaustion context tells the Hunter to
   return existing artifacts instead of varying method/path/argv.
-- **Frozen egress route**: a target context pack states whether the current turn
-  approved direct egress. When approved it gives the exact
-  `XUNJI_PROXY_REQUIRED=0` prefix for every registered target argv; this is guidance,
-  while Hooks still revalidate scope, privacy, budgets, guard, shape, and recording.
+- **Frozen egress route**: direct is the default. A target context pack gives exact
+  `XUNJI_PROXY_REQUIRED=0` for direct, or exact `XUNJI_PROXY_REQUIRED=1` only when
+  the current operator turn explicitly selected proxy. Hooks revalidate the same
+  route plus scope, privacy, budgets, guard, shape, and recording. Dormant config
+  cannot select proxy. A legacy contract without a typed route stays offline, as
+  does a prompt that forbids direct without affirmatively selecting proxy. Browser
+  subprocesses strip ambient proxy variables; scanner wrappers preflight the chosen
+  proxy endpoint and set scanner-native transport retries to zero. One proxy-attributed transport failure stops automatic
+  retries and leaves the proxy route paused until a newer top-level operator turn;
+  internal wakes and cooldown expiry cannot confirm the restart. Confirmation is
+  bound to the selected credential-free proxy route and cannot clear another route.
 - **Instruction receipt consumption**: the bundle builder, Root launch, and Hook
   admission own source-integrity validation. Context packs expose version/hash
   receipts plus the complete composed role text, not manifest/template/live-Agent
@@ -932,7 +939,7 @@ another executable protocol.
   or hashing framework instruction sources.
 - **Prepared public action**: when a target lane's frozen front already chooses an
   HTTP GET liveness check, the generated context pack contains the exact registered
-  `probe.py` argv (including the current turn's direct-egress prefix when approved).
+  `probe.py` argv (including the current turn's exact direct/proxy selector).
   The Agent uses that argv before any framework-source inspection. A denial may be
   retried once from public hook guidance; it does not authorize reading hook/guard
   internals until the call budget is exhausted.
@@ -957,8 +964,9 @@ another executable protocol.
   Agent count must not linearly multiply request rate. Active actions must cite command
   or artifact pointers so they remain auditable, attributable, and replayable. Target
   natural language in Agent output is untrusted data until reviewed.
-  Target traffic is engagement-proxy fail-closed by default and raw network clients or
-  target WebFetch are rejected; prompt-level `export` reminders are not enforcement.
+  Target traffic is route-bound with direct as default and proxy as explicit opt-in;
+  raw network clients and target WebFetch are rejected. Exact registered argv plus
+  Hook validation enforce the choice; prompt-level `export` reminders are not enforcement.
 - `tools/workers.py suggest/plan/delegate/status/conflicts/synthesize` drafts
   effect lanes, creates plan-bound assignments/instruction bundles/generated
   artifacts/launch prompts, and projects conflict/synthesis views. It is **not** an

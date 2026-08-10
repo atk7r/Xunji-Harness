@@ -186,7 +186,7 @@ Operator prompt
 Target-facing capability
   -> PreToolUse authority/safety gate
   -> typed Python tool/wrapper
-  -> exact command channel + scope + privacy + proxy + guard/budget
+  -> exact command channel + scope + privacy + frozen direct/proxy selector + guard/budget
   -> target
   -> redacted replay/artifact + receipt + evidence candidate
 
@@ -666,9 +666,18 @@ Coverage、planner、assignment、launch prompt 与 child target gate 的 effect
 `host[:port]`；coverage 有显式 port 时，host-only 不再被当作同一 assignment。若 target front
 已有合法 `ASSET-...` opaque ID，该 coverage row 是 ID owner，assignment/context projection
 复制该 ID，不再按 display identity 独立哈希并制造第二身份。若 target front
-已冻结 HTTP GET liveness next move，context pack 生成一次精确公开 `probe.py` argv，并把本轮
-operator 已授权的 direct-egress 精确前缀冻结进所有 target lane guidance；Agent 不再为发现 CLI
-参数或 route 读取工具/Hook/guard 源码，Hook 仍重新验证全部出站硬边界。
+已冻结 HTTP GET liveness next move，context pack 生成一次精确公开 `probe.py` argv。目标路线
+默认 direct，只有当前 operator 明确要求才选择 proxy；context pack 分别把 exact
+`XUNJI_PROXY_REQUIRED=0|1` 冻结进所有 target lane guidance。Dormant `XUNJI_PROXY`/
+`proxy.conf` 不具有 route authority；route-less historical contract 与仅禁止 direct 的 prompt
+均冻结为 offline。Agent 不再为发现 CLI 参数或 route 读取工具/Hook/guard 源码，Hook 仍重新
+验证全部出站硬边界。Browser process 剥 ambient proxy env；scanner 先 preflight selected proxy
+endpoint，并把 native transport retry 设为 0。显式代理缺配置 fail closed；首个
+proxy-attributed connect/TLS/DNS/reset/timeout failure 立即打开 route-wide manual pause 并停止 wrapper retry。冷却时间、内部 wake、
+Agent/Root 文本均不能恢复；只有 failure 之后更新的顶层 operator turn 可通过默认 direct 换路，
+或再次明确 proxy 并由 PreToolUse 原子消费 selected-route confirmation，且不清除其他 failed
+proxy route。该 confirmation 不是 route health success，下一次代理失败仍一击暂停。本地
+control/note 中出现 route env 文本不参与 target 判定。
 Safety gate 在检查 URL 内容前先识别 exact registered active-run control capability；URL 出现在
 `loop_journal`/work-plan 的 note/next-action 只是本地数据，invalid/wrapped argv 不获得豁免。
 Agent lifecycle hook 的内部 receipt 异常以 `XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED` 非零退出并
@@ -801,7 +810,7 @@ Xunji 管的是自动执行的效果和执行者，而不是禁止技术思考�
   unknown Bash 在执行授权上仍是 target-capable/fail-closed；但没有显式 destination 的本地
   command-shape/coordinator denial 不铸造成 target-result debt。registry target effect、
   WebFetch 或显式 destination 的 denial 仍按 target action 记录。
-- guard 提供 scope、proxy、速率、响应体、session budget、host backoff、auth 失败、
+- guard 提供 scope、显式 proxy route manual pause、速率、响应体、session budget、host backoff、auth 失败、
   upload registry 等工具层控制。
 - privacy 在出站前检查 project/run/Agent/operator identity、PII、secret 和真实 payload
   bytes；redirect 每跳重新校验并在跨 origin 时清理认证。
@@ -1182,8 +1191,61 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     v1 只拥有当前 exact Claude Code tool-use interruption + Reviewer Start-hook timeout
     形状；OOM、process kill、network loss 或其他 pre-model failure 不得共用或放宽此
     reason，必须以新的 versioned reason/schema、迁移语义和 fault fixtures 单独准入。
+32. Target route 默认为 direct；proxy 只能来自当前 operator 明确选择，配置存在本身不授权。
+    Exact target argv 用 `XUNJI_PROXY_REQUIRED=0|1` 与 turn route 双向匹配，raw/non-attested client
+    继续禁止。Route-less legacy contract 与无 affirmative proxy 的 direct denial 都是 offline；
+    browser 剥 ambient proxy env，scanner preflight proxy endpoint 并关闭 native retry。首个
+    proxy-attributed transport failure 打开 route-wide operator-confirmation pause；自动 retry、
+    cooldown、internal wake、Agent/Root prose 均不能恢复。只有晚于 failure 的新顶层 operator
+    turn 可改走默认 direct，或再次明确 proxy 并由 Hook 原子消费 exact selected-route 确认；
+    confirmation 不清除其他 failed proxy route，也不等于 route health success。Local control
+    argv/note 中的 route 文本不得被扫描成 target effect。
 
 ## 12. Maintenance Checkpoint
+
+### 2026-08-10 — Direct-default target route and operator-confirmed proxy recovery
+
+- Scope: target-route compilation and execution across `tools/harness/proxy.py`,
+  `tools/turn_contract.py`, `tools/harness/guard.py`, `tools/context_pack.py`,
+  `tools/probe.py`, `tools/render.py`, `tools/scan.py`, proxy owner skills, Agent
+  preparation guidance, and operator documentation.
+- Architecture impact: yes — this supersedes the historical proxy-default rule.
+  Fresh operator turns compile to `direct` unless they affirmatively request proxy;
+  direct-only denial without affirmative proxy and route-less historical contracts
+  are `offline`. Dormant configuration and ambient system proxy variables cannot
+  select the target route.
+- Ownership/enforcement: UserPromptSubmit owns typed `operator_intent.route`;
+  PreToolUse binds every registered target capability to one exact direct/proxy
+  selector before process launch. `proxy.resolve` owns transport selection,
+  `HostHealth` owns route-scoped failure/confirmation state, and wrappers record the
+  selected credential-free route. Local lifecycle and settlement data stays local.
+- Recovery: the first proxy-attributed connect/TLS/DNS/reset/timeout failure stops
+  automatic retry and opens an operator-confirmation pause. Cooldown and internal
+  events cannot restart it. A newer turn may use direct or explicitly choose proxy;
+  the selected route's confirmation is consumed only after all other gates pass and
+  immediately before target I/O. It is not health evidence and cannot clear another
+  proxy endpoint.
+- Migration: no historical run or receipt is rewritten. New contracts carry the
+  typed route; legacy affirmative-direct contracts remain direct, while route-less
+  false/proxy-default state waits offline for a new operator turn.
+- Verification: exact-final compilation, diff check, rules, templates, runtime
+  boundary, publication hygiene, capability registry, command-shape, Hook, and
+  focused proxy/guard/context/probe/render/scan checks passed. All 11 registered
+  target scripts equal the route-aware set. The exact sanitized-public-tree matrix
+  was 67 passed / 3 failed in 120.5s; the three suites retain only the pre-existing
+  SessionEnd/session-selection failures. DeepSeek-backed Claude primary-driver
+  session `4dee08bd-25db-41ff-b3ac-c109d6e288f8` executed the one exact registered
+  `turn_contract --selftest` argv through real Hooks; all five requested route
+  assertions passed, with no edit, target, run, Agent, or Cron action.
+- Independent review: external assistance was disabled. Fresh-context no-tools
+  Claude first found route-language/selector blockers, all of which were reproduced,
+  fixed, and regression-tested. Final exact-current compiler/gate review session
+  `b198b6b8-6e1a-4d9a-9a20-1883e26e460b` returned WARN with no concrete outbound
+  fail-open. The remaining warning is conservative `offline` overmatching after a
+  proxy vote; full dispositions are recorded in
+  `review/records/2026-08-10-direct-default-proxy-confirmation-review.md`.
+- Exclusions: no live target/network test, live run transition, Agent/Cron action,
+  or historical evidence rewrite is part of this maintenance change.
 
 ### 2026-08-01 — Public knowledge scaffold and history sanitization
 

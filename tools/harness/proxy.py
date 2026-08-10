@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""harness/proxy.py — 交战出口代理(opsec egress)。
+"""harness/proxy.py — 交战出口路由(opsec egress)。
 
-铁律: **所有渗透流量**(probe / render / scan + 任何打目标的脚本)走【交战代理】XUNJI_PROXY;
+默认目标路由是【直连】。只有当前操作者明确要求代理时，active 工具才读取并使用
+【交战代理】XUNJI_PROXY；
 **模型调用**(peer_review 的 codex / deepseek / glm / claude, 任何 LLM API)【绝不】走交战代理。
 
 为什么用【专用】XUNJI_PROXY 而非 HTTPS_PROXY: HTTPS_PROXY 是系统级共享变量, codex CLI / urllib /
@@ -10,8 +11,9 @@ requests 都自动继承 —— 若把交战代理塞进 HTTPS_PROXY, 模型调�
 中继 = 串味 + 泄露)。所以交战代理走【专用】XUNJI_PROXY, 只有 active 工具显式读它; 模型调用另外【强制
 剥代理】(model_safe_env / model_no_proxy_opener), 双保险。
 
-fail-closed: active 工具默认要求代理；没配就【拒绝直连】(防真实 IP 泄露)。只有操作者显式设置
-XUNJI_PROXY_REQUIRED=0 才允许直连，不依赖模型记得 export。
+路由选择由当前 turn contract 冻结：默认/`XUNJI_PROXY_REQUIRED=0` 是直连；只有
+`XUNJI_PROXY_REQUIRED=1` 或显式 `--proxy` 才启用代理。显式选择代理但没有配置时
+fail closed；代理连接失败后由 guard 暂停该代理路线，直到更新的操作者回合再次明确选择代理。
 
 配置(优先级): `--proxy` 参数 > `XUNJI_PROXY` 环境变量 > `tools/harness/proxy.conf`(每行一个 url, # 注释)。
 支持 http:// 与 socks5://; **建议 socks5h://**(代理侧解析 DNS, 防 DNS 泄露; socks4a 在 PySocks 某些失败下
@@ -52,26 +54,33 @@ def engagement_proxy(override: str | None = None) -> str | None:
 
 
 def required() -> bool:
-    """Active target traffic is fail-closed unless the operator opts out.
-
-    Model prompts are not a security boundary.  An absent environment variable
-    therefore means "proxy required"; only an explicit operator value of
-    ``0/false/no/off`` permits direct egress.
-    """
+    """Whether this invocation explicitly selected the engagement proxy."""
     raw = (os.environ.get("XUNJI_PROXY_REQUIRED") or "").strip().lower()
-    if not raw:
+    if raw in ("", "0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
         return True
-    return raw not in ("0", "false", "no", "off")
+    raise SystemExit(
+        "[proxy] XUNJI_PROXY_REQUIRED 只接受 0/false/no/off 或 1/true/yes/on。")
 
 
 def resolve(override: str | None = None) -> str | None:
-    """active 工具用: 返回须用的交战代理。required 但没配 → fail-closed 抛 SystemExit(不许直连泄真实 IP)。"""
-    p = engagement_proxy(override)
-    if p is None and required():
+    """Return the selected target route; direct is the default.
+
+    An explicit ``--proxy`` always selects that proxy. Otherwise proxy config is
+    consulted only when ``XUNJI_PROXY_REQUIRED=1``. This prevents a stale
+    ``proxy.conf`` or ``XUNJI_PROXY`` from silently changing a direct turn.
+    """
+    if override and override.strip():
+        return override.strip()
+    if not required():
+        return None
+    p = engagement_proxy()
+    if p is None:
         raise SystemExit(
-            "[proxy] 主动目标流量默认要求交战代理，但当前未配置 —— 拒绝直连(防真实 IP 泄露)。"
+            "[proxy] 当前操作者明确选择了交战代理，但尚未配置 —— 停止目标流量。"
             " 设 XUNJI_PROXY=socks5h://host:port / 写 tools/harness/proxy.conf；"
-            "仅操作者明确接受直连时才设置 XUNJI_PROXY_REQUIRED=0。")
+            "修复代理后请让操作者确认继续走代理；也可由操作者改为默认直连。")
     return p
 
 
@@ -166,7 +175,7 @@ def urllib_proxy_handlers(override: str | None = None, ssl_context=None) -> list
     - socks5(h):// / socks4(a):// → SOCKS HTTP/HTTPS handlers(它们自身经 socks,
       build_opener 不会再补默认 HTTPS → 无直连旁路; ...5h/...4a = 代理侧解析 DNS 防 DNS 泄露)。
       需 PySocks; 没装 → SystemExit(绝不静默直连泄真实 IP)。
-    内部 resolve() —— import probe.send 的工具不传 override 也拿到交战代理, required 时 fail-closed。"""
+    内部 resolve() —— 默认直连；只有显式 proxy 选择才读取交战代理，选择后缺配置 fail-closed。"""
     https = urllib.request.HTTPSHandler(context=ssl_context)
     p = resolve(override)
     if not p:
@@ -226,10 +235,17 @@ def scrub_proxy_env(base: dict | None = None) -> dict:
 
 
 def status() -> dict:
-    p = engagement_proxy()
+    configured = engagement_proxy()
+    selected = resolve(None)
     src = ("XUNJI_PROXY" if (os.environ.get("XUNJI_PROXY") or "").strip()
-           else "proxy.conf" if (p and _CONF.exists()) else "none")
-    return {"engagement_proxy": p, "required": required(), "source": src}
+           else "proxy.conf" if (configured and _CONF.exists()) else "none")
+    return {
+        "route": "proxy" if selected else "direct",
+        "engagement_proxy": selected,
+        "proxy_configured": configured is not None,
+        "required": required(),
+        "source": src if selected else "default-direct",
+    }
 
 
 def _selftest() -> int:
@@ -285,16 +301,22 @@ def _selftest() -> int:
             ("scrub_proxy_env 不设 NO_PROXY(不压显式 --proxy)", "NO_PROXY" not in senv),
             ("scrub_proxy_env 保留无关变量", senv.get("PATH") == "/bin"),
         ]
-        # fail-closed
+        # Default direct ignores dormant proxy configuration. Explicit proxy
+        # selection remains fail-closed when configuration is absent.
         os.environ.pop("HTTPS_PROXY", None)
         os.environ.pop("XUNJI_PROXY_REQUIRED", None)
+        checks.append(("默认未要求代理 → 直连", resolve(None) is None))
+        os.environ["XUNJI_PROXY"] = "socks5h://dormant:1080"
+        checks.append(("默认直连忽略 dormant XUNJI_PROXY", resolve(None) is None))
+        os.environ.pop("XUNJI_PROXY", None)
+        os.environ["XUNJI_PROXY_REQUIRED"] = "1"
         try:
             resolve(None)
             fc = False
         except SystemExit:
             fc = True
-        checks.append(("默认 required 且没配 → fail-closed 抛错(不直连)", fc))
-        checks.append(("required 配了 override → 不抛、返回代理", resolve("http://relay:9") == "http://relay:9"))
+        checks.append(("显式要求代理但没配 → fail-closed", fc))
+        checks.append(("显式 --proxy 直接选择代理", resolve("http://relay:9") == "http://relay:9"))
     finally:
         globals()["_CONF"] = old_conf
         for k, v in old_env.items():

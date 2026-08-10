@@ -59,7 +59,9 @@ from harness.command_shape import (  # noqa: E402
     split_literal_and_chain,
     trusted_python_token,
 )
+from harness import guard as guardmod  # noqa: E402
 from harness import maintenance_authority, privacy  # noqa: E402
+from harness import proxy as proxymod  # noqa: E402
 
 
 SCHEMA = "xunji.turn_contract.v1"
@@ -125,20 +127,6 @@ RAW_NETWORK_CLIENT_RE = re.compile(
     r"(?i)(?:^|[\s;&|])(curl|wget|httpx|nuclei|sqlmap)(?:\s|$)|"
     r"\b(?:requests\.(?:get|post|request)|urllib\.request|socket\.(?:socket|create_connection))\b"
 )
-DIRECT_EGRESS_ENV_RE = re.compile(
-    r"(?i)\bXUNJI_PROXY_REQUIRED\s*=\s*(?:0|false|no|off)\b"
-)
-DIRECT_EGRESS_APPROVAL_RE = re.compile(
-    r"(?:明确)?(?:允许|接受|批准|同意).{0,24}(?:直连|direct[ -]?egress)|"
-    r"(?:allow|approve|accept).{0,24}direct[ -]?egress",
-    re.I,
-)
-DIRECT_EGRESS_DENIAL_RE = re.compile(
-    r"(?:不|不要|不得|禁止|拒绝).{0,16}(?:允许|接受|批准|同意|直连)|"
-    r"(?:do\s+not|don't|never|deny|forbid).{0,24}"
-    r"(?:allow|approve|accept|direct[ -]?egress)",
-    re.I,
-)
 DIRECT_ROUTE_APPROVAL_RE = re.compile(
     r"(?:不用|无需|别|不走)\s*(?:走|使用)?\s*(?:代理|proxy)"
     r".{0,20}(?:直连|直接访问)|"
@@ -146,9 +134,68 @@ DIRECT_ROUTE_APPROVAL_RE = re.compile(
     r"(?:without|no)\s+(?:the\s+)?proxy.{0,20}\bdirect\b",
     re.I,
 )
+DIRECT_ROUTE_CLAUSE_APPROVAL_RE = re.compile(
+    r"(?:(?:请|继续|本回合|当前回合|明确|务必|只|仅|后面|我(?:想|要|需要))\s*)*"
+    r"(?:(?:允许|必须|需要|要求)\s*)?(?:走|用|使用|启用|通过|切到|切换到|改用|"
+    r"换成|换为)?\s*(?:直连|直接访问)"
+    r"(?:\s*(?:即可|就行|模式|路线|访问(?:目标|站点|资产)?))?|"
+    r"(?:(?:please|explicitly|must|should|only|continue\s+to|later)\s+|"
+    r"i\s+(?:want|need)\s+to\s+)*"
+    r"(?:(?:use|enable|require|switch\s+to|route|go|connect)\s+)?"
+    r"(?:direct|directly|direct\s+(?:route|access|connection))",
+    re.I,
+)
+DIRECT_ROUTE_TOKEN_RE = re.compile(
+    r"(?:直连|直接访问|直接连接)|\bdirect(?:ly)?\b", re.I)
+PROXY_ROUTE_TOKEN_RE = re.compile(r"(?:代理|proxy)", re.I)
 DIRECT_ROUTE_HARD_DENIAL_RE = re.compile(
     r"(?:不要|不得|禁止|拒绝|不允许)\s*(?:进行)?\s*(?:直连|直接访问)|"
     r"(?:do\s+not|don't|never|deny|forbid).{0,16}\bdirect\b",
+    re.I,
+)
+PROXY_ROUTE_APPROVAL_RE = re.compile(
+    # This expression is used with ``fullmatch`` on a punctuation/connector-
+    # bounded clause. A negated or otherwise qualified phrase cannot gain
+    # proxy authority merely because it contains a positive verb substring.
+    r"(?:/loop\s+(?:https?://)?[A-Za-z0-9._~:/?#%=&+\-]+\s*)?"
+    r"(?:(?:请|继续|本回合|当前回合|明确|务必|只|仅|我(?:想|要|需要))\s*)*"
+    r"(?:(?:必须|需要|要求)\s*(?:走|用|使用|启用|通过|切到|改用)?|"
+    r"(?:走|用|使用|启用|通过|切到|改用))"
+    r"\s*(?:交战)?(?:代理|proxy)"
+    r"(?:\s*(?:即可|就行|模式|路线|渗透|访问(?:目标|站点|资产)?))?|"
+    r"(?:(?:please|explicitly|must|should|only|continue\s+to)\s+|"
+    r"i\s+(?:want|need)\s+to\s+)*"
+    r"(?:use|using|enable|require|via|through|switch\s+to|"
+    r"route\s+(?:via|through)|go\s+through)\s+"
+    r"(?:the\s+)?(?:engagement\s+)?proxy"
+    r"(?:\s+(?:route|mode|for\s+(?:this\s+)?(?:run|turn)))?",
+    re.I,
+)
+PROXY_ROUTE_CLAUSE_SPLIT_RE = re.compile(
+    r"[，,、。；;！？!?\r\n]+|(?:并且|然后|同时|并|且)|\b(?:and|then|but|instead)\b",
+    re.I,
+)
+ROUTE_RETRACTION_RE = re.compile(
+    r"(?:不|无|未|没|免|避|禁|拒|停|取消|别|勿|莫|毋|休|忽略|废弃|关闭|撤销|放弃)|"
+    r"\b(?:do\s+not|not|never|without|no|avoid|stop|cannot|can't|must\s+not|"
+    r"disable|forbid|deny|refuse|later)\b|\b[A-Za-z]+n't\b",
+    re.I,
+)
+PROXY_ROUTE_DENIAL_RE = re.compile(
+    # Proxy authority is affirmative-only. Within one punctuation-bounded
+    # clause, any ordinary Chinese negation cue before proxy vetoes a positive
+    # verb; a trailing "proxy is not needed/allowed" form also vetoes it.
+    r"(?:不|无|未|没|免|避|禁|拒|停|取消|别|勿|莫|毋|休)"
+    r"[^，,、。；;！？!?\r\n]{0,20}(?:交战)?(?:代理|proxy)|"
+    r"(?:代理|proxy)[^，,、。；;！？!?\r\n]{0,12}"
+    r"(?:不(?:需要|要|用|走|启用|允许|可以|可)|无需|不可|不能|禁用|停用)|"
+    # Anchor English words so `use` cannot match inside `refuse`; treat any
+    # common negative cue in the same clause as a veto, including contractions.
+    r"(?:\b(?:do\s+not|not|never|without|no|avoid|stop|cannot|can't|must\s+not|"
+    r"disable|forbid|deny|refuse)\b|\b[A-Za-z]+n't\b)"
+    r"[^，,。；;！？!?\r\n]{0,28}\bproxy\b|"
+    r"\bproxy\b[^，,。；;！？!?\r\n]{0,16}"
+    r"\b(?:(?:is|was|be)\s+not|unnecessary|disabled|forbidden)\b",
     re.I,
 )
 ALL_NETWORK_DENIAL_RE = re.compile(
@@ -861,16 +908,66 @@ def _operator_flag_approved(
     return bool(positive.search(intent) and not denial.search(intent))
 
 
-def _direct_egress_approved(prompt: str) -> bool:
-    """Recognize an explicit route choice without trusting implied descriptions."""
+def _compiled_prompt_route(prompt: str) -> str:
+    """Compile direct by default; proxy only by affirmative operator opt-in."""
     intent = _operator_intent_text(prompt)
-    if DIRECT_ROUTE_HARD_DENIAL_RE.search(intent):
-        return False
-    explicit = bool(
-        DIRECT_EGRESS_APPROVAL_RE.search(intent)
-        and not DIRECT_EGRESS_DENIAL_RE.search(intent)
+    clauses = [
+        clause.strip() for clause in PROXY_ROUTE_CLAUSE_SPLIT_RE.split(intent)
+        if clause.strip()
+    ]
+    proxy_votes = [
+        index for index, clause in enumerate(clauses)
+        if PROXY_ROUTE_APPROVAL_RE.fullmatch(clause)
+    ]
+    direct_requested = bool(
+        DIRECT_ROUTE_APPROVAL_RE.search(intent)
+        or any(DIRECT_ROUTE_CLAUSE_APPROVAL_RE.fullmatch(clause) for clause in clauses)
+        or any(
+            DIRECT_ROUTE_TOKEN_RE.search(clause)
+            and not ROUTE_RETRACTION_RE.search(clause)
+            for clause in clauses
+        )
     )
-    return explicit or bool(DIRECT_ROUTE_APPROVAL_RE.search(intent))
+    direct_denied = bool(any(
+        DIRECT_ROUTE_TOKEN_RE.search(clause)
+        and ROUTE_RETRACTION_RE.search(clause)
+        for clause in clauses
+    ))
+    proxy_denied = bool(PROXY_ROUTE_DENIAL_RE.search(intent))
+    proxy_preconflict = bool(
+        proxy_votes
+        and any(
+            ROUTE_RETRACTION_RE.search(clause)
+            and not DIRECT_ROUTE_TOKEN_RE.search(clause)
+            for clause in clauses[:proxy_votes[0]]
+        )
+    )
+    proxy_retracted = bool(
+        proxy_votes
+        and any(
+            ROUTE_RETRACTION_RE.search(clause)
+            or (
+                PROXY_ROUTE_TOKEN_RE.search(clause)
+                and not PROXY_ROUTE_APPROVAL_RE.fullmatch(clause)
+            )
+            for clause in clauses[proxy_votes[-1] + 1:]
+        )
+    )
+    if proxy_votes and not (
+            proxy_denied or proxy_preconflict or proxy_retracted or direct_requested):
+        return "proxy"
+    if proxy_votes:
+        # Conflicting or subsequently retracted route language is not authority
+        # for either outbound path. Require a fresh unambiguous operator turn.
+        return "offline"
+    if direct_denied or DIRECT_ROUTE_HARD_DENIAL_RE.search(intent):
+        return "offline"
+    return "direct"
+
+
+def _direct_egress_approved(prompt: str) -> bool:
+    """Compatibility projection of the compiled direct-default route."""
+    return _compiled_prompt_route(prompt) == "direct"
 
 
 def _safe_lifecycle_source_hint(value: str) -> str:
@@ -1189,11 +1286,14 @@ def _contract_from_event(
             if source_sha256s or source_ambiguous else "setup"
     else:
         lifecycle_operation = "none"
-    direct_egress_approved = _direct_egress_approved(prompt)
+    prompt_route = _compiled_prompt_route(prompt)
     route = (
         "offline" if target_egress_denied else
-        "direct" if direct_egress_approved else "proxy"
+        prompt_route
     )
+    # Compatibility field retained for v1 consumers; it now projects the
+    # compiled route instead of representing an exceptional opt-out.
+    direct_egress_approved = route == "direct"
     source_hint_value = loop_source
     if mode == INTENT_PENDING and len(source_values) == 1:
         source_hint_value = source_values[0]
@@ -5394,35 +5494,35 @@ def _unassigned_assets(run_dir: Path) -> tuple[list[str], str]:
 
 
 def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
-    """Deny target egress paths that cannot prove use of the engagement proxy."""
+    """Deny target paths that cannot prove use of the guarded route service."""
     tool = str(event.get("tool_name") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = str(tool_input.get("command") or "")
     if tool == "Bash" and RAW_NETWORK_CLIENT_RE.search(command):
         return (
-            "交战代理硬门：active run 禁止使用裸 curl/wget/httpx/nuclei/sqlmap/requests/urllib/socket；"
-            "请走项目的 proxy-aware guarded tools。"
+            "目标出口硬门：active run 禁止使用裸 curl/wget/httpx/nuclei/sqlmap/requests/urllib/socket；"
+            "请走项目的 route-aware guarded tools。"
         )
     touched, coverage_error = _event_known_hosts(run_dir, event)
     if coverage_error:
         return "资产覆盖硬门：无法派生目标资产账本，拒绝在未知 scope/代理状态下执行：" + coverage_error
     if tool == "WebFetch":
         return (
-            "交战代理硬门：active run 中 WebFetch 无法证明经过 XUNJI_PROXY，且未知目标会"
+            "目标出口硬门：active run 中 WebFetch 无法证明经过冻结的 direct/proxy 路线，且未知目标会"
             "绕过资产账本；目标请求必须改用 tools/probe.py/render.py/scan.py，公共资料研究"
             "使用 WebSearch/知识工具。"
         )
     if tool != "Bash":
         if touched or _event_destinations(event):
             return (
-                "交战代理硬门：该非 Bash 网络工具无法证明经过 XUNJI_PROXY；"
-                "目标请求必须改用 proxy-aware project tools。"
+                "目标出口硬门：该非 Bash 网络工具无法证明经过冻结路线；"
+                "目标请求必须改用 route-aware project tools。"
             )
         return ""
     try:
         tokens = shlex.split(command)
     except ValueError:
-        return "交战代理硬门：无法解析目标命令，拒绝可能的直连出口。"
+        return "目标出口硬门：无法解析目标命令，拒绝未绑定路线的目标出口。"
     approved = False
     for token in tokens:
         if not token.endswith(".py"):
@@ -5441,7 +5541,7 @@ def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
         if inventory_error:
             return "资产覆盖硬门：无法派生目标资产账本：" + inventory_error
         if not rows:
-            return "资产覆盖硬门：proxy-aware 目标工具执行前必须先建立 coverage/asset ledger。"
+            return "资产覆盖硬门：route-aware 目标工具执行前必须先建立 coverage/asset ledger。"
         destinations = _event_destinations(event)
         unapproved = _unapproved_scope_destinations(run_dir, rows, destinations)
         if unapproved:
@@ -5458,14 +5558,14 @@ def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
         unknown = sorted(destinations - _coverage_hostnames(rows))
         if unknown:
             return (
-                "资产覆盖硬门：proxy-aware 目标工具只能访问 coverage ledger 已声明的 host/IP；"
+                "资产覆盖硬门：route-aware 目标工具只能访问 coverage ledger 已声明的 host/IP；"
                 "未知目标: " + ", ".join(unknown)
             )
     if not approved:
         if not touched:
             return ""
         return (
-            "交战代理硬门：该目标命令未绑定项目的 proxy-aware 工具，无法证明出口代理；"
+            "目标出口硬门：该目标命令未绑定项目的 route-aware 工具，无法证明冻结出口路线；"
             "改用 tools/probe.py、render.py 或 scan.py。"
         )
     return ""
@@ -5494,6 +5594,215 @@ def _is_target_action(event: dict) -> bool:
     if tool in NON_EGRESS_TOOLS:
         return False
     return bool(_event_destinations(event))
+
+
+def _contract_egress_route(contract: dict) -> str:
+    """Return the compiled route, retaining conservative v1 compatibility."""
+    operator_intent = contract.get("operator_intent") \
+        if isinstance(contract.get("operator_intent"), dict) else {}
+    route = str(operator_intent.get("route") or "")
+    if route in {"offline", "direct", "proxy"}:
+        return route
+    # A legacy affirmative direct projection remains usable. A route-less false
+    # value came from the historical proxy-default era; it is not affirmative
+    # operator proxy authority, so require a fresh top-level turn (offline).
+    return "direct" if contract.get("direct_egress_approved") is True else "offline"
+
+
+def _target_route_reason(
+    event: dict,
+    contract: dict,
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None,
+) -> str:
+    """Bind one registered target command to the turn's exact route choice."""
+    if capability is None:
+        tool_input = event.get("tool_input") \
+            if isinstance(event.get("tool_input"), dict) else {}
+        command = str(tool_input.get("command") or "")
+        invocation = parse_exact_python_command(
+            command,
+            root=ROOT,
+            allowed_scripts=REGISTERED_CAPABILITY_SCRIPTS,
+            allow_environment=True,
+        )
+        route_env_names = [
+            item.partition("=")[0]
+            for item in (invocation.environment if invocation is not None else ())
+            if item.partition("=")[0] in {"XUNJI_PROXY_REQUIRED", "XUNJI_PROXY"}
+        ]
+        duplicate_route_selector = len(route_env_names) != len(set(route_env_names))
+        inline_env = dict(
+            item.split("=", 1) for item in invocation.environment
+        ) if invocation is not None and not duplicate_route_selector else {}
+        tool_env = tool_input.get("env") \
+            if isinstance(tool_input.get("env"), dict) else {}
+        mixed_environment_sources = bool(inline_env and tool_env)
+        supplied_env = tool_env or inline_env
+        raw_required = str(
+            supplied_env.get("XUNJI_PROXY_REQUIRED", "")).strip().lower()
+        direct_selected = raw_required in {"0", "false", "no", "off"}
+        proxy_selected = raw_required in {"1", "true", "yes", "on"}
+        proxy_config_supplied = bool(
+            str(supplied_env.get("XUNJI_PROXY", "")).strip())
+        explicit_proxy_arg = bool(
+            invocation is not None
+            and any(
+                token == "--proxy" or token.startswith("--proxy=")
+                for token in invocation.args
+            )
+        )
+        if invocation is not None \
+                and invocation.script.resolve() in PROXY_AWARE_TARGET_TOOLS \
+                and (duplicate_route_selector or mixed_environment_sources):
+            return (
+                "目标出口路由硬门：route-aware 目标工具的 argv/env 未匹配唯一 typed "
+                "capability，无法把当前命令绑定到 exact direct/proxy selector；拒绝执行。"
+            )
+        route_aware = bool(
+            invocation is not None
+            and invocation.script.resolve() in PROXY_AWARE_TARGET_TOOLS
+        )
+        route = _contract_egress_route(contract)
+        if route_aware and route == "offline":
+            return "当前操作者禁止 target egress；离线路由不能执行目标 capability。"
+        if route_aware and route == "direct" and (
+                proxy_selected or proxy_config_supplied or explicit_proxy_arg):
+            return (
+                "目标出口路由硬门：当前回合默认/明确选择直连，不得由模型、旧环境或 argv "
+                "切换到代理。请使用 exact `XUNJI_PROXY_REQUIRED=0` 前缀。"
+            )
+        if route_aware and route == "direct" and not direct_selected:
+            return (
+                "目标出口路由硬门：当前回合选择直连；为覆盖残留 shell 环境，注册目标命令必须"
+                "使用 exact `XUNJI_PROXY_REQUIRED=0` 前缀。"
+            )
+        if route_aware and route == "proxy" and direct_selected:
+            return (
+                "目标出口路由硬门：当前操作者明确要求代理，不能用 "
+                "`XUNJI_PROXY_REQUIRED=0` 降级为直连。"
+            )
+        if route_aware and route == "proxy" \
+                and not (proxy_selected or explicit_proxy_arg):
+            return (
+                "目标出口路由硬门：代理不是默认路线；当前操作者已明确选择代理，注册目标命令"
+                "必须使用 exact `XUNJI_PROXY_REQUIRED=1` 或其受控 `--proxy` 参数。"
+            )
+        return ""
+    if capability[0].effect != "target":
+        return ""
+    _spec, _script, args, supplied_env = capability
+    route = _contract_egress_route(contract)
+    raw_required = str(supplied_env.get("XUNJI_PROXY_REQUIRED", "")).strip().lower()
+    direct_selected = raw_required in {"0", "false", "no", "off"}
+    proxy_selected = raw_required in {"1", "true", "yes", "on"}
+    proxy_config_supplied = bool(str(supplied_env.get("XUNJI_PROXY", "")).strip())
+    explicit_proxy_arg = any(
+        token == "--proxy" or token.startswith("--proxy=") for token in args)
+    if route == "offline":
+        return "当前操作者禁止 target egress；离线路由不能执行目标 capability。"
+    if route == "direct":
+        if proxy_selected or proxy_config_supplied or explicit_proxy_arg:
+            return (
+                "目标出口路由硬门：当前回合默认/明确选择直连，不得由模型、旧环境或 argv "
+                "切换到代理。请使用 exact `XUNJI_PROXY_REQUIRED=0` 前缀。"
+            )
+        if not direct_selected:
+            return (
+                "目标出口路由硬门：当前回合选择直连；为覆盖残留 shell 环境，注册目标命令必须"
+                "使用 exact `XUNJI_PROXY_REQUIRED=0` 前缀。"
+            )
+        return ""
+    if direct_selected:
+        return (
+            "目标出口路由硬门：当前操作者明确要求代理，不能用 "
+            "`XUNJI_PROXY_REQUIRED=0` 降级为直连。"
+        )
+    if not (proxy_selected or explicit_proxy_arg):
+        return (
+            "目标出口路由硬门：代理不是默认路线；当前操作者已明确选择代理，注册目标命令"
+            "必须使用 exact `XUNJI_PROXY_REQUIRED=1` 或其受控 `--proxy` 参数。"
+        )
+    return ""
+
+
+def _proxy_pause_reason(contract: dict, capability=None) -> str:
+    """Require a newer operator proxy turn after a proxy-attributed failure."""
+    if _contract_egress_route(contract) != "proxy":
+        return ""
+    try:
+        selected_route = _selected_proxy_route(capability)
+        pause = guardmod.HostHealth().proxy_confirmation_state(
+            egress_route=selected_route or None)
+    except Exception as exc:
+        return (
+            "[XUNJI_E_PROXY_STATE_INVALID] 无法验证代理暂停状态，拒绝代理目标流量："
+            + exc.__class__.__name__
+        )
+    if not pause.get("required"):
+        return ""
+    try:
+        contract_updated = float(contract.get("updated_at") or 0.0)
+        latest_failure = float(pause.get("latest_updated_at") or 0.0)
+    except (TypeError, ValueError):
+        contract_updated = 0.0
+        latest_failure = 0.0
+    if contract_updated <= latest_failure:
+        classes = ",".join(str(item) for item in pause.get("error_classes", []))
+        return (
+            "[XUNJI_E_PROXY_CONFIRMATION_REQUIRED] 代理链路已失败并停止；当前回合不能自动重试"
+            f"（{classes or 'proxy transport'}）。请结束本回合，等待操作者确认改为直连，或在"
+            "更新的顶层 prompt 中再次明确要求走代理。"
+        )
+    return ""
+
+
+def _selected_proxy_route(
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None,
+) -> str:
+    """Derive the selected credential-free proxy route from exact capability argv."""
+    if capability is None or capability[0].effect != "target":
+        return ""
+    _spec, _script, args, supplied_env = capability
+    override = ""
+    for index, token in enumerate(args):
+        if token == "--proxy" and index + 1 < len(args):
+            override = str(args[index + 1]).strip()
+            break
+        if token.startswith("--proxy="):
+            override = token.split("=", 1)[1].strip()
+            break
+    proxy_url = (
+        override
+        or str(supplied_env.get("XUNJI_PROXY") or "").strip()
+        or str(proxymod.engagement_proxy() or "").strip()
+    )
+    return guardmod.egress_route_id(proxy_url) if proxy_url else ""
+
+
+def _acknowledge_proxy_retry(contract: dict, capability=None) -> str:
+    """Consume the newer operator proxy choice immediately before target I/O."""
+    if _contract_egress_route(contract) != "proxy":
+        return ""
+    selected_route = _selected_proxy_route(capability)
+    if not selected_route:
+        return (
+            "[XUNJI_E_PROXY_CONFIG_MISSING] 当前回合明确选择代理，但无法从受控 argv/环境/"
+            "专用配置绑定唯一代理路线；停止目标流量并等待操作者确认。"
+        )
+    try:
+        guardmod.HostHealth().acknowledge_proxy_retry(
+            confirmed_at=float(contract.get("updated_at") or 0.0),
+            egress_route=selected_route)
+    except Exception as exc:
+        return (
+            "[XUNJI_E_PROXY_CONFIRMATION_RACE] 代理确认未能原子消费，目标流量保持停止："
+            + exc.__class__.__name__
+        )
+    return ""
 
 
 def _denial_is_target_action(event: dict, reason: str) -> bool:
@@ -5611,16 +5920,11 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
     tool_env = tool_input.get("env") if isinstance(tool_input.get("env"), dict) else {}
     registered_capability = _registered_capability_invocation(
         command, tool_env=tool_env) if tool == "Bash" else None
-    normalized_capability_env = (
-        registered_capability[3] if registered_capability is not None else {}
-    )
-    direct_env_opt_out = str(
-        normalized_capability_env.get(
-            "XUNJI_PROXY_REQUIRED",
-            tool_env.get("XUNJI_PROXY_REQUIRED", ""),
-        )
-    ).strip().lower() in {"0", "false", "no", "off"}
-
+    if tool == "Bash" and registered_capability is None:
+        invalid_target_route = _target_route_reason(
+            event, contract, registered_capability)
+        if invalid_target_route:
+            return invalid_target_route
     # Exact registered capabilities already passed script identity and typed argv
     # validation.  Do not rescan their quoted data (for example a disposition
     # note naming ``assignments.json``) as if it were an opaque shell write.
@@ -5717,13 +6021,6 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             return "长期记忆写入需要操作者在当前 prompt 明确批准；retrospective 不能自行升级为 memory。"
     if tool == "Bash" and BACKGROUND_REVIEW_RE.search(command):
         return "peer_review 不得后台运行并与可变 evidence 并发；请前台冻结快照后完成复审。"
-    if tool == "Bash" and (DIRECT_EGRESS_ENV_RE.search(text) or direct_env_opt_out) \
-            and not contract.get("direct_egress_approved"):
-        return (
-            "交战代理硬门：XUNJI_PROXY_REQUIRED=0 只能由当前操作者 prompt 明确批准直连；"
-            "模型或历史环境变量不能自行关闭 fail-closed。"
-        )
-
     if mode == EXPLAIN:
         if tool not in {"Read", "Grep", "Glob", "WebSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"}:
             return "当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。"
@@ -5834,9 +6131,16 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             "禁止目标动作，先修复 frontier.md 的 Status/Barrier class/Current depth。"
         )
     if _is_target_action(event):
+        route_reason = _target_route_reason(
+            event, contract, registered_capability)
+        if route_reason:
+            return route_reason
         proxy_reason = _proxy_egress_reason(run_dir, event)
         if proxy_reason:
             return proxy_reason
+        pause_reason = _proxy_pause_reason(contract, registered_capability)
+        if pause_reason:
+            return pause_reason
         unassigned_assets, coverage_error = _unassigned_assets(run_dir)
         touched_hosts, host_error = _event_known_hosts(run_dir, event)
         if coverage_error or host_error:
@@ -6064,6 +6368,19 @@ def _context_message(contract: dict, run_dir: Path) -> str:
             "[Xunji operator effect: SETUP_ONLY] 只完成 lifecycle setup；"
             "成功后仅可读取/验证，禁止 target、Agent、Cron 或 canonical state 修改。"
         )
+    if mode == EXECUTE and not contract.get("target_egress_denied"):
+        route = _contract_egress_route(contract)
+        if route == "direct":
+            effect_note += (
+                "[Xunji operator route: DIRECT_DEFAULT] 本回合目标出口默认直连；每条注册目标 "
+                "argv 使用 exact `XUNJI_PROXY_REQUIRED=0`，不得继承旧代理环境。"
+            )
+        elif route == "proxy":
+            effect_note += (
+                "[Xunji operator route: PROXY_EXPLICIT] 本回合仅因操作者明确要求而使用交战代理；"
+                "每条注册目标 argv 使用 exact `XUNJI_PROXY_REQUIRED=1`。代理失败后立即停止，"
+                "等待新的操作者回合确认。"
+            )
     if contract.get("scope_admission_parse_error"):
         return (
             "[Xunji scope admission: INVALID] 未授予任何资产准入权限；"
@@ -6378,6 +6695,19 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
         budget_reason = _claim_plan_bound_child_tool_call(run_dir, event)
         reason = private_api_reason or budget_reason \
             or evaluate_pretool(run_dir, event, contract)
+        if not reason and _is_target_action(event):
+            # Consume a newer operator proxy confirmation only after every
+            # authority/scope/shape/budget gate passed, at the last local
+            # boundary before target I/O. Direct turns never touch this state.
+            target_capability = None
+            if str(event.get("tool_name") or "") == "Bash":
+                target_tool_input = event.get("tool_input") \
+                    if isinstance(event.get("tool_input"), dict) else {}
+                target_tool_env = target_tool_input.get("env") \
+                    if isinstance(target_tool_input.get("env"), dict) else {}
+                target_capability = _registered_capability_invocation(
+                    command, tool_env=target_tool_env)
+            reason = _acknowledge_proxy_retry(contract, target_capability)
         if reason:
             decision_metadata = _decision_metadata(reason, event)
             shape_denial = decision_metadata.get("xunji_decision_code") \
@@ -6514,6 +6844,9 @@ def _selftest() -> int:
             "activate", target_name, profile=profile)
 
     root = Path(tempfile.mkdtemp())
+    guardmod.STATE_DIR = root / "guard-state"
+    guardmod.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    guardmod._LOCK_PATH = guardmod.STATE_DIR / ".lock"
     (root / "recon.json").write_text(json.dumps({
         "assets": [{"host": "bootstrap.example"}],
     }), encoding="utf-8")
@@ -6625,7 +6958,80 @@ def _selftest() -> int:
     mixed_direct_denial = _contract_from_event({
         "prompt": "不用代理直连，但 do not allow direct egress",
     })
+    negated_proxy_cn = [
+        _contract_from_event({"prompt": text})
+        for text in (
+            "不要走代理，继续执行当前运行",
+            "不要使用代理，继续执行当前运行",
+            "不再需要代理，继续执行当前运行",
+            "不能走代理，继续执行当前运行",
+            "不可以走代理，继续执行当前运行",
+            "不允许走代理，继续执行当前运行",
+            "无法使用代理，继续执行当前运行",
+            "要求不要用代理，继续执行当前运行",
+            "走代理不需要，继续执行当前运行",
+            "请勿使用代理，继续执行当前运行",
+            "莫使用代理，继续执行当前运行",
+            "走代理不再需要，继续执行当前运行",
+            "走代理无法使用，继续执行当前运行",
+        )
+    ]
+    negated_proxy_en = [
+        _contract_from_event({"prompt": text})
+        for text in (
+            "don't use proxy; continue the current run",
+            "never use the engagement proxy; continue",
+            "without using the proxy, continue the current run",
+            "avoid using the proxy; continue the current run",
+            "the proxy is not needed; continue the current run",
+            "I do not want to use proxy; continue the current run",
+            "use proxy is forbidden; continue the current run",
+        )
+    ]
+    proxy_shorthand = _contract_from_event({
+        "prompt": "继续执行当前运行，用代理",
+    })
+    bare_proxy_is_not_authority = _contract_from_event({
+        "prompt": "继续执行当前运行，代理",
+    })
+    connector_proxy_request = _contract_from_event({
+        "prompt": "continue the current run and use proxy",
+    })
+    retracted_proxy_requests = [
+        _contract_from_event({"prompt": text})
+        for text in (
+            "走代理，然后停用",
+            "走代理，但本回合不要用",
+            "use proxy but not now",
+            "use proxy then stop using it",
+            "enable proxy then disable it",
+            "用代理，然后走直连",
+            "走代理，后面切换到直连",
+            "use proxy but route direct",
+            "use proxy then connect directly",
+            "请走代理。改成使用直连",
+            "不要，请使用代理",
+            "不行，继续使用代理",
+            "不用了，继续使用代理",
+        )
+    ]
+    both_routes_denied = _contract_from_event({
+        "prompt": "不要直连，也不要走代理；保持离线",
+    })
+    direct_denial_variants = [
+        _contract_from_event({"prompt": text})
+        for text in (
+            "不用直连，继续执行当前运行",
+            "别直连，继续执行当前运行",
+            "不能直连，继续执行当前运行",
+            "不要用直连，继续执行当前运行",
+            "不要直接连接，继续执行当前运行",
+            "no direct; continue the current run",
+        )
+    ]
     explicit_direct = _contract_from_event({"prompt": "明确允许本回合直连"})
+    default_direct = _contract_from_event({"prompt": "继续执行当前运行"})
+    explicit_proxy = _contract_from_event({"prompt": "继续执行当前运行，明确使用代理"})
     scope_prompt = (
         "/xunji-scope-admit --run runs/pilot_20260715 "
         "--assets one.example.test,two.example.test --reason operator-confirmed-scope"
@@ -6643,13 +7049,18 @@ def _selftest() -> int:
         "prompt_excerpt": "/loop 重新开一个新 run",
         "origin_run": run.name,
         "bound_run": run.name,
+        "direct_egress_approved": True,
+        "operator_intent": {"route": "direct"},
         "updated_at": time.time(),
         "coordination_signature": _coordination_signature(run),
         "fanout_epoch_started_at": time.time() - 1,
         "fanout_epoch_id": "0123456789abcdef",
     }
     target_event = {"tool_name": "Bash", "tool_input": {
-        "command": "python3 tools/probe.py GET https://example.test"}}
+        "command": (
+            "XUNJI_PROXY_REQUIRED=0 python3 tools/probe.py "
+            "GET https://example.test"
+        )}}
     scope_turn_target_blocked = "zero-probe local transition" in evaluate_pretool(
         run, target_event, scope_contract)
     malformed_scope_write_blocked = bool(evaluate_pretool(
@@ -8024,6 +8435,7 @@ def _selftest() -> int:
         and item.get("loop_source_kind") == "url"
         and item.get("source_identity_version") == "canonical-v1"
         and item.get("lifecycle_source_hint") == "https://cloud.scshr.com/"
+        and item.get("operator_intent", {}).get("route") == "proxy"
         and _source_authority_matches(
             "HTTPS://Cloud.SCSHR.COM:443", item,
         )
@@ -11754,6 +12166,8 @@ def _selftest() -> int:
     proxy_contract = {
         "mode": EXECUTE, "session_id": "proxy-session", "prompt_excerpt": "继续执行",
         "fanout_override": True, "updated_at": time.time(),
+        "direct_egress_approved": False,
+        "operator_intent": {"route": "proxy"},
     }
     raw_curl = {"tool_name": "Bash", "tool_input": {
         "command": "curl https://a.example/"}}
@@ -11763,9 +12177,15 @@ def _selftest() -> int:
     unknown_webfetch = {"tool_name": "WebFetch", "tool_input": {
         "url": "https://unknown.example/"}}
     guarded_probe = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/"
+        )}}
     unknown_guarded_probe = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://unknown.example/"
+        )}}
     direct_guarded_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
             f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
@@ -11780,14 +12200,44 @@ def _selftest() -> int:
             f"XUNJI_PROXY_REQUIRED=o''ff python3 {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/"
         )}}
+    direct_with_proxy_arg = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/ --proxy http://proxy.example:8080"
+        )}}
+    direct_with_proxy_equals_arg = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/ --proxy=http://proxy.example:8080"
+        )}}
+    invalid_direct_route_proxy_env = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/ --invalid-route-fixture"
+        )}}
+    invalid_proxy_route_direct_env = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/ --invalid-route-fixture"
+        )}}
+    duplicate_env_selects_proxy = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            "XUNJI_PROXY_REQUIRED=0 XUNJI_PROXY_REQUIRED=1 "
+            f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"
+        )}}
+    duplicate_env_selects_direct = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            "XUNJI_PROXY_REQUIRED=1 XUNJI_PROXY_REQUIRED=0 "
+            f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"
+        )}}
     browser_target = {"tool_name": "mcp__browser__navigate", "tool_input": {
         "url": "https://a.example/"}}
-    raw_curl_blocked = "交战代理硬门" in evaluate_pretool(proxy_run, raw_curl, proxy_contract)
-    raw_requests_blocked = "交战代理硬门" in evaluate_pretool(
+    raw_curl_blocked = "目标出口硬门" in evaluate_pretool(proxy_run, raw_curl, proxy_contract)
+    raw_requests_blocked = "目标出口硬门" in evaluate_pretool(
         proxy_run, raw_requests, proxy_contract)
-    target_webfetch_blocked = "交战代理硬门" in evaluate_pretool(
+    target_webfetch_blocked = "目标出口硬门" in evaluate_pretool(
         proxy_run, target_webfetch, proxy_contract)
-    unknown_webfetch_blocked = "交战代理硬门" in evaluate_pretool(
+    unknown_webfetch_blocked = "目标出口硬门" in evaluate_pretool(
         proxy_run, unknown_webfetch, proxy_contract)
     guarded_probe_allowed = evaluate_pretool(proxy_run, guarded_probe, proxy_contract) == ""
     scoped_proxy_coverage = json.loads(
@@ -11815,18 +12265,108 @@ def _selftest() -> int:
         proxy_run, guarded_probe, proxy_contract) == ""
     unknown_guarded_probe_blocked = "未知目标: unknown.example" in evaluate_pretool(
         proxy_run, unknown_guarded_probe, proxy_contract)
-    direct_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
+    direct_without_operator_blocked = "明确要求代理" in evaluate_pretool(
         proxy_run, direct_guarded_probe, proxy_contract)
-    direct_env_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
+    direct_env_without_operator_blocked = "明确要求代理" in evaluate_pretool(
         proxy_run, direct_env_probe, proxy_contract)
-    quoted_direct_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
+    quoted_direct_without_operator_blocked = "明确要求代理" in evaluate_pretool(
         proxy_run, quoted_direct_probe, proxy_contract)
+    direct_contract = {
+        **proxy_contract,
+        "direct_egress_approved": True,
+        "operator_intent": {"route": "direct"},
+    }
+    direct_proxy_arg_blocked = "不得由模型" in evaluate_pretool(
+        proxy_run, direct_with_proxy_arg, direct_contract)
+    direct_proxy_equals_arg_blocked = "不得由模型" in evaluate_pretool(
+        proxy_run, direct_with_proxy_equals_arg, direct_contract)
+    invalid_capability_route_selectors_fail_closed = (
+        "不得由模型" in _target_route_reason(
+            invalid_direct_route_proxy_env, direct_contract, None)
+        and "不能用" in _target_route_reason(
+            invalid_proxy_route_direct_env, proxy_contract, None)
+        and "离线路由" in _target_route_reason(
+            invalid_direct_route_proxy_env,
+            {**direct_contract, "direct_egress_approved": False,
+             "operator_intent": {"route": "offline"}}, None)
+    )
+    duplicate_env_assignments_fail_closed = (
+        _registered_capability_invocation(
+            duplicate_env_selects_proxy["tool_input"]["command"]) is None
+        and _registered_capability_invocation(
+            duplicate_env_selects_direct["tool_input"]["command"]) is None
+        and "目标出口路由硬门" in evaluate_pretool(
+            proxy_run, duplicate_env_selects_proxy, proxy_contract)
+        and "目标出口路由硬门" in evaluate_pretool(
+            proxy_run, duplicate_env_selects_direct, direct_contract)
+    )
     direct_with_operator_allowed = evaluate_pretool(
         proxy_run, direct_guarded_probe,
-        {**proxy_contract, "direct_egress_approved": True}) == ""
+        {**proxy_contract, "direct_egress_approved": True,
+         "operator_intent": {"route": "direct"}}) == ""
     quoted_direct_with_operator_allowed = evaluate_pretool(
         proxy_run, quoted_direct_probe,
-        {**proxy_contract, "direct_egress_approved": True}) == ""
+        {**proxy_contract, "direct_egress_approved": True,
+         "operator_intent": {"route": "direct"}}) == ""
+    local_settlement_with_route_text = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'loop_journal.py'} {proxy_run} end "
+            "--next-action '等待操作者确认 XUNJI_PROXY_REQUIRED=0 后重试 F-001'"
+        )}}
+    local_route_text_is_not_target_route = "目标出口路由硬门" not in evaluate_pretool(
+        proxy_run, local_settlement_with_route_text, proxy_contract)
+    plain_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/",
+    }}
+    proxy_route_needs_positive_selection = (
+        "XUNJI_PROXY_REQUIRED=1" in evaluate_pretool(
+            proxy_run, plain_guarded_probe, proxy_contract))
+    direct_route_needs_clean_selection = (
+        "XUNJI_PROXY_REQUIRED=0" in evaluate_pretool(
+            proxy_run, plain_guarded_probe, direct_contract))
+    legacy_route_less_contract = dict(proxy_contract)
+    legacy_route_less_contract.pop("operator_intent", None)
+    legacy_proxy_default_stays_offline = (
+        _contract_egress_route(legacy_route_less_contract) == "offline"
+        and "离线路由" in evaluate_pretool(
+            proxy_run, guarded_probe, legacy_route_less_contract)
+    )
+    pause_projection = {
+        "required": True,
+        "latest_updated_at": proxy_contract["updated_at"] + 1.0,
+        "routes": ["proxy:http:" + "a" * 16],
+        "error_classes": ["proxy_connect"],
+    }
+    with mock.patch.object(
+            guardmod.HostHealth, "proxy_confirmation_state",
+            return_value=pause_projection):
+        same_turn_proxy_retry_blocked = (
+            "XUNJI_E_PROXY_CONFIRMATION_REQUIRED" in _proxy_pause_reason(
+                proxy_contract))
+        newer_proxy_contract = {
+            **proxy_contract,
+            "updated_at": pause_projection["latest_updated_at"] + 1.0,
+        }
+        newer_operator_proxy_turn_allowed = (
+            _proxy_pause_reason(newer_proxy_contract) == "")
+    with mock.patch.object(
+            guardmod.HostHealth, "acknowledge_proxy_retry",
+            return_value=True) as acknowledge_retry, mock.patch.object(
+                proxymod, "engagement_proxy",
+                return_value="http://proxy.example:8080"):
+        guarded_capability = _registered_capability_invocation(
+            guarded_probe["tool_input"]["command"])
+        proxy_confirmation_consumed = (
+            _acknowledge_proxy_retry(
+                newer_proxy_contract, guarded_capability) == ""
+            and acknowledge_retry.call_args.kwargs["confirmed_at"]
+            == newer_proxy_contract["updated_at"]
+            and acknowledge_retry.call_args.kwargs["egress_route"]
+            == guardmod.egress_route_id("http://proxy.example:8080"))
+    with mock.patch.object(proxymod, "engagement_proxy", return_value=None):
+        proxy_missing_configuration_blocked = (
+            "XUNJI_E_PROXY_CONFIG_MISSING" in _acknowledge_proxy_retry(
+                newer_proxy_contract, guarded_capability))
     nonbash_target_tool_blocked = "非 Bash 网络工具" in evaluate_pretool(
         proxy_run, browser_target, proxy_contract)
     (proxy_run / "frontier.md").write_text(
@@ -11849,7 +12389,10 @@ def _selftest() -> int:
     (corrupt_run / "coverage.json").write_text("{broken", encoding="utf-8")
     corrupt_reason = evaluate_pretool(
         corrupt_run, {"tool_name": "Bash", "tool_input": {
-            "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"}},
+            "command": (
+                "XUNJI_PROXY_REQUIRED=1 "
+                f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"
+            )}},
         proxy_contract)
     corrupt_coverage_fails_closed = (
         "资产覆盖硬门" in corrupt_reason and "coverage" in corrupt_reason)
@@ -11863,7 +12406,7 @@ def _selftest() -> int:
     (nested_run / "classify" / "coverage.json").write_text(json.dumps({"assets": [
         {"host": "nested.example", "reachable": True},
     ]}), encoding="utf-8")
-    nested_fallback_host_is_enforced = "交战代理硬门" in evaluate_pretool(
+    nested_fallback_host_is_enforced = "目标出口硬门" in evaluate_pretool(
         nested_run, {"tool_name": "Bash", "tool_input": {
             "command": "curl https://nested.example/"}}, proxy_contract)
 
@@ -11907,6 +12450,8 @@ def _selftest() -> int:
     ]}), encoding="utf-8")
     actor_contract = {
         "mode": EXECUTE, "session_id": "actor-session", "prompt_excerpt": "继续执行",
+        "direct_egress_approved": True,
+        "operator_intent": {"route": "direct"},
         "updated_at": time.time(), "fanout_epoch_started_at": time.time() - 1,
         "coordination_signature": _coordination_signature(actor_run),
         "fanout_epoch_id": "fedcba9876543210",
@@ -11957,9 +12502,15 @@ def _selftest() -> int:
     actor_launch("launch-one", "A-one", "F-001", "a.example", "child-one")
     actor_launch("launch-two", "A-two", "F-002", "b.example", "child-two")
     child_own_action = {"tool_name": "Bash", "agent_id": "child-one", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/"
+        )}}
     child_outside_action = {"tool_name": "Bash", "agent_id": "child-one", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://b.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://b.example/"
+        )}}
     child_nested_agent = {"tool_name": "Agent", "agent_id": "child-one", "tool_input": {
         "prompt": "XUNJI_ASSIGNMENT=A-two XUNJI_FRONT=F-002 XUNJI_ASSETS=b.example"}}
     child_lane_allowed = evaluate_pretool(actor_run, child_own_action, actor_contract) == ""
@@ -11967,8 +12518,13 @@ def _selftest() -> int:
         actor_run, child_outside_action, actor_contract)
     nested_agent_blocked = "只有 Root 可派 Agent" in evaluate_pretool(
         actor_run, child_nested_agent, actor_contract)
+    actor_root_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/"
+        )}}
     root_allowed_while_agents_running = evaluate_pretool(
-        actor_run, {**guarded_probe}, actor_contract) == ""
+        actor_run, actor_root_probe, actor_contract) == ""
     runtime_receipts.append_hook_event(actor_run, {
         "hook_event_name": "SubagentStop", "session_id": "actor-session",
         "transcript_path": str(actor_transcript), "agent_id": "child-one",
@@ -11976,9 +12532,12 @@ def _selftest() -> int:
         "tool_response": {"content": "child-one returned its bounded lane result"},
     })
     root_blocked_after_real_return = "SubagentStop" in evaluate_pretool(
-        actor_run, {**guarded_probe}, actor_contract)
+        actor_run, actor_root_probe, actor_contract)
     child_two_action = {"tool_name": "Bash", "agent_id": "child-two", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://b.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://b.example/"
+        )}}
     running_peer_not_blocked_by_returned_peer = evaluate_pretool(
         actor_run, child_two_action, actor_contract) == ""
     actor_assignments = json.loads(
@@ -13170,12 +13729,37 @@ def _selftest() -> int:
          and "XUNJI_E_MAINTENANCE_BLOCKED" not in (live_agent_after_blocker.stdout or "")
          and not live_denials
          and len(live_durable_denials) == 1),
-        ("negated direct-egress phrases never grant approval",
+        ("explicit proxy remains selected when direct is denied",
          not negated_direct_cn["direct_egress_approved"]
-         and not negated_direct_en["direct_egress_approved"]
-         and not mixed_direct_denial["direct_egress_approved"]),
-        ("explicit direct-egress phrase grants current-turn approval",
-         explicit_direct["direct_egress_approved"]),
+         and negated_direct_cn.get("operator_intent", {}).get("route") == "proxy"
+         and explicit_proxy.get("operator_intent", {}).get("route") == "proxy"),
+        ("direct denial without affirmative proxy freezes offline",
+         not negated_direct_en["direct_egress_approved"]
+         and negated_direct_en.get("operator_intent", {}).get("route") == "offline"
+         and not mixed_direct_denial["direct_egress_approved"]
+         and mixed_direct_denial.get("operator_intent", {}).get("route") == "offline"),
+        ("direct is the default route without a proxy request",
+         explicit_direct["direct_egress_approved"]
+         and default_direct["direct_egress_approved"]
+         and default_direct.get("operator_intent", {}).get("route") == "direct"),
+        ("negated proxy phrases cannot mint proxy authority",
+         all(item["direct_egress_approved"]
+             and item.get("operator_intent", {}).get("route") == "direct"
+             for item in negated_proxy_cn + negated_proxy_en)
+         and not both_routes_denied["direct_egress_approved"]
+         and both_routes_denied.get("operator_intent", {}).get("route") == "offline"
+         and all(not item["direct_egress_approved"]
+                 and item.get("operator_intent", {}).get("route") == "offline"
+                 for item in direct_denial_variants)
+         and not proxy_shorthand["direct_egress_approved"]
+         and proxy_shorthand.get("operator_intent", {}).get("route") == "proxy"
+         and bare_proxy_is_not_authority["direct_egress_approved"]
+         and bare_proxy_is_not_authority.get("operator_intent", {}).get("route") == "direct"
+         and not connector_proxy_request["direct_egress_approved"]
+         and connector_proxy_request.get("operator_intent", {}).get("route") == "proxy"
+         and all(not item["direct_egress_approved"]
+                 and item.get("operator_intent", {}).get("route") == "offline"
+                 for item in retracted_proxy_requests)),
         ("exact scope directive binds run/assets and execute mode",
          scope_contract.get("mode") == EXECUTE
          and scope_contract.get("scope_admission_run") == "pilot_20260715"
@@ -13196,7 +13780,8 @@ def _selftest() -> int:
          target_webfetch_blocked),
         ("unknown-host WebFetch cannot bypass the engagement proxy gate",
          unknown_webfetch_blocked),
-        ("proxy-aware guarded target tool is allowed", guarded_probe_allowed),
+        ("explicit proxy route allows an exact proxy-selected guarded tool",
+         guarded_probe_allowed),
         ("source/AI review-scope asset cannot become a target capability",
          review_scope_target_blocked),
         ("explicit out-of-scope asset stays blocked", out_scope_target_blocked),
@@ -13204,13 +13789,29 @@ def _selftest() -> int:
          forged_candidate_in_scope_blocked),
         ("explicit in-scope ledger asset remains executable",
          explicit_in_scope_target_allowed),
-        ("proxy-aware tool rejects destinations absent from the asset ledger",
+        ("route-aware tool rejects destinations absent from the asset ledger",
          unknown_guarded_probe_blocked),
-        ("direct-egress opt-out requires current operator approval",
+        ("explicit proxy route rejects a direct override",
          direct_without_operator_blocked and direct_env_without_operator_blocked
          and quoted_direct_without_operator_blocked),
-        ("current operator may explicitly approve direct egress",
+        ("default direct route accepts the exact direct-selection prefix",
          direct_with_operator_allowed and quoted_direct_with_operator_allowed),
+        ("each target command binds an exact direct or proxy selector",
+         proxy_route_needs_positive_selection
+         and direct_route_needs_clean_selection
+         and direct_proxy_arg_blocked
+         and direct_proxy_equals_arg_blocked
+         and invalid_capability_route_selectors_fail_closed
+         and duplicate_env_assignments_fail_closed),
+        ("route-less historical proxy-default contracts stay offline",
+         legacy_proxy_default_stays_offline),
+        ("proxy failure blocks same-turn retry until a newer operator proxy turn",
+         same_turn_proxy_retry_blocked
+         and newer_operator_proxy_turn_allowed
+         and proxy_confirmation_consumed
+         and proxy_missing_configuration_blocked),
+        ("local settlement text cannot be mistaken for a route override",
+         local_route_text_is_not_target_route),
         ("non-Bash target network tool cannot bypass proxy attestation",
          nonbash_target_tool_blocked),
         ("unassigned coverage asset blocks target action", unassigned_asset_blocked),

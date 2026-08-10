@@ -110,7 +110,7 @@ export CODEX_PROXY_REQUIRED=1
 python3 tools/harness/codex_proxy.py --status
 ```
 
-不要把交战代理放进 `HTTPS_PROXY` / `HTTP_PROXY`，也不要让模型流量走目标侧中继。主动工具若未显式给 `--proxy`，会读取 `XUNJI_PROXY` 或 `tools/harness/proxy.conf`，但不会偷读系统 `HTTPS_PROXY`。目标流量现在**默认 fail-closed**：没有代理配置就拒绝直连，不再依赖 Agent 记得 export。只有操作者明确接受真实出口直连时，才临时设置 `XUNJI_PROXY_REQUIRED=0`。目标 `WebFetch`、裸 `curl` / `wget` / `requests` / `socket` 也会被 turn gate 拒绝。
+不要把交战代理放进 `HTTPS_PROXY` / `HTTP_PROXY`，也不要让模型流量走目标侧中继。目标流量**默认直连**，注册目标命令使用 `XUNJI_PROXY_REQUIRED=0`；只有当前操作者明确要求代理时，才使用 `XUNJI_PROXY_REQUIRED=1`（或受控 `--proxy`）读取 `XUNJI_PROXY` / `tools/harness/proxy.conf`。主动工具和浏览器子进程始终不会偷读系统代理变量，已存在的代理配置也不会静默改变默认路线。旧的无类型路线契约保持离线；只说“不要直连”也不会被推断为代理。显式选择代理但缺配置会停止；扫描器会先检查代理端点并关闭自身传输重试。代理首次连接/TLS 失败后自动重试立即停止，冷却到期也不会自行恢复，必须等待新的顶层操作者回合确认改为直连或再次明确走代理；确认只消费当前选中的代理路线。目标 `WebFetch`、裸 `curl` / `wget` / `requests` / `socket` 仍会被 turn gate 拒绝。
 
 ## 6. 创建或续接 run
 

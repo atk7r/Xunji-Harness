@@ -114,6 +114,13 @@ When the current turn explicitly denies target egress, the planner emits only th
 offline Hunter and its Reviewer. That pair is the complete offline suffix; do not
 add a verification pair for a target artifact that does not exist.
 
+Target route is orthogonal to the lane effect: direct is the default and proxy is
+only an explicit current-turn choice. The generated context freezes exact
+`XUNJI_PROXY_REQUIRED=0` or `=1` in every prepared target argv. If a proxy-attributed
+failure occurs, do not replan, delegate a replacement lane, or consume another
+request-budget slot to vary the retry. Return/settle the blocker and stop until a
+new top-level operator turn confirms direct or explicitly selects proxy again.
+
 If the gate returns `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` with
 `invalid-argv`, the command did not execute. Rebuild the exact direct
 `commit-proposal` argv and retry in the same operator turn. Do not add pipes,
