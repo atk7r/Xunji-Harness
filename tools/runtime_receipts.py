@@ -26,6 +26,8 @@ from pathlib import Path
 import agent_instruction_bundle as _instruction_bundle
 import contract_schema
 from evidence_parse import content_path_manifest, current_evidence_index_hash
+from harness import capability_registry as _capability_registry
+from harness import command_shape as _command_shape
 from harness import privacy
 
 try:
@@ -6288,6 +6290,85 @@ def agent_actor(run_dir: str | Path, agent_id: str, *, session_id: str = "",
     return matches[0]
 
 
+def _destination_endpoint(value: str, *, allow_bare: bool) \
+        -> tuple[str, int | None] | None:
+    """Compatibility wrapper for the registry-owned endpoint normalizer."""
+    return _capability_registry.target_endpoint(
+        _capability_registry.TargetReference(
+            value, role="runtime", allow_bare=allow_bare))
+
+
+def _assignment_asset_endpoint(value: str) -> tuple[str, int | None] | None:
+    """Return the assignment identity; an explicit port remains significant."""
+    raw = str(value or "").strip().lower().rstrip(".")
+    if not raw:
+        return None
+    if re.match(r"(?i)^https?://", raw):
+        return _destination_endpoint(raw, allow_bare=False)
+    return _destination_endpoint(raw.split("/", 1)[0], allow_bare=True)
+
+
+def _registered_bash_target_values(
+    command: str, *, receipt_claims_target: bool = False,
+) -> list[tuple[str, bool]]:
+    """Return only target-bearing argv slots of one registered target command."""
+    root = _capability_registry.ROOT
+    invocation = _command_shape.parse_exact_python_command(
+        command,
+        root=root,
+        allowed_scripts=_capability_registry.registered_scripts(
+            root=root, effects={"target"}),
+        allow_environment=True,
+    )
+    if invocation is None:
+        if receipt_claims_target:
+            raise RuntimeError(
+                "successful target receipt no longer parses as one exact "
+                "registered Python capability")
+        return []
+    spec = _capability_registry.match(invocation.script, invocation.args, root=root)
+    if spec is None or spec.effect != "target":
+        if receipt_claims_target:
+            raise RuntimeError(
+                "successful target receipt no longer matches a registered "
+                "target capability")
+        return []
+    try:
+        references = _capability_registry.target_references(
+            spec, invocation.args)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"successful target receipt cannot project {spec.id} destinations: "
+            f"{exc}") from exc
+    return [(item.value, item.allow_bare) for item in references]
+
+
+def _target_event_endpoints(event: dict) -> set[tuple[str, int | None]]:
+    """Extract actual target endpoints from one hash-chained tool input excerpt."""
+    try:
+        tool_input = json.loads(str(event.get("input_excerpt") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return set()
+    if not isinstance(tool_input, dict):
+        return set()
+    if str(event.get("tool_name") or "") != "Bash":
+        return set()
+    candidates = _registered_bash_target_values(
+        str(tool_input.get("command") or ""),
+        receipt_claims_target=event.get("target_action") is True,
+    )
+    endpoints: set[tuple[str, int | None]] = set()
+    for candidate, allow_bare in candidates:
+        endpoint = _destination_endpoint(candidate, allow_bare=allow_bare)
+        if endpoint is None:
+            if event.get("target_action") is True:
+                raise RuntimeError(
+                    "successful target receipt contains an invalid projected destination")
+            continue
+        endpoints.add(endpoint)
+    return endpoints
+
+
 def agent_asset_activity(run_dir: str | Path, assignment: str) -> dict[str, int]:
     """Count successful target actions by the assignment's concrete assets."""
     run = Path(run_dir)
@@ -6317,10 +6398,16 @@ def agent_asset_activity(run_dir: str | Path, assignment: str) -> dict[str, int]
               ) in actor_keys]
     counts = {asset: 0 for asset in assets}
     for event in events:
-        text = _input_text(event).lower()
+        destinations = _target_event_endpoints(event)
         for asset in assets:
-            host = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", asset).split("/", 1)[0]
-            if host and re.search(r"(?<![\w.\-])" + re.escape(host) + r"(?![\w.\-])", text):
+            identity = _assignment_asset_endpoint(asset)
+            if identity is None:
+                continue
+            host, port = identity
+            if any(
+                target_host == host and (port is None or target_port == port)
+                for target_host, target_port in destinations
+            ):
                 counts[asset] += 1
     return counts
 
@@ -11649,6 +11736,41 @@ def _selftest() -> int:
     ).read_text(encoding="utf-8", errors="strict"))
     foreign_receipt_schema_valid = not _selftest_schema_errors(
         foreign_receipt, foreign_schema)
+    typed_destination_attribution = (
+        _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({"command": (
+                "python3 tools/probe.py POST https://actual.example/path "
+                "--data https://payload-forgery.example/value "
+                "--header 'Referer: https://header-forgery.example/' "
+                "--preflight-get https://preflight.example/form "
+                "--save f003-cms-8090-app-js.js")}),
+        }) == {("actual.example", 443), ("preflight.example", 443)}
+        and not _target_event_endpoints({
+            "tool_name": "WebFetch",
+            "input_excerpt": json.dumps({
+                "url": "https://typed.example/path",
+                "description": "https://forged.example/path",
+            }),
+        })
+    )
+    production_excerpt_projection = _target_event_endpoints({
+        "tool_name": "Bash",
+        "input_excerpt": _excerpt({
+            "command": "python3 tools/probe.py GET https://excerpt.example/",
+        }),
+    }) == {("excerpt.example", 443)}
+    invalid_target_receipt_projection_rejected = False
+    try:
+        _target_event_endpoints({
+            "tool_name": "Bash",
+            "target_action": True,
+            "input_excerpt": _excerpt({
+                "command": "python3 tools/probe.py GET scheme-less.example",
+            }),
+        })
+    except RuntimeError:
+        invalid_target_receipt_projection_rejected = True
 
     checks = [
         ("hash chain validates", not chain_errors and len(events) == len(ids)),
@@ -11660,6 +11782,12 @@ def _selftest() -> int:
          legacy_quarantine_preserves_journal),
         ("foreign lifecycle receipt conforms to frozen schema",
          foreign_receipt_schema_valid),
+        ("asset attribution consumes typed destinations rather than prose or outputs",
+         typed_destination_attribution),
+        ("asset attribution consumes the production receipt excerpt serialization",
+         production_excerpt_projection),
+        ("invalid successful target receipt projection fails closed as integrity debt",
+         invalid_target_receipt_projection_rejected),
         ("new runtime journal append flushes and fsyncs file plus parent directory",
          runtime_new_append_durable),
         ("existing nonempty runtime journal append does not repeat directory fsync",

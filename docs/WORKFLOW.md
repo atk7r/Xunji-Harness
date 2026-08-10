@@ -197,6 +197,13 @@ links, tested groups, and disposition. Before target traffic, every reachable/un
 asset must be explicitly named in a front. Upstream-unreachable rows remain visible as
 `unreachable-baseline`; they are accounted, not silently deleted.
 
+Coverage authorization and per-asset settlement consume the same registry-owned
+destination projection for each exact target capability. Only declared target argv
+slots count: artifact outputs such as `--save`, headers, payloads, proxy selectors,
+and descriptive text cannot be reclassified as hosts. Supporting destinations such
+as probe preflight URLs are checked explicitly. A new target capability without an
+explicit or indirect destination policy fails closed.
+
 If a coverage-matrix cell is genuinely not applicable despite asset surface
 signals, record a structured waiver instead of prose:
 `- Coverage waiver: asset=<host>; groups=<MatrixGroup[,MatrixGroup]>; reason=<why>; evidence=<E-id>`.

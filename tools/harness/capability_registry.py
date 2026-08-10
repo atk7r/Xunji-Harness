@@ -9,6 +9,7 @@ scope, and actor bindings before using a matched capability.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import json
 from pathlib import Path
 import re
@@ -50,6 +51,64 @@ class CapabilitySpec:
 
     def path(self, root: Path = ROOT) -> Path:
         return (root / self.script).resolve()
+
+
+@dataclass(frozen=True)
+class TargetReference:
+    """One outbound target-bearing argv value from a validated capability."""
+
+    value: str
+    role: str = "primary"
+    allow_bare: bool = False
+
+
+def target_endpoint(
+    reference: TargetReference,
+) -> tuple[str, int | None] | None:
+    """Normalize one registry-declared destination for every gate/receipt user."""
+    raw = str(reference.value or "").strip()
+    if not raw or len(raw.encode("utf-8")) > 8192 \
+            or re.search(r"[\x00-\x20\x7f]", raw):
+        return None
+    has_scheme = bool(re.match(r"(?i)^https?://", raw))
+    if not has_scheme and not reference.allow_bare:
+        return None
+    if has_scheme and re.match(
+        r"(?i)^https?://(?:localhost|(?:[a-z0-9-]+\.)+[a-z]{2,63}"
+        r"|[0-9.]+|\[[0-9a-f:.]+\])"
+        r"(?::\d{1,5})?[\u3400-\u4dbf\u4e00-\u9fff]",
+        raw,
+    ):
+        return None
+    try:
+        parsed = urlsplit(raw if has_scheme else "//" + raw)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.username is not None or parsed.password is not None \
+            or parsed.netloc.endswith(":"):
+        return None
+    if has_scheme and (parsed.scheme.lower() not in {"http", "https"}
+                       or not parsed.netloc):
+        return None
+    host = str(parsed.hostname or "").strip().lower().rstrip(".")
+    if not host or port is not None and not (1 <= port <= 65535):
+        return None
+    try:
+        host = ipaddress.ip_address(host).compressed.lower()
+    except ValueError:
+        try:
+            host = host.encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            return None
+        if len(host) > 253 or any(
+                not label or len(label) > 63 or not re.fullmatch(
+                    r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+                for label in host.split(".")):
+            return None
+    if has_scheme and port is None:
+        port = 443 if parsed.scheme.lower() == "https" else 80
+    return host, port
 
 
 def _spec(
@@ -434,25 +493,45 @@ def _validate_scope_admission(args: tuple[str, ...]) -> bool:
         and not args[0].startswith("-") and not args[2].startswith("-")
 
 
+_PROBE_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--data": None, "--data-file": None, "--data-json-file": None,
+    "--value-json": None, "--value-json-file": None,
+    "--preflight-get": None, "--preflight-save": None,
+    "--extract-csrf": None, "--csrf-field": None,
+    "--cookie-jar": None, "-H": None, "--header": None,
+    "--auth-key": None, "--timeout": None, "--tag": None,
+    "--save": None, "--run": None, "--proxy": None,
+    "--retry": None, "--retry-wait": None, "--range": None,
+    "--chunk-size": None, "--samples": None,
+}
+_PROBE_FLAG_OPTIONS = {
+    "--allow-sensitive-auth", "--allow-legacy-cleanup", "--headers",
+    "--no-redirect", "--save-chunks",
+}
+_RENDER_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--eval": None, "--eval-wait": None, "--out": None,
+    "--run": None, "--wait": {"load", "domcontentloaded", "networkidle"},
+    "--wait-sec": None, "--timeout": None, "--proxy": None,
+    "--cookie": None, "--cookies-file": None, "--save": None,
+}
+_RENDER_FLAG_OPTIONS = {
+    "--stealth", "--allow-sensitive-auth", "--screenshot",
+}
+_FETCH_ASSETS_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--html": None, "--base": None, "--out": None, "--timeout": None,
+}
+_CDN_BYPASS_VALUE_OPTIONS: dict[str, set[str] | None] = {"--proxy": None}
+_CDN_BYPASS_FLAG_OPTIONS = {"--json"}
+_EXPLOIT_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--target": None, "--payload": None, "--cmd": None, "--run": None,
+}
+_EXPLOIT_FLAG_OPTIONS = {"--check"}
+
+
 def _validate_probe(args: tuple[str, ...]) -> bool:
-    values = {
-        "--data": None, "--data-file": None, "--data-json-file": None,
-        "--value-json": None, "--value-json-file": None,
-        "--preflight-get": None, "--preflight-save": None,
-        "--extract-csrf": None, "--csrf-field": None,
-        "--cookie-jar": None, "-H": None, "--header": None,
-        "--auth-key": None, "--timeout": None, "--tag": None,
-        "--save": None, "--run": None, "--proxy": None,
-        "--retry": None, "--retry-wait": None, "--range": None,
-        "--chunk-size": None, "--samples": None,
-    }
-    flags = {
-        "--allow-sensitive-auth", "--allow-legacy-cleanup", "--headers",
-        "--no-redirect", "--save-chunks",
-    }
     for positionals in (2, 3):
         ok, _seen, pos = _options(
-            args, values=values, flags=flags,
+            args, values=_PROBE_VALUE_OPTIONS, flags=_PROBE_FLAG_OPTIONS,
             repeatable={"-H", "--header"}, positionals=positionals,
         )
         if not ok:
@@ -468,43 +547,43 @@ def _validate_probe(args: tuple[str, ...]) -> bool:
 def _validate_render(args: tuple[str, ...], *, eval_mode: bool) -> bool:
     ok, seen, _pos = _options(
         args,
-        values={
-            "--eval": None, "--eval-wait": None, "--out": None,
-            "--run": None, "--wait": {"load", "domcontentloaded", "networkidle"},
-            "--wait-sec": None, "--timeout": None, "--proxy": None,
-            "--cookie": None, "--cookies-file": None, "--save": None,
-        },
-        flags={"--stealth", "--allow-sensitive-auth", "--screenshot"},
+        values=_RENDER_VALUE_OPTIONS,
+        flags=_RENDER_FLAG_OPTIONS,
         repeatable={"--cookie"}, positionals=1,
     )
     return ok and ("--eval" in seen) is eval_mode
 
 
-def _validate_scan(args: tuple[str, ...]) -> bool:
+def _scan_target(args: tuple[str, ...]) -> str:
+    """Return the sole scan destination from the validator-owned exact shape."""
     # Scanner argv is deliberately closed: one active run, one built-in scanner,
     # and one explicit absolute URL.  Scanner-native flags can name target files,
     # remote template URLs, output paths, resumes, and configuration profiles, so
     # none may cross this capability boundary as model-controlled tail argv.
     if len(args) not in {4, 6} or args[0] != "--run" \
             or not args[1] or args[1].startswith("-"):
-        return False
+        return ""
     index = 2
     if len(args) == 6:
         if args[index] != "--name" \
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", args[index + 1]):
-            return False
+            return ""
         index += 2
     if args[index] not in {"sqlmap", "nuclei"}:
-        return False
+        return ""
     target = args[index + 1]
     try:
         parsed = urlsplit(target)
     except ValueError:
-        return False
-    return bool(
+        return ""
+    return target if (
         parsed.scheme in {"http", "https"} and parsed.netloc and parsed.hostname
         and not parsed.username and not parsed.password
-    )
+    ) else ""
+
+
+def _validate_scan(args: tuple[str, ...]) -> bool:
+    return bool(_scan_target(args))
 
 
 def _validate_replay(args: tuple[str, ...], *, force: bool) -> bool:
@@ -529,8 +608,7 @@ def _validate_fetch_assets(args: tuple[str, ...]) -> bool:
     for positionals in (0, 1):
         ok, seen, _pos = _options(
             args,
-            values={"--html": None, "--base": None, "--out": None,
-                    "--timeout": None},
+            values=_FETCH_ASSETS_VALUE_OPTIONS,
             flags=set(), positionals=positionals,
         )
         if not ok:
@@ -563,7 +641,8 @@ def _validate_classify_hosts(args: tuple[str, ...]) -> bool:
 
 def _validate_cdn_bypass(args: tuple[str, ...]) -> bool:
     ok, _seen, _pos = _options(
-        args, values={"--proxy": None}, flags={"--json"}, positionals=1,
+        args, values=_CDN_BYPASS_VALUE_OPTIONS,
+        flags=_CDN_BYPASS_FLAG_OPTIONS, positionals=1,
     )
     return ok
 
@@ -571,9 +650,8 @@ def _validate_cdn_bypass(args: tuple[str, ...]) -> bool:
 def _validate_exploit(args: tuple[str, ...], *, check: bool) -> bool:
     ok, seen, _pos = _options(
         args,
-        values={"--target": None, "--payload": None, "--cmd": None,
-                "--run": None},
-        flags={"--check"}, positionals=1,
+        values=_EXPLOIT_VALUE_OPTIONS,
+        flags=_EXPLOIT_FLAG_OPTIONS, positionals=1,
     )
     if not ok or "--target" not in seen or _pos != ["viewstate"] \
             or ("--check" in seen) is not check:
@@ -1060,8 +1138,116 @@ def output_references(spec: CapabilitySpec, args: Iterable[str]) -> tuple[str, .
     return tuple(value for name in sorted(found) for value in found[name])
 
 
+_EXPLICIT_TARGET_REFERENCE_VALIDATORS = frozenset({
+    "probe-live", "render-live", "render-eval", "scan-live",
+    "fetch-assets", "cdn-bypass", "exploit-check", "exploit-delivery",
+})
+_INDIRECT_TARGET_REFERENCE_VALIDATORS = frozenset({
+    "check-run-replay", "setup-run-classify", "replay-live", "replay-force",
+    "rerun-deferred", "classify-hosts",
+})
+
+
+def target_reference_policy(spec: CapabilitySpec) -> str:
+    """Classify how a registered target capability obtains its destinations."""
+    if spec.effect != "target":
+        return "none"
+    if spec.argv_validator in _EXPLICIT_TARGET_REFERENCE_VALIDATORS:
+        return "explicit"
+    if spec.argv_validator in _INDIRECT_TARGET_REFERENCE_VALIDATORS:
+        return "indirect"
+    return "missing"
+
+
+def _strict_target_options(
+    args: tuple[str, ...], *,
+    values: dict[str, set[str] | None],
+    flags: set[str],
+    positional_counts: tuple[int, ...],
+    repeatable: set[str] = frozenset(),
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Reparse target argv with the validator-owned, closed option schema."""
+    for positional_count in positional_counts:
+        ok, seen, positionals = _options(
+            args, values=values, flags=flags, repeatable=repeatable,
+            positionals=positional_count,
+        )
+        if ok:
+            return seen, positionals
+    raise ValueError("validated target argv cannot be projected by its option schema")
+
+
+def target_references(
+    spec: CapabilitySpec, args: Iterable[str],
+) -> tuple[TargetReference, ...]:
+    """Project only outbound destination argv from one exact target capability."""
+    values = tuple(str(value) for value in args)
+    policy = target_reference_policy(spec)
+    if policy == "none":
+        return ()
+    if policy == "missing":
+        raise ValueError(
+            f"target capability {spec.id} has no destination reference contract")
+    if not argv_matches(spec.argv_validator, values):
+        raise ValueError(
+            f"target capability {spec.id} argv no longer matches its registry contract")
+    if policy == "indirect":
+        return ()
+
+    references: list[TargetReference] = []
+    if spec.argv_validator == "probe-live":
+        seen, positionals = _strict_target_options(
+            values, values=_PROBE_VALUE_OPTIONS, flags=_PROBE_FLAG_OPTIONS,
+            repeatable={"-H", "--header"}, positional_counts=(2, 3),
+        )
+        references.extend(TargetReference(value) for value in positionals[1:])
+        # probe.py performs extra network I/O only for --preflight-get.
+        # --preflight-save is an output path; extract/csrf/data/value options
+        # transform local request or response bytes and are not destinations.
+        preflight = (seen.get("--preflight-get") or [""])[0]
+        if preflight:
+            references.append(TargetReference(preflight, role="supporting"))
+    elif spec.argv_validator in {"render-live", "render-eval"}:
+        _seen, positionals = _strict_target_options(
+            values, values=_RENDER_VALUE_OPTIONS, flags=_RENDER_FLAG_OPTIONS,
+            repeatable={"--cookie"}, positional_counts=(1,),
+        )
+        references.append(TargetReference(positionals[0]))
+    elif spec.argv_validator == "scan-live":
+        value = _scan_target(values)
+        if value:
+            references.append(TargetReference(value))
+    elif spec.argv_validator == "fetch-assets":
+        seen, positionals = _strict_target_options(
+            values, values=_FETCH_ASSETS_VALUE_OPTIONS, flags=set(),
+            positional_counts=(0, 1),
+        )
+        value = positionals[0] if positionals else (seen.get("--base") or [""])[0]
+        if value:
+            references.append(TargetReference(value))
+    elif spec.argv_validator == "cdn-bypass":
+        _seen, positionals = _strict_target_options(
+            values, values=_CDN_BYPASS_VALUE_OPTIONS,
+            flags=_CDN_BYPASS_FLAG_OPTIONS, positional_counts=(1,),
+        )
+        references.append(TargetReference(positionals[0], allow_bare=True))
+    elif spec.argv_validator in {"exploit-check", "exploit-delivery"}:
+        seen, _positionals = _strict_target_options(
+            values, values=_EXPLOIT_VALUE_OPTIONS,
+            flags=_EXPLOIT_FLAG_OPTIONS, positional_counts=(1,),
+        )
+        value = (seen.get("--target") or [""])[0]
+        if value:
+            references.append(TargetReference(value))
+    if not references:
+        raise ValueError(
+            f"explicit target capability {spec.id} produced no destination references")
+    return tuple(references)
+
+
 def selftest() -> int:
     ids = [spec.id for spec in CAPABILITIES]
+    demo_run = "runs/demo_20260101"
     root_direct_ids = {
         spec.id for spec in CAPABILITIES if spec.root_direct_eligible
     }
@@ -1071,6 +1257,29 @@ def selftest() -> int:
         "verify.check-run",
         "read.run-model",
     }
+    target_specs = [spec for spec in CAPABILITIES if spec.effect == "target"]
+    noisy_probe_args = [
+        "POST", "https://actual.example/app.js",
+        "--data", "next=https://payload.example/callback",
+        "--header", "Referer: https://header.example/source",
+        "--preflight-get", "https://preflight.example/form",
+        "--save", "f003-cms-8090-app-js.js", "--run", demo_run,
+    ]
+    noisy_probe_spec = match(ROOT / "tools/probe.py", noisy_probe_args)
+    noisy_probe_targets = target_references(
+        noisy_probe_spec, noisy_probe_args) if noisy_probe_spec else ()
+    diff_probe_args = [
+        "DIFF", "https://one.example/", "http://two.example/",
+    ]
+    diff_probe_spec = match(ROOT / "tools/probe.py", diff_probe_args)
+    missing_target_policy_rejected = False
+    try:
+        target_references(
+            _spec("target.future", "tools/probe.py", "target", "future-target"),
+            ["https://future.example/"],
+        )
+    except ValueError:
+        missing_target_policy_rejected = True
     checks: list[tuple[str, bool]] = [
         ("capability ids are unique", len(ids) == len(set(ids))),
         ("all registered scripts exist", all(spec.path().is_file() for spec in CAPABILITIES)),
@@ -1089,6 +1298,47 @@ def selftest() -> int:
             and spec.privacy == "none" and spec.proxy == "none"
             and spec.guard == "none" and spec.recorder == "none"
             for spec in CAPABILITIES if spec.root_direct_eligible)),
+        ("every target capability declares an explicit or indirect destination policy",
+         bool(target_specs) and all(
+             target_reference_policy(spec) in {"explicit", "indirect"}
+             for spec in target_specs)),
+        ("a new target capability without a destination policy fails closed",
+         missing_target_policy_rejected),
+        ("probe destination projection excludes payload header and dotted save names",
+         noisy_probe_targets == (
+             TargetReference("https://actual.example/app.js"),
+             TargetReference(
+                 "https://preflight.example/form", role="supporting"),
+        ) and output_references(noisy_probe_spec, noisy_probe_args)
+         == ("f003-cms-8090-app-js.js",)),
+        ("probe DIFF projects both and only its two destinations",
+         bool(diff_probe_spec) and target_references(
+             diff_probe_spec, diff_probe_args) == (
+                 TargetReference("https://one.example/"),
+                 TargetReference("http://two.example/"),
+             )),
+        ("scan projection consumes its validator-owned sole destination",
+         (lambda spec, args: bool(
+             spec and target_references(spec, args)
+             == (TargetReference("https://scan.example/"),)
+         ))(match(ROOT / "tools/scan.py", [
+             "--run", demo_run, "--name", "focused", "nuclei",
+             "https://scan.example/",
+         ]), [
+             "--run", demo_run, "--name", "focused", "nuclei",
+             "https://scan.example/",
+         ])),
+        ("target endpoint normalization preserves explicit ports",
+         target_endpoint(TargetReference("https://Port.Example/path"))
+         == ("port.example", 443)
+        and target_endpoint(TargetReference(
+             "https://port.example:8443/path")) == ("port.example", 8443)
+         and target_endpoint(TargetReference(
+             "https://example.中国/path"))
+         == ("example.xn--fiqs8s", 443)
+         and target_endpoint(TargetReference(
+             "https://example.com中文说明")) is None
+         and target_endpoint(TargetReference("port.example")) is None),
         ("root-direct eligibility defaults closed",
          _spec("fixture.closed", "tools/run_model.py", "local_read", "one-run")
          .root_direct_eligible is False),

@@ -948,6 +948,12 @@ another executable protocol.
   explicit port, dropping it to host-only is not an equivalent assignment. The
   coverage row owns its valid opaque `ASSET-...` ID; assignment and Agent scaffold
   projections copy it rather than independently re-hashing the display identity.
+- **Typed target projection**: the capability registry owns the closed argv schema
+  and destination-bearing slots used by both PreToolUse coverage authorization and
+  post-use per-asset settlement. Output paths, headers, payloads, proxy selectors,
+  and description text are never hosts merely because they look URL- or DNS-like.
+  Supporting destinations such as preflight URLs remain explicit checked targets;
+  missing projection policy fails closed.
 - **Model-proposed typed DAG**: `workers.py plan` writes a replaceable proposal
   seed bound to the current turn/input. Root may reshape its execution/Reviewer
   pairs under the existing 16-lane schema, then `workers.py commit-proposal`

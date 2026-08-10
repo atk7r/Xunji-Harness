@@ -666,8 +666,13 @@ Coverage、planner、assignment、launch prompt 与 child target gate 的 effect
 `host[:port]`；coverage 有显式 port 时，host-only 不再被当作同一 assignment。若 target front
 已有合法 `ASSET-...` opaque ID，该 coverage row 是 ID owner，assignment/context projection
 复制该 ID，不再按 display identity 独立哈希并制造第二身份。若 target front
-已冻结 HTTP GET liveness next move，context pack 生成一次精确公开 `probe.py` argv。目标路线
-默认 direct，只有当前 operator 明确要求才选择 proxy；context pack 分别把 exact
+已冻结 HTTP GET liveness next move，context pack 生成一次精确公开 `probe.py` argv。
+PreToolUse coverage gate 与 PostToolUse per-asset settlement 共同消费 capability registry
+声明的 closed argv schema 与 destination slots。`--save`/`--out`、header、payload、proxy
+selector 和 description 即使长得像 URL/host 也不进入目的地集合；preflight 等 supporting
+destination 则显式进入同一检查。新增 target capability 未声明 explicit/indirect projection
+policy 时 fail closed，禁止各消费者再扫描任意 token 猜 host。目标路线默认 direct，只有当前
+operator 明确要求才选择 proxy；context pack 分别把 exact
 `XUNJI_PROXY_REQUIRED=0|1` 冻结进所有 target lane guidance。Dormant `XUNJI_PROXY`/
 `proxy.conf` 不具有 route authority；route-less historical contract 与仅禁止 direct 的 prompt
 均冻结为 offline。Agent 不再为发现 CLI 参数或 route 读取工具/Hook/guard 源码，Hook 仍重新
@@ -1202,6 +1207,36 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     argv/note 中的 route 文本不得被扫描成 target effect。
 
 ## 12. Maintenance Checkpoint
+
+### 2026-08-11 — Registry-owned target destination projection
+
+- Scope: `tools/harness/capability_registry.py`, `tools/turn_contract.py`,
+  `tools/runtime_receipts.py`, focused selftests, workflow contracts, and this
+  checkpoint.
+- Architecture impact: yes — destination identity is now a typed capability
+  contract shared by pre-execution coverage authorization and post-execution asset
+  settlement. Arbitrary argv/text scanning no longer owns host classification.
+- Ownership/enforcement: the capability registry owns each target tool's closed
+  option schema, explicit/indirect destination policy, and endpoint normalization.
+  PreToolUse and runtime receipts consume that projection; missing or invalid
+  projection fails closed.
+- Migration: no historical run, receipt, coverage row, or evidence is rewritten.
+  Existing registered target argv stays compatible; only false destination credits
+  or denials derived from output/header/payload/description text are removed.
+- Verification: registry and runtime-receipt selftests pass, including probe DIFF,
+  scan projection, production receipt serialization, invalid-receipt integrity debt,
+  dotted `.js` outputs, URL-shaped payload/header values, supporting preflight URLs,
+  and shared attribution. Turn-contract focused assertions pass; its command retains
+  seven SessionEnd assertion failures. The full matrix is 67 passed / 3 failed suites,
+  matching the published SessionEnd/session-selection baseline.
+- Independent review: fresh-context Claude returned WARN with no finding against the
+  `.js`/payload/header correction itself. Scan, DIFF, scheme-less fail-closed,
+  non-Bash settlement, production serialization, and CJK IDN concerns were either
+  fixed and retested or dispositioned in the matching review record. External
+  `arkcli` review was unavailable because the configured subscription had expired;
+  no heterogeneous vote is claimed.
+- Exclusions: no live target/network request, run transition, Agent/Cron action,
+  evidence promotion, or historical repair is part of this change.
 
 ### 2026-08-10 — Direct-default target route and operator-confirmed proxy recovery
 

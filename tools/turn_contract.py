@@ -5367,12 +5367,80 @@ def _coverage_rows(run_dir: Path) -> tuple[list[dict], str]:
     return rows, ""
 
 
-def _event_known_hosts(run_dir: Path, event: dict) -> tuple[set[str], str]:
-    text = _tool_text(event).lower()
+def _target_reference_endpoint(
+    reference: capability_registry.TargetReference,
+) -> tuple[str, int | None] | None:
+    """Compatibility wrapper for the registry-owned endpoint normalizer."""
+    return capability_registry.target_endpoint(reference)
+
+
+def _registered_target_endpoints(
+    event: dict,
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None = None,
+) -> tuple[set[tuple[str, int | None]], str] | None:
+    """Return typed target endpoints, or None for a non-registered target event."""
+    if str(event.get("tool_name") or "") != "Bash":
+        return None
+    tool_input = event.get("tool_input") \
+        if isinstance(event.get("tool_input"), dict) else {}
+    if capability is None:
+        tool_env = tool_input.get("env") \
+            if isinstance(tool_input.get("env"), dict) else {}
+        capability = _registered_capability_invocation(
+            str(tool_input.get("command") or ""), tool_env=tool_env)
+    if capability is None or capability[0].effect != "target":
+        return None
+    spec, _script, args, _env = capability
+    try:
+        references = capability_registry.target_references(spec, args)
+    except ValueError as exc:
+        return set(), str(exc)
+    endpoints: set[tuple[str, int | None]] = set()
+    for reference in references:
+        endpoint = _target_reference_endpoint(reference)
+        if endpoint is None:
+            return set(), (
+                f"registered target capability {spec.id} has an invalid "
+                f"{reference.role} destination")
+        endpoints.add(endpoint)
+    return endpoints, ""
+
+
+def _event_known_hosts(
+    run_dir: Path,
+    event: dict,
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None = None,
+) -> tuple[set[str], str]:
     found: set[str] = set()
     rows, error = _coverage_rows(run_dir)
     if error:
         return set(), error
+    typed = _registered_target_endpoints(event, capability)
+    if typed is not None:
+        endpoints, endpoint_error = typed
+        if endpoint_error:
+            return set(), endpoint_error
+        for row in rows:
+            assets = _normalized_assets([row.get("asset")])
+            if not assets:
+                continue
+            identity = _target_reference_endpoint(
+                capability_registry.TargetReference(
+                    assets[0], role="coverage", allow_bare=True))
+            if identity is None:
+                continue
+            host, port = identity
+            if any(
+                    target_host == host
+                    and (port is None or target_port == port)
+                    for target_host, target_port in endpoints):
+                found.add(assets[0])
+        return found, ""
+    text = _tool_text(event).lower()
     for row in rows:
         host = _normalized_assets([row.get("asset")])
         if host and re.search(r"(?<![\w.\-])" + re.escape(host[0]) + r"(?![\w.\-])", text):
@@ -5493,7 +5561,13 @@ def _unassigned_assets(run_dir: Path) -> tuple[list[str], str]:
              if str(item.get("asset") or "")], "")
 
 
-def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
+def _proxy_egress_reason(
+    run_dir: Path,
+    event: dict,
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None = None,
+) -> str:
     """Deny target paths that cannot prove use of the guarded route service."""
     tool = str(event.get("tool_name") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
@@ -5503,7 +5577,7 @@ def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
             "目标出口硬门：active run 禁止使用裸 curl/wget/httpx/nuclei/sqlmap/requests/urllib/socket；"
             "请走项目的 route-aware guarded tools。"
         )
-    touched, coverage_error = _event_known_hosts(run_dir, event)
+    touched, coverage_error = _event_known_hosts(run_dir, event, capability)
     if coverage_error:
         return "资产覆盖硬门：无法派生目标资产账本，拒绝在未知 scope/代理状态下执行：" + coverage_error
     if tool == "WebFetch":
@@ -5519,30 +5593,22 @@ def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
                 "目标请求必须改用 route-aware project tools。"
             )
         return ""
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return "目标出口硬门：无法解析目标命令，拒绝未绑定路线的目标出口。"
-    approved = False
-    for token in tokens:
-        if not token.endswith(".py"):
-            continue
-        path = Path(token)
-        if not path.is_absolute():
-            path = ROOT / path
-        try:
-            approved = path.resolve() in PROXY_AWARE_TARGET_TOOLS
-        except Exception:
-            approved = False
-        if approved:
-            break
+    approved = bool(capability and capability[0].effect == "target")
     if approved:
         rows, inventory_error = _coverage_rows(run_dir)
         if inventory_error:
             return "资产覆盖硬门：无法派生目标资产账本：" + inventory_error
         if not rows:
             return "资产覆盖硬门：route-aware 目标工具执行前必须先建立 coverage/asset ledger。"
-        destinations = _event_destinations(event)
+        typed = _registered_target_endpoints(event, capability)
+        if typed is None:
+            return (
+                "资产覆盖硬门：注册目标 capability 缺少 typed destination projection；"
+                "拒绝 fail-open。")
+        endpoints, destination_error = typed
+        if destination_error:
+            return "资产覆盖硬门：无法解析注册目标目的地，拒绝 fail-open：" + destination_error
+        destinations = {host for host, _port in endpoints}
         unapproved = _unapproved_scope_destinations(run_dir, rows, destinations)
         if unapproved:
             detail = ", ".join(
@@ -6135,7 +6201,8 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             event, contract, registered_capability)
         if route_reason:
             return route_reason
-        proxy_reason = _proxy_egress_reason(run_dir, event)
+        proxy_reason = _proxy_egress_reason(
+            run_dir, event, registered_capability)
         if proxy_reason:
             return proxy_reason
         pause_reason = _proxy_pause_reason(contract, registered_capability)
@@ -12186,6 +12253,30 @@ def _selftest() -> int:
             f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
             "GET https://unknown.example/"
         )}}
+    schemeless_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET a.example"
+        )}}
+    dotted_save_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"GET https://a.example/app.js --save f003-cms-8090-app-js.js "
+            f"--run {proxy_run}"
+        )}}
+    data_url_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "POST https://a.example/api "
+            "--data 'next=https://payload-only.example/callback' "
+            "--header 'Referer: https://header-only.example/source'"
+        )}}
+    unknown_preflight_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "POST https://a.example/api "
+            "--preflight-get https://preflight-unknown.example/form"
+        )}}
     direct_guarded_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
             f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
@@ -12265,6 +12356,16 @@ def _selftest() -> int:
         proxy_run, guarded_probe, proxy_contract) == ""
     unknown_guarded_probe_blocked = "未知目标: unknown.example" in evaluate_pretool(
         proxy_run, unknown_guarded_probe, proxy_contract)
+    schemeless_registered_target_fails_closed = (
+        "invalid primary destination" in evaluate_pretool(
+            proxy_run, schemeless_guarded_probe, proxy_contract))
+    dotted_save_is_not_destination = evaluate_pretool(
+        proxy_run, dotted_save_guarded_probe, proxy_contract) == ""
+    payload_and_header_urls_are_not_destinations = evaluate_pretool(
+        proxy_run, data_url_guarded_probe, proxy_contract) == ""
+    supporting_preflight_destination_is_checked = (
+        "未知目标: preflight-unknown.example" in evaluate_pretool(
+            proxy_run, unknown_preflight_probe, proxy_contract))
     direct_without_operator_blocked = "明确要求代理" in evaluate_pretool(
         proxy_run, direct_guarded_probe, proxy_contract)
     direct_env_without_operator_blocked = "明确要求代理" in evaluate_pretool(
@@ -13791,6 +13892,14 @@ def _selftest() -> int:
          explicit_in_scope_target_allowed),
         ("route-aware tool rejects destinations absent from the asset ledger",
          unknown_guarded_probe_blocked),
+        ("registered scheme-less target argv fails closed before execution",
+         schemeless_registered_target_fails_closed),
+        ("coverage gate ignores dotted save filenames from exact target argv",
+         dotted_save_is_not_destination),
+        ("coverage gate ignores payload and header URL-shaped data",
+         payload_and_header_urls_are_not_destinations),
+        ("coverage gate checks supporting preflight destinations",
+         supporting_preflight_destination_is_checked),
         ("explicit proxy route rejects a direct override",
          direct_without_operator_blocked and direct_env_without_operator_blocked
          and quoted_direct_without_operator_blocked),
