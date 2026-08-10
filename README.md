@@ -37,7 +37,7 @@ Xunji 会建立 run，并在每个 `cycle_end` 后重新读取状态、规划下
 只执行一个周期时使用自然语言：
 
 ```text
-对 https://example.com 进行渗透。
+https://example.com 对该目标进行渗透。
 ```
 
 两种入口都会建立运行态、读取已有情报、拆解攻击面、调度 Hunter 与 Reviewer，并把
