@@ -206,9 +206,9 @@ def final_type_a_verdict(results: dict) -> str:
     default_sha = eg.get("default_guarded", {}).get("sha1")
     proxy_sha = eg.get("explicit_proxy", {}).get("sha1")
     if default_sha and proxy_sha and default_sha == proxy_sha:
-        reasons.append("默认 guarded 出口 vs 显式代理响应相同 — CDN 无差异")
+        reasons.append("默认直连出口 vs 显式代理响应相同 — CDN 无差异")
     elif proxy_sha:
-        reasons.append("默认 guarded 出口与显式代理有差异 — 可能是 CDN 地域路由")
+        reasons.append("默认直连出口与显式代理有差异 — 可能是 CDN 地域路由")
     else:
         reasons.append("未提供显式代理出口对比")
 

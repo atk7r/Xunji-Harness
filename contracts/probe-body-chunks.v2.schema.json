@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/probe-body-chunks.v2.schema.json",
+  "title": "Xunji bounded probe body chunk manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "saved_body",
+    "chunk_dir",
+    "chunk_size",
+    "wire_len",
+    "wire_sha1",
+    "wire_sha256",
+    "chunks"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.probe.body_chunks.v2"},
+    "saved_body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[^/\\\\]+$"
+    },
+    "chunk_dir": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 272,
+      "pattern": "^[^/\\\\]+\\.chunks$"
+    },
+    "chunk_size": {"type": "integer", "minimum": 1, "maximum": 8388608},
+    "wire_len": {"type": "integer", "minimum": 0, "maximum": 8388608},
+    "wire_sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "wire_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "chunks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "offset", "bytes", "sha256"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 320,
+            "pattern": "^[^/\\\\]+\\.chunks/part-[0-9]{4}\\.bin$"
+          },
+          "offset": {"type": "integer", "minimum": 0, "maximum": 8388608},
+          "bytes": {"type": "integer", "minimum": 0, "maximum": 8388608},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

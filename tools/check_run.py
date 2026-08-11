@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -58,6 +59,10 @@ try:
     import contract_schema as _contract_schema
 except Exception:
     _contract_schema = None
+try:
+    import completion_transaction as _completion_transaction
+except Exception:
+    _completion_transaction = None
 from evidence_parse import (  # 唯一权威证据解析器与 evidence-index hash owner
     current_evidence_index_hash,
     evidence_artifact_manifest,
@@ -310,7 +315,7 @@ def run_replay_verify(run_dir: Path) -> tuple[list[str], list[str]]:
         return ([f"replay 核实异常(已捕获, 不影响其余检查): {e}"], [])
     warns = _summarize_replay(results)
     errors: list[str] = []
-    if _report_is_final(run_dir):
+    if _report_ready_for_closure(run_dir):
         unacked = _replay_unacked_findings(run_dir, results, {"DIVERGED"})
         privacy_unacked = _replay_unacked_findings(
             run_dir, results, {"SKIPPED-PRIVACY-REDACTED"}
@@ -641,7 +646,9 @@ def check_untrusted_content(run_dir: Path) -> list[str]:
     target_content = _has_target_content_artifacts(run_dir)
     review = run_dir / "review.md"
     rv = review.read_text(encoding="utf-8", errors="replace") if review.exists() else ""
-    if target_content and _report_is_final(run_dir) and not re.search(
+    if target_content and (
+            _report_ready_for_closure(run_dir)
+            or _legacy_report_closure_signal(run_dir)) and not re.search(
             r"Untrusted content|target-content|prompt injection|目标内容|不可信内容", rv, re.I):
         warns.append(
             "不可信内容复核: 本 run 有 target-content/untrusted 产物, 但终版前 review.md 未记录 "
@@ -870,15 +877,35 @@ def check_coverage_health(run_dir: Path) -> list[str]:
     return warns
 
 
-def _report_is_final(run_dir: Path) -> bool:
-    """report.md 是否为【实质终版报告】(而非中途存根): 其 `Evidence IDs:` 行引用了
-    >=1 个 E-id, 且其中至少一个在 evidence.md 里已确认(certainty>=0.8)。
+def _report_status(run_dir: Path) -> tuple[str, int]:
+    """Return the explicit report state and number of Status fields."""
+    report = run_dir / "report.md"
+    if not report.exists():
+        return "", 0
+    rtext = report.read_text(encoding="utf-8", errors="replace")
+    matches = re.findall(
+        rf"(?im)^{HWS}*-{HWS}*Status{HWS}*[:：]{HWS}*([^\r\n]*)$",
+        rtext,
+    )
+    return (matches[0].strip().upper() if len(matches) == 1 else "", len(matches))
 
-    用作【状态式收口信号】—— 把收口纪律的触发从『report 里写了"已穷尽/exhausted"这类
-    忏悔措辞』改成『写出了引用确认发现的终版报告』, 堵住"在聊天里宣布完工、run 文件里
-    只字不提收口"的【静默收口】漏洞(hamastar run: 行为上收口、report.md 无任何收口措辞
-    → _closure_claimed 返回 False → 整个收口闸门被跳过)。闸门审的是文件不是聊天, 且原先
-    只在自首时才硬审; 现在产出终版报告即触发, 自首与否都拦得住。"""
+
+def _report_is_final(run_dir: Path) -> bool:
+    """FINAL is an explicit state written only by completion_transaction."""
+    status, count = _report_status(run_dir)
+    return count == 1 and status == "FINAL"
+
+
+def _report_ready_for_closure(run_dir: Path) -> bool:
+    status, count = _report_status(run_dir)
+    return count == 1 and status in {"READY", "FINAL"}
+
+
+def _legacy_report_closure_signal(run_dir: Path) -> bool:
+    """Conservatively gate old substantive reports without calling them FINAL."""
+    status, count = _report_status(run_dir)
+    if count or status:
+        return False
     report = run_dir / "report.md"
     if not report.exists():
         return False
@@ -888,6 +915,94 @@ def _report_is_final(run_dir: Path) -> bool:
         return False
     confirmed = {r["id"] for r in parse_evidence(run_dir) if r["confirmed"]}
     return bool(cited & confirmed)
+
+
+def check_report_completion_contract(run_dir: Path) -> tuple[list[str], list[str]]:
+    """Validate explicit report state, review policy, and terminal transaction."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    report = run_dir / "report.md"
+    if not report.exists():
+        return errors, warnings
+    status, count = _report_status(run_dir)
+    if count == 0:
+        warnings.append(
+            "report 状态兼容警告: report.md 缺少唯一 `- Status: DRAFT|READY|FINAL`; "
+            "按 legacy 报告只做保守收口预检，不推断 FINAL。首次 prepare 前显式采用新状态。"
+        )
+    elif count != 1:
+        errors.append(
+            "report 状态硬门: report.md 必须且只能有一个 `- Status:` 字段。"
+        )
+    elif status not in {"DRAFT", "READY", "FINAL"}:
+        errors.append(
+            "report 状态硬门: Status 只能是 DRAFT、READY 或 FINAL；当前为 "
+            + repr(status) + "。"
+        )
+
+    marker = _completion_marker_claimed(run_dir)
+    policy_path = run_dir / "state" / "review_policy.json"
+    requires_policy = status in {"READY", "FINAL"} or marker
+    if not policy_path.exists():
+        message = (
+            "review policy 缺失: state/review_policy.json 不存在；旧 run 首次 prepare "
+            "必须显式 adopt role-based review policy，mandatory slot 不得静默降级。"
+        )
+        (errors if requires_policy else warnings).append(message)
+    elif _completion_transaction is None:
+        (errors if requires_policy else warnings).append(
+            "review policy 无法验证: completion_transaction owner 不可用。"
+        )
+    else:
+        try:
+            policy = json.loads(policy_path.read_text(
+                encoding="utf-8", errors="strict"))
+            _completion_transaction.validate_policy(policy)
+        except Exception as exc:
+            errors.append(
+                "review policy 硬门: state/review_policy.json 无效: "
+                f"{exc.__class__.__name__}: {exc}"
+            )
+
+    current_path = run_dir / "state" / "completion_transaction.json"
+    needs_transaction = status == "FINAL" or marker or current_path.exists()
+    if not needs_transaction:
+        return errors, warnings
+    if _completion_transaction is None:
+        errors.append(
+            "收口事务硬门: completion_transaction owner 不可用，无法验证 FINAL/marker。"
+        )
+        return errors, warnings
+    try:
+        completion = _completion_transaction.status(run_dir)
+    except Exception as exc:
+        errors.append(
+            "收口事务硬门: completion manifest/CAS 校验失败: "
+            f"{exc.__class__.__name__}: {exc}"
+        )
+        return errors, warnings
+    transaction_status = str(completion.get("status") or "")
+    if status == "FINAL" or marker:
+        if transaction_status == "legacy_unbound":
+            errors.append(
+                "收口事务硬门: 发现未绑定旧 marker。必须公开执行 completion_transaction "
+                "reopen，重新完成 S3 review/check/CronList 后 prepare → commit；不得回填伪造 receipt。"
+            )
+        elif transaction_status != "committed":
+            errors.append(
+                "收口事务硬门: FINAL/marker 仅在 committed completion transaction 下有效；"
+                f"当前 transaction={transaction_status or 'missing'}。"
+            )
+        if status != "FINAL" or not marker:
+            errors.append(
+                "收口事务硬门: report FINAL 与 decisions completion marker 必须由同一次 commit "
+                "原子成对发布。"
+            )
+    elif transaction_status == "committed":
+        errors.append(
+            "收口事务硬门: committed receipt 与当前非 FINAL report/marker 不一致。"
+        )
+    return errors, warnings
 
 
 def _completion_marker_claimed(run_dir: Path) -> bool:
@@ -915,20 +1030,20 @@ def _retrospective_closure_claimed(run_dir: Path) -> bool:
 
 
 def _closure_gate_active(run_dir: Path) -> bool:
-    """Whether any canonical run file claims or materially enters closure.
-
-    Closure used to be inferred only from report.md. That let a run write
-    `retrospective.md` with `Verdict: FINAL` while report.md stayed a stub,
-    bypassing closure-only coverage, loop_state, retrospective, and review gates.
-    Keep this as the single source of truth for closure-trigger checks.
-    """
+    """Use explicit report lifecycle; legacy prose only when Status is absent."""
     report = run_dir / "report.md"
     rtext = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
+    status, count = _report_status(run_dir)
+    marker = _completion_marker_claimed(run_dir)
+    if count == 1 and status in {"DRAFT", "READY", "FINAL"}:
+        return marker or status in {"READY", "FINAL"}
+    if count:
+        return marker
     return bool(
-        (rtext and _closure_claimed(rtext))
-        or _report_is_final(run_dir)
+        marker
+        or (rtext and _closure_claimed(rtext))
+        or _legacy_report_closure_signal(run_dir)
         or _decision_closing(run_dir)
-        or _completion_marker_claimed(run_dir)
         or _retrospective_closure_claimed(run_dir)
     )
 
@@ -937,16 +1052,20 @@ def _closure_gate_sources(run_dir: Path) -> list[str]:
     out: list[str] = []
     report = run_dir / "report.md"
     rtext = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
-    if rtext and _closure_claimed(rtext):
-        out.append("report.md closure wording")
-    if _report_is_final(run_dir):
-        out.append("report.md confirmed Evidence IDs")
-    if _decision_closing(run_dir):
-        out.append("decisions.md closing status")
+    status, count = _report_status(run_dir)
+    if count == 1 and status in {"READY", "FINAL"}:
+        out.append(f"report.md Status={status}")
     if _completion_marker_claimed(run_dir):
         out.append("decisions.md completion marker")
-    if _retrospective_closure_claimed(run_dir):
-        out.append("retrospective.md closure verdict")
+    if count == 0:
+        if rtext and _closure_claimed(rtext):
+            out.append("legacy report.md closure wording")
+        if _legacy_report_closure_signal(run_dir):
+            out.append("legacy report confirmed Evidence IDs (preflight only)")
+        if _decision_closing(run_dir):
+            out.append("legacy decisions.md closing status")
+        if _retrospective_closure_claimed(run_dir):
+            out.append("legacy retrospective.md closure verdict")
     return out
 
 
@@ -962,8 +1081,8 @@ def _report_stub_or_missing(run_dir: Path, rtext: str) -> bool:
     confirmed_section = re.search(
         r"(?ims)^##\s+(?:Confirmed Findings\b|Confirmed Vulnerabilities\b|确认发现|已确认发现|确认漏洞)"
         r"(.*?)(?=^##\s|\Z)", cleaned)
-    summary_status = re.search(
-        rf"(?im)^{HWS}*-{HWS}*Status{HWS}*[:：]{HWS}*\S", cleaned)
+    status, status_count = _report_status(run_dir)
+    summary_status = status_count == 1 and status in {"READY", "FINAL"}
     confirmed_ids = re.findall(r"E-\d+[a-z]*", confirmed_section.group(1) if confirmed_section else "")
     return not summary_status and not confirmed_ids
 
@@ -2632,6 +2751,7 @@ def _selftest() -> int:
     consume it). Mirrors check_hook's self-testing pattern. No network, no run dir."""
     import os
     import tempfile
+    from unittest import mock
     import peer_review as _peer_review_test
     valid_review_text = (
         "# Review\n\n## Independent Review\n"
@@ -2795,16 +2915,35 @@ def _selftest() -> int:
         ("tool-backed current review receipt satisfies gate"
          + (f" ({receipt_review_reason})" if receipt_review_reason else ""),
          receipt_review_valid and has_completed_independent_review(receipt_review_text, d)),
+        ("tool-backed receipt remains valid with legacy arkcli-panel reviewer label",
+         receipt_review_valid and has_completed_independent_review(
+             receipt_review_text.replace(
+                 "## Independent Review", "## Independent Review\n- Reviewer: arkcli-panel", 1),
+             d)),
+        ("tool-backed receipt remains valid with external-assistance reviewer label",
+         receipt_review_valid and has_completed_independent_review(
+             receipt_review_text.replace(
+                 "## Independent Review",
+                 "## Independent Review\n- Reviewer: external-assistance:arkcli", 1),
+             d)),
         ("independent review prose mention does not satisfy gate",
          not has_completed_independent_review(
              "# Review\nIndependent Review is still required before closure.\n")),
         ("independent review template placeholders do not satisfy gate",
          not has_completed_independent_review(
-             "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
+             "## Independent Review\n- Reviewer: (codex / external-assistance:arkcli / manual-driver)\n"
              "- Verdict: (PASS / WARN / BLOCKER)\n")),
-        ("filled self-review after untouched independent template cannot satisfy gate",
+        ("legacy arkcli-panel template placeholders do not satisfy gate",
          not has_completed_independent_review(
              "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
+             "- Verdict: (PASS / WARN / BLOCKER)\n")),
+        ("external-assistance reviewer label alone cannot satisfy receipt gate",
+         not has_completed_independent_review(
+             "## Independent Review\n- Reviewer: external-assistance:arkcli\n"
+             "- Verdict: PASS\n- Findings: none after source review.\n", d)),
+        ("filled self-review after untouched independent template cannot satisfy gate",
+         not has_completed_independent_review(
+             "## Independent Review\n- Reviewer: (codex / external-assistance:arkcli / manual-driver)\n"
              "- Verdict: (PASS / WARN / BLOCKER)\n\n## R-001 Self review\n"
              + ("- Findings: driver checked its own evidence and claims PASS.\n" * 30))),
         ("peer_review-looking prose without receipt cannot satisfy gate",
@@ -2941,8 +3080,10 @@ def _selftest() -> int:
          mat_recs["E-013"]["maturity"] == "candidate" and mat_recs["E-013"]["maturity_unknown"] is True),
         ("report maturity gate: candidate in Evidence IDs hard error",
          any("E-011=candidate" in e for e in mat_errors)),
-        ("report maturity gate: high-cert candidate still triggers final report",
-         _report_is_final(d_mat) is True and any("E-015=candidate" in e for e in mat_errors)),
+        ("legacy Evidence IDs trigger conservative preflight without inferring FINAL",
+         _report_is_final(d_mat) is False
+         and _legacy_report_closure_signal(d_mat) is True
+         and any("E-015=candidate" in e for e in mat_errors)),
         ("report maturity gate: phenomenon in body soft warn",
          any("E-010=phenomenon" in w for w in mat_warns)),
         ("report maturity gate: inline code E-id ignored",
@@ -2961,6 +3102,66 @@ def _selftest() -> int:
          "E-015" in mat_index["confirmed"] and "E-015" not in mat_index["confirmed_findings"]
          and "E-012" in mat_index["confirmed_findings"]),
     ]
+
+    d_report_state = Path(tempfile.mkdtemp())
+    (d_report_state / "ev.html").write_text("x", encoding="utf-8")
+    (d_report_state / "evidence.md").write_text(
+        "# Evidence Ledger\n## E-001\n- Certainty: 0.8\n"
+        "- Replicated: yes\n- Artifacts: `ev.html`\n",
+        encoding="utf-8",
+    )
+    (d_report_state / "report.md").write_text(
+        "# Report\n- Status: DRAFT\nEvidence IDs: E-001\n",
+        encoding="utf-8",
+    )
+    draft_contract_errors, draft_contract_warns = \
+        check_report_completion_contract(d_report_state)
+    draft_not_closure = not _closure_gate_active(d_report_state)
+    (d_report_state / "report.md").write_text(
+        "# Report\n- Status: COMPLETE\nEvidence IDs: E-001\n",
+        encoding="utf-8",
+    )
+    invalid_contract_errors, _ = check_report_completion_contract(d_report_state)
+
+    d_legacy_completion = Path(tempfile.mkdtemp())
+    (d_legacy_completion / "state").mkdir()
+    (d_legacy_completion / "frontier.md").write_text(
+        "# Frontier\n", encoding="utf-8")
+    (d_legacy_completion / "report.md").write_text(
+        "# Report\n- Status: FINAL\nEvidence IDs:\n", encoding="utf-8")
+    (d_legacy_completion / "decisions.md").write_text(
+        "# Decisions\nGHOST_COMPLETE\n", encoding="utf-8")
+    (d_legacy_completion / "state" / "review_policy.json").write_text(
+        json.dumps({
+            "schema": "xunji.review-policy.v1",
+            "policy_id": "selftest-policy",
+            "slots": [{
+                "slot_id": "independent-review",
+                "role": "independent-reviewer",
+                "requirement": "mandatory",
+            }],
+        }),
+        encoding="utf-8",
+    )
+    legacy_completion_errors, _ = check_report_completion_contract(
+        d_legacy_completion)
+    with mock.patch.object(
+            _completion_transaction, "status",
+            return_value={"status": "committed"}):
+        committed_pair_errors, _ = check_report_completion_contract(
+            d_legacy_completion)
+    checks.extend([
+        ("DRAFT with confirmed Evidence IDs does not pretend to enter closure",
+         draft_not_closure
+         and draft_contract_errors == []
+         and any("review policy 缺失" in item for item in draft_contract_warns)),
+        ("unknown explicit report state fails closed",
+         any("Status 只能" in item for item in invalid_contract_errors)),
+        ("legacy unbound completion marker requires public reopen and recertification",
+         any("未绑定旧 marker" in item for item in legacy_completion_errors)),
+        ("committed transaction admits the exact FINAL plus marker pair",
+         not any("收口事务硬门" in item for item in committed_pair_errors)),
+    ])
 
     d_un = Path(tempfile.mkdtemp())
     (d_un / "evidence" / "render_app").mkdir(parents=True)
@@ -2996,10 +3197,11 @@ def _selftest() -> int:
         encoding="utf-8")
     (d2 / "target.md").write_text(
         "# Target\n- Existing intel / recon report: /path/recon.json\n", encoding="utf-8")
-    (d2 / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+    (d2 / "report.md").write_text(
+        "# Report\n- Status: READY\nEvidence IDs: E-001\n", encoding="utf-8")
     _built = lambda rd: [w for w in check_coverage_health(rd) if "覆盖台账缺建" in w]  # ② 缺建子警
     cov_warn_before = _built(d2)
-    final_before = _report_is_final(d2)
+    ready_before = _report_ready_for_closure(d2)
     cerr_before, _ = check_closure_discipline(d2)
     (d2 / "coverage.json").write_text(
         '{"total":1,"examined":1,"reachable":1,"assets":[]}', encoding="utf-8")
@@ -3021,8 +3223,8 @@ def _selftest() -> int:
     (d3 / "target.md").write_text("# Target\n- Existing intel / recon report: N/A\n", encoding="utf-8")
     checks += [
         ("recon cited + no coverage -> warn", bool(cov_warn_before)),
-        ("real report (confirmed E-id) -> final (state-trigger)", final_before is True),
-        ("final report + no coverage -> closure HARD error", any("覆盖台账" in e for e in cerr_before)),
+        ("explicit READY report activates closure preflight", ready_before is True),
+        ("READY report + no coverage -> closure HARD error", any("覆盖台账" in e for e in cerr_before)),
         ("coverage built -> coverage warn clears", cov_warn_after == []),
         ("coverage built -> closure coverage error clears", not any("覆盖台账" in e for e in cerr_after)),
         ("防lump: unknown and actionable LOGIN remain candidates",
@@ -3195,7 +3397,8 @@ def _selftest() -> int:
         "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n", encoding="utf-8")
     (d_retro_final / "review.md").write_text(valid_review_text, encoding="utf-8")
     (d_retro_final / "target.md").write_text("# Target\n- Existing intel / recon report: none\n", encoding="utf-8")
-    (d_retro_final / "report.md").write_text("# Report\n\n## Summary\n- Status:\n\n## Confirmed Findings\n", encoding="utf-8")
+    (d_retro_final / "report.md").write_text(
+        "# Report\n\n## Summary\n\n## Confirmed Findings\n", encoding="utf-8")
     (d_retro_final / "retrospective.md").write_text(
         "# Retrospective\n\n- Verdict: FINAL\n\n"
         "## Self problems\n- Closed before checking generated state against canonical files.\n\n"
@@ -3226,6 +3429,15 @@ def _selftest() -> int:
         "# Retrospective\n\n- Status: NEEDS_REPAIR\n\n"
         "## Closure\nDo not write GHOST_COMPLETE until hard gates pass.\n",
         encoding="utf-8")
+    d_draft_strong = Path(tempfile.mkdtemp())
+    (d_draft_strong / "report.md").write_text(
+        "# Report\n- Status: DRAFT\nEvidence IDs: E-999\n已穷尽全部攻击面。\n",
+        encoding="utf-8",
+    )
+    (d_draft_strong / "decisions.md").write_text(
+        "# Decisions\n- Status: CLOSING\n", encoding="utf-8")
+    (d_draft_strong / "retrospective.md").write_text(
+        "# Retrospective\n- Verdict: FINAL\n", encoding="utf-8")
     d_cron = Path(tempfile.mkdtemp())
     (d_cron / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
     (d_cron / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
@@ -3389,12 +3601,14 @@ def _selftest() -> int:
             any("Problem: second parser issue: missing Status" in e for e in retro_problem_missing)),
         ("closure trigger + no retrospective -> closure carries 复盘 error",
             any("强制复盘" in e for e in retro_closure_err)),
-        ("retrospective Verdict: FINAL activates closure gate",
+        ("legacy no-Status retrospective Verdict: FINAL activates closure gate",
             _closure_gate_active(d_retro_final) is True),
-        ("retrospective FINAL + report stub hard-fails report gate",
+        ("legacy retrospective FINAL + report stub hard-fails report gate",
             any("收口硬门(report)" in e for e in retro_final_err)),
-        ("retrospective FINAL activates coverage closure mode",
+        ("legacy retrospective FINAL activates coverage closure mode",
             check_coverage_matrix is None or any("收口硬门" in e for e in retro_matrix_errors)),
+        ("explicit DRAFT ignores closure prose, EIDs, decisions, and retrospective prose",
+            _closure_gate_active(d_draft_strong) is False),
         ("report stub gate accepts Chinese 确认发现 section", report_cn_stub is False),
         ("retrospective prose mentioning GHOST_COMPLETE does not trigger closure",
             _closure_gate_active(d_retro_prose) is False),
@@ -3821,7 +4035,8 @@ def _selftest() -> int:
     (d13 / "evidence.md").write_text(
         "# Evidence Ledger\n\n## E-900\n- Replicated: yes\n- Artifacts: `evidence/clean.html`\n- Certainty: 1.0\n",
         encoding="utf-8")
-    (d13 / "report.md").write_text("# Report\nEvidence IDs: E-900\n", encoding="utf-8")
+    (d13 / "report.md").write_text(
+        "# Report\n- Status: FINAL\nEvidence IDs: E-900\n", encoding="utf-8")
     drift_w = check_layout_drift(d13)
     checks.append(("布局漂移: 终版报告产出后散落 -> WARN", bool(drift_w) and "ev_loose.html" in drift_w[0]))
 
@@ -4002,7 +4217,8 @@ def _selftest() -> int:
     (d14 / "evidence.md").write_text(
         "# Evidence Ledger\n\n## E-901\n- Replicated: yes\n- Artifacts: `evidence/ok.html`\n- Certainty: 1.0\n",
         encoding="utf-8")
-    (d14 / "report.md").write_text("# Report\nEvidence IDs: E-901\n", encoding="utf-8")
+    (d14 / "report.md").write_text(
+        "# Report\n- Status: FINAL\nEvidence IDs: E-901\n", encoding="utf-8")
     checks.append(("布局漂移: 收口且根目录干净 -> 静默", check_layout_drift(d14) == []))
 
     # 断-1 replay 接入: _summarize_replay 汇总逻辑(纯函数, 离线; 实网重放走 --replay-verify 不在此测)
@@ -4334,6 +4550,16 @@ def main() -> int:
         print(f"run directory must be under {runs_root}")
         return 1
 
+    if _runtime_receipts is None \
+            or not hasattr(_runtime_receipts, "validation_snapshot_scope"):
+        print("run check failed")
+        print("- runtime receipt validation snapshot owner unavailable")
+        return 1
+    validation_scope = contextlib.nullcontext(None)
+    if not args.auto_peer_review and not args.replay_verify:
+        validation_scope = _runtime_receipts.validation_snapshot_scope(run_dir)
+    validation_scope.__enter__()
+
     errors: list[str] = []
     for name in REQUIRED_FILES:
         path = run_dir / name
@@ -4410,24 +4636,54 @@ def main() -> int:
     maturity_errors, maturity_warns = check_report_maturity(run_dir)
     errors.extend(maturity_errors)
     warnings.extend(maturity_warns)
+    report_contract_errors, report_contract_warns = \
+        check_report_completion_contract(run_dir)
+    errors.extend(report_contract_errors)
+    warnings.extend(report_contract_warns)
     errors.extend(check_chain_maturity(run_dir))
     errors.extend(check_loop_state_closure_blockers(run_dir))
     # P0-1 收口硬门: 缺独立复审=硬错(并入 errors), 其余=软警
     closure_errors, closure_warns = check_closure_discipline(run_dir)
     errors.extend(closure_errors)
     warnings.extend(closure_warns)
-    if warnings:
-        print("warnings")
-        for w in warnings:
-            print(f"- {w}")
-
     if errors:
+        if warnings:
+            print("warnings")
+            for w in warnings:
+                print(f"- {w}")
         print("run check failed")
         for error in errors:
             print(f"- {error}")
+        validation_scope.__exit__(None, None, None)
         return 1
 
+    if _completion_transaction is None:
+        print("run check failed")
+        print("- check-run machine token owner unavailable")
+        validation_scope.__exit__(None, None, None)
+        return 1
+    try:
+        check_token, warning_codes = _completion_transaction.build_check_run_token(
+            run_dir, warnings)
+    except Exception as exc:
+        print("run check failed")
+        print(
+            "- check-run machine token snapshot failed: "
+            f"{exc.__class__.__name__}: {exc}"
+        )
+        validation_scope.__exit__(None, None, None)
+        return 1
+    print(check_token)
+    if warnings:
+        print("warnings")
+        coded = {
+            _completion_transaction.warning_code(message): message
+            for message in warnings
+        }
+        for code in warning_codes:
+            print(f"- [{code}] {coded[code]}")
     print("STRUCTURAL_PASS: run structure is consistent; this is not completion proof")
+    validation_scope.__exit__(None, None, None)
     return 0
 
 

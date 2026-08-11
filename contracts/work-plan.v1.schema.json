@@ -31,12 +31,15 @@
     "replan_reason": {"type": "string", "maxLength": 2048},
     "lanes": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "maxItems": 16,
       "items": {"$ref": "#/$defs/lane"}
     },
     "execution_mode": {
-      "enum": ["ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS"]
+      "enum": [
+        "ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS",
+        "COMPLETION_REVIEW"
+      ]
     },
     "merge_owner": {"const": "Root/Single Synthesizer"},
     "exit_gate": {"type": "string", "minLength": 1, "maxLength": 2048},
@@ -66,6 +69,21 @@
             "items": {"not": {"required": ["capability_id"]}}
           }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {"execution_mode": {"const": "COMPLETION_REVIEW"}},
+        "required": ["execution_mode"]
+      },
+      "then": {
+        "properties": {
+          "macro_stage": {"const": "S3"},
+          "lanes": {"maxItems": 0}
+        }
+      },
+      "else": {
+        "properties": {"lanes": {"minItems": 1}}
       }
     }
   ],
@@ -112,6 +130,7 @@
           "maxLength": 256,
           "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)*$"
         },
+        "infra_barrier": {"$ref": "#/$defs/infraBarrierBinding"},
         "assets": {
           "type": "array",
           "maxItems": 64,
@@ -133,6 +152,37 @@
         "atomic": {"type": "boolean"}
       }
     },
+    "infraBarrierBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "action_fingerprint",
+        "cause_code",
+        "precondition_digest",
+        "operation_class"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.infra-barrier-binding.v1"},
+        "action_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cause_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Z][A-Z0-9_.-]*$"
+        },
+        "precondition_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "operation_class": {
+          "enum": ["target_attempt", "repair", "local_verify"]
+        }
+      }
+    },
     "turnBinding": {
       "type": "object",
       "additionalProperties": false,
@@ -149,17 +199,30 @@
       "required": ["schema", "mode", "reason", "lane_ids", "committed_at"],
       "properties": {
         "schema": {"const": "xunji.delegation-decision.v1"},
-        "mode": {"enum": ["ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS"]},
+        "mode": {
+          "enum": [
+            "ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS",
+            "COMPLETION_REVIEW"
+          ]
+        },
         "reason": {"type": "string", "minLength": 1, "maxLength": 2048},
         "lane_ids": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 16,
           "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"},
           "uniqueItems": true
         },
         "committed_at": {"type": "number", "exclusiveMinimum": 0}
-      }
+      },
+      "allOf": [{
+        "if": {
+          "properties": {"mode": {"const": "COMPLETION_REVIEW"}},
+          "required": ["mode"]
+        },
+        "then": {"properties": {"lane_ids": {"maxItems": 0}}},
+        "else": {"properties": {"lane_ids": {"minItems": 1}}}
+      }]
     }
   }
 }

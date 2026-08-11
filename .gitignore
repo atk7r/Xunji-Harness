@@ -30,6 +30,7 @@ config.ini
 .claude/xunji_pending_turns/
 .claude/xunji_transition_claims/
 .claude/xunji_scope_admission_claims/
+.claude/xunji_subagent_stop_ingress/
 
 # Manual/security-sensitive work products — never publish real target findings
 reports/

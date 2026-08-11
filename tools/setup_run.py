@@ -48,6 +48,8 @@ REQUIRED = ["target.md", "surface.md", "frontier.md", "hypotheses.md", "evidence
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import loop_journal  # noqa: E402
+import contract_schema  # noqa: E402
+import completion_transaction  # noqa: E402
 import setup_normalizer  # noqa: E402
 import setup_source  # noqa: E402
 import setup_transaction  # noqa: E402
@@ -86,6 +88,17 @@ def scaffold(run_dir: Path) -> list[str]:
     profile_src = TPL / "operator_profile.json"
     if profile_src.exists():
         shutil.copyfile(profile_src, state / "operator_profile.json")
+    review_policy = completion_transaction.default_review_policy()
+    policy_errors = contract_schema.named_schema_errors(
+        review_policy, "review-policy.v1.schema.json")
+    if policy_errors:
+        raise RuntimeError(
+            "default review policy is invalid: " + "; ".join(policy_errors[:4]))
+    (state / "review_policy.json").write_text(
+        json.dumps(review_policy, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
     return made
 
 
@@ -844,6 +857,7 @@ def prepare_staging_run(
                 sys.executable,
                 str(ROOT / "tools" / "classify_hosts.py"),
                 str(recon_path),
+                "--run", str(run_dir),
                 "--out", str(classify_dir),
                 "--egress-recheck",
             ]
@@ -1015,6 +1029,15 @@ def _selftest() -> int:
         ("evidence/ subdir", (rd / "evidence").is_dir() and (rd / "evidence" / ".gitkeep").exists()),
         ("scripts/ subdir", (rd / "scripts").is_dir()),
         ("operator profile scaffolded", (rd / "state" / "operator_profile.json").exists()),
+        ("role-based review policy is frozen at setup",
+         not contract_schema.named_schema_errors(
+             json.loads((rd / "state" / "review_policy.json").read_text(
+                 encoding="utf-8")),
+             "review-policy.v1.schema.json")
+         and any(
+             slot.get("requirement") == "mandatory"
+             for slot in json.loads((rd / "state" / "review_policy.json").read_text(
+                 encoding="utf-8")).get("slots", []))),
         ("frontier template has depth field", "Current depth" in (rd / "frontier.md").read_text(encoding="utf-8")),
         ("canonical scaffold contains no fake concrete IDs or example hosts",
          not re.search(
@@ -1359,7 +1382,18 @@ def _selftest() -> int:
     checks += [
         ("--classify setup succeeds with isolated classifier", classify_rc == 0),
         ("--classify executes egress recheck",
-         len(classify_calls) == 1 and "--egress-recheck" in classify_calls[0]),
+         len(classify_calls) == 1
+         and "--egress-recheck" in classify_calls[0]
+         and (lambda command: (
+             Path(command[command.index("--run") + 1])
+             == Path(command[command.index("--out") + 1]).parent
+             and Path(command[command.index("--out") + 1]).name == "classify"
+             and Path(command[command.index("--run") + 1]).name.startswith(
+                 "classifycheck_20260103."
+             )
+             and Path(command[command.index("--run") + 1]).parent.name
+             == setup_transaction.STAGING_NAME
+         ))(classify_calls[0])),
         ("--classify progress stdout stays silent", classify_stdout.getvalue() == ""),
         ("--classify has no stderr diagnostics on success", classify_stderr.getvalue() == ""),
         ("--classify preserves closed Setup journal cycle",

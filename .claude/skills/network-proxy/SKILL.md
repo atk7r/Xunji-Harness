@@ -30,14 +30,22 @@ Do not confuse this with Xunji's active engagement proxy discipline:
 
 - Active Xunji target-facing tools (`probe.py`, `render.py`, `scan.py`, sensors)
   use `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf` through
-  `tools/harness/proxy.py`. This channel is fail-closed by default; absent proxy
-  configuration rejects target traffic. Only an operator-approved direct-egress
-  session may set `XUNJI_PROXY_REQUIRED=0`.
+  `tools/harness/proxy.py`. Direct is the default route and uses exact
+  `XUNJI_PROXY_REQUIRED=0`; proxy is used only when the current operator turn
+  explicitly selects it, with exact `XUNJI_PROXY_REQUIRED=1` or a registered
+  `--proxy`. Dormant proxy config never selects the route by itself.
+- A route-less historical contract and a prompt that only forbids direct are
+  offline; neither can recover the former proxy default. Browser subprocesses
+  strip ambient proxy variables. Scanner wrappers preflight the selected proxy
+  endpoint and disable scanner-native transport retries.
 - Target `WebFetch`, other non-attested network tools, and raw
-  curl/wget/requests/socket are rejected by the turn gate; use the proxy-aware
-  project tools. `XUNJI_PROXY_REQUIRED=0` is accepted from a Claude Bash action
-  only when the current operator prompt explicitly approves direct egress.
-  Prompt reminders alone are not proxy enforcement.
+  curl/wget/requests/socket are rejected by the turn gate; use the route-aware
+  project tools. One proxy-attributed failure stops automatic retry and pauses
+  that proxy route. Do not wait out the cooldown or vary the command: return the
+  blocker and wait for a newer top-level operator turn to choose default direct
+  or explicitly select proxy again. A confirmation closes only its selected
+  proxy route. Internal scheduler wakes are not confirmation.
+  Prompt reminders alone are not route enforcement.
 - Codex review traffic uses the dedicated `CODEX_PROXY` /
   `tools/harness/codex_proxy.conf` path.
 - Model/API calls must not be routed through the engagement proxy.
@@ -84,7 +92,7 @@ will not run Xunji active tools or model/API clients afterwards.
 For Xunji active tools, do this instead:
 
 ```bash
-XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
+XUNJI_PROXY_REQUIRED=1 XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
 ```
 
 ## WebFetch / WebSearch failures
@@ -106,5 +114,5 @@ This skill provides **connectivity fixes only**. It does NOT:
 - Provide payloads, exploits, or attack methodology
 - Bypass rate limits or authentication — that's the target's concern, not the network's
 
-The limits remain `src-safety-boundary` (effect, not method) and the
+The limits remain `safety-boundary` (effect, not method) and the
 `.claude/hooks/` gate.

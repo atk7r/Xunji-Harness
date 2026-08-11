@@ -13,7 +13,7 @@ Discipline:
   (reusing the page's own crypto/token). That traffic is rate-paced and recorded in
   network.json, but is NOT body/scope-capped like probe.py -- so it follows the
   proof-level / author-and-handoff boundary: auto-run proof-level only; state-changing
-  flows are handed to the operator (src-safety-boundary).
+  flows are handed to the operator (safety-boundary).
 - Routed through guard.RateLimiter (禁高频) and guard.cap_body (禁拖库).
 - Captures the post-challenge HTML, page title, visible text, script URLs, form
   structures, screenshot (optional), and the network requests the page makes
@@ -27,9 +27,9 @@ the login page. This is symmetric to the cookie EXPORT render.py already does:
 
 Run with the venv python (Playwright lives there); activate the venv first
 (.venv/bin/activate on Linux/macOS, .venv\Scripts\activate on Windows):
-  python tools/render.py <url> [--out runs/<dir>/render] [--wait networkidle]
-  python tools/render.py <url> --cookie "PHPSESSID=abc; security=low"
-  python tools/render.py <url> --screenshot --save page.html --wait-sec 3
+  python tools/render.py <url> --run runs/<dir> [--wait networkidle]
+  python tools/render.py <url> --run runs/<dir> --cookie "PHPSESSID=abc; security=low"
+  python tools/render.py <url> --run runs/<dir> --screenshot --save page.html --wait-sec 3
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ from harness.guard import (RateLimiter, cap_body, RateBudgetExceeded,  # noqa: E
 from harness import guard as guardmod  # noqa: E402
 from harness import privacy as privacymod  # noqa: E402
 from harness import proxy as proxymod  # noqa: E402  渗透流量走交战代理(模型调用不走)
+from harness import output_layout  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
@@ -183,7 +184,12 @@ def render(url: str, out_dir: Path, wait: str, timeout_ms: int,
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled"] if STEALTH else [])
+            args=["--disable-blink-features=AutomationControlled"] if STEALTH else [],
+            # Chromium must not inherit model/desktop proxy variables. The
+            # engagement proxy, when explicitly selected, is bound below on
+            # the browser context; otherwise the browser route is truly direct.
+            env=proxymod.scrub_proxy_env(),
+        )
         ctx_kwargs = dict(user_agent=UA, ignore_https_errors=True, locale="zh-CN")
         if PROXY:
             ctx_kwargs["proxy"] = {"server": PROXY}
@@ -368,6 +374,8 @@ def _selftest() -> int:
     checks.append(("render accepts screenshot", "screenshot" in sig))
     checks.append(("render accepts wait_sec", "wait_sec" in sig))
     checks.append(("render accepts save_html", "save_html" in sig))
+    checks.append(("browser process strips ambient proxy variables",
+                   "env=proxymod.scrub_proxy_env()" in inspect.getsource(render)))
     checks.append(("provenance marks target content untrusted",
                    provenance()["source"] == "target-content" and provenance()["trust"] == "untrusted"))
     checks.append(("browser route/error provenance is structured",
@@ -403,6 +411,23 @@ def _selftest() -> int:
     for k in ("url", "title", "status", "dom_html_len", "scripts", "forms", "screenshot_path", "error"):
         checks.append((f"result dict has key '{k}'", k in dummy_result))
 
+    run_out = (output_layout.ROOT / "runs" / "demo_20260101" / "evidence"
+               / "render_x" / "attempt-a")
+    checks.append((
+        "render save basename stays inside its invocation directory",
+        _place_save("page", "runs/demo_20260101", run_out, invocation="attempt-a")
+        == str(run_out / "page.html"),
+    ))
+    replay_rejected = False
+    try:
+        _place_save(
+            "page.replay.json", "runs/demo_20260101", run_out,
+            invocation="attempt-a",
+        )
+    except output_layout.OutputLayoutError:
+        replay_rejected = True
+    checks.append(("render rejects replay sidecar as saved body", replay_rejected))
+
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(("ok   " if ok else "FAIL ") + n, file=sys.stderr)
@@ -422,17 +447,27 @@ class _FakePage:
         return None
 
 
-def _place_save(save: str | None, run: str | None) -> str | None:
-    """Unified layout for --save: when --run is given and --save is a bare filename,
-    place it under <run>/evidence/. Respects explicit paths (containing / or \\).
-    """
-    if not save:
-        return save
-    if ("/" in save) or ("\\" in save):
-        return save
-    if not run:
-        return save
-    return str(Path(run) / "evidence" / save)
+def _place_save(
+    save: str | None,
+    run: str | None,
+    out_dir: Path,
+    *,
+    invocation: str,
+) -> str | None:
+    """Place optional saved HTML beside the rest of this render attempt."""
+    if save is None:
+        return None
+    candidate = Path(save)
+    if "/" not in save and "\\" not in save:
+        candidate = out_dir / save
+    path = output_layout.resolve_artifact_file(
+        str(candidate),
+        run=run,
+        tool="render",
+        invocation=invocation,
+        default_suffix=".html",
+    )
+    return str(path) if path is not None else None
 
 
 def main() -> int:
@@ -445,9 +480,11 @@ def main() -> int:
                          "Result -> eval.json. State-changing flows = author-and-handoff.")
     ap.add_argument("--eval-wait", type=int, default=0,
                     help="ms to wait after load before --eval (let token/crypto JS settle)")
-    ap.add_argument("--out", default=None, help="artifact dir (default tmp/render/<host>)")
+    ap.add_argument("--out", default=None,
+                    help="managed base directory; each invocation writes a unique child directory")
     ap.add_argument("--run", default=None,
-                    help="run 目录 runs/<dir>; 未给 --out 时产物默认落 <run>/evidence/render_<host>/"
+                    help="run 目录 runs/<dir>; 未给 --out 时产物默认落 "
+                         "<run>/evidence/render_<host>/<invocation>/"
                          "(统一布局, 防散落根目录)")
     ap.add_argument("--wait", default="networkidle",
                     choices=["load", "domcontentloaded", "networkidle"])
@@ -458,8 +495,8 @@ def main() -> int:
                     help="minimal anti-automation hardening for authorized access to "
                          "anti-bot-gated pages (does not forge challenge tokens)")
     ap.add_argument("--proxy", default=None,
-                    help="交战代理(http://h:p / socks5h://h:p)；经中继访问境内资产。"
-                         "未给则走 harness.proxy(XUNJI_PROXY / proxy.conf, 不读 HTTPS_PROXY=模型那条)")
+                    help="仅在操作者明确要求时使用交战代理(http://h:p / socks5h://h:p)。"
+                         "未给时默认直连且不读取 XUNJI_PROXY / proxy.conf / HTTPS_PROXY")
     ap.add_argument("--cookie", action="append", default=[],
                     help="注入会话 cookie(认证后页面用),形如 'PHPSESSID=abc; security=low';可重复")
     ap.add_argument("--cookies-file", default=None,
@@ -480,20 +517,32 @@ def main() -> int:
 
     global STEALTH, PROXY
     STEALTH = args.stealth
-    PROXY = proxymod.resolve(args.proxy)   # 交战代理(XUNJI_PROXY/proxy.conf/--proxy); required 时没配 fail-closed
+    # 默认直连；只有冻结路线显式选择代理时才允许 --proxy 或读取专用配置。
+    PROXY = proxymod.resolve(args.proxy)
 
     eval_js = Path(args.eval_file).read_text(encoding="utf-8") if args.eval_file else None
     host = urlparse(args.url).hostname or "page"
-    if args.out:
-        out_dir = Path(args.out)
-    elif args.run:
-        out_dir = Path(args.run) / "evidence" / f"render_{host}"   # 统一布局
-    else:
-        out_dir = Path("tmp") / "render" / host
+    safe_host = re.sub(r"[^A-Za-z0-9._-]+", "_", host).strip("._-") or "page"
+    artifact_invocation = output_layout.invocation_id()
+    requested_out = str(Path(args.out) / artifact_invocation) if args.out else None
+    try:
+        out_dir = output_layout.resolve_artifact_dir(
+            requested_out,
+            run=args.run,
+            tool="render",
+            invocation=artifact_invocation,
+            default_leaf=f"render_{safe_host}",
+            unique_run_dir=True,
+        )
+        save_html = _place_save(
+            args.save,
+            args.run,
+            out_dir,
+            invocation=artifact_invocation,
+        )
+    except output_layout.OutputLayoutError as exc:
+        ap.error(str(exc))
     cookies = build_cookies(args.url, args.cookie, args.cookies_file)
-
-    # Resolve --save path (unified layout with --run)
-    save_html = _place_save(args.save, args.run)
 
     try:
         res = render(args.url, out_dir, args.wait, args.timeout, cookies,
@@ -527,6 +576,9 @@ def main() -> int:
         "error_class": res.get("error_class"),
         "attribution": res.get("attribution"),
         "breaker_scope": res.get("breaker_scope"),
+        "restart_policy": res.get("restart_policy"),
+        "automatic_retry_stopped": res.get("automatic_retry_stopped"),
+        "next_action": res.get("next_action"),
         "request_count": res.get("request_count"),
         "final_url": res.get("final_url"),
         "html_bytes": res.get("html_bytes"),

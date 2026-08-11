@@ -14,7 +14,7 @@
 - Subagents produce observations, candidates, refutations, and review notes only.
   The Single Synthesizer is the sole final adjudicator for `finding` promotion,
   certainty calibration, dedupe, conflict resolution, and report inclusion.
-- **Limits are not in this file** → declared in the `src-safety-boundary` skill,
+- **Limits are not in this file** → declared in the `safety-boundary` skill,
   enforced by the `.claude/hooks/` gate. This file is role / drive / method only.
 
 ### Verification doctrine
@@ -160,8 +160,20 @@
   trusted single operator's persistent current-run selection, not a session lease:
   `SessionEnd` preserves the pointer and canonical run but retires that session's
   visible binding; startup/clear cannot resurrect it, while an exact resume event
-  may restore it through the public lifecycle path. Each real UserPromptSubmit
-  writes a fresh turn contract for the selected run. Session/transcript fields
+  may restore it through the public lifecycle path. A real UserPromptSubmit
+  normally writes a fresh turn contract for the selected run. A same-session
+  scheduler exception accepts an exact prompt replay or strict bare/current-run
+  continuation alias while the old `EXECUTE` contract is fresh and its exact
+  current-input-bound committed plan is unended: the Hook retains that plan's
+  turn binding, appends `XUNJI_CONTINUATION_COALESCED` to the runtime hash chain,
+  and treats the prompt as a wake-up. A different session's strict no-delta wake,
+  including a byte-identical prompt replay,
+  for the same active run instead preserves that owner contract, appends
+  `UserPromptWakeCoalesced`, and returns `XUNJI_E_RUN_BUSY`; it receives no
+  turn/plan/target authority; its later non-read tool attempt is Hook-denied for
+  lack of a matching contract. Receipt failure, changed wording/constraint, stale
+  inputs/contract, typed `cycle_end`, or any cross-session semantic delta falls
+  back to a fresh contract. Session/transcript fields
   remain causal receipt metadata, display binding, and stale-effect correlation
   keys, never a user ACL or a reason to reject a new personal session.
 - **Target-facing privacy boundary:** Root and every Agent must keep generated
@@ -262,6 +274,19 @@ observe -> update state graph -> decompose fronts
   ENTIRE group is downgraded to Type B in one atomic decision — never one front
   at a time. The Root records the group downgrade in `decisions.md` citing the
   barrier class and all affected fronts.
+  This is a Root strategy decision, not the mechanical retry counter. For local
+  infrastructure denial, call the `barrier_state.py` owner only with an exact
+  runtime target `PreToolUseDenied` receipt. Each receipt retains exact
+  front/action/cause/precondition diagnostics, but two distinct zero-byte receipts
+  for the same front/action open the derived barrier even if cause/precondition rotates; every
+  later target lane carries its typed binding, and plan commit plus delegate reject
+  the third exact target attempt. Only a changed actual action, or a typed repair/
+  local_verify lane, remains schedulable; changing only caller-supplied cause or
+  precondition text cannot bypass the barrier. Only matching target success or an
+  exact barrier-bound repair receipt after the active failure epoch clears it;
+  epoch-tail CAS rejects a concurrent new failure, and unrelated local verification does not. Prose
+  counts and generic tool failure neither open nor bypass this gate, and it never
+  closes a front or creates evidence.
 - Don't keep the investigation only in chat memory. The run dir is the audit trail.
 
 ## Autonomous Drive
@@ -281,6 +306,11 @@ observe -> update state graph -> decompose fronts
   Interpret effect-narrowing constraints by clause: “继续修复当前运行；不要联网、
   不要启动 Agent” remains `EXECUTE` with those effects denied. A clause-local
   “不要恢复这个运行” or an actual why/explain-only request remains read-only.
+  A hash-chain-receipted no-delta continuation of one fresh unended current plan
+  retains that plan's exact turn binding and resumes its unique owner action; do
+  not replan, recreate an assignment, or relaunch merely because the scheduler
+  woke the task. Any semantic delta still replaces the contract and makes the old
+  plan settlement-only.
 - **Live framework maintenance is inferred from ordinary operator wording.**
   Ordinary `/loop` authority cannot modify the safety-critical paths compiled in
   `tools/harness/maintenance_authority.py` and mirrored by
@@ -404,7 +434,7 @@ observe -> update state graph -> decompose fronts
   described as successful. These output records grant no authority and are not
   the plan's typed `cycle_end`.
 - **Stop Coda is mechanically enforced only for `EXECUTE`.** While `.claude/xunji_active_run`
-  points to a run without a valid completion marker, the last non-empty output
+  points to a run without a valid transaction-bound completion marker, the last non-empty output
   line must be the only Coda line and must name one concrete object plus one
   executable action: `下一行动: ...`. Empty/template values, generic "continue",
   multiple actions/F-ids/Coda lines, an unrelated F-id, or `BLOCKED:` before the
@@ -560,10 +590,20 @@ observe -> update state graph -> decompose fronts
 
 ## Closure Pre-condition (硬门)
 
-- Declaring a run FINAL / 收工 / 结束 requires BOTH:
+- Declaring a report READY for closure preflight requires BOTH:
   1. `check_run` passes (no hard gates)
   2. `frontier.md` Open Fronts count = 0
-- If either fails, the next action MUST be an attack, not a closure declaration.
+- If either fails, the next action MUST advance or adjudicate an open front, not
+  declare closure.
+- Report state is `DRAFT -> READY -> FINAL`. Root may write READY but never FINAL or
+  a completion marker directly. Only `completion_transaction.py commit` may
+  atomically publish FINAL plus its transaction-bound marker after S3 completion,
+  review-policy, Reason/cycle-end, first-line transcript-backed check token/exact
+  warning set, Cron, and complete canonical/artifact/runtime-manifest validation.
+  `STRUCTURAL_PASS` prose is not a completion basis. Prepared/committed state is
+  terminal: target/Agent/Cron are denied; committed adds only the exact plain offline
+  post-commit check to reads/status/reopen. Legacy unbound markers must go through
+  public reopen, missing-only `adopt-policy` when needed, and full recertification.
 - The Stop hook enforces this; treat its block as a real signal, not paper compliance.
 
 ## Operator Authority
@@ -664,12 +704,22 @@ replaces the content-addressed independent ReviewReceipt below.
   one-off scripts. Don't reintroduce `apps/` · `schemas/` · `prompts/` · `policies/` ·
   `examples/` or a JSON orchestrator unless the operator explicitly asks to restore the
   old architecture.
-- Target egress is proxy fail-closed by default. `probe.py`/`render.py`/`scan.py` read
-  `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf`; absent proxy configuration
-  rejects target traffic. Only an operator who explicitly accepts direct egress may set
-  `XUNJI_PROXY_REQUIRED=0`, and the turn gate binds that opt-out to the current operator
-  prompt. Target `WebFetch`, raw curl/wget/requests/socket, and other unverified network
-  clients are rejected; a prompt reminder or Agent export is not a security boundary.
+- Target egress is direct by default; proxy is opt-in per current operator turn.
+  Registered target argv use exact `XUNJI_PROXY_REQUIRED=0` for direct and exact
+  `XUNJI_PROXY_REQUIRED=1` (or a registered `--proxy`) only when the operator explicitly
+  requested proxy. A dormant `XUNJI_PROXY`/`proxy.conf` must not silently change a direct
+  turn. A route-less historical contract and a prompt that only forbids direct without
+  affirmatively requesting proxy are offline; both require a fresh operator turn. Explicit
+  proxy with missing configuration fails closed. Browser subprocesses strip ambient proxy
+  variables, and scanner wrappers preflight the selected proxy endpoint with native retries
+  disabled. The first proxy-attributed
+  transport failure pauses that proxy route, stops wrapper retries, and requires a newer
+  top-level operator turn before target traffic restarts; an internal wake or elapsed
+  cooldown is not confirmation. Confirmation binds only the selected credential-free proxy
+  route and never clears another failed proxy. Local settlement/control text that merely mentions either
+  env spelling remains local data. Target `WebFetch`, raw curl/wget/requests/socket, and
+  other unverified network clients remain rejected; route selection never bypasses scope,
+  privacy, guard, budget, or recording.
 - Any new active capability inherits the guard layer (rate limit · body cap ·
   brute-force lock · upload cleanup) and routes through it; the skill + hook define its
   limits.
@@ -686,16 +736,20 @@ Claude Code 永远是 live run 与集成主驾驶。复审输出是候选，不�
 
 ### Claude Code 主驾驶或由 Claude Code 修改代码
 
-Claude Code 负责修改、集成、测试与落盘；Codex/arkcli 是复审补盲。
+Claude Code 负责修改、集成、测试与落盘；Codex 和外部/第三方协助模块是复审补盲。
 
 | 可用性 | 修改者 | 复审者 | 大脑 / 综合 |
 |------|------|------|-------------|
-| Codex + arkcli 都可用 | Claude Code | Codex + arkcli panel | Codex |
-| Codex 不可用 | Claude Code | arkcli panel | arkcli panel |
-| arkcli 不可用 | Claude Code | Codex | Codex |
-| Codex 与 arkcli 都不可用 | Claude Code | Claude Code fresh-context 同族 | Claude Code（最弱兜底） |
+| Codex + 外部协助都可用 | Claude Code | Codex + 外部/第三方协助 | Codex |
+| Codex 不可用 | Claude Code | 外部/第三方协助 | Claude Code |
+| 外部协助不可用 | Claude Code | Codex | Codex |
+| Codex 与外部协助都不可用 | Claude Code | Claude Code fresh-context 同族 | Claude Code（最弱兜底） |
 
-arkcli panel 默认模型：kimi-k2.7-code + glm-5.2。不得调用其他 arkcli 模型。
+外部/第三方协助模块只返回候选 review，不获得 Single Synthesizer
+或集成裁决权。`config.ini [external_assistance]` 显式启用已注册 provider；
+当前选择是 `arkcli`，其默认模型是 `kimi-k2.7-code` + `glm-5.2`。
+`arkcli` 是 provider/CLI 兼容名，不是权限角色名；新增 provider 复用同一候选票边界，
+不能因扩容获得 evidence 晋级、集成或 closure 权力。
 
 ### 接收 Codex-authored diff
 

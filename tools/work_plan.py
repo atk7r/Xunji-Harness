@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import loop_journal  # noqa: E402
 import run_model  # noqa: E402
 import contract_schema  # noqa: E402
+import barrier_state  # noqa: E402
 from harness import capability_registry  # noqa: E402
 
 
@@ -43,7 +44,9 @@ PLAN_FILE = "work_plan.json"
 PLAN_ARCHIVE_DIR = "work_plans"
 TRANSACTION_FILE = "work_plan_transaction.json"
 TRANSACTION_ARCHIVE_DIR = "work_plan_transactions"
-MODES = frozenset({"ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS"})
+MODES = frozenset({
+    "ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS", "COMPLETION_REVIEW",
+})
 CANONICAL_LANE_ROLES = frozenset({
     "surface", "web-auth", "web-hunter", "code-audit", "exploit", "verify",
     "review", "report",
@@ -66,6 +69,7 @@ _FRONT_ID = re.compile(r"F-[0-9]+")
 _CAPABILITY_ID = re.compile(
     r"[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)*"
 )
+_CAUSE_CODE = re.compile(r"[A-Z][A-Z0-9_.-]{0,127}")
 
 
 class PlanError(ValueError):
@@ -312,9 +316,9 @@ def normalize_lane(value: object) -> dict:
         "id", "role", "front", "effect", "assets", "dependencies",
         "expected_evidence", "expected_information_gain", "stop_condition",
         "request_cost", "request_budget", "merge_cost", "atomic",
-        "capability_id",
+        "capability_id", "infra_barrier",
     }
-    required = allowed - {"front", "capability_id"}
+    required = allowed - {"front", "capability_id", "infra_barrier"}
     unknown = set(value) - allowed
     if unknown:
         raise PlanError("WORK_PLAN_LANE_UNKNOWN_FIELD:" + ",".join(sorted(unknown)))
@@ -388,12 +392,45 @@ def normalize_lane(value: object) -> dict:
     atomic = value.get("atomic")
     if not isinstance(atomic, bool):
         raise PlanError("WORK_PLAN_ATOMIC_BOOLEAN_REQUIRED")
+    raw_barrier = value.get("infra_barrier")
+    barrier: dict | None = None
+    if raw_barrier is not None:
+        if not isinstance(raw_barrier, dict) or set(raw_barrier) != {
+            "schema", "action_fingerprint", "cause_code",
+            "precondition_digest", "operation_class",
+        }:
+            raise PlanError("WORK_PLAN_INFRA_BARRIER_INVALID")
+        action_fingerprint = raw_barrier.get("action_fingerprint")
+        cause_code = raw_barrier.get("cause_code")
+        precondition_digest = raw_barrier.get("precondition_digest")
+        operation_class = raw_barrier.get("operation_class")
+        if raw_barrier.get("schema") != "xunji.infra-barrier-binding.v1" \
+                or not isinstance(action_fingerprint, str) \
+                or not _HEX64.fullmatch(action_fingerprint) \
+                or not isinstance(cause_code, str) \
+                or not _CAUSE_CODE.fullmatch(cause_code) \
+                or not isinstance(precondition_digest, str) \
+                or not _HEX64.fullmatch(precondition_digest) \
+                or operation_class not in {
+                    "target_attempt", "repair", "local_verify",
+                }:
+            raise PlanError("WORK_PLAN_INFRA_BARRIER_INVALID")
+        if not front:
+            raise PlanError("WORK_PLAN_INFRA_BARRIER_FRONT_REQUIRED")
+        barrier = {
+            "schema": "xunji.infra-barrier-binding.v1",
+            "action_fingerprint": action_fingerprint,
+            "cause_code": cause_code,
+            "precondition_digest": precondition_digest,
+            "operation_class": operation_class,
+        }
     return {
         "id": lane_id,
         "role": role,
         **({"front": front} if front else {}),
         "effect": effect,
         **({"capability_id": capability_id} if capability_id else {}),
+        **({"infra_barrier": barrier} if barrier else {}),
         "assets": assets,
         "dependencies": dependencies,
         "expected_evidence": _clean_text(
@@ -547,6 +584,8 @@ def _validate_reviewer_topology(mode: str, lanes: list[dict]) -> None:
     """Freeze execution -> exactly-one Reviewer -> next execution ordering."""
     if mode not in MODES:
         return
+    if mode == "COMPLETION_REVIEW":
+        return
     reviewers = [
         lane for lane in lanes
         if str(lane.get("role") or "").strip().lower().replace("_", "-")
@@ -651,10 +690,143 @@ def _validate_capability_binding(mode: str, lanes: list[dict]) -> None:
         raise PlanError("WORK_PLAN_ROOT_DIRECT_CAPABILITY_EFFECT_MISMATCH")
 
 
+def infra_barrier_preflight(
+    run_dir: str | Path,
+    lane: dict,
+    *,
+    actual_action_fingerprint: str = "",
+) -> dict:
+    """Enforce one lane's exact derived infrastructure-barrier binding.
+
+    The journal is scheduling state only.  A target lane that names a front
+    with any open barrier must acknowledge it with a typed binding.  Only a
+    changed action fingerprint is a new target attempt; cause/precondition are
+    diagnostics and cannot rotate around an open front + action barrier.
+    Delegation calls this again so a barrier opened after plan commit cannot
+    race into a third launch.
+    """
+    run = _resolve_run(run_dir)
+    binding = lane.get("infra_barrier")
+    front = str(lane.get("front") or "")
+    effect = str(lane.get("effect") or "")
+    operation_class = str(
+        binding.get("operation_class") if isinstance(binding, dict) else "")
+    if actual_action_fingerprint and not _HEX64.fullmatch(
+            actual_action_fingerprint):
+        raise PlanError("WORK_PLAN_INFRA_BARRIER_ACTUAL_ACTION_INVALID")
+    if binding is not None:
+        if operation_class == "target_attempt" and effect != "target":
+            raise PlanError("WORK_PLAN_INFRA_BARRIER_OPERATION_MISMATCH")
+        if operation_class == "local_verify" and effect != "local_verify":
+            raise PlanError("WORK_PLAN_INFRA_BARRIER_OPERATION_MISMATCH")
+        if operation_class == "repair" and effect not in {
+            "control", "repo_mutation", "local_verify",
+        }:
+            raise PlanError("WORK_PLAN_INFRA_BARRIER_OPERATION_MISMATCH")
+
+    journal = run / "state" / barrier_state.JOURNAL
+    if binding is None and not journal.exists():
+        return {
+            "schema": "xunji.infra-barrier-decision.v1",
+            "allowed": True,
+            "code": "ALLOW",
+            "operation_class": "",
+            "barrier_key": {},
+            "failure_count": 0,
+            "open_event_hash": "",
+            "authority": barrier_state.AUTHORITY,
+        }
+    try:
+        projection = barrier_state.status_projection(
+            run, runs_root=run.parent)
+    except (barrier_state.BarrierStateError,
+            barrier_state.BarrierDurabilityError) as exc:
+        raise PlanError("WORK_PLAN_INFRA_BARRIER_STATE_INVALID") from exc
+    open_for_front = [
+        item for item in projection.get("open_barriers", [])
+        if isinstance(item, dict)
+        and str((item.get("barrier_key") or {}).get("front") or "") == front
+    ]
+    if binding is None:
+        if effect == "target" and open_for_front:
+            raise PlanError("WORK_PLAN_INFRA_BARRIER_BINDING_REQUIRED")
+        return {
+            "schema": "xunji.infra-barrier-decision.v1",
+            "allowed": True,
+            "code": "ALLOW",
+            "operation_class": "",
+            "barrier_key": {},
+            "failure_count": 0,
+            "open_event_hash": "",
+            "authority": barrier_state.AUTHORITY,
+        }
+    bound_action = str(binding.get("action_fingerprint") or "")
+    if actual_action_fingerprint and operation_class == "target_attempt" \
+            and bound_action != actual_action_fingerprint:
+        raise PlanError("WORK_PLAN_INFRA_BARRIER_ACTUAL_ACTION_MISMATCH")
+    # Cause/precondition are diagnostics, not an alternate identity namespace
+    # that may be changed to replay the same target operation.  Any open state
+    # for this front + action must be acknowledged by its exact full key.
+    open_for_action = [
+        item for item in open_for_front
+        if str((item.get("barrier_key") or {}).get(
+            "action_fingerprint") or "") == bound_action
+    ]
+    if operation_class == "target_attempt" and open_for_action:
+        binding_key = (
+            front,
+            bound_action,
+            str(binding.get("cause_code") or ""),
+            str(binding.get("precondition_digest") or ""),
+        )
+        open_keys = {
+            (
+                str((item.get("barrier_key") or {}).get("front") or ""),
+                str((item.get("barrier_key") or {}).get(
+                    "action_fingerprint") or ""),
+                str((item.get("barrier_key") or {}).get("cause_code") or ""),
+                str((item.get("barrier_key") or {}).get(
+                    "precondition_digest") or ""),
+            )
+            for item in open_for_action
+        }
+        if binding_key not in open_keys:
+            raise PlanError("WORK_PLAN_INFRA_BARRIER_BINDING_MISMATCH")
+    try:
+        decision = barrier_state.preflight_decision(
+            run,
+            front=front,
+            action_fingerprint=str(binding["action_fingerprint"]),
+            cause_code=str(binding["cause_code"]),
+            precondition_digest=str(binding["precondition_digest"]),
+            operation_class=operation_class,
+            runs_root=run.parent,
+        )
+    except (barrier_state.BarrierStateError,
+            barrier_state.BarrierDurabilityError) as exc:
+        raise PlanError("WORK_PLAN_INFRA_BARRIER_STATE_INVALID") from exc
+    if not decision.get("allowed"):
+        raise PlanError("WORK_PLAN_INFRA_BARRIER_OPEN")
+    return decision
+
+
+def _validate_infra_barrier_bindings(run_dir: Path, lanes: list[dict]) -> None:
+    for lane in lanes:
+        infra_barrier_preflight(run_dir, lane)
+
+
 def _validate_mode(mode: str, lanes: list[dict], run_dir: Path,
-                   contract: dict) -> None:
+                   contract: dict, *, macro_stage: str) -> None:
     if mode not in MODES:
         raise PlanError("WORK_PLAN_EXECUTION_MODE_INVALID")
+    if mode == "COMPLETION_REVIEW":
+        if macro_stage != "S3":
+            raise PlanError("WORK_PLAN_COMPLETION_REVIEW_REQUIRES_S3")
+        if lanes:
+            raise PlanError("WORK_PLAN_COMPLETION_REVIEW_LANES_FORBIDDEN")
+        return
+    if not lanes:
+        raise PlanError("WORK_PLAN_LANES_INVALID")
     if contract.get("target_egress_denied") and any(
             lane["effect"] == "target" for lane in lanes):
         raise PlanError("WORK_PLAN_OPERATOR_TARGET_EGRESS_DENIED")
@@ -688,6 +860,7 @@ def _validate_mode(mode: str, lanes: list[dict], run_dir: Path,
                 raise PlanError("WORK_PLAN_PARALLEL_TARGET_OVERLAP")
             target_assets.update(lane["assets"])
     _validate_capability_binding(mode, lanes)
+    _validate_infra_barrier_bindings(run_dir, lanes)
     try:
         fanout_required = bool(run_model.summary(run_dir).get("fanout_required"))
     except Exception as exc:
@@ -730,8 +903,12 @@ def validate_plan(value: object, *, run_dir: str | Path | None = None,
     if stage not in STAGES:
         raise PlanError("WORK_PLAN_MACRO_STAGE_INVALID")
     lanes_raw = plan.get("lanes")
-    if not isinstance(lanes_raw, list) or not 1 <= len(lanes_raw) <= 16:
+    lane_minimum = 0 if mode == "COMPLETION_REVIEW" else 1
+    if not isinstance(lanes_raw, list) \
+            or not lane_minimum <= len(lanes_raw) <= 16:
         raise PlanError("WORK_PLAN_LANES_INVALID")
+    if mode == "COMPLETION_REVIEW" and stage != "S3":
+        raise PlanError("WORK_PLAN_COMPLETION_REVIEW_REQUIRES_S3")
     lanes = [normalize_lane(item) for item in lanes_raw]
     if lanes != lanes_raw:
         raise PlanError("WORK_PLAN_LANES_NOT_CANONICAL")
@@ -796,7 +973,7 @@ def validate_plan(value: object, *, run_dir: str | Path | None = None,
         _validate_stage(stage, run, ignore_plan_digest=str(plan.get("plan_digest") or ""))
     if run_dir is not None and contract is not None:
         run = _resolve_run(run_dir)
-        _validate_mode(mode, lanes, run, contract)
+        _validate_mode(mode, lanes, run, contract, macro_stage=stage)
         current_binding = {
             "session_id": str(contract.get("session_id") or ""),
             "prompt_sha256": str(contract.get("prompt_sha256") or ""),
@@ -921,6 +1098,7 @@ _EXPECTED_EVENT_PATTERNS = {
     ("cycle_start", "stage_plan", "delegation_committed"),
     ("replan", "delegation_committed"),
     ("cycle_start", "replan", "delegation_committed"),
+    ("stage_exit", "stage_plan", "delegation_committed"),
     ("cycle_start", "stage_exit", "stage_plan", "delegation_committed"),
 }
 
@@ -1084,9 +1262,13 @@ def _validate_transaction(value: object) -> dict:
         raise PlanError("WORK_PLAN_TRANSACTION_EVENTS_INVALID")
     delegation = next(
         item for item in expected if item["event"] == "delegation_committed")
-    if delegation["data"] != {
-            "plan_digest": plan["plan_digest"],
-            "lane_ids": [lane["id"] for lane in plan["lanes"]]} \
+    expected_delegation = {
+        "plan_digest": plan["plan_digest"],
+        "lane_ids": [lane["id"] for lane in plan["lanes"]],
+        **({"execution_mode": "COMPLETION_REVIEW"}
+           if plan["execution_mode"] == "COMPLETION_REVIEW" else {}),
+    }
+    if delegation["data"] != expected_delegation \
             or delegation["note"] != plan["execution_mode"]:
         raise PlanError("WORK_PLAN_TRANSACTION_EVENTS_INVALID")
     if plan_event["event"] == "replan":
@@ -1364,6 +1546,7 @@ def _exact_prior_cycle_end(run: Path, plan: dict,
                 run,
                 plan_digest=digest,
                 next_action=str(data.get("next_action") or ""),
+                historical_front_context=True,
             )
         except loop_journal.JournalContractError as exc:
             raise PlanError(f"WORK_PLAN_STAGE_EXIT_CYCLE_END_INVALID:{exc.code}") from exc
@@ -1425,6 +1608,8 @@ def _expected_plan_events(*, plan: dict, prior: dict, stage_changed: bool,
         "data": {
             "plan_digest": plan["plan_digest"],
             "lane_ids": [lane["id"] for lane in plan["lanes"]],
+            **({"execution_mode": "COMPLETION_REVIEW"}
+               if plan["execution_mode"] == "COMPLETION_REVIEW" else {}),
         },
         "bindings": {},
     })
@@ -1781,7 +1966,10 @@ def commit_plan(run_dir: str | Path, *, macro_stage: str, objective: str,
     clean_replan_reason = _clean_text(
         replan_reason, field="replan_reason", required=False)
     _validate_dependency_dag(normalized_lanes)
-    _validate_mode(mode, normalized_lanes, run, current_contract)
+    _validate_mode(
+        mode, normalized_lanes, run, current_contract,
+        macro_stage=macro_stage,
+    )
     with _plan_lock(run):
         cancellation_path = (
             run / "state" / "assignment_cancellation_transaction.json")
@@ -2417,6 +2605,96 @@ def _selftest() -> int:
         }
 
     checks: list[tuple[str, bool]] = []
+
+    barrier_run, _ = make_run("infra-barrier-plan-binding")
+    barrier_binding = {
+        "schema": "xunji.infra-barrier-binding.v1",
+        "action_fingerprint": "1" * 64,
+        "cause_code": "WORK_PLAN_TURN_STALE",
+        "precondition_digest": "2" * 64,
+        "operation_class": "target_attempt",
+    }
+    barrier_lane = normalize_lane({
+        "id": "L-BARRIER-EXEC", "role": "web-hunter", "front": "F-001",
+        "effect": "target", "assets": ["app.example"], "dependencies": [],
+        "expected_evidence": "one exact target response",
+        "expected_information_gain": "medium",
+        "stop_condition": "response or typed infrastructure failure",
+        "request_cost": 1, "request_budget": 1, "merge_cost": 1,
+        "atomic": True, "infra_barrier": barrier_binding,
+    })
+    barrier_state.record_failure(
+        barrier_run, front="F-001", action_fingerprint="1" * 64,
+        cause_code="WORK_PLAN_TURN_STALE", precondition_digest="2" * 64,
+        failure_receipt_sha256="3" * 64, failure_domain="scheduler",
+        target_bytes=0, runs_root=root,
+    )
+    barrier_state.record_failure(
+        barrier_run, front="F-001", action_fingerprint="1" * 64,
+        cause_code="WORK_PLAN_TURN_STALE", precondition_digest="2" * 64,
+        failure_receipt_sha256="4" * 64, failure_domain="scheduler",
+        target_bytes=0, runs_root=root,
+    )
+    exact_retry_blocked = False
+    try:
+        infra_barrier_preflight(barrier_run, barrier_lane)
+    except PlanError as exc:
+        exact_retry_blocked = str(exc) == "WORK_PLAN_INFRA_BARRIER_OPEN"
+    missing_binding_blocked = False
+    try:
+        infra_barrier_preflight(
+            barrier_run, {key: value for key, value in barrier_lane.items()
+                          if key != "infra_barrier"})
+    except PlanError as exc:
+        missing_binding_blocked = (
+            str(exc) == "WORK_PLAN_INFRA_BARRIER_BINDING_REQUIRED")
+    changed_lane = dict(barrier_lane)
+    changed_lane["infra_barrier"] = {
+        **barrier_binding, "action_fingerprint": "5" * 64,
+    }
+    changed_allowed = infra_barrier_preflight(
+        barrier_run, changed_lane).get("allowed") is True
+    changed_diagnostics_lane = dict(barrier_lane)
+    changed_diagnostics_lane["infra_barrier"] = {
+        **barrier_binding,
+        "cause_code": "WORK_PLAN_INPUTS_STALE",
+        "precondition_digest": "6" * 64,
+    }
+    changed_diagnostics_blocked = False
+    try:
+        infra_barrier_preflight(barrier_run, changed_diagnostics_lane)
+    except PlanError as exc:
+        changed_diagnostics_blocked = (
+            str(exc) == "WORK_PLAN_INFRA_BARRIER_BINDING_MISMATCH")
+    actual_action_mismatch_blocked = False
+    try:
+        infra_barrier_preflight(
+            barrier_run, changed_lane,
+            actual_action_fingerprint="1" * 64)
+    except PlanError as exc:
+        actual_action_mismatch_blocked = (
+            str(exc) == "WORK_PLAN_INFRA_BARRIER_ACTUAL_ACTION_MISMATCH")
+    verify_lane = dict(barrier_lane)
+    verify_lane["effect"] = "local_verify"
+    verify_lane["assets"] = []
+    verify_lane["infra_barrier"] = {
+        **barrier_binding, "operation_class": "local_verify",
+    }
+    verify_allowed = infra_barrier_preflight(
+        barrier_run, verify_lane).get("allowed") is True
+    checks.extend([
+        ("open infrastructure barrier blocks the exact third target lane",
+         exact_retry_blocked),
+        ("target lane cannot evade an open front barrier by omitting its binding",
+         missing_binding_blocked),
+        ("changed action fingerprint remains schedulable", changed_allowed),
+        ("changed cause/precondition cannot bypass the same open action",
+         changed_diagnostics_blocked),
+        ("runtime action must equal the lane barrier fingerprint",
+         actual_action_mismatch_blocked),
+        ("local verification remains schedulable across an open barrier",
+         verify_allowed),
+    ])
 
     # Conditional canonical inputs have an explicit absence row.  Therefore
     # missing -> present, content mutation, and present -> missing all stale an
@@ -3583,13 +3861,17 @@ def _selftest() -> int:
                                 "delegation_committed"]))
     settle_plan(run, s2_plan)
     loop_journal.append_event(
-        run, "cycle_end", next_action="运行 check_run 验证当前计划")
+        run, "cycle_end",
+        next_action="执行 F-001 的收口前置（check_run 结构检查）")
     (run / "frontier.md").write_text(
         "# Frontier\n\n## Closed Fronts\n\n### F-001 — auth\n"
         "- Status: blocked_type_b\n- Barrier class: auth-layer\n"
         "- Current depth: moderate\n",
         encoding="utf-8",
     )
+    closure_cycle_start = loop_journal.append_event(
+        run, "cycle_start", note="operator pre-started closure cycle")
+    settled_front_cycle_end = _exact_prior_cycle_end(run, s2_plan)
     s3_plan = commit_plan(
         run, macro_stage="S3", objective="verify closure parity",
         mode="SERIAL_AGENT", reason="execution then exact Reviewer",
@@ -3598,6 +3880,20 @@ def _selftest() -> int:
     )
     checks.append(("S1/S2/S3 forward transition remains available",
                    s3_plan["macro_stage"] == "S3"))
+    checks.append((
+        "stage exit preserves a prior Coda front after that front settles",
+        settled_front_cycle_end["data"]["next_action"]
+        == "执行 F-001 的收口前置（check_run 结构检查）",
+    ))
+    s3_transaction = _load_transaction(run)
+    checks.append((
+        "stage transition adopts one validated pre-existing cycle_start",
+        s3_plan["cycle_id"] == closure_cycle_start["cycle"]
+        and s3_transaction["prior_tail_hash"]
+        == closure_cycle_start["event_hash"]
+        and [item["event"] for item in s3_transaction["expected_events"]]
+        == ["stage_exit", "stage_plan", "delegation_committed"],
+    ))
 
     # Backward Macro-Stage movement uses the same real execution -> Reviewer ->
     # Root -> exact cycle_end chain; it is not a hand-written journal shortcut.
@@ -3836,6 +4132,126 @@ def _selftest() -> int:
         offline_target_plan_error == "WORK_PLAN_OPERATOR_TARGET_EGRESS_DENIED",
     ))
 
+    from harness.selftest_plan import seed_current_plan
+    completion_run = root / "completion-review"
+    _completion_contract, completion_plan = seed_current_plan(
+        completion_run, stage="S3")
+    completion_pending = run_model.plan_cycle_projection(
+        completion_run, plan=completion_plan)
+    completion_s1_error = ""
+    invalid_completion_run, invalid_completion_contract = make_run(
+        "completion-review-s1-invalid")
+    try:
+        commit_plan(
+            invalid_completion_run, macro_stage="S1",
+            objective="invalid completion stage", mode="COMPLETION_REVIEW",
+            reason="selftest", exit_gate="must fail", lanes=[],
+            contract=invalid_completion_contract,
+        )
+    except PlanError as exc:
+        completion_s1_error = str(exc)
+    completion_open_error = ""
+    invalid_open_run, invalid_open_contract = make_run(
+        "completion-review-open-invalid")
+    try:
+        commit_plan(
+            invalid_open_run, macro_stage="S3",
+            objective="premature completion review", mode="COMPLETION_REVIEW",
+            reason="selftest", exit_gate="must fail", lanes=[],
+            contract=invalid_open_contract,
+        )
+    except PlanError as exc:
+        completion_open_error = str(exc)
+    completion_lane_error = ""
+    invalid_laned_run, invalid_laned_contract = make_run(
+        "completion-review-lane-invalid")
+    (invalid_laned_run / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "app.example", "examined": True}],
+    }), encoding="utf-8")
+    (invalid_laned_run / "frontier.md").write_text(
+        "# Frontier\n\n## Closed Fronts\n\n### F-001 — auth\n"
+        "- Status: blocked_type_b\n- Barrier class: auth-layer\n"
+        "- Current depth: moderate\n", encoding="utf-8")
+    try:
+        commit_plan(
+            invalid_laned_run, macro_stage="S3",
+            objective="invalid completion lane", mode="COMPLETION_REVIEW",
+            reason="selftest", exit_gate="must fail",
+            lanes=lane_pair("COMPLETION-INVALID"),
+            contract=invalid_laned_contract,
+        )
+    except PlanError as exc:
+        completion_lane_error = str(exc)
+    completion_receipt = {
+        "run": completion_run.name,
+        "evidence_index_hash": "1" * 40,
+        "completion_bundle_hash": "2" * 64,
+    }
+    unlabeled_empty_delegation_rejected = False
+    try:
+        loop_journal.validate_typed_event_data(
+            "delegation_committed",
+            {"plan_digest": completion_plan["plan_digest"], "lane_ids": []},
+            cycle=completion_plan["cycle_id"],
+        )
+    except loop_journal.JournalContractError as exc:
+        unlabeled_empty_delegation_rejected = (
+            exc.code == "CYCLE_EVENT_DATA_INVALID")
+    completed_projection = {
+        **completion_pending,
+        "lane_ids": [],
+        "completion_review": completion_receipt,
+        "debt": {"merge": [], "review": []},
+    }
+    with mock.patch.object(
+            run_model, "plan_cycle_projection", return_value=completed_projection):
+        completion_end = loop_journal.append_event(
+            completion_run, "cycle_end",
+            next_action="运行 check_run 验证当前收口计划")
+    invalid_completion_schema_lane = json.loads(json.dumps(completion_plan))
+    invalid_completion_schema_lane["lanes"] = lane_pair("SCHEMA-LANE")
+    invalid_completion_schema_stage = dict(completion_plan, macro_stage="S2")
+    invalid_ordinary_schema_empty = json.loads(json.dumps(completion_plan))
+    invalid_ordinary_schema_empty["execution_mode"] = "SERIAL_AGENT"
+    invalid_ordinary_schema_empty["delegation_decision"]["mode"] = "SERIAL_AGENT"
+    completion_schema_contract_exact = bool(
+        not contract_schema.named_schema_errors(
+            completion_plan, "work-plan.v1.schema.json")
+        and contract_schema.named_schema_errors(
+            invalid_completion_schema_lane, "work-plan.v1.schema.json")
+        and contract_schema.named_schema_errors(
+            invalid_completion_schema_stage, "work-plan.v1.schema.json")
+        and contract_schema.named_schema_errors(
+            invalid_ordinary_schema_empty, "work-plan.v1.schema.json")
+    )
+    checks += [
+        ("S3 COMPLETION_REVIEW is a first-class zero-lane plan",
+         completion_plan["macro_stage"] == "S3"
+         and completion_plan["execution_mode"] == "COMPLETION_REVIEW"
+         and completion_plan["lanes"] == []
+         and completion_plan["delegation_decision"]["lane_ids"] == []),
+        ("work-plan schema admits only the S3 zero-lane completion shape",
+         completion_schema_contract_exact),
+        ("completion plan stays open until the exact global review receipt",
+         completion_pending.get("lane_ids") == []
+         and "completion-review:pending-or-invalid"
+            in completion_pending.get("debt", {}).get("review", [])),
+        ("COMPLETION_REVIEW is forbidden outside S3",
+         completion_s1_error == "WORK_PLAN_COMPLETION_REVIEW_REQUIRES_S3"),
+        ("direct completion commit cannot bypass zero-open S3 readiness",
+         completion_open_error.startswith("WORK_PLAN_STAGE_NOT_READY:")
+         and "OPEN_FRONTS_PRESENT" in completion_open_error),
+        ("COMPLETION_REVIEW cannot smuggle assignment lanes",
+         completion_lane_error == "WORK_PLAN_COMPLETION_REVIEW_LANES_FORBIDDEN"),
+        ("empty delegation journal data requires the completion mode label",
+         unlabeled_empty_delegation_rejected),
+        ("typed completion cycle_end binds the exact global review receipt",
+         completion_end["data"].get("execution_mode") == "COMPLETION_REVIEW"
+         and completion_end["data"].get("lane_ids") == []
+         and completion_end["data"].get("completion_review")
+            == completion_receipt),
+    ]
+
     direct_run, direct_contract = make_run("root-direct")
     direct_lane = dict(
         lane_pair("DIRECT")[0], id="L-DIRECT", atomic=True,
@@ -3994,7 +4410,13 @@ def main(argv: list[str] | None = None) -> int:
     commit.add_argument("--reason", required=True)
     commit.add_argument("--exit-gate", required=True)
     commit.add_argument("--replan-reason", default="")
-    commit.add_argument("--lane", action="append", type=_parse_lane_json, required=True)
+    commit.add_argument(
+        "--lane", action="append", type=_parse_lane_json, default=[],
+        help=(
+            "repeat for ordinary/ROOT_DIRECT plans; omit only with "
+            "--stage S3 --mode COMPLETION_REVIEW"
+        ),
+    )
     status = sub.add_parser("status")
     status.add_argument("run_dir")
     status.add_argument("--json", action="store_true")
@@ -4011,7 +4433,7 @@ def main(argv: list[str] | None = None) -> int:
             plan = commit_plan(
                 args.run_dir, macro_stage=args.stage, objective=args.objective,
                 mode=args.mode, reason=args.reason, exit_gate=args.exit_gate,
-                lanes=args.lane, replan_reason=args.replan_reason,
+                lanes=args.lane or [], replan_reason=args.replan_reason,
             )
         except PlanError as exc:
             print(f"[work-plan] ERROR {exc}", file=sys.stderr)

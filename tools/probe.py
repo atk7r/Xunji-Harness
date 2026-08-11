@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -37,15 +38,21 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback uses exclusive file create
+    fcntl = None
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import guard as guardmod  # noqa: E402
-from harness.guard import (RateLimiter, AuthFailCounter, cap_body,  # noqa: E402
+from harness.guard import (RateLimiter, AuthFailCounter,  # noqa: E402
                            RateBudgetExceeded, BruteforceLock,
                            HostHealth, HostBackoff, SessionBudget, SessionTripped,
                            MIN_STATIC_ASSET_BYTES)
 from harness import privacy as privacymod  # noqa: E402
 from harness.privacy import OutboundPrivacyError  # noqa: E402
 from harness import proxy as proxymod  # noqa: E402  渗透流量走交战代理(模型调用不走)
+from harness import output_layout  # noqa: E402
 
 # Emit UTF-8 regardless of the OS locale, so this tool's JSON (ensure_ascii=False,
 # 含中文/标题) survives being captured by a parent process on Windows (default
@@ -69,6 +76,23 @@ _TEXT_CTYPES = frozenset({
     "application/javascript", "application/ld+json", "application/rss+xml",
     "application/atom+xml", "application/x-www-form-urlencoded",
 })
+
+STREAM_READ_BYTES = 64 * 1024
+MAX_CHUNK_CAPTURE_BYTES = 8 * 1024 * 1024
+MAX_CHUNK_COUNT = 128
+E_RANGE_NOT_HONORED = "XUNJI_E_PROBE_RANGE_NOT_HONORED"
+E_CHUNK_LIMIT = "XUNJI_E_PROBE_BODY_CHUNK_LIMIT"
+E_ARTIFACT_EXISTS = "XUNJI_E_PROBE_ARTIFACT_EXISTS"
+E_RESPONSE_LENGTH_MISMATCH = "XUNJI_E_PROBE_RESPONSE_LENGTH_MISMATCH"
+E_RESPONSE_FRAMING_INVALID = "XUNJI_E_PROBE_RESPONSE_FRAMING_INVALID"
+E_ARTIFACT_PUBLISH_FAILED = "XUNJI_E_PROBE_ARTIFACT_PUBLISH_FAILED"
+
+
+class ProbeCaptureError(RuntimeError):
+    def __init__(self, code: str, message: str, *, observed_bytes: int = 0):
+        super().__init__(message)
+        self.code = code
+        self.observed_bytes = observed_bytes
 
 
 def _safe_snippet(raw: bytes, ctype: str, max_len: int = 240) -> tuple[str, str | None]:
@@ -132,13 +156,15 @@ class _PrivacyRedirect(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
-def _opener(no_redirect: bool = False, *, allow_sensitive_auth: bool = False,
+def _opener(no_redirect: bool = False, *, selected_proxy: str | None = None,
+            allow_sensitive_auth: bool = False,
             allow_legacy_cleanup: bool = False) -> urllib.request.OpenerDirector:
     # urllib_proxy_handlers 返回【完整连接 handler(含带 _CTX 的 HTTPS handler)】。这里【不要】再自己加
     # HTTPSHandler —— 否则普通 HTTPSHandler 会和 socks handler 抢 https, socks 连不上时悄悄走直连泄真实 IP
-    # (实测坏代理仍回 200 的坑)。_PROXY 仅是 --proxy 覆盖; 内部 resolve() 让 import probe.send 的工具
-    # (classify_hosts/fetch_assets/replay/rerun_deferred)也走交战代理 + required 时 fail-closed。
-    handlers: list = list(proxymod.urllib_proxy_handlers(_PROXY, ssl_context=_CTX))
+    # (实测坏代理仍回 200 的坑)。selected_proxy 已由 resolve() 冻结，避免 route ID、guard 与
+    # opener 在配置并发变化时指向不同出口。
+    handlers: list = list(proxymod.urllib_proxy_handlers(
+        selected_proxy, ssl_context=_CTX))
     if no_redirect:
         handlers.append(_NoRedirect())          # build_opener 用它替换默认 HTTPRedirectHandler
     else:
@@ -244,46 +270,293 @@ def _request_data_from_args(args: argparse.Namespace) -> tuple[bytes | None, boo
     return None, False
 
 
-def _write_body_chunks(save: str, raw: bytes, *, chunk_size: int) -> dict:
+def _fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(str(path), flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        _fsync_directory(path.parent)
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_json(path: Path, value: dict) -> None:
+    _atomic_write_bytes(
+        path,
+        (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+    )
+
+
+def _publish_bytes_noclobber(path: Path, data: bytes) -> None:
+    """Durably publish one new file without ever replacing a competing path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(tmp, path)
+        _fsync_directory(path.parent)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+@contextlib.contextmanager
+def _artifact_output_reservation(save: str | None):
+    """Reserve one save group across target I/O without creating partial evidence."""
+    if not save:
+        yield
+        return
+    lock_root = Path(tempfile.gettempdir()) / "xunji-probe-reservations"
+    lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock_name = hashlib.sha256(
+        str(Path(save).absolute()).encode("utf-8")).hexdigest() + ".lock"
+    lock_path = lock_root / lock_name
+    descriptor: int | None = None
+    exclusive_path = False
+    try:
+        if fcntl is not None:
+            descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise FileExistsError(
+                    "artifact output is reserved by another probe invocation") from exc
+        else:  # pragma: no cover - exercised only where advisory file locks lack
+            descriptor = os.open(
+                lock_path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+            exclusive_path = True
+        yield
+    finally:
+        if descriptor is not None:
+            if fcntl is not None:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+            os.close(descriptor)
+        if exclusive_path:
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+
+
+def _read_response_stream(
+    stream,
+    *,
+    save_chunks: bool,
+    chunk_size: int,
+) -> tuple[bytes, int, str, str, bytes | None]:
+    """Read a wire response once while retaining only bounded local bytes."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
+    if save_chunks and chunk_size > MAX_CHUNK_CAPTURE_BYTES:
+        raise ValueError(
+            f"chunk_size exceeds hard capture limit {MAX_CHUNK_CAPTURE_BYTES}")
+    body = bytearray()
+    full_parts: list[bytes] | None = [] if save_chunks else None
+    sha1 = hashlib.sha1()
+    sha256 = hashlib.sha256()
+    wire_len = 0
+    while True:
+        part = stream.read(STREAM_READ_BYTES)
+        if not part:
+            break
+        wire_len += len(part)
+        sha1.update(part)
+        sha256.update(part)
+        remaining = guardmod.MAX_BODY_BYTES - len(body)
+        if remaining > 0:
+            body.extend(part[:remaining])
+        if full_parts is not None:
+            if wire_len > MAX_CHUNK_CAPTURE_BYTES:
+                raise ProbeCaptureError(
+                    E_CHUNK_LIMIT,
+                    "response exceeds explicit chunk capture byte limit",
+                    observed_bytes=wire_len,
+                )
+            required_chunks = max(1, (wire_len + chunk_size - 1) // chunk_size)
+            if required_chunks > MAX_CHUNK_COUNT:
+                raise ProbeCaptureError(
+                    E_CHUNK_LIMIT,
+                    "response exceeds explicit chunk capture count limit",
+                    observed_bytes=wire_len,
+                )
+            full_parts.append(part)
+    return (
+        bytes(body), wire_len, sha1.hexdigest(), sha256.hexdigest(),
+        b"".join(full_parts) if full_parts is not None else None,
+    )
+
+
+def _range_response_error(
+    requested: str | None,
+    *,
+    status: int,
+    headers: dict,
+    body_len: int | None = None,
+) -> str:
+    if not requested:
+        return ""
+    request_match = re.fullmatch(
+        r"bytes=(\d+)-(\d+)", requested.strip(), re.I)
+    if not request_match:
+        return "only one explicit bytes=start-end range is supported"
+    req_start, req_end = (int(request_match.group(1)), int(request_match.group(2)))
+    if req_end < req_start:
+        return "range end precedes range start"
+    if status != 206:
+        return f"server ignored Range and returned status {status}"
+    value = _header_value(headers, "Content-Range") or ""
+    response_match = re.fullmatch(
+        r"bytes\s+(\d+)-(\d+)/(\d+|\*)", value.strip(), re.I)
+    if not response_match:
+        return "missing or malformed Content-Range"
+    got_start, got_end = int(response_match.group(1)), int(response_match.group(2))
+    total = response_match.group(3)
+    clipped_at_eof = (
+        total != "*"
+        and got_start == req_start
+        and got_end < req_end
+        and got_end == int(total) - 1
+        and req_start < int(total)
+    )
+    if got_start != req_start or (got_end != req_end and not clipped_at_eof):
+        return "Content-Range does not match requested byte interval"
+    if total != "*" and (int(total) <= got_end):
+        return "Content-Range total is inconsistent"
+    if body_len is not None and body_len != got_end - got_start + 1:
+        return "Content-Range length differs from received bytes"
+    return ""
+
+
+def _content_length_error(
+    headers: dict,
+    *,
+    body_len: int,
+    method: str,
+    status: int,
+) -> str:
+    """Detect incomplete or ambiguous HTTP message framing.
+
+    Content-Length describes the framed response body, not the origin resource.
+    It is therefore checked only where a body is permitted and transfer-encoding
+    has not replaced it.
+    """
+    declared = (_header_value(headers, "Content-Length") or "").strip()
+    transfer = (_header_value(headers, "Transfer-Encoding") or "").strip()
+    if declared and transfer:
+        return "response contains both Content-Length and Transfer-Encoding"
+    if not declared or transfer or method.upper() == "HEAD" \
+            or status in {204, 304} or 100 <= status < 200:
+        return ""
+    if not re.fullmatch(r"\d+", declared):
+        return "malformed Content-Length"
+    if int(declared) != body_len:
+        return "Content-Length differs from received response bytes"
+    return ""
+
+
+def _duplicate_content_length_error(headers) -> str:
+    values = headers.get_all("Content-Length") \
+        if hasattr(headers, "get_all") else None
+    if values is not None and len(values) > 1:
+        return "response contains multiple Content-Length headers"
+    return ""
+
+
+def _write_body_chunks(save: str, raw: bytes, *, chunk_size: int,
+                       wire_sha1: str, wire_sha256: str) -> dict:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    if len(raw) > MAX_CHUNK_CAPTURE_BYTES:
+        raise ProbeCaptureError(
+            E_CHUNK_LIMIT, "response exceeds explicit chunk capture byte limit",
+            observed_bytes=len(raw))
+    required_chunks = max(1, (len(raw) + chunk_size - 1) // chunk_size)
+    if required_chunks > MAX_CHUNK_COUNT:
+        raise ProbeCaptureError(
+            E_CHUNK_LIMIT, "response exceeds explicit chunk capture count limit",
+            observed_bytes=len(raw))
     base = Path(save)
     chunk_dir = base.with_name(base.name + ".chunks")
-    chunk_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = base.with_name(base.name + ".chunks.json")
+    if chunk_dir.exists() or manifest_path.exists():
+        raise FileExistsError("chunk output already exists; choose a fresh --save path")
+    base.parent.mkdir(parents=True, exist_ok=True)
+    stage_root = Path(tempfile.mkdtemp(
+        prefix=f".{base.name}.chunks-stage-", dir=str(base.parent)))
+    stage_chunks = stage_root / chunk_dir.name
+    stage_chunks.mkdir()
     chunks: list[dict] = []
-    for idx, offset in enumerate(range(0, len(raw), chunk_size)):
-        part = raw[offset:offset + chunk_size]
-        part_path = chunk_dir / f"part-{idx:04d}.bin"
-        part_path.write_bytes(part)
-        chunks.append({
-            "file": str(part_path),
-            "offset": offset,
-            "bytes": len(part),
-            "sha1": hashlib.sha1(part).hexdigest(),
-        })
-    if not chunks:
-        part_path = chunk_dir / "part-0000.bin"
-        part_path.write_bytes(b"")
-        chunks.append({"file": str(part_path), "offset": 0, "bytes": 0,
-                       "sha1": hashlib.sha1(b"").hexdigest()})
-    manifest = {
-        "schema": "xunji.probe.body_chunks.v1",
-        "saved_body": save,
-        "chunk_dir": str(chunk_dir),
-        "chunk_size": chunk_size,
-        "full_len": len(raw),
-        "full_sha1": hashlib.sha1(raw).hexdigest(),
-        "chunks": chunks,
-    }
-    manifest_path = save + ".chunks.json"
-    Path(manifest_path).write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
-                                   encoding="utf-8")
+    try:
+        offsets = list(range(0, len(raw), chunk_size)) or [0]
+        for idx, offset in enumerate(offsets):
+            part = raw[offset:offset + chunk_size]
+            name = f"part-{idx:04d}.bin"
+            part_path = stage_chunks / name
+            _atomic_write_bytes(part_path, part)
+            chunks.append({
+                "path": f"{chunk_dir.name}/{name}",
+                "offset": offset,
+                "bytes": len(part),
+                "sha256": hashlib.sha256(part).hexdigest(),
+            })
+        manifest = {
+            "schema": "xunji.probe.body_chunks.v2",
+            "saved_body": base.name,
+            "chunk_dir": chunk_dir.name,
+            "chunk_size": chunk_size,
+            "wire_len": len(raw),
+            "wire_sha1": wire_sha1,
+            "wire_sha256": wire_sha256,
+            "chunks": chunks,
+        }
+        chunk_dir.mkdir()
+        for item in chunks:
+            name = Path(str(item["path"])).name
+            os.link(stage_chunks / name, chunk_dir / name)
+        _fsync_directory(chunk_dir)
+        _fsync_directory(base.parent)
+    except Exception:
+        if chunk_dir.exists() and not manifest_path.exists():
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+        raise
+    finally:
+        shutil.rmtree(stage_root, ignore_errors=True)
     return {
-        "manifest": manifest_path,
+        "manifest": str(manifest_path),
+        "manifest_reference": manifest_path.name,
         "chunk_dir": str(chunk_dir),
         "chunks": len(chunks),
         "full_len": len(raw),
-        "full_sha1": manifest["full_sha1"],
+        "full_sha1": wire_sha1,
+        "full_sha256": wire_sha256,
+        "manifest_data": manifest,
     }
 
 
@@ -492,17 +765,46 @@ def _apply_preflight(args, headers: dict, data: bytes | None, json_body: bool) -
                     pass
 
 
-def send(method: str, url: str, headers: dict, data: bytes | None,
-         auth_key: str | None, timeout: int, save: str | None = None,
-         retry: int = 0, retry_wait: float = 1.5,
-         want_headers: bool = False, no_redirect: bool = False,
-         byte_range: str | None = None, save_chunks: bool = False,
-         chunk_size: int = guardmod.MAX_BODY_BYTES,
-         allow_sensitive_auth: bool = False,
-         allow_legacy_cleanup: bool = False) -> dict:
+def _send_impl(method: str, url: str, headers: dict, data: bytes | None,
+               auth_key: str | None, timeout: int, save: str | None = None,
+               retry: int = 0, retry_wait: float = 1.5,
+               want_headers: bool = False, no_redirect: bool = False,
+               byte_range: str | None = None, save_chunks: bool = False,
+               chunk_size: int = guardmod.MAX_BODY_BYTES,
+               allow_sensitive_auth: bool = False,
+               allow_legacy_cleanup: bool = False) -> dict:
     req_headers = {"User-Agent": UA, **headers}
     if byte_range and not any(k.lower() == "range" for k in req_headers):
         req_headers["Range"] = _range_header_value(byte_range)
+    requested_range = _header_value(req_headers, "Range")
+    if requested_range and not re.fullmatch(
+            r"bytes=\d+-\d+", requested_range.strip(), re.I):
+        return {
+            "method": method.upper(), "url": url,
+            "error": "only one explicit bytes=start-end range is supported",
+            "error_code": E_RANGE_NOT_HONORED,
+        }
+    if save_chunks and (
+            chunk_size <= 0 or chunk_size > MAX_CHUNK_CAPTURE_BYTES):
+        return {
+            "method": method.upper(), "url": url,
+            "error": "chunk_size is outside the bounded capture contract",
+            "error_code": E_CHUNK_LIMIT,
+        }
+    if save:
+        save_path = Path(save)
+        output_paths = [save_path, Path(save + ".replay.json")]
+        if save_chunks:
+            output_paths.extend([
+                save_path.with_name(save_path.name + ".chunks"),
+                save_path.with_name(save_path.name + ".chunks.json"),
+            ])
+        if any(path.exists() or path.is_symlink() for path in output_paths):
+            return {
+                "method": method.upper(), "url": url,
+                "error": "artifact output already exists; choose a fresh --save path",
+                "error_code": E_ARTIFACT_EXISTS,
+            }
     # Privacy is a pre-I/O boundary.  Reject generated project/operator identity
     # and real PII before rate state mutates or an opener can touch the target.
     privacymod.validate_outbound_request(
@@ -511,7 +813,8 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         allow_legacy_cleanup=allow_legacy_cleanup,
     )
     host = urlparse(url).hostname or "unknown"
-    egress_route = guardmod.egress_route_id(proxymod.engagement_proxy(_PROXY))
+    selected_proxy = proxymod.resolve(_PROXY)
+    egress_route = guardmod.egress_route_id(selected_proxy)
     afc = AuthFailCounter()
     if auth_key:
         afc.check(auth_key)            # anti-runaway: stop once locked
@@ -522,15 +825,21 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                                  data=data, headers=req_headers)
     summary: dict = {"method": method.upper(), "url": url,
                      "egress_route": egress_route}
-    if byte_range:
-        summary["range"] = _header_value(req_headers, "Range")
+    if requested_range:
+        summary["range"] = requested_range
     opener = _opener(
         no_redirect,
+        selected_proxy=selected_proxy,
         allow_sensitive_auth=allow_sensitive_auth,
         allow_legacy_cleanup=allow_legacy_cleanup,
     )
     last_err: str | None = None
-    raw = b""
+    body = b""
+    wire_len = 0
+    wire_sha1 = hashlib.sha1(b"").hexdigest()
+    wire_sha256 = hashlib.sha256(b"").hexdigest()
+    chunk_raw: bytes | None = None
+    capture_error: ProbeCaptureError | None = None
     status = 0
     resp_headers: dict = {}
     cookie_list: list[str] = []            # ALL Set-Cookie values (dict() would drop dups)
@@ -546,17 +855,92 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         RateLimiter().gate(host)           # 禁高频(每次实际请求都计入)
         try:
             with opener.open(req, timeout=timeout) as r:
-                raw = r.read()
                 status = r.status
+                framing_error = _duplicate_content_length_error(r.headers)
+                if framing_error:
+                    raise ProbeCaptureError(
+                        E_RESPONSE_FRAMING_INVALID, framing_error)
                 resp_headers = dict(r.headers)
                 cookie_list = r.headers.get_all("Set-Cookie") or []
+                range_error = _range_response_error(
+                    requested_range, status=status, headers=resp_headers)
+                if range_error:
+                    raise ProbeCaptureError(E_RANGE_NOT_HONORED, range_error)
+                body, wire_len, wire_sha1, wire_sha256, chunk_raw = (
+                    _read_response_stream(
+                        r, save_chunks=save_chunks, chunk_size=chunk_size))
+                length_error = _content_length_error(
+                    resp_headers, body_len=wire_len, method=method,
+                    status=status)
+                if length_error:
+                    raise ProbeCaptureError(
+                        E_RESPONSE_LENGTH_MISMATCH, length_error,
+                        observed_bytes=wire_len)
+                range_error = _range_response_error(
+                    requested_range, status=status, headers=resp_headers,
+                    body_len=wire_len)
+                if range_error:
+                    raise ProbeCaptureError(
+                        E_RANGE_NOT_HONORED, range_error,
+                        observed_bytes=wire_len)
             last_err = None
             break
         except urllib.error.HTTPError as e:
-            raw = e.read()
             status = e.code
+            framing_error = _duplicate_content_length_error(e.headers)
+            if framing_error:
+                capture_error = ProbeCaptureError(
+                    E_RESPONSE_FRAMING_INVALID, framing_error)
+                last_err = None
+                break
             resp_headers = dict(e.headers or {})
             cookie_list = (e.headers.get_all("Set-Cookie") if e.headers else None) or []
+            range_error = _range_response_error(
+                requested_range, status=status, headers=resp_headers)
+            if range_error:
+                capture_error = ProbeCaptureError(
+                    E_RANGE_NOT_HONORED, range_error)
+                last_err = None
+                break
+            try:
+                body, wire_len, wire_sha1, wire_sha256, chunk_raw = (
+                    _read_response_stream(
+                        e, save_chunks=save_chunks, chunk_size=chunk_size))
+                length_error = _content_length_error(
+                    resp_headers, body_len=wire_len, method=method,
+                    status=status)
+                if length_error:
+                    raise ProbeCaptureError(
+                        E_RESPONSE_LENGTH_MISMATCH, length_error,
+                        observed_bytes=wire_len)
+                range_error = _range_response_error(
+                    requested_range, status=status, headers=resp_headers,
+                    body_len=wire_len)
+                if range_error:
+                    raise ProbeCaptureError(
+                        E_RANGE_NOT_HONORED, range_error,
+                        observed_bytes=wire_len)
+            except ProbeCaptureError as exc:
+                capture_error = exc
+            last_err = None
+            break
+        except ProbeCaptureError as exc:
+            capture_error = exc
+            last_err = None
+            break
+        except http.client.IncompleteRead as exc:
+            capture_error = ProbeCaptureError(
+                E_RESPONSE_LENGTH_MISMATCH,
+                "response ended before its declared Content-Length",
+                observed_bytes=len(exc.partial or b""),
+            )
+            last_err = None
+            break
+        except http.client.HTTPException as exc:
+            capture_error = ProbeCaptureError(
+                E_RESPONSE_FRAMING_INVALID,
+                f"invalid HTTP response framing: {exc.__class__.__name__}",
+            )
             last_err = None
             break
         except OutboundPrivacyError:
@@ -570,6 +954,11 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
                 print(sb_warn, file=sys.stderr)
             hh.record_error(host, egress_route=egress_route,
                             error_class=error_class, lease=lease)
+            if guardmod.host_error_policy(error_class)["attribution"] == "proxy":
+                # A broken explicit proxy is not a transient target retry. The
+                # first route-attributed failure opens a manual pause; return now
+                # even when --retry was supplied and wait for a newer operator turn.
+                break
             if attempt < retry:
                 time.sleep(retry_wait)     # 瞬时超时/RST 重试(如本次 vpn)
     if last_err is not None:
@@ -585,13 +974,41 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
             "attempt_error_classes": attempt_error_classes,
             "attempts": attempts,
         }
+        if policy["attribution"] == "proxy":
+            out.update({
+                "restart_policy": "operator_confirmation_required",
+                "automatic_retry_stopped": True,
+                "next_action": (
+                    "stop and wait for the operator to choose default direct or "
+                    "explicitly confirm proxy again"
+                ),
+            })
         return out
+    if capture_error is not None:
+        observed = max(wire_len, capture_error.observed_bytes)
+        sb_warn = sb.record(observed, count=1)
+        if sb_warn:
+            print(sb_warn, file=sys.stderr)
+        hh.record_ok(host, egress_route=egress_route, lease=lease)
+        return {
+            **summary,
+            "status": status,
+            "error": str(capture_error),
+            "error_code": capture_error.code,
+            "observed_bytes": observed,
+            "transport_error": False,
+            "application_error": status >= 400,
+            "auth_failure": status in {401, 403},
+            "blocked_by_policy": False,
+            "capture_error": True,
+            "attempts": attempts,
+        }
     # JS/CSS 静态资源 >MIN_STATIC_ASSET_BYTES 不计入 bytes budget(防 JS-heavy SPA 的 chunk 下载触发假熔断);
     # 仍计入 count budget。小于阈值的仍正常计(防大量小文件绕过)。
     response_content_type = _header_value(resp_headers, "Content-Type") or ""
     content_type = response_content_type.lower()
-    record_bytes = len(raw)
-    if len(raw) >= MIN_STATIC_ASSET_BYTES and any(t in content_type for t in ("javascript", "css")):
+    record_bytes = wire_len
+    if wire_len >= MIN_STATIC_ASSET_BYTES and any(t in content_type for t in ("javascript", "css")):
         record_bytes = 0
     # Failed attempts were recorded at failure time; this records the one HTTP
     # response and its wire bytes, so retries cannot be double-counted.
@@ -603,12 +1020,12 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     if warn:
         print(warn, file=sys.stderr)
 
-    body, truncated = cap_body(raw)
-    _full_sha1 = hashlib.sha1(raw).hexdigest()
+    truncated = wire_len > len(body)
+    _full_sha1 = wire_sha1
     _snippet_val, _snippet_enc = _safe_snippet(body, response_content_type)
     summary.update({
         "status": status,
-        "len": len(raw),
+        "len": wire_len,
         "truncated": truncated,
         "sha1": _full_sha1[:12],
         "sha1_full": _full_sha1,            # 全 sha1: replay 比对整完整性(不削成 48-bit)
@@ -644,70 +1061,111 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
         summary["headers"] = resp_headers
         summary["set_cookies"] = cookie_list
     if save:
-        # write the guard-capped body to a file for full-evidence inspection
+        # Publish body/chunks/replay from temporary files.  The v2 manifest is
+        # written last and is therefore the group commit marker.
         Path(save).parent.mkdir(parents=True, exist_ok=True)
-        Path(save).write_bytes(body)
-        summary["saved"] = save
-        summary["saved_bytes"] = len(body)
         chunk_info = None
-        if save_chunks:
-            chunk_info = _write_body_chunks(save, raw, chunk_size=chunk_size)
-            summary["chunk_manifest"] = chunk_info["manifest"]
-            summary["chunk_count"] = chunk_info["chunks"]
-            summary["chunk_full_len"] = chunk_info["full_len"]
-            summary["chunk_full_sha1"] = chunk_info["full_sha1"]
-        # snippet 覆盖率: 当 body 远超 240-char snippet 时, driver 可能仅依赖 snippet
-        # 而遗漏关键内容(codex review 实战教训: 3 次因 body 空/snippet 短导致错误分析)。
-        # 此字段告诉 driver "snippet 只涵盖了 X% 的响应, 需要读 saved 文件"。
-        snippet_len = min(240, len(body))
-        summary["snippet_pct"] = round(snippet_len / max(len(body), 1) * 100, 1)
-        if len(body) > 500:
-            print(f"[probe] saved {len(body)} bytes → {save}  (snippet covers {summary['snippet_pct']}% only — read the saved file for full content)",
-                  file=sys.stderr)
-        # 操作录像(.replay.json): 请求字段先脱敏；Cookie/Authorization/个人字段只留
-        # 不可逆短 hash。发生脱敏的录像会标成 replayable=false，replay.py 不会把占位符
-        # 发给目标。响应只存摘要(status/全 sha1/len/脱敏 headers/snippet)。
-        safe_request, request_privacy = privacymod.sanitize_request_record(
-            method, url, req_headers, data,
-            auth_exception=allow_sensitive_auth,
-        )
-        safe_response, response_redactions = privacymod.sanitize_response_record(
-            status, resp_headers, _snippet_val,
-        )
-        safe_snippet_encoding = _snippet_enc if not any(
-            item.startswith("response.body") for item in response_redactions
-        ) else None
-        replay = {
-            "schema": "xunji.probe.replay.v2",
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "request": safe_request,
-            "response": {"status": status, "len": len(raw),
-                         "sha1": hashlib.sha1(raw).hexdigest(),
-                         "wire_len": len(raw),
-                         "wire_sha1": hashlib.sha1(raw).hexdigest(),
-                         "ctype": response_content_type,
-                         "headers": safe_response["headers"],
-                         "snippet": safe_response["body_preview"],
-                         **_snippet_kwargs(safe_snippet_encoding)},
-            "privacy": {
-                **request_privacy,
-                "response_redactions": response_redactions,
-            },
-            "saved_body": save,
-            "saved_body_meta": {
-                "len": len(body),
-                "sha1": hashlib.sha1(body).hexdigest(),
-                "truncated": bool(truncated),
-            },
-        }
-        if chunk_info:
-            replay["saved_body_chunks"] = chunk_info["manifest"]
-        # 文件名【追加】.replay.json(不用 with_suffix: 它替换最后扩展名 -> a.html/a.txt 都成
-        # a.replay.json 互相覆盖、x.tar.gz 丢 .gz —— dogfood 第5次 WARN)。追加保证唯一对应。
-        replay_path = save + ".replay.json"
-        Path(replay_path).write_text(json.dumps(replay, ensure_ascii=False, indent=2),
-                                     encoding="utf-8")
-        summary["replay"] = replay_path
+        published_paths: list[Path] = []
+        try:
+            if save_chunks:
+                if chunk_raw is None:
+                    raise ProbeCaptureError(
+                        E_CHUNK_LIMIT, "chunk capture bytes were not retained")
+                chunk_info = _write_body_chunks(
+                    save, chunk_raw, chunk_size=chunk_size,
+                    wire_sha1=wire_sha1, wire_sha256=wire_sha256)
+                published_paths.append(Path(chunk_info["chunk_dir"]))
+                summary["chunk_manifest"] = chunk_info["manifest"]
+                summary["chunk_count"] = chunk_info["chunks"]
+                summary["chunk_full_len"] = chunk_info["full_len"]
+                summary["chunk_full_sha1"] = chunk_info["full_sha1"]
+                summary["chunk_full_sha256"] = chunk_info["full_sha256"]
+
+            _publish_bytes_noclobber(Path(save), body)
+            published_paths.append(Path(save))
+            summary["saved"] = save
+            summary["saved_bytes"] = len(body)
+
+            # snippet 覆盖率提醒 driver 使用 bounded artifact_view，而不是让
+            # Agent 一次 Read 整个大型静态资源。
+            snippet_len = min(240, len(body))
+            summary["snippet_pct"] = round(
+                snippet_len / max(len(body), 1) * 100, 1)
+            if len(body) > 500:
+                print(
+                    f"[probe] saved {len(body)} bytes → {save}  "
+                    f"(snippet covers {summary['snippet_pct']}% only — "
+                    "use bounded artifact view for inspection)",
+                    file=sys.stderr,
+                )
+
+            safe_request, request_privacy = privacymod.sanitize_request_record(
+                method, url, req_headers, data,
+                auth_exception=allow_sensitive_auth,
+            )
+            safe_response, response_redactions = privacymod.sanitize_response_record(
+                status, resp_headers, _snippet_val,
+            )
+            safe_snippet_encoding = _snippet_enc if not any(
+                item.startswith("response.body") for item in response_redactions
+            ) else None
+            replay = {
+                "schema": "xunji.probe.replay.v2",
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "request": safe_request,
+                "response": {
+                    "status": status,
+                    "len": wire_len,
+                    "sha1": wire_sha1,
+                    "wire_len": wire_len,
+                    "wire_sha1": wire_sha1,
+                    "wire_sha256": wire_sha256,
+                    "ctype": response_content_type,
+                    "headers": safe_response["headers"],
+                    "snippet": safe_response["body_preview"],
+                    **_snippet_kwargs(safe_snippet_encoding),
+                },
+                "privacy": {
+                    **request_privacy,
+                    "response_redactions": response_redactions,
+                },
+                "saved_body": save,
+                "saved_body_meta": {
+                    "len": len(body),
+                    "sha1": hashlib.sha1(body).hexdigest(),
+                    "truncated": bool(truncated),
+                },
+            }
+            if chunk_info:
+                replay["saved_body_chunks"] = chunk_info["manifest_reference"]
+            replay_path = save + ".replay.json"
+            _publish_bytes_noclobber(
+                Path(replay_path),
+                (json.dumps(replay, ensure_ascii=False, indent=2) + "\n").encode(
+                    "utf-8"),
+            )
+            published_paths.append(Path(replay_path))
+            summary["replay"] = replay_path
+
+            if chunk_info:
+                _publish_bytes_noclobber(
+                    Path(chunk_info["manifest"]),
+                    (json.dumps(
+                        chunk_info["manifest_data"], ensure_ascii=False,
+                        indent=2,
+                    ) + "\n").encode("utf-8"),
+                )
+                published_paths.append(Path(chunk_info["manifest"]))
+        except BaseException:
+            for path in reversed(published_paths):
+                try:
+                    if path.is_dir() and not path.is_symlink():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
+                except OSError:
+                    pass
+            raise
     if auth_key:
         # heuristic: 401/403 or a login-ish redirect counts as an auth failure
         ok = status not in (401, 403)
@@ -721,14 +1179,47 @@ def send(method: str, url: str, headers: dict, data: bytes | None,
     return summary
 
 
+def send(method: str, url: str, headers: dict, data: bytes | None,
+         auth_key: str | None, timeout: int, save: str | None = None,
+         retry: int = 0, retry_wait: float = 1.5,
+         want_headers: bool = False, no_redirect: bool = False,
+         byte_range: str | None = None, save_chunks: bool = False,
+         chunk_size: int = guardmod.MAX_BODY_BYTES,
+         allow_sensitive_auth: bool = False,
+         allow_legacy_cleanup: bool = False) -> dict:
+    """Reserve a save group before network I/O, then publish it no-clobber."""
+    try:
+        with _artifact_output_reservation(save):
+            return _send_impl(
+                method, url, headers, data, auth_key, timeout, save, retry,
+                retry_wait, want_headers, no_redirect, byte_range, save_chunks,
+                chunk_size, allow_sensitive_auth, allow_legacy_cleanup,
+            )
+    except FileExistsError as exc:
+        return {
+            "method": method.upper(), "url": url,
+            "error": str(exc), "error_code": E_ARTIFACT_EXISTS,
+        }
+    except OSError as exc:
+        return {
+            "method": method.upper(), "url": url,
+            "error": f"artifact publication failed: {exc.__class__.__name__}",
+            "error_code": E_ARTIFACT_PUBLISH_FAILED,
+            "capture_error": True,
+            "blocked_by_policy": False,
+        }
+
+
 def _selftest() -> int:
     """Regression for full Set-Cookie capture (dict() used to drop duplicate
     Set-Cookie -> the ASP.NET Core antiforgery flow broke) + --save. Local-only."""
     import http.server
+    import io
     import re as _re
     import socketserver
     import tempfile
     import threading
+    from unittest import mock
 
     checks: list[tuple[str, bool]] = []
     redirect = _PrivacyRedirect()
@@ -796,6 +1287,61 @@ def _selftest() -> int:
                     self.end_headers()
                     self.wfile.write(b)
                     return
+                if self.path.startswith("/length-short"):
+                    b = b"short"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", "10")
+                    self.end_headers()
+                    self.wfile.write(b)
+                    self.close_connection = True
+                    return
+                if self.path.startswith("/length-duplicate"):
+                    b = b"hello"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(b)))
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                    return
+                if self.path.startswith("/range-ignored"):
+                    b = b"0123456789"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                    return
+                if self.path.startswith("/range-wrong"):
+                    b = b"1234"
+                    self.send_response(206)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Range", "bytes 1-4/10")
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                    return
+                if self.path.startswith("/range-short"):
+                    b = b"234"
+                    self.send_response(206)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Range", "bytes 2-4/10")
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                    return
+                if self.path.startswith("/range-clipped"):
+                    b = b"0123456789"
+                    if self.headers.get("Range") == "bytes=2-99":
+                        part = b[2:]
+                        self.send_response(206)
+                        self.send_header("Content-Type", "text/plain")
+                        self.send_header("Content-Range", "bytes 2-9/10")
+                        self.send_header("Content-Length", str(len(part)))
+                        self.end_headers()
+                        self.wfile.write(part)
+                        return
                 if self.path.startswith("/range"):
                     b = b"0123456789"
                     if self.headers.get("Range") == "bytes=2-5":
@@ -952,9 +1498,16 @@ def _selftest() -> int:
                            and dl.get("truncated") is True))
             checks.append(("--save-chunks writes manifest with full body metadata",
                            manifest.exists()
-                           and manifest_data.get("full_len") == guardmod.MAX_BODY_BYTES + 17
-                           and manifest_data.get("full_sha1") == hashlib.sha1(
+                           and manifest_data.get("schema") == "xunji.probe.body_chunks.v2"
+                           and manifest_data.get("wire_len") == guardmod.MAX_BODY_BYTES + 17
+                           and manifest_data.get("wire_sha1") == hashlib.sha1(
                                b"L" * (guardmod.MAX_BODY_BYTES + 17)).hexdigest()
+                           and manifest_data.get("wire_sha256") == hashlib.sha256(
+                               b"L" * (guardmod.MAX_BODY_BYTES + 17)).hexdigest()
+                           and manifest_data.get("saved_body") == large.name
+                           and all(not Path(item.get("path", "")).is_absolute()
+                                   and len(item.get("sha256", "")) == 64
+                                   for item in manifest_data.get("chunks", []))
                            and dl.get("chunk_manifest") == str(manifest)))
             large_replay = json.loads(
                 Path(str(large) + ".replay.json").read_text(encoding="utf-8"))
@@ -990,6 +1543,133 @@ def _selftest() -> int:
             checks.append(("--range respects caller-supplied Range header casing",
                            rr2.get("status") == 206 and rr2.get("snippet") == "2345"
                            and rr2.get("range") == "bytes=2-5"))
+            range_ignored = send(
+                "GET", f"http://127.0.0.1:{port}/range-ignored", {}, None,
+                None, 5, byte_range="2-5")
+            checks.append(("ignored Range fails with a typed error before body capture",
+                           range_ignored.get("error_code") == E_RANGE_NOT_HONORED
+                           and range_ignored.get("status") == 200))
+            range_wrong = send(
+                "GET", f"http://127.0.0.1:{port}/range-wrong", {}, None,
+                None, 5, byte_range="2-5")
+            checks.append(("mismatched Content-Range fails with the same typed error",
+                           range_wrong.get("error_code") == E_RANGE_NOT_HONORED
+                           and range_wrong.get("status") == 206))
+            range_short = send(
+                "GET", f"http://127.0.0.1:{port}/range-short", {}, None,
+                None, 5, byte_range="2-5")
+            checks.append(("shorter-than-requested Content-Range fails closed",
+                           range_short.get("error_code") == E_RANGE_NOT_HONORED
+                           and range_short.get("status") == 206))
+            range_clipped = send(
+                "GET", f"http://127.0.0.1:{port}/range-clipped", {}, None,
+                None, 5, byte_range="2-99")
+            checks.append(("RFC-valid final range clipping at EOF is accepted",
+                           range_clipped.get("status") == 206
+                           and range_clipped.get("len") == 8
+                           and range_clipped.get("snippet") == "23456789"))
+            checks.append(("capture contract errors are not target policy blocks",
+                           range_ignored.get("capture_error") is True
+                           and range_ignored.get("blocked_by_policy") is False))
+            checks.append(("declared response length mismatch is typed",
+                           bool(_content_length_error(
+                               {"Content-Length": "10"}, body_len=5,
+                               method="GET", status=200))
+                           and not _content_length_error(
+                               {"Content-Length": "10"}, body_len=0,
+                               method="HEAD", status=200)))
+            early_eof = send(
+                "GET", f"http://127.0.0.1:{port}/length-short", {}, None,
+                None, 5)
+            checks.append(("early EOF is a typed capture error, not target blocking",
+                           early_eof.get("error_code")
+                           == E_RESPONSE_LENGTH_MISMATCH
+                           and early_eof.get("capture_error") is True
+                           and early_eof.get("blocked_by_policy") is False))
+            duplicate_length = send(
+                "GET", f"http://127.0.0.1:{port}/length-duplicate", {}, None,
+                None, 5)
+            checks.append(("duplicate Content-Length fails with typed framing error",
+                           duplicate_length.get("error_code")
+                           == E_RESPONSE_FRAMING_INVALID
+                           and duplicate_length.get("capture_error") is True
+                           and duplicate_length.get("blocked_by_policy") is False))
+            bounded_stream = _read_response_stream(
+                io.BytesIO(b"B" * (guardmod.MAX_BODY_BYTES + 9)),
+                save_chunks=False, chunk_size=guardmod.MAX_BODY_BYTES)
+            checks.append(("streaming keeps only the normal 256KiB body cap",
+                           len(bounded_stream[0]) == guardmod.MAX_BODY_BYTES
+                           and bounded_stream[1] == guardmod.MAX_BODY_BYTES + 9
+                           and bounded_stream[4] is None))
+            try:
+                _read_response_stream(
+                    io.BytesIO(b"C" * (MAX_CHUNK_CAPTURE_BYTES + 1)),
+                    save_chunks=True, chunk_size=guardmod.MAX_BODY_BYTES)
+                chunk_limit_typed = False
+            except ProbeCaptureError as exc:
+                chunk_limit_typed = exc.code == E_CHUNK_LIMIT
+            checks.append(("explicit chunk capture has a typed total-byte hard limit",
+                           chunk_limit_typed))
+            competing = Path(tempfile.mkdtemp()) / "competing.bin"
+            competing.write_bytes(b"competitor")
+            try:
+                _publish_bytes_noclobber(competing, b"probe")
+                no_clobber = False
+            except FileExistsError:
+                no_clobber = competing.read_bytes() == b"competitor"
+            checks.append(("artifact publication never replaces a competing file",
+                           no_clobber))
+            interrupted_save = Path(tempfile.mkdtemp()) / "interrupted.html"
+            original_publish = _publish_bytes_noclobber
+            publish_calls = 0
+
+            def interrupt_second_publish(path: Path, data: bytes) -> None:
+                nonlocal publish_calls
+                publish_calls += 1
+                if publish_calls == 2:
+                    raise KeyboardInterrupt
+                original_publish(path, data)
+
+            interrupted = False
+            try:
+                with mock.patch(
+                        __name__ + "._publish_bytes_noclobber",
+                        side_effect=interrupt_second_publish):
+                    send(
+                        "GET", f"http://127.0.0.1:{port}/", {}, None,
+                        None, 5, save=str(interrupted_save))
+            except KeyboardInterrupt:
+                interrupted = True
+            checks.append(("KeyboardInterrupt cleans a partially published save group",
+                           interrupted and not interrupted_save.exists()
+                           and not Path(
+                               str(interrupted_save) + ".replay.json").exists()))
+            reserved = Path(tempfile.mkdtemp()) / "reserved.bin"
+            with _artifact_output_reservation(str(reserved)):
+                try:
+                    with _artifact_output_reservation(str(reserved)):
+                        pass
+                    reservation_exclusive = False
+                except FileExistsError:
+                    reservation_exclusive = True
+            checks.append(("save group is reserved before target I/O",
+                           reservation_exclusive))
+            with mock.patch(__name__ + ".send", return_value={"sha1": "a"}) as mocked:
+                _diff_samples(
+                    "https://example.test/a", str(reserved), samples=1,
+                    headers={}, auth_key=None, timeout=5, retry=0,
+                    retry_wait=0.0, want_headers=False, no_redirect=True,
+                    byte_range="0-3", save_chunks=True, chunk_size=4096,
+                    allow_sensitive_auth=False, allow_legacy_cleanup=True,
+                )
+            diff_args = mocked.call_args.args if mocked.call_args else ()
+            checks.append(("DIFF forwards chunk/range/redirect flags to each side",
+                           len(diff_args) >= 16
+                           and diff_args[10] is True
+                           and diff_args[11] == "0-3"
+                           and diff_args[12] is True
+                           and diff_args[13] == 4096
+                           and diff_args[15] is True))
             jar = Path(tempfile.mkdtemp()) / "cookies.json"
             _save_cookie_jar(str(jar), {
                 "csrf_session": "JAR_OLD",
@@ -1051,13 +1731,52 @@ def _selftest() -> int:
                            and failed.get("breaker_scope") == "target"))
             checks.append(("retry wrapper records exact real request count",
                            failed.get("attempts") == 3 and totals_after - totals_before == 3))
+            globals()["_PROXY"] = f"http://127.0.0.1:{unused_port}"
+            proxy_failed = send(
+                "GET", f"http://127.0.0.1:{port}/", {}, None, None, 1,
+                retry=2, retry_wait=0)
+            globals()["_PROXY"] = None
+            checks.append(("proxy failure stops automatic retry pending operator confirmation",
+                           proxy_failed.get("egress_route", "").startswith("proxy:http:")
+                           and proxy_failed.get("attribution") == "proxy"
+                           and proxy_failed.get("attempts") == 1
+                           and proxy_failed.get("automatic_retry_stopped") is True
+                           and proxy_failed.get("restart_policy")
+                           == "operator_confirmation_required"))
         finally:
             srv.shutdown()
-    # 统一布局 _place_save: 裸文件名 + --run -> <run>/evidence/; 显式路径/无 --run 原样
-    ps_bare = _place_save("ev_x.html", "runs/t_20260101")
-    checks.append(("--run + 裸名 -> <run>/evidence/", Path(ps_bare) == Path("runs/t_20260101/evidence/ev_x.html")))
-    checks.append(("--run + 显式路径 -> 原样尊重", _place_save("sub/ev.html", "runs/t") == "sub/ev.html"))
-    checks.append(("无 --run -> 原样", _place_save("ev.html", None) == "ev.html"))
+    # Output layout: live artifacts stay in run/evidence; standalone saves use
+    # one managed invocation directory under repository tmp/.
+    ps_bare = _place_save("ev_x.html", "runs/t_20260101", invocation="selftest-a")
+    checks.append(("--run + 裸名 -> <run>/evidence/",
+                   Path(ps_bare) == output_layout.ROOT / "runs/t_20260101/evidence/ev_x.html"))
+    checks.append(("--run + evidence 内显式路径 -> 原样尊重",
+                   _place_save("runs/t/evidence/sub/ev.html", "runs/t", invocation="selftest-b")
+                   == str(output_layout.ROOT / "runs/t/evidence/sub/ev.html")))
+    checks.append(("无 --run -> invocation scratch",
+                   _place_save("ev.html", None, invocation="selftest-c")
+                   == str(output_layout.ROOT / "tmp" / "probe" / "selftest-c" / "ev.html")))
+    outside_rejected = False
+    replay_name_rejected = False
+    try:
+        _place_save("sub/ev.html", "runs/t", invocation="selftest-d")
+    except output_layout.OutputLayoutError:
+        outside_rejected = True
+    try:
+        _place_save("ev.replay.json", "runs/t", invocation="selftest-e")
+    except output_layout.OutputLayoutError:
+        replay_name_rejected = True
+    checks.append(("run output outside evidence rejected", outside_rejected))
+    checks.append(("replay sidecar name rejected as response body", replay_name_rejected))
+    checks.append(("run cookie jar uses state/http rather than evidence",
+                   _place_cookie_jar("cookies.json", "runs/t", invocation="selftest-cookie")
+                   == str(output_layout.ROOT / "runs/t/state/http/cookies.json")))
+    cookie_outside_rejected = False
+    try:
+        _place_cookie_jar(".state/cookies.json", "runs/t", invocation="selftest-cookie-bad")
+    except output_layout.OutputLayoutError:
+        cookie_outside_rejected = True
+    checks.append(("run cookie jar outside state is rejected", cookie_outside_rejected))
     cookie_headers = {"Cookie": "same=explicit; explicit_only=1"}
     _merge_cookies_into_headers(cookie_headers, {"same": "jar", "jar_only": "1"})
     checks.append(("explicit Cookie overrides loaded jar before preflight",
@@ -1072,10 +1791,14 @@ def _selftest() -> int:
                    and _cookie_expired("Wed, 31 Dec 1969 23:00:00", now=0)))
     # #3: 无扩展名裸名补 .html(dogfood: --save tomcat9 存成裸名, driver 以为 .html 报错)
     checks.append(("--run + 无扩展名裸名 -> 补 .html 落 evidence/",
-                   Path(_place_save("tomcat9", "runs/t")) == Path("runs/t/evidence/tomcat9.html")))
-    checks.append(("无 --run + 无扩展名 -> 补 .html", _place_save("foo", None) == "foo.html"))
-    checks.append(("已带扩展名不重复补", _place_save("a.json", None) == "a.json"))
-    checks.append(("显式路径(含分隔符)无扩展名也不补/不改(Codex#7)", _place_save("sub/tomcat9", "runs/t") == "sub/tomcat9"))
+                   Path(_place_save("tomcat9", "runs/t", invocation="selftest-f"))
+                   == output_layout.ROOT / "runs/t/evidence/tomcat9.html"))
+    checks.append(("无 --run + 无扩展名 -> scratch + .html",
+                   _place_save("foo", None, invocation="selftest-g")
+                   == str(output_layout.ROOT / "tmp" / "probe" / "selftest-g" / "foo.html")))
+    checks.append(("已带扩展名不重复补",
+                   _place_save("a.json", None, invocation="selftest-h")
+                   == str(output_layout.ROOT / "tmp" / "probe" / "selftest-h" / "a.json")))
     raw_body_file = Path(tempfile.mkdtemp()) / "body.bin"
     raw_body_file.write_bytes(b"raw=1")
     json_body_file = Path(tempfile.mkdtemp()) / "body.json"
@@ -1120,19 +1843,37 @@ def _selftest() -> int:
     return 0 if not bad else 1
 
 
-def _place_save(save: str | None, run: str | None) -> str | None:
-    """统一布局: --run 给定且 --save 是【裸文件名】(无路径分隔)时, 产物落到 <run>/evidence/
-    —— 录像 .replay.json 写在 save 旁, 自动一并跟随。--save 已带路径分隔则原样尊重
-    (显式路径优先, 向后兼容)。专治证据散落 run 根目录、与草稿混作一团(断-2)。"""
-    if not save:
-        return save
-    if ("/" in save) or ("\\" in save):
-        return save                       # 显式路径: 原样尊重(向后兼容), 不补扩展名/不改(Codex#7)
-    if "." not in Path(save).name:        # 裸名无扩展名 → 补 .html(#3: --save tomcat9 存成裸名报错;
-        save = save + ".html"             # 录像 .replay.json 自动跟随)
-    if not run:
-        return save
-    return str(Path(run) / "evidence" / save)
+def _place_save(
+    save: str | None,
+    run: str | None,
+    *,
+    invocation: str | None = None,
+) -> str | None:
+    """Resolve a response body path without ever falling back to the CWD."""
+    path = output_layout.resolve_artifact_file(
+        save,
+        run=run,
+        tool="probe",
+        invocation=invocation,
+        default_suffix=".html",
+    )
+    return str(path) if path is not None else None
+
+
+def _place_cookie_jar(
+    value: str | None,
+    run: str | None,
+    *,
+    invocation: str | None = None,
+) -> str | None:
+    path = output_layout.resolve_run_state_file(
+        value,
+        run=run,
+        tool="probe",
+        invocation=invocation,
+        default_leaf="http",
+    )
+    return str(path) if path is not None else None
 
 
 def _diff_side_save(base: str | None, side: str) -> str | None:
@@ -1142,6 +1883,34 @@ def _diff_side_save(base: str | None, side: str) -> str | None:
     if path.suffix:
         return str(path.with_name(path.stem + f".{side}" + path.suffix))
     return str(path.with_name(path.name + f".{side}"))
+
+
+def _diff_samples(
+    url: str,
+    save: str | None,
+    *,
+    samples: int,
+    headers: dict,
+    auth_key: str | None,
+    timeout: int,
+    retry: int,
+    retry_wait: float,
+    want_headers: bool,
+    no_redirect: bool,
+    byte_range: str | None,
+    save_chunks: bool,
+    chunk_size: int,
+    allow_sensitive_auth: bool,
+    allow_legacy_cleanup: bool,
+) -> tuple[dict, bool, list]:
+    runs = [send(
+        "GET", url, headers, None, auth_key, timeout,
+        save if index == 0 else None,
+        retry, retry_wait, want_headers, no_redirect, byte_range, save_chunks,
+        chunk_size, allow_sensitive_auth, allow_legacy_cleanup,
+    ) for index in range(samples)]
+    hashes = sorted({row.get("sha1") for row in runs})
+    return runs[0], len(hashes) == 1, hashes
 
 
 def main() -> int:
@@ -1168,7 +1937,8 @@ def main() -> int:
     ap.add_argument("--csrf-field", default="__RequestVerificationToken",
                     help="form/JSON field name for --extract-csrf")
     ap.add_argument("--cookie-jar", default=None,
-                    help="JSON cookie jar to load/update across preflight and final request")
+                    help="JSON cookie jar to load/update; basename -> <run>/state/http/ "
+                         "or standalone tmp/<tool>/<invocation>/")
     ap.add_argument("-H", "--header", action="append", default=[], help="k: v")
     ap.add_argument("--auth-key", default=None,
                     help="endpoint key for the brute-force lock counter")
@@ -1186,8 +1956,9 @@ def main() -> int:
                     help="run 目录 runs/<dir>; 给了它且 --save 是裸文件名时, 产物落到 "
                          "<run>/evidence/(统一布局, 防散落根目录; 录像 .replay.json 一并跟随)")
     ap.add_argument("--proxy", default=None,
-                    help="交战代理(http://h:p / socks5h://h:p)；解锁境内资产经中继。"
-                         "未给则走 harness.proxy 解析(XUNJI_PROXY / proxy.conf, 不读 HTTPS_PROXY=模型那条)")
+                    help="显式交战代理(http://h:p / socks5h://h:p)；未给时默认直连。"
+                         "只有 XUNJI_PROXY_REQUIRED=1 才读取 XUNJI_PROXY / proxy.conf；"
+                         "不读 HTTPS_PROXY=模型通道")
     ap.add_argument("--retry", type=int, default=0,
                     help="超时/RST 重试次数(瞬时不可达时用)")
     ap.add_argument("--retry-wait", type=float, default=1.5, help="重试间隔秒")
@@ -1200,8 +1971,9 @@ def main() -> int:
                     help="HTTP byte range helper, e.g. 0-262143 or bytes=0-262143. "
                          "Adds a Range header unless one was supplied explicitly.")
     ap.add_argument("--save-chunks", action="store_true",
-                    help="with --save, also write the full response into <save>.chunks/ plus "
-                         "<save>.chunks.json manifest. The normal saved body remains guard-capped.")
+                    help="with --save, also write a bounded response stream into <save>.chunks/ "
+                         "plus a v2 relative-path/SHA-256 manifest (hard cap: 8 MiB and 128 "
+                         "parts). The normal saved body remains guard-capped at 256 KiB.")
     ap.add_argument("--chunk-size", type=int, default=guardmod.MAX_BODY_BYTES,
                     help="bytes per --save-chunks part (default: guard cap size)")
     ap.add_argument("--samples", type=int, default=1,
@@ -1213,11 +1985,19 @@ def main() -> int:
     if not args.method or not args.url:
         ap.error("method and url are required (or use --selftest)")
 
-    args.save = _place_save(args.save, args.run)   # 统一布局: --run 时裸文件名 -> <run>/evidence/
-    args.preflight_save = _place_save(args.preflight_save, args.run)
+    artifact_invocation = output_layout.invocation_id()
+    try:
+        args.save = _place_save(
+            args.save, args.run, invocation=artifact_invocation)
+        args.preflight_save = _place_save(
+            args.preflight_save, args.run, invocation=artifact_invocation)
+        args.cookie_jar = _place_cookie_jar(
+            args.cookie_jar, args.run, invocation=artifact_invocation)
+    except output_layout.OutputLayoutError as exc:
+        ap.error(str(exc))
 
     global _PROXY
-    _PROXY = args.proxy   # 仅存 --proxy 覆盖; 真正解析在 _opener(urllib_proxy_handlers), 直跑与 import 都走交战代理
+    _PROXY = args.proxy   # --proxy 显式选代理；否则 proxy.resolve 按 required=0/1 冻结 direct/proxy
 
     headers = {}
     for h in args.header:
@@ -1247,14 +2027,16 @@ def main() -> int:
             n = max(1, args.samples)
 
             def sample(url: str, save: str | None) -> tuple[dict, bool, list]:
-                runs = [send("GET", url, headers, None, args.auth_key,
-                             args.timeout, save if index == 0 else None,
-                             args.retry, args.retry_wait,
-                             args.headers, byte_range=args.byte_range,
-                             allow_sensitive_auth=args.allow_sensitive_auth)
-                        for index in range(n)]
-                hs = sorted({r.get("sha1") for r in runs})
-                return runs[0], len(hs) == 1, hs
+                return _diff_samples(
+                    url, save, samples=n, headers=headers,
+                    auth_key=args.auth_key, timeout=args.timeout,
+                    retry=args.retry, retry_wait=args.retry_wait,
+                    want_headers=args.headers, no_redirect=args.no_redirect,
+                    byte_range=args.byte_range, save_chunks=args.save_chunks,
+                    chunk_size=args.chunk_size,
+                    allow_sensitive_auth=args.allow_sensitive_auth,
+                    allow_legacy_cleanup=args.allow_legacy_cleanup,
+                )
 
             a, a_stable, a_h = sample(args.url, _diff_side_save(args.save, "a"))
             b, b_stable, b_h = sample(args.url2, _diff_side_save(args.save, "b"))

@@ -90,5 +90,5 @@ by **effect**, not by this skill:
   zone (availability / flooding) — that is not unlocked by being able to solve the
   captcha. **SMS / SMS verification-code endpoints especially**: solving the
   captcha does not license triggering a flood of messages.
-- Limits remain `src-safety-boundary` (effect, not method) and the
+- Limits remain `safety-boundary` (effect, not method) and the
   `.claude/hooks/` gate.

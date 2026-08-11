@@ -79,7 +79,8 @@
               "response": {
                 "oneOf": [
                   {"$ref": "#/$defs/legacyReplayResponse"},
-                  {"$ref": "#/$defs/v2ReplayResponse"}
+                  {"$ref": "#/$defs/v2ReplayResponse"},
+                  {"$ref": "#/$defs/chunkVerifiedReplayResponse"}
                 ]
               },
               "saved_body": {"type": "string", "pattern": "^evidence/"}
@@ -122,6 +123,40 @@
         "saved_sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
         "truncated": {"type": "boolean"},
         "wire_verified": {"type": "boolean"}
+      }
+    },
+    "chunkVerifiedReplayResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "len",
+        "sha1",
+        "saved_len",
+        "saved_sha1",
+        "truncated",
+        "wire_verified",
+        "wire_sha256",
+        "chunk_manifest",
+        "chunk_manifest_sha256"
+      ],
+      "properties": {
+        "status": {"type": "integer"},
+        "len": {"type": "integer", "minimum": 0},
+        "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "saved_len": {"type": "integer", "minimum": 0},
+        "saved_sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "truncated": {"type": "boolean"},
+        "wire_verified": {"const": true},
+        "wire_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "chunk_manifest": {
+          "type": "string",
+          "pattern": "^evidence/(?:(?!\\.\\.(?:/|$))[^/\\\\]+/)*(?!\\.\\.(?:/|$))[^/\\\\]+\\.chunks\\.json$"
+        },
+        "chunk_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
       }
     }
   }

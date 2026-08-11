@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/completion-transaction.v1.schema.json",
+  "title": "Xunji Completion Transaction v1",
+  "description": "Recoverable single-writer transaction binding a frozen run manifest and closure receipts to the report FINAL transition and terminal decisions marker.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "status", "transaction_id", "run_name", "mode", "marker",
+    "manifest", "manifest_sha256", "basis", "review_policy",
+    "review_policy_sha256", "review_bindings", "report_transition",
+    "decisions_transition", "prepared_at", "terminal_at",
+    "previous_receipt_sha256", "completion_binding_sha256", "receipt_sha256",
+    "legacy_unbound", "reopen_reason"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.completion-transaction.v1"},
+    "status": {"enum": ["prepared", "committed", "reopened"]},
+    "transaction_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "run_name": {"type": "string", "minLength": 1, "maxLength": 255},
+    "mode": {"enum": ["ghost", "normal"]},
+    "marker": {"enum": ["GHOST_COMPLETE", "NORMAL_COMPLETE"]},
+    "manifest": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 4096,
+      "items": {"$ref": "#/$defs/manifestEntry"}
+    },
+    "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "basis": {"$ref": "#/$defs/basis"},
+    "review_policy": {
+      "oneOf": [
+        {"$ref": "review-policy.v1.schema.json"},
+        {"type": "object", "additionalProperties": false, "maxProperties": 0}
+      ]
+    },
+    "review_policy_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+    "review_bindings": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/reviewBinding"}
+    },
+    "report_transition": {"$ref": "#/$defs/fileTransition"},
+    "decisions_transition": {"$ref": "#/$defs/fileTransition"},
+    "prepared_at": {"type": "number", "exclusiveMinimum": 0},
+    "terminal_at": {"type": "number", "minimum": 0},
+    "previous_receipt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+    "completion_binding_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "legacy_unbound": {"type": "boolean"},
+    "reopen_reason": {"type": "string", "maxLength": 2048}
+  },
+  "$defs": {
+    "manifestEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "present", "sha256", "size"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+        },
+        "present": {"type": "boolean"},
+        "sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "size": {"type": "integer", "minimum": 0, "maximum": 1073741824}
+      }
+    },
+    "basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_plan_digest", "work_plan_inputs_digest", "reason_receipt_sha256",
+        "completion_review_receipt_sha256", "cycle_end_receipt_sha256",
+        "closure_check_receipt_sha256", "closure_check_token_sha256",
+        "closure_input_sha256", "warning_codes", "cron_disposition",
+        "cron_receipt_sha256", "warning_dispositions", "turn_contract_sha256",
+        "runtime_tail_seq", "runtime_tail_receipt_sha256"
+      ],
+      "properties": {
+        "work_plan_digest": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "work_plan_inputs_digest": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "reason_receipt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "completion_review_receipt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "cycle_end_receipt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "closure_check_receipt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "closure_check_token_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "closure_input_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "warning_codes": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^CHECK_WARNING_[0-9A-F]{20}$"}
+        },
+        "cron_disposition": {"enum": ["quiescent", "not_requested", "legacy_unbound"]},
+        "cron_receipt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "warning_dispositions": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {"$ref": "#/$defs/warningDisposition"}
+        },
+        "turn_contract_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "runtime_tail_seq": {"type": "integer", "minimum": 0},
+        "runtime_tail_receipt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"}
+      }
+    },
+    "warningDisposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "disposition", "reason"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "disposition": {"enum": ["accepted", "dismissed", "deferred", "fixed"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2048}
+      }
+    },
+    "reviewBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot_id", "role", "requirement", "provider", "backend",
+        "receipt_sha256", "limitation"
+      ],
+      "properties": {
+        "slot_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "role": {"type": "string", "minLength": 1, "maxLength": 128},
+        "requirement": {"enum": ["mandatory", "optional"]},
+        "provider": {"type": "string", "maxLength": 128},
+        "backend": {"type": "string", "maxLength": 128},
+        "receipt_sha256": {"type": "string", "pattern": "^(?:|[0-9a-f]{64})$"},
+        "limitation": {"type": "string", "maxLength": 2048}
+      }
+    },
+    "fileTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "before_sha256", "after_sha256"],
+      "properties": {
+        "path": {"enum": ["report.md", "decisions.md"]},
+        "before_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "after_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

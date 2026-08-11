@@ -475,6 +475,14 @@ def _gates(fronts: dict, agents: dict, progress: dict, coverage: dict) -> dict:
 
 
 def _completion_markers(run_dir: Path) -> list[str]:
+    # Completion is an owner transaction, not prose.  A legacy/unbound marker
+    # must not stop the loop or suppress the next scheduled iteration.
+    try:
+        import completion_transaction
+        if not completion_transaction.is_valid_committed(run_dir):
+            return []
+    except Exception:
+        return []
     path = run_dir / "decisions.md"
     if not path.exists():
         return []
@@ -484,7 +492,8 @@ def _completion_markers(run_dir: Path) -> list[str]:
         return []
     markers = []
     for marker in ("GHOST_COMPLETE", "NORMAL_COMPLETE"):
-        if re.search(rf"(?<![A-Z0-9_]){marker}(?![A-Z0-9_])", text):
+        if re.search(
+                rf"(?m)^\s*{marker}\s+receipt=[0-9a-f]{{64}}\s*$", text):
             markers.append(marker)
     return markers
 
@@ -1101,9 +1110,19 @@ def _selftest() -> int:
         encoding="utf-8",
     )
     (complete_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
-    (complete_run / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
+    (complete_run / "decisions.md").write_text(
+        "# Decisions\n\nGHOST_COMPLETE receipt=" + ("a" * 64) + "\n",
+        encoding="utf-8",
+    )
     (complete_run / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
-    complete_state = write_outputs(complete_run)
+    unbound_complete_state = write_outputs(complete_run)
+    import completion_transaction as _completion_transaction
+    original_committed_predicate = _completion_transaction.is_valid_committed
+    try:
+        _completion_transaction.is_valid_committed = lambda _run: True
+        complete_state = write_outputs(complete_run)
+    finally:
+        _completion_transaction.is_valid_committed = original_committed_predicate
 
     checks = [
         ("writes loop state json", (run / "state" / "loop_state.json").exists()),
@@ -1175,7 +1194,10 @@ def _selftest() -> int:
          and closing_state["fronts"]["closed"] == ["F-001"]
          and not closing_state["fronts"]["unclassified_status"]
          and closing_state["gates"]["completion_pause_candidate"]),
-        ("completion marker sets loop_complete and stops next-loop scheduling",
+        ("legacy unbound marker cannot stop next-loop scheduling",
+         not unbound_complete_state["gates"]["loop_complete"]
+         and unbound_complete_state["gates"]["completion_markers"] == []),
+        ("valid committed transaction sets loop_complete and stops scheduling",
          complete_state["gates"]["loop_complete"]
          and complete_state["gates"]["completion_markers"] == ["GHOST_COMPLETE"]
          and complete_state["next_actions"] == [

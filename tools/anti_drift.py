@@ -21,8 +21,8 @@ closure. Operational liveness is projected separately from journals/runtime/Agen
 never inferred from canonical-file mtimes.
 
 Two modes (config.ini [mode] mode=):
-  normal — full enforcement: drift block + evidence gates + auto-closure
-  dev    — development: drift detection records but does not block, evidence gates + closure checks still run
+  normal — full workflow: repeated drift may block and Normal-only review/completion prerequisites apply
+  dev    — development observability: drift records/reminds without that block; hard safety/evidence/Coda/closure-integrity gates still run
 
 Usage:
     python tools/anti_drift.py            # print the anchor (UserPromptSubmit hook target)
@@ -105,6 +105,14 @@ if _TOOLS_PATH not in sys.path:
 
 # ---- Mode detection (Decision 3: single parse, 5s cache) ----
 _mode_cache: tuple[float, str] = (0.0, "normal")
+SENTINEL_PENDING_SCAN_LIMIT = 1024 * 1024
+SENTINEL_ALERT_TAIL_LIMIT = 256 * 1024
+_SENTINEL_PENDING_RE = re.compile(
+    r"Status\s*:\s*\[\s*\]\s*pending\s*$", re.IGNORECASE
+)
+_SENTINEL_ALERT_ACK_RE = re.compile(
+    r"(?im)^\s*[-*]?\s*SentinelAlertsAck\s*[:：]\s*sha256:([0-9a-f]{64})\s*$"
+)
 
 
 def get_mode() -> str:
@@ -133,6 +141,22 @@ def is_dev_mode() -> bool:
 
 def is_normal_mode() -> bool:
     return get_mode() == "normal"
+
+
+def _normal_completion_committed(run: Path) -> bool:
+    """Return true only for a valid NORMAL completion owner transaction."""
+    try:
+        import completion_transaction
+        if not completion_transaction.is_valid_committed(run):
+            return False
+        decisions = (run / "decisions.md").read_text(
+            encoding="utf-8", errors="replace")
+        return bool(re.search(
+            r"(?m)^\s*NORMAL_COMPLETE\s+receipt=[0-9a-f]{64}\s*$",
+            decisions,
+        ))
+    except Exception:
+        return False
 
 # Binding rules — split into three tiers so primacy/recency work for us, not against us.
 # Tier-1 (TOP — "本轮必做"): immediate action rules. Placed first so the model sees them at the
@@ -767,8 +791,102 @@ def _check_drift_alert(run_dir: Path) -> list[str]:
         lines = alerts.read_text(encoding="utf-8", errors="replace").splitlines()
         unresolved = [l for l in lines if l.startswith("- [ ]") or l.startswith("PENDING")]
         return unresolved[:5]
-    except Exception:
-        return []
+    except Exception as exc:
+        return [
+            "drift_alerts.md 读取失败"
+            f"({type(exc).__name__})，未解决状态未知; 先人工 Read/处置"
+        ]
+
+
+def _sentinel_soft_reminders(run_dir: Path) -> list[str]:
+    """Project fresh observe-only sentinel debt into the recency anchor.
+
+    Sentinel remains an audit/attribution layer: this helper never writes,
+    blocks, grants authority, or treats an alert as fact.  Explicit unchecked
+    pending items remain visible.  Ordinary alerts are reminded only while the
+    alert ledger has no matching content-bound acknowledgement in the Root-owned
+    decisions ledger, which keeps the advisory from becoming permanent context
+    spam without relying on forgeable mtimes.
+    """
+    reminders: list[str] = []
+
+    def _tail_bytes(path: Path, limit: int) -> bytes:
+        with path.open("rb") as handle:
+            size = path.stat().st_size
+            if size > limit:
+                handle.seek(size - limit)
+            return handle.read(limit)
+
+    def _alert_token(path: Path) -> tuple[str, str]:
+        before = path.stat()
+        raw = _tail_bytes(path, SENTINEL_ALERT_TAIL_LIMIT)
+        after = path.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise RuntimeError("alert ledger changed during read")
+        digest = hashlib.sha256(
+            str(after.st_size).encode("ascii") + b"\0" + raw
+        ).hexdigest()
+        return digest, raw.decode("utf-8", "replace")
+
+    pending = run_dir / "pending_approval.md"
+    if pending.is_file():
+        try:
+            # pending_approval.md is append-only audit state and old entries may
+            # remain unresolved outside any tail.  Scan the whole file only
+            # within a fixed per-prompt budget.  Above that budget, surface an
+            # explicit unknown-state reminder instead of doing unbounded work or
+            # falsely inferring that old authority debt is clear.
+            pending_size = pending.stat().st_size
+            if pending_size > SENTINEL_PENDING_SCAN_LIMIT:
+                reminders.append(
+                    "sentinel pending_approval.md 超出每回合扫描预算，完整状态未知; "
+                    "先 Read/处置或归档压缩，且不得把 observe-only 记录当成已批准"
+                )
+            else:
+                with pending.open("r", encoding="utf-8", errors="replace") as handle:
+                    count = sum(1 for line in handle if _SENTINEL_PENDING_RE.search(line))
+                if count:
+                    reminders.append(
+                        f"sentinel pending_approval.md 至少 {count} 条未处置; "
+                        "先 Read 并交由 operator/Root 处置, 不得把 observe-only 记录当成已批准"
+                    )
+        except Exception as exc:
+            reminders.append(
+                "sentinel pending_approval.md 读取失败"
+                f"({type(exc).__name__})，状态未知; 先人工 Read/处置，不得视为已批准"
+            )
+
+    alerts = run_dir / "alerts.md"
+    if alerts.is_file():
+        try:
+            decisions = run_dir / "decisions.md"
+            alert_digest, text = _alert_token(alerts)
+            if not text.strip():
+                return reminders
+            decisions_text = (
+                _tail_bytes(decisions, SENTINEL_ALERT_TAIL_LIMIT).decode("utf-8", "replace")
+                if decisions.is_file() else ""
+            )
+            acknowledged = {
+                match.group(1).lower()
+                for match in _SENTINEL_ALERT_ACK_RE.finditer(decisions_text)
+            }
+            if alert_digest not in acknowledged:
+                headings = re.findall(
+                    r"(?m)^##\s+(?:ALERT|CIRCUIT-BREAKER)\b[^\n]*", text
+                )
+                latest = re.sub(r"\s+", " ", headings[-1]).strip() if headings else "new alert"
+                reminders.append(
+                    "sentinel alerts.md 有未按内容指纹确认的新观察"
+                    f"(最新: {latest[:120]}); 先 Read/归因，处置后在 decisions.md 记录 "
+                    f"`- SentinelAlertsAck: sha256:{alert_digest}`"
+                )
+        except Exception as exc:
+            reminders.append(
+                "sentinel alerts.md 读取失败"
+                f"({type(exc).__name__})，状态未知; 先人工 Read/归因"
+            )
+    return reminders
 
 def _check_agent_board_needed(run_dir: Path, _model=None) -> tuple[bool, int, dict]:
     """Check if Agent Board is mandatory: active fronts >= 4 and barriers are diverse
@@ -862,9 +980,11 @@ def build_anchor(
 ) -> str:
     lines = []
 
-    # ---- Normal mode: 全量执行规则 ----
-    if is_normal_mode():
+    # ---- Runtime mode: keep the effective config visible every turn. ----
+    runtime_mode = get_mode()
+    if runtime_mode == "normal":
         lines.append("[NORMAL MODE — 全量执行]")
+        lines.append("  · 漂移路径: output_gate 记录/软提醒; run_gate Phase 3 对重复协议/自主性漂移阻断")
         lines.append("")
         lines.append("【Normal 自立规则】")
         lines.append("  · 凭据自立: 默认密码→弱口令爆破→注册→用户枚举→密码喷洒, 不等待/不询问")
@@ -872,6 +992,12 @@ def build_anchor(
         lines.append("  · 决策自立: 不问操作者任何问题, 所有选择自主做出, 记录在 decisions.md")
         lines.append("  · 不因Type B放弃: WAF/限流/超时阻挡→换方法绕过, 不关闭前沿")
         lines.append("  · 收口自立: 完成所有前沿后, 按 lifecycle/reviewops owner 跑离线硬门、独立复审、复盘，再按 typed completion contract 收口")
+        lines.append("")
+    else:
+        lines.append("[DEV MODE — 开发观察]")
+        lines.append("  · 漂移路径: output_gate 仍记录/软提醒; run_gate 跳过 repeated-drift 阻断")
+        lines.append("  · 跳过 Normal-only 额外复审/完成前置")
+        lines.append("  · authority/safety/privacy/evidence/Coda/closure integrity 硬门不降级")
         lines.append("")
 
     lines.append("[ANTI-DRIFT ANCHOR — 每回合自检, 漂移=没按下面走]")
@@ -957,18 +1083,14 @@ def build_anchor(
         stage = _detect_stage(run)
         lines.append("【当前状态】")
         lines.append(f"  run: {run.name} | 阶段: {stage} | 最后改动: {age}m 前")
-        # Normal complete detection: check decisions.md for NORMAL_COMPLETE
-        if is_normal_mode():
-            try:
-                dc = run / "decisions.md"
-                if dc.exists() and "NORMAL_COMPLETE" in dc.read_text(encoding="utf-8", errors="replace"):
-                    lines.append("  ✅ NORMAL_COMPLETE: 所有前沿已完成, run 已自动收口")
-                    lines.append("     → 停止: 无剩余工作, 等待操作者确认或关闭会话")
-            except Exception:
-                pass
+        if is_normal_mode() and _normal_completion_committed(run):
+            lines.append("  ✅ NORMAL_COMPLETE: 所有前沿已完成, run 已自动收口")
+            lines.append("     → 停止: 无剩余工作, 等待操作者确认或关闭会话")
         overdue = _overdue_steps(run)
         for f in overdue:
             lines.append(f"  · {f}")
+        for reminder in _sentinel_soft_reminders(run):
+            lines.append(f"  ⚠ 安全护栏软提醒: {reminder}")
         # 中间闸门(每回合自动跑 —— 不让 AI 忘记 check_run)
         try:
             if _TOOLS_PATH not in sys.path:
@@ -979,8 +1101,11 @@ def build_anchor(
                 lines.append(f"  ⛔ 中间闸门 HARD FAIL: {e[:130]}")
             for w in inter_warns[:3]:
                 lines.append(f"  ⚠ 中间闸门: {w[:130]}")
-        except Exception:
-            pass
+        except Exception as exc:
+            lines.append(
+                "  ⚠ 中间闸门读取失败"
+                f"({type(exc).__name__})，状态未知; 不得据此推断可收口"
+            )
         drift_items = _check_drift_alert(run)
         if drift_items:
             lines.append("  ⚠ 漂移告警(未解决):")
@@ -1015,14 +1140,44 @@ def build_anchor(
 def _selftest() -> int:
     import tempfile
 
-    # Isolate from real config.ini — selftest always runs in normal mode.
-    _orig_is_dev_mode = globals()["is_dev_mode"]
-    globals()["is_dev_mode"] = lambda: False
-
     checks: list[tuple[str, bool]] = []
     d = Path(tempfile.mkdtemp())
     empty_runs = d / "empty-runs"
     empty_runs.mkdir()
+
+    # Prove both config.ini modes are connected without touching the operator's
+    # ignored local config.  Local config overrides the tracked example; invalid
+    # values fail closed to normal.
+    global CONFIG_INI, CONFIG_EXAMPLE_INI, _mode_cache
+    mode_dir = d / "mode-config"
+    mode_dir.mkdir()
+
+    @contextlib.contextmanager
+    def _isolated_mode_paths():
+        global CONFIG_INI, CONFIG_EXAMPLE_INI, _mode_cache
+        original = (CONFIG_INI, CONFIG_EXAMPLE_INI, _mode_cache)
+        try:
+            CONFIG_EXAMPLE_INI = mode_dir / "config.example.ini"
+            CONFIG_INI = mode_dir / "config.ini"
+            CONFIG_EXAMPLE_INI.write_text("[mode]\nmode = normal\n", encoding="utf-8")
+            CONFIG_INI.write_text("[mode]\nmode = dev\n", encoding="utf-8")
+            _mode_cache = (0.0, "normal")
+            yield
+        finally:
+            CONFIG_INI, CONFIG_EXAMPLE_INI, _mode_cache = original
+
+    with _isolated_mode_paths():
+        dev_mode = get_mode()
+        dev_anchor = build_anchor(
+            runs_root=empty_runs, active_pointer=d / "missing-dev-pointer"
+        )
+        checks.append(("config local dev overrides example normal",
+                       dev_mode == "dev" and "[DEV MODE" in dev_anchor))
+        CONFIG_INI.write_text("[mode]\nmode = unknown\n", encoding="utf-8")
+        _mode_cache = (0.0, "dev")
+        checks.append(("invalid config mode fails closed to normal",
+                       get_mode() == "normal"))
+
     a = build_anchor(runs_root=empty_runs, active_pointer=d / "missing-pointer")
     checks.append(("anchor non-empty", bool(a.strip())))
     checks.append(("anchor carries binding rules", "本轮必做" in a and "约束速查" in a))
@@ -1036,6 +1191,23 @@ def _selftest() -> int:
                    "receipt-backed TARGET_DENIED" in a
                    and "修正 typed path/argv 后可同回合重试" in a
                    and "BLOCKED都会被" not in a))
+    completion_probe = d / "completion-probe"
+    completion_probe.mkdir()
+    (completion_probe / "decisions.md").write_text(
+        "# Decisions\n\nNORMAL_COMPLETE receipt=" + ("a" * 64) + "\n",
+        encoding="utf-8",
+    )
+    import completion_transaction as _completion_transaction
+    checks.append(("legacy normal marker cannot claim completion",
+                   not _normal_completion_committed(completion_probe)))
+    original_committed_predicate = _completion_transaction.is_valid_committed
+    try:
+        _completion_transaction.is_valid_committed = lambda _run: True
+        committed_probe = _normal_completion_committed(completion_probe)
+    finally:
+        _completion_transaction.is_valid_committed = original_committed_predicate
+    checks.append(("valid completion transaction enables normal status",
+                   committed_probe))
     # drift patterns list
     checks.append(("drift patterns non-empty", len(DRIFT_PATTERNS) >= 5))
     # find_active_run: explicit pointer is the only run authority.
@@ -1107,9 +1279,72 @@ def _selftest() -> int:
     # self-check section present when drift
     checks.append(("anchor has self-check section when drift",
                    "输出前自检" in anchor_with_drift))
-    # No drift_block.json referenced in anchor output
-    checks.append(("anchor no drift_block reference",
+    # The retired drift_block.json file must not be presented as authority; the
+    # mode banner above names the current output_gate/run_gate ownership.
+    checks.append(("anchor names current drift owners, not retired drift_block file",
                    "drift_block" not in anchor_with_drift.lower()))
+
+    # Sentinel is observe-only, but new/unresolved audit debt must be visible in
+    # the next-prompt recency anchor instead of depending on model memory.
+    sentinel_run = _tmp_runs / "sentinel_soft_reminder"
+    sentinel_run.mkdir()
+    (sentinel_run / "evidence.md").write_text("# Evidence\n", encoding="utf-8")
+    (sentinel_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (sentinel_run / "alerts.md").write_text(
+        "# Behavioral Alerts\n\n## ALERT 2026-08-02 L2/NOTIFY\n- new\n",
+        encoding="utf-8",
+    )
+    (sentinel_run / "pending_approval.md").write_text(
+        "# Pending\n\n## PENDING 2026-08-02 L3/GATE\nStatus: [ ] pending\n",
+        encoding="utf-8",
+    )
+    sentinel_reminders = _sentinel_soft_reminders(sentinel_run)
+    checks.append(("sentinel pending and fresh alerts become soft reminders",
+                   len(sentinel_reminders) == 2
+                   and any("pending_approval.md" in item for item in sentinel_reminders)
+                   and any("alerts.md" in item for item in sentinel_reminders)))
+    alert_reminder = next(item for item in sentinel_reminders if "alerts.md" in item)
+    alert_ack = re.search(r"sha256:([0-9a-f]{64})", alert_reminder)
+    (sentinel_run / "decisions.md").write_text(
+        "# Decisions\n\n- SentinelAlertsAck: sha256:"
+        + (alert_ack.group(1) if alert_ack else "missing") + "\n",
+        encoding="utf-8",
+    )
+    disposed_reminders = _sentinel_soft_reminders(sentinel_run)
+    checks.append(("content-bound decisions ack silences ordinary alert reminder only",
+                   len(disposed_reminders) == 1
+                   and "pending_approval.md" in disposed_reminders[0]))
+    empty_alert_run = _tmp_runs / "sentinel_empty_alert"
+    empty_alert_run.mkdir()
+    (empty_alert_run / "alerts.md").write_text("  \n", encoding="utf-8")
+    checks.append(("empty alerts ledger does not create a phantom soft reminder",
+                   _sentinel_soft_reminders(empty_alert_run) == []))
+    (sentinel_run / "pending_approval.md").write_text(
+        "Status: [ ] pending\n" + ("x" * (300 * 1024)) +
+        "\nStatus: [x] resolved\n",
+        encoding="utf-8",
+    )
+    checks.append(("old pending outside alert tail cap remains visible",
+                   any("至少 1 条" in item
+                       for item in _sentinel_soft_reminders(sentinel_run))))
+    (sentinel_run / "pending_approval.md").write_text(
+        "Status: [ ] pending\n" + ("x" * SENTINEL_PENDING_SCAN_LIMIT),
+        encoding="utf-8",
+    )
+    checks.append(("oversize pending ledger is bounded but never inferred clear",
+                   any("超出每回合扫描预算" in item
+                       for item in _sentinel_soft_reminders(sentinel_run))))
+    test_pointer.write_text(str(sentinel_run), encoding="utf-8")
+    sentinel_anchor = build_anchor(runs_root=_tmp_runs, active_pointer=test_pointer)
+    checks.append(("anchor exposes safety soft reminder without granting authority",
+                   "安全护栏软提醒" in sentinel_anchor
+                   and "不得把 observe-only 记录当成已批准" in sentinel_anchor))
+    drift_read_error_run = _tmp_runs / "drift_alert_read_error"
+    drift_read_error_run.mkdir()
+    (drift_read_error_run / "drift_alerts.md").mkdir()
+    checks.append(("drift alert read failure is visible, not silently clear",
+                   any("读取失败" in item
+                       for item in _check_drift_alert(drift_read_error_run))))
 
     # Stale session_state auto-reset
     fresh_run = _tmp_runs / "fresh_session"
@@ -1403,9 +1638,6 @@ def _selftest() -> int:
     (no_frontier / "evidence.md").write_text("# test", encoding="utf-8")
     needed_nf, n_nf, _ = _check_agent_board_needed(no_frontier)
     checks.append(("agent board: no frontier.md -> not needed", not needed_nf and n_nf == 0))
-
-    # Restore original is_dev_mode after selftest
-    globals()["is_dev_mode"] = _orig_is_dev_mode
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

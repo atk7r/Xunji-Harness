@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/subagent-stop-ingress.v1.schema.json",
+  "title": "Xunji Schema-Independent SubagentStop Ingress Receipt v1",
+  "description": "A project-level, content-addressed observation written by the first SubagentStop Hook before turn-contract, work-plan, or contract-schema validation. It has no run owner and is not runtime, assignment, disposition, evidence, merge, or closure truth. Typed recovery may bind it only after selecting one run-owned canonical launch and SubagentStart.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "hook_event_name", "session_id", "agent_id", "agent_type",
+    "transcript_path_sha256", "result_present", "result_length",
+    "result_sha256", "canonical_event_sha256", "observed_at", "receipt_hash"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.subagent-stop-ingress.v1"},
+    "hook_event_name": {"const": "SubagentStop"},
+    "session_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$(?![\\s\\S])"},
+    "agent_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$(?![\\s\\S])"},
+    "agent_type": {"type": "string", "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127})?$(?![\\s\\S])"},
+    "transcript_path_sha256": {"type": "string", "pattern": "^(?:[0-9a-f]{64})?$(?![\\s\\S])"},
+    "result_present": {"type": "boolean"},
+    "result_length": {"type": "integer", "minimum": 0, "maximum": 16777216},
+    "result_sha256": {"type": "string", "pattern": "^(?:[0-9a-f]{64})?$(?![\\s\\S])"},
+    "canonical_event_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$(?![\\s\\S])"},
+    "observed_at": {"type": "string", "format": "date-time", "minLength": 20, "maxLength": 64},
+    "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$(?![\\s\\S])"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"result_present": {"const": true}}, "required": ["result_present"]},
+      "then": {
+        "properties": {
+          "result_length": {"minimum": 1},
+          "result_sha256": {"pattern": "^[0-9a-f]{64}$(?![\\s\\S])"}
+        }
+      },
+      "else": {
+        "properties": {
+          "result_length": {"const": 0},
+          "result_sha256": {"const": ""}
+        }
+      }
+    }
+  ]
+}

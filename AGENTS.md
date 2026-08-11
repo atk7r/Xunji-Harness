@@ -147,6 +147,16 @@ shared change is intentionally necessary and recorded. If both trees need change
 state which part is Claude primary-driver behavior and which part is Codex
 auxiliary behavior before or while editing.
 
+Every `.agents/skills/*/SKILL.md` description must identify itself as
+`Codex-side`. A same-name mirror must also state that it does not inherit Claude
+Root or Hook authority. Claude-primary live-run protocols must not be copied into
+the Codex skill discovery surface merely to make them available for reference.
+In particular, ordinary Codex web research, repository comparison, and read-only
+advice use the host product's normal research rules; they do not invoke Xunji's
+Claude-primary time gate, local-knowledge-first sequence, or run evidence ledger
+unless Codex is explicitly delegated work inside a live run whose canonical
+owner requires those steps.
+
 ## Useful Contributions
 
 Codex is especially useful for:
@@ -238,10 +248,18 @@ Codex-authored maintenance review matrix:
 
 | Available reviewers | Author | Required review | Synthesis |
 |---|---|---|---|
-| arkcli + Claude Code | Codex | arkcli panel + Claude Code fresh-context/API | Codex |
-| no arkcli | Codex | Claude Code fresh-context/API | Codex |
-| no Claude Code, arkcli available | Codex | arkcli panel; record the missing-Claude limitation | Codex |
+| external/third-party assistance + Claude Code | Codex | external assistance + Claude Code fresh-context/API | Codex |
+| no external assistance | Codex | Claude Code fresh-context/API | Codex |
+| no Claude Code, external assistance available | Codex | external assistance; record the missing-Claude limitation | Codex |
 | neither available | Codex | no independent vote; record the blocker/limitation | Codex |
+
+External/third-party providers are registered in the trusted review registry
+and activated locally through `config.ini [external_assistance]`. The current
+selection is `arkcli`; that backend name and its CLI compatibility do not make
+it a synthesis or authority role. New providers inherit the same candidate-only
+boundary. With multiple providers, the default Codex-authored pair remains the
+first enabled external provider plus Claude Code; later providers are fallbacks
+or explicit extra slots. Codex remains the synthesizer for Codex-authored maintenance.
 
 Never treat Codex self-review as the independent review.
 

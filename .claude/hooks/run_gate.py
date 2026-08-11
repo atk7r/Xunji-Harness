@@ -542,6 +542,18 @@ def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str
                     "补齐 typed ROOT_DIRECT action receipt 后由 loop_journal end "
                     "推导 cycle_end"
                 )
+            elif mode == "COMPLETION_REVIEW":
+                if projection.get("completion_review"):
+                    next_step = (
+                        "completion Reviewer receipt 已有效；运行 loop_journal end "
+                        "推导 typed cycle_end"
+                    )
+                else:
+                    next_step = (
+                        "运行 `python3 tools/workers.py completion-review "
+                        f"{run_dir}`，将输出的 tool_input 逐字节用于一次 "
+                        "xunji-reviewer Agent 调用；不得手写 envelope"
+                    )
             else:
                 recovery = _agent_settlement.stale_recovery_action(
                     run_dir, plan, projection=projection,
@@ -862,9 +874,10 @@ def _normal_closure_prerequisite(review_text: str, decisions_text: str,
     """Return a hard-block reason for missing Normal-mode closure prerequisites."""
     if not _has_completed_independent_review(review_text, run_dir):
         return (
-            "[Normal 收口] report 已终版但缺独立复审。"
+            "[Normal 收口] report 已进入 READY 但缺独立复审。"
             "请加载 xunji-reviewops，取得当前 fingerprint-bound ReviewReceipt 并处理全部 finding → "
-            "写 retrospective.md → 在 decisions.md 末尾写入 NORMAL_COMPLETE。"
+            "完成 retrospective.md → 由 xunji-run-lifecycle 路由到 "
+            "completion_transaction.py prepare/commit；不得手写 FINAL 或 NORMAL_COMPLETE。"
         )
     if not _has_codex_completion_review(decisions_text, run_dir):
         return (
@@ -1070,6 +1083,11 @@ def _selftest() -> int:
     normal_run = Path(tempfile.mkdtemp())
     (normal_run / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
     valid_normal_review = ""
+    valid_completion_projection: dict = {}
+    valid_completion_cycle: dict = {}
+    valid_completion_gate_mode = ""
+    valid_completion_gate_message = ""
+    ended_completion_gate_mode = "block"
     if _cr is not None and _runtime_receipts is not None:
         import peer_review as _peer_review_test
         bundle = _peer_review_test.build_review_bundle(normal_run, write=True)
@@ -1090,7 +1108,8 @@ def _selftest() -> int:
                 f"XUNJI_REVIEW_BUNDLE={result.bundle_hash}\nreview completed"
             )},
         })
-        seed_current_plan(normal_run, stage="S3")
+        normal_completion_contract, _normal_completion_plan = seed_current_plan(
+            normal_run, stage="S3")
         completion_state = _runtime_receipts.completion_review_state(
             normal_run, require_current_inputs=True)
         completion_prompt = _runtime_receipts.completion_review_prompt(normal_run)
@@ -1135,6 +1154,22 @@ def _selftest() -> int:
             "agent_type": "xunji-reviewer",
             "last_assistant_message": completion_result,
         })
+        if _run_model is not None and _loop_journal is not None:
+            valid_completion_projection = _run_model.plan_cycle_projection(
+                normal_run)
+            valid_completion_cycle = _loop_journal.derive_cycle_end_data(
+                normal_run,
+                next_action="运行 check_run 验证当前计划",
+            )
+            valid_completion_gate_mode, valid_completion_gate_message = (
+                _check_agent_board(normal_run, normal_completion_contract))
+            _loop_journal.append_event(
+                normal_run,
+                "cycle_end",
+                next_action="运行 check_run 验证当前计划",
+            )
+            ended_completion_gate_mode, _ended_completion_gate_message = (
+                _check_agent_board(normal_run, normal_completion_contract))
         valid_normal_review = (normal_run / "review.md").read_text(encoding="utf-8")
     normal_decisions = (
         "## CodexCompletionReview\n- Reviewer: codex-fresh\n- Verdict: PASS\n"
@@ -1157,13 +1192,37 @@ def _selftest() -> int:
                    "assignment-free global completion owner" in missing_completion_message
                    and "formatter 产出的完整 contract" in missing_completion_message
                    and "subagent_type=" not in missing_completion_message))
+    checks.append((
+        "valid completion lifecycle projects exact typed cycle_end and Stop action",
+        bool(valid_completion_projection.get("completion_review"))
+        and valid_completion_cycle.get("execution_mode") == "COMPLETION_REVIEW"
+        and valid_completion_cycle.get("lane_ids") == []
+        and valid_completion_cycle.get("completion_review", {}).get("run")
+            == normal_run.name
+        and valid_completion_gate_mode == "block"
+        and "completion Reviewer receipt 已有效" in valid_completion_gate_message
+        and "loop_journal end" in valid_completion_gate_message
+        and ended_completion_gate_mode != "block",
+    ))
     checks.append(("normal closure: both prerequisites pass",
                    _normal_closure_prerequisite(
                        valid_normal_review, normal_decisions, normal_run) == ""))
+    new_label_normal_review = valid_normal_review.replace(
+        "## Independent Review",
+        "## Independent Review\n- Reviewer: external-assistance:arkcli",
+        1,
+    )
+    checks.append(("normal closure: valid receipt accepts external-assistance reviewer label",
+                   _normal_closure_prerequisite(
+                       new_label_normal_review, normal_decisions, normal_run) == ""))
     checks.append(("normal closure: review prose mention does not satisfy gate",
                    not _has_completed_independent_review(
                        "# Review\nWe still need an Independent Review before closing.\n")))
     checks.append(("normal closure: review template placeholders do not satisfy gate",
+                   not _has_completed_independent_review(
+                       "## Independent Review\n- Reviewer: (codex / external-assistance:<provider> / manual-driver)\n"
+                       "- Verdict: (PASS / WARN / BLOCKER)\n")))
+    checks.append(("normal closure: legacy arkcli-panel template still fails closed",
                    not _has_completed_independent_review(
                        "## Independent Review\n- Reviewer: (codex / arkcli-panel / manual-driver)\n"
                        "- Verdict: (PASS / WARN / BLOCKER)\n")))
@@ -1229,7 +1288,7 @@ def _selftest() -> int:
                    find_active_run(runs, active_pointer=active_pointer) is None))
     checks.append(("no runs dir -> none", find_active_run(d / "nope") is None))
 
-    # report_is_final via check_run import (终版 vs 存根)
+    # report_is_final via check_run import (explicit FINAL vs legacy substantive report)
     if _cr is not None:
         checks.append(("check_run closure predicate is callable", callable(getattr(_cr, "_closure_gate_active", None))))
         rd = runs / "b_20260101"
@@ -1238,12 +1297,25 @@ def _selftest() -> int:
         (rd / "evidence.md").write_text(
             "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n",
             encoding="utf-8")
-        (rd / "report.md").write_text("# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+        (rd / "report.md").write_text(
+            "# Report\n- Status: FINAL\nEvidence IDs: E-001\n", encoding="utf-8")
         rd2 = runs / "c_20260101"
         rd2.mkdir()
         (rd2 / "report.md").write_text("# Report\nEvidence IDs:\n", encoding="utf-8")
-        checks.append(("report_is_final TRUE on confirmed report", report_is_final(rd) is True))
+        checks.append(("report_is_final TRUE only on explicit FINAL", report_is_final(rd) is True))
         checks.append(("report_is_final FALSE on stub", report_is_final(rd2) is False))
+        rd_legacy = runs / "legacy_20260101"
+        rd_legacy.mkdir()
+        (rd_legacy / "ev.html").write_text("x" * 10, encoding="utf-8")
+        (rd_legacy / "evidence.md").write_text(
+            "# Evidence Ledger\n## E-001\n- Replicated: y\n- Artifacts: `ev.html`\n- Certainty: 1.0\n",
+            encoding="utf-8")
+        (rd_legacy / "report.md").write_text(
+            "# Report\nEvidence IDs: E-001\n", encoding="utf-8")
+        checks.append(("legacy cited report is not inferred FINAL",
+                       report_is_final(rd_legacy) is False))
+        checks.append(("legacy cited report still activates conservative preflight",
+                       closure_gate_active(rd_legacy) is True))
         rd_retro = runs / "retro_20260101"
         rd_retro.mkdir()
         (rd_retro / "report.md").write_text("# Report\nEvidence IDs:\n", encoding="utf-8")
@@ -1761,6 +1833,21 @@ def _selftest() -> int:
                    _work_plan is None or (
                        mode3c == "block" and "cycle_end=missing" in msg3c
                        and "root-action-pending:no-claim" in msg3c)))
+
+    # Case 3d: the zero-lane S3 completion plan is still an explicit Stop
+    # obligation and routes to its exact read-only launch-contract formatter.
+    ab_run3d = ab_test / "completion_review_without_receipt"
+    completion_contract, _completion_plan = seed_current_plan(
+        ab_run3d, stage="S3")
+    mode3d, msg3d = _check_agent_board(ab_run3d, completion_contract)
+    checks.append((
+        "agent board gate: completion plan names the exact formatter command",
+        mode3d == "block"
+        and "cycle_end=missing" in msg3d
+        and "python3 tools/workers.py completion-review" in msg3d
+        and str(ab_run3d) in msg3d
+        and "不得手写 envelope" in msg3d,
+    ))
 
     # Case 4: >= 4 open fronts diverse, no agents -> block
     ab_run4 = ab_test / "diverse_no_agents"

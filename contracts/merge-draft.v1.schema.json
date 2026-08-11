@@ -127,7 +127,10 @@
         "source": {
           "enum": [
             "agent_tool_response", "agent_failure_response",
-            "subagent_stop_response", "transcript_tool_result", "missing"
+            "external_stop_receipt", "stream_stall_receipt",
+            "hook_failed_stop_recovery",
+            "subagent_stop_response",
+            "transcript_tool_result", "missing"
           ]
         }
       },

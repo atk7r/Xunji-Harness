@@ -70,6 +70,7 @@ def seed_current_plan(
     if isinstance(execution_count, bool) or execution_count < 1:
         raise ValueError("execution_count must be a positive integer")
     selected_mode = mode or (
+        "COMPLETION_REVIEW" if stage == "S3" else
         "SERIAL_AGENT" if execution_count == 1 else "PARALLEL_AGENTS")
     if selected_mode == "SERIAL_AGENT" and execution_count != 1:
         raise ValueError("SERIAL_AGENT selftest fixture supports one execution")
@@ -130,7 +131,8 @@ def seed_current_plan(
         mode=selected_mode,
         reason="selftest uses the production work-plan transaction",
         exit_gate="selftest result is reviewed and dispositioned",
-        lanes=lane_pairs(execution_count),
+        lanes=[] if selected_mode == "COMPLETION_REVIEW" \
+            else lane_pairs(execution_count),
         contract=contract,
         fault=fault,
     )

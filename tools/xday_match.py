@@ -13,7 +13,7 @@
   内容【永不入库/不 push】(本工具 .py 入库, 它读的东西不入库)。surface 的是【本地副本路径+元数据】。
 - match-gated: 必须 --body 命中【活目标】或显式 --id 才调; --list 只列清单不吐 payload。
   不预载整层当清单盲跑(同 cognition「攻击者非扫描器」: 命中后查、按目标适配)。
-- 证明即止/外发脱敏仍归 src-safety-boundary + poc-package skill 管。
+- 证明即止/外发脱敏仍归 safety-boundary + poc-package skill 管。
 
 用法:
   python tools/xday_match.py --body resp.html    # 目标内容命中 → 调出对应本地 xday

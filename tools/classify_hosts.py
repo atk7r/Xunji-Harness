@@ -9,8 +9,9 @@ ingest_recon.py 把 recon 折成资产表/可达性矩阵；本工具补它的�
 
 它只【分类】，不做选择/判断 —— front 选择仍是 driver 的事。
 
-  python tools/classify_hosts.py <recon.json> [--out runs/<t>/classify] [--delay 1.5]
-  python tools/classify_hosts.py --hosts hosts.txt --out runs/<t>/classify
+  python tools/classify_hosts.py <recon.json> --run runs/<t> \
+    --out runs/<t>/classify --egress-recheck [--delay 1.5]
+  python tools/classify_hosts.py --hosts hosts.txt
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 ROOT = Path(__file__).resolve().parents[1]   # 仓库根(flywheel 读端 load_knowledge_signatures 用; 之前漏定义 → 真 recon 跑必崩 NameError, selftest 没覆盖到那行)
 import probe  # noqa: E402  (复用 send + 其 guard 接入 + UTF-8 stdout)
 from harness.guard import HostBackoff  # noqa: E402
+from harness import output_layout  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
@@ -467,6 +469,7 @@ def _selftest() -> int:
     (egress_out / "coverage.json").write_bytes(baseline_bytes)
     probed: list[str] = []
     original_fetch_body = globals()["fetch_body"]
+    original_root = globals()["ROOT"]
     original_argv = list(sys.argv)
 
     def _offline_fetch(host: str, _save_dir: Path, _timeout: int) -> tuple[str, dict]:
@@ -477,8 +480,10 @@ def _selftest() -> int:
 
     try:
         globals()["fetch_body"] = _offline_fetch
+        globals()["ROOT"] = egress_root
         sys.argv = [
             "classify_hosts.py", str(egress_recon), "--out", str(egress_out),
+            "--run", str(egress_root),
             "--egress-recheck", "--delay", "0",
         ]
         with contextlib.redirect_stdout(io.StringIO()), \
@@ -487,6 +492,7 @@ def _selftest() -> int:
     finally:
         sys.argv = original_argv
         globals()["fetch_body"] = original_fetch_body
+        globals()["ROOT"] = original_root
     egress_data = json.loads((egress_out / "egress_coverage.json").read_text(
         encoding="utf-8"))
     checks += [
@@ -636,6 +642,8 @@ def main() -> int:
     ap.add_argument("recon", nargs="?", help="recon JSON 路径")
     ap.add_argument("--hosts", help="每行一个主机的文本文件")
     ap.add_argument("--out", default=None, help="输出目录(存 body + 表)")
+    ap.add_argument("--run", default=None,
+                    help="run 目录；live egress recheck 输出只允许进入 <run>/classify/")
     ap.add_argument("--delay", type=float, default=1.5, help="每主机间隔秒(配合限速)")
     ap.add_argument("--timeout", type=int, default=8)
     ap.add_argument("--selftest", action="store_true", help="run regression and exit")
@@ -652,18 +660,25 @@ def main() -> int:
     if not (args.recon or args.hosts):
         ap.error("need a recon JSON path or --hosts FILE (or --selftest)")
 
-    if args.egress_recheck and (args.hosts or args.all or not args.recon or not args.out):
-        ap.error("--egress-recheck requires recon + --out and forbids --hosts/--all")
+    if args.egress_recheck and (
+            args.hosts or args.all or not args.recon or not args.out or not args.run):
+        ap.error("--egress-recheck requires recon + --run + --out and forbids --hosts/--all")
 
-    # --out is a DIRECTORY (stores body + tables). Guard the common footgun of
-    # passing a file path like ".../coverage.json" (which used to create a dir
-    # named coverage.json/ with coverage.json inside it): use its parent instead.
+    # --out is a DIRECTORY (stores body + tables). Reject file-shaped values;
+    # silently rewriting to a parent makes the actual destination surprising.
     if args.out and Path(args.out).suffix:
-        print(f"[!] --out '{args.out}' looks like a file; using its parent dir "
-              f"'{Path(args.out).parent}' (--out is a directory).", file=sys.stderr)
-        out_dir = Path(args.out).parent
-    else:
-        out_dir = Path(args.out) if args.out else Path("tmp") / "classify"
+        ap.error("--out is a directory; pass its directory path, not a filename")
+    try:
+        out_dir = output_layout.resolve_run_bucket_dir(
+            args.out,
+            run=args.run,
+            bucket="classify",
+            tool="classify",
+            invocation=output_layout.invocation_id(),
+            repo_root=ROOT,
+        )
+    except output_layout.OutputLayoutError as exc:
+        ap.error(str(exc))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.egress_recheck:

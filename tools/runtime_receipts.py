@@ -10,23 +10,31 @@ because Claude may persist its transcript only after the next PreToolUse begins.
 from __future__ import annotations
 
 import argparse
+import copy
 import contextlib
+import contextvars
 import hashlib
 import json
 import os
 import re
 import shlex
+import stat
 import sys
 import tempfile
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import agent_instruction_bundle as _instruction_bundle
 import contract_schema
+import setup_source as _setup_source
 from evidence_parse import content_path_manifest, current_evidence_index_hash
+from harness import capability_registry as _capability_registry
+from harness import command_shape as _command_shape
 from harness import privacy
+from harness import subagent_stop_ingress as _stop_ingress
 
 try:
     import fcntl
@@ -38,6 +46,10 @@ SCHEMA = "xunji.runtime_receipt.v1"
 EVENTS = "runtime_events.jsonl"
 MAX_EXCERPT = 6000
 MAX_AGENT_RESULT_BYTES = 16 * 1024 * 1024
+MAX_VALIDATION_TRANSCRIPT_BYTES = 64 * 1024 * 1024
+MAX_VALIDATION_TRANSCRIPT_TOTAL_BYTES = 256 * 1024 * 1024
+MAX_VALIDATION_TRANSCRIPT_COUNT = 256
+MAX_VALIDATION_TRANSCRIPT_RECORDS = 200_000
 PROJECTION_ERROR = "runtime_projection_error.json"
 PROJECTION_CURSOR = "runtime_projection_cursor.json"
 PROJECTION_ERROR_SCHEMA = "xunji.runtime_projection_error.v1"
@@ -50,6 +62,35 @@ INTERRUPTED_REVIEWER_START_SCHEMA = "xunji.interrupted-reviewer-start.v1"
 INTERRUPTED_REVIEWER_START_REASON = (
     "subagent_start_hook_cancelled_before_assistant"
 )
+EXTERNALLY_STOPPED_AGENT_DIR = "externally_stopped_agents"
+EXTERNALLY_STOPPED_AGENT_SCHEMA = "xunji.externally-stopped-agent.v1"
+EXTERNALLY_STOPPED_AGENT_REASON = "claude_client_user_stop_no_resume"
+STREAM_STALLED_AGENT_DIR = "stream_stalled_agents"
+STREAM_STALLED_AGENT_SCHEMA = "xunji.stream-stalled-agent.v1"
+STREAM_STALLED_AGENT_REASON = (
+    "claude_stream_watchdog_idle_timeout_no_stop"
+)
+STREAM_STALLED_AGENT_ERROR = (
+    "API Error: Stream idle timeout - no chunks received"
+)
+STREAM_STALLED_AGENT_SUMMARY_SUFFIX = (
+    " failed: Agent stalled: no progress for 600s "
+    "(stream watchdog did not recover)"
+)
+STREAM_STALLED_AGENT_NOTIFICATION_NOTE = (
+    "A task-notification fires each time this agent stops with no live "
+    "background children of its own. The user can send it another message "
+    "and resume it, so the same task-id may notify more than once."
+)
+HOOK_FAILED_AGENT_STOP_DIR = "hook_failed_agent_stops"
+HOOK_FAILED_AGENT_STOP_LEGACY_SCHEMA = "xunji.hook-failed-agent-stop.v1"
+HOOK_FAILED_AGENT_STOP_SCHEMA = "xunji.hook-failed-agent-stop.v2"
+HOOK_FAILED_AGENT_STOP_REASON = "subagent_stop_hook_failed_after_model_return"
+HOOK_FAILED_AGENT_STOP_ERROR = "XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED"
+# Only the observed pre-wrapper incident class may use the direct-turn-contract
+# migration format.  Future direct-hook regressions fail closed instead of
+# silently bypassing the schema-independent ingress boundary.
+HOOK_FAILED_AGENT_STOP_LEGACY_CUTOFF = "2026-08-08T01:10:00Z"
 MAX_PROJECTION_SUCCESS_GENERATION = (1 << 63) - 1
 NONTERMINAL_ASSIGNMENT_STATUSES = {"assigned", "starting", "running", "working", "?", ""}
 TERMINAL_ASSIGNMENT_STATUSES = {
@@ -147,10 +188,58 @@ _INTERRUPTED_REVIEWER_START_FIELDS = {
     "child_transcript_length", "child_transcript_sha256",
     "recorded_at", "receipt_hash",
 }
+_EXTERNALLY_STOPPED_AGENT_FIELDS = {
+    "schema", "parent_run", "reason", "assignment", "role", "session_id",
+    "agent_id", "tool_use_id", "lane_id", "plan_digest",
+    "launch_prompt_sha256", "launch_event_seq", "launch_event_hash",
+    "start_event_seq", "start_event_hash", "observed_head_seq",
+    "observed_head_hash", "stop_tool_use_id", "stop_message", "stopped_at",
+    "parent_transcript_prefix_length", "parent_transcript_prefix_sha256",
+    "child_transcript_length", "child_transcript_sha256", "result_snapshot",
+    "recorded_at", "receipt_hash",
+}
+_STREAM_STALLED_AGENT_FIELDS = {
+    "schema", "parent_run", "reason", "assignment", "role", "session_id",
+    "agent_id", "tool_use_id", "lane_id", "plan_digest",
+    "launch_prompt_sha256", "launch_event_seq", "launch_event_hash",
+    "start_event_seq", "start_event_hash", "observed_head_seq",
+    "observed_head_hash", "agent_description", "stall_summary",
+    "parent_notification_uuid", "child_error_uuid",
+    "child_interrupted_uuid", "failed_at",
+    "parent_transcript_prefix_length", "parent_transcript_prefix_sha256",
+    "child_transcript_length", "child_transcript_sha256", "result_snapshot",
+    "recorded_at", "receipt_hash",
+}
+_HOOK_FAILED_AGENT_STOP_FIELDS = {
+    "schema", "parent_run", "reason", "assignment", "role", "front",
+    "subagent_type", "session_id", "agent_id", "tool_use_id", "lane_id",
+    "plan_digest", "launch_prompt_sha256", "launch_event_seq",
+    "launch_event_hash", "start_event_seq", "start_event_hash",
+    "observed_head_seq", "observed_head_hash", "hook_error_code",
+    "hook_error_cause", "hook_driver", "parent_notification_uuid", "child_final_uuid",
+    "child_hook_feedback_uuid", "returned_at",
+    "stop_ingress_receipt_hash",
+    "parent_transcript_prefix_length", "parent_transcript_prefix_sha256",
+    "child_transcript_length", "child_transcript_sha256", "result_snapshot",
+    "recorded_at", "receipt_hash",
+}
+_EXTERNAL_STOP_RESULT_FIELDS = {
+    "schema", "assignment", "agent_id", "outcome", "reason",
+    "stop_tool_use_id", "stopped_at", "message",
+}
 
 
 class RuntimeReceiptDurabilityError(OSError):
     """A runtime receipt or immutable artifact missed its durability barrier."""
+
+
+class TranscriptSnapshotMutationError(RuntimeError):
+    """A transcript changed identity or bytes during one validation pass."""
+
+
+_ACTIVE_VALIDATION_SNAPSHOT: contextvars.ContextVar[object | None] = (
+    contextvars.ContextVar("xunji_active_validation_snapshot", default=None)
+)
 
 
 def _json_bytes(value: object) -> bytes:
@@ -196,6 +285,18 @@ def _foreign_lifecycle_dir(run_dir: Path) -> Path:
 
 def _interrupted_reviewer_start_dir(run_dir: Path) -> Path:
     return run_dir / "state" / INTERRUPTED_REVIEWER_START_DIR
+
+
+def _externally_stopped_agent_dir(run_dir: Path) -> Path:
+    return run_dir / "state" / EXTERNALLY_STOPPED_AGENT_DIR
+
+
+def _stream_stalled_agent_dir(run_dir: Path) -> Path:
+    return run_dir / "state" / STREAM_STALLED_AGENT_DIR
+
+
+def _hook_failed_agent_stop_dir(run_dir: Path) -> Path:
+    return run_dir / "state" / HOOK_FAILED_AGENT_STOP_DIR
 
 
 @contextlib.contextmanager
@@ -569,6 +670,8 @@ def completion_review_state(
     except Exception:
         return {}
     if str(plan.get("macro_stage") or "") != "S3" \
+            or str(plan.get("execution_mode") or "") != "COMPLETION_REVIEW" \
+            or plan.get("lanes") != [] \
             or not re.fullmatch(r"[0-9a-f]{64}", str(
                 plan.get("plan_digest") or "")):
         return {}
@@ -723,6 +826,8 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
         if isinstance(event.get("tool_input"), dict) else {}
     lifecycle_binding = event.get("xunji_agent_lifecycle_binding") \
         if isinstance(event.get("xunji_agent_lifecycle_binding"), dict) else {}
+    tool_call_binding = event.get("xunji_agent_tool_call_binding") \
+        if isinstance(event.get("xunji_agent_tool_call_binding"), dict) else {}
     parsed_parent_agent_binding = _agent_invocation_binding({
         "tool_use_id": str(event.get("tool_use_id") or ""),
         "tool_input": tool_input,
@@ -731,7 +836,10 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
         if isinstance(event.get("xunji_agent_parent_binding"), dict) else {}
     parent_agent_binding = (
         frozen_parent_agent_binding or parsed_parent_agent_binding)
-    agent_binding = lifecycle_binding or parent_agent_binding
+    # Child PreToolUse claims are the only authority for binding an ordinary
+    # child denial/success/failure back to its immutable assignment plan/lane.
+    # Do not infer that identity from command text or mutable assignments.
+    agent_binding = lifecycle_binding or tool_call_binding or parent_agent_binding
     if agent_binding:
         assignment = str(agent_binding.get("assignment") or "")
         front = str(agent_binding.get("front") or "")
@@ -748,6 +856,10 @@ def normalize_hook_event(run_dir: str | Path, event: dict) -> dict:
     launched_agent_id, agent_is_async, agent_status = _agent_launch_fields(response)
     tool_use_id = str(
         lifecycle_binding.get("tool_use_id") or event.get("tool_use_id") or "")
+    # Subagent lifecycle inputs are host envelopes, so their frozen lifecycle
+    # binding is the action identity.  An ordinary child tool event must retain
+    # its real tool input/action hash even when claim metadata supplies the
+    # assignment identity.
     binding_input = lifecycle_binding if lifecycle_binding else event.get("tool_input") or {}
     record = {
         "schema": SCHEMA,
@@ -1476,6 +1588,1065 @@ def _load_interrupted_reviewer_start_receipts(
     return receipts
 
 
+def _externally_stopped_agent_receipt_hash(receipt: dict) -> str:
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_hash", None)
+    return _hash(unsigned)
+
+
+def _external_stop_message(agent_id: str) -> str:
+    return (
+        f"Agent {agent_id} was stopped by the user and won't be resumed. "
+        "Treat its work as cancelled; only launch a new agent if the user "
+        "explicitly asks."
+    )
+
+
+def _external_stop_result_value(receipt: dict) -> dict:
+    return {
+        "schema": "xunji.external-stop-result.v1",
+        "assignment": str(receipt.get("assignment") or ""),
+        "agent_id": str(receipt.get("agent_id") or ""),
+        "outcome": "failed",
+        "reason": EXTERNALLY_STOPPED_AGENT_REASON,
+        "stop_tool_use_id": str(receipt.get("stop_tool_use_id") or ""),
+        "stopped_at": str(receipt.get("stopped_at") or ""),
+        "message": str(receipt.get("stop_message") or ""),
+    }
+
+
+def _external_stop_event_owned(receipt: dict, event: dict) -> bool:
+    session_id = str(receipt.get("session_id") or "")
+    agent_id = str(receipt.get("agent_id") or "")
+    tool_use_id = str(receipt.get("tool_use_id") or "")
+    if str(event.get("session_id") or "") != session_id:
+        return False
+    if str(event.get("agent_id") or "") == agent_id:
+        return True
+    return bool(
+        event.get("tool_name") == "Agent"
+        and str(event.get("tool_use_id") or "") == tool_use_id
+    )
+
+
+def _validate_externally_stopped_agent_receipt(
+    run_dir: Path,
+    receipt: object,
+    events: list[dict],
+    *,
+    filename: str,
+) -> str:
+    if contract_schema.named_schema_errors(
+            receipt, "externally-stopped-agent.v1.schema.json"):
+        return "invalid formal receipt shape"
+    if not isinstance(receipt, dict) \
+            or set(receipt) != _EXTERNALLY_STOPPED_AGENT_FIELDS:
+        return "invalid receipt shape"
+    if receipt.get("schema") != EXTERNALLY_STOPPED_AGENT_SCHEMA \
+            or receipt.get("parent_run") != run_dir.name \
+            or receipt.get("reason") != EXTERNALLY_STOPPED_AGENT_REASON \
+            or receipt.get("role") not in _ASSIGNMENT_HUNTER_ROLES:
+        return "invalid receipt identity"
+    claimed = str(receipt.get("receipt_hash") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", claimed) \
+            or claimed != _externally_stopped_agent_receipt_hash(receipt) \
+            or filename != f"{claimed}.json":
+        return "invalid receipt hash or filename"
+    digest_fields = (
+        "plan_digest", "launch_prompt_sha256", "launch_event_hash",
+        "start_event_hash", "observed_head_hash",
+        "parent_transcript_prefix_sha256", "child_transcript_sha256",
+    )
+    if not _valid_iso_datetime(receipt.get("recorded_at")) \
+            or not _valid_iso_datetime(receipt.get("stopped_at")) \
+            or any(
+                re.fullmatch(r"[0-9a-f]{64}", str(receipt.get(field) or ""))
+                is None for field in digest_fields):
+        return "invalid receipt digest or timestamp"
+    for field in (
+            "launch_event_seq", "start_event_seq", "observed_head_seq",
+            "parent_transcript_prefix_length", "child_transcript_length"):
+        value = receipt.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return f"invalid {field}"
+    launch_seq = int(receipt["launch_event_seq"])
+    start_seq = int(receipt["start_event_seq"])
+    head_seq = int(receipt["observed_head_seq"])
+    if launch_seq > len(events) or start_seq > len(events) or head_seq > len(events):
+        return "receipt event is outside the runtime journal"
+    launch = events[launch_seq - 1]
+    start = events[start_seq - 1]
+    if str(launch.get("receipt_hash") or "") \
+            != str(receipt.get("launch_event_hash") or "") \
+            or str(start.get("receipt_hash") or "") \
+            != str(receipt.get("start_event_hash") or "") \
+            or str(events[head_seq - 1].get("receipt_hash") or "") \
+            != str(receipt.get("observed_head_hash") or ""):
+        return "receipt does not bind immutable runtime events"
+    exact_common = {
+        "assignment": str(receipt.get("assignment") or ""),
+        "session_id": str(receipt.get("session_id") or ""),
+        "tool_use_id": str(receipt.get("tool_use_id") or ""),
+        "assignment_lane": str(receipt.get("lane_id") or ""),
+        "assignment_plan_digest": str(receipt.get("plan_digest") or ""),
+        "launch_prompt_sha256": str(
+            receipt.get("launch_prompt_sha256") or ""),
+        "subagent_type": _HUNTER_AGENT_TYPE,
+    }
+    if launch.get("hook_event_name") != "PostToolUse" \
+            or launch.get("tool_name") != "Agent" \
+            or launch.get("success") is not True \
+            or str(launch.get("launched_agent_id") or "") \
+                != str(receipt.get("agent_id") or "") \
+            or any(launch.get(field) != value
+                   for field, value in exact_common.items()):
+        return "receipt does not bind the exact successful Agent launch"
+    start_common = dict(exact_common)
+    start_common["agent_id"] = str(receipt.get("agent_id") or "")
+    if start.get("hook_event_name") != "SubagentStart" \
+            or start.get("completion_review") is True \
+            or start.get("agent_type") != _HUNTER_AGENT_TYPE \
+            or any(start.get(field) != value
+                   for field, value in start_common.items()):
+        return "receipt does not bind the exact Hunter Start"
+    if not launch_seq < start_seq <= head_seq:
+        return "receipt runtime ordering is invalid"
+    if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == exact_common["session_id"]
+            and str(item.get("agent_id") or "")
+                == str(receipt.get("agent_id") or "")
+            for item in events):
+        return "externally stopped Agent has a runtime Stop"
+    if any(
+            int(item.get("seq") or 0) > head_seq
+            and _external_stop_event_owned(receipt, item)
+            for item in events):
+        return "externally stopped Agent has later runtime activity"
+    stop_epoch = _parse_iso_timestamp(str(receipt.get("stopped_at") or ""))
+    if not stop_epoch or any(
+            _external_stop_event_owned(receipt, item)
+            and float(item.get("ts") or 0.0) > stop_epoch + 0.001
+            for item in events):
+        return "externally stopped Agent activity follows the client stop"
+    try:
+        transcript = _external_stop_transcript_proof(start)
+    except RuntimeError as exc:
+        return "external stop transcript proof invalid: " + str(exc)
+    transcript_fields = (
+        "stop_tool_use_id", "stop_message", "stopped_at",
+        "parent_transcript_prefix_length", "parent_transcript_prefix_sha256",
+        "child_transcript_length", "child_transcript_sha256",
+    )
+    if any(transcript.get(field) != receipt.get(field)
+           for field in transcript_fields):
+        return "external stop transcript proof changed"
+    snapshot = receipt.get("result_snapshot") \
+        if isinstance(receipt.get("result_snapshot"), dict) else {}
+    payload = _agent_result_bytes(_external_stop_result_value(receipt))
+    digest = hashlib.sha256(payload).hexdigest()
+    expected = (
+        run_dir / "state" / "merge_results"
+        / str(receipt.get("assignment") or "invalid")
+        / f"{receipt.get('agent_id')}-{digest}.json"
+    ).resolve(strict=False)
+    try:
+        actual_path = Path(str(snapshot.get("path") or "")).resolve(strict=True)
+        actual_payload = actual_path.read_bytes()
+    except Exception:
+        return "external stop result snapshot is unavailable"
+    if actual_path != expected or actual_payload != payload \
+            or snapshot != {
+                "path": str(actual_path),
+                "length": len(payload),
+                "sha256": digest,
+                "missing": False,
+                "source": "external_stop_receipt",
+            }:
+        return "external stop result snapshot changed"
+    return ""
+
+
+def _load_externally_stopped_agent_receipts(
+    run_dir: Path,
+    events: list[dict],
+) -> list[dict]:
+    directory = _externally_stopped_agent_dir(run_dir)
+    if not directory.exists():
+        return []
+    if directory.is_symlink() or not directory.is_dir():
+        raise RuntimeError("externally stopped Agent receipt directory is not regular")
+    receipts: list[dict] = []
+    for path in sorted(directory.glob("*.json")):
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(
+                f"externally stopped Agent receipt is not regular: {path.name}")
+        try:
+            receipt = json.loads(path.read_text(
+                encoding="utf-8", errors="strict"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"externally stopped Agent receipt is unreadable: {path.name}"
+            ) from exc
+        error = _validate_externally_stopped_agent_receipt(
+            run_dir, receipt, events, filename=path.name)
+        if error:
+            raise RuntimeError(
+                f"externally stopped Agent receipt {path.name} invalid: {error}")
+        receipts.append(receipt)
+    identities = [
+        (
+            str(item["session_id"]), str(item["agent_id"]),
+            str(item["tool_use_id"]),
+        )
+        for item in receipts
+    ]
+    if len(identities) != len(set(identities)):
+        raise RuntimeError("externally stopped Agent receipt duplicates an attempt")
+    return receipts
+
+
+def _stream_stalled_agent_receipt_hash(receipt: dict) -> str:
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_hash", None)
+    return _hash(unsigned)
+
+
+def _stream_stall_result_value(receipt: dict) -> dict:
+    return {
+        "schema": "xunji.stream-stall-result.v1",
+        "assignment": str(receipt.get("assignment") or ""),
+        "agent_id": str(receipt.get("agent_id") or ""),
+        "outcome": "failed",
+        "reason": STREAM_STALLED_AGENT_REASON,
+        "failed_at": str(receipt.get("failed_at") or ""),
+        "summary": str(receipt.get("stall_summary") or ""),
+        "message": (
+            "Claude Code's stream watchdog terminated this Agent without a "
+            "SubagentStop receipt. The attempt produced no admissible result."
+        ),
+    }
+
+
+def _stream_stall_event_owned(receipt: dict, event: dict) -> bool:
+    return bool(
+        str(event.get("session_id") or "")
+        == str(receipt.get("session_id") or "")
+        and (
+            str(event.get("agent_id") or "")
+            == str(receipt.get("agent_id") or "")
+            or (
+                event.get("tool_name") == "Agent"
+                and str(event.get("tool_use_id") or "")
+                == str(receipt.get("tool_use_id") or "")
+            )
+        )
+    )
+
+
+def _validate_stream_stalled_agent_receipt(
+    run_dir: Path,
+    receipt: object,
+    events: list[dict],
+    *,
+    filename: str,
+) -> str:
+    if contract_schema.named_schema_errors(
+            receipt, "stream-stalled-agent.v1.schema.json"):
+        return "invalid formal receipt shape"
+    if not isinstance(receipt, dict) \
+            or set(receipt) != _STREAM_STALLED_AGENT_FIELDS:
+        return "invalid receipt shape"
+    if receipt.get("schema") != STREAM_STALLED_AGENT_SCHEMA \
+            or receipt.get("parent_run") != run_dir.name \
+            or receipt.get("reason") != STREAM_STALLED_AGENT_REASON \
+            or receipt.get("role") not in _ASSIGNMENT_HUNTER_ROLES:
+        return "invalid receipt identity"
+    claimed = str(receipt.get("receipt_hash") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", claimed) \
+            or claimed != _stream_stalled_agent_receipt_hash(receipt) \
+            or filename != f"{claimed}.json":
+        return "invalid receipt hash or filename"
+    digest_fields = (
+        "plan_digest", "launch_prompt_sha256", "launch_event_hash",
+        "start_event_hash", "observed_head_hash",
+        "parent_transcript_prefix_sha256", "child_transcript_sha256",
+    )
+    if not _valid_iso_datetime(receipt.get("recorded_at")) \
+            or not _valid_iso_datetime(receipt.get("failed_at")) \
+            or any(
+                re.fullmatch(r"[0-9a-f]{64}", str(receipt.get(field) or ""))
+                is None for field in digest_fields):
+        return "invalid receipt digest or timestamp"
+    for field in (
+            "launch_event_seq", "start_event_seq", "observed_head_seq",
+            "parent_transcript_prefix_length", "child_transcript_length"):
+        value = receipt.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return f"invalid {field}"
+    launch_seq = int(receipt["launch_event_seq"])
+    start_seq = int(receipt["start_event_seq"])
+    head_seq = int(receipt["observed_head_seq"])
+    if launch_seq > len(events) or start_seq > len(events) \
+            or head_seq > len(events):
+        return "receipt event is outside the runtime journal"
+    launch = events[launch_seq - 1]
+    start = events[start_seq - 1]
+    if str(launch.get("receipt_hash") or "") \
+            != str(receipt.get("launch_event_hash") or "") \
+            or str(start.get("receipt_hash") or "") \
+            != str(receipt.get("start_event_hash") or "") \
+            or str(events[head_seq - 1].get("receipt_hash") or "") \
+            != str(receipt.get("observed_head_hash") or ""):
+        return "receipt does not bind immutable runtime events"
+    exact_common = {
+        "assignment": str(receipt.get("assignment") or ""),
+        "session_id": str(receipt.get("session_id") or ""),
+        "tool_use_id": str(receipt.get("tool_use_id") or ""),
+        "assignment_lane": str(receipt.get("lane_id") or ""),
+        "assignment_plan_digest": str(receipt.get("plan_digest") or ""),
+        "launch_prompt_sha256": str(
+            receipt.get("launch_prompt_sha256") or ""),
+        "subagent_type": _HUNTER_AGENT_TYPE,
+    }
+    if launch.get("hook_event_name") != "PostToolUse" \
+            or launch.get("tool_name") != "Agent" \
+            or launch.get("success") is not True \
+            or str(launch.get("launched_agent_id") or "") \
+                != str(receipt.get("agent_id") or "") \
+            or any(launch.get(field) != value
+                   for field, value in exact_common.items()):
+        return "receipt does not bind the exact successful Agent launch"
+    start_common = dict(exact_common)
+    start_common["agent_id"] = str(receipt.get("agent_id") or "")
+    if start.get("hook_event_name") != "SubagentStart" \
+            or start.get("completion_review") is True \
+            or start.get("agent_type") != _HUNTER_AGENT_TYPE \
+            or any(start.get(field) != value
+                   for field, value in start_common.items()):
+        return "receipt does not bind the exact Hunter Start"
+    if not launch_seq < start_seq <= head_seq:
+        return "receipt runtime ordering is invalid"
+    if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == exact_common["session_id"]
+            and str(item.get("agent_id") or "")
+                == str(receipt.get("agent_id") or "")
+            for item in events):
+        return "stream-stalled Agent has a runtime Stop"
+    if any(
+            int(item.get("seq") or 0) > head_seq
+            and _stream_stall_event_owned(receipt, item)
+            for item in events):
+        return "stream-stalled Agent has later runtime activity"
+    failed_epoch = _parse_iso_timestamp(str(receipt.get("failed_at") or ""))
+    if not failed_epoch or any(
+            _stream_stall_event_owned(receipt, item)
+            and float(item.get("ts") or 0.0) > failed_epoch + 0.001
+            for item in events):
+        return "stream-stalled Agent activity follows watchdog failure"
+    try:
+        transcript = _stream_stall_transcript_proof(start)
+    except RuntimeError as exc:
+        return "stream-stall transcript proof invalid: " + str(exc)
+    transcript_fields = (
+        "agent_description", "stall_summary", "parent_notification_uuid",
+        "child_error_uuid", "child_interrupted_uuid", "failed_at",
+        "parent_transcript_prefix_length", "parent_transcript_prefix_sha256",
+        "child_transcript_length", "child_transcript_sha256",
+    )
+    if any(transcript.get(field) != receipt.get(field)
+           for field in transcript_fields):
+        return "stream-stall transcript proof changed"
+    snapshot = receipt.get("result_snapshot") \
+        if isinstance(receipt.get("result_snapshot"), dict) else {}
+    payload = _agent_result_bytes(_stream_stall_result_value(receipt))
+    digest = hashlib.sha256(payload).hexdigest()
+    expected = (
+        run_dir / "state" / "merge_results"
+        / str(receipt.get("assignment") or "invalid")
+        / f"{receipt.get('agent_id')}-{digest}.json"
+    ).resolve(strict=False)
+    try:
+        actual_path = Path(str(snapshot.get("path") or "")).resolve(strict=True)
+        actual_payload = actual_path.read_bytes()
+    except Exception:
+        return "stream-stall result snapshot is unavailable"
+    if actual_path != expected or actual_payload != payload \
+            or snapshot != {
+                "path": str(actual_path),
+                "length": len(payload),
+                "sha256": digest,
+                "missing": False,
+                "source": "stream_stall_receipt",
+            }:
+        return "stream-stall result snapshot changed"
+    return ""
+
+
+def _load_stream_stalled_agent_receipts(
+    run_dir: Path,
+    events: list[dict],
+) -> list[dict]:
+    directory = _stream_stalled_agent_dir(run_dir)
+    if not directory.exists():
+        return []
+    if directory.is_symlink() or not directory.is_dir():
+        raise RuntimeError("stream-stalled Agent receipt directory is not regular")
+    receipts: list[dict] = []
+    for path in sorted(directory.glob("*.json")):
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(
+                f"stream-stalled Agent receipt is not regular: {path.name}")
+        try:
+            receipt = json.loads(path.read_text(
+                encoding="utf-8", errors="strict"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"stream-stalled Agent receipt is unreadable: {path.name}"
+            ) from exc
+        error = _validate_stream_stalled_agent_receipt(
+            run_dir, receipt, events, filename=path.name)
+        if error:
+            raise RuntimeError(
+                f"stream-stalled Agent receipt {path.name} invalid: {error}")
+        receipts.append(receipt)
+    identities = [
+        (str(item["session_id"]), str(item["agent_id"]),
+         str(item["tool_use_id"]))
+        for item in receipts
+    ]
+    if len(identities) != len(set(identities)):
+        raise RuntimeError("stream-stalled Agent receipt duplicates an attempt")
+    return receipts
+
+
+def _hook_failed_agent_stop_receipt_hash(receipt: dict) -> str:
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_hash", None)
+    return _hash(unsigned)
+
+
+def _hook_failed_stop_receipt_schema(
+    hook_driver: str,
+    returned_at: str,
+    ingress_hash: str,
+) -> str:
+    """Select one mechanically disjoint legacy/current recovery contract."""
+    if hook_driver == "legacy_direct_turn_contract":
+        returned_epoch = _parse_iso_timestamp(returned_at)
+        cutoff_epoch = _parse_iso_timestamp(
+            HOOK_FAILED_AGENT_STOP_LEGACY_CUTOFF)
+        if ingress_hash or not returned_epoch or not cutoff_epoch \
+                or returned_epoch > cutoff_epoch:
+            raise RuntimeError("HOOK_FAILED_STOP_LEGACY_CUTOVER_EXPIRED")
+        return HOOK_FAILED_AGENT_STOP_LEGACY_SCHEMA
+    if hook_driver == "schema_independent_wrapper":
+        if re.fullmatch(r"[0-9a-f]{64}", ingress_hash) is None:
+            raise RuntimeError("HOOK_FAILED_STOP_INGRESS_MISSING")
+        return HOOK_FAILED_AGENT_STOP_SCHEMA
+    raise RuntimeError("HOOK_FAILED_STOP_DRIVER_INVALID")
+
+
+def _hook_failed_stop_event_owned(receipt: dict, event: dict) -> bool:
+    return bool(
+        str(event.get("session_id") or "")
+        == str(receipt.get("session_id") or "")
+        and (
+            str(event.get("agent_id") or "")
+            == str(receipt.get("agent_id") or "")
+            or (
+                event.get("tool_name") == "Agent"
+                and str(event.get("tool_use_id") or "")
+                == str(receipt.get("tool_use_id") or "")
+            )
+        )
+    )
+
+
+def _task_notification_tag(content: str, tag: str) -> str:
+    pattern = re.compile(
+        rf"<{re.escape(tag)}>([^<>]*)</{re.escape(tag)}>"
+    )
+    matches = pattern.findall(content)
+    return matches[0] if len(matches) == 1 else ""
+
+
+def _task_notification_result(content: str) -> str:
+    opening = "<result>"
+    closing = "</result>"
+    if content.count(opening) != 1 or content.count(closing) != 1:
+        return ""
+    before, remainder = content.split(opening, 1)
+    result, after = remainder.split(closing, 1)
+    if not before.startswith("<task-notification>") \
+            or not after.startswith("\n<usage>") \
+            or not content.endswith("</task-notification>"):
+        return ""
+    return result if result.strip() else ""
+
+
+def _failed_task_notification_result(content: str) -> str:
+    opening = "<result>"
+    closing = "</result>"
+    if content.count(opening) != 1 or content.count(closing) != 1:
+        return ""
+    before, remainder = content.split(opening, 1)
+    result, after = remainder.split(closing, 1)
+    if not before.startswith("<task-notification>\n") \
+            or after != "\n</task-notification>":
+        return ""
+    return result if result.strip() else ""
+
+
+def _stream_stall_transcript_proof(start: dict) -> dict:
+    """Freeze one exact host watchdog failure and terminal child error pair."""
+    session_id = str(start.get("session_id") or "")
+    agent_id = str(start.get("agent_id") or "")
+    tool_use_id = str(start.get("tool_use_id") or "")
+    transcript_path = Path(str(start.get("transcript_path") or ""))
+    if start.get("hook_event_name") != "SubagentStart" \
+            or start.get("subagent_type") != _HUNTER_AGENT_TYPE \
+            or start.get("agent_type") != _HUNTER_AGENT_TYPE \
+            or not _TRANSCRIPT_ID_RE.fullmatch(session_id) \
+            or not _TRANSCRIPT_ID_RE.fullmatch(agent_id) \
+            or not tool_use_id:
+        raise RuntimeError("STREAM_STALL_START_INVALID")
+
+    parent_payload, parent_records = _transcript_json_records(transcript_path)
+    parent_lines = parent_payload.splitlines(keepends=True)
+    if len(parent_lines) != len(parent_records):
+        raise RuntimeError("STREAM_STALL_PARENT_LINES_INVALID")
+    parent_calls = [
+        candidate
+        for record in parent_records
+        for candidate in _agent_tool_use_candidates(record)
+        if str(candidate.get("tool_use_id") or "") == tool_use_id
+    ]
+    if len(parent_calls) != 1:
+        raise RuntimeError("STREAM_STALL_PARENT_CALL_NOT_UNIQUE")
+    tool_input = parent_calls[0].get("tool_input") \
+        if isinstance(parent_calls[0].get("tool_input"), dict) else {}
+    description = str(tool_input.get("description") or "")
+    prompt = str(tool_input.get("prompt") or "")
+    if not description or len(description) > 255 \
+            or tool_input.get("subagent_type") != _HUNTER_AGENT_TYPE \
+            or _launch_prompt_sha256(prompt) \
+                != str(start.get("launch_prompt_sha256") or ""):
+        raise RuntimeError("STREAM_STALL_PARENT_CALL_BINDING_INVALID")
+    expected_summary = f'Agent "{description}"' \
+        + STREAM_STALLED_AGENT_SUMMARY_SUFFIX
+    notifications: list[tuple[int, dict]] = []
+    for index, record in enumerate(parent_records):
+        message = record.get("message") \
+            if isinstance(record.get("message"), dict) else {}
+        origin = record.get("origin") \
+            if isinstance(record.get("origin"), dict) else {}
+        content = message.get("content")
+        if record.get("isSidechain") is not False \
+                or record.get("type") != "user" \
+                or message.get("role") != "user" \
+                or not isinstance(content, str) \
+                or origin.get("kind") != "task-notification" \
+                or record.get("promptSource") != "system" \
+                or str(record.get("sessionId") or "") != session_id:
+            continue
+        if _task_notification_tag(content, "task-id") != agent_id \
+                or _task_notification_tag(content, "tool-use-id") \
+                    != tool_use_id \
+                or _task_notification_tag(content, "status") != "failed" \
+                or _task_notification_tag(content, "summary") \
+                    != expected_summary \
+                or _task_notification_tag(content, "note") \
+                    != STREAM_STALLED_AGENT_NOTIFICATION_NOTE \
+                or not _failed_task_notification_result(content):
+            continue
+        notifications.append((index, record))
+    if len(notifications) != 1:
+        raise RuntimeError("STREAM_STALL_NOTIFICATION_NOT_UNIQUE")
+    notification_index, notification = notifications[0]
+    notification_at = str(notification.get("timestamp") or "")
+    notification_uuid = str(notification.get("uuid") or "")
+    if not _valid_iso_datetime(notification_at) \
+            or not _TRANSCRIPT_ID_RE.fullmatch(notification_uuid):
+        raise RuntimeError("STREAM_STALL_NOTIFICATION_IDENTITY_INVALID")
+
+    child_path = _child_transcript_path(start)
+    if child_path is None:
+        raise RuntimeError("STREAM_STALL_CHILD_TRANSCRIPT_MISSING")
+    child_payload, child_records = _transcript_json_records(child_path)
+    first = child_records[0]
+    first_message = first.get("message") \
+        if isinstance(first.get("message"), dict) else {}
+    initial = first_message.get("content")
+    if first.get("isSidechain") is not True \
+            or str(first.get("sessionId") or "") != session_id \
+            or str(first.get("agentId") or "") != agent_id \
+            or first.get("type") != "user" \
+            or first_message.get("role") != "user" \
+            or not isinstance(initial, str) \
+            or _launch_prompt_sha256(initial) \
+                != str(start.get("launch_prompt_sha256") or ""):
+        raise RuntimeError("STREAM_STALL_CHILD_PROMPT_INVALID")
+    if len(child_records) < 3:
+        raise RuntimeError("STREAM_STALL_CHILD_TERMINAL_PAIR_MISSING")
+    error_record = child_records[-2]
+    interrupted_record = child_records[-1]
+    error_message = error_record.get("message") \
+        if isinstance(error_record.get("message"), dict) else {}
+    interrupted_message = interrupted_record.get("message") \
+        if isinstance(interrupted_record.get("message"), dict) else {}
+    error_content = error_message.get("content")
+    interrupted_content = interrupted_message.get("content")
+    if error_record.get("isSidechain") is not True \
+            or str(error_record.get("sessionId") or "") != session_id \
+            or str(error_record.get("agentId") or "") != agent_id \
+            or error_record.get("type") != "assistant" \
+            or error_record.get("isApiErrorMessage") is not True \
+            or error_record.get("error") != "unknown" \
+            or error_message.get("role") != "assistant" \
+            or error_message.get("model") != "<synthetic>" \
+            or error_message.get("stop_reason") != "stop_sequence" \
+            or not isinstance(error_content, list) \
+            or error_content != [{
+                "type": "text", "text": STREAM_STALLED_AGENT_ERROR,
+            }]:
+        raise RuntimeError("STREAM_STALL_CHILD_ERROR_INVALID")
+    if interrupted_record.get("isSidechain") is not True \
+            or str(interrupted_record.get("sessionId") or "") != session_id \
+            or str(interrupted_record.get("agentId") or "") != agent_id \
+            or interrupted_record.get("type") != "user" \
+            or interrupted_message.get("role") != "user" \
+            or interrupted_content != [{
+                "type": "text", "text": "[Request interrupted by user]",
+            }] \
+            or str(interrupted_record.get("parentUuid") or "") \
+                != str(error_record.get("uuid") or ""):
+        raise RuntimeError("STREAM_STALL_CHILD_INTERRUPTED_INVALID")
+    error_uuid = str(error_record.get("uuid") or "")
+    interrupted_uuid = str(interrupted_record.get("uuid") or "")
+    error_at = str(error_record.get("timestamp") or "")
+    interrupted_at = str(interrupted_record.get("timestamp") or "")
+    if not all(_TRANSCRIPT_ID_RE.fullmatch(item) for item in (
+            error_uuid, interrupted_uuid)) \
+            or not _valid_iso_datetime(error_at) \
+            or not _valid_iso_datetime(interrupted_at) \
+            or not (
+                _parse_iso_timestamp(error_at)
+                <= _parse_iso_timestamp(interrupted_at)
+                <= _parse_iso_timestamp(notification_at)
+            ):
+        raise RuntimeError("STREAM_STALL_TRANSCRIPT_ORDER_INVALID")
+    prefix = b"".join(parent_lines[:notification_index + 1])
+    if not prefix or not parent_payload.startswith(prefix):
+        raise RuntimeError("STREAM_STALL_PARENT_PREFIX_INVALID")
+    return {
+        "agent_description": description,
+        "stall_summary": expected_summary,
+        "parent_notification_uuid": notification_uuid,
+        "child_error_uuid": error_uuid,
+        "child_interrupted_uuid": interrupted_uuid,
+        "failed_at": _iso_timestamp(_parse_iso_timestamp(notification_at)),
+        "parent_transcript_prefix_length": len(prefix),
+        "parent_transcript_prefix_sha256": hashlib.sha256(prefix).hexdigest(),
+        "child_transcript_length": len(child_payload),
+        "child_transcript_sha256": hashlib.sha256(child_payload).hexdigest(),
+    }
+
+
+def _final_assistant_text(record: dict) -> str:
+    try:
+        content = _last_assistant_content(record)
+    except RuntimeError:
+        return ""
+    if not _assistant_event_is_final(record, content):
+        return ""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list) or len(content) != 1 \
+            or not isinstance(content[0], dict) \
+            or content[0].get("type") != "text":
+        return ""
+    return str(content[0].get("text") or "")
+
+
+def _hook_failed_stop_feedback(record: dict, *, session_id: str,
+                               agent_id: str) -> dict:
+    if record.get("isSidechain") is not True \
+            or str(record.get("sessionId") or "") != session_id \
+            or str(record.get("agentId") or "") != agent_id \
+            or record.get("type") != "user":
+        return {}
+    message = record.get("message") \
+        if isinstance(record.get("message"), dict) else {}
+    if message.get("role") != "user" or not isinstance(
+            message.get("content"), str):
+        return {}
+    prefixes = (
+        (
+            "legacy_direct_turn_contract",
+            r"\[python3 \"\$CLAUDE_PROJECT_DIR/tools/turn_contract\.py\"\]",
+        ),
+        (
+            "schema_independent_wrapper",
+            r"\[python3 \"\$CLAUDE_PROJECT_DIR/tools/harness/"
+            r"subagent_stop_ingress\.py\"\]",
+        ),
+    )
+    for driver, prefix in prefixes:
+        match = re.fullmatch(
+            r"Stop hook feedback:\n" + prefix + r": "
+            r"\[XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED\] SubagentStop runtime "
+            r"receipt recording failed closed: ([A-Za-z][A-Za-z0-9_.]{0,127})\n?",
+            message["content"],
+        )
+        if match:
+            return {"cause": str(match.group(1)), "driver": driver}
+    return {}
+
+
+def _hook_failed_stop_transcript_proof(start: dict) -> dict:
+    """Freeze one host-authored failed Stop plus its exact completed result."""
+    session_id = str(start.get("session_id") or "")
+    agent_id = str(start.get("agent_id") or "")
+    tool_use_id = str(start.get("tool_use_id") or "")
+    transcript_path = Path(str(start.get("transcript_path") or ""))
+    if start.get("hook_event_name") != "SubagentStart" \
+            or start.get("subagent_type") not in {
+                _HUNTER_AGENT_TYPE, _REVIEWER_AGENT_TYPE,
+            } \
+            or start.get("agent_type") != start.get("subagent_type") \
+            or not _TRANSCRIPT_ID_RE.fullmatch(session_id) \
+            or not _TRANSCRIPT_ID_RE.fullmatch(agent_id) \
+            or not tool_use_id:
+        raise RuntimeError("HOOK_FAILED_STOP_START_INVALID")
+
+    parent_payload, parent_records = _transcript_json_records(transcript_path)
+    parent_lines = parent_payload.splitlines(keepends=True)
+    if len(parent_lines) != len(parent_records):
+        raise RuntimeError("HOOK_FAILED_STOP_PARENT_LINES_INVALID")
+    notifications: list[tuple[int, dict, str]] = []
+    for index, record in enumerate(parent_records):
+        message = record.get("message") \
+            if isinstance(record.get("message"), dict) else {}
+        origin = record.get("origin") \
+            if isinstance(record.get("origin"), dict) else {}
+        content = message.get("content")
+        if record.get("isSidechain") is not False \
+                or record.get("type") != "user" \
+                or message.get("role") != "user" \
+                or not isinstance(content, str) \
+                or origin.get("kind") != "task-notification" \
+                or record.get("promptSource") != "system" \
+                or str(record.get("sessionId") or "") != session_id:
+            continue
+        if _task_notification_tag(content, "task-id") != agent_id \
+                or _task_notification_tag(content, "tool-use-id") \
+                    != tool_use_id \
+                or _task_notification_tag(content, "status") != "completed":
+            continue
+        result = _task_notification_result(content)
+        if result:
+            notifications.append((index, record, result))
+    if len(notifications) != 1:
+        raise RuntimeError("HOOK_FAILED_STOP_NOTIFICATION_NOT_UNIQUE")
+    notification_index, notification, result = notifications[0]
+    notification_at = str(notification.get("timestamp") or "")
+    notification_uuid = str(notification.get("uuid") or "")
+    if not _valid_iso_datetime(notification_at) \
+            or not _TRANSCRIPT_ID_RE.fullmatch(notification_uuid):
+        raise RuntimeError("HOOK_FAILED_STOP_NOTIFICATION_IDENTITY_INVALID")
+
+    child_path = _child_transcript_path(start)
+    if child_path is None:
+        raise RuntimeError("HOOK_FAILED_STOP_CHILD_TRANSCRIPT_MISSING")
+    child_payload, child_records = _transcript_json_records(child_path)
+    first = child_records[0]
+    first_message = first.get("message") \
+        if isinstance(first.get("message"), dict) else {}
+    initial = first_message.get("content")
+    if first.get("isSidechain") is not True \
+            or str(first.get("sessionId") or "") != session_id \
+            or str(first.get("agentId") or "") != agent_id \
+            or first.get("type") != "user" \
+            or first_message.get("role") != "user" \
+            or not isinstance(initial, str) \
+            or _launch_prompt_sha256(initial) \
+                != str(start.get("launch_prompt_sha256") or ""):
+        raise RuntimeError("HOOK_FAILED_STOP_CHILD_PROMPT_INVALID")
+
+    pairs: list[tuple[dict, dict, str, str]] = []
+    for index in range(len(child_records) - 1):
+        final = child_records[index]
+        feedback = child_records[index + 1]
+        if _final_assistant_text(final) != result:
+            continue
+        feedback_proof = _hook_failed_stop_feedback(
+            feedback, session_id=session_id, agent_id=agent_id)
+        if feedback_proof:
+            pairs.append((
+                final,
+                feedback,
+                str(feedback_proof.get("cause") or ""),
+                str(feedback_proof.get("driver") or ""),
+            ))
+    if len(pairs) != 1 or child_records[-1] is not pairs[0][1]:
+        raise RuntimeError("HOOK_FAILED_STOP_FINAL_FEEDBACK_NOT_UNIQUE")
+    final, feedback, cause, driver = pairs[0]
+    final_uuid = str(final.get("uuid") or "")
+    feedback_uuid = str(feedback.get("uuid") or "")
+    final_at = str(final.get("timestamp") or "")
+    feedback_at = str(feedback.get("timestamp") or "")
+    if not all(_TRANSCRIPT_ID_RE.fullmatch(item) for item in (
+            final_uuid, feedback_uuid)) \
+            or not _valid_iso_datetime(final_at) \
+            or not _valid_iso_datetime(feedback_at) \
+            or not (
+                _parse_iso_timestamp(final_at)
+                <= _parse_iso_timestamp(feedback_at)
+                <= _parse_iso_timestamp(notification_at)
+            ):
+        raise RuntimeError("HOOK_FAILED_STOP_TRANSCRIPT_ORDER_INVALID")
+
+    prefix = b"".join(parent_lines[:notification_index + 1])
+    if not prefix or not parent_payload.startswith(prefix):
+        raise RuntimeError("HOOK_FAILED_STOP_PARENT_PREFIX_INVALID")
+    return {
+        "hook_error_code": HOOK_FAILED_AGENT_STOP_ERROR,
+        "hook_error_cause": cause,
+        "hook_driver": driver,
+        "parent_notification_uuid": notification_uuid,
+        "child_final_uuid": final_uuid,
+        "child_hook_feedback_uuid": feedback_uuid,
+        "returned_at": _iso_timestamp(_parse_iso_timestamp(notification_at)),
+        "parent_transcript_prefix_length": len(prefix),
+        "parent_transcript_prefix_sha256": hashlib.sha256(prefix).hexdigest(),
+        "child_transcript_length": len(child_payload),
+        "child_transcript_sha256": hashlib.sha256(child_payload).hexdigest(),
+        "_result": result,
+    }
+
+
+def _validate_hook_failed_agent_stop_receipt(
+    run_dir: Path,
+    receipt: object,
+    events: list[dict],
+    *,
+    filename: str,
+) -> str:
+    schema_value = receipt.get("schema") if isinstance(receipt, dict) else None
+    schema_name = {
+        HOOK_FAILED_AGENT_STOP_LEGACY_SCHEMA:
+            "hook-failed-agent-stop.v1.schema.json",
+        HOOK_FAILED_AGENT_STOP_SCHEMA:
+            "hook-failed-agent-stop.v2.schema.json",
+    }.get(schema_value)
+    if not schema_name or contract_schema.named_schema_errors(
+            receipt, schema_name):
+        return "invalid formal receipt shape"
+    if not isinstance(receipt, dict) \
+            or set(receipt) != _HOOK_FAILED_AGENT_STOP_FIELDS:
+        return "invalid receipt shape"
+    if receipt.get("parent_run") != run_dir.name \
+            or receipt.get("reason") != HOOK_FAILED_AGENT_STOP_REASON \
+            or receipt.get("hook_error_code") != HOOK_FAILED_AGENT_STOP_ERROR \
+            or receipt.get("role") not in _ASSIGNMENT_ROLE_ALIASES.values() \
+            or receipt.get("subagent_type") not in {
+                _HUNTER_AGENT_TYPE, _REVIEWER_AGENT_TYPE,
+            }:
+        return "invalid receipt identity"
+    try:
+        expected_schema = _hook_failed_stop_receipt_schema(
+            str(receipt.get("hook_driver") or ""),
+            str(receipt.get("returned_at") or ""),
+            str(receipt.get("stop_ingress_receipt_hash") or ""),
+        )
+    except RuntimeError as exc:
+        return str(exc)
+    if receipt.get("schema") != expected_schema:
+        return "hook-failed Stop receipt uses the wrong compatibility schema"
+    claimed = str(receipt.get("receipt_hash") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", claimed) \
+            or claimed != _hook_failed_agent_stop_receipt_hash(receipt) \
+            or filename != f"{claimed}.json":
+        return "invalid receipt hash or filename"
+    digest_fields = (
+        "plan_digest", "launch_prompt_sha256", "launch_event_hash",
+        "start_event_hash", "observed_head_hash",
+        "parent_transcript_prefix_sha256", "child_transcript_sha256",
+    )
+    if not _valid_iso_datetime(receipt.get("recorded_at")) \
+            or not _valid_iso_datetime(receipt.get("returned_at")) \
+            or any(re.fullmatch(
+                r"[0-9a-f]{64}", str(receipt.get(field) or "")) is None
+                for field in digest_fields):
+        return "invalid receipt digest or timestamp"
+    for field in (
+            "launch_event_seq", "start_event_seq", "observed_head_seq",
+            "parent_transcript_prefix_length", "child_transcript_length"):
+        value = receipt.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return f"invalid {field}"
+    launch_seq = int(receipt["launch_event_seq"])
+    start_seq = int(receipt["start_event_seq"])
+    head_seq = int(receipt["observed_head_seq"])
+    if launch_seq > len(events) or start_seq > len(events) \
+            or head_seq > len(events):
+        return "receipt event is outside the runtime journal"
+    launch = events[launch_seq - 1]
+    start = events[start_seq - 1]
+    if str(launch.get("receipt_hash") or "") \
+            != str(receipt.get("launch_event_hash") or "") \
+            or str(start.get("receipt_hash") or "") \
+            != str(receipt.get("start_event_hash") or "") \
+            or str(events[head_seq - 1].get("receipt_hash") or "") \
+            != str(receipt.get("observed_head_hash") or ""):
+        return "receipt does not bind immutable runtime events"
+    exact = {
+        "assignment": str(receipt.get("assignment") or ""),
+        "front": str(receipt.get("front") or ""),
+        "session_id": str(receipt.get("session_id") or ""),
+        "tool_use_id": str(receipt.get("tool_use_id") or ""),
+        "assignment_lane": str(receipt.get("lane_id") or ""),
+        "assignment_plan_digest": str(receipt.get("plan_digest") or ""),
+        "launch_prompt_sha256": str(receipt.get("launch_prompt_sha256") or ""),
+        "subagent_type": str(receipt.get("subagent_type") or ""),
+    }
+    if launch.get("hook_event_name") != "PostToolUse" \
+            or launch.get("tool_name") != "Agent" \
+            or launch.get("success") is not True \
+            or str(launch.get("launched_agent_id") or "") \
+                != str(receipt.get("agent_id") or "") \
+            or any(launch.get(field) != value for field, value in exact.items()):
+        return "receipt does not bind the exact successful Agent launch"
+    start_exact = dict(exact)
+    start_exact["agent_id"] = str(receipt.get("agent_id") or "")
+    if start.get("hook_event_name") != "SubagentStart" \
+            or start.get("completion_review") is True \
+            or start.get("agent_type") != receipt.get("subagent_type") \
+            or any(start.get(field) != value
+                   for field, value in start_exact.items()):
+        return "receipt does not bind the exact Agent Start"
+    if not launch_seq < start_seq <= head_seq:
+        return "receipt runtime ordering is invalid"
+    if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == exact["session_id"]
+            and str(item.get("agent_id") or "")
+                == str(receipt.get("agent_id") or "")
+            for item in events):
+        return "hook-failed Agent has a runtime Stop"
+    if any(
+            int(item.get("seq") or 0) > head_seq
+            and _hook_failed_stop_event_owned(receipt, item)
+            for item in events):
+        return "hook-failed Agent has later runtime activity"
+    try:
+        transcript = _hook_failed_stop_transcript_proof(start)
+    except RuntimeError as exc:
+        return "hook-failed Stop transcript proof invalid: " + str(exc)
+    transcript_fields = (
+        "hook_error_code", "hook_error_cause", "hook_driver",
+        "parent_notification_uuid",
+        "child_final_uuid", "child_hook_feedback_uuid", "returned_at",
+        "parent_transcript_prefix_length", "parent_transcript_prefix_sha256",
+        "child_transcript_length", "child_transcript_sha256",
+    )
+    if any(transcript.get(field) != receipt.get(field)
+           for field in transcript_fields):
+        return "hook-failed Stop transcript proof changed"
+    ingress_hash = str(receipt.get("stop_ingress_receipt_hash") or "")
+    if ingress_hash and re.fullmatch(r"[0-9a-f]{64}", ingress_hash) is None:
+        return "invalid Stop ingress receipt hash"
+    if ingress_hash:
+        try:
+            ingress = _matching_subagent_stop_ingress(
+                run_dir, start, transcript["_result"])
+        except RuntimeError as exc:
+            return "hook-failed Stop ingress proof invalid: " + str(exc)
+        if str(ingress.get("receipt_hash") or "") != ingress_hash:
+            return "hook-failed Stop ingress proof changed"
+    snapshot = receipt.get("result_snapshot") \
+        if isinstance(receipt.get("result_snapshot"), dict) else {}
+    payload = _agent_result_bytes(transcript["_result"])
+    digest = hashlib.sha256(payload).hexdigest()
+    expected = (
+        run_dir / "state" / "merge_results"
+        / str(receipt.get("assignment") or "invalid")
+        / f"{receipt.get('agent_id')}-{digest}.json"
+    ).resolve(strict=False)
+    try:
+        actual_path = Path(str(snapshot.get("path") or "")).resolve(strict=True)
+        actual_payload = actual_path.read_bytes()
+    except Exception:
+        return "hook-failed Stop result snapshot is unavailable"
+    if actual_path != expected or actual_payload != payload \
+            or snapshot != {
+                "path": str(actual_path),
+                "length": len(payload),
+                "sha256": digest,
+                "missing": False,
+                "source": "hook_failed_stop_recovery",
+            }:
+        return "hook-failed Stop result snapshot changed"
+    return ""
+
+
+def _load_hook_failed_agent_stop_receipts(
+    run_dir: Path,
+    events: list[dict],
+) -> list[dict]:
+    directory = _hook_failed_agent_stop_dir(run_dir)
+    if not directory.exists():
+        return []
+    if directory.is_symlink() or not directory.is_dir():
+        raise RuntimeError("hook-failed Agent Stop receipt directory is not regular")
+    receipts: list[dict] = []
+    for path in sorted(directory.glob("*.json")):
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(
+                f"hook-failed Agent Stop receipt is not regular: {path.name}")
+        try:
+            receipt = json.loads(path.read_text(
+                encoding="utf-8", errors="strict"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"hook-failed Agent Stop receipt is unreadable: {path.name}"
+            ) from exc
+        error = _validate_hook_failed_agent_stop_receipt(
+            run_dir, receipt, events, filename=path.name)
+        if error:
+            raise RuntimeError(
+                f"hook-failed Agent Stop receipt {path.name} invalid: {error}")
+        receipts.append(receipt)
+    identities = [
+        (str(item["session_id"]), str(item["agent_id"]), str(item["tool_use_id"]))
+        for item in receipts
+    ]
+    if len(identities) != len(set(identities)):
+        raise RuntimeError("hook-failed Agent Stop receipt duplicates an attempt")
+    return receipts
+
+
+def _load_typed_agent_termination_receipts(
+    run_dir: Path,
+    events: list[dict],
+) -> tuple[list[dict], list[dict], list[dict]]:
+    external = _load_externally_stopped_agent_receipts(run_dir, events)
+    stream_stalled = _load_stream_stalled_agent_receipts(run_dir, events)
+    hook_failed = _load_hook_failed_agent_stop_receipts(run_dir, events)
+    identities = [
+        (str(item.get("session_id") or ""),
+         str(item.get("agent_id") or ""),
+         str(item.get("tool_use_id") or ""))
+        for item in [*external, *stream_stalled, *hook_failed]
+    ]
+    if len(identities) != len(set(identities)):
+        raise RuntimeError(
+            "typed Agent termination receipts overlap one runtime attempt")
+    return external, stream_stalled, hook_failed
+
+
 def _effective_agent_events(
     run_dir: Path,
     events: list[dict],
@@ -1483,6 +2654,9 @@ def _effective_agent_events(
     receipt_events: list[dict] | None = None,
 ) -> list[dict]:
     receipt_basis = events if receipt_events is None else receipt_events
+    # External-stop receipts do not erase hook facts. Loading them here makes
+    # transcript/snapshot tamper a runtime-integrity failure on every consumer.
+    _load_typed_agent_termination_receipts(run_dir, receipt_basis)
     quarantined = {
         (int(item["runtime_event_seq"]), str(item["runtime_event_hash"]))
         for item in _load_foreign_lifecycle_receipts(run_dir, receipt_basis)
@@ -1577,6 +2751,18 @@ def _agent_result_bytes(value: object) -> bytes:
         raise RuntimeError(
             f"Agent result exceeds immutable snapshot limit ({MAX_AGENT_RESULT_BYTES} bytes)")
     return payload
+
+
+def _matching_subagent_stop_ingress(
+    run_dir: Path,
+    start: dict,
+    result: object,
+) -> dict:
+    del run_dir  # owner selection is supplied by the already-validated Start.
+    try:
+        return _stop_ingress.matching_receipt(start, result)
+    except _stop_ingress.SubagentStopIngressError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def _freeze_agent_result(run_dir: Path, *, assignment: str, attempt_id: str,
@@ -1687,16 +2873,58 @@ def _agent_tool_use_candidates(value: object) -> list[dict]:
     return out
 
 
+def _agent_tool_uses_from_records(
+    records: list[tuple[int, object]],
+) -> list[dict]:
+    """Build the stable parent-Agent index from already decoded events."""
+    candidates: dict[str, dict] = {}
+    transcript_order = 0
+    for event_index, decoded in records:
+        event_candidates = _agent_tool_use_candidates(decoded)
+        if not event_candidates:
+            continue
+        event_identity = [
+            {
+                "tool_use_id": str(item.get("tool_use_id") or ""),
+                "tool_input_sha256": _hash(item.get("tool_input") or {}),
+            }
+            for item in event_candidates
+        ]
+        batch_sha256 = _hash(event_identity)
+        batch_size = len(event_candidates)
+        for batch_ordinal, candidate in enumerate(event_candidates):
+            tool_use_id = str(candidate["tool_use_id"])
+            existing = candidates.get(tool_use_id)
+            if existing is not None:
+                if existing.get("tool_input") != candidate.get("tool_input"):
+                    raise RuntimeError(
+                        "Agent transcript reuses one tool_use_id with conflicting input")
+                # Claude transcript progress records may repeat an already
+                # serialized tool-use.  Its first occurrence is the durable
+                # order anchor; never rewrite allocation order from a newer
+                # duplicate observation.
+                continue
+            candidates[tool_use_id] = {
+                **candidate,
+                "transcript_order": transcript_order,
+                "transcript_event_index": event_index,
+                "transcript_batch_sha256": batch_sha256,
+                "transcript_batch_ordinal": batch_ordinal,
+                "transcript_batch_size": batch_size,
+            }
+            transcript_order += 1
+    return list(candidates.values())
+
+
 def _transcript_agent_tool_uses(path: Path) -> list[dict]:
     if not path.is_file():
         return []
-    candidates: dict[str, dict] = {}
+    records: list[tuple[int, object]] = []
     try:
         handle = path.open("rb")
     except OSError:
         return []
     with handle:
-        transcript_order = 0
         event_index = 0
         while True:
             raw = handle.readline(MAX_AGENT_RESULT_BYTES + 1)
@@ -1709,40 +2937,8 @@ def _transcript_agent_tool_uses(path: Path) -> list[dict]:
                 decoded = json.loads(raw.decode("utf-8", errors="strict"))
             except Exception:
                 continue
-            event_candidates = _agent_tool_use_candidates(decoded)
-            if not event_candidates:
-                continue
-            event_identity = [
-                {
-                    "tool_use_id": str(item.get("tool_use_id") or ""),
-                    "tool_input_sha256": _hash(item.get("tool_input") or {}),
-                }
-                for item in event_candidates
-            ]
-            batch_sha256 = _hash(event_identity)
-            batch_size = len(event_candidates)
-            for batch_ordinal, candidate in enumerate(event_candidates):
-                tool_use_id = str(candidate["tool_use_id"])
-                existing = candidates.get(tool_use_id)
-                if existing is not None:
-                    if existing.get("tool_input") != candidate.get("tool_input"):
-                        raise RuntimeError(
-                            "Agent transcript reuses one tool_use_id with conflicting input")
-                    # Claude transcript progress records may repeat an already
-                    # serialized tool-use.  Its first occurrence is the durable
-                    # order anchor; never rewrite allocation order from a newer
-                    # duplicate observation.
-                    continue
-                candidates[tool_use_id] = {
-                    **candidate,
-                    "transcript_order": transcript_order,
-                    "transcript_event_index": event_index,
-                    "transcript_batch_sha256": batch_sha256,
-                    "transcript_batch_ordinal": batch_ordinal,
-                    "transcript_batch_size": batch_size,
-                }
-                transcript_order += 1
-    return list(candidates.values())
+            records.append((event_index, decoded))
+    return _agent_tool_uses_from_records(records)
 
 
 def _agent_invocation_binding(candidate: dict) -> dict:
@@ -2954,9 +4150,13 @@ def _project_agent_lifecycle(
             dict(derived_snapshot) if derived_matches
             else dict(record.get("agent_result_snapshot") or {})
         )
+        termination_receipt_hash = str(
+            derived.get("termination_receipt_hash") or "")
+        recovery_receipt_hash = str(
+            derived.get("recovery_receipt_hash") or "")
         derived_state = str(derived.get("state") or "")
         projected_state = "running" if start_projection else (
-            derived_state if derived_state in {"running", "returned"} else (
+            derived_state if derived_state in {"running", "returned", "failed"} else (
                 "returned" if derived_returned_at else "running"
             )
         )
@@ -3076,9 +4276,15 @@ def _project_agent_lifecycle(
                     "launched_at": stamp,
                     "state": projected_state,
                 }
-                if projected_state == "returned":
+                if projected_state in {"returned", "failed"}:
                     projected_attempt["returned_at"] = _iso_timestamp(derived_returned_at) \
                         if derived_returned_at else stamp
+                if projected_state == "failed" and termination_receipt_hash:
+                    projected_attempt["termination_receipt_hash"] = (
+                        termination_receipt_hash)
+                if projected_state == "returned" and recovery_receipt_hash:
+                    projected_attempt["recovery_receipt_hash"] = (
+                        recovery_receipt_hash)
                 attempts.append(projected_attempt)
                 row_changed = True
             else:
@@ -3108,9 +4314,14 @@ def _project_agent_lifecycle(
                     if not existing_snapshot:
                         projected_attempt["result_snapshot"] = snapshot
                         row_changed = True
-                if projected_state == "returned" \
-                        and projected_attempt.get("state") != "returned":
-                    projected_attempt["state"] = "returned"
+                if projected_state in {"returned", "failed"} \
+                        and projected_attempt.get("state") != projected_state:
+                    if projected_attempt.get("state") not in {
+                            "running", projected_state}:
+                        raise RuntimeError(
+                            f"runtime attempt terminal conflict for "
+                            f"{assignment}/{attempt_id}")
+                    projected_attempt["state"] = projected_state
                     projected_attempt["returned_at"] = (
                         _iso_timestamp(derived_returned_at)
                         if derived_returned_at else stamp
@@ -3125,6 +4336,16 @@ def _project_agent_lifecycle(
                                 f"{assignment}/{attempt_id}")
                         if not existing_snapshot:
                             projected_attempt["result_snapshot"] = dict(derived_snapshot)
+                    if projected_state == "failed":
+                        if not termination_receipt_hash:
+                            raise RuntimeError(
+                                f"external stop receipt missing for "
+                                f"{assignment}/{attempt_id}")
+                        projected_attempt["termination_receipt_hash"] = (
+                            termination_receipt_hash)
+                    if projected_state == "returned" and recovery_receipt_hash:
+                        projected_attempt["recovery_receipt_hash"] = (
+                            recovery_receipt_hash)
                     row_changed = True
             if row.get("current_attempt") != attempt_id:
                 row["current_attempt"] = attempt_id
@@ -3138,11 +4359,20 @@ def _project_agent_lifecycle(
                 and str(row.get("last_note") or "").startswith("runtime return:")
             )
             if current in NONTERMINAL_ASSIGNMENT_STATUSES or provisional_done_rebind:
-                projected_status = "running" if projected_state == "running" else "done"
+                projected_status = (
+                    "running" if projected_state == "running"
+                    else "failed" if projected_state == "failed" else "done"
+                )
                 projected_note = (
                     f"runtime launch: attempt={attempt_id}"
                     if projected_state == "running"
-                    else f"runtime return: attempt={attempt_id}; disposition pending"
+                    else (
+                        f"runtime external stop: attempt={attempt_id}; "
+                        "disposition pending"
+                        if projected_state == "failed"
+                        else f"runtime return: attempt={attempt_id}; "
+                             "disposition pending"
+                    )
                 )
                 if row.get("status") != projected_status \
                         or row.get("last_note") != projected_note:
@@ -3150,11 +4380,16 @@ def _project_agent_lifecycle(
                     row["last_note"] = projected_note
                     row_changed = True
             if row_changed:
-                row["updated_at"] = stamp
+                row["updated_at"] = (
+                    _iso_timestamp(derived_returned_at)
+                    if projected_state in {"returned", "failed"}
+                    and derived_returned_at
+                    else stamp
+                )
                 changed = True
-            if projected_state == "returned" and row_changed:
+            if projected_state in {"returned", "failed"} and row_changed:
                 _write_merge_draft(
-                    run_dir, row, projected_attempt, outcome="returned")
+                    run_dir, row, projected_attempt, outcome=projected_state)
             break
     elif hook == "PostToolUseFailure" and record.get("tool_name") == "Agent":
         assignment = str(record.get("assignment") or "")
@@ -3545,6 +4780,7 @@ def _agent_tool_call_claim_record_error(record: object) -> str:
 
 def _agent_tool_call_claim_integrity_errors_from(
     events: list[dict],
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> list[str]:
     """Validate each child-call reservation against one earlier live Start."""
     errors: list[str] = []
@@ -3618,8 +4854,14 @@ def _agent_tool_call_claim_integrity_errors_from(
                 expected_request_ordinal += 1
                 if row.get("agent_request_ordinal") != expected_request_ordinal:
                     errors.append(f"{label} has a non-contiguous request ordinal")
-            if not _transcript_has(
-                    row, events, parent_tool_ids_cache):
+            try:
+                transcript_valid = _transcript_has(
+                    row, events, parent_tool_ids_cache,
+                    validation_snapshot=validation_snapshot)
+            except TranscriptSnapshotMutationError as exc:
+                errors.append(f"{label} transcript changed during validation: {exc}")
+                continue
+            if not transcript_valid:
                 errors.append(f"{label} lacks its exact child transcript tool-use")
     return errors
 
@@ -3648,6 +4890,8 @@ def claim_agent_tool_call(run_dir: str | Path, event: dict) -> dict:
         if chain_errors:
             raise RuntimeError(
                 "AGENT_TOOL_CALL_CHAIN_INVALID: " + chain_errors[0])
+        external_stops, stream_stalls, recovered_stops = (
+            _load_typed_agent_termination_receipts(run, events))
         claim_errors = _agent_tool_call_claim_integrity_errors_from(events)
         if claim_errors:
             raise RuntimeError(
@@ -3718,6 +4962,21 @@ def claim_agent_tool_call(run_dir: str | Path, event: dict) -> dict:
             item for item in prior
             if str(item.get("tool_use_id") or "") == child_tool_use_id
         ]
+        if not same_id and any(
+                str(item.get("session_id") or "") == session_id
+                and str(item.get("agent_id") or "") == agent_id
+                for item in external_stops):
+            raise RuntimeError("AGENT_TOOL_CALL_AFTER_EXTERNAL_STOP")
+        if not same_id and any(
+                str(item.get("session_id") or "") == session_id
+                and str(item.get("agent_id") or "") == agent_id
+                for item in stream_stalls):
+            raise RuntimeError("AGENT_TOOL_CALL_AFTER_STREAM_STALL")
+        if not same_id and any(
+                str(item.get("session_id") or "") == session_id
+                and str(item.get("agent_id") or "") == agent_id
+                for item in recovered_stops):
+            raise RuntimeError("AGENT_TOOL_CALL_AFTER_HOOK_FAILED_STOP_RECOVERY")
         if same_id:
             semantic_fields = (
                 "tool_name", "input_sha256", "action_sha256",
@@ -3947,8 +5206,12 @@ def _exact_agent_event_replay(events: list[dict], candidate: dict) -> dict | Non
     )
 
 
-def _agent_event_integrity_errors_from(events: list[dict]) -> list[str]:
-    errors: list[str] = _agent_tool_call_claim_integrity_errors_from(events)
+def _agent_event_integrity_errors_from(
+    events: list[dict],
+    validation_snapshot: RunValidationSnapshot | None = None,
+) -> list[str]:
+    errors: list[str] = _agent_tool_call_claim_integrity_errors_from(
+        events, validation_snapshot=validation_snapshot)
     by_tool: dict[tuple[str, str], list[dict]] = {}
     by_lifecycle: dict[tuple[str, str, str], list[dict]] = {}
     by_binding: dict[tuple[str, str, str], set[tuple[str, str]]] = {}
@@ -4146,19 +5409,44 @@ def _agent_event_integrity_errors_from(events: list[dict]) -> list[str]:
     return errors
 
 
-def agent_event_integrity_errors(run_dir: str | Path) -> list[str]:
+def agent_event_integrity_errors(
+    run_dir: str | Path,
+    *,
+    validation_snapshot: RunValidationSnapshot | None = None,
+) -> list[str]:
     run = Path(run_dir).resolve()
-    events, chain_errors = validate_chain(run)
+    snapshot = current_validation_snapshot(run, validation_snapshot)
+    if snapshot is not None:
+        cached = snapshot.cached_agent_integrity_errors()
+        if cached is not None:
+            return cached
+
+    def finish(errors: list[str]) -> list[str]:
+        if snapshot is not None:
+            snapshot.cache_agent_integrity_errors(errors)
+        return errors
+
+    if snapshot is not None:
+        events, effective_events, chain_errors, effective_error = (
+            snapshot.runtime_state())
+    else:
+        events, chain_errors = validate_chain(run)
+        effective_events = []
+        effective_error = ""
     if chain_errors:
-        return ["runtime chain invalid: " + chain_errors[0]]
-    try:
-        effective_events = _effective_agent_events(run, events)
-    except RuntimeError as exc:
-        return ["foreign lifecycle receipts invalid: " + str(exc)]
+        return finish(["runtime chain invalid: " + chain_errors[0]])
+    if effective_error:
+        return finish(["foreign lifecycle receipts invalid: " + effective_error])
+    if snapshot is None:
+        try:
+            effective_events = _effective_agent_events(run, events)
+        except RuntimeError as exc:
+            return finish(["foreign lifecycle receipts invalid: " + str(exc)])
     cursor_error = _projection_cursor_error(run, events)
     if cursor_error:
-        return ["runtime projection cursor invalid: " + cursor_error]
-    return _agent_event_integrity_errors_from(effective_events)
+        return finish(["runtime projection cursor invalid: " + cursor_error])
+    return finish(_agent_event_integrity_errors_from(
+        effective_events, validation_snapshot=snapshot))
 
 
 def _root_action_plan_binding(plan: object) -> tuple[dict, str]:
@@ -4761,7 +6049,7 @@ def _clear_projection_error(
     *,
     recover_corrupt_cursor: bool,
 ) -> tuple[str, str]:
-    """Durably advance success first, then clear an exactly covered diagnostic."""
+    """Validate diagnostic coverage before publishing successful reconciliation."""
     with _locked(run):
         snapshot_errors = _runtime_chain_errors(snapshot)
         if snapshot_errors:
@@ -4789,8 +6077,6 @@ def _clear_projection_error(
                 run, snapshot, current,
                 recover_corrupt=recover_corrupt_cursor)
             return "absent", cursor_status
-        cursor_status = _advance_projection_cursor_locked(
-            run, snapshot, current, recover_corrupt=recover_corrupt_cursor)
         error_seq = int(existing["event_seq"])
         error_hash = str(existing["event_hash"])
         if not _snapshot_covers_identity(current, error_seq, error_hash):
@@ -4801,14 +6087,18 @@ def _clear_projection_error(
                     "projection diagnostic has conflicting hash at the same event sequence")
             raise RuntimeError(
                 "projection diagnostic is not covered by runtime journal")
-        if error_seq > len(snapshot):
-            return "retained_newer", cursor_status
-        if not _snapshot_covers_identity(snapshot, error_seq, error_hash):
+        if error_seq <= len(snapshot) \
+                and not _snapshot_covers_identity(
+                    snapshot, error_seq, error_hash):
             if error_seq == len(snapshot):
                 raise RuntimeError(
                     "projection diagnostic has conflicting hash at the same event sequence")
             raise RuntimeError(
                 "successful projection snapshot does not cover diagnostic")
+        cursor_status = _advance_projection_cursor_locked(
+            run, snapshot, current, recover_corrupt=recover_corrupt_cursor)
+        if error_seq > len(snapshot):
+            return "retained_newer", cursor_status
         _durable_projection_unlink(error_path)
         return "cleared", cursor_status
 
@@ -4953,6 +6243,95 @@ def _agent_cancellation_preflight(event: dict) -> dict:
     }
 
 
+def _plan_bound_child_claim_from_events(
+    event: dict,
+    events: list[dict],
+) -> dict:
+    """Return the unique immutable claim owning one child terminal event.
+
+    A child denial or terminal delivery is not plan-bound merely because raw
+    hook input names an ``agent_id``.  It must match the earlier, fsynced
+    ``AgentToolCallClaim`` by the complete child/tool/action identity.  Missing
+    claims mean this is not a plan-bound child event; conflicting candidates
+    fail closed.
+    """
+    hook = str(event.get("hook_event_name") or "")
+    if hook not in {"PreToolUseDenied", "PostToolUse", "PostToolUseFailure"}:
+        return {}
+    session_id = str(event.get("session_id") or "")
+    agent_id = str(event.get("agent_id") or "")
+    transcript_path = str(event.get("transcript_path") or "")
+    tool_use_id = str(event.get("tool_use_id") or "")
+    tool_name = str(event.get("tool_name") or "")
+    if not all((session_id, agent_id, transcript_path, tool_use_id, tool_name)):
+        return {}
+    identity_matches = [
+        item for item in events
+        if item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT
+        and str(item.get("session_id") or "") == session_id
+        and str(item.get("agent_id") or "") == agent_id
+        and str(item.get("transcript_path") or "") == transcript_path
+        and str(item.get("tool_use_id") or "") == tool_use_id
+    ]
+    if not identity_matches:
+        return {}
+    if len(identity_matches) != 1:
+        raise RuntimeError("AGENT_TOOL_CALL_TERMINAL_CLAIM_NOT_UNIQUE")
+    claim = identity_matches[0]
+    detail = _agent_tool_call_claim_record_error(claim)
+    if detail:
+        raise RuntimeError(
+            "AGENT_TOOL_CALL_TERMINAL_CLAIM_INVALID:" + detail)
+    event_action = str(event.get("action_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", event_action):
+        event_action = _action_hash(tool_name, event.get("tool_input") or {})
+    if claim.get("tool_name") != tool_name \
+            or claim.get("action_sha256") != event_action:
+        raise RuntimeError("AGENT_TOOL_CALL_TERMINAL_ACTION_MISMATCH")
+    return claim
+
+
+def plan_bound_child_claim(
+    run_dir: str | Path,
+    event: dict,
+    *,
+    events: list[dict] | None = None,
+) -> dict:
+    """Public read-only proof that a receipt belongs to one plan-bound lane."""
+    snapshot = events
+    if snapshot is None:
+        snapshot, errors = validate_chain(run_dir)
+        if errors:
+            raise RuntimeError(
+                "AGENT_TOOL_CALL_TERMINAL_CHAIN_INVALID:" + errors[0])
+    return _plan_bound_child_claim_from_events(event, snapshot)
+
+
+def _child_tool_call_binding(claim: dict) -> dict:
+    """Project only frozen assignment metadata; never replace tool identity."""
+    if not claim:
+        return {}
+    return {
+        "assignment": str(claim.get("assignment") or ""),
+        "front": str(claim.get("front") or ""),
+        "assignment_assets": [
+            str(item) for item in claim.get("assignment_assets", [])],
+        "assignment_lane": str(claim.get("assignment_lane") or ""),
+        "assignment_plan_digest": str(
+            claim.get("assignment_plan_digest") or ""),
+        "assignment_result_digest": str(
+            claim.get("assignment_result_digest") or ""),
+        "launch_prompt_sha256": str(
+            claim.get("launch_prompt_sha256") or ""),
+        "subagent_type": str(claim.get("subagent_type") or ""),
+        "assignment_tool_call_limit": int(
+            claim.get("assignment_tool_call_limit") or 0),
+        "assignment_request_budget": int(
+            claim.get("assignment_request_budget") or 0),
+        "completion_review": False,
+    }
+
+
 def append_hook_event(run_dir: str | Path, event: dict) -> dict:
     run = Path(run_dir).resolve()
     projection_events: list[dict] = []
@@ -4963,6 +6342,13 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
                 "cannot append to invalid runtime receipt chain: "
                 + chain_errors[0])
         effective_events = _effective_agent_events(run, events)
+        external_stops, stream_stalls, recovered_stops = (
+            _load_typed_agent_termination_receipts(run, events))
+        child_claim = _plan_bound_child_claim_from_events(event, events)
+        if child_claim:
+            event = dict(event)
+            event["xunji_agent_tool_call_binding"] = (
+                _child_tool_call_binding(child_claim))
         # A cancellation may remove the mutable assignment row before a late
         # runtime delivery reaches prompt validation.  Check the immutable
         # tombstone first so every genuinely new delivery observes one stable
@@ -4970,6 +6356,15 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
         # still proceed to the exact-replay path below.
         existing_delivery = _agent_event_identity_exists(effective_events, event)
         if not existing_delivery:
+            if any(_external_stop_event_owned(receipt, event)
+                   for receipt in external_stops):
+                raise RuntimeError("AGENT_EVENT_AFTER_EXTERNAL_STOP")
+            if any(_stream_stall_event_owned(receipt, event)
+                   for receipt in stream_stalls):
+                raise RuntimeError("AGENT_EVENT_AFTER_STREAM_STALL")
+            if any(_hook_failed_stop_event_owned(receipt, event)
+                   for receipt in recovered_stops):
+                raise RuntimeError("AGENT_EVENT_AFTER_HOOK_FAILED_STOP_RECOVERY")
             import agent_settlement
             agent_settlement.require_runtime_event_not_cancelled(
                 run, _agent_cancellation_preflight(event))
@@ -5233,7 +6628,326 @@ def _child_transcript_path(record: dict) -> Path | None:
     return resolved
 
 
-def _child_transcript_has_tool_use(path: Path, record: dict) -> bool:
+def _structured_tool_use_ids(value: object) -> list[str]:
+    found: list[str] = []
+    if isinstance(value, dict):
+        kind = str(value.get("type") or "").replace("_", "").lower()
+        if kind == "tooluse":
+            candidate = str(
+                value.get("id") or value.get("tool_use_id")
+                or value.get("toolUseId") or "")
+            if candidate:
+                found.append(candidate)
+        for child in value.values():
+            found.extend(_structured_tool_use_ids(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(_structured_tool_use_ids(child))
+    return found
+
+
+class RunValidationSnapshot:
+    """Invocation-local, read-only journal/transcript validation state.
+
+    The snapshot is never persisted and never grants authority.  It prevents a
+    read-only projection (notably ``check_run``) from reopening and reparsing the
+    same Claude transcript once per Agent claim/assignment.  Every transcript is
+    keyed by resolved path plus stable inode/size/mtime identity and is checked
+    again after the read; mutation is explicit integrity debt rather than a
+    mixed-generation projection.
+    """
+
+    def __init__(self, run_dir: str | Path):
+        self.run_dir = Path(run_dir).resolve()
+        self._transcripts: dict[
+            tuple[str, int, int, int, int], dict[str, object]
+        ] = {}
+        self._path_identities: dict[str, tuple[str, int, int, int, int]] = {}
+        self._runtime_state: tuple[
+            list[dict], list[dict], list[str], str
+        ] | None = None
+        self._plan_projections: dict[str, dict] = {}
+        self._agent_integrity_errors: list[str] | None = None
+        self._consumer_cache: dict[str, object] = {}
+        self._transcript_bytes = 0
+        self._snapshot_errors: list[str] = []
+        self.transcript_parse_counts: dict[str, int] = {}
+
+    def __enter__(self) -> "RunValidationSnapshot":
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback) -> bool:
+        self.assert_stable()
+        return False
+
+    def _limit_error(self, detail: str) -> RuntimeError:
+        self._snapshot_errors.append(detail)
+        return RuntimeError(detail)
+
+    @staticmethod
+    def _identity(resolved: Path, value: os.stat_result) \
+            -> tuple[str, int, int, int, int]:
+        return (
+            str(resolved), int(value.st_dev), int(value.st_ino),
+            int(value.st_size), int(value.st_mtime_ns),
+        )
+
+    def _load_transcript(self, path: Path) -> dict[str, object]:
+        candidate = Path(path)
+        try:
+            before_path = os.stat(candidate, follow_symlinks=False)
+            if not stat.S_ISREG(before_path.st_mode) or candidate.is_symlink():
+                raise RuntimeError("transcript is not one regular non-symlink file")
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise RuntimeError("transcript cannot be resolved as a regular file") from exc
+        before_identity = self._identity(resolved, before_path)
+        prior_identity = self._path_identities.get(str(resolved))
+        if prior_identity is not None:
+            if prior_identity != before_identity:
+                raise TranscriptSnapshotMutationError(
+                    "transcript identity changed during validation")
+            return self._transcripts[prior_identity]
+        if len(self._transcripts) >= MAX_VALIDATION_TRANSCRIPT_COUNT:
+            raise self._limit_error(
+                "validation snapshot transcript-count limit exceeded")
+        if before_path.st_size > MAX_VALIDATION_TRANSCRIPT_BYTES:
+            raise self._limit_error(
+                "validation snapshot per-transcript byte limit exceeded")
+        if self._transcript_bytes + before_path.st_size \
+                > MAX_VALIDATION_TRANSCRIPT_TOTAL_BYTES:
+            raise self._limit_error(
+                "validation snapshot total transcript byte limit exceeded")
+
+        payload = bytearray()
+        decoded_records: list[tuple[int, object]] = []
+        strict_json_error = False
+        oversized_event = False
+        try:
+            with candidate.open("rb") as handle:
+                before_fd = os.fstat(handle.fileno())
+                if self._identity(resolved, before_fd) != before_identity:
+                    raise TranscriptSnapshotMutationError(
+                        "transcript identity changed before validation read")
+                event_index = 0
+                while True:
+                    raw = handle.readline(MAX_AGENT_RESULT_BYTES + 1)
+                    if not raw:
+                        break
+                    event_index += 1
+                    if event_index > MAX_VALIDATION_TRANSCRIPT_RECORDS:
+                        raise self._limit_error(
+                            "validation snapshot transcript-record limit exceeded")
+                    payload.extend(raw)
+                    if len(payload) > MAX_VALIDATION_TRANSCRIPT_BYTES:
+                        raise self._limit_error(
+                            "validation snapshot per-transcript byte limit exceeded")
+                    if len(raw) > MAX_AGENT_RESULT_BYTES:
+                        oversized_event = True
+                        continue
+                    try:
+                        decoded = json.loads(raw.decode("utf-8", errors="strict"))
+                    except Exception:
+                        strict_json_error = True
+                        continue
+                    decoded_records.append((event_index, decoded))
+                after_fd = os.fstat(handle.fileno())
+            after_path = os.stat(candidate, follow_symlinks=False)
+        except TranscriptSnapshotMutationError:
+            raise
+        except OSError as exc:
+            raise RuntimeError("transcript cannot be read") from exc
+        after_identity = self._identity(resolved, after_path)
+        if self._identity(resolved, after_fd) != before_identity \
+                or after_identity != before_identity:
+            raise TranscriptSnapshotMutationError(
+                "transcript changed while validation was reading it")
+
+        child_envelopes: dict[str, list[tuple[bool, str, str]]] = {}
+        for _event_index, decoded in decoded_records:
+            envelope = (
+                isinstance(decoded, dict) and decoded.get("isSidechain") is True,
+                str(decoded.get("sessionId") or "")
+                if isinstance(decoded, dict) else "",
+                str(decoded.get("agentId") or "")
+                if isinstance(decoded, dict) else "",
+            )
+            for tool_use_id in _structured_tool_use_ids(decoded):
+                child_envelopes.setdefault(tool_use_id, []).append(envelope)
+        entry: dict[str, object] = {
+            "identity": before_identity,
+            "payload": bytes(payload),
+            "decoded_records": decoded_records,
+            "strict_json_error": strict_json_error,
+            "oversized_event": oversized_event,
+            "child_envelopes": child_envelopes,
+            "agent_tool_uses": None,
+        }
+        self._transcripts[before_identity] = entry
+        self._path_identities[str(resolved)] = before_identity
+        self._transcript_bytes += before_path.st_size
+        self.transcript_parse_counts[str(resolved)] = (
+            self.transcript_parse_counts.get(str(resolved), 0) + 1
+        )
+        return entry
+
+    @property
+    def unique_transcript_count(self) -> int:
+        return len(self._transcripts)
+
+    def contains_tokens(self, path: Path, tokens: set[str]) -> set[str]:
+        if not tokens:
+            return set()
+        try:
+            entry = self._load_transcript(path)
+        except RuntimeError as exc:
+            if isinstance(exc, TranscriptSnapshotMutationError):
+                raise
+            return set()
+        payload = entry["payload"]
+        if not isinstance(payload, bytes):
+            return set()
+        return {
+            token for token in tokens
+            if token and token.encode("utf-8") in payload
+        }
+
+    def agent_tool_uses(self, path: Path) -> list[dict]:
+        try:
+            entry = self._load_transcript(path)
+        except RuntimeError as exc:
+            if isinstance(exc, TranscriptSnapshotMutationError):
+                raise
+            return []
+        if entry.get("oversized_event") is True:
+            raise RuntimeError(
+                "Agent transcript event exceeds immutable snapshot limit")
+        cached = entry.get("agent_tool_uses")
+        if cached is None:
+            rows = entry.get("decoded_records")
+            cached = _agent_tool_uses_from_records(
+                rows if isinstance(rows, list) else [])
+            entry["agent_tool_uses"] = cached
+        return [copy.deepcopy(item) for item in cached if isinstance(item, dict)] \
+            if isinstance(cached, list) else []
+
+    def child_has_tool_use(self, path: Path, record: dict) -> bool:
+        try:
+            entry = self._load_transcript(path)
+        except RuntimeError as exc:
+            if isinstance(exc, TranscriptSnapshotMutationError):
+                raise
+            return False
+        if entry.get("strict_json_error") is True \
+                or entry.get("oversized_event") is True:
+            return False
+        tool_use_id = str(record.get("tool_use_id") or "")
+        if not tool_use_id:
+            return False
+        indexes = entry.get("child_envelopes")
+        envelopes = indexes.get(tool_use_id, []) \
+            if isinstance(indexes, dict) else []
+        expected = (
+            True,
+            str(record.get("session_id") or ""),
+            str(record.get("agent_id") or ""),
+        )
+        return bool(envelopes) and all(item == expected for item in envelopes)
+
+    def runtime_state(self) -> tuple[list[dict], list[dict], list[str], str]:
+        if self._runtime_state is None:
+            events, errors = validate_chain(self.run_dir)
+            effective: list[dict] = []
+            chain_errors = list(errors)
+            effective_error = ""
+            if not chain_errors:
+                try:
+                    effective = _effective_agent_events(self.run_dir, events)
+                except RuntimeError as exc:
+                    effective_error = str(exc)
+            self._runtime_state = (
+                copy.deepcopy(events), copy.deepcopy(effective),
+                list(chain_errors), effective_error)
+        events, effective, errors, effective_error = self._runtime_state
+        return (
+            copy.deepcopy(events), copy.deepcopy(effective),
+            list(errors), effective_error)
+
+    def cached_plan_projection(self, plan_digest: str) -> dict | None:
+        value = self._plan_projections.get(plan_digest)
+        return copy.deepcopy(value) if isinstance(value, dict) else None
+
+    def cache_plan_projection(self, plan_digest: str, projection: dict) -> None:
+        if plan_digest:
+            self._plan_projections[plan_digest] = copy.deepcopy(projection)
+
+    def cached_agent_integrity_errors(self) -> list[str] | None:
+        return (
+            list(self._agent_integrity_errors)
+            if self._agent_integrity_errors is not None else None
+        )
+
+    def cache_agent_integrity_errors(self, errors: list[str]) -> None:
+        self._agent_integrity_errors = list(errors)
+
+    def cached_consumer_value(self, key: str) -> object | None:
+        return copy.deepcopy(self._consumer_cache.get(key))
+
+    def cache_consumer_value(self, key: str, value: object) -> None:
+        self._consumer_cache[key] = copy.deepcopy(value)
+
+    def assert_stable(self) -> None:
+        """Fence every transcript identity again before a snapshot verdict escapes."""
+        if self._snapshot_errors:
+            raise RuntimeError(self._snapshot_errors[0])
+        for raw_path, expected in self._path_identities.items():
+            candidate = Path(raw_path)
+            try:
+                current = os.stat(candidate, follow_symlinks=False)
+                if not stat.S_ISREG(current.st_mode) or candidate.is_symlink() \
+                        or candidate.resolve(strict=True) != candidate:
+                    raise OSError("transcript path identity is no longer regular")
+            except OSError as exc:
+                raise TranscriptSnapshotMutationError(
+                    "transcript identity changed before validation completed") from exc
+            if self._identity(candidate, current) != expected:
+                raise TranscriptSnapshotMutationError(
+                    "transcript identity changed before validation completed")
+
+
+def current_validation_snapshot(
+    run_dir: str | Path,
+    explicit: RunValidationSnapshot | None = None,
+) -> RunValidationSnapshot | None:
+    snapshot = explicit
+    if snapshot is None:
+        candidate = _ACTIVE_VALIDATION_SNAPSHOT.get()
+        snapshot = candidate if isinstance(candidate, RunValidationSnapshot) else None
+    if snapshot is None:
+        return None
+    if snapshot.run_dir != Path(run_dir).resolve():
+        raise RuntimeError("validation snapshot belongs to a different run")
+    return snapshot
+
+
+@contextlib.contextmanager
+def validation_snapshot_scope(run_dir: str | Path):
+    snapshot = RunValidationSnapshot(run_dir)
+    token = _ACTIVE_VALIDATION_SNAPSHOT.set(snapshot)
+    try:
+        yield snapshot
+    finally:
+        try:
+            snapshot.assert_stable()
+        finally:
+            _ACTIVE_VALIDATION_SNAPSHOT.reset(token)
+
+
+def _child_transcript_has_tool_use(
+    path: Path,
+    record: dict,
+    validation_snapshot: RunValidationSnapshot | None = None,
+) -> bool:
     """Require one structured tool-use in the exact Claude child envelope."""
     tool_use_id = str(record.get("tool_use_id") or "")
     session_id = str(record.get("session_id") or "")
@@ -5241,22 +6955,8 @@ def _child_transcript_has_tool_use(path: Path, record: dict) -> bool:
     if not tool_use_id:
         return False
 
-    def tool_use_ids(value: object) -> list[str]:
-        found: list[str] = []
-        if isinstance(value, dict):
-            kind = str(value.get("type") or "").replace("_", "").lower()
-            if kind == "tooluse":
-                candidate = str(
-                    value.get("id") or value.get("tool_use_id")
-                    or value.get("toolUseId") or "")
-                if candidate:
-                    found.append(candidate)
-            for child in value.values():
-                found.extend(tool_use_ids(child))
-        elif isinstance(value, list):
-            for child in value:
-                found.extend(tool_use_ids(child))
-        return found
+    if validation_snapshot is not None:
+        return validation_snapshot.child_has_tool_use(path, record)
 
     found = False
     try:
@@ -5274,7 +6974,7 @@ def _child_transcript_has_tool_use(path: Path, record: dict) -> bool:
                 decoded = json.loads(raw.decode("utf-8", errors="strict"))
             except Exception:
                 return False
-            if tool_use_id not in tool_use_ids(decoded):
+            if tool_use_id not in _structured_tool_use_ids(decoded):
                 continue
             exact_envelope = (
                 isinstance(decoded, dict)
@@ -5310,6 +7010,134 @@ def _transcript_json_records(path: Path) -> tuple[bytes, list[dict]]:
     if not records:
         raise RuntimeError("transcript is empty")
     return payload, records
+
+
+def _external_stop_transcript_proof(start: dict) -> dict:
+    """Freeze Claude Code's exact structured permanent-stop observation.
+
+    The parent transcript is frozen only through the matching SendMessage
+    result so unrelated later Root turns may continue. The child transcript is
+    frozen in full; a supposedly stopped child that later writes is integrity
+    debt rather than a silently accepted failure.
+    """
+    session_id = str(start.get("session_id") or "")
+    agent_id = str(start.get("agent_id") or "")
+    transcript_path = Path(str(start.get("transcript_path") or ""))
+    expected_message = _external_stop_message(agent_id)
+    if start.get("hook_event_name") != "SubagentStart" \
+            or start.get("subagent_type") != _HUNTER_AGENT_TYPE \
+            or start.get("agent_type") != _HUNTER_AGENT_TYPE \
+            or not _TRANSCRIPT_ID_RE.fullmatch(session_id) \
+            or not _TRANSCRIPT_ID_RE.fullmatch(agent_id):
+        raise RuntimeError("EXTERNAL_STOP_START_INVALID")
+    parent_payload, parent_records = _transcript_json_records(transcript_path)
+    parent_lines = parent_payload.splitlines(keepends=True)
+    if len(parent_lines) != len(parent_records):
+        raise RuntimeError("EXTERNAL_STOP_PARENT_LINES_INVALID")
+    tool_uses: list[tuple[int, dict, dict]] = []
+    for index, record in enumerate(parent_records):
+        if record.get("isSidechain") is True \
+                or str(record.get("sessionId") or "") != session_id:
+            continue
+        for node in _nested_nodes(record):
+            kind = str(node.get("type") or "").replace("_", "").lower()
+            if kind != "tooluse" or node.get("name") != "SendMessage":
+                continue
+            tool_input = node.get("input") \
+                if isinstance(node.get("input"), dict) else {}
+            recipient = str(
+                tool_input.get("to") or tool_input.get("recipient") or "")
+            if recipient != agent_id:
+                continue
+            secondary = str(tool_input.get("recipient") or "")
+            if secondary and secondary != agent_id:
+                continue
+            tool_id = str(
+                node.get("id") or node.get("tool_use_id")
+                or node.get("toolUseId") or "")
+            if tool_id:
+                tool_uses.append((index, record, node))
+    if len(tool_uses) != 1:
+        raise RuntimeError("EXTERNAL_STOP_SEND_CALL_NOT_UNIQUE")
+    use_index, use_record, use_node = tool_uses[0]
+    stop_tool_id = str(
+        use_node.get("id") or use_node.get("tool_use_id")
+        or use_node.get("toolUseId") or "")
+    results: list[tuple[int, dict]] = []
+    for index, record in enumerate(parent_records):
+        if index <= use_index or record.get("isSidechain") is True \
+                or str(record.get("sessionId") or "") != session_id:
+            continue
+        structured = record.get("toolUseResult") \
+            if isinstance(record.get("toolUseResult"), dict) else None
+        if structured != {"success": False, "message": expected_message}:
+            continue
+        matching_blocks: list[dict] = []
+        for node in _nested_nodes(record):
+            kind = str(node.get("type") or "").replace("_", "").lower()
+            result_id = str(
+                node.get("tool_use_id") or node.get("toolUseId") or "")
+            if kind == "toolresult" and result_id == stop_tool_id:
+                matching_blocks.append(node)
+        if len(matching_blocks) != 1:
+            continue
+        content = matching_blocks[0].get("content")
+        if not isinstance(content, list) or len(content) != 1 \
+                or not isinstance(content[0], dict) \
+                or content[0].get("type") != "text":
+            continue
+        try:
+            nested = json.loads(str(content[0].get("text") or ""))
+        except Exception:
+            continue
+        if nested != structured \
+                or record.get("type") != "user" \
+                or not isinstance(record.get("message"), dict) \
+                or record["message"].get("role") != "user" \
+                or str(record.get("sourceToolAssistantUUID") or "") \
+                    != str(use_record.get("uuid") or ""):
+            continue
+        results.append((index, record))
+    if len(results) != 1:
+        raise RuntimeError("EXTERNAL_STOP_SEND_RESULT_NOT_UNIQUE")
+    result_index, result_record = results[0]
+    transcript_stopped_at = str(result_record.get("timestamp") or "")
+    if not _valid_iso_datetime(transcript_stopped_at):
+        raise RuntimeError("EXTERNAL_STOP_TIMESTAMP_INVALID")
+    # Claude transcript timestamps are semantic instants, not receipt syntax.
+    # Normalize harmless ISO-8601 variants to the canonical millisecond-Z
+    # representation required by agent-receipt.v1. The frozen parent prefix
+    # still binds the exact source bytes, including the original spelling.
+    stopped_at = _iso_timestamp(_parse_iso_timestamp(transcript_stopped_at))
+    prefix = b"".join(parent_lines[:result_index + 1])
+    if not prefix or not parent_payload.startswith(prefix):
+        raise RuntimeError("EXTERNAL_STOP_PARENT_PREFIX_INVALID")
+    child_path = _child_transcript_path(start)
+    if child_path is None:
+        raise RuntimeError("EXTERNAL_STOP_CHILD_TRANSCRIPT_MISSING")
+    child_payload, child_records = _transcript_json_records(child_path)
+    first = child_records[0]
+    first_message = first.get("message") \
+        if isinstance(first.get("message"), dict) else {}
+    initial = first_message.get("content")
+    if first.get("isSidechain") is not True \
+            or str(first.get("sessionId") or "") != session_id \
+            or str(first.get("agentId") or "") != agent_id \
+            or first.get("type") != "user" \
+            or first_message.get("role") != "user" \
+            or not isinstance(initial, str) \
+            or _launch_prompt_sha256(initial) \
+                != str(start.get("launch_prompt_sha256") or ""):
+        raise RuntimeError("EXTERNAL_STOP_CHILD_PROMPT_INVALID")
+    return {
+        "stop_tool_use_id": stop_tool_id,
+        "stop_message": expected_message,
+        "stopped_at": stopped_at,
+        "parent_transcript_prefix_length": len(prefix),
+        "parent_transcript_prefix_sha256": hashlib.sha256(prefix).hexdigest(),
+        "child_transcript_length": len(child_payload),
+        "child_transcript_sha256": hashlib.sha256(child_payload).hexdigest(),
+    }
 
 
 def _nested_nodes(value: object):
@@ -5623,10 +7451,1025 @@ def recover_interrupted_reviewer_starts(run_dir: str | Path) -> dict:
     }
 
 
+def _external_stop_candidate_proof(
+    run_dir: Path,
+    assignment: str,
+    events: list[dict],
+    row: dict,
+) -> dict:
+    """Prove one exact started Hunter is permanently stopped by the client."""
+    role = str(row.get("role") or "")
+    attempts = row.get("attempts") \
+        if isinstance(row.get("attempts"), list) else []
+    current_attempt = str(row.get("current_attempt") or "")
+    matching_attempts = [
+        item for item in attempts
+        if isinstance(item, dict)
+        and str(item.get("attempt_id") or "") == current_attempt
+    ]
+    if row.get("schema") != "xunji.assignment.v1" \
+            or str(row.get("agent") or "") != assignment \
+            or role not in _ASSIGNMENT_HUNTER_ROLES \
+            or str(row.get("status") or "") not in {"running", "working"} \
+            or len(matching_attempts) != 1:
+        raise RuntimeError(f"EXTERNAL_STOP_ASSIGNMENT_NOT_RUNNING:{assignment}")
+    attempt = matching_attempts[0]
+    agent_id = str(attempt.get("agent_id") or "")
+    session_id = str(attempt.get("session_id") or "")
+    tool_use_id = str(attempt.get("tool_use_id") or "")
+    plan_digest = str(row.get("plan_digest") or "")
+    lane_id = str(row.get("lane_id") or "")
+    prompt_hash = assignment_launch_prompt_sha256(row)
+    if attempt.get("schema") != "xunji.agent-receipt.v1" \
+            or attempt.get("state") != "running" \
+            or attempt.get("result_snapshot") != {} \
+            or not agent_id or not session_id or not tool_use_id \
+            or str(row.get("runtime_agent_id") or "") != agent_id \
+            or str(attempt.get("lane_id") or "") != lane_id \
+            or str(attempt.get("plan_digest") or "") != plan_digest \
+            or str(attempt.get("launch_prompt_sha256") or "") != prompt_hash \
+            or str(attempt.get("subagent_type") or "") != _HUNTER_AGENT_TYPE \
+            or not re.fullmatch(r"L-[A-Za-z0-9._-]+", lane_id) \
+            or not re.fullmatch(r"[0-9a-f]{64}", plan_digest) \
+            or not re.fullmatch(r"[0-9a-f]{64}", prompt_hash):
+        raise RuntimeError(f"EXTERNAL_STOP_ATTEMPT_BINDING_INVALID:{assignment}")
+    launches = [
+        item for item in events
+        if item.get("hook_event_name") == "PostToolUse"
+        and item.get("tool_name") == "Agent"
+        and item.get("success") is True
+        and str(item.get("assignment") or "") == assignment
+        and str(item.get("session_id") or "") == session_id
+        and str(item.get("tool_use_id") or "") == tool_use_id
+        and str(item.get("launched_agent_id") or "") == agent_id
+    ]
+    starts = [
+        item for item in events
+        if item.get("hook_event_name") == "SubagentStart"
+        and str(item.get("assignment") or "") == assignment
+        and str(item.get("session_id") or "") == session_id
+        and str(item.get("tool_use_id") or "") == tool_use_id
+        and str(item.get("agent_id") or "") == agent_id
+    ]
+    if len(launches) != 1 or len(starts) != 1:
+        raise RuntimeError(f"EXTERNAL_STOP_LIFECYCLE_NOT_UNIQUE:{assignment}")
+    launch = launches[0]
+    start = starts[0]
+    exact = {
+        "assignment_lane": lane_id,
+        "assignment_plan_digest": plan_digest,
+        "launch_prompt_sha256": prompt_hash,
+        "subagent_type": _HUNTER_AGENT_TYPE,
+    }
+    if start.get("agent_type") != _HUNTER_AGENT_TYPE \
+            or start.get("completion_review") is True \
+            or any(launch.get(field) != value or start.get(field) != value
+                   for field, value in exact.items()) \
+            or int(launch.get("seq") or 0) >= int(start.get("seq") or 0):
+        raise RuntimeError(f"EXTERNAL_STOP_LIFECYCLE_BINDING_INVALID:{assignment}")
+    if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("agent_id") or "") == agent_id
+            for item in events):
+        raise RuntimeError(f"EXTERNAL_STOP_HAS_RUNTIME_STOP:{assignment}")
+    transcript = _external_stop_transcript_proof(start)
+    stop_epoch = _parse_iso_timestamp(str(transcript.get("stopped_at") or ""))
+    identity = {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "tool_use_id": tool_use_id,
+    }
+    if not stop_epoch or any(
+            _external_stop_event_owned(identity, item)
+            and float(item.get("ts") or 0.0) > stop_epoch + 0.001
+            for item in events):
+        raise RuntimeError(f"EXTERNAL_STOP_HAS_LATER_ACTIVITY:{assignment}")
+    if not events:
+        raise RuntimeError(f"EXTERNAL_STOP_RUNTIME_EMPTY:{assignment}")
+    head = events[-1]
+    return {
+        "schema": EXTERNALLY_STOPPED_AGENT_SCHEMA,
+        "parent_run": run_dir.name,
+        "reason": EXTERNALLY_STOPPED_AGENT_REASON,
+        "assignment": assignment,
+        "role": role,
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "tool_use_id": tool_use_id,
+        "lane_id": lane_id,
+        "plan_digest": plan_digest,
+        "launch_prompt_sha256": prompt_hash,
+        "launch_event_seq": int(launch.get("seq") or 0),
+        "launch_event_hash": str(launch.get("receipt_hash") or ""),
+        "start_event_seq": int(start.get("seq") or 0),
+        "start_event_hash": str(start.get("receipt_hash") or ""),
+        "observed_head_seq": int(head.get("seq") or 0),
+        "observed_head_hash": str(head.get("receipt_hash") or ""),
+        **transcript,
+        "recorded_at": _iso_timestamp(time.time()),
+        "receipt_hash": "",
+    }
+
+
+def _publish_externally_stopped_agent_receipt(
+    run_dir: Path,
+    proof: dict,
+) -> dict:
+    receipt = dict(proof)
+    receipt["receipt_hash"] = _externally_stopped_agent_receipt_hash(receipt)
+    payload = json.dumps(
+        receipt, ensure_ascii=False, indent=2, sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    path = _externally_stopped_agent_dir(
+        run_dir) / f"{receipt['receipt_hash']}.json"
+    if path.exists() and path.read_bytes() != payload:
+        raise RuntimeError("externally stopped Agent receipt hash collision")
+    _atomic_bytes(path, payload, owner_directory=run_dir / "state")
+    return receipt
+
+
+def _load_assignment_rows_for_external_stop(run_dir: Path) -> tuple[dict, list[dict]]:
+    path = run_dir / "state" / "assignments.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except Exception as exc:
+        raise RuntimeError(
+            "cannot read assignments for external-stop settlement") from exc
+    rows = data.get("assignments") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        raise RuntimeError("assignments state has no assignments list")
+    errors = assignment_state_errors(data, parent_run=run_dir.name)
+    if errors:
+        raise RuntimeError("assignments state invalid: " + errors[0])
+    return data, rows
+
+
+def external_stop_recovery_status(
+    run_dir: str | Path,
+    assignment: str,
+) -> dict:
+    """Read-only eligibility for the exact Claude user-stop receipt."""
+    run = Path(run_dir).resolve()
+    try:
+        with _locked(run):
+            events, errors = validate_chain(run)
+            if errors:
+                raise RuntimeError("runtime chain invalid: " + errors[0])
+            receipts, _stream, _hook = (
+                _load_typed_agent_termination_receipts(run, events))
+            existing = [
+                item for item in receipts
+                if str(item.get("assignment") or "") == assignment
+            ]
+            if len(existing) > 1:
+                raise RuntimeError("multiple external-stop receipts for assignment")
+            if existing:
+                return {
+                    "status": "settled",
+                    "assignment": assignment,
+                    "receipt_hash": str(existing[0].get("receipt_hash") or ""),
+                    "error": "",
+                }
+            with assignment_mutation_lock(run):
+                _data, rows = _load_assignment_rows_for_external_stop(run)
+                matching = [
+                    item for item in rows
+                    if isinstance(item, dict)
+                    and str(item.get("agent") or "") == assignment
+                ]
+                if len(matching) != 1:
+                    raise RuntimeError("assignment is not unique")
+                proof = _external_stop_candidate_proof(
+                    run, assignment, events, matching[0])
+            return {
+                "status": "eligible",
+                "assignment": assignment,
+                "receipt_hash": "",
+                "stopped_at": str(proof.get("stopped_at") or ""),
+                "error": "",
+            }
+    except RuntimeError as exc:
+        return {
+            "status": "not_eligible",
+            "assignment": assignment,
+            "receipt_hash": "",
+            "error": str(exc),
+        }
+
+
+def settle_externally_stopped_agent(
+    run_dir: str | Path,
+    assignment: str,
+) -> dict:
+    """Project a transcript-proven permanent client stop as a failed attempt.
+
+    This creates no evidence and no successful return. The generated failure
+    result remains subject to the ordinary digest-bound Reviewer and Root
+    disposition gates.
+    """
+    run = Path(run_dir).resolve()
+    changed = False
+    with _locked(run):
+        events, errors = validate_chain(run)
+        if errors:
+            raise RuntimeError("runtime chain invalid: " + errors[0])
+        receipts, _stream, _hook = (
+            _load_typed_agent_termination_receipts(run, events))
+        existing = [
+            item for item in receipts
+            if str(item.get("assignment") or "") == assignment
+        ]
+        if len(existing) > 1:
+            raise RuntimeError("multiple external-stop receipts for assignment")
+        with assignment_mutation_lock(run):
+            data, rows = _load_assignment_rows_for_external_stop(run)
+            matching = [
+                item for item in rows
+                if isinstance(item, dict)
+                and str(item.get("agent") or "") == assignment
+            ]
+            if len(matching) != 1:
+                raise RuntimeError("assignment is not unique")
+            row = matching[0]
+            receipt = existing[0] if existing else None
+            if receipt is None:
+                proof = _external_stop_candidate_proof(
+                    run, assignment, events, row)
+                snapshot = _freeze_agent_result(
+                    run,
+                    assignment=assignment,
+                    attempt_id=str(proof.get("agent_id") or ""),
+                    value=_external_stop_result_value(proof),
+                    source="external_stop_receipt",
+                )
+                proof["result_snapshot"] = snapshot
+                receipt = _publish_externally_stopped_agent_receipt(run, proof)
+                validation = _validate_externally_stopped_agent_receipt(
+                    run, receipt, events,
+                    filename=f"{receipt['receipt_hash']}.json")
+                if validation:
+                    raise RuntimeError(
+                        "published external-stop receipt is invalid: " + validation)
+            attempts = row.get("attempts") \
+                if isinstance(row.get("attempts"), list) else []
+            exact_attempts = [
+                item for item in attempts
+                if isinstance(item, dict)
+                and str(item.get("attempt_id") or "")
+                    == str(receipt.get("agent_id") or "")
+                and str(item.get("agent_id") or "")
+                    == str(receipt.get("agent_id") or "")
+                and str(item.get("tool_use_id") or "")
+                    == str(receipt.get("tool_use_id") or "")
+                and str(item.get("session_id") or "")
+                    == str(receipt.get("session_id") or "")
+            ]
+            if len(exact_attempts) != 1:
+                raise RuntimeError("external-stop receipt has no exact projected attempt")
+            attempt = exact_attempts[0]
+            expected_attempt_fields = {
+                "state": "failed",
+                "returned_at": str(receipt.get("stopped_at") or ""),
+                "result_snapshot": dict(receipt.get("result_snapshot") or {}),
+                "termination_receipt_hash": str(
+                    receipt.get("receipt_hash") or ""),
+            }
+            if attempt.get("state") == "running":
+                attempt.update(expected_attempt_fields)
+                changed = True
+            elif any(attempt.get(key) != value
+                     for key, value in expected_attempt_fields.items()):
+                raise RuntimeError("external-stop attempt projection conflicts")
+            current_status = str(row.get("status") or "")
+            if current_status in NONTERMINAL_ASSIGNMENT_STATUSES:
+                row["status"] = "failed"
+                row["last_note"] = (
+                    "runtime external stop: "
+                    f"attempt={receipt.get('agent_id')}; disposition pending")
+                row["updated_at"] = str(receipt.get("stopped_at") or "")
+                row["last_seen_at"] = str(receipt.get("stopped_at") or "")
+                changed = True
+            elif current_status not in TERMINAL_ASSIGNMENT_STATUSES:
+                raise RuntimeError("external-stop assignment status conflicts")
+            _write_merge_draft(run, row, attempt, outcome="failed")
+            state_errors = assignment_state_errors(data, parent_run=run.name)
+            if state_errors:
+                raise RuntimeError(
+                    "external-stop settlement would invalidate assignments: "
+                    + state_errors[0])
+            if changed:
+                _atomic_json(run / "state" / "assignments.json", data)
+    projection = reconcile_agent_projection(run)
+    return {
+        "status": "settled" if changed else "unchanged",
+        "assignment": assignment,
+        "receipt": receipt,
+        "projection": projection,
+    }
+
+
+def _stream_stall_candidate_proof(
+    run_dir: Path,
+    assignment: str,
+    events: list[dict],
+    row: dict,
+) -> dict:
+    """Prove one exact started Hunter was killed by the stream watchdog."""
+    role = str(row.get("role") or "")
+    attempts = row.get("attempts") \
+        if isinstance(row.get("attempts"), list) else []
+    current_attempt = str(row.get("current_attempt") or "")
+    matching_attempts = [
+        item for item in attempts
+        if isinstance(item, dict)
+        and str(item.get("attempt_id") or "") == current_attempt
+    ]
+    if row.get("schema") != "xunji.assignment.v1" \
+            or str(row.get("agent") or "") != assignment \
+            or role not in _ASSIGNMENT_HUNTER_ROLES \
+            or str(row.get("status") or "") not in {"running", "working"} \
+            or len(matching_attempts) != 1:
+        raise RuntimeError(f"STREAM_STALL_ASSIGNMENT_NOT_RUNNING:{assignment}")
+    attempt = matching_attempts[0]
+    agent_id = str(attempt.get("agent_id") or "")
+    session_id = str(attempt.get("session_id") or "")
+    tool_use_id = str(attempt.get("tool_use_id") or "")
+    plan_digest = str(row.get("plan_digest") or "")
+    lane_id = str(row.get("lane_id") or "")
+    prompt_hash = assignment_launch_prompt_sha256(row)
+    if attempt.get("schema") != "xunji.agent-receipt.v1" \
+            or attempt.get("state") != "running" \
+            or attempt.get("result_snapshot") != {} \
+            or not agent_id or not session_id or not tool_use_id \
+            or str(row.get("runtime_agent_id") or "") != agent_id \
+            or str(attempt.get("lane_id") or "") != lane_id \
+            or str(attempt.get("plan_digest") or "") != plan_digest \
+            or str(attempt.get("launch_prompt_sha256") or "") != prompt_hash \
+            or str(attempt.get("subagent_type") or "") != _HUNTER_AGENT_TYPE \
+            or not re.fullmatch(r"L-[A-Za-z0-9._-]+", lane_id) \
+            or not re.fullmatch(r"[0-9a-f]{64}", plan_digest) \
+            or not re.fullmatch(r"[0-9a-f]{64}", prompt_hash):
+        raise RuntimeError(f"STREAM_STALL_ATTEMPT_BINDING_INVALID:{assignment}")
+    launches = [
+        item for item in events
+        if item.get("hook_event_name") == "PostToolUse"
+        and item.get("tool_name") == "Agent"
+        and item.get("success") is True
+        and str(item.get("assignment") or "") == assignment
+        and str(item.get("session_id") or "") == session_id
+        and str(item.get("tool_use_id") or "") == tool_use_id
+        and str(item.get("launched_agent_id") or "") == agent_id
+    ]
+    starts = [
+        item for item in events
+        if item.get("hook_event_name") == "SubagentStart"
+        and str(item.get("assignment") or "") == assignment
+        and str(item.get("session_id") or "") == session_id
+        and str(item.get("tool_use_id") or "") == tool_use_id
+        and str(item.get("agent_id") or "") == agent_id
+    ]
+    if len(launches) != 1 or len(starts) != 1:
+        raise RuntimeError(f"STREAM_STALL_LIFECYCLE_NOT_UNIQUE:{assignment}")
+    launch = launches[0]
+    start = starts[0]
+    exact = {
+        "assignment_lane": lane_id,
+        "assignment_plan_digest": plan_digest,
+        "launch_prompt_sha256": prompt_hash,
+        "subagent_type": _HUNTER_AGENT_TYPE,
+    }
+    if start.get("agent_type") != _HUNTER_AGENT_TYPE \
+            or start.get("completion_review") is True \
+            or any(launch.get(field) != value or start.get(field) != value
+                   for field, value in exact.items()) \
+            or int(launch.get("seq") or 0) >= int(start.get("seq") or 0):
+        raise RuntimeError(f"STREAM_STALL_LIFECYCLE_BINDING_INVALID:{assignment}")
+    if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("agent_id") or "") == agent_id
+            for item in events):
+        raise RuntimeError(f"STREAM_STALL_HAS_RUNTIME_STOP:{assignment}")
+    transcript = _stream_stall_transcript_proof(start)
+    failed_epoch = _parse_iso_timestamp(str(transcript.get("failed_at") or ""))
+    identity = {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "tool_use_id": tool_use_id,
+    }
+    if not failed_epoch or any(
+            _stream_stall_event_owned(identity, item)
+            and float(item.get("ts") or 0.0) > failed_epoch + 0.001
+            for item in events):
+        raise RuntimeError(f"STREAM_STALL_HAS_LATER_ACTIVITY:{assignment}")
+    if not events:
+        raise RuntimeError(f"STREAM_STALL_RUNTIME_EMPTY:{assignment}")
+    head = events[-1]
+    return {
+        "schema": STREAM_STALLED_AGENT_SCHEMA,
+        "parent_run": run_dir.name,
+        "reason": STREAM_STALLED_AGENT_REASON,
+        "assignment": assignment,
+        "role": role,
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "tool_use_id": tool_use_id,
+        "lane_id": lane_id,
+        "plan_digest": plan_digest,
+        "launch_prompt_sha256": prompt_hash,
+        "launch_event_seq": int(launch.get("seq") or 0),
+        "launch_event_hash": str(launch.get("receipt_hash") or ""),
+        "start_event_seq": int(start.get("seq") or 0),
+        "start_event_hash": str(start.get("receipt_hash") or ""),
+        "observed_head_seq": int(head.get("seq") or 0),
+        "observed_head_hash": str(head.get("receipt_hash") or ""),
+        **transcript,
+        "recorded_at": _iso_timestamp(time.time()),
+        "receipt_hash": "",
+    }
+
+
+def _publish_stream_stalled_agent_receipt(
+    run_dir: Path,
+    proof: dict,
+) -> dict:
+    receipt = dict(proof)
+    receipt["receipt_hash"] = _stream_stalled_agent_receipt_hash(receipt)
+    payload = json.dumps(
+        receipt, ensure_ascii=False, indent=2, sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    path = _stream_stalled_agent_dir(
+        run_dir) / f"{receipt['receipt_hash']}.json"
+    if path.exists() and path.read_bytes() != payload:
+        raise RuntimeError("stream-stalled Agent receipt hash collision")
+    _atomic_bytes(path, payload, owner_directory=run_dir / "state")
+    return receipt
+
+
+def stream_stall_recovery_status(
+    run_dir: str | Path,
+    assignment: str,
+) -> dict:
+    """Read-only eligibility for an exact Claude stream-watchdog failure."""
+    run = Path(run_dir).resolve()
+    try:
+        with _locked(run):
+            events, errors = validate_chain(run)
+            if errors:
+                raise RuntimeError("runtime chain invalid: " + errors[0])
+            _external, stream_receipts, _hook = (
+                _load_typed_agent_termination_receipts(run, events))
+            existing = [
+                item for item in stream_receipts
+                if str(item.get("assignment") or "") == assignment
+            ]
+            if len(existing) > 1:
+                raise RuntimeError(
+                    "multiple stream-stall receipts for assignment")
+            if existing:
+                return {
+                    "status": "settled",
+                    "assignment": assignment,
+                    "receipt_hash": str(existing[0].get("receipt_hash") or ""),
+                    "error": "",
+                }
+            with assignment_mutation_lock(run):
+                _data, rows = _load_assignment_rows_for_external_stop(run)
+                matching = [
+                    item for item in rows
+                    if isinstance(item, dict)
+                    and str(item.get("agent") or "") == assignment
+                ]
+                if len(matching) != 1:
+                    raise RuntimeError("assignment is not unique")
+                proof = _stream_stall_candidate_proof(
+                    run, assignment, events, matching[0])
+            return {
+                "status": "eligible",
+                "assignment": assignment,
+                "receipt_hash": "",
+                "failed_at": str(proof.get("failed_at") or ""),
+                "error": "",
+            }
+    except RuntimeError as exc:
+        return {
+            "status": "not_eligible",
+            "assignment": assignment,
+            "receipt_hash": "",
+            "error": str(exc),
+        }
+
+
+def settle_stream_stalled_agent(
+    run_dir: str | Path,
+    assignment: str,
+) -> dict:
+    """Project one transcript-proven stream-watchdog death as failed."""
+    run = Path(run_dir).resolve()
+    changed = False
+    with _locked(run):
+        events, errors = validate_chain(run)
+        if errors:
+            raise RuntimeError("runtime chain invalid: " + errors[0])
+        _external, stream_receipts, _hook = (
+            _load_typed_agent_termination_receipts(run, events))
+        existing = [
+            item for item in stream_receipts
+            if str(item.get("assignment") or "") == assignment
+        ]
+        if len(existing) > 1:
+            raise RuntimeError("multiple stream-stall receipts for assignment")
+        with assignment_mutation_lock(run):
+            data, rows = _load_assignment_rows_for_external_stop(run)
+            matching = [
+                item for item in rows
+                if isinstance(item, dict)
+                and str(item.get("agent") or "") == assignment
+            ]
+            if len(matching) != 1:
+                raise RuntimeError("assignment is not unique")
+            row = matching[0]
+            receipt = existing[0] if existing else None
+            if receipt is None:
+                proof = _stream_stall_candidate_proof(
+                    run, assignment, events, row)
+                snapshot = _freeze_agent_result(
+                    run,
+                    assignment=assignment,
+                    attempt_id=str(proof.get("agent_id") or ""),
+                    value=_stream_stall_result_value(proof),
+                    source="stream_stall_receipt",
+                )
+                proof["result_snapshot"] = snapshot
+                receipt = _publish_stream_stalled_agent_receipt(run, proof)
+                validation = _validate_stream_stalled_agent_receipt(
+                    run, receipt, events,
+                    filename=f"{receipt['receipt_hash']}.json")
+                if validation:
+                    raise RuntimeError(
+                        "published stream-stall receipt is invalid: "
+                        + validation)
+            attempts = row.get("attempts") \
+                if isinstance(row.get("attempts"), list) else []
+            exact_attempts = [
+                item for item in attempts
+                if isinstance(item, dict)
+                and str(item.get("attempt_id") or "")
+                    == str(receipt.get("agent_id") or "")
+                and str(item.get("agent_id") or "")
+                    == str(receipt.get("agent_id") or "")
+                and str(item.get("tool_use_id") or "")
+                    == str(receipt.get("tool_use_id") or "")
+                and str(item.get("session_id") or "")
+                    == str(receipt.get("session_id") or "")
+            ]
+            if len(exact_attempts) != 1:
+                raise RuntimeError(
+                    "stream-stall receipt has no exact projected attempt")
+            attempt = exact_attempts[0]
+            expected_attempt_fields = {
+                "state": "failed",
+                "returned_at": str(receipt.get("failed_at") or ""),
+                "result_snapshot": dict(receipt.get("result_snapshot") or {}),
+                "termination_receipt_hash": str(
+                    receipt.get("receipt_hash") or ""),
+            }
+            if attempt.get("state") == "running":
+                attempt.update(expected_attempt_fields)
+                changed = True
+            elif any(attempt.get(key) != value
+                     for key, value in expected_attempt_fields.items()):
+                raise RuntimeError("stream-stall attempt projection conflicts")
+            current_status = str(row.get("status") or "")
+            if current_status in NONTERMINAL_ASSIGNMENT_STATUSES:
+                row["status"] = "failed"
+                row["last_note"] = (
+                    "runtime stream watchdog failure: "
+                    f"attempt={receipt.get('agent_id')}; disposition pending")
+                row["updated_at"] = str(receipt.get("failed_at") or "")
+                row["last_seen_at"] = str(receipt.get("failed_at") or "")
+                changed = True
+            elif current_status not in TERMINAL_ASSIGNMENT_STATUSES:
+                raise RuntimeError("stream-stall assignment status conflicts")
+            _write_merge_draft(run, row, attempt, outcome="failed")
+            state_errors = assignment_state_errors(data, parent_run=run.name)
+            if state_errors:
+                raise RuntimeError(
+                    "stream-stall settlement would invalidate assignments: "
+                    + state_errors[0])
+            if changed:
+                _atomic_json(run / "state" / "assignments.json", data)
+    projection = reconcile_agent_projection(run)
+    return {
+        "status": "settled" if changed else "unchanged",
+        "assignment": assignment,
+        "receipt": receipt,
+        "projection": projection,
+    }
+
+
+def _hook_failed_stop_candidate_proof(
+    run_dir: Path,
+    assignment: str,
+    events: list[dict],
+    row: dict,
+) -> dict:
+    """Prove one exact model return whose SubagentStop hook failed closed."""
+    role = str(row.get("role") or "")
+    expected_type = assignment_subagent_type(row)
+    attempts = row.get("attempts") \
+        if isinstance(row.get("attempts"), list) else []
+    current_attempt = str(row.get("current_attempt") or "")
+    matching_attempts = [
+        item for item in attempts
+        if isinstance(item, dict)
+        and str(item.get("attempt_id") or "") == current_attempt
+    ]
+    if row.get("schema") != "xunji.assignment.v1" \
+            or str(row.get("agent") or "") != assignment \
+            or not expected_type \
+            or str(row.get("status") or "") not in {"running", "working"} \
+            or len(matching_attempts) != 1:
+        raise RuntimeError(f"HOOK_FAILED_STOP_ASSIGNMENT_NOT_RUNNING:{assignment}")
+    attempt = matching_attempts[0]
+    agent_id = str(attempt.get("agent_id") or "")
+    session_id = str(attempt.get("session_id") or "")
+    tool_use_id = str(attempt.get("tool_use_id") or "")
+    plan_digest = str(row.get("plan_digest") or "")
+    lane_id = str(row.get("lane_id") or "")
+    front = str(row.get("front") or "")
+    prompt_hash = assignment_launch_prompt_sha256(row)
+    expected_result = str(row.get("review_result_digest") or "")
+    if attempt.get("schema") != "xunji.agent-receipt.v1" \
+            or attempt.get("state") != "running" \
+            or attempt.get("result_snapshot") != {} \
+            or not agent_id or not session_id or not tool_use_id \
+            or str(row.get("runtime_agent_id") or "") != agent_id \
+            or str(attempt.get("lane_id") or "") != lane_id \
+            or str(attempt.get("plan_digest") or "") != plan_digest \
+            or str(attempt.get("launch_prompt_sha256") or "") != prompt_hash \
+            or str(attempt.get("subagent_type") or "") != expected_type \
+            or (role == "review" and str(
+                attempt.get("result_digest_binding") or "") != expected_result) \
+            or not re.fullmatch(r"F-[A-Za-z0-9._-]+", front) \
+            or not re.fullmatch(r"L-[A-Za-z0-9._-]+", lane_id) \
+            or not re.fullmatch(r"[0-9a-f]{64}", plan_digest) \
+            or not re.fullmatch(r"[0-9a-f]{64}", prompt_hash):
+        raise RuntimeError(f"HOOK_FAILED_STOP_ATTEMPT_BINDING_INVALID:{assignment}")
+    launches = [
+        item for item in events
+        if item.get("hook_event_name") == "PostToolUse"
+        and item.get("tool_name") == "Agent"
+        and item.get("success") is True
+        and str(item.get("assignment") or "") == assignment
+        and str(item.get("session_id") or "") == session_id
+        and str(item.get("tool_use_id") or "") == tool_use_id
+        and str(item.get("launched_agent_id") or "") == agent_id
+    ]
+    starts = [
+        item for item in events
+        if item.get("hook_event_name") == "SubagentStart"
+        and str(item.get("assignment") or "") == assignment
+        and str(item.get("session_id") or "") == session_id
+        and str(item.get("tool_use_id") or "") == tool_use_id
+        and str(item.get("agent_id") or "") == agent_id
+    ]
+    if len(launches) != 1 or len(starts) != 1:
+        raise RuntimeError(f"HOOK_FAILED_STOP_LIFECYCLE_NOT_UNIQUE:{assignment}")
+    launch = launches[0]
+    start = starts[0]
+    exact = {
+        "front": front,
+        "assignment_lane": lane_id,
+        "assignment_plan_digest": plan_digest,
+        "launch_prompt_sha256": prompt_hash,
+        "subagent_type": expected_type,
+    }
+    if start.get("agent_type") != expected_type \
+            or start.get("completion_review") is True \
+            or any(launch.get(field) != value or start.get(field) != value
+                   for field, value in exact.items()) \
+            or (role == "review" and (
+                launch.get("assignment_result_digest") != expected_result
+                or start.get("assignment_result_digest") != expected_result
+            )) \
+            or int(launch.get("seq") or 0) >= int(start.get("seq") or 0):
+        raise RuntimeError(f"HOOK_FAILED_STOP_LIFECYCLE_BINDING_INVALID:{assignment}")
+    if any(
+            item.get("hook_event_name") == "SubagentStop"
+            and str(item.get("session_id") or "") == session_id
+            and str(item.get("agent_id") or "") == agent_id
+            for item in events):
+        raise RuntimeError(f"HOOK_FAILED_STOP_HAS_RUNTIME_STOP:{assignment}")
+    transcript = _hook_failed_stop_transcript_proof(start)
+    returned_epoch = _parse_iso_timestamp(str(transcript.get("returned_at") or ""))
+    identity = {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "tool_use_id": tool_use_id,
+    }
+    if not returned_epoch or any(
+            _hook_failed_stop_event_owned(identity, item)
+            and float(item.get("ts") or 0.0) > returned_epoch + 0.001
+            for item in events):
+        raise RuntimeError(f"HOOK_FAILED_STOP_HAS_LATER_ACTIVITY:{assignment}")
+    if not events:
+        raise RuntimeError(f"HOOK_FAILED_STOP_RUNTIME_EMPTY:{assignment}")
+    head = events[-1]
+    result = transcript.pop("_result")
+    ingress = _matching_subagent_stop_ingress(run_dir, start, result)
+    schema = _hook_failed_stop_receipt_schema(
+        str(transcript.get("hook_driver") or ""),
+        str(transcript.get("returned_at") or ""),
+        str(ingress.get("receipt_hash") or ""),
+    )
+    return {
+        "schema": schema,
+        "parent_run": run_dir.name,
+        "reason": HOOK_FAILED_AGENT_STOP_REASON,
+        "assignment": assignment,
+        "role": role,
+        "front": front,
+        "subagent_type": expected_type,
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "tool_use_id": tool_use_id,
+        "lane_id": lane_id,
+        "plan_digest": plan_digest,
+        "launch_prompt_sha256": prompt_hash,
+        "launch_event_seq": int(launch.get("seq") or 0),
+        "launch_event_hash": str(launch.get("receipt_hash") or ""),
+        "start_event_seq": int(start.get("seq") or 0),
+        "start_event_hash": str(start.get("receipt_hash") or ""),
+        "observed_head_seq": int(head.get("seq") or 0),
+        "observed_head_hash": str(head.get("receipt_hash") or ""),
+        **transcript,
+        "stop_ingress_receipt_hash": str(
+            ingress.get("receipt_hash") or ""),
+        "result_snapshot": {},
+        "recorded_at": _iso_timestamp(time.time()),
+        "receipt_hash": "",
+        "_result": result,
+    }
+
+
+def _publish_hook_failed_agent_stop_receipt(
+    run_dir: Path,
+    proof: dict,
+    events: list[dict],
+) -> dict:
+    receipt = dict(proof)
+    receipt.pop("_result", None)
+    receipt["receipt_hash"] = _hook_failed_agent_stop_receipt_hash(receipt)
+    filename = f"{receipt['receipt_hash']}.json"
+    validation = _validate_hook_failed_agent_stop_receipt(
+        run_dir, receipt, events, filename=filename)
+    if validation:
+        raise RuntimeError(
+            "hook-failed Stop receipt prepublication validation failed: "
+            + validation)
+    payload = json.dumps(
+        receipt, ensure_ascii=False, indent=2, sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    path = _hook_failed_agent_stop_dir(run_dir) / filename
+    if path.exists() and path.read_bytes() != payload:
+        raise RuntimeError("hook-failed Agent Stop receipt hash collision")
+    _atomic_bytes(path, payload, owner_directory=run_dir / "state")
+    if path.read_bytes() != payload:
+        raise RuntimeError("hook-failed Agent Stop receipt readback mismatch")
+    return receipt
+
+
+def _hook_failed_stop_projection_error(
+    run_dir: Path,
+    receipt: dict,
+) -> str:
+    """Return debt while the durable recovery receipt lacks its derived row.
+
+    The recovery receipt is the immutable commit.  ``assignments.json`` and the
+    merge draft are rebuildable projections, but callers must not report a fully
+    recovered attempt until both expose the exact receipt-bound return.
+    """
+    assignment = str(receipt.get("assignment") or "")
+    try:
+        with assignment_mutation_lock(run_dir):
+            _data, rows = _load_assignment_rows_for_external_stop(run_dir)
+            matching_rows = [
+                item for item in rows
+                if isinstance(item, dict)
+                and str(item.get("agent") or "") == assignment
+            ]
+            if len(matching_rows) != 1:
+                return "assignment projection is not unique"
+            row = matching_rows[0]
+            attempts = row.get("attempts") \
+                if isinstance(row.get("attempts"), list) else []
+            matching_attempts = [
+                item for item in attempts
+                if isinstance(item, dict)
+                and str(item.get("agent_id") or "")
+                    == str(receipt.get("agent_id") or "")
+                and str(item.get("tool_use_id") or "")
+                    == str(receipt.get("tool_use_id") or "")
+                and str(item.get("session_id") or "")
+                    == str(receipt.get("session_id") or "")
+            ]
+            if len(matching_attempts) != 1:
+                return "assignment has no unique recovered attempt projection"
+            attempt = matching_attempts[0]
+            if attempt.get("state") != "returned" \
+                    or str(attempt.get("recovery_receipt_hash") or "") \
+                    != str(receipt.get("receipt_hash") or "") \
+                    or str(attempt.get("returned_at") or "") \
+                    != str(receipt.get("returned_at") or "") \
+                    or attempt.get("result_snapshot") \
+                    != receipt.get("result_snapshot"):
+                return "assignment recovered attempt projection is incomplete"
+            draft = _load_json_file(merge_draft_path(run_dir, assignment))
+            runtime_attempt = draft.get("runtime_attempt") \
+                if isinstance(draft.get("runtime_attempt"), dict) else {}
+            snapshot = receipt.get("result_snapshot") \
+                if isinstance(receipt.get("result_snapshot"), dict) else {}
+            if draft.get("schema") != "xunji.merge-draft.v1" \
+                    or draft.get("assignment") != assignment \
+                    or draft.get("outcome") != "returned" \
+                    or draft.get("result") != snapshot \
+                    or draft.get("result_digest") != snapshot.get("sha256") \
+                    or runtime_attempt != {
+                        "agent_id": str(receipt.get("agent_id") or ""),
+                        "tool_use_id": str(receipt.get("tool_use_id") or ""),
+                        "state": "returned",
+                        "returned_at": str(receipt.get("returned_at") or ""),
+                    }:
+                return "merge-draft recovered return projection is incomplete"
+    except RuntimeError as exc:
+        return str(exc)
+    return ""
+
+
+def _runtime_reproject_argv(run_dir: Path) -> str:
+    return (
+        "python3 tools/runtime_receipts.py "
+        + shlex.quote(str(run_dir.resolve()))
+        + " --reproject"
+    )
+
+
+def hook_failed_stop_recovery_status(
+    run_dir: str | Path,
+    assignment: str,
+) -> dict:
+    """Read-only eligibility for one exact host-recorded failed Stop."""
+    run = Path(run_dir).resolve()
+    try:
+        with _locked(run):
+            events, errors = validate_chain(run)
+            if errors:
+                raise RuntimeError("runtime chain invalid: " + errors[0])
+            _external, _stream, receipts = (
+                _load_typed_agent_termination_receipts(run, events))
+            existing = [
+                item for item in receipts
+                if str(item.get("assignment") or "") == assignment
+            ]
+            if len(existing) > 1:
+                raise RuntimeError(
+                    "multiple hook-failed Stop receipts for assignment")
+            if existing:
+                projection_error = _hook_failed_stop_projection_error(
+                    run, existing[0])
+                return {
+                    "status": (
+                        "committed_projection_pending"
+                        if projection_error else "recovered"
+                    ),
+                    "assignment": assignment,
+                    "receipt_hash": str(existing[0].get("receipt_hash") or ""),
+                    "error": projection_error,
+                    **({"next_argv": _runtime_reproject_argv(run)}
+                       if projection_error else {}),
+                }
+            with assignment_mutation_lock(run):
+                _data, rows = _load_assignment_rows_for_external_stop(run)
+                matching = [
+                    item for item in rows
+                    if isinstance(item, dict)
+                    and str(item.get("agent") or "") == assignment
+                ]
+                if len(matching) != 1:
+                    raise RuntimeError("assignment is not unique")
+                proof = _hook_failed_stop_candidate_proof(
+                    run, assignment, events, matching[0])
+            return {
+                "status": "eligible",
+                "assignment": assignment,
+                "receipt_hash": "",
+                "returned_at": str(proof.get("returned_at") or ""),
+                "hook_error_cause": str(proof.get("hook_error_cause") or ""),
+                "error": "",
+            }
+    except RuntimeError as exc:
+        return {
+            "status": "not_eligible",
+            "assignment": assignment,
+            "receipt_hash": "",
+            "error": str(exc),
+        }
+
+
+def recover_hook_failed_agent_stop(
+    run_dir: str | Path,
+    assignment: str,
+) -> dict:
+    """Project an exact transcript-proven model return after failed Stop ingress.
+
+    The receipt preserves that the physical SubagentStop was never journaled.
+    It grants only returned-attempt projection; ordinary Reviewer disposition,
+    Root settlement, evidence promotion, and closure gates remain unchanged.
+    """
+    run = Path(run_dir).resolve()
+    published = False
+    with _locked(run):
+        events, errors = validate_chain(run)
+        if errors:
+            raise RuntimeError("runtime chain invalid: " + errors[0])
+        _external, _stream, receipts = (
+            _load_typed_agent_termination_receipts(run, events))
+        existing = [
+            item for item in receipts
+            if str(item.get("assignment") or "") == assignment
+        ]
+        if len(existing) > 1:
+            raise RuntimeError("multiple hook-failed Stop receipts for assignment")
+        receipt = existing[0] if existing else None
+        if receipt is None:
+            with assignment_mutation_lock(run):
+                _data, rows = _load_assignment_rows_for_external_stop(run)
+                matching = [
+                    item for item in rows
+                    if isinstance(item, dict)
+                    and str(item.get("agent") or "") == assignment
+                ]
+                if len(matching) != 1:
+                    raise RuntimeError("assignment is not unique")
+                proof = _hook_failed_stop_candidate_proof(
+                    run, assignment, events, matching[0])
+                snapshot = _freeze_agent_result(
+                    run,
+                    assignment=assignment,
+                    attempt_id=str(proof.get("agent_id") or ""),
+                    value=proof["_result"],
+                    source="hook_failed_stop_recovery",
+                )
+                proof["result_snapshot"] = snapshot
+                receipt = _publish_hook_failed_agent_stop_receipt(
+                    run, proof, events)
+                published = True
+    try:
+        projection = reconcile_agent_projection(run)
+    except RuntimeError as exc:
+        return {
+            "status": "committed_projection_pending",
+            "assignment": assignment,
+            "receipt": receipt,
+            "projection": {"status": "error", "error": str(exc)},
+            "next_argv": _runtime_reproject_argv(run),
+        }
+    projection_error = _hook_failed_stop_projection_error(run, receipt)
+    attempts = [
+        item for item in agent_attempts(run)
+        if item.get("assignment") == assignment
+        and item.get("state") == "returned"
+        and item.get("recovery_receipt_hash") == receipt.get("receipt_hash")
+    ]
+    if len(attempts) != 1 and not projection_error:
+        projection_error = (
+            "runtime attempt view has no exact returned recovery projection")
+    if projection_error:
+        return {
+            "status": "committed_projection_pending",
+            "assignment": assignment,
+            "receipt": receipt,
+            "projection": {
+                **projection,
+                "projection_error": projection_error,
+            },
+            "next_argv": _runtime_reproject_argv(run),
+        }
+    return {
+        "status": "recovered" if published else "unchanged",
+        "assignment": assignment,
+        "receipt": receipt,
+        "projection": projection,
+    }
+
+
 def _child_receipt_has_causal_owner(
     record: dict,
     events: list[dict],
     parent_tool_ids_cache: dict[str, set[str]] | None = None,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> bool:
     """Bind a child tool receipt to one earlier Start or async Agent return."""
     session_id = str(record.get("session_id") or "")
@@ -5662,8 +8505,14 @@ def _child_receipt_has_causal_owner(
         try:
             parent_tool_ids = {
                 str(item.get("tool_use_id") or "")
-                for item in _transcript_agent_tool_uses(parent)
+                for item in (
+                    validation_snapshot.agent_tool_uses(parent)
+                    if validation_snapshot is not None
+                    else _transcript_agent_tool_uses(parent)
+                )
             }
+        except TranscriptSnapshotMutationError:
+            raise
         except RuntimeError:
             return False
         if parent_tool_ids_cache is not None:
@@ -5675,18 +8524,30 @@ def _transcript_has(
     record: dict,
     events: list[dict] | None = None,
     parent_tool_ids_cache: dict[str, set[str]] | None = None,
+    *,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> bool:
     tool_use_id = str(record.get("tool_use_id") or "")
     transcript = Path(str(record.get("transcript_path") or ""))
     if not tool_use_id or not transcript.is_file():
         return False
+    snapshot = validation_snapshot
+    if snapshot is None:
+        candidate = _ACTIVE_VALIDATION_SNAPSHOT.get()
+        snapshot = candidate if isinstance(candidate, RunValidationSnapshot) else None
     if not str(record.get("agent_id") or ""):
-        return _file_contains_token(transcript, tool_use_id)
+        return (
+            tool_use_id in snapshot.contains_tokens(transcript, {tool_use_id})
+            if snapshot is not None
+            else _file_contains_token(transcript, tool_use_id)
+        )
     if events is None or not _child_receipt_has_causal_owner(
-            record, events, parent_tool_ids_cache):
+            record, events, parent_tool_ids_cache,
+            validation_snapshot=snapshot):
         return False
     child = _child_transcript_path(record)
-    return bool(child and _child_transcript_has_tool_use(child, record))
+    return bool(child and _child_transcript_has_tool_use(
+        child, record, validation_snapshot=snapshot))
 
 
 def valid_tool_events(
@@ -5695,12 +8556,18 @@ def valid_tool_events(
     *,
     session_id: str = "",
     since: float = 0.0,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> list[dict]:
-    events, errors = validate_chain(run_dir)
+    snapshot = current_validation_snapshot(run_dir, validation_snapshot)
+    if snapshot is not None:
+        events, _effective, errors, _effective_error = snapshot.runtime_state()
+    else:
+        events, errors = validate_chain(run_dir)
     if errors:
         return []
     return _valid_tool_events_from(
-        events, tool_name, session_id=session_id, since=since)
+        events, tool_name, session_id=session_id, since=since,
+        validation_snapshot=snapshot)
 
 
 def _valid_tool_events_from(
@@ -5709,6 +8576,7 @@ def _valid_tool_events_from(
     *,
     session_id: str = "",
     since: float = 0.0,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> list[dict]:
     candidates = [
         event for event in events
@@ -5727,7 +8595,11 @@ def _valid_tool_events_from(
         if token:
             parent_tokens.setdefault(transcript, set()).add(token)
     parent_matches = {
-        str(path): _file_contains_tokens(path, tokens)
+        str(path): (
+            validation_snapshot.contains_tokens(path, tokens)
+            if validation_snapshot is not None
+            else _file_contains_tokens(path, tokens)
+        )
         for path, tokens in parent_tokens.items()
     }
     parent_tool_ids_cache: dict[str, set[str]] = {}
@@ -5738,7 +8610,8 @@ def _valid_tool_events_from(
                 str(Path(str(event.get("transcript_path") or ""))), set())
             if not str(event.get("agent_id") or "")
             else _transcript_has(
-                event, events, parent_tool_ids_cache)
+                event, events, parent_tool_ids_cache,
+                validation_snapshot=validation_snapshot)
         )
     ]
 
@@ -5754,6 +8627,7 @@ def valid_control_events(
     *,
     session_id: str = "",
     since: float = 0.0,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> list[dict]:
     """Return same-turn local control receipts without transcript-lag races.
 
@@ -5765,7 +8639,11 @@ def valid_control_events(
     review, and evidence-bearing events continue to use ``valid_tool_events``
     and therefore retain transcript corroboration.
     """
-    events, errors = validate_chain(run_dir)
+    snapshot = current_validation_snapshot(run_dir, validation_snapshot)
+    if snapshot is not None:
+        events, _effective, errors, _effective_error = snapshot.runtime_state()
+    else:
+        events, errors = validate_chain(run_dir)
     if errors:
         return []
     return [
@@ -5783,18 +8661,26 @@ def valid_lifecycle_events(
     *,
     session_id: str = "",
     since: float = 0.0,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> list[dict]:
     """Return transcript-backed SubagentStart/SubagentStop hook receipts."""
     run = Path(run_dir).resolve()
-    events, errors = validate_chain(run)
-    if errors:
+    snapshot = current_validation_snapshot(run, validation_snapshot)
+    if snapshot is not None:
+        _events, events, errors, effective_error = snapshot.runtime_state()
+    else:
+        events, errors = validate_chain(run)
+        effective_error = ""
+    if errors or effective_error:
         return []
-    try:
-        events = _effective_agent_events(run, events)
-    except RuntimeError:
-        return []
+    if snapshot is None:
+        try:
+            events = _effective_agent_events(run, events)
+        except RuntimeError:
+            return []
     return _valid_lifecycle_events_from(
-        events, session_id=session_id, since=since)
+        events, session_id=session_id, since=since,
+        validation_snapshot=snapshot)
 
 
 def _valid_lifecycle_events_from(
@@ -5802,6 +8688,7 @@ def _valid_lifecycle_events_from(
     *,
     session_id: str = "",
     since: float = 0.0,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> list[dict]:
     candidates: list[dict] = []
     transcript_tokens: dict[Path, set[str]] = {}
@@ -5822,7 +8709,11 @@ def _valid_lifecycle_events_from(
         transcript_tokens.setdefault(
             Path(transcript_path), set()).add(transcript_token)
     transcript_matches = {
-        str(path): _file_contains_tokens(path, tokens)
+        str(path): (
+            validation_snapshot.contains_tokens(path, tokens)
+            if validation_snapshot is not None
+            else _file_contains_tokens(path, tokens)
+        )
         for path, tokens in transcript_tokens.items()
     }
     out: list[dict] = []
@@ -5841,9 +8732,14 @@ def denied_tool_events(
     session_id: str = "",
     since: float = 0.0,
     target_only: bool = False,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> list[dict]:
     """Return transcript-backed denials emitted by the trusted PreToolUse hook."""
-    events, errors = validate_chain(run_dir)
+    snapshot = current_validation_snapshot(run_dir, validation_snapshot)
+    if snapshot is not None:
+        events, _effective, errors, _effective_error = snapshot.runtime_state()
+    else:
+        events, errors = validate_chain(run_dir)
     if errors:
         return []
     return [
@@ -5853,7 +8749,8 @@ def denied_tool_events(
         and (not target_only or event.get("target_action") is True)
         and (not session_id or str(event.get("session_id") or "") == session_id)
         and (not since or float(event.get("ts") or 0.0) >= since)
-        and _transcript_has(event, events)
+        and _transcript_has(
+            event, events, validation_snapshot=snapshot)
     ]
 
 
@@ -5862,9 +8759,14 @@ def failed_tool_events(
     *,
     session_id: str = "",
     since: float = 0.0,
+    validation_snapshot: RunValidationSnapshot | None = None,
 ) -> list[dict]:
     """Return transcript-backed tool failures emitted after an allowed action."""
-    events, errors = validate_chain(run_dir)
+    snapshot = current_validation_snapshot(run_dir, validation_snapshot)
+    if snapshot is not None:
+        events, _effective, errors, _effective_error = snapshot.runtime_state()
+    else:
+        events, errors = validate_chain(run_dir)
     if errors:
         return []
     return [
@@ -5873,7 +8775,8 @@ def failed_tool_events(
         and event.get("success") is False
         and (not session_id or str(event.get("session_id") or "") == session_id)
         and (not since or float(event.get("ts") or 0.0) >= since)
-        and _transcript_has(event, events)
+        and _transcript_has(
+            event, events, validation_snapshot=snapshot)
     ]
 
 
@@ -6070,6 +8973,7 @@ def agent_attempts(
     *,
     session_id: str = "",
     since: float = 0.0,
+    validation_snapshot: RunValidationSnapshot | None = None,
     _ignore_projection_cursor: bool = False,
     _prevalidated_events: list[dict] | None = None,
 ) -> list[dict]:
@@ -6078,14 +8982,23 @@ def agent_attempts(
     The provisional Start path is required for foreground/synchronous Agents:
     child tool hooks run before the parent Agent PostToolUse exists.  Its binding
     comes only from the exact parent transcript Agent tool_use frozen on Start.
+
+    ``_prevalidated_events`` is a private projection port. Its caller must pass
+    one complete run-global effective snapshot from ``_effective_agent_events``;
+    it is never a session- or time-filtered query view. Public narrowing happens
+    only through ``session_id`` and ``since`` below, after global receipt proof.
     """
+    run = Path(run_dir).resolve()
+    snapshot = current_validation_snapshot(run, validation_snapshot)
     effective_events: list[dict] | None = None
+    receipt_events: list[dict] = []
     if _prevalidated_events is not None:
         effective_events = list(_prevalidated_events)
+        receipt_events = list(_prevalidated_events)
         integrity_errors: list[str] = []
     elif _ignore_projection_cursor:
-        run = Path(run_dir).resolve()
         events, chain_errors = validate_chain(run)
+        receipt_events = list(events)
         try:
             effective_events = _effective_agent_events(run, events)
         except RuntimeError as exc:
@@ -6095,22 +9008,55 @@ def agent_attempts(
             ["runtime chain invalid: " + chain_errors[0]] if chain_errors
             else _agent_event_integrity_errors_from(effective_events)
         )
+    elif snapshot is not None:
+        events, effective_events, chain_errors, effective_error = (
+            snapshot.runtime_state())
+        receipt_events = list(events)
+        integrity_errors = (
+            ["runtime chain invalid: " + chain_errors[0]] if chain_errors
+            else ["foreign lifecycle receipts invalid: " + effective_error]
+            if effective_error
+            else agent_event_integrity_errors(
+                run, validation_snapshot=snapshot)
+        )
     else:
         integrity_errors = agent_event_integrity_errors(run_dir)
+        if not integrity_errors:
+            events, chain_errors = validate_chain(run)
+            if chain_errors:
+                integrity_errors = [
+                    "runtime chain invalid: " + chain_errors[0]]
+            else:
+                receipt_events = list(events)
+                try:
+                    effective_events = _effective_agent_events(run, events)
+                except RuntimeError as exc:
+                    integrity_errors = [str(exc)]
     if integrity_errors:
+        # Preserve the historical empty-view behavior for unrelated lifecycle
+        # debt, but never let a corrupt typed termination receipt make a real
+        # attempt disappear. Every consumer must observe that immutable receipt
+        # corruption as an exception, just like append/reconcile do.
+        events, chain_errors = validate_chain(run)
+        if not chain_errors:
+            _load_typed_agent_termination_receipts(run, events)
         return []
     if effective_events is None:
         launches = valid_tool_events(
-            run_dir, "Agent", session_id=session_id, since=since)
+            run_dir, "Agent", session_id=session_id, since=since,
+            validation_snapshot=snapshot)
         lifecycle = valid_lifecycle_events(
-            run_dir, session_id=session_id, since=since)
+            run_dir, session_id=session_id, since=since,
+            validation_snapshot=snapshot)
     else:
         launches = _valid_tool_events_from(
             effective_events, "Agent",
-            session_id=session_id, since=since)
+            session_id=session_id, since=since,
+            validation_snapshot=snapshot)
         lifecycle = _valid_lifecycle_events_from(
             effective_events,
-            session_id=session_id, since=since)
+            session_id=session_id, since=since,
+            validation_snapshot=snapshot)
     stops: dict[tuple[str, str], list[dict]] = {}
     starts: dict[tuple[str, str], list[dict]] = {}
     starts_by_tool: dict[tuple[str, str], list[dict]] = {}
@@ -6268,6 +9214,123 @@ def agent_attempts(
             "result_snapshot": result_snapshot,
             "kind": "completion_review" if completion_review else "assignment",
         })
+    stopped_receipts, stream_stalls, recovered_stops = (
+        _load_typed_agent_termination_receipts(run, receipt_events))
+    for receipt in stopped_receipts:
+        # The receipt set is global to the run and must always be validated,
+        # but this attempt view may be intentionally narrowed to one session or
+        # time window (agent_actor does this for every child PreToolUse). A
+        # valid historical termination from another session is not a missing
+        # attempt in the narrowed view and must not poison the current child.
+        if session_id and str(receipt.get("session_id") or "") != session_id:
+            continue
+        if since:
+            launch_seq = int(receipt.get("launch_event_seq") or 0)
+            launch_events = [
+                item for item in receipt_events
+                if int(item.get("seq") or 0) == launch_seq
+            ]
+            if len(launch_events) != 1:
+                raise RuntimeError(
+                    "externally stopped Agent receipt launch is not unique")
+            if float(launch_events[0].get("ts") or 0.0) < since:
+                continue
+        matches = [
+            item for item in attempts
+            if str(item.get("assignment") or "")
+                == str(receipt.get("assignment") or "")
+            and str(item.get("session_id") or "")
+                == str(receipt.get("session_id") or "")
+            and str(item.get("agent_id") or "")
+                == str(receipt.get("agent_id") or "")
+            and str(item.get("tool_use_id") or "")
+                == str(receipt.get("tool_use_id") or "")
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "externally stopped Agent receipt has no unique runtime attempt")
+        matches[0].update({
+            "state": "failed",
+            "returned_at": _parse_iso_timestamp(
+                str(receipt.get("stopped_at") or "")),
+            "result_snapshot": dict(receipt.get("result_snapshot") or {}),
+            "termination_receipt_hash": str(
+                receipt.get("receipt_hash") or ""),
+            "launch_status": "externally_stopped",
+        })
+    for receipt in stream_stalls:
+        if session_id and str(receipt.get("session_id") or "") != session_id:
+            continue
+        if since:
+            launch_seq = int(receipt.get("launch_event_seq") or 0)
+            launch_events = [
+                item for item in receipt_events
+                if int(item.get("seq") or 0) == launch_seq
+            ]
+            if len(launch_events) != 1:
+                raise RuntimeError(
+                    "stream-stalled Agent receipt launch is not unique")
+            if float(launch_events[0].get("ts") or 0.0) < since:
+                continue
+        matches = [
+            item for item in attempts
+            if str(item.get("assignment") or "")
+                == str(receipt.get("assignment") or "")
+            and str(item.get("session_id") or "")
+                == str(receipt.get("session_id") or "")
+            and str(item.get("agent_id") or "")
+                == str(receipt.get("agent_id") or "")
+            and str(item.get("tool_use_id") or "")
+                == str(receipt.get("tool_use_id") or "")
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "stream-stalled Agent receipt has no unique runtime attempt")
+        matches[0].update({
+            "state": "failed",
+            "returned_at": _parse_iso_timestamp(
+                str(receipt.get("failed_at") or "")),
+            "result_snapshot": dict(receipt.get("result_snapshot") or {}),
+            "termination_receipt_hash": str(
+                receipt.get("receipt_hash") or ""),
+            "launch_status": "stream_stalled",
+        })
+    for receipt in recovered_stops:
+        if session_id and str(receipt.get("session_id") or "") != session_id:
+            continue
+        if since:
+            launch_seq = int(receipt.get("launch_event_seq") or 0)
+            launch_events = [
+                item for item in receipt_events
+                if int(item.get("seq") or 0) == launch_seq
+            ]
+            if len(launch_events) != 1:
+                raise RuntimeError(
+                    "hook-failed Stop receipt launch is not unique")
+            if float(launch_events[0].get("ts") or 0.0) < since:
+                continue
+        matches = [
+            item for item in attempts
+            if str(item.get("assignment") or "")
+                == str(receipt.get("assignment") or "")
+            and str(item.get("session_id") or "")
+                == str(receipt.get("session_id") or "")
+            and str(item.get("agent_id") or "")
+                == str(receipt.get("agent_id") or "")
+            and str(item.get("tool_use_id") or "")
+                == str(receipt.get("tool_use_id") or "")
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "hook-failed Stop receipt has no unique runtime attempt")
+        matches[0].update({
+            "state": "returned",
+            "returned_at": _parse_iso_timestamp(
+                str(receipt.get("returned_at") or "")),
+            "result_snapshot": dict(receipt.get("result_snapshot") or {}),
+            "recovery_receipt_hash": str(receipt.get("receipt_hash") or ""),
+            "launch_status": "hook_failed_stop_recovered",
+        })
     return attempts
 
 
@@ -6286,6 +9349,116 @@ def agent_actor(run_dir: str | Path, agent_id: str, *, session_id: str = "",
     if len(matches) != 1:
         return {}
     return matches[0]
+
+
+def _destination_endpoint(value: str, *, allow_bare: bool) \
+        -> tuple[str, int | None] | None:
+    """Compatibility wrapper for the registry-owned endpoint normalizer."""
+    return _capability_registry.target_endpoint(
+        _capability_registry.TargetReference(
+            value, role="runtime", allow_bare=allow_bare))
+
+
+def _assignment_asset_endpoint(value: str) -> tuple[str, int | None] | None:
+    """Return the assignment identity; an explicit port remains significant."""
+    raw = str(value or "").strip().lower().rstrip(".")
+    if not raw:
+        return None
+    if re.match(r"(?i)^https?://", raw):
+        return _destination_endpoint(raw, allow_bare=False)
+    return _destination_endpoint(raw.split("/", 1)[0], allow_bare=True)
+
+
+def _structured_target_values(value: object) -> list[str]:
+    """Read destination-bearing fields without crediting prompt/description prose."""
+    found: list[str] = []
+    if not isinstance(value, dict):
+        return found
+    for key, child in value.items():
+        normalized = str(key).replace("_", "").replace("-", "").lower()
+        if normalized not in {
+            "url", "urls", "target", "targets", "targeturl",
+            "host", "hosts", "endpoint", "endpoints",
+            "destination", "destinations",
+        }:
+            continue
+        values = child if isinstance(child, list) else [child]
+        found.extend(str(item) for item in values if isinstance(item, str))
+    return found
+
+
+def _registered_bash_target_values(
+    command: str, *, receipt_claims_target: bool = False,
+) -> list[tuple[str, bool]]:
+    """Return only target-bearing argv slots of one registered target command.
+
+    ``xunji_target_action`` proves the Hook classified an effect, but it does not
+    identify which URL-shaped token was the outbound destination. Re-parse the
+    exact single Python invocation and consume the registry-owned destination
+    projection shared with the pre-execution coverage gate. Unknown/new target
+    capabilities settle no asset until that registry contract exists.
+    """
+    root = _capability_registry.ROOT
+    invocation = _command_shape.parse_exact_python_command(
+        command,
+        root=root,
+        allowed_scripts=_capability_registry.registered_scripts(
+            root=root, effects={"target"}),
+        allow_environment=True,
+    )
+    if invocation is None:
+        if receipt_claims_target:
+            raise RuntimeError(
+                "successful target receipt no longer parses as one exact "
+                "registered Python capability")
+        return []
+    spec = _capability_registry.match(invocation.script, invocation.args, root=root)
+    if spec is None or spec.effect != "target":
+        if receipt_claims_target:
+            raise RuntimeError(
+                "successful target receipt no longer matches a registered "
+                "target capability")
+        return []
+    try:
+        references = _capability_registry.target_references(
+            spec, invocation.args)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"successful target receipt cannot project {spec.id} destinations: "
+            f"{exc}") from exc
+    return [(item.value, item.allow_bare) for item in references]
+
+
+def _target_event_endpoints(event: dict) -> set[tuple[str, int | None]]:
+    """Extract actual target endpoints from one hash-chained tool input excerpt.
+
+    Bash receipts revalidate the exact registered target capability and use only
+    its target-bearing argv slots.  In particular, payload/header/save values and
+    ``description`` text cannot grant per-asset settlement.  Other target tools
+    use only explicit destination-bearing input fields.
+    """
+    try:
+        tool_input = json.loads(str(event.get("input_excerpt") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return set()
+    if not isinstance(tool_input, dict):
+        return set()
+    candidates: list[tuple[str, bool]] = []
+    if str(event.get("tool_name") or "") == "Bash":
+        candidates.extend(_registered_bash_target_values(
+            str(tool_input.get("command") or ""),
+            receipt_claims_target=event.get("target_action") is True,
+        ))
+    else:
+        candidates.extend(
+            (candidate, True) for candidate in _structured_target_values(tool_input)
+        )
+    endpoints: set[tuple[str, int | None]] = set()
+    for candidate, allow_bare in candidates:
+        endpoint = _destination_endpoint(candidate, allow_bare=allow_bare)
+        if endpoint is not None:
+            endpoints.add(endpoint)
+    return endpoints
 
 
 def agent_asset_activity(run_dir: str | Path, assignment: str) -> dict[str, int]:
@@ -6317,10 +9490,16 @@ def agent_asset_activity(run_dir: str | Path, assignment: str) -> dict[str, int]
               ) in actor_keys]
     counts = {asset: 0 for asset in assets}
     for event in events:
-        text = _input_text(event).lower()
+        destinations = _target_event_endpoints(event)
         for asset in assets:
-            host = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", asset).split("/", 1)[0]
-            if host and re.search(r"(?<![\w.\-])" + re.escape(host) + r"(?![\w.\-])", text):
+            identity = _assignment_asset_endpoint(asset)
+            if identity is None:
+                continue
+            host, port = identity
+            if any(
+                target_host == host and (port is None or target_port == port)
+                for target_host, target_port in destinations
+            ):
                 counts[asset] += 1
     return counts
 
@@ -6720,13 +9899,17 @@ def cron_quiescent(
             active.pop(job, None)
     response = str(latest_list.get("response_excerpt") or "").lower()
     run_name = Path(run_dir).name.lower()
-    if active:
-        return False, "active run Cron job receipt(s): " + ", ".join(sorted(active))
     listed_run_jobs = [str(job) for job in latest_list.get("listed_run_job_ids", []) if job]
     if listed_run_jobs:
         return False, "latest CronList contains active run job(s): " + ", ".join(listed_run_jobs)
     if run_name and run_name in response:
         return False, "latest CronList still mentions the active run"
+    if active:
+        return True, (
+            "latest successful CronList proves no active run job; "
+            "reconciled unmatched historical CronCreate receipt(s): "
+            + ", ".join(sorted(active))
+        )
     return True, "latest successful CronList proves no active run job"
 
 
@@ -7019,6 +10202,8 @@ def _selftest() -> int:
     from unittest import mock
     sys.modules["runtime_receipts"] = sys.modules[__name__]
     from harness.selftest_plan import seed_current_plan
+    import agent_settlement
+    import run_model
     import workers
 
     run = Path(tempfile.mkdtemp()) / "run"
@@ -7031,6 +10216,7 @@ def _selftest() -> int:
         "tool-target-failed", "tool-target-other", "tool-target-success",
         "tool-maintenance-denied", "tool-maintenance-failed", "tool-maintenance-success",
         "tool-target-chain-denied", "tool-target-chain-success",
+        "tool-orphan-create", "tool-orphan-list",
     )
     _write_transcript(transcript, *ids)
 
@@ -7300,6 +10486,12 @@ def _selftest() -> int:
     stale, _ = cron_quiescent(run)
     append_hook_event(run, event("CronList", ids[6], {}, {"tasks": []}))
     after, _ = cron_quiescent(run)
+    append_hook_event(run, event(
+        "CronCreate", ids[19], {"prompt": f"/loop {run.name}"},
+        {"id": "orphaned"}))
+    orphan_stale, _ = cron_quiescent(run)
+    append_hook_event(run, event("CronList", ids[20], {}, {"tasks": []}))
+    orphan_reconciled, orphan_note = cron_quiescent(run)
     current_turn, _ = cron_quiescent(run, session_id="different-session", since=time.time() - 30)
     plan_run = run.parent / "plan-run"
     (plan_run / "state").mkdir(parents=True)
@@ -8017,7 +11209,8 @@ def _selftest() -> int:
     async_transcript = run.parent / "async-session.jsonl"
     async_parent_events = []
     for tool_id, assignment, front, asset in (
-        ("async-launch-1", "A-async-001", "F-001", "a.example"),
+        ("async-launch-1", "A-async-001", "F-001",
+         "a.example,a.example:443,a.example:8443"),
         ("async-launch-2", "A-async-002", "F-002", "b.example"),
     ):
         async_parent_events.append(json.dumps({
@@ -8051,6 +11244,9 @@ def _selftest() -> int:
     child_one_transcript.write_text("\n".join([
         child_tool_event("child-action-denied", child_target_command),
         child_tool_event("child-action-1", child_target_command),
+        child_tool_event("child-action-description-forgery",
+                         "python3 tools/probe.py GET https://other.example "
+                         "--save a.example:8443"),
         child_tool_event("child-maintenance-denied", child_maintenance_command),
         child_tool_event("child-maintenance-success", child_maintenance_command),
         child_tool_event("sibling-only-tool", "python3 tools/workers.py status async-run"),
@@ -8065,7 +11261,7 @@ def _selftest() -> int:
     (async_run / "evidence.md").write_text("# Evidence\n", encoding="utf-8")
     (async_run / "state" / "assignments.json").write_text(json.dumps({"assignments": [
         {"agent": "A-async-001", "front": "F-001", "status": "assigned",
-         "assets": ["a.example"]},
+         "assets": ["a.example", "a.example:443", "a.example:8443"]},
         {"agent": "A-async-002", "front": "F-002", "status": "assigned",
          "assets": ["b.example"]},
     ]}), encoding="utf-8")
@@ -8083,7 +11279,9 @@ def _selftest() -> int:
                               "status": "async_launched"},
         })
 
-    async_launch("async-launch-1", "A-async-001", "F-001", "a.example", "child-agent-1")
+    async_launch(
+        "async-launch-1", "A-async-001", "F-001",
+        "a.example,a.example:443,a.example:8443", "child-agent-1")
     async_replay_before = len(load_events(async_run))
     async_replayed = append_hook_event(async_run, {
         "hook_event_name": "PostToolUse", "session_id": "async-session",
@@ -8091,7 +11289,7 @@ def _selftest() -> int:
         "tool_use_id": "async-launch-1",
         "tool_input": {"prompt": (
             "XUNJI_ASSIGNMENT=A-async-001 XUNJI_FRONT=F-001 "
-            "XUNJI_ASSETS=a.example"
+            "XUNJI_ASSETS=a.example,a.example:443,a.example:8443"
         )},
         "tool_response": {"agentId": "child-agent-1", "isAsync": True,
                           "status": "async_launched"},
@@ -8108,7 +11306,7 @@ def _selftest() -> int:
             "tool_use_id": "async-launch-1",
             "tool_input": {"prompt": (
                 "XUNJI_ASSIGNMENT=A-async-001 XUNJI_FRONT=F-001 "
-                "XUNJI_ASSETS=a.example"
+                "XUNJI_ASSETS=a.example,a.example:443,a.example:8443"
             )},
             "tool_response": {"agentId": "conflicting-child", "isAsync": True,
                               "status": "async_launched"},
@@ -8136,6 +11334,19 @@ def _selftest() -> int:
         "tool_input": {"command": child_target_command},
         "tool_response": {"stdout": "ok"}, "xunji_target_action": True,
     })
+    append_hook_event(async_run, {
+        "hook_event_name": "PostToolUse", "session_id": "async-session",
+        "transcript_path": str(async_transcript), "tool_name": "Bash",
+        "tool_use_id": "child-action-description-forgery",
+        "agent_id": "child-agent-1",
+        "tool_input": {
+            "command": (
+                "python3 tools/probe.py GET https://other.example "
+                "--save a.example:8443"),
+            "description": "a.example:8443",
+        },
+        "tool_response": {"stdout": "ok"}, "xunji_target_action": True,
+    })
     child_target_after_retry = unresolved_target_denials(
         async_run, session_id="async-session")
     async_activity = agent_asset_activity(async_run, "A-async-001")
@@ -8161,6 +11372,199 @@ def _selftest() -> int:
     })
     child_maintenance_after_retry = unresolved_maintenance_blockers(
         async_run, session_id="async-session")
+    endpoint_identity_normalization = (
+        _destination_endpoint(
+            "https://Port.Example/path", allow_bare=False)
+        == ("port.example", 443)
+        and _destination_endpoint(
+            "HTTPS://Port.Example/path", allow_bare=False)
+        == ("port.example", 443)
+        and _destination_endpoint(
+            "https://port.example:443/path", allow_bare=False)
+        == ("port.example", 443)
+        and _destination_endpoint(
+            "http://port.example/path", allow_bare=False)
+        == ("port.example", 80)
+        and _destination_endpoint(
+            "https://port.example:8443/path", allow_bare=False)
+        == ("port.example", 8443)
+        and _destination_endpoint(
+            "https://[2001:db8::1]/path", allow_bare=False)
+        == ("2001:db8::1", 443)
+        and _assignment_asset_endpoint("port.example")
+        == ("port.example", None)
+        and _assignment_asset_endpoint("web1") == ("web1", None)
+        and _assignment_asset_endpoint("例子.测试")
+        == (str(_setup_source.parse_target_url(
+            "https://例子.测试/")["host"]), None)
+        and _destination_endpoint(
+            "127.0.0.1:8443", allow_bare=True)
+        == ("127.0.0.1", 8443)
+        and _destination_endpoint(
+            "[2001:db8::1]:8443", allow_bare=True)
+        == ("2001:db8::1", 8443)
+        and _destination_endpoint(
+            "https://user:secret@port.example/", allow_bare=False) is None
+        and _destination_endpoint(
+            "https://user@port.example/", allow_bare=False) is None
+        and _destination_endpoint(
+            "https://port.example:/", allow_bare=False) is None
+        and _assignment_asset_endpoint("port.example:") is None
+        and _assignment_asset_endpoint("[2001:db8::1]:") is None
+        and _destination_endpoint(
+            "https://port.example:0/", allow_bare=False) is None
+        and _destination_endpoint(
+            "https://port.example:65536/", allow_bare=False) is None
+        and _destination_endpoint(
+            "https://port.exa\nmple/", allow_bare=False) is None
+    )
+    fetch_live_destinations = [
+        _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({"command": command}),
+        })
+        for command in (
+            "python3 tools/fetch_assets.py https://fetch.example/",
+            "python3 tools/fetch_assets.py https://fetch.example/ "
+            "--run runs/demo_20260101",
+        )
+    ]
+    fetch_html_destinations = [
+        _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({"command": command}),
+        })
+        for command in (
+            "python3 tools/fetch_assets.py --html /tmp/page.html "
+            "--base https://base.example/",
+            "python3 tools/fetch_assets.py --html /tmp/page.html "
+            "--base https://base.example/ --run runs/demo_20260101",
+        )
+    ]
+    typed_destination_attribution = (
+        _target_event_endpoints({
+            "tool_name": "WebFetch",
+            "input_excerpt": json.dumps({
+                "url": "https://typed.example/path",
+                "description": "forged.example:8443",
+            }),
+        }) == {("typed.example", 443)}
+        and _target_event_endpoints({
+            "tool_name": "BrowserNavigate",
+            "input_excerpt": json.dumps({
+                "target_url": "http://typed.example/path",
+            }),
+        }) == {("typed.example", 80)}
+        and _target_event_endpoints({
+            "tool_name": "HostProbe",
+            "input_excerpt": json.dumps({"host": "web1"}),
+        }) == {("web1", None)}
+        and _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": (
+                    "python3 tools/render.py https://inline.example/path "
+                    "--run runs/demo_20260101"),
+            }),
+        }) == {("inline.example", 443)}
+        and _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": (
+                    "python3 tools/probe.py POST https://actual.example/path "
+                    "--data https://payload-forgery.example/value "
+                    "--header 'Referer: https://header-forgery.example/' "
+                    "--preflight-get https://preflight.example/form "
+                    "--save f003-cms-8090-app-js.js"),
+            }),
+        }) == {("actual.example", 443), ("preflight.example", 443)}
+        and _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": (
+                    "python3 tools/probe.py DIFF https://one.example/ "
+                    "http://two.example/"),
+            }),
+        }) == {("one.example", 443), ("two.example", 80)}
+        and _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": (
+                    "python3 tools/render.py https://eval.example/ "
+                    "--eval proof.js --run runs/demo_20260101"),
+            }),
+        }) == {("eval.example", 443)}
+        and _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": (
+                    "python3 tools/scan.py --run runs/demo_20260101 nuclei "
+                    "https://scan.example/"),
+            }),
+        }) == {("scan.example", 443)}
+        and fetch_live_destinations.count({("fetch.example", 443)}) == 1
+        and fetch_live_destinations.count(set()) == 1
+        and fetch_html_destinations.count({("base.example", 443)}) == 1
+        and fetch_html_destinations.count(set()) == 1
+        and _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": "python3 tools/cdn_bypass.py cdn.example --json",
+            }),
+        }) == {("cdn.example", None)}
+        and _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": (
+                    "python3 tools/exploit.py viewstate --target "
+                    "https://exploit.example/ --check"),
+            }),
+        }) == {("exploit.example", 443)}
+        and not _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": "python3 tools/replay.py runs/demo_20260101",
+            }),
+        })
+        and not _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": "echo https://mentioned.example/",
+            }),
+        })
+        and not _target_event_endpoints({
+            "tool_name": "Bash",
+            "input_excerpt": json.dumps({
+                "command": "python3 tool.py --save artifact.example",
+                "description": "https://forged.example/path",
+            }),
+        })
+    )
+    invalid_target_receipt_projection_rejected = False
+    try:
+        _target_event_endpoints({
+            "tool_name": "Bash",
+            "target_action": True,
+            "input_excerpt": json.dumps({
+                "command": (
+                    "python3 tools/fetch_assets.py "
+                    "https://unbound-fetch.example/"),
+            }),
+        })
+    except RuntimeError as exc:
+        invalid_target_receipt_projection_rejected = (
+            "no longer matches a registered target capability" in str(exc))
+    indirect_target_receipt_projects_no_forged_endpoint = (
+        _target_event_endpoints({
+            "tool_name": "Bash",
+            "target_action": True,
+            "input_excerpt": json.dumps({
+                "command": (
+                    "python3 tools/check_run.py runs/demo_20260101 "
+                    "--replay-verify"),
+            }),
+        }) == set()
+    )
     append_hook_event(async_run, {
         "hook_event_name": "PreToolUseDenied", "session_id": "async-session",
         "transcript_path": str(async_transcript), "tool_name": "Bash",
@@ -10720,6 +14124,7 @@ def _selftest() -> int:
         and conflicting_hash_diagnostic.get("event_hash") == conflicting_hash
         and conflicting_hash_diagnostic.get("error")
             == "RuntimeError: preserved conflicting diagnostic"
+        and not _projection_cursor_path(conflicting_hash_run).exists()
     )
     async_draft = _load_json_file(merge_draft_path(async_run, "A-async-001"))
     async_snapshot = async_draft.get("result") \
@@ -11475,6 +14880,17 @@ def _selftest() -> int:
         claim_agent_tool_call(budget_run, budget_pretool(index))
         for index in range(1, 6)
     ]
+    budget_denied_event = dict(budget_pretool(1))
+    budget_denied_event.update({
+        "hook_event_name": "PreToolUseDenied",
+        "xunji_decision": "deny",
+        "xunji_reason": "fixture typed scheduler denial",
+        "xunji_decision_code": "XUNJI_E_WORK_PLAN_STALE",
+        "xunji_decision_class": "work_plan",
+        "xunji_target_action": True,
+    })
+    budget_bound_denial = append_hook_event(
+        budget_run, budget_denied_event)
     budget_replay_count_before = len(load_events(budget_run))
     budget_replay = claim_agent_tool_call(budget_run, budget_pretool(5))
     budget_replay_count_after = len(load_events(budget_run))
@@ -11522,6 +14938,128 @@ def _selftest() -> int:
         if budget_chain_errors:
             raise RuntimeError(budget_chain_errors[0])
         _append_runtime_record_locked(budget_run, budget_stop, budget_events)
+    budget_snapshot = RunValidationSnapshot(budget_run)
+    budget_snapshot_integrity_first = agent_event_integrity_errors(
+        budget_run, validation_snapshot=budget_snapshot)
+    budget_snapshot_integrity_second = agent_event_integrity_errors(
+        budget_run, validation_snapshot=budget_snapshot)
+    budget_snapshot_parses_once = bool(
+        not budget_snapshot_integrity_first
+        and budget_snapshot_integrity_second == budget_snapshot_integrity_first
+        and budget_snapshot.unique_transcript_count == 2
+        and budget_snapshot.transcript_parse_counts
+        and max(budget_snapshot.transcript_parse_counts.values()) == 1
+    )
+
+    malformed_snapshot_path = budget_child_dir / "agent-malformed-snapshot.jsonl"
+    malformed_snapshot_path.write_text(
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": budget_session,
+            "agentId": "malformed-snapshot",
+            "message": {"content": [{
+                "type": "tool_use", "id": "malformed-tool",
+            }]},
+        }) + "\n{broken\n",
+        encoding="utf-8",
+    )
+    malformed_snapshot = RunValidationSnapshot(budget_run)
+    malformed_snapshot_rejected = not malformed_snapshot.child_has_tool_use(
+        malformed_snapshot_path, {
+            "session_id": budget_session,
+            "agent_id": "malformed-snapshot",
+            "tool_use_id": "malformed-tool",
+        })
+    wrong_envelope_rejected = not malformed_snapshot.child_has_tool_use(
+        budget_child_transcript, {
+            "session_id": budget_session,
+            "agent_id": "not-the-budget-child",
+            "tool_use_id": budget_child_ids[0],
+        })
+    mutation_snapshot_path = budget_child_dir / "agent-mutation-snapshot.jsonl"
+    mutation_snapshot_path.write_text(json.dumps({
+        "isSidechain": True,
+        "sessionId": budget_session,
+        "agentId": "mutation-snapshot",
+        "message": {"content": [{
+            "type": "tool_use", "id": "mutation-tool",
+        }]},
+    }) + "\n", encoding="utf-8")
+    mutation_snapshot = RunValidationSnapshot(budget_run)
+    mutation_snapshot.child_has_tool_use(mutation_snapshot_path, {
+        "session_id": budget_session,
+        "agent_id": "mutation-snapshot",
+        "tool_use_id": "mutation-tool",
+    })
+    mutation_snapshot_path.write_text(
+        mutation_snapshot_path.read_text(encoding="utf-8") + "{}\n",
+        encoding="utf-8",
+    )
+    try:
+        mutation_snapshot.child_has_tool_use(mutation_snapshot_path, {
+            "session_id": budget_session,
+            "agent_id": "mutation-snapshot",
+            "tool_use_id": "mutation-tool",
+        })
+        transcript_mutation_rejected = False
+    except TranscriptSnapshotMutationError:
+        transcript_mutation_rejected = True
+    final_fence_path = budget_child_dir / "agent-final-fence.jsonl"
+    final_fence_path.write_text("{}\n", encoding="utf-8")
+    try:
+        with validation_snapshot_scope(budget_run) as final_fence_snapshot:
+            final_fence_snapshot.contains_tokens(final_fence_path, {"missing"})
+            final_fence_path.write_text("{}\n{}\n", encoding="utf-8")
+        transcript_final_fence_rejected = False
+    except TranscriptSnapshotMutationError:
+        transcript_final_fence_rejected = True
+
+    per_file_cap_path = budget_child_dir / "agent-per-file-cap.jsonl"
+    per_file_cap_path.write_text("{}\n{}\n", encoding="utf-8")
+    with mock.patch.object(
+        sys.modules[__name__], "MAX_VALIDATION_TRANSCRIPT_BYTES", 4,
+    ):
+        try:
+            RunValidationSnapshot(budget_run)._load_transcript(per_file_cap_path)
+            transcript_per_file_cap_rejected = False
+        except RuntimeError as exc:
+            transcript_per_file_cap_rejected = "per-transcript" in str(exc)
+
+    global_cap_one = budget_child_dir / "agent-global-cap-one.jsonl"
+    global_cap_two = budget_child_dir / "agent-global-cap-two.jsonl"
+    global_cap_one.write_text("{}\n", encoding="utf-8")
+    global_cap_two.write_text("{}\n", encoding="utf-8")
+    with mock.patch.object(
+        sys.modules[__name__], "MAX_VALIDATION_TRANSCRIPT_BYTES", 8,
+    ), mock.patch.object(
+        sys.modules[__name__], "MAX_VALIDATION_TRANSCRIPT_TOTAL_BYTES", 5,
+    ):
+        global_cap_snapshot = RunValidationSnapshot(budget_run)
+        global_cap_snapshot._load_transcript(global_cap_one)
+        try:
+            global_cap_snapshot._load_transcript(global_cap_two)
+            transcript_global_cap_rejected = False
+        except RuntimeError as exc:
+            transcript_global_cap_rejected = "total transcript" in str(exc)
+
+    defensive_snapshot = RunValidationSnapshot(budget_run)
+    original_projection = {"nested": {"value": 1}}
+    defensive_snapshot.cache_plan_projection("d" * 64, original_projection)
+    original_projection["nested"]["value"] = 2
+    returned_projection = defensive_snapshot.cached_plan_projection("d" * 64)
+    if isinstance(returned_projection, dict):
+        returned_projection["nested"]["value"] = 3
+    defensive_snapshot.cache_consumer_value(
+        "consumer", {"nested": {"value": 4}})
+    returned_consumer = defensive_snapshot.cached_consumer_value("consumer")
+    if isinstance(returned_consumer, dict):
+        returned_consumer["nested"]["value"] = 5
+    snapshot_cache_defensive = bool(
+        defensive_snapshot.cached_plan_projection("d" * 64)
+        == {"nested": {"value": 1}}
+        and defensive_snapshot.cached_consumer_value("consumer")
+        == {"nested": {"value": 4}}
+    )
     budget_after_stop_rejected = False
     try:
         claim_agent_tool_call(budget_run, budget_pretool(9))
@@ -11650,6 +15188,1180 @@ def _selftest() -> int:
     foreign_receipt_schema_valid = not _selftest_schema_errors(
         foreign_receipt, foreign_schema)
 
+    # Claude Code may permanently stop a started child without delivering the
+    # SubagentStop hook. Only its exact structured SendMessage failure may
+    # project a failed result; ordinary Reviewer/Root settlement remains debt.
+    external_stop_run = run.parent / "external-stop-run"
+    _external_contract, external_plan = seed_current_plan(
+        external_stop_run, stage="S1")
+    external_lane = external_plan["lanes"][0]
+    external_row = workers.create_agent_assignment(
+        external_stop_run,
+        role=str(external_lane["role"]),
+        front=str(external_lane["front"]),
+        assets=[str(item) for item in external_lane.get("assets", [])],
+        agent="A-external-stop-001",
+        lane_id=str(external_lane["id"]),
+    )
+    external_session = "external-stop-session"
+    external_agent = "external-stop-child"
+    external_launch_tool = "external-stop-launch"
+    external_send_tool = "external-stop-send"
+    external_child_tool = "external-stop-child-read"
+    external_prompt = assignment_launch_prompt(external_row)
+    external_parent = run.parent / f"{external_session}.jsonl"
+    external_parent_records = [{
+        "isSidechain": False,
+        "sessionId": external_session,
+        "uuid": "external-stop-launch-uuid",
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": external_launch_tool, "name": "Agent",
+            "input": {
+                "prompt": external_prompt,
+                "subagent_type": "xunji-hunter",
+                "run_in_background": True,
+            },
+        }]},
+    }]
+    external_parent.write_text(
+        "\n".join(json.dumps(item) for item in external_parent_records) + "\n",
+        encoding="utf-8",
+    )
+    external_child_dir = external_parent.with_suffix("") / "subagents"
+    external_child_dir.mkdir(parents=True)
+    external_child = external_child_dir / f"agent-{external_agent}.jsonl"
+    external_child.write_text("\n".join((
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": external_session,
+            "agentId": external_agent,
+            "type": "user",
+            "message": {"role": "user", "content": external_prompt},
+        }),
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": external_session,
+            "agentId": external_agent,
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": external_child_tool,
+                "name": "Read", "input": {"file_path": "/tmp/probe.txt"},
+            }]},
+        }),
+    )) + "\n", encoding="utf-8")
+    append_hook_event(external_stop_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": external_session,
+        "transcript_path": str(external_parent),
+        "tool_name": "Agent",
+        "tool_use_id": external_launch_tool,
+        "tool_input": {
+            "prompt": external_prompt,
+            "subagent_type": "xunji-hunter",
+            "run_in_background": True,
+        },
+        "tool_response": {
+            "agentId": external_agent,
+            "isAsync": True,
+            "status": "async_launched",
+        },
+    })
+    append_hook_event(external_stop_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": external_session,
+        "transcript_path": str(external_parent),
+        "agent_id": external_agent,
+        "agent_type": "xunji-hunter",
+    })
+    external_started_events, external_started_errors = validate_chain(
+        external_stop_run)
+    external_normalized_starts = [
+        item for item in external_started_events
+        if item.get("hook_event_name") == "SubagentStart"
+        and item.get("agent_id") == external_agent
+    ]
+    external_start_normalized = bool(
+        not external_started_errors
+        and len(external_normalized_starts) == 1
+        and external_normalized_starts[0].get("tool_use_id")
+            == external_launch_tool
+        and external_normalized_starts[0].get("assignment")
+            == "A-external-stop-001"
+        and external_normalized_starts[0].get("subagent_type")
+            == "xunji-hunter"
+    )
+    claim_agent_tool_call(external_stop_run, {
+        "hook_event_name": "PreToolUse",
+        "session_id": external_session,
+        "transcript_path": str(external_parent),
+        "tool_name": "Read",
+        "tool_use_id": external_child_tool,
+        "agent_id": external_agent,
+        "tool_input": {"file_path": "/tmp/probe.txt"},
+    })
+    external_message = _external_stop_message(external_agent)
+    external_stopped_at = _iso_timestamp(time.time())
+    external_parent_records.extend((
+        {
+            "isSidechain": False,
+            "sessionId": external_session,
+            "uuid": "external-stop-send-uuid",
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": external_send_tool,
+                "name": "SendMessage",
+                "input": {
+                    "to": external_agent,
+                    "recipient": external_agent,
+                    "message": "resume exact child",
+                },
+            }]},
+        },
+        {
+            "isSidechain": False,
+            "sessionId": external_session,
+            "uuid": "external-stop-result-uuid",
+            "type": "user",
+            "timestamp": external_stopped_at,
+            "sourceToolAssistantUUID": "external-stop-send-uuid",
+            "message": {"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": external_send_tool,
+                "content": [{
+                    "type": "text",
+                    "text": json.dumps({
+                        "success": False,
+                        "message": external_message,
+                    }, separators=(",", ":")),
+                }],
+            }]},
+            "toolUseResult": {
+                "success": False,
+                "message": external_message,
+            },
+        },
+    ))
+    external_parent.write_text(
+        "\n".join(json.dumps(item) for item in external_parent_records) + "\n",
+        encoding="utf-8",
+    )
+    external_parent_exact = external_parent.read_bytes()
+    external_parent.write_bytes(external_parent_exact.replace(
+        b"won't be resumed", b"will not be resumed"))
+    external_message_drift_status = external_stop_recovery_status(
+        external_stop_run, "A-external-stop-001")
+    external_parent.write_bytes(external_parent_exact)
+    external_parent_records[-1]["timestamp"] = (
+        external_stopped_at[:-1] + "+00:00")
+    external_parent.write_text(
+        "\n".join(json.dumps(item) for item in external_parent_records) + "\n",
+        encoding="utf-8",
+    )
+    external_offset_timestamp_status = external_stop_recovery_status(
+        external_stop_run, "A-external-stop-001")
+    external_parent_records[-1]["timestamp"] = external_stopped_at
+    external_parent.write_bytes(external_parent_exact)
+    _external_assignment_data, external_rows_before = (
+        _load_assignment_rows_for_external_stop(external_stop_run))
+    external_rows_before = [
+        item for item in external_rows_before
+        if item.get("agent") == "A-external-stop-001"
+    ]
+    external_candidate_events, external_candidate_errors = validate_chain(
+        external_stop_run)
+    external_preexisting_stop_rejected = False
+    external_terminal_row_rejected = False
+    external_reviewer_row_rejected = False
+    if len(external_rows_before) == 1 and not external_candidate_errors:
+        external_row_before = external_rows_before[0]
+        try:
+            _external_stop_candidate_proof(
+                external_stop_run,
+                "A-external-stop-001",
+                [*external_candidate_events, {
+                    "hook_event_name": "SubagentStop",
+                    "session_id": external_session,
+                    "agent_id": external_agent,
+                }],
+                external_row_before,
+            )
+        except RuntimeError as exc:
+            external_preexisting_stop_rejected = (
+                "EXTERNAL_STOP_HAS_RUNTIME_STOP" in str(exc))
+        terminal_row = json.loads(json.dumps(external_row_before))
+        terminal_row["status"] = "merged"
+        try:
+            _external_stop_candidate_proof(
+                external_stop_run, "A-external-stop-001",
+                external_candidate_events, terminal_row)
+        except RuntimeError as exc:
+            external_terminal_row_rejected = (
+                "EXTERNAL_STOP_ASSIGNMENT_NOT_RUNNING" in str(exc))
+        reviewer_row = json.loads(json.dumps(external_row_before))
+        reviewer_row["role"] = "review"
+        try:
+            _external_stop_candidate_proof(
+                external_stop_run, "A-external-stop-001",
+                external_candidate_events, reviewer_row)
+        except RuntimeError as exc:
+            external_reviewer_row_rejected = (
+                "EXTERNAL_STOP_ASSIGNMENT_NOT_RUNNING" in str(exc))
+    external_status_before = external_stop_recovery_status(
+        external_stop_run, "A-external-stop-001")
+    external_stale_recovery = agent_settlement.stale_recovery_action(
+        external_stop_run,
+        external_plan,
+        projection=run_model.plan_cycle_projection(
+            external_stop_run, plan=external_plan),
+    )
+    external_settlement = settle_externally_stopped_agent(
+        external_stop_run, "A-external-stop-001")
+    external_settlement_replay = settle_externally_stopped_agent(
+        external_stop_run, "A-external-stop-001")
+    external_state = _load_json_file(
+        external_stop_run / "state" / "assignments.json")
+    external_row_after = external_state["assignments"][0]
+    external_attempt_after = external_row_after["attempts"][0]
+    external_attempt_graph = agent_attempts(external_stop_run)
+    external_receipt_events, external_receipt_chain_errors = validate_chain(
+        external_stop_run)
+    external_effective_snapshot = _effective_agent_events(
+        external_stop_run, external_receipt_events)
+    external_prevalidated_attempt_graph = agent_attempts(
+        external_stop_run,
+        _ignore_projection_cursor=True,
+        _prevalidated_events=external_effective_snapshot,
+    )
+    external_launch_ts = float(
+        external_attempt_graph[0].get("launched_at") or 0.0) \
+        if external_attempt_graph else 0.0
+    external_same_session_view = agent_attempts(
+        external_stop_run, session_id=external_session)
+    external_at_launch_view = agent_attempts(
+        external_stop_run,
+        session_id=external_session,
+        since=external_launch_ts,
+    )
+    external_before_launch_view = agent_attempts(
+        external_stop_run,
+        session_id=external_session,
+        since=external_launch_ts - 0.001,
+    )
+    external_unrelated_session_view = agent_attempts(
+        external_stop_run, session_id="external-stop-new-session")
+    external_post_stop_session_view = agent_attempts(
+        external_stop_run,
+        since=_parse_iso_timestamp(external_stopped_at) + 1.0,
+    )
+    external_projection_after = run_model.plan_cycle_projection(
+        external_stop_run, plan=external_plan)
+    external_execution_states = [
+        item for item in external_projection_after.get("lane_states", [])
+        if isinstance(item, dict)
+        and item.get("lane_id") == external_lane.get("id")
+    ]
+    external_draft = _load_json_file(
+        merge_draft_path(external_stop_run, "A-external-stop-001"))
+    external_receipt = external_settlement.get("receipt") \
+        if isinstance(external_settlement.get("receipt"), dict) else {}
+    external_schema = json.loads((
+        Path(__file__).resolve().parents[1] / "contracts"
+        / "externally-stopped-agent.v1.schema.json"
+    ).read_text(encoding="utf-8", errors="strict"))
+    external_schema_valid = not _selftest_schema_errors(
+        external_receipt, external_schema)
+    external_reviewer_wave = workers.delegate_ready_lanes(
+        external_stop_run,
+        runtime_slots=1,
+        request_budget=0,
+        model_egress_budget=1,
+        merge_capacity=10,
+        limit=1,
+    )
+    external_reviewer_assignments = external_reviewer_wave.get("assignments", []) \
+        if isinstance(external_reviewer_wave, dict) else []
+    external_reviewer_name = str(
+        external_reviewer_assignments[0].get("assignment") or "") \
+        if external_reviewer_assignments else ""
+    external_reviewer_row = next(
+        (
+            item for item in _load_json_file(
+                external_stop_run / "state" / "assignments.json"
+            ).get("assignments", [])
+            if item.get("agent") == external_reviewer_name
+        ),
+        {},
+    )
+    external_reviewer_prompt = assignment_launch_prompt(external_reviewer_row)
+    external_reviewer_type = assignment_subagent_type(external_reviewer_row)
+    external_reviewer_session = "external-stop-reviewer-session"
+    external_reviewer_agent = "external-stop-reviewer-child"
+    external_reviewer_launch_tool = "external-stop-reviewer-launch"
+    external_reviewer_read_tool = "external-stop-reviewer-read"
+    external_reviewer_parent = (
+        run.parent / f"{external_reviewer_session}.jsonl")
+    external_reviewer_parent.write_text(json.dumps({
+        "isSidechain": False,
+        "sessionId": external_reviewer_session,
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use",
+            "id": external_reviewer_launch_tool,
+            "name": "Agent",
+            "input": {
+                "prompt": external_reviewer_prompt,
+                "subagent_type": external_reviewer_type,
+                "run_in_background": True,
+            },
+        }]},
+    }) + "\n", encoding="utf-8")
+    external_reviewer_child_dir = (
+        external_reviewer_parent.with_suffix("") / "subagents")
+    external_reviewer_child_dir.mkdir(parents=True)
+    external_reviewer_child = (
+        external_reviewer_child_dir
+        / f"agent-{external_reviewer_agent}.jsonl")
+    external_reviewer_child.write_text("\n".join((
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": external_reviewer_session,
+            "agentId": external_reviewer_agent,
+            "type": "user",
+            "message": {"role": "user", "content": external_reviewer_prompt},
+        }),
+        json.dumps({
+            "isSidechain": True,
+            "sessionId": external_reviewer_session,
+            "agentId": external_reviewer_agent,
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{
+                "type": "tool_use",
+                "id": external_reviewer_read_tool,
+                "name": "Read",
+                "input": {"file_path": "/tmp/review-input.txt"},
+            }]},
+        }),
+    )) + "\n", encoding="utf-8")
+    append_hook_event(external_stop_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": external_reviewer_session,
+        "transcript_path": str(external_reviewer_parent),
+        "tool_name": "Agent",
+        "tool_use_id": external_reviewer_launch_tool,
+        "tool_input": {
+            "prompt": external_reviewer_prompt,
+            "subagent_type": external_reviewer_type,
+            "run_in_background": True,
+        },
+        "tool_response": {
+            "agentId": external_reviewer_agent,
+            "isAsync": True,
+            "status": "async_launched",
+        },
+    })
+    append_hook_event(external_stop_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": external_reviewer_session,
+        "transcript_path": str(external_reviewer_parent),
+        "agent_id": external_reviewer_agent,
+        "agent_type": external_reviewer_type,
+    })
+    external_reviewer_actor = agent_actor(
+        external_stop_run,
+        external_reviewer_agent,
+        session_id=external_reviewer_session,
+    )
+    external_reviewer_claim = claim_agent_tool_call(external_stop_run, {
+        "hook_event_name": "PreToolUse",
+        "session_id": external_reviewer_session,
+        "transcript_path": str(external_reviewer_parent),
+        "tool_name": "Read",
+        "tool_use_id": external_reviewer_read_tool,
+        "agent_id": external_reviewer_agent,
+        "tool_input": {"file_path": "/tmp/review-input.txt"},
+    })
+    external_reviewer_at_launch_view = agent_attempts(
+        external_stop_run,
+        session_id=external_reviewer_session,
+        since=float(external_reviewer_actor.get("launched_at") or 0.0),
+    )
+    external_reviewer_after_historical_stop = bool(
+        external_reviewer_actor.get("state") == "running"
+        and external_reviewer_actor.get("agent_id")
+            == external_reviewer_agent
+        and external_reviewer_actor.get("session_id")
+            == external_reviewer_session
+        and external_reviewer_claim.get("agent_tool_call_admitted") is True
+        and external_reviewer_claim.get("agent_tool_call_ordinal") == 1
+        and len(external_reviewer_at_launch_view) == 1
+        and external_reviewer_at_launch_view[0].get("agent_id")
+            == external_reviewer_agent
+    )
+    external_unrelated_root_event = append_hook_event(external_stop_run, {
+        "hook_event_name": "Notification",
+        "session_id": external_session,
+        "transcript_path": str(external_parent),
+        "tool_name": "",
+        "tool_use_id": "",
+        "tool_input": {},
+        "tool_response": {"message": "unrelated later Root notification"},
+    })
+    external_unrelated_root_allowed = bool(
+        int(external_unrelated_root_event.get("seq") or 0)
+            > int(external_receipt.get("observed_head_seq") or 0)
+        and not agent_event_integrity_errors(external_stop_run)
+    )
+    external_late_stop_rejected = False
+    try:
+        append_hook_event(external_stop_run, {
+            "hook_event_name": "SubagentStop",
+            "session_id": external_session,
+            "transcript_path": str(external_parent),
+            "agent_id": external_agent,
+            "agent_type": "xunji-hunter",
+            "last_assistant_message": "late return must not win",
+        })
+    except RuntimeError as exc:
+        external_late_stop_rejected = (
+            "AFTER_EXTERNAL_STOP" in str(exc))
+    external_late_claim_rejected = False
+    try:
+        claim_agent_tool_call(external_stop_run, {
+            "hook_event_name": "PreToolUse",
+            "session_id": external_session,
+            "transcript_path": str(external_parent),
+            "tool_name": "Read",
+            "tool_use_id": "external-stop-late-read",
+            "agent_id": external_agent,
+            "tool_input": {"file_path": "/tmp/late.txt"},
+        })
+    except RuntimeError as exc:
+        external_late_claim_rejected = (
+            "AFTER_EXTERNAL_STOP" in str(exc))
+    external_snapshot = Path(str(
+        external_attempt_after.get("result_snapshot", {}).get("path") or ""))
+    external_snapshot_original = external_snapshot.read_bytes()
+    external_snapshot.write_bytes(external_snapshot_original + b"\n")
+    external_snapshot_tamper_integrity = bool(
+        agent_event_integrity_errors(external_stop_run))
+    external_snapshot_tamper_projection_failed = False
+    try:
+        agent_attempts(external_stop_run)
+    except RuntimeError:
+        external_snapshot_tamper_projection_failed = True
+    external_snapshot_tamper_narrowed_failed = False
+    try:
+        agent_attempts(
+            external_stop_run,
+            session_id=external_reviewer_session,
+        )
+    except RuntimeError:
+        external_snapshot_tamper_narrowed_failed = True
+    external_snapshot.write_bytes(external_snapshot_original)
+    external_child_original = external_child.read_bytes()
+    external_child.write_bytes(
+        external_child_original + json.dumps({
+            "isSidechain": True,
+            "sessionId": external_session,
+            "agentId": external_agent,
+            "type": "assistant",
+            "message": {"role": "assistant", "content": "late write"},
+        }).encode("utf-8") + b"\n")
+    external_child_tamper_detected = bool(
+        agent_event_integrity_errors(external_stop_run))
+    external_child.write_bytes(external_child_original)
+    external_settlement_exact = bool(
+        external_status_before.get("status") == "eligible"
+        and external_message_drift_status.get("status") == "not_eligible"
+        and external_offset_timestamp_status.get("status") == "eligible"
+        and external_offset_timestamp_status.get("stopped_at")
+            == external_stopped_at
+        and external_start_normalized
+        and external_preexisting_stop_rejected
+        and external_terminal_row_rejected
+        and external_reviewer_row_rejected
+        and external_stale_recovery.get("action")
+            == agent_settlement.RECOVERY_SETTLE_EXTERNALLY_STOPPED
+        and external_settlement.get("status") == "settled"
+        and external_settlement_replay.get("status") == "unchanged"
+        and external_row_after.get("status") == "failed"
+        and external_attempt_after.get("state") == "failed"
+        and external_attempt_after.get("agent_id") == external_agent
+        and external_attempt_after.get("result_snapshot", {}).get("source")
+            == "external_stop_receipt"
+        and external_attempt_after.get("termination_receipt_hash")
+            == external_receipt.get("receipt_hash")
+        and len(external_attempt_graph) == 1
+        and external_attempt_graph[0].get("state") == "failed"
+        and not external_receipt_chain_errors
+        and len(external_prevalidated_attempt_graph) == 1
+        and external_prevalidated_attempt_graph[0].get("state") == "failed"
+        and len(external_same_session_view) == 1
+        and external_same_session_view[0].get("state") == "failed"
+        and len(external_at_launch_view) == 1
+        and external_at_launch_view[0].get("state") == "failed"
+        and len(external_before_launch_view) == 1
+        and external_before_launch_view[0].get("state") == "failed"
+        and external_unrelated_session_view == []
+        and external_post_stop_session_view == []
+        and len(external_execution_states) == 1
+        and external_execution_states[0].get("runtime_state") == "failed"
+        and external_execution_states[0].get("complete") is not True
+        and external_draft.get("outcome") == "failed"
+        and external_draft.get("review_status") == "required"
+        and external_draft.get("result", {}).get("source")
+            == "external_stop_receipt"
+        and len(external_reviewer_assignments) == 1
+        and external_reviewer_assignments[0].get("role") == "review"
+        and external_reviewer_after_historical_stop
+        and (
+            "XUNJI_RESULT_DIGEST="
+            + str(external_draft.get("result_digest") or "")
+        ) in str(external_reviewer_assignments[0].get("launch_prompt") or "")
+        and external_unrelated_root_allowed
+    )
+
+    # The host stream watchdog can kill a live child without emitting Stop.
+    # Only the exact failed task-notification plus the terminal synthetic API
+    # error / interruption pair may settle that attempt as failed.
+    stream_run = run.parent / "stream-stall-run"
+    _stream_contract, stream_plan = seed_current_plan(stream_run, stage="S1")
+    stream_lane = stream_plan["lanes"][0]
+    stream_row = workers.create_agent_assignment(
+        stream_run,
+        role=str(stream_lane["role"]),
+        front=str(stream_lane["front"]),
+        assets=[str(item) for item in stream_lane.get("assets", [])],
+        agent="A-stream-stall-001",
+        lane_id=str(stream_lane["id"]),
+    )
+    stream_session = "stream-stall-session"
+    stream_agent = "stream-stall-child"
+    stream_tool = "stream-stall-launch"
+    stream_description = "Probe stream watchdog fixture"
+    stream_prompt = assignment_launch_prompt(stream_row)
+    stream_parent = run.parent / f"{stream_session}.jsonl"
+    stream_parent_records = [{
+        "isSidechain": False,
+        "sessionId": stream_session,
+        "uuid": "stream-stall-launch-uuid",
+        "type": "assistant",
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": stream_tool, "name": "Agent",
+            "input": {
+                "description": stream_description,
+                "prompt": stream_prompt,
+                "subagent_type": "xunji-hunter",
+                "run_in_background": True,
+            },
+        }]},
+    }]
+    stream_parent.write_text(
+        "\n".join(json.dumps(item) for item in stream_parent_records) + "\n",
+        encoding="utf-8",
+    )
+    stream_child_dir = stream_parent.with_suffix("") / "subagents"
+    stream_child_dir.mkdir(parents=True)
+    stream_child = stream_child_dir / f"agent-{stream_agent}.jsonl"
+    stream_child_records = [{
+        "isSidechain": True,
+        "sessionId": stream_session,
+        "agentId": stream_agent,
+        "type": "user",
+        "message": {"role": "user", "content": stream_prompt},
+    }]
+    stream_child.write_text(
+        "\n".join(json.dumps(item) for item in stream_child_records) + "\n",
+        encoding="utf-8",
+    )
+    append_hook_event(stream_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": stream_session,
+        "transcript_path": str(stream_parent),
+        "tool_name": "Agent",
+        "tool_use_id": stream_tool,
+        "tool_input": {
+            "description": stream_description,
+            "prompt": stream_prompt,
+            "subagent_type": "xunji-hunter",
+            "run_in_background": True,
+        },
+        "tool_response": {
+            "agentId": stream_agent,
+            "isAsync": True,
+            "status": "async_launched",
+        },
+    })
+    append_hook_event(stream_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": stream_session,
+        "transcript_path": str(stream_parent),
+        "agent_id": stream_agent,
+        "agent_type": "xunji-hunter",
+    })
+    stream_base = time.time()
+    stream_error_at = _iso_timestamp(stream_base)
+    stream_interrupted_at = _iso_timestamp(stream_base + 0.001)
+    stream_failed_at = _iso_timestamp(stream_base + 0.002)
+    stream_error_uuid = "stream-stall-error-uuid"
+    stream_interrupted_uuid = "stream-stall-interrupted-uuid"
+    stream_child_records.extend((
+        {
+            "parentUuid": "stream-stall-prompt-uuid",
+            "isSidechain": True,
+            "agentId": stream_agent,
+            "type": "assistant",
+            "uuid": stream_error_uuid,
+            "timestamp": stream_error_at,
+            "message": {
+                "model": "<synthetic>",
+                "role": "assistant",
+                "stop_reason": "stop_sequence",
+                "content": [{
+                    "type": "text", "text": STREAM_STALLED_AGENT_ERROR,
+                }],
+            },
+            "error": "unknown",
+            "isApiErrorMessage": True,
+            "sessionId": stream_session,
+        },
+        {
+            "parentUuid": stream_error_uuid,
+            "isSidechain": True,
+            "agentId": stream_agent,
+            "type": "user",
+            "uuid": stream_interrupted_uuid,
+            "timestamp": stream_interrupted_at,
+            "message": {"role": "user", "content": [{
+                "type": "text", "text": "[Request interrupted by user]",
+            }]},
+            "sessionId": stream_session,
+        },
+    ))
+    stream_child.write_text(
+        "\n".join(json.dumps(item) for item in stream_child_records) + "\n",
+        encoding="utf-8",
+    )
+    stream_summary = f'Agent "{stream_description}"' \
+        + STREAM_STALLED_AGENT_SUMMARY_SUFFIX
+    stream_notification = (
+        "<task-notification>\n"
+        f"<task-id>{stream_agent}</task-id>\n"
+        f"<tool-use-id>{stream_tool}</tool-use-id>\n"
+        "<output-file>/private/tmp/stream-stall.output</output-file>\n"
+        "<status>failed</status>\n"
+        f"<summary>{stream_summary}</summary>\n"
+        f"<note>{STREAM_STALLED_AGENT_NOTIFICATION_NOTE}</note>\n"
+        "<result>partial, non-admissible child text</result>\n"
+        "</task-notification>"
+    )
+    stream_parent_records.append({
+        "isSidechain": False,
+        "sessionId": stream_session,
+        "uuid": "stream-stall-notification-uuid",
+        "type": "user",
+        "timestamp": stream_failed_at,
+        "promptSource": "system",
+        "origin": {"kind": "task-notification"},
+        "message": {"role": "user", "content": stream_notification},
+    })
+    stream_parent.write_text(
+        "\n".join(json.dumps(item) for item in stream_parent_records) + "\n",
+        encoding="utf-8",
+    )
+    stream_parent_original = stream_parent.read_bytes()
+    stream_parent.write_bytes(stream_parent_original.replace(b"600s", b"601s"))
+    stream_drift_status = stream_stall_recovery_status(
+        stream_run, "A-stream-stall-001")
+    stream_parent.write_bytes(stream_parent_original)
+    stream_status_before = stream_stall_recovery_status(
+        stream_run, "A-stream-stall-001")
+    stream_events, stream_event_errors = validate_chain(stream_run)
+    stream_has_stop_rejected = False
+    stream_rows = _load_assignment_rows_for_external_stop(stream_run)[1]
+    try:
+        _stream_stall_candidate_proof(
+            stream_run,
+            "A-stream-stall-001",
+            [*stream_events, {
+                "hook_event_name": "SubagentStop",
+                "session_id": stream_session,
+                "agent_id": stream_agent,
+            }],
+            next(item for item in stream_rows
+                 if item.get("agent") == "A-stream-stall-001"),
+        )
+    except RuntimeError as exc:
+        stream_has_stop_rejected = "STREAM_STALL_HAS_RUNTIME_STOP" in str(exc)
+    stream_stale_recovery = agent_settlement.stale_recovery_action(
+        stream_run,
+        stream_plan,
+        projection=run_model.plan_cycle_projection(
+            stream_run, plan=stream_plan),
+    )
+    stream_settlement = settle_stream_stalled_agent(
+        stream_run, "A-stream-stall-001")
+    stream_replay = settle_stream_stalled_agent(
+        stream_run, "A-stream-stall-001")
+    stream_receipt = stream_settlement.get("receipt") \
+        if isinstance(stream_settlement.get("receipt"), dict) else {}
+    stream_attempts = agent_attempts(stream_run)
+    stream_attempt = next(
+        (item for item in stream_attempts
+         if item.get("assignment") == "A-stream-stall-001"), {})
+    stream_late_stop_rejected = False
+    try:
+        append_hook_event(stream_run, {
+            "hook_event_name": "SubagentStop",
+            "session_id": stream_session,
+            "transcript_path": str(stream_parent),
+            "agent_id": stream_agent,
+            "agent_type": "xunji-hunter",
+            "last_assistant_message": "late physical Stop",
+        })
+    except RuntimeError as exc:
+        stream_late_stop_rejected = "AFTER_STREAM_STALL" in str(exc)
+    stream_child_original = stream_child.read_bytes()
+    stream_child.write_bytes(stream_child_original + b"\n")
+    stream_child_tamper_detected = bool(
+        agent_event_integrity_errors(stream_run))
+    stream_child.write_bytes(stream_child_original)
+    stream_schema = json.loads((
+        Path(__file__).resolve().parents[1]
+        / "contracts" / "stream-stalled-agent.v1.schema.json"
+    ).read_text(encoding="utf-8", errors="strict"))
+    stream_settlement_exact = bool(
+        not stream_event_errors
+        and stream_drift_status.get("status") == "not_eligible"
+        and stream_status_before.get("status") == "eligible"
+        and stream_status_before.get("failed_at") == stream_failed_at
+        and stream_has_stop_rejected
+        and stream_stale_recovery.get("action")
+            == agent_settlement.RECOVERY_SETTLE_STREAM_STALLED
+        and stream_settlement.get("status") == "settled"
+        and stream_replay.get("status") == "unchanged"
+        and stream_attempt.get("state") == "failed"
+        and stream_attempt.get("launch_status") == "stream_stalled"
+        and stream_attempt.get("result_snapshot", {}).get("source")
+            == "stream_stall_receipt"
+        and stream_attempt.get("termination_receipt_hash")
+            == stream_receipt.get("receipt_hash")
+        and not _selftest_schema_errors(stream_receipt, stream_schema)
+        and stream_late_stop_rejected
+        and stream_child_tamper_detected
+        and not agent_event_integrity_errors(stream_run)
+    )
+
+    # A model may finish and emit one host-authored task-notification while its
+    # SubagentStop hook fails before journal append. The recovery below binds
+    # that exact negative space without minting a physical Stop.
+    hook_stop_run = run.parent / "hook-failed-stop-run"
+    _hook_contract, hook_plan = seed_current_plan(hook_stop_run, stage="S1")
+    hook_target_lane = hook_plan["lanes"][0]
+    hook_review_lane = hook_plan["lanes"][1]
+    hook_target = workers.create_agent_assignment(
+        hook_stop_run,
+        role=str(hook_target_lane["role"]),
+        front=str(hook_target_lane["front"]),
+        assets=[str(item) for item in hook_target_lane.get("assets", [])],
+        agent="A-hook-target-001",
+        lane_id=str(hook_target_lane["id"]),
+    )
+    hook_target_session = "hook-target-session"
+    hook_target_agent = "hook-target-child"
+    hook_target_tool = "hook-target-launch"
+    hook_target_prompt = assignment_launch_prompt(hook_target)
+    hook_target_parent = run.parent / f"{hook_target_session}.jsonl"
+    hook_target_parent.write_text(json.dumps({
+        "isSidechain": False,
+        "sessionId": hook_target_session,
+        "uuid": "hook-target-launch-uuid",
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": hook_target_tool, "name": "Agent",
+            "input": {
+                "prompt": hook_target_prompt,
+                "subagent_type": "xunji-hunter",
+                "run_in_background": True,
+            },
+        }]},
+    }) + "\n", encoding="utf-8")
+    hook_target_child_dir = hook_target_parent.with_suffix("") / "subagents"
+    hook_target_child_dir.mkdir(parents=True)
+    hook_target_child = (
+        hook_target_child_dir / f"agent-{hook_target_agent}.jsonl")
+    hook_target_child.write_text(json.dumps({
+        "isSidechain": True,
+        "sessionId": hook_target_session,
+        "agentId": hook_target_agent,
+        "type": "user",
+        "message": {"role": "user", "content": hook_target_prompt},
+    }) + "\n", encoding="utf-8")
+    append_hook_event(hook_stop_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": hook_target_session,
+        "transcript_path": str(hook_target_parent),
+        "tool_name": "Agent",
+        "tool_use_id": hook_target_tool,
+        "tool_input": {
+            "prompt": hook_target_prompt,
+            "subagent_type": "xunji-hunter",
+            "run_in_background": True,
+        },
+        "tool_response": {
+            "agentId": hook_target_agent,
+            "isAsync": True,
+            "status": "async_launched",
+        },
+    })
+    append_hook_event(hook_stop_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": hook_target_session,
+        "transcript_path": str(hook_target_parent),
+        "agent_id": hook_target_agent,
+        "agent_type": "xunji-hunter",
+    })
+    append_hook_event(hook_stop_run, {
+        "hook_event_name": "SubagentStop",
+        "session_id": hook_target_session,
+        "transcript_path": str(hook_target_parent),
+        "agent_id": hook_target_agent,
+        "agent_type": "xunji-hunter",
+        "last_assistant_message": "bounded target fixture result",
+    })
+    hook_reviewer = workers.create_agent_assignment(
+        hook_stop_run,
+        role="review",
+        front=str(hook_review_lane["front"]),
+        assets=[str(item) for item in hook_review_lane.get("assets", [])],
+        agent="A-hook-review-001",
+        lane_id=str(hook_review_lane["id"]),
+    )
+    hook_session = "hook-review-session"
+    hook_agent = "hook-review-child"
+    hook_tool = "hook-review-launch"
+    hook_prompt = assignment_launch_prompt(hook_reviewer)
+    hook_parent = run.parent / f"{hook_session}.jsonl"
+    hook_parent_records = [{
+        "isSidechain": False,
+        "sessionId": hook_session,
+        "uuid": "hook-review-launch-uuid",
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": hook_tool, "name": "Agent",
+            "input": {
+                "prompt": hook_prompt,
+                "subagent_type": "xunji-reviewer",
+                "run_in_background": True,
+            },
+        }]},
+    }]
+    hook_parent.write_text(
+        "\n".join(json.dumps(item) for item in hook_parent_records) + "\n",
+        encoding="utf-8",
+    )
+    hook_child_dir = hook_parent.with_suffix("") / "subagents"
+    hook_child_dir.mkdir(parents=True)
+    hook_child = hook_child_dir / f"agent-{hook_agent}.jsonl"
+    hook_child_records = [{
+        "isSidechain": True,
+        "sessionId": hook_session,
+        "agentId": hook_agent,
+        "type": "user",
+        "message": {"role": "user", "content": hook_prompt},
+    }]
+    hook_child.write_text(
+        "\n".join(json.dumps(item) for item in hook_child_records) + "\n",
+        encoding="utf-8",
+    )
+    append_hook_event(hook_stop_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": hook_session,
+        "transcript_path": str(hook_parent),
+        "tool_name": "Agent",
+        "tool_use_id": hook_tool,
+        "tool_input": {
+            "prompt": hook_prompt,
+            "subagent_type": "xunji-reviewer",
+            "run_in_background": True,
+        },
+        "tool_response": {
+            "agentId": hook_agent,
+            "isAsync": True,
+            "status": "async_launched",
+        },
+    })
+    append_hook_event(hook_stop_run, {
+        "hook_event_name": "SubagentStart",
+        "session_id": hook_session,
+        "transcript_path": str(hook_parent),
+        "agent_id": hook_agent,
+        "agent_type": "xunji-reviewer",
+    })
+    hook_result = "Candidate disposition `blocked` — exact fixture review."
+    hook_ingress_survived_schema_failure = False
+    hook_ingress_root = run.parent / "project-stop-ingress"
+    hook_ingress_patch = mock.patch.object(
+        _stop_ingress, "INGRESS_ROOT", hook_ingress_root)
+    hook_ingress_patch.start()
+    failed_stop_event = {
+        "hook_event_name": "SubagentStop",
+        "session_id": hook_session,
+        "transcript_path": str(hook_parent),
+        "agent_id": hook_agent,
+        "agent_type": "xunji-reviewer",
+        "last_assistant_message": hook_result,
+    }
+    # This call models the first settings.json Hook.  It has no dependency on
+    # runtime_receipts, work_plan, or contract_schema.
+    hook_ingress_receipt = _stop_ingress.capture(failed_stop_event)
+    try:
+        with mock.patch.object(
+                sys.modules[__name__], "_prepare_agent_lifecycle_binding",
+                side_effect=contract_schema.ContractSchemaUnavailable(
+                    "work-plan.v1.schema.json",
+                    "SCHEMA_JSON_INVALID",
+                    "JSONDecodeError",
+                )):
+            append_hook_event(hook_stop_run, failed_stop_event)
+    except contract_schema.ContractSchemaUnavailable:
+        hook_ingress_survived_schema_failure = bool(
+            hook_ingress_receipt
+            and not any(
+                item.get("hook_event_name") == "SubagentStop"
+                and str(item.get("agent_id") or "") == hook_agent
+                for item in load_events(hook_stop_run)
+            )
+        )
+    hook_final_at = _iso_timestamp(time.time() - 2.0)
+    hook_feedback_at = _iso_timestamp(time.time() - 1.0)
+    hook_notification_at = _iso_timestamp(time.time())
+    hook_child_records.extend((
+        {
+            "isSidechain": True,
+            "sessionId": hook_session,
+            "agentId": hook_agent,
+            "type": "assistant",
+            "uuid": "hook-review-final-uuid",
+            "timestamp": hook_final_at,
+            "message": {"role": "assistant", "content": [{
+                "type": "text", "text": hook_result,
+            }]},
+        },
+        {
+            "isSidechain": True,
+            "sessionId": hook_session,
+            "agentId": hook_agent,
+            "type": "user",
+            "uuid": "hook-review-feedback-uuid",
+            "timestamp": hook_feedback_at,
+            "message": {"role": "user", "content": (
+                "Stop hook feedback:\n"
+                "[python3 \"$CLAUDE_PROJECT_DIR/tools/harness/"
+                "subagent_stop_ingress.py\"]: "
+                "[XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED] SubagentStop runtime "
+                "receipt recording failed closed: ContractSchemaUnavailable\n"
+            )},
+        },
+    ))
+    hook_child.write_text(
+        "\n".join(json.dumps(item) for item in hook_child_records) + "\n",
+        encoding="utf-8",
+    )
+    notification_content = (
+        "<task-notification>\n"
+        f"<task-id>{hook_agent}</task-id>\n"
+        f"<tool-use-id>{hook_tool}</tool-use-id>\n"
+        "<output-file>/tmp/hook-review.output</output-file>\n"
+        "<status>completed</status>\n"
+        "<summary>Agent finished</summary>\n"
+        "<note>host-authored completion</note>\n"
+        f"<result>{hook_result}</result>\n"
+        "<usage><subagent_tokens>1</subagent_tokens><tool_uses>0</tool_uses>"
+        "<duration_ms>1</duration_ms></usage>\n"
+        "</task-notification>"
+    )
+    hook_parent_records.append({
+        "isSidechain": False,
+        "sessionId": hook_session,
+        "type": "user",
+        "uuid": "hook-review-notification-uuid",
+        "timestamp": hook_notification_at,
+        "origin": {"kind": "task-notification"},
+        "promptSource": "system",
+        "message": {"role": "user", "content": notification_content},
+    })
+    hook_parent.write_text(
+        "\n".join(json.dumps(item) for item in hook_parent_records) + "\n",
+        encoding="utf-8",
+    )
+    hook_status_before = hook_failed_stop_recovery_status(
+        hook_stop_run, "A-hook-review-001")
+    hook_child_exact = hook_child.read_bytes()
+    hook_child.write_bytes(hook_child_exact.replace(
+        b"tools/harness/subagent_stop_ingress.py",
+        b"tools/turn_contract.py",
+    ))
+    with mock.patch.object(
+            _stop_ingress, "INGRESS_ROOT", run.parent / "legacy-no-ingress"):
+        hook_legacy_status = hook_failed_stop_recovery_status(
+            hook_stop_run, "A-hook-review-001")
+    hook_child.write_bytes(hook_child_exact)
+    hook_child.write_bytes(hook_child_exact.replace(
+        b"XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED",
+        b"XUNJI_E_DIFFERENT_HOOK_FAILURE",
+    ))
+    hook_feedback_drift_status = hook_failed_stop_recovery_status(
+        hook_stop_run, "A-hook-review-001")
+    hook_child.write_bytes(hook_child_exact)
+    original_named_schema_errors = contract_schema.named_schema_errors
+
+    def hook_receipt_schema_unavailable(
+        value: object, name: str, *args: object, **kwargs: object,
+    ) -> list[str]:
+        if name == "hook-failed-agent-stop.v2.schema.json":
+            raise contract_schema.ContractSchemaUnavailable(
+                name, "SCHEMA_JSON_INVALID", "JSONDecodeError")
+        return original_named_schema_errors(value, name, *args, **kwargs)
+
+    hook_prepublication_failed_closed = False
+    with mock.patch.object(
+            contract_schema, "named_schema_errors",
+            side_effect=hook_receipt_schema_unavailable):
+        try:
+            recover_hook_failed_agent_stop(
+                hook_stop_run, "A-hook-review-001")
+        except contract_schema.ContractSchemaUnavailable:
+            hook_prepublication_failed_closed = not list(
+                _hook_failed_agent_stop_dir(hook_stop_run).glob("*.json"))
+    hook_recovery = recover_hook_failed_agent_stop(
+        hook_stop_run, "A-hook-review-001")
+    hook_recovery_replay = recover_hook_failed_agent_stop(
+        hook_stop_run, "A-hook-review-001")
+    hook_receipt = hook_recovery.get("receipt") \
+        if isinstance(hook_recovery.get("receipt"), dict) else {}
+    hook_attempts = [
+        item for item in agent_attempts(hook_stop_run)
+        if item.get("assignment") == "A-hook-review-001"
+    ]
+    hook_state = _load_json_file(
+        hook_stop_run / "state" / "assignments.json")
+    hook_review_row = next(
+        item for item in hook_state.get("assignments", [])
+        if item.get("agent") == "A-hook-review-001"
+    )
+    hook_review_attempt = hook_review_row["attempts"][0]
+    hook_draft = _load_json_file(
+        merge_draft_path(hook_stop_run, "A-hook-review-001"))
+    with mock.patch.object(
+            sys.modules[__name__], "reconcile_agent_projection",
+            side_effect=RuntimeError("selftest projection unavailable")):
+        hook_committed_pending = recover_hook_failed_agent_stop(
+            hook_stop_run, "A-hook-review-001")
+    hook_draft_path = merge_draft_path(
+        hook_stop_run, "A-hook-review-001")
+    hook_draft_bytes = hook_draft_path.read_bytes()
+    hook_draft_path.unlink()
+    hook_pending_status = hook_failed_stop_recovery_status(
+        hook_stop_run, "A-hook-review-001")
+    hook_draft_path.write_bytes(hook_draft_bytes)
+    hook_recovered_status = hook_failed_stop_recovery_status(
+        hook_stop_run, "A-hook-review-001")
+    hook_schema = json.loads((
+        Path(__file__).resolve().parents[1] / "contracts"
+        / "hook-failed-agent-stop.v2.schema.json"
+    ).read_text(encoding="utf-8", errors="strict"))
+    hook_schema_valid = not _selftest_schema_errors(hook_receipt, hook_schema)
+    legacy_schema_before_cutover = _hook_failed_stop_receipt_schema(
+        "legacy_direct_turn_contract", "2026-08-08T01:04:33.336Z", "")
+    legacy_cutover_rejected = False
+    try:
+        _hook_failed_stop_receipt_schema(
+            "legacy_direct_turn_contract", "2026-08-08T01:10:00.001Z", "")
+    except RuntimeError as exc:
+        legacy_cutover_rejected = (
+            "HOOK_FAILED_STOP_LEGACY_CUTOVER_EXPIRED" in str(exc))
+    hook_review_receipt = workers.record_review_disposition(
+        hook_stop_run,
+        target="A-hook-target-001",
+        reviewer="A-hook-review-001",
+        disposition="blocked",
+        note="Reason: exact hook-failed Stop recovery fixture; Front: F-001",
+    )
+    hook_late_stop_rejected = False
+    try:
+        append_hook_event(hook_stop_run, {
+            "hook_event_name": "SubagentStop",
+            "session_id": hook_session,
+            "transcript_path": str(hook_parent),
+            "agent_id": hook_agent,
+            "agent_type": "xunji-reviewer",
+            "last_assistant_message": "late result must not replace recovery",
+        })
+    except RuntimeError as exc:
+        hook_late_stop_rejected = (
+            "AFTER_HOOK_FAILED_STOP_RECOVERY" in str(exc))
+    hook_snapshot = Path(str(
+        hook_review_attempt.get("result_snapshot", {}).get("path") or ""))
+    hook_snapshot_exact = hook_snapshot.read_bytes()
+    hook_snapshot.write_bytes(hook_snapshot_exact + b"\n")
+    hook_snapshot_tamper_detected = bool(
+        agent_event_integrity_errors(hook_stop_run))
+    hook_snapshot.write_bytes(hook_snapshot_exact)
+    hook_child.write_bytes(hook_child_exact + json.dumps({
+        "isSidechain": True,
+        "sessionId": hook_session,
+        "agentId": hook_agent,
+        "type": "assistant",
+        "uuid": "hook-review-late-uuid",
+        "timestamp": _iso_timestamp(time.time()),
+        "message": {"role": "assistant", "content": "late mutation"},
+    }).encode("utf-8") + b"\n")
+    hook_child_tamper_detected = bool(
+        agent_event_integrity_errors(hook_stop_run))
+    hook_child.write_bytes(hook_child_exact)
+    hook_recovery_exact = bool(
+        hook_status_before.get("status") == "eligible"
+        and hook_legacy_status.get("status") == "not_eligible"
+        and "HOOK_FAILED_STOP_LEGACY_CUTOVER_EXPIRED"
+            in str(hook_legacy_status.get("error") or "")
+        and legacy_schema_before_cutover == HOOK_FAILED_AGENT_STOP_LEGACY_SCHEMA
+        and legacy_cutover_rejected
+        and hook_feedback_drift_status.get("status") == "not_eligible"
+        and hook_recovery.get("status") == "recovered"
+        and hook_prepublication_failed_closed
+        and hook_recovery_replay.get("status") == "unchanged"
+        and hook_committed_pending.get("status")
+            == "committed_projection_pending"
+        and hook_pending_status.get("status")
+            == "committed_projection_pending"
+        and hook_pending_status.get("next_argv")
+            == _runtime_reproject_argv(hook_stop_run)
+        and hook_recovered_status.get("status") == "recovered"
+        and hook_schema_valid
+        and hook_ingress_survived_schema_failure
+        and hook_receipt.get("stop_ingress_receipt_hash")
+            == hook_ingress_receipt.get("receipt_hash")
+        and len(hook_attempts) == 1
+        and len([
+            item for item in hook_attempts
+            if item.get("agent_id") == hook_agent
+            and item.get("state") == "returned"
+            and item.get("recovery_receipt_hash")
+                == hook_receipt.get("receipt_hash")
+        ]) == 1
+        and hook_review_row.get("status") == "done"
+        and hook_review_attempt.get("state") == "returned"
+        and hook_review_attempt.get("result_snapshot", {}).get("source")
+            == "hook_failed_stop_recovery"
+        and hook_review_attempt.get("recovery_receipt_hash")
+            == hook_receipt.get("receipt_hash")
+        and hook_review_row.get("updated_at") == hook_receipt.get("returned_at")
+        and hook_draft.get("outcome") == "returned"
+        and hook_draft.get("result", {}).get("source")
+            == "hook_failed_stop_recovery"
+        and hook_review_receipt.get("reviewer_assignment")
+            == "A-hook-review-001"
+    )
+    hook_integrity_restored = not agent_event_integrity_errors(hook_stop_run)
+    hook_ingress_patch.stop()
+
     checks = [
         ("hash chain validates", not chain_errors and len(events) == len(ids)),
         ("foreign internal SubagentStop is audited outside Agent journal",
@@ -11660,6 +16372,71 @@ def _selftest() -> int:
          legacy_quarantine_preserves_journal),
         ("foreign lifecycle receipt conforms to frozen schema",
          foreign_receipt_schema_valid),
+        ("exact Claude user-stop/no-resume receipt projects failed Reviewer debt",
+         external_settlement_exact and external_schema_valid),
+        ("exact host failed-Stop receipt restores one authentic returned Reviewer",
+         hook_recovery_exact),
+        ("raw SubagentStop ingress survives schema failure without minting Stop truth",
+         hook_ingress_survived_schema_failure),
+        ("failed recovery schema validation publishes no unusable receipt",
+         hook_prepublication_failed_closed),
+        ("committed failed-Stop receipt exposes exact reproject debt until healed",
+         hook_committed_pending.get("status")
+            == "committed_projection_pending"
+         and hook_pending_status.get("status")
+            == "committed_projection_pending"
+         and hook_recovered_status.get("status") == "recovered"),
+        ("legacy direct-turn_contract recovery is frozen behind one UTC cutover",
+         hook_legacy_status.get("status") == "not_eligible"
+         and legacy_schema_before_cutover
+            == HOOK_FAILED_AGENT_STOP_LEGACY_SCHEMA
+         and legacy_cutover_rejected),
+        ("hook-failed Stop recovery rejects feedback drift and late physical Stop",
+         hook_feedback_drift_status.get("status") == "not_eligible"
+         and hook_late_stop_rejected),
+        ("hook-failed Stop recovery freezes result and child transcript bytes",
+         hook_snapshot_tamper_detected and hook_child_tamper_detected
+         and hook_integrity_restored),
+        ("stream-watchdog recovery is exact, failed-only, immutable, and idempotent",
+         stream_settlement_exact),
+        ("external-stop receipt blocks late Stop and child tool-call claims",
+         external_late_stop_rejected and external_late_claim_rejected),
+        ("external-stop rejects prior Stop, terminal rows, and Reviewer rows",
+         external_preexisting_stop_rejected
+         and external_terminal_row_rejected
+         and external_reviewer_row_rejected),
+        ("external-stop normalizes Start binding and ISO timestamp spelling",
+         external_start_normalized
+         and external_offset_timestamp_status.get("status") == "eligible"
+         and external_offset_timestamp_status.get("stopped_at")
+            == external_stopped_at),
+        ("external-stop allows unrelated later Root runtime events",
+         external_unrelated_root_allowed),
+        ("historical external-stop receipt does not poison narrowed attempt views",
+         external_unrelated_session_view == []
+         and external_post_stop_session_view == []),
+        ("historical external-stop receipt permits later Reviewer child claims",
+         external_reviewer_after_historical_stop),
+        ("external-stop receipt overlays a full prevalidated projection snapshot",
+         not external_receipt_chain_errors
+         and len(external_prevalidated_attempt_graph) == 1
+         and external_prevalidated_attempt_graph[0].get("state") == "failed"),
+        ("external-stop scoped views include the exact launch boundary",
+         len(external_same_session_view) == 1
+         and external_same_session_view[0].get("state") == "failed"
+         and len(external_at_launch_view) == 1
+         and external_at_launch_view[0].get("state") == "failed"
+         and len(external_before_launch_view) == 1
+         and external_before_launch_view[0].get("state") == "failed"
+         and len(external_reviewer_at_launch_view) == 1),
+        ("external-stop snapshot tamper enters integrity debt",
+         external_snapshot_tamper_integrity),
+        ("external-stop snapshot tamper fails attempt projection closed",
+         external_snapshot_tamper_projection_failed
+         and external_snapshot_tamper_narrowed_failed),
+        ("external-stop child transcript is frozen against late writes",
+         external_child_tamper_detected
+         and not agent_event_integrity_errors(external_stop_run)),
         ("new runtime journal append flushes and fsyncs file plus parent directory",
          runtime_new_append_durable),
         ("existing nonempty runtime journal append does not repeat directory fsync",
@@ -11687,6 +16464,14 @@ def _selftest() -> int:
          and budget_replay_count_before == budget_replay_count_after
          and [item.get("agent_tool_call_ordinal") for item in budget_claim_rows]
              == list(range(1, 9))),
+        ("child denial freezes plan/lane/front only from its exact tool-call claim",
+         budget_bound_denial.get("assignment") == "A-budget-001"
+         and budget_bound_denial.get("front") == "F-001"
+         and budget_bound_denial.get("assignment_lane") == "L-BUDGET"
+         and budget_bound_denial.get("assignment_plan_digest") == "b" * 64
+         and plan_bound_child_claim(
+             budget_run, budget_bound_denial).get("receipt_hash")
+             == budget_first_five[0].get("receipt_hash")),
         ("concurrent boundary calls linearize to one admitted sixth and one denied seventh",
          {item.get("agent_tool_call_ordinal") for item in budget_boundary} == {6, 7}
          and sum(item.get("agent_tool_call_admitted") is True
@@ -11705,6 +16490,18 @@ def _selftest() -> int:
                      if item.get("tool_use_id") == budget_child_ids[5])
          and budget_request_replay_count_before
              == budget_request_replay_count_after),
+        ("validation snapshot parses each parent/child transcript at most once",
+         budget_snapshot_parses_once),
+        ("validation snapshot rejects malformed and wrong child envelopes",
+         malformed_snapshot_rejected and wrong_envelope_rejected),
+        ("validation snapshot fails closed when transcript identity changes",
+         transcript_mutation_rejected),
+        ("validation snapshot final fence catches mutation after the last read",
+         transcript_final_fence_rejected),
+        ("validation snapshot enforces per-file and invocation-global byte caps",
+         transcript_per_file_cap_rejected and transcript_global_cap_rejected),
+        ("validation snapshot returns defensive copies of mutable caches",
+         snapshot_cache_defensive),
         ("Agent tool-call identity conflict and post-Stop calls fail closed",
          budget_identity_conflict and budget_after_stop_rejected),
         ("Agent tool-call receipt tamper enters integrity debt",
@@ -11725,6 +16522,11 @@ def _selftest() -> int:
         ("CronDelete rejects unlisted job", not wrong_delete),
         ("post-delete CronList is still required", not stale),
         ("post-delete CronList proves quiescence", after),
+        ("unmatched CronCreate still requires a later CronList", not orphan_stale),
+        ("fresh empty CronList reconciles an unmatched historical CronCreate",
+         orphan_reconciled
+         and "orphaned" in orphan_note
+         and "reconciled unmatched historical CronCreate" in orphan_note),
         ("old-session CronList cannot satisfy current turn", not current_turn),
         ("current-session CronCreate receipt names the bound run", cron_seen),
         ("iteration plan is absent immediately after CronCreate", not plan_before),
@@ -11785,7 +16587,17 @@ def _selftest() -> int:
          all(item.get("status") == "running" and item.get("attempts")
              for item in async_state["assignments"])),
         ("child target receipt is attributed to its assigned asset",
-         async_activity.get("a.example") == 1),
+         async_activity.get("a.example") == 1
+         and async_activity.get("a.example:443") == 1
+         and async_activity.get("a.example:8443") == 0),
+        ("target endpoint identity normalizes default and explicit ports",
+         endpoint_identity_normalization),
+        ("typed destination fields settle without prose or artifact forgery",
+         typed_destination_attribution),
+        ("a claimed target receipt cannot silently lose registry projection",
+         invalid_target_receipt_projection_rejected),
+        ("indirect target receipts never invent an argv endpoint",
+         indirect_target_receipt_projects_no_forged_endpoint),
         ("exact child transcript backs target debt and its identical retry",
          len(child_target_before_retry) == 1
          and child_target_before_retry[0].get("agent_id") == "child-agent-1"

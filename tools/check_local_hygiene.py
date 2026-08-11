@@ -35,11 +35,16 @@ FORBIDDEN_TRACKED_EXACT = {
 
 FORBIDDEN_TRACKED_PREFIXES = {
     "runs/": "real run workbenches are local evidence, not published fixtures",
+    "evidence/": "root evidence is not a canonical run; move it under runs/<run>/evidence",
     ".codex/hooks/": "Codex hook runtime is not maintained; use .claude/hooks only",
 }
 
 ROOT_RUN_DIR_RE = re.compile(
     r"^[^/]+_20\d{6}(?:_20\d{6})?/",
+)
+ROOT_CAPTURE_RE = re.compile(
+    r"(?i)^(?:cap(?:tcha)?[^/]*|screen(?:shot)?[^/]*|scrn[^/]*|[^/]*ocr[^/]*)"
+    r"\.(?:png|jpe?g|gif|webp)$"
 )
 
 
@@ -106,7 +111,63 @@ def publication_issues_for_tracked(
         else:
             if ROOT_RUN_DIR_RE.match(rel):
                 issues.append(f"{rel}: root-level real run workbench must stay local")
+            elif "/" not in rel and (
+                    rel.endswith(".replay.json")
+                    or ROOT_CAPTURE_RE.fullmatch(rel)
+                    or rel.lower().endswith((".html", ".htm"))):
+                issues.append(
+                    f"{rel}: root-level target artifact must stay in a run or local quarantine"
+                )
     return issues
+
+
+def workspace_output_warnings(untracked: list[str] | None = None) -> list[str]:
+    """Report output-layout drift without opening or modifying target files."""
+    paths = untracked if untracked is not None else _git_lines(
+        ["ls-files", "--others", "--exclude-standard"]
+    )
+    git_errors = [
+        value.removeprefix("__git_error__:")
+        for value in paths if value.startswith("__git_error__:")
+    ]
+    if git_errors:
+        return [f"workspace output audit unavailable: {error}" for error in git_errors]
+    normalized = {Path(value).as_posix() for value in paths}
+    root_replays = {
+        value for value in normalized
+        if "/" not in value and value.endswith(".replay.json")
+    }
+    root_bodies = {
+        value for value in normalized
+        if "/" not in value and value.lower().endswith((".html", ".htm"))
+    }
+    root_captures = {
+        value for value in normalized
+        if "/" not in value and ROOT_CAPTURE_RE.fullmatch(value)
+    }
+    root_evidence = {value for value in normalized if value.startswith("evidence/")}
+    double_replays = {
+        value for value in normalized if value.endswith(".replay.json.replay.json")
+    }
+    warnings: list[str] = []
+    if root_bodies or root_replays or root_captures:
+        warnings.append(
+            "workspace output drift: "
+            f"root bodies={len(root_bodies)}, replay sidecars={len(root_replays)}, "
+            f"capture/OCR files={len(root_captures)}; use runs/<run>/evidence/ or "
+            "the dry-run migration tool"
+        )
+    if root_evidence:
+        warnings.append(
+            f"workspace output drift: top-level evidence/ contains {len(root_evidence)} "
+            "untracked files but is not a canonical run"
+        )
+    if double_replays:
+        warnings.append(
+            f"workspace output drift: {len(double_replays)} double replay sidecars; "
+            "--save must name the response body, not a .replay.json file"
+        )
+    return warnings
 
 
 def check_publication_index() -> list[str]:
@@ -141,9 +202,21 @@ def _selftest() -> int:
             "config.ini",
             ".codex/hooks/safety_gate.py",
             "review/review_bundle.json",
+            "evidence/orphan.html",
+            "body-without-sidecar.html",
+            "loose.html",
+            "loose.html.replay.json",
+            "captcha-ocr.png",
+            "screenshot.png",
         ],
         ["config.ini"],
     )
+    workspace_warnings = workspace_output_warnings([
+        "loose.html", "loose.html.replay.json",
+        "body-without-sidecar.html",
+        "evidence/body.replay.json", "evidence/body.replay.json.replay.json",
+        "captcha-ocr.png",
+    ])
     checks = [
         ("clean file has no issues", clean_issues == []),
         ("dirty file reports category", dirty_issues and "github-token" in dirty_issues[0]),
@@ -155,6 +228,19 @@ def _selftest() -> int:
         ("publication rejects Codex hooks", any(".codex/hooks" in i for i in tracked_issues)),
         ("publication rejects generated review bundle",
          any("review/review_bundle.json" in i for i in tracked_issues)),
+        ("publication rejects top-level evidence directory",
+         any("evidence/orphan.html" in i for i in tracked_issues)),
+        ("publication rejects root body/replay pairs",
+         any("loose.html" in i for i in tracked_issues)),
+        ("publication rejects lone root HTML body",
+         any("body-without-sidecar.html" in i for i in tracked_issues)),
+        ("publication rejects root capture/OCR files",
+         any("captcha-ocr.png" in i for i in tracked_issues)
+         and any("screenshot.png" in i for i in tracked_issues)),
+        ("workspace warning counts output drift without file content",
+         len(workspace_warnings) == 3
+         and "root bodies=2" in workspace_warnings[0]
+         and all("loose.html" not in warning for warning in workspace_warnings)),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:
@@ -170,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.selftest:
         return _selftest()
     issues = check()
+    warnings = workspace_output_warnings()
+    for warning in warnings:
+        print(f"warning: {warning}")
     if issues:
         print("local hygiene check failed")
         for issue in issues:

@@ -1,16 +1,17 @@
 ---
 name: xunji-reviewops
-description: ReviewOps discipline for Xunji autonomous runs. Use when reviewing run evidence, resolving peer_review PR ledger items, judging Codex/heterogeneous review findings, closing reports, handling check_run failures, replay/artifact QA, or declaring safety-critical changes to hooks, privacy/command-shape, guard, or sentinel done. Protects autonomous AI closure from self-deception without adding exploit playbooks.
+description: Codex-side ReviewOps guide for auditing run evidence, advising Claude Root, adjudicating maintenance reviews, and checking report or closure claims. It does not make Codex the live Single Synthesizer or authorize canonical run mutations unless the operator or Claude Root explicitly delegates them.
 ---
 
 # Xunji ReviewOps
 
 ## Overview
 
-This is the review and closure discipline layer for Xunji. It protects autonomous
-drive by forcing evidence-bound adjudication at the points where an agent is most
-likely to rationalize: review findings, report inclusion, closure, replay drift,
-and safety-critical framework changes.
+This is the Codex-side review and closure discipline guide for Xunji. Claude Root
+remains the live Single Synthesizer and canonical run writer. Codex normally
+returns challenges, dispositions, and repair candidates; it changes live run
+state only when the operator or Claude Root explicitly delegates that effect
+through the existing owner path.
 
 It is not a process script and not a vulnerability checklist. Keep the driver
 autonomous: use the gates below to decide what is true, what must be reopened,
@@ -44,8 +45,8 @@ Run a ReviewOps pass when any of these are true:
 
 ## Run Review Loop
 
-Before final report or closure, and every 3-5 Root/Hunter cycles during a rich
-run:
+When Codex is explicitly asked to review a live run, apply this pass at the
+requested checkpoint or before assessing a final report or closure claim:
 
 1. Read the current run state: `frontier.md`, `hypotheses.md`, `evidence.md`,
    `false_positive.md`, `decisions.md`, `review.md`, `report.md`, and relevant
@@ -61,9 +62,10 @@ run:
 4. If replay evidence is load-bearing or closure is near, run
    `python tools/check_run.py runs/<dir> --replay-verify` and re-adjudicate any
    `DIVERGED` evidence before relying on it.
-5. Convert findings into action: reopen fronts, downgrade certainty, add
-   controls/artifacts, update report scope, or write an evidence-backed
-   resolution.
+5. Return concrete action candidates to Claude Root: reopen fronts, downgrade
+   certainty, add controls/artifacts, update report scope, or write an
+   evidence-backed resolution. Do not directly commit those canonical changes
+   unless the operator or Claude Root explicitly delegated that effect.
 
 Passing `check_run` means the structure is present. It does not prove the report
 is correct. Keep hunting if the evidence graph still exposes a live front.
@@ -80,12 +82,14 @@ When Codex authors the maintenance diff:
   artifacts as proof that a live run was safe.
 - Codex does not count as an independent reviewer of its own code change.
 - Use `python tools/peer_review.py <scope> --driver codex` for Codex-authored code
-  review. With full availability, the reviewer votes are `arkcli panel` plus
+  review. With full availability, the reviewer votes are the external/third-party
+  assistance module (registered providers are enabled through local `config.ini`;
+  current selection: `arkcli`) plus
   `Claude Code CLI`; the synthesis brain remains Codex, which must adjudicate
   their findings through evidence, tests, diffs, and recorded rationale.
-- If arkcli is unavailable, Claude Code CLI or a fresh-context Claude Code review
-  is still required. If Claude is unavailable but arkcli is available, use arkcli
-  panel and record the missing-Claude limitation. If neither external reviewer
+- If external assistance is unavailable, Claude Code CLI or a fresh-context Claude Code review
+  is still required. If Claude is unavailable but the external module is available, use it
+  and record the missing-Claude limitation. If neither external reviewer
   is available, record that limitation and do not pretend Codex self-review is
   independent.
 - For safety-critical behavior changes under `.claude/hooks/`,
@@ -136,8 +140,10 @@ Do not declare FINAL, 收工, complete, or "explored enough" unless both are tru
 - `frontier.md` has zero open fronts, or every remaining front has an evidence-
   backed deferred/closed rationale that the review accepts.
 
-If either fails, the next action is not closure. Continue autonomous work:
-reopen, verify, gather a missing control, fix the ledger, or downgrade the claim.
+If either fails, the review verdict is not closure. Return the exact required
+next action—reopen, verify, gather a missing control, fix the ledger, or downgrade
+the claim—to the live Claude Root, unless Codex was explicitly delegated that
+canonical repair.
 
 ## Safety-Critical Code Review
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xunji.local/contracts/cycle-event.v1.schema.json",
   "title": "Xunji Typed Cycle Event v1",
-  "description": "Strict shapes for stage_plan, replan, stage_exit, delegation_committed, and plan-bound cycle_end records in the append-only loop journal. Both plan-bound cycle_end variants require the exact next_action projected by the final Coda. Other historical journal events are outside this typed subset.",
+  "description": "Strict shapes for stage_plan, replan, stage_exit, delegation_committed, and plan-bound cycle_end records in the append-only loop journal. Every plan-bound cycle_end variant requires the exact next_action projected by the final Coda. Other historical journal events are outside this typed subset.",
   "oneOf": [
     {"$ref": "#/$defs/stagePlan"},
     {"$ref": "#/$defs/replan"},
@@ -90,7 +90,8 @@
               "oneOf": [
                 {"type": "object", "additionalProperties": false, "maxProperties": 0},
                 {"$ref": "#/$defs/planCycleEndData"},
-                {"$ref": "#/$defs/rootDirectCycleEndData"}
+                {"$ref": "#/$defs/rootDirectCycleEndData"},
+                {"$ref": "#/$defs/completionReviewCycleEndData"}
               ]
             }
           }
@@ -148,19 +149,29 @@
       }
     },
     "delegationData": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["plan_digest", "lane_ids"],
-      "properties": {
-        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "lane_ids": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 16,
-          "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"}
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["plan_digest", "lane_ids"],
+          "properties": {
+            "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "lane_ids": {
+              "type": "array", "minItems": 1, "maxItems": 16,
+              "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"}
+            }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["plan_digest", "execution_mode", "lane_ids"],
+          "properties": {
+            "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "execution_mode": {"const": "COMPLETION_REVIEW"},
+            "lane_ids": {"type": "array", "maxItems": 0}
+          }
         }
-      }
+      ]
     },
     "planCycleEndData": {
       "type": "object",
@@ -209,6 +220,31 @@
           "items": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$"}
         },
         "root_action_receipt": {"$ref": "root-action-receipt.v1.schema.json"},
+        "next_action": {"type": "string", "minLength": 4, "maxLength": 2048}
+      }
+    },
+    "completionReviewCycleEndData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id", "plan_digest", "execution_mode", "lane_ids",
+        "completion_review", "next_action"
+      ],
+      "properties": {
+        "plan_id": {"type": "string", "pattern": "^WP-[0-9]+-[0-9a-f]{8}$"},
+        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "execution_mode": {"const": "COMPLETION_REVIEW"},
+        "lane_ids": {"type": "array", "maxItems": 0},
+        "completion_review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["run", "evidence_index_hash", "completion_bundle_hash"],
+          "properties": {
+            "run": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,256}$"},
+            "evidence_index_hash": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "completion_bundle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
         "next_action": {"type": "string", "minLength": 4, "maxLength": 2048}
       }
     },

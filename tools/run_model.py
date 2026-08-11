@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
 import tempfile
 from dataclasses import asdict, dataclass
@@ -49,6 +51,14 @@ _REPLAY_RESPONSE_LEGACY_FIELDS = {"status", "len", "sha1"}
 _REPLAY_RESPONSE_V2_FIELDS = _REPLAY_RESPONSE_LEGACY_FIELDS | {
     "saved_len", "saved_sha1", "truncated", "wire_verified",
 }
+_REPLAY_RESPONSE_CHUNK_FIELDS = _REPLAY_RESPONSE_V2_FIELDS | {
+    "wire_sha256", "chunk_manifest", "chunk_manifest_sha256",
+}
+_REVIEW_ARTIFACT_MAX_BYTES = 64 * 1024 * 1024
+_REVIEW_REPLAY_MAX_BYTES = 2 * 1024 * 1024
+_REVIEW_MANIFEST_MAX_BYTES = 256 * 1024
+_REVIEW_CHUNK_TOTAL_MAX_BYTES = 8 * 1024 * 1024
+_REVIEW_CHUNK_MAX_COUNT = 128
 _MERGE_DRAFT_FIELDS = {
     "schema", "assignment", "role", "front", "assets", "effect", "plan_id",
     "plan_digest", "lane_id", "assignment_attempt", "runtime_attempt", "result",
@@ -353,7 +363,9 @@ def _load_plan_projection(run: Path, plan: dict | None = None) -> tuple[dict, li
             or value.get("plan_id") != f"WP-{cycle}-{digest[:8]}":
         return {}, ["work-plan:id-mismatch"]
     lanes = value.get("lanes")
-    if not isinstance(lanes, list) or not lanes:
+    mode = str(value.get("execution_mode") or "")
+    if not isinstance(lanes, list) \
+            or (not lanes and mode != "COMPLETION_REVIEW"):
         return {}, ["work-plan:lanes-invalid"]
     lane_ids = [str(item.get("id") or "") for item in lanes if isinstance(item, dict)]
     if len(lane_ids) != len(lanes) or len(set(lane_ids)) != len(lane_ids) \
@@ -370,14 +382,39 @@ def _runtime_module():
     return runtime_receipts
 
 
-def _runtime_records(run: Path) -> tuple[list[dict], list[dict], list[str], object | None]:
+def _runtime_records(
+    run: Path,
+    *,
+    validation_snapshot: object | None = None,
+) -> tuple[list[dict], list[dict], list[str], object | None]:
     module = _runtime_module()
     if module is None:
         return [], [], ["runtime-receipts:unavailable"], None
+    cache_key = "run_model.runtime_records.v1"
+    if validation_snapshot is not None \
+            and hasattr(validation_snapshot, "cached_consumer_value"):
+        cached = validation_snapshot.cached_consumer_value(cache_key)
+        if isinstance(cached, tuple) and len(cached) == 3:
+            return cached[0], cached[1], cached[2], module
+
+    def finish(
+        attempts: list[dict], failures: list[dict], errors: list[str],
+    ) -> tuple[list[dict], list[dict], list[str], object | None]:
+        if validation_snapshot is not None \
+                and hasattr(validation_snapshot, "cache_consumer_value"):
+            validation_snapshot.cache_consumer_value(
+                cache_key, (attempts, failures, errors))
+        return attempts, failures, errors, module
+
     try:
-        _, errors = module.validate_chain(run)
+        if validation_snapshot is not None \
+                and hasattr(validation_snapshot, "runtime_state"):
+            _events, _effective, errors, _effective_error = (
+                validation_snapshot.runtime_state())
+        else:
+            _, errors = module.validate_chain(run)
         if errors:
-            return [], [], ["runtime-receipts:invalid-chain:" + errors[0]], module
+            return finish([], [], ["runtime-receipts:invalid-chain:" + errors[0]])
         projection_error = run / "state" / "runtime_projection_error.json"
         if projection_error.exists():
             recovery = module.foreign_lifecycle_recovery_status(run) \
@@ -385,10 +422,10 @@ def _runtime_records(run: Path) -> tuple[list[dict], list[dict], list[str], obje
             candidates = recovery.get("candidate_event_seqs", []) \
                 if isinstance(recovery, dict) else []
             if candidates:
-                return [], [], [
+                return finish([], [], [
                     "runtime-receipts:foreign-lifecycle-quarantine-required:"
                     + ",".join(str(item) for item in candidates)
-                ], module
+                ])
             try:
                 error_value = json.loads(projection_error.read_text(
                     encoding="utf-8", errors="strict"))
@@ -396,23 +433,186 @@ def _runtime_records(run: Path) -> tuple[list[dict], list[dict], list[str], obje
                     if isinstance(error_value, dict) else "invalid projection error receipt"
             except Exception:
                 detail = "unreadable projection error receipt"
-            return [], [], ["runtime-receipts:projection-error:" + detail], module
-        integrity_errors = module.agent_event_integrity_errors(run)
+            return finish([], [], ["runtime-receipts:projection-error:" + detail])
+        integrity_errors = module.agent_event_integrity_errors(
+            run, validation_snapshot=validation_snapshot)
         if integrity_errors:
-            return [], [], [
+            return finish([], [], [
                 "runtime-receipts:agent-event-integrity:" + integrity_errors[0]
-            ], module
-        attempts = [item for item in module.agent_attempts(run) if isinstance(item, dict)]
+            ])
+        attempts = [
+            item for item in module.agent_attempts(
+                run, validation_snapshot=validation_snapshot)
+            if isinstance(item, dict)
+        ]
         failures = [
-            item for item in module.failed_tool_events(run)
+            item for item in module.failed_tool_events(
+                run, validation_snapshot=validation_snapshot)
             if isinstance(item, dict) and item.get("tool_name") == "Agent"
         ]
     except Exception as exc:
-        return [], [], [f"runtime-receipts:projection-error:{exc.__class__.__name__}"], module
-    return attempts, failures, [], module
+        return finish(
+            [], [], [f"runtime-receipts:projection-error:{exc.__class__.__name__}"])
+    return finish(attempts, failures, [])
 
 
-def _receipt_hash_valid(receipt: object) -> bool:
+def _review_artifact_token(token: object) -> tuple[str, ...] | None:
+    if not isinstance(token, str) or not token.startswith("evidence/") \
+            or "\\" in token:
+        return None
+    parts = tuple(token.split("/"))
+    if len(parts) < 2 or any(part in {"", ".", ".."} for part in parts):
+        return None
+    return parts
+
+
+def _read_review_artifact(run: Path, token: str, *, max_bytes: int) -> bytes:
+    """Read one run artifact through a stable no-symlink dirfd walk."""
+    parts = _review_artifact_token(token)
+    if parts is None or max_bytes < 0:
+        raise ValueError("review artifact path is invalid")
+    run_path = run.resolve(strict=True)
+    directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) \
+        | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    leaf_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) \
+        | getattr(os, "O_NOFOLLOW", 0)
+    root_fd = os.open(run_path, directory_flags)
+    parent_fd = os.dup(root_fd)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, directory_flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = child
+        leaf_fd = os.open(parts[-1], leaf_flags, dir_fd=parent_fd)
+        try:
+            before = os.fstat(leaf_fd)
+            path_before = os.stat(
+                parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+            identity = (
+                before.st_dev, before.st_ino, before.st_size,
+                before.st_mtime_ns, before.st_ctime_ns,
+            )
+            if not stat.S_ISREG(before.st_mode) \
+                    or not stat.S_ISREG(path_before.st_mode) \
+                    or (before.st_dev, before.st_ino) != (
+                        path_before.st_dev, path_before.st_ino) \
+                    or before.st_size > max_bytes:
+                raise ValueError("review artifact is not one bounded regular file")
+            payload = bytearray()
+            while True:
+                chunk = os.read(leaf_fd, min(64 * 1024, max_bytes + 1 - len(payload)))
+                if not chunk:
+                    break
+                payload.extend(chunk)
+                if len(payload) > max_bytes:
+                    raise ValueError("review artifact byte limit exceeded")
+            after = os.fstat(leaf_fd)
+            path_after = os.stat(
+                parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+            if identity != (
+                    after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns) \
+                    or (after.st_dev, after.st_ino) != (
+                        path_after.st_dev, path_after.st_ino):
+                raise ValueError("review artifact changed during read")
+        finally:
+            os.close(leaf_fd)
+
+        # Re-walk from the run anchor after the read. Holding the old parent fd
+        # alone would miss an intermediate directory replacement.
+        verify_parent = os.dup(root_fd)
+        try:
+            for part in parts[:-1]:
+                child = os.open(part, directory_flags, dir_fd=verify_parent)
+                os.close(verify_parent)
+                verify_parent = child
+            verify_leaf = os.open(parts[-1], leaf_flags, dir_fd=verify_parent)
+            try:
+                verify = os.fstat(verify_leaf)
+                if identity != (
+                        verify.st_dev, verify.st_ino, verify.st_size,
+                        verify.st_mtime_ns, verify.st_ctime_ns):
+                    raise ValueError("review artifact path changed during read")
+            finally:
+                os.close(verify_leaf)
+        finally:
+            os.close(verify_parent)
+        return bytes(payload)
+    except OSError as exc:
+        raise ValueError("review artifact cannot be securely opened") from exc
+    finally:
+        os.close(parent_fd)
+        os.close(root_fd)
+
+
+def _chunk_manifest_matches_receipt(
+    run: Path, manifest_token: str, manifest_sha256: str, response: dict,
+) -> bool:
+    try:
+        raw = _read_review_artifact(
+            run, manifest_token, max_bytes=_REVIEW_MANIFEST_MAX_BYTES)
+        if hashlib.sha256(raw).hexdigest() != manifest_sha256:
+            return False
+        manifest = json.loads(raw.decode("utf-8", "strict"))
+        if contract_schema.named_schema_errors(
+                manifest, "probe-body-chunks.v2.schema.json"):
+            return False
+        if manifest.get("wire_len") != response.get("len") \
+                or manifest.get("wire_sha1") != response.get("sha1") \
+                or manifest.get("wire_sha256") != response.get("wire_sha256"):
+            return False
+        chunks = manifest.get("chunks")
+        wire_len = manifest.get("wire_len")
+        chunk_size = manifest.get("chunk_size")
+        if not isinstance(chunks, list) or len(chunks) > _REVIEW_CHUNK_MAX_COUNT \
+                or isinstance(wire_len, bool) or not isinstance(wire_len, int) \
+                or wire_len < 0 or wire_len > _REVIEW_CHUNK_TOTAL_MAX_BYTES \
+                or isinstance(chunk_size, bool) or not isinstance(chunk_size, int) \
+                or chunk_size < 1 or chunk_size > _REVIEW_CHUNK_TOTAL_MAX_BYTES:
+            return False
+        expected_count = max(1, (wire_len + chunk_size - 1) // chunk_size)
+        if len(chunks) != expected_count:
+            return False
+        manifest_parent = manifest_token.rsplit("/", 1)[0]
+        full_sha1 = hashlib.sha1()
+        full_sha256 = hashlib.sha256()
+        next_offset = 0
+        for index, chunk in enumerate(chunks):
+            expected_bytes = 0 if wire_len == 0 else min(
+                chunk_size, wire_len - next_offset)
+            expected_path = f"{manifest['chunk_dir']}/part-{index:04d}.bin"
+            if not isinstance(chunk, dict) \
+                    or chunk.get("path") != expected_path \
+                    or chunk.get("offset") != next_offset \
+                    or chunk.get("bytes") != expected_bytes:
+                return False
+            token = f"{manifest_parent}/{expected_path}"
+            part = _read_review_artifact(run, token, max_bytes=expected_bytes)
+            if len(part) != expected_bytes \
+                    or hashlib.sha256(part).hexdigest() != chunk.get("sha256"):
+                return False
+            full_sha1.update(part)
+            full_sha256.update(part)
+            next_offset += len(part)
+        if next_offset != wire_len \
+                or full_sha1.hexdigest() != manifest.get("wire_sha1") \
+                or full_sha256.hexdigest() != manifest.get("wire_sha256"):
+            return False
+        return hashlib.sha256(_read_review_artifact(
+            run, manifest_token,
+            max_bytes=_REVIEW_MANIFEST_MAX_BYTES)).hexdigest() == manifest_sha256
+    except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+
+def _receipt_hash_valid(
+    receipt: object,
+    *,
+    run: Path | None = None,
+    structural_only: bool = False,
+) -> bool:
+    if run is None and not structural_only:
+        return False
     if contract_schema.named_schema_errors(
             receipt, "review-disposition.v1.schema.json"):
         return False
@@ -435,15 +635,16 @@ def _receipt_hash_valid(receipt: object) -> bool:
     artifact_validation = receipt.get("artifact_validation", [])
     if not isinstance(artifact_validation, list):
         return False
+    chunk_bindings: list[tuple[str, str]] = []
     for item in artifact_validation:
         if not isinstance(item, dict) or set(item) not in (
             {"path", "sha256", "size"},
             {"path", "sha256", "size", "request", "response", "saved_body"},
         ):
             return False
-        if not isinstance(item.get("path"), str) \
-                or not item["path"].startswith("evidence/") \
+        if _review_artifact_token(item.get("path")) is None \
                 or not _HEX64.fullmatch(str(item.get("sha256") or "")) \
+                or isinstance(item.get("size"), bool) \
                 or not isinstance(item.get("size"), int) or item["size"] < 0:
             return False
         if "request" in item:
@@ -457,6 +658,7 @@ def _receipt_hash_valid(receipt: object) -> bool:
                     or response_fields not in (
                         _REPLAY_RESPONSE_LEGACY_FIELDS,
                         _REPLAY_RESPONSE_V2_FIELDS,
+                        _REPLAY_RESPONSE_CHUNK_FIELDS,
                     ) \
                     or isinstance(response.get("status"), bool) \
                     or not isinstance(response.get("status"), int) \
@@ -465,10 +667,11 @@ def _receipt_hash_valid(receipt: object) -> bool:
                     or response["len"] < 0 \
                     or not isinstance(response.get("sha1"), str) \
                     or not _HEX40.fullmatch(response["sha1"]) \
-                    or not isinstance(item.get("saved_body"), str) \
-                    or not item["saved_body"].startswith("evidence/"):
+                    or _review_artifact_token(item.get("saved_body")) is None:
                 return False
-            if response_fields == _REPLAY_RESPONSE_V2_FIELDS:
+            if response_fields in (
+                    _REPLAY_RESPONSE_V2_FIELDS,
+                    _REPLAY_RESPONSE_CHUNK_FIELDS):
                 saved_len = response.get("saved_len")
                 truncated = response.get("truncated")
                 if isinstance(saved_len, bool) or not isinstance(saved_len, int) \
@@ -478,8 +681,91 @@ def _receipt_hash_valid(receipt: object) -> bool:
                         or not isinstance(truncated, bool) \
                         or not isinstance(response.get("wire_verified"), bool) \
                         or truncated != (saved_len < response["len"]) \
+                        or (response_fields == _REPLAY_RESPONSE_V2_FIELDS
+                            and response.get("wire_verified") is not (not truncated)) \
                         or (not truncated and response["saved_sha1"] != response["sha1"]):
                     return False
+            if response_fields == _REPLAY_RESPONSE_CHUNK_FIELDS:
+                manifest = response.get("chunk_manifest")
+                manifest_path = Path(manifest) if isinstance(manifest, str) else Path()
+                if response.get("wire_verified") is not True \
+                        or not _HEX64.fullmatch(str(response.get("wire_sha256") or "")) \
+                        or not isinstance(manifest, str) \
+                        or _review_artifact_token(manifest) is None \
+                        or not manifest.endswith(".chunks.json") \
+                        or manifest_path.is_absolute() \
+                        or any(part in {"", ".", ".."} for part in manifest_path.parts) \
+                        or not _HEX64.fullmatch(str(
+                            response.get("chunk_manifest_sha256") or "")):
+                    return False
+                chunk_bindings.append((
+                    manifest, str(response["chunk_manifest_sha256"])))
+            if response_fields in (
+                    _REPLAY_RESPONSE_V2_FIELDS,
+                    _REPLAY_RESPONSE_CHUNK_FIELDS):
+                body_matches = [
+                    candidate for candidate in artifact_validation
+                    if isinstance(candidate, dict)
+                    and candidate.get("path") == item.get("saved_body")
+                    and set(candidate) == {"path", "sha256", "size"}
+                ]
+                if len(body_matches) != 1 \
+                        or body_matches[0].get("size") != response.get("saved_len"):
+                    return False
+    if len({manifest for manifest, _sha256 in chunk_bindings}) \
+            != len(chunk_bindings):
+        return False
+    for manifest, manifest_sha256 in chunk_bindings:
+        matches = [
+            item for item in artifact_validation
+            if isinstance(item, dict) and item.get("path") == manifest
+        ]
+        if len(matches) != 1 \
+                or set(matches[0]) != {"path", "sha256", "size"} \
+                or matches[0].get("sha256") != manifest_sha256:
+            return False
+    if run is not None:
+        try:
+            payload_by_path: dict[str, bytes] = {}
+            for item in artifact_validation:
+                path = str(item["path"])
+                maximum = _REVIEW_MANIFEST_MAX_BYTES \
+                    if path.endswith(".chunks.json") \
+                    else _REVIEW_REPLAY_MAX_BYTES \
+                    if "request" in item else _REVIEW_ARTIFACT_MAX_BYTES
+                payload = _read_review_artifact(run, path, max_bytes=maximum)
+                if len(payload) != item["size"] \
+                        or hashlib.sha256(payload).hexdigest() != item["sha256"]:
+                    return False
+                payload_by_path[path] = payload
+            for item in artifact_validation:
+                response = item.get("response") if isinstance(item, dict) else None
+                if not isinstance(response, dict) or set(response) not in (
+                        _REPLAY_RESPONSE_V2_FIELDS,
+                        _REPLAY_RESPONSE_CHUNK_FIELDS):
+                    continue
+                saved_payload = payload_by_path.get(str(item.get("saved_body") or ""))
+                if saved_payload is None \
+                        or len(saved_payload) != response.get("saved_len") \
+                        or hashlib.sha1(saved_payload).hexdigest() \
+                        != response.get("saved_sha1"):
+                    return False
+            response_by_manifest = {
+                str(item["response"]["chunk_manifest"]): item["response"]
+                for item in artifact_validation
+                if isinstance(item, dict)
+                and isinstance(item.get("response"), dict)
+                and set(item["response"]) == _REPLAY_RESPONSE_CHUNK_FIELDS
+            }
+            if len(response_by_manifest) != len(chunk_bindings):
+                return False
+            for manifest, manifest_sha256 in chunk_bindings:
+                if not _chunk_manifest_matches_receipt(
+                        run, manifest, manifest_sha256,
+                        response_by_manifest[manifest]):
+                    return False
+        except (OSError, ValueError):
+            return False
     for field, maximum in (
         ("reviewer_agent_id", 1024), ("reviewer_tool_use_id", 1024),
         ("note", 2048), ("recorded_at", 128),
@@ -571,7 +857,10 @@ def _draft_result_valid(run: Path, draft: object, *, assignment: str,
             or result.get("missing") is not False \
             or source not in {
                 "agent_tool_response", "agent_failure_response",
-                "subagent_stop_response", "transcript_tool_result",
+                "external_stop_receipt", "stream_stall_receipt",
+                "hook_failed_stop_recovery",
+                "subagent_stop_response",
+                "transcript_tool_result",
             }:
         return False, "frozen-result-digest-mismatch"
     attempt_id = str(runtime_record.get("attempt_id") or expected_agent or expected_tool)
@@ -623,7 +912,12 @@ def _auth_runtime_state(assignment: str, lane_id: str, plan_digest: str,
     )
 
 
-def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> dict:
+def plan_cycle_projection(
+    run_dir: str | Path,
+    *,
+    plan: dict | None = None,
+    validation_snapshot: object | None = None,
+) -> dict:
     """Recompute one exact plan cycle from plan lanes and immutable runtime receipts.
 
     No assignment projection, Agent prose, hand-written status, or caller-provided
@@ -633,8 +927,22 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
     """
     run = Path(run_dir).resolve()
     current, plan_errors = _load_plan_projection(run, plan)
+    runtime_module = _runtime_module()
+    snapshot = None
+    if runtime_module is not None \
+            and hasattr(runtime_module, "current_validation_snapshot"):
+        snapshot = runtime_module.current_validation_snapshot(
+            run, validation_snapshot)
+    current_digest = str(current.get("plan_digest") or "") \
+        if isinstance(current, dict) else ""
+    if snapshot is not None and current_digest \
+            and hasattr(snapshot, "cached_plan_projection"):
+        cached = snapshot.cached_plan_projection(current_digest)
+        if isinstance(cached, dict):
+            return cached
     rows, row_errors = _load_assignment_rows(run)
-    attempts, failures, runtime_errors, runtime_module = _runtime_records(run)
+    attempts, failures, runtime_errors, runtime_module = _runtime_records(
+        run, validation_snapshot=snapshot)
     merge_debt = [*plan_errors, *row_errors, *runtime_errors]
     review_debt: list[str] = []
     assigned_debt: list[str] = []
@@ -647,7 +955,7 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
             assignment = str(item.get("agent") or "(missing)")
             merge_debt.append(f"{assignment}:no-current-plan")
             review_debt.append(f"{assignment}:no-current-plan")
-        return {
+        projection = {
             "schema": "xunji.plan-cycle-projection.v1", "plan_id": "",
             "plan_digest": "", "lane_ids": [], "lane_states": [],
             "assignment_dispositions": [],
@@ -660,6 +968,7 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
                      "review": sorted(set(review_debt))},
             "assigned_debt": sorted(set(assigned_debt)), "has_assignments": False,
         }
+        return projection
 
     digest = str(current["plan_digest"])
     lanes = [item for item in current["lanes"] if isinstance(item, dict)]
@@ -677,6 +986,73 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
     assigned_debt.extend(f"{item}:orphan-plan-assignment" for item in orphans)
     if row_errors or runtime_errors:
         assigned_debt.extend([*row_errors, *runtime_errors])
+
+    # The S3 completion challenge is assignment-free by design. Its terminal
+    # fact is the exact transcript-backed global Reviewer receipt bound to the
+    # current completion-plan digest and frozen input bundle.
+    if mode == "COMPLETION_REVIEW":
+        if plan_rows:
+            merge_debt.append("completion-review:unexpected-assignment")
+            assigned_debt.extend(
+                f"{str(item.get('agent') or 'completion-review')}:unexpected-assignment"
+                for item in plan_rows
+            )
+        completion_receipt: dict = {}
+        completion_projection_error = ""
+        if not runtime_errors and runtime_module is not None:
+            try:
+                # Completion-owned decisions.md is deliberately outside the
+                # frozen bundle and can stale the scheduler fingerprint after
+                # Reviewer Stop.  The terminal projection therefore validates
+                # the committed transaction plus the freshly recomputed bundle;
+                # completion_review_valid still requires the newest exact
+                # same-session parent/Start/Stop lifecycle for that bundle.
+                state = runtime_module.completion_review_state(
+                    run, require_current_inputs=False)
+                evidence_hash = str(state.get("evidence_index_hash") or "") \
+                    if isinstance(state, dict) else ""
+                if str(state.get("plan_digest") or "") == digest \
+                        and runtime_module.completion_review_valid(
+                            run, evidence_hash):
+                    completion_receipt = {
+                        "run": str(state.get("run") or ""),
+                        "evidence_index_hash": evidence_hash,
+                        "completion_bundle_hash": str(
+                            state.get("completion_bundle_hash") or ""),
+                    }
+            except Exception as exc:
+                completion_receipt = {}
+                completion_projection_error = exc.__class__.__name__
+        if not completion_receipt:
+            review_debt.append("completion-review:pending-or-invalid")
+            if completion_projection_error:
+                review_debt.append(
+                    "completion-review:projection-error:"
+                    + completion_projection_error)
+        projection = {
+            "schema": "xunji.plan-cycle-projection.v1",
+            "plan_id": str(current.get("plan_id") or ""),
+            "plan_digest": digest,
+            "execution_mode": mode,
+            "lane_ids": [],
+            "lane_states": [],
+            "completion_review": completion_receipt,
+            "assignment_dispositions": [],
+            "merge_disposition_summary": {
+                "schema": "xunji.merge-disposition-summary.v1",
+                "merged": [], "reviewed": [], "blocked": [], "failed": [],
+                "abandoned": [], "pending": [],
+            },
+            "debt": {
+                "merge": sorted(set(merge_debt)),
+                "review": sorted(set(review_debt)),
+            },
+            "assigned_debt": sorted(set(assigned_debt)),
+            "has_assignments": bool(plan_rows) or bool(row_errors),
+        }
+        if snapshot is not None:
+            snapshot.cache_plan_projection(digest, projection)
+        return projection
 
     # ROOT_DIRECT is a separate, assignment-free execution contract.  It is
     # satisfied only by the runtime module's exact claim -> terminal projection;
@@ -715,7 +1091,7 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
             "review_receipt_hash": "",
             "complete": complete,
         }
-        return {
+        projection = {
             "schema": "xunji.plan-cycle-projection.v1",
             "plan_id": str(current.get("plan_id") or ""),
             "plan_digest": digest,
@@ -736,6 +1112,9 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
             "assigned_debt": sorted(set(assigned_debt)),
             "has_assignments": bool(plan_rows) or bool(row_errors),
         }
+        if snapshot is not None:
+            snapshot.cache_plan_projection(digest, projection)
+        return projection
 
     states: dict[str, dict] = {}
     for lane in lanes:
@@ -863,7 +1242,7 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
         reviewer_row = next((item for item in plan_rows
                              if item.get("lane_id") == reviewer_ids[0]), {})
         receipt_ok = bool(
-            _receipt_hash_valid(receipt)
+            _receipt_hash_valid(receipt, run=run)
             and draft.get("review_status") == "complete"
             and receipt.get("target_assignment") == assignment
             and receipt.get("target_result_digest") == state.get("result_digest")
@@ -949,7 +1328,7 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
         **{key: sorted(set(value)) for key, value in dispositions.items()},
         "pending": pending,
     }
-    return {
+    projection = {
         "schema": "xunji.plan-cycle-projection.v1",
         "plan_id": str(current.get("plan_id") or ""),
         "plan_digest": digest,
@@ -964,6 +1343,9 @@ def plan_cycle_projection(run_dir: str | Path, *, plan: dict | None = None) -> d
         "assigned_debt": sorted(set(assigned_debt)),
         "has_assignments": bool(plan_rows) or bool(row_errors),
     }
+    if snapshot is not None:
+        snapshot.cache_plan_projection(digest, projection)
+    return projection
 
 
 def plan_bound_agent_debt(run_dir: str | Path, *, ignore_plan_digest: str = "") -> dict:
@@ -1221,6 +1603,33 @@ def _selftest() -> int:
         key: value for key, value in valid_v2_receipt.items()
         if key != "receipt_hash"
     })
+    valid_chunk_receipt = json.loads(json.dumps(valid_v2_receipt))
+    valid_chunk_receipt["artifact_validation"].append({
+        "path": "evidence/root.html.chunks.json",
+        "sha256": "7" * 64,
+        "size": 240,
+    })
+    valid_chunk_receipt["artifact_validation"][1]["response"].update({
+        "wire_sha256": "8" * 64,
+        "chunk_manifest": "evidence/root.html.chunks.json",
+        "chunk_manifest_sha256": "7" * 64,
+    })
+    valid_chunk_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in valid_chunk_receipt.items()
+        if key != "receipt_hash"
+    })
+    missing_chunk_manifest_receipt = json.loads(json.dumps(valid_chunk_receipt))
+    missing_chunk_manifest_receipt["artifact_validation"].pop()
+    missing_chunk_manifest_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in missing_chunk_manifest_receipt.items()
+        if key != "receipt_hash"
+    })
+    mismatched_chunk_manifest_receipt = json.loads(json.dumps(valid_chunk_receipt))
+    mismatched_chunk_manifest_receipt["artifact_validation"][-1]["sha256"] = "9" * 64
+    mismatched_chunk_manifest_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in mismatched_chunk_manifest_receipt.items()
+        if key != "receipt_hash"
+    })
     valid_legacy_artifact_receipt = json.loads(json.dumps(valid_v2_receipt))
     valid_legacy_artifact_receipt["artifact_validation"][1]["response"] = {
         "status": 200, "len": 5, "sha1": "6" * 40,
@@ -1250,6 +1659,112 @@ def _selftest() -> int:
     bad_time_receipt = dict(valid_receipt, recorded_at="eventually")
     bad_time_receipt["receipt_hash"] = _sha256_json({
         key: value for key, value in bad_time_receipt.items()
+        if key != "receipt_hash"
+    })
+    durable_evidence = run / "evidence"
+    durable_chunks = durable_evidence / "root.html.chunks"
+    durable_chunks.mkdir(parents=True)
+    durable_body = durable_evidence / "root.html"
+    durable_replay = durable_evidence / "root.html.replay.json"
+    durable_part = durable_chunks / "part-0000.bin"
+    durable_body.write_bytes(b"")
+    durable_replay.write_bytes(b"{}")
+    durable_part.write_bytes(b"")
+    empty_sha1 = hashlib.sha1(b"").hexdigest()
+    empty_sha256 = hashlib.sha256(b"").hexdigest()
+    durable_manifest_value = {
+        "schema": "xunji.probe.body_chunks.v2",
+        "saved_body": "root.html",
+        "chunk_dir": "root.html.chunks",
+        "chunk_size": 65536,
+        "wire_len": 0,
+        "wire_sha1": empty_sha1,
+        "wire_sha256": empty_sha256,
+        "chunks": [{
+            "path": "root.html.chunks/part-0000.bin",
+            "offset": 0, "bytes": 0, "sha256": empty_sha256,
+        }],
+    }
+    durable_manifest = durable_evidence / "root.html.chunks.json"
+    durable_manifest.write_text(
+        json.dumps(durable_manifest_value, sort_keys=True), encoding="utf-8")
+    durable_manifest_raw = durable_manifest.read_bytes()
+    durable_manifest_sha256 = hashlib.sha256(durable_manifest_raw).hexdigest()
+    durable_chunk_receipt = json.loads(json.dumps(valid_receipt))
+    durable_chunk_receipt["artifact_validation"] = [
+        {"path": "evidence/root.html", "sha256": empty_sha256, "size": 0},
+        {
+            "path": "evidence/root.html.replay.json",
+            "sha256": hashlib.sha256(b"{}").hexdigest(), "size": 2,
+            "request": {"method": "GET", "url": "https://app.example/"},
+            "response": {
+                "status": 200, "len": 0, "sha1": empty_sha1,
+                "saved_len": 0, "saved_sha1": empty_sha1,
+                "truncated": False, "wire_verified": True,
+                "wire_sha256": empty_sha256,
+                "chunk_manifest": "evidence/root.html.chunks.json",
+                "chunk_manifest_sha256": durable_manifest_sha256,
+            },
+            "saved_body": "evidence/root.html",
+        },
+        {
+            "path": "evidence/root.html.chunks.json",
+            "sha256": durable_manifest_sha256,
+            "size": len(durable_manifest_raw),
+        },
+    ]
+    durable_chunk_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in durable_chunk_receipt.items()
+        if key != "receipt_hash"
+    })
+    durable_receipt_valid = _receipt_hash_valid(
+        durable_chunk_receipt, run=run)
+    durable_part.write_bytes(b"tampered")
+    durable_chunk_mutation_rejected = not _receipt_hash_valid(
+        durable_chunk_receipt, run=run)
+    durable_part.write_bytes(b"")
+    saved_identity_receipt = json.loads(json.dumps(durable_chunk_receipt))
+    saved_identity_receipt["artifact_validation"][1]["response"][
+        "saved_sha1"] = "f" * 40
+    saved_identity_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in saved_identity_receipt.items()
+        if key != "receipt_hash"
+    })
+    saved_identity_mismatch_rejected = not _receipt_hash_valid(
+        saved_identity_receipt, run=run)
+    zero_chunk_manifest = json.loads(json.dumps(durable_manifest_value))
+    zero_chunk_manifest["chunk_size"] = 0
+    durable_manifest.write_text(
+        json.dumps(zero_chunk_manifest, sort_keys=True), encoding="utf-8")
+    zero_manifest_raw = durable_manifest.read_bytes()
+    zero_manifest_sha256 = hashlib.sha256(zero_manifest_raw).hexdigest()
+    zero_chunk_receipt = json.loads(json.dumps(durable_chunk_receipt))
+    zero_chunk_receipt["artifact_validation"][1]["response"][
+        "chunk_manifest_sha256"] = zero_manifest_sha256
+    zero_chunk_receipt["artifact_validation"][2].update({
+        "sha256": zero_manifest_sha256, "size": len(zero_manifest_raw),
+    })
+    zero_chunk_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in zero_chunk_receipt.items()
+        if key != "receipt_hash"
+    })
+    zero_chunk_size_rejected = not _receipt_hash_valid(
+        zero_chunk_receipt, run=run)
+    durable_manifest.write_bytes(durable_manifest_raw)
+    shared_manifest_receipt = json.loads(json.dumps(durable_chunk_receipt))
+    second_response = json.loads(json.dumps(
+        shared_manifest_receipt["artifact_validation"][1]))
+    second_response["path"] = "evidence/second.replay.json"
+    shared_manifest_receipt["artifact_validation"].append(second_response)
+    shared_manifest_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in shared_manifest_receipt.items()
+        if key != "receipt_hash"
+    })
+    backslash_manifest_receipt = json.loads(json.dumps(valid_chunk_receipt))
+    backslash_manifest_receipt["artifact_validation"][1]["response"][
+        "chunk_manifest"] = "evidence/root\\..\\evil.chunks.json"
+    backslash_manifest_receipt["receipt_hash"] = _sha256_json({
+        key: value for key, value in backslash_manifest_receipt.items()
         if key != "receipt_hash"
     })
     committed_at = 1.0
@@ -1343,20 +1858,34 @@ def _selftest() -> int:
          stage_declaration_issues("S3", open_stage)
          == open_stage["readiness"]["S3"]["blockers"]),
         ("review receipt accepts only its exact typed self-hashed schema",
-         _receipt_hash_valid(valid_receipt)),
+         _receipt_hash_valid(valid_receipt, structural_only=True)
+         and not _receipt_hash_valid(valid_receipt)),
         ("review receipt projection accepts complete legacy and v2 replay metadata",
-         _receipt_hash_valid(valid_legacy_artifact_receipt)
-         and _receipt_hash_valid(valid_v2_receipt)),
+         _receipt_hash_valid(valid_legacy_artifact_receipt, structural_only=True)
+         and _receipt_hash_valid(valid_v2_receipt, structural_only=True)
+         and _receipt_hash_valid(valid_chunk_receipt, structural_only=True)),
+        ("chunk-verified replay metadata is bound to one manifest receipt",
+         not _receipt_hash_valid(missing_chunk_manifest_receipt, structural_only=True)
+         and not _receipt_hash_valid(
+             mismatched_chunk_manifest_receipt, structural_only=True)),
+        ("durable chunk receipt revalidates reconstructed bytes from disk",
+         durable_receipt_valid and durable_chunk_mutation_rejected
+         and saved_identity_mismatch_rejected and zero_chunk_size_rejected),
+        ("one chunk manifest cannot satisfy two response proofs",
+         not _receipt_hash_valid(shared_manifest_receipt, structural_only=True)),
+        ("manifest path rejects backslash traversal aliases",
+         not _receipt_hash_valid(backslash_manifest_receipt, structural_only=True)),
         ("review receipt projection rejects partial or inconsistent v2 metadata",
-         not _receipt_hash_valid(partial_v2_receipt)
-         and not _receipt_hash_valid(inconsistent_v2_receipt)),
+         not _receipt_hash_valid(partial_v2_receipt, structural_only=True)
+         and not _receipt_hash_valid(inconsistent_v2_receipt, structural_only=True)),
         ("review receipt rejects unknown disposition even with a fresh self-hash",
-         not _receipt_hash_valid(invalid_enum_receipt)),
+         not _receipt_hash_valid(invalid_enum_receipt, structural_only=True)),
         ("review receipt rejects extra fields and stale self-hashes",
-         not _receipt_hash_valid(extra_field_receipt)
-         and not _receipt_hash_valid(dict(valid_receipt, note="tampered"))),
+         not _receipt_hash_valid(extra_field_receipt, structural_only=True)
+         and not _receipt_hash_valid(
+             dict(valid_receipt, note="tampered"), structural_only=True)),
         ("review receipt rejects non-ISO ordering timestamps",
-         not _receipt_hash_valid(bad_time_receipt)),
+         not _receipt_hash_valid(bad_time_receipt, structural_only=True)),
         ("plan projection reuses the strict work-plan contract owner",
          loaded_valid_plan == valid_plan and not valid_plan_errors),
         ("self-hashed work plan with unknown fields is rejected",

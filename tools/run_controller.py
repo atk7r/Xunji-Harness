@@ -306,8 +306,21 @@ def _selftest() -> int:
     (closed / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
     closed_loop = loop_state.write_outputs(closed)
     closed_ctl = derive(closed, loop_data=closed_loop, ledger_data=progress_ledger.derive(closed, loop_data=closed_loop))
-    (closed / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
-    complete_loop = loop_state.write_outputs(closed)
+    (closed / "decisions.md").write_text(
+        "# Decisions\n\nGHOST_COMPLETE receipt=" + ("a" * 64) + "\n",
+        encoding="utf-8",
+    )
+    unbound_loop = loop_state.write_outputs(closed)
+    unbound_ctl = derive(
+        closed, loop_data=unbound_loop,
+        ledger_data=progress_ledger.derive(closed, loop_data=unbound_loop))
+    import completion_transaction as _completion_transaction
+    original_committed_predicate = _completion_transaction.is_valid_committed
+    try:
+        _completion_transaction.is_valid_committed = lambda _run: True
+        complete_loop = loop_state.write_outputs(closed)
+    finally:
+        _completion_transaction.is_valid_committed = original_committed_predicate
     complete_ctl = derive(closed, loop_data=complete_loop, ledger_data=progress_ledger.derive(closed, loop_data=complete_loop))
 
     checks = [
@@ -329,7 +342,10 @@ def _selftest() -> int:
          and closed_ctl["signals"]["closure_review_candidate"]
          and not closed_ctl["can_stop"]
          and all("replay" not in item.lower() for item in closed_ctl["stop_requires"])),
-        ("completion marker allows loop stop without treating candidate as enough",
+        ("legacy marker cannot make the advisory controller stop",
+         unbound_ctl["state"] != "LOOP_COMPLETE"
+         and not unbound_ctl["can_stop"]),
+        ("valid completion transaction allows stop without treating candidate as enough",
          complete_ctl["state"] == "LOOP_COMPLETE"
          and complete_ctl["can_stop"]
          and complete_ctl["signals"]["completion_markers"] == ["GHOST_COMPLETE"]

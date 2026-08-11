@@ -43,6 +43,13 @@ derived, non-authorizing seed bound to the exact current turn and canonical inpu
 digest. It is deliberately editable by Root: the generated six-step front chain
 is a conservative fallback, not a mandatory attack playbook.
 
+There is one deliberate branch. When no strong lane candidate exists and the
+derived S3 readiness blockers are empty, `workers.py plan` writes a fully filled
+`execution_mode=COMPLETION_REVIEW`, `macro_stage=S3`, `lanes=[]` proposal and
+prints one `NEXT_OWNER_ACTION`. Do not edit that completion proposal: execute the
+printed `commit-proposal` argv directly. `COMPLETION_REVIEW` is the only legal
+zero-lane mode; ordinary modes still require their full execution/Reviewer DAG.
+
 Before commit, use the built-in Edit/Write tool on that exact proposal file:
 
 - keep `schema` and `basis` byte-for-byte semantically unchanged;
@@ -78,7 +85,9 @@ inherits only identity-equal lanes already proven complete by Agent return,
 Reviewer disposition, and Root settlement, then commits the unfinished suffix;
 never repeat an inherited lane. "Ready" applies only after that commit when
 `delegate` selects dependency-satisfied work; it never selects a plan subset.
-If `workers.py plan` exits nonzero with `NO_STRONG_CANDIDATE`, do not commit, invent lanes,
+If `workers.py plan` exits nonzero with `NO_STRONG_CANDIDATE`, it did not find an
+ordinary lane and also did not qualify for the S3 completion branch; the error's
+`S3_NOT_READY=...` field names the completion blockers. In that case, do not commit, invent lanes,
 or copy a documentation example. Repair the canonical
 frontier/coverage mapping and rerun the state pass. If commit reports
 `WORK_PLAN_PROPOSAL_STALE`, rerun
@@ -114,10 +123,37 @@ When the current turn explicitly denies target egress, the planner emits only th
 offline Hunter and its Reviewer. That pair is the complete offline suffix; do not
 add a verification pair for a target artifact that does not exist.
 
+Target route is orthogonal to the lane effect: direct is the default and proxy is
+only an explicit current-turn choice. The generated context freezes exact
+`XUNJI_PROXY_REQUIRED=0` or `=1` in every prepared target argv. A route-less
+historical contract or a prompt that only forbids direct remains offline. If a proxy-attributed
+failure occurs, do not replan, delegate a replacement lane, or consume another
+request-budget slot to vary the retry. Return/settle the blocker and stop until a
+new top-level operator turn confirms direct or explicitly selects proxy again;
+that confirmation is bound only to the selected proxy route.
+
 If the gate returns `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` with
 `invalid-argv`, the command did not execute. Rebuild the exact direct
 `commit-proposal` argv and retry in the same operator turn. Do not add pipes,
 redirects, wrappers, environment assignments, or `python -c` inspection.
+
+## Launch The Assignment-Free Completion Reviewer
+
+After the zero-lane proposal commits, do not run `delegate`. Run the exact
+read-only formatter command named by the commit receipt:
+
+```bash
+python3 tools/workers.py completion-review runs/<dir>
+```
+
+It validates the current committed transaction, turn/input binding, S3 mode,
+zero-lane shape, evidence index, and completion bundle, then prints one JSON
+object with `tool_name=Agent` and exact `tool_input.subagent_type` plus
+`tool_input.prompt`. Call Agent once with that `tool_input` unchanged. The same
+object prints the exact required PASS final line. Missing, stale, prepared,
+corrupt, non-S3, non-completion, or already-diverged state produces no launch
+contract and tells Root to regenerate the plan. Never add description text,
+prompt prefixes/suffixes, whitespace, or hand-computed hashes.
 
 ## Delegate Ready Work
 
@@ -180,6 +216,8 @@ an invented transition.
 - `ROOT_DIRECT` accepts one dependency-free atomic lane, at most one request, and
   one exact `root_direct_eligible` capability. A terminal receipt settles only
   that mechanical action; it proves no evidence, review, exit gate, or closure.
+- `COMPLETION_REVIEW` accepts zero lanes only at S3. It has no assignment or
+  delegate wave; only the exact global Reviewer lifecycle can settle it.
 
 ## Stale Plan Settlement
 
@@ -202,3 +240,32 @@ python3 tools/workers.py cancel-unlaunched runs/<dir> A-<assignment> --reason "t
 Cancellation is auditable settlement, not a result, review, refutation, merge,
 evidence item, or completed cycle. Commit a material replan before replacement
 work.
+
+A same-session no-delta scheduler wake-up is not a superseding turn when
+`turn_contract.py` returns `XUNJI_CONTINUATION_COALESCED`: the existing fresh,
+current-input-bound, unended plan keeps its exact binding. Continue its one owner
+action from current status; do not regenerate a proposal, assignment, or launch.
+A different session may receive `UserPromptWakeCoalesced` / `XUNJI_E_RUN_BUSY`
+for a strict same-run no-delta wake. That preserves the existing owner contract
+but authorizes nothing in the wake session; wait for the owner chain or submit a
+material semantic delta. Without either hash-chain receipt, use the stale-plan
+rules above.
+
+## Repeated Infrastructure Barrier Binding
+
+When a target action is denied before any target bytes, run the public
+`barrier_state.py observe` with the exact `PreToolUseDenied` runtime receipt
+SHA-256. Do not use a PostToolUseFailure, prose count, or guessed fingerprint.
+The owner derives and returns the closed diagnostic key
+`front + action_fingerprint + cause_code + precondition_digest`; the threshold
+aggregates by `front + action_fingerprint`. After two distinct same-action receipts,
+even if cause/precondition rotates, every later target lane for that front must include
+that exact `infra_barrier` binding. The work-plan commit and the delegate
+preflight both reject the third same-action `target_attempt`; omitting the binding
+is also rejected. A materially changed actual action, or a typed `repair` or
+`local_verify` lane, remains eligible; changing only caller-supplied cause or
+precondition does not. Clear only with matching target success or an exact
+barrier-bound repair receipt after the active failure epoch through the public owner;
+epoch-tail CAS rejects a concurrent new failure and unrelated local verification
+does not clear it. This derived state neither settles nor
+closes the front and creates no evidence.

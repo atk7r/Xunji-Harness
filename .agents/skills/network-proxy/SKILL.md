@@ -1,9 +1,14 @@
 ---
 name: network-proxy
-description: Network connectivity workarounds — proxy configuration, git push failures through SOCKS, WebFetch/WebSearch blocks, and general outbound-access troubleshooting. Invoke when any network operation fails (git push/pull/clone, web fetch, API call) and the fix is likely proxy/connectivity-related rather than a target-side issue.
+description: Codex-side network connectivity utility for proxy configuration, Git failures, web research access, and outbound troubleshooting. It repairs transport only and does not import Claude live-run routing, scope, or Hook authority.
 ---
 
 # Network Proxy & Connectivity Troubleshooting
+
+A Codex-side capability mirror. It may repair Codex or local developer
+connectivity, but it does not select targets, authorize egress, or replace the
+Claude-primary `.claude/hooks/` and harness proxy owners. Ordinary Codex research
+continues to use the host product's normal research rules.
 
 A **utility** skill. When the machine is behind a SOCKS proxy or firewall and a
 network operation fails, this skill provides the fix patterns. It does NOT decide
@@ -31,6 +36,16 @@ Do not confuse this with Xunji's active engagement proxy discipline:
 - Active Xunji target-facing tools (`probe.py`, `render.py`, `scan.py`, sensors)
   use `--proxy`, `XUNJI_PROXY`, or `tools/harness/proxy.conf` through
   `tools/harness/proxy.py`.
+- Direct is the Claude-primary target default (`XUNJI_PROXY_REQUIRED=0`). The
+  engagement proxy is selected only by an explicit current operator request
+  (`XUNJI_PROXY_REQUIRED=1` or registered `--proxy`); dormant config is inert.
+- A route-less historical contract and a prompt that only forbids direct remain
+  offline. Browser subprocesses strip ambient proxy variables; scanner wrappers
+  preflight the selected proxy and disable native transport retries.
+- A proxy-attributed failure stops automatic retry and remains paused until a
+  newer top-level operator turn chooses direct or explicitly selects proxy again.
+  Confirmation is route-specific. Codex advice must not reinterpret an internal
+  wake or cooldown as confirmation.
 - Codex review traffic uses the dedicated `CODEX_PROXY` /
   `tools/harness/codex_proxy.conf` path.
 - Model/API calls must not be routed through the engagement proxy.
@@ -77,7 +92,7 @@ will not run Xunji active tools or model/API clients afterwards.
 For Xunji active tools, do this instead:
 
 ```bash
-XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
+XUNJI_PROXY_REQUIRED=1 XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
 ```
 
 ## WebFetch / WebSearch failures
@@ -99,6 +114,6 @@ This skill provides **connectivity fixes only**. It does NOT:
 - Provide payloads, exploits, or attack methodology
 - Bypass rate limits or authentication — that's the target's concern, not the network's
 
-The limits remain `src-safety-boundary` (effect, not method) and the live
+The limits remain `safety-boundary` (effect, not method) and the live
 Claude `.claude/hooks/` gate. Codex does not provide or maintain a parallel
 hook boundary.

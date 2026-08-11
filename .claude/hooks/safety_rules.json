@@ -192,7 +192,7 @@
       "reason": "GCP resource deletion (gcloud ... delete)"
     },
     {
-      "_comment_permission_soft": "Permission/ownership/role/ACL/privilege changes (chmod/chown/setfacl/set-role/cloud IAM/k8s RBAC) are SOFT rules now — operator-gated in src-safety-boundary, NOT machine-blocked. They are reversible (non-destructive), so they are not denied here.",
+      "_comment_permission_soft": "Permission/ownership/role/ACL/privilege changes (chmod/chown/setfacl/set-role/cloud IAM/k8s RBAC) are L3 GATE in safety-boundary, NOT L4 machine-blocked. They are legitimate but irreversible-leaning, so they are not denied here.",
       "category": "delete_resource",
       "pattern": "(-X|--request)\\s*['\"]?DELETE",
       "reason": "state-changing HTTP DELETE against target"

@@ -1,9 +1,13 @@
 ---
 name: captcha-solve
-description: Procedure for solving an interactive captcha barrier (slider / click-select / rotate / text) by driving a real headless browser and reusing the page's OWN verification JS, then extracting the resulting validate token to feed a follow-up request. Invoke when a captcha gates the endpoint you need to verify. Procedure and tooling only — no target selection, no per-vendor payload library.
+description: Codex-side procedure for reviewing, advising on, or explicitly delegated solving of an interactive captcha barrier (slider / click-select / rotate / text) with a real browser. It supplies capability guidance only and does not give Codex Claude Root or Hook authority.
 ---
 
 # Captcha Solving (barrier bypass)
+
+A Codex-side capability mirror. It may support local analysis or work explicitly
+delegated by the operator or Claude Root, but it does not authorize target-facing
+effects, create a live-run owner, or replace the `.claude/hooks/` boundary.
 
 A **capability/procedure** skill, not a playbook. Solving a captcha is **method,
 and method is free** — this skill does not decide *what* to attack or *whether*
@@ -88,5 +92,5 @@ by **effect**, not by this skill:
   zone (availability / flooding) — that is not unlocked by being able to solve the
   captcha. **SMS / SMS verification-code endpoints especially**: solving the
   captcha does not license triggering a flood of messages.
-- Limits remain `src-safety-boundary` (effect, not method) and the
+- Limits remain `safety-boundary` (effect, not method) and the
   `.claude/hooks/` gate used by the Claude Code engagement runtime.

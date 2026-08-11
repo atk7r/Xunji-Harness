@@ -32,6 +32,7 @@ Run the bundled deterministic scan from the repo root:
 
 ```bash
 python3 .agents/skills/xunji-closure-audit/scripts/closure_audit.py
+python3 .agents/skills/xunji-closure-audit/scripts/closure_audit.py --selftest
 ```
 
 Hard failures from this script mean real wiring gaps until disproven:
@@ -39,7 +40,19 @@ Hard failures from this script mean real wiring gaps until disproven:
 - a documented `python tools/*.py` / `.claude/hooks/*.py` command references a
   missing file;
 - a Python entry point containing `--selftest` is not registered in
-  `tools/selftest_all.py`.
+  `tools/selftest_all.py`;
+- a `.agents/skills/*/SKILL.md` entry does not declare `Codex-side` ownership,
+  its declared name differs from its directory, or a Claude-primary-only skill
+  such as `web-research` has leaked into the Codex discovery tree;
+- an intentional same-name capability/policy mirror omits its explicit
+  Claude-runtime boundary;
+- a new cross-tree same-name skill is not explicitly classified as an
+  intentional mirror or Codex-adapted counterpart, or the required canonical
+  Claude owner is missing;
+- a renamed Codex entry reproduces multiple distinctive steps of a
+  Claude-primary protocol. The explicitly classified
+  `xunji-web-research-sync` maintenance-audit skill may cite those steps without
+  becoming a general discovery entry.
 
 Then run the relevant project gates:
 
@@ -81,12 +94,20 @@ examples worth fixing:
 
 1. Preserve the Claude-primary boundary: update `.claude/skills/` for Root
    behavior; update `.agents/skills/` only for Codex-side audit guidance.
-2. Prefer adding or wiring the missing local tool over documenting around it.
-3. Keep evidence discipline conservative: source/research leads stay
+2. Do not copy Claude-primary live-run protocols into `.agents/skills/`.
+   Codex-side mirrors must identify their role in frontmatter and state that
+   they do not inherit Claude Root/Hook authority. Classify every permitted
+   cross-tree same-name relationship in the audit script; unknown collisions
+   fail by default. Keep protocol-content signatures narrow and require multiple
+   matches so the renamed-copy check does not become a generic prose scanner.
+3. Prefer adding or wiring the missing local tool over documenting around it.
+4. Keep evidence discipline conservative: source/research leads stay
    `phenomenon` or `candidate` until active proof passes the evidence gate.
-4. Add or update `--selftest` coverage for new tools, then register it in
-   `tools/selftest_all.py`.
-5. Re-run the bundled scan and relevant gates.
+5. Add or update `--selftest` coverage for new tools, then register it in
+   `tools/selftest_all.py`. The bundled ownership regression fixtures cover a
+   missing declaration, a Claude-primary-only entry, an unclassified same-name
+   collision, and a renamed protocol copy.
+6. Re-run the bundled scan and relevant gates.
 
 ## Review And Commit Discipline
 

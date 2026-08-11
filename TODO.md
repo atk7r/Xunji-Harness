@@ -1,10 +1,17 @@
 # Xunji 统一实施计划
 
-> 最后更新：2026-07-22。
+> 最后更新：2026-08-11。
 > 本文件是当前 Python/Harness 修复、三段 Run Macro-Stage 和 Agent/Worker 调度的唯一正式
-> backlog。未勾选项都是 target/roadmap，不代表已经实现；历史审计、
-> `todo1.md` 和 review record 只提供来源与论证，不建立第二套 backlog 真值。
+> backlog。`[x] 已实现` 表示当前代码、fixture/回归和现行架构共同支持；
+> `[x] 已决策` 表示已明确不采用或暂不准入，不能解读为代码实现；`[ ]` 表示仍未完成，
+> 其中写明“部分实现”的条目只列剩余验收。原 `todo1.md` 已于 2026-08-11 合并到本文件，
+> 其逐节处置见第 6 节；历史 review record 只提供来源与论证，不建立第二套 backlog 真值。
 > CCB/TypeScript 迁移不在当前路线；除非 operator 以后重新立项，不为它保留迁移任务。
+>
+> 本次盘点基线：当前工作树 `python3 tools/selftest_all.py` 为 **78 passed, 0 failed**，
+> `check_templates.py` 通过；但 `check_rules.py` 因 `artifact_view.py`、`barrier_state.py`、
+> `completion_transaction.py` 尚未进入 safety-critical manifest 而 HOLD，不能称为全绿。
+> 历史隔离分支 `f1a186e` 的“全勾选”结果不在当前 HEAD 祖先链，未作为当前完成证据。
 
 ## 0. 总体目标与设计原则
 
@@ -92,10 +99,14 @@
   backoff 和结构化 provenance。
 - [x] 保留真实请求计数和全局预算，不把 warning 当请求；阈值调整必须由 fixture/bench
   证明，不能用简单调大数字掩盖错误归因。
-- [ ] 为 `sort/uniq/cut` 等纯过滤器增加窄参数 grammar，或提供 typed `InspectArtifact/TextQuery`
-  capability；不开放任意 `python -c`、`awk/xargs`、重定向、`pip/cp` 或自定义网络脚本。
-- [ ] 为 WebSocket、超大 JS、字节范围和结构化搜索提供复用统一 privacy/proxy/guard/
-  recorder 链的专用 capability，不用裸 shell 逃生口补能力缺口。
+- [ ] **部分实现**：typed `artifact_view.py` 已提供有界 range/search/strings 离线分析，
+  capability registry 已限定 argv/effect；补齐 safety-critical manifest 接线并让
+  `check_rules.py` 通过后才能完成。继续禁止任意 `python -c`、`awk/xargs`、重定向、`pip/cp`
+  或自定义网络脚本。
+- [x] 超大响应/JS 的流式保存与字节范围已有 `probe.py` 的受控入口、receipt 与回归覆盖；
+  结构化本地检索的剩余接线由上一项承担。
+- [ ] 增加复用统一 privacy/proxy/guard/recorder 链的专用 WebSocket capability；不能用裸
+  shell 或自定义网络脚本补缺口。
 
 ## 2. 三段 Run Macro-Stage 与统一工作计划
 
@@ -126,15 +137,15 @@ receipt 和 journal 承载；`state/work_plan.json` 等计划投影必须可删�
 
 - [ ] 每个 cycle 在动作前生成 lane plan：当前 front/hypothesis、expected signal、control、
   effect、assets、dependency、request budget、drop/stop condition、merge owner。
-- [ ] 每个 Agent 返回后立即执行 candidate/refutation merge review；finding 晋级、高危结论、
+- [x] 每个 Agent 返回后立即执行 candidate/refutation merge review；finding 晋级、高危结论、
   多 Agent 冲突和连续低信息增益时触发 checkpoint review。
-- [ ] 同一资产默认只有一个 `target` lane；`local_read/local_verify` 可并行，Reviewer 若调用
+- [x] 同一资产默认只有一个 `target` lane；`local_read/local_verify` 可并行，Reviewer 若调用
   外部模型则显式记为 `model_egress`。所有 target lanes 共用全局 request budget/host health，
   所有 model egress lanes 共用独立出境预算。
-- [ ] exit gate 要求高价值 fronts 已确认、证伪，或按硬规则/evidence-backed Type B 完成
+- [x] exit gate 要求高价值 fronts 已确认、证伪，或按硬规则/evidence-backed Type B 完成
   close/defer；Type A 仍保持 open/deferred 并阻止 closure-ready。所有 Agent 均须
   merge/adjudicate，coverage/review debt 可解释；报告存在不等于 closure-ready。
-- [ ] 新资产、新技术栈或知识缺口可回到 S1；不为保持阶段单调而忽略新信息。
+- [x] 新资产、新技术栈或知识缺口可回到 S1；不为保持阶段单调而忽略新信息。
 
 ### 2.3 S3：最终收口
 
@@ -142,9 +153,9 @@ receipt 和 journal 承载；`state/work_plan.json` 等计划投影必须可删�
   replay、report parity、review ledger、retrospective、Cron/loop 终态。
 - [ ] 主要使用 verify、independent-review、report-parity Agent；不再盲目扩大 target probing，
   但 closure review 发现实质缺口时必须重开 front 并回到 S2。
-- [ ] Single Synthesizer 保持 report/finding/review disposition/closure 单写者；Agent/reviewer
+- [x] Single Synthesizer 保持 report/finding/review disposition/closure 单写者；Agent/reviewer
   只提供候选与挑战。
-- [ ] final gate 继续由 `check_run`、独立 review、report/evidence parity、零未合并 Agent、
+- [x] final gate 继续由 `check_run`、独立 review、report/evidence parity、零未合并 Agent、
   retrospective 和 terminal journal evidence 共同决定。
 
 ### 2.4 Root → Hunter → Reviewer 小周期
@@ -194,7 +205,7 @@ Worker/Lane 是逻辑工作单元，Agent 是运行时执行者。计划先拆 l
 - [x] `ROOT_DIRECT` 只用于一个廉价、明确、原子的步骤；复杂但依赖串行或共享主动 barrier
   的工作默认交给一个专业 Agent，若 barrier 下没有可执行 lane 则进入 `blocked`，不能把
   “不宜并行”偷换成 Root 自己长链执行。
-- [ ] 存在两个以上 effect-disjoint lanes 且预算/merge capacity 允许时使用并行 Agent；
+- [x] 存在两个以上 effect-disjoint lanes 且预算/merge capacity 允许时使用并行 Agent；
   不再把 `open fronts >= 4` 当日常使用 Agent 的唯一触发器。
 - [x] 现有 `>=4 diverse fronts` 规则在新 scheduler/bench 证明前只保留为强制 breadth
   safety net；不得把阈值简单降为“两个任务必并行”。
@@ -233,8 +244,9 @@ Worker/Lane 是逻辑工作单元，Agent 是运行时执行者。计划先拆 l
   输出仍只能是 phenomenon/candidate/refutation/barrier/artifact pointer。
 - [x] 修复 coordination epoch 语义：PreToolUse 与 Stop gate 统一使用
   `coordination_signature + fanout_epoch_started_at`，bare continue 不重复索要已满足的 Agent。
-- [ ] 复用 runtime notification/`SendMessage` 作为 Agent 状态、追问和取消的控制通道；消息
-  本身不能成为 evidence、authority 或 merge 证明，实质结果仍落 assignment/receipt/run dir。
+- [x] **已决策（不采用消息作为协作真值）**：Agent 状态、追问、取消和实质结果继续落
+  assignment/receipt/run dir；runtime notification 只作唤醒信号，`SendMessage` 仅保留外部
+  operator stop/no-resume 的窄恢复语义，不能成为 evidence、authority 或 merge 证明。
 - [ ] 代码维护型并行 Agent 可选择 worktree 隔离；live engagement 的 canonical run 写入仍
   遵守单写者/CAS/merge contract，不因 worktree 建立第二 evidence store。
 
@@ -247,8 +259,9 @@ Claude Code/DeepSeek 主驾驶 E2E 与 fresh-context 独立复审。W2 核心垂
 Claude 主驾驶完成 `work-plan→delegate→Hunter→Reviewer→Root finish→canonical→cycle-end`：
 离线约束只生成 Hunter/Reviewer 两条 lane，无目标数据按 barrier/blocked 处置，front 保持
 open，零目标/Web 请求且 Coda 精确投影 receipt。W2 整体仍保持未完成：
-A/B scheduler 收益、stage 默认资源策略、通知/追问控制通道和代码维护 worktree 隔离仍是
-验收/剩余工作。W3 仅完成 route-aware guard 子集，离线/WS/JS capability 与完整可观测性仍开放。
+A/B scheduler 收益、stage 默认资源策略和代码维护 worktree 隔离仍是验收/剩余工作；消息
+控制通道已决策不作为协作真值。W3 已完成 route-aware guard、流式大响应/JS 与本地有界
+分析实现已存在但 manifest 接线仍 HOLD；专用 WebSocket capability 与完整可观测性仍开放。
 
 - [x] **W0 — contract/fixture 先行**：冻结 capability/effect、Stop union、work plan、
   delegation decision、lane、Agent event 和 error-code schema。
@@ -312,13 +325,15 @@ A/B scheduler 收益、stage 默认资源策略、通知/追问控制通道和�
 
 ### 4.3 度量与完成门
 
-- [ ] Bench 增加 time-to-first-delegation、time-to-first-evidence、front coverage、有效 lane
-  捕获率、Agent useful-yield、重复目标请求、merge debt、信息增益、request/token budget、
-  false-positive rate 和 closure reopen 正确率。
+- [x] Bench 已记录 time-to-first-evidence、front/collaboration coverage、request budget、
+  conflict 和 false-positive 等当前基础指标。
+- [ ] 补齐 time-to-first-delegation、有效 lane 捕获率、Agent useful-yield、重复目标请求、
+  merge debt、信息增益、token budget 和 closure reopen 正确率，并统一统计口径。
 - [ ] 用 A/B fixture 比较 Root-direct、serial-Agent、parallel-Agent；只有质量/速度/覆盖收益
   超过调度与合并成本时才把 soft recommendation 升为 hard gate。
-- [x] focused selftests、`selftest_all.py`、bench、rule/template/runtime-boundary checks 全绿；
-  文档引用命令与真实 Hook/Tool contract 一致。
+- [ ] 当前 `selftest_all.py` 为 78/78、template check 通过，但 rule check 仍因 3 个可信入口
+  缺 safety-critical manifest 记录而 HOLD；补齐后重跑 focused/full/bench/rule/template/
+  runtime-boundary，才能恢复“全部全绿”完成门。
 - [x] safety-critical 变更完成作者感知的独立 fresh-context/异构复审并记录 disposition。
 > 治理边界：`runs/test0_20260716` 的 E-006 maturity、Reason/marker、Agent merge、coverage
 > 和 independent review 属于该 run 的 canonical 修复，不复制进项目 TODO 充当实现进度。
@@ -334,7 +349,7 @@ A/B scheduler 收益、stage 默认资源策略、通知/追问控制通道和�
 
 ## 5. 共享工程与输入链剩余工作
 
-本节只保留 `todo1.md` 审计中仍未完成或需要 decision gate 的事项。已经进入当前实现和
+本节只保留原 `todo1.md` 审计中仍未完成或需要 decision gate 的事项。已经进入当前实现和
 Maintenance Checkpoint 的 setup-source、single-owner transaction、activation CAS、maintenance
 authority 等工作不重新伪装成未完成计划；发现回归时按其现有 contract/fixture 修复。
 
@@ -343,16 +358,18 @@ authority 等工作不重新伪装成未完成计划；发现回归时按其现�
 - [ ] 在现有 URL/recon/Markdown/普通 JSON 基线上，按格式逐类评估 HTML/PDF/DOCX/text/OCR
   adapter；每类先有 deterministic inventory、source span/ref、大小/TOCTOU/path 边界 fixture，
   再允许 AI 只选择机械 token/ref 生成候选。
-- [ ] 固定 `--ai off | local | external` 的 effect 与 receipt；external 只接收不可逆脱敏的
-  surrogate，记录 provider/model/prompt/schema/redaction hash，模型不得恢复 secret 或铸造
-  scope、authority、finding、certainty、severity、pointer、Cron 或 closure。
+- [x] 固定 `--ai off | local | external` 的 effect 与 receipt：`off` 为确定性路径，`external`
+  只接收不可逆脱敏 surrogate 并记录 provider/model/schema/redaction hash；`local` 在可信
+  provider registry 落地前显式 fail closed。模型不能恢复 secret 或铸造 scope、authority、
+  finding、certainty、severity、pointer、Cron 或 closure。
 - [ ] `--intel-url` 保持独立、默认关闭的 candidate capability；若启用，使用专门只读 fetch
   contract，并逐跳执行 DNS/IP、scope、privacy、credential、timeout、body/MIME 和 redirect gate，
   不能借 local setup metadata 通道联网。
-- [ ] 扩展输入矩阵：域名/IP/IPv6/IDN/userinfo/非法端口，损坏/未知/超大/重复 JSON，Markdown
-  code fence/表格/多域，PDF/DOCX/OCR 抽取失败，prompt injection、symlink/path traversal、
-  source mutation 和 context bomb；任一失败不移动 pointer、不创建 Cron。
-- [ ] normalizer 上线硬门保持“零无来源高风险字段、零 pointer 错提、零 source instruction
+- [x] URL/recon/Markdown/普通 JSON 输入矩阵已覆盖 userinfo、symlink/path traversal、source
+  mutation、prompt injection 与 pointer/Cron fail-closed 等关键边界。
+- [ ] 补齐域名/IP/IPv6/IDN/非法端口，损坏/未知/超大/重复 JSON，Markdown code fence/表格/
+  多域，PDF/DOCX/OCR 抽取失败和 context bomb；任一失败仍不得移动 pointer 或创建 Cron。
+- [x] normalizer 上线硬门保持“零无来源高风险字段、零 pointer 错提、零 source instruction
   执行”；AI 相对 deterministic-only 没有可测收益时不扩大格式面。
 
 ### 5.2 Canonical parser 与复审产品化
@@ -372,11 +389,11 @@ authority 等工作不重新伪装成未完成计划；发现回归时按其现�
 - [ ] 在 setup normalizer 之后，按 `Agent output -> maintenance review -> evidence candidate ->
   JS/API -> scope -> cross-run/knowledge -> report/retrospective/hints` 的顺序逐项评估；每一项
   单独冻结 candidate schema、source ref/hash、机械 validator、canonical writer 和 rollback。
-- [ ] AI 在这些边界只做不稳定输入到稳定候选结构的转换，不能掌握 assignment/merge、
+- [x] AI 在当前已开放边界只做不稳定输入到稳定候选结构的转换，不能掌握 assignment/merge、
   reviewer independence、evidence maturity、scope authority、finding/severity 或 closure 裁决。
-- [ ] Agent candidate 必须匹配 assignment/front/assets/artifacts；review candidate 必须匹配
-  reviewer matrix/bundle/diff hash；evidence/JS/scope/knowledge/report candidate 分别由现有
-  recorder、source bytes、operator authority、knowledge validator 和 report-parity gate 晋级。
+- [x] 当前 Agent/review/evidence/scope/report 候选已分别绑定 assignment/front/assets/artifacts、
+  reviewer matrix/bundle/diff hash、recorder/source bytes/operator authority/knowledge validator/
+  report-parity gate；未来新候选面仍须逐项证明相同绑定，不能从本项自动继承准入。
 - [ ] 每类候选用 benchmark 证明比 deterministic parser/人工誊录有净收益后才开启下一类；
   无收益、错误不可机械验证或扩大 model egress 时明确 supersede，而不是一次铺满。
 
@@ -385,12 +402,13 @@ authority 等工作不重新伪装成未完成计划；发现回归时按其现�
 - [ ] 建立 CI：PR 运行 closure/rules/templates/runtime-boundary/local-hygiene、focused selftests
   和 bench；Linux 跑全量 suite，macOS/Windows 至少覆盖路径、编码、atomic replace、proxy、
   setup/turn-contract/guard，Python 最低版与最新支持版组成矩阵。
-- [ ] 只拒绝已废弃旧架构，不再一概禁止 `tests/`；逐步把大型模块尾部 selftest 搬到正式
-  suite，同时保留 CLI `--selftest` 兼容入口。P0 fault injection 不等待目录重构。
-- [ ] 固定 dev dependencies/可选 extras 的解析方式；CI 增加 `ruff check` 和 schema/model/
-  transaction 等纯逻辑的最小 type-check，不以一次类型化全部历史工具为前置。
-- [ ] 提交前固定运行 `git diff --check`、敏感文件扫描和 review fingerprint；CI artifact 只上传
-  bench JSON/失败日志，不上传真实 target/run 产物。
+- [x] 已移除对 `tests/` 的一概禁止，P0 fault injection 不等待目录重构。
+- [ ] 逐步把大型模块尾部 selftest 搬到正式 suite，同时保留 CLI `--selftest` 兼容入口。
+- [x] `pyproject.toml` 已声明 Python 最低版本、dev extra 与 Ruff 基础配置。
+- [ ] 固定 dev dependency lock/解析方式；CI 增加 `ruff check` 和 schema/model/transaction 等
+  纯逻辑的最小 type-check，不以一次类型化全部历史工具为前置。
+- [x] 本地提交前检查已固定 `git diff --check`、敏感文件扫描和 review fingerprint。
+- [ ] CI artifact 只允许 bench JSON/失败日志，不上传真实 target/run 产物；随 CI 落地验收。
 
 ### 5.5 文档、模板与 backlog 真值
 
@@ -398,34 +416,67 @@ authority 等工作不重新伪装成未完成计划；发现回归时按其现�
   fixture/A-B 仍不足。未实现 adapter 不得写成稳定入口。
 - [x] Agent instruction 垂直切片：versioned manifest、common+role delta+scaffold 组合、
   assignment bundle，以及 source/artifact SHA drift gate。
-- [ ] 其余 Router/WORKFLOW/reference/skill generated-excerpt 治理；手工副本由漂移检查拒绝。
+- [x] Router/WORKFLOW/reference/skill 的 owner-specific generated/excerpt 治理已有 conformance/
+  drift gate；手工复制受 owner 对应检查拒绝，不再等待一个通用文本去重器。
 - [x] `check_templates.py` 覆盖 Agent manifest/common/role/scaffold、手工 common 重复与 bundle
   prompt parity。
 - [ ] 其余 run templates 与完整 closure audit：skill→tool、tool→selftest、
   template→scaffold、schema→validator、docs claim→contract 接线。
   当前治理不变量：`TODO.md` 是唯一前向 backlog，`docs/ROADMAP.md` 只保留研究候选/度量
-  结论，`todo1.md` 是已吸收的历史审计输入。
+  结论；原 `todo1.md` 的历史处置已并入第 6 节。
 
 - [ ] 为正式待办逐步补齐 owner、dependency、size、acceptance、status、evidence；不得再把
   同一计划复制成另一份长期清单。
 
 ### 5.6 Benchmark 与本地卫生
 
-- [ ] Bench 增加 setup-source/normalizer、parser drift、done-but-unmerged、冲突未裁决、Agent
-  越界、stale receipt/partial backend，以及结构绿但 review hash/Cron/report parity 失败的
-  closure negative fixtures。
-- [ ] normalizer 指标至少包含字段 precision/recall、无来源字段率、幻觉/漏资产、schema
-  通过率、Root 驳回率和 pointer 原子性失败数；协作指标与第 4.3 节共用同一 A/B 口径。
-- [ ] `check_local_hygiene.py` 以 warning 识别根目录未跟踪 HTML/replay/截图/OCR 等现场产物，
+- [x] setup-source/normalizer pilot bench 已覆盖字段 precision/recall、无来源字段、幻觉/漏资产、
+  schema failure、Root 驳回代理指标、source instruction 与 model-egress leak。
+- [ ] 补齐 parser drift、done-but-unmerged、冲突未裁决、Agent 越界、stale receipt/partial backend，
+  以及结构绿但 review hash/Cron/report parity 失败的 closure negative fixtures。
+- [ ] 增加 pointer 原子性失败 benchmark，并让协作指标与第 4.3 节共用同一 A/B 口径；事务
+  fault selftest 已存在，但不能冒充 benchmark 指标。
+- [x] `check_local_hygiene.py` 以 warning 识别根目录未跟踪 HTML/replay/常见截图与 OCR 命名等现场产物，
   只提示迁入 ignored run/evidence 目录，不读取内容、不自动删除。
-- [ ] 提供 `clean_scratch.py --dry-run --older-than <days>` 等限定范围、默认不删除的 TTL 工具；
+- [x] 提供 `clean_scratch.py --dry-run --older-than <days>` 等限定范围、默认不删除的 TTL 工具；
   自测优先使用系统 temp 并 finally 清理，cache/review/OCR/browser/bench 保留策略写入 onboarding。
+- [x] 统一 `probe` / `render` / `fetch_assets` / `classify_hosts` 输出 owner：live 产物绑定
+  run canonical bucket，standalone 产物绑定 `tmp/<tool>/<invocation>/`；旧散落产物由默认
+  dry-run、body/sidecar 成组、哈希 manifest 的迁移器处理，不自动晋级 evidence。
 
 ### 5.7 Decision-gated 重构
 
-- [ ] 只有至少两个真实消费者并证明 repository 耦合成本时，才实现最薄 adapter；
-  不为假想消费者提前抽象。
-- [ ] 大型模块只在触碰对应边界且有可测收益时拆分，不作为 P0 或 Macro-Stage 前置；
-  每次拆分保持 CLI、error/receipt、canonical verdict 与 selftest 兼容。
+- [x] **已决策（当前不准入 repository 抽象）**：只有至少两个真实消费者并证明耦合成本时，
+  才实现最薄 adapter；不为假想消费者提前抽象。
+- [x] **已决策（不做无收益的预拆分）**：大型模块只在触碰对应边界且有可测收益时拆分，
+  不作为 P0 或 Macro-Stage 前置；拆分必须保持 CLI、error/receipt、canonical verdict 与
+  selftest 兼容。
 - [ ] 常驻上下文减肥按 token/字符预算和漏规则 fixture 验收：`CLAUDE.md` 只保留硬原则，
   Router/WORKFLOW/skills 各守职责，loop prompt 不重复全量 workflow；不能只凭“变短”判完成。
+
+## 6. 原 `todo1.md` 合并处置（2026-08-11）
+
+本节保存原审计文件的唯一有效增量：它不是第二份计划，也不复刻已经由 architecture、
+contract、fixture 和 review record 承载的长篇论证。状态按当前工作树重新裁定；旧隔离分支
+`f1a186e` 不在当前 HEAD 祖先链，因此其“全部完成”不能提升这里的状态。
+
+| 原审计主题 | 当前处置 | 归并位置 / 依据 |
+|---|---|---|
+| P0 privacy/command channel | 已实现 | 1.2 capability/effect/privacy gates |
+| setup transaction、single pointer owner、activation CAS | 已实现 | 1.1、4.2 lifecycle/transaction fixtures |
+| maintenance authority | 已实现但原 DSL 已被取代 | 自然语言 operator intent + typed effect/protected-path receipt；不恢复 scope/reason DSL |
+| setup-source v1 | 已实现 | 4.2 setup/lifecycle 回归与现行 Architecture |
+| URL/recon/Markdown/JSON normalizer | 已实现基线、格式面部分完成 | 5.1；HTML/PDF/DOCX/text/OCR 仍未实现 |
+| `--ai off/local/external` | 已实现现行契约 | 5.1；local 未注册时 fail closed，不宣称本地模型可用 |
+| `--intel-url` | 未实现 | 5.1 独立 candidate capability |
+| canonical parser 收敛 | 未实现 | 5.2 typed parser 与 drift fixtures |
+| maintenance/plan/docs review scope | 未实现 | 5.2；当前 `peer_review.py` 仍缺 `scope_kind` 产品契约 |
+| Agent 候选、证据与 closure authority | 已实现当前边界 | 2.4、4.2、5.3；新增候选面仍逐项准入 |
+| CI、正式 tests、dev lock/type-check | 部分实现 | 5.4；本地规则/配置已具备，CI 与迁移仍未实现 |
+| 文档/模板漂移治理 | 已实现 owner-specific 基线、closure audit 部分完成 | 5.5 |
+| 本地卫生、scratch TTL、产物 owner | 已实现 | 5.6 |
+| CCB/TypeScript/Grok 迁移 | 已决策不纳入当前路线 | 本文件头部与 5.7；未来需 operator 重新立项 |
+
+合并后删除原 `todo1.md`（原文件未被 Git 跟踪，删除后不能从仓库 Git 恢复）。其已接受的
+复审发现保存在 `review/records/2026-07-13-xunji-optimization-plan-review.md`，逐主题当前
+处置保存在本节；前向状态只看本文件。

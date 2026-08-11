@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/stream-stalled-agent.v1.schema.json",
+  "title": "Xunji Stream-Stalled Agent Receipt v1",
+  "description": "Content-addressed proof that Claude Code's host stream watchdog terminated one exact started plan-bound non-Reviewer Agent without emitting SubagentStop. This projects failed for ordinary Reviewer and Root settlement; it is not an Agent return or evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "parent_run",
+    "reason",
+    "assignment",
+    "role",
+    "session_id",
+    "agent_id",
+    "tool_use_id",
+    "lane_id",
+    "plan_digest",
+    "launch_prompt_sha256",
+    "launch_event_seq",
+    "launch_event_hash",
+    "start_event_seq",
+    "start_event_hash",
+    "observed_head_seq",
+    "observed_head_hash",
+    "agent_description",
+    "stall_summary",
+    "parent_notification_uuid",
+    "child_error_uuid",
+    "child_interrupted_uuid",
+    "failed_at",
+    "parent_transcript_prefix_length",
+    "parent_transcript_prefix_sha256",
+    "child_transcript_length",
+    "child_transcript_sha256",
+    "result_snapshot",
+    "recorded_at",
+    "receipt_hash"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.stream-stalled-agent.v1"},
+    "parent_run": {"type": "string", "minLength": 1, "maxLength": 512},
+    "reason": {"const": "claude_stream_watchdog_idle_timeout_no_stop"},
+    "assignment": {
+      "type": "string",
+      "pattern": "^A-[A-Za-z0-9._-]+$",
+      "maxLength": 256
+    },
+    "role": {
+      "enum": [
+        "surface", "web-auth", "web-hunter", "code-audit", "exploit",
+        "verify", "report"
+      ]
+    },
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "agent_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "tool_use_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "lane_id": {
+      "type": "string",
+      "pattern": "^L-[A-Za-z0-9._-]+$",
+      "maxLength": 256
+    },
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "launch_prompt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "launch_event_seq": {"type": "integer", "minimum": 1},
+    "launch_event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "start_event_seq": {"type": "integer", "minimum": 1},
+    "start_event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "observed_head_seq": {"type": "integer", "minimum": 1},
+    "observed_head_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "agent_description": {"type": "string", "minLength": 1, "maxLength": 255},
+    "stall_summary": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "parent_notification_uuid": {
+      "type": "string", "minLength": 1, "maxLength": 256
+    },
+    "child_error_uuid": {"type": "string", "minLength": 1, "maxLength": 256},
+    "child_interrupted_uuid": {
+      "type": "string", "minLength": 1, "maxLength": 256
+    },
+    "failed_at": {"$ref": "#/$defs/timestamp"},
+    "parent_transcript_prefix_length": {"type": "integer", "minimum": 1},
+    "parent_transcript_prefix_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "child_transcript_length": {"type": "integer", "minimum": 1},
+    "child_transcript_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "result_snapshot": {"$ref": "#/$defs/resultSnapshot"},
+    "recorded_at": {"$ref": "#/$defs/timestamp"},
+    "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "minLength": 20,
+      "maxLength": 64
+    },
+    "resultSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "length", "sha256", "missing", "source"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "length": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "missing": {"const": false},
+        "source": {"const": "stream_stall_receipt"}
+      }
+    }
+  }
+}

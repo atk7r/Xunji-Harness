@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/infra-barrier.v1.schema.json",
+  "title": "Xunji Infrastructure Barrier Event v1",
+  "description": "Append-only derived scheduling events for consecutive infrastructure failures that produced zero target bytes. A cleared event resets a partial or open failure epoch. The journal can reject a third identical target-shaped attempt, but it never records a target failure, closes a front, promotes evidence, or grants completion authority.",
+  "oneOf": [
+    {"$ref": "#/$defs/observed"},
+    {"$ref": "#/$defs/opened"},
+    {"$ref": "#/$defs/cleared"}
+  ],
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "event",
+        "seq",
+        "run_dir",
+        "writer",
+        "recorded_at",
+        "barrier_key",
+        "data",
+        "previous_event_hash",
+        "authority",
+        "event_hash"
+      ],
+      "properties": {
+        "schema": {"const": "xunji.infra-barrier.v1"},
+        "event": {"enum": ["observed", "opened", "cleared"]},
+        "seq": {"type": "integer", "minimum": 1},
+        "run_dir": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "writer": {"const": "tools/barrier_state.py"},
+        "recorded_at": {"type": "number", "exclusiveMinimum": 0},
+        "barrier_key": {"$ref": "#/$defs/barrierKey"},
+        "data": {"type": "object"},
+        "previous_event_hash": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$"
+        },
+        "authority": {
+          "const": "derived scheduling barrier only; no target, front, evidence, review, report, or closure authority"
+        },
+        "event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "barrierKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "front",
+        "action_fingerprint",
+        "cause_code",
+        "precondition_digest"
+      ],
+      "properties": {
+        "front": {"type": "string", "pattern": "^F-[0-9]+$"},
+        "action_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "cause_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Z][A-Z0-9_.-]*$"
+        },
+        "precondition_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "observed": {
+      "allOf": [
+        {"$ref": "#/$defs/envelope"},
+        {
+          "properties": {
+            "event": {"const": "observed"},
+            "data": {"$ref": "#/$defs/observedData"}
+          }
+        }
+      ]
+    },
+    "opened": {
+      "allOf": [
+        {"$ref": "#/$defs/envelope"},
+        {
+          "properties": {
+            "event": {"const": "opened"},
+            "data": {"$ref": "#/$defs/openedData"}
+          }
+        }
+      ]
+    },
+    "cleared": {
+      "allOf": [
+        {"$ref": "#/$defs/envelope"},
+        {
+          "properties": {
+            "event": {"const": "cleared"},
+            "data": {"$ref": "#/$defs/clearedData"}
+          }
+        }
+      ]
+    },
+    "observedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "failure_receipt_sha256",
+        "failure_domain",
+        "target_bytes",
+        "target_failure_counted",
+        "front_state_changed"
+      ],
+      "properties": {
+        "failure_receipt_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "failure_domain": {
+          "enum": ["proxy", "network_transport", "runtime", "scheduler", "tooling"]
+        },
+        "target_bytes": {"const": 0},
+        "target_failure_counted": {"const": false},
+        "front_state_changed": {"const": false}
+      }
+    },
+    "openedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failure_count", "trigger_observation_hash"],
+      "properties": {
+        "failure_count": {"const": 2},
+        "trigger_observation_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "clearedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "basis_sha256", "prior_open_event_hash"],
+      "properties": {
+        "reason": {
+          "enum": [
+            "repair_succeeded",
+            "target_response_observed",
+            "failure_reclassified",
+            "precondition_superseded"
+          ]
+        },
+        "basis_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "prior_open_event_hash": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

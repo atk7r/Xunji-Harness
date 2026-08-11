@@ -13,7 +13,7 @@ Always follow:
 - `docs/cognition/README.md` — judgment core (always). Its phase-specific companion
   `docs/cognition/reference.md` (Attribution Checks, Grounding-vs-Weaponized detail) loads
   **on demand** — Hunter phase / when handling the knowledge base.
-- `.claude/skills/src-safety-boundary/SKILL.md`
+- `.claude/skills/safety-boundary/SKILL.md`
 
 The `.claude/hooks/` boundary is always active when Claude Code runs Bash through the
 PreToolUse hook.
@@ -23,7 +23,7 @@ PreToolUse hook.
 - `.claude/skills/src-rules/SKILL.md` — SRC / bug-bounty rules (e.g. education
   vuln-report platform / EDUSRC). Load **only when the operator says to use the SRC
   skill**; don't auto-load by guessing a target belongs to a program. Tightens
-  `src-safety-boundary` for platform submissions (pivot off the table, data changes
+  `safety-boundary` for platform submissions (pivot off the table, data changes
   need platform authorization).
 
 ## Entry Semantics
@@ -55,6 +55,11 @@ single setup/resume/execute lifecycle operation classified by the turn contract.
 **Procedure/tooling** skills, not playbooks — a recurring, error-prone *mechanism*,
 never attack methodology or target selection. Invoke on demand; don't auto-load.
 
+- `.claude/skills/xunji-local-maintenance/SKILL.md` — repository edit/test
+  discipline for a top-level `MAINTENANCE` turn. Load it before changing
+  `contracts/*.schema.json`; it owns the registered help and atomic
+  candidate-publication workflow. It routes Hook/guard changes onward to
+  `xunji-sentinel-guard-review`.
 - `.claude/skills/poc-package/SKILL.md` — package an authored PoC into a handoff-ready
   artifact (xday/normal home, hardened binaries, **scrub-real-targets-before-handoff**).
   Invoke before handing off / committing / submitting any PoC.
@@ -80,9 +85,11 @@ candidates/refutations only, and the Synthesizer still owns finding promotion.
   and anti-checklist behavior. Invoke when using exploitation-specific thinking or
   when a candidate is being promoted/downgraded.
 - `.claude/skills/xunji-exploit-techniques/SKILL.md` — scarce technique lenses from
-  Xunji run history: WebVPN/proxy rewrite, browser-side crypto replay, SSO OAuth/SAML,
-  upload context chains, and captcha boundary bypass. Load **only the one reference**
-  that matches the live front; never load all references.
+  Xunji run history and selectively adapted external research: WebVPN/proxy rewrite,
+  browser-side crypto replay, SSO OAuth/SAML, upload context chains, captcha boundary
+  bypass, business state machines, HTTP parser differentials, GraphQL resolver
+  authorization/cost, and race/TOCTOU state transitions. Load **only the one
+  reference** that matches an evidenced live-front trigger; never load all references.
 
 ## Run Authority
 
@@ -407,7 +414,7 @@ Project-discipline and run-structure checks in `tools/`:
 - `python3 tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
   `surface.md`-ready asset table, entry points, and a reachability matrix (recon-view vs
   your-egress-view). Setup helper; structures intel, makes no front choices.
-- `python3 tools/classify_hosts.py <recon.json> --out runs/<dir>/classify --egress-recheck`
+- `python3 tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck`
   — **OPT-IN** per-host classification by
   LIVE re-probe (stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags). **Not the default
   coverage builder** — setup_run's Guanlan adapter already produces `coverage.json` with
@@ -415,7 +422,8 @@ Project-discipline and run-structure checks in `tools/`:
   **your-own-egress liveness/fingerprint recheck** (e.g. proxy now up). The registered
   live shape is exactly the command above; legacy `--hosts`/`--all` modes are not
   live capabilities and must not be inferred from helper CLI options.
-- `python3 tools/fetch_assets.py <page-url>` — fetch ALL JS a SPA references (incl. webpack
+- `python3 tools/fetch_assets.py <page-url> --run runs/<dir>` — fetch ALL JS a SPA references
+  into `runs/<dir>/evidence/assets_<host>/<invocation>/` (incl. webpack
   chunks) and assert completeness. **Run before claiming endpoint enumeration is complete**
   — grepping endpoints from a partial JS set is how a real engagement missed an
   account-takeover endpoint (only 4/13 chunks fetched). "fetched N/M" must be N==M before
@@ -439,6 +447,11 @@ Project-discipline and run-structure checks in `tools/`:
   returns contracts but does not spawn. Legacy `assign` and `--new` remain
   non-authorizing compatibility surfaces. The board never writes canonical findings
   or bypasses the Single Synthesizer.
+- `python3 tools/workers.py --help` — registered local-read command index for the
+  current planner, inspection, settlement, and typed-repair subcommands. It makes
+  `recover-hook-failed-stop` discoverable but is not a lifecycle or argument owner;
+  Root still reads the Agent Board reference named above before acting, and child
+  Agents do not spend calls on CLI discovery.
 - `python3 tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash
   chain for actual Agent/Cron/iteration-plan/foreground-review events. Plan
   receipts cover TaskCreate/TaskUpdate/TodoWrite and remain derived rather than

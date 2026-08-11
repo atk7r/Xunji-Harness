@@ -2,7 +2,7 @@
 
 本工作区自有的 PoC 库，按**披露状态**分两类。与 `knowledge/`（接地知识，
 只存识别签名+弱点锚点）不同，这里存**可运行的验证工具**——但同样受
-`src-safety-boundary` 与 `.claude/hooks/` 硬边界约束：证明存在即停，
+`safety-boundary` 与 `.claude/hooks/` 硬边界约束：证明存在即停，
 不做不可逆危害。
 
 ## 分类

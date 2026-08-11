@@ -606,6 +606,39 @@ def selftest() -> int:
     from unittest import mock
 
     cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
+    sha_a = "a" * 64
+    sha_b = "b" * 64
+    lifecycle_commands = (
+        (
+            (ROOT / "tools" / "completion_transaction.py").resolve(),
+            f"{shlex.quote(sys.executable)} "
+            f"{shlex.quote(str(ROOT / 'tools' / 'completion_transaction.py'))} "
+            "adopt-policy runs/demo_20260101",
+        ),
+        (
+            (ROOT / "tools" / "completion_transaction.py").resolve(),
+            f"{shlex.quote(sys.executable)} "
+            f"{shlex.quote(str(ROOT / 'tools' / 'completion_transaction.py'))} "
+            "prepare runs/demo_20260101 --mode normal "
+            f"--review-receipt independent-review={sha_a} "
+            "--review-limitation 'external-assistance=not configured' "
+            "--cron-disposition not_requested",
+        ),
+        (
+            (ROOT / "tools" / "barrier_state.py").resolve(),
+            f"{shlex.quote(sys.executable)} "
+            f"{shlex.quote(str(ROOT / 'tools' / 'barrier_state.py'))} "
+            "observe runs/demo_20260101 "
+            f"--failure-receipt-sha256 {sha_a}",
+        ),
+        (
+            (ROOT / "tools" / "artifact_view.py").resolve(),
+            f"{shlex.quote(sys.executable)} "
+            f"{shlex.quote(str(ROOT / 'tools' / 'artifact_view.py'))} "
+            "search runs/demo_20260101 evidence/large.bin 'session token' "
+            "--scan-limit 8388608 --max-matches 20 --context-bytes 80",
+        ),
+    )
     checks: list[tuple[str, bool]] = []
     for case in cases:
         command = str(case["command"]).replace("{ROOT}", str(ROOT))
@@ -671,6 +704,59 @@ def selftest() -> int:
              root=ROOT,
              allowed_scripts={(ROOT / "tools" / "workers.py").resolve()},
          ) is None),
+        ("settle-stopped exact Python argv parses as one control invocation",
+         (lambda invocation: bool(
+             invocation
+             and invocation.args == (
+                 "settle-stopped", "runs/demo_20260101",
+                 "A-web-hunter-001",
+             )
+         ))(parse_exact_python_command(
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "settle-stopped runs/demo_20260101 A-web-hunter-001",
+             root=ROOT,
+             allowed_scripts={(ROOT / "tools" / "workers.py").resolve()},
+         ))),
+        ("settle-stopped shell chaining never parses as control",
+         parse_exact_python_command(
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "settle-stopped runs/demo_20260101 A-web-hunter-001; echo forged",
+             root=ROOT,
+             allowed_scripts={(ROOT / "tools" / "workers.py").resolve()},
+         ) is None),
+        ("settle-stream-stalled exact Python argv parses as one control invocation",
+         (lambda invocation: bool(
+             invocation
+             and invocation.args == (
+                 "settle-stream-stalled", "runs/demo_20260101",
+                 "A-web-hunter-001",
+             )
+         ))(parse_exact_python_command(
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "settle-stream-stalled runs/demo_20260101 A-web-hunter-001",
+             root=ROOT,
+             allowed_scripts={(ROOT / "tools" / "workers.py").resolve()},
+         ))),
+        ("settle-stream-stalled shell chaining never parses as control",
+         parse_exact_python_command(
+             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
+             "settle-stream-stalled runs/demo_20260101 "
+             "A-web-hunter-001; echo forged",
+             root=ROOT,
+             allowed_scripts={(ROOT / "tools" / "workers.py").resolve()},
+         ) is None),
+        ("new lifecycle tools reach exact Python argv parsing",
+         all(parse_exact_python_command(
+             command, root=ROOT, allowed_scripts={script},
+         ) is not None for script, command in lifecycle_commands)),
+        ("new lifecycle tools reject appended shell effects",
+         all(parse_exact_python_command(
+             command + "; echo forged", root=ROOT, allowed_scripts={script},
+         ) is None for script, command in lifecycle_commands)),
         ("literal && chain splits only for diagnostic classification",
          (lambda first, second: split_literal_and_chain(
              f"{first} && {second}"

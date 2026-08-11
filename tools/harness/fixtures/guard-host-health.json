@@ -56,6 +56,7 @@
     {"name": "direct DNS", "exception": "gaierror", "route": "direct", "expect": "local_dns"},
     {"name": "direct TLS", "exception": "ssl", "route": "direct", "expect": "target_tls"},
     {"name": "direct reset", "exception": "reset", "route": "direct", "expect": "target_reset"},
+    {"name": "proxy endpoint DNS", "exception": "gaierror", "route": "proxy:http:0011223344556677", "expect": "proxy_connect"},
     {"name": "proxy TLS", "exception": "ssl", "route": "proxy:https:fedcba9876543210", "expect": "proxy_tls"},
     {"name": "proxy reset", "exception": "reset", "route": "proxy:socks5h:0123456789abcdef", "expect": "proxy_connect"},
     {"name": "legacy reset", "exception": "reset", "route": "legacy", "expect": "unattributed_transport"}

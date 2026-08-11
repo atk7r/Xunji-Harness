@@ -348,6 +348,26 @@ def _string_ids(value: object, *, field: str, pattern: re.Pattern[str],
     return value
 
 
+def _completion_review_receipt(value: object) -> dict:
+    receipt = _exact_keys(
+        value, {"run", "evidence_index_hash", "completion_bundle_hash"},
+        event="cycle_end.completion_review",
+    )
+    if not isinstance(receipt["run"], str) \
+            or not re.fullmatch(r"[A-Za-z0-9._-]{1,256}", receipt["run"]):
+        _contract_error(
+            "CYCLE_EVENT_DATA_INVALID", "completion review run is invalid")
+    if not isinstance(receipt["evidence_index_hash"], str) \
+            or not re.fullmatch(r"[0-9a-f]{40}", receipt["evidence_index_hash"]):
+        _contract_error(
+            "CYCLE_EVENT_DATA_INVALID", "completion evidence hash is invalid")
+    _hex_digest(
+        receipt["completion_bundle_hash"],
+        field="completion_review.completion_bundle_hash",
+    )
+    return receipt
+
+
 def _merge_debt(value: object) -> dict:
     debt = _exact_keys(value, {"merge", "review"}, event="stage_exit.merge_debt")
     for field in ("merge", "review"):
@@ -443,6 +463,22 @@ def validate_typed_event_data(event: str, data: object, *, cycle: int | None = N
     if event == "cycle_end":
         if data == {}:
             return {}
+        if isinstance(data, dict) \
+                and data.get("execution_mode") == "COMPLETION_REVIEW":
+            payload = _exact_keys(
+                data, {
+                    "plan_id", "plan_digest", "execution_mode", "lane_ids",
+                    "completion_review", "next_action",
+                }, event=event,
+            )
+            digest = _hex_digest(payload["plan_digest"], field="plan_digest")
+            _plan_id(payload["plan_id"], digest=digest, cycle=cycle)
+            _string_ids(
+                payload["lane_ids"], field="lane_ids", pattern=_LANE_ID,
+                minimum=0, maximum=0)
+            _completion_review_receipt(payload["completion_review"])
+            _next_action_text(payload["next_action"])
+            return payload
         if isinstance(data, dict) and (
                 "execution_mode" in data or "root_action_receipt" in data):
             payload = _exact_keys(
@@ -482,10 +518,18 @@ def validate_typed_event_data(event: str, data: object, *, cycle: int | None = N
         _next_action_text(payload["next_action"])
         return payload
     if event == "delegation_committed":
-        payload = _exact_keys(data, {"plan_digest", "lane_ids"}, event=event)
+        completion = isinstance(data, dict) \
+            and data.get("execution_mode") == "COMPLETION_REVIEW"
+        payload = _exact_keys(
+            data,
+            {"plan_digest", "execution_mode", "lane_ids"}
+            if completion else {"plan_digest", "lane_ids"},
+            event=event,
+        )
         _hex_digest(payload["plan_digest"], field="plan_digest")
         _string_ids(payload["lane_ids"], field="lane_ids", pattern=_LANE_ID,
-                    minimum=1, maximum=16)
+                    minimum=0 if completion else 1,
+                    maximum=0 if completion else 16)
         return payload
     if event == "stage_exit":
         required = {
@@ -961,11 +1005,17 @@ def derive_cycle_end_data(
     *,
     next_action: str,
     plan_digest: str = "",
+    historical_front_context: bool = False,
 ) -> dict:
     """Derive an exhaustive cycle_end payload from the current plan and receipts.
 
     This is the only producer for plan-bound cycle_end data.  Callers may request
     ``end`` and its exact next action but cannot submit disposition arrays.
+
+    ``historical_front_context`` is reserved for exact revalidation of an
+    already-frozen prior-cycle event. A front cited while it was active remains
+    a valid historical control object after it moves to Closed or Deferred. New
+    events keep the default and may cite only currently active fronts.
     """
     run = _resolve_run_dir(run_dir)
     try:
@@ -988,10 +1038,17 @@ def derive_cycle_end_data(
     try:
         frontier = run_model.summary(run)
         active_fronts = [str(item) for item in frontier.get("open", [])]
+        front_context = active_fronts
+        if historical_front_context:
+            front_context = [
+                str(item)
+                for state in ("open", "deferred", "closed")
+                for item in frontier.get(state, [])
+            ]
     except Exception as exc:
         _contract_error("CYCLE_EVENT_NEXT_ACTION_CONTEXT_INVALID", exc.__class__.__name__)
     semantic_error = validate_next_action_semantics(
-        action, active_fronts=active_fronts)
+        action, active_fronts=front_context)
     if semantic_error:
         _contract_error(
             "CYCLE_EVENT_NEXT_ACTION_INVALID",
@@ -1023,6 +1080,25 @@ def derive_cycle_end_data(
         _contract_error("CYCLE_EVENT_PLAN_DEBT_OPEN", "; ".join(detail[:8]))
     lane_ids = [str(item) for item in projection.get("lane_ids", [])]
     mode = str(plan.get("execution_mode") or "")
+    if mode == "COMPLETION_REVIEW":
+        receipt = projection.get("completion_review")
+        if lane_ids or not isinstance(receipt, dict) \
+                or str(receipt.get("run") or "") != run.name:
+            _contract_error(
+                "CYCLE_EVENT_PLAN_COVERAGE_INCOMPLETE",
+                "COMPLETION_REVIEW requires one exact global review receipt",
+            )
+        payload = {
+            "plan_id": str(projection.get("plan_id") or ""),
+            "plan_digest": digest,
+            "execution_mode": "COMPLETION_REVIEW",
+            "lane_ids": [],
+            "completion_review": receipt,
+            "next_action": action,
+        }
+        validate_typed_event_data(
+            "cycle_end", payload, cycle=int(plan.get("cycle_id") or 0))
+        return payload
     if mode == "ROOT_DIRECT":
         receipt = projection.get("root_action_receipt")
         plan_lanes = plan.get("lanes") if isinstance(plan.get("lanes"), list) else []
@@ -2044,6 +2120,56 @@ def _selftest() -> int:
                        "lane_ids", {}).get("minItems") == 1
                    and root_cycle_schema.get("properties", {}).get(
                        "lane_ids", {}).get("maxItems") == 1))
+    delegation_schema = cycle_schema.get("$defs", {}).get("delegationData", {})
+    completion_cycle_schema = (
+        cycle_schema.get("$defs", {}).get("completionReviewCycleEndData", {}))
+    schema_plan_digest = "a" * 64
+    schema_plan_id = f"WP-1-{schema_plan_digest[:8]}"
+    schema_completion_receipt = {
+        "run": "completion-run",
+        "evidence_index_hash": "b" * 40,
+        "completion_bundle_hash": "c" * 64,
+    }
+    schema_completion_cycle = {
+        "plan_id": schema_plan_id,
+        "plan_digest": schema_plan_digest,
+        "execution_mode": "COMPLETION_REVIEW",
+        "lane_ids": [],
+        "completion_review": schema_completion_receipt,
+        "next_action": "运行 check_run 验证当前计划",
+    }
+    checks.append((
+        "cycle schema accepts only explicitly labeled empty completion delegation",
+        not contract_schema.schema_errors(
+            {
+                "plan_digest": schema_plan_digest,
+                "execution_mode": "COMPLETION_REVIEW",
+                "lane_ids": [],
+            }, delegation_schema, root=cycle_schema)
+        and bool(contract_schema.schema_errors(
+            {"plan_digest": schema_plan_digest, "lane_ids": []},
+            delegation_schema, root=cycle_schema))
+        and bool(contract_schema.schema_errors(
+            {
+                "plan_digest": schema_plan_digest,
+                "execution_mode": "COMPLETION_REVIEW",
+                "lane_ids": ["L-INVALID"],
+            }, delegation_schema, root=cycle_schema)),
+    ))
+    checks.append((
+        "completion cycle schema is exact and cannot degrade to Agent cycle data",
+        completion_cycle_schema.get("additionalProperties") is False
+        and not contract_schema.schema_errors(
+            schema_completion_cycle, completion_cycle_schema, root=cycle_schema)
+        and bool(contract_schema.schema_errors(
+            {key: value for key, value in schema_completion_cycle.items()
+             if key != "completion_review"},
+            completion_cycle_schema, root=cycle_schema))
+        and bool(contract_schema.schema_errors(
+            schema_completion_cycle,
+            plan_cycle_schema,
+            root=cycle_schema)),
+    ))
     checks.append(("Root action receipt schema and semantic validator freeze the same fields",
                    root_receipt_schema.get("additionalProperties") is False
                    and set(root_receipt_schema.get("required", []))

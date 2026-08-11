@@ -9,20 +9,24 @@
 文件名)→ 核对已抓 vs 缺失 → 一键抓全(走 guard 熔断/限速/UTF-8)→ 完整性断言。
 之后对 --out 目录 grep 端点, 才有"已枚举完"的底气。
 
-  python tools/fetch_assets.py https://t/app/ --out runs/<dir>/appjs
-  python tools/fetch_assets.py --html runs/<dir>/page.html --base https://t --out runs/<dir>/js
+  python tools/fetch_assets.py https://t/app/ --run runs/<dir>
+  python tools/fetch_assets.py --html runs/<dir>/evidence/page.html --base https://t \
+    --run runs/<dir> --out runs/<dir>/evidence/assets_t
 """
 from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import probe  # noqa: E402  (复用 send + guard 接入 + UTF-8 stdout)
 from harness.guard import HostBackoff  # noqa: E402
+from harness import output_layout  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
@@ -55,14 +59,108 @@ def to_url(ref: str, base: str, asset_dir_hint: str) -> str:
     return urljoin(base + "/", ref)
 
 
+def _place_output_dir(
+    value: str | None,
+    *,
+    run: str | Path | None,
+    invocation: str,
+    safe_host: str,
+    repo_root: Path = output_layout.ROOT,
+) -> Path:
+    base = output_layout.resolve_artifact_dir(
+        value,
+        run=run,
+        tool="fetch-assets",
+        invocation=invocation,
+        default_leaf=f"assets_{safe_host}",
+        unique_run_dir=value is None,
+        repo_root=repo_root,
+    )
+    return base / invocation if value is not None else base
+
+
+def _selftest() -> int:
+    checks: list[tuple[str, bool]] = []
+    refs = asset_paths(
+        '<script src="/app/main.abcdef.js"></script>'
+        '"chunk-admin.123abc.js"'
+    )
+    checks.append(("asset parser finds entry and chunk", {
+        "/app/main.abcdef.js", "chunk-admin.123abc.js",
+    } <= refs))
+    root = Path(tempfile.mkdtemp())
+    run = root / "runs" / "demo_20260101"
+    try:
+        out = _place_output_dir(
+            None,
+            run=run,
+            invocation="attempt-a",
+            safe_host="example.test",
+            repo_root=root,
+        )
+        checks.append((
+            "run assets use a unique evidence directory",
+            out == (run / "evidence" / "assets_example.test" / "attempt-a").resolve(strict=False),
+        ))
+        explicit_a = _place_output_dir(
+            str(run / "evidence" / "assets_custom"),
+            run=run, invocation="attempt-a", safe_host="example.test",
+            repo_root=root,
+        )
+        explicit_b = _place_output_dir(
+            str(run / "evidence" / "assets_custom"),
+            run=run, invocation="attempt-b", safe_host="example.test",
+            repo_root=root,
+        )
+        checks.append((
+            "explicit output is a base and retries remain distinct",
+            explicit_a == (run / "evidence" / "assets_custom" / "attempt-a").resolve(strict=False)
+            and explicit_b == (run / "evidence" / "assets_custom" / "attempt-b").resolve(strict=False),
+        ))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    bad = [name for name, ok in checks if not ok]
+    for name, ok in checks:
+        print(("ok   " if ok else "FAIL ") + name)
+    print("fetch-assets selftest " + ("passed" if not bad else f"FAILED ({len(bad)})"))
+    return 0 if not bad else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="抓全 SPA 页面的 JS 资源 + 完整性断言")
     ap.add_argument("url", nargs="?", help="页面 URL")
     ap.add_argument("--html", help="改用已存的 HTML 文件(配 --base)")
     ap.add_argument("--base", help="--html 模式下的站点基址")
-    ap.add_argument("--out", default=None, help="JS 输出目录")
+    ap.add_argument("--out", default=None,
+                    help="managed output base; each invocation gets a unique child directory")
+    ap.add_argument("--run", default=None,
+                    help="run 目录；未给 --out 时进入 evidence/assets_<host>/<invocation>/")
     ap.add_argument("--timeout", type=int, default=8)
+    ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
+
+    if args.selftest:
+        return _selftest()
+
+    base = ""
+    page_host = "page"
+    if args.url:
+        parsed_url = urlparse(args.url)
+        page_host = parsed_url.hostname or "page"
+    elif args.base:
+        parsed_base = urlparse(args.base)
+        page_host = parsed_base.hostname or "page"
+    safe_host = re.sub(r"[^A-Za-z0-9._-]+", "_", page_host).strip("._-") or "page"
+    artifact_invocation = output_layout.invocation_id()
+    try:
+        out_dir = _place_output_dir(
+            args.out,
+            run=args.run,
+            invocation=artifact_invocation,
+            safe_host=safe_host,
+        )
+    except output_layout.OutputLayoutError as exc:
+        ap.error(str(exc))
 
     if args.html:
         html = Path(args.html).read_text(encoding="utf-8", errors="replace")
@@ -75,13 +173,12 @@ def main() -> int:
         # send 不返 body, 重取一次存盘读
         pr = urlparse(args.url)
         base = f"{pr.scheme}://{pr.netloc}"
-        tmp = Path(args.out or "tmp") / "_page.html"
+        tmp = out_dir / "_page.html"
         probe.send("GET", args.url, {}, None, None, args.timeout, save=str(tmp), retry=1)
         html = tmp.read_text(encoding="utf-8", errors="replace")
     else:
         ap.error("需 url 或 --html")
 
-    out_dir = Path(args.out) if args.out else Path("tmp") / "assets"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # 页面里第一个带路径的 js -> 作为裸 chunk 名的目录前缀提示

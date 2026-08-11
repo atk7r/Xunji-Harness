@@ -73,6 +73,8 @@ STALE_BASES = frozenset({"turn", "inputs", "both"})
 RECOVERY_REPLAY_ASSIGNED_REVIEWER = "replay_assigned_reviewer"
 RECOVERY_CREATE_REVIEWER = "create_reviewer"
 RECOVERY_CANCEL_UNLAUNCHED_EXECUTION = "cancel_unlaunched_execution"
+RECOVERY_SETTLE_EXTERNALLY_STOPPED = "settle_externally_stopped"
+RECOVERY_SETTLE_STREAM_STALLED = "settle_stream_stalled"
 RECOVERY_WAIT_RUNNING = "wait_running"
 RECOVERY_MATERIAL_REPLAN = "material_replan"
 RECOVERY_HARD_INVALID = "hard_invalid"
@@ -775,10 +777,42 @@ def stale_recovery_action(
             "action": RECOVERY_CREATE_REVIEWER,
             "items": sorted(create_reviewers, key=key),
         }
+    externally_stopped: list[dict] = []
+    stream_stalled: list[dict] = []
+    still_running: list[dict] = []
     if running:
+        try:
+            import runtime_receipts
+        except Exception:
+            runtime_receipts = None
+        for item in running:
+            assignment = str(item.get("assignment") or "")
+            stream_status = runtime_receipts.stream_stall_recovery_status(
+                run_dir, assignment) if runtime_receipts is not None \
+                and assignment else {}
+            status = runtime_receipts.external_stop_recovery_status(
+                run_dir, assignment) if runtime_receipts is not None \
+                and assignment else {}
+            if stream_status.get("status") == "eligible":
+                stream_stalled.append(item)
+            elif status.get("status") == "eligible":
+                externally_stopped.append(item)
+            else:
+                still_running.append(item)
+    if stream_stalled:
+        return {
+            "action": RECOVERY_SETTLE_STREAM_STALLED,
+            "items": sorted(stream_stalled, key=key),
+        }
+    if externally_stopped:
+        return {
+            "action": RECOVERY_SETTLE_EXTERNALLY_STOPPED,
+            "items": sorted(externally_stopped, key=key),
+        }
+    if still_running:
         return {
             "action": RECOVERY_WAIT_RUNNING,
-            "items": sorted(running, key=key),
+            "items": sorted(still_running, key=key),
         }
     if cancellable:
         return {

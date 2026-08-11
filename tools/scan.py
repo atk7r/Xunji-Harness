@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -37,15 +38,26 @@ NEUTRAL_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 # defaults chosen to stay inside proof-only verification + the rate ceiling
 SQLMAP_SAFE = ["--batch", "--level=1", "--risk=1",
                "--technique=BEUST",  # blind/error/union/stacked? -> drop S below
-               "--threads=1", "--delay=1", "--timeout=20", "--ignore-redirects",
+               "--threads=1", "--delay=1", "--timeout=20", "--retries=0",
+               "--ignore-redirects",
                f"--user-agent={NEUTRAL_UA}", "--banner"]
 # stacked queries (S) can be state-changing; keep proof-only techniques:
 SQLMAP_TECH = "--technique=BEU"
 NUCLEI_SAFE = ["-rate-limit", "30", "-concurrency", "5", "-timeout", "15",
+               "-retries", "0",
                "-severity", "info,low,medium,high,critical",
                "-exclude-tags", "dos,intrusive,fuzz", "-header", f"User-Agent: {NEUTRAL_UA}"]
 
 FORBIDDEN_NUCLEI_TEMPLATE_FLAGS = ("-t", "-templates", "-template", "-ud", "-user-data")
+PROXY_FAILURE_MARKERS = (
+    "proxyconnect", "proxy connection", "connect to proxy", "connecting to proxy",
+    "proxy dialer", "proxy error", "proxy authentication", "407 proxy",
+    "target or proxy", "target url or proxy", "socks connect", "socks5 connect",
+)
+PROXY_DEFAULT_PORTS = {
+    "http": 80, "https": 443,
+    "socks4": 1080, "socks4a": 1080, "socks5": 1080, "socks5h": 1080,
+}
 
 
 def _privacy_input_error(tool: str, target: str, extra: list[str]) -> str:
@@ -75,6 +87,34 @@ def _valid_target(target: str) -> bool:
     )
 
 
+def _looks_like_proxy_failure(_stdout: str, stderr: str) -> bool:
+    # Scanner stdout may contain target-controlled response text. Only the
+    # tool's diagnostic channel can attribute an internal proxy failure.
+    text = stderr.lower()
+    return any(marker in text for marker in PROXY_FAILURE_MARKERS)
+
+
+def _proxy_endpoint(proxy: str) -> tuple[str, int]:
+    try:
+        parsed = urlparse(proxy)
+        host = parsed.hostname or ""
+        port = parsed.port or PROXY_DEFAULT_PORTS.get(parsed.scheme.lower(), 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid proxy endpoint") from exc
+    if not host or parsed.scheme.lower() not in PROXY_DEFAULT_PORTS or port <= 0:
+        raise ValueError("invalid proxy endpoint")
+    return host, port
+
+
+def _preflight_proxy(proxy: str, timeout: float = 3.0) -> Exception | None:
+    """Check only the selected proxy endpoint before a scanner can self-retry."""
+    try:
+        with socket.create_connection(_proxy_endpoint(proxy), timeout=timeout):
+            return None
+    except (OSError, ValueError) as exc:
+        return exc
+
+
 def _selftest() -> int:
     checks = [
         ("neutral fixed scanner UA", "xunji" not in NEUTRAL_UA.lower()),
@@ -95,6 +135,20 @@ def _selftest() -> int:
              "proxy:socks5h:")
          and "secret" not in guardmod.egress_route_id(
              "socks5h://user:secret@proxy.internal:1080")),
+        ("strong scanner proxy failure is recognized",
+         _looks_like_proxy_failure("", "proxyconnect tcp: connection refused")),
+        ("sqlmap target-or-proxy transport diagnostic stops the route",
+         _looks_like_proxy_failure(
+             "", "[CRITICAL] unable to connect to the target or proxy")),
+        ("target-controlled stdout cannot forge a proxy failure",
+         not _looks_like_proxy_failure("proxy error: socks connect", "")),
+        ("generic target failure is not blamed on proxy",
+         not _looks_like_proxy_failure("", "target connection refused")),
+        ("proxy endpoint parser applies scheme defaults",
+         _proxy_endpoint("socks5h://proxy.example") == ("proxy.example", 1080)),
+        ("scanner-native transport retries are disabled",
+         "--retries=0" in SQLMAP_SAFE
+         and NUCLEI_SAFE[NUCLEI_SAFE.index("-retries") + 1] == "0"),
     ]
     bad = [name for name, ok in checks if not ok]
     for name, ok in checks:
@@ -104,7 +158,7 @@ def _selftest() -> int:
 
 
 def run(cmd: list[str], run_dir: str | None = None, name: str | None = None,
-        host: str = "", tool: str = "") -> int:
+        host: str = "", tool: str = "", egress_route: str = "direct") -> int:
     print("[scan] " + " ".join(cmd), file=sys.stderr)
     start = time.time()
     try:
@@ -114,6 +168,17 @@ def run(cmd: list[str], run_dir: str | None = None, name: str | None = None,
         if run_dir:
             _save_evidence(run_dir, name or f"{tool}_{host}", tool, host, cmd,
                            result.returncode, result.stdout, result.stderr, elapsed)
+        if host and result.returncode == 0:
+            HostHealth().record_ok(host, egress_route=egress_route)
+        elif host and egress_route.startswith("proxy:") and _looks_like_proxy_failure(
+                result.stdout or "", result.stderr or ""):
+            HostHealth().record_error(
+                host, egress_route=egress_route, error_class="proxy_connect")
+            print(
+                "[scan] explicit proxy failed; automatic retry is stopped. "
+                "Wait for a newer operator turn to choose direct or explicitly confirm proxy.",
+                file=sys.stderr,
+            )
         return result.returncode
     except FileNotFoundError:
         print(f"[scan] '{cmd[0]}' not installed on this host.", file=sys.stderr)
@@ -163,9 +228,9 @@ def main() -> int:
     if not _valid_target(args.target):
         ap.error("target must be one absolute credential-free http(s) URL")
 
-    # The engagement proxy is a mandatory harness service.  It is resolved only
-    # from trusted environment/config; model-controlled --proxy argv is not part
-    # of this capability because it could redirect the entire scanner stream.
+    # The frozen turn route is direct by default.  Only an explicit proxy turn
+    # causes resolve() to read the trusted engagement-proxy configuration;
+    # model-controlled scanner-native proxy argv remains outside this capability.
     proxy = proxymod.resolve(None)
     egress_route = guardmod.egress_route_id(proxy)
     host = urlparse(args.target).hostname or args.target
@@ -187,6 +252,19 @@ def main() -> int:
     except guardmod.RateBudgetExceeded as e:
         print(f"[scan] refused: session/rate budget: {e}", file=sys.stderr)
         return 4
+    if proxy:
+        proxy_error = _preflight_proxy(proxy)
+        if proxy_error is not None:
+            error_class = guardmod.classify_network_error(
+                proxy_error, egress_route=egress_route)
+            HostHealth().record_error(
+                host, egress_route=egress_route, error_class=error_class)
+            print(
+                "[scan] explicit proxy endpoint is unavailable; scanner launch stopped. "
+                "Wait for a newer operator turn to choose direct or explicitly confirm proxy.",
+                file=sys.stderr,
+            )
+            return 4
     RateLimiter().gate(host)  # space the launch itself
 
     if args.tool == "sqlmap":
@@ -198,7 +276,8 @@ def main() -> int:
                SQLMAP_TECH]
         if proxy:
             cmd.append(f"--proxy={proxy}")
-        return run(cmd, run_dir=args.run_dir, name=args.name, host=host, tool="sqlmap")
+        return run(cmd, run_dir=args.run_dir, name=args.name, host=host, tool="sqlmap",
+                   egress_route=egress_route)
 
     # nuclei
     if not shutil.which("nuclei"):
@@ -208,7 +287,8 @@ def main() -> int:
     cmd = ["nuclei", "-u", args.target, *NUCLEI_SAFE]
     if proxy:
         cmd += ["-proxy", proxy]
-    return run(cmd, run_dir=args.run_dir, name=args.name, host=host, tool="nuclei")
+    return run(cmd, run_dir=args.run_dir, name=args.name, host=host, tool="nuclei",
+               egress_route=egress_route)
 
 
 if __name__ == "__main__":

@@ -267,6 +267,17 @@ def _front_block(run_dir: Path, front_id: str) -> str:
     return m.group(0).strip() if m else ""
 
 
+def _egress_route(contract: dict) -> str:
+    operator_intent = contract.get("operator_intent") \
+        if isinstance(contract.get("operator_intent"), dict) else {}
+    route = str(operator_intent.get("route") or "")
+    if route in {"offline", "direct", "proxy"}:
+        return route
+    # Historical false meant proxy-by-default, not an affirmative operator
+    # choice. Do not revive it; a fresh top-level turn must freeze a route.
+    return "direct" if contract.get("direct_egress_approved") is True else "offline"
+
+
 def _prepared_action_lines(run_dir: Path, *, effect: str, target: str,
                            front_text: str) -> list[str]:
     """Render a narrow public argv when the frozen front already chose GET liveness.
@@ -303,9 +314,13 @@ def _prepared_action_lines(run_dir: Path, *, effect: str, target: str,
         return []
     run_ref = _profile_rel(run_dir)
     contract = _turn_contract(run_dir)
+    route = _egress_route(contract)
+    if route == "offline":
+        return []
     prefix = (
-        "XUNJI_PROXY_REQUIRED=0 "
-        if contract.get("direct_egress_approved") is True else ""
+        "XUNJI_PROXY_REQUIRED=1 "
+        if route == "proxy"
+        else "XUNJI_PROXY_REQUIRED=0 "
     )
     command = (
         f'{prefix}python3 tools/probe.py GET "{url}" '
@@ -329,17 +344,24 @@ def _egress_contract_lines(run_dir: Path, *, effect: str) -> list[str]:
     if effect != "target":
         return []
     contract = _turn_contract(run_dir)
-    if contract.get("direct_egress_approved") is True:
+    route = _egress_route(contract)
+    if route == "direct":
         return [
             "## Frozen Egress Route",
-            "This turn explicitly approves direct egress. Prefix every registered target",
+            "This turn uses the default direct route. Prefix every registered target",
             "capability argv with exact `XUNJI_PROXY_REQUIRED=0`; Hooks still revalidate",
             "scope, privacy, request budget, guard, command shape, and recording.",
         ]
+    if route == "offline":
+        return [
+            "## Frozen Egress Route",
+            "This turn is offline. Do not invoke a target capability.",
+        ]
     return [
         "## Frozen Egress Route",
-        "Direct egress is not approved for this turn. Use the registered proxy-aware",
-        "target capability unchanged; do not add or infer an environment override.",
+        "The operator explicitly selected the engagement proxy for this turn. Prefix every",
+        "registered target argv with exact `XUNJI_PROXY_REQUIRED=1`. If the proxy fails,",
+        "return the blocker and stop; only a newer operator turn may restart target traffic.",
     ]
 
 
@@ -782,7 +804,7 @@ def _selftest() -> int:
         "session_id": "context-pack-session",
         "transcript_path": str(d / "context-pack-transcript.jsonl"),
         "prompt_sha256": "a" * 64,
-        "prompt_excerpt": "operator explicitly approved direct egress",
+        "prompt_excerpt": "operator continued with the default direct route",
         "memory_approved": False,
         "direct_egress_approved": True,
         "fanout_override": False,
@@ -848,6 +870,31 @@ def _selftest() -> int:
             "- Next autonomous move: 使用 probe.py GET / 确认可达性并收集响应指纹\n"
         ),
     ))
+    contract_path = d / "state" / "turn_contract.json"
+    direct_contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    proxy_contract = dict(direct_contract)
+    proxy_contract["direct_egress_approved"] = False
+    proxy_contract["operator_intent"] = {"route": "proxy"}
+    saved_turn_contract = globals()["_turn_contract"]
+    try:
+        # This unit exercises projection only. The normal loader independently
+        # rejects partial contracts; supplying the typed projection here avoids
+        # minting a fake historical keyset merely for a renderer fixture.
+        globals()["_turn_contract"] = lambda _run_dir: proxy_contract
+        prepared_proxy_probe = "\n".join(_prepared_action_lines(
+            d,
+            effect="target",
+            target="# Target\n- Target: http://127.0.0.1:18765\n",
+            front_text=(
+                "### F-001\n"
+                "- Next autonomous move: Execute HTTP GET probe against "
+                "http://127.0.0.1:18765 to confirm reachability\n"
+            ),
+        ))
+        proxy_route_lines = "\n".join(_egress_contract_lines(d, effect="target"))
+    finally:
+        globals()["_turn_contract"] = saved_turn_contract
+    contract_path.write_text(json.dumps(direct_contract), encoding="utf-8")
     checks = [
         ("pack names front and role", "Context Pack F-001 / web-auth" in pack),
         ("pack includes matched coverage", "app.example" in pack and "kb:foobar-cms" in pack),
@@ -867,9 +914,14 @@ def _selftest() -> int:
         ("pack includes xday pointer without dumping note body", "local xday pointer" in pack and "local note" not in pack),
         ("pack includes evidence block", "E-001" in pack),
         ("target pack exposes the frozen direct-egress argv prefix",
-         "This turn explicitly approves direct egress" in "\n".join(
+         "This turn uses the default direct route" in "\n".join(
              _egress_contract_lines(d, effect="target"))
          and prepared_probe.count("XUNJI_PROXY_REQUIRED=0") == 1),
+        ("explicit proxy route freezes proxy opt-in and stop-on-failure guidance",
+         prepared_proxy_probe.count("XUNJI_PROXY_REQUIRED=1") == 1
+         and "only a newer operator turn may restart" in proxy_route_lines),
+        ("route-less historical proxy-default projection stays offline",
+         _egress_route({"direct_egress_approved": False}) == "offline"),
         ("pack includes relevant threat hypothesis", "Relevant Hypotheses / Threat Hypotheses" in pack
          and "hidden admin API may expose cross-role data" in pack
          and "Linked IS/C/E: IS-001" in pack),

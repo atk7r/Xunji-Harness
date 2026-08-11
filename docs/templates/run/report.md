@@ -2,7 +2,7 @@
 
 ## Summary
 
-- Status:
+- Status: DRAFT
 - Severity candidate:
 - Affected asset:
 - Evidence IDs:   (finding maturity only; do not list phenomenon/candidate here)

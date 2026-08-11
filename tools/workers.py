@@ -37,7 +37,8 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {
     "list", "new", "suggest", "plan", "commit-plan", "commit-proposal",
-    "delegate", "assign", "cancel-unlaunched",
+    "delegate", "completion-review", "assign", "cancel-unlaunched", "settle-stopped",
+    "settle-stream-stalled", "recover-hook-failed-stop",
     "status", "agent-check",
     "heartbeat", "finish", "review-disposition", "lifecycle-check",
     "merge-check", "conflicts",
@@ -56,6 +57,12 @@ STALE_HEARTBEAT_SECONDS = 30 * 60
 PLAN_PROPOSAL_SCHEMA = "xunji.work-plan-proposal.v1"
 PLAN_PROPOSAL_FILE = "work_plan_proposal.json"
 PLAN_PROPOSAL_MAX_BYTES = 64 * 1024
+PROBE_BODY_CHUNKS_V2_SCHEMA = "probe-body-chunks.v2.schema.json"
+PROBE_CHUNK_MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+PROBE_CHUNK_MAX_COUNT = 128
+PROBE_CHUNK_MANIFEST_MAX_BYTES = 256 * 1024
+REVIEW_REPLAY_MAX_BYTES = 2 * 1024 * 1024
+REVIEW_ARTIFACT_MAX_BYTES = 64 * 1024 * 1024
 
 SATURATION_SCRIPT = ROOT / "tools" / "saturation.py"
 
@@ -877,10 +884,20 @@ def _plan_proposal_basis(run_dir: Path) -> dict:
     }
 
 
-def write_plan_proposal(run_dir: Path, lanes: list[dict]) -> dict:
+def write_plan_proposal(
+    run_dir: Path,
+    lanes: list[dict],
+    *,
+    macro_stage: str | None = None,
+    execution_mode: str = "",
+    objective: str = "",
+    delegation_reason: str = "",
+    exit_gate: str = "",
+    replan_reason: str = "",
+) -> dict:
     """Write a replaceable, non-authorizing seed for Root strategy edits."""
     ready = [lane for lane in lanes if not lane.get("dependencies")]
-    topology_mode = (
+    topology_mode = execution_mode or (
         "PARALLEL_AGENTS" if len(ready) >= 2
         and all(lanes_can_overlap(left, right)
                 for index, left in enumerate(ready)
@@ -890,12 +907,12 @@ def write_plan_proposal(run_dir: Path, lanes: list[dict]) -> dict:
     proposal = {
         "schema": PLAN_PROPOSAL_SCHEMA,
         "basis": _plan_proposal_basis(run_dir),
-        "macro_stage": None,
-        "objective": "",
+        "macro_stage": macro_stage,
+        "objective": objective,
         "execution_mode": topology_mode,
-        "delegation_reason": "",
-        "exit_gate": "",
-        "replan_reason": "",
+        "delegation_reason": delegation_reason,
+        "exit_gate": exit_gate,
+        "replan_reason": replan_reason,
         "lanes": lanes,
     }
     path = _plan_proposal_path(run_dir)
@@ -932,15 +949,20 @@ def load_plan_proposal(run_dir: Path) -> tuple[dict, str]:
         raise ValueError("WORK_PLAN_PROPOSAL_STALE")
     if value.get("macro_stage") not in _work_plan.STAGES:
         raise ValueError("WORK_PLAN_PROPOSAL_STAGE_REQUIRED")
-    if value.get("execution_mode") not in {"SERIAL_AGENT", "PARALLEL_AGENTS"}:
+    mode = value.get("execution_mode")
+    if mode not in {"SERIAL_AGENT", "PARALLEL_AGENTS", "COMPLETION_REVIEW"}:
         raise ValueError("WORK_PLAN_PROPOSAL_MODE_INVALID")
     for field in ("objective", "delegation_reason", "exit_gate", "replan_reason"):
         if not isinstance(value.get(field), str):
             raise ValueError(f"WORK_PLAN_PROPOSAL_{field.upper()}_INVALID")
     lanes = value.get("lanes")
-    if not isinstance(lanes, list) or not 1 <= len(lanes) <= 16 \
+    minimum = 0 if mode == "COMPLETION_REVIEW" else 1
+    if not isinstance(lanes, list) or not minimum <= len(lanes) <= 16 \
             or not all(isinstance(item, dict) for item in lanes):
         raise ValueError("WORK_PLAN_PROPOSAL_LANES_INVALID")
+    if mode == "COMPLETION_REVIEW" \
+            and (value.get("macro_stage") != "S3" or lanes):
+        raise ValueError("WORK_PLAN_PROPOSAL_COMPLETION_INVALID")
     return value, hashlib.sha256(raw).hexdigest()
 
 
@@ -2463,7 +2485,12 @@ def _plan_cycle_is_ended(run_dir: Path, plan_digest: str) -> bool:
     }
 
 
-def _current_review_receipt(run_dir: Path, rec: dict) -> dict:
+def _current_review_receipt(
+    run_dir: Path,
+    rec: dict,
+    *,
+    projection_cache: dict[str, dict] | None = None,
+) -> dict:
     if str(rec.get("role") or "") == "review":
         return {}
     if not str(rec.get("plan_digest") or "") or not str(rec.get("lane_id") or ""):
@@ -2473,9 +2500,14 @@ def _current_review_receipt(run_dir: Path, rec: dict) -> dict:
     try:
         if _work_plan is None:
             return {}
-        plan = _work_plan.load_plan_snapshot(
-            run_dir, str(rec.get("plan_digest") or ""))
-        projection = _run_model.plan_cycle_projection(run_dir, plan=plan)
+        digest = str(rec.get("plan_digest") or "")
+        projection = projection_cache.get(digest) \
+            if projection_cache is not None else None
+        if not isinstance(projection, dict):
+            plan = _work_plan.load_plan_snapshot(run_dir, digest)
+            projection = _run_model.plan_cycle_projection(run_dir, plan=plan)
+            if projection_cache is not None:
+                projection_cache[digest] = projection
     except Exception:
         return {}
     state = next((
@@ -2503,8 +2535,14 @@ def _current_review_receipt(run_dir: Path, rec: dict) -> dict:
     return receipt
 
 
-def _review_receipt_complete(run_dir: Path, rec: dict) -> bool:
-    return bool(_current_review_receipt(run_dir, rec))
+def _review_receipt_complete(
+    run_dir: Path,
+    rec: dict,
+    *,
+    projection_cache: dict[str, dict] | None = None,
+) -> bool:
+    return bool(_current_review_receipt(
+        run_dir, rec, projection_cache=projection_cache))
 
 
 def record_review_disposition(run_dir: Path, *, target: str, reviewer: str,
@@ -2532,6 +2570,13 @@ _FROZEN_ARTIFACT_HEADING_START_RE = re.compile(
     rf"^\s*(?:#{{1,6}}\s+|\*\*|{_FROZEN_ARTIFACT_HEADING_PHRASE})",
     re.I,
 )
+_FROZEN_ARTIFACT_DISPOSITION_HEADING_RE = re.compile(
+    r"^\s*`?accept-candidate`?(?=\s|—|--|-|:)"
+    r"[^\r\n]{0,1024}?\b(?:Exact\s+)?Evidence paths?\s+present\s+in\s+the\s+"
+    r"frozen\s+result\b"
+    r"[^:\r\n]{0,256}:\s*$",
+    re.I,
+)
 _FROZEN_ARTIFACT_FIELD_RE = re.compile(r"^\s*\*\*[^*\n]{1,120}:\*\*", re.I)
 _ELIDED_EVIDENCE_REF_RE = re.compile(
     r"(?<![A-Za-z0-9._/-])\.\.\./(evidence/[A-Za-z0-9][A-Za-z0-9._/-]*)"
@@ -2549,7 +2594,8 @@ _ARTIFACT_NEGATION_RE = re.compile(
     r"\bwithout\s+(?:an?\s+)?(?:artifact|evidence|path|file|sidecar|"
     r"pair|body|replay|reference)s?\b|"
     r"\bno\s+(?:artifact|evidence|path|file|sidecar|pair|body|replay|"
-    r"reference)s?\b|(?:^|[?;:.])\s*(?:no\s*[,;:]|none\b))",
+    r"reference)s?\b|\bnone(?:\s+(?:exist|exists|available|present|found))?\b|"
+    r"(?:^|[?;:.])\s*no\s*[,;:])",
     re.I,
 )
 
@@ -2574,11 +2620,13 @@ def _normalize_evidence_reference(run_dir: Path, raw: str) -> tuple[str, Path]:
     relative = raw[len(prefix):] if raw.startswith(prefix) else raw
     if not relative.startswith("evidence/"):
         raise ValueError(f"invalid run-local evidence reference: {raw}")
-    candidate = (run_dir / relative).resolve()
-    try:
-        candidate.relative_to((run_dir / "evidence").resolve())
-    except ValueError as exc:
-        raise ValueError(f"evidence reference escapes run: {raw}") from exc
+    relative_path = Path(relative)
+    if relative_path.is_absolute() or "\\" in relative \
+            or relative_path.parts[0] != "evidence" \
+            or any(part in {"", ".", ".."} for part in relative_path.parts):
+        raise ValueError(f"evidence reference escapes run: {raw}")
+    evidence = (run_dir / "evidence").resolve()
+    candidate = evidence.joinpath(*relative_path.parts[1:])
     return relative, candidate
 
 
@@ -2647,10 +2695,15 @@ def _frozen_artifact_references(
     pair_inference_used = False
     block_has_content = False
     for line in normalized.splitlines():
-        heading = bool(
+        line_start_heading = bool(
             _FROZEN_ARTIFACT_HEADING_RE.search(line)
             and _FROZEN_ARTIFACT_HEADING_START_RE.match(line)
         )
+        disposition_heading = bool(
+            _FROZEN_ARTIFACT_DISPOSITION_HEADING_RE.match(line)
+            and not _artifact_line_is_negated(line)
+        )
+        heading = line_start_heading or disposition_heading
         if heading:
             in_artifacts = True
             directory_anchor = False
@@ -2788,6 +2841,377 @@ def _frozen_result_text(draft: dict, *, label: str) -> str:
         raise ValueError(f"{label} frozen result is unavailable") from exc
 
 
+def _secure_directory_flags() -> int:
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+
+
+def _secure_open_directory_path(path: Path) -> int:
+    resolved = path.resolve(strict=True)
+    descriptor = os.open(os.path.sep, _secure_directory_flags())
+    try:
+        for part in resolved.parts[1:]:
+            child = os.open(
+                part, _secure_directory_flags(), dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _evidence_relative_path(run_dir: Path, path: Path) -> tuple[Path, Path]:
+    """Return the canonical evidence anchor and a symlink-preserving relative path."""
+    evidence_path = run_dir / "evidence"
+    if evidence_path.is_symlink():
+        raise ValueError("run evidence root must not be a symlink")
+    evidence = evidence_path.resolve(strict=True)
+    if any(part in {"", ".", ".."} for part in path.parts[1:]):
+        raise ValueError("unsafe evidence path component")
+    candidate = path.absolute()
+    for root in (evidence_path.absolute(), evidence):
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError:
+            continue
+        if relative.parts:
+            return evidence, relative
+    raise ValueError("evidence path is outside its run")
+
+
+def _secure_open_evidence_leaf(
+    run_dir: Path,
+    path: Path,
+) -> tuple[int, int, Path, Path, tuple[int, int]]:
+    """Open one evidence file through an anchored component-by-component walk."""
+    evidence_path = run_dir / "evidence"
+    try:
+        evidence, relative = _evidence_relative_path(run_dir, path)
+    except (OSError, ValueError) as exc:
+        raise ValueError("evidence path escapes its run") from exc
+    if not relative.parts or any(
+            part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("evidence path is not a safe relative file")
+    anchor_before = os.stat(evidence, follow_symlinks=False)
+    parent = _secure_open_directory_path(evidence)
+    try:
+        anchor_fd = os.fstat(parent)
+        if (anchor_fd.st_dev, anchor_fd.st_ino) != (
+                anchor_before.st_dev, anchor_before.st_ino):
+            raise ValueError("run evidence root changed during validation")
+        for part in relative.parts[:-1]:
+            child = os.open(
+                part, _secure_directory_flags(), dir_fd=parent)
+            os.close(parent)
+            parent = child
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) \
+            | getattr(os, "O_NOFOLLOW", 0)
+        leaf = os.open(relative.parts[-1], flags, dir_fd=parent)
+        return (
+            leaf, parent, evidence, relative,
+            (anchor_before.st_dev, anchor_before.st_ino),
+        )
+    except Exception:
+        os.close(parent)
+        raise
+
+
+def _inspect_evidence_regular_file(
+    run_dir: Path,
+    path: Path,
+    *,
+    max_bytes: int,
+    label: str,
+    collect: bool,
+) -> tuple[bytes, str, int]:
+    """Bound and hash one regular evidence file with a final path-identity fence."""
+    try:
+        descriptor, parent, evidence, relative, anchor_identity = (
+            _secure_open_evidence_leaf(run_dir, path))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"{label} is unavailable") from exc
+    payload = bytearray()
+    digest = hashlib.sha256()
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} is not a regular file")
+        if before.st_size > max_bytes:
+            raise ValueError(f"{label} exceeds its hard byte limit")
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(64 * 1024, max_bytes + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError(f"{label} exceeds its hard byte limit")
+            digest.update(chunk)
+            if collect:
+                payload.extend(chunk)
+        after = os.fstat(descriptor)
+        path_after = os.stat(
+            relative.parts[-1], dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISREG(path_after.st_mode) or (
+            before.st_dev, before.st_ino, before.st_size,
+            before.st_mtime_ns, before.st_ctime_ns
+        ) != (
+            after.st_dev, after.st_ino, after.st_size,
+            after.st_mtime_ns, after.st_ctime_ns
+        ) or (before.st_dev, before.st_ino) != (
+            path_after.st_dev, path_after.st_ino
+        ):
+            raise ValueError(f"{label} changed during validation")
+        fresh_leaf, fresh_parent, _fresh_evidence, _fresh_relative, fresh_anchor = (
+            _secure_open_evidence_leaf(run_dir, evidence / relative))
+        try:
+            fresh = os.fstat(fresh_leaf)
+        finally:
+            os.close(fresh_leaf)
+            os.close(fresh_parent)
+        if fresh_anchor != anchor_identity or (
+                fresh.st_dev, fresh.st_ino, fresh.st_size,
+                fresh.st_mtime_ns, fresh.st_ctime_ns) != (
+                    before.st_dev, before.st_ino,
+                    before.st_size, before.st_mtime_ns, before.st_ctime_ns):
+            raise ValueError(f"{label} path changed during validation")
+        return bytes(payload), digest.hexdigest(), total
+    except OSError as exc:
+        raise ValueError(f"{label} is unavailable") from exc
+    finally:
+        os.close(descriptor)
+        os.close(parent)
+
+
+def _v2_relative_regular_path(
+    run_dir: Path,
+    base_dir: Path,
+    token: str,
+    *,
+    replay_ref: str,
+    label: str,
+) -> Path:
+    """Resolve one v2 artifact relative to its owner without following links."""
+    value = str(token or "")
+    relative = Path(value)
+    if not value or "\\" in value or relative.is_absolute() \
+            or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError(f"replay {label} path is invalid: {replay_ref}")
+
+    evidence_root = (run_dir / "evidence").resolve()
+    owner = base_dir.resolve()
+    try:
+        owner.relative_to(evidence_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"replay {label} owner escapes evidence: {replay_ref}") from exc
+    candidate = owner.joinpath(*relative.parts)
+    try:
+        candidate.relative_to(evidence_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"replay {label} path escapes evidence: {replay_ref}") from exc
+
+    cursor = evidence_root
+    for index, part in enumerate(candidate.relative_to(evidence_root).parts):
+        cursor = cursor / part
+        try:
+            mode = os.lstat(cursor).st_mode
+        except OSError as exc:
+            raise ValueError(
+                f"replay {label} is unavailable: {replay_ref}") from exc
+        if stat.S_ISLNK(mode):
+            raise ValueError(
+                f"replay {label} path contains a symlink: {replay_ref}")
+        if index == len(candidate.relative_to(evidence_root).parts) - 1:
+            if not stat.S_ISREG(mode):
+                raise ValueError(
+                    f"replay {label} is not a regular file: {replay_ref}")
+        elif not stat.S_ISDIR(mode):
+            raise ValueError(
+                f"replay {label} parent is not a directory: {replay_ref}")
+    try:
+        cursor.resolve(strict=True).relative_to(evidence_root)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"replay {label} path escapes evidence: {replay_ref}") from exc
+    return cursor
+
+
+def _read_v2_regular_file(
+    run_dir: Path,
+    path: Path,
+    *,
+    max_bytes: int,
+    replay_ref: str,
+    label: str,
+) -> bytes:
+    try:
+        payload, _sha256, _size = _inspect_evidence_regular_file(
+            run_dir, path, max_bytes=max_bytes,
+            label=f"replay {label}: {replay_ref}", collect=True)
+        return payload
+    except ValueError as exc:
+        raise ValueError(f"replay {label} is unavailable: {replay_ref}") from exc
+
+
+def _load_replay_chunk_manifest(
+    run_dir: Path, replay_ref: str, manifest_token: str,
+) -> tuple[dict, Path, bool, bytes]:
+    """Load v2 relative manifests while retaining the exact v1 path grammar."""
+    token_path = Path(manifest_token)
+    relative_v2_token = bool(manifest_token) \
+        and not token_path.is_absolute() \
+        and "\\" not in manifest_token \
+        and len(token_path.parts) == 1 \
+        and token_path.parts[0] not in {"", ".", ".."}
+    if relative_v2_token:
+        _, replay_path = _normalize_evidence_reference(run_dir, replay_ref)
+        manifest_path = _v2_relative_regular_path(
+            run_dir, replay_path.parent, manifest_token,
+            replay_ref=replay_ref, label="v2 chunk manifest",
+        )
+        raw = _read_v2_regular_file(
+            run_dir,
+            manifest_path,
+            max_bytes=PROBE_CHUNK_MANIFEST_MAX_BYTES,
+            replay_ref=replay_ref,
+            label="v2 chunk manifest",
+        )
+        try:
+            manifest = json.loads(raw.decode("utf-8", "strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"replay chunk manifest is unavailable: {replay_ref}") from exc
+        if not isinstance(manifest, dict) \
+                or manifest.get("schema") != "xunji.probe.body_chunks.v2":
+            # A basename was never valid in the v1 grammar.  Do not silently
+            # widen that historical contract while adding the v2 location rule.
+            raise ValueError(
+                f"replay chunk manifest binding mismatch: {replay_ref}")
+        return manifest, manifest_path, True, raw
+
+    manifest_refs = _evidence_references(run_dir, manifest_token)
+    if len(manifest_refs) != 1:
+        raise ValueError(f"replay sidecar has invalid chunk manifest: {replay_ref}")
+    _, manifest_path = next(iter(manifest_refs.items()))
+    try:
+        raw = _read_v2_regular_file(
+            run_dir, manifest_path,
+            max_bytes=PROBE_CHUNK_MANIFEST_MAX_BYTES,
+            replay_ref=replay_ref, label="legacy chunk manifest")
+        manifest = json.loads(raw.decode("utf-8", "strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"replay chunk manifest is unavailable: {replay_ref}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError(f"replay chunk manifest binding mismatch: {replay_ref}")
+    return manifest, manifest_path, False, raw
+
+
+def _validated_v2_chunk_manifest(
+    run_dir: Path,
+    replay_ref: str,
+    manifest: dict,
+    manifest_path: Path,
+    response: dict,
+    body_path: Path,
+    *,
+    wire_len: int,
+    wire_sha1: str,
+    manifest_sha256: str,
+) -> str:
+    """Validate one bounded v2 chunk set and return its full SHA-256."""
+    schema_errors = contract_schema.named_schema_errors(
+        manifest, PROBE_BODY_CHUNKS_V2_SCHEMA)
+    if schema_errors:
+        raise ValueError(
+            f"replay v2 chunk manifest schema invalid: {replay_ref}; "
+            + "; ".join(schema_errors[:3]))
+
+    manifest_wire_sha256 = str(manifest.get("wire_sha256") or "")
+    response_wire_sha256 = str(response.get("wire_sha256") or "")
+    if manifest.get("wire_len") != wire_len \
+            or str(manifest.get("wire_sha1") or "") != wire_sha1 \
+            or wire_len > PROBE_CHUNK_MAX_CAPTURE_BYTES \
+            or len(manifest["chunks"]) > PROBE_CHUNK_MAX_COUNT \
+            or response_wire_sha256 and (
+                not re.fullmatch(r"[0-9a-f]{64}", response_wire_sha256)
+                or response_wire_sha256 != manifest_wire_sha256
+            ):
+        raise ValueError(f"replay chunk manifest binding mismatch: {replay_ref}")
+
+    manifest_body_path = _v2_relative_regular_path(
+        run_dir, manifest_path.parent, str(manifest["saved_body"]),
+        replay_ref=replay_ref, label="v2 saved body",
+    )
+    try:
+        _manifest_evidence, manifest_body_relative = _evidence_relative_path(
+            run_dir, manifest_body_path)
+        _body_evidence, body_relative = _evidence_relative_path(
+            run_dir, body_path)
+    except ValueError as exc:
+        raise ValueError(
+            f"replay chunk manifest body binding mismatch: {replay_ref}") from exc
+    if manifest_body_relative != body_relative:
+        raise ValueError(f"replay chunk manifest body binding mismatch: {replay_ref}")
+
+    chunk_size = manifest["chunk_size"]
+    if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) \
+            or chunk_size < 1:
+        raise ValueError(f"replay v2 chunk manifest chunk_size invalid: {replay_ref}")
+    expected_count = max(1, (wire_len + chunk_size - 1) // chunk_size)
+    chunks = manifest["chunks"]
+    if len(chunks) != expected_count:
+        raise ValueError(f"replay chunk manifest count mismatch: {replay_ref}")
+
+    full_sha1 = hashlib.sha1()
+    full_sha256 = hashlib.sha256()
+    next_offset = 0
+    for index, chunk in enumerate(chunks):
+        expected_path = (
+            f"{manifest['chunk_dir']}/part-{index:04d}.bin")
+        expected_bytes = 0 if wire_len == 0 else min(
+            chunk_size, wire_len - next_offset)
+        if chunk.get("path") != expected_path \
+                or chunk.get("offset") != next_offset \
+                or chunk.get("bytes") != expected_bytes:
+            raise ValueError(f"replay chunk integrity mismatch: {replay_ref}")
+        chunk_path = _v2_relative_regular_path(
+            run_dir, manifest_path.parent, str(chunk["path"]),
+            replay_ref=replay_ref, label="v2 chunk",
+        )
+        part = _read_v2_regular_file(
+            run_dir,
+            chunk_path,
+            max_bytes=expected_bytes,
+            replay_ref=replay_ref,
+            label="v2 chunk",
+        )
+        if len(part) != expected_bytes \
+                or hashlib.sha256(part).hexdigest() != str(chunk["sha256"]):
+            raise ValueError(f"replay chunk integrity mismatch: {replay_ref}")
+        full_sha1.update(part)
+        full_sha256.update(part)
+        next_offset += len(part)
+
+    if next_offset != wire_len or full_sha1.hexdigest() != wire_sha1 \
+            or full_sha256.hexdigest() != manifest_wire_sha256:
+        raise ValueError(f"replay full-body chunk hash mismatch: {replay_ref}")
+    _manifest_after, manifest_after_sha256, _manifest_after_size = (
+        _inspect_evidence_regular_file(
+            run_dir, manifest_path,
+            max_bytes=PROBE_CHUNK_MANIFEST_MAX_BYTES,
+            label=f"replay v2 chunk manifest: {replay_ref}", collect=False))
+    if manifest_after_sha256 != manifest_sha256:
+        raise ValueError(f"replay chunk manifest changed during validation: {replay_ref}")
+    return manifest_wire_sha256
+
+
 def _validated_replay_body(
     run_dir: Path, replay_ref: str, replay: dict, response: dict,
     body_path: Path,
@@ -2799,7 +3223,9 @@ def _validated_replay_body(
     domains.  A legacy capped body remains an honest partial artifact; an empty
     or malformed wire digest never bypasses integrity checks.
     """
-    body = body_path.read_bytes()
+    body, saved_sha256, _body_size = _inspect_evidence_regular_file(
+        run_dir, body_path, max_bytes=PROBE_CHUNK_MAX_CAPTURE_BYTES,
+        label=f"replay saved body: {replay_ref}", collect=True)
     saved_len = len(body)
     saved_sha1 = hashlib.sha1(body).hexdigest()
     wire_len_raw = response.get("wire_len", response.get("len"))
@@ -2834,63 +3260,96 @@ def _validated_replay_body(
         truncated = saved_len < wire_len
 
     wire_verified = False
+    wire_sha256 = ""
+    chunk_manifest = ""
+    chunk_manifest_sha256 = ""
+    chunk_manifest_size = 0
     manifest_token = str(replay.get("saved_body_chunks") or "")
     if manifest_token:
-        manifest_refs = _evidence_references(run_dir, manifest_token)
-        if len(manifest_refs) != 1:
-            raise ValueError(f"replay sidecar has invalid chunk manifest: {replay_ref}")
-        _, manifest_path = next(iter(manifest_refs.items()))
-        try:
-            manifest = json.loads(
-                manifest_path.read_text(encoding="utf-8", errors="strict"))
-        except Exception as exc:
-            raise ValueError(f"replay chunk manifest is unavailable: {replay_ref}") from exc
+        manifest, manifest_path, relative_v2, manifest_raw = _load_replay_chunk_manifest(
+            run_dir, replay_ref, manifest_token)
         chunks = manifest.get("chunks") if isinstance(manifest, dict) else None
-        if manifest.get("schema") != "xunji.probe.body_chunks.v1" \
+        if manifest.get("schema") == "xunji.probe.body_chunks.v2":
+            if not relative_v2:
+                raise ValueError(
+                    f"v2 replay chunk manifest is not sidecar-relative: {replay_ref}")
+            wire_sha256 = _validated_v2_chunk_manifest(
+                run_dir, replay_ref, manifest, manifest_path, response, body_path,
+                wire_len=wire_len, wire_sha1=wire_sha1,
+                manifest_sha256=hashlib.sha256(manifest_raw).hexdigest(),
+            )
+            try:
+                chunk_manifest = manifest_path.relative_to(
+                    run_dir.resolve()).as_posix()
+            except ValueError as exc:
+                raise ValueError(
+                    f"replay v2 chunk manifest escapes run: {replay_ref}") from exc
+            chunk_manifest_sha256 = hashlib.sha256(manifest_raw).hexdigest()
+            chunk_manifest_size = len(manifest_raw)
+            wire_verified = True
+        elif manifest.get("schema") != "xunji.probe.body_chunks.v1" \
                 or manifest.get("full_len") != wire_len \
                 or str(manifest.get("full_sha1") or "") != wire_sha1 \
-                or not isinstance(chunks, list) or not chunks:
+                or not isinstance(chunks, list) or not chunks \
+                or len(chunks) > PROBE_CHUNK_MAX_COUNT \
+                or wire_len > PROBE_CHUNK_MAX_CAPTURE_BYTES:
             raise ValueError(f"replay chunk manifest binding mismatch: {replay_ref}")
-        full_hash = hashlib.sha1()
-        next_offset = 0
-        total = 0
-        for chunk in chunks:
-            if not isinstance(chunk, dict):
-                raise ValueError(f"replay chunk entry is invalid: {replay_ref}")
-            refs = _evidence_references(run_dir, str(chunk.get("file") or ""))
-            if len(refs) != 1:
-                raise ValueError(f"replay chunk path is invalid: {replay_ref}")
-            _, chunk_path = next(iter(refs.items()))
-            part = chunk_path.read_bytes()
-            expected_bytes = chunk.get("bytes")
-            expected_offset = chunk.get("offset")
-            expected_sha1 = str(chunk.get("sha1") or "")
-            if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) \
-                    or isinstance(expected_offset, bool) \
-                    or not isinstance(expected_offset, int) \
-                    or expected_offset != next_offset \
-                    or expected_bytes != len(part) \
-                    or not re.fullmatch(r"[0-9a-f]{40}", expected_sha1) \
-                    or hashlib.sha1(part).hexdigest() != expected_sha1:
-                raise ValueError(f"replay chunk integrity mismatch: {replay_ref}")
-            full_hash.update(part)
-            total += len(part)
-            next_offset += len(part)
-        if total != wire_len or full_hash.hexdigest() != wire_sha1:
-            raise ValueError(f"replay full-body chunk hash mismatch: {replay_ref}")
-        wire_verified = True
+        else:
+            full_hash = hashlib.sha1()
+            next_offset = 0
+            total = 0
+            for chunk in chunks:
+                if not isinstance(chunk, dict):
+                    raise ValueError(f"replay chunk entry is invalid: {replay_ref}")
+                refs = _evidence_references(run_dir, str(chunk.get("file") or ""))
+                if len(refs) != 1:
+                    raise ValueError(f"replay chunk path is invalid: {replay_ref}")
+                expected_bytes = chunk.get("bytes")
+                expected_offset = chunk.get("offset")
+                expected_sha1 = str(chunk.get("sha1") or "")
+                if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) \
+                        or expected_bytes < 0 \
+                        or expected_bytes > PROBE_CHUNK_MAX_CAPTURE_BYTES \
+                        or isinstance(expected_offset, bool) \
+                        or not isinstance(expected_offset, int) \
+                        or expected_offset != next_offset \
+                        or not re.fullmatch(r"[0-9a-f]{40}", expected_sha1) \
+                        or total + expected_bytes > PROBE_CHUNK_MAX_CAPTURE_BYTES:
+                    raise ValueError(f"replay chunk integrity mismatch: {replay_ref}")
+                _, chunk_path = next(iter(refs.items()))
+                part = _read_v2_regular_file(
+                    run_dir, chunk_path, max_bytes=expected_bytes,
+                    replay_ref=replay_ref, label="legacy chunk")
+                if expected_bytes != len(part) \
+                        or hashlib.sha1(part).hexdigest() != expected_sha1:
+                    raise ValueError(f"replay chunk integrity mismatch: {replay_ref}")
+                full_hash.update(part)
+                total += len(part)
+                next_offset += len(part)
+            if total != wire_len or full_hash.hexdigest() != wire_sha1:
+                raise ValueError(f"replay full-body chunk hash mismatch: {replay_ref}")
+            wire_verified = True
     elif not truncated:
         if saved_sha1 != wire_sha1:
             raise ValueError(f"replay sidecar full body hash mismatch: {replay_ref}")
         wire_verified = True
+        wire_sha256 = str(response.get("wire_sha256") or saved_sha256)
+        if not re.fullmatch(r"[0-9a-f]{64}", wire_sha256) \
+                or wire_sha256 != saved_sha256:
+            raise ValueError(f"replay sidecar full body SHA-256 mismatch: {replay_ref}")
 
     return {
         "wire_len": wire_len,
         "wire_sha1": wire_sha1,
+        "wire_sha256": wire_sha256,
         "saved_len": saved_len,
         "saved_sha1": saved_sha1,
+        "saved_sha256": saved_sha256,
         "truncated": truncated,
         "wire_verified": wire_verified,
+        "chunk_manifest": chunk_manifest,
+        "chunk_manifest_sha256": chunk_manifest_sha256,
+        "chunk_manifest_size": chunk_manifest_size,
     }
 
 
@@ -2921,51 +3380,133 @@ def _validated_review_artifacts(run_dir: Path, *, target_row: dict,
         if extra:
             detail.append("Reviewer added " + ", ".join(extra))
         raise ValueError("Reviewer evidence set mismatch: " + "; ".join(detail))
-    missing_paths = sorted(ref for ref, path in target_refs.items() if not path.is_file())
-    if missing_paths:
-        raise ValueError("frozen result references missing evidence: " + ", ".join(missing_paths))
-    receipts: list[dict] = []
+    receipts_by_ref: dict[str, dict] = {}
+    replay_payloads: dict[str, dict] = {}
     for ref in sorted(target_refs):
         path = target_refs[ref]
+        try:
+            raw, sha256, size = _inspect_evidence_regular_file(
+                run_dir, path,
+                max_bytes=(REVIEW_REPLAY_MAX_BYTES if ref.endswith(
+                    ".replay.json") else REVIEW_ARTIFACT_MAX_BYTES),
+                label=f"frozen artifact {ref}",
+                collect=ref.endswith(".replay.json"),
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"frozen result references missing evidence or invalid evidence: {ref}") from exc
         entry = {
             "path": ref,
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            "size": path.stat().st_size,
+            "sha256": sha256,
+            "size": size,
         }
+        receipts_by_ref[ref] = entry
         if ref.endswith(".replay.json"):
             try:
-                replay = json.loads(path.read_text(encoding="utf-8", errors="strict"))
-            except Exception as exc:
+                replay = json.loads(raw.decode("utf-8", "strict"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError(f"invalid replay sidecar: {ref}") from exc
-            request = replay.get("request") if isinstance(replay.get("request"), dict) else {}
-            response = replay.get("response") if isinstance(replay.get("response"), dict) else {}
-            saved_body = str(replay.get("saved_body") or "")
-            saved_refs = _evidence_references(run_dir, saved_body)
-            if len(saved_refs) != 1:
-                raise ValueError(f"replay sidecar has invalid saved_body: {ref}")
-            body_ref, body_path = next(iter(saved_refs.items()))
-            if body_ref not in target_refs or not body_path.is_file():
-                raise ValueError(f"replay sidecar body is absent from frozen artifact set: {ref}")
-            if not request.get("method") or not request.get("url") \
-                    or not isinstance(response.get("status"), int):
-                raise ValueError(f"replay sidecar lacks request/response binding: {ref}")
-            body_binding = _validated_replay_body(
-                run_dir, ref, replay, response, body_path)
-            entry["request"] = {
-                "method": str(request["method"]),
-                "url": str(request["url"]),
+            replay_payloads[ref] = replay
+
+    manifest_owners: dict[str, str] = {}
+    for ref in sorted(replay_payloads):
+        entry = receipts_by_ref[ref]
+        replay = replay_payloads[ref]
+        request = replay.get("request") if isinstance(replay.get("request"), dict) else {}
+        response = replay.get("response") if isinstance(replay.get("response"), dict) else {}
+        saved_body = str(replay.get("saved_body") or "")
+        saved_refs = _evidence_references(run_dir, saved_body)
+        if len(saved_refs) != 1:
+            raise ValueError(f"replay sidecar has invalid saved_body: {ref}")
+        body_ref, body_path = next(iter(saved_refs.items()))
+        if body_ref not in target_refs:
+            raise ValueError(f"replay sidecar body is absent from frozen artifact set: {ref}")
+        if not request.get("method") or not request.get("url") \
+                or not isinstance(response.get("status"), int):
+            raise ValueError(f"replay sidecar lacks request/response binding: {ref}")
+        body_binding = _validated_replay_body(
+            run_dir, ref, replay, response, body_path)
+        body_receipt = receipts_by_ref.get(body_ref)
+        if not isinstance(body_receipt, dict) \
+                or body_receipt.get("sha256") != body_binding["saved_sha256"]:
+            raise ValueError(
+                f"replay saved body changed during artifact validation: {ref}")
+        entry["request"] = {
+            "method": str(request["method"]),
+            "url": str(request["url"]),
+        }
+        entry["response"] = {
+            "status": int(response["status"]),
+            "len": body_binding["wire_len"],
+            "sha1": body_binding["wire_sha1"],
+            "saved_len": body_binding["saved_len"],
+            "saved_sha1": body_binding["saved_sha1"],
+            "truncated": body_binding["truncated"],
+            "wire_verified": body_binding["wire_verified"],
+        }
+        manifest_ref = str(body_binding.get("chunk_manifest") or "")
+        if manifest_ref:
+            prior_owner = manifest_owners.get(manifest_ref)
+            if prior_owner is not None and prior_owner != ref:
+                raise ValueError(
+                    "one chunk manifest cannot certify multiple replay responses: "
+                    + f"{prior_owner}, {ref}")
+            manifest_owners[manifest_ref] = ref
+            entry["response"].update({
+                "wire_sha256": body_binding["wire_sha256"],
+                "chunk_manifest": manifest_ref,
+                "chunk_manifest_sha256": body_binding[
+                    "chunk_manifest_sha256"],
+            })
+            _, manifest_path = _normalize_evidence_reference(
+                run_dir, manifest_ref)
+            _manifest_raw, current_manifest_sha256, current_manifest_size = (
+                _inspect_evidence_regular_file(
+                    run_dir, manifest_path,
+                    max_bytes=PROBE_CHUNK_MANIFEST_MAX_BYTES,
+                    label=f"replay chunk manifest {manifest_ref}",
+                    collect=False,
+                ))
+            if current_manifest_sha256 != body_binding[
+                    "chunk_manifest_sha256"] \
+                    or current_manifest_size != body_binding[
+                        "chunk_manifest_size"]:
+                raise ValueError(
+                    f"replay chunk manifest changed during artifact validation: {ref}")
+            existing_manifest = receipts_by_ref.get(manifest_ref)
+            manifest_entry = {
+                "path": manifest_ref,
+                "sha256": current_manifest_sha256,
+                "size": current_manifest_size,
             }
-            entry["response"] = {
-                "status": int(response["status"]),
-                "len": body_binding["wire_len"],
-                "sha1": body_binding["wire_sha1"],
-                "saved_len": body_binding["saved_len"],
-                "saved_sha1": body_binding["saved_sha1"],
-                "truncated": body_binding["truncated"],
-                "wire_verified": body_binding["wire_verified"],
-            }
-            entry["saved_body"] = body_ref
-        receipts.append(entry)
+            if existing_manifest is not None \
+                    and existing_manifest != manifest_entry:
+                raise ValueError(
+                    f"replay chunk manifest receipt mismatch: {ref}")
+            receipts_by_ref[manifest_ref] = manifest_entry
+        entry["saved_body"] = body_ref
+    manifest_refs = {
+        str(item.get("response", {}).get("chunk_manifest") or "")
+        for item in receipts_by_ref.values()
+        if isinstance(item.get("response"), dict)
+    }
+    manifest_refs.discard("")
+    for ref, entry in sorted(receipts_by_ref.items()):
+        _, path = _normalize_evidence_reference(run_dir, ref)
+        _raw, final_sha256, final_size = _inspect_evidence_regular_file(
+            run_dir, path,
+            max_bytes=(
+                REVIEW_REPLAY_MAX_BYTES if ref.endswith(".replay.json")
+                else PROBE_CHUNK_MANIFEST_MAX_BYTES if ref in manifest_refs
+                else REVIEW_ARTIFACT_MAX_BYTES
+            ),
+            label=f"final frozen artifact {ref}",
+            collect=False,
+        )
+        if final_sha256 != entry.get("sha256") or final_size != entry.get("size"):
+            raise ValueError(
+                f"frozen artifact changed during artifact validation: {ref}")
+    receipts = [receipts_by_ref[ref] for ref in sorted(receipts_by_ref)]
     if not any(item["path"].endswith(".replay.json") for item in receipts):
         raise ValueError("target accept-candidate requires at least one replay sidecar")
     return receipts
@@ -3147,6 +3688,25 @@ def _update_agent_lifecycle_locked(run_dir: Path, agent: str, *, status: str,
         adjudicated = {"merged", "reviewed", "blocked", "failed", "abandoned"}
         plan_bound = bool(
             str(rec.get("plan_digest") or "") and str(rec.get("lane_id") or ""))
+        attempts = rec.get("attempts") \
+            if isinstance(rec.get("attempts"), list) else []
+        current_attempt = str(rec.get("current_attempt") or "")
+        failed_attempts = [
+            item for item in attempts
+            if isinstance(item, dict) and item.get("state") == "failed"
+        ]
+        projected_failure_pending = bool(
+            plan_bound
+            and previous_status == "failed"
+            and not str(rec.get("root_disposition_at") or "")
+            and not str(rec.get("root_disposition_review_receipt_hash") or "")
+            and len(failed_attempts) == 1
+            and (
+                not current_attempt
+                or str(failed_attempts[0].get("attempt_id") or "")
+                    == current_attempt
+            )
+        )
         if _plan_cycle_is_ended(run_dir, str(rec.get("plan_digest") or "")):
             if (
                 terminal and not amend and status_norm == previous_status
@@ -3155,8 +3715,6 @@ def _update_agent_lifecycle_locked(run_dir: Path, agent: str, *, status: str,
                 return rec
             raise ValueError("ended plan cycle is immutable; commit a new plan instead")
         if not terminal and plan_bound and status_norm in {"running", "working"}:
-            attempts = rec.get("attempts") if isinstance(rec.get("attempts"), list) else []
-            current_attempt = str(rec.get("current_attempt") or "")
             runtime_attempt = next((
                 item for item in attempts
                 if isinstance(item, dict)
@@ -3178,6 +3736,10 @@ def _update_agent_lifecycle_locked(run_dir: Path, agent: str, *, status: str,
             raise ValueError(
                 "plan-bound done is projected only from the authentic Agent return; "
                 "Root must record a reviewed disposition")
+        if terminal and projected_failure_pending and status_norm == "merged":
+            raise ValueError(
+                "failed runtime attempt cannot be merged; use a reviewed "
+                "blocked/failed/abandoned Root disposition")
         if not terminal and previous_status in TERMINAL_AGENT_STATUSES:
             raise ValueError(
                 f"{agent} already has terminal status {previous_status}; "
@@ -3189,7 +3751,8 @@ def _update_agent_lifecycle_locked(run_dir: Path, agent: str, *, status: str,
             note_issues = _runtime_receipts.disposition_note_issues(run_dir, status_norm, note)
             if note_issues:
                 raise ValueError("invalid disposition note; " + "; ".join(note_issues))
-        if terminal and previous_status in adjudicated:
+        if terminal and previous_status in adjudicated \
+                and not projected_failure_pending:
             if not amend:
                 if status_norm == previous_status and note.strip() == str(rec.get("last_note") or "").strip():
                     return rec
@@ -3204,7 +3767,7 @@ def _update_agent_lifecycle_locked(run_dir: Path, agent: str, *, status: str,
                 "finished_at": str(rec.get("finished_at") or ""),
                 "amended_at": stamp,
             })
-        elif amend:
+        elif amend and not projected_failure_pending:
             raise ValueError(f"{agent} has no terminal disposition to amend")
         merge_validation = None
         review_receipt: dict = {}
@@ -3258,6 +3821,7 @@ def _update_agent_lifecycle_locked(run_dir: Path, agent: str, *, status: str,
 def agent_lifecycle_issues(run_dir: Path, *, closure: bool = False,
                            stale_after_seconds: int = STALE_HEARTBEAT_SECONDS) -> list[dict]:
     issues: list[dict] = []
+    projection_cache: dict[str, dict] = {}
     now = time.time()
     for row in agent_status_rows(run_dir):
         agent = str(row.get("agent") or "?")
@@ -3276,8 +3840,11 @@ def agent_lifecycle_issues(run_dir: Path, *, closure: bool = False,
                 disposition_guidance = (
                     "plan-bound 状态只能由真实 launch/return 投影推进；不得由 Root "
                     "finish 为 done。等待匹配 SubagentStop 投影 done 后，执行 Reviewer "
-                    "disposition 与 Root settlement；未启动且 turn/inputs stale 才走 "
-                    "cancel-unlaunched。"
+                    "disposition 与 Root settlement；若 Claude 客户端已有 exact "
+                    "user-stop/no-resume transcript 回执，先走 settle-stopped 类型化失败"
+                    "投影；若 host watchdog 与 child terminal pair 精确证明 stream "
+                    "stall，则走 settle-stream-stalled；未启动且 turn/inputs stale "
+                    "才走 cancel-unlaunched。"
                 )
             else:
                 disposition_guidance = (
@@ -3308,7 +3875,8 @@ def agent_lifecycle_issues(run_dir: Path, *, closure: bool = False,
         if returned and str(row.get("role") or "") != "review" \
                 and str(row.get("plan_digest") or "") \
                 and str(row.get("lane_id") or "") \
-                and not _review_receipt_complete(run_dir, row):
+                and not _review_receipt_complete(
+                    run_dir, row, projection_cache=projection_cache):
             issues.append({
                 "severity": "error" if closure else "warn",
                 "agent": agent,
@@ -3810,10 +4378,52 @@ def print_suggest(run_dir: Path, limit: int | None = None) -> int:
 def print_plan(run_dir: Path, limit: int) -> int:
     rows = [r for r in suggest(run_dir) if r["score"] >= 3]
     if not rows:
+        try:
+            prior = _work_plan.transaction_bound_plan(run_dir) \
+                if _work_plan.plan_path(run_dir).is_file() else {}
+            prior_digest = str(prior.get("plan_digest") or "")
+            projection = _run_model.stage_readiness(
+                run_dir, ignore_plan_digest=prior_digest)
+            stage_issues = _run_model.stage_declaration_issues("S3", projection)
+        except Exception as exc:
+            print(
+                f"[workers plan] COMPLETION_PREFLIGHT_ERROR: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        if not stage_issues:
+            proposal_info = write_plan_proposal(
+                run_dir,
+                [],
+                macro_stage="S3",
+                execution_mode="COMPLETION_REVIEW",
+                objective="obtain one global review of the frozen closure bundle",
+                delegation_reason=(
+                    "zero open fronts require the assignment-free completion Reviewer"
+                ),
+                exit_gate="exact completion Reviewer PASS receipt is recorded",
+                replan_reason=(
+                    "enter assignment-free S3 completion review" if prior else ""
+                ),
+            )
+            print(
+                f"[workers plan] S3_COMPLETION_PROPOSAL: "
+                f"{display_path(proposal_info['path'])}"
+            )
+            print(
+                "No lane is created: COMPLETION_REVIEW is the only legal "
+                "assignment-free plan mode and is restricted to S3."
+            )
+            print(
+                "NEXT_OWNER_ACTION: python3 tools/workers.py commit-proposal "
+                f"{display_path(run_dir)}"
+            )
+            return 0
         print(
             "[workers plan] NO_STRONG_CANDIDATE: do not commit or copy a "
             "documentation example; update canonical frontier/coverage mapping, "
-            "rerun the state pass, then rerun this planner."
+            "rerun the state pass, then rerun this planner. "
+            f"S3_NOT_READY={','.join(stage_issues)}"
         )
         return 1
     selected = rows[:min(limit, 2)]
@@ -3948,14 +4558,28 @@ def print_commit_plan(
     exit_gate: str, limit: int, replan_reason: str = "",
 ) -> int:
     """Compatibility path: commit the conservative generated seed directly."""
-    lanes = [row["work_plan_lane"] for row in lane_suggestions(run_dir, limit=limit)]
-    if not lanes:
+    if mode == "COMPLETION_REVIEW":
         print(
-            "[workers commit-plan] NO_STRONG_CANDIDATE: update canonical "
-            "frontier/coverage mapping and rerun the state pass.",
+            "[workers commit-plan] COMPLETION_REVIEW_REQUIRES_PROPOSAL: run "
+            "`python3 tools/workers.py plan RUN_DIR`, inspect its current S3 "
+            "zero-lane proposal, then use the printed commit-proposal owner.",
             file=sys.stderr,
         )
         return 1
+    lanes = [] if mode == "COMPLETION_REVIEW" else [
+        row["work_plan_lane"] for row in lane_suggestions(run_dir, limit=limit)]
+    if not lanes:
+        if mode == "COMPLETION_REVIEW" and stage == "S3":
+            pass
+        else:
+            print(
+                "[workers commit-plan] NO_STRONG_CANDIDATE: update canonical "
+                "frontier/coverage mapping and rerun the state pass. If S3 is "
+                "ready, run `python3 tools/workers.py plan RUN_DIR` to generate "
+                "the exact assignment-free completion proposal.",
+                file=sys.stderr,
+            )
+            return 1
     try:
         lanes, inherited = _remaining_replan_lanes(
             run_dir, lanes, replan_reason=replan_reason)
@@ -3973,17 +4597,19 @@ def print_commit_plan(
         print(f"[workers commit-plan] ERROR {exc}", file=sys.stderr)
         return 1
     _print_plan_commit_receipt(
-        plan, inherited=inherited, source="generated-seed")
+        plan, run_dir=run_dir, inherited=inherited, source="generated-seed")
     return 0
 
 
 def _print_plan_commit_receipt(
-    plan: dict, *, inherited: list[str], source: str,
+    plan: dict, *, run_dir: Path, inherited: list[str], source: str,
     proposal_sha256: str = "",
 ) -> None:
     ready = [item for item in plan.get("lanes") or []
              if isinstance(item, dict) and not item.get("dependencies")]
+    completion_mode = plan.get("execution_mode") == "COMPLETION_REVIEW"
     topology_mode = (
+        "COMPLETION_REVIEW" if completion_mode else
         "PARALLEL_AGENTS" if len(ready) >= 2
         and all(lanes_can_overlap(left, right)
                 for index, left in enumerate(ready)
@@ -4007,7 +4633,11 @@ def _print_plan_commit_receipt(
                           for item in plan.get("lanes") or []
                           if isinstance(item, dict) and item.get("front")}),
         "inherited_completed_lanes": inherited,
-        "next_action": "delegate dependency-ready lanes from this committed plan",
+        "next_action": (
+            "python3 tools/workers.py completion-review " + display_path(run_dir)
+            if completion_mode else
+            "delegate dependency-ready lanes from this committed plan"
+        ),
     }
     if proposal_sha256:
         receipt["proposal_sha256"] = proposal_sha256
@@ -4041,10 +4671,76 @@ def print_commit_proposal(run_dir: Path) -> int:
         return 1
     _print_plan_commit_receipt(
         plan,
+        run_dir=run_dir,
         inherited=inherited,
         source="model-proposal",
         proposal_sha256=proposal_sha256,
     )
+    return 0
+
+
+def print_completion_review(run_dir: Path) -> int:
+    """Print the exact assignment-free Agent tool contract for current S3."""
+    if _runtime_receipts is None:
+        print(
+            "[workers completion-review] ERROR runtime_receipts unavailable",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        state = _runtime_receipts.completion_review_state(
+            run_dir, require_current_inputs=True)
+        evidence_hash = str(state.get("evidence_index_hash") or "") \
+            if isinstance(state, dict) else ""
+        bundle_hash = str(state.get("completion_bundle_hash") or "") \
+            if isinstance(state, dict) else ""
+        prompt = _runtime_receipts.completion_review_prompt(
+            run_dir, evidence_hash, bundle_hash)
+    except Exception as exc:
+        print(
+            "[workers completion-review] ERROR "
+            f"COMPLETION_REVIEW_STATE_INVALID:{exc.__class__.__name__}: "
+            "rerun the current planner and exact commit-proposal path.",
+            file=sys.stderr,
+        )
+        return 1
+    if not state or not prompt:
+        print(
+            "[workers completion-review] ERROR COMPLETION_REVIEW_NOT_READY: "
+            "commit a current S3 COMPLETION_REVIEW plan first with "
+            f"`python3 tools/workers.py plan {display_path(run_dir)}` then "
+            "`python3 tools/workers.py commit-proposal "
+            f"{display_path(run_dir)}`.",
+            file=sys.stderr,
+        )
+        return 1
+    completed = _runtime_receipts.completion_review_valid(
+        run_dir, evidence_hash)
+    result_envelope = _runtime_receipts.completion_review_result_envelope(
+        run_dir.name,
+        evidence_hash,
+        bundle_hash,
+    )
+    receipt = {
+        "schema": "xunji.completion-review-launch.v1",
+        "status": "complete" if completed else "ready",
+        "plan_digest": state.get("plan_digest"),
+        "evidence_index_hash": evidence_hash,
+        "completion_bundle_hash": state.get("completion_bundle_hash"),
+        "tool_name": "Agent",
+        "tool_input": {
+            "subagent_type": "xunji-reviewer",
+            "prompt": prompt,
+        },
+        "required_pass_final_line": result_envelope,
+        "next_owner_action": (
+            "derive typed cycle_end with tools/loop_journal.py end"
+            if completed else
+            "call Agent once with tool_input exactly as printed; do not add, "
+            "remove, or reorder any prompt byte"
+        ),
+    }
+    print(json.dumps(receipt, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -4082,6 +4778,107 @@ def print_cancel_unlaunched(run_dir: Path, assignment: str, reason: str) -> int:
         "review, evidence item, refutation, completed lane/cycle, or authority "
         "to close the front. Re-read canonical status and replan only after all "
         "assignment debt is clear."
+    )
+    return 0
+
+
+def print_settle_stopped(run_dir: Path, assignment: str) -> int:
+    if _runtime_receipts is None \
+            or not hasattr(_runtime_receipts, "settle_externally_stopped_agent"):
+        print(
+            "[workers settle-stopped] ERROR runtime receipt owner unavailable",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        result = _runtime_receipts.settle_externally_stopped_agent(
+            run_dir, assignment)
+    except Exception as exc:
+        print(f"[workers settle-stopped] ERROR {exc}", file=sys.stderr)
+        return 1
+    receipt = result.get("receipt") \
+        if isinstance(result.get("receipt"), dict) else {}
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    print(
+        "NEXT_OWNER_ACTION: the exact started attempt is projected failed, not "
+        "returned and not evidence. Run the ordinary workers.py delegate "
+        "checkpoint to create/replay its unique digest-bound Reviewer; record "
+        "Reviewer disposition, then Root may settle blocked/failed/abandoned "
+        "but never merged. receipt="
+        + str(receipt.get("receipt_hash") or "(missing)")
+    )
+    return 0
+
+
+def print_settle_stream_stalled(run_dir: Path, assignment: str) -> int:
+    if _runtime_receipts is None or not hasattr(
+            _runtime_receipts, "settle_stream_stalled_agent"):
+        print(
+            "[workers settle-stream-stalled] ERROR runtime receipt owner unavailable",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        result = _runtime_receipts.settle_stream_stalled_agent(
+            run_dir, assignment)
+    except Exception as exc:
+        print(
+            f"[workers settle-stream-stalled] ERROR {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    receipt = result.get("receipt") \
+        if isinstance(result.get("receipt"), dict) else {}
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    print(
+        "NEXT_OWNER_ACTION: the exact watchdog-killed attempt is projected "
+        "failed, not returned and not evidence. Create/replay its unique "
+        "digest-bound Reviewer, record disposition, then Root may settle "
+        "blocked/failed/abandoned but never merged. Do not resume or relabel "
+        "the old attempt; replan the still-open lane only after settlement. "
+        "receipt=" + str(receipt.get("receipt_hash") or "(missing)")
+    )
+    return 0
+
+
+def print_recover_hook_failed_stop(run_dir: Path, assignment: str) -> int:
+    if _runtime_receipts is None or not hasattr(
+            _runtime_receipts, "recover_hook_failed_agent_stop"):
+        print(
+            "[workers recover-hook-failed-stop] ERROR runtime receipt owner unavailable",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        result = _runtime_receipts.recover_hook_failed_agent_stop(
+            run_dir, assignment)
+    except Exception as exc:
+        print(
+            f"[workers recover-hook-failed-stop] ERROR {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    receipt = result.get("receipt") \
+        if isinstance(result.get("receipt"), dict) else {}
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    if result.get("status") == "committed_projection_pending":
+        print(
+            "NEXT_OWNER_ACTION: the immutable failed-Stop recovery receipt is "
+            "committed, but its assignment/merge projection is not complete. "
+            "Run exact `" + str(result.get("next_argv") or "")
+            + "`, then re-run `python3 tools/workers.py status "
+            + display_path(run_dir) + "`. Do not create a second receipt, "
+            "fabricate SubagentStop, or record Reviewer disposition first."
+        )
+        return 1
+    print(
+        "NEXT_OWNER_ACTION: this exact model return is now projected from the "
+        "content-addressed failed-Stop recovery receipt; no physical "
+        "SubagentStop was fabricated. Re-run workers.py status, then use the "
+        "ordinary digest-bound Reviewer/Root disposition path. The recovery "
+        "itself grants no finding, evidence, merge, front closure, or run "
+        "completion authority. receipt="
+        + str(receipt.get("receipt_hash") or "(missing)")
     )
     return 0
 
@@ -4283,6 +5080,12 @@ def _delegate_ready_lanes_locked(
     mode = str(plan.get("execution_mode") or "")
     if mode == "ROOT_DIRECT":
         raise ValueError("ROOT_DIRECT plan has no Agent delegation wave")
+    if mode == "COMPLETION_REVIEW":
+        raise ValueError(
+            "COMPLETION_REVIEW has no assignment lanes; run `python3 "
+            f"tools/workers.py completion-review {display_path(run_dir)}` and "
+            "call the exact printed Agent contract"
+        )
     projection = _run_model.plan_cycle_projection(run_dir, plan=plan) \
         if _run_model is not None else {}
     projected_states = {
@@ -4314,6 +5117,11 @@ def _delegate_ready_lanes_locked(
             continue
         if not _work_plan.lane_dependencies_satisfied(run_dir, plan, lane):
             continue
+        # Recheck immediately before selection.  A second infrastructure
+        # failure may open the derived barrier after this plan was committed;
+        # no stale prepared assignment or scheduler race may become the third
+        # identical target-shaped launch.
+        _work_plan.infra_barrier_preflight(run_dir, lane)
         ready.append({
             "work_plan_lane": {**lane, "dependencies": []},
             **({"existing_assignment": existing} if existing else {}),
@@ -4514,6 +5322,9 @@ def print_status(run_dir: Path) -> int:
         last = r.get("last_seen_at") or r.get("updated_at") or "-"
         print(f"  {r['agent']:22} role={r['role']:12} front={r['front']:8} "
               f"state={r.get('status','?'):9} last={last} file={r.get('file_status','?')}{warn}")
+    continuation = _plan_continuation_notice(run_dir)
+    if continuation:
+        print(continuation)
     return 0
 
 
@@ -4577,6 +5388,76 @@ def _plan_continuation_notice(run_dir: Path) -> str:
         if isinstance(item, dict) and item.get("complete") is not True
         and str(item.get("lane_id") or "")
     ]
+    if _runtime_receipts is not None:
+        for item in projection.get("lane_states", []):
+            if not isinstance(item, dict):
+                continue
+            assignment = str(item.get("assignment") or "")
+            hook_failed_status = (
+                _runtime_receipts.hook_failed_stop_recovery_status(
+                    run_dir, assignment)
+                if assignment and hasattr(
+                    _runtime_receipts, "hook_failed_stop_recovery_status")
+                else {}
+            )
+            if hook_failed_status.get("status") \
+                    == "committed_projection_pending":
+                return (
+                    "NEXT_OWNER_ACTION: the immutable failed-Stop recovery "
+                    f"receipt for {assignment} is committed, but its derived "
+                    "assignment/merge projection is incomplete; run exact `"
+                    + str(hook_failed_status.get("next_argv") or "")
+                    + "`, then rerun `python3 tools/workers.py status "
+                    + display_path(run_dir)
+                    + "`. Do not create another recovery receipt or record "
+                    "Reviewer disposition before the projection is exact."
+                )
+            if str(item.get("runtime_state") or "") != "running":
+                continue
+            stream_status = (
+                _runtime_receipts.stream_stall_recovery_status(
+                    run_dir, assignment)
+                if assignment and hasattr(
+                    _runtime_receipts, "stream_stall_recovery_status")
+                else {}
+            )
+            stop_status = _runtime_receipts.external_stop_recovery_status(
+                run_dir, assignment) if assignment else {}
+            if hook_failed_status.get("status") == "eligible":
+                return (
+                    "NEXT_OWNER_ACTION: Claude Code recorded one exact completed "
+                    f"model result for running assignment {assignment}, followed "
+                    "by host-authored XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED "
+                    "SubagentStop feedback, while the runtime journal has no Stop; "
+                    "run exact typed "
+                    f"`python3 tools/workers.py recover-hook-failed-stop "
+                    f"{display_path(run_dir)} {assignment}`. This preserves the "
+                    "missing physical Stop as a typed recovery receipt and "
+                    "projects returned only; ordinary Reviewer and Root "
+                    "settlement remain mandatory."
+                )
+            if stream_status.get("status") == "eligible":
+                return (
+                    "NEXT_OWNER_ACTION: Claude Code host task-notification and "
+                    f"the exact child terminal pair prove running assignment "
+                    f"{assignment} was killed by the stream watchdog after "
+                    "600s idle, with no SubagentStop or later activity; run "
+                    "exact typed `python3 tools/workers.py "
+                    f"settle-stream-stalled {display_path(run_dir)} "
+                    f"{assignment}`. This projects failed only; Reviewer and "
+                    "Root non-merged settlement remain mandatory, and the old "
+                    "attempt must not be resumed."
+                )
+            if stop_status.get("status") == "eligible":
+                return (
+                    "NEXT_OWNER_ACTION: Claude Code has transcript-proven "
+                    f"running assignment {assignment} user-stopped and "
+                    "permanently non-resumable; run exact typed "
+                    f"`python3 tools/workers.py settle-stopped "
+                    f"{display_path(run_dir)} {assignment}`. This projects a "
+                    "failed result only; Reviewer and Root non-merged "
+                    "settlement remain mandatory."
+                )
     if not pending:
         return ""
     freshness = "current"
@@ -4631,6 +5512,28 @@ def _plan_continuation_notice(run_dir: Path) -> str:
                 f"{display_path(run_dir)} {assignment} --reason "
                 "\"turn or canonical inputs changed before launch\"` settlement, "
                 "then replan the still-open front."
+            )
+        if action == _agent_settlement.RECOVERY_SETTLE_EXTERNALLY_STOPPED \
+                and assignment:
+            return (
+                "NEXT_OWNER_ACTION: committed plan retains a started attempt "
+                "that Claude Code has transcript-proven user-stopped and "
+                "permanently non-resumable; run the exact typed "
+                f"`python3 tools/workers.py settle-stopped "
+                f"{display_path(run_dir)} {assignment}` command. This projects "
+                "failed only; then create/replay its digest-bound Reviewer and "
+                "complete Root settlement."
+            )
+        if action == _agent_settlement.RECOVERY_SETTLE_STREAM_STALLED \
+                and assignment:
+            return (
+                "NEXT_OWNER_ACTION: committed plan retains a started attempt "
+                "whose exact host notification and child terminal pair prove "
+                "stream-watchdog death without SubagentStop; run `python3 "
+                f"tools/workers.py settle-stream-stalled "
+                f"{display_path(run_dir)} {assignment}`. This projects failed "
+                "only; then create/replay its digest-bound Reviewer and "
+                "complete Root non-merged settlement before replanning."
             )
         if action == _agent_settlement.RECOVERY_WAIT_RUNNING:
             return (
@@ -5122,6 +6025,56 @@ def _selftest() -> int:
         ),
         disposition="accept-candidate",
     )
+    disposition_inline_paths_from_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=frozen_artifact_text,
+        reviewer_text=(
+            "`accept-candidate` — the frozen candidate is supported. "
+            "Evidence paths present in the frozen result "
+            "(bodies and sidecars, complete):\n\n"
+            + "".join(f"- {path.resolve()}\n" for path in artifact_paths)
+        ),
+        disposition="accept-candidate",
+    )
+    disposition_bound_result_paths_from_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=frozen_artifact_text,
+        reviewer_text=(
+            "`accept-candidate` for the frozen Hunter result "
+            f"`{'a' * 64}` (A-web-hunter-036, L-F-001-TARGET-33). "
+            "Exact evidence paths present in the frozen result "
+            "(body and replay sidecar each repeated as complete paths):\n"
+            + "".join(f"- {path.resolve()}\n" for path in artifact_paths)
+        ),
+        disposition="accept-candidate",
+    )
+    negated_disposition_inline_heading_ignored = not _frozen_artifact_references(
+        artifact_review_run,
+        "`accept-candidate` — no Evidence paths present in the frozen result:\n"
+        + "".join(f"- {path.resolve()}\n" for path in artifact_paths),
+        expected={f"evidence/{path.name}" for path in artifact_paths},
+    )
+    negated_disposition_variants_ignored = all(
+        not _frozen_artifact_references(
+            artifact_review_run,
+            heading + "\n" + "".join(
+                f"- {path.resolve()}\n" for path in artifact_paths),
+            expected={f"evidence/{path.name}" for path in artifact_paths},
+        )
+        for heading in (
+            "`accept-candidate` — Evidence paths present in the frozen result — None exist:",
+            "`ACCEPT-CANDIDATE` — no evidence is present; Evidence paths present in the frozen result:",
+            "> `accept-candidate` — Evidence paths present in the frozen result:",
+        )
+    )
+    ordinary_inline_evidence_phrase_ignored = not _frozen_artifact_references(
+        artifact_review_run,
+        "Review notes mention Evidence paths present in the frozen result:\n"
+        + "".join(f"- {path.resolve()}\n" for path in artifact_paths),
+        expected={f"evidence/{path.name}" for path in artifact_paths},
+    )
     root_body = artifact_review_run / "evidence" / "root.html"
     legacy_under_target = (
         "## Artifacts (saved body + replay pairs)\n"
@@ -5355,6 +6308,265 @@ def _selftest() -> int:
         _evidence_references(artifact_review_run, "evidence/../outside.txt")
     except ValueError as exc:
         evidence_escape_rejected = "escapes run" in str(exc)
+
+    v2_wire = b"bounded-v2-wire-body-for-chunk-validation"
+    v2_saved = v2_wire[:12]
+    v2_body = artifact_review_run / "evidence" / "bounded-v2.bin"
+    v2_replay = artifact_review_run / "evidence" / "bounded-v2.bin.replay.json"
+    v2_manifest_path = artifact_review_run / "evidence" / "bounded-v2.bin.chunks.json"
+    v2_chunk_dir = artifact_review_run / "evidence" / "bounded-v2.bin.chunks"
+    v2_body.write_bytes(v2_saved)
+    v2_chunk_dir.mkdir()
+    v2_chunk_size = 11
+    v2_chunks: list[dict] = []
+    for index, offset in enumerate(range(0, len(v2_wire), v2_chunk_size)):
+        part = v2_wire[offset:offset + v2_chunk_size]
+        name = f"part-{index:04d}.bin"
+        (v2_chunk_dir / name).write_bytes(part)
+        v2_chunks.append({
+            "path": f"{v2_chunk_dir.name}/{name}",
+            "offset": offset,
+            "bytes": len(part),
+            "sha256": hashlib.sha256(part).hexdigest(),
+        })
+    v2_manifest_record = {
+        "schema": "xunji.probe.body_chunks.v2",
+        "saved_body": v2_body.name,
+        "chunk_dir": v2_chunk_dir.name,
+        "chunk_size": v2_chunk_size,
+        "wire_len": len(v2_wire),
+        "wire_sha1": hashlib.sha1(v2_wire).hexdigest(),
+        "wire_sha256": hashlib.sha256(v2_wire).hexdigest(),
+        "chunks": v2_chunks,
+    }
+    v2_manifest_path.write_text(
+        json.dumps(v2_manifest_record), encoding="utf-8")
+    v2_manifest_sha256 = hashlib.sha256(v2_manifest_path.read_bytes()).hexdigest()
+    v2_replay_record = {
+        "schema": "xunji.probe.replay.v2",
+        "request": {"method": "GET", "url": "http://127.0.0.1:18765/v2"},
+        "response": {
+            "status": 200,
+            "len": len(v2_wire),
+            "sha1": hashlib.sha1(v2_wire).hexdigest(),
+            "wire_len": len(v2_wire),
+            "wire_sha1": hashlib.sha1(v2_wire).hexdigest(),
+            "wire_sha256": hashlib.sha256(v2_wire).hexdigest(),
+        },
+        "saved_body": str(v2_body.resolve()),
+        "saved_body_meta": {
+            "len": len(v2_saved),
+            "sha1": hashlib.sha1(v2_saved).hexdigest(),
+            "truncated": True,
+        },
+        "saved_body_chunks": v2_manifest_path.name,
+    }
+    v2_replay.write_text(json.dumps(v2_replay_record), encoding="utf-8")
+    v2_text = (
+        "Artifacts:\n"
+        f"- {v2_body.resolve()}\n"
+        f"- {v2_replay.resolve()}\n"
+    )
+    v2_receipts = _validated_review_artifacts(
+        artifact_review_run,
+        target_row={"effect": "target"},
+        target_text=v2_text,
+        reviewer_text=v2_text,
+        disposition="accept-candidate",
+    )
+    v2_receipt_response = next(
+        item["response"] for item in v2_receipts
+        if item.get("path", "").endswith(".replay.json"))
+    v2_manifest_receipt = next(
+        item for item in v2_receipts
+        if item.get("path") == "evidence/bounded-v2.bin.chunks.json")
+    v2_direct_binding = _validated_replay_body(
+        artifact_review_run,
+        "evidence/bounded-v2.bin.replay.json",
+        v2_replay_record,
+        v2_replay_record["response"],
+        v2_body,
+    )
+
+    def v2_manifest_rejected(
+        mutated: dict,
+        expected: str,
+        *,
+        response_override: dict | None = None,
+    ) -> bool:
+        v2_manifest_path.write_text(json.dumps(mutated), encoding="utf-8")
+        try:
+            _validated_replay_body(
+                artifact_review_run,
+                "evidence/bounded-v2.bin.replay.json",
+                v2_replay_record,
+                response_override or v2_replay_record["response"],
+                v2_body,
+            )
+        except ValueError as exc:
+            return expected in str(exc)
+        finally:
+            v2_manifest_path.write_text(
+                json.dumps(v2_manifest_record), encoding="utf-8")
+        return False
+
+    v2_traversal_manifest = json.loads(json.dumps(v2_manifest_record))
+    v2_traversal_manifest["chunks"][0]["path"] = (
+        "../escape.chunks/part-0000.bin")
+    v2_chunk_traversal_rejected = v2_manifest_rejected(
+        v2_traversal_manifest, "schema invalid")
+
+    v2_sha256_manifest = json.loads(json.dumps(v2_manifest_record))
+    v2_sha256_manifest["wire_sha256"] = "0" * 64
+    v2_sha256_response = dict(
+        v2_replay_record["response"], wire_sha256="0" * 64)
+    v2_full_sha256_tamper_rejected = v2_manifest_rejected(
+        v2_sha256_manifest, "full-body chunk hash mismatch",
+        response_override=v2_sha256_response)
+
+    v2_length_manifest = json.loads(json.dumps(v2_manifest_record))
+    v2_length_manifest["wire_len"] = len(v2_wire) + 1
+    v2_length_tamper_rejected = v2_manifest_rejected(
+        v2_length_manifest, "binding mismatch")
+
+    v2_count_manifest = json.loads(json.dumps(v2_manifest_record))
+    v2_count_manifest["chunks"] = [
+        json.loads(json.dumps(v2_manifest_record["chunks"][0]))
+        for _ in range(PROBE_CHUNK_MAX_COUNT + 1)
+    ]
+    v2_count_limit_rejected = v2_manifest_rejected(
+        v2_count_manifest, "schema invalid")
+
+    v2_zero_chunk_size = json.loads(json.dumps(v2_manifest_record))
+    v2_zero_chunk_size["chunk_size"] = 0
+    v2_zero_chunk_size_rejected = v2_manifest_rejected(
+        v2_zero_chunk_size, "schema invalid")
+    v2_fractional_chunk_size = json.loads(json.dumps(v2_manifest_record))
+    v2_fractional_chunk_size["chunk_size"] = 11.5
+    v2_fractional_chunk_size_rejected = v2_manifest_rejected(
+        v2_fractional_chunk_size, "schema invalid")
+
+    v2_second_replay = (
+        artifact_review_run / "evidence" / "bounded-v2-copy.bin.replay.json")
+    v2_second_replay.write_text(json.dumps(v2_replay_record), encoding="utf-8")
+    shared_manifest_text = (
+        "Artifacts:\n"
+        f"- {v2_body.resolve()}\n"
+        f"- {v2_replay.resolve()}\n"
+        f"- {v2_second_replay.resolve()}\n"
+    )
+    try:
+        _validated_review_artifacts(
+            artifact_review_run,
+            target_row={"effect": "target"},
+            target_text=shared_manifest_text,
+            reviewer_text=shared_manifest_text,
+            disposition="accept-candidate",
+        )
+        shared_manifest_rejected = False
+    except ValueError as exc:
+        shared_manifest_rejected = "cannot certify multiple" in str(exc)
+
+    first_v2_chunk = v2_chunk_dir / "part-0000.bin"
+    first_v2_bytes = first_v2_chunk.read_bytes()
+    first_v2_chunk.write_bytes(b"!" + first_v2_bytes[1:])
+    try:
+        _validated_replay_body(
+            artifact_review_run,
+            "evidence/bounded-v2.bin.replay.json",
+            v2_replay_record,
+            v2_replay_record["response"],
+            v2_body,
+        )
+        v2_chunk_tamper_rejected = False
+    except ValueError as exc:
+        v2_chunk_tamper_rejected = "integrity mismatch" in str(exc)
+    finally:
+        first_v2_chunk.write_bytes(first_v2_bytes)
+
+    v2_real_chunk_dir = artifact_review_run / "evidence" / "bounded-v2.bin.real-chunks"
+    v2_chunk_dir.rename(v2_real_chunk_dir)
+    v2_chunk_dir.symlink_to(v2_real_chunk_dir.name, target_is_directory=True)
+    try:
+        _validated_replay_body(
+            artifact_review_run,
+            "evidence/bounded-v2.bin.replay.json",
+            v2_replay_record,
+            v2_replay_record["response"],
+            v2_body,
+        )
+        v2_chunk_symlink_rejected = False
+    except ValueError as exc:
+        v2_chunk_symlink_rejected = "symlink" in str(exc)
+    finally:
+        v2_chunk_dir.unlink()
+        v2_real_chunk_dir.rename(v2_chunk_dir)
+
+    secure_real_dir = artifact_review_run / "evidence" / "secure-real"
+    secure_real_dir.mkdir()
+    secure_leaf = secure_real_dir / "leaf.bin"
+    secure_leaf.write_bytes(b"secure")
+    secure_link = artifact_review_run / "evidence" / "secure-link"
+    secure_link.symlink_to(secure_real_dir.name, target_is_directory=True)
+    frozen_intermediate_symlink_rejected = False
+    try:
+        _inspect_evidence_regular_file(
+            artifact_review_run, secure_link / secure_leaf.name,
+            max_bytes=16, label="secure-open selftest", collect=True)
+    except ValueError:
+        frozen_intermediate_symlink_rejected = True
+    bounded_artifact_read_rejected = False
+    try:
+        _inspect_evidence_regular_file(
+            artifact_review_run, v2_body,
+            max_bytes=len(v2_saved) - 1,
+            label="bounded-read selftest", collect=True)
+    except ValueError as exc:
+        bounded_artifact_read_rejected = "hard byte limit" in str(exc)
+
+    v1_wire = b"legacy-v1-full-wire"
+    v1_saved = v1_wire[:6]
+    v1_body = artifact_review_run / "evidence" / "legacy-v1.bin"
+    v1_chunk_dir = artifact_review_run / "evidence" / "legacy-v1.bin.chunks"
+    v1_manifest_path = artifact_review_run / "evidence" / "legacy-v1.bin.chunks.json"
+    v1_body.write_bytes(v1_saved)
+    v1_chunk_dir.mkdir()
+    v1_part_path = v1_chunk_dir / "part-0000.bin"
+    v1_part_path.write_bytes(v1_wire)
+    v1_manifest_path.write_text(json.dumps({
+        "schema": "xunji.probe.body_chunks.v1",
+        "saved_body": str(v1_body.resolve()),
+        "chunk_dir": str(v1_chunk_dir.resolve()),
+        "chunk_size": len(v1_wire),
+        "full_len": len(v1_wire),
+        "full_sha1": hashlib.sha1(v1_wire).hexdigest(),
+        "chunks": [{
+            "file": str(v1_part_path.resolve()),
+            "offset": 0,
+            "bytes": len(v1_wire),
+            "sha1": hashlib.sha1(v1_wire).hexdigest(),
+        }],
+    }), encoding="utf-8")
+    v1_replay_record = {
+        "schema": "xunji.probe.replay.v2",
+        "response": {
+            "wire_len": len(v1_wire),
+            "wire_sha1": hashlib.sha1(v1_wire).hexdigest(),
+        },
+        "saved_body_meta": {
+            "len": len(v1_saved),
+            "sha1": hashlib.sha1(v1_saved).hexdigest(),
+            "truncated": True,
+        },
+        "saved_body_chunks": str(v1_manifest_path.resolve()),
+    }
+    v1_chunk_binding = _validated_replay_body(
+        artifact_review_run,
+        "evidence/legacy-v1.bin.replay.json",
+        v1_replay_record,
+        v1_replay_record["response"],
+        v1_body,
+    )
     partial_wire = b"prefix-" + b"x" * 64
     partial_saved = partial_wire[:16]
     partial_body = artifact_review_run / "evidence" / "partial.html"
@@ -5558,6 +6770,58 @@ def _selftest() -> int:
     planner_seed_bytes = _plan_proposal_path(run).read_bytes()
     planner_seed_proposal = json.loads(planner_seed_bytes.decode("utf-8"))
     planner_seed_digest = hashlib.sha256(planner_seed_bytes).hexdigest()
+    completion_plan_run = d / "completion-plan"
+    (completion_plan_run / "state").mkdir(parents=True)
+    (completion_plan_run / "target.md").write_text(
+        "# Target\n- Authorized scope: completion.example\n",
+        encoding="utf-8",
+    )
+    (completion_plan_run / "coverage.json").write_text(json.dumps({
+        "assets": [{
+            "host": "completion.example", "reachable": True,
+            "examined": True,
+        }],
+    }), encoding="utf-8")
+    (completion_plan_run / "frontier.md").write_text(
+        "# Frontier\n\n## Closed Fronts\n\n"
+        "### F-001 — completed front\n"
+        "- Status: blocked_type_b\n- Barrier class: authorization\n"
+        "- Current depth: moderate\n",
+        encoding="utf-8",
+    )
+    (completion_plan_run / "state" / "turn_contract.json").write_text(
+        json.dumps(fixture_turn_contract(
+            completion_plan_run, "completion-plan-fixture")),
+        encoding="utf-8",
+    )
+    for relative in _runtime_receipts.GLOBAL_COMPLETION_INPUTS:
+        path = completion_plan_run / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text(f"# {relative}\nsubstantive selftest state\n",
+                            encoding="utf-8")
+    (completion_plan_run / "state" / "conflicts.json").write_text(
+        "{}\n", encoding="utf-8")
+    completion_plan_output = io.StringIO()
+    with contextlib.redirect_stdout(completion_plan_output):
+        completion_plan_exit = print_plan(completion_plan_run, 2)
+    completion_proposal = json.loads(
+        _plan_proposal_path(completion_plan_run).read_text(encoding="utf-8"))
+    completion_commit_output = io.StringIO()
+    with contextlib.redirect_stdout(completion_commit_output):
+        completion_commit_exit = print_commit_proposal(completion_plan_run)
+    completion_contract_output = io.StringIO()
+    with contextlib.redirect_stdout(completion_contract_output):
+        completion_contract_exit = print_completion_review(completion_plan_run)
+    completion_launch = json.loads(completion_contract_output.getvalue()) \
+        if completion_contract_exit == 0 else {}
+    completion_state_error_output = io.StringIO()
+    with mock.patch.object(
+            _runtime_receipts, "completion_review_state",
+            side_effect=RuntimeError("selftest projection failure")), \
+            contextlib.redirect_stderr(completion_state_error_output):
+        completion_state_error_exit = print_completion_review(
+            completion_plan_run)
     driver_output = io.StringIO()
     with contextlib.redirect_stdout(driver_output):
         no_strong_exit = print_plan(no_strong, 3)
@@ -5679,6 +6943,46 @@ def _selftest() -> int:
     lifecycle_closed = agent_lifecycle_issues(lifecycle_run, closure=True)
     lifecycle_file = ROOT / lifecycle_rec["agent_file"] if not Path(lifecycle_rec["agent_file"]).is_absolute() else Path(lifecycle_rec["agent_file"])
     lifecycle_text = lifecycle_file.read_text(encoding="utf-8")
+
+    projection_cache_run = d / "projection-cache"
+    projection_cache_run.mkdir()
+    projection_cache_rec = {
+        "agent": "A-cache-001",
+        "role": "web-hunter",
+        "plan_digest": "a" * 64,
+        "lane_id": "L-CACHE",
+    }
+    projection_cache_receipt = {"receipt_hash": "b" * 64}
+    projection_cache_draft = _runtime_receipts.merge_draft_path(
+        projection_cache_run, projection_cache_rec["agent"])
+    projection_cache_draft.parent.mkdir(parents=True)
+    projection_cache_draft.write_text(json.dumps({
+        "schema": "xunji.merge-draft.v1",
+        "review_status": "complete",
+        "review_receipt": projection_cache_receipt,
+    }), encoding="utf-8")
+    projection_cache: dict[str, dict] = {}
+    with mock.patch.object(
+            _work_plan, "load_plan_snapshot",
+            return_value={"plan_digest": "a" * 64}), \
+            mock.patch.object(
+                _run_model, "plan_cycle_projection",
+                return_value={"lane_states": [{
+                    "lane_id": "L-CACHE",
+                    "assignment": "A-cache-001",
+                    "review_receipt_hash": "b" * 64,
+                }]}) as projection_spy:
+        projection_cache_first = _current_review_receipt(
+            projection_cache_run, projection_cache_rec,
+            projection_cache=projection_cache)
+        projection_cache_second = _current_review_receipt(
+            projection_cache_run, projection_cache_rec,
+            projection_cache=projection_cache)
+    lifecycle_projection_reused = bool(
+        projection_cache_first == projection_cache_receipt
+        and projection_cache_second == projection_cache_receipt
+        and projection_spy.call_count == 1
+    )
 
     explicit_assets_required = False
     try:
@@ -5837,7 +7141,9 @@ def _selftest() -> int:
                 "message": {"role": "assistant", "content": [{
                     "type": "tool_use", "id": "action-" + host, "name": "Bash",
                     "input": {
-                        "command": f"python3 tools/probe.py GET https://{host}"},
+                        "command": (
+                            "python3 tools/probe.py GET https://"
+                            + (host[:-4] if host.endswith(":443") else host))},
                 }]},
             }) for host in assets_for_agent) + "\n",
             encoding="utf-8",
@@ -5902,17 +7208,20 @@ def _selftest() -> int:
         partial_asset_merge_blocked = "two.example" in str(exc)
 
     full_run, full_rec, full_transcript, full_child = build_merge_gate_run(
-        "full-activity", ["alpha.example", "bravo.example"])
+        "full-activity", ["alpha.example:443", "bravo.example:8443"])
     (full_run / "evidence.md").write_text(
-        "# Evidence\n## E-001\n- Action: checked alpha.example and bravo.example\n"
+        "# Evidence\n## E-001\n"
+        "- Action: checked alpha.example:443 and bravo.example:8443\n"
         "- Result: per-asset controls recorded\n- Certainty: 0.5\n",
         encoding="utf-8")
-    for host in ("alpha.example", "bravo.example"):
+    for host in ("alpha.example:443", "bravo.example:8443"):
         _runtime_receipts.append_hook_event(full_run, {
             "hook_event_name": "PostToolUse", "session_id": "full-activity",
             "transcript_path": str(full_transcript), "tool_name": "Bash",
             "tool_use_id": "action-" + host, "agent_id": full_child,
-            "tool_input": {"command": f"python3 tools/probe.py GET https://{host}"},
+            "tool_input": {"command": (
+                "python3 tools/probe.py GET https://"
+                + (host[:-4] if host.endswith(":443") else host))},
             "tool_response": {"stdout": "ok"}, "xunji_target_action": True,
         })
     _runtime_receipts.append_hook_event(full_run, {
@@ -5927,7 +7236,7 @@ def _selftest() -> int:
     full_asset_merge_allowed = (
         full_merge.get("coverage_merge_satisfied") is True
         and set((full_merge.get("coverage_merge") or {}).get("assets", {}))
-        == {"alpha.example", "bravo.example"}
+        == {"alpha.example:443", "bravo.example:8443"}
         and all(
             item.get("canonical_promotion") == "pending_root_synthesis"
             and set(item) == {"target_actions", "canonical_promotion"}
@@ -6123,6 +7432,30 @@ def _selftest() -> int:
             contract=contract, lanes=execution_lanes + reviewer_lanes,
         )
         return transaction_run
+
+    barrier_race_run = build_delegate_transaction_run(
+        "delegate-infra-barrier-race", "barrier", include_target_lane=True)
+    for receipt in ("1" * 64, "2" * 64):
+        _work_plan.barrier_state.record_failure(
+            barrier_race_run,
+            front="F-031",
+            action_fingerprint="a" * 64,
+            cause_code="WORK_PLAN_TURN_STALE",
+            precondition_digest="b" * 64,
+            failure_receipt_sha256=receipt,
+            failure_domain="scheduler",
+            target_bytes=0,
+            runs_root=d,
+        )
+    delegate_barrier_race_blocked = False
+    try:
+        delegate_ready_lanes(
+            barrier_race_run, runtime_slots=2, request_budget=1,
+            model_egress_budget=0, merge_capacity=10, limit=2,
+        )
+    except ValueError as exc:
+        delegate_barrier_race_blocked = (
+            "WORK_PLAN_INFRA_BARRIER_BINDING_REQUIRED" in str(exc))
 
     transaction_run = build_delegate_transaction_run(
         "delegate-transaction-rollback", "a")
@@ -6869,6 +8202,34 @@ def _selftest() -> int:
     except ValueError as exc:
         runtime_event_cancel_blocked = any(token in str(exc) for token in (
             "NOT_UNLAUNCHED", "RUNTIME_STATE_EXISTS", "RUNTIME_EVENT_EXISTS"))
+    projected_failure_merge_rejected = False
+    try:
+        update_agent_lifecycle(
+            runtime_launch_run, runtime_launch["assignment"],
+            status="merged", note="Evidence: E-001; Front: F-001",
+            terminal=True,
+        )
+    except ValueError as exc:
+        projected_failure_merge_rejected = (
+            "failed runtime attempt cannot be merged" in str(exc))
+    with mock.patch.object(
+            sys.modules[__name__], "_current_review_receipt",
+            return_value={"receipt_hash": "f" * 64}), \
+            mock.patch.object(
+                _runtime_receipts, "disposition_note_issues",
+                return_value=[]):
+        projected_failure_root_settlement = update_agent_lifecycle(
+            runtime_launch_run, runtime_launch["assignment"],
+            status="blocked",
+            note="Reason: launch failed; Front: F-001",
+            terminal=True,
+        )
+    projected_failure_settles_without_amend = bool(
+        projected_failure_root_settlement.get("status") == "blocked"
+        and projected_failure_root_settlement.get(
+            "root_disposition_review_receipt_hash") == "f" * 64
+        and projected_failure_root_settlement.get("root_disposition_at")
+    )
 
     def exact_replay_fixture(kind: str, *, tombstone: bool) -> bool:
         replay_run = d / f"agent-exact-replay-{kind}-tombstone-{int(tombstone)}"
@@ -7122,6 +8483,24 @@ def _selftest() -> int:
             limit=1,
         )
     planned_plan = _work_plan.load_plan(planned_run)
+    completion_compat_output = io.StringIO()
+    with contextlib.redirect_stderr(completion_compat_output):
+        completion_compat_exit = print_commit_plan(
+            planned_run,
+            stage="S3",
+            objective="attempt direct completion compatibility bypass",
+            mode="COMPLETION_REVIEW",
+            reason="must use proposal owner",
+            exit_gate="must remain unchanged",
+            limit=1,
+        )
+    completion_compat_rejected = bool(
+        completion_compat_exit == 1
+        and "COMPLETION_REVIEW_REQUIRES_PROPOSAL"
+        in completion_compat_output.getvalue()
+        and _work_plan.load_plan(planned_run).get("plan_digest")
+        == planned_plan.get("plan_digest")
+    )
     planned_hunter_batch = delegate_ready_lanes(
         planned_run, runtime_slots=1, request_budget=10,
         model_egress_budget=1, merge_capacity=100, limit=1,
@@ -8094,6 +9473,20 @@ def _selftest() -> int:
          len(exact_paths_from_receipts) == 4
          and sum(item["path"].endswith(".replay.json")
                  for item in exact_paths_from_receipts) == 2),
+        ("accept-candidate inline evidence heading admits its following exact list",
+         len(disposition_inline_paths_from_receipts) == 4
+         and sum(item["path"].endswith(".replay.json")
+                 for item in disposition_inline_paths_from_receipts) == 2),
+        ("accept-candidate bound-result evidence heading admits its exact list",
+         len(disposition_bound_result_paths_from_receipts) == 4
+         and sum(item["path"].endswith(".replay.json")
+                 for item in disposition_bound_result_paths_from_receipts) == 2),
+        ("negated accept-candidate inline evidence heading remains ignored",
+         negated_disposition_inline_heading_ignored),
+        ("negated disposition heading variants remain data, not evidence authority",
+         negated_disposition_variants_ignored),
+        ("ordinary prose cannot open an inline evidence declaration",
+         ordinary_inline_evidence_phrase_ignored),
         ("legacy exact-directory plus basename artifact pairs normalize narrowly",
          len(legacy_under_receipts) == 4
          and sum(item["path"].endswith(".replay.json")
@@ -8146,6 +9539,44 @@ def _selftest() -> int:
          non_artifact_stale_ignored),
         ("artifact parser rejects evidence traversal outside the evidence directory",
          evidence_escape_rejected),
+        ("v2 replay resolves its bounded chunk manifest relative to the sidecar",
+         v2_receipt_response.get("wire_verified") is True
+         and v2_receipt_response.get("len") == len(v2_wire)
+         and v2_receipt_response.get("wire_sha256")
+            == hashlib.sha256(v2_wire).hexdigest()
+         and v2_receipt_response.get("chunk_manifest")
+            == "evidence/bounded-v2.bin.chunks.json"
+         and v2_receipt_response.get("chunk_manifest_sha256")
+            == v2_manifest_sha256
+         and v2_manifest_receipt.get("sha256") == v2_manifest_sha256
+         and v2_manifest_receipt.get("size") == v2_manifest_path.stat().st_size
+         and v2_direct_binding.get("wire_sha256")
+            == hashlib.sha256(v2_wire).hexdigest()),
+        ("frozen artifact reads reject intermediate symlinks",
+         frozen_intermediate_symlink_rejected),
+        ("frozen artifact reads enforce hard byte caps before collection",
+         bounded_artifact_read_rejected),
+        ("v2 chunk manifest rejects traversal syntax",
+         v2_chunk_traversal_rejected),
+        ("v2 chunk paths reject intermediate symlinks",
+         v2_chunk_symlink_rejected),
+        ("v2 chunk bytes are hashed instead of trusted from the manifest",
+         v2_chunk_tamper_rejected),
+        ("v2 full-wire SHA-256 is recomputed from the bounded chunks",
+         v2_full_sha256_tamper_rejected),
+        ("v2 manifest length stays bound to the replay response",
+         v2_length_tamper_rejected),
+        ("v2 manifest count cannot exceed the hard chunk cap",
+         v2_count_limit_rejected),
+        ("v2 chunk size rejects zero and fractional values before arithmetic",
+         v2_zero_chunk_size_rejected and v2_fractional_chunk_size_rejected),
+        ("one v2 chunk manifest cannot certify two replay responses",
+         shared_manifest_rejected),
+        ("legacy v1 absolute chunk manifests remain readable",
+         v1_chunk_binding.get("wire_verified") is True
+         and v1_chunk_binding.get("wire_len") == len(v1_wire)
+         and v1_chunk_binding.get("wire_sha1")
+            == hashlib.sha1(v1_wire).hexdigest()),
         ("truncated replay validates saved bytes without comparing them to the wire hash",
          partial_response.get("truncated") is True
          and partial_response.get("saved_len") == len(partial_saved)
@@ -8181,6 +9612,46 @@ def _selftest() -> int:
          no_strong_exit == 1
          and "NO_STRONG_CANDIDATE" in driver_output.getvalue()
          and "do not commit or copy" in driver_output.getvalue()),
+        ("direct completion commit-plan cannot bypass the S3 proposal owner",
+         completion_compat_rejected),
+        ("zero-open S3 planner writes one current-basis completion proposal",
+         completion_plan_exit == 0
+         and completion_proposal.get("macro_stage") == "S3"
+         and completion_proposal.get("execution_mode") == "COMPLETION_REVIEW"
+         and completion_proposal.get("lanes") == []
+         and "NEXT_OWNER_ACTION: python3 tools/workers.py commit-proposal"
+            in completion_plan_output.getvalue()),
+        ("completion proposal commits as an assignment-free plan",
+         completion_commit_exit == 0
+         and '"execution_mode": "COMPLETION_REVIEW"'
+            in completion_commit_output.getvalue()
+         and '"lane_count": 0' in completion_commit_output.getvalue()
+         and "python3 tools/workers.py completion-review"
+            in completion_commit_output.getvalue()),
+        ("completion-review prints one copy-exact Agent tool contract",
+         completion_contract_exit == 0
+         and completion_launch.get("status") == "ready"
+         and completion_launch.get("tool_name") == "Agent"
+         and completion_launch.get("tool_input", {}).get("subagent_type")
+            == "xunji-reviewer"
+         and completion_launch.get("tool_input", {}).get("prompt")
+            == _runtime_receipts.format_completion_review_prompt(
+                completion_plan_run.name,
+                str(completion_launch.get("evidence_index_hash") or ""),
+                str(completion_launch.get("completion_bundle_hash") or ""),
+            )
+         and completion_launch.get("required_pass_final_line")
+            == _runtime_receipts.completion_review_result_envelope(
+                completion_plan_run.name,
+                str(completion_launch.get("evidence_index_hash") or ""),
+                str(completion_launch.get("completion_bundle_hash") or ""),
+            )),
+        ("completion-review maps owner-state failures to exact recovery guidance",
+         completion_state_error_exit == 1
+         and "COMPLETION_REVIEW_STATE_INVALID:RuntimeError"
+            in completion_state_error_output.getvalue()
+         and "rerun the current planner and exact commit-proposal path"
+            in completion_state_error_output.getvalue()),
         ("merge-check clean path exits 0", clean_exit == 0),
         ("created worker scans assigned front", clean_rows and clean_rows[0]["front"] == "F-123"),
         ("field parser does not cross newline on empty value", _field("- Barrier class:\n- Same barrier failures: 1", "Barrier class") == ""),
@@ -8255,6 +9726,8 @@ def _selftest() -> int:
          delegate_uses_exact_budget_selection),
         ("stale inputs cannot launch another unassigned execution lane",
          stale_plan_new_execution_blocked),
+        ("delegate rechecks a barrier opened after plan commit",
+         delegate_barrier_race_blocked),
         ("scheduler skips over-budget merge, target, and model-egress rows",
          scheduler_skips_each_over_budget_effect),
         ("delegate batch failure rolls back assignments and generated artifacts",
@@ -8313,6 +9786,9 @@ def _selftest() -> int:
          denied_launch_cancellation_allowed),
         ("runtime failure/event cannot be relabeled as not-run cancellation",
          runtime_event_cancel_blocked),
+        ("runtime failed projection requires review but not disposition amendment",
+         projected_failure_merge_rejected
+         and projected_failure_settles_without_amend),
         ("all Agent lifecycle identities replay exactly without a tombstone",
          all(exact_replay_without_tombstone)
          and len(exact_replay_without_tombstone) == 5),
@@ -8583,6 +10059,8 @@ def _selftest() -> int:
         ("lifecycle: done remains an adjudication blocker and patches agent file",
          any(i["kind"] == "agent-done-unadjudicated" for i in lifecycle_closed)
          and "Status: done" in lifecycle_text and "returned coda" in lifecycle_text),
+        ("lifecycle: review lookup reuses one projection per plan digest",
+         lifecycle_projection_reused),
         ("role alias web uses web-hunter template", "Missing role template" not in web_context.read_text(encoding="utf-8")),
         ("agent assignment writes context pack", context_exists),
         ("assignments.json records agent", any(a.get("agent") == a1["agent"] for a in load_assignments(run)["assignments"])),
@@ -8656,13 +10134,15 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("--objective", required=True)
             ap.add_argument(
                 "--mode", required=True,
-                choices=["SERIAL_AGENT", "PARALLEL_AGENTS"],
+                choices=[
+                    "SERIAL_AGENT", "PARALLEL_AGENTS", "COMPLETION_REVIEW",
+                ],
             )
             ap.add_argument("--reason", required=True)
             ap.add_argument("--exit-gate", required=True)
             ap.add_argument("--replan-reason", default="")
             ap.add_argument("--limit", type=int, default=2)
-        elif cmd == "commit-proposal":
+        elif cmd in {"commit-proposal", "completion-review"}:
             ap.add_argument("run_dir", type=Path)
         elif cmd == "delegate":
             ap.add_argument("run_dir", type=Path)
@@ -8687,6 +10167,11 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("assignment")
             ap.add_argument("--reason", required=True)
+        elif cmd in {
+                "settle-stopped", "settle-stream-stalled",
+                "recover-hook-failed-stop"}:
+            ap.add_argument("run_dir", type=Path)
+            ap.add_argument("assignment")
         elif cmd == "heartbeat":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("agent")
@@ -8741,6 +10226,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         if cmd == "commit-proposal":
             return print_commit_proposal(run_dir)
+        if cmd == "completion-review":
+            return print_completion_review(run_dir)
         if cmd == "delegate":
             return print_delegate(
                 run_dir,
@@ -8754,6 +10241,12 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "cancel-unlaunched":
             return print_cancel_unlaunched(
                 run_dir, args.assignment, args.reason)
+        if cmd == "settle-stopped":
+            return print_settle_stopped(run_dir, args.assignment)
+        if cmd == "settle-stream-stalled":
+            return print_settle_stream_stalled(run_dir, args.assignment)
+        if cmd == "recover-hook-failed-stop":
+            return print_recover_hook_failed_stop(run_dir, args.assignment)
         if cmd == "heartbeat":
             return print_heartbeat(run_dir, args.agent, args.status, args.note)
         if cmd == "finish":
@@ -8784,8 +10277,25 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(
         description="并行 worker 脚手架 + 合并台账(不编排)",
-        epilog="new commands: list, new, suggest, plan, merge-check. "
-               "Legacy forms remain: workers.py RUN_DIR and workers.py RUN_DIR --new F-005.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Claude-primary command index (run a command with -h for exact arguments):
+  read/control: list, status, agent-check, lifecycle-check, conflicts,
+                merge-check, merge-constraints, merge-threats, synthesize
+  planning:     suggest, plan, commit-plan, commit-proposal, completion-review
+  delegation:   delegate, assign, heartbeat, finish, review-disposition
+  typed repair: cancel-unlaunched, settle-stopped, recover-hook-failed-stop
+  stream repair: settle-stream-stalled
+
+Exact failed-Stop repair:
+  python3 tools/workers.py recover-hook-failed-stop RUN_DIR A-ASSIGNMENT
+If it reports committed_projection_pending, run its exact printed
+tools/runtime_receipts.py RUN_DIR --reproject argv before disposition.
+
+Exact stream-watchdog repair:
+  python3 tools/workers.py settle-stream-stalled RUN_DIR A-ASSIGNMENT
+
+Legacy forms remain: workers.py RUN_DIR and workers.py RUN_DIR --new F-005.
+They are compatibility views/scaffolds, not plan or launch authority.""",
     )
     ap.add_argument("run_dir", type=Path)
     ap.add_argument("--new", metavar="F-ID", help="开一个新 worker 脚手架, 指派给该 front")

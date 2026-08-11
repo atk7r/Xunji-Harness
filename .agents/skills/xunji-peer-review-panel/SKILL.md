@@ -1,6 +1,6 @@
 ---
 name: xunji-peer-review-panel
-description: Codex-side Xunji heterogeneous peer-review panel protocol. Use when Codex is the auxiliary reviewer or code-maintenance driver, when auditing `tools/peer_review.py`, choosing arkcli/Claude review backends for Codex-authored diffs, checking arkcli panel default models and thinking behavior, or recording Codex-side review findings under `review/records/`.
+description: Codex-side Xunji heterogeneous review and external/third-party assistance protocol. Use when Codex is the auxiliary reviewer or code-maintenance driver, when auditing `tools/peer_review.py`, choosing external-assistance or Claude review backends for Codex-authored diffs, checking the current arkcli provider adapter, or recording Codex-side review findings under `review/records/`.
 ---
 
 # Xunji Peer Review Panel
@@ -39,13 +39,13 @@ current behavior and update the stale doc.
 
 For Claude Code-driven live runs or Claude-authored code/report/closure changes:
 
-- Full availability: Claude Code modifies/drives; Codex + arkcli panel review;
+- Full availability: Claude Code modifies/drives; Codex + external/third-party assistance review;
   Codex is the synthesis brain.
-- No Codex: Claude Code modifies/drives; arkcli panel reviews; arkcli panel is
-  the synthesis brain.
-- No arkcli: Claude Code modifies/drives; Codex reviews; Codex is the synthesis
+- No Codex: Claude Code modifies/drives; external/third-party assistance reviews;
+  Claude Code remains the synthesis brain.
+- No external assistance: Claude Code modifies/drives; Codex reviews; Codex is the synthesis
   brain.
-- Neither Codex nor arkcli: fresh-context Claude same-family fallback only
+- Neither Codex nor external assistance: fresh-context Claude same-family fallback only
   transparently; it reduces bias but not shared blind spots.
 
 For Codex-authored code maintenance, use:
@@ -58,22 +58,34 @@ In this mode:
 
 - Codex authors the change and remains the final synthesis brain.
 - Codex does not count as an independent reviewer of its own diff.
-- Full availability: arkcli panel plus Claude Code CLI review.
-- No arkcli: Claude Code CLI or fresh-context Claude Code review is required.
-- No Claude Code but arkcli available: use arkcli panel and record the missing
+- Full availability: external/third-party assistance plus Claude Code CLI review.
+- No external assistance: Claude Code CLI or fresh-context Claude Code review is required.
+- No Claude Code but external assistance available: use the external module and record the missing
   Claude limitation.
 - If neither external reviewer is available, do not pretend Codex self-review is
   independent.
 
-## Arkcli Panel Defaults
+## External Assistance Providers
 
-The default arkcli panel models are:
+Provider definitions belong to the trusted registry in `tools/peer_review.py` or
+`review/peer_review.json`; local `config.ini [external_assistance]` only enables
+an ordered list of registered names. It cannot supply commands. Each external
+provider must declare `role = external-assistance` and use an allowlisted adapter
+kind; core fallbacks declare `role = core-reviewer`, and unclassified backends
+never execute. Missing/false/invalid config, unknown providers, role mismatches, and
+unknown kinds fail closed with diagnostics; `--backend` does not bypass the gate.
+
+The current selected provider adapter is `arkcli`; it is a backend/CLI
+compatibility name, not a synthesis or authority role. Its default models are:
 
 1. `kimi-k2.7-code`
 2. `glm-5.2`
 
-Default arkcli panel behavior does not disable thinking. Only pass `--thinking`
+Default arkcli adapter behavior does not disable thinking. Only pass `--thinking`
 when a private config explicitly sets a `thinking` field for a model.
+For Codex-authored work with multiple enabled providers, the default two slots
+remain the first external provider plus Claude Code. Additional providers are
+fallbacks or explicit extra slots; they do not displace the Claude acceptance vote.
 
 ## Common Commands
 
@@ -95,7 +107,13 @@ Append an independent review into a Claude-run directory when acting as helper:
 python3 tools/peer_review.py runs/<dir> --into-run
 ```
 
-Force the arkcli panel:
+Inspect provider activation and adapter availability:
+
+```bash
+python3 tools/peer_review.py --list-backends
+```
+
+Force the current arkcli provider adapter after local activation:
 
 ```bash
 python3 tools/peer_review.py runs/<dir> --backend arkcli
@@ -115,7 +133,7 @@ python3 tools/peer_review.py --selftest
 - Dismiss findings only with a concrete alternate explanation and evidence.
 - Record Codex-authored review dispositions in `review/records/<date>-<topic>.md`
   when they affect closure, report text, or safety-critical code.
-- Preserve the data-egress distinction: arkcli/Codex/API review sends bundle
+- Preserve the data-egress distinction: external providers/Codex/API review send bundle
   content to external model providers; use bundle-only or fresh-context local
   review when egress is not accepted.
 
@@ -131,7 +149,7 @@ python3 tools/selftest_all.py --only peer_review
 Then grep for stale claims:
 
 ```bash
-rg -n "arkcli panel|kimi-k2.7-code|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
+rg -n "external/third-party|arkcli|kimi-k2.7-code|glm-5.2|thinking" tools review docs README.md AGENTS.md .agents/skills .claude/skills
 ```
 
 If the change affects `.claude/hooks/`, `tools/harness/privacy.py`,

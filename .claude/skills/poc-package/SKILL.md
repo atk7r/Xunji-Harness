@@ -89,8 +89,9 @@ real domain root / org slug is provably absent.
 
 ## Handoff / publish rules
 
-- **author-and-handoff**: deliver complete, runnable, full-impact code to the
-  operator, who runs it. No ceiling on what you author. What the driver
+- **author-and-handoff**: deliver complete, runnable, full-impact assessment code
+  to the operator, who runs it. Do not weaken legitimate exploit methods; the
+  `safety-boundary` harm-as-purpose floor remains excluded. What the driver
   *auto-runs* against the live target stays proof-level (prove-and-stop); hard-effect
   classes (database dump / DoS / destruction) are never auto-run regardless of handoff.
 - **xday → operator/local only**: hand off out of band; do not commit content
@@ -103,7 +104,7 @@ real domain root / org slug is provably absent.
 
 ## Boundary
 
-This skill is procedure; the limits are still `src-safety-boundary` (effect, not
+This skill is procedure; the limits are still `safety-boundary` (effect, not
 method) and the `.claude/hooks/` gate. Packaging never weakens them, and the
 scrub step is hygiene, not a safety control — describe what the PoC does, never
 annotate it with self-labeling restraint fields.

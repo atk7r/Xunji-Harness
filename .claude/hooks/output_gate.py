@@ -165,6 +165,10 @@ try:
     import work_plan as _work_plan
 except Exception:
     _work_plan = None
+try:
+    import completion_transaction as _completion_transaction
+except Exception:
+    _completion_transaction = None
 
 
 def _active_run_declared(pointer: Path | None = None) -> bool:
@@ -609,14 +613,12 @@ def _fallback_protocol_state(run_dir: Path, error: str = "") -> dict:
     except Exception:
         pass
     loop_complete = False
-    try:
-        decisions = (run_dir / "decisions.md").read_text(encoding="utf-8", errors="replace")
-        loop_complete = bool(re.search(
-            r"(?<![A-Z0-9_])(?:GHOST_COMPLETE|NORMAL_COMPLETE)(?![A-Z0-9_])",
-            decisions,
-        ))
-    except Exception:
-        pass
+    if _completion_transaction is not None:
+        try:
+            loop_complete = bool(
+                _completion_transaction.is_valid_committed(run_dir))
+        except Exception:
+            loop_complete = False
     return {
         "active_fronts": sorted(active),
         "blocked_type_a": sorted(blocked_a),
@@ -1464,9 +1466,27 @@ def _selftest() -> int:
     checks.append(("closure candidate rejects arbitrary front id",
                    "当前没有 active 前沿" in _protocol_block_reason(
                        "下一行动: F-999 检查另一个入口", closed_run)))
-    (closed_run / "decisions.md").write_text("# Decisions\n\n- GHOST_COMPLETE\n", encoding="utf-8")
-    checks.append(("completion marker releases output protocol",
-                   _protocol_block_reason("收口检查完成。", closed_run) == ""))
+    (closed_run / "decisions.md").write_text(
+        "# Decisions\n\nGHOST_COMPLETE receipt=" + ("a" * 64) + "\n",
+        encoding="utf-8",
+    )
+    unbound_completion_reason = _protocol_block_reason("收口检查完成。", closed_run)
+    original_committed_predicate = (
+        _completion_transaction.is_valid_committed
+        if _completion_transaction is not None else None
+    )
+    try:
+        if _completion_transaction is not None:
+            _completion_transaction.is_valid_committed = lambda _run: True
+        committed_completion_reason = _protocol_block_reason(
+            "收口检查完成。", closed_run)
+    finally:
+        if _completion_transaction is not None and original_committed_predicate is not None:
+            _completion_transaction.is_valid_committed = original_committed_predicate
+    checks.append(("legacy unbound marker cannot release output protocol",
+                   "输出协议硬拦" in unbound_completion_reason))
+    checks.append(("valid committed transaction releases output protocol",
+                   committed_completion_reason == ""))
     checks.append(("active front cannot use BLOCKED coda",
                    "不能用 BLOCKED" in _protocol_block_reason("BLOCKED: 等待外部凭据到位", open_run)))
     checks.append(("wrong active front id is rejected",
@@ -1611,14 +1631,26 @@ def _selftest() -> int:
         encoding="utf-8",
     )
     (fallback_heading_run / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    fallback_predicate = (
+        _completion_transaction.is_valid_committed
+        if _completion_transaction is not None else None
+    )
     try:
         globals()["_loop_state"] = None
         fallback_state = _protocol_state(open_run)
         fallback_heading_state = _protocol_state(fallback_heading_run)
+        fallback_unbound_completion = _protocol_state(closed_run)
+        if _completion_transaction is not None:
+            _completion_transaction.is_valid_committed = lambda _run: True
+        fallback_committed_completion = _protocol_state(closed_run)
+        if _completion_transaction is not None and fallback_predicate is not None:
+            _completion_transaction.is_valid_committed = fallback_predicate
         fallback_block = _protocol_block_reason("本轮先停在这里。", open_run)
         fallback_pass = _protocol_block_reason("下一行动: F-001 检查登录错误页", open_run)
     finally:
         globals()["_loop_state"] = original_loop_state
+        if _completion_transaction is not None and fallback_predicate is not None:
+            _completion_transaction.is_valid_committed = fallback_predicate
     checks.append(("loop_state failure keeps fallback active-front Coda enforcement",
                    fallback_state.get("fallback") is True
                    and fallback_state.get("active_fronts") == ["F-001"]
@@ -1626,6 +1658,9 @@ def _selftest() -> int:
                    and fallback_pass == ""))
     checks.append(("fallback parser accepts labeled F-id headings",
                    fallback_heading_state.get("active_fronts") == ["F-002"]))
+    checks.append(("fallback completion also requires a valid transaction",
+                   not fallback_unbound_completion.get("loop_complete")
+                   and fallback_committed_completion.get("loop_complete") is True))
     original_protocol_state = globals().get("_protocol_state")
     try:
         globals()["_protocol_state"] = lambda _run_dir: {}

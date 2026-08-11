@@ -15,7 +15,7 @@ playbook; it protects the run boundary.
 - Use `xunji-local-maintenance` for ordinary docs/tools/skills edits outside the
   safety boundary.
 - Use `xunji-reviewops` to record and adjudicate the independent review findings.
-- Use `src-safety-boundary` for live-run action limits; this skill is for
+- Use `safety-boundary` for live-run action limits; this skill is for
   maintaining the boundary implementation.
 
 ## Boundary Model
@@ -52,6 +52,15 @@ Define whether the change alters hard deny, soft ask/notify, replay safety,
 scope classification, rate/body/session boundaries, or just text/tests.
 
 ## Required Checks
+
+The schema-independent SubagentStop ingress is invoked without arguments only by
+the first Hook registered in `.claude/settings.json`; it is not a Root/Agent
+control command and its project-level receipt is not run truth. Its only public
+maintenance invocation is the registered selftest:
+
+```bash
+python3 tools/harness/subagent_stop_ingress.py --selftest
+```
 
 Run the relevant registered aggregate for touched layers:
 

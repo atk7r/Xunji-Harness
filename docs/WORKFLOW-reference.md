@@ -20,7 +20,8 @@ runs/<slug>_<date>/
                     workflow_checkpoint.json · coverage_matrix.* · loop_state.* ·
                     progress_ledger.* · controller.shadow.json · controller_diff.md ·
                     loop_journal.jsonl
-  evidence/         sensor proof artifacts: *.html, *.replay.json, render_<host>/, screenshots
+  evidence/         proof artifacts: *.html + sidecar, render_<host>/<invocation>/,
+                    assets_<host>/<invocation>/, screenshots
   classify/         classify_hosts output: coverage.json + per-host bodies
   scripts/          PoC / helper scripts (author-and-handoff)
   sources/          immutable setup input + normalized candidate + validator receipt
@@ -38,25 +39,68 @@ versioned `xunji.setup-source.v1` contract.
 boundary; source JSON cannot silently overwrite it. Any adjacent recon `report.md`
 that affects baseline reachability is a hashed `related_sources` snapshot rather
 than an invisible second input. To make the right
-place the easy place: `probe --save NAME --run runs/<dir>` drops the body **and** its
-`.replay.json` into `<run>/evidence/`; `render --run runs/<dir>` defaults its output
-to `<run>/evidence/render_<host>/`. A render also drops `network.json` (every request
+place the easy place: `probe --save NAME --run runs/<dir>` drops the bounded body
+**and** its `.replay.json` into `<run>/evidence/`; a body name must not itself end
+in `.replay.json`. Probe reads 64 KiB at a time and the normal body is capped at
+256 KiB. Explicit `--save-chunks` publishes a v2 relative-path/SHA-256 manifest
+atomically and remains bounded to 8 MiB/128 parts; v1 is read-only compatible.
+Range capture requires a matching `206 Content-Range`; only EOF clipping may shorten
+the requested end to `total-1`. Duplicate/conflicting `Content-Length`, premature
+EOF, malformed HTTP framing, and publication failure are typed capture errors rather
+than target policy blocks, and an interrupted invocation removes its unpublished
+temporary tree. Existing large artifacts
+and chunk manifests are secure-opened without following symlinks; chunk-verified
+review receipts retain full wire SHA-256 plus the run-relative manifest path/hash,
+which must match the unique manifest artifact receipt. Replay/artifact/body/manifest
+reads are capped at 2 MiB/64 MiB/8 MiB/256 KiB respectively. Existing large artifacts
+must not share one manifest across responses; `run_model` secure-reopens all receipt
+paths and reconstructs v2 chunks on projection, so later byte drift invalidates disposition.
+Existing large artifacts are inspected through bounded `artifact_view.py range|search|strings`, which is a
+local read under `evidence/`, not evidence promotion. `render --run runs/<dir>`
+defaults each attempt to
+`<run>/evidence/render_<host>/<invocation>/`, and `fetch_assets --run runs/<dir>`
+defaults to `<run>/evidence/assets_<host>/<invocation>/`. For both tools an explicit
+`--out` names a managed **base**, and the invocation child is still appended, so
+retries do not silently overwrite the previous attempt. A render also drops
+`network.json` (every request
 the page made, capped at 500 — the app/API calls, `xhr`/`fetch` + `/api`·`/rest`·`.do`,
 are in there; render's stdout also echoes that filtered subset as `api_requests`) and
 `cookies.json` (its session) there — don't let them evaporate: if those requests
 surface app/API endpoints, fold them into `surface.md`/`frontier.md`; if a follow-up
 check needs the authenticated session, reuse `cookies.json` via `render --cookies-file`
 or a `probe -H 'Cookie: …'`. The closure gate still resolves a cited artifact
-wherever it sits (it is layout-tolerant), but `check_run.py` **warns on layout
+wherever it sits (it is layout-tolerant), but registered model-driven live render/fetch/classify
+calls require an explicit `--run`, and their path resolver rejects outputs outside
+the canonical run bucket before I/O. Direct operator CLI remains available because
+the workstation operator is trusted; those no-run calls are not registered model
+live capabilities. A probe save or direct standalone invocation without `--run` is scratch and
+lands under `tmp/<tool>/<invocation>/`; it never inherits the caller's current
+directory. A probe cookie jar is mutable session state, not evidence: a basename
+uses `<run>/state/http/` (or invocation scratch without a run), and an explicit live
+path must remain under `<run>/state/`. `classify_hosts --egress-recheck` is separately bound to
+`<run>/classify/` because its coverage overlay is not an evidence body.
+
+`check_run.py` **warns on layout
 drift at closure** — proof/scratch files left loose in the run root once a final
 report exists — because mixing evidence with scratch is what makes a run hard to
 audit (the original break-2 finding: `scshr` dumped 33 `ev_*.html` in the root,
 `cqytxy` 21 scratch files). The warn is **closure-gated** (silent during active
 verification, where mid-flight scratch in the root is normal — same cadence as
 `check_shallow_close`) and never hard-fails, so legacy runs are not punished; it
-just nudges you to tidy before the report is final (`tools/cleanup.py --scratch`
-clears `tmp/` / `__pycache__` / `.state` scratch — dry-run by default, `--apply` to
-delete).
+just nudges you to tidy before the report is final. Repository hygiene also warns,
+without reading artifact content, about untracked root HTML/replay/capture files and
+top-level `evidence/` drift. For existing loose output,
+`python3 tools/migrate_output_artifacts.py --batch <id>` is a dry-run plan: a body
+and its replay sidecar move as one group only when canonical Markdown uniquely
+names a run; ambiguous/unreferenced files are planned for local
+`artifacts/orphans/<batch>/`. `--apply` is explicit, preflights a whole
+body/sidecar group, stages verified copies, publishes every member before removing
+any original, refuses changed sources and overwrites, and records group state in a
+hash manifest. A failed source removal can leave a complete duplicate, never
+intentional data loss or a half-pair; migration does not promote evidence or
+rewrite a run receipt. `python3 tools/clean_scratch.py --dry-run --older-than <days>` is the
+bounded TTL inventory for `tmp/`; `--apply` is explicit, and run/review/report/PoC/
+artifact-quarantine trees are never cleanup roots.
 
 ## File Templates
 
@@ -293,6 +337,11 @@ and its `.replay.json`, put both concrete paths in `Artifacts`, one path per lin
 a directory heading plus basenames, suffix shorthand, or “matching sidecar” prose
 does not become an artifact citation. This keeps the ledger producer aligned with
 the scoped artifact parser and the review-disposition gate.
+For v2 chunk-backed full-wire proof, the consumer revalidates the closed schema,
+regular-file/no-symlink containment, contiguous offsets and lengths, every chunk
+SHA-256, and reconstructed wire SHA-1/SHA-256/length. A `200` response to a Range
+request, non-EOF short or malformed `Content-Range`, path escape, mutation, or cap violation is a
+typed failure rather than permission to continue piecemeal capture.
 
 **Replay-verify the evidence (close the trust loop).** A saved `*.html` proves a
 response existed; a `.replay.json` (written automatically by `probe --save`) proves
@@ -384,7 +433,7 @@ Run a review before final reporting and whenever the investigation starts
 summarizing instead of advancing a front. (The independent-review hard gate at
 closure is in core "Closure Discipline".)
 
-### report.md — final draft that cites the evidence ledger
+### report.md — lifecycle-bound draft that cites the evidence ledger
 
 Allowed states: `confirmed` (requires certainty `>= 0.8`) · `suspected` (useful
 signal needing more evidence) · `rejected` (disproven or too weak).
@@ -394,7 +443,7 @@ signal needing more evidence) · `rejected` (disproven or too weak).
 
 ## Summary
 
-- Status:
+- Status: DRAFT
 - Severity candidate:
 - Affected asset:
 - Evidence IDs:   (finding maturity only; do not list phenomenon/candidate here)
@@ -429,6 +478,12 @@ Context that explains scope, fingerprints, controls, or exclusions.
 
 ## Open Questions
 ```
+
+Only `DRAFT`, `READY`, and `FINAL` are valid for current runs. E-ids or
+final-sounding prose inside DRAFT do not activate closure. Root may advance the
+canonical report to READY for preflight; only the completion transaction may
+publish FINAL together with its bound decisions marker. A missing Status is a
+legacy warning, never inferred FINAL.
 
 Do not promote a finding to confirmed unless the evidence ledger supports it.
 
@@ -523,7 +578,13 @@ completion summaries or disposition arrays. The newest validated structured
 single-action, concrete-object, and active-front semantics; an older ended plan
 never shadows a newer active plan. The Stop consumer independently revalidates
 the committed transaction archive and lineage, while compatibility free-text
-checks apply only when the current plan has no structured end. The command
+checks apply only when the current plan has no structured end. New events always
+bind a cited front to the current open set. Stage-exit exact revalidation of an
+already-frozen prior event instead accepts that same identity from the current
+known-front set (`open`, `deferred`, or `closed`), so the action that closes the
+last front does not invalidate its own historical Coda. Unknown identities remain
+`CODA_WRONG_FRONT`; the journal is never rewritten and the exact event payload,
+transaction lineage, dispositions, and review receipts must still match. The command
 rejects provenance errors and open debt. The journal helps resume after a
 broken loop turn. An append returns success only after flush and file fsync under
 the journal lock; creating or retrying a zero-byte journal also fsyncs the parent
@@ -571,7 +632,18 @@ persistent current-run selection: `SessionEnd` preserves it while retiring that
 session's visible binding; startup, clear, and compact do not restore it; exact
 resume may restore only its matching receipt through the public lifecycle path. A
 first prompt in any new local Claude session writes a fresh turn contract for the
-selected run. Session/transcript values remain causal correlation and display-binding
+selected run. Within that same session, an exact prompt replay or strict
+bare/current-run continuation alias may retain the existing binding only when the
+prior contract is fresh `EXECUTE` and its exact committed plan remains
+current-input-bound and unended. The Hook first appends the typed
+`XUNJI_CONTINUATION_COALESCED` runtime receipt; if that append fails, or any
+intent/input/cycle condition differs, it writes the normal fresh contract. A
+different session's strict no-delta wake for the same run, including a byte-identical
+prompt replay, preserves the existing
+owner contract, appends `UserPromptWakeCoalesced`, and returns
+`XUNJI_E_RUN_BUSY`; it receives no turn/plan/target authority and its subsequent
+non-read tool attempt is denied for lack of a matching contract. A semantic delta
+still creates a fresh contract. Session/transcript values remain causal correlation and display-binding
 metadata, not a user ACL. Pending bootstrap permits only reads and its
 current-session lifecycle transition until binding. A target/session/prompt-hash
 claim prevents cross-session pending selection; concurrent claims fail closed. The
@@ -674,6 +746,17 @@ A maintenance denial/failure stays in the append-only receipt journal and cannot
 be narrated as success, but it does not sticky-freeze the personal operator's turn.
 The operator may correct a typed path/argv and retry immediately; `MAINTENANCE`
 itself still prohibits Agent, target, Cron, and canonical run progression.
+Published JSON contracts are a special repository-maintenance boundary because
+Hooks may read them concurrently. Incremental Edit/Write of
+`contracts/*.schema.json` is denied even in `MAINTENANCE`. The sole Claude-primary
+operational workflow is in `xunji-local-maintenance`: registered help -> prepare
+one CAS-bound ignored candidate -> structured Edit/Write of only that candidate ->
+publish by validation/fsync/atomic replace, or discard only the candidate pair.
+The publisher validates every other published schema before replacement and rolls
+back a failed post-replace validation. The loader distinguishes missing, invalid
+UTF-8, invalid JSON, other read failures, and invalid roots, and always names the
+registered schema selftest. Neither direct final-path repair nor `python -c` is a
+recovery path.
 
 ## Work plan and reversible Macro-Stage
 
@@ -691,6 +774,12 @@ These labels are not Router phases and are not another canonical truth. Root may
 move backward after a changed premise, but a later `work_plan.py commit` needs a
 material `--replan-reason`; stage change also needs the prior plan's debt-free
 typed `cycle_end`. `work_plan.py` alone writes the typed stage/replan sequence.
+An already-open, validated current cycle is a legal prefix: the transaction binds
+its exact count/digest/tail and owns only the following `stage_exit`, `stage_plan`,
+and `delegation_committed` events. Without an open cycle it atomically emits its
+own `cycle_start` first. This mirrors the existing first-plan/replan behavior and
+does not make an arbitrary journal tail adoptable; duplicate starts, an ended
+cycle, invalid ordering, or any prefix drift still fail closed.
 The current owner is the Python/Hook control path. This stage does not add a
 parallel plan, assignment, or merge runtime.
 
@@ -701,6 +790,30 @@ for binary launch/return, Reviewer/Root settlement, and typed cycle end is its
 `launch-return-settlement.md` sibling. Read those references completely at the
 corresponding action; this deep reference does not copy their executable examples.
 
+S3 has one explicit zero-lane terminal plan. When no strong front candidate
+exists and S3 readiness has no blockers, `workers.py plan` generates a
+current-turn/input-bound `COMPLETION_REVIEW` proposal with `lanes=[]` and prints
+the exact `commit-proposal` next action. All other modes retain at least one lane.
+After commit, `workers.py completion-review runs/<dir>` is the sole public
+formatter for the exact Agent tool input; `delegate`, hand-written proposal
+basis, shell-transported lane JSON, and `python -c` are not recovery paths.
+
+Repeated local infrastructure denial has a separate derived scheduling owner.
+`barrier_state.py observe` accepts only the SHA-256 of one unique runtime-chain
+target `PreToolUseDenied`; this proves target bytes were zero. Two distinct
+receipts keep the exact diagnostic key
+`front + action_fingerprint + cause_code + precondition_digest`, while the
+threshold aggregates by `front + action_fingerprint`. Two distinct same-action
+receipts open the barrier even when cause/precondition rotates. Every later target lane for that front must carry the owner's closed
+`xunji.infra-barrier-binding.v1`; omission and the third exact
+`target_attempt` are rejected both at plan commit and immediately before
+delegate. A changed actual action, `repair`, and `local_verify` remain available;
+changing only caller-supplied cause/precondition cannot bypass it. `clear` needs
+matching target success or an exact barrier-bound repair receipt later than the
+active failure epoch; clear uses an epoch-tail CAS, so a concurrent new failure wins.
+Unrelated local verification does not clear it. Historical prose counters and generic PostToolUseFailure are not migrated into
+barrier authority, and barrier state does not close a front or create evidence.
+
 The semantic invariant retained here is that a plan is consumable only when its
 committed v2 transaction, immutable receipt-hash archive, complete prior-receipt
 lineage, typed journal, content-addressed snapshot, current turn/input binding,
@@ -710,8 +823,10 @@ only an unambiguous pre-transaction/native-v1 state with an already frozen
 snapshot; it cannot mint history or become `ROOT_DIRECT`.
 Every writer of `state/assignments.json`—delegate/create, runtime projection,
 heartbeat, review disposition, and Root finish—uses the same cross-process
-assignment lock. Runtime journal collection is snapshotted before that lock and
-the locks are never nested. Exact Agent hook replay returns the existing receipt;
+assignment lock. Ordinary runtime projection snapshots and releases the runtime
+lock before acquiring it; only typed cancellation/recovery transactions use the
+single `runtime -> assignment` nesting order to freeze a termination race. Exact
+Agent hook replay returns the existing receipt;
 conflicting runtime-identity reuse and duplicate projected attempts fail closed.
 Async final bytes are frozen from `SubagentStop.last_assistant_message` or the exact
 child transcript, never the parent `async_launched` tool result. A synchronous Agent
@@ -769,6 +884,56 @@ content-addressed `xunji.foreign_agent_lifecycle.v1` observation outside
 the immutable supersession binds the original seq/hash and validated journal
 head, preserves the journal bytes, then reprojects. Any ownership signal keeps
 the event fail closed.
+A started non-Reviewer with no Stop has one separate typed termination path. The
+exact `workers.py settle-stopped` command owned by
+`launch-return-settlement.md` accepts only Claude Code's same-session structured
+`SendMessage` failure naming the same agent as user-stopped and permanently
+non-resumable. `xunji.externally-stopped-agent.v1` freezes the launch/Start/head,
+parent transcript prefix through that result, full child transcript, and a
+deterministic failure snapshot. It projects `failed`, not returned, and cannot
+create evidence or merged authority; the unique digest-bound Reviewer and Root
+non-merged disposition remain required. That runtime-failed projection is not a
+prior Root adjudication, so its first reviewed disposition needs no amendment. A
+late Stop/call, changed transcript,
+Reviewer, OOM/kill/network inference, or message drift fails closed.
+A disjoint `xunji.stream-stalled-agent.v1` path covers only the exact host
+stream-watchdog terminal: one successful plan-bound Hunter launch/Start, no Stop
+or later activity, an exact failed task notification for 600 seconds of
+unrecovered stream idle, and a child transcript ending in the exact synthetic
+idle-timeout API error plus immediate interruption. The read-only status owner
+prints only `workers.py settle-stream-stalled`; that command freezes the
+notification/child UUIDs, parent prefix, full child bytes, runtime head and
+deterministic failed snapshot. It does not accept partial notification result
+text as an Agent result, does not project returned/evidence/merge, and still
+requires the unique Reviewer and Root non-merged disposition. The old attempt
+cannot be resumed. Any shape drift, Reviewer, late Stop/call, or other
+OOM/process/network/timeout inference needs a separately versioned contract.
+A different path covers a model that really returned while its downstream
+`SubagentStop` Hook failed before appending Stop. `workers.py status` is the
+read-only discovery owner; when all exact transcript/journal predicates hold, it
+prints the `recover-hook-failed-stop` argv owned by
+`launch-return-settlement.md`. The versioned hook-failed-Stop receipt freezes the
+successful launch and Start, assignment/lane/plan/prompt/type, final child result,
+the child final's immediately following host Hook feedback, parent task notification,
+transcript prefixes, result snapshot, runtime head, and absence of Stop/later activity. It
+projects `returned` without fabricating a physical Stop and grants no review,
+evidence, merge, front, or closure authority.
+
+The current first Stop Hook is a dependency-free wrapper. Before importing or
+running `turn_contract.py`, it writes a bounded project-level
+`xunji.subagent-stop-ingress.v1` observation and then forwards the exact stdin,
+stdout, stderr, and exit code. This ingress has no run owner and is not canonical
+runtime or settlement truth. Current wrapper-era
+`xunji.hook-failed-agent-stop.v2` recovery must bind exactly one such receipt after
+selecting the run-owned launch/Start; a raw ingress receipt cannot choose a run or
+settle anything. Legacy `xunji.hook-failed-agent-stop.v1` is restricted to former
+direct-`turn_contract.py` feedback returned no later than the frozen
+`2026-08-08T01:10:00Z` cutover and requires an empty ingress hash. Future direct
+Hook feedback fails closed rather than falling back to that migration branch.
+Recovery replay is idempotent. If the
+content-addressed recovery receipt commits but its derived projection does not,
+preserve the receipt and use the existing exact reprojection/status route; late
+Stop/child activity conflicts instead of replacing the receipt.
 Plan-bound settlement and typed cycle-end command shapes live only in
 `xunji-agent-board/references/launch-return-settlement.md`. A plan-bound end
 re-derives the exact receipt chain and fails closed on any missing lane, frozen
@@ -842,7 +1007,9 @@ another executable protocol.
   hypothesis variance, or closure has unresolved conflicts.
 - **Mandatory breadth fallback**: with four or more active fronts and no single shared
   concrete barrier, the current coordination epoch uses at least two disjoint
-  assignments and two actual Agent launches. Bare continue/resume preserves the epoch;
+  assignments and two actual Agent launches. A receipt-bound no-delta bare
+  continue/resume may preserve both the epoch and one fresh unended plan binding;
+  a semantically changed/new-session continuation preserves neither turn authority;
   a material active-front or asset-debt change resets it. Every plan-bound Hunter and
   Reviewer prompt carries the exact assignment-row assets in its immutable base
   package; the Reviewer additionally binds the frozen target-result digest and
@@ -879,7 +1046,14 @@ another executable protocol.
   artifact validation: Hunter and Reviewer must name the identical run-local set;
   absolute paths emitted by Claude Read and `runs/<dir>/evidence/...` paths normalize
   to the same run-local identity before containment checks. New returns list every
-  saved body and replay sidecar separately with one complete path. A narrow
+  saved body and replay sidecar separately with one complete path. A frozen
+  compatibility case also accepts a line beginning with the exact
+  `accept-candidate` disposition and ending in the affirmative declaration
+  `Evidence paths present in the frozen result ...:` or
+  `Exact evidence paths present in the frozen result ...:`, followed by the exact
+  path list. Its bounded middle may use punctuation or name the frozen Hunter result;
+  no particular delimiter is authoritative. Ordinary inline prose, a missing terminal
+  declaration, and negated forms do not open an artifact block. A narrow
   compatibility grammar for frozen prose also normalizes an exact run evidence
   directory plus safe basenames, an explicitly elided `.../evidence/<file>` only
   after an exact current-run binding, and
@@ -921,10 +1095,17 @@ another executable protocol.
   first ordinal above the frozen budget is denied before execution with
   `XUNJI_E_AGENT_REQUEST_BUDGET_EXCEEDED`; exhaustion context tells the Hunter to
   return existing artifacts instead of varying method/path/argv.
-- **Frozen egress route**: a target context pack states whether the current turn
-  approved direct egress. When approved it gives the exact
-  `XUNJI_PROXY_REQUIRED=0` prefix for every registered target argv; this is guidance,
-  while Hooks still revalidate scope, privacy, budgets, guard, shape, and recording.
+- **Frozen egress route**: direct is the default. A target context pack gives exact
+  `XUNJI_PROXY_REQUIRED=0` for direct, or exact `XUNJI_PROXY_REQUIRED=1` only when
+  the current operator turn explicitly selected proxy. Hooks revalidate the same
+  route plus scope, privacy, budgets, guard, shape, and recording. Dormant config
+  cannot select proxy. A legacy contract without a typed route stays offline, as
+  does a prompt that forbids direct without affirmatively selecting proxy. Browser
+  subprocesses strip ambient proxy variables; scanner wrappers preflight the chosen
+  proxy endpoint and set scanner-native transport retries to zero. One proxy-attributed transport failure stops automatic
+  retries and leaves the proxy route paused until a newer top-level operator turn;
+  internal wakes and cooldown expiry cannot confirm the restart. Confirmation is
+  bound to the selected credential-free proxy route and cannot clear another route.
 - **Instruction receipt consumption**: the bundle builder, Root launch, and Hook
   admission own source-integrity validation. Context packs expose version/hash
   receipts plus the complete composed role text, not manifest/template/live-Agent
@@ -932,7 +1113,7 @@ another executable protocol.
   or hashing framework instruction sources.
 - **Prepared public action**: when a target lane's frozen front already chooses an
   HTTP GET liveness check, the generated context pack contains the exact registered
-  `probe.py` argv (including the current turn's direct-egress prefix when approved).
+  `probe.py` argv (including the current turn's exact direct/proxy selector).
   The Agent uses that argv before any framework-source inspection. A denial may be
   retried once from public hook guidance; it does not authorize reading hook/guard
   internals until the call budget is exhausted.
@@ -941,6 +1122,26 @@ another executable protocol.
   explicit port, dropping it to host-only is not an equivalent assignment. The
   coverage row owns its valid opaque `ASSET-...` ID; assignment and Agent scaffold
   projections copy it rather than independently re-hashing the display identity.
+  Root settlement extracts destinations only from successful target tool inputs.
+  Bash must revalidate as one exact registered target capability and only its
+  target-bearing argv slots count. Its validator and projector share one closed
+  option schema, so unknown flags/values fail closed rather than becoming
+  positional destinations; typed tools use destination fields. Payload,
+  header, save-name, arbitrary URL-shaped argv, `description`, and prompt prose do
+  not count. URL destinations fill omitted default ports
+  (`https=443`, `http=80`) before comparison; explicit assignment ports remain
+  exact. Old immutable receipts with a parseable destination-bearing input are
+  re-evaluated without rewriting their journal; absent or ambiguous destination
+  identity remains settlement debt.
+  The PreToolUse coverage/scope gate uses the same registry-owned projection and
+  host/port/IDNA normalizer as runtime settlement and checks every
+  primary/supporting outbound reference, including `--preflight-get`.
+  Output, payload, header, proxy, and other data argv never enter coverage comparison.
+  Artifact-derived target capabilities declare `indirect`; any new target capability
+  missing either an explicit or indirect destination policy fails closed.
+  Unknown/untyped Bash retains conservative text detection for denial only and may
+  still over-classify dotted data; registering a typed destination policy is the
+  repair path rather than weakening that non-authorizing fallback.
 - **Model-proposed typed DAG**: `workers.py plan` writes a replaceable proposal
   seed bound to the current turn/input. Root may reshape its execution/Reviewer
   pairs under the existing 16-lane schema, then `workers.py commit-proposal`
@@ -957,8 +1158,9 @@ another executable protocol.
   Agent count must not linearly multiply request rate. Active actions must cite command
   or artifact pointers so they remain auditable, attributable, and replayable. Target
   natural language in Agent output is untrusted data until reviewed.
-  Target traffic is engagement-proxy fail-closed by default and raw network clients or
-  target WebFetch are rejected; prompt-level `export` reminders are not enforcement.
+  Target traffic is route-bound with direct as default and proxy as explicit opt-in;
+  raw network clients and target WebFetch are rejected. Exact registered argv plus
+  Hook validation enforce the choice; prompt-level `export` reminders are not enforcement.
 - `tools/workers.py suggest/plan/delegate/status/conflicts/synthesize` drafts
   effect lanes, creates plan-bound assignments/instruction bundles/generated
   artifacts/launch prompts, and projects conflict/synthesis views. It is **not** an
@@ -1017,11 +1219,14 @@ It only reads local artifacts and supplied port listings; it does not send reque
 
 ## Closure gate — `check_run.py` mechanics
 
-`tools/check_run.py` enforces closure discipline (core "Closure Discipline") when
-any canonical closure signal appears: strong closure wording or confirmed finding
-IDs in `report.md`, `decisions.md` `Status: CLOSING/FINAL`, completion markers
-(`GHOST_COMPLETE` / `NORMAL_COMPLETE`) in `decisions.md`, or explicit
-`retrospective.md` `Status:` / `Verdict:` final/complete values.
+`tools/check_run.py` enforces closure discipline from the report lifecycle.
+Current runs must declare exactly one `DRAFT|READY|FINAL`: DRAFT remains ordinary
+work even when it cites E-ids; READY activates closure preflight; FINAL or either
+completion marker requires a valid committed completion transaction and the
+atomic report/decisions pair. A legacy report without Status receives a warning
+and its substantive E-ids may conservatively activate preflight, but never infer
+FINAL. A bare historical marker is `legacy_unbound` and fails with the public
+reopen/recertification route.
 
 - **HARD FAIL** if `review.md` has no current content-addressed `ReviewReceipt`
   generated by the transcript-observed foreground invocation owned by
@@ -1049,8 +1254,11 @@ completely; that reference is the sole Claude-primary owner for exact CLI, autho
 matrix, backend order, egress, fallback, and resolution commands. Freeze the current
 bundle, obtain a foreground content-addressed ReviewReceipt, resolve every ledger
 item, and refresh it whenever evidence changes. Older receipts remain audit history
-but cannot validate current evidence. Backend failure or no successful allowed
-backend leaves closure incomplete; manual-driver prose never replaces the vote.
+but cannot validate current evidence. Setup freezes `state/review_policy.json`.
+Each `mandatory` role must bind a valid role-matching receipt. Each `optional`
+slot must bind either a valid receipt or an explicit limitation; provider
+unavailability never silently downgrades a mandatory slot. Manual-driver prose
+cannot replace any required vote.
 Normal-mode Stop separately requires the structured global completion review and
 its current-evidence Agent receipt.
 
@@ -1072,17 +1280,25 @@ HARD-fails closure if `retrospective.md` is missing, its **Self problems** /
 Framework/tooling lesson lacks its own repair status (`fixed|open|deferred`). A
 fixed item also needs non-empty `Fixed by` + `Verification`; an open/deferred
 item needs `Residual risk`. One status line for the whole section does not close
-multiple lessons. Retrospective `Status:` / `Verdict:` values such as `FINAL`
-activate closure gates, but they are not completion actions.
+multiple lessons. Retrospective `Status:` / `Verdict:` prose does not promote a
+DRAFT report or become a completion action.
 
 #### Assignment-free global completion Reviewer
 
-**Completion marker and scheduled-loop disposition.** `GHOST_COMPLETE` /
-`NORMAL_COMPLETE` belongs only in `decisions.md` and only after closure gates pass.
-`check_run.py` also requires a substantive `## CodexCompletionReview` compatibility
+**Completion transaction and scheduled-loop disposition.** Root first advances
+the canonical report from DRAFT to READY; it never writes FINAL or a marker.
+`check_run.py` requires a substantive `## CodexCompletionReview` compatibility
 section with Reviewer + Verdict + concrete cross-check detail at that point. The
 heading does not name the current executor. A single-line field, prose mention, or
-"still missing" note does not count. Invoke exact
+"still missing" note does not count. First commit the generated S3
+`COMPLETION_REVIEW` plan (`lanes=[]`), then run:
+
+```bash
+python3 tools/workers.py completion-review runs/<dir>
+```
+
+Invoke Agent using the resulting JSON object's exact `tool_input`; do not
+reconstruct it. The formatter emits exact
 `subagent_type=xunji-reviewer` with the exact assignment-free formatter output
 `XUNJI_COMPLETION_REVIEW EVIDENCE_INDEX=<current evidence_index sha1> COMPLETION_BUNDLE=<current completion bundle sha256> run=<run.name>
 CHECKS=report_parity,severity_artifacts,reachable_frontier,review_ledger`. It must
@@ -1100,8 +1316,66 @@ In the same turn, only `loop_requested=true` runs `CronList`, deletes the observ
 current-run job if present, and lists again; `loop_requested=false` performs no
 Cron action. Then append a loop journal `end --next-action "<exact final Coda
 action>"` record (`cycle_end`) with `cron_cancelled=<job-id|none>` in the note.
-`check_run.py` HARD-fails a completion marker without the applicable runtime
-receipts and the auditable end-of-cycle disposition.
+Cron quiescence requires the latest successful CronList receipt to follow every
+observed CronCreate/CronDelete. That newest scheduler snapshot, not an indefinitely
+accumulated create-minus-delete map, decides current liveness: listed jobs or a
+response that still names the run fail closed; an explicit no-current-run snapshot
+reconciles but does not erase unmatched historical CronCreate receipts and reports
+their ids in the diagnostic note.
+Run plain offline `check_run.py` while the report is READY. Its stdout starts with
+the content-addressed `XUNJI_CHECK_RUN_V1` token that binds the current closure-input
+digest and the exact sorted `CHECK_WARNING_*` set; later `STRUCTURAL_PASS` prose is
+informational and is not accepted as completion basis. Dispose every emitted warning explicitly.
+Then use the sole completion owner:
+
+```bash
+python3 tools/completion_transaction.py prepare runs/<dir> --mode ghost --review-receipt independent-review=<review-receipt-sha256> --review-limitation external-assistance="<provider unavailable or not used>" --cron-disposition quiescent
+python3 tools/completion_transaction.py commit runs/<dir>
+```
+
+For normal mode use `--mode normal`; a non-recurring run uses
+`--cron-disposition not_requested`. Every check warning needs repeatable
+`--warning-disposition CODE:DISPOSITION:REASON`, where `DISPOSITION` is one of
+`accepted|dismissed|deferred|fixed`, before
+prepare can freeze it. Prepare binds the intended report/decisions, complete
+canonical/frozen/artifact/review/work-plan/runtime manifest, current S3 plan,
+Reason/completion-review/cycle-end/transcript-backed check/Cron receipts,
+review-policy digest, warning set, and every role disposition without changing
+canonical Markdown. Commit revalidates the same basis plus allowed transaction-only
+runtime growth and fresh Cron/CAS state, atomically publishes
+report FINAL plus the transaction-bound `GHOST_COMPLETE`/`NORMAL_COMPLETE` marker,
+and appends its hash-chain receipt. Any later canonical drift invalidates the
+committed status.
+Status, terminal gating, commit retry, and reopen all revalidate that complete
+dynamic path set plus owner-produced policy/review/S3/Reason/cycle/check/Cron/
+runtime/archive/staging basis; a self-hashed receipt with omitted paths cannot pass.
+
+Prepared state is mechanically terminal: only completion `status|commit|reopen`
+and local reads remain authorized. Committed state permits only local reads,
+completion `status|reopen`, and the exact plain offline `verify.check-run` used for
+post-commit verification. Replay/auto-review flags, any other local verification,
+target, Agent, Cron, and a second commit are denied until public `reopen`.
+The direct compatibility command `workers commit-plan --mode COMPLETION_REVIEW`
+is denied; only the current S3 `workers plan` zero-lane proposal and its printed
+`commit-proposal` owner may create the completion plan.
+
+Prepared, committed, or legacy-unbound state is reopened only through:
+
+```bash
+python3 tools/completion_transaction.py reopen runs/<dir> --reason "<material reason>"
+```
+
+A legacy marker is never backfilled: reopen it, create a fresh S3 completion plan,
+then, if the legacy run lacks `state/review_policy.json`, adopt the fixed policy only
+through:
+
+```bash
+python3 tools/completion_transaction.py adopt-policy runs/<dir>
+```
+
+The command is missing-only/idempotent and accepts no caller policy JSON. Repeat
+review/check/Cron, then prepare and commit. `check_run.py` HARD-fails FINAL
+or a marker without this current committed transaction and auditable end basis.
 
 **Operator pause is not closure.** A stop/pause prompt writes
 `PAUSED_BY_OPERATOR`, keeps open/probing/Type-A fronts unchanged, forbids target

@@ -63,6 +63,77 @@ python3 tools/runtime_receipts.py runs/<dir> --reproject
 python3 tools/workers.py status runs/<dir>
 ```
 
+If `workers.py status` instead identifies one exact completed model result whose
+`SubagentStop` was followed immediately by host-authored
+`XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED` feedback, do not wait for a physical Stop or
+invent one. Run only the exact typed owner command printed by status:
+
+```bash
+python3 tools/workers.py recover-hook-failed-stop runs/<dir> A-<assignment>
+```
+
+Eligibility binds one successful plan-bound launch, one exact `SubagentStart`,
+the assignment/lane/plan/prompt/type/result identity, the child's final assistant
+bytes, the child final's immediately following host Hook feedback, the parent
+transcript's exact completed task notification, the frozen transcript/runtime prefixes, no journaled
+Stop, and no later child/runtime activity. The content-addressed recovery
+receipt preserves that the physical Stop is missing while projecting only the
+authentic returned result. It grants no finding, evidence, review disposition,
+merge, front closure, or completion.
+
+There are two mechanically disjoint contracts. Legacy
+`xunji.hook-failed-agent-stop.v1` accepts only direct-`turn_contract.py` feedback
+whose normalized `returned_at` is at or before the frozen
+`2026-08-08T01:10:00Z` cutover, and its ingress hash must be empty. This narrow
+migration branch covers the observed pre-wrapper incident class; a direct-Hook
+event after the cutover fails closed even if its transcript otherwise matches.
+Current `xunji.hook-failed-agent-stop.v2` accepts only
+`schema_independent_wrapper` feedback and requires the exact content-addressed
+ingress observation captured by the schema-independent wrapper before any
+contract-schema import. The project-level ingress has no run owner and is not
+canonical lifecycle, assignment, review,
+evidence, merge, or closure truth; it can be consumed only after this recovery
+owner selects one run-owned launch and Start. Raw ingress bytes or notification
+prose can never settle an assignment by themselves.
+
+Exact recovery replay is idempotent. If the receipt is already committed but its
+derived assignment/result projection is pending, preserve it and run the exact
+`runtime_receipts.py ... --reproject` command shown above, then repeat the exact
+`workers.py status` read. Do not delete the receipt, recapture ingress, rewrite the
+journal/assignment, or launch a second Reviewer. A late Stop or later child call is
+an integrity conflict with the recovery receipt, not authority to replace it.
+
+A separately versioned non-Reviewer failure covers only Claude Code's stream
+watchdog terminal shape. If `workers.py status` proves one successful plan-bound
+Hunter launch and Start, no Stop, no later child/runtime activity, one exact
+host-authored failed task notification ending in
+`Agent stalled: no progress for 600s (stream watchdog did not recover)`, and the
+same child's final two records are the synthetic
+`API Error: Stream idle timeout - no chunks received` followed immediately by
+`[Request interrupted by user]`, run only:
+
+```bash
+python3 tools/workers.py settle-stream-stalled runs/<dir> A-<assignment>
+```
+
+The `xunji.stream-stalled-agent.v1` receipt binds the assignment/session/tool/
+agent/lane/plan/prompt identity, exact Agent description and notification, child
+error/interruption UUIDs, runtime launch/Start/head, parent prefix through the
+notification, full child transcript, and deterministic failed-result snapshot.
+Notification summary/note drift, another API error, another timeout, missing
+interruption, Reviewer role, a Stop, later child/runtime activity, transcript
+mutation, or ambiguous identity fails closed. The notification's partial
+`<result>` remains frozen source data and is never promoted as the Agent result.
+
+This projects `failed`, never `returned`, and grants no evidence, finding, merge,
+front closure, or cycle completion. Launch the unique digest-bound Reviewer,
+record its disposition, then Root may settle blocked/failed/abandoned but never
+merged. Do not resume or relabel the killed attempt; replan the still-open lane
+only after this settlement chain completes. Receipt replay is idempotent and any
+late Stop/call becomes integrity conflict. OOM, process kill, generic network
+loss, other watchdog text, or future host shapes require another versioned
+reason and transcript-proof fixture; do not widen this contract by analogy.
+
 Exception: when the foreground Reviewer parent call itself ended with
 `[Request interrupted by user for tool use]` after a
 `SubagentStart:xunji-reviewer` hook cancellation, do not loop on `--reproject`
@@ -75,11 +146,42 @@ then returns the same durable Reviewer contract. If those facts are absent or
 ambiguous, the row remains `running` and this exception gives no authority to
 cancel, edit, abandon, or synthesize a Reviewer result.
 
-This v1 recovery contract covers only that exact Claude Code interruption shape.
-OOM, process kill, network loss, a different hook terminal, or any other
+This Reviewer v1 recovery contract covers only that exact Claude Code interruption shape.
+OOM, process kill, a different hook terminal, or any other
 pre-model failure must remain `running`/integrity debt until a separately
 versioned reason and transcript-proof contract is added with its own fixtures.
 Do not widen the v1 reason string or infer equivalence from prose.
+
+A separate non-Reviewer path exists when Claude Code itself has already reported
+one started child as user-stopped and permanently non-resumable. Run only the
+exact typed owner command named by `workers.py status`:
+
+```bash
+python3 tools/workers.py settle-stopped runs/<dir> A-<assignment>
+```
+
+This command requires one exact successful plan-bound Hunter launch, its exact
+`SubagentStart`, no `SubagentStop`, and the same parent transcript's structured
+`SendMessage` result: `Agent <id> was stopped by the user and won't be resumed...`.
+It freezes the parent prefix through that result, the full child transcript, the
+validated journal head, and a content-addressed
+`xunji.externally-stopped-agent.v1` receipt. Any message drift, different agent,
+late child/runtime activity, transcript mutation, OOM/process/network inference,
+Reviewer role, or ambiguous identity fails closed.
+The parent-prefix hash preserves the exact transcript timestamp bytes while the
+receipt normalizes an otherwise valid ISO-8601 instant to canonical millisecond
+UTC `Z` form; this harmless spelling normalization does not relax the exact
+structured message or identity proof.
+
+Settlement projects the authentic attempt as `failed` and writes a deterministic
+failure result under `state/merge_results/`; it never fabricates a return, Stop,
+finding, evidence, or successful lane. Repeat the ordinary delegate checkpoint
+to create/replay the unique digest-bound Reviewer. After its disposition, Root
+may settle `blocked`, `failed`, or `abandoned`, never `merged`. Exact command
+replay is idempotent, and late Stop/child calls conflict with the termination
+receipt rather than replacing it. The projected `status=failed` is runtime
+outcome pending Root disposition, not an earlier Root adjudication; after the
+Reviewer receipt, the first non-merged `finish` does not require `--amend`.
 
 If `workers.py status` instead names
 `foreign-lifecycle-quarantine-required` or gives event sequences for proven
@@ -98,7 +200,7 @@ with any Xunji ownership signal remains lifecycle debt and must not use this
 recovery.
 
 `status=reconciled` alone is not return proof. If the assignment is still
-`running` and the exact interrupted-Start exception above does not apply, wait
+`running` and none of the exact recovery paths above applies, wait
 for hook delivery and repeat this checkpoint; do not end the phase, delegate, or
 call `finish`. Root never writes `done`: `SubagentStop` projects it.
 Do not express that wait as `sleep ... && workers.py status ...`; it is one
@@ -119,6 +221,16 @@ A result becomes
 journal-eligible only after its immutable file and merge-result directory chain
 cross the durability barrier. Retry the same Stop after a pre-journal crash; the
 checkpoint above recovers only derived projection.
+
+If a scheduler/operator wake-up arrives during this chain and the Hook reports
+`XUNJI_CONTINUATION_COALESCED`, it retained the exact current unended plan turn
+binding. Re-read status and continue the unique return/Reviewer/Root settlement
+action; do not material-replan or duplicate the Hunter/Reviewer solely because of
+that prompt. A different session's strict no-delta wake may instead report
+`UserPromptWakeCoalesced` / `XUNJI_E_RUN_BUSY`; it does not supersede the owner
+contract but also does not authorize the wake session to settle it. A new
+constraint, stale input, ended cycle, or missing coalescing receipt remains an
+ordinary fresh/superseding turn.
 
 ## Hunter Then Reviewer
 
@@ -178,6 +290,16 @@ Before `merged`, verify every assigned asset has the required transcript-backed
 target receipt and the frozen candidate has any control/replay evidence needed for
 later promotion. Root `finish` accepts the reviewed result into synthesis; it does
 not itself create an E-id or finding. A zero-tool or partial package cannot merge.
+The receipt owner derives asset activity only from the successful target tool's
+destination-bearing input. Bash must revalidate as one exact registered target
+capability and only its target-bearing argv slots count; typed tools use destination
+fields. Payload/header/save values, arbitrary URL-shaped argv, `description`, and
+prompt prose never count. URL destinations
+normalize an omitted default port to `https=443` or `http=80`; an explicit
+assignment port must match that effective endpoint exactly. This interpretation is
+also applied to existing immutable receipts whose frozen input contains a parseable
+destination. Missing or ambiguous identity remains fail-closed settlement debt; do
+not edit the journal or replay an already successful request as a workaround.
 `blocked`, `failed`, and
 `abandoned` use the literal note grammar `Reason: <exact barrier>; Front: F-xxx`;
 optional E/D anchors must already exist. These statuses preserve unresolved
@@ -245,8 +367,10 @@ generation covers the journal prefix; same-sequence hash conflicts remain debt.
 ## Global Completion Is Separate
 
 The global completion challenge is a separate assignment-free Reviewer envelope,
-not a plan-bound lane and not an independent peer-review replacement. Read the
-exact formatter-owned prompt and verdict contract in
+not a plan-bound lane and not an independent peer-review replacement. It is
+authorized only by the current zero-lane S3 `COMPLETION_REVIEW` plan. Run
+`python3 tools/workers.py completion-review runs/<dir>` and use the printed Agent
+`tool_input` byte-for-byte. Read the exact formatter-owned prompt and verdict contract in
 `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer" and the Agent boundary in
 `.claude/agents/xunji-reviewer.md`; do not reconstruct placeholder hashes or the
 final line from this summary.
@@ -255,4 +379,7 @@ It requires a real same-session Reviewer Start and Stop and creates only the
 pseudo `XUNJI-COMPLETION` / `REVIEW` lifecycle receipt. It creates no assignment,
 immutable plan result, merge draft, review disposition, evidence item, or closure
 authority. The independent content-addressed ReviewReceipt remains a separate
-gate owned by `xunji-reviewops`.
+gate owned by `xunji-reviewops`. After the typed cycle end, return to
+`xunji-run-lifecycle`: keep report READY, run check/Cron reconciliation, and use
+completion transaction prepare/commit. Agent Board must never write report FINAL
+or a completion marker directly.

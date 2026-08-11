@@ -1,9 +1,13 @@
 ---
 name: poc-package
-description: Procedure for turning an authored PoC/exploit into a clean, handoff-ready artifact — pick its xday/normal home, build hardened cross-platform binaries (garble), scrub real-target instances before any handoff or publish, verify source AND binaries, then hand off (author-and-handoff). Invoke when packaging/delivering/committing a PoC. Procedure and tooling only — no attack methodology, no target selection, no payload guidance.
+description: Codex-side procedure for reviewing or explicitly delegated packaging of an authored PoC into a clean handoff artifact. It governs local packaging and scrub checks only; it does not grant Claude Root, live-run, target-execution, or Hook authority.
 ---
 
 # PoC Packaging & Handoff
+
+A Codex-side capability mirror for local artifact work. Packaging may be
+performed when the operator delegates it, but this skill does not authorize
+target execution or replace the Claude-primary `.claude/hooks/` boundary.
 
 A **capability/procedure** skill, not a playbook. It does not decide *what* to
 attack or *how* to exploit — that is the driver's free method. It encodes the
@@ -89,8 +93,9 @@ real domain root / org slug is provably absent.
 
 ## Handoff / publish rules
 
-- **author-and-handoff**: deliver complete, runnable, full-impact code to the
-  operator, who runs it. No ceiling on what you author. What the driver
+- **author-and-handoff**: deliver complete, runnable, full-impact assessment code
+  to the operator, who runs it. Do not weaken legitimate exploit methods; the
+  `safety-boundary` harm-as-purpose floor remains excluded. What the driver
   *auto-runs* against the live target stays proof-level (prove-and-stop); hard-effect
   classes (database dump / DoS / destruction) are never auto-run regardless of handoff.
 - **xday → operator/local only**: hand off out of band; do not commit content
@@ -103,7 +108,7 @@ real domain root / org slug is provably absent.
 
 ## Boundary
 
-This skill is procedure; the limits are still `src-safety-boundary` (effect, not
+This skill is procedure; the limits are still `safety-boundary` (effect, not
 method) and the `.claude/hooks/` gate used by the Claude Code engagement runtime.
 Packaging never weakens them, and the
 scrub step is hygiene, not a safety control — describe what the PoC does, never

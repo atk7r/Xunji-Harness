@@ -9,6 +9,7 @@ scope, and actor bindings before using a matched capability.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import json
 from pathlib import Path
 import re
@@ -52,6 +53,63 @@ class CapabilitySpec:
         return (root / self.script).resolve()
 
 
+@dataclass(frozen=True)
+class TargetReference:
+    """One outbound target-bearing argv value from a validated capability."""
+
+    value: str
+    role: str = "primary"
+    allow_bare: bool = False
+
+
+def target_endpoint(
+    reference: TargetReference,
+) -> tuple[str, int | None] | None:
+    """Normalize one registry-declared destination for every gate/receipt user."""
+    raw = str(reference.value or "").strip()
+    if not raw or len(raw.encode("utf-8")) > 8192 \
+            or re.search(r"[\x00-\x20\x7f]", raw):
+        return None
+    has_scheme = bool(re.match(r"(?i)^https?://", raw))
+    if not has_scheme and not reference.allow_bare:
+        return None
+    if has_scheme and re.match(
+        r"(?i)^https?://(?:localhost|[a-z0-9.-]+|\[[0-9a-f:.]+\])"
+        r"(?::\d{1,5})?[\u3400-\u4dbf\u4e00-\u9fff]",
+        raw,
+    ):
+        return None
+    try:
+        parsed = urlsplit(raw if has_scheme else "//" + raw)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.username is not None or parsed.password is not None \
+            or parsed.netloc.endswith(":"):
+        return None
+    if has_scheme and (parsed.scheme.lower() not in {"http", "https"}
+                       or not parsed.netloc):
+        return None
+    host = str(parsed.hostname or "").strip().lower().rstrip(".")
+    if not host or port is not None and not (1 <= port <= 65535):
+        return None
+    try:
+        host = ipaddress.ip_address(host).compressed.lower()
+    except ValueError:
+        try:
+            host = host.encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            return None
+        if len(host) > 253 or any(
+                not label or len(label) > 63 or not re.fullmatch(
+                    r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+                for label in host.split(".")):
+            return None
+    if has_scheme and port is None:
+        port = 443 if parsed.scheme.lower() == "https" else 80
+    return host, port
+
+
 def _spec(
     capability_id: str,
     script: str,
@@ -76,9 +134,14 @@ _SELFTEST_SCRIPTS = (
     "tools/selftest_all.py", "tools/check_rules.py", "tools/check_hook.py",
     "tools/check_runtime_boundary.py", "tools/check_templates.py",
     "tools/harness/command_shape.py", "tools/harness/guard.py",
-    "tools/harness/maintenance_authority.py", "tools/harness/privacy.py",
+    "tools/harness/proxy.py",
+    "tools/harness/maintenance_authority.py", "tools/harness/output_layout.py",
+    "tools/harness/privacy.py", "tools/harness/subagent_stop_ingress.py",
     "tools/setup_source.py", "tools/run_model.py", "tools/runtime_receipts.py",
-    "tools/turn_contract.py", "tools/work_plan.py", "tools/workers.py",
+    "tools/turn_contract.py", "tools/context_pack.py",
+    "tools/work_plan.py", "tools/workers.py",
+    "tools/contract_schema.py", "tools/completion_transaction.py",
+    "tools/barrier_state.py", "tools/artifact_view.py",
     "tools/anti_drift.py",
     "tools/timestamp_gate.py", "tools/check_run.py",
     "tools/coverage_matrix.py", "tools/ingest_recon.py",
@@ -87,7 +150,8 @@ _SELFTEST_SCRIPTS = (
     "tools/session_handoff.py", "tools/setup_run.py",
     "tools/scope_admission.py", "tools/xunji_statusline.py",
     "tools/probe.py", "tools/render.py", "tools/scan.py", "tools/replay.py",
-    "tools/classify_hosts.py", "tools/exploit.py",
+    "tools/classify_hosts.py", "tools/fetch_assets.py", "tools/exploit.py",
+    "tools/clean_scratch.py", "tools/migrate_output_artifacts.py",
     ".claude/hooks/ip_blacklist.py", ".claude/hooks/output_gate.py",
     ".claude/hooks/run_gate.py", ".claude/hooks/safety_gate.py",
     "sentinel/replay.py", "sentinel/verify_layers.py",
@@ -112,6 +176,14 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             "sentinel/verify_layers.py",
         } else "selftest",
     ) for script in _SELFTEST_SCRIPTS),
+    _spec("maintenance.contract-schema-prepare", "tools/contract_schema.py",
+          "repo_mutation", "contract-schema-prepare"),
+    _spec("maintenance.contract-schema-publish", "tools/contract_schema.py",
+          "repo_mutation", "contract-schema-publish"),
+    _spec("maintenance.contract-schema-discard", "tools/contract_schema.py",
+          "repo_mutation", "contract-schema-discard"),
+    _spec("read.contract-schema-help", "tools/contract_schema.py",
+          "local_read", "contract-schema-help"),
     _spec("read.timestamp-gate", "tools/timestamp_gate.py", "local_read",
           "timestamp-gate", root_direct_eligible=True),
     _spec("read.anti-drift-semantic-status", "tools/anti_drift.py", "local_read",
@@ -142,6 +214,41 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
     _spec("review.peer-review", "tools/peer_review.py", "model_egress",
           "peer-review-model", scope="review_scope", privacy="model_egress",
           recorder="review_receipt"),
+    _spec("read.completion-transaction-status",
+          "tools/completion_transaction.py", "local_read",
+          "completion-transaction-status", scope="active_run"),
+    _spec("control.completion-transaction-adopt-policy",
+          "tools/completion_transaction.py", "control",
+          "completion-transaction-adopt-policy", scope="active_run",
+          recorder="control_journal"),
+    _spec("control.completion-transaction-prepare",
+          "tools/completion_transaction.py", "control",
+          "completion-transaction-prepare", scope="active_run",
+          recorder="control_journal"),
+    _spec("control.completion-transaction-commit",
+          "tools/completion_transaction.py", "control",
+          "completion-transaction-commit", scope="active_run",
+          recorder="control_journal"),
+    _spec("control.completion-transaction-reopen",
+          "tools/completion_transaction.py", "control",
+          "completion-transaction-reopen", scope="active_run",
+          recorder="control_journal"),
+    _spec("read.infra-barrier-status", "tools/barrier_state.py",
+          "local_read", "barrier-state-status", scope="active_run"),
+    _spec("read.infra-barrier-check", "tools/barrier_state.py",
+          "local_read", "barrier-state-check", scope="active_run"),
+    _spec("control.infra-barrier-observe", "tools/barrier_state.py",
+          "control", "barrier-state-observe", scope="active_run",
+          recorder="control_journal"),
+    _spec("control.infra-barrier-clear", "tools/barrier_state.py",
+          "control", "barrier-state-clear", scope="active_run",
+          recorder="control_journal"),
+    _spec("read.artifact-view-range", "tools/artifact_view.py",
+          "local_read", "artifact-view-range", scope="active_run"),
+    _spec("read.artifact-view-search", "tools/artifact_view.py",
+          "local_read", "artifact-view-search", scope="active_run"),
+    _spec("read.artifact-view-strings", "tools/artifact_view.py",
+          "local_read", "artifact-view-strings", scope="active_run"),
     _spec("read.work-plan", "tools/work_plan.py", "local_read",
           "work-plan-status", scope="active_run"),
     _spec("control.work-plan", "tools/work_plan.py", "control",
@@ -149,10 +256,21 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
     _spec("control.work-plan-legacy-migration", "tools/work_plan.py", "control",
           "work-plan-migrate-legacy", scope="active_run",
           recorder="control_journal"),
+    _spec("read.workers-help", "tools/workers.py", "local_read",
+          "workers-help"),
     _spec("read.workers", "tools/workers.py", "local_read",
           "workers-read", scope="active_run"),
     _spec("control.workers-cancel-unlaunched", "tools/workers.py", "control",
           "workers-cancel-unlaunched", scope="active_run",
+          recorder="control_journal"),
+    _spec("control.workers-settle-stopped", "tools/workers.py", "control",
+          "workers-settle-stopped", scope="active_run",
+          recorder="control_journal"),
+    _spec("control.workers-settle-stream-stalled", "tools/workers.py", "control",
+          "workers-settle-stream-stalled", scope="active_run",
+          recorder="control_journal"),
+    _spec("control.workers-recover-hook-failed-stop", "tools/workers.py", "control",
+          "workers-recover-hook-failed-stop", scope="active_run",
           recorder="control_journal"),
     _spec("control.workers", "tools/workers.py", "control",
           "workers-control", scope="active_run", recorder="control_journal"),
@@ -276,6 +394,17 @@ def _one_run(args: tuple[str, ...]) -> bool:
     return len(args) == 1 and bool(args[0]) and not args[0].startswith("-")
 
 
+def _validate_contract_schema_action(
+    args: tuple[str, ...], *, action: str,
+) -> bool:
+    return bool(
+        len(args) == 2
+        and args[0] == action
+        and re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]*\.schema\.json", args[1])
+    )
+
+
 def _options(
     args: tuple[str, ...],
     *,
@@ -312,6 +441,44 @@ def _options(
         raw_positionals.append(token)
         index += 1
     return len(raw_positionals) == positionals, seen, raw_positionals
+
+
+_PROBE_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--data": None, "--data-file": None, "--data-json-file": None,
+    "--value-json": None, "--value-json-file": None,
+    "--preflight-get": None, "--preflight-save": None,
+    "--extract-csrf": None, "--csrf-field": None,
+    "--cookie-jar": None, "-H": None, "--header": None,
+    "--auth-key": None, "--timeout": None, "--tag": None,
+    "--save": None, "--run": None, "--proxy": None,
+    "--retry": None, "--retry-wait": None, "--range": None,
+    "--chunk-size": None, "--samples": None,
+}
+_PROBE_FLAG_OPTIONS = {
+    "--allow-sensitive-auth", "--allow-legacy-cleanup", "--headers",
+    "--no-redirect", "--save-chunks",
+}
+_RENDER_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--eval": None, "--eval-wait": None, "--out": None,
+    "--run": None, "--wait": {"load", "domcontentloaded", "networkidle"},
+    "--wait-sec": None, "--timeout": None, "--proxy": None,
+    "--cookie": None, "--cookies-file": None, "--save": None,
+}
+_RENDER_FLAG_OPTIONS = {
+    "--stealth", "--allow-sensitive-auth", "--screenshot",
+}
+_FETCH_ASSETS_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--html": None, "--base": None, "--out": None, "--run": None,
+    "--timeout": None,
+}
+_CDN_BYPASS_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--proxy": None,
+}
+_CDN_BYPASS_FLAG_OPTIONS = {"--json"}
+_EXPLOIT_VALUE_OPTIONS: dict[str, set[str] | None] = {
+    "--target": None, "--payload": None, "--cmd": None, "--run": None,
+}
+_EXPLOIT_FLAG_OPTIONS = {"--check"}
 
 
 def _validate_coverage(args: tuple[str, ...], *, write: bool) -> bool:
@@ -435,24 +602,9 @@ def _validate_scope_admission(args: tuple[str, ...]) -> bool:
 
 
 def _validate_probe(args: tuple[str, ...]) -> bool:
-    values = {
-        "--data": None, "--data-file": None, "--data-json-file": None,
-        "--value-json": None, "--value-json-file": None,
-        "--preflight-get": None, "--preflight-save": None,
-        "--extract-csrf": None, "--csrf-field": None,
-        "--cookie-jar": None, "-H": None, "--header": None,
-        "--auth-key": None, "--timeout": None, "--tag": None,
-        "--save": None, "--run": None, "--proxy": None,
-        "--retry": None, "--retry-wait": None, "--range": None,
-        "--chunk-size": None, "--samples": None,
-    }
-    flags = {
-        "--allow-sensitive-auth", "--allow-legacy-cleanup", "--headers",
-        "--no-redirect", "--save-chunks",
-    }
     for positionals in (2, 3):
         ok, _seen, pos = _options(
-            args, values=values, flags=flags,
+            args, values=_PROBE_VALUE_OPTIONS, flags=_PROBE_FLAG_OPTIONS,
             repeatable={"-H", "--header"}, positionals=positionals,
         )
         if not ok:
@@ -468,16 +620,11 @@ def _validate_probe(args: tuple[str, ...]) -> bool:
 def _validate_render(args: tuple[str, ...], *, eval_mode: bool) -> bool:
     ok, seen, _pos = _options(
         args,
-        values={
-            "--eval": None, "--eval-wait": None, "--out": None,
-            "--run": None, "--wait": {"load", "domcontentloaded", "networkidle"},
-            "--wait-sec": None, "--timeout": None, "--proxy": None,
-            "--cookie": None, "--cookies-file": None, "--save": None,
-        },
-        flags={"--stealth", "--allow-sensitive-auth", "--screenshot"},
+        values=_RENDER_VALUE_OPTIONS,
+        flags=_RENDER_FLAG_OPTIONS,
         repeatable={"--cookie"}, positionals=1,
     )
-    return ok and ("--eval" in seen) is eval_mode
+    return ok and "--run" in seen and ("--eval" in seen) is eval_mode
 
 
 def _validate_scan(args: tuple[str, ...]) -> bool:
@@ -529,11 +676,12 @@ def _validate_fetch_assets(args: tuple[str, ...]) -> bool:
     for positionals in (0, 1):
         ok, seen, _pos = _options(
             args,
-            values={"--html": None, "--base": None, "--out": None,
-                    "--timeout": None},
+            values=_FETCH_ASSETS_VALUE_OPTIONS,
             flags=set(), positionals=positionals,
         )
         if not ok:
+            continue
+        if "--run" not in seen:
             continue
         if positionals == 1 and "--html" not in seen:
             return True
@@ -545,10 +693,11 @@ def _validate_fetch_assets(args: tuple[str, ...]) -> bool:
 def _validate_classify_hosts(args: tuple[str, ...]) -> bool:
     ok, seen, pos = _options(
         args,
-        values={"--out": None, "--delay": None, "--timeout": None},
+        values={"--out": None, "--run": None, "--delay": None, "--timeout": None},
         flags={"--egress-recheck"}, positionals=1,
     )
-    if not ok or "--out" not in seen or "--egress-recheck" not in seen \
+    if not ok or "--out" not in seen or "--run" not in seen \
+            or "--egress-recheck" not in seen \
             or not pos[0] or pos[0].startswith("-"):
         return False
     try:
@@ -563,7 +712,8 @@ def _validate_classify_hosts(args: tuple[str, ...]) -> bool:
 
 def _validate_cdn_bypass(args: tuple[str, ...]) -> bool:
     ok, _seen, _pos = _options(
-        args, values={"--proxy": None}, flags={"--json"}, positionals=1,
+        args, values=_CDN_BYPASS_VALUE_OPTIONS,
+        flags=_CDN_BYPASS_FLAG_OPTIONS, positionals=1,
     )
     return ok
 
@@ -571,9 +721,8 @@ def _validate_cdn_bypass(args: tuple[str, ...]) -> bool:
 def _validate_exploit(args: tuple[str, ...], *, check: bool) -> bool:
     ok, seen, _pos = _options(
         args,
-        values={"--target": None, "--payload": None, "--cmd": None,
-                "--run": None},
-        flags={"--check"}, positionals=1,
+        values=_EXPLOIT_VALUE_OPTIONS,
+        flags=_EXPLOIT_FLAG_OPTIONS, positionals=1,
     )
     if not ok or "--target" not in seen or _pos != ["viewstate"] \
             or ("--check" in seen) is not check:
@@ -642,7 +791,10 @@ def _validate_work_plan(args: tuple[str, ...], *, status: bool) -> bool:
         values={
             "--stage": {"S1", "S2", "S3"},
             "--objective": None,
-            "--mode": {"ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS"},
+            "--mode": {
+                "ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS",
+                "COMPLETION_REVIEW",
+            },
             "--reason": None,
             "--exit-gate": None,
             "--replan-reason": None,
@@ -651,11 +803,22 @@ def _validate_work_plan(args: tuple[str, ...], *, status: bool) -> bool:
         flags=set(), repeatable={"--lane"}, positionals=1,
     )
     required = {"--stage", "--objective", "--mode", "--reason",
-                "--exit-gate", "--lane"}
+                "--exit-gate"}
     if not ok or not required.issubset(seen):
         return False
+    modes = seen.get("--mode", [])
+    stages = seen.get("--stage", [])
+    completion = modes == ["COMPLETION_REVIEW"]
+    if completion:
+        if stages != ["S3"] or "--lane" in seen:
+            return False
+    elif "--lane" not in seen:
+        return False
     try:
-        return all(isinstance(json.loads(value), dict) for value in seen["--lane"])
+        return all(
+            isinstance(json.loads(value), dict)
+            for value in seen.get("--lane", [])
+        )
     except json.JSONDecodeError:
         return False
 
@@ -665,20 +828,27 @@ def _validate_work_plan_legacy_migration(args: tuple[str, ...]) -> bool:
         and _one_run(args[1:])
 
 
+_WORKERS_COMMANDS = frozenset({
+    "list", "new", "commit-plan", "commit-proposal", "delegate",
+    "completion-review", "assign", "heartbeat", "finish",
+    "review-disposition", "lifecycle-check", "status", "agent-check", "suggest",
+    "plan", "merge-check", "conflicts", "synthesize", "merge-constraints",
+    "merge-threats",
+})
+_WORKERS_HELP_COMMANDS = _WORKERS_COMMANDS | {
+    "cancel-unlaunched", "settle-stopped", "settle-stream-stalled",
+    "recover-hook-failed-stop",
+}
+
+
 def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
     if not args:
         return False
-    commands = {
-        "list", "new", "commit-plan", "commit-proposal", "delegate", "assign",
-        "heartbeat", "finish", "review-disposition", "lifecycle-check",
-        "status", "agent-check", "suggest", "plan", "merge-check", "conflicts",
-        "synthesize", "merge-constraints", "merge-threats",
-    }
     read_commands = {
-        "list", "status", "agent-check", "suggest",
+        "list", "status", "agent-check", "suggest", "completion-review",
         "lifecycle-check", "merge-check",
     }
-    if args[0] not in commands:
+    if args[0] not in _WORKERS_COMMANDS:
         ok, seen, _pos = _options(
             args, values={"--new": None}, flags=set(), positionals=1,
         )
@@ -706,7 +876,10 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
                 # generated multi-lane planner draft will reject it later with
                 # a precise work-plan error. Let the owner CLI explain that
                 # recoverable choice instead of hiding it as an unknown argv.
-                "--mode": {"ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS"},
+                "--mode": {
+                    "ROOT_DIRECT", "SERIAL_AGENT", "PARALLEL_AGENTS",
+                    "COMPLETION_REVIEW",
+                },
                 "--reason": None,
                 "--exit-gate": None,
                 "--replan-reason": None,
@@ -719,11 +892,14 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
         }
         if not ok or not required.issubset(seen):
             return False
+        if seen.get("--mode") == ["COMPLETION_REVIEW"] \
+                and seen.get("--stage") != ["S3"]:
+            return False
         limits = seen.get("--limit", ["2"])
         return all(
             re.fullmatch(r"[12]", raw) is not None for raw in limits
         )
-    if command == "commit-proposal":
+    if command in {"commit-proposal", "completion-review"}:
         return len(args) == 2 and _one_run(args[1:])
     if command == "delegate":
         ok, seen, _pos = _options(
@@ -785,6 +961,33 @@ def _validate_workers_cancel_unlaunched(args: tuple[str, ...]) -> bool:
         and len(reason) <= 4096
 
 
+def _validate_workers_settle_stopped(args: tuple[str, ...]) -> bool:
+    return bool(
+        len(args) == 3
+        and args[0] == "settle-stopped"
+        and _one_run(args[1:2])
+        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[2])
+    )
+
+
+def _validate_workers_settle_stream_stalled(args: tuple[str, ...]) -> bool:
+    return bool(
+        len(args) == 3
+        and args[0] == "settle-stream-stalled"
+        and _one_run(args[1:2])
+        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[2])
+    )
+
+
+def _validate_workers_recover_hook_failed_stop(args: tuple[str, ...]) -> bool:
+    return bool(
+        len(args) == 3
+        and args[0] == "recover-hook-failed-stop"
+        and _one_run(args[1:2])
+        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[2])
+    )
+
+
 def _validate_peer_review(args: tuple[str, ...], mode: str) -> bool:
     if mode == "list":
         return args == ("--list-backends",)
@@ -819,10 +1022,249 @@ def _validate_peer_review(args: tuple[str, ...], mode: str) -> bool:
     return ok and not ({"--bundle-only", "--resolve", "--list-backends"} & set(seen))
 
 
+def _mapping_items(
+    values: list[str], *, digest: bool, maximum_value_bytes: int = 2048,
+) -> bool:
+    keys: set[str] = set()
+    for raw in values:
+        key, separator, value = raw.partition("=")
+        if not separator or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", key) \
+                or key in keys or not value.strip():
+            return False
+        if digest:
+            if not re.fullmatch(r"[0-9a-f]{64}", value):
+                return False
+        elif len(value.encode("utf-8", "replace")) > maximum_value_bytes:
+            return False
+        keys.add(key)
+    return True
+
+
+def _validate_completion_transaction(
+    args: tuple[str, ...], *, action: str,
+) -> bool:
+    if not args or args[0] != action:
+        return False
+    if action in {"status", "commit", "adopt-policy"}:
+        return len(args) == 2 and _one_run(args[1:])
+    if action == "reopen":
+        ok, seen, _pos = _options(
+            args[1:], values={"--reason": None}, flags=set(), positionals=1,
+        )
+        reason = (seen.get("--reason") or [""])[0]
+        return bool(
+            ok and "--reason" in seen and reason.strip()
+            and len(reason.encode("utf-8", "replace")) <= 2048
+        )
+    if action != "prepare":
+        return False
+    ok, seen, _pos = _options(
+        args[1:],
+        values={
+            "--mode": {"ghost", "normal"},
+            "--review-receipt": None,
+            "--review-limitation": None,
+            "--cron-disposition": {"quiescent", "not_requested"},
+            "--warning-disposition": None,
+        },
+        flags=set(),
+        repeatable={
+            "--review-receipt", "--review-limitation",
+            "--warning-disposition",
+        },
+        positionals=1,
+    )
+    if not ok or not {"--mode", "--cron-disposition"}.issubset(seen):
+        return False
+    if not _mapping_items(seen.get("--review-receipt", []), digest=True) \
+            or not _mapping_items(
+                seen.get("--review-limitation", []), digest=False,
+            ):
+        return False
+    warning_codes: set[str] = set()
+    for raw in seen.get("--warning-disposition", []):
+        code, separator, tail = raw.partition(":")
+        disposition, second, reason = tail.partition(":")
+        if not separator or not second \
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", code) \
+                or disposition not in {
+                    "accepted", "dismissed", "deferred", "fixed",
+                } \
+                or not reason.strip() or code in warning_codes \
+                or len(reason.encode("utf-8", "replace")) > 2048:
+            return False
+        warning_codes.add(code)
+    return True
+
+
+def _barrier_key_valid(seen: dict[str, list[str]]) -> bool:
+    required = {
+        "--front", "--action-fingerprint", "--cause-code",
+        "--precondition-digest",
+    }
+    return bool(
+        required.issubset(seen)
+        and re.fullmatch(r"F-[0-9]+", seen["--front"][0])
+        and re.fullmatch(r"[0-9a-f]{64}", seen["--action-fingerprint"][0])
+        and re.fullmatch(
+            r"[A-Z][A-Z0-9_.-]{0,127}", seen["--cause-code"][0],
+        )
+        and re.fullmatch(r"[0-9a-f]{64}", seen["--precondition-digest"][0])
+    )
+
+
+def _validate_barrier_state(args: tuple[str, ...], *, action: str) -> bool:
+    if not args or args[0] != action:
+        return False
+    if action == "status":
+        return len(args) == 2 and _one_run(args[1:])
+    common = {
+        "--front": None,
+        "--action-fingerprint": None,
+        "--cause-code": None,
+        "--precondition-digest": None,
+    }
+    if action == "check":
+        values = {
+            **common,
+            "--operation-class": {
+                "target_attempt", "repair", "local_verify",
+            },
+        }
+        required = {"--operation-class"}
+    elif action == "observe":
+        values = {
+            "--failure-receipt-sha256": None,
+        }
+        required = {"--failure-receipt-sha256"}
+    elif action == "clear":
+        values = {
+            **common,
+            "--reason": {
+                "repair_succeeded", "target_response_observed",
+            },
+            "--basis-sha256": None,
+        }
+        required = {"--reason", "--basis-sha256"}
+    else:
+        return False
+    ok, seen, _pos = _options(
+        args[1:], values=values, flags=set(), positionals=1,
+    )
+    if not ok or not required.issubset(seen):
+        return False
+    if action == "observe":
+        return bool(re.fullmatch(
+            r"[0-9a-f]{64}", seen["--failure-receipt-sha256"][0],
+        ))
+    if not _barrier_key_valid(seen):
+        return False
+    if action == "clear":
+        return bool(re.fullmatch(r"[0-9a-f]{64}", seen["--basis-sha256"][0]))
+    return True
+
+
+def _bounded_decimal(raw: str, *, minimum: int, maximum: int) -> bool:
+    if not re.fullmatch(r"0|[1-9][0-9]*", raw):
+        return False
+    try:
+        value = int(raw)
+    except ValueError:
+        return False
+    return minimum <= value <= maximum
+
+
+def _validate_artifact_view(args: tuple[str, ...], *, action: str) -> bool:
+    if not args or args[0] != action:
+        return False
+    if action == "range":
+        ok, seen, pos = _options(
+            args[1:],
+            values={"--offset": None, "--length": None},
+            flags=set(), positionals=2,
+        )
+        if not ok or "--offset" not in seen:
+            return False
+        return bool(
+            pos[1]
+            and _bounded_decimal(
+                seen["--offset"][0], minimum=0, maximum=(1 << 63) - 1,
+            )
+            and ("--length" not in seen or _bounded_decimal(
+                seen["--length"][0], minimum=1, maximum=64 * 1024,
+            ))
+        )
+    if action == "search":
+        ok, seen, pos = _options(
+            args[1:],
+            values={
+                "--scan-limit": None, "--max-matches": None,
+                "--context-bytes": None,
+            },
+            flags=set(), positionals=3,
+        )
+        if not ok or not pos[1] or not pos[2] \
+                or len(pos[2].encode("utf-8", "replace")) > 512:
+            return False
+        bounds = {
+            "--scan-limit": (1, 64 * 1024 * 1024),
+            "--max-matches": (1, 100),
+            "--context-bytes": (0, 256),
+        }
+    elif action == "strings":
+        ok, seen, pos = _options(
+            args[1:],
+            values={
+                "--min-length": None, "--scan-limit": None,
+                "--max-strings": None, "--max-string-bytes": None,
+            },
+            flags=set(), positionals=2,
+        )
+        if not ok or not pos[1]:
+            return False
+        bounds = {
+            "--min-length": (1, 128),
+            "--scan-limit": (1, 64 * 1024 * 1024),
+            "--max-strings": (1, 200),
+            "--max-string-bytes": (1, 512),
+        }
+    else:
+        return False
+    if any(
+        name in seen and not _bounded_decimal(
+            seen[name][0], minimum=limits[0], maximum=limits[1],
+        )
+        for name, limits in bounds.items()
+    ):
+        return False
+    if action == "strings":
+        minimum = int((seen.get("--min-length") or ["4"])[0])
+        maximum = int((seen.get("--max-string-bytes") or ["256"])[0])
+        if maximum < minimum:
+            return False
+    return True
+
+
 def argv_matches(validator: str, args: Iterable[str]) -> bool:
     values = tuple(str(value) for value in args)
     if not _bounded(values):
         return False
+    if validator == "contract-schema-prepare":
+        return _validate_contract_schema_action(values, action="prepare")
+    if validator == "contract-schema-publish":
+        return _validate_contract_schema_action(values, action="publish")
+    if validator == "contract-schema-discard":
+        return _validate_contract_schema_action(values, action="discard")
+    if validator == "contract-schema-help":
+        return values in {("--help",), ("-h",)}
+    if validator == "workers-help":
+        return bool(
+            values in {("--help",), ("-h",)}
+            or len(values) == 2
+            and values[0] in _WORKERS_HELP_COMMANDS
+            and values[1] in {"--help", "-h"}
+        )
     if validator == "selftest":
         return values == ("--selftest",)
     if validator == "no-args":
@@ -928,6 +1370,12 @@ def argv_matches(validator: str, args: Iterable[str]) -> bool:
         return _validate_workers(values, read=True)
     if validator == "workers-cancel-unlaunched":
         return _validate_workers_cancel_unlaunched(values)
+    if validator == "workers-settle-stopped":
+        return _validate_workers_settle_stopped(values)
+    if validator == "workers-settle-stream-stalled":
+        return _validate_workers_settle_stream_stalled(values)
+    if validator == "workers-recover-hook-failed-stop":
+        return _validate_workers_recover_hook_failed_stop(values)
     if validator == "workers-control":
         return _validate_workers(values, read=False)
     if validator == "peer-review-list":
@@ -938,6 +1386,18 @@ def argv_matches(validator: str, args: Iterable[str]) -> bool:
         return _validate_peer_review(values, "resolve")
     if validator == "peer-review-model":
         return _validate_peer_review(values, "model")
+    if validator.startswith("completion-transaction-"):
+        return _validate_completion_transaction(
+            values, action=validator.removeprefix("completion-transaction-"),
+        )
+    if validator.startswith("barrier-state-"):
+        return _validate_barrier_state(
+            values, action=validator.removeprefix("barrier-state-"),
+        )
+    if validator.startswith("artifact-view-"):
+        return _validate_artifact_view(
+            values, action=validator.removeprefix("artifact-view-"),
+        )
     return False
 
 
@@ -1013,6 +1473,10 @@ def run_reference(spec: CapabilitySpec, args: Iterable[str]) -> str:
         return ""
     if validator.startswith("work-plan-"):
         return values[1] if len(values) > 1 else ""
+    if validator.startswith((
+            "completion-transaction-", "barrier-state-", "artifact-view-",
+    )):
+        return values[1] if len(values) > 1 else ""
     if validator in {
         "anti-drift-semantic-status", "anti-drift-record-reason-pass",
     }:
@@ -1020,8 +1484,10 @@ def run_reference(spec: CapabilitySpec, args: Iterable[str]) -> str:
     if validator.startswith("workers-"):
         commands = {
             "list", "new", "suggest", "plan", "commit-plan", "commit-proposal",
-            "delegate", "assign",
-            "cancel-unlaunched", "status",
+            "delegate", "completion-review", "assign",
+            "cancel-unlaunched", "settle-stopped", "settle-stream-stalled",
+            "recover-hook-failed-stop",
+            "status",
             "agent-check", "heartbeat", "finish", "review-disposition",
             "lifecycle-check",
             "merge-check", "conflicts", "synthesize", "merge-constraints",
@@ -1060,8 +1526,141 @@ def output_references(spec: CapabilitySpec, args: Iterable[str]) -> tuple[str, .
     return tuple(value for name in sorted(found) for value in found[name])
 
 
+_EXPLICIT_TARGET_REFERENCE_VALIDATORS = frozenset({
+    "probe-live", "render-live", "render-eval", "scan-live",
+    "fetch-assets", "cdn-bypass", "exploit-check", "exploit-delivery",
+})
+_INDIRECT_TARGET_REFERENCE_VALIDATORS = frozenset({
+    "check-run-replay", "setup-run-classify", "replay-live", "replay-force",
+    "rerun-deferred", "classify-hosts",
+})
+
+
+def target_reference_policy(spec: CapabilitySpec) -> str:
+    """Classify how a registered target capability obtains its destinations."""
+    if spec.effect != "target":
+        return "none"
+    if spec.argv_validator in _EXPLICIT_TARGET_REFERENCE_VALIDATORS:
+        return "explicit"
+    if spec.argv_validator in _INDIRECT_TARGET_REFERENCE_VALIDATORS:
+        return "indirect"
+    return "missing"
+
+
+def _strict_target_options(
+    args: tuple[str, ...], *,
+    values: dict[str, set[str] | None],
+    flags: set[str],
+    positional_counts: tuple[int, ...],
+    repeatable: set[str] = frozenset(),
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Reparse target argv with the validator-owned, closed option schema."""
+    for positional_count in positional_counts:
+        ok, seen, positionals = _options(
+            args,
+            values=values,
+            flags=flags,
+            repeatable=repeatable,
+            positionals=positional_count,
+        )
+        if ok:
+            return seen, positionals
+    raise ValueError("validated target argv cannot be projected by its option schema")
+
+
+def target_references(
+    spec: CapabilitySpec, args: Iterable[str],
+) -> tuple[TargetReference, ...]:
+    """Project only outbound destination argv from one exact target capability.
+
+    Callers use this shared contract for pre-execution coverage authorization and
+    post-execution asset attribution.  Output paths, payloads, headers, proxy
+    selectors, and arbitrary URL-shaped data are excluded by construction.
+    """
+    values = tuple(str(value) for value in args)
+    policy = target_reference_policy(spec)
+    if policy == "none":
+        return ()
+    if policy == "missing":
+        raise ValueError(
+            f"target capability {spec.id} has no destination reference contract")
+    if not argv_matches(spec.argv_validator, values):
+        raise ValueError(
+            f"target capability {spec.id} argv no longer matches its registry contract")
+    if policy == "indirect":
+        return ()
+
+    references: list[TargetReference] = []
+    if spec.argv_validator == "probe-live":
+        seen, positionals = _strict_target_options(
+            values,
+            values=_PROBE_VALUE_OPTIONS,
+            flags=_PROBE_FLAG_OPTIONS,
+            repeatable={"-H", "--header"},
+            positional_counts=(2, 3),
+        )
+        references.extend(
+            TargetReference(value) for value in positionals[1:])
+        preflight = (seen.get("--preflight-get") or [""])[0]
+        if preflight:
+            references.append(TargetReference(preflight, role="supporting"))
+    elif spec.argv_validator in {"render-live", "render-eval"}:
+        _seen, positionals = _strict_target_options(
+            values,
+            values=_RENDER_VALUE_OPTIONS,
+            flags=_RENDER_FLAG_OPTIONS,
+            repeatable={"--cookie"},
+            positional_counts=(1,),
+        )
+        references.append(TargetReference(positionals[0]))
+    elif spec.argv_validator == "scan-live" and values:
+        references.append(TargetReference(values[-1]))
+    elif spec.argv_validator == "fetch-assets":
+        seen, positionals = _strict_target_options(
+            values,
+            values=_FETCH_ASSETS_VALUE_OPTIONS,
+            flags=set(),
+            positional_counts=(0, 1),
+        )
+        value = positionals[0] if positionals else (seen.get("--base") or [""])[0]
+        if value:
+            references.append(TargetReference(value))
+    elif spec.argv_validator == "cdn-bypass":
+        _seen, positionals = _strict_target_options(
+            values,
+            values=_CDN_BYPASS_VALUE_OPTIONS,
+            flags=_CDN_BYPASS_FLAG_OPTIONS,
+            positional_counts=(1,),
+        )
+        references.append(TargetReference(positionals[0], allow_bare=True))
+    elif spec.argv_validator in {"exploit-check", "exploit-delivery"}:
+        seen, _positionals = _strict_target_options(
+            values,
+            values=_EXPLOIT_VALUE_OPTIONS,
+            flags=_EXPLOIT_FLAG_OPTIONS,
+            positional_counts=(1,),
+        )
+        value = (seen.get("--target") or [""])[0]
+        if value:
+            references.append(TargetReference(value))
+
+    if not references:
+        raise ValueError(
+            f"explicit target capability {spec.id} produced no destination references")
+    return tuple(references)
+
+
 def selftest() -> int:
     ids = [spec.id for spec in CAPABILITIES]
+    demo_run = "runs/demo_20260101"
+    sha_a = "a" * 64
+    sha_b = "b" * 64
+    barrier_key_args = [
+        "--front", "F-001",
+        "--action-fingerprint", sha_a,
+        "--cause-code", "NETWORK_TIMEOUT",
+        "--precondition-digest", sha_b,
+    ]
     root_direct_ids = {
         spec.id for spec in CAPABILITIES if spec.root_direct_eligible
     }
@@ -1071,6 +1670,71 @@ def selftest() -> int:
         "verify.check-run",
         "read.run-model",
     }
+    target_specs = [spec for spec in CAPABILITIES if spec.effect == "target"]
+
+    def projected_targets(script: str, args: list[str]) -> tuple[TargetReference, ...]:
+        spec = match(ROOT / script, args)
+        if spec is None:
+            return ()
+        try:
+            return target_references(spec, args)
+        except ValueError:
+            return ()
+
+    noisy_probe_args = [
+        "POST", "https://actual.example/app.js",
+        "--data", "next=https://payload.example/callback",
+        "--header", "Referer: https://header.example/source",
+        "--preflight-get", "https://preflight.example/form",
+        "--save", "f003-cms-8090-app-js.js",
+        "--run", demo_run,
+    ]
+    noisy_probe_targets = projected_targets("tools/probe.py", noisy_probe_args)
+    bare_cdn_targets = projected_targets(
+        "tools/cdn_bypass.py", ["cdn.example", "--json"])
+    shared_endpoint_normalization = (
+        target_endpoint(TargetReference("https://Port.Example/path"))
+        == ("port.example", 443)
+        and target_endpoint(TargetReference(
+            "https://port.example:8443/path"))
+        == ("port.example", 8443)
+        and target_endpoint(TargetReference("https://例子.测试/path"))
+        == ("xn--fsqu00a.xn--0zwm56d", 443)
+        and target_endpoint(TargetReference(
+            "[2001:db8::1]:8443", allow_bare=True))
+        == ("2001:db8::1", 8443)
+        and target_endpoint(TargetReference(
+            "https://user@port.example/")) is None
+        and target_endpoint(TargetReference(
+            "https://port.example:/")) is None
+        and target_endpoint(TargetReference("port.example")) is None
+    )
+    missing_target_policy_rejected = False
+    try:
+        target_references(
+            _spec(
+                "target.future", "tools/probe.py", "target",
+                "future-target-validator",
+            ),
+            ["https://future.example/"],
+        )
+    except ValueError as exc:
+        missing_target_policy_rejected = (
+            "no destination reference contract" in str(exc))
+    unknown_target_option_rejected = False
+    try:
+        _strict_target_options(
+            (
+                "GET", "https://actual.example/", "--future-target",
+                "https://must-not-be-promoted.example/",
+            ),
+            values=_PROBE_VALUE_OPTIONS,
+            flags=_PROBE_FLAG_OPTIONS,
+            repeatable={"-H", "--header"},
+            positional_counts=(2, 3),
+        )
+    except ValueError:
+        unknown_target_option_rejected = True
     checks: list[tuple[str, bool]] = [
         ("capability ids are unique", len(ids) == len(set(ids))),
         ("all registered scripts exist", all(spec.path().is_file() for spec in CAPABILITIES)),
@@ -1089,6 +1753,74 @@ def selftest() -> int:
             and spec.privacy == "none" and spec.proxy == "none"
             and spec.guard == "none" and spec.recorder == "none"
             for spec in CAPABILITIES if spec.root_direct_eligible)),
+        ("every target capability declares an explicit or indirect destination policy",
+         bool(target_specs) and all(
+             target_reference_policy(spec) in {"explicit", "indirect"}
+             for spec in target_specs)),
+        ("a new target capability without a destination policy fails closed",
+         missing_target_policy_rejected),
+        ("unknown target options cannot promote their values to destinations",
+         unknown_target_option_rejected),
+        ("probe target projection excludes payload header and dotted save names",
+         noisy_probe_targets == (
+             TargetReference("https://actual.example/app.js"),
+             TargetReference(
+                 "https://preflight.example/form", role="supporting"),
+         )
+         and output_references(
+             match(ROOT / "tools/probe.py", noisy_probe_args)
+             or _spec("", "", "", ""), noisy_probe_args)
+         == ("f003-cms-8090-app-js.js",)),
+        ("bare target references require an explicit capability-owned opt-in",
+         bare_cdn_targets == (
+             TargetReference("cdn.example", allow_bare=True),
+         )),
+        ("every consumer shares one strict host port and IDNA normalizer",
+         shared_endpoint_normalization),
+        ("indirect target capabilities cannot invent argv destinations",
+         (lambda spec: bool(
+             spec and target_reference_policy(spec) == "indirect"
+             and target_references(spec, [demo_run, "--replay-verify"]) == ()
+         ))(match(ROOT / "tools/check_run.py", [
+             demo_run, "--replay-verify",
+         ]))),
+        ("contract schema maintenance has three exact discoverable argv", bool(
+            (match(ROOT / "tools/contract_schema.py", [
+                "prepare", "work-plan.v1.schema.json",
+            ]) or _spec("", "", "", "")).id
+                == "maintenance.contract-schema-prepare"
+            and (match(ROOT / "tools/contract_schema.py", [
+                "publish", "work-plan.v1.schema.json",
+            ]) or _spec("", "", "", "")).id
+                == "maintenance.contract-schema-publish"
+            and (match(ROOT / "tools/contract_schema.py", [
+                "discard", "work-plan.v1.schema.json",
+            ]) or _spec("", "", "", "")).id
+                == "maintenance.contract-schema-discard"
+            and all((match(ROOT / "tools/contract_schema.py", argv)
+                     or _spec("", "", "", "")).effect == "repo_mutation"
+                    for argv in (
+                        ["prepare", "work-plan.v1.schema.json"],
+                        ["publish", "work-plan.v1.schema.json"],
+                        ["discard", "work-plan.v1.schema.json"],
+                    ))
+            and match(ROOT / "tools/contract_schema.py", [
+                "publish", "../work-plan.v1.schema.json",
+            ]) is None
+            and (match(ROOT / "tools/contract_schema.py", ["--help"])
+                 or _spec("", "", "", "")).id
+                == "read.contract-schema-help"
+        )),
+        ("workers top-level help is an exact local-read capability", bool(
+            (match(ROOT / "tools/workers.py", ["--help"])
+             or _spec("", "", "", "")).id == "read.workers-help"
+            and (match(ROOT / "tools/workers.py", ["-h"])
+                 or _spec("", "", "", "")).effect == "local_read"
+            and (match(ROOT / "tools/workers.py", [
+                "recover-hook-failed-stop", "--help",
+            ]) or _spec("", "", "", "")).id == "read.workers-help"
+            and match(ROOT / "tools/workers.py", ["--help", "extra"]) is None
+        )),
         ("root-direct eligibility defaults closed",
          _spec("fixture.closed", "tools/run_model.py", "local_read", "one-run")
          .root_direct_eligible is False),
@@ -1112,6 +1844,190 @@ def selftest() -> int:
         ("control capabilities always declare a recorder", all(
             spec.recorder != "none"
             for spec in CAPABILITIES if spec.effect == "control")),
+        ("new tool selftests are local verification only", all(
+            (match(ROOT / script, ["--selftest"])
+             or _spec("", "", "", "")).effect == "local_verify"
+            for script in (
+                "tools/completion_transaction.py", "tools/barrier_state.py",
+                "tools/artifact_view.py",
+            )
+        )),
+        ("completion transaction actions have distinct exact effects", bool(
+            (match(ROOT / "tools/completion_transaction.py", [
+                "status", demo_run,
+            ]) or _spec("", "", "", "")).id
+            == "read.completion-transaction-status"
+            and (match(ROOT / "tools/completion_transaction.py", [
+                "adopt-policy", demo_run,
+            ]) or _spec("", "", "", "")).id
+            == "control.completion-transaction-adopt-policy"
+            and (match(ROOT / "tools/completion_transaction.py", [
+                "prepare", demo_run,
+                "--mode", "normal",
+                "--review-receipt", f"independent-review={sha_a}",
+                "--review-limitation", "external-assistance=not configured",
+                "--cron-disposition", "not_requested",
+                "--warning-disposition", "CHECK_WARN:accepted:reviewed locally",
+            ]) or _spec("", "", "", "")).id
+            == "control.completion-transaction-prepare"
+            and (match(ROOT / "tools/completion_transaction.py", [
+                "commit", demo_run,
+            ]) or _spec("", "", "", "")).id
+            == "control.completion-transaction-commit"
+            and (match(ROOT / "tools/completion_transaction.py", [
+                "reopen", demo_run, "--reason", "new canonical evidence",
+            ]) or _spec("", "", "", "")).id
+            == "control.completion-transaction-reopen"
+            and all(
+                (match(ROOT / "tools/completion_transaction.py", argv)
+                 or _spec("", "", "", "")).recorder == "control_journal"
+                for argv in (
+                    ["adopt-policy", demo_run],
+                    ["prepare", demo_run, "--mode", "ghost",
+                     "--cron-disposition", "quiescent"],
+                    ["commit", demo_run],
+                    ["reopen", demo_run, "--reason", "basis changed"],
+                )
+            )
+            and run_reference(
+                match(ROOT / "tools/completion_transaction.py", [
+                    "commit", demo_run,
+                ]) or _spec("", "", "", ""),
+                ["commit", demo_run],
+            ) == demo_run
+        )),
+        ("completion transaction argv fail closed on malformed extensions", bool(
+            match(ROOT / "tools/completion_transaction.py", [
+                "prepare", demo_run, "--mode", "normal",
+                "--cron-disposition", "not_requested", "--future", "x",
+            ]) is None
+            and match(ROOT / "tools/completion_transaction.py", [
+                "prepare", demo_run, "--mode", "normal",
+                "--review-receipt", "independent-review=not-a-digest",
+                "--cron-disposition", "not_requested",
+            ]) is None
+            and match(ROOT / "tools/completion_transaction.py", [
+                "prepare", demo_run, "--mode", "normal", "--mode", "ghost",
+                "--cron-disposition", "not_requested",
+            ]) is None
+            and match(ROOT / "tools/completion_transaction.py", [
+                "reopen", demo_run,
+            ]) is None
+            and match(ROOT / "tools/completion_transaction.py", [
+                "commit", demo_run, "--future",
+            ]) is None
+            and match(ROOT / "tools/completion_transaction.py", [
+                "adopt-policy", demo_run, "extra",
+            ]) is None
+        )),
+        ("infrastructure barrier separates reads from derived-state controls", bool(
+            (match(ROOT / "tools/barrier_state.py", [
+                "status", demo_run,
+            ]) or _spec("", "", "", "")).id == "read.infra-barrier-status"
+            and (match(ROOT / "tools/barrier_state.py", [
+                "check", demo_run, *barrier_key_args,
+                "--operation-class", "target_attempt",
+            ]) or _spec("", "", "", "")).id == "read.infra-barrier-check"
+            and (match(ROOT / "tools/barrier_state.py", [
+                "observe", demo_run,
+                "--failure-receipt-sha256", sha_a,
+            ]) or _spec("", "", "", "")).id
+            == "control.infra-barrier-observe"
+            and (match(ROOT / "tools/barrier_state.py", [
+                "clear", demo_run, *barrier_key_args,
+                "--reason", "repair_succeeded", "--basis-sha256", sha_b,
+            ]) or _spec("", "", "", "")).id
+            == "control.infra-barrier-clear"
+            and all(
+                (match(ROOT / "tools/barrier_state.py", argv)
+                 or _spec("", "", "", "")).recorder == "control_journal"
+                for argv in (
+                    ["observe", demo_run,
+                     "--failure-receipt-sha256", sha_a],
+                    ["clear", demo_run, *barrier_key_args,
+                     "--reason", "repair_succeeded", "--basis-sha256", sha_b],
+                )
+            )
+            and run_reference(
+                match(ROOT / "tools/barrier_state.py", [
+                    "status", demo_run,
+                ]) or _spec("", "", "", ""),
+                ["status", demo_run],
+            ) == demo_run
+        )),
+        ("infrastructure barrier observe accepts only a runtime receipt reference", bool(
+            match(ROOT / "tools/barrier_state.py", [
+                "observe", demo_run,
+                "--failure-receipt-sha256", "not-a-digest",
+            ]) is None
+            and match(ROOT / "tools/barrier_state.py", [
+                "observe", demo_run,
+                "--failure-receipt-sha256", sha_a,
+                "--failure-domain", "runtime",
+            ]) is None
+            and match(ROOT / "tools/barrier_state.py", [
+                "clear", demo_run, *barrier_key_args,
+                "--reason", "failure_reclassified", "--basis-sha256", sha_b,
+            ]) is None
+            and match(ROOT / "tools/barrier_state.py", [
+                "check", demo_run, *barrier_key_args,
+                "--operation-class", "future",
+            ]) is None
+            and match(ROOT / "tools/barrier_state.py", [
+                "status", demo_run, "--future",
+            ]) is None
+        )),
+        ("artifact view exposes only bounded active-run reads", bool(
+            (match(ROOT / "tools/artifact_view.py", [
+                "range", demo_run, "responses/large.bin",
+                "--offset", "0", "--length", "65536",
+            ]) or _spec("", "", "", "")).id == "read.artifact-view-range"
+            and (match(ROOT / "tools/artifact_view.py", [
+                "search", demo_run, "responses/large.bin", "literal",
+                "--scan-limit", str(64 * 1024 * 1024),
+                "--max-matches", "100", "--context-bytes", "256",
+            ]) or _spec("", "", "", "")).id == "read.artifact-view-search"
+            and (match(ROOT / "tools/artifact_view.py", [
+                "strings", demo_run, "responses/large.bin",
+                "--min-length", "4", "--scan-limit", "1024",
+                "--max-strings", "20", "--max-string-bytes", "256",
+            ]) or _spec("", "", "", "")).id == "read.artifact-view-strings"
+            and all(
+                (match(ROOT / "tools/artifact_view.py", argv)
+                 or _spec("", "", "", "")).scope == "active_run"
+                for argv in (
+                    ["range", demo_run, "large.bin", "--offset", "0"],
+                    ["search", demo_run, "large.bin", "needle"],
+                    ["strings", demo_run, "large.bin"],
+                )
+            )
+            and run_reference(
+                match(ROOT / "tools/artifact_view.py", [
+                    "range", demo_run, "large.bin", "--offset", "0",
+                ]) or _spec("", "", "", ""),
+                ["range", demo_run, "large.bin", "--offset", "0"],
+            ) == demo_run
+        )),
+        ("artifact view bounds and unknown argv fail closed", bool(
+            match(ROOT / "tools/artifact_view.py", [
+                "range", demo_run, "large.bin", "--offset", "-1",
+            ]) is None
+            and match(ROOT / "tools/artifact_view.py", [
+                "range", demo_run, "large.bin", "--offset", "0",
+                "--length", "65537",
+            ]) is None
+            and match(ROOT / "tools/artifact_view.py", [
+                "search", demo_run, "large.bin", "needle",
+                "--scan-limit", str(64 * 1024 * 1024 + 1),
+            ]) is None
+            and match(ROOT / "tools/artifact_view.py", [
+                "strings", demo_run, "large.bin",
+                "--min-length", "128", "--max-string-bytes", "127",
+            ]) is None
+            and match(ROOT / "tools/artifact_view.py", [
+                "strings", demo_run, "large.bin", "--future", "1",
+            ]) is None
+        )),
         ("offline check_run is local verification", (match(
             ROOT / "tools/check_run.py", ["runs/demo_20260101"]
         ) or _spec("", "", "repo_mutation", "")).effect == "local_verify"),
@@ -1218,6 +2134,55 @@ def selftest() -> int:
                 "commit-proposal", "runs/demo_20260101", "--future",
             ]) is None
         )),
+        ("completion plan and launch formatter have exact distinct effects", bool(
+            (lambda matched: bool(
+                matched and matched.effect == "control"
+            ))(match(ROOT / "tools/workers.py", [
+                "commit-plan", "runs/demo_20260101",
+                "--stage", "S3", "--objective", "review closure bundle",
+                "--mode", "COMPLETION_REVIEW", "--reason", "zero open fronts",
+                "--exit-gate", "exact completion receipt",
+            ]))
+            and match(ROOT / "tools/workers.py", [
+                "commit-plan", "runs/demo_20260101",
+                "--stage", "S2", "--objective", "review closure bundle",
+                "--mode", "COMPLETION_REVIEW", "--reason", "zero open fronts",
+                "--exit-gate", "exact completion receipt",
+            ]) is None
+            and match(ROOT / "tools/workers.py", [
+                "commit-plan", "runs/demo_20260101",
+                "--stage", "S3", "--objective", "review closure bundle",
+                "--mode", "COMPLETION_REVIEW", "--reason", "zero open fronts",
+                "--exit-gate", "exact completion receipt",
+                "--lane", "{}",
+            ]) is None
+            and (lambda matched: bool(
+                matched
+                and matched.effect == "local_read"
+                and run_reference(matched, [
+                    "completion-review", "runs/demo_20260101",
+                ]) == "runs/demo_20260101"
+            ))(match(ROOT / "tools/workers.py", [
+                "completion-review", "runs/demo_20260101",
+            ]))
+            and match(ROOT / "tools/workers.py", [
+                "completion-review", "runs/demo_20260101", "--future",
+            ]) is None
+            and (lambda matched: bool(
+                matched and matched.effect == "control"
+            ))(match(ROOT / "tools/work_plan.py", [
+                "commit", "runs/demo_20260101",
+                "--stage", "S3", "--objective", "review closure bundle",
+                "--mode", "COMPLETION_REVIEW", "--reason", "zero open fronts",
+                "--exit-gate", "exact completion receipt",
+            ]))
+            and match(ROOT / "tools/work_plan.py", [
+                "commit", "runs/demo_20260101",
+                "--stage", "S2", "--objective", "review closure bundle",
+                "--mode", "COMPLETION_REVIEW", "--reason", "zero open fronts",
+                "--exit-gate", "exact completion receipt",
+            ]) is None
+        )),
         ("workers delegate has exact bounded scheduler argv", bool(
             match(ROOT / "tools/workers.py", [
                 "delegate", "runs/demo_20260101", "--runtime-slots", "2",
@@ -1250,6 +2215,55 @@ def selftest() -> int:
             and match(ROOT / "tools/workers.py", [
                 "cancel-unlaunched", "runs/demo_20260101", "A-web-hunter-001",
                 "--reason", "ok", "--future",
+            ]) is None)),
+        ("workers external-stop settlement is a distinct exact control capability", bool(
+            (match(ROOT / "tools/workers.py", [
+                "settle-stopped", "runs/demo_20260101", "A-web-hunter-001",
+            ]) or _spec("", "", "", "")).id
+            == "control.workers-settle-stopped"
+            and (match(ROOT / "tools/workers.py", [
+                "settle-stopped", "runs/demo_20260101", "A-web-hunter-001",
+            ]) or _spec("", "", "", "")).recorder == "control_journal"
+            and match(ROOT / "tools/workers.py", [
+                "settle-stopped", "runs/demo_20260101",
+            ]) is None
+            and match(ROOT / "tools/workers.py", [
+                "settle-stopped", "runs/demo_20260101", "A-web-hunter-001",
+                "--future",
+            ]) is None)),
+        ("workers stream-stall settlement is a distinct exact control capability", bool(
+            (match(ROOT / "tools/workers.py", [
+                "settle-stream-stalled", "runs/demo_20260101",
+                "A-web-hunter-001",
+            ]) or _spec("", "", "", "")).id
+            == "control.workers-settle-stream-stalled"
+            and (match(ROOT / "tools/workers.py", [
+                "settle-stream-stalled", "runs/demo_20260101",
+                "A-web-hunter-001",
+            ]) or _spec("", "", "", "")).recorder == "control_journal"
+            and match(ROOT / "tools/workers.py", [
+                "settle-stream-stalled", "runs/demo_20260101",
+            ]) is None
+            and match(ROOT / "tools/workers.py", [
+                "settle-stream-stalled", "runs/demo_20260101",
+                "A-web-hunter-001", "--future",
+            ]) is None)),
+        ("workers hook-failed Stop recovery is a distinct exact control capability", bool(
+            (match(ROOT / "tools/workers.py", [
+                "recover-hook-failed-stop", "runs/demo_20260101",
+                "A-review-001",
+            ]) or _spec("", "", "", "")).id
+            == "control.workers-recover-hook-failed-stop"
+            and (match(ROOT / "tools/workers.py", [
+                "recover-hook-failed-stop", "runs/demo_20260101",
+                "A-review-001",
+            ]) or _spec("", "", "", "")).recorder == "control_journal"
+            and match(ROOT / "tools/workers.py", [
+                "recover-hook-failed-stop", "runs/demo_20260101",
+            ]) is None
+            and match(ROOT / "tools/workers.py", [
+                "recover-hook-failed-stop", "runs/demo_20260101",
+                "A-review-001", "--future",
             ]) is None)),
         ("workers status is read while assignment is control", (match(
             ROOT / "tools/workers.py", ["status", "runs/demo_20260101"]
@@ -1404,22 +2418,41 @@ def selftest() -> int:
         ("classify capability is baseline-bound egress recheck only", bool(
             match(ROOT / "tools/classify_hosts.py", [
                 "recon.json", "--out", "runs/demo_20260101/classify",
+                "--run", "runs/demo_20260101",
                 "--egress-recheck",
             ])
             and match(ROOT / "tools/classify_hosts.py", [
                 "--hosts", "/tmp/hidden-targets", "--out",
-                "runs/demo_20260101/classify", "--egress-recheck",
-            ]) is None
-            and match(ROOT / "tools/classify_hosts.py", [
-                "recon.json", "--out", "runs/demo_20260101/classify", "--all",
+                "runs/demo_20260101/classify", "--run", "runs/demo_20260101",
+                "--egress-recheck",
             ]) is None
             and match(ROOT / "tools/classify_hosts.py", [
                 "recon.json", "--out", "runs/demo_20260101/classify",
+                "--run", "runs/demo_20260101", "--all",
+            ]) is None
+            and match(ROOT / "tools/classify_hosts.py", [
+                "recon.json", "--out", "runs/demo_20260101/classify",
+                "--run", "runs/demo_20260101",
+            ]) is None
+        )),
+        ("render and fetch-assets require an explicit run binding", bool(
+            match(ROOT / "tools/render.py", [
+                "https://example.test/", "--run", "runs/demo_20260101",
+            ])
+            and match(ROOT / "tools/render.py", [
+                "https://example.test/",
+            ]) is None
+            and match(ROOT / "tools/fetch_assets.py", [
+                "https://example.test/", "--run", "runs/demo_20260101",
+            ])
+            and match(ROOT / "tools/fetch_assets.py", [
+                "https://example.test/",
             ]) is None
         )),
         ("render eval and forced replay receive explicit capability ids", bool(
             (match(ROOT / "tools/render.py", [
                 "https://example.test/", "--eval", "proof.js",
+                "--run", "runs/demo_20260101",
             ]) or _spec("", "", "", "")).id == "target.render-eval"
             and (match(ROOT / "tools/replay.py", [
                 "runs/demo_20260101", "--force",

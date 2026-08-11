@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""异构复审模块 (peer review) —— 把"另一个模型当独立复审员"做成可接入的独立部件。
+"""异构复审与外部/第三方协助模块。
 
 背景: review/independent-reviewer.md 把复审实现列为三种 —— 子代理 / 人开新会话 /
 【另一个模型(独立性更强)】。本模块自动化第三种, 并按"谁改代码/谁是评审对象"选后端:
-    Claude Code 主驾驶/修改: 满配 Codex(gpt-5.5 high, 本地 CLI agent) + arkcli 双模型 panel;
-      缺 Codex 用 arkcli panel; 缺 arkcli 用 Codex; 都缺才 Claude Code 同族兜底。
-    Codex-authored maintenance diff: Codex 不算独立票, 满配用 arkcli panel + Claude Code CLI 复审;
-      缺 arkcli 时用 Claude Code CLI 复审。最终综合/决策权仍在 Codex。
+    Claude Code 主驾驶/修改: 满配 Codex + 外部/第三方协助模块;
+      当前选择的第三方适配器是 arkcli 双模型 panel。缺 Codex 时仍可使用该协助票,
+      但最终综合回到 Claude Code 主驾驶;缺第三方后端时用 Codex。
+    Codex-authored maintenance diff: Codex 不算独立票, 满配用外部/第三方协助模块
+      + Claude Code CLI 复审;缺第三方后端时用 Claude Code CLI。最终综合/决策权仍在 Codex。
 为什么这个顺序: A2 盲区在权重里, 补盲要【正交的错误分布】。Claude 主驾满配大脑是 Codex;
-arkcli panel 是外部异构补盲团; Claude 自家只减 bias 不减盲区, 故仅在 Claude 主驾时作兜底。
+外部/第三方协助模块只提供异构候选票,不成为 Single Synthesizer。arkcli 是当前选择的
+后端适配器,不是模块的权限名称。provider 先在受信任 registry 注册,再由本地
+config.ini [external_assistance] 启用；本地配置不能注入命令。Claude 自家 fresh-context 只减 bias 不减同族盲区,
+故仅在 Claude 主驾时作最弱兜底。
 如果评审对象是 Codex-authored maintenance diff, 用 --driver codex:
-  Codex 后端不再计为独立复审票, 矩阵切到 arkcli panel + Claude Code CLI, 但综合大脑仍为 Codex。
+  Codex 后端不再计为独立复审票, 矩阵切到外部/第三方协助 + Claude Code CLI,
+  但综合大脑仍为 Codex。
 
 接入方式(其他功能 import):
     from peer_review import review
@@ -22,13 +27,14 @@ arkcli panel 是外部异构补盲团; Claude 自家只减 bias 不减盲区, �
 铁律(单整合者): 本模块的产出是【一票/候选, 不是裁决】。driver 仍是唯一整合者, 须过
 证据门: 不盲从(可驳回工具/语境误报), 不忽视(采纳真盲补)。模块绝不自动改 run。
 
-数据出境提示: Codex 会把 run 审计内容发给 OpenAI; arkcli panel 会把冻结 review_bundle
+数据出境提示: Codex 会把 run 审计内容发给 OpenAI; 当前 arkcli 第三方适配器会把冻结 review_bundle
 发给 ARK 数据面模型; anthropic/openai 兼容旧后端也会发外部厂商 API。这等同"把目标发现物
 发布到外部服务"。仅在操作者接受时使用 API 后端。
 """
 from __future__ import annotations
 
 import argparse
+import configparser
 import hashlib
 import json
 import os
@@ -60,11 +66,25 @@ from evidence_parse import (                    # noqa: E402  Codex 裁决事实
     parse_evidence,
 )
 CONFIG_PATH = ROOT / "review" / "peer_review.json"
+LOCAL_CONFIG_PATH = ROOT / "config.ini"
 DEFAULT_DRIVER = "claude"
+EXTERNAL_ASSISTANCE_ROLE = "external-assistance"
+CORE_REVIEWER_ROLE = "core-reviewer"
+SUPPORTED_BACKEND_KINDS = {
+    "cli-agent", "arkcli-panel", "openai", "claude-code-cli",
+}
 
 # ---- 默认配置(可被 review/peer_review.json 覆盖) ----
 DEFAULT_CONFIG: dict = {
     "priority": ["codex", "arkcli", "claude"],
+    # Local config.ini owns activation only. Provider definitions and adapter
+    # kinds stay in this trusted registry (or review/peer_review.json), so a
+    # local toggle cannot become an arbitrary-command execution surface.
+    "external_assistance": {
+        "enabled": False,
+        "providers": ["arkcli"],
+        "warnings": [],
+    },
     "panel": {
         "min_heterogeneous": "auto",
         "max_backends": 2,
@@ -89,25 +109,30 @@ DEFAULT_CONFIG: dict = {
     "backends": {
         # cli-agent: 自己能读文件, prompt 只给路径 + rubric
         "codex": {"kind": "cli-agent", "cmd": "codex", "sandbox": "read-only",
-                  "model": "gpt-5.5", "effort": "high", "heterogeneous": True},
-        # arkcli 外部异构补盲团: 双模型独立审同一冻结 bundle, 聚合成候选 finding。
+                  "model": "gpt-5.5", "effort": "high", "heterogeneous": True,
+                  "role": CORE_REVIEWER_ROLE},
+        # 外部/第三方协助模块当前选择的 arkcli 适配器:
+        # 双模型独立审同一冻结 bundle, 聚合成候选 finding。
         "arkcli": {"kind": "arkcli-panel", "cmd": "arkcli", "heterogeneous": True,
+                   "role": EXTERNAL_ASSISTANCE_ROLE,
                    "per_model_timeout": 300, "max_context_chars": 120_000,
                    "models": [
                        {"id": "kimi-k2.7-code"},
                        {"id": "glm-5.2"},
                    ]},
-        # 旧 OpenAI 兼容后端: 保留给 --backend 强制/私有配置, 不在默认链路。
+        # 旧 OpenAI 兼容后端: 保留给私有配置；和其他外部 provider 一样，
+        # 必须先在 config.ini 启用后才能由 --backend 强制，不在默认链路。
         "deepseek": {"kind": "openai", "base_url": "https://api.deepseek.com/v1",
                      "model": "deepseek-reasoner", "api_key_env": "DEEPSEEK_API_KEY",
-                     "heterogeneous": True},
+                     "heterogeneous": True, "role": EXTERNAL_ASSISTANCE_ROLE},
         "glm": {"kind": "openai", "base_url": "https://open.bigmodel.cn/api/paas/v4",
-                "model": "glm-4-plus", "api_key_env": "GLM_API_KEY", "heterogeneous": True},
+                "model": "glm-4-plus", "api_key_env": "GLM_API_KEY", "heterogeneous": True,
+                "role": EXTERNAL_ASSISTANCE_ROLE},
         # Claude Code CLI: 走 `claude -p`, 不直连 Anthropic Messages API。对 Claude 主驾是同族兜底;
         # 对 Codex-authored diff 是独立 reviewer。
         "claude": {"kind": "claude-code-cli", "cmd": "claude", "effort": "high",
                    "permission_mode": "dontAsk",
-                   "heterogeneous": False},
+                   "heterogeneous": False, "role": CORE_REVIEWER_ROLE},
     },
 }
 
@@ -302,13 +327,139 @@ def _deep_merge(base: dict, over: dict) -> dict:
     return out
 
 
-def load_config(path: Path = CONFIG_PATH) -> dict:
+_PROVIDER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+def _backend_role(name: str, cfg: dict) -> str:
+    return str(cfg.get("backends", {}).get(name, {}).get("role") or "").strip().lower()
+
+
+def _backend_kind(name: str, cfg: dict) -> str:
+    return str(cfg.get("backends", {}).get(name, {}).get("kind") or "").strip().lower()
+
+
+def _is_external_provider(name: str, cfg: dict) -> bool:
+    return _backend_role(name, cfg) == EXTERNAL_ASSISTANCE_ROLE
+
+
+def _provider_names(raw) -> list[str]:
+    if isinstance(raw, str):
+        values = re.split(r"[\s,]+", raw.strip()) if raw.strip() else []
+    elif isinstance(raw, (list, tuple)):
+        values = [str(item).strip() for item in raw]
+    else:
+        values = []
+    out: list[str] = []
+    for value in values:
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def _external_provider_names(cfg: dict) -> list[str]:
+    section = cfg.get("external_assistance", {})
+    if not isinstance(section, dict) or section.get("enabled") is not True:
+        return []
+    return [
+        name for name in _provider_names(section.get("providers"))
+        if _PROVIDER_NAME_RE.fullmatch(name)
+        and _is_external_provider(name, cfg)
+        and _backend_kind(name, cfg) in SUPPORTED_BACKEND_KINDS
+    ]
+
+
+def _external_provider_enabled(name: str, cfg: dict) -> bool:
+    role = _backend_role(name, cfg)
+    if role == CORE_REVIEWER_ROLE:
+        return True
+    if role == EXTERNAL_ASSISTANCE_ROLE:
+        return name in _external_provider_names(cfg)
+    # Every executable backend must be classified by the trusted registry.
+    # This keeps a misspelled/missing external role from silently becoming an
+    # ungated ordinary backend while preserving explicitly classified core fallbacks.
+    return False
+
+
+def _parse_ini_bool(raw: str) -> bool | None:
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if value in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return None
+
+
+def _load_external_assistance(cfg: dict, local_path: Path | None) -> dict:
+    section = cfg.get("external_assistance")
+    if not isinstance(section, dict):
+        section = {}
+    state = {
+        "enabled": False,
+        "providers": _provider_names(section.get("providers") or ["arkcli"]),
+        "warnings": [],
+        "source": str(local_path) if local_path is not None else "(disabled)",
+    }
+    if local_path is None or not local_path.is_file():
+        cfg["external_assistance"] = state
+        return cfg
+
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        with local_path.open("r", encoding="utf-8") as fh:
+            parser.read_file(fh)
+    except Exception as exc:
+        state["warnings"].append(
+            f"{local_path}: parse failed; external assistance disabled: {exc}")
+        cfg["external_assistance"] = state
+        return cfg
+
+    if not parser.has_section("external_assistance"):
+        cfg["external_assistance"] = state
+        return cfg
+
+    ini = parser["external_assistance"]
+    enabled = _parse_ini_bool(ini.get("enabled", "false"))
+    if enabled is None:
+        state["warnings"].append(
+            f"{local_path}: [external_assistance] enabled must be true/false; disabled fail-closed")
+        enabled = False
+    state["enabled"] = enabled
+    state["providers"] = _provider_names(
+        ini.get("providers", ",".join(state["providers"])))
+
+    for name in state["providers"]:
+        if not _PROVIDER_NAME_RE.fullmatch(name):
+            state["warnings"].append(
+                f"{local_path}: invalid external provider name {name!r}; ignored")
+        elif name not in cfg.get("backends", {}):
+            state["warnings"].append(
+                f"{local_path}: external provider {name!r} is not registered; ignored")
+        elif not _is_external_provider(name, cfg):
+            state["warnings"].append(
+                f"{local_path}: backend {name!r} is not registered with role "
+                f"{EXTERNAL_ASSISTANCE_ROLE!r}; ignored")
+        elif _backend_kind(name, cfg) not in SUPPORTED_BACKEND_KINDS:
+            state["warnings"].append(
+                f"{local_path}: external provider {name!r} uses unsupported adapter kind "
+                f"{_backend_kind(name, cfg)!r}; ignored")
+    if enabled and not _external_provider_names({**cfg, "external_assistance": state}):
+        state["warnings"].append(
+            f"{local_path}: external assistance enabled but no registered provider is active")
+    cfg["external_assistance"] = state
+    return cfg
+
+
+def load_config(path: Path = CONFIG_PATH,
+                local_path: Path | None = LOCAL_CONFIG_PATH) -> dict:
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))   # deep copy
     if path.is_file():
         try:
             cfg = _deep_merge(cfg, json.loads(path.read_text(encoding="utf-8")))
         except Exception as e:
             print(f"[peer_review] WARN: 配置 {path} 解析失败, 用默认: {e}", file=sys.stderr)
+    cfg = _load_external_assistance(cfg, local_path)
+    for warning in cfg.get("external_assistance", {}).get("warnings", []):
+        print(f"[peer_review] WARN: {warning}", file=sys.stderr)
     return cfg
 
 
@@ -598,6 +749,8 @@ def backend_available(name: str, cfg: dict) -> bool:
     b = cfg["backends"].get(name)
     if not b:
         return False
+    if not _external_provider_enabled(name, cfg):
+        return False
     kind = b.get("kind")
     if kind == "cli-agent":
         if shutil.which(b.get("cmd", name)) is None:
@@ -617,7 +770,9 @@ def backend_available(name: str, cfg: dict) -> bool:
 
 def select_backend(cfg: dict, forced: str | None = None) -> str | None:
     if forced:
-        return forced if forced in cfg["backends"] else None
+        if forced not in cfg["backends"] or not _external_provider_enabled(forced, cfg):
+            return None
+        return forced
     for name in cfg.get("priority", []):
         if backend_available(name, cfg):
             return name
@@ -641,8 +796,8 @@ def _normalize_driver(driver: str | None = None) -> str:
 def _is_heterogeneous(name: str, cfg: dict, driver: str | None = None) -> bool:
     """独立/异构是相对当前主驾驶说的。
 
-    默认主驾驶是 Claude Code: codex/arkcli/legacy API 算异构, claude 同族不算。
-    若主操作面切到 Codex: codex 变成自审, arkcli 与 Claude Code CLI 才算独立复审。
+    默认主驾驶是 Claude Code: Codex/已启用外部 provider 算异构, Claude 同族不算。
+    若主操作面切到 Codex: Codex 变成自审, 外部 provider 与 Claude Code CLI 才算独立复审。
     """
     driver = _normalize_driver(driver)
     if driver == "codex":
@@ -653,26 +808,35 @@ def _is_heterogeneous(name: str, cfg: dict, driver: str | None = None) -> bool:
     return bool(cfg["backends"].get(name, {}).get("heterogeneous", False))
 
 
-def _driver_matrix_order(driver: str | None = None) -> list[str]:
+def _driver_matrix_order(cfg: dict, driver: str | None = None) -> list[str]:
     """Preferred reviewer order for the active author/review-subject mode."""
     driver = _normalize_driver(driver)
+    providers = _external_provider_names(cfg)
     if driver == "codex":
-        # Codex-authored changes need external review: arkcli panel plus Claude Code CLI.
-        return ["arkcli", "claude"]
-    # Claude Code-authored/driven changes use Codex plus arkcli when available.
-    return ["codex", "arkcli"]
+        # Reserve the second default panel slot for the required independent
+        # Claude acceptance reviewer. Additional external providers remain
+        # ordered fallbacks/expansion slots if either primary reviewer is absent
+        # or max_backends is explicitly raised.
+        return providers[:1] + ["claude"] + providers[1:]
+    # Claude Code-authored/driven changes use Codex plus the configured
+    # external-assistance provider (arkcli by default) when available.
+    return ["codex"] + providers
 
 
 def _available_heterogeneous_backends(cfg: dict, driver: str | None = None) -> list[str]:
-    preferred = _driver_matrix_order(driver)
+    preferred = _driver_matrix_order(cfg, driver)
     priority = list(cfg.get("priority", []))
-    # Keep private-config legacy backends usable and allow priority to disable a
-    # backend, but never let priority invert the active driver matrix.
-    order = [name for name in preferred if name in priority]
+    # config.ini provider order owns the external slots. Keep private-config
+    # legacy backends usable, but never let priority invert the author matrix or
+    # re-enable a disabled external provider.
+    external = set(_external_provider_names(cfg))
+    order = [name for name in preferred if name in priority or name in external]
     order += [name for name in priority if name not in order]
     return [
         name for name in order
-        if _is_heterogeneous(name, cfg, driver) and backend_available(name, cfg)
+        if _external_provider_enabled(name, cfg)
+        and _is_heterogeneous(name, cfg, driver)
+        and backend_available(name, cfg)
     ]
 
 
@@ -685,14 +849,20 @@ def _matrix_brain(cfg: dict, selected: list[str] | None = None,
         return "codex"
     if "codex" in selected:
         return "codex"
-    if "arkcli" in selected:
-        return "arkcli panel"
+    if any(_is_external_provider(name, cfg) for name in selected):
+        # The external provider contributes a review candidate; the active
+        # Claude driver remains the synthesizer when Codex is unavailable.
+        return "claude code driver"
     return "claude code same-family"
 
 
 def list_backends(cfg: dict) -> list:
     rows = []
-    for name in cfg.get("priority", []):
+    names = list(cfg.get("priority", []))
+    for name in cfg.get("backends", {}):
+        if name not in names:
+            names.append(name)
+    for name in names:
         b = cfg["backends"].get(name, {})
         rows.append((name, b.get("kind", "?"), backend_available(name, cfg)))
     return rows
@@ -712,8 +882,9 @@ def build_rubric(base: str | None = None, *, role: str | None = None,
 
 def _effective_panel_min(selected: list[str], explicit_min: int | None, configured_min) -> int:
     """Default policy matrix:
-    - Claude driver: codex + arkcli require both; one missing accepts the other.
-    - Codex-authored diff: arkcli + Claude Code CLI require both; no arkcli requires Claude.
+    - Claude driver: Codex + external assistance require both; one missing accepts the other.
+    - Codex-authored diff: external assistance + Claude Code CLI require both;
+      no external provider requires Claude.
     - Claude driver with neither external backend: fall back to same-family Claude."""
     if explicit_min is not None:
         return explicit_min
@@ -910,7 +1081,8 @@ def _arkcli_model_id(item) -> str:
 
 
 def _aggregate_arkcli_panel(results: list[tuple[str, ReviewResult]],
-                            errors: list[str], backend_used: str) -> ReviewResult:
+                            errors: list[str], backend_used: str,
+                            provider_name: str = "arkcli") -> ReviewResult:
     findings: list[Finding] = []
     blind_spots: list[str] = []
     context_limits: list[str] = []
@@ -928,7 +1100,7 @@ def _aggregate_arkcli_panel(results: list[tuple[str, ReviewResult]],
                 severity=f.severity,
                 claim=f.claim,
                 evidence=f.evidence,
-                why=f"[arkcli:{model}] {f.why}",
+                why=f"[{provider_name}:{model}] {f.why}",
                 id=f"PR-{len(findings) + 1:03d}",
                 category=f.category,
                 affected_eids=f.affected_eids,
@@ -941,9 +1113,10 @@ def _aggregate_arkcli_panel(results: list[tuple[str, ReviewResult]],
             verdict = "WARN"
         findings.append(Finding(
             severity="WARN",
-            claim="arkcli panel had backend errors; review is partial",
+            claim="external-assistance provider had backend errors; review is partial",
             evidence="; ".join(errors),
-            why="At least one arkcli reviewer failed, so PASS only means the completed panel members found no blocker.",
+            why=(f"At least one {provider_name} reviewer failed, so PASS only means "
+                 "the completed panel members found no blocker."),
             id=f"PR-{len(findings) + 1:03d}",
             category="backend_error",
             recommended_action="rerun_or_escalate",
@@ -953,7 +1126,8 @@ def _aggregate_arkcli_panel(results: list[tuple[str, ReviewResult]],
         return ReviewResult(
             verdict="ERROR",
             backend_used=backend_used,
-            error="arkcli panel 全部模型失败: " + ("; ".join(errors) if errors else "no results"),
+            error=f"{provider_name} external-assistance adapter 全部模型失败: "
+                  + ("; ".join(errors) if errors else "no results"),
             context_limits=errors,
         )
 
@@ -976,13 +1150,15 @@ def _aggregate_arkcli_panel(results: list[tuple[str, ReviewResult]],
 def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
                       bundle: dict | None = None,
                       artifact_excerpt_chars: int = ARTIFACT_EXCERPT_CAP,
-                      max_bundle_chars: int = BUNDLE_CHAR_CAP) -> ReviewResult:
+                      max_bundle_chars: int = BUNDLE_CHAR_CAP,
+                      provider_name: str = "arkcli") -> ReviewResult:
     cmd = b.get("cmd", "arkcli")
     if shutil.which(cmd) is None:
-        return ReviewResult(verdict="ERROR", backend_used="arkcli", error=f"arkcli not found: {cmd}")
+        return ReviewResult(verdict="ERROR", backend_used=provider_name,
+                            error=f"arkcli adapter command not found: {cmd}")
     models = b.get("models") or []
     model_ids = [_arkcli_model_id(m) for m in models if _arkcli_model_id(m)]
-    backend_used = "arkcli:" + "+".join(model_ids)
+    backend_used = provider_name + ":" + "+".join(model_ids)
     context = _bundle_context(_model_egress_bundle(bundle or build_review_bundle(
         scope_dir,
         redact_egress=True,
@@ -990,9 +1166,11 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
         max_bundle_chars=max_bundle_chars)))
     cap = _context_cap(int(b.get("max_context_chars") or (PER_FILE_CAP * 5)), max_bundle_chars)
     if len(context) > cap:
-        context = context[:cap] + f"\n…[review_bundle truncated to {cap} chars for arkcli panel]"
+        context = context[:cap] + (
+            f"\n…[review_bundle truncated to {cap} chars for arkcli external-assistance adapter]"
+        )
     panel_prompt = (
-        "You are one independent reviewer in the Xunji external heterogeneous panel. "
+        "You are one independent reviewer in the Xunji external/third-party assistance module. "
         "Return ONLY a JSON object matching schema xunji.peer_review.v1. Do not use markdown. "
         "Your output is a candidate review note, not a final decision. "
         "Treat report.md/review.md/decisions.md as claims; facts must cite evidence_index entries "
@@ -1033,12 +1211,12 @@ def _run_arkcli_panel(scope_dir: Path, rubric: str, b: dict, timeout: int,
             content = envelope.get("content") or envelope.get("reasoning_content") or raw
         except Exception:
             content = raw
-        result = parse_review_output(str(content), f"arkcli:{model}")
+        result = parse_review_output(str(content), f"{provider_name}:{model}")
         if result.verdict == "ERROR":
             errors.append(f"{model}: parse error; output tail: {str(content)[-500:]}")
             continue
         results.append((model, result))
-    return _aggregate_arkcli_panel(results, errors, backend_used)
+    return _aggregate_arkcli_panel(results, errors, backend_used, provider_name)
 
 
 def _extract_claude_cli_result(stdout: str) -> str:
@@ -1157,7 +1335,8 @@ def _run_backend_once(scope: Path, rubric: str, cfg: dict, name: str, timeout: i
     if kind == "arkcli-panel":
         return _run_arkcli_panel(scope, rubric, b, timeout, bundle,
                                  artifact_excerpt_chars=artifact_excerpt_chars,
-                                 max_bundle_chars=max_bundle_chars)
+                                 max_bundle_chars=max_bundle_chars,
+                                 provider_name=name)
     if kind == "openai":
         return _run_openai(scope, rubric, b, name, timeout, bundle,
                            artifact_excerpt_chars=artifact_excerpt_chars,
@@ -1238,12 +1417,19 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
         candidates = _available_heterogeneous_backends(cfg, driver)
         selected: list[str] = candidates or ([select_backend(cfg, None)] if select_backend(cfg, None) else [])
     else:
+        if _is_external_provider(backend, cfg) and not _external_provider_enabled(backend, cfg):
+            return ReviewResult(
+                verdict="ERROR",
+                backend_used=backend,
+                error=(f"external-assistance provider {backend!r} is disabled; set "
+                       "[external_assistance] enabled = true and include it in providers in config.ini"),
+            )
         forced = select_backend(cfg, backend)
         selected = [forced] if forced else []
     if not selected:
         return ReviewResult(verdict="ERROR",
-                            error="无可用复审后端(codex 未装 + arkcli 不可用 + 无 Claude 兜底)。"
-                                  "装 codex/arkcli/claude CLI。")
+                            error="无可用复审后端(Codex 不可用 + 未启用/不可用外部 provider + "
+                                  "无 Claude 兜底)。检查 config.ini 与已注册 adapter。")
     failed_backends: list[str] = []
     result: ReviewResult | None = None
     chosen = ""
@@ -1254,7 +1440,7 @@ def review(scope_dir, *, rubric: str | None = None, backend: str | None = None,
             rel = scope.relative_to(ROOT).as_posix() if scope.is_relative_to(ROOT) else str(scope)
             result = ReviewResult(verdict="NEEDS_DRIVER", backend_used=f"{candidate}:same-family-rejected",
                 raw=f"[需真异构] 唯一可用后端 '{candidate}' 是同族(非异构), 不满足异构独立复审门。装 codex "
-                    f"或 arkcli, 或 driver spawn fresh-context 子代理复审 {rel}。")
+                    f"或在 config.ini 启用已注册外部 provider, 或 driver spawn fresh-context 子代理复审 {rel}。")
             chosen = candidate
             if backend is not None:
                 break
@@ -1358,7 +1544,8 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
         rr.backend_used = rr.backend_used or "claude:same-family-fallback"
         if rr.verdict not in {"ERROR", "NEEDS_DRIVER"}:
             rr.context_limits.append(
-                "same-family fallback: no codex/arkcli available; this reduces reviewer independence")
+                "same-family fallback: no Codex or enabled external provider available; "
+                "this reduces reviewer independence")
             if into_run:
                 _append_run_review(scope, rr)
         return rr
@@ -1377,7 +1564,9 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
             err_low = (rr.error or "").lower()
             if name == "codex" and any(kw in err_low for kw in ("quota", "usage limit")):
                 min_heterogeneous = max(1, min_heterogeneous - 1)
-                context_limits.append("codex quota/rate-limit exhausted; heterogeneous bar lowered to arkcli-only; manual-driver supplement required")
+                context_limits.append(
+                    "codex quota/rate-limit exhausted; heterogeneous bar lowered to "
+                    "enabled external assistance only; manual-driver supplement required")
             continue
         results.append((name, rr))
 
@@ -1473,7 +1662,8 @@ def review_panel(scope_dir, *, backends: list[str] | None = None,
     return result
 
 
-# arkcli panel 是外部异构补盲团; 聚合结果仍是候选非裁决。Codex + evidence gate + run 才做最终裁决。
+# arkcli 是外部/第三方协助当前选择的后端适配器;
+# 聚合结果仍是候选非裁决, 不获得 Single Synthesizer 权限。
 def _strip_template_review_placeholders(text: str) -> str:
     """Remove the old docs/templates/run/review.md fake PR block if a run inherited it.
 
@@ -1549,7 +1739,7 @@ def _append_run_review(run_dir: Path, result: ReviewResult) -> str:
     receipt_id = _write_review_receipt(run_dir, result, review_kind)
     result.runtime_receipt_id = receipt_id
     if same_family_fallback:
-        review_note = "同族 Claude 兜底复审, 独立性弱于 Codex/arkcli; 仍是候选非裁决。"
+        review_note = "同族 Claude 兜底复审, 独立性弱于 Codex/外部协助 provider; 仍是候选非裁决。"
     elif backend_root == "claude" and driver == "codex":
         review_note = "Claude Code CLI 相对 Codex-authored diff 是独立复审; 候选非裁决。"
     else:
@@ -1668,30 +1858,116 @@ def _selftest() -> int:
     from evidence_parse import current_evidence_index_hash as _current_evidence_index_hash
 
     checks = []
-    cfg = load_config()
+    # Matrix/default-adapter assertions need one explicit enabled provider
+    # fixture. Never inherit the operator's local config.ini here: a deliberate
+    # `enabled = false` is a runtime policy choice, not a selftest failure and
+    # must not require an arkcli subscription merely to run the test suite.
+    config_dir = Path(tempfile.mkdtemp())
+    selftest_enabled_ini = config_dir / "selftest-enabled.ini"
+    selftest_enabled_ini.write_text(
+        "[external_assistance]\nenabled = true\nproviders = arkcli\n",
+        encoding="utf-8")
+    cfg = load_config(
+        path=config_dir / "missing-review.json",
+        local_path=selftest_enabled_ini)
     checks.append(("默认配置 priority = codex > arkcli > claude",
                    cfg["priority"] == ["codex", "arkcli", "claude"]))
     checks.append(("默认 panel min_heterogeneous=auto",
                    cfg["panel"]["min_heterogeneous"] == "auto"))
-    checks.append(("默认 arkcli panel 模型顺序",
+    checks.append(("默认外部协助的 arkcli 适配器模型顺序",
                    [_arkcli_model_id(x) for x in cfg["backends"]["arkcli"]["models"]]
                    == ["kimi-k2.7-code", "glm-5.2"]))
-    checks.append(("默认 arkcli panel 不禁用 thinking",
+    checks.append(("默认外部协助的 arkcli 适配器不禁用 thinking",
                    all(not (isinstance(x, dict) and x.get("thinking") == "disabled")
                        for x in cfg["backends"]["arkcli"]["models"])))
     checks.append(("默认 artifact excerpt cap 覆盖旧 1200 字截断",
                    cfg["egress"].get("artifact_excerpt_chars") == ARTIFACT_EXCERPT_CAP))
     checks.append(("默认 max_bundle_chars 有效",
                    cfg["egress"].get("max_bundle_chars") == BUNDLE_CHAR_CAP))
+
+    missing_local = load_config(
+        path=config_dir / "missing-review.json",
+        local_path=config_dir / "missing-config.ini")
+    disabled_ini = config_dir / "disabled.ini"
+    disabled_ini.write_text(
+        "[external_assistance]\nenabled = false\nproviders = arkcli\n",
+        encoding="utf-8")
+    disabled_cfg = load_config(
+        path=config_dir / "missing-review.json", local_path=disabled_ini)
+    enabled_ini = config_dir / "enabled.ini"
+    enabled_ini.write_text(
+        "[external_assistance]\nenabled = true\nproviders = arkcli, deepseek\n",
+        encoding="utf-8")
+    enabled_cfg = load_config(
+        path=config_dir / "missing-review.json", local_path=enabled_ini)
+    invalid_ini = config_dir / "invalid.ini"
+    invalid_ini.write_text(
+        "[external_assistance]\nenabled = perhaps\nproviders = unknown-provider\n",
+        encoding="utf-8")
+    invalid_cfg = load_config(
+        path=config_dir / "missing-review.json", local_path=invalid_ini)
+    unknown_kind_ini = config_dir / "unknown-kind.ini"
+    unknown_kind_ini.write_text(
+        "[external_assistance]\nenabled = true\nproviders = partner_bad\n",
+        encoding="utf-8")
+    unknown_kind_cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    unknown_kind_cfg["backends"]["partner_bad"] = {
+        "kind": "typo-adapter", "heterogeneous": True,
+        "role": EXTERNAL_ASSISTANCE_ROLE,
+    }
+    unknown_kind_cfg = _load_external_assistance(
+        unknown_kind_cfg, unknown_kind_ini)
+    wrong_role_ini = config_dir / "wrong-role.ini"
+    wrong_role_ini.write_text(
+        "[external_assistance]\nenabled = true\nproviders = partner_roleless\n",
+        encoding="utf-8")
+    wrong_role_cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    wrong_role_cfg["backends"]["partner_roleless"] = {
+        "kind": "claude-code-cli", "cmd": sys.executable,
+        "heterogeneous": True,
+    }
+    wrong_role_cfg["priority"].insert(0, "partner_roleless")
+    wrong_role_cfg = _load_external_assistance(wrong_role_cfg, wrong_role_ini)
+    checks += [
+        ("config.ini absent -> external assistance disabled",
+         _external_provider_names(missing_local) == []),
+        ("config.ini enabled=false -> provider cannot be forced",
+         _external_provider_names(disabled_cfg) == []
+         and select_backend(disabled_cfg, "arkcli") is None),
+        ("config.ini enables registered providers in declared order",
+         _external_provider_names(enabled_cfg) == ["arkcli", "deepseek"]),
+        ("invalid bool/provider fail closed with diagnostics",
+         _external_provider_names(invalid_cfg) == []
+         and len(invalid_cfg["external_assistance"]["warnings"]) >= 2),
+        ("provider registry role is mandatory",
+         _is_external_provider("arkcli", enabled_cfg)
+         and not _is_external_provider("codex", enabled_cfg)
+         and _external_provider_enabled("codex", enabled_cfg)),
+        ("unknown adapter kind fails closed with diagnostics",
+         _external_provider_names(unknown_kind_cfg) == []
+         and any("unsupported adapter kind" in warning
+                 for warning in unknown_kind_cfg["external_assistance"]["warnings"])),
+        ("role-less backend is not forceable or auto-selectable",
+         select_backend(wrong_role_cfg, "partner_roleless") is None
+         and not backend_available("partner_roleless", wrong_role_cfg)
+         and "partner_roleless" not in _available_heterogeneous_backends(
+             wrong_role_cfg, "claude")
+         and any("not registered with role" in warning
+                 for warning in wrong_role_cfg["external_assistance"]["warnings"])),
+    ]
     checks += [
         ("driver matrix order: claude -> codex,arkcli",
-         _driver_matrix_order("claude") == ["codex", "arkcli"]),
+         _driver_matrix_order(cfg, "claude") == ["codex", "arkcli"]),
         ("driver matrix order: codex -> arkcli,claude",
-         _driver_matrix_order("codex") == ["arkcli", "claude"]),
+         _driver_matrix_order(cfg, "codex") == ["arkcli", "claude"]),
         ("panel auto min: codex+arkcli -> 2",
          _effective_panel_min(["codex", "arkcli"], None, "auto") == 2),
         ("panel auto min: codex-driver arkcli+claude -> 2",
          _effective_panel_min(["arkcli", "claude"], None, "auto") == 2),
+        ("panel auto min is provider-name agnostic for codex driver",
+         _effective_panel_min(["partner_api", "claude"], None, "auto") == 2),
+        ("panel auto min is provider-name agnostic for claude driver",
+         _effective_panel_min(["codex", "partner_api"], None, "auto") == 2),
         ("panel auto min: only arkcli -> 1",
          _effective_panel_min(["arkcli"], None, "auto") == 1),
         ("panel auto min: only codex -> 1",
@@ -1707,8 +1983,8 @@ def _selftest() -> int:
     checks += [
         ("matrix brain: full claude driver -> codex",
          _matrix_brain(cfg, ["codex", "arkcli"], "claude") == "codex"),
-        ("matrix brain: no codex -> arkcli panel",
-         _matrix_brain(cfg, ["arkcli"], "claude") == "arkcli panel"),
+        ("matrix brain: external assistance never becomes synthesizer",
+         _matrix_brain(cfg, ["arkcli"], "claude") == "claude code driver"),
         ("matrix brain: no arkcli -> codex",
          _matrix_brain(cfg, ["codex"], "claude") == "codex"),
         ("matrix brain: no hetero -> claude code same-family",
@@ -1717,6 +1993,8 @@ def _selftest() -> int:
          _matrix_brain(cfg, ["arkcli", "claude"], "codex") == "codex"),
     ]
     fake_all = json.loads(json.dumps(DEFAULT_CONFIG))
+    fake_all["external_assistance"]["enabled"] = True
+    fake_all["external_assistance"]["providers"] = ["arkcli"]
     fake_all["priority"] = ["claude", "arkcli", "codex"]  # private config cannot invert the matrix
     for n in ("codex", "arkcli", "claude"):
         fake_all["backends"][n]["kind"] = "claude-code-cli"
@@ -1727,6 +2005,42 @@ def _selftest() -> int:
         ("matrix selection for codex driver is arkcli+claude",
          _available_heterogeneous_backends(fake_all, "codex")[:2] == ["arkcli", "claude"]),
     ]
+    expanded = json.loads(json.dumps(DEFAULT_CONFIG))
+    expanded["external_assistance"] = {
+        "enabled": True, "providers": ["partner_api"], "warnings": [],
+    }
+    expanded["backends"]["partner_api"] = {
+        "kind": "claude-code-cli", "cmd": sys.executable,
+        "heterogeneous": True, "role": EXTERNAL_ASSISTANCE_ROLE,
+    }
+    expanded["backends"]["codex"]["kind"] = "claude-code-cli"
+    expanded["backends"]["codex"]["cmd"] = sys.executable
+    expanded["backends"]["claude"]["cmd"] = sys.executable
+    checks += [
+        ("registered provider expands claude-driver slot without priority entry",
+         _driver_matrix_order(expanded, "claude") == ["codex", "partner_api"]
+         and _available_heterogeneous_backends(expanded, "claude")[:2]
+         == ["codex", "partner_api"]),
+        ("registered provider expands codex-driver slot without gaining synthesis",
+         _driver_matrix_order(expanded, "codex") == ["partner_api", "claude"]
+         and _matrix_brain(expanded, ["partner_api"], "claude")
+         == "claude code driver"),
+    ]
+    expanded_multi = json.loads(json.dumps(expanded))
+    expanded_multi["external_assistance"]["providers"] = [
+        "partner_api", "partner_two",
+    ]
+    expanded_multi["backends"]["partner_two"] = {
+        "kind": "claude-code-cli", "cmd": sys.executable,
+        "heterogeneous": True, "role": EXTERNAL_ASSISTANCE_ROLE,
+    }
+    checks.append((
+        "codex-driver reserves Claude slot before second external provider",
+        _driver_matrix_order(expanded_multi, "codex")
+        == ["partner_api", "claude", "partner_two"]
+        and _available_heterogeneous_backends(expanded_multi, "codex")[:2]
+        == ["partner_api", "claude"],
+    ))
 
     # 优先级选择: 模拟可用性
     fake = json.loads(json.dumps(DEFAULT_CONFIG))
@@ -1736,7 +2050,8 @@ def _selftest() -> int:
     fake["backends"]["claude"]["cmd"] = sys.executable
     # claude CLI 可用 -> 无 codex/无 arkcli 时应选 claude(兜底)
     sel_fallback = select_backend(
-        {"priority": ["arkcli", "claude"], "backends": fake["backends"]})
+        {"priority": ["arkcli", "claude"], "backends": fake["backends"],
+         "external_assistance": {"enabled": True, "providers": ["arkcli"]}})
     checks.append(("无 arkcli 时优先级落到 claude 兜底", sel_fallback == "claude"))
     # forced 强制
     checks.append(("--backend 强制存在的后端",
@@ -1747,10 +2062,18 @@ def _selftest() -> int:
     checks.append(("arkcli-panel cmd 存在时 available 或可被本地环境决定",
                    backend_available("arkcli", cfg) == (shutil.which(cfg["backends"]["arkcli"]["cmd"]) is not None)))
     retry_cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    retry_cfg["external_assistance"]["enabled"] = True
+    retry_cfg["external_assistance"]["providers"] = ["arkcli"]
     retry_cfg["priority"] = ["codex", "arkcli"]
     retry_cfg["retry"] = {"max_attempts": 2, "retryable_error_patterns": ["timeout", "no output"]}
-    retry_cfg["backends"]["codex"] = {"kind": "cli-agent", "cmd": sys.executable, "heterogeneous": True}
-    retry_cfg["backends"]["arkcli"] = {"kind": "cli-agent", "cmd": sys.executable, "heterogeneous": True}
+    retry_cfg["backends"]["codex"] = {
+        "kind": "cli-agent", "cmd": sys.executable, "heterogeneous": True,
+        "role": CORE_REVIEWER_ROLE,
+    }
+    retry_cfg["backends"]["arkcli"] = {
+        "kind": "cli-agent", "cmd": sys.executable, "heterogeneous": True,
+        "role": EXTERNAL_ASSISTANCE_ROLE,
+    }
     d_retry = Path(tempfile.mkdtemp())
     (d_retry / "evidence.md").write_text("# Evidence Ledger\n", encoding="utf-8")
     original_runner = _run_backend_once
@@ -1771,6 +2094,26 @@ def _selftest() -> int:
                    and retry_result.verdict == "PASS"
                    and retry_result.backend_used == "arkcli"
                    and any("backend fallback used" in x for x in retry_result.context_limits)))
+    disabled_panel_cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    disabled_panel_cfg["external_assistance"]["enabled"] = False
+    disabled_panel_cfg["external_assistance"]["providers"] = ["arkcli"]
+    disabled_panel_calls: list[str] = []
+    original_runner = _run_backend_once
+    try:
+        def _disabled_panel_runner(scope, rubric, cfg_arg, name, timeout, bundle,
+                                   artifact_excerpt_chars, max_bundle_chars):
+            disabled_panel_calls.append(name)
+            return ReviewResult(verdict="PASS", backend_used=name)
+        globals()["_run_backend_once"] = _disabled_panel_runner
+        disabled_panel_result = review_panel(
+            d_retry, backends=["arkcli"], min_heterogeneous=1,
+            max_backends=1, config=disabled_panel_cfg,
+        )
+    finally:
+        globals()["_run_backend_once"] = original_runner
+    checks.append(("explicit panel list cannot execute disabled external provider",
+                   disabled_panel_calls == []
+                   and disabled_panel_result.verdict == "NEEDS_DRIVER"))
 
     # 输出解析
     sample = """blah blah process log
@@ -1823,8 +2166,10 @@ def _selftest() -> int:
              backend_used="arkcli:kimi-k2.7-code"))],
         ["kimi-k2.7-code: timeout >1s"],
         "arkcli:kimi-k2.7-code+glm-5.2")
-    checks.append(("arkcli panel 聚合 WARN + backend_error", panel.verdict == "WARN" and len(panel.findings) == 2))
-    checks.append(("arkcli panel PR id 唯一化", [f.id for f in panel.findings] == ["PR-001", "PR-002"]))
+    checks.append(("arkcli external-assistance adapter 聚合 WARN + backend_error",
+                   panel.verdict == "WARN" and len(panel.findings) == 2))
+    checks.append(("arkcli external-assistance adapter PR id 唯一化",
+                   [f.id for f in panel.findings] == ["PR-001", "PR-002"]))
     panel_matrix = ReviewResult(verdict="PASS", backend_used="panel:codex+arkcli", brain="codex")
     checks.append(("as_markdown emits brain",
                    "_brain: codex_" in panel_matrix.as_markdown()))
@@ -2149,11 +2494,17 @@ def _selftest() -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="异构复审矩阵 (Claude-authored: Codex+arkcli; Codex-authored: arkcli+Claude)")
+    ap = argparse.ArgumentParser(
+        description=("异构复审/外部第三方协助矩阵 "
+                     "(provider 由 config.ini 启用; arkcli 是当前选择的适配器)"))
     ap.add_argument("scope", nargs="?", help="run 目录, 如 runs/<target>")
-    ap.add_argument("--backend", help="强制单后端: codex|arkcli|claude (legacy: deepseek|glm)。不指定则按矩阵跑 panel。")
+    ap.add_argument("--backend", help=("强制单个已注册后端。外部 provider 必须先在 "
+                                       "config.ini 的 [external_assistance] 启用；"
+                                       "arkcli 为兼容名。"))
     ap.add_argument("--driver", choices=["claude", "codex"], default=None,
-                    help="作者/评审对象模式(默认 claude; 可用 XUNJI_REVIEW_DRIVER 覆盖)。claude-authored: Codex+arkcli; codex-authored: arkcli+Claude, 排除 Codex 自审票。")
+                    help=("作者/评审对象模式(默认 claude; 可用 XUNJI_REVIEW_DRIVER 覆盖)。"
+                          "claude-authored: Codex+外部协助; codex-authored: "
+                          "外部协助+Claude, 排除 Codex 自审票。"))
     ap.add_argument("--out", help="把复审写到该文件(如 review/records/<x>.md)")
     ap.add_argument("--json-out", help="把结构化复审结果写到 JSON 文件")
     ap.add_argument("--into-run", action="store_true",
@@ -2163,7 +2514,7 @@ def main() -> int:
     ap.add_argument("--panel", action="store_true",
                     help="跑多后端矩阵 panel, 聚合候选 findings。不指定 --backend 时这是默认行为。")
     ap.add_argument("--panel-backends",
-                    help="配合 --panel: 逗号分隔后端列表, 如 codex,arkcli")
+                    help="配合 --panel: 逗号分隔已注册后端, 如 codex,arkcli")
     ap.add_argument("--min-heterogeneous", type=int, default=None,
                     help="配合 --panel: 最少成功异构后端数(默认 auto: 满配2, 缺一边1)")
     ap.add_argument("--max-backends", type=int, default=None,
@@ -2188,10 +2539,20 @@ def main() -> int:
     cfg = load_config()
     if args.list_backends:
         driver = _normalize_driver(args.driver)
+        external = cfg.get("external_assistance", {})
+        requested = _provider_names(external.get("providers"))
+        active = _external_provider_names(cfg)
+        print("外部协助配置:")
+        print(f"  enabled: {str(bool(external.get('enabled'))).lower()}")
+        print(f"  providers: {', '.join(requested) if requested else '(none)'}")
+        print(f"  active: {', '.join(active) if active else '(none)'}")
         print("后端可用性(按优先级):")
         for name, kind, ok in list_backends(cfg):
             indep = _is_heterogeneous(name, cfg, driver)
-            print(f"  {'[可用]' if ok else '[ 不可用 ]'}  {name:10} ({kind}, {'independent' if indep else 'same/self'})")
+            role = _backend_role(name, cfg) or "unclassified"
+            gate = "enabled" if _external_provider_enabled(name, cfg) else "disabled-by-policy"
+            print(f"  {'[可用]' if ok else '[ 不可用 ]'}  {name:10} "
+                  f"({kind}, {role}, {gate}, {'independent' if indep else 'same/self'})")
         if args.backend:
             chosen = select_backend(cfg, args.backend)
             print(f"\n单后端: {chosen or '(无可用后端)'}")

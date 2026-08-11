@@ -5473,6 +5473,17 @@ def _stale_plan_recovery_hint(run_dir: Path, plan: dict) -> str:
             "Reviewer 与 Root blocked/failed/abandoned settlement；这不是 return、"
             "evidence 或 merged。"
         )
+    if action == agent_settlement.RECOVERY_SETTLE_STREAM_STALLED \
+            and assignment:
+        return (
+            "旧 plan 含真实 started attempt，且 host task-notification 与 child "
+            "transcript 已共同证明 stream watchdog idle-timeout 后进程终止、无 "
+            "SubagentStop。运行 "
+            f"`python3 tools/workers.py settle-stream-stalled "
+            f"runs/{run_dir.name} {assignment}` 投影 typed failed result，再走唯一 "
+            "digest-bound Reviewer 与 Root blocked/failed/abandoned settlement；"
+            "这不是 return、evidence 或 merged，也不得复活旧 attempt。"
+        )
     if action == agent_settlement.RECOVERY_WAIT_RUNNING:
         return (
             "旧 plan 仍有真实 running attempt；不得取消或 replan。"

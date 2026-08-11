@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xunji.local/contracts/agent-receipt.v1.schema.json",
   "title": "Xunji Plan-bound Agent Attempt Receipt v1",
-  "description": "A projected, immutable-runtime-bound attempt. Running attempts carry an explicitly empty result_snapshot; returned and failed attempts carry the exact frozen result metadata.",
+  "description": "A projected, immutable-runtime-bound attempt. Running attempts carry an explicitly empty result_snapshot; returned attempts carry either a SubagentStop result or an exact typed hook-failed Stop recovery result; failed attempts carry an Agent launch-failure result or an exact typed termination receipt. returned_at is the historical terminal timestamp field name for both returned and failed states.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -48,6 +48,14 @@
         {"$ref": "#/$defs/resultSnapshot"}
       ]
     },
+    "termination_receipt_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recovery_receipt_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "launched_at": {"$ref": "#/$defs/timestamp"},
     "returned_at": {"$ref": "#/$defs/timestamp"}
   },
@@ -71,7 +79,11 @@
             "maxProperties": 0
           }
         },
-        "not": {"required": ["returned_at"]}
+        "allOf": [
+          {"not": {"required": ["returned_at"]}},
+          {"not": {"required": ["termination_receipt_hash"]}},
+          {"not": {"required": ["recovery_receipt_hash"]}}
+        ]
       }
     },
     {
@@ -87,31 +99,76 @@
                 "properties": {
                   "source": {
                     "enum": [
-                      "agent_tool_response",
-                      "subagent_stop_response",
-                      "transcript_tool_result"
+                      "agent_tool_response", "hook_failed_stop_recovery",
+                      "subagent_stop_response", "transcript_tool_result"
                     ]
                   }
                 }
               }
             ]
           }
-        }
+        },
+        "not": {"required": ["termination_receipt_hash"]},
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result_snapshot": {
+                  "properties": {
+                    "source": {"const": "hook_failed_stop_recovery"}
+                  },
+                  "required": ["source"]
+                }
+              },
+              "required": ["result_snapshot"]
+            },
+            "then": {"required": ["recovery_receipt_hash"]},
+            "else": {"not": {"required": ["recovery_receipt_hash"]}}
+          }
+        ]
       }
     },
     {
       "if": {"properties": {"state": {"const": "failed"}}, "required": ["state"]},
       "then": {
         "required": ["returned_at"],
-        "properties": {
-          "agent_id": {"const": ""},
-          "result_snapshot": {
-            "allOf": [
-              {"$ref": "#/$defs/resultSnapshot"},
-              {"properties": {"source": {"const": "agent_failure_response"}}}
-            ]
+        "allOf": [
+          {"not": {"required": ["recovery_receipt_hash"]}}
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "agent_id": {"const": ""},
+              "result_snapshot": {
+                "allOf": [
+                  {"$ref": "#/$defs/resultSnapshot"},
+                  {"properties": {"source": {"const": "agent_failure_response"}}}
+                ]
+              }
+            },
+            "not": {"required": ["termination_receipt_hash"]}
+          },
+          {
+            "required": ["termination_receipt_hash"],
+            "properties": {
+              "agent_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+              "result_snapshot": {
+                "allOf": [
+                  {"$ref": "#/$defs/resultSnapshot"},
+                  {
+                    "properties": {
+                      "source": {
+                        "enum": [
+                          "external_stop_receipt", "stream_stall_receipt"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
           }
-        }
+        ]
       }
     }
   ],
@@ -135,6 +192,9 @@
           "enum": [
             "agent_tool_response",
             "agent_failure_response",
+            "external_stop_receipt",
+            "stream_stall_receipt",
+            "hook_failed_stop_recovery",
             "subagent_stop_response",
             "transcript_tool_result"
           ]

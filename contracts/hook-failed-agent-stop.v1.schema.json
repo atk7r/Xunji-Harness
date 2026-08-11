@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xunji.local/contracts/hook-failed-agent-stop.v1.schema.json",
+  "title": "Xunji Hook-Failed Agent Stop Recovery Receipt v1",
+  "description": "Legacy migration-only recovery proof for a direct turn_contract SubagentStop failure returned no later than the frozen wrapper cutover. New wrapper-era failures must use v2 and bind a schema-independent ingress receipt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "parent_run", "reason", "assignment", "role", "front",
+    "subagent_type", "session_id", "agent_id", "tool_use_id", "lane_id",
+    "plan_digest", "launch_prompt_sha256", "launch_event_seq",
+    "launch_event_hash", "start_event_seq", "start_event_hash",
+    "observed_head_seq", "observed_head_hash", "hook_error_code",
+    "hook_error_cause", "hook_driver", "parent_notification_uuid", "child_final_uuid",
+    "child_hook_feedback_uuid", "returned_at",
+    "stop_ingress_receipt_hash",
+    "parent_transcript_prefix_length", "parent_transcript_prefix_sha256",
+    "child_transcript_length", "child_transcript_sha256", "result_snapshot",
+    "recorded_at", "receipt_hash"
+  ],
+  "properties": {
+    "schema": {"const": "xunji.hook-failed-agent-stop.v1"},
+    "parent_run": {"type": "string", "minLength": 1, "maxLength": 512},
+    "reason": {"const": "subagent_stop_hook_failed_after_model_return"},
+    "assignment": {"type": "string", "pattern": "^A-[A-Za-z0-9._-]+$", "maxLength": 256},
+    "role": {"enum": ["surface", "web-auth", "web-hunter", "code-audit", "exploit", "verify", "review", "report"]},
+    "front": {"type": "string", "pattern": "^F-[A-Za-z0-9._-]+$", "maxLength": 256},
+    "subagent_type": {"enum": ["xunji-hunter", "xunji-reviewer"]},
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "agent_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "tool_use_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "lane_id": {"type": "string", "pattern": "^L-[A-Za-z0-9._-]+$", "maxLength": 256},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "launch_prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "launch_event_seq": {"type": "integer", "minimum": 1},
+    "launch_event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "start_event_seq": {"type": "integer", "minimum": 1},
+    "start_event_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "observed_head_seq": {"type": "integer", "minimum": 1},
+    "observed_head_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "hook_error_code": {"const": "XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED"},
+    "hook_error_cause": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]{0,127}$"},
+    "hook_driver": {"const": "legacy_direct_turn_contract"},
+    "parent_notification_uuid": {"type": "string", "minLength": 1, "maxLength": 128},
+    "child_final_uuid": {"type": "string", "minLength": 1, "maxLength": 128},
+    "child_hook_feedback_uuid": {"type": "string", "minLength": 1, "maxLength": 128},
+    "returned_at": {"$ref": "#/$defs/timestamp"},
+    "stop_ingress_receipt_hash": {"const": ""},
+    "parent_transcript_prefix_length": {"type": "integer", "minimum": 1},
+    "parent_transcript_prefix_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "child_transcript_length": {"type": "integer", "minimum": 1},
+    "child_transcript_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "result_snapshot": {"$ref": "#/$defs/resultSnapshot"},
+    "recorded_at": {"$ref": "#/$defs/timestamp"},
+    "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"role": {"const": "review"}}, "required": ["role"]},
+      "then": {"properties": {"subagent_type": {"const": "xunji-reviewer"}}},
+      "else": {"properties": {"subagent_type": {"const": "xunji-hunter"}}}
+    }
+  ],
+  "$defs": {
+    "timestamp": {"type": "string", "format": "date-time", "minLength": 20, "maxLength": 64},
+    "resultSnapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "length", "sha256", "missing", "source"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "length": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "missing": {"const": false},
+        "source": {"const": "hook_failed_stop_recovery"}
+      }
+    }
+  }
+}

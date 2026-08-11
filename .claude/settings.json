@@ -11,6 +11,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/harness/subagent_stop_ingress.py\" --selftest"
+          },
+          {
+            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety_gate.py\" --selftest"
           },
           {
@@ -131,7 +135,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/turn_contract.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/harness/subagent_stop_ingress.py\""
           }
         ]
       }
