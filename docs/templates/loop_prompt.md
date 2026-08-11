@@ -6,10 +6,21 @@ versus natural-language one-cycle route. Bind `{{RUN_DIR}}` and `{{PYTHON}}` onl
 after the current turn contract and active selection identify the same run.
 
 When `loop_requested=true`, the delivered literal entry may continue through the
-registered recurring-Cron sequence. When a client-reserved `/loop` forces the
-owner's natural-language fallback, `loop_requested=false`: run one material cycle,
-skip recurring-Cron creation, and never describe that fallback as scheduled loop
-authority. A scheduler expansion to `cron_manager.py` is not a Xunji transition.
+registered recurring-Cron sequence. Its sole Cron owner is `recurring=true`,
+client-session-scoped (`durable=false`), and wakes with the exact prompt
+`/loop runs/<bound-run>`. If an older client-reserved `/loop` never delivers the
+literal entry, the owner's natural-language fallback stays `loop_requested=false`:
+run one material cycle and never claim scheduled authority from `cron_manager.py`
+expansion text.
+
+Cron is a single-flight wake source, never a backlog. A wake or same-session
+`继续` while this plan lacks typed `cycle_end` only resumes the existing owner and
+must not replan or duplicate an Agent. After typed `cycle_end`, same-session
+`继续` may advance one cycle early only when Hook context reports the observed
+session Cron owner; the immediately following wall-clock tick is then a no-op.
+Every tick during a cycle longer than its interval is likewise a no-op, and the
+first later wall-clock tick after completion is eligible. Never catch up missed
+ticks. `TICK_COALESCED`, `RUN_BUSY`, and audit-failure context perform no cycle work.
 
 `XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED` is a non-authorizing command-shape denial.
 Remove any observational wrapper; for `invalid-argv`, return to the corresponding
@@ -29,7 +40,7 @@ Run one **material** autonomous iteration: state pass, the selected typed execut
 lane (a real Agent when the plan requires one), merge/verification, canonical
 writes, and refreshed gates. Planning, one request, one file edit, or satisfying a
 hook format is not an iteration result. Until the
-run has a valid completion marker, an `EXECUTE` turn ends with exactly one final
+run has a valid transaction-bound completion marker, an `EXECUTE` turn ends with exactly one final
 Coda line: `下一行动: <object + concrete
 action>`. Empty/template values, generic "continue", multiple Coda lines, and an
 unrelated or multiple F-id/action list are invalid. `BLOCKED:` cannot discharge
@@ -67,16 +78,19 @@ material. Record Setup only when the first-source adapter actually entered it.
 ### 0. Completion Guard, Then Journal Start
 
 Before any journal `start`, phase marker, task, work plan, Agent, or target action,
-check whether this run already has a valid `GHOST_COMPLETE` or `NORMAL_COMPLETE`
-marker. If it does and `loop_requested=true`, perform a fresh CronList, delete only
-a scheduled `/loop` job whose prompt names this exact run if one exists, then
-CronList again to verify it is gone. If `loop_requested=false`, perform no Cron
-operation. In either mode, do not create/reschedule a Cron or call
-`loop_journal.py ... start|end`: the existing typed cycle end remains terminal.
-Return directly with `BLOCKED: run already complete` after the applicable guard;
-do not create tasks, plans, receipts, phases, or canonical writes.
+run `{{PYTHON}} tools/completion_transaction.py status "{{RUN_DIR}}"`. Treat only
+a valid `committed` transaction with its atomic FINAL+marker pair as complete.
+Its transaction already binds either fresh pre-commit Cron quiescence or a
+non-recurring turn. Do not perform Cron, create/reschedule a job, or call
+`loop_journal.py ... start|end`: the existing typed cycle end remains terminal,
+and the committed Hook gate authorizes only reads/status/reopen plus the exact
+plain offline post-commit check. Return directly with
+`BLOCKED: run already complete`; do not create tasks, plans, receipts, phases, or
+canonical writes. Any material continuation first uses public `reopen`.
 
-Only when no valid completion marker is present, record that this bound execute
+A `legacy_unbound` marker is not completion: load `xunji-run-lifecycle` and use
+its public reopen/recertification route; never backfill or hand-edit the marker.
+Only when no valid committed transaction is present, record that this bound execute
 cycle has begun. This journal is a derived interruption aid, not evidence:
 
 ```bash
@@ -156,6 +170,11 @@ After choosing the target front/control-plane move, close Root Orchestrator with
 the generic phase-end contract and name the next entered phase.
 
 If closure is near, the same barrier keeps failing, 3 cycles produced no new evidence, or a hint asks for metacog, append one compact `Divergence trigger:` block and assign a verify/review/surface Agent when useful: Trigger / Blind spot hypothesis / Assigned role / Proposed action / Target object / Expected signal / Safety class / Why current trajectory likely missed it.
+For a repeated local-infrastructure denial, also follow the Agent Board owner's
+receipt-bound infra-barrier route: observe only the exact target
+`PreToolUseDenied`, carry its typed binding into later lanes, and never use prose
+counts to authorize a third same-action target attempt. Rotating only the
+cause/precondition diagnostics does not reset the action-level threshold.
 
 If `state/loop_state.json` says `progress.coda_converged=true`, treat it as a trajectory-review trigger: record why the current path stalled, then pivot mechanism/input shape/role, assign a review/surface Agent, or explicitly justify continuing with a changed precondition. Coda convergence is not a Completion pause by itself. Open fronts and Type A barriers remain stop blockers until evidence-backed adjudication resolves them.
 
@@ -276,7 +295,10 @@ ReviewReceipt, independent review ledger resolved, retrospective.md with real Se
 and Framework/tooling sections, and no unresolved PR items. Load the exact
 assignment-free completion formatter and verdict contract from
 `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer". It
-still requires real same-session
+requires `workers.py plan` to generate, and `workers.py commit-proposal` to
+commit, the zero-lane S3 `COMPLETION_REVIEW` plan. Then run
+`python3 tools/workers.py completion-review runs/<dir>` and use its printed Agent
+`tool_input` unchanged. It still requires real same-session
 Reviewer Start/Stop, creates no assignment/merge projection, and does not replace
 the independent ReviewReceipt. For recurring mode, cancel only this run's listed
 job and record `cron_cancelled=<job-id|none>`; a one-cycle fallback has no invented
@@ -332,10 +354,13 @@ projection contract owned by `references/launch-return-settlement.md`. It valida
 the plan transaction/archive lineage and all return/review/Root debt; never replace
 the receipt with a hand-written journal row or Coda.
 
-If this iteration wrote `GHOST_COMPLETE` or `NORMAL_COMPLETE`, the `end` note
-must include `cron_cancelled=<job-id|none>`. Only `loop_requested=true` performs
+When closure is ready, Root leaves report at READY and the `end` note must include
+`cron_cancelled=<job-id|none>`. Only `loop_requested=true` performs
 CronList/delete/verification; `loop_requested=false` records `none` without a Cron
-operation or recurring-loop claim.
+operation or recurring-loop claim. After typed cycle_end, run the plain READY check
+and keep its first-line `XUNJI_CHECK_RUN_V1` token; closure prose alone does not
+certify it. Load `xunji-run-lifecycle` and use completion transaction
+prepare/commit; that owner alone writes FINAL and the marker.
 
 If the loop is interrupted before Markdown files are consistent, append an
 `interrupt` event with the last completed step before handing back or restarting:

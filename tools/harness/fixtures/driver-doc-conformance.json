@@ -39,8 +39,12 @@
         "not a sticky `MAINTENANCE_BLOCKED` state",
         "`run_gate` yields before",
         "typed lane/runtime receipts still govern execution",
+        "python3 tools/workers.py completion-review runs/<dir>",
         "harmless leading\nhorizontal whitespace/BOM",
-        "XUNJI_E_LIFECYCLE_PRIVATE_API"
+        "XUNJI_E_LIFECYCLE_PRIVATE_API",
+        "project-level, content-addressed observation",
+        "registered `--help` prints the same sequence",
+        "committed receipt with pending derived projection"
       ],
       "forbidden": [
         "that is the Reviewer's job",
@@ -71,10 +75,17 @@
         "#### Assignment-free global completion Reviewer",
         "peer-review-panel reference",
         "sole Claude-primary owner for exact CLI",
-        "Backend failure or no successful allowed",
+        "unavailability never silently downgrades a mandatory slot",
         "does not sticky-freeze the personal operator's turn",
         "`run_gate` yields to that fixed output",
-        "An Agent final response may include `## New Threat Hypotheses`"
+        "An Agent final response may include `## New Threat Hypotheses`",
+        "python3 tools/workers.py completion-review runs/<dir>",
+        "xunji.hook-failed-agent-stop.v1",
+        "xunji.hook-failed-agent-stop.v2",
+        "2026-08-08T01:10:00Z",
+        "xunji.subagent-stop-ingress.v1",
+        "registered help -> prepare",
+        "Recovery replay is idempotent"
       ],
       "forbidden": [
         "unavailable matrix is a",
@@ -100,7 +111,13 @@
         "Never discover",
         "`maintenance_action=true` denial freezes",
         "## Non-Negotiable Agent-Mode Cycle",
-        "Every Agent execution lane has exactly one dependent Reviewer"
+        "A **lane** is one plan-bound work unit",
+        "not an Agent process and not a front",
+        "Every Agent execution lane has exactly one dependent Reviewer",
+        "workers.py completion-review",
+        "COMPLETION_REVIEW",
+        "recover-hook-failed-stop",
+        "pre-schema project ingress is only a non-canonical observation"
       ],
       "forbidden": [
         "python3 tools/workers.py assign runs/<dir>",
@@ -126,7 +143,9 @@
         "Cancellation is auditable settlement",
         "NO_STRONG_CANDIDATE",
         "do not commit, invent lanes",
-        "no unassigned lane has satisfied runtime dependencies"
+        "no unassigned lane has satisfied runtime dependencies",
+        "python3 tools/workers.py completion-review runs/<dir>",
+        "the only legal\nzero-lane mode"
       ],
       "forbidden": [
         "python3 tools/workers.py assign runs/<dir>",
@@ -147,6 +166,7 @@
         "xunji-hunter",
         "xunji-reviewer",
         "python3 tools/workers.py status runs/<dir>",
+        "python3 tools/workers.py settle-stopped runs/<dir>",
         "python3 tools/workers.py review-disposition runs/<dir>",
         "python3 tools/workers.py finish runs/<dir>",
         "python3 tools/loop_journal.py runs/<dir> end",
@@ -156,7 +176,15 @@
         "Root never writes `done`",
         "`Reason: <exact barrier>; Front: F-xxx`",
         "XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED",
-        "PreToolUse atomically\nappends one idempotent call claim"
+        "PreToolUse atomically\nappends one idempotent call claim",
+        "python3 tools/workers.py completion-review runs/<dir>",
+        "python3 tools/workers.py recover-hook-failed-stop runs/<dir>",
+        "xunji.hook-failed-agent-stop.v1",
+        "xunji.hook-failed-agent-stop.v2",
+        "2026-08-08T01:10:00Z",
+        "schema-independent wrapper",
+        "project-level ingress has no run owner",
+        "Exact recovery replay is idempotent"
       ],
       "forbidden": [
         "python3 tools/work_plan.py commit runs/<dir>",
@@ -216,8 +244,9 @@
       "path": ".claude/skills/xunji-run-lifecycle/SKILL.md",
       "required": [
         "python3 tools/loop_bootstrap.py --source '<source>' --type auto",
-        "observed in Claude Code 2.1.201",
+        "verified on\n  2.1.220",
         "`loop_requested=false`",
+        "`UserPromptManualLoopAdvance`",
         "prepared_not_active",
         "persistent current-run selection",
         "python3 tools/session_handoff.py write runs/<dir>",
@@ -229,8 +258,11 @@
         "A denied or failed\naction is not a result",
         "the eligible atomic `ROOT_DIRECT` path",
         "`docs/WORKFLOW-reference.md` \"Assignment-free global completion Reviewer\"",
+        "python3 tools/workers.py completion-review runs/<dir>",
         "Harmless leading horizontal whitespace/BOM",
-        "XUNJI_E_LIFECYCLE_PRIVATE_API"
+        "XUNJI_E_LIFECYCLE_PRIVATE_API",
+        "exact status-emitted hook-failed Stop recovery",
+        "project-level ingress observation is\nnot canonical run truth"
       ],
       "forbidden": [
         "python3 tools/work_plan.py commit runs/<dir>",
@@ -248,7 +280,14 @@
         "load `xunji-sentinel-guard-review`",
         "tools/setup_transaction.py",
         "mandatory full aggregate",
-        "fresh independent-review gate"
+        "fresh independent-review gate",
+        "python3 tools/contract_schema.py --help",
+        "python3 tools/contract_schema.py prepare <name.schema.json>",
+        "tmp/contract_schema_candidates/<name.schema.json>",
+        "python3 tools/contract_schema.py publish <name.schema.json>",
+        "python3 tools/contract_schema.py discard <name.schema.json>",
+        "python3 tools/contract_schema.py --selftest",
+        "SCHEMA_PUBLISH_CAS_MISMATCH"
       ],
       "forbidden": [
         "when feasible"
@@ -261,7 +300,9 @@
         "tools/harness/command_shape.py",
         "tools/setup_transaction.py",
         "python3 tools/selftest_all.py",
-        "fresh independent review"
+        "fresh independent review",
+        "python3 tools/harness/subagent_stop_ingress.py --selftest",
+        "project-level receipt is not run truth"
       ],
       "forbidden": [
         "When feasible"
@@ -434,6 +475,31 @@
       ]
     },
     {
+      "path": "tools/contract_schema.py",
+      "required": [
+        "AI workflow:",
+        "prepare writes/reuses tmp/contract_schema_candidates/<name>",
+        "publish validates all schemas, enforces the base CAS",
+        "discard removes only the ignored candidate pair"
+      ],
+      "forbidden": [
+        "edit contracts/<name> directly"
+      ]
+    },
+    {
+      "path": "tools/workers.py",
+      "required": [
+        "Claude-primary command index",
+        "typed repair: cancel-unlaunched, settle-stopped, recover-hook-failed-stop",
+        "Exact failed-Stop repair:",
+        "committed_projection_pending",
+        "tools/runtime_receipts.py RUN_DIR --reproject"
+      ],
+      "forbidden": [
+        "new commands: list, new, suggest, plan, merge-check"
+      ]
+    },
+    {
       "path": ".claude/hooks/run_gate.py",
       "required": [
         "assignment-free global completion owner",
@@ -468,14 +534,16 @@
         "ordered board-debt/conflict checks",
         "{{PYTHON}} tools/anti_drift.py --semantic-status \"{{RUN_DIR}}\"",
         "does not duplicate the target-tool catalog",
-        "`loop_requested=false`: run one material cycle",
+        "client-session-scoped (`durable=false`)",
+        "Cron is a single-flight wake source",
         "Before any journal `start`, phase marker, task, work plan, Agent, or target action",
-        "If it does and `loop_requested=true`",
-        "If `loop_requested=false`, perform no Cron",
-        "do not create/reschedule a Cron or call",
-        "Return directly with `BLOCKED: run already complete` after the applicable guard",
+        "Its transaction already binds either fresh pre-commit Cron quiescence",
+        "Do not perform Cron, create/reschedule a job",
+        "the committed Hook gate authorizes only reads/status/reopen",
+        "`BLOCKED: run already complete`",
         "references/plan-and-delegate.md",
         "references/launch-return-settlement.md",
+        "python3 tools/workers.py completion-review runs/<dir>",
         "single command owned there",
         "assignment-free completion formatter",
         "Assignment-free global completion Reviewer",
@@ -512,14 +580,17 @@
       "path": "docs/ROUTER.md",
       "required": [
         "python3 tools/workers.py <subcommand> runs/<dir>",
-        "python3 tools/classify_hosts.py <recon.json> --out runs/<dir>/classify --egress-recheck",
+        "python3 tools/workers.py --help",
+        "python3 tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck",
         "exact Claude binary launch contract (`subagent_type` plus",
         "Client-reserved scheduler expansion is not authority",
         ".claude/skills/web-research/SKILL.md",
         ".claude/skills/xunji-reviewops/SKILL.md",
+        ".claude/skills/xunji-local-maintenance/SKILL.md",
         "references/peer-review-panel.md",
         "setup-only stops after activation",
-        "`loop_requested=false` performs no Cron"
+        "`loop_requested=false` performs no Cron",
+        "atomic\n  candidate-publication workflow"
       ],
       "forbidden": [
         "python3 tools/workers.py runs/<dir>",
@@ -539,11 +610,80 @@
         "`xunji-web-research-sync` 与 `xunji-peer-review-panel` 仅保留为兼容路由"
         ,"`loop_requested=false` 单周期 EXECUTE"
         ,"XUNJI_E_LIFECYCLE_PRIVATE_API"
+        ,"xunji.subagent-stop-ingress.v1"
+        ,"xunji.hook-failed-agent-stop.v1"
+        ,"xunji.hook-failed-agent-stop.v2"
+        ,"2026-08-08T01:10:00Z"
+        ,"SCHEMA_UTF8_INVALID"
+        ,"prepare -> structured Edit/Write ignored candidate -> publish|discard"
       ],
       "forbidden": []
     }
   ],
   "capability_cases": [
+    {
+      "name": "workers top-level command index",
+      "document": "docs/ROUTER.md",
+      "marker": "python3 tools/workers.py --help",
+      "script": "tools/workers.py",
+      "argv": ["--help"],
+      "expected_id": "read.workers-help",
+      "expected_effect": "local_read"
+    },
+    {
+      "name": "contract schema help index",
+      "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
+      "marker": "python3 tools/contract_schema.py --help",
+      "script": "tools/contract_schema.py",
+      "argv": ["--help"],
+      "expected_id": "read.contract-schema-help",
+      "expected_effect": "local_read"
+    },
+    {
+      "name": "contract schema diagnostic selftest",
+      "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
+      "marker": "python3 tools/contract_schema.py --selftest",
+      "script": "tools/contract_schema.py",
+      "argv": ["--selftest"],
+      "expected_id": "verify.tools.contract-schema",
+      "expected_effect": "local_verify"
+    },
+    {
+      "name": "contract schema candidate prepare",
+      "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
+      "marker": "python3 tools/contract_schema.py prepare <name.schema.json>",
+      "script": "tools/contract_schema.py",
+      "argv": ["prepare", "work-plan.v1.schema.json"],
+      "expected_id": "maintenance.contract-schema-prepare",
+      "expected_effect": "repo_mutation"
+    },
+    {
+      "name": "contract schema atomic publish",
+      "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
+      "marker": "python3 tools/contract_schema.py publish <name.schema.json>",
+      "script": "tools/contract_schema.py",
+      "argv": ["publish", "work-plan.v1.schema.json"],
+      "expected_id": "maintenance.contract-schema-publish",
+      "expected_effect": "repo_mutation"
+    },
+    {
+      "name": "contract schema candidate discard",
+      "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
+      "marker": "python3 tools/contract_schema.py discard <name.schema.json>",
+      "script": "tools/contract_schema.py",
+      "argv": ["discard", "work-plan.v1.schema.json"],
+      "expected_id": "maintenance.contract-schema-discard",
+      "expected_effect": "repo_mutation"
+    },
+    {
+      "name": "schema-independent Stop ingress selftest",
+      "document": ".claude/skills/xunji-sentinel-guard-review/SKILL.md",
+      "marker": "python3 tools/harness/subagent_stop_ingress.py --selftest",
+      "script": "tools/harness/subagent_stop_ingress.py",
+      "argv": ["--selftest"],
+      "expected_id": "verify.tools.harness.subagent-stop-ingress",
+      "expected_effect": "local_verify"
+    },
     {
       "name": "web research timestamp gate",
       "document": ".claude/skills/web-research/SKILL.md",
@@ -564,6 +704,18 @@
       ],
       "expected_id": "control.workers",
       "expected_effect": "control"
+    },
+    {
+      "name": "agent board completion launch formatter",
+      "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
+      "marker": "python3 tools/workers.py completion-review runs/<dir>",
+      "script": "tools/workers.py",
+      "argv": [
+        "completion-review",
+        "runs/demo_20260101"
+      ],
+      "expected_id": "read.workers",
+      "expected_effect": "local_read"
     },
     {
       "name": "loop prompt deferred rerun",
@@ -597,9 +749,14 @@
     {
       "name": "router classified-host egress recheck",
       "document": "docs/ROUTER.md",
-      "marker": "python3 tools/classify_hosts.py <recon.json> --out runs/<dir>/classify --egress-recheck",
+      "marker": "python3 tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck",
       "script": "tools/classify_hosts.py",
-      "argv": ["recon.json", "--out", "runs/demo_20260101/classify", "--egress-recheck"],
+      "argv": [
+        "recon.json",
+        "--run", "runs/demo_20260101",
+        "--out", "runs/demo_20260101/classify",
+        "--egress-recheck"
+      ],
       "expected_id": "target.classify-hosts",
       "expected_effect": "target"
     },
@@ -631,6 +788,24 @@
       "script": "tools/workers.py",
       "argv": ["cancel-unlaunched", "runs/demo_20260101", "A-target", "--reason", "turn or canonical inputs changed before launch"],
       "expected_id": "control.workers-cancel-unlaunched",
+      "expected_effect": "control"
+    },
+    {
+      "name": "agent board external-stop settlement",
+      "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
+      "marker": "python3 tools/workers.py settle-stopped runs/<dir>",
+      "script": "tools/workers.py",
+      "argv": ["settle-stopped", "runs/demo_20260101", "A-target"],
+      "expected_id": "control.workers-settle-stopped",
+      "expected_effect": "control"
+    },
+    {
+      "name": "agent board failed-Stop returned recovery",
+      "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
+      "marker": "python3 tools/workers.py recover-hook-failed-stop runs/<dir>",
+      "script": "tools/workers.py",
+      "argv": ["recover-hook-failed-stop", "runs/demo_20260101", "A-review-001"],
+      "expected_id": "control.workers-recover-hook-failed-stop",
       "expected_effect": "control"
     },
     {
@@ -1127,7 +1302,7 @@
       "markers": [
         "### 0. Completion Guard, Then Journal Start",
         "Before any journal `start`, phase marker, task, work plan, Agent, or target action",
-        "Only when no valid completion marker is present",
+        "Only when no valid committed transaction is present",
         "{{PYTHON}} tools/loop_journal.py \"{{RUN_DIR}}\" start --note \"绑定的执行周期开始\""
       ]
     }
