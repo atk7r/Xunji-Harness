@@ -17,7 +17,7 @@ Hooks and guard enforce authority/effects; this skill only routes the lifecycle.
   read `xunji-agent-board` and the reference it names for that action.
 - Evidence promotion or live replay: read `xunji-evidence-replay-gate`.
 - Independent review or ledger adjudication: read `xunji-reviewops`.
-- Safety/privacy/target effects: read `src-safety-boundary`.
+- Safety/privacy/target effects: read `safety-boundary`.
 - Exact iteration order: render and follow `docs/templates/loop_prompt.md`.
 
 Do not restate another owner's argv, backend matrix, Agent envelope, or evidence
@@ -49,12 +49,18 @@ rules here.
   an IDN suffix. Distinct host/path/query choices remain ambiguous and require the
   operator to select one; harmless wording, spacing, or a trailing retry request
   does not.
-- When the current Claude Code client reserves `/loop` as its own scheduler
-  (observed in Claude Code 2.1.201), an expansion to `cron_manager.py` is not a
-  Xunji entry and must remain denied. Use an affirmative, uniquely named
-  `继续执行 runs/<normalized-run-dir>` for one existing-run execute/resume cycle,
-  or an affirmative one-source setup request for setup. This fallback has
-  `loop_requested=false`: it does not mint recurring-Cron semantics.
+- When Claude Code forwards the literal `/loop` to `UserPromptSubmit` (verified on
+  2.1.220), it is the recurring Xunji entry. After the run is bound, use one fresh
+  `CronList`; reuse the one observed current-run owner, or if none exists create
+  exactly one recurring client-session task with
+  `durable=false` (or the client's verified false default) and the byte-exact wake
+  prompt `/loop runs/<normalized-run-dir>`. Natural-language `继续` is deliberately
+  not the Cron payload: it is reserved for the operator's early-cycle signal.
+- An older client expansion that never delivers the literal `/loop` still cannot
+  mint Xunji authority from `cron_manager.py` text. In that client, affirmative
+  `继续执行 runs/<normalized-run-dir>` remains one execute/resume cycle with
+  `loop_requested=false`; upgrade or use a client path that forwards literal
+  `/loop` before expecting recurring behavior.
 - Existing `runs/<dir>` or a file inside it resumes that run. A URL is saved
   locally without fetching; recon and supported files route through setup ingest.
 - After setup, every later entry names `runs/<normalized-run-dir>`, never the
@@ -62,6 +68,24 @@ rules here.
   the client actually delivers.
 - Operator steering for an existing run goes to `hints.md`; it is a lead, not a
   fact or scope grant.
+
+## Session-Scoped Single Flight
+
+- The Claude Code Cron is a wake source, not a queue. At most one Xunji cycle may
+  own execution. If its committed plan has no typed `cycle_end`, both Cron wakes
+  and same-session `继续` are coalesced into the current owner; do not replan,
+  duplicate an assignment, or launch another Agent.
+- After typed `cycle_end`, a same-session bare/named-run `继续` may start one next
+  cycle immediately only while the one observed recurring `durable=false` Cron
+  owner is still active. Record `UserPromptManualLoopAdvance`; this early cycle
+  consumes exactly the immediately following scheduled tick.
+- Therefore a 10:09 manual advance makes the 10:10 tick a no-op and leaves 10:20
+  eligible. If the cycle runs longer than ten minutes, every tick while it is busy
+  is a no-op; the first later wall-clock tick after typed `cycle_end` is eligible.
+  Never accumulate missed ticks or run catch-up cycles.
+- Exiting the owning Claude Code client retires its `durable=false` task. Pause or
+  successful engagement closure still performs CronList -> observed CronDelete ->
+  CronList. Neither runtime receipts nor a resumed/new session resurrect a task.
 
 After that semantic intent is compiled, the single effect-facing bootstrap shape is:
 
@@ -163,6 +187,14 @@ For every execute cycle, use the loop template and Agent Board owner to:
    the real Hunter -> Reviewer -> Root disposition chain;
 4. derive typed `cycle_end` and project its exact next action.
 
+If an Agent completion wakes the Root while its assignment remains `running`,
+return to the Agent Board launch/settlement owner. A schema/Hook failure is not a
+run-side result and must not be repaired by editing assignments, receipts, or the
+active run. Use the exact status-emitted hook-failed Stop recovery when eligible;
+otherwise preserve the lifecycle debt. Its project-level ingress observation is
+not canonical run truth, and even a recovered returned projection still needs the
+ordinary Reviewer and Root disposition before `cycle_end` or closure.
+
 Task/Todo state proves iteration planning only. It is not the work plan, Agent
 return, evidence, or closure. Local gates should be repaired and rerun in the same
 cycle when possible; a denied target or protected maintenance action remains debt
@@ -203,18 +235,40 @@ Closure is a sequence, not a report-presence heuristic:
 1. Run the offline structural check and settle all plan/Agent/review/merge debt.
 2. Use authorized live replay only where evidence requires it.
 3. Run `xunji-reviewops`; resolve the review ledger and obtain the required
-   content-addressed independent ReviewReceipt.
+   content-addressed independent ReviewReceipt. Re-read
+   `state/review_policy.json`: every mandatory role needs a valid matching receipt;
+   every optional slot needs either its valid receipt or an explicit limitation.
 4. Complete evidence/report parity, reachable coverage, severity artifacts, and
-   per-lesson retrospective repair status.
-5. Run the separate assignment-free completion Reviewer contract in
-   `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer".
+   per-lesson retrospective repair status, then move report `DRAFT -> READY`.
+5. Run `python3 tools/workers.py plan runs/<dir>`, commit its generated zero-lane
+   S3 `COMPLETION_REVIEW` proposal with the printed exact
+   `python3 tools/workers.py commit-proposal runs/<dir>`, then run
+   `python3 tools/workers.py completion-review runs/<dir>` and call
+   the exact printed assignment-free Reviewer contract. The detailed contract is
+   in `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer".
    Its pseudo receipt does not replace the independent peer review.
+   Never use the compatibility `workers.py commit-plan --mode COMPLETION_REVIEW`;
+   that route is mechanically rejected because it bypasses the current S3 proposal basis.
 6. If `loop_requested=true`, list/cancel/re-list only the observed current-run job;
    if false, perform no Cron action. Record `cron_cancelled=<job-id|none>` either way.
-7. Only after every hard gate passes may Root write the completion marker.
+7. Run plain offline `check_run.py` while READY and retain its first-line
+   `XUNJI_CHECK_RUN_V1` token; `STRUCTURAL_PASS` prose is not completion basis.
+   Dispose the exact coded warning set. Use the public
+   `completion_transaction.py prepare` command from WORKFLOW-reference to freeze
+   the canonical manifest, S3/Reason/completion-review/cycle-end/check/Cron basis,
+   review policy, and slot dispositions. Then call `commit`; it is the sole writer
+   of report FINAL and the bound completion marker. Root never writes either
+   directly.
+8. If state is prepared, committed, or `legacy_unbound`, use the public
+   `completion_transaction.py reopen --reason ...` owner. A reopened legacy run
+   missing `state/review_policy.json` then uses the missing-only
+   `completion_transaction.py adopt-policy` command before the fresh review.
+   Repeat the S3/review/check/Cron path; never backfill a transaction or hand-write
+   the protected policy. Prepared/committed terminal state denies target/Agent/Cron;
+   committed permits only plain offline post-commit check plus reads/status/reopen.
 
 Open/Type-A fronts, unresolved coverage, stale review, failed/denied actions, Agent
-prose, and completion-review prose remain non-completion.
+prose, report E-ids, and completion-review prose remain non-completion.
 
 ## Maintenance Checks
 

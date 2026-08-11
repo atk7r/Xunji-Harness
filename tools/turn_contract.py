@@ -34,6 +34,8 @@ TRANSITION_CLAIMS_DIR = Path(os.environ.get(
 SESSION_SELECTION_DIR = Path(os.environ.get(
     "XUNJI_SESSION_SELECTION_DIR",
     str(ROOT / ".claude" / "xunji_session_selections")))
+SUBAGENT_STOP_INGRESS_DIR = (
+    ROOT / ".claude" / "xunji_subagent_stop_ingress")
 sys.path.insert(0, str(ROOT / "tools"))
 
 import run_model  # noqa: E402
@@ -44,6 +46,8 @@ import setup_normalizer  # noqa: E402
 import setup_source  # noqa: E402
 import setup_transaction  # noqa: E402
 import work_plan  # noqa: E402
+import barrier_state  # noqa: E402
+import completion_transaction  # noqa: E402
 import agent_settlement  # noqa: E402
 import agent_instruction_bundle  # noqa: E402
 from evidence_parse import current_evidence_index_hash  # noqa: E402
@@ -59,7 +63,9 @@ from harness.command_shape import (  # noqa: E402
     split_literal_and_chain,
     trusted_python_token,
 )
+from harness import guard as guardmod  # noqa: E402
 from harness import maintenance_authority, privacy  # noqa: E402
+from harness import proxy as proxymod  # noqa: E402
 
 
 SCHEMA = "xunji.turn_contract.v1"
@@ -73,6 +79,25 @@ MAINTENANCE = "MAINTENANCE"
 NORMAL = "NORMAL"
 STALE_SECONDS = 6 * 60 * 60
 PENDING_STALE_SECONDS = 15 * 60
+CONTINUATION_COALESCED_EVENT = "UserPromptContinuationCoalesced"
+E_CONTINUATION_COALESCED = "XUNJI_CONTINUATION_COALESCED"
+SCHEDULER_WAKE_COALESCED_EVENT = "UserPromptWakeCoalesced"
+E_RUN_BUSY = "XUNJI_E_RUN_BUSY"
+MANUAL_LOOP_ADVANCE_EVENT = "UserPromptManualLoopAdvance"
+E_MANUAL_LOOP_ADVANCE = "XUNJI_MANUAL_LOOP_ADVANCE"
+SCHEDULED_LOOP_TICK_COALESCED_EVENT = "UserPromptScheduledLoopTickCoalesced"
+E_SCHEDULED_LOOP_TICK_COALESCED = "XUNJI_SCHEDULED_LOOP_TICK_COALESCED"
+E_CRON_SESSION_SCOPE_REQUIRED = "XUNJI_E_CRON_SESSION_SCOPE_REQUIRED"
+E_CRON_RECURRING_REQUIRED = "XUNJI_E_CRON_RECURRING_REQUIRED"
+E_CRON_PROMPT_MISMATCH = "XUNJI_E_CRON_PROMPT_MISMATCH"
+E_CRON_LOOP_AUTHORITY_REQUIRED = "XUNJI_E_CRON_LOOP_AUTHORITY_REQUIRED"
+E_INFRA_BARRIER = "XUNJI_E_INFRA_BARRIER"
+E_INFRA_BARRIER_RECORD_FAILED = "XUNJI_E_INFRA_BARRIER_RECORD_FAILED"
+E_INFRA_BARRIER_CLEAR_FAILED = "XUNJI_E_INFRA_BARRIER_CLEAR_FAILED"
+E_COMPLETION_TERMINAL = "XUNJI_E_COMPLETION_TERMINAL"
+BUSY_WAKE_AUDITED = "busy_audited"
+BUSY_WAKE_AUDIT_FAILED = "busy_audit_failed"
+BUSY_WAKE_NOT_BUSY = "not_busy"
 SESSION_END_REASONS = frozenset({
     "clear", "resume", "logout", "prompt_input_exit",
     "bypass_permissions_disabled", "other",
@@ -125,20 +150,6 @@ RAW_NETWORK_CLIENT_RE = re.compile(
     r"(?i)(?:^|[\s;&|])(curl|wget|httpx|nuclei|sqlmap)(?:\s|$)|"
     r"\b(?:requests\.(?:get|post|request)|urllib\.request|socket\.(?:socket|create_connection))\b"
 )
-DIRECT_EGRESS_ENV_RE = re.compile(
-    r"(?i)\bXUNJI_PROXY_REQUIRED\s*=\s*(?:0|false|no|off)\b"
-)
-DIRECT_EGRESS_APPROVAL_RE = re.compile(
-    r"(?:明确)?(?:允许|接受|批准|同意).{0,24}(?:直连|direct[ -]?egress)|"
-    r"(?:allow|approve|accept).{0,24}direct[ -]?egress",
-    re.I,
-)
-DIRECT_EGRESS_DENIAL_RE = re.compile(
-    r"(?:不|不要|不得|禁止|拒绝).{0,16}(?:允许|接受|批准|同意|直连)|"
-    r"(?:do\s+not|don't|never|deny|forbid).{0,24}"
-    r"(?:allow|approve|accept|direct[ -]?egress)",
-    re.I,
-)
 DIRECT_ROUTE_APPROVAL_RE = re.compile(
     r"(?:不用|无需|别|不走)\s*(?:走|使用)?\s*(?:代理|proxy)"
     r".{0,20}(?:直连|直接访问)|"
@@ -149,6 +160,17 @@ DIRECT_ROUTE_APPROVAL_RE = re.compile(
 DIRECT_ROUTE_HARD_DENIAL_RE = re.compile(
     r"(?:不要|不得|禁止|拒绝|不允许)\s*(?:进行)?\s*(?:直连|直接访问)|"
     r"(?:do\s+not|don't|never|deny|forbid).{0,16}\bdirect\b",
+    re.I,
+)
+PROXY_ROUTE_APPROVAL_RE = re.compile(
+    r"(?:明确)?(?:走|使用|启用|通过|切到|改用)\s*(?:交战)?(?:代理|proxy)|"
+    r"(?:必须|需要|要求).{0,12}(?:走|使用|通过)?\s*(?:交战)?(?:代理|proxy)|"
+    r"(?:use|enable|require|through|via|switch\s+to).{0,16}\bproxy\b",
+    re.I,
+)
+PROXY_ROUTE_DENIAL_RE = re.compile(
+    r"(?:不用|无需|不要|不得|禁止|拒绝|不走|不使用|不启用)\s*(?:交战)?(?:代理|proxy)|"
+    r"(?:do\s+not|don't|never|without|no)\s+(?:the\s+)?(?:engagement\s+)?proxy",
     re.I,
 )
 ALL_NETWORK_DENIAL_RE = re.compile(
@@ -279,6 +301,9 @@ PROTECTED_RUNTIME_RE = re.compile(
     r"work_plan_transaction\.json|\.work_plan\.lock|"
     r"work_plans[/\\][0-9a-f]{64}\.json|"
     r"work_plan_transactions[/\\][0-9a-f]{64}\.json|"
+    r"review_policy\.json|infra_barriers\.jsonl|\.infra_barriers\.lock|"
+    r"completion_transaction\.json|\.completion_transaction\.lock|"
+    r"completion_transactions[/\\][^\s;|&]+|"
     r"setup_source\.json|setup_transaction\.json|"
     r"sources[/\\](?:normalized\.json|validator_receipt\.json|original[/\\][^\s;|&]+)|"
     r"\.xunji_(?:activation|setup|scope_admission)\.lock|\.xunji_staging|"
@@ -861,16 +886,24 @@ def _operator_flag_approved(
     return bool(positive.search(intent) and not denial.search(intent))
 
 
-def _direct_egress_approved(prompt: str) -> bool:
-    """Recognize an explicit route choice without trusting implied descriptions."""
+def _compiled_prompt_route(prompt: str) -> str:
+    """Compile direct by default; proxy only by affirmative operator opt-in."""
     intent = _operator_intent_text(prompt)
-    if DIRECT_ROUTE_HARD_DENIAL_RE.search(intent):
-        return False
-    explicit = bool(
-        DIRECT_EGRESS_APPROVAL_RE.search(intent)
-        and not DIRECT_EGRESS_DENIAL_RE.search(intent)
+    direct_requested = bool(DIRECT_ROUTE_APPROVAL_RE.search(intent))
+    proxy_requested = bool(
+        PROXY_ROUTE_APPROVAL_RE.search(intent)
+        and not PROXY_ROUTE_DENIAL_RE.search(intent)
     )
-    return explicit or bool(DIRECT_ROUTE_APPROVAL_RE.search(intent))
+    if proxy_requested and not direct_requested:
+        return "proxy"
+    if DIRECT_ROUTE_HARD_DENIAL_RE.search(intent):
+        return "offline"
+    return "direct"
+
+
+def _direct_egress_approved(prompt: str) -> bool:
+    """Compatibility projection of the compiled direct-default route."""
+    return _compiled_prompt_route(prompt) == "direct"
 
 
 def _safe_lifecycle_source_hint(value: str) -> str:
@@ -1189,11 +1222,14 @@ def _contract_from_event(
             if source_sha256s or source_ambiguous else "setup"
     else:
         lifecycle_operation = "none"
-    direct_egress_approved = _direct_egress_approved(prompt)
+    prompt_route = _compiled_prompt_route(prompt)
     route = (
         "offline" if target_egress_denied else
-        "direct" if direct_egress_approved else "proxy"
+        prompt_route
     )
+    # Compatibility field retained for v1 consumers; it now projects the
+    # compiled route instead of representing an exceptional opt-out.
+    direct_egress_approved = route == "direct"
     source_hint_value = loop_source
     if mode == INTENT_PENDING and len(source_values) == 1:
         source_hint_value = source_values[0]
@@ -1382,13 +1418,33 @@ def _previous_contract(run_dir: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def write_contract(run_dir: Path, event: dict) -> dict:
+def _turn_contract_payload_sha256(contract: dict) -> str:
+    payload = (
+        json.dumps(
+            contract, ensure_ascii=False, indent=2, sort_keys=True,
+        ) + "\n"
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _build_contract(
+    run_dir: Path,
+    event: dict,
+    *,
+    session_loop_owner: dict | None = None,
+    force_mode: str = "",
+) -> dict:
     previous = _previous_contract(run_dir)
     contract = _contract_from_event(
         event,
         run_name=run_dir.name,
         previous_mode=str(previous.get("mode") or ""),
     )
+    if session_loop_owner:
+        contract["loop_requested"] = True
+        contract["loop_source_kind"] = "run"
+    if force_mode:
+        contract["mode"] = force_mode
     requested_scope_run = str(contract.get("scope_admission_run") or "")
     if requested_scope_run and requested_scope_run != run_dir.name:
         contract.pop("scope_admission_run", None)
@@ -1410,9 +1466,631 @@ def write_contract(run_dir: Path, event: dict) -> dict:
         ).hexdigest()[:16]
     contract["coordination_signature"] = signature
     _require_turn_contract_shape(contract)
+    return contract
+
+
+def _persist_built_contract(run_dir: Path, contract: dict) -> dict:
+    _require_turn_contract_shape(contract)
     _atomic_json(contract_path(run_dir), contract, durable=True)
     _write_run_status(run_dir, contract)
     return contract
+
+
+def write_contract(
+    run_dir: Path,
+    event: dict,
+    *,
+    session_loop_owner: dict | None = None,
+    force_mode: str = "",
+) -> dict:
+    contract = _build_contract(
+        run_dir,
+        event,
+        session_loop_owner=session_loop_owner,
+        force_mode=force_mode,
+    )
+    return _persist_built_contract(run_dir, contract)
+
+
+def _strict_continuation_alias(prompt: str, run_name: str) -> str:
+    """Classify only byte-bounded no-delta continuation aliases.
+
+    Longer prompts are never treated as aliases: they may carry a new goal or
+    constraint and must mint a fresh turn contract. Exact prompt replay is
+    handled separately because it preserves every previously compiled clause.
+    """
+    text = str(prompt or "").lstrip("\ufeff \t").strip()
+    text = re.sub(r"[。.!！]+$", "", text).strip()
+    if re.fullmatch(r"(?:继续|继续执行|继续推进|continue|resume)", text, re.I):
+        return "bare_continue"
+    if run_name and re.fullmatch(
+            rf"(?:继续|继续执行|继续推进|continue|resume)\s+"
+            rf"runs/{re.escape(run_name)}",
+            text,
+            re.I,
+    ):
+        return "named_run_continue"
+    if run_name and re.fullmatch(
+            rf"/loop\s+runs/{re.escape(run_name)}", text, re.I):
+        return "scheduled_loop_wake"
+    return ""
+
+
+def _excerpt_object(event: dict, key: str) -> dict:
+    try:
+        value = json.loads(str(event.get(key) or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _normalized_loop_wake_prompt(prompt: str) -> str:
+    return re.sub(r"\s+", " ", str(prompt or "").strip()).casefold()
+
+
+def _active_session_loop_owner(
+    run_dir: Path,
+    previous: dict,
+) -> tuple[dict, str]:
+    """Return the one live recurring, client-session-scoped Cron owner.
+
+    Claude Code owns the actual scheduler lifetime.  ``durable=false`` is its
+    process/session boundary; Xunji only projects an unambiguous owner from the
+    append-only receipts and lets a newer CronList supersede stale create history.
+    Hook session ids remain causal metadata and may differ between scheduled turns.
+    """
+    if previous.get("loop_requested") is not True \
+            or str(previous.get("bound_run") or "") != run_dir.name \
+            or previous.get("authority_state") in {
+                AUTHORITY_SESSION_ENDED, AUTHORITY_RESUME_BARRIER,
+            }:
+        return {}, "previous contract has no live loop authority"
+    events = runtime_receipts.valid_control_events(run_dir)
+    cron = [
+        event for event in events
+        if str(event.get("tool_name") or "").startswith("Cron")
+    ]
+    active: dict[str, dict] = {}
+    run_name = run_dir.name.casefold()
+    for event in cron:
+        tool = str(event.get("tool_name") or "")
+        job = str(event.get("job_id") or "")
+        if tool == "CronCreate" and event.get("run_mentioned") and job:
+            active[job] = event
+        elif tool == "CronDelete" and job:
+            active.pop(job, None)
+        elif tool == "CronList":
+            listed = {
+                str(item) for item in event.get("listed_run_job_ids", [])
+                if str(item)
+            }
+            response = str(event.get("response_excerpt") or "").casefold()
+            if listed:
+                active = {
+                    active_job: create
+                    for active_job, create in active.items()
+                    if active_job in listed
+                }
+            elif run_name not in response:
+                active = {}
+            else:
+                return {}, "latest CronList names the run without one typed job id"
+    if len(active) != 1:
+        return {}, f"expected one active run CronCreate receipt, observed {len(active)}"
+    job_id, create = next(iter(active.items()))
+    tool_input = _excerpt_object(create, "input_excerpt")
+    response = _excerpt_object(create, "response_excerpt")
+    cron_prompt = str(tool_input.get("prompt") or "").strip()
+    prompt_kind = _strict_continuation_alias(cron_prompt, run_dir.name)
+    if prompt_kind not in {"named_run_continue", "scheduled_loop_wake"}:
+        return {}, "CronCreate prompt is not an exact run-bound wake signal"
+    if tool_input.get("recurring") is not True \
+            or response.get("recurring") is not True:
+        return {}, "CronCreate receipt does not prove recurring=true"
+    if response.get("durable") is not False:
+        return {}, "CronCreate receipt does not prove durable=false"
+    return {
+        "job_id": job_id,
+        "prompt": cron_prompt,
+        "seq": int(create.get("seq", 0) or 0),
+        "session_id": str(create.get("session_id") or ""),
+    }, "one active recurring durable=false run Cron is observed"
+
+
+def _continuation_kind(
+    run_dir: Path,
+    event: dict,
+    previous: dict,
+) -> str:
+    prompt = str(event.get("prompt") or "")
+    owner, _note = _active_session_loop_owner(run_dir, previous)
+    if owner and _normalized_loop_wake_prompt(prompt) \
+            == _normalized_loop_wake_prompt(str(owner.get("prompt") or "")):
+        return (
+            "scheduled_loop_wake"
+            if _strict_continuation_alias(prompt, run_dir.name)
+            == "scheduled_loop_wake"
+            else "scheduled_loop_wake_legacy"
+        )
+    incoming_hash = hashlib.sha256(
+        prompt.encode("utf-8", "replace")).hexdigest()
+    if incoming_hash == str(previous.get("prompt_sha256") or ""):
+        return "exact_prompt_replay"
+    return _strict_continuation_alias(prompt, run_dir.name)
+
+
+def _scheduled_loop_wake_owned(
+    run_dir: Path,
+    previous: dict,
+    event: dict,
+    kind: str,
+) -> bool:
+    if not kind.startswith("scheduled_loop_wake"):
+        return True
+    owner, _note = _active_session_loop_owner(run_dir, previous)
+    return bool(
+        owner
+        and _normalized_loop_wake_prompt(str(event.get("prompt") or ""))
+        == _normalized_loop_wake_prompt(str(owner.get("prompt") or ""))
+    )
+
+
+def _continuation_plan_candidate(
+    run_dir: Path,
+    event: dict,
+    previous: dict,
+) -> tuple[dict, str]:
+    """Return the one current unended plan eligible for turn coalescing.
+
+    This is a narrow scheduler composition rule, not a background authority
+    lease. The old contract must still be fresh, executable, same-session,
+    current-input-bound, and attached to an unended committed plan.
+    """
+    if previous.get("mode") != EXECUTE \
+            or previous.get("authority_state") in {
+                AUTHORITY_SESSION_ENDED, AUTHORITY_RESUME_BARRIER,
+            }:
+        return {}, ""
+    incoming_session, _binding_kind = _event_session_binding(event)
+    previous_session = str(previous.get("session_id") or "")
+    incoming_transcript = str(event.get("transcript_path") or "").strip()
+    previous_transcript = str(previous.get("transcript_path") or "").strip()
+    if not previous_session or incoming_session != previous_session \
+            or not incoming_transcript \
+            or incoming_transcript != previous_transcript:
+        return {}, ""
+    try:
+        age = time.time() - float(previous.get("updated_at") or 0.0)
+    except (TypeError, ValueError):
+        return {}, ""
+    if age < 0 or age > STALE_SECONDS:
+        return {}, ""
+    if str(previous.get("bound_run") or run_dir.name) != run_dir.name:
+        return {}, ""
+
+    kind = _continuation_kind(run_dir, event, previous)
+    if not kind:
+        return {}, ""
+    if not _scheduled_loop_wake_owned(run_dir, previous, event, kind):
+        return {}, ""
+    try:
+        plan = work_plan.current_plan(run_dir, previous)
+        if work_plan.plan_cycle_ended(run_dir, plan):
+            return {}, ""
+    except (work_plan.PlanError, OSError, RuntimeError, ValueError):
+        return {}, ""
+    return plan, kind
+
+
+def _coalesce_continuation(
+    run_dir: Path,
+    event: dict,
+    previous: dict,
+) -> tuple[dict, dict, str]:
+    """Retain one valid plan binding and append its audit receipt.
+
+    Receipt failure deliberately returns no coalescing decision so the caller
+    falls back to the ordinary fresh-contract path and preserves fail-closed
+    turn invalidation.
+    """
+    plan, kind = _continuation_plan_candidate(run_dir, event, previous)
+    if not plan:
+        return {}, {}, ""
+    incoming_hash = hashlib.sha256(
+        str(event.get("prompt") or "").encode("utf-8", "replace")
+    ).hexdigest()
+    receipt_event = {
+        "hook_event_name": CONTINUATION_COALESCED_EVENT,
+        "session_id": str(previous.get("session_id") or ""),
+        "transcript_path": str(previous.get("transcript_path") or ""),
+        "tool_name": "TurnContract",
+        "tool_input": {
+            "coalescing_kind": kind,
+            "incoming_prompt_sha256": incoming_hash,
+            "retained_prompt_sha256": str(
+                previous.get("prompt_sha256") or ""),
+            "retained_contract_updated_at": float(
+                previous.get("updated_at") or 0.0),
+            "plan_id": str(plan.get("plan_id") or ""),
+            "plan_digest": str(plan.get("plan_digest") or ""),
+        },
+        "tool_response": {"status": "retained_current_unended_plan"},
+        "xunji_decision": "coalesce",
+        "xunji_reason": (
+            "same-session no-delta continuation retained the current unended "
+            "work-plan turn binding"
+        ),
+        "xunji_decision_code": E_CONTINUATION_COALESCED,
+        "xunji_decision_class": "turn_authority",
+    }
+    try:
+        runtime_receipts.append_hook_event(run_dir, receipt_event)
+    except Exception:
+        return {}, {}, ""
+    return previous, plan, kind
+
+
+def _coalesced_context(
+    contract: dict,
+    run_dir: Path,
+    plan: dict,
+    kind: str,
+) -> str:
+    return (
+        _context_message(contract, run_dir)
+        + "\n[Xunji continuation: COALESCED] 当前输入是同 session 的无语义增量继续信号"
+        f"（{kind}）；已保留未结束计划 {plan.get('plan_id')} 的原 turn binding，"
+        "并写入 hash-chain runtime receipt。把本输入视为 wake-up：从该计划的 current "
+        "status/return/Reviewer/Root settlement/typed cycle_end 唯一 owner action 继续；"
+        "不得仅因本次唤醒 replan、重建 assignment 或重复 launch。"
+    )
+
+
+def _coalesce_cross_session_busy_wake(
+    run_dir: Path,
+    event: dict,
+    previous: dict,
+) -> tuple[str, dict, str]:
+    """Coalesce a pure cross-session wake without transferring authority.
+
+    A second Claude session may receive the scheduler's bare ``continue`` while
+    another session still owns a fresh, current-input-bound plan cycle.  Replacing
+    the canonical turn contract in that case would stale the in-flight plan; copying
+    it would incorrectly transfer execution authority.  The only safe composition is
+    therefore an audited ``RUN_BUSY`` observation.  Any semantic delta falls through
+    to the ordinary fresh-contract path.
+    """
+    incoming_session, _binding_kind = _event_session_binding(event)
+    previous_session = str(previous.get("session_id") or "")
+    incoming_transcript = str(event.get("transcript_path") or "").strip()
+    if not incoming_session or not previous_session \
+            or incoming_session == previous_session or not incoming_transcript:
+        return BUSY_WAKE_NOT_BUSY, {}, ""
+    prompt = str(event.get("prompt") or "")
+    incoming_hash = hashlib.sha256(
+        prompt.encode("utf-8", "replace")).hexdigest()
+    kind = _continuation_kind(run_dir, event, previous)
+    if not kind:
+        return BUSY_WAKE_NOT_BUSY, {}, ""
+    if not _scheduled_loop_wake_owned(run_dir, previous, event, kind):
+        return BUSY_WAKE_NOT_BUSY, {}, ""
+    # Prove the active plan through the previous owning contract.  The incoming
+    # session is deliberately never substituted into this validation and receives
+    # no retained contract.
+    try:
+        if previous.get("mode") != EXECUTE \
+            or previous.get("authority_state") in {
+                    AUTHORITY_SESSION_ENDED, AUTHORITY_RESUME_BARRIER,
+                }:
+            return BUSY_WAKE_NOT_BUSY, {}, ""
+        age = time.time() - float(previous.get("updated_at") or 0.0)
+        if age < 0 or age > STALE_SECONDS:
+            return BUSY_WAKE_NOT_BUSY, {}, ""
+        if str(previous.get("bound_run") or run_dir.name) != run_dir.name:
+            return BUSY_WAKE_NOT_BUSY, {}, ""
+        plan = work_plan.current_plan(run_dir, previous)
+        if work_plan.plan_cycle_ended(run_dir, plan):
+            return BUSY_WAKE_NOT_BUSY, {}, ""
+    except (work_plan.PlanError, OSError, RuntimeError, TypeError, ValueError):
+        return BUSY_WAKE_NOT_BUSY, {}, ""
+    receipt_event = {
+        "hook_event_name": SCHEDULER_WAKE_COALESCED_EVENT,
+        "session_id": incoming_session,
+        "transcript_path": incoming_transcript,
+        "tool_name": "TurnContract",
+        "tool_input": {
+            "coalescing_kind": f"cross_session_{kind}",
+            "incoming_prompt_sha256": incoming_hash,
+            "retained_contract_sha256": hashlib.sha256(
+                json.dumps(
+                    previous, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
+            "plan_id": str(plan.get("plan_id") or ""),
+            "plan_digest": str(plan.get("plan_digest") or ""),
+        },
+        "tool_response": {"status": "run_busy"},
+        "xunji_decision": "coalesce",
+        "xunji_reason": (
+            "cross-session no-delta scheduler wake observed an active plan; "
+            "the owning turn contract was retained without authority transfer"
+        ),
+        "xunji_decision_code": E_RUN_BUSY,
+        "xunji_decision_class": "turn_authority",
+    }
+    try:
+        runtime_receipts.append_hook_event(run_dir, receipt_event)
+    except Exception:
+        # The plan is already proven busy.  Losing only its new audit append
+        # must not be reinterpreted as NOT_BUSY and replace the older owner's
+        # still-valid authority.  Preserve it and surface explicit audit debt.
+        return BUSY_WAKE_AUDIT_FAILED, plan, kind
+    return BUSY_WAKE_AUDITED, plan, kind
+
+
+def _busy_wake_context(
+    run_dir: Path,
+    plan: dict,
+    kind: str,
+    *,
+    audited: bool,
+) -> str:
+    audit_note = (
+        "已合并并写入审计回执。" if audited else
+        "已识别为 busy，但新审计回执 append 失败；旧 owner contract 仍原样保留。"
+    )
+    return (
+        "[Xunji scheduler: RUN_BUSY] 当前 run " + run_dir.name
+        + " 已有未结束计划 " + str(plan.get("plan_id") or "")
+        + f"；本次跨 session 无语义增量唤醒（{kind}）" + audit_note
+        + "本 session 未继承原执行权限，不得 replan、重建 assignment、重复 launch 或推进"
+        "canonical state。等待原 owner 完成；若操作者确需替换任务，请提交包含实际语义变化的"
+        "新指令。"
+    )
+
+
+def _manual_loop_advance_candidate(
+    run_dir: Path,
+    event: dict,
+    previous: dict,
+) -> tuple[dict, str, dict]:
+    """Admit bare continue as one early cycle only after the prior cycle ended."""
+    if previous.get("mode") != EXECUTE \
+            or previous.get("authority_state") in {
+                AUTHORITY_SESSION_ENDED, AUTHORITY_RESUME_BARRIER,
+            }:
+        return {}, "", {}
+    incoming_session, _binding_kind = _event_session_binding(event)
+    incoming_transcript = str(event.get("transcript_path") or "").strip()
+    if not incoming_session \
+            or incoming_session != str(previous.get("session_id") or "") \
+            or not incoming_transcript \
+            or incoming_transcript != str(previous.get("transcript_path") or ""):
+        return {}, "", {}
+    try:
+        age = time.time() - float(previous.get("updated_at") or 0.0)
+    except (TypeError, ValueError):
+        return {}, "", {}
+    if age < 0 or age > STALE_SECONDS \
+            or str(previous.get("bound_run") or "") != run_dir.name:
+        return {}, "", {}
+    kind = _continuation_kind(run_dir, event, previous)
+    if kind not in {"bare_continue", "named_run_continue"}:
+        return {}, "", {}
+    owner, _note = _active_session_loop_owner(run_dir, previous)
+    if not owner:
+        return {}, "", {}
+    try:
+        plan = work_plan.current_plan(run_dir, previous)
+        if not work_plan.plan_cycle_ended(run_dir, plan):
+            return {}, "", {}
+    except (work_plan.PlanError, OSError, RuntimeError, ValueError):
+        return {}, "", {}
+    return plan, kind, owner
+
+
+def _audit_manual_loop_advance(
+    run_dir: Path,
+    event: dict,
+    previous: dict,
+) -> tuple[str, dict, str, dict, dict]:
+    plan, kind, owner = _manual_loop_advance_candidate(
+        run_dir, event, previous)
+    if not plan:
+        return "not_applicable", {}, "", {}, {}
+    prepared_contract = _build_contract(
+        run_dir, event, session_loop_owner=owner)
+    incoming_hash = hashlib.sha256(
+        str(event.get("prompt") or "").encode("utf-8", "replace")
+    ).hexdigest()
+    receipt_event = {
+        "hook_event_name": MANUAL_LOOP_ADVANCE_EVENT,
+        "session_id": str(previous.get("session_id") or ""),
+        "transcript_path": str(previous.get("transcript_path") or ""),
+        "tool_name": "TurnContract",
+        "tool_input": {
+            "advance_kind": kind,
+            "incoming_prompt_sha256": incoming_hash,
+            "ended_plan_id": str(plan.get("plan_id") or ""),
+            "ended_plan_digest": str(plan.get("plan_digest") or ""),
+            "cron_job_id": str(owner.get("job_id") or ""),
+            "prepared_contract_sha256": _turn_contract_payload_sha256(
+                prepared_contract),
+        },
+        "tool_response": {
+            "status": "manual_advance_prepared_pending_contract"
+        },
+        "xunji_decision": "advance",
+        "xunji_reason": (
+            "same-session manual continue prepared one early cycle after the "
+            "prior typed cycle_end; admission and next-tick coalescing require "
+            "the exact prepared contract to commit"
+        ),
+        "xunji_decision_code": E_MANUAL_LOOP_ADVANCE,
+        "xunji_decision_class": "turn_authority",
+    }
+    try:
+        runtime_receipts.append_hook_event(run_dir, receipt_event)
+    except Exception:
+        return "audit_failed", plan, kind, owner, {}
+    return "audited", plan, kind, owner, prepared_contract
+
+
+def _pending_manual_loop_advance(
+    run_dir: Path,
+    owner: dict,
+    contract: dict,
+) -> str:
+    events, errors = runtime_receipts.validate_chain(run_dir)
+    if errors:
+        return "state_invalid"
+    manual = [
+        item for item in events
+        if item.get("hook_event_name") == MANUAL_LOOP_ADVANCE_EVENT
+    ]
+    if not manual:
+        return "none"
+    latest = manual[-1]
+    latest_input = _excerpt_object(latest, "input_excerpt")
+    if str(latest_input.get("cron_job_id") or "") \
+            != str(owner.get("job_id") or ""):
+        return "none"
+    prepared_hash = str(
+        latest_input.get("prepared_contract_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", prepared_hash):
+        return "state_invalid"
+    if _turn_contract_payload_sha256(contract) != prepared_hash:
+        # The append-only preparation receipt survived, but the exact EXECUTE
+        # contract did not commit.  It cannot consume a future scheduler tick.
+        return "orphaned"
+    if str(latest_input.get("incoming_prompt_sha256") or "") \
+            != str(contract.get("prompt_sha256") or "") \
+            or str(latest.get("session_id") or "") \
+            != str(contract.get("session_id") or "") \
+            or str(latest.get("transcript_path") or "") \
+            != str(contract.get("transcript_path") or ""):
+        return "state_invalid"
+    latest_seq = int(latest.get("seq", 0) or 0)
+    for item in events:
+        if int(item.get("seq", 0) or 0) <= latest_seq:
+            continue
+        if item.get("hook_event_name") == SCHEDULED_LOOP_TICK_COALESCED_EVENT:
+            return "consumed"
+        if item.get("hook_event_name") not in {
+                CONTINUATION_COALESCED_EVENT,
+                SCHEDULER_WAKE_COALESCED_EVENT,
+            }:
+            continue
+        kind = str(_excerpt_object(
+            item, "input_excerpt").get("coalescing_kind") or "")
+        if "scheduled_loop_wake" in kind:
+            return "consumed"
+    return "pending"
+
+
+def _coalesce_scheduled_loop_tick(
+    run_dir: Path,
+    event: dict,
+    previous: dict,
+) -> tuple[str, str, dict]:
+    kind = _continuation_kind(run_dir, event, previous)
+    if not kind.startswith("scheduled_loop_wake"):
+        return "not_applicable", "", {}
+    _events, chain_errors = runtime_receipts.validate_chain(run_dir)
+    if chain_errors:
+        return "state_invalid", kind, {}
+    owner, owner_note = _active_session_loop_owner(run_dir, previous)
+    if not owner:
+        if owner_note not in {
+                "previous contract has no live loop authority",
+                "expected one active run CronCreate receipt, observed 0",
+        }:
+            return "state_invalid", kind, {}
+        return "not_applicable", "", {}
+    if not _scheduled_loop_wake_owned(run_dir, previous, event, kind):
+        return "state_invalid", kind, owner
+    pending_state = _pending_manual_loop_advance(
+        run_dir, owner, previous)
+    if pending_state == "state_invalid":
+        return "state_invalid", kind, owner
+    if pending_state != "pending":
+        return "not_applicable", "", {}
+    incoming_session, _binding_kind = _event_session_binding(event)
+    incoming_hash = hashlib.sha256(
+        str(event.get("prompt") or "").encode("utf-8", "replace")
+    ).hexdigest()
+    receipt_event = {
+        "hook_event_name": SCHEDULED_LOOP_TICK_COALESCED_EVENT,
+        "session_id": incoming_session,
+        "transcript_path": str(event.get("transcript_path") or ""),
+        "tool_name": "TurnContract",
+        "tool_input": {
+            "coalescing_kind": kind,
+            "incoming_prompt_sha256": incoming_hash,
+            "cron_job_id": str(owner.get("job_id") or ""),
+        },
+        "tool_response": {"status": "manual_advance_consumed_scheduled_tick"},
+        "xunji_decision": "coalesce",
+        "xunji_reason": (
+            "the immediately pending scheduled tick was consumed because a "
+            "manual continue already advanced the loop by one cycle"
+        ),
+        "xunji_decision_code": E_SCHEDULED_LOOP_TICK_COALESCED,
+        "xunji_decision_class": "turn_authority",
+    }
+    try:
+        runtime_receipts.append_hook_event(run_dir, receipt_event)
+    except Exception:
+        return "audit_failed", kind, owner
+    return "audited", kind, owner
+
+
+def _manual_loop_advance_context(
+    contract: dict,
+    run_dir: Path,
+    plan: dict,
+    *,
+    audited: bool,
+) -> str:
+    if not audited:
+        return (
+            "[Xunji loop: MANUAL_ADVANCE_BLOCKED] 手动提前一轮的审计回执写入失败；"
+            "本回合已冻结为 EXPLAIN_ONLY，未获得新的执行权限。请重试明确的 /loop。"
+        )
+    return (
+        _context_message(contract, run_dir)
+        + "\n[Xunji loop: MANUAL_ADVANCE] 上一计划 "
+        + str(plan.get("plan_id") or "")
+        + " 已结束；本次同 session ‘继续’已提前启动唯一下一轮。紧邻的 Cron 定时点"
+          "必须被合并，不得再建 plan、assignment 或 Agent；后续墙钟定时点照常竞争空闲锁。"
+    )
+
+
+def _scheduled_loop_tick_context(
+    run_dir: Path,
+    kind: str,
+    *,
+    state: str,
+) -> str:
+    if state == "state_invalid":
+        return (
+            "[Xunji scheduler: TICK_STATE_INVALID] 定时唤醒形状已匹配，但当前 "
+            "Cron owner 或 runtime receipt chain 无法得到唯一、完整验证；本回合冻结为 "
+            "EXPLAIN_ONLY，不得新建 cycle、Cron、plan、assignment 或 Agent。先用新的 "
+            "CronList 对账并修复审计链。"
+        )
+    if state != "audited":
+        return (
+            "[Xunji scheduler: TICK_AUDIT_FAILED] 已识别待消费的定时点，但审计回执"
+            "写入失败；本回合冻结为 EXPLAIN_ONLY，不得启动 cycle。下一定时点再重试。"
+        )
+    return (
+        "[Xunji scheduler: TICK_COALESCED] 当前 run " + run_dir.name
+        + f" 的本次定时唤醒（{kind}）已被此前手动‘继续’消费并写入回执；"
+          "本次不创建 turn plan、assignment、Agent 或任何 canonical/target effect。"
+          "等待下一个墙钟定时点；不存在补跑队列。"
+    )
 
 
 def _write_session_barrier(
@@ -1450,6 +2128,7 @@ def _write_session_barrier(
     barrier.update({
         "authority_state": authority_state,
         "resume_requires_prompt": True,
+        "direct_egress_approved": False,
         "transcript_sha256": transcript_sha256,
         "ended_from_contract_sha256": ended_from_contract_sha256,
     })
@@ -3140,18 +3819,21 @@ _RUN_PROTECTED_STATE_FILES = {
     ".loop_journal.lock", "reason_pass_receipts.jsonl", ".reason_pass.lock",
     "turn_contract.json", "run_status.json", "work_plan.json",
     "work_plan_transaction.json", ".work_plan.lock", "setup_source.json",
-    "setup_transaction.json", "assignments.json", "delegate_transaction.json",
+    "setup_transaction.json", "review_policy.json", "infra_barriers.jsonl",
+    ".infra_barriers.lock", "completion_transaction.json",
+    ".completion_transaction.lock", "assignments.json", "delegate_transaction.json",
     "assignment_cancellation_transaction.json",
     ".assignments.lock",
 }
 _RUN_PROTECTED_STATE_DIRS = {
     "work_plans", "work_plan_transactions", "assignment_cancellations",
-    "merge_drafts", "merge_results",
+    "completion_transactions", "merge_drafts", "merge_results",
     "scope_admissions",
 }
 _WORKSPACE_PROTECTED_CLAUDE_NAMES = {
     "xunji_active_run", "xunji_pending_turns", "xunji_session_selections",
     "xunji_transition_claims", "xunji_scope_admission_claims",
+    "xunji_subagent_stop_ingress",
 }
 
 
@@ -3255,7 +3937,7 @@ def _structured_path_is_protected(raw: str, run_dir: Path | None) -> tuple[bool,
         configured_exact.update(configured_views)
     for configured in (
             PENDING_DIR, TRANSITION_CLAIMS_DIR, SESSION_SELECTION_DIR,
-            scope_admission.CLAIMS_DIR):
+            scope_admission.CLAIMS_DIR, SUBAGENT_STOP_INGRESS_DIR):
         configured_views, configured_invalid = _path_views(str(configured), None)
         if configured_invalid:
             return False, True
@@ -3591,6 +4273,28 @@ def _local_verification_bash(command: str) -> bool:
     return bool(invocation and invocation[0].effect == "local_verify")
 
 
+def _maintenance_repo_mutation_bash(command: str) -> bool:
+    """Allow only one exact registry-owned repository mutation argv."""
+    invocation = _registered_capability_invocation(command)
+    return bool(invocation and invocation[0].effect == "repo_mutation")
+
+
+def _maintenance_local_read_bash(command: str) -> bool:
+    invocation = _registered_capability_invocation(command)
+    return bool(invocation and invocation[0].effect == "local_read")
+
+
+def _direct_contract_schema_edits(event: dict) -> list[str]:
+    paths, invalid = maintenance_authority.event_paths(event)
+    if invalid:
+        return []
+    return sorted({
+        path.removeprefix("contracts/") for path in paths
+        if re.fullmatch(
+            r"contracts/[A-Za-z0-9][A-Za-z0-9._-]*\.schema\.json", path)
+    })
+
+
 def _trusted_critical_execution_bash(
     command: str,
     *,
@@ -3636,6 +4340,16 @@ def _maintenance_pretool_reason(event: dict, contract: dict) -> str:
                 "框架维护不得直接写 live-run、Git 或控制状态路径: "
                 + ", ".join(forbidden)
             )
+        schema_names = _direct_contract_schema_edits(event)
+        if schema_names:
+            first = schema_names[0]
+            return (
+                "contract schema 禁止直接逐步 Edit/Write 发布。先运行精确 "
+                f"`python3 tools/contract_schema.py prepare {first}`，只编辑其"
+                f"输出的 `tmp/contract_schema_candidates/{first}`，再运行输出的"
+                "唯一 publish argv；发布器会验证、CAS 并以 fsync+os.replace "
+                "原子替换。"
+            )
         return ""
     if tool == "Bash":
         tool_env = tool_input.get("env") if isinstance(tool_input.get("env"), dict) else {}
@@ -3644,7 +4358,9 @@ def _maintenance_pretool_reason(event: dict, contract: dict) -> str:
                 "框架维护 Bash 禁止工具级环境覆盖；PYTHONPATH/Git 外部 helper 等变量会"
                 "破坏本地只读/验证命令的确定性。"
             )
-        if _readonly_shell(command) or _local_verification_bash(command):
+        if _readonly_shell(command) or _local_verification_bash(command) \
+                or _maintenance_repo_mutation_bash(command) \
+                or _maintenance_local_read_bash(command):
             return ""
         if _event_destinations(event):
             return "框架维护回合禁止 target/network action、Agent 与 Cron；本回合只做本地精确路径维护。"
@@ -4333,6 +5049,10 @@ def _decision_metadata(reason: str, event: dict) -> dict:
         E_CLEAR_ACTIVE_FORBIDDEN: "lifecycle",
         E_CRON_LIST_REQUIRED: "cron",
         E_CRON_RUN_MISMATCH: "cron",
+        E_CRON_SESSION_SCOPE_REQUIRED: "cron",
+        E_CRON_RECURRING_REQUIRED: "cron",
+        E_CRON_PROMPT_MISMATCH: "cron",
+        E_CRON_LOOP_AUTHORITY_REQUIRED: "cron",
         E_CRON_CREATE_REQUIRED: "cron",
         E_ITERATION_PLAN_REQUIRED: "iteration_plan",
         E_WORK_PLAN_REQUIRED: "work_plan",
@@ -4344,6 +5064,10 @@ def _decision_metadata(reason: str, event: dict) -> dict:
         E_AGENT_TOOL_CALL_IDENTITY_CONFLICT: "agent_tool_budget",
         E_AGENT_TOOL_CALL_BUDGET_INVALID: "agent_tool_budget",
         E_AGENT_REQUEST_BUDGET_EXCEEDED: "agent_request_budget",
+        E_INFRA_BARRIER: "infra_barrier",
+        E_INFRA_BARRIER_RECORD_FAILED: "infra_barrier",
+        E_INFRA_BARRIER_CLEAR_FAILED: "infra_barrier",
+        E_COMPLETION_TERMINAL: "completion_terminal",
     }
     metadata = {
         "xunji_decision_code": code,
@@ -4597,14 +5321,13 @@ def _loop_iteration_gate_reason(run_dir: Path, event: dict, contract: dict) -> s
         transition_reason = _transition_commit_reason(run_dir, contract)
         if transition_reason:
             return transition_reason
-    if transitioned and recurring_loop:
-        cron_ok, cron_note = runtime_receipts.cron_create_observed(
-            run_dir, session_id=session_id, since=since,
-        )
-        if not cron_ok:
+    if recurring_loop:
+        cron_owner, cron_note = _active_session_loop_owner(run_dir, contract)
+        if not cron_owner:
             return (
-                f"[{E_CRON_CREATE_REQUIRED}] 新 run 已绑定，但尚无当前回合、显式命名该 run "
-                f"的成功 CronCreate 回执；先执行 fresh CronList/CronCreate。{cron_note}"
+                f"[{E_CRON_CREATE_REQUIRED}] 当前 /loop 没有唯一、仍活跃且 "
+                "recurring=true/durable=false 的 run-bound Cron owner；先执行 fresh "
+                f"CronList/CronCreate。{cron_note}"
             )
     if task_plan_tool:
         return ""
@@ -4739,6 +5462,16 @@ def _stale_plan_recovery_hint(run_dir: Path, plan: dict) -> str:
             f"`python3 tools/workers.py cancel-unlaunched runs/{run_dir.name} "
             f"{assignment} --reason \"turn or canonical inputs changed before launch\"`，"
             "再为仍开放的 front 提交新 plan。"
+        )
+    if action == agent_settlement.RECOVERY_SETTLE_EXTERNALLY_STOPPED \
+            and assignment:
+        return (
+            "旧 plan 含真实 started attempt，且 Claude Code 父 transcript 已给出 "
+            "exact user-stop/no-resume 结构化回执。运行 "
+            f"`python3 tools/workers.py settle-stopped runs/{run_dir.name} "
+            f"{assignment}` 投影 typed failed result，再走唯一 digest-bound "
+            "Reviewer 与 Root blocked/failed/abandoned settlement；这不是 return、"
+            "evidence 或 merged。"
         )
     if action == agent_settlement.RECOVERY_WAIT_RUNNING:
         return (
@@ -4990,10 +5723,13 @@ def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
     if completion_reason is not None:
         if completion_reason:
             return completion_reason
-        if plan.get("macro_stage") != "S3":
+        if plan.get("macro_stage") != "S3" \
+                or plan.get("execution_mode") != "COMPLETION_REVIEW" \
+                or plan.get("lanes") != []:
             return (
-                f"[{E_DELEGATION_REQUIRED}] completion review Agent 只允许绑定 S3 "
-                "work plan。"
+                f"[{E_DELEGATION_REQUIRED}] completion review Agent 只允许绑定 "
+                "S3 COMPLETION_REVIEW work plan（lanes=[]）。先运行 workers.py "
+                "plan 与 commit-proposal。"
             )
         return ""
     assignment, front = runtime_receipts._assignment_fields(prompt)
@@ -5241,6 +5977,92 @@ def _plan_bound_child_budget_context(event: dict) -> dict | None:
     return _pretool_context("\n".join(messages)) if messages else None
 
 
+def _child_infra_barrier_reason(
+    run_dir: Path,
+    event: dict,
+    actor: dict,
+) -> str:
+    """Recheck the actor's immutable lane against the actual target action."""
+    if not _is_target_action(event):
+        return ""
+    plan_digest = str(actor.get("plan_digest") or "")
+    lane_id = str(actor.get("lane_id") or "")
+    # Pre-plan legacy assignments have no lane barrier binding to revalidate;
+    # they remain constrained by their frozen asset package below.  A partial
+    # plan binding is never legacy-compatible and must fail closed.
+    if not plan_digest and not lane_id:
+        return ""
+    try:
+        if not re.fullmatch(r"[0-9a-f]{64}", plan_digest) or not lane_id:
+            raise work_plan.PlanError(
+                "WORK_PLAN_INFRA_BARRIER_ACTOR_BINDING_INCOMPLETE")
+        plan = work_plan.transaction_bound_plan(run_dir)
+        if str(plan.get("plan_digest") or "") \
+                != plan_digest:
+            raise work_plan.PlanError("WORK_PLAN_INFRA_BARRIER_ACTOR_PLAN_MISMATCH")
+        lanes = [
+            lane for lane in plan.get("lanes", [])
+            if isinstance(lane, dict) and str(lane.get("id") or "") == lane_id
+        ]
+        if len(lanes) != 1:
+            raise work_plan.PlanError("WORK_PLAN_INFRA_BARRIER_ACTOR_LANE_MISMATCH")
+        lane = lanes[0]
+        if str(lane.get("front") or "") != str(actor.get("front") or "") \
+                or str(lane.get("effect") or "") != "target":
+            raise work_plan.PlanError("WORK_PLAN_INFRA_BARRIER_ACTOR_LANE_MISMATCH")
+        normalized = runtime_receipts.normalize_hook_event(run_dir, event)
+        actual = barrier_state.runtime_action_fingerprint(normalized)
+        work_plan.infra_barrier_preflight(
+            run_dir, lane, actual_action_fingerprint=actual)
+    except (work_plan.PlanError, barrier_state.BarrierStateError,
+            barrier_state.BarrierDurabilityError) as exc:
+        code = getattr(exc, "code", "") or str(exc).split(":", 1)[0]
+        return (
+            f"[{E_INFRA_BARRIER}] plan-bound 子 Agent target action 未通过"
+            "当前 infra-barrier lane/action 重验："
+            f"{code or type(exc).__name__}。本次工具未执行；不得改 cause/"
+            "precondition 或伪造 binding 绕过，改实际 action，或先完成 exact typed repair。"
+        )
+    return ""
+
+
+def _observe_denial_barrier_after_receipt(
+    run_dir: Path,
+    receipt: dict,
+) -> str:
+    """Return a stable fail-closed diagnostic only for eligible write debt."""
+    try:
+        barrier_state.observe_runtime_failure_if_eligible(
+            run_dir,
+            failure_receipt_sha256=str(receipt.get("receipt_hash") or ""),
+            runs_root=run_dir.parent,
+        )
+    except (barrier_state.BarrierStateError,
+            barrier_state.BarrierDurabilityError) as exc:
+        code = getattr(exc, "code", "") or type(exc).__name__
+        return (
+            f"[{E_INFRA_BARRIER_RECORD_FAILED}] eligible denial receipt 已耐久，"
+            "但 infra barrier observe/append 未完成；保持 fail-closed，修复派生"
+            f"状态后精确重试 Hook owner。cause={code}"
+        )
+    return ""
+
+
+def _clear_barrier_after_success(run_dir: Path, receipt: dict) -> None:
+    """Consume only an exact claim/lane-bound target or repair success."""
+    try:
+        barrier_state.record_runtime_success_clear(
+            run_dir,
+            basis_sha256=str(receipt.get("receipt_hash") or ""),
+            runs_root=run_dir.parent,
+        )
+    except (barrier_state.BarrierStateError,
+            barrier_state.BarrierDurabilityError) as exc:
+        code = getattr(exc, "code", "") or type(exc).__name__
+        raise RuntimeError(
+            f"{E_INFRA_BARRIER_CLEAR_FAILED}:{code}") from exc
+
+
 def _normalized_assets(values: object) -> list[str]:
     out: list[str] = []
     for raw in values if isinstance(values, list) else []:
@@ -5267,12 +6089,81 @@ def _coverage_rows(run_dir: Path) -> tuple[list[dict], str]:
     return rows, ""
 
 
-def _event_known_hosts(run_dir: Path, event: dict) -> tuple[set[str], str]:
-    text = _tool_text(event).lower()
+def _target_reference_endpoint(
+    reference: capability_registry.TargetReference,
+) -> tuple[str, int | None] | None:
+    """Compatibility wrapper for the registry-owned endpoint normalizer."""
+    return capability_registry.target_endpoint(reference)
+
+
+def _registered_target_endpoints(
+    event: dict,
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None = None,
+) -> tuple[set[tuple[str, int | None]], str] | None:
+    """Return typed target endpoints, or None for a non-registered target event."""
+    tool = str(event.get("tool_name") or "")
+    if tool != "Bash":
+        return None
+    tool_input = event.get("tool_input") \
+        if isinstance(event.get("tool_input"), dict) else {}
+    if capability is None:
+        tool_env = tool_input.get("env") \
+            if isinstance(tool_input.get("env"), dict) else {}
+        capability = _registered_capability_invocation(
+            str(tool_input.get("command") or ""), tool_env=tool_env)
+    if capability is None or capability[0].effect != "target":
+        return None
+    spec, _script, args, _env = capability
+    try:
+        references = capability_registry.target_references(spec, args)
+    except ValueError as exc:
+        return set(), str(exc)
+    endpoints: set[tuple[str, int | None]] = set()
+    for reference in references:
+        endpoint = _target_reference_endpoint(reference)
+        if endpoint is None:
+            return set(), (
+                f"registered target capability {spec.id} has an invalid "
+                f"{reference.role} destination")
+        endpoints.add(endpoint)
+    return endpoints, ""
+
+
+def _event_known_hosts(
+    run_dir: Path,
+    event: dict,
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None = None,
+) -> tuple[set[str], str]:
     found: set[str] = set()
     rows, error = _coverage_rows(run_dir)
     if error:
         return set(), error
+    typed = _registered_target_endpoints(event, capability)
+    if typed is not None:
+        endpoints, endpoint_error = typed
+        if endpoint_error:
+            return set(), endpoint_error
+        for row in rows:
+            assets = _normalized_assets([row.get("asset")])
+            if not assets:
+                continue
+            identity = _target_reference_endpoint(
+                capability_registry.TargetReference(
+                    assets[0], role="coverage", allow_bare=True))
+            if identity is None:
+                continue
+            host, port = identity
+            if any(
+                    target_host == host
+                    and (port is None or target_port == port)
+                    for target_host, target_port in endpoints):
+                found.add(assets[0])
+        return found, ""
+    text = _tool_text(event).lower()
     for row in rows:
         host = _normalized_assets([row.get("asset")])
         if host and re.search(r"(?<![\w.\-])" + re.escape(host[0]) + r"(?![\w.\-])", text):
@@ -5393,56 +6284,55 @@ def _unassigned_assets(run_dir: Path) -> tuple[list[str], str]:
              if str(item.get("asset") or "")], "")
 
 
-def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
-    """Deny target egress paths that cannot prove use of the engagement proxy."""
+def _proxy_egress_reason(
+    run_dir: Path,
+    event: dict,
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None = None,
+) -> str:
+    """Deny target paths that cannot prove use of the guarded route service."""
     tool = str(event.get("tool_name") or "")
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = str(tool_input.get("command") or "")
     if tool == "Bash" and RAW_NETWORK_CLIENT_RE.search(command):
         return (
-            "交战代理硬门：active run 禁止使用裸 curl/wget/httpx/nuclei/sqlmap/requests/urllib/socket；"
-            "请走项目的 proxy-aware guarded tools。"
+            "目标出口硬门：active run 禁止使用裸 curl/wget/httpx/nuclei/sqlmap/requests/urllib/socket；"
+            "请走项目的 route-aware guarded tools。"
         )
-    touched, coverage_error = _event_known_hosts(run_dir, event)
+    touched, coverage_error = _event_known_hosts(
+        run_dir, event, capability)
     if coverage_error:
         return "资产覆盖硬门：无法派生目标资产账本，拒绝在未知 scope/代理状态下执行：" + coverage_error
     if tool == "WebFetch":
         return (
-            "交战代理硬门：active run 中 WebFetch 无法证明经过 XUNJI_PROXY，且未知目标会"
+            "目标出口硬门：active run 中 WebFetch 无法证明经过冻结的 direct/proxy 路线，且未知目标会"
             "绕过资产账本；目标请求必须改用 tools/probe.py/render.py/scan.py，公共资料研究"
             "使用 WebSearch/知识工具。"
         )
     if tool != "Bash":
         if touched or _event_destinations(event):
             return (
-                "交战代理硬门：该非 Bash 网络工具无法证明经过 XUNJI_PROXY；"
-                "目标请求必须改用 proxy-aware project tools。"
+                "目标出口硬门：该非 Bash 网络工具无法证明经过冻结路线；"
+                "目标请求必须改用 route-aware project tools。"
             )
         return ""
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return "交战代理硬门：无法解析目标命令，拒绝可能的直连出口。"
-    approved = False
-    for token in tokens:
-        if not token.endswith(".py"):
-            continue
-        path = Path(token)
-        if not path.is_absolute():
-            path = ROOT / path
-        try:
-            approved = path.resolve() in PROXY_AWARE_TARGET_TOOLS
-        except Exception:
-            approved = False
-        if approved:
-            break
+    approved = bool(capability and capability[0].effect == "target")
     if approved:
         rows, inventory_error = _coverage_rows(run_dir)
         if inventory_error:
             return "资产覆盖硬门：无法派生目标资产账本：" + inventory_error
         if not rows:
-            return "资产覆盖硬门：proxy-aware 目标工具执行前必须先建立 coverage/asset ledger。"
-        destinations = _event_destinations(event)
+            return "资产覆盖硬门：route-aware 目标工具执行前必须先建立 coverage/asset ledger。"
+        typed = _registered_target_endpoints(event, capability)
+        if typed is None:
+            return (
+                "资产覆盖硬门：注册目标 capability 缺少 typed destination projection；"
+                "拒绝 fail-open。")
+        endpoints, destination_error = typed
+        if destination_error:
+            return "资产覆盖硬门：无法解析注册目标目的地，拒绝 fail-open：" + destination_error
+        destinations = {host for host, _port in endpoints}
         unapproved = _unapproved_scope_destinations(run_dir, rows, destinations)
         if unapproved:
             detail = ", ".join(
@@ -5458,14 +6348,14 @@ def _proxy_egress_reason(run_dir: Path, event: dict) -> str:
         unknown = sorted(destinations - _coverage_hostnames(rows))
         if unknown:
             return (
-                "资产覆盖硬门：proxy-aware 目标工具只能访问 coverage ledger 已声明的 host/IP；"
+                "资产覆盖硬门：route-aware 目标工具只能访问 coverage ledger 已声明的 host/IP；"
                 "未知目标: " + ", ".join(unknown)
             )
     if not approved:
         if not touched:
             return ""
         return (
-            "交战代理硬门：该目标命令未绑定项目的 proxy-aware 工具，无法证明出口代理；"
+            "目标出口硬门：该目标命令未绑定项目的 route-aware 工具，无法证明冻结出口路线；"
             "改用 tools/probe.py、render.py 或 scan.py。"
         )
     return ""
@@ -5494,6 +6384,162 @@ def _is_target_action(event: dict) -> bool:
     if tool in NON_EGRESS_TOOLS:
         return False
     return bool(_event_destinations(event))
+
+
+def _contract_egress_route(contract: dict) -> str:
+    """Return the compiled route, retaining conservative v1 compatibility."""
+    operator_intent = contract.get("operator_intent") \
+        if isinstance(contract.get("operator_intent"), dict) else {}
+    route = str(operator_intent.get("route") or "")
+    if route in {"offline", "direct", "proxy"}:
+        return route
+    # A legacy affirmative direct projection remains usable. A route-less false
+    # value came from the historical proxy-default era; it is not affirmative
+    # operator proxy authority, so require a fresh top-level turn (offline).
+    return "direct" if contract.get("direct_egress_approved") is True else "offline"
+
+
+def _target_route_reason(
+    event: dict,
+    contract: dict,
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None,
+) -> str:
+    """Bind one registered target command to the turn's exact route choice."""
+    if capability is None:
+        command = str((event.get("tool_input") or {}).get("command") or "") \
+            if isinstance(event.get("tool_input"), dict) else ""
+        invocation = parse_exact_python_command(
+            command,
+            root=ROOT,
+            allowed_scripts=REGISTERED_CAPABILITY_SCRIPTS,
+            allow_environment=True,
+        )
+        route_env_names = [
+            item.partition("=")[0]
+            for item in (invocation.environment if invocation is not None else ())
+            if item.partition("=")[0] in {"XUNJI_PROXY_REQUIRED", "XUNJI_PROXY"}
+        ]
+        duplicate_route_selector = len(route_env_names) != len(set(route_env_names))
+        if invocation is not None \
+                and invocation.script.resolve() in PROXY_AWARE_TARGET_TOOLS \
+                and duplicate_route_selector:
+            return (
+                "目标出口路由硬门：route-aware 目标工具的 argv/env 未匹配唯一 typed "
+                "capability，无法把当前命令绑定到 exact direct/proxy selector；拒绝执行。"
+            )
+        return ""
+    if capability[0].effect != "target":
+        return ""
+    _spec, _script, args, supplied_env = capability
+    route = _contract_egress_route(contract)
+    raw_required = str(supplied_env.get("XUNJI_PROXY_REQUIRED", "")).strip().lower()
+    direct_selected = raw_required in {"0", "false", "no", "off"}
+    proxy_selected = raw_required in {"1", "true", "yes", "on"}
+    proxy_config_supplied = bool(str(supplied_env.get("XUNJI_PROXY", "")).strip())
+    explicit_proxy_arg = "--proxy" in args
+    if route == "offline":
+        return "当前操作者禁止 target egress；离线路由不能执行目标 capability。"
+    if route == "direct":
+        if proxy_selected or proxy_config_supplied or explicit_proxy_arg:
+            return (
+                "目标出口路由硬门：当前回合默认/明确选择直连，不得由模型、旧环境或 argv "
+                "切换到代理。请使用 exact `XUNJI_PROXY_REQUIRED=0` 前缀。"
+            )
+        if not direct_selected:
+            return (
+                "目标出口路由硬门：当前回合选择直连；为覆盖残留 shell 环境，注册目标命令必须"
+                "使用 exact `XUNJI_PROXY_REQUIRED=0` 前缀。"
+            )
+        return ""
+    if direct_selected:
+        return (
+            "目标出口路由硬门：当前操作者明确要求代理，不能用 "
+            "`XUNJI_PROXY_REQUIRED=0` 降级为直连。"
+        )
+    if not (proxy_selected or explicit_proxy_arg):
+        return (
+            "目标出口路由硬门：代理不是默认路线；当前操作者已明确选择代理，注册目标命令"
+            "必须使用 exact `XUNJI_PROXY_REQUIRED=1` 或其受控 `--proxy` 参数。"
+        )
+    return ""
+
+
+def _proxy_pause_reason(contract: dict) -> str:
+    """Require a newer operator proxy turn after a proxy-attributed failure."""
+    if _contract_egress_route(contract) != "proxy":
+        return ""
+    try:
+        pause = guardmod.HostHealth().proxy_confirmation_state()
+    except Exception as exc:
+        return (
+            "[XUNJI_E_PROXY_STATE_INVALID] 无法验证代理暂停状态，拒绝代理目标流量："
+            + exc.__class__.__name__
+        )
+    if not pause.get("required"):
+        return ""
+    try:
+        contract_updated = float(contract.get("updated_at") or 0.0)
+        latest_failure = float(pause.get("latest_updated_at") or 0.0)
+    except (TypeError, ValueError):
+        contract_updated = 0.0
+        latest_failure = 0.0
+    if contract_updated <= latest_failure:
+        classes = ",".join(str(item) for item in pause.get("error_classes", []))
+        return (
+            "[XUNJI_E_PROXY_CONFIRMATION_REQUIRED] 代理链路已失败并停止；当前回合不能自动重试"
+            f"（{classes or 'proxy transport'}）。请结束本回合，等待操作者确认改为直连，或在"
+            "更新的顶层 prompt 中再次明确要求走代理。"
+        )
+    return ""
+
+
+def _selected_proxy_route(
+    capability: tuple[
+        capability_registry.CapabilitySpec, Path, list[str], dict[str, str]
+    ] | None,
+) -> str:
+    """Derive the selected credential-free proxy route from exact capability argv."""
+    if capability is None or capability[0].effect != "target":
+        return ""
+    _spec, _script, args, supplied_env = capability
+    override = ""
+    for index, token in enumerate(args):
+        if token == "--proxy" and index + 1 < len(args):
+            override = str(args[index + 1]).strip()
+            break
+        if token.startswith("--proxy="):
+            override = token.split("=", 1)[1].strip()
+            break
+    proxy_url = (
+        override
+        or str(supplied_env.get("XUNJI_PROXY") or "").strip()
+        or str(proxymod.engagement_proxy() or "").strip()
+    )
+    return guardmod.egress_route_id(proxy_url) if proxy_url else ""
+
+
+def _acknowledge_proxy_retry(contract: dict, capability=None) -> str:
+    """Consume the newer operator proxy choice immediately before target I/O."""
+    if _contract_egress_route(contract) != "proxy":
+        return ""
+    selected_route = _selected_proxy_route(capability)
+    if not selected_route:
+        return (
+            "[XUNJI_E_PROXY_CONFIG_MISSING] 当前回合明确选择代理，但无法从受控 argv/环境/"
+            "专用配置绑定唯一代理路线；停止目标流量并等待操作者确认。"
+        )
+    try:
+        guardmod.HostHealth().acknowledge_proxy_retry(
+            confirmed_at=float(contract.get("updated_at") or 0.0),
+            egress_route=selected_route)
+    except Exception as exc:
+        return (
+            "[XUNJI_E_PROXY_CONFIRMATION_RACE] 代理确认未能原子消费，目标流量保持停止："
+            + exc.__class__.__name__
+        )
+    return ""
 
 
 def _denial_is_target_action(event: dict, reason: str) -> bool:
@@ -5602,6 +6648,56 @@ def _scope_admission_pretool_reason(
     )
 
 
+def _completion_terminal_reason(run_dir: Path, event: dict) -> str:
+    """Freeze terminal runs to read/status/commit-or-reopen owner actions."""
+    gate = completion_transaction.terminal_gate_state(run_dir)
+    status = str(gate.get("status") or "invalid")
+    # Only a durable v2 transaction can mint terminal execution authority.
+    # ``legacy_unbound`` is an observation about an old prose marker, while
+    # ``invalid`` can also mean this ordinary pre-completion fixture has no
+    # completion inputs yet.  Neither may silently freeze a live run.
+    if status not in {"prepared", "committed"}:
+        return ""
+    tool = str(event.get("tool_name") or "")
+    if tool in {"Read", "Grep", "Glob"}:
+        return ""
+    tool_input = event.get("tool_input") \
+        if isinstance(event.get("tool_input"), dict) else {}
+    capability = _registered_capability_invocation(
+        str(tool_input.get("command") or ""),
+        tool_env=tool_input.get("env")
+        if isinstance(tool_input.get("env"), dict) else {},
+    ) if tool == "Bash" else None
+    capability_id = capability[0].id if capability else ""
+    capability_effect = capability[0].effect if capability else ""
+    common_ids = {
+        "read.completion-transaction-status",
+        "control.completion-transaction-reopen",
+    }
+    allowed_ids = set(common_ids)
+    if status == "prepared":
+        allowed_ids.add("control.completion-transaction-commit")
+    elif status == "committed":
+        # The offline shape is a distinct registered capability.  Replay and
+        # auto-review flags resolve to target/model-egress capability IDs, so
+        # they cannot inherit this narrow post-commit exception.
+        allowed_ids.add("verify.check-run")
+    if capability_id in allowed_ids:
+        return ""
+    # Read-only registered commands remain inspection, but local_verify is not
+    # terminal read authority: after commit it could mutate derived/canonical
+    # state and after prepare it could move the frozen runtime tail.
+    if capability is not None and capability_effect == "local_read":
+        return ""
+    allowed = "read/status/commit/reopen" if status == "prepared" \
+        else "read/status/reopen"
+    return (
+        f"[{E_COMPLETION_TERMINAL}] completion state={status} 已进入 terminal "
+        f"control surface；仅允许 {allowed}。禁止 target、Agent、Cron、"
+        "local_verify 及其它 control/canonical mutation；如需恢复执行，先走 exact reopen owner。"
+    )
+
+
 def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
     tool = str(event.get("tool_name") or "")
     text = _tool_text(event)
@@ -5611,16 +6707,11 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
     tool_env = tool_input.get("env") if isinstance(tool_input.get("env"), dict) else {}
     registered_capability = _registered_capability_invocation(
         command, tool_env=tool_env) if tool == "Bash" else None
-    normalized_capability_env = (
-        registered_capability[3] if registered_capability is not None else {}
-    )
-    direct_env_opt_out = str(
-        normalized_capability_env.get(
-            "XUNJI_PROXY_REQUIRED",
-            tool_env.get("XUNJI_PROXY_REQUIRED", ""),
-        )
-    ).strip().lower() in {"0", "false", "no", "off"}
-
+    if tool == "Bash" and registered_capability is None:
+        invalid_target_route = _target_route_reason(
+            event, contract, registered_capability)
+        if invalid_target_route:
+            return invalid_target_route
     # Exact registered capabilities already passed script identity and typed argv
     # validation.  Do not rescan their quoted data (for example a disposition
     # note naming ``assignments.json``) as if it were an opaque shell write.
@@ -5717,13 +6808,6 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             return "长期记忆写入需要操作者在当前 prompt 明确批准；retrospective 不能自行升级为 memory。"
     if tool == "Bash" and BACKGROUND_REVIEW_RE.search(command):
         return "peer_review 不得后台运行并与可变 evidence 并发；请前台冻结快照后完成复审。"
-    if tool == "Bash" and (DIRECT_EGRESS_ENV_RE.search(text) or direct_env_opt_out) \
-            and not contract.get("direct_egress_approved"):
-        return (
-            "交战代理硬门：XUNJI_PROXY_REQUIRED=0 只能由当前操作者 prompt 明确批准直连；"
-            "模型或历史环境变量不能自行关闭 fail-closed。"
-        )
-
     if mode == EXPLAIN:
         if tool not in {"Read", "Grep", "Glob", "WebSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"}:
             return "当前回合是 EXPLAIN_ONLY：只能读取/分析，禁止修改、探测、Agent、Cron 或执行命令。"
@@ -5784,6 +6868,11 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
                 f"[{E_NEW_RUN_SETUP_REQUIRED}] Cron 单实例门：当前 prompt 要求创建新 run；"
                 "先完成 setup 并切换 contract，再对新 run 执行 CronList/CronCreate。"
             )
+        if contract.get("loop_requested") is not True:
+            return (
+                f"[{E_CRON_LOOP_AUTHORITY_REQUIRED}] 只有当前 typed /loop contract "
+                "可以创建 recurring Cron；普通继续/执行回合不得自行升级。"
+            )
         cron_ok, cron_note = runtime_receipts.cron_quiescent(
             run_dir,
             session_id=str(contract.get("session_id") or ""),
@@ -5794,10 +6883,21 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
                 f"[{E_CRON_LIST_REQUIRED}] Cron 单实例门：创建 /loop 前必须先 CronList "
                 "证明本 run 无现存任务。" + cron_note
             )
-        if run_dir.name.lower() not in text.lower():
+        if tool_input.get("recurring") is not True:
             return (
-                f"[{E_CRON_RUN_MISMATCH}] Cron 单实例门：CronCreate prompt 必须显式"
-                "包含当前 run 目录名。"
+                f"[{E_CRON_RECURRING_REQUIRED}] /loop CronCreate 必须显式 "
+                "recurring=true。"
+            )
+        if tool_input.get("durable") is True:
+            return (
+                f"[{E_CRON_SESSION_SCOPE_REQUIRED}] /loop 必须使用 Claude Code "
+                "session-scoped Cron（durable=false 或客户端默认 false）；禁止持久任务。"
+            )
+        expected_prompt = f"/loop runs/{run_dir.name}"
+        if str(tool_input.get("prompt") or "").strip() != expected_prompt:
+            return (
+                f"[{E_CRON_PROMPT_MISMATCH}] CronCreate prompt 必须 byte-exact 为 "
+                f"{expected_prompt!r}；自然语言‘继续’保留给操作者手动提前一轮。"
             )
         return ""
 
@@ -5834,11 +6934,20 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
             "禁止目标动作，先修复 frontier.md 的 Status/Barrier class/Current depth。"
         )
     if _is_target_action(event):
-        proxy_reason = _proxy_egress_reason(run_dir, event)
+        route_reason = _target_route_reason(
+            event, contract, registered_capability)
+        if route_reason:
+            return route_reason
+        proxy_reason = _proxy_egress_reason(
+            run_dir, event, registered_capability)
         if proxy_reason:
             return proxy_reason
+        pause_reason = _proxy_pause_reason(contract)
+        if pause_reason:
+            return pause_reason
         unassigned_assets, coverage_error = _unassigned_assets(run_dir)
-        touched_hosts, host_error = _event_known_hosts(run_dir, event)
+        touched_hosts, host_error = _event_known_hosts(
+            run_dir, event, registered_capability)
         if coverage_error or host_error:
             return "资产覆盖硬门：账本派生失败，拒绝 fail-open：" + (coverage_error or host_error)
         if touched_hosts and unassigned_assets:
@@ -5899,6 +7008,10 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
                 "Agent Board effect 边界：子 Agent capability effect="
                 f"{effective} 超出 assignment lane effect={lane_effect}。"
             )
+        barrier_reason = _child_infra_barrier_reason(
+            run_dir, event, actor)
+        if barrier_reason:
+            return barrier_reason
         assigned_assets = set(_normalized_assets(rec.get("assets")))
         if _is_target_action(event) and not assigned_assets:
             return (
@@ -5906,7 +7019,8 @@ def evaluate_pretool(run_dir: Path, event: dict, contract: dict) -> str:
                 "Root 必须创建带显式 asset package 的新 assignment。"
             )
         if _is_target_action(event):
-            touched, coverage_error = _event_known_hosts(run_dir, event)
+            touched, coverage_error = _event_known_hosts(
+                run_dir, event, registered_capability)
             if coverage_error:
                 return "Agent Board 资产边界：无法派生资产账本，拒绝 fail-open：" + coverage_error
             outside = sorted(touched - assigned_assets)
@@ -6145,7 +7259,8 @@ def _context_message(contract: dict, run_dir: Path) -> str:
         if contract.get("run_transition_requested"):
             return effect_note + intent_note + (
                 "[Xunji lifecycle: RUN_BOUND] 新 run 已绑定；按 fresh CronList -> CronCreate"
-                "（prompt 精确命名当前 run）-> TaskCreate/TaskUpdate -> graph/fronts -> real "
+                f"（recurring=true、durable=false、prompt 精确为 /loop runs/{run_dir.name}）"
+                " -> TaskCreate/TaskUpdate -> graph/fronts -> real "
                 "Agent launches -> adjudication/synthesis 推进。Agent/目标动作会在缺少当前"
                 "回合回执时 fail closed。"
             )
@@ -6197,20 +7312,99 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
         lock = ACTIVE_RUN_POINTER.parent / setup_transaction.ACTIVATION_LOCK_NAME
         with setup_transaction.exclusive_directory_lock(lock):
             incoming_session, _binding_kind = _event_session_binding(event)
-            _revoke_pending_session_unlocked(incoming_session)
             run_dir = supplied_run_dir or explicit_active_run()
             if run_dir is None:
+                _revoke_pending_session_unlocked(incoming_session)
                 contract = _write_pending_contract_unlocked(event)
             else:
-                previous_session = str(
-                    _previous_contract(run_dir).get("session_id") or "")
-                if previous_session and previous_session != incoming_session:
-                    # The active run has one canonical turn contract.  Replacing
-                    # it invalidates claims derived from that exact old contract,
-                    # even when another Claude session supplied the new prompt.
-                    # Unrelated no-active pending sessions remain isolated.
-                    _revoke_transition_claims_unlocked(previous_session)
-                contract = write_contract(run_dir, event)
+                previous = _previous_contract(run_dir)
+                contract, coalesced_plan, coalescing_kind = (
+                    _coalesce_continuation(run_dir, event, previous)
+                )
+                busy_state = BUSY_WAKE_NOT_BUSY
+                busy_plan: dict = {}
+                busy_kind = ""
+                manual_state = "not_applicable"
+                manual_plan: dict = {}
+                _manual_kind = ""
+                manual_owner: dict = {}
+                manual_prepared_contract: dict = {}
+                tick_state = "not_applicable"
+                tick_kind = ""
+                tick_owner: dict = {}
+                if not contract:
+                    busy_state, busy_plan, busy_kind = (
+                        _coalesce_cross_session_busy_wake(
+                            run_dir, event, previous)
+                    )
+                    if busy_state in {
+                            BUSY_WAKE_AUDITED, BUSY_WAKE_AUDIT_FAILED}:
+                        # Preserve the owner contract byte-for-byte.  This local
+                        # variable is used only to render RUN_BUSY context; it is not
+                        # authority for the incoming session.
+                        contract = previous
+                    else:
+                        tick_state, tick_kind, tick_owner = (
+                            _coalesce_scheduled_loop_tick(
+                                run_dir, event, previous)
+                        )
+                        if tick_state == "audited":
+                            # A manual advance already ran this scheduler slot.
+                            # Preserve the ended/current contract byte-for-byte;
+                            # no new turn authority is minted for the tick.
+                            contract = previous
+                            coalescing_kind = ""
+                            continue_replacement = False
+                        else:
+                            continue_replacement = True
+                            if tick_state == "not_applicable":
+                                (
+                                    manual_state,
+                                    manual_plan,
+                                    _manual_kind,
+                                    manual_owner,
+                                    manual_prepared_contract,
+                                ) = _audit_manual_loop_advance(
+                                    run_dir, event, previous)
+                        if continue_replacement:
+                            inherited_owner = tick_owner or manual_owner
+                            if not inherited_owner:
+                                fresh_kind = _continuation_kind(
+                                    run_dir, event, previous)
+                                if fresh_kind.startswith("scheduled_loop_wake"):
+                                    inherited_owner, _owner_note = (
+                                        _active_session_loop_owner(
+                                            run_dir, previous)
+                                    )
+                                    if inherited_owner and not (
+                                            _scheduled_loop_wake_owned(
+                                                run_dir, previous, event,
+                                                fresh_kind)
+                                    ):
+                                        inherited_owner = {}
+                            _revoke_pending_session_unlocked(incoming_session)
+                            previous_session = str(previous.get("session_id") or "")
+                            if previous_session and previous_session != incoming_session:
+                                # Replacing the canonical contract invalidates claims
+                                # derived from the exact old turn, even cross-session.
+                                _revoke_transition_claims_unlocked(
+                                    previous_session)
+                            if manual_state == "audited":
+                                contract = _persist_built_contract(
+                                    run_dir, manual_prepared_contract)
+                            else:
+                                contract = write_contract(
+                                    run_dir,
+                                    event,
+                                    session_loop_owner=inherited_owner or None,
+                                    force_mode=(
+                                        EXPLAIN if tick_state in {
+                                            "audit_failed", "state_invalid",
+                                        } or manual_state == "audit_failed"
+                                        else ""
+                                    ),
+                                )
+                            coalescing_kind = ""
         if run_dir is None:
             if not contract:
                 return None
@@ -6234,7 +7428,33 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
         return {
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
-                "additionalContext": _context_message(contract, run_dir),
+                "additionalContext": (
+                    _busy_wake_context(
+                        run_dir, busy_plan, busy_kind,
+                        audited=busy_state == BUSY_WAKE_AUDITED)
+                    if busy_state in {
+                        BUSY_WAKE_AUDITED, BUSY_WAKE_AUDIT_FAILED,
+                    } else (
+                        _scheduled_loop_tick_context(
+                            run_dir, tick_kind,
+                            state=tick_state)
+                        if tick_state in {
+                            "audited", "audit_failed", "state_invalid",
+                        }
+                        else (
+                            _manual_loop_advance_context(
+                                contract, run_dir, manual_plan,
+                                audited=manual_state == "audited")
+                            if manual_state in {"audited", "audit_failed"}
+                            else (
+                                _coalesced_context(
+                                    contract, run_dir, coalesced_plan,
+                                    coalescing_kind)
+                                if coalesced_plan
+                                else _context_message(contract, run_dir)
+                            )
+                        )
+                )),
             }
         }
     else:
@@ -6375,9 +7595,24 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
         if lifecycle_invocation:
             contract = _promote_model_candidate_for_event(
                 event, lifecycle_invocation, contract, run_dir=run_dir)
-        budget_reason = _claim_plan_bound_child_tool_call(run_dir, event)
-        reason = private_api_reason or budget_reason \
+        terminal_reason = _completion_terminal_reason(run_dir, event)
+        budget_reason = "" if terminal_reason else (
+            _claim_plan_bound_child_tool_call(run_dir, event))
+        reason = private_api_reason or terminal_reason or budget_reason \
             or evaluate_pretool(run_dir, event, contract)
+        if not reason and _is_target_action(event):
+            # All authority/scope/shape/budget checks passed. Consume a newer
+            # operator proxy confirmation at the last local boundary before the
+            # target process starts. Direct turns never touch proxy pause state.
+            target_capability = None
+            if str(event.get("tool_name") or "") == "Bash":
+                target_tool_input = event.get("tool_input") \
+                    if isinstance(event.get("tool_input"), dict) else {}
+                target_tool_env = target_tool_input.get("env") \
+                    if isinstance(target_tool_input.get("env"), dict) else {}
+                target_capability = _registered_capability_invocation(
+                    command, tool_env=target_tool_env)
+            reason = _acknowledge_proxy_retry(contract, target_capability)
         if reason:
             decision_metadata = _decision_metadata(reason, event)
             shape_denial = decision_metadata.get("xunji_decision_code") \
@@ -6395,8 +7630,12 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
                 if maintenance_action else [],
             })
             receipt_event.update(decision_metadata)
-            runtime_receipts.append_hook_event(run_dir, receipt_event)
-            return _deny(reason)
+            receipt = runtime_receipts.append_hook_event(run_dir, receipt_event)
+            barrier_diagnostic = _observe_denial_barrier_after_receipt(
+                run_dir, receipt)
+            return _deny(
+                reason + ("\n" + barrier_diagnostic
+                          if barrier_diagnostic else ""))
         control_invocation = _control_invocation(command) \
             if str(event.get("tool_name") or "") == "Bash" else None
         if _scope_admission_invocation(control_invocation):
@@ -6496,7 +7735,9 @@ def handle_event(event: dict, run_dir: Path | None = None) -> dict | None:
                 capability[0].recorder if capability else "")
             receipt_event["xunji_maintenance_paths"] = (
                 _maintenance_receipt_paths(event, contract) if maintenance_action else [])
-            runtime_receipts.append_hook_event(run_dir, receipt_event)
+            receipt = runtime_receipts.append_hook_event(run_dir, receipt_event)
+            if hook == "PostToolUse" and receipt.get("success") is True:
+                _clear_barrier_after_success(run_dir, receipt)
         return None
     return None
 
@@ -6514,6 +7755,9 @@ def _selftest() -> int:
             "activate", target_name, profile=profile)
 
     root = Path(tempfile.mkdtemp())
+    guardmod.STATE_DIR = root / "guard-state"
+    guardmod.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    guardmod._LOCK_PATH = guardmod.STATE_DIR / ".lock"
     (root / "recon.json").write_text(json.dumps({
         "assets": [{"host": "bootstrap.example"}],
     }), encoding="utf-8")
@@ -6626,6 +7870,577 @@ def _selftest() -> int:
         "prompt": "不用代理直连，但 do not allow direct egress",
     })
     explicit_direct = _contract_from_event({"prompt": "明确允许本回合直连"})
+    default_direct = _contract_from_event({"prompt": "继续执行当前运行"})
+    explicit_proxy = _contract_from_event({"prompt": "继续执行当前运行，明确使用代理"})
+
+    continuation_run = root / "continuation-coalescing_20260101"
+    (continuation_run / "state").mkdir(parents=True)
+    (continuation_run / "target.md").write_text(
+        "# Target\n- Authorized scope: app.example\n", encoding="utf-8")
+    (continuation_run / "coverage.json").write_text(json.dumps({
+        "assets": [{"host": "app.example", "examined": False}],
+    }), encoding="utf-8")
+    (continuation_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n### F-001 — auth\n"
+        "- Status: open\n- Barrier class: authorization\n"
+        "- Current depth: shallow\n",
+        encoding="utf-8",
+    )
+    continuation_transcript = str(root / "continuation-coalescing.jsonl")
+    continuation_prompt = (
+        f"继续执行 runs/{continuation_run.name} 深入挖掘，需要getshell"
+    )
+    continuation_event = {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "continuation-coalescing-session",
+        "transcript_path": continuation_transcript,
+        "prompt": continuation_prompt,
+    }
+    continuation_contract = write_contract(
+        continuation_run, continuation_event)
+    continuation_invocation = _control_invocation(
+        f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+        f"--resume runs/{continuation_run.name}"
+    )
+    continuation_contract = _promote_model_lifecycle_candidate(
+        continuation_run, continuation_invocation, continuation_contract)
+    _atomic_json(
+        contract_path(continuation_run), continuation_contract, durable=True)
+    _write_run_status(continuation_run, continuation_contract)
+    continuation_lanes = [
+        {
+            "id": "L-F001-EXEC", "role": "verify", "front": "F-001",
+            "effect": "local_verify", "assets": [], "dependencies": [],
+            "expected_evidence": "bounded result",
+            "expected_information_gain": "medium",
+            "stop_condition": "result returned", "request_cost": 0,
+            "request_budget": 0, "merge_cost": 2, "atomic": False,
+        },
+        {
+            "id": "L-F001-REVIEW", "role": "review", "front": "F-001",
+            "effect": "local_verify", "assets": [],
+            "dependencies": ["L-F001-EXEC"],
+            "expected_evidence": "digest-bound review",
+            "expected_information_gain": "medium",
+            "stop_condition": "result reviewed", "request_cost": 0,
+            "request_budget": 0, "merge_cost": 2, "atomic": False,
+        },
+    ]
+    continuation_plan = work_plan.commit_plan(
+        continuation_run,
+        macro_stage="S1",
+        objective="exercise no-delta continuation coalescing",
+        mode="SERIAL_AGENT",
+        reason="one current unended selftest lane",
+        exit_gate="the exact result is reviewed and settled",
+        lanes=continuation_lanes,
+        contract=continuation_contract,
+    )
+    continuation_pointer = root / "continuation-active-run"
+    continuation_pointer.write_text(
+        str(continuation_run), encoding="utf-8")
+    continuation_pending = root / "continuation-pending"
+    continuation_claims = root / "continuation-claims"
+    continuation_raw = contract_path(continuation_run).read_bytes()
+    with mock.patch.object(
+            sys.modules[__name__], "ACTIVE_RUN_POINTER", continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        repeated_continuation = handle_event(
+            continuation_event, run_dir=continuation_run)
+        named_alias_continuation = handle_event({
+            **continuation_event,
+            "prompt": f"继续执行 runs/{continuation_run.name}",
+        }, run_dir=continuation_run)
+        cross_session_busy_wake = handle_event({
+            **continuation_event,
+            "session_id": "continuation-second-session",
+            "transcript_path": str(root / "continuation-second-session.jsonl"),
+            "prompt": f"继续执行 runs/{continuation_run.name}",
+        }, run_dir=continuation_run)
+        cross_session_exact_replay = handle_event({
+            **continuation_event,
+            "session_id": "continuation-exact-replay-session",
+            "transcript_path": str(root / "continuation-exact-replay.jsonl"),
+        }, run_dir=continuation_run)
+    continuation_receipts = runtime_receipts.load_events(continuation_run)
+    continuation_binding_preserved = bool(
+        contract_path(continuation_run).read_bytes() == continuation_raw
+        and "continuation: COALESCED" in json.dumps(
+            repeated_continuation, ensure_ascii=False)
+        and "continuation: COALESCED" in json.dumps(
+            named_alias_continuation, ensure_ascii=False)
+        and [item.get("decision_code") for item in continuation_receipts]
+        == [E_CONTINUATION_COALESCED, E_CONTINUATION_COALESCED,
+            E_RUN_BUSY, E_RUN_BUSY]
+        and runtime_receipts.validate_chain(continuation_run)[1] == []
+        and work_plan.current_plan(
+            continuation_run, continuation_contract).get("plan_digest")
+        == continuation_plan.get("plan_digest")
+    )
+    cross_session_busy_is_non_authorizing = bool(
+        contract_path(continuation_run).read_bytes() == continuation_raw
+        and "scheduler: RUN_BUSY" in json.dumps(
+            cross_session_busy_wake, ensure_ascii=False)
+        and "未继承原执行权限" in json.dumps(
+            cross_session_busy_wake, ensure_ascii=False)
+        and _previous_contract(continuation_run).get("session_id")
+        == continuation_contract.get("session_id")
+        and "scheduler: RUN_BUSY" in json.dumps(
+            cross_session_exact_replay, ensure_ascii=False)
+    )
+    with mock.patch.object(
+            sys.modules[__name__], "ACTIVE_RUN_POINTER", continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        cross_session_tool_attempt = handle_event({
+            "hook_event_name": "PreToolUse",
+            "session_id": "continuation-second-session",
+            "transcript_path": str(root / "continuation-second-session.jsonl"),
+            "tool_name": "TaskUpdate",
+            "tool_use_id": "continuation-second-session-tool",
+            "tool_input": {"taskId": "fixture", "status": "in_progress"},
+        }, run_dir=continuation_run)
+    cross_session_busy_tool_denied = bool(
+        isinstance(cross_session_tool_attempt, dict)
+        and cross_session_tool_attempt.get("hookSpecificOutput", {}).get(
+            "permissionDecision") == "deny"
+        and "turn contract" in json.dumps(
+            cross_session_tool_attempt, ensure_ascii=False)
+        and contract_path(continuation_run).read_bytes() == continuation_raw
+    )
+    with mock.patch.object(
+            sys.modules[__name__], "ACTIVE_RUN_POINTER", continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims), \
+            mock.patch.object(
+                runtime_receipts, "append_hook_event",
+                side_effect=RuntimeError("injected busy audit failure")):
+        cross_session_busy_audit_failure = handle_event({
+            **continuation_event,
+            "session_id": "continuation-audit-failure-session",
+            "transcript_path": str(root / "continuation-audit-failure.jsonl"),
+            "prompt": f"继续执行 runs/{continuation_run.name}",
+        }, run_dir=continuation_run)
+    cross_session_busy_audit_failure_preserves_owner = bool(
+        contract_path(continuation_run).read_bytes() == continuation_raw
+        and "scheduler: RUN_BUSY" in json.dumps(
+            cross_session_busy_audit_failure, ensure_ascii=False)
+        and "append 失败" in json.dumps(
+            cross_session_busy_audit_failure, ensure_ascii=False)
+        and _previous_contract(continuation_run).get("session_id")
+        == continuation_contract.get("session_id")
+    )
+    scheduled_wake_event = {
+        **continuation_event,
+        "session_id": "continuation-cron-wake-session",
+        "transcript_path": str(root / "continuation-cron-wake.jsonl"),
+        "prompt": f"/loop runs/{continuation_run.name}",
+    }
+    scheduled_contract = dict(continuation_contract)
+    scheduled_contract["loop_requested"] = True
+    scheduled_without_cron_state, _, _ = _coalesce_cross_session_busy_wake(
+        continuation_run, scheduled_wake_event, scheduled_contract)
+    runtime_receipts.append_hook_event(continuation_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": str(scheduled_contract.get("session_id") or ""),
+        "transcript_path": continuation_transcript,
+        "tool_name": "CronCreate",
+        "tool_use_id": "continuation-cron-create",
+        "tool_input": {
+            "prompt": f"/loop runs/{continuation_run.name}",
+            "recurring": True,
+        },
+        "tool_response": {
+            "id": "cron-continuation-fixture",
+            "recurring": True,
+            "durable": False,
+        },
+    })
+    _atomic_json(
+        contract_path(continuation_run), scheduled_contract, durable=True)
+    _write_run_status(continuation_run, scheduled_contract)
+    scheduled_raw = contract_path(continuation_run).read_bytes()
+    with mock.patch.object(
+            sys.modules[__name__], "ACTIVE_RUN_POINTER", continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        scheduled_busy_wake = handle_event(
+            scheduled_wake_event, run_dir=continuation_run)
+        scheduled_owner_preserved = (
+            contract_path(continuation_run).read_bytes() == scheduled_raw)
+        scheduled_semantic_delta = handle_event({
+            **scheduled_wake_event,
+            "session_id": "continuation-cron-delta-session",
+            "transcript_path": str(root / "continuation-cron-delta.jsonl"),
+            "prompt": f"/loop runs/{continuation_run.name}；不要联网",
+        }, run_dir=continuation_run)
+    scheduled_wake_is_narrow = bool(
+        scheduled_without_cron_state == BUSY_WAKE_NOT_BUSY
+        and "scheduler: RUN_BUSY" in json.dumps(
+            scheduled_busy_wake, ensure_ascii=False)
+        and "scheduled_loop_wake" in json.dumps(
+            scheduled_busy_wake, ensure_ascii=False)
+        and scheduled_owner_preserved
+        and contract_path(continuation_run).read_bytes() != scheduled_raw
+        and _previous_contract(continuation_run).get("session_id")
+        == "continuation-cron-delta-session"
+        and "scheduler: RUN_BUSY" not in json.dumps(
+            scheduled_semantic_delta, ensure_ascii=False)
+    )
+    # Restore the loop owner and exercise both manual-advance timing cases.
+    _atomic_json(
+        contract_path(continuation_run), scheduled_contract, durable=True)
+    _write_run_status(continuation_run, scheduled_contract)
+    manual_advance_event = {
+        **continuation_event,
+        "prompt": "继续",
+    }
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=continuation_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        manual_advance = handle_event(
+            manual_advance_event, run_dir=continuation_run)
+    manual_contract = _previous_contract(continuation_run)
+    manual_advance_starts_one_loop_cycle = bool(
+        manual_contract.get("loop_requested") is True
+        and manual_contract.get("loop_source_kind") == "run"
+        and manual_contract.get("prompt_sha256") == hashlib.sha256(
+            b"\xe7\xbb\xa7\xe7\xbb\xad").hexdigest()
+        and "loop: MANUAL_ADVANCE" in json.dumps(
+            manual_advance, ensure_ascii=False)
+    )
+    same_session_scheduled_wake = {
+        **scheduled_wake_event,
+        "session_id": str(manual_contract.get("session_id") or ""),
+        "transcript_path": str(manual_contract.get("transcript_path") or ""),
+    }
+    manual_cycle_plan = {
+        "plan_id": "WP-manual-cycle",
+        "plan_digest": "d" * 64,
+    }
+    manual_contract_raw = contract_path(continuation_run).read_bytes()
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=manual_cycle_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=False), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        scheduled_during_manual_cycle = handle_event(
+            same_session_scheduled_wake, run_dir=continuation_run)
+    scheduled_tick_skips_while_manual_cycle_active = bool(
+        contract_path(continuation_run).read_bytes() == manual_contract_raw
+        and "continuation: COALESCED" in json.dumps(
+            scheduled_during_manual_cycle, ensure_ascii=False)
+        and _pending_manual_loop_advance(
+            continuation_run,
+            _active_session_loop_owner(
+                continuation_run, manual_contract)[0],
+            manual_contract,
+        ) != "pending"
+    )
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=manual_cycle_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        next_tick_after_long_cycle = handle_event(
+            same_session_scheduled_wake, run_dir=continuation_run)
+    post_long_tick_contract = _previous_contract(continuation_run)
+    next_wall_clock_tick_runs_after_long_cycle = bool(
+        contract_path(continuation_run).read_bytes() != manual_contract_raw
+        and post_long_tick_contract.get("loop_requested") is True
+        and post_long_tick_contract.get("prompt_excerpt")
+        == f"/loop runs/{continuation_run.name}"
+        and "TICK_COALESCED" not in json.dumps(
+            next_tick_after_long_cycle, ensure_ascii=False)
+    )
+
+    # A fast manual cycle still consumes the immediately following wall-clock
+    # slot: 10:09 manual -> 10:10 skip -> 10:20 eligible.
+    fast_manual_event = {
+        **manual_advance_event,
+        "session_id": str(post_long_tick_contract.get("session_id") or ""),
+        "transcript_path": str(
+            post_long_tick_contract.get("transcript_path") or ""),
+    }
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=manual_cycle_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        fast_manual_advance = handle_event(
+            fast_manual_event, run_dir=continuation_run)
+    fast_manual_contract = _previous_contract(continuation_run)
+    fast_manual_raw = contract_path(continuation_run).read_bytes()
+    fast_scheduled_wake = {
+        **scheduled_wake_event,
+        "session_id": str(fast_manual_contract.get("session_id") or ""),
+        "transcript_path": str(fast_manual_contract.get("transcript_path") or ""),
+    }
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=manual_cycle_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        immediate_tick_after_fast_manual = handle_event(
+            fast_scheduled_wake, run_dir=continuation_run)
+        following_tick_after_fast_manual = handle_event(
+            fast_scheduled_wake, run_dir=continuation_run)
+    fast_manual_consumes_only_next_tick = bool(
+        "loop: MANUAL_ADVANCE" in json.dumps(
+            fast_manual_advance, ensure_ascii=False)
+        and "scheduler: TICK_COALESCED" in json.dumps(
+            immediate_tick_after_fast_manual, ensure_ascii=False)
+        and fast_manual_raw != contract_path(continuation_run).read_bytes()
+        and _previous_contract(continuation_run).get("loop_requested") is True
+        and "scheduler: TICK_COALESCED" not in json.dumps(
+            following_tick_after_fast_manual, ensure_ascii=False)
+    )
+    _atomic_json(
+        contract_path(continuation_run), scheduled_contract, durable=True)
+    _write_run_status(continuation_run, scheduled_contract)
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=continuation_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                runtime_receipts, "append_hook_event",
+                side_effect=RuntimeError("injected manual advance audit failure")), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        manual_advance_audit_failure = handle_event(
+            manual_advance_event, run_dir=continuation_run)
+    manual_audit_failure_fails_closed = bool(
+        _previous_contract(continuation_run).get("mode") == EXPLAIN
+        and _previous_contract(continuation_run).get("loop_requested") is True
+        and "MANUAL_ADVANCE_BLOCKED" in json.dumps(
+            manual_advance_audit_failure, ensure_ascii=False)
+    )
+    _atomic_json(
+        contract_path(continuation_run), scheduled_contract, durable=True)
+    _write_run_status(continuation_run, scheduled_contract)
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=continuation_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        advance_before_tick_audit_failure = handle_event(
+            manual_advance_event, run_dir=continuation_run)
+    pre_tick_failure_contract = _previous_contract(continuation_run)
+    audit_failure_scheduled_wake = {
+        **scheduled_wake_event,
+        "session_id": str(pre_tick_failure_contract.get("session_id") or ""),
+        "transcript_path": str(
+            pre_tick_failure_contract.get("transcript_path") or ""),
+    }
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=manual_cycle_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                runtime_receipts, "append_hook_event",
+                side_effect=RuntimeError("injected tick audit failure")), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        scheduled_tick_audit_failure = handle_event(
+            audit_failure_scheduled_wake, run_dir=continuation_run)
+    scheduled_tick_audit_failure_fails_closed = bool(
+        "loop: MANUAL_ADVANCE" in json.dumps(
+            advance_before_tick_audit_failure, ensure_ascii=False)
+        and _previous_contract(continuation_run).get("mode") == EXPLAIN
+        and _previous_contract(continuation_run).get("loop_requested") is True
+        and "scheduler: TICK_AUDIT_FAILED" in json.dumps(
+            scheduled_tick_audit_failure, ensure_ascii=False)
+    )
+
+    # The manual receipt prepares one exact contract.  If that contract cannot
+    # commit, the orphan preparation must not consume a later real Cron tick.
+    _atomic_json(
+        contract_path(continuation_run), scheduled_contract, durable=True)
+    _write_run_status(continuation_run, scheduled_contract)
+    manual_contract_commit_failed = False
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=continuation_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                sys.modules[__name__], "_persist_built_contract",
+                side_effect=TransitionDurabilityError(
+                    "injected manual contract commit failure")), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        try:
+            handle_event(manual_advance_event, run_dir=continuation_run)
+        except TransitionDurabilityError:
+            manual_contract_commit_failed = True
+    orphan_owner = _active_session_loop_owner(
+        continuation_run, scheduled_contract)[0]
+    orphan_preparation_does_not_become_pending = bool(
+        manual_contract_commit_failed
+        and _pending_manual_loop_advance(
+            continuation_run, orphan_owner, scheduled_contract) == "orphaned"
+    )
+    orphan_before_tick_raw = contract_path(continuation_run).read_bytes()
+    with mock.patch.object(
+            work_plan, "current_plan", return_value=manual_cycle_plan), \
+            mock.patch.object(
+                work_plan, "plan_cycle_ended", return_value=True), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        tick_after_orphan_preparation = handle_event(
+            same_session_scheduled_wake, run_dir=continuation_run)
+    orphan_preparation_does_not_skip_tick = bool(
+        contract_path(continuation_run).read_bytes() != orphan_before_tick_raw
+        and _previous_contract(continuation_run).get("mode") == EXECUTE
+        and "TICK_COALESCED" not in json.dumps(
+            tick_after_orphan_preparation, ensure_ascii=False)
+    )
+
+    # A scheduler-shaped wake must freeze, not mint a replacement EXECUTE turn,
+    # when the receipt chain cannot prove its owner/pending state.
+    _atomic_json(
+        contract_path(continuation_run), scheduled_contract, durable=True)
+    _write_run_status(continuation_run, scheduled_contract)
+    with mock.patch.object(
+            runtime_receipts, "validate_chain",
+            return_value=([], ["injected invalid runtime chain"])), \
+            mock.patch.object(
+                sys.modules[__name__], "ACTIVE_RUN_POINTER",
+                continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims):
+        invalid_chain_tick = handle_event(
+            same_session_scheduled_wake, run_dir=continuation_run)
+    invalid_scheduler_state_fails_closed = bool(
+        _previous_contract(continuation_run).get("mode") == EXPLAIN
+        and _previous_contract(continuation_run).get("loop_requested") is True
+        and "scheduler: TICK_STATE_INVALID" in json.dumps(
+            invalid_chain_tick, ensure_ascii=False)
+    )
+    # Restore the original owner for the independent same-session audit-fault
+    # fixture below; the semantic-delta assertion above deliberately replaced
+    # it with a fresh contract.
+    _atomic_json(
+        contract_path(continuation_run), continuation_contract, durable=True)
+    _write_run_status(continuation_run, continuation_contract)
+    continuation_changed_prompt_rejected = not _continuation_plan_candidate(
+        continuation_run,
+        {**continuation_event, "prompt": continuation_prompt + "；不要联网"},
+        continuation_contract,
+    )[0]
+    continuation_other_session_rejected = not _continuation_plan_candidate(
+        continuation_run,
+        {**continuation_event, "session_id": "other-session"},
+        continuation_contract,
+    )[0]
+    with mock.patch.object(
+            work_plan, "plan_cycle_ended", return_value=True):
+        continuation_ended_plan_rejected = not _continuation_plan_candidate(
+            continuation_run, continuation_event, continuation_contract)[0]
+    with mock.patch.object(
+            sys.modules[__name__], "ACTIVE_RUN_POINTER", continuation_pointer), \
+            mock.patch.object(
+                sys.modules[__name__], "PENDING_DIR", continuation_pending), \
+            mock.patch.object(
+                sys.modules[__name__], "TRANSITION_CLAIMS_DIR",
+                continuation_claims), \
+            mock.patch.object(
+                runtime_receipts, "append_hook_event",
+                side_effect=RuntimeError("injected receipt failure")):
+        continuation_receipt_failure = handle_event(
+            continuation_event, run_dir=continuation_run)
+    continuation_after_receipt_failure = _previous_contract(continuation_run)
+    continuation_receipt_failure_fails_closed = bool(
+        "continuation: COALESCED" not in json.dumps(
+            continuation_receipt_failure, ensure_ascii=False)
+        and continuation_after_receipt_failure.get("prompt_sha256")
+        == continuation_contract.get("prompt_sha256")
+        and continuation_after_receipt_failure.get("updated_at")
+        != continuation_contract.get("updated_at")
+    )
     scope_prompt = (
         "/xunji-scope-admit --run runs/pilot_20260715 "
         "--assets one.example.test,two.example.test --reason operator-confirmed-scope"
@@ -6643,13 +8458,18 @@ def _selftest() -> int:
         "prompt_excerpt": "/loop 重新开一个新 run",
         "origin_run": run.name,
         "bound_run": run.name,
+        "direct_egress_approved": True,
+        "operator_intent": {"route": "direct"},
         "updated_at": time.time(),
         "coordination_signature": _coordination_signature(run),
         "fanout_epoch_started_at": time.time() - 1,
         "fanout_epoch_id": "0123456789abcdef",
     }
     target_event = {"tool_name": "Bash", "tool_input": {
-        "command": "python3 tools/probe.py GET https://example.test"}}
+        "command": (
+            "XUNJI_PROXY_REQUIRED=0 python3 tools/probe.py "
+            "GET https://example.test"
+        )}}
     scope_turn_target_blocked = "zero-probe local transition" in evaluate_pretool(
         run, target_event, scope_contract)
     malformed_scope_write_blocked = bool(evaluate_pretool(
@@ -8024,6 +9844,7 @@ def _selftest() -> int:
         and item.get("loop_source_kind") == "url"
         and item.get("source_identity_version") == "canonical-v1"
         and item.get("lifecycle_source_hint") == "https://cloud.scshr.com/"
+        and item.get("operator_intent", {}).get("route") == "proxy"
         and _source_authority_matches(
             "HTTPS://Cloud.SCSHR.COM:443", item,
         )
@@ -9076,8 +10897,17 @@ def _selftest() -> int:
     missing_frontier_blocks = "canonical frontier" in evaluate_pretool(
         run, target_event, contract)
     (run / "frontier.md").write_text(original_frontier, encoding="utf-8")
-    cron_create = {"tool_name": "CronCreate", "tool_input": {"prompt": f"/loop {run.name}"}}
-    cron_contract = {**contract, "prompt_excerpt": f"/loop {run.name}"}
+    cron_create = {"tool_name": "CronCreate", "tool_input": {
+        "prompt": f"/loop runs/{run.name}",
+        "recurring": True,
+        "durable": False,
+    }}
+    cron_contract = {
+        **contract,
+        "prompt_excerpt": f"/loop runs/{run.name}",
+        "loop_requested": True,
+        "loop_source_kind": "run",
+    }
     cron_before_list = bool(evaluate_pretool(run, cron_create, cron_contract))
     with transcript.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({
@@ -9099,6 +10929,39 @@ def _selftest() -> int:
         "tool_response": {"tasks": []},
     })
     cron_after_list = evaluate_pretool(run, cron_create, cron_contract) == ""
+    cron_nonrecurring_blocked = E_CRON_RECURRING_REQUIRED in evaluate_pretool(
+        run, {**cron_create, "tool_input": {
+            **cron_create["tool_input"], "recurring": False,
+        }}, cron_contract)
+    cron_durable_blocked = E_CRON_SESSION_SCOPE_REQUIRED in evaluate_pretool(
+        run, {**cron_create, "tool_input": {
+            **cron_create["tool_input"], "durable": True,
+        }}, cron_contract)
+    cron_natural_prompt_blocked = E_CRON_PROMPT_MISMATCH in evaluate_pretool(
+        run, {**cron_create, "tool_input": {
+            **cron_create["tool_input"],
+            "prompt": f"继续执行 runs/{run.name}",
+        }}, cron_contract)
+    cron_without_loop_authority_blocked = E_CRON_LOOP_AUTHORITY_REQUIRED \
+        in evaluate_pretool(run, cron_create, {
+            **contract, "run_transition_requested": False,
+        })
+    existing_loop_task = {"tool_name": "TaskCreate", "tool_input": {
+        "subject": "existing-run loop iteration",
+    }}
+    existing_loop_task_before_create_blocked = E_CRON_CREATE_REQUIRED \
+        in evaluate_pretool(run, existing_loop_task, cron_contract)
+    runtime_receipts.append_hook_event(run, {
+        "hook_event_name": "PostToolUse", "session_id": "s",
+        "transcript_path": str(transcript), "tool_name": "CronCreate",
+        "tool_use_id": "current-cron-create", "tool_input": {
+            "prompt": f"/loop runs/{run.name}", "recurring": True,
+        }, "tool_response": {
+            "id": "current-cron-job", "recurring": True, "durable": False,
+        },
+    })
+    existing_loop_task_after_create_allowed = evaluate_pretool(
+        run, existing_loop_task, cron_contract) == ""
     new_run_cron_blocked_until_transition = "先完成 setup" in evaluate_pretool(
         run, cron_create, contract)
     lifecycle_task = {"tool_name": "TaskCreate", "tool_input": {
@@ -9221,8 +11084,13 @@ def _selftest() -> int:
         "session_id": str(lifecycle_contract.get("session_id") or ""),
         "transcript_path": str(lifecycle_transcript),
         "tool_name": "CronCreate", "tool_use_id": "bound-cron",
-        "tool_input": {"prompt": f"/loop {lifecycle_run.name}"},
-        "tool_response": {"id": "bound-cron-job"},
+        "tool_input": {
+            "prompt": f"/loop runs/{lifecycle_run.name}",
+            "recurring": True,
+        },
+        "tool_response": {
+            "id": "bound-cron-job", "recurring": True, "durable": False,
+        },
     })
     agent_before_plan_blocked = E_ITERATION_PLAN_REQUIRED in evaluate_pretool(
         lifecycle_run, lifecycle_agent, lifecycle_contract)
@@ -9721,13 +11589,38 @@ def _selftest() -> int:
         "- Status: open\n- Barrier class: local-state\n- Current depth: shallow\n",
         encoding="utf-8")
     stale_review_transcript = root / "stale-review-transcript.jsonl"
-    stale_review_transcript.write_text("stale-review-task\n", encoding="utf-8")
+    stale_review_transcript.write_text(
+        "stale-review-cron-list\nstale-review-cron-create\n"
+        "stale-review-task\n",
+        encoding="utf-8",
+    )
     stale_review_contract = _contract_from_event({
         "session_id": "stale-review-session",
         "transcript_path": str(stale_review_transcript.resolve()),
         "prompt": "/loop",
     }, run_name=stale_review_run.name)
     _atomic_json(contract_path(stale_review_run), stale_review_contract)
+    runtime_receipts.append_hook_event(stale_review_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": stale_review_contract["session_id"],
+        "transcript_path": str(stale_review_transcript),
+        "tool_name": "CronList", "tool_use_id": "stale-review-cron-list",
+        "tool_input": {}, "tool_response": {"jobs": []},
+    })
+    runtime_receipts.append_hook_event(stale_review_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": stale_review_contract["session_id"],
+        "transcript_path": str(stale_review_transcript),
+        "tool_name": "CronCreate", "tool_use_id": "stale-review-cron-create",
+        "tool_input": {
+            "prompt": f"/loop runs/{stale_review_run.name}",
+            "recurring": True,
+        },
+        "tool_response": {
+            "id": "stale-review-cron-job", "recurring": True,
+            "durable": False,
+        },
+    })
     runtime_receipts.append_hook_event(stale_review_run, {
         "hook_event_name": "PostToolUse",
         "session_id": stale_review_contract["session_id"],
@@ -10005,9 +11898,33 @@ def _selftest() -> int:
     _atomic_json(contract_path(direct_run), direct_contract)
     direct_transcript = root / "root-direct-transcript.jsonl"
     direct_transcript.write_text(
-        "root-direct-task\nroot-direct-action-1\nroot-direct-action-2\n",
+        "root-direct-cron-list\nroot-direct-cron-create\nroot-direct-task\n"
+        "root-direct-action-1\nroot-direct-action-2\n",
         encoding="utf-8",
     )
+    runtime_receipts.append_hook_event(direct_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": direct_contract["session_id"],
+        "transcript_path": str(direct_transcript),
+        "tool_name": "CronList",
+        "tool_use_id": "root-direct-cron-list",
+        "tool_input": {},
+        "tool_response": {"jobs": []},
+    })
+    runtime_receipts.append_hook_event(direct_run, {
+        "hook_event_name": "PostToolUse",
+        "session_id": direct_contract["session_id"],
+        "transcript_path": str(direct_transcript),
+        "tool_name": "CronCreate",
+        "tool_use_id": "root-direct-cron-create",
+        "tool_input": {
+            "prompt": f"/loop runs/{direct_run.name}", "recurring": True,
+        },
+        "tool_response": {
+            "id": "root-direct-cron-job", "recurring": True,
+            "durable": False,
+        },
+    })
     runtime_receipts.append_hook_event(direct_run, {
         "hook_event_name": "PostToolUse",
         "session_id": direct_contract["session_id"],
@@ -11754,6 +13671,8 @@ def _selftest() -> int:
     proxy_contract = {
         "mode": EXECUTE, "session_id": "proxy-session", "prompt_excerpt": "继续执行",
         "fanout_override": True, "updated_at": time.time(),
+        "direct_egress_approved": False,
+        "operator_intent": {"route": "proxy"},
     }
     raw_curl = {"tool_name": "Bash", "tool_input": {
         "command": "curl https://a.example/"}}
@@ -11763,9 +13682,40 @@ def _selftest() -> int:
     unknown_webfetch = {"tool_name": "WebFetch", "tool_input": {
         "url": "https://unknown.example/"}}
     guarded_probe = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/"
+        )}}
     unknown_guarded_probe = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://unknown.example/"
+        )}}
+    dotted_save_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"GET https://a.example/app.js --save f003-cms-8090-app-js.js "
+            f"--run {proxy_run}"
+        )}}
+    data_url_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"POST https://a.example/api "
+            "--data 'next=https://payload-only.example/callback' "
+            "--header 'Referer: https://header-only.example/source' "
+            f"--save f003-cms-8090-app-js.css --run {proxy_run}"
+        )}}
+    unknown_preflight_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "POST https://a.example/api "
+            "--preflight-get https://preflight-unknown.example/form"
+        )}}
+    unknown_diff_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            "DIFF https://a.example/ https://diff-unknown.example/"
+        )}}
     direct_guarded_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
             f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
@@ -11780,14 +13730,29 @@ def _selftest() -> int:
             f"XUNJI_PROXY_REQUIRED=o''ff python3 {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/"
         )}}
+    direct_with_proxy_arg = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/ --proxy http://proxy.example:8080"
+        )}}
+    duplicate_env_selects_proxy = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            "XUNJI_PROXY_REQUIRED=0 XUNJI_PROXY_REQUIRED=1 "
+            f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"
+        )}}
+    duplicate_env_selects_direct = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            "XUNJI_PROXY_REQUIRED=1 XUNJI_PROXY_REQUIRED=0 "
+            f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"
+        )}}
     browser_target = {"tool_name": "mcp__browser__navigate", "tool_input": {
         "url": "https://a.example/"}}
-    raw_curl_blocked = "交战代理硬门" in evaluate_pretool(proxy_run, raw_curl, proxy_contract)
-    raw_requests_blocked = "交战代理硬门" in evaluate_pretool(
+    raw_curl_blocked = "目标出口硬门" in evaluate_pretool(proxy_run, raw_curl, proxy_contract)
+    raw_requests_blocked = "目标出口硬门" in evaluate_pretool(
         proxy_run, raw_requests, proxy_contract)
-    target_webfetch_blocked = "交战代理硬门" in evaluate_pretool(
+    target_webfetch_blocked = "目标出口硬门" in evaluate_pretool(
         proxy_run, target_webfetch, proxy_contract)
-    unknown_webfetch_blocked = "交战代理硬门" in evaluate_pretool(
+    unknown_webfetch_blocked = "目标出口硬门" in evaluate_pretool(
         proxy_run, unknown_webfetch, proxy_contract)
     guarded_probe_allowed = evaluate_pretool(proxy_run, guarded_probe, proxy_contract) == ""
     scoped_proxy_coverage = json.loads(
@@ -11815,18 +13780,131 @@ def _selftest() -> int:
         proxy_run, guarded_probe, proxy_contract) == ""
     unknown_guarded_probe_blocked = "未知目标: unknown.example" in evaluate_pretool(
         proxy_run, unknown_guarded_probe, proxy_contract)
-    direct_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
+    dotted_save_is_not_destination = evaluate_pretool(
+        proxy_run, dotted_save_guarded_probe, proxy_contract) == ""
+    payload_and_header_urls_are_not_destinations = evaluate_pretool(
+        proxy_run, data_url_guarded_probe, proxy_contract) == ""
+    supporting_preflight_destination_is_checked = (
+        "未知目标: preflight-unknown.example" in evaluate_pretool(
+            proxy_run, unknown_preflight_probe, proxy_contract))
+    every_diff_destination_is_checked = (
+        "未知目标: diff-unknown.example" in evaluate_pretool(
+            proxy_run, unknown_diff_probe, proxy_contract))
+    endpoint_run = root / "typed-endpoint-run"
+    endpoint_run.mkdir()
+    (endpoint_run / "coverage.json").write_text(json.dumps({"assets": [
+        {"host": "port.example:443", "reachable": True, "examined": False},
+        {"host": "port.example:8443", "reachable": True, "examined": False},
+        {"host": "host-only.example", "reachable": True, "examined": False},
+    ]}), encoding="utf-8")
+
+    def endpoint_probe(url: str) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": (
+            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"GET {url}"
+        )}}
+
+    typed_endpoint_coverage_is_exact = (
+        _event_known_hosts(
+            endpoint_run, endpoint_probe("https://port.example/"))
+        == ({"port.example:443"}, "")
+        and _event_known_hosts(
+            endpoint_run, endpoint_probe("https://port.example:8443/"))
+        == ({"port.example:8443"}, "")
+        and _event_known_hosts(
+            endpoint_run, endpoint_probe("https://host-only.example:9443/"))
+        == ({"host-only.example"}, "")
+    )
+    direct_without_operator_blocked = "明确要求代理" in evaluate_pretool(
         proxy_run, direct_guarded_probe, proxy_contract)
-    direct_env_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
+    direct_env_without_operator_blocked = "明确要求代理" in evaluate_pretool(
         proxy_run, direct_env_probe, proxy_contract)
-    quoted_direct_without_operator_blocked = "当前操作者 prompt" in evaluate_pretool(
+    quoted_direct_without_operator_blocked = "明确要求代理" in evaluate_pretool(
         proxy_run, quoted_direct_probe, proxy_contract)
+    direct_contract = {
+        **proxy_contract,
+        "direct_egress_approved": True,
+        "operator_intent": {"route": "direct"},
+    }
+    direct_proxy_arg_blocked = "不得由模型" in evaluate_pretool(
+        proxy_run, direct_with_proxy_arg, direct_contract)
+    duplicate_env_assignments_fail_closed = (
+        _registered_capability_invocation(
+            duplicate_env_selects_proxy["tool_input"]["command"]) is None
+        and _registered_capability_invocation(
+            duplicate_env_selects_direct["tool_input"]["command"]) is None
+        and "目标出口路由硬门" in evaluate_pretool(
+            proxy_run, duplicate_env_selects_proxy, proxy_contract)
+        and "目标出口路由硬门" in evaluate_pretool(
+            proxy_run, duplicate_env_selects_direct, direct_contract)
+    )
     direct_with_operator_allowed = evaluate_pretool(
         proxy_run, direct_guarded_probe,
-        {**proxy_contract, "direct_egress_approved": True}) == ""
+        {**proxy_contract, "direct_egress_approved": True,
+         "operator_intent": {"route": "direct"}}) == ""
     quoted_direct_with_operator_allowed = evaluate_pretool(
         proxy_run, quoted_direct_probe,
-        {**proxy_contract, "direct_egress_approved": True}) == ""
+        {**proxy_contract, "direct_egress_approved": True,
+         "operator_intent": {"route": "direct"}}) == ""
+    local_settlement_with_route_text = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"python3 {ROOT / 'tools' / 'loop_journal.py'} {proxy_run} end "
+            "--next-action '等待操作者确认 XUNJI_PROXY_REQUIRED=0 后重试 F-001'"
+        )}}
+    local_route_text_is_not_target_route = "目标出口路由硬门" not in evaluate_pretool(
+        proxy_run, local_settlement_with_route_text, proxy_contract)
+    plain_guarded_probe = {"tool_name": "Bash", "tool_input": {
+        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/",
+    }}
+    proxy_route_needs_positive_selection = (
+        "XUNJI_PROXY_REQUIRED=1" in evaluate_pretool(
+            proxy_run, plain_guarded_probe, proxy_contract))
+    direct_route_needs_clean_selection = (
+        "XUNJI_PROXY_REQUIRED=0" in evaluate_pretool(
+            proxy_run, plain_guarded_probe, direct_contract))
+    legacy_route_less_contract = dict(proxy_contract)
+    legacy_route_less_contract.pop("operator_intent", None)
+    legacy_proxy_default_stays_offline = (
+        _contract_egress_route(legacy_route_less_contract) == "offline"
+        and "离线路由" in evaluate_pretool(
+            proxy_run, guarded_probe, legacy_route_less_contract)
+    )
+    pause_projection = {
+        "required": True,
+        "latest_updated_at": proxy_contract["updated_at"] + 1.0,
+        "routes": ["proxy:http:" + "a" * 16],
+        "error_classes": ["proxy_connect"],
+    }
+    with mock.patch.object(
+            guardmod.HostHealth, "proxy_confirmation_state",
+            return_value=pause_projection):
+        same_turn_proxy_retry_blocked = (
+            "XUNJI_E_PROXY_CONFIRMATION_REQUIRED" in _proxy_pause_reason(
+                proxy_contract))
+        newer_proxy_contract = {
+            **proxy_contract,
+            "updated_at": pause_projection["latest_updated_at"] + 1.0,
+        }
+        newer_operator_proxy_turn_allowed = (
+            _proxy_pause_reason(newer_proxy_contract) == "")
+    with mock.patch.object(
+            guardmod.HostHealth, "acknowledge_proxy_retry",
+            return_value=True) as acknowledge_retry, mock.patch.object(
+                proxymod, "engagement_proxy",
+                return_value="http://proxy.example:8080"):
+        guarded_capability = _registered_capability_invocation(
+            guarded_probe["tool_input"]["command"])
+        proxy_confirmation_consumed = (
+            _acknowledge_proxy_retry(
+                newer_proxy_contract, guarded_capability) == ""
+            and acknowledge_retry.call_args.kwargs["confirmed_at"]
+            == newer_proxy_contract["updated_at"]
+            and acknowledge_retry.call_args.kwargs["egress_route"]
+            == guardmod.egress_route_id("http://proxy.example:8080"))
+    with mock.patch.object(proxymod, "engagement_proxy", return_value=None):
+        proxy_missing_configuration_blocked = (
+            "XUNJI_E_PROXY_CONFIG_MISSING" in _acknowledge_proxy_retry(
+                newer_proxy_contract, guarded_capability))
     nonbash_target_tool_blocked = "非 Bash 网络工具" in evaluate_pretool(
         proxy_run, browser_target, proxy_contract)
     (proxy_run / "frontier.md").write_text(
@@ -11849,7 +13927,10 @@ def _selftest() -> int:
     (corrupt_run / "coverage.json").write_text("{broken", encoding="utf-8")
     corrupt_reason = evaluate_pretool(
         corrupt_run, {"tool_name": "Bash", "tool_input": {
-            "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"}},
+            "command": (
+                "XUNJI_PROXY_REQUIRED=1 "
+                f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"
+            )}},
         proxy_contract)
     corrupt_coverage_fails_closed = (
         "资产覆盖硬门" in corrupt_reason and "coverage" in corrupt_reason)
@@ -11863,7 +13944,7 @@ def _selftest() -> int:
     (nested_run / "classify" / "coverage.json").write_text(json.dumps({"assets": [
         {"host": "nested.example", "reachable": True},
     ]}), encoding="utf-8")
-    nested_fallback_host_is_enforced = "交战代理硬门" in evaluate_pretool(
+    nested_fallback_host_is_enforced = "目标出口硬门" in evaluate_pretool(
         nested_run, {"tool_name": "Bash", "tool_input": {
             "command": "curl https://nested.example/"}}, proxy_contract)
 
@@ -11907,6 +13988,8 @@ def _selftest() -> int:
     ]}), encoding="utf-8")
     actor_contract = {
         "mode": EXECUTE, "session_id": "actor-session", "prompt_excerpt": "继续执行",
+        "direct_egress_approved": True,
+        "operator_intent": {"route": "direct"},
         "updated_at": time.time(), "fanout_epoch_started_at": time.time() - 1,
         "coordination_signature": _coordination_signature(actor_run),
         "fanout_epoch_id": "fedcba9876543210",
@@ -11957,9 +14040,15 @@ def _selftest() -> int:
     actor_launch("launch-one", "A-one", "F-001", "a.example", "child-one")
     actor_launch("launch-two", "A-two", "F-002", "b.example", "child-two")
     child_own_action = {"tool_name": "Bash", "agent_id": "child-one", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/"
+        )}}
     child_outside_action = {"tool_name": "Bash", "agent_id": "child-one", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://b.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://b.example/"
+        )}}
     child_nested_agent = {"tool_name": "Agent", "agent_id": "child-one", "tool_input": {
         "prompt": "XUNJI_ASSIGNMENT=A-two XUNJI_FRONT=F-002 XUNJI_ASSETS=b.example"}}
     child_lane_allowed = evaluate_pretool(actor_run, child_own_action, actor_contract) == ""
@@ -11967,8 +14056,13 @@ def _selftest() -> int:
         actor_run, child_outside_action, actor_contract)
     nested_agent_blocked = "只有 Root 可派 Agent" in evaluate_pretool(
         actor_run, child_nested_agent, actor_contract)
+    actor_root_probe = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://a.example/"
+        )}}
     root_allowed_while_agents_running = evaluate_pretool(
-        actor_run, {**guarded_probe}, actor_contract) == ""
+        actor_run, actor_root_probe, actor_contract) == ""
     runtime_receipts.append_hook_event(actor_run, {
         "hook_event_name": "SubagentStop", "session_id": "actor-session",
         "transcript_path": str(actor_transcript), "agent_id": "child-one",
@@ -11976,9 +14070,12 @@ def _selftest() -> int:
         "tool_response": {"content": "child-one returned its bounded lane result"},
     })
     root_blocked_after_real_return = "SubagentStop" in evaluate_pretool(
-        actor_run, {**guarded_probe}, actor_contract)
+        actor_run, actor_root_probe, actor_contract)
     child_two_action = {"tool_name": "Bash", "agent_id": "child-two", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://b.example/"}}
+        "command": (
+            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            "GET https://b.example/"
+        )}}
     running_peer_not_blocked_by_returned_peer = evaluate_pretool(
         actor_run, child_two_action, actor_contract) == ""
     actor_assignments = json.loads(
@@ -12297,6 +14394,26 @@ def _selftest() -> int:
     maintenance_compile = {"tool_name": "Bash", "tool_input": {
         "command": "python3 -m py_compile tools/turn_contract.py",
     }}
+    maintenance_schema_edit = {"tool_name": "Edit", "tool_input": {
+        "file_path": str(ROOT / "contracts" / "work-plan.v1.schema.json"),
+        "old_string": "old", "new_string": "new",
+    }}
+    maintenance_schema_candidate_edit = {"tool_name": "Edit", "tool_input": {
+        "file_path": str(
+            ROOT / "tmp" / "contract_schema_candidates"
+            / "work-plan.v1.schema.json"),
+        "old_string": "old", "new_string": "new",
+    }}
+    maintenance_schema_prepare = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            "python3 tools/contract_schema.py prepare "
+            "work-plan.v1.schema.json"),
+    }}
+    maintenance_schema_publish = {"tool_name": "Bash", "tool_input": {
+        "command": (
+            "python3 tools/contract_schema.py publish "
+            "work-plan.v1.schema.json"),
+    }}
     maintenance_git_status = {"tool_name": "Bash", "tool_input": {
         "command": "git status --short",
     }}
@@ -12398,6 +14515,15 @@ def _selftest() -> int:
         run, maintenance_read, maintenance_contract) == ""
     maintenance_compile_allowed = evaluate_pretool(
         run, maintenance_compile, maintenance_contract) == ""
+    maintenance_schema_edit_blocked = (
+        "contract schema 禁止直接" in evaluate_pretool(
+            run, maintenance_schema_edit, maintenance_contract))
+    maintenance_schema_candidate_allowed = evaluate_pretool(
+        run, maintenance_schema_candidate_edit, maintenance_contract) == ""
+    maintenance_schema_tools_allowed = all(
+        evaluate_pretool(run, event, maintenance_contract) == ""
+        for event in (maintenance_schema_prepare, maintenance_schema_publish)
+    )
     maintenance_git_read_allowed = evaluate_pretool(
         run, maintenance_git_status, maintenance_contract) == ""
     maintenance_git_diff_allowed = evaluate_pretool(
@@ -12607,7 +14733,7 @@ def _selftest() -> int:
         "hook_event_name": "UserPromptSubmit",
         "session_id": "live-maintenance-session",
         "transcript_path": str(live_transcript),
-        "prompt": f"/loop {live_run}",
+        "prompt": "继续修复当前运行，核验维护拒绝后控制面仍可读",
     })
     live_critical_denial = live_hook({
         "hook_event_name": "PreToolUse",
@@ -12667,13 +14793,24 @@ def _selftest() -> int:
             "subagent_type": "xunji-hunter",
         },
     })
-
     def wired(event_name: str) -> bool:
         return any(
             "tools/turn_contract.py" in str(hook.get("command") or "")
             for group in hooks.get(event_name, []) if isinstance(group, dict)
             for hook in group.get("hooks", []) if isinstance(hook, dict)
         )
+
+    subagent_stop_commands = [
+        str(hook.get("command") or "")
+        for group in hooks.get("SubagentStop", []) if isinstance(group, dict)
+        for hook in group.get("hooks", []) if isinstance(hook, dict)
+    ]
+    subagent_stop_wrapper_wired = bool(
+        len(subagent_stop_commands) == 1
+        and "tools/harness/subagent_stop_ingress.py"
+            in subagent_stop_commands[0]
+        and "tools/turn_contract.py" not in subagent_stop_commands[0]
+    )
 
     session_start_selftest = any(
         "tools/turn_contract.py" in str(hook.get("command") or "")
@@ -12831,6 +14968,15 @@ def _selftest() -> int:
     ordinary_failure_code, ordinary_failure_diagnostic = (
         _runtime_hook_failure_diagnostic(
             {"hook_event_name": "UserPromptSubmit"}, RuntimeError("opaque")))
+    schema_wrapper = RuntimeError("schema wrapper")
+    schema_wrapper.__cause__ = contract_schema.ContractSchemaUnavailable(
+        "work-plan.v1.schema.json",
+        "SCHEMA_JSON_INVALID",
+        "JSONDecodeError",
+    )
+    schema_failure_code, schema_failure_diagnostic = (
+        _runtime_hook_failure_diagnostic(
+            {"hook_event_name": "SubagentStop"}, schema_wrapper))
     budget_actor_fixture = {
         "kind": "assignment",
         "state": "running",
@@ -12968,7 +15114,240 @@ def _selftest() -> int:
         request_over_reason = _claim_plan_bound_child_tool_call(
             run, request_over_event)
 
+    completion_tool = ROOT / "tools" / "completion_transaction.py"
+    terminal_events = {
+        "read": {"tool_name": "Read", "tool_input": {
+            "file_path": str(run / "report.md")}},
+        "skill": {"tool_name": "Skill", "tool_input": {
+            "skill": "xunji-run-lifecycle"}},
+        "status": {"tool_name": "Bash", "tool_input": {
+            "command": f"python3 {completion_tool} status {run}"}},
+        "commit": {"tool_name": "Bash", "tool_input": {
+            "command": f"python3 {completion_tool} commit {run}"}},
+        "reopen": {"tool_name": "Bash", "tool_input": {
+            "command": (
+                f"python3 {completion_tool} reopen {run} "
+                "--reason resume-open-front")}},
+        "target": {"tool_name": "WebFetch", "tool_input": {
+            "url": "https://example.test/"}},
+        "agent": {"tool_name": "Agent", "tool_input": {
+            "prompt": "fixture"}},
+        "cron": {"tool_name": "CronCreate", "tool_input": {
+            "prompt": f"/loop runs/{run.name}"}},
+        "verify": {"tool_name": "Bash", "tool_input": {
+            "command": f"python3 {ROOT / 'tools' / 'check_run.py'} {run}"}},
+        "replay_verify": {"tool_name": "Bash", "tool_input": {
+            "command": (
+                f"python3 {ROOT / 'tools' / 'check_run.py'} {run} "
+                "--replay-verify")}},
+        "auto_verify": {"tool_name": "Bash", "tool_input": {
+            "command": (
+                f"python3 {ROOT / 'tools' / 'check_run.py'} {run} "
+                "--auto-peer-review --review-driver codex")}},
+        "other_verify": {"tool_name": "Bash", "tool_input": {
+            "command": f"python3 {ROOT / 'tools' / 'peer_review.py'} --selftest"}},
+    }
+    prepared_gate = {
+        "schema": "xunji.completion-terminal-gate.v1",
+        "status": "prepared", "transaction_id": "CT-fixture",
+        "prepared_at": time.time(), "terminal_at": 0,
+        "allowed_capability_ids": [], "allowed_effects": ["local_read"],
+        "error": "",
+    }
+    committed_gate = {
+        **prepared_gate, "status": "committed", "terminal_at": time.time(),
+    }
+    with mock.patch.object(
+            completion_transaction, "terminal_gate_state",
+            return_value=prepared_gate):
+        prepared_terminal_reasons = {
+            name: _completion_terminal_reason(run, event)
+            for name, event in terminal_events.items()
+        }
+    with mock.patch.object(
+            completion_transaction, "terminal_gate_state",
+            return_value=committed_gate):
+        committed_terminal_reasons = {
+            name: _completion_terminal_reason(run, event)
+            for name, event in terminal_events.items()
+        }
+
+    # The Hook owner must mechanically consume the exact receipt it just
+    # appended.  This prevents a model from "forgetting" a separate observe or
+    # clear command after the denied/successful tool event.
+    barrier_hook_order: list[str] = []
+    denial_receipt_hash = "7" * 64
+    denial_hook_event = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "barrier-hook-session",
+        "transcript_path": str(root / "barrier-hook-transcript.jsonl"),
+        "tool_name": "Bash", "tool_use_id": "barrier-hook-denial",
+        "tool_input": {"command": "echo denied-in-explain-mode"},
+    }
+
+    def append_denial_fixture(_run: Path, _event: dict) -> dict:
+        barrier_hook_order.append("append-denial")
+        return {"receipt_hash": denial_receipt_hash, "success": False}
+
+    def observe_denial_fixture(
+            _run: Path, *, failure_receipt_sha256: str,
+            runs_root: Path) -> dict:
+        barrier_hook_order.append("observe-denial")
+        return {
+            "status": "observed",
+            "failure_receipt_sha256": failure_receipt_sha256,
+            "runs_root": str(runs_root),
+        }
+
+    with mock.patch.object(
+            completion_transaction, "terminal_gate_state",
+            return_value={"status": "open"}), \
+            mock.patch.object(
+                runtime_receipts, "append_hook_event",
+                side_effect=append_denial_fixture), \
+            mock.patch.object(
+                barrier_state, "observe_runtime_failure_if_eligible",
+                side_effect=observe_denial_fixture) as observed_denial:
+        automatic_denial_result = handle_event(
+            denial_hook_event, run)
+    hook_automatic_observe = bool(
+        automatic_denial_result
+        and barrier_hook_order == ["append-denial", "observe-denial"]
+        and observed_denial.call_args.kwargs.get(
+            "failure_receipt_sha256") == denial_receipt_hash
+    )
+    with mock.patch.object(
+            completion_transaction, "terminal_gate_state",
+            return_value={"status": "open"}), \
+            mock.patch.object(
+                runtime_receipts, "append_hook_event",
+                return_value={
+                    "receipt_hash": "8" * 64, "success": False,
+                }), \
+            mock.patch.object(
+                barrier_state, "observe_runtime_failure_if_eligible",
+                side_effect=barrier_state.BarrierDurabilityError(
+                    "fixture-durability-failure")):
+        denial_durability_result = handle_event({
+            **denial_hook_event,
+            "tool_use_id": "barrier-hook-denial-durability",
+        }, run)
+    hook_observe_failure_is_diagnostic = (
+        E_INFRA_BARRIER_RECORD_FAILED
+        in json.dumps(denial_durability_result, ensure_ascii=False)
+    )
+
+    success_receipt_hash = "9" * 64
+    success_hook_order: list[str] = []
+
+    def append_success_fixture(_run: Path, _event: dict) -> dict:
+        success_hook_order.append("append-success")
+        return {"receipt_hash": success_receipt_hash, "success": True}
+
+    def clear_success_fixture(
+            _run: Path, *, basis_sha256: str, runs_root: Path) -> dict:
+        success_hook_order.append("clear-success")
+        return {
+            "status": "cleared", "basis_sha256": basis_sha256,
+            "runs_root": str(runs_root),
+        }
+
+    with mock.patch.object(
+            runtime_receipts, "append_hook_event",
+            side_effect=append_success_fixture), \
+            mock.patch.object(
+                barrier_state, "record_runtime_success_clear",
+                side_effect=clear_success_fixture) as cleared_success:
+        handle_event({
+            "hook_event_name": "PostToolUse",
+            "session_id": "barrier-hook-session",
+            "transcript_path": str(root / "barrier-hook-transcript.jsonl"),
+            "tool_name": "WebFetch", "tool_use_id": "barrier-hook-success",
+            "tool_input": {"url": "https://example.test/"},
+            "tool_response": {"status": 200, "body": "fixture"},
+        }, run)
+    hook_automatic_success_clear = bool(
+        success_hook_order == ["append-success", "clear-success"]
+        and cleared_success.call_args.kwargs.get(
+            "basis_sha256") == success_receipt_hash
+    )
+
+    lane_action_event = {
+        "tool_name": "WebFetch", "agent_id": "barrier-race-child",
+        "tool_input": {"url": "https://example.test/"},
+    }
+    actual_lane_action = barrier_state.runtime_action_fingerprint(
+        runtime_receipts.normalize_hook_event(run, lane_action_event))
+    barrier_actor = {
+        "plan_digest": "a" * 64, "lane_id": "L-BARRIER-RACE",
+        "front": "F-001",
+    }
+    barrier_lane = {
+        "id": "L-BARRIER-RACE", "front": "F-001", "effect": "target",
+        "infra_barrier": {
+            "schema": "xunji.infra-barrier-binding.v1",
+            "action_fingerprint": actual_lane_action,
+            "cause_code": "WORK_PLAN_TURN_STALE",
+            "precondition_digest": "b" * 64,
+            "operation_class": "target_attempt",
+        },
+    }
+    barrier_plan = {
+        "plan_digest": "a" * 64, "lanes": [barrier_lane],
+    }
+    with mock.patch.object(
+            work_plan, "transaction_bound_plan",
+            return_value=barrier_plan), \
+            mock.patch.object(
+                work_plan, "infra_barrier_preflight",
+                side_effect=work_plan.PlanError(
+                    "WORK_PLAN_INFRA_BARRIER_OPEN")) as race_preflight:
+        post_launch_barrier_reason = _child_infra_barrier_reason(
+            run, lane_action_event, barrier_actor)
+    post_launch_barrier_revalidated = bool(
+        E_INFRA_BARRIER in post_launch_barrier_reason
+        and race_preflight.call_args.kwargs.get(
+            "actual_action_fingerprint") == actual_lane_action
+    )
+    mismatched_barrier_plan = json.loads(json.dumps(barrier_plan))
+    mismatched_barrier_plan["lanes"][0]["infra_barrier"][
+        "action_fingerprint"] = "c" * 64
+    with mock.patch.object(
+            work_plan, "transaction_bound_plan",
+            return_value=mismatched_barrier_plan):
+        mismatched_lane_action_reason = _child_infra_barrier_reason(
+            run, lane_action_event, barrier_actor)
+    actual_action_mismatch_fails_closed = bool(
+        E_INFRA_BARRIER in mismatched_lane_action_reason
+        and "WORK_PLAN_INFRA_BARRIER_ACTUAL_ACTION_MISMATCH"
+        in mismatched_lane_action_reason
+    )
+
     checks = [
+        ("denied Hook appends then automatically observes the exact receipt",
+         hook_automatic_observe),
+        ("eligible observe durability failure is an explicit Hook diagnostic",
+         hook_observe_failure_is_diagnostic),
+        ("successful Hook appends then automatically clears from the exact receipt",
+         hook_automatic_success_clear),
+        ("child target PreToolUse rechecks a barrier opened after launch",
+         post_launch_barrier_revalidated),
+        ("child target action must equal its lane barrier fingerprint",
+         actual_action_mismatch_fails_closed),
+        ("prepared completion terminal permits only read/status/commit/reopen",
+         all(not prepared_terminal_reasons[name]
+             for name in ("read", "status", "commit", "reopen"))
+         and all(E_COMPLETION_TERMINAL in prepared_terminal_reasons[name]
+                 for name in (
+                     "skill", "target", "agent", "cron", "verify", "replay_verify",
+                     "auto_verify", "other_verify"))),
+        ("committed completion terminal permits only offline check_run verification",
+         all(not committed_terminal_reasons[name]
+             for name in ("read", "status", "reopen", "verify"))
+         and all(E_COMPLETION_TERMINAL in committed_terminal_reasons[name]
+                 for name in (
+                     "skill", "commit", "target", "agent", "cron", "replay_verify",
+                     "auto_verify", "other_verify"))),
         ("plan-bound child attempts are claimed before a later policy denial",
          budget_near_reason == "" and budget_policy_denial_still_counted),
         ("near-cap and final-call PreToolUse context instruct an immediate return",
@@ -13025,7 +15404,13 @@ def _selftest() -> int:
              f"[{E_RUNTIME_RECEIPT_HOOK_FAILED}] SubagentStop")
          and "opaque" not in lifecycle_failure_diagnostic
          and ordinary_failure_code == 0
-         and ordinary_failure_diagnostic == ""),
+         and ordinary_failure_diagnostic == ""
+         and schema_failure_code == 2
+         and "ContractSchemaUnavailable.SCHEMA_JSON_INVALID.JSONDecodeError"
+             in schema_failure_diagnostic
+         and "python3 tools/contract_schema.py prepare "
+             "work-plan.v1.schema.json" in schema_failure_diagnostic
+         and "ignored candidate" in schema_failure_diagnostic),
         ("ordinary operator wording derives a distinct maintenance turn mode",
          maintenance_contract.get("mode") == MAINTENANCE
          and maintenance_contract.get("maintenance_intent") == "operator_prompt"
@@ -13089,6 +15474,10 @@ def _selftest() -> int:
          ordinary_critical_edit_blocked),
         ("maintenance intent allows a typed critical-path edit",
          authorized_critical_edit_allowed),
+        ("contract schemas require candidate plus registered atomic publication",
+         maintenance_schema_edit_blocked
+         and maintenance_schema_candidate_allowed
+         and maintenance_schema_tools_allowed),
         ("maintenance intent allows an adjacent documentation edit",
          authorized_adjacent_doc_allowed),
         ("maintenance intent allows repository-local paths without predeclaration",
@@ -13170,12 +15559,50 @@ def _selftest() -> int:
          and "XUNJI_E_MAINTENANCE_BLOCKED" not in (live_agent_after_blocker.stdout or "")
          and not live_denials
          and len(live_durable_denials) == 1),
-        ("negated direct-egress phrases never grant approval",
+        ("explicit proxy remains selected when direct is denied",
          not negated_direct_cn["direct_egress_approved"]
-         and not negated_direct_en["direct_egress_approved"]
-         and not mixed_direct_denial["direct_egress_approved"]),
-        ("explicit direct-egress phrase grants current-turn approval",
-         explicit_direct["direct_egress_approved"]),
+         and negated_direct_cn.get("operator_intent", {}).get("route") == "proxy"
+         and explicit_proxy.get("operator_intent", {}).get("route") == "proxy"),
+        ("direct denial without affirmative proxy freezes offline",
+         not negated_direct_en["direct_egress_approved"]
+         and negated_direct_en.get("operator_intent", {}).get("route") == "offline"
+         and not mixed_direct_denial["direct_egress_approved"]
+         and mixed_direct_denial.get("operator_intent", {}).get("route") == "offline"),
+        ("direct is the default route without a proxy request",
+         explicit_direct["direct_egress_approved"]
+         and default_direct["direct_egress_approved"]
+         and default_direct.get("operator_intent", {}).get("route") == "direct"),
+        ("same-session exact and strict named-run continuation preserve one current plan binding",
+         continuation_binding_preserved),
+        ("changed intent and cross-session continuation never inherit plan authority",
+         continuation_changed_prompt_rejected
+         and continuation_other_session_rejected),
+        ("cross-session alias or exact prompt replay is RUN_BUSY without contract replacement",
+         cross_session_busy_is_non_authorizing
+         and cross_session_busy_tool_denied),
+        ("RUN_BUSY audit failure preserves the old owner contract fail closed",
+         cross_session_busy_audit_failure_preserves_owner),
+        ("scheduled /loop wake needs old loop authority, exact run, and CronCreate receipt",
+         scheduled_wake_is_narrow),
+        ("ended-cycle manual continue starts exactly one inherited loop cycle",
+         manual_advance_starts_one_loop_cycle),
+        ("a scheduled tick during a long manual cycle coalesces without queueing",
+         scheduled_tick_skips_while_manual_cycle_active
+         and next_wall_clock_tick_runs_after_long_cycle),
+        ("a fast manual advance consumes only the immediately following Cron tick",
+         fast_manual_consumes_only_next_tick),
+        ("manual-advance and scheduled-tick audit failures freeze execution",
+         manual_audit_failure_fails_closed
+         and scheduled_tick_audit_failure_fails_closed),
+        ("an uncommitted manual preparation cannot consume a later Cron tick",
+         orphan_preparation_does_not_become_pending
+         and orphan_preparation_does_not_skip_tick),
+        ("an invalid scheduler receipt state freezes instead of double-running",
+         invalid_scheduler_state_fails_closed),
+        ("an ended plan cannot retain its old turn binding",
+         continuation_ended_plan_rejected),
+        ("continuation receipt failure falls back to fresh-turn invalidation",
+         continuation_receipt_failure_fails_closed),
         ("exact scope directive binds run/assets and execute mode",
          scope_contract.get("mode") == EXECUTE
          and scope_contract.get("scope_admission_run") == "pilot_20260715"
@@ -13196,7 +15623,8 @@ def _selftest() -> int:
          target_webfetch_blocked),
         ("unknown-host WebFetch cannot bypass the engagement proxy gate",
          unknown_webfetch_blocked),
-        ("proxy-aware guarded target tool is allowed", guarded_probe_allowed),
+        ("explicit proxy route allows an exact proxy-selected guarded tool",
+         guarded_probe_allowed),
         ("source/AI review-scope asset cannot become a target capability",
          review_scope_target_blocked),
         ("explicit out-of-scope asset stays blocked", out_scope_target_blocked),
@@ -13204,13 +15632,37 @@ def _selftest() -> int:
          forged_candidate_in_scope_blocked),
         ("explicit in-scope ledger asset remains executable",
          explicit_in_scope_target_allowed),
-        ("proxy-aware tool rejects destinations absent from the asset ledger",
+        ("route-aware tool rejects destinations absent from the asset ledger",
          unknown_guarded_probe_blocked),
-        ("direct-egress opt-out requires current operator approval",
+        ("coverage gate ignores dotted save filenames from exact target argv",
+         dotted_save_is_not_destination),
+        ("coverage gate ignores payload and header URL-shaped data",
+         payload_and_header_urls_are_not_destinations),
+        ("coverage gate checks supporting preflight destinations",
+         supporting_preflight_destination_is_checked),
+        ("coverage gate checks every DIFF destination",
+         every_diff_destination_is_checked),
+        ("typed coverage projection preserves explicit ports and host-only compatibility",
+         typed_endpoint_coverage_is_exact),
+        ("explicit proxy route rejects a direct override",
          direct_without_operator_blocked and direct_env_without_operator_blocked
          and quoted_direct_without_operator_blocked),
-        ("current operator may explicitly approve direct egress",
+        ("default direct route accepts the exact direct-selection prefix",
          direct_with_operator_allowed and quoted_direct_with_operator_allowed),
+        ("each target command binds an exact direct or proxy selector",
+         proxy_route_needs_positive_selection
+         and direct_route_needs_clean_selection
+         and direct_proxy_arg_blocked
+         and duplicate_env_assignments_fail_closed),
+        ("route-less historical proxy-default contracts stay offline",
+         legacy_proxy_default_stays_offline),
+        ("proxy failure blocks same-turn retry until a newer operator proxy turn",
+         same_turn_proxy_retry_blocked
+         and newer_operator_proxy_turn_allowed
+         and proxy_confirmation_consumed
+         and proxy_missing_configuration_blocked),
+        ("local settlement text cannot be mistaken for a route override",
+         local_route_text_is_not_target_route),
         ("non-Bash target network tool cannot bypass proxy attestation",
          nonbash_target_tool_blocked),
         ("unassigned coverage asset blocks target action", unassigned_asset_blocked),
@@ -13560,6 +16012,13 @@ def _selftest() -> int:
         ("pause mode allows CronList", evaluate_pretool(run, {"tool_name": "CronList", "tool_input": {}}, {"mode": PAUSE}) == ""),
         ("CronCreate requires current-turn CronList", cron_before_list),
         ("CronCreate allowed after current-turn empty CronList", cron_after_list),
+        ("CronCreate is recurring, session-scoped, exact-prompt, and loop-authority only",
+         cron_nonrecurring_blocked and cron_durable_blocked
+         and cron_natural_prompt_blocked
+         and cron_without_loop_authority_blocked),
+        ("an existing-run /loop creates one session Cron before task planning",
+         existing_loop_task_before_create_blocked
+         and existing_loop_task_after_create_allowed),
         ("new-run /loop cannot schedule the origin run before transition",
          new_run_cron_blocked_until_transition),
         ("pending new-run /loop blocks task planning on the origin run",
@@ -13780,7 +16239,7 @@ def _selftest() -> int:
          maintenance_receipt_tools <= receipt_matcher_tools("PostToolUse")
          and maintenance_receipt_tools <= receipt_matcher_tools("PostToolUseFailure")),
         ("settings wires Subagent lifecycle receipts",
-         wired("SubagentStart") and wired("SubagentStop")),
+         wired("SubagentStart") and subagent_stop_wrapper_wired),
         ("CronDelete rejects job not listed for this run", bool(evaluate_pretool(
             run, {"tool_name": "CronDelete", "tool_input": {"id": "otherjob"}}, contract))),
         ("memory write needs explicit approval", bool(evaluate_pretool(
@@ -13856,6 +16315,13 @@ def _selftest() -> int:
                 run / "state" / "work_plan_transactions"
                 / ("c" * 64 + ".json"),
                 run / "state" / "work_plan_transaction.json",
+                run / "state" / "review_policy.json",
+                run / "state" / "infra_barriers.jsonl",
+                run / "state" / ".infra_barriers.lock",
+                run / "state" / "completion_transaction.json",
+                run / "state" / "completion_transactions"
+                / ("e" * 64 + ".json"),
+                run / "state" / ".completion_transaction.lock",
                 run / "state" / "delegate_transaction.json",
                 run / "state" / "assignment_cancellation_transaction.json",
                 run / "state" / "assignment_cancellations"
@@ -13904,15 +16370,49 @@ def _selftest() -> int:
     return 0 if not bad else 1
 
 
+def _safe_exception_token(
+    exc: BaseException,
+) -> tuple[str, contract_schema.ContractSchemaUnavailable | None]:
+    """Return one non-secret cause token and the typed schema fault, if any."""
+    safe_cause = type(exc).__name__
+    cursor: BaseException | None = exc
+    seen: set[int] = set()
+    schema_fault: contract_schema.ContractSchemaUnavailable | None = None
+    while cursor is not None and id(cursor) not in seen:
+        seen.add(id(cursor))
+        if isinstance(cursor, contract_schema.ContractSchemaUnavailable):
+            schema_fault = cursor
+            safe_cause = ".".join((
+                type(cursor).__name__, cursor.code, cursor.cause_class,
+            ))
+            break
+        cursor = cursor.__cause__ or cursor.__context__
+    return safe_cause, schema_fault
+
+
+def _schema_repair_guidance(
+    fault: contract_schema.ContractSchemaUnavailable | None,
+) -> str:
+    if fault is None:
+        return ""
+    return (
+        "；schema 修复不得在当前失败链中绕过 Hook。请发起独立框架维护回合并运行精确 "
+        f"`python3 tools/contract_schema.py prepare {fault.schema_name}`，"
+        "只编辑命令输出的 ignored candidate，再运行其 `next_argv`"
+    )
+
+
 def _runtime_hook_failure_diagnostic(event: dict, exc: Exception) -> tuple[int, str]:
     hook = str(event.get("hook_event_name") or "")
     if hook not in {
             "PostToolUse", "PostToolUseFailure",
             "SubagentStart", "SubagentStop"}:
         return 0, ""
+    safe_cause, schema_fault = _safe_exception_token(exc)
     return 2, (
         f"[{E_RUNTIME_RECEIPT_HOOK_FAILED}] {hook} runtime receipt "
-        f"recording failed closed: {type(exc).__name__}"
+        f"recording failed closed: {safe_cause}"
+        + _schema_repair_guidance(schema_fault)
     )
 
 
@@ -13935,9 +16435,11 @@ def main() -> int:
         if hook == "PreToolUse":
             run_dir = explicit_active_run()
             state = "active run" if run_dir is not None else "no active run"
+            safe_cause, schema_fault = _safe_exception_token(exc)
             print(json.dumps(_deny(
                 f"Xunji PreToolUse contract 内部异常，{state} 按 fail-closed 阻断："
-                + type(exc).__name__), ensure_ascii=False))
+                + safe_cause + _schema_repair_guidance(schema_fault)),
+                ensure_ascii=False))
             return 0
         exit_code, diagnostic = _runtime_hook_failure_diagnostic(event, exc)
         if diagnostic:
