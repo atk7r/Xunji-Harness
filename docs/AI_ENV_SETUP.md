@@ -72,6 +72,7 @@ playwright install chromium
 | `config.ini` | 本机覆盖配置；选择运行模式并启用外部协助 provider | 否 |
 | `.claude/settings.json` | Claude hooks、statusline 接线 | 是 |
 | `.claude/settings.local.json` | 本机 Claude 权限白名单 / 本地偏好 | 否 |
+| `.claude/settings.local.example.json` | 最小本机权限样例；无 auto-allow，只保留破坏性 ask | 是 |
 | `.claude/xunji_active_run` | 当前 active run 指针 | 否 |
 | `.claude/xunji_session_selections/` | Claude session 的持久选择/因果回执；仅 exact resume 可据此走公开恢复路径 | 否 |
 | `tools/harness/proxy.conf` | 交战出口代理，一行一个 URL | 否 |
@@ -85,6 +86,21 @@ playwright install chromium
 cp config.example.ini config.ini
 # 把 config.ini 里的 mode 改为 dev；真实运行保持 normal
 ```
+
+Claude 本机权限从最小样例开始，不复制旧机器积累的目标、临时脚本或命令
+auto-allow。项目的可机械验证基线是 `permissions.allow=[]`；任何非空 auto-allow
+都会只按数量报告本机 hygiene HOLD，不解析或输出可能含私有信息的规则正文：
+
+```bash
+cp .claude/settings.local.example.json .claude/settings.local.json
+python3 tools/check_local_hygiene.py
+```
+
+该检查以 strict UTF-8 有界读取并拒绝 symlink/非普通文件，同时校验
+`allow/ask/deny` 的列表形状；仓库里的最小样例也会接受同一凭据扫描和
+`allow=[]`/最小结构漂移检查。样例与该检查都只约束 Claude 的本机提示/自动批准
+体验，不是 Xunji authority 或 safety 边界；每次调用仍由项目 Hooks、turn
+contract 和 capability registry 重新校验。
 
 `normal` 与 `dev` 都会读取同一套 authority、safety、privacy、evidence
 与 closure integrity 硬边界。区别只在开发体验：`normal` 允许重复的

@@ -111,11 +111,14 @@ scope、maintenance、finding、pointer 或 closure authority。
 transaction commit 后只保留读取与 registered local verification，frontier/evidence、Agent、Cron、
 target 和其他状态修改继续 fail closed。
 
-### 3.6 按需上下文与最小能力
+### 3.6 按需上下文与最小暴露
 
 `CLAUDE.md`/`AGENTS.md` 只保存常驻不变量和路由。具体字段、流程和专项方法放进
 skills/reference；Agent 只得到完成 lane 所需的上下文与能力。父级合并结构化
-receipt/candidate，而不是把完整子会话当作状态。
+receipt/candidate，而不是把完整子会话当作状态。Xunji 不以减少 registry 中的能力数量为
+目标：能力保持细分，统一使用 typed capability/effect/validator/mandatory-service 契约；
+真正最小化的是每个 assignment 当前看到的派生能力投影和自动批准面。完整 registry 仍由
+Hook 在调用时精确匹配，不能把多个语义入口合并进一个宽 Bash 入口来换取表面上的 Tool 少。
 
 ### 3.7 并发取决于副作用
 
@@ -152,6 +155,12 @@ active run；它不是敌对多租户服务。目标模型固定为：**操作�
 3. **本地可靠性机制**：canonical 单写者、原子替换、append-only receipt、幂等恢复保护崩溃
    与模型误操作。active-run pointer 可以保留为当前选择，但 pointer/session ownership、
    防抢占 ACL 和专用 maintenance 授权仪式不是个人工具的不变量。
+
+`.claude/settings.local.json` 只控制 Claude 宿主的本机提示/自动批准体验，不是 Xunji 的
+authority 或 safety owner。项目样例固定 `permissions.allow=[]`；本地文件只要出现任何
+auto-allow 就由 hygiene preflight 按数量 HOLD，但不解析、输出或把规则正文复制进 CI。
+真正的 effect、scope、privacy、route、budget 与 recorder 边界仍由 Hook 和 capability
+registry 在每次调用时重验。
 
 通用 live-effect 策略由 `.claude/skills/safety-boundary/SKILL.md` 统一解释为四级：
 L1 `AUTO`、L2 `NOTIFY`、L3 `GATE`、L4 `BLOCK`。L2 是“可逆但值得审计”，不能因
@@ -862,13 +871,33 @@ Unknown/untyped Bash 仍保留只用于 denial 的保守文本检测，可能继
 按 `https=443`、`http=80` 归一后再与 assignment 比较；description/prompt 散文不参与
 归因。显式 assignment port 继续 exact-match，旧 immutable runtime receipt 只由同一解释器
 在含可解析 destination-bearing input 时重算；缺失或歧义保持 settlement debt，不改写 journal
-或以重复出站动作绕过。若 target front
-已冻结 HTTP GET liveness next move，context pack 生成一次精确公开 `probe.py` argv。目标路线
-默认 direct，只有当前 operator 明确要求才选择 proxy；context pack 分别把 exact
-`XUNJI_PROXY_REQUIRED=0|1` 冻结进所有 target lane guidance。Dormant `XUNJI_PROXY`/
+或以重复出站动作绕过。`context_pack.py` 在每次 assignment 创建时，从冻结 lane/front
+重新计算 **0–3 个** derived registry-backed capability view；推不出完整 argv 时 0 是正确结果，
+不能按 effect 枚举 registry 或为凑数猜命令；空投影只描述这层 derived view，不会移除
+built-ins、公开 capability contract 或 assignment authority。第一版闭集只生成 frozen next move
+以窄肯定句把能力作为起始动词直接动作且含唯一 URL 的 HTTP GET liveness，以及把唯一、
+非 symlink saved evidence artifact 作为直接宾语的 bounded range/search/strings/JS inventory。
+否定、排除、已完成、条件式、多个 URL、
+多个 artifact、非法显式 offset/length 或无法唯一绑定的描述均产生 0。GET argv 保留 frozen URL
+原文，使用 assignment-unique no-clobber basename，并固定 `--no-redirect --headers`，避免经目标
+30x 形成 registry/assignment 看不到的第二跳。每个候选都必须反向通过 exact registry id/argv、
+active-run reference、lane-effect subset、env、request budget、route、assignment asset endpoint
+与已存在的 target-attempt barrier action fingerprint；任一歧义、越界或不匹配直接不投影。
+Context 同时冻结 expected evidence 与 stop condition，并写入只供离线 A/B 连接的
+capability/action hash marker。该投影只是 guidance，不是新的 registry、availability 或
+authority；Hook 仍重新验证 turn、assignment、scope、privacy、proxy、guard、budget、command
+shape 与 recorder。目标路线默认 direct，只有当前 operator 明确要求才选择 proxy；context pack
+分别把 exact `XUNJI_PROXY_REQUIRED=0|1` 冻结进 target argv，永不投影实际代理值。Dormant `XUNJI_PROXY`/
 `proxy.conf` 不具有 route authority；route-less historical contract 与仅禁止 direct 的 prompt
-均冻结为 offline。Agent 不再为发现 CLI 参数或 route 读取工具/Hook/guard
-源码，Hook 仍重新验证全部出站硬边界。Browser process 剥 ambient proxy env；scanner 先
+均冻结为 offline。Recorded assignment 的 context 由 frozen instruction bundle 的 identity、digest、
+descriptor/path containment 与 **exact context bytes** 重放，不因后来 role/scaffold source 维护而
+重新生成。生成的 Agent Markdown 会被 heartbeat/finish 正常更新，因此 context replay 与离线测量
+只要求它仍是同 descriptor/path 下可安全读取的 bounded regular strict-UTF-8 文件，不把生命周期
+更新误报为 instruction drift；严格 frozen verifier 仍要求两份 artifact byte-exact，live admission
+再额外要求 current source freshness。Prepared marker 只从唯一生成 section 的完整结构读取，必须
+反向匹配 registry 并重算 Bash action hash；target/front 数据中的同名文本不能伪造归因。
+Agent 不再为发现 CLI 参数或 route 读取工具/Hook/guard 源码，Hook 仍重新验证全部出站硬边界。
+Browser process 剥 ambient proxy env；scanner 先
 preflight selected proxy endpoint，并把 native transport retry 设为 0。显式代理缺配置 fail closed；首个 proxy-attributed
 connect/TLS failure 立即打开 route-wide manual pause 并停止 wrapper retry。冷却时间、内部 wake、
 Agent/Root 文本均不能恢复；只有 failure 之后更新的顶层 operator turn 可通过默认 direct 换路，
@@ -1192,6 +1221,20 @@ Claude Code primary-driver E2E 仍是当前实现的验收门。完整 A/B bench
 仍待验证。`>=4 diverse fronts` 继续作为强制 breadth safety net，不是日常 scheduler；
 不能因 Python 调度闭环已落地就推断真实 Agent 验收或 bench 已完成。
 
+Tool friction 只在 fixture 显式声明 `expected_tool_friction` 时进入评分，旧 fixture 的原有
+score/exit gate 不因此改变。`runtime_receipts.py` 先验证 journal chain 与 plan-bound child
+claim，再以完整 identity 和同一 Start/Stop 因果区间连接 denial/Post/transcript terminal；
+`AgentToolCallClaim.success=false` 只是 attempt/预算事实，不能当工具失败。缺 Xunji denial 且存在
+exact child terminal 只能称 `xunji_non_denied_terminal`；宿主原生权限拒绝也可能产生这种
+transcript terminal，因此不能推断宿主已批准、effect 已执行或工具成功。
+Prepared hit 还必须由 frozen bundle 中唯一完整 section 反向证明 exact Bash/registry/action hash，
+并让同 assignment 的 claim 共享一个 `launch_prompt_sha256`，且与当前冻结 row 重建出的唯一
+launch prompt hash 完全相等；自洽但属于另一 launch 的替换 bundle 只能进入 attribution unknown。
+Measurement verifier 保持 context byte-exact，只豁免 lifecycle-mutable Agent Markdown 的当前字节，
+该豁免不能替代上述 launch-hash 绑定或 live admission。
+`bench.py` 对 required fixture 的 unknown、阈值失败、attribution unknown 和 fixture 集变化 fail
+closed；当前实现提供可度量口径，不宣称尚未完成的长期 A/B 收益、token 节省或 target 成功。
+
 ## 7. 非当前路线
 
 CCB/TypeScript 原生化、双 runtime、语言重写和为其准备的 repository abstraction 均不在
@@ -1218,6 +1261,7 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `tools/setup_transaction.py` | staging、setup receipt、active pointer、typed lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
 | `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
 | `tools/harness/capability_registry.py` | exact script/argv→effect 与 mandatory service policy；`root_direct_eligible` 默认关闭 | turn contract、command-shape、文档命令 fixture |
+| `tools/context_pack.py` | 从 frozen lane/front 派生 0–3 个 exact registry-backed capability guidance、expected evidence/stop projection；不拥有 authority、availability 或 registry | instruction bundle、workers、turn route、barrier fingerprint、runtime attribution、intent/ambiguity/redirect fixtures |
 | `tools/harness/output_layout.py` | active-run artifact/classify bucket 与 standalone invocation scratch 的统一路径 owner；只做 placement/containment，不晋级 evidence | probe/render/fetch/classify、local hygiene、TTL/migration selftests、protected-path manifest |
 | `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
 | `tools/harness/guard.py` | 主动工具统一运行时护栏 | wrappers、privacy/proxy、fixtures、独立复审 |
@@ -1226,12 +1270,14 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `tools/work_plan.py` + `contracts/work-plan.v1.schema.json` | Macro-Stage/work-plan/delegation 单一 commit owner、前向恢复事务、plan snapshots、stage transition 与 versioned infra-barrier lane binding/preflight | run_model、loop journal、workers、turn/run gates、barrier owner、fault fixtures |
 | `tools/barrier_state.py` + `contracts/infra-barrier.v1.schema.json` | 从 runtime-proven zero-byte denial 自动派生的重复基础设施 barrier hash-chain、typed open/clear 与 exact-action target retry preflight；Hook 自动 observe/matching target-or-repair clear，不拥有 front/evidence/target failure | runtime receipts、work-plan commit、child Pre/PostToolUse、workers delegate、capability registry、provenance/race/clear/fault fixtures |
 | `tools/completion_transaction.py` + completion/review-policy schemas | `adopt-policy/prepare/commit/reopen`、transcript-backed check token/warning set、review slot binding、complete closure manifest/basis CAS、terminal state、report FINAL 与 marker 原子发布的 sole writer | setup policy、S3 completion challenge、Reason/cycle-end/check/Cron/runtime receipts、check_run、terminal Hook/capability registry、forgery/drift/fault fixtures |
-| `tools/probe.py` + `contracts/probe-body-chunks.v2.schema.json` + `tools/artifact_view.py` | 有界响应 streaming/chunk no-clobber publication、strict Range、relative/hash manifest、secure-open/final identity fence 与 evidence 内有界 local read；不拥有 evidence promotion | guard/privacy/proxy、replay、workers durable wire/manifest consumer、output layout、path/symlink/race/limit fixtures |
-| `contracts/agent-instruction-sources.v1.json` + `tools/agent_instruction_bundle.py` + `docs/templates/agents/` + `.claude/agents/xunji-{hunter,reviewer}.md` | Claude-primary versioned source selection、common+role delta 组合、scaffold/live definition 与 source/artifact byte-integrity contract | workers、context pack、assignment schema、runtime receipts、turn contract、template check、protected-path manifest |
+| `tools/probe.py` + `contracts/probe-body-chunks.v2.schema.json` + `tools/artifact_view.py` + `tools/js_inventory.py` | 有界响应 streaming/chunk no-clobber publication、strict Range、relative/hash manifest、secure-open/final identity fence，以及 evidence 内 range/search/strings/单-artifact JS inventory；JS 输出有界脱敏、不呈现原始内容或 unkeyed content digest 且非 canonical，不拥有 evidence promotion | guard/privacy/proxy、replay、workers durable wire/manifest consumer、output layout、capability registry、path/symlink/race/secret/limit fixtures |
+| `contracts/agent-instruction-sources.v1.json` + `tools/agent_instruction_bundle.py` + `docs/templates/agents/` + `.claude/agents/xunji-{hunter,reviewer}.md` | Claude-primary versioned source selection、common+role delta 组合、scaffold/live definition；分别提供 live source-fresh + strict frozen artifact + exact-context/lifecycle-readable-Agent replay/measurement 契约 | workers、context pack、assignment launch hash、runtime receipts、turn contract、template check、path/descriptor/lifecycle-mutation fixtures、protected-path manifest |
 | `tools/workers.py` + assignment/merge/review schemas | lane planner、S3 零-lane completion proposal 与公开 exact completion Agent formatter、预算/effect scheduler、批量 assignment 事务、原子物化 instruction bundle/context/Agent scaffold，并由 typed row 返回 canonical type+prompt 二元 launch contract、Reviewer/Root disposition，以及 failed-Stop/stream-stall recovery 的 status discovery/exact control argv | runtime receipts、context pack、Agent source manifest、merge/conflict/completion/recovery tests |
 | `tools/agent_settlement.py` + `contracts/assignment-cancellation.v2.schema.json`（v1 只读兼容） | turn/input/both stale-plan unlaunched assignment 的 typed cancellation、immutable tombstone、runtime/replan barrier 与 forward recovery | workers 单写者、runtime receipts、turn contract、fault/schema fixtures |
 | `tools/harness/subagent_stop_ingress.py` + `contracts/subagent-stop-ingress.v1.schema.json` | 唯一 first Stop Hook 的 stdlib-only、project-level、内容寻址 arrival observation 与 downstream exact forwarding；不拥有 run/lifecycle/assignment/result/review/evidence/merge/closure truth | `.claude/settings.json` 唯一 wiring、runtime recovery 的 run-owned Start 后置绑定、symlink/durability/concurrency fixtures、protected-path manifest |
-| `tools/runtime_receipts.py` + Root/Agent/foreign-lifecycle/interrupted-Reviewer/external-stop/stream-stall/hook-failed-Stop receipt schemas | 含 instruction-bundle digest 的 plan-bound type+prompt、typed tool-call/request budget 唯一 formatter、Start 冻结与 child PreToolUse 重验/原子 claim，assignment-free global completion formatter/lifecycle、exact child-sidechain transcript truth、hook-observed launch/return/failure 及 exact claim-bound barrier facts、foreign Claude lifecycle admission/quarantine、pre-model Reviewer Start supersession、exact Claude user-stop/no-resume 与 exact host stream-watchdog failed projection、exact downstream Stop-Hook-failure returned projection、有硬上限/final fence/defensive-copy 的 invocation-local parse-once `RunValidationSnapshot`、immutable result、ROOT_DIRECT claim/terminal projection | ingress receipt、workers、instruction bundle、turn contract、parent/child transcript、run model、loop journal、check_run、schema/TOCTOU/cap/cache-mutation fixtures |
+| `tools/runtime_receipts.py` + Root/Agent/foreign-lifecycle/interrupted-Reviewer/external-stop/stream-stall/hook-failed-Stop receipt schemas | 含 instruction-bundle digest 的 plan-bound type+prompt、typed tool-call/request budget 唯一 formatter、Start 冻结与 child PreToolUse 重验/原子 claim，assignment-free global completion formatter/lifecycle、exact child-sidechain transcript truth、hook-observed launch/return/failure 及 exact claim-bound barrier facts、foreign Claude lifecycle admission/quarantine、pre-model Reviewer Start supersession、exact Claude user-stop/no-resume 与 exact host stream-watchdog failed projection、exact downstream Stop-Hook-failure returned projection、有硬上限/final fence/defensive-copy的 invocation-local parse-once `RunValidationSnapshot`、immutable result、ROOT_DIRECT claim/terminal projection，以及只输出聚合结果的 plan-bound tool-friction/prepared attribution projector | ingress receipt、workers、instruction bundle、turn contract、parent/child transcript、run model、loop journal、check_run、bench、schema/TOCTOU/causality/marker-injection/cap/cache-mutation fixtures |
+| `tools/bench.py` + `bench/fixtures/` | opt-in tool-friction 阈值、A/B required metric 与 exact fixture-population comparison；不从未知 terminal 猜 effect success，不拥有 runtime receipts | runtime outcome projector、fixture truth、legacy score/exit compatibility、unknown/population/threshold negative fixtures |
+| `.claude/settings.local.example.json` + `tools/check_local_hygiene.py` | 本机 Claude auto-allow 最小样例与 bounded/no-leak hygiene preflight；不是 authority 或 safety 边界，operator-local 状态不进入 hermetic CI truth | AI environment setup、Hook/capability registry、live preflight + 独立 hermetic selftest |
 | `tools/run_model.py` + `tools/loop_journal.py` + cycle schema | receipt-derived plan debt/readiness 与 append-only typed cycle/stage sequence | work plan、run/check gates、exact rederive/fallback/tamper fixtures |
 | `docs/WORKFLOW*.md` | live run 核心/按需参考流程 | templates、check_run、skills |
 | `docs/cognition/` | 判断纪律与 evidence confidence | 不把攻击 playbook 写进 cognition |
@@ -1528,6 +1574,92 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     health success。Local control argv/note 中的 route 文本不得被扫描成 target effect。
 
 ## 12. Maintenance Checkpoint
+
+### 2026-08-12 — Rich capability registry with minimum runtime exposure
+
+- Date: 2026-08-12
+- Scope: replace the earlier "few tools" interpretation with a typed, capability-rich
+  registry and a minimal per-assignment exposure model; add zero-to-three derived
+  prepared capability views, narrow saved-artifact JS/API inventory, local Claude
+  permission hygiene, plan-bound tool-friction measurement, and the missing trusted
+  entrypoint/selftest wiring required for one green project health gate.
+- Architecture impact: yes — capability count is no longer treated as the optimization
+  target. The registry keeps semantically distinct capabilities so argv validation,
+  effect policy, permissions, rendering, audit, and mandatory services remain precise.
+  `context_pack.py` exposes only zero to three complete derived argv for the frozen
+  assignment; that projection is guidance and never changes registry availability,
+  built-in tool availability, assignment authority, or Hook admission. Ambiguous,
+  negated, excluded, completed, conditional, multi-URL/multi-artifact, route/barrier-
+  mismatched, redirecting, or clobbering projections produce zero candidates.
+- Owner/enforcement: `tools/harness/capability_registry.py` remains the exact
+  script/argv/effect/service owner. `tools/context_pack.py` owns only deterministic
+  candidate derivation and marker rendering. `tools/agent_instruction_bundle.py`
+  owns live, strict-frozen, context-replay, and measurement validation surfaces;
+  lifecycle-mutated Agent Markdown never relaxes exact context or launch-hash binding.
+  `.claude/hooks/`, turn contract, command shape, scope/privacy/proxy/guard/budget, and
+  recorder services still revalidate every effect. `tools/artifact_view.py` and
+  `tools/js_inventory.py` own bounded secure local reads; `runtime_receipts.py` owns
+  aggregate causal outcome projection; `bench.py` owns opt-in thresholds and A/B
+  population checks. `check_local_hygiene.py` checks host convenience only and is not
+  an authority boundary.
+- Migration: no live run, journal, assignment, evidence, finding, report, pointer, or
+  historical review record was rewritten. Old fixtures without `expected_tool_friction`
+  retain their score/exit behavior; missing or unprovable historical attribution stays
+  unknown. The tracked permission example requires `allow=[]`; the ignored workstation
+  file was reduced from 71 local auto-allow entries to zero, while its exact prior bytes
+  remain recoverable from the dated backup. No WebSocket transport was admitted.
+- Verification: Python compilation, `git diff --check`, direct instruction-bundle
+  selftest, focused 15-suite integration, rule/template/runtime-boundary/local-hygiene
+  gates, and the exact final `python3 tools/selftest_all.py` all passed. The final full
+  matrix is `80 passed, 0 failed` in 139.4 seconds. Named adversarial fixtures cover
+  marker injection, cross-tool hashes, launch replacement, future/after-Stop terminals,
+  lifecycle Agent mutation, context/path/descriptor tamper, symlink and directory-chain
+  replacement, low-entropy secret digest leakage, single/double percent-encoded path and
+  query-name leakage, CLI error privacy, redirect/no-clobber,
+  English/Chinese negation and conditional suffixes, URL query words, permission-template
+  drift, producer exceptions, threshold unknowns, and benchmark population removal.
+- Claude Code real-driver validation: the exact candidate was exercised only in isolated
+  worktree `/private/tmp/xunji-tool-exposure-driver.H9kMiv/Xunji`. Fresh DeepSeek-backed
+  session `b21ef597-ecaa-4b08-8ed1-a91ed3da4983` completed one synthetic offline
+  Hunter -> Reviewer -> Root cycle without `/loop`. The Hunter received exactly one
+  prepared `read.js-inventory` command,
+  `python3 tools/js_inventory.py inspect runs/driverjs_20260812 evidence/app.js`, with
+  action hash `c133210dbff54132ec5941fe1736b73571560877587e70d192d2798a1a8ccfb8`.
+  Runtime truth recorded 2 Agent launches, 14 child claims, 0 child denial, 0 Cron/Web/
+  target/request action, clean chain/assignment settlement, and no canonical evidence,
+  finding, report, or closure promotion. Final code replay over the frozen receipts yields
+  attempted=14, outcome unknown=0, non-denied terminal=14, prepared hits=2/offered=14,
+  attribution unknown=0. Both Hunter and Reviewer received the same single prepared
+  capability and each used its exact Bash action once. `offered=14` is claim-level: it
+  counts every child call from assignments whose verified context exposed at least one
+  prepared capability, not the number of prepared entries or Bash calls. The synthetic
+  setup/front was a test precondition, not proof that Claude authored setup inputs.
+- Independent review: external assistance is disabled, so no heterogeneous vote is
+  claimed. Fresh no-tools Claude session `ffffb632-be0b-4c4e-97fa-84adda92550c` returned
+  PASS/no P0-P2 for offline reads and local permissions. Session
+  `92695bae-a257-48a9-932b-7712566b00d9` returned WARN with one real P2: lifecycle Agent
+  updates blocked frozen context replay. That defect was fixed, and focused session
+  `ab148be8-7894-44f1-9b56-56d39e8d6162` returned PASS/no unresolved P0-P2. Final
+  capability-exposure session `4bf04860-687c-47ba-8c9d-c89ca03ac7c0` returned PASS/no
+  unresolved P0-P2; its conditional-suffix P3 was mechanically reproduced, fixed, and
+  covered by target/local English/Chinese tests. Oversized sessions
+  `1125b72c-60a3-47cc-9c4d-00701140b5f1` and
+  `3831d061-7086-4256-870a-ef64fe0ac920` reached output limits without a verdict and do
+  not count as votes. Full disposition is recorded in
+  `review/records/2026-08-12-tool-exposure-optimization.md`.
+  Final exact-slice review sessions `dee35f05-fdb1-44f3-91b2-ec7aca691bc4` and
+  `f18942ee-a484-4362-a95a-5efc292dbf53` passed the capability and metrics surfaces.
+  Offline slice `82ee9844-3957-427a-b191-8e11b5cf6a2b` correctly held a percent-encoded
+  short-path-secret leak; raw `%` is now redacted before any decoded path/query name can
+  render, single/double-encoding fixtures pass, and focused follow-up
+  `b4fe2fbb-c8a2-4731-ba8c-fa39647d19e2` returned PASS/no unresolved P0-P2.
+- Residuals/exclusions: live WebSocket remains NO-GO until one unified raw-socket proxy,
+  scope, frame/message/byte/time budget, privacy, recorder, and review contract exists.
+  Tool-friction proves Xunji non-denial and transcript terminal, not host permission,
+  effect success, useful evidence, token savings, or A/B benefit. One extra ordinary
+  local `Read` in the driver is permitted built-in capability, not exposure failure.
+  Codex did not execute target traffic, alter the original active pointer or `runs/`,
+  promote the offline candidate, or count its own review as an independent vote.
 
 ### 2026-08-11 — Stream-watchdog Agent typed termination
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+from dataclasses import dataclass
 import io
 import json
 import os
@@ -42,6 +43,22 @@ class ArtifactViewError(ValueError):
         self.code = code
         self.detail = detail
         super().__init__(f"{code}: {detail}" if detail else code)
+
+
+@dataclass(frozen=True)
+class BoundedArtifactRead:
+    """One stable, bounded byte snapshot of a run-owned evidence artifact.
+
+    The returned payload is never larger than ``scan_limit``.  The file and
+    every parent component remain protected by the same no-follow, identity
+    stable open used by the CLI views.
+    """
+
+    artifact: str
+    file_size: int
+    payload: bytes
+    scanned_bytes: int
+    scan_truncated: bool
 
 
 def _fail(code: str, detail: str) -> None:
@@ -171,21 +188,27 @@ def _open_directory_path(path: Path) -> int:
         _fail("ARTIFACT_VIEW_OPEN_FAILED", type(exc).__name__)
 
 
-def _open_relative_regular(anchor: Path, relative: Path) -> tuple[int, int]:
-    """Return leaf/parent fds from one anchored no-follow component walk."""
+def _open_relative_regular(
+    anchor: Path, relative: Path,
+) -> tuple[int, int, tuple[tuple[int, int], ...]]:
+    """Return leaf/parent fds plus every opened directory identity."""
     parts = relative.parts
     if not parts or any(part in {"", ".", ".."} for part in parts):
         _fail("ARTIFACT_VIEW_OPEN_FAILED", "artifact path is not a safe relative path")
     parent = _open_directory_path(anchor)
+    parent_stat = os.fstat(parent)
+    directory_chain = [(parent_stat.st_dev, parent_stat.st_ino)]
     try:
         for part in parts[:-1]:
             child = os.open(part, _directory_flags(), dir_fd=parent)
             os.close(parent)
             parent = child
+            child_stat = os.fstat(parent)
+            directory_chain.append((child_stat.st_dev, child_stat.st_ino))
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) \
             | getattr(os, "O_NOFOLLOW", 0)
         leaf = os.open(parts[-1], flags, dir_fd=parent)
-        return leaf, parent
+        return leaf, parent, tuple(directory_chain)
     except OSError as exc:
         os.close(parent)
         _fail("ARTIFACT_VIEW_OPEN_FAILED", type(exc).__name__)
@@ -197,10 +220,9 @@ def _open_stable(path: Path, *, anchor: Path):
     try:
         anchor_resolved = anchor.resolve(strict=True)
         relative = path.relative_to(anchor_resolved)
-        anchor_before = os.stat(anchor_resolved, follow_symlinks=False)
     except (OSError, ValueError) as exc:
         _fail("ARTIFACT_VIEW_OPEN_FAILED", type(exc).__name__)
-    descriptor, parent_descriptor = _open_relative_regular(
+    descriptor, parent_descriptor, directory_chain = _open_relative_regular(
         anchor_resolved, relative)
     try:
         before = os.fstat(descriptor)
@@ -223,23 +245,21 @@ def _open_stable(path: Path, *, anchor: Path):
                 "artifact changed during bounded inspection",
             )
         try:
-            path_after = os.stat(
-                relative.parts[-1], dir_fd=parent_descriptor,
-                follow_symlinks=False,
+            current_descriptor, current_parent, current_directory_chain = (
+                _open_relative_regular(anchor_resolved, relative)
             )
-            anchor_descriptor = _open_directory_path(anchor_resolved)
             try:
-                anchor_after = os.fstat(anchor_descriptor)
+                current_path = os.fstat(current_descriptor)
             finally:
-                os.close(anchor_descriptor)
-        except OSError as exc:
+                os.close(current_descriptor)
+                os.close(current_parent)
+        except (ArtifactViewError, OSError) as exc:
             _fail("ARTIFACT_VIEW_ARTIFACT_CHANGED", type(exc).__name__)
-        if not _identity_unchanged(before, path_after) \
-                or (anchor_before.st_dev, anchor_before.st_ino) != (
-                    anchor_after.st_dev, anchor_after.st_ino):
+        if not _identity_unchanged(before, current_path) \
+                or directory_chain != current_directory_chain:
             _fail(
                 "ARTIFACT_VIEW_ARTIFACT_CHANGED",
-                "artifact path changed during bounded inspection",
+                "artifact path or directory chain changed during bounded inspection",
             )
     finally:
         os.close(descriptor)
@@ -264,6 +284,42 @@ def _bounded_int(
 
 def _decode(value: bytes) -> str:
     return value.decode("utf-8", "replace")
+
+
+def read_bounded_artifact(
+    run_dir: str | Path,
+    artifact: str | Path,
+    *,
+    scan_limit: int,
+    runs_root: str | Path = RUNS_ROOT,
+) -> BoundedArtifactRead:
+    """Secure-open one explicit evidence artifact and read a bounded prefix.
+
+    This is the public reuse surface for offline analyzers.  It deliberately
+    returns bytes rather than decoded or rendered target content, and it grants
+    no evidence/canonical-state authority.
+    """
+    scan_limit = _bounded_int(
+        scan_limit, field="scan_limit", minimum=1, maximum=MAX_SCAN_LIMIT,
+    )
+    run, path, relative = resolve_artifact(
+        run_dir, artifact, runs_root=runs_root,
+    )
+    with _open_stable(path, anchor=run / "evidence") as (handle, before):
+        budget = min(before.st_size, scan_limit)
+        payload = handle.read(budget)
+        if len(payload) != budget:
+            _fail(
+                "ARTIFACT_VIEW_ARTIFACT_CHANGED",
+                "artifact ended before its stable bounded read completed",
+            )
+    return BoundedArtifactRead(
+        artifact=relative,
+        file_size=before.st_size,
+        payload=payload,
+        scanned_bytes=len(payload),
+        scan_truncated=len(payload) < before.st_size,
+    )
 
 
 def view_range(
@@ -521,6 +577,9 @@ def _selftest() -> int:
             run, "large.bin", min_length=5, scan_limit=len(payload),
             max_strings=10, max_string_bytes=32, runs_root=runs_root,
         )
+        bounded = read_bounded_artifact(
+            run, "large.bin", scan_limit=16, runs_root=runs_root,
+        )
         limited = search_literal(
             run, "large.bin", pattern="tail-printable", scan_limit=32,
             runs_root=runs_root,
@@ -539,6 +598,12 @@ def _selftest() -> int:
             ("strings extraction preserves offsets and bounded previews",
              any(item["text"] == "HELLO_WORLD" for item in strings["strings"])
              and all(len(item["text"]) <= 32 for item in strings["strings"])),
+            ("public stable read returns only its bounded prefix",
+             bounded.payload == payload[:16]
+             and bounded.scanned_bytes == 16
+             and bounded.file_size == len(payload)
+             and bounded.scan_truncated is True
+             and bounded.artifact == "evidence/large.bin"),
             ("scan limit is explicit and cannot imply absence",
              limited["scan_truncated"] and not limited["matches"]),
             ("all operations are read-only",
@@ -604,6 +669,30 @@ def _selftest() -> int:
             checks.append((
                 "secure open rejects an intermediate symlink without a resolve/open gap",
                 _expect_error("ARTIFACT_VIEW_OPEN_FAILED", open_linked_parent),
+            ))
+
+            moving = evidence / "moving"
+            moving.mkdir()
+            moving_artifact = moving / "inside.bin"
+            moving_artifact.write_bytes(b"stable-old-bytes")
+            moving_artifact_resolved = moving_artifact.resolve()
+
+            def replace_intermediate_during_read() -> None:
+                moved = evidence / "moving-old"
+                with _open_stable(
+                    moving_artifact_resolved, anchor=evidence,
+                ) as (handle, _before):
+                    handle.read(6)
+                    moving.rename(moved)
+                    moving.mkdir()
+                    (moving / "inside.bin").write_bytes(b"replacement")
+
+            checks.append((
+                "intermediate directory replacement during read fails the final fence",
+                _expect_error(
+                    "ARTIFACT_VIEW_ARTIFACT_CHANGED",
+                    replace_intermediate_during_read,
+                ),
             ))
 
         with mock.patch(__name__ + "._identity_unchanged", return_value=False):

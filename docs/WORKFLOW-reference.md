@@ -80,6 +80,38 @@ uses `<run>/state/http/` (or invocation scratch without a run), and an explicit 
 path must remain under `<run>/state/`. `classify_hosts --egress-recheck` is separately bound to
 `<run>/classify/` because its coverage overlay is not an evidence body.
 
+For offline JS/API route extraction, the sole registered command is:
+
+```bash
+python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>
+```
+
+`read.js-inventory` is an `active_run`-scoped `local_read`; no optional path list,
+whole-run fallback, output flag, or network mode is registered. The legacy
+positional whole-run form remains forbidden. The artifact
+must be exactly one supported file under `evidence/`. The shared stable secure-open
+rejects traversal and symlinks at the evidence root, every intermediate component,
+and the leaf, then re-walks and compares the complete directory chain plus file
+identity across the read. Scan, candidate,
+and serialized-output ceilings are fixed at 2 MiB, 64, and 64 KiB. Output is compact
+JSON with opaque active-run/artifact identifiers; query values, userinfo, fragments,
+local paths/basenames, high-entropy query keys, and sensitive/high-entropy path
+segments or values following sensitive path keys are removed or redacted.
+Raw artifact bytes and their unkeyed content digests are never rendered into the
+model-visible inventory; low-entropy content must not gain an offline-guess oracle.
+Every row is marked untrusted target-derived candidate material. The command writes
+nothing and its output is noncanonical: it cannot create evidence, a finding, a
+front disposition, or promotion authority. A prepared `local_read` projection may
+include this exact command only when the current frozen front resolves one
+unambiguous supported evidence artifact and explicit JS/API inventory intent;
+registry reverse-match and the normal Hook gates remain mandatory.
+
+WebSocket URL recognition remains conservative classification/denial only. A
+dedicated WebSocket capability is currently **NO-GO** because there is no unified
+raw-socket proxy, no frame/message/byte/duration budgets, and no handshake/message
+audit recorder. `websocat`, `wscat`, browser sockets, or a new helper must not form
+a second outbound path around scope, privacy, proxy, guard, budget, and recording.
+
 `check_run.py` **warns on layout
 drift at closure** — proof/scratch files left loose in the run root once a final
 report exists — because mixing evidence with scratch is what makes a run hard to
@@ -1111,12 +1143,28 @@ another executable protocol.
   receipts plus the complete composed role text, not manifest/template/live-Agent
   paths. A child consumes that receipt and must not spend its call budget rereading
   or hashing framework instruction sources.
-- **Prepared public action**: when a target lane's frozen front already chooses an
-  HTTP GET liveness check, the generated context pack contains the exact registered
-  `probe.py` argv (including the current turn's exact direct/proxy selector).
-  The Agent uses that argv before any framework-source inspection. A denial may be
-  retried once from public hook guidance; it does not authorize reading hook/guard
-  internals until the call budget is exhausted.
+- **Prepared capability projection**: assignment creation recomputes zero to three
+  derived, exact registry-backed capability views from the frozen lane/front. Zero
+  is valid and explicit when complete argv cannot be determined; the builder never
+  exposes all capabilities for an effect and never guesses to fill a quota. Zero
+  describes this derived view only; it does not narrow built-ins, public contracts,
+  or assignment authority. The
+  closed first-version generators cover a front-selected HTTP GET liveness check,
+  unambiguous bounded range/search/strings inspection, and the exact
+  `read.js-inventory` offline scan of one saved evidence artifact. Every candidate
+  must reverse-match its registry id/argv, current run,
+  lane-effect subset, environment, route, request budget and assigned destinations;
+  ambiguity, symlink/path escape, unsafe text or any mismatch yields no command.
+  The context freezes expected evidence and stop condition beside this guidance and
+  carries an action-hash marker for artifact-only A/B measurement. Historical
+  attribution additionally binds every claim to one shared launch-prompt hash and
+  requires that hash to match the prompt reconstructed from the frozen assignment
+  row; an internally valid replacement bundle from another launch stays unknown.
+  It grants no
+  authority: Hooks still revalidate turn, assignment, scope, privacy, proxy, guard,
+  budgets, command shape and recorder. The Agent uses an emitted exact argv before
+  framework-source inspection. A denial may be retried once from public Hook
+  guidance; it does not authorize reading Hook/guard internals.
 - **Canonical asset identity**: planner, assignment, launch prompt, and child target
   gate use the coverage display identity `host[:port]`. If coverage carries an
   explicit port, dropping it to host-only is not an equivalent assignment. The

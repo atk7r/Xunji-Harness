@@ -24,6 +24,7 @@ review/review_bundle.json
 
 # Local runtime config
 config.ini
+.claude/settings.local.json
 .claude/xunji_active_run
 .claude/xunji_active_run.*.tmp
 .claude/xunji_session_selections/

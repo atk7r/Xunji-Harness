@@ -367,9 +367,10 @@ def _read_artifact_bytes(path: Path) -> bytes:
             os.close(directory_fd)
 
 
-def verify_assignment_bundle(
+def _verified_assignment_bundle_parts(
     run_dir: Path, row: object, *, root: Path = ROOT,
 ) -> dict:
+    """Verify bundle identity and resolve both artifact descriptors safely."""
     if not isinstance(row, dict) or row.get("schema") != "xunji.assignment.v1":
         raise InstructionBundleError("source_invalid", "typed assignment row is required")
     bundle = row.get("instruction_bundle")
@@ -391,7 +392,128 @@ def verify_assignment_bundle(
     }
     if any(bundle.get(field) != value for field, value in expected_identity.items()):
         raise InstructionBundleError("source_invalid", "instruction bundle identity does not match assignment")
-    current_role = load_role_contract(expected_identity["role"], root=root)
+    assignment = expected_identity["assignment"]
+    context_path = str(row.get("context") or "")
+    agent_path = str(row.get("agent_file") or "")
+    return {
+        "bundle": bundle,
+        "digest": digest,
+        "context_artifact": _artifact_path(
+            root, run_dir, bundle.get("context"), context_path,
+            "context", assignment,
+        ),
+        "agent_artifact": _artifact_path(
+            root, run_dir, bundle.get("agent_file"), agent_path,
+            "agents", assignment,
+        ),
+    }
+
+
+def _read_utf8_artifact(path: Path) -> bytes:
+    raw = _read_artifact_bytes(path)
+    try:
+        raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise InstructionBundleError(
+            "artifact_invalid", f"artifact is not strict UTF-8: {path.name}",
+        ) from exc
+    return raw
+
+
+def _public_verified_bundle(verified: dict) -> dict:
+    return {"bundle": verified["bundle"], "digest": verified["digest"]}
+
+
+def verify_frozen_assignment_bundle(
+    run_dir: Path, row: object, *, root: Path = ROOT,
+) -> dict:
+    """Verify one recorded bundle and its frozen artifacts without source freshness.
+
+    This replay surface proves assignment identity, bundle digest, containment,
+    and exact generated artifact bytes.  It deliberately does not claim that
+    the recorded role/scaffold descriptors still equal today's repository
+    sources; live admission remains the stricter ``verify_assignment_bundle``.
+    """
+    verified = _verified_assignment_bundle_parts(run_dir, row, root=root)
+    for path, desc in (
+        verified["context_artifact"], verified["agent_artifact"],
+    ):
+        raw = _read_utf8_artifact(path)
+        if len(raw) != desc["length"] or _sha256(raw) != desc["sha256"]:
+            raise InstructionBundleError(
+                "artifact_invalid",
+                f"instruction artifact bytes changed: {path.name}",
+            )
+    return _public_verified_bundle(verified)
+
+
+def _verify_bundle_with_exact_context_and_readable_agent(
+    run_dir: Path, row: object, *, root: Path = ROOT,
+) -> tuple[dict, str]:
+    """Verify immutable context plus one lifecycle-mutable Agent artifact.
+
+    The generated Agent Markdown is lifecycle-mutable after launch: heartbeat
+    and finish update it.  This shared verifier therefore validates its recorded
+    descriptor and path plus current containment, bounded regular-file shape,
+    and UTF-8 encoding, but not current byte equality.  Context bytes remain an
+    exact match for the digest-bound descriptor.
+    """
+    verified = _verified_assignment_bundle_parts(run_dir, row, root=root)
+    context_path, context_desc = verified["context_artifact"]
+    context_raw = _read_utf8_artifact(context_path)
+    if len(context_raw) != context_desc["length"] \
+            or _sha256(context_raw) != context_desc["sha256"]:
+        raise InstructionBundleError(
+            "artifact_invalid",
+            f"instruction artifact bytes changed: {context_path.name}",
+        )
+    agent_path, _agent_desc = verified["agent_artifact"]
+    _read_utf8_artifact(agent_path)
+    return verified, context_raw.decode("utf-8", errors="strict")
+
+
+def verify_assignment_bundle_for_context_replay(
+    run_dir: Path, row: object, *, root: Path = ROOT,
+) -> dict:
+    """Return exact frozen context after replay-safe artifact verification.
+
+    Assignment identity, bundle digest, both descriptors and both paths remain
+    fail-closed.  The context must still equal its frozen descriptor byte for
+    byte.  The Agent Markdown need only remain a safely readable strict-UTF-8
+    regular file because normal lifecycle transitions mutate those bytes after
+    launch.  Live admission remains the stricter ``verify_assignment_bundle``.
+    """
+    verified, context_text = _verify_bundle_with_exact_context_and_readable_agent(
+        run_dir, row, root=root,
+    )
+    return {
+        **_public_verified_bundle(verified),
+        "context_text": context_text,
+    }
+
+
+def verify_assignment_bundle_for_measurement(
+    run_dir: Path, row: object, *, root: Path = ROOT,
+) -> dict:
+    """Verify the launch bundle and exact context for offline measurement.
+
+    The caller must separately bind the bundle digest to the immutable
+    claim/Start launch-prompt hash before attributing prepared-capability use.
+    """
+    verified, _context_text = _verify_bundle_with_exact_context_and_readable_agent(
+        run_dir, row, root=root,
+    )
+    return _public_verified_bundle(verified)
+
+
+def verify_assignment_bundle(
+    run_dir: Path, row: object, *, root: Path = ROOT,
+) -> dict:
+    """Verify a frozen bundle plus current repository source freshness."""
+    verified = verify_frozen_assignment_bundle(run_dir, row, root=root)
+    bundle = verified["bundle"]
+    expected_role = str(row.get("role") or "") if isinstance(row, dict) else ""
+    current_role = load_role_contract(expected_role, root=root)
     if bundle.get("role_contract") != current_role["contract"]:
         raise InstructionBundleError("source_stale", "instruction role or live Agent source changed")
     if bundle.get("subagent_type") != current_role["contract"].get("subagent_type"):
@@ -399,21 +521,7 @@ def verify_assignment_bundle(
     current_scaffold = load_scaffold_source(root=root)
     if bundle.get("scaffold_source") != current_scaffold["source"]:
         raise InstructionBundleError("source_stale", "Agent scaffold source changed")
-    assignment = expected_identity["assignment"]
-    context_path = str(row.get("context") or "")
-    agent_path = str(row.get("agent_file") or "")
-    for path, desc in (
-        _artifact_path(root, run_dir, bundle.get("context"), context_path, "context", assignment),
-        _artifact_path(root, run_dir, bundle.get("agent_file"), agent_path, "agents", assignment),
-    ):
-        raw = _read_artifact_bytes(path)
-        try:
-            raw.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise InstructionBundleError("artifact_invalid", f"artifact is not strict UTF-8: {path.name}") from exc
-        if len(raw) != desc["length"] or _sha256(raw) != desc["sha256"]:
-            raise InstructionBundleError("artifact_invalid", f"instruction artifact bytes changed: {path.name}")
-    return {"bundle": bundle, "digest": digest}
+    return verified
 
 
 def selftest(*, root: Path = ROOT) -> list[str]:
@@ -497,11 +605,37 @@ def selftest(*, root: Path = ROOT) -> list[str]:
             verify_assignment_bundle(run_dir, row, root=fixture_root)
         except InstructionBundleError as exc:
             errors.append(f"valid assignment bundle: {exc.code}: {exc}")
+        try:
+            verify_assignment_bundle_for_measurement(
+                run_dir, row, root=fixture_root)
+        except InstructionBundleError as exc:
+            errors.append(
+                f"valid measurement bundle: {exc.code}: {exc}"
+            )
+        try:
+            replay = verify_assignment_bundle_for_context_replay(
+                run_dir, row, root=fixture_root)
+            if replay.get("context_text") != context_text:
+                errors.append("valid context replay returned different bytes")
+        except InstructionBundleError as exc:
+            errors.append(
+                f"valid context replay bundle: {exc.code}: {exc}"
+            )
 
         context_path.write_text(context_text + "tampered\n", encoding="utf-8")
         expect_error(
             "artifact_invalid", "context byte tamper",
             lambda: verify_assignment_bundle(run_dir, row, root=fixture_root),
+        )
+        expect_error(
+            "artifact_invalid", "measurement context byte tamper",
+            lambda: verify_assignment_bundle_for_measurement(
+                run_dir, row, root=fixture_root),
+        )
+        expect_error(
+            "artifact_invalid", "context replay byte tamper",
+            lambda: verify_assignment_bundle_for_context_replay(
+                run_dir, row, root=fixture_root),
         )
         context_path.write_text(context_text, encoding="utf-8")
 
@@ -509,6 +643,37 @@ def selftest(*, root: Path = ROOT) -> list[str]:
         expect_error(
             "artifact_invalid", "Agent scaffold byte tamper",
             lambda: verify_assignment_bundle(run_dir, row, root=fixture_root),
+        )
+        expect_error(
+            "artifact_invalid", "frozen replay Agent byte tamper",
+            lambda: verify_frozen_assignment_bundle(
+                run_dir, row, root=fixture_root),
+        )
+        try:
+            verify_assignment_bundle_for_measurement(
+                run_dir, row, root=fixture_root)
+        except InstructionBundleError as exc:
+            errors.append(
+                "measurement rejected lifecycle-mutable Agent bytes: "
+                f"{exc.code}: {exc}"
+            )
+        try:
+            replay = verify_assignment_bundle_for_context_replay(
+                run_dir, row, root=fixture_root)
+            if replay.get("context_text") != context_text:
+                errors.append(
+                    "context replay changed after lifecycle Agent mutation"
+                )
+        except InstructionBundleError as exc:
+            errors.append(
+                "context replay rejected lifecycle Agent mutation: "
+                f"{exc.code}: {exc}"
+            )
+        agent_path.write_bytes(b"\xff")
+        expect_error(
+            "artifact_invalid", "context replay non-UTF8 Agent artifact",
+            lambda: verify_assignment_bundle_for_context_replay(
+                run_dir, row, root=fixture_root),
         )
         agent_path.write_text(agent_text, encoding="utf-8")
 
@@ -519,6 +684,12 @@ def selftest(*, root: Path = ROOT) -> list[str]:
             "source_stale", "common source byte drift",
             lambda: verify_assignment_bundle(run_dir, row, root=fixture_root),
         )
+        try:
+            verify_frozen_assignment_bundle(run_dir, row, root=fixture_root)
+        except InstructionBundleError as exc:
+            errors.append(
+                f"frozen replay rejected source-only drift: {exc.code}: {exc}"
+            )
         common_path.write_bytes(common_bytes)
 
         live_path = fixture_root / manifest["live_agents"]["xunji-hunter"]["path"]
@@ -585,8 +756,33 @@ def selftest(*, root: Path = ROOT) -> list[str]:
             "artifact_invalid", "symlink generated artifact",
             lambda: verify_assignment_bundle(run_dir, row, root=fixture_root),
         )
+        expect_error(
+            "artifact_invalid", "measurement symlink generated artifact",
+            lambda: verify_assignment_bundle_for_measurement(
+                run_dir, row, root=fixture_root),
+        )
+        expect_error(
+            "artifact_invalid", "context replay symlink Agent artifact",
+            lambda: verify_assignment_bundle_for_context_replay(
+                run_dir, row, root=fixture_root),
+        )
         agent_path.unlink()
         agent_path.write_text(agent_text, encoding="utf-8")
+
+        path_tamper = {
+            **row,
+            "agent_file": context_path.relative_to(fixture_root).as_posix(),
+        }
+        expect_error(
+            "artifact_invalid", "measurement Agent path tamper",
+            lambda: verify_assignment_bundle_for_measurement(
+                run_dir, path_tamper, root=fixture_root),
+        )
+        expect_error(
+            "artifact_invalid", "context replay Agent path tamper",
+            lambda: verify_assignment_bundle_for_context_replay(
+                run_dir, path_tamper, root=fixture_root),
+        )
 
         context_directory = context_path.parent
         real_context_directory = run_dir / "context.real"
@@ -612,10 +808,30 @@ def selftest(*, root: Path = ROOT) -> list[str]:
             lambda: verify_assignment_bundle(
                 run_dir, identity_tamper, root=fixture_root),
         )
+        expect_error(
+            "source_invalid", "measurement rehashed bundle identity tamper",
+            lambda: verify_assignment_bundle_for_measurement(
+                run_dir, identity_tamper, root=fixture_root),
+        )
+        expect_error(
+            "source_invalid", "context replay rehashed bundle identity tamper",
+            lambda: verify_assignment_bundle_for_context_replay(
+                run_dir, identity_tamper, root=fixture_root),
+        )
         digest_tamper = {**row, "instruction_bundle_sha256": "0" * 64}
         expect_error(
             "source_invalid", "bundle digest tamper",
             lambda: verify_assignment_bundle(
+                run_dir, digest_tamper, root=fixture_root),
+        )
+        expect_error(
+            "source_invalid", "measurement bundle digest tamper",
+            lambda: verify_assignment_bundle_for_measurement(
+                run_dir, digest_tamper, root=fixture_root),
+        )
+        expect_error(
+            "source_invalid", "context replay bundle digest tamper",
+            lambda: verify_assignment_bundle_for_context_replay(
                 run_dir, digest_tamper, root=fixture_root),
         )
         schema_tamper = json.loads(json.dumps(row))
@@ -626,6 +842,25 @@ def selftest(*, root: Path = ROOT) -> list[str]:
             "source_invalid", "unknown instruction bundle schema",
             lambda: verify_assignment_bundle(
                 run_dir, schema_tamper, root=fixture_root),
+        )
+        expect_error(
+            "source_invalid", "measurement unknown instruction bundle schema",
+            lambda: verify_assignment_bundle_for_measurement(
+                run_dir, schema_tamper, root=fixture_root),
+        )
+        descriptor_tamper = json.loads(json.dumps(row))
+        descriptor_tamper["instruction_bundle"]["context"]["length"] += 1
+        descriptor_tamper["instruction_bundle_sha256"] = canonical_digest(
+            descriptor_tamper["instruction_bundle"])
+        expect_error(
+            "artifact_invalid", "measurement context descriptor tamper",
+            lambda: verify_assignment_bundle_for_measurement(
+                run_dir, descriptor_tamper, root=fixture_root),
+        )
+        expect_error(
+            "artifact_invalid", "context replay descriptor tamper",
+            lambda: verify_assignment_bundle_for_context_replay(
+                run_dir, descriptor_tamper, root=fixture_root),
         )
         expect_error(
             "source_invalid", "unknown canonical role",

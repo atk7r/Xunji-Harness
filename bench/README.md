@@ -54,6 +54,14 @@ bench/
     "max_requests_per_agent": 2,
     "require_no_missed_high_value": true
   },
+  "expected_tool_friction": {             // 可选: 显式启用 typed Agent tool-call 摩擦门
+    "min_attempted_calls": 4,
+    "max_denial_rate": 0.25,
+    "max_invalid_argv_rate": 0.0,
+    "max_post_failures": 0,
+    "min_non_denied_terminal_rate": 0.75,
+    "min_prepared_capability_hit_rate": 0.75
+  },
   "budget": {"max_requests": 200}       // 可选: 请求预算上限(对照录像 .replay.json 计数, 下界)
 }
 ```
@@ -66,6 +74,55 @@ request/action 到首个 evidence 的秒数)· **closure correctness**(recorded 
 conflict resolution、missed high-value front、per-agent budget、agent first-evidence、false-positive
 suppression)。声明了 `expected_collaboration` 的 fixture 会把这些 checks 纳入 clean 门；缺
 `state/events.jsonl` 等必要观测数据时不会静默通过, 而是记录 `skipped` 且非 clean。
+
+`expected_tool_friction` 只在 fixture 显式声明时启用；未声明它的旧 fixture 不读取 runtime
+receipts，原有打分与退出码语义保持不变。JSON 是可加字段的输出，启用这版代码后会出现
+`tool_friction: null` 或汇总元数据，因此不承诺与旧版本 byte-for-byte 相同。它只消费
+hash-chain-valid 的 `AgentToolCallClaim`、完整 identity 绑定的
+`PreToolUseDenied` / `PostToolUse` / `PostToolUseFailure`；只有缺 Hook terminal 时，才用 exact
+child transcript 中匹配 tool-use id 的完整 `tool_result` 证明 narrow terminal。
+`AgentToolCallClaim.success=false` 表示“已预留一次尝试”，
+**不表示工具失败**；缺 Hook terminal 但 exact child transcript 已有结果时，只记为
+`xunji_non_denied_terminal`，不读取结果语义。这里的“non-denied”只表示没有 Xunji
+`PreToolUseDenied` receipt；宿主原生权限拒绝也可能生成完整 `tool_result` 并落入此 bucket。
+`non_denied_terminal` 只证明存在一个未被 Xunji Hook deny 归类的完整 terminal；它包含
+`PostToolUseFailure`，**不证明宿主已放行、effect 已执行、成功或形成证据**。歧义、identity
+漂移、terminal 缺失或 receipt chain 问题进入
+outcome `unknown`，且必须为 0 才能 clean；context/marker 归因问题单独进入
+`prepared_attribution_unknown`。Prepared 归因还要求同 assignment 的 claim 共享一个
+`launch_prompt_sha256`，并与 frozen row 重建的 launch prompt 完全一致；替换为另一套自洽
+bundle 仍必须 unknown。只要 fixture 声明 prepared threshold，该计数就必须为 0。输出仅含
+聚合计数/比率，不含 command、path、URL、session/Agent/tool-use id 或 result bytes。
+
+Producer 输出还要通过完整 shape/invariant gate：bucket 总数必须等于 attempted calls，
+invalid-argv 必须是 denial 子集，non-denied 总数必须等于三个 non-denied terminal bucket 之和，
+prepared hit/offered/unknown 不得越过 attempted calls，所有 rate 必须由对应 count 精确重算，
+unknown reason 总数必须与 outcome unknown 相等。字段缺失、bool 冒充整数、NaN/越界 rate 或
+内部计数矛盾都会 fail closed。Producer 意外异常也会以固定的 `producer-error` reason fail
+closed；异常原文不会进入公开 score，以免泄露路径、命令或导入数据。
+
+支持的 threshold：
+
+- count：`min_attempted_calls`、`max_denied_calls`、`max_invalid_argv_denials`、
+  `max_post_failures`、`min_non_denied_terminals`、`min_prepared_capability_hits`；
+- rate（0..1）：`max_denial_rate`、`max_invalid_argv_rate`、
+  `min_non_denied_terminal_rate`、`min_prepared_capability_hit_rate`。
+
+prepared-capability 命中只认 assignment instruction bundle 中 context descriptor 验证过的
+精确 marker，不解析旧 heading 或命令文本：
+
+```html
+<!-- xunji.prepared-capability.v1 {"action_sha256":"...","capability_id":"...","effect":"..."} -->
+```
+
+`prepared_capability_hit_rate` 的分母不是所有 tool calls：它等于
+`prepared_capability_hits / prepared_capability_offered_calls`。其中 offered calls 只统计
+context descriptor 已验证、且至少含一个有效 prepared marker 的 assignment 所发起的调用；
+没有被投影任何 prepared capability 的 lane 不进入该分母。
+
+只要声明 prepared threshold，context descriptor/marker 归因必须完整，
+`prepared_attribution_unknown` 也必须为 0。声明 `expected_tool_friction` 却没有任何受支持
+threshold，或 threshold 名拼错/类型越界，都会 fail closed。
 
 可选 `events.jsonl` 每行一个事件:
 
@@ -84,9 +141,18 @@ python tools/bench.py compare tmp/baseline.json tmp/change.json       # A/B 指�
 python tools/bench.py --selftest                                    # 离线回归(已并入 selftest_all)
 ```
 
-退出码: `score` / `score-all` 全检出 + 全校准 + 零误报 + 预算内 + 必需过程断言满足 = 0,
+退出码: `score` / `score-all` 全检出 + 全校准 + 零误报 + 预算内 + 必需过程断言满足，且所有
+显式 tool-friction threshold 满足、unknown=0 = 0,
 否则 1。`compare` 在 detection / calibration / closure 下降, 或 false-pos / budget /
-time-to-first-evidence 上升时返回 1, 可当 A/B 回归门。
+time-to-first-evidence / tool-friction 回归时返回 1；任一 tool-friction required metric 在
+baseline 或 change 缺失也 fail closed。A/B 两侧必须含完全相同、非空且唯一的
+tool-friction fixture ID 集；该 ID 来自 score 的 `fixture` 字段：truth 显式提供 `name` 时使用
+该值，否则回退到 run 目录名。`score-all` 中最终得到的 ID 必须非空且全局唯一；单 fixture 做
+A/B 时应在前后 truth 中显式复用同一个稳定 `name`，不要依赖可能变化的 run 目录名。删除或
+替换难例不能改善汇总。baseline 可以不满足 threshold，
+以便证明 change 的真实改善；但 change 必须绝对满足 `checks_failed=0`、outcome `unknown=0`，
+声明 prepared threshold 时还必须满足 `prepared_attribution_unknown=0`，否则即使数值没有继续
+恶化，`compare` 仍返回 1。
 
 ## 怎么用它 A/B 一个框架改动
 
@@ -94,7 +160,8 @@ time-to-first-evidence 上升时返回 1, 可当 A/B 回归门。
 2. 改框架**前**: driver 打一次, 落 `runs/<a>/` → `bench.py score runs/<a> <truth> --json-out tmp/baseline.json`。
 3. 改框架**后**: 同 fixture 再打一次, 落 `runs/<b>/` → `--json-out tmp/change.json`。
 4. 跑 `bench.py compare tmp/baseline.json tmp/change.json`。
-5. 比 detection / calibration / false-pos / request budget / time-to-first-evidence / closure。**分数没变好 = 改动没证明价值**(ROADMAP
+5. 比 detection / calibration / false-pos / request budget / time-to-first-evidence / closure /
+   tool denial / invalid argv / non-denied terminal / prepared marker hit。**分数没变好 = 改动没证明价值**(ROADMAP
    gating principle: 度量先行, 别凭手感堆)。
 
 ## 现有 fixture

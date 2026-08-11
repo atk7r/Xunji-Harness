@@ -141,7 +141,7 @@ _SELFTEST_SCRIPTS = (
     "tools/turn_contract.py", "tools/context_pack.py",
     "tools/work_plan.py", "tools/workers.py",
     "tools/contract_schema.py", "tools/completion_transaction.py",
-    "tools/barrier_state.py", "tools/artifact_view.py",
+    "tools/barrier_state.py", "tools/artifact_view.py", "tools/js_inventory.py",
     "tools/anti_drift.py",
     "tools/timestamp_gate.py", "tools/check_run.py",
     "tools/coverage_matrix.py", "tools/ingest_recon.py",
@@ -249,6 +249,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
           "local_read", "artifact-view-search", scope="active_run"),
     _spec("read.artifact-view-strings", "tools/artifact_view.py",
           "local_read", "artifact-view-strings", scope="active_run"),
+    _spec("read.js-inventory", "tools/js_inventory.py",
+          "local_read", "js-inventory", scope="active_run"),
     _spec("read.work-plan", "tools/work_plan.py", "local_read",
           "work-plan-status", scope="active_run"),
     _spec("control.work-plan", "tools/work_plan.py", "control",
@@ -1246,6 +1248,28 @@ def _validate_artifact_view(args: tuple[str, ...], *, action: str) -> bool:
     return True
 
 
+def _validate_js_inventory(args: tuple[str, ...]) -> bool:
+    if len(args) != 3 or args[0] != "inspect" or not re.fullmatch(
+            r"runs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", args[1]):
+        return False
+    artifact = args[2]
+    if not artifact or len(artifact.encode("utf-8", "replace")) > 1024 \
+            or "\\" in artifact or re.search(r"[\x00-\x1f\x7f]", artifact):
+        return False
+    parts = artifact.split("/")
+    return bool(
+        len(parts) >= 2
+        and parts[0] == "evidence"
+        and all(
+            part not in {"", ".", ".."}
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", part)
+            for part in parts[1:]
+        )
+        and Path(parts[-1]).suffix.lower()
+        in {".js", ".mjs", ".html", ".htm", ".json", ".txt"}
+    )
+
+
 def argv_matches(validator: str, args: Iterable[str]) -> bool:
     values = tuple(str(value) for value in args)
     if not _bounded(values):
@@ -1398,6 +1422,8 @@ def argv_matches(validator: str, args: Iterable[str]) -> bool:
         return _validate_artifact_view(
             values, action=validator.removeprefix("artifact-view-"),
         )
+    if validator == "js-inventory":
+        return _validate_js_inventory(values)
     return False
 
 
@@ -1476,6 +1502,8 @@ def run_reference(spec: CapabilitySpec, args: Iterable[str]) -> str:
     if validator.startswith((
             "completion-transaction-", "barrier-state-", "artifact-view-",
     )):
+        return values[1] if len(values) > 1 else ""
+    if validator == "js-inventory":
         return values[1] if len(values) > 1 else ""
     if validator in {
         "anti-drift-semantic-status", "anti-drift-record-reason-pass",
@@ -1849,7 +1877,7 @@ def selftest() -> int:
              or _spec("", "", "", "")).effect == "local_verify"
             for script in (
                 "tools/completion_transaction.py", "tools/barrier_state.py",
-                "tools/artifact_view.py",
+                "tools/artifact_view.py", "tools/js_inventory.py",
             )
         )),
         ("completion transaction actions have distinct exact effects", bool(
@@ -2026,6 +2054,51 @@ def selftest() -> int:
             ]) is None
             and match(ROOT / "tools/artifact_view.py", [
                 "strings", demo_run, "large.bin", "--future", "1",
+            ]) is None
+        )),
+        ("JS inventory is one exact bounded active-run artifact read", bool(
+            (match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "evidence/assets/app.js",
+            ]) or _spec("", "", "", "")).id == "read.js-inventory"
+            and (match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "evidence/assets/app.js",
+            ]) or _spec("", "", "", "")).effect == "local_read"
+            and (match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "evidence/assets/app.js",
+            ]) or _spec("", "", "", "")).scope == "active_run"
+            and run_reference(
+                match(ROOT / "tools/js_inventory.py", [
+                    "inspect", demo_run, "evidence/assets/app.js",
+                ]) or _spec("", "", "", ""),
+                ["inspect", demo_run, "evidence/assets/app.js"],
+            ) == demo_run
+        )),
+        ("JS inventory rejects whole-run broadening and unknown argv", bool(
+            match(ROOT / "tools/js_inventory.py", [demo_run]) is None
+            and match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run,
+            ]) is None
+            and match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "state/control.json",
+            ]) is None
+            and match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "evidence/../state/control.json",
+            ]) is None
+            and match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "/tmp/app.js",
+            ]) is None
+            and match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "evidence/app.js", "evidence/two.js",
+            ]) is None
+            and match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "evidence/app.js", "--future",
+            ]) is None
+            and match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run, "evidence/raw.bin",
+            ]) is None
+            and match(ROOT / "tools/js_inventory.py", [
+                "inspect", demo_run,
+                "evidence/operator:pw@host#frag?token=secret.js",
             ]) is None
         )),
         ("offline check_run is local verification", (match(

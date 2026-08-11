@@ -6246,6 +6246,8 @@ def _agent_cancellation_preflight(event: dict) -> dict:
 def _plan_bound_child_claim_from_events(
     event: dict,
     events: list[dict],
+    *,
+    prospective_append: bool = False,
 ) -> dict:
     """Return the unique immutable claim owning one child terminal event.
 
@@ -6282,6 +6284,64 @@ def _plan_bound_child_claim_from_events(
     if detail:
         raise RuntimeError(
             "AGENT_TOOL_CALL_TERMINAL_CLAIM_INVALID:" + detail)
+    claim_seq = claim.get("seq")
+    if isinstance(claim_seq, bool) or not isinstance(claim_seq, int) \
+            or claim_seq < 1:
+        raise RuntimeError("AGENT_TOOL_CALL_TERMINAL_CLAIM_SEQUENCE_INVALID")
+    if prospective_append:
+        # Raw Hook input has no journal-owned sequence.  Its only admissible
+        # causal position is the next append slot; caller-supplied ``seq`` is
+        # never authority.
+        event_seqs = [
+            item.get("seq") for item in events
+            if isinstance(item.get("seq"), int)
+            and not isinstance(item.get("seq"), bool)
+            and item.get("seq") > 0
+        ]
+        terminal_seq = max(event_seqs, default=0) + 1
+    else:
+        stored_terminal = [
+            item for item in events if item is event or item == event
+        ]
+        if len(stored_terminal) != 1:
+            raise RuntimeError("AGENT_TOOL_CALL_TERMINAL_NOT_JOURNALED")
+        terminal_seq = stored_terminal[0].get("seq")
+    if isinstance(terminal_seq, bool) or not isinstance(terminal_seq, int) \
+            or terminal_seq <= claim_seq:
+        raise RuntimeError("AGENT_TOOL_CALL_TERMINAL_NOT_AFTER_CLAIM")
+    interval_key = (session_id, agent_id, transcript_path)
+    starts = [
+        item for item in events
+        if item.get("hook_event_name") == "SubagentStart"
+        and (
+            str(item.get("session_id") or ""),
+            str(item.get("agent_id") or ""),
+            str(item.get("transcript_path") or ""),
+        ) == interval_key
+    ]
+    if len(starts) != 1:
+        raise RuntimeError("AGENT_TOOL_CALL_TERMINAL_START_NOT_UNIQUE")
+    start_seq = starts[0].get("seq")
+    if isinstance(start_seq, bool) or not isinstance(start_seq, int) \
+            or start_seq < 1 or not start_seq < claim_seq:
+        raise RuntimeError("AGENT_TOOL_CALL_TERMINAL_INTERVAL_INVALID")
+    stop_seqs = [
+        item.get("seq") for item in events
+        if item.get("hook_event_name") == "SubagentStop"
+        and (
+            str(item.get("session_id") or ""),
+            str(item.get("agent_id") or ""),
+            str(item.get("transcript_path") or ""),
+        ) == interval_key
+    ]
+    # The immutable receipt sequence is causal authority. Iteration/list order
+    # cannot move a terminal back inside a Start/Stop interval.
+    if any(
+        isinstance(stop_seq, bool) or not isinstance(stop_seq, int)
+        or stop_seq < 1 or start_seq < stop_seq <= terminal_seq
+        for stop_seq in stop_seqs
+    ):
+        raise RuntimeError("AGENT_TOOL_CALL_TERMINAL_AFTER_STOP")
     event_action = str(event.get("action_sha256") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", event_action):
         event_action = _action_hash(tool_name, event.get("tool_input") or {})
@@ -6344,7 +6404,8 @@ def append_hook_event(run_dir: str | Path, event: dict) -> dict:
         effective_events = _effective_agent_events(run, events)
         external_stops, stream_stalls, recovered_stops = (
             _load_typed_agent_termination_receipts(run, events))
-        child_claim = _plan_bound_child_claim_from_events(event, events)
+        child_claim = _plan_bound_child_claim_from_events(
+            event, events, prospective_append=True)
         if child_claim:
             event = dict(event)
             event["xunji_agent_tool_call_binding"] = (
@@ -8778,6 +8839,628 @@ def failed_tool_events(
         and _transcript_has(
             event, events, validation_snapshot=snapshot)
     ]
+
+
+_PREPARED_CAPABILITY_MARKER = "xunji.prepared-capability.v1"
+_PREPARED_CAPABILITY_MARKER_RE = re.compile(
+    r"^<!-- xunji\.prepared-capability\.v1 (\{[^\r\n]+\}) -->$"
+)
+_PREPARED_CAPABILITY_HEADING = "## Prepared Registered Capabilities"
+_PREPARED_CAPABILITY_END_HEADING = "## Matched Coverage"
+_PREPARED_CAPABILITY_IDS = frozenset({
+    "target.probe",
+    "read.js-inventory",
+    "read.artifact-view-search",
+    "read.artifact-view-range",
+    "read.artifact-view-strings",
+})
+_PREPARED_CAPABILITY_EFFECTS = {
+    "local_read": frozenset({"local_read"}),
+    "local_verify": frozenset({"local_read", "local_verify"}),
+    "target": frozenset({"local_read", "local_verify", "target"}),
+    "model_egress": frozenset({
+        "local_read", "local_verify", "model_egress",
+    }),
+}
+_PREPARED_CAPABILITY_INTRO = (
+    "Derived guidance only. This block grants no authority; Hooks revalidate the",
+    "turn, assignment, effect, assets, budgets, route, command shape, and registry match.",
+)
+_PREPARED_CAPABILITY_EMPTY = (
+    "- None. No complete registry-backed argv can be derived from this frozen lane.",
+    "  This empty projection does not reduce assignment authority or tool availability.",
+    "  Continue with assignment-authorized built-ins and public capability contracts;",
+    "  do not guess argv or inspect private framework source merely to discover syntax.",
+)
+_PREPARED_CAPABILITY_TAIL = (
+    "A denial is an attributable outcome: follow its public retry text once, then",
+    "return the supported result or barrier without reading Hook/guard/tool source.",
+)
+
+
+def _prepared_capability_entries(
+    text: str,
+) -> list[tuple[dict, str]] | None:
+    """Parse the one generated prepared-capability section, or fail closed.
+
+    The marker is not a free-standing assertion.  It is meaningful only inside
+    the exact generated section, paired with a complete numbered entry and one
+    exact Bash argv block.  This narrow grammar deliberately treats generator
+    structure drift as unknown attribution instead of guessing.
+    """
+    if not isinstance(text, str) or "\r" in text:
+        return None
+    lines = text.splitlines()
+    if lines.count(_PREPARED_CAPABILITY_HEADING) != 1 \
+            or lines.count(_PREPARED_CAPABILITY_END_HEADING) != 1:
+        return None
+    start = lines.index(_PREPARED_CAPABILITY_HEADING)
+    end = lines.index(_PREPARED_CAPABILITY_END_HEADING)
+    if end <= start:
+        return None
+    body = lines[start + 1:end]
+    if body[:len(_PREPARED_CAPABILITY_INTRO)] \
+            != list(_PREPARED_CAPABILITY_INTRO):
+        return None
+    remainder = body[len(_PREPARED_CAPABILITY_INTRO):]
+    if remainder == ["", *_PREPARED_CAPABILITY_EMPTY, ""]:
+        return [] if not any(
+            _PREPARED_CAPABILITY_MARKER in line for line in lines
+        ) else None
+
+    entries: list[tuple[dict, str]] = []
+    marker_indexes: set[int] = set()
+    cursor = len(_PREPARED_CAPABILITY_INTRO)
+    while cursor < len(body):
+        if body[cursor:] == ["", *_PREPARED_CAPABILITY_TAIL, ""]:
+            break
+        if len(entries) >= 3 or cursor + 10 >= len(body) \
+                or body[cursor] != "":
+            return None
+        heading = body[cursor + 1]
+        heading_match = re.fullmatch(
+            r"### ([1-3])\. ([a-z0-9][a-z0-9._-]{0,127})", heading,
+        )
+        expected_index = len(entries) + 1
+        if heading_match is None \
+                or int(heading_match.group(1)) != expected_index:
+            return None
+        capability_id = heading_match.group(2)
+        marker_line = body[cursor + 2]
+        marker_match = _PREPARED_CAPABILITY_MARKER_RE.fullmatch(marker_line)
+        if marker_match is None:
+            return None
+        try:
+            marker = json.loads(marker_match.group(1))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(marker, dict) \
+                or set(marker) != {
+                    "action_sha256", "capability_id", "effect",
+                } \
+                or json.dumps(
+                    marker, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"),
+                ) != marker_match.group(1) \
+                or marker.get("capability_id") != capability_id \
+                or not re.fullmatch(
+                    r"[0-9a-f]{64}",
+                    str(marker.get("action_sha256") or ""),
+                ) \
+                or marker.get("effect") not in {
+                    "local_read", "local_verify", "target", "model_egress",
+                }:
+            return None
+        effect_line = body[cursor + 3]
+        purpose_line = body[cursor + 4]
+        result_line = body[cursor + 5]
+        command = body[cursor + 9]
+        if effect_line != f"- Effect: {marker['effect']}" \
+                or not purpose_line.startswith("- Purpose: ") \
+                or not purpose_line.removeprefix("- Purpose: ").strip() \
+                or not result_line.startswith("- Result: ") \
+                or not result_line.removeprefix("- Result: ").strip() \
+                or body[cursor + 6:cursor + 9] != [
+                    "- Exact argv:", "", "```bash",
+                ] \
+                or not command.strip() \
+                or body[cursor + 10] != "```":
+            return None
+        marker_indexes.add(start + 1 + cursor + 2)
+        entries.append((marker, command))
+        cursor += 11
+    if not entries \
+            or body[cursor:] != ["", *_PREPARED_CAPABILITY_TAIL, ""]:
+        return None
+    observed_marker_indexes = {
+        index for index, line in enumerate(lines)
+        if _PREPARED_CAPABILITY_MARKER in line
+    }
+    if observed_marker_indexes != marker_indexes:
+        return None
+    identities = [
+        (str(marker["capability_id"]), str(marker["action_sha256"]))
+        for marker, _command in entries
+    ]
+    if len(set(identities)) != len(identities) \
+            or len({digest for _capability, digest in identities}) \
+            != len(identities):
+        return None
+    return entries
+
+
+def _prepared_capability_run_reference(run: Path, root: Path) -> str:
+    try:
+        return str(run.relative_to(root))
+    except ValueError:
+        return str(run)
+
+
+def _prepared_capability_action(
+    run: Path,
+    row: dict,
+    marker: dict,
+    command: str,
+    *,
+    root: Path,
+) -> str:
+    """Reverse-validate one frozen entry and return its canonical Bash hash."""
+    capability_id = str(marker.get("capability_id") or "")
+    if capability_id not in _PREPARED_CAPABILITY_IDS:
+        return ""
+    spec = _capability_registry.by_id(capability_id)
+    lane_effect = str(row.get("effect") or "")
+    if spec is None or spec.effect != marker.get("effect") \
+            or spec.effect not in _PREPARED_CAPABILITY_EFFECTS.get(
+                lane_effect, frozenset(),
+            ):
+        return ""
+    invocation = _command_shape.parse_exact_python_command(
+        command,
+        root=root,
+        allowed_scripts=_capability_registry.registered_scripts(root=root),
+        allow_environment=True,
+    )
+    if invocation is None \
+            or _capability_registry.match(
+                invocation.script, invocation.args, root=root,
+            ) != spec:
+        return ""
+    environment: list[tuple[str, str]] = []
+    for raw in invocation.environment:
+        key, separator, value = raw.partition("=")
+        if not separator or not key or key not in spec.allowed_env \
+                or not value \
+                or len(value.encode("utf-8", "replace")) > 256 * 1024 \
+                or re.search(r"[\x00-\x1f\x7f]", value):
+            return ""
+        environment.append((key, value))
+    if len({key for key, _value in environment}) != len(environment):
+        return ""
+    if spec.effect == "target":
+        if tuple(environment) not in {
+            (("XUNJI_PROXY_REQUIRED", "0"),),
+            (("XUNJI_PROXY_REQUIRED", "1"),),
+        }:
+            return ""
+        assignment_endpoints = {
+            endpoint for endpoint in (
+                _capability_registry.target_endpoint(
+                    _capability_registry.TargetReference(
+                        str(asset), role="assignment", allow_bare=True,
+                    )
+                )
+                for asset in row.get("assets", [])
+            ) if endpoint is not None
+        }
+        try:
+            references = _capability_registry.target_references(
+                spec, invocation.args,
+            )
+        except ValueError:
+            return ""
+        if not references or not assignment_endpoints:
+            return ""
+        for reference in references:
+            endpoint = _capability_registry.target_endpoint(reference)
+            if endpoint is None or not any(
+                asset_host == endpoint[0]
+                and (asset_port is None or asset_port == endpoint[1])
+                for asset_host, asset_port in assignment_endpoints
+            ):
+                return ""
+    elif environment:
+        return ""
+    canonical_env = " ".join(
+        f"{key}={shlex.quote(value)}" for key, value in environment
+    )
+    canonical_argv = shlex.join(("python3", spec.script, *invocation.args))
+    canonical_command = (
+        f"{canonical_env} {canonical_argv}" if canonical_env else canonical_argv
+    )
+    if command != canonical_command:
+        return ""
+    expected_run = _prepared_capability_run_reference(run, root)
+    run_reference = _capability_registry.run_reference(spec, invocation.args)
+    if run_reference != expected_run:
+        return ""
+    try:
+        referenced_run = Path(run_reference)
+        if not referenced_run.is_absolute():
+            referenced_run = root / referenced_run
+        if referenced_run.resolve(strict=True) != run.resolve(strict=True):
+            return ""
+    except (OSError, RuntimeError, ValueError):
+        return ""
+    action_sha256 = _action_hash("Bash", {"command": canonical_command})
+    return action_sha256 if action_sha256 == marker.get("action_sha256") else ""
+
+
+def _prepared_capability_claim_hit(
+    claim: dict, action_sha256s: set[str],
+) -> bool:
+    """Only an exact Bash claim can consume a prepared Bash argv marker."""
+    return bool(
+        claim.get("tool_name") == "Bash"
+        and str(claim.get("action_sha256") or "") in action_sha256s
+    )
+
+
+def _prepared_capability_actions(
+    run: Path,
+    claims: list[dict],
+) -> tuple[dict[str, set[str]], set[str]]:
+    """Load exact marker hashes through the assignment context descriptor.
+
+    A marker is trusted for measurement only when the frozen assignment bundle,
+    exact context bytes, generated section grammar, registry identity, effect,
+    environment, run reference, and recomputed Bash action hash all verify.  The
+    returned assignment names remain internal to the projection and never enter
+    its public aggregate.
+    """
+    assignments: dict[str, tuple[str, str, str]] = {}
+    unknown: set[str] = set()
+    for claim in claims:
+        assignment = str(claim.get("assignment") or "")
+        identity = (
+            str(claim.get("assignment_plan_digest") or ""),
+            str(claim.get("assignment_lane") or ""),
+            str(claim.get("launch_prompt_sha256") or ""),
+        )
+        if not assignment:
+            continue
+        if assignment in assignments and assignments[assignment] != identity:
+            unknown.add(assignment)
+        else:
+            assignments[assignment] = identity
+    path = run / "state" / "assignments.json"
+    try:
+        ledger = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except Exception:
+        return {}, set(assignments)
+    rows = ledger.get("assignments") if isinstance(ledger, dict) else None
+    if not isinstance(rows, list):
+        return {}, set(assignments)
+    by_assignment: dict[str, list[dict]] = {}
+    for row in rows:
+        if isinstance(row, dict):
+            by_assignment.setdefault(str(row.get("agent") or ""), []).append(row)
+
+    actions: dict[str, set[str]] = {}
+    root = Path(__file__).resolve().parents[1]
+    for assignment, (plan_digest, lane_id, launch_prompt_sha256) \
+            in assignments.items():
+        if assignment in unknown:
+            continue
+        matches = by_assignment.get(assignment, [])
+        if len(matches) != 1:
+            unknown.add(assignment)
+            continue
+        row = matches[0]
+        if str(row.get("plan_digest") or "") != plan_digest \
+                or str(row.get("lane_id") or "") != lane_id:
+            unknown.add(assignment)
+            continue
+        try:
+            verified = (
+                _instruction_bundle.verify_assignment_bundle_for_measurement(
+                    run, row, root=root,
+                )
+            )
+            row_launch_prompt_sha256 = assignment_launch_prompt_sha256(row)
+            if not row_launch_prompt_sha256 \
+                    or row_launch_prompt_sha256 != launch_prompt_sha256:
+                raise RuntimeError("assignment launch prompt binding changed")
+            bundle = verified["bundle"]
+            context_path, descriptor = _instruction_bundle._artifact_path(
+                root, run, bundle.get("context"),
+                str(row.get("context") or ""), "context", assignment,
+            )
+            raw = _instruction_bundle._read_artifact_bytes(context_path)
+            if len(raw) != descriptor["length"] \
+                    or hashlib.sha256(raw).hexdigest() != descriptor["sha256"]:
+                raise RuntimeError("context descriptor changed")
+            text = raw.decode("utf-8", errors="strict")
+        except (KeyError, OSError, RuntimeError, UnicodeDecodeError,
+                _instruction_bundle.InstructionBundleError):
+            unknown.add(assignment)
+            continue
+        entries = _prepared_capability_entries(text)
+        if entries is None:
+            unknown.add(assignment)
+            continue
+        hashes = {
+            digest for digest in (
+                _prepared_capability_action(
+                    run, row, marker, command, root=root,
+                )
+                for marker, command in entries
+            ) if digest
+        }
+        if len(hashes) != len(entries):
+            unknown.add(assignment)
+            continue
+        actions[assignment] = hashes
+    return actions, unknown
+
+
+def _agent_tool_outcome_summary(
+    attempted: int,
+    counts: dict[str, int],
+    unknown_reasons: dict[str, int],
+    *,
+    integrity: str,
+) -> dict:
+    """Build the aggregate-only, privacy-safe child tool outcome view."""
+    attempted = max(int(attempted), 0)
+    outcomes = {
+        "denied": max(int(counts.get("denied", 0)), 0),
+        "post_success": max(int(counts.get("post_success", 0)), 0),
+        "post_failure": max(int(counts.get("post_failure", 0)), 0),
+        "xunji_non_denied_terminal": max(
+            int(counts.get("xunji_non_denied_terminal", 0)), 0),
+        "unknown": max(int(counts.get("unknown", 0)), 0),
+    }
+    non_denied = sum(outcomes[name] for name in (
+        "post_success", "post_failure", "xunji_non_denied_terminal"))
+    invalid_argv = max(int(counts.get("invalid_argv_denial", 0)), 0)
+    prepared_hits = max(int(counts.get("prepared_capability_hit", 0)), 0)
+    prepared_offered = max(int(counts.get("prepared_capability_offered", 0)), 0)
+    prepared_unknown = max(int(counts.get("prepared_attribution_unknown", 0)), 0)
+
+    def rate(value: int) -> float | None:
+        return round(value / attempted, 6) if attempted else None
+
+    return {
+        "schema": "xunji.agent-tool-call-outcomes.v1",
+        "integrity": integrity if integrity in {"valid", "unknown"} else "unknown",
+        "attempted_calls": attempted,
+        "outcomes": outcomes,
+        "invalid_argv_denials": invalid_argv,
+        "non_denied_terminals": non_denied,
+        "prepared_capability_hits": prepared_hits,
+        "prepared_capability_offered_calls": prepared_offered,
+        "prepared_attribution_unknown": prepared_unknown,
+        "denial_rate": rate(outcomes["denied"]),
+        "invalid_argv_rate": rate(invalid_argv),
+        "non_denied_terminal_rate": rate(non_denied),
+        "prepared_capability_hit_rate": (
+            round(prepared_hits / prepared_offered, 6)
+            if prepared_offered else None),
+        "unknown_reason_counts": {
+            name: max(int(value), 0)
+            for name, value in sorted(unknown_reasons.items())
+            if int(value) > 0
+        },
+    }
+
+
+def agent_tool_call_outcomes(run_dir: str | Path) -> dict:
+    """Return aggregate outcomes for exact plan-bound child tool attempts.
+
+    The fsynced ``AgentToolCallClaim`` is an attempt reservation, not a failed
+    tool result: its intentionally false ``success`` field is never classified
+    as failure.  Each claim is joined to a denial or Post terminal only through
+    the complete child/tool/action identity already enforced by
+    ``_plan_bound_child_claim_from_events`` and the exact sidechain transcript.
+    When a Hook terminal is absent but the exact child transcript contains the
+    matching full tool_result, the narrow result is
+    ``xunji_non_denied_terminal``; its bytes and meaning are not inspected or
+    returned.  That label means only "no Xunji PreToolUseDenied receipt": a
+    host-native permission denial can itself emit a complete ``tool_result``
+    and therefore remain in this narrow terminal bucket.  It does not prove
+    host admission, effect execution, or success.  Missing, ambiguous,
+    drifting, or integrity-invalid observations stay ``unknown``.
+
+    Prepared capability hit rate is hits divided by calls made by assignments
+    whose verified context offered at least one exact marker, not by all calls.
+
+    The projection is deliberately aggregate-only.  It exposes no command,
+    transcript/run path, URL, tool input, tool result, session, Agent, or
+    tool-use identifier.
+    """
+    run = Path(run_dir).resolve()
+    observed_claims = 0
+    try:
+        with validation_snapshot_scope(run) as snapshot:
+            events, _effective, chain_errors, effective_error = (
+                snapshot.runtime_state())
+            claims = [
+                item for item in events
+                if item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT
+            ]
+            observed_claims = len(claims)
+            if chain_errors:
+                unknown = max(observed_claims, 1)
+                return _agent_tool_outcome_summary(
+                    observed_claims,
+                    {"unknown": unknown},
+                    {"chain_invalid": unknown},
+                    integrity="unknown",
+                )
+            if effective_error:
+                unknown = max(observed_claims, 1)
+                return _agent_tool_outcome_summary(
+                    observed_claims,
+                    {"unknown": unknown},
+                    {"typed_projection_invalid": unknown},
+                    integrity="unknown",
+                )
+            claim_errors = _agent_tool_call_claim_integrity_errors_from(
+                events, validation_snapshot=snapshot)
+            if claim_errors:
+                unknown = max(observed_claims, 1)
+                return _agent_tool_outcome_summary(
+                    observed_claims,
+                    {"unknown": unknown},
+                    {"claim_integrity_invalid": unknown},
+                    integrity="unknown",
+                )
+
+            claim_keys: dict[tuple[int, str], dict] = {}
+            prefix_claims: dict[tuple[str, str, str], list[tuple[int, str]]] = {}
+            for claim in claims:
+                key = (
+                    int(claim.get("seq") or 0),
+                    str(claim.get("receipt_hash") or ""),
+                )
+                claim_keys[key] = claim
+                prefix = (
+                    str(claim.get("session_id") or ""),
+                    str(claim.get("agent_id") or ""),
+                    str(claim.get("tool_use_id") or ""),
+                )
+                prefix_claims.setdefault(prefix, []).append(key)
+
+            terminals: dict[tuple[int, str], list[str]] = {
+                key: [] for key in claim_keys
+            }
+            drifted: set[tuple[int, str]] = set()
+            terminal_hooks = {
+                "PreToolUseDenied", "PostToolUse", "PostToolUseFailure",
+            }
+            for event in events:
+                hook = str(event.get("hook_event_name") or "")
+                if hook not in terminal_hooks or not str(event.get("agent_id") or ""):
+                    continue
+                prefix = (
+                    str(event.get("session_id") or ""),
+                    str(event.get("agent_id") or ""),
+                    str(event.get("tool_use_id") or ""),
+                )
+                possible = prefix_claims.get(prefix, [])
+                if not possible:
+                    continue
+                if len(possible) != 1:
+                    drifted.update(possible)
+                    continue
+                expected_key = possible[0]
+                try:
+                    owner = _plan_bound_child_claim_from_events(event, events)
+                except RuntimeError:
+                    drifted.add(expected_key)
+                    continue
+                owner_key = (
+                    int(owner.get("seq") or 0),
+                    str(owner.get("receipt_hash") or ""),
+                ) if owner else (0, "")
+                if owner_key != expected_key:
+                    drifted.add(expected_key)
+                    continue
+                try:
+                    transcript_valid = _transcript_has(
+                        event, events, validation_snapshot=snapshot)
+                except (RuntimeError, TranscriptSnapshotMutationError):
+                    transcript_valid = False
+                if not transcript_valid:
+                    terminals[expected_key].append("terminal_identity_drift")
+                elif hook == "PreToolUseDenied" \
+                        and event.get("decision") == "deny" \
+                        and event.get("success") is False:
+                    terminals[expected_key].append("denied")
+                    if event.get("decision_class") == "command_shape" \
+                            and str(event.get("shape_category") or "").startswith(
+                                "invalid-argv"):
+                        terminals[expected_key].append("invalid_argv_denial")
+                elif hook == "PostToolUse" and event.get("success") is True:
+                    terminals[expected_key].append("post_success")
+                elif hook == "PostToolUseFailure" and event.get("success") is False:
+                    terminals[expected_key].append("post_failure")
+                else:
+                    terminals[expected_key].append("terminal_identity_drift")
+
+            counts = {
+                "denied": 0,
+                "post_success": 0,
+                "post_failure": 0,
+                "xunji_non_denied_terminal": 0,
+                "invalid_argv_denial": 0,
+                "prepared_capability_hit": 0,
+                "prepared_capability_offered": 0,
+                "prepared_attribution_unknown": 0,
+                "unknown": 0,
+            }
+            prepared_actions, prepared_unknown = _prepared_capability_actions(
+                run, claims)
+            for claim in claims:
+                assignment = str(claim.get("assignment") or "")
+                if assignment in prepared_unknown or assignment not in prepared_actions:
+                    counts["prepared_attribution_unknown"] += 1
+                elif prepared_actions[assignment]:
+                    counts["prepared_capability_offered"] += 1
+                    if _prepared_capability_claim_hit(
+                            claim, prepared_actions[assignment]):
+                        counts["prepared_capability_hit"] += 1
+            unknown_reasons: dict[str, int] = {}
+
+            def unknown(reason: str) -> None:
+                counts["unknown"] += 1
+                unknown_reasons[reason] = unknown_reasons.get(reason, 0) + 1
+
+            for key, claim in claim_keys.items():
+                if key in drifted:
+                    unknown("terminal_identity_drift")
+                    continue
+                observed = terminals.get(key, [])
+                primary = [value for value in observed
+                           if value != "invalid_argv_denial"]
+                invalid_argv = "invalid_argv_denial" in observed
+                if len(primary) == 1 and primary[0] in {
+                        "denied", "post_success", "post_failure"}:
+                    counts[primary[0]] += 1
+                    if primary[0] == "denied" and invalid_argv:
+                        counts["invalid_argv_denial"] += 1
+                    continue
+                if primary:
+                    unknown(
+                        "terminal_identity_drift"
+                        if "terminal_identity_drift" in primary
+                        else "ambiguous_terminal")
+                    continue
+                child = _child_transcript_path(claim)
+                if child is None:
+                    unknown("transcript_unavailable")
+                    continue
+                try:
+                    # Exact content existence is enough.  Never inspect or
+                    # return the payload: it can contain imported target data.
+                    _transcript_tool_result(
+                        child, str(claim.get("tool_use_id") or ""))
+                except RuntimeError:
+                    unknown("missing_terminal")
+                else:
+                    counts["xunji_non_denied_terminal"] += 1
+
+            return _agent_tool_outcome_summary(
+                observed_claims, counts, unknown_reasons, integrity="valid")
+    except (OSError, RuntimeError, TranscriptSnapshotMutationError, ValueError):
+        unknown = max(observed_claims, 1)
+        return _agent_tool_outcome_summary(
+            observed_claims,
+            {"unknown": unknown},
+            {"snapshot_unstable": unknown},
+            integrity="unknown",
+        )
 
 
 def _target_semantic_action(event: dict) -> tuple[str, str, str] | None:
@@ -14805,9 +15488,98 @@ def _selftest() -> int:
     budget_agent = "budget-child"
     budget_parent_tool = "budget-parent-agent-tool"
     budget_transcript = budget_run.parent / f"{budget_session}.jsonl"
-    budget_prompt = (
-        "XUNJI_ASSIGNMENT=A-budget-001 XUNJI_FRONT=F-001 XUNJI_ASSETS=none "
-        "XUNJI_LANE=L-BUDGET XUNJI_PLAN=" + "b" * 64)
+    budget_child_dir = budget_transcript.with_suffix("") / "subagents"
+    budget_child_dir.mkdir(parents=True)
+    budget_child_transcript = budget_child_dir / f"agent-{budget_agent}.jsonl"
+    budget_child_ids = [f"budget-child-tool-{index}" for index in range(1, 10)]
+    budget_prepared_command = shlex.join((
+        "python3", "tools/artifact_view.py", "range", str(budget_run.resolve()),
+        "fixture.bin", "--offset", "0", "--length", "4096",
+    ))
+    budget_context = budget_run / "context" / "A-budget-001.md"
+    budget_agent_file = budget_run / "agents" / "A-budget-001.md"
+    (budget_run / "evidence").mkdir()
+    (budget_run / "evidence" / "fixture.bin").write_bytes(b"fixture")
+    budget_context.parent.mkdir()
+    budget_agent_file.parent.mkdir()
+
+    def budget_context_for(marker: dict, command: str) -> str:
+        return (
+            "# Budget context\n\n"
+            "## Prepared Registered Capabilities\n"
+            "Derived guidance only. This block grants no authority; Hooks revalidate the\n"
+            "turn, assignment, effect, assets, budgets, route, command shape, and registry match.\n\n"
+            "### 1. read.artifact-view-range\n"
+            "<!-- xunji.prepared-capability.v1 "
+            + json.dumps(marker, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":"))
+            + " -->\n"
+            "- Effect: local_read\n"
+            "- Purpose: bounded selftest range\n"
+            "- Result: bounded JSON bytes\n"
+            "- Exact argv:\n\n"
+            "```bash\n"
+            + command
+            + "\n```\n\n"
+            "A denial is an attributable outcome: follow its public retry text once, then\n"
+            "return the supported result or barrier without reading Hook/guard/tool source.\n\n"
+            "## Matched Coverage\n"
+            "- (selftest fixture)\n"
+        )
+
+    budget_marker = {
+        "action_sha256": _action_hash(
+            "Bash", {"command": budget_prepared_command}),
+        "capability_id": "read.artifact-view-range",
+        "effect": "local_read",
+    }
+    budget_context_text = budget_context_for(
+        budget_marker, budget_prepared_command)
+    budget_agent_text = "# Budget Agent scaffold\n"
+    budget_context.write_text(budget_context_text, encoding="utf-8")
+    budget_agent_file.write_text(budget_agent_text, encoding="utf-8")
+    budget_root = Path(__file__).resolve().parents[1]
+    budget_role_bundle = _instruction_bundle.load_role_contract(
+        "web-hunter", root=budget_root)
+    budget_scaffold = _instruction_bundle.load_scaffold_source(
+        root=budget_root)
+    budget_instruction_bundle, budget_instruction_digest = (
+        _instruction_bundle.build_assignment_bundle(
+            assignment="A-budget-001",
+            plan_digest="b" * 64,
+            lane_id="L-BUDGET",
+            role="web-hunter",
+            role_bundle=budget_role_bundle,
+            scaffold_source=budget_scaffold["source"],
+            context_path=str(budget_context),
+            context_text=budget_context_text,
+            agent_path=str(budget_agent_file),
+            agent_text=budget_agent_text,
+        )
+    )
+    budget_assignment_row = {
+        "schema": "xunji.assignment.v1",
+        "agent": "A-budget-001",
+        "front": "F-001",
+        "plan_digest": "b" * 64,
+        "lane_id": "L-BUDGET",
+        "role": "web-hunter",
+        "effect": "local_read",
+        "assets": [],
+        "tool_call_limit": 6,
+        "request_budget": 2,
+        "context": str(budget_context),
+        "agent_file": str(budget_agent_file),
+        "instruction_bundle": budget_instruction_bundle,
+        "instruction_bundle_sha256": budget_instruction_digest,
+    }
+    budget_assignment_ledger = {
+        "schema": 3, "assignments": [budget_assignment_row],
+    }
+    budget_assignment_path = budget_run / "state" / "assignments.json"
+    budget_assignment_path.write_text(json.dumps(
+        budget_assignment_ledger, ensure_ascii=False), encoding="utf-8")
+    budget_prompt = assignment_launch_prompt(budget_assignment_row)
     budget_transcript.write_text(json.dumps({
         "message": {"role": "assistant", "content": [{
             "type": "tool_use", "name": "Agent", "id": budget_parent_tool,
@@ -14815,17 +15587,24 @@ def _selftest() -> int:
                       "subagent_type": "xunji-hunter"},
         }]},
     }) + "\n", encoding="utf-8")
-    budget_child_dir = budget_transcript.with_suffix("") / "subagents"
-    budget_child_dir.mkdir(parents=True)
-    budget_child_transcript = budget_child_dir / f"agent-{budget_agent}.jsonl"
-    budget_child_ids = [f"budget-child-tool-{index}" for index in range(1, 10)]
+
+    def budget_child_call(
+        index: int, *, path_suffix: str = "",
+    ) -> tuple[str, dict]:
+        if index == 2:
+            return "Bash", {"command": budget_prepared_command}
+        return "Read", {
+            "file_path": f"/tmp/budget-{index}{path_suffix}.txt",
+        }
+
     budget_child_transcript.write_text("\n".join(json.dumps({
         "isSidechain": True,
         "sessionId": budget_session,
         "agentId": budget_agent,
         "message": {"role": "assistant", "content": [{
-            "type": "tool_use", "name": "Read", "id": tool_id,
-            "input": {"file_path": f"/tmp/budget-{index}.txt"},
+            "type": "tool_use", "name": budget_child_call(index)[0],
+            "id": tool_id,
+            "input": budget_child_call(index)[1],
         }]},
     }) for index, tool_id in enumerate(budget_child_ids, 1)) + "\n",
         encoding="utf-8")
@@ -14864,15 +15643,17 @@ def _selftest() -> int:
         _append_runtime_record_locked(budget_run, budget_start, [])
 
     def budget_pretool(index: int, *, path_suffix: str = "") -> dict:
+        tool_name, tool_input = budget_child_call(
+            index, path_suffix=path_suffix,
+        )
         return {
             "hook_event_name": "PreToolUse",
             "session_id": budget_session,
             "transcript_path": str(budget_transcript),
-            "tool_name": "Read",
+            "tool_name": tool_name,
             "tool_use_id": budget_child_ids[index - 1],
             "agent_id": budget_agent,
-            "tool_input": {
-                "file_path": f"/tmp/budget-{index}{path_suffix}.txt"},
+            "tool_input": tool_input,
             "xunji_agent_request_action": index in {1, 6, 7},
         }
 
@@ -14906,6 +15687,366 @@ def _selftest() -> int:
         budget_run, budget_pretool(6))
     budget_request_replay_count_after = len(load_events(budget_run))
     budget_eighth = claim_agent_tool_call(budget_run, budget_pretool(8))
+    budget_success_event = dict(budget_pretool(2))
+    budget_success_event.update({
+        "hook_event_name": "PostToolUse",
+        "tool_response": {"content": "fixture success bytes"},
+    })
+    append_hook_event(budget_run, budget_success_event)
+    budget_failure_event = dict(budget_pretool(3))
+    budget_failure_event.update({
+        "hook_event_name": "PostToolUseFailure",
+        "tool_response": {"error": "fixture failure bytes"},
+    })
+    append_hook_event(budget_run, budget_failure_event)
+    budget_invalid_argv_event = dict(budget_pretool(5))
+    budget_invalid_argv_event.update({
+        "hook_event_name": "PreToolUseDenied",
+        "xunji_decision": "deny",
+        "xunji_reason": "fixture retryable command shape",
+        "xunji_decision_code": "XUNJI_E_REGISTERED_CHAIN_INVALID_ARGV",
+        "xunji_decision_class": "command_shape",
+        "xunji_shape_category": "invalid-argv-output-filter",
+    })
+    append_hook_event(budget_run, budget_invalid_argv_event)
+    with budget_child_transcript.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({
+            "isSidechain": True,
+            "sessionId": budget_session,
+            "agentId": budget_agent,
+            "message": {"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": budget_child_ids[3],
+                "is_error": True,
+                "content": "native permission denial fixture bytes",
+            }]},
+        }) + "\n")
+    budget_tool_outcomes = agent_tool_call_outcomes(budget_run)
+
+    def budget_prepared_attribution_is_unknown(outcomes: dict) -> bool:
+        return bool(
+            outcomes.get("integrity") == "valid"
+            and outcomes.get("prepared_capability_hits") == 0
+            and outcomes.get("prepared_capability_offered_calls") == 0
+            and outcomes.get("prepared_attribution_unknown")
+                == outcomes.get("attempted_calls")
+        )
+
+    budget_agent_file.write_text(
+        budget_agent_text + "- Status: done\n", encoding="utf-8")
+    try:
+        budget_agent_lifecycle_outcomes = agent_tool_call_outcomes(budget_run)
+    finally:
+        budget_agent_file.write_text(budget_agent_text, encoding="utf-8")
+    budget_agent_lifecycle_mutation_preserved = (
+        budget_agent_lifecycle_outcomes == budget_tool_outcomes
+    )
+
+    budget_context.write_text(
+        budget_context_text + "post-launch context mutation\n",
+        encoding="utf-8",
+    )
+    try:
+        budget_context_mutation_outcomes = agent_tool_call_outcomes(budget_run)
+    finally:
+        budget_context.write_text(budget_context_text, encoding="utf-8")
+    budget_context_mutation_rejected = (
+        budget_prepared_attribution_is_unknown(
+            budget_context_mutation_outcomes)
+    )
+
+    budget_path_mutation_row = {
+        **budget_assignment_row,
+        "agent_file": str(budget_context),
+    }
+    budget_assignment_path.write_text(json.dumps({
+        "schema": 3, "assignments": [budget_path_mutation_row],
+    }, ensure_ascii=False), encoding="utf-8")
+    try:
+        budget_path_mutation_outcomes = agent_tool_call_outcomes(budget_run)
+    finally:
+        budget_assignment_path.write_text(json.dumps(
+            budget_assignment_ledger, ensure_ascii=False), encoding="utf-8")
+    budget_path_mutation_rejected = budget_prepared_attribution_is_unknown(
+        budget_path_mutation_outcomes)
+
+    budget_descriptor_mutation_row = json.loads(json.dumps(
+        budget_assignment_row))
+    budget_descriptor = budget_descriptor_mutation_row[
+        "instruction_bundle"]["agent_file"]
+    budget_descriptor["sha256"] = (
+        "0" * 64 if budget_descriptor["sha256"] != "0" * 64 else "1" * 64
+    )
+    budget_descriptor_mutation_row["instruction_bundle_sha256"] = (
+        _instruction_bundle.canonical_digest(
+            budget_descriptor_mutation_row["instruction_bundle"])
+    )
+    budget_assignment_path.write_text(json.dumps({
+        "schema": 3, "assignments": [budget_descriptor_mutation_row],
+    }, ensure_ascii=False), encoding="utf-8")
+    try:
+        budget_descriptor_mutation_outcomes = agent_tool_call_outcomes(
+            budget_run)
+    finally:
+        budget_assignment_path.write_text(json.dumps(
+            budget_assignment_ledger, ensure_ascii=False), encoding="utf-8")
+    budget_descriptor_mutation_rejected = bool(
+        assignment_launch_prompt_sha256(budget_descriptor_mutation_row)
+            != budget_binding["launch_prompt_sha256"]
+        and budget_prepared_attribution_is_unknown(
+            budget_descriptor_mutation_outcomes)
+    )
+
+    with mock.patch.object(
+        _instruction_bundle,
+        "verify_assignment_bundle",
+        side_effect=_instruction_bundle.InstructionBundleError(
+            "source_stale", "selftest current source drift",
+        ),
+    ):
+        budget_history_source_drift_outcomes = agent_tool_call_outcomes(
+            budget_run)
+    budget_history_source_drift_preserved = (
+        budget_history_source_drift_outcomes == budget_tool_outcomes
+    )
+    budget_attribution_claims = [
+        item for item in load_events(budget_run)
+        if item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT
+    ]
+    alternate_launch_hash = (
+        "0" * 64
+        if budget_binding["launch_prompt_sha256"] != "0" * 64
+        else "1" * 64
+    )
+    _inconsistent_actions, inconsistent_unknown = (
+        _prepared_capability_actions(budget_run, [
+            *budget_attribution_claims,
+            {
+                **budget_attribution_claims[0],
+                "launch_prompt_sha256": alternate_launch_hash,
+            },
+        ])
+    )
+    budget_prepared_claim_identity_rejected = (
+        "A-budget-001" in inconsistent_unknown
+    )
+    _wrong_launch_actions, wrong_launch_unknown = (
+        _prepared_capability_actions(budget_run, [
+            {**item, "launch_prompt_sha256": alternate_launch_hash}
+            for item in budget_attribution_claims
+        ])
+    )
+    budget_prepared_launch_binding_rejected = (
+        "A-budget-001" in wrong_launch_unknown
+    )
+
+    # A replacement row may be internally self-consistent while belonging to a
+    # different launch.  Historical prepared attribution must stay bound to the
+    # launch hash frozen by Start/AgentToolCallClaim, not silently follow the
+    # mutable assignment ledger to the replacement marker.
+    budget_rebound_command = shlex.join((
+        "python3", "tools/artifact_view.py", "range", str(budget_run.resolve()),
+        "fixture.bin", "--offset", "1", "--length", "4096",
+    ))
+    budget_rebound_marker = {
+        **budget_marker,
+        "action_sha256": _action_hash(
+            "Bash", {"command": budget_rebound_command}),
+    }
+    budget_rebound_context_text = budget_context_for(
+        budget_rebound_marker, budget_rebound_command)
+    budget_rebound_bundle, budget_rebound_digest = (
+        _instruction_bundle.build_assignment_bundle(
+            assignment="A-budget-001",
+            plan_digest="b" * 64,
+            lane_id="L-BUDGET",
+            role="web-hunter",
+            role_bundle=budget_role_bundle,
+            scaffold_source=budget_scaffold["source"],
+            context_path=str(budget_context),
+            context_text=budget_rebound_context_text,
+            agent_path=str(budget_agent_file),
+            agent_text=budget_agent_text,
+        )
+    )
+    budget_rebound_row = {
+        **budget_assignment_row,
+        "instruction_bundle": budget_rebound_bundle,
+        "instruction_bundle_sha256": budget_rebound_digest,
+    }
+    budget_original_launch_hash = assignment_launch_prompt_sha256(
+        budget_assignment_row)
+    budget_rebound_launch_hash = assignment_launch_prompt_sha256(
+        budget_rebound_row)
+    budget_context.write_text(
+        budget_rebound_context_text, encoding="utf-8")
+    budget_assignment_path.write_text(json.dumps({
+        "schema": 3, "assignments": [budget_rebound_row],
+    }, ensure_ascii=False), encoding="utf-8")
+    try:
+        budget_rebound_outcomes = agent_tool_call_outcomes(budget_run)
+    finally:
+        budget_context.write_text(budget_context_text, encoding="utf-8")
+        budget_assignment_path.write_text(json.dumps(
+            budget_assignment_ledger, ensure_ascii=False), encoding="utf-8")
+    budget_restored_outcomes = agent_tool_call_outcomes(budget_run)
+    budget_prepared_bundle_rebinding_rejected = bool(
+        budget_original_launch_hash
+        and budget_original_launch_hash
+            == budget_binding["launch_prompt_sha256"]
+        and budget_rebound_launch_hash
+        and budget_rebound_launch_hash != budget_original_launch_hash
+        and budget_rebound_marker["action_sha256"]
+            != budget_marker["action_sha256"]
+        and budget_prepared_attribution_is_unknown(
+            budget_rebound_outcomes)
+        and budget_restored_outcomes == budget_tool_outcomes
+    )
+    budget_marker_line = (
+        "<!-- xunji.prepared-capability.v1 "
+        + json.dumps(budget_marker, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":"))
+        + " -->"
+    )
+    budget_marker_injection_rejected = all(
+        _prepared_capability_entries(candidate) is None
+        for candidate in (
+            budget_marker_line + "\n" + budget_context_text,
+            budget_context_text + "\n" + budget_marker_line + "\n",
+            budget_context_text.replace(
+                "- Purpose: bounded selftest range",
+                "- Purpose: bounded selftest range\n" + budget_marker_line,
+            ),
+        )
+    )
+    budget_structure_drift_rejected = all(
+        _prepared_capability_entries(candidate) is None
+        for candidate in (
+            budget_context_text.replace("- Exact argv:", "- Exact command:"),
+            budget_context_text.replace(
+                "## Matched Coverage",
+                "## Prepared Registered Capabilities\n## Matched Coverage",
+            ),
+            budget_context_text.replace("### 1.", "### 2."),
+        )
+    )
+
+    def budget_prepared_context(entries: list[tuple[dict, str]]) -> str:
+        lines = [
+            "# Prepared cardinality fixture",
+            "",
+            _PREPARED_CAPABILITY_HEADING,
+            *_PREPARED_CAPABILITY_INTRO,
+        ]
+        if not entries:
+            lines += ["", *_PREPARED_CAPABILITY_EMPTY]
+        else:
+            for index, (entry_marker, entry_command) in enumerate(entries, 1):
+                lines += [
+                    "",
+                    f"### {index}. {entry_marker['capability_id']}",
+                    f"<!-- {_PREPARED_CAPABILITY_MARKER} "
+                    + json.dumps(
+                        entry_marker, ensure_ascii=False, sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + " -->",
+                    f"- Effect: {entry_marker['effect']}",
+                    "- Purpose: complete cardinality fixture",
+                    "- Result: typed fixture result",
+                    "- Exact argv:",
+                    "",
+                    "```bash",
+                    entry_command,
+                    "```",
+                ]
+            lines += ["", *_PREPARED_CAPABILITY_TAIL]
+        lines += ["", _PREPARED_CAPABILITY_END_HEADING, "- fixture"]
+        return "\n".join(lines) + "\n"
+
+    budget_three_entries = [
+        ({
+            "action_sha256": str(index) * 64,
+            "capability_id": capability_id,
+            "effect": "local_read",
+        }, f"python3 tools/artifact_view.py fixture-{index}")
+        for index, capability_id in enumerate((
+            "read.artifact-view-search",
+            "read.artifact-view-range",
+            "read.artifact-view-strings",
+        ), 1)
+    ]
+    budget_prepared_cardinality_exact = bool(
+        _prepared_capability_entries(budget_prepared_context([])) == []
+        and len(_prepared_capability_entries(
+            budget_prepared_context(budget_three_entries)) or []) == 3
+        and _prepared_capability_entries(budget_prepared_context([
+            *budget_three_entries,
+            ({
+                "action_sha256": "4" * 64,
+                "capability_id": "read.js-inventory",
+                "effect": "local_read",
+            }, "python3 tools/js_inventory.py fixture-4"),
+        ])) is None
+    )
+    prepared_root = Path(__file__).resolve().parents[1]
+    mismatched_run_command = shlex.join((
+        "python3", "tools/artifact_view.py", "range",
+        str(budget_run.parent.resolve()), "fixture.bin",
+        "--offset", "0", "--length", "4096",
+    ))
+    mismatched_run_marker = {
+        **budget_marker,
+        "action_sha256": _action_hash(
+            "Bash", {"command": mismatched_run_command},
+        ),
+    }
+    env_command = "LANG=C " + budget_prepared_command
+    env_marker = {
+        **budget_marker,
+        "action_sha256": _action_hash("Bash", {"command": env_command}),
+    }
+    budget_reverse_binding_rejected = all(not value for value in (
+        _prepared_capability_action(
+            budget_run, {"effect": "local_read", "assets": []},
+            {**budget_marker, "action_sha256": "0" * 64},
+            budget_prepared_command, root=prepared_root,
+        ),
+        _prepared_capability_action(
+            budget_run, {"effect": "local_read", "assets": []},
+            {**budget_marker, "capability_id": "read.artifact-view-search"},
+            budget_prepared_command, root=prepared_root,
+        ),
+        _prepared_capability_action(
+            budget_run, {"effect": "control", "assets": []},
+            budget_marker, budget_prepared_command, root=prepared_root,
+        ),
+        _prepared_capability_action(
+            budget_run, {"effect": "local_read", "assets": []},
+            mismatched_run_marker, mismatched_run_command,
+            root=prepared_root,
+        ),
+        _prepared_capability_action(
+            budget_run, {"effect": "local_read", "assets": []},
+            env_marker, env_command, root=prepared_root,
+        ),
+    ))
+    budget_cross_tool_hash_rejected = not _prepared_capability_claim_hit(
+        {
+            "tool_name": "Read",
+            "action_sha256": str(budget_marker["action_sha256"]),
+        },
+        {str(budget_marker["action_sha256"])},
+    )
+    budget_tool_outcomes_text = json.dumps(
+        budget_tool_outcomes, ensure_ascii=False, sort_keys=True)
+    budget_tool_outcomes_private = any(
+        marker in budget_tool_outcomes_text
+        for marker in (
+            "/tmp/", "budget-session", "budget-child", "https://",
+            "native permission denial fixture bytes", "fixture failure bytes",
+        )
+    )
     budget_identity_conflict = False
     try:
         claim_agent_tool_call(
@@ -14917,6 +16058,12 @@ def _selftest() -> int:
         item for item in budget_events_before_stop
         if item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT
     ]
+    budget_empty_assignment_claim = copy.deepcopy(budget_claim_rows[0])
+    budget_empty_assignment_claim["assignment"] = ""
+    budget_empty_assignment_rejected = (
+        _agent_tool_call_claim_record_error(
+            budget_empty_assignment_claim) == "assignment-binding"
+    )
     budget_tampered_events = json.loads(json.dumps(budget_events_before_stop))
     next(item for item in budget_tampered_events
          if item.get("hook_event_name") == AGENT_TOOL_CALL_CLAIM_EVENT)[
@@ -14937,7 +16084,41 @@ def _selftest() -> int:
         budget_events, budget_chain_errors = validate_chain(budget_run)
         if budget_chain_errors:
             raise RuntimeError(budget_chain_errors[0])
-        _append_runtime_record_locked(budget_run, budget_stop, budget_events)
+        budget_stop = _append_runtime_record_locked(
+            budget_run, budget_stop, budget_events)
+    budget_future_terminal_rejected = False
+    future_terminal = copy.deepcopy(budget_bound_denial)
+    future_terminal["seq"] = int(budget_first_five[0]["seq"]) - 1
+    try:
+        _plan_bound_child_claim_from_events(
+            future_terminal,
+            [*budget_events_before_stop, future_terminal],
+        )
+    except RuntimeError as exc:
+        budget_future_terminal_rejected = (
+            "TERMINAL_NOT_AFTER_CLAIM" in str(exc)
+        )
+    budget_after_stop_terminal_rejected = False
+    after_stop_terminal = copy.deepcopy(budget_bound_denial)
+    after_stop_terminal["seq"] = int(budget_stop["seq"]) + 1
+    try:
+        _plan_bound_child_claim_from_events(
+            after_stop_terminal,
+            [*load_events(budget_run), after_stop_terminal],
+        )
+    except RuntimeError as exc:
+        budget_after_stop_terminal_rejected = "TERMINAL_AFTER_STOP" in str(exc)
+    budget_after_stop_order_independent = False
+    try:
+        _plan_bound_child_claim_from_events(
+            after_stop_terminal,
+            list(reversed(load_events(budget_run))),
+            prospective_append=True,
+        )
+    except RuntimeError as exc:
+        budget_after_stop_order_independent = (
+            "TERMINAL_AFTER_STOP" in str(exc)
+        )
     budget_snapshot = RunValidationSnapshot(budget_run)
     budget_snapshot_integrity_first = agent_event_integrity_errors(
         budget_run, validation_snapshot=budget_snapshot)
@@ -16508,6 +17689,65 @@ def _selftest() -> int:
          budget_tamper_detected
          and not _agent_tool_call_claim_integrity_errors_from(
              budget_events_before_stop)),
+        ("empty assignment claim fails integrity before prepared attribution",
+         budget_empty_assignment_rejected),
+        ("Agent tool-call outcomes join exact claim/denial/Post/transcript terminals",
+         budget_tool_outcomes.get("integrity") == "valid"
+         and budget_tool_outcomes.get("attempted_calls") == 8
+         and budget_tool_outcomes.get("outcomes") == {
+             "denied": 2,
+             "post_success": 1,
+             "post_failure": 1,
+             "xunji_non_denied_terminal": 1,
+             "unknown": 3,
+         }
+         and budget_tool_outcomes.get("invalid_argv_denials") == 1
+         and budget_tool_outcomes.get("non_denied_terminals") == 3
+         and budget_tool_outcomes.get("denial_rate") == 0.25
+         and budget_tool_outcomes.get("invalid_argv_rate") == 0.125
+         and budget_tool_outcomes.get("non_denied_terminal_rate") == 0.375
+         and budget_tool_outcomes.get("prepared_capability_hits") == 1
+         and budget_tool_outcomes.get("prepared_capability_offered_calls") == 8
+         and budget_tool_outcomes.get("prepared_attribution_unknown") == 0
+         and budget_tool_outcomes.get("prepared_capability_hit_rate") == 0.125),
+        ("prepared attribution uses frozen bundles despite current source drift",
+         budget_history_source_drift_preserved),
+        ("prepared attribution survives lifecycle-only Agent file mutation",
+         budget_agent_lifecycle_mutation_preserved),
+        ("prepared attribution rejects post-launch context byte mutation",
+         budget_context_mutation_rejected),
+        ("prepared attribution rejects assignment artifact path mutation",
+         budget_path_mutation_rejected),
+        ("prepared attribution rejects a rehashed Agent descriptor mutation",
+         budget_descriptor_mutation_rejected),
+        ("prepared attribution requires one exact launch hash across assignment claims",
+         budget_prepared_claim_identity_rejected),
+        ("prepared attribution requires the claims' launch hash to match the row",
+         budget_prepared_launch_binding_rejected),
+        ("prepared attribution rejects a self-consistent bundle replacement from another launch",
+         budget_prepared_bundle_rebinding_rejected),
+        ("prepared attribution rejects isolated, duplicated, and injected markers",
+         budget_marker_injection_rejected),
+        ("prepared attribution rejects section structure and numbering drift",
+         budget_structure_drift_rejected),
+        ("prepared sections accept exactly zero through three complete entries",
+         budget_prepared_cardinality_exact),
+        ("prepared attribution reverse-validates registry/effect/env/run/hash",
+         budget_reverse_binding_rejected),
+        ("prepared Bash hash cannot be credited to a cross-tool claim",
+         budget_cross_tool_hash_rejected),
+        ("child terminal cannot bind a future AgentToolCallClaim",
+         budget_future_terminal_rejected),
+        ("child terminal cannot bind after its same-agent Stop",
+         budget_after_stop_terminal_rejected
+         and budget_after_stop_order_independent),
+        ("transcript-only native permission denial remains a narrow terminal",
+         budget_tool_outcomes.get("outcomes", {}).get(
+             "xunji_non_denied_terminal") == 1),
+        ("AgentToolCallClaim success=false is an attempt, not a failure outcome",
+         budget_tool_outcomes.get("outcomes", {}).get("post_failure") == 1),
+        ("Agent tool-call outcome projection returns no private action/result identity",
+         not budget_tool_outcomes_private),
         ("Agent tool-use replay identity is scoped by session",
          agent_identity_is_session_scoped),
         ("two real Agent receipts satisfy fanout", agent_fanout(run)["satisfied"]),

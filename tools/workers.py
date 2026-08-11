@@ -2154,6 +2154,7 @@ def _create_agent_assignment_locked(run_dir: Path, *, role: str, front: str,
         assignment_attempt=assignment_attempt,
         tool_call_limit=tool_call_limit,
         request_budget=int(lane.get("request_budget") or 0),
+        lane=json.loads(json.dumps(lane, ensure_ascii=False)),
         role_bundle=role_bundle,
     )
     if reviews_assignments and _runtime_receipts is not None:
@@ -9935,6 +9936,10 @@ def _selftest() -> int:
              encoding="utf-8")
          and f"Hard tool-call limit: {DEFAULT_AGENT_TOOL_CALL_LIMIT}" in planned_reviewer_context.read_text(
              encoding="utf-8")
+         and f"Expected evidence: {generated_plan_lanes[1]['expected_evidence']}"
+            in planned_reviewer_context.read_text(encoding="utf-8")
+         and f"Stop condition: {generated_plan_lanes[1]['stop_condition']}"
+            in planned_reviewer_context.read_text(encoding="utf-8")
          and planned_hunter["agent"] in planned_reviewer_context.read_text(encoding="utf-8")),
         ("Hunter return creates a plan/lane/result-bound merge draft",
          planned_draft.get("schema") == "xunji.merge-draft.v1"

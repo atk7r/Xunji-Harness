@@ -40,7 +40,13 @@ origin changes; raw redirect-following commands with authentication are refused.
 The scanner wrapper uses a fixed neutral User-Agent and vetted default templates;
 custom nuclei templates/user-data are refused because external scanner-generated
 requests cannot be inspected individually by the Python guard.
-The command boundary includes HTTP(S), WebSocket(S), and FTP URL-bearing actions.
+The command boundary conservatively detects HTTP(S), WebSocket(S), and FTP
+URL-bearing actions for classification and denial. That WebSocket text detection
+does not admit a model-executable `ws`/`wss` capability. A dedicated WebSocket
+capability is currently **NO-GO**: the harness has no unified raw-socket proxy,
+no frame/message/byte/duration budgets, and no recorder that audits the handshake
+and bounded message stream. Raw socket clients must not become a second outbound
+path around the HTTP target capability stack.
 The engagement proxy is optional, operator-controlled trusted infrastructure.
 The target route defaults to direct; `XUNJI_PROXY`/`proxy.conf` is consumed only
 when the current operator turn explicitly selects proxy. Driver bytes are checked
@@ -525,12 +531,20 @@ is a separate transcript-bound compatibility branch. Recovery preserves that no
 physical Stop exists, projects returned only, and still requires the ordinary
 Reviewer and Root settlement; a committed receipt with pending derived projection
 routes to exact reprojection and status, not deletion or reconstruction.
-New assignments default to 24 calls; a normal delegate omits the override. When a
-frozen target front already selects HTTP GET liveness, its generated context carries
-the exact registered `probe.py` argv so bounded Agents do not inspect framework
-source to discover command grammar. Every target context also freezes the current
-turn's route choice: default direct uses exact `XUNJI_PROXY_REQUIRED=0`; explicit
-proxy uses exact `XUNJI_PROXY_REQUIRED=1`. Hooks retain all outbound validation.
+New assignments default to 24 calls; a normal delegate omits the override. Each
+generated context recomputes a derived projection of **zero to three** exact
+registry-backed capabilities from the frozen lane/front. Zero is the correct
+result when complete argv cannot be determined; the builder never enumerates the
+registry by effect or guesses a command merely to fill a quota. An empty projection
+does not remove built-ins, public contracts, or assignment authority. The current closed
+set covers explicit HTTP GET liveness and unambiguous bounded inspection of one
+saved evidence artifact. Every projected candidate is reverse-validated by exact
+registry id/argv, run binding, lane-effect subset, route, request budget and assigned
+asset before rendering. The projection is guidance, not authority; Hooks revalidate
+the turn, assignment, scope, effect, budgets, privacy, proxy, guard, command shape
+and recorder. Context also freezes the lane's expected evidence and stop condition.
+For target projection, default direct uses exact `XUNJI_PROXY_REQUIRED=0`; explicit
+proxy uses exact `XUNJI_PROXY_REQUIRED=1` without exposing the proxy value.
 Route-less historical contracts do not regain the old proxy default: they remain
 offline until a fresh top-level operator turn. Merely forbidding direct does not
 authorize proxy; proxy still needs affirmative wording.
@@ -861,12 +875,33 @@ facts (hosts, IPs, titles, banners) as given, and probe only to (1) fill a gap,
 saying which in `decisions.md`. Re-collecting existing data wastes the request
 budget, the scarce resource against a rate-limited / WAF target.
 
-When saved JS bundles, rendered `network.json`, or captured pages may hide API
-routes, freeze the exact saved-artifact paths before delegation; the Agent uses
-built-in Read over only those paths and extracts
-candidate input shapes or threat hypotheses for Root adjudication. The
-`tools/js_inventory.py` CLI is an offline developer helper, not a registered live
-capability. Proof still goes through guarded actions and evidence entries.
+When a saved JS bundle, rendered `network.json`, or captured page may hide API
+routes, freeze exactly one active-run evidence artifact before delegation. The
+only registered inventory command is:
+
+```bash
+python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>
+```
+
+The capability registry binds that exact argv as `read.js-inventory`, effect
+`local_read`, scope `active_run`. The legacy whole-run command remains forbidden:
+the tool never walks the run, `state/`, or sibling artifacts. Its stable secure
+read rejects traversal plus evidence-root, intermediate, and leaf symlinks, and
+re-walks the complete directory chain after reading; it
+scans at most 2 MiB, returns at most 64 candidates, and emits at most 64 KiB of
+compact JSON. Query values, URL userinfo and fragments are removed; query-key names
+are retained only when they remain safe, low-entropy identifiers after the shared
+privacy pass, otherwise they become a fixed redaction marker. Sensitive or
+high-entropy path segments, plus values after sensitive path keys, are redacted.
+Run/artifact labels are opaque typed identifiers; no local filesystem path
+or artifact basename is rendered, and raw artifact bytes or their unkeyed content
+digests are never model-visible. Output is explicitly untrusted, target-derived and noncanonical: it is
+only candidate input for Root/Single Synthesizer adjudication, never an `E-xxx`,
+finding, proof, or promotion. When a frozen `local_read` lane unambiguously names
+one supported artifact and JS/API inventory intent, this exact capability may be
+emitted as a prepared `local_read` candidate; Hooks still revalidate the current
+run, assignment and exact argv. Proof still goes through guarded target actions
+and the evidence gate.
 
 ## Threat Triage (at Setup)
 

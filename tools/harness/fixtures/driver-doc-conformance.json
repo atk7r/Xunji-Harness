@@ -44,7 +44,13 @@
         "XUNJI_E_LIFECYCLE_PRIVATE_API",
         "project-level, content-addressed observation",
         "registered `--help` prints the same sequence",
-        "committed receipt with pending derived projection"
+        "committed receipt with pending derived projection",
+        "python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
+        "`read.js-inventory`, effect",
+        "prepared `local_read` candidate",
+        "dedicated WebSocket\ncapability is currently **NO-GO**",
+        "unified raw-socket proxy",
+        "frame/message/byte/duration budgets"
       ],
       "forbidden": [
         "that is the Reviewer's job",
@@ -85,13 +91,20 @@
         "2026-08-08T01:10:00Z",
         "xunji.subagent-stop-ingress.v1",
         "registered help -> prepare",
-        "Recovery replay is idempotent"
+        "Recovery replay is idempotent",
+        "python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
+        "`read.js-inventory` is an `active_run`-scoped `local_read`",
+        "prepared `local_read` projection",
+        "dedicated WebSocket capability is currently **NO-GO**",
+        "no unified\nraw-socket proxy",
+        "no frame/message/byte/duration budgets"
       ],
       "forbidden": [
         "unavailable matrix is a",
         "python3 tools/peer_review.py runs/<dir> --into-run",
         "Codex-authored work uses `--driver codex`",
-        "Agents may write `## New Threat Hypotheses`"
+        "Agents may write `## New Threat Hypotheses`",
+        "python3 tools/js_inventory.py runs/<dir>"
       ]
     },
     {
@@ -621,6 +634,15 @@
     }
   ],
   "capability_cases": [
+    {
+      "name": "active-run one-artifact JS offline inventory",
+      "document": "docs/WORKFLOW.md",
+      "marker": "python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
+      "script": "tools/js_inventory.py",
+      "argv": ["inspect", "runs/demo_20260101", "evidence/app.js"],
+      "expected_id": "read.js-inventory",
+      "expected_effect": "local_read"
+    },
     {
       "name": "workers top-level command index",
       "document": "docs/ROUTER.md",

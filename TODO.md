@@ -1,6 +1,6 @@
 # Xunji 统一实施计划
 
-> 最后更新：2026-08-11。
+> 最后更新：2026-08-12。
 > 本文件是当前 Python/Harness 修复、三段 Run Macro-Stage 和 Agent/Worker 调度的唯一正式
 > backlog。`[x] 已实现` 表示当前代码、fixture/回归和现行架构共同支持；
 > `[x] 已决策` 表示已明确不采用或暂不准入，不能解读为代码实现；`[ ]` 表示仍未完成，
@@ -8,9 +8,9 @@
 > 其逐节处置见第 6 节；历史 review record 只提供来源与论证，不建立第二套 backlog 真值。
 > CCB/TypeScript 迁移不在当前路线；除非 operator 以后重新立项，不为它保留迁移任务。
 >
-> 本次盘点基线：当前工作树 `python3 tools/selftest_all.py` 为 **78 passed, 0 failed**，
-> `check_templates.py` 通过；但 `check_rules.py` 因 `artifact_view.py`、`barrier_state.py`、
-> `completion_transaction.py` 尚未进入 safety-critical manifest 而 HOLD，不能称为全绿。
+> 本次盘点基线：当前工作树 `python3 tools/selftest_all.py` 为 **80 passed, 0 failed**；
+> `check_rules.py`、`check_templates.py`、`check_runtime_boundary.py` 与本机/封闭式 hygiene
+> 检查均通过，新增可信入口已与 safety-critical manifest 同步。
 > 历史隔离分支 `f1a186e` 的“全勾选”结果不在当前 HEAD 祖先链，未作为当前完成证据。
 
 ## 0. 总体目标与设计原则
@@ -24,6 +24,8 @@
 
 - 按 Agent 要完成的能力拆 Tool，不按现有 Python 文件机械拆分。
 - 每个模型可见 Tool 保持单一职责、结构化输入和结构化输出。
+- 不以 registry 中 Tool 数量少为目标；最小化的是每个 assignment 的运行时暴露面和
+  Claude 本机 auto-allow，所有能力继续复用统一 typed capability/effect/Hook 契约。
 - `scope / guard / privacy / proxy / evidence recorder` 属于不可绕过的内部执行链，不暴露成可选 Tool。
 - `runs/<target>/` Markdown、证据产物和审查记录继续作为事实来源；聊天、模型置信度和派生缓存不是证据。
 - 子代理只产生候选；Root/Synthesizer 负责去重、冲突处理、证据晋级、报告纳入和收口。
@@ -63,6 +65,10 @@
   整个 safety-critical manifest 粗暴变成可执行白名单。
 - [x] 保持不含 URL 的本地 `rg/grep` 不进入 outbound privacy；继续阻止 run/project/operator
   identity、secret、PII 被发送到目标或外部 reviewer。
+- [x] tracked `.claude/settings.local.example.json` 固定 `permissions.allow=[]`；ignored 本机
+  settings 只要出现任何 auto-allow 就由 bounded/no-leak hygiene preflight HOLD。该检查只
+  收缩 Claude 原生自动批准面，不冒充 Hook/capability registry 的 authority/safety 边界；
+  仓库自身 `.gitignore` 与 publication gate 同时阻止 operator-local settings 被误跟踪。
 
 ### 1.3 P0：统一 Stop 终态与 Coda
 
@@ -99,14 +105,17 @@
   backoff 和结构化 provenance。
 - [x] 保留真实请求计数和全局预算，不把 warning 当请求；阈值调整必须由 fixture/bench
   证明，不能用简单调大数字掩盖错误归因。
-- [ ] **部分实现**：typed `artifact_view.py` 已提供有界 range/search/strings 离线分析，
-  capability registry 已限定 argv/effect；补齐 safety-critical manifest 接线并让
-  `check_rules.py` 通过后才能完成。继续禁止任意 `python -c`、`awk/xargs`、重定向、`pip/cp`
-  或自定义网络脚本。
+- [x] typed `artifact_view.py` 已提供有界 range/search/strings，`js_inventory.py inspect`
+  已提供 active-run 单 evidence artifact 的 2 MiB/64-candidate/64 KiB 脱敏 JSON 分析；两者
+  都经 exact `local_read` capability、safety-critical manifest、secure-open/identity fence
+  与 fixture 接线；JS 模型可见输出不携带原始内容或其 unkeyed digest，避免低熵秘密枚举。
+  继续禁止任意 `python -c`、`awk/xargs`、重定向、`pip/cp` 或自定义网络脚本。
 - [x] 超大响应/JS 的流式保存与字节范围已有 `probe.py` 的受控入口、receipt 与回归覆盖；
   结构化本地检索的剩余接线由上一项承担。
-- [ ] 增加复用统一 privacy/proxy/guard/recorder 链的专用 WebSocket capability；不能用裸
-  shell 或自定义网络脚本补缺口。
+- [x] **已决策（本轮不准入）**：不新增 live WebSocket capability。当前缺少复用统一
+  raw-socket proxy、帧/消息/字节/时长预算和握手/消息 recorder 的完整 transport；在这些
+  mandatory services 与回归具备前，裸 shell、自定义网络脚本或仅靠 URL 文本识别都会形成
+  第二出口，必须继续拒绝。未来若重启该能力，需单独更新架构和安全复审。
 
 ## 2. 三段 Run Macro-Stage 与统一工作计划
 
@@ -236,6 +245,10 @@ Worker/Lane 是逻辑工作单元，Agent 是运行时执行者。计划先拆 l
   台账也不能继续被误当自动编排器。
 - [x] context pack 使用 `agent-id + front + asset-digest + attempt` 唯一路径，顶部写 exact assignment/front/
   assets/effect；同 front/role 的不同资产或 attempt 不得覆盖上下文。
+- [x] context pack 从完整 frozen lane/front 按 assignment 重新计算 0–3 个 registry-backed
+  prepared capability；只投影窄肯定、唯一可绑定的 GET 或单 evidence artifact 本地读取，
+  否定/完成/条件/歧义/越界均为 0。投影不授予权限，Hook 仍全量重验；历史 assignment
+  只重放 bundle 验证过的 frozen context，不因后来 role/scaffold 维护而生成新 argv。
 - [x] Agent start/return/failure 只接受 matching assignment、tool-use-id、runtime agent id 和
   exact asset package；过滤 active-run hook 收到的无归属 SubagentStop。
 - [x] Agent 返回自动生成 merge draft 与 per-asset outcome；`done` 必须进入 merge/refute/
@@ -260,8 +273,9 @@ Claude 主驾驶完成 `work-plan→delegate→Hunter→Reviewer→Root finish�
 离线约束只生成 Hunter/Reviewer 两条 lane，无目标数据按 barrier/blocked 处置，front 保持
 open，零目标/Web 请求且 Coda 精确投影 receipt。W2 整体仍保持未完成：
 A/B scheduler 收益、stage 默认资源策略和代码维护 worktree 隔离仍是验收/剩余工作；消息
-控制通道已决策不作为协作真值。W3 已完成 route-aware guard、流式大响应/JS 与本地有界
-分析实现已存在但 manifest 接线仍 HOLD；专用 WebSocket capability 与完整可观测性仍开放。
+控制通道已决策不作为协作真值。W3 已完成 route-aware guard、流式大响应、typed 本地有界
+artifact/JS 分析与 opt-in 工具摩擦投影；live WebSocket 已明确 NO-GO，不以第二出口补缺。
+长期 A/B 收益、其余协作指标与完整可观测性仍开放。
 
 - [x] **W0 — contract/fixture 先行**：冻结 capability/effect、Stop union、work plan、
   delegation decision、lane、Agent event 和 error-code schema。
@@ -270,8 +284,9 @@ A/B scheduler 收益、stage 默认资源策略和代码维护 worktree 隔离�
 - [ ] **W2 — Macro-Stage 与主动调度**：实现统一 work plan、Root/Hunter/Reviewer 小周期、
   lane planner、serial/parallel
   Agent、effect overlap、自动 receipt/merge 和 coordinator-like Root gate。
-- [ ] **W3 — Guard/分析能力与可观测性**：完成 route-aware breaker、typed offline/
-  WebSocket/JS capability、稳定错误与状态投影。
+- [ ] **W3 — Guard/分析能力与可观测性**：route-aware breaker、typed offline artifact/JS
+  capability 和工具摩擦投影已实现；剩余工作是长期 A/B/协作指标与在完整 transport 契约后
+  重新评估 WebSocket，不把当前 NO-GO 写成已实现。
 
 ### 4.2 必备 fixtures 与测试
 
@@ -327,14 +342,20 @@ A/B scheduler 收益、stage 默认资源策略和代码维护 worktree 隔离�
 
 - [x] Bench 已记录 time-to-first-evidence、front/collaboration coverage、request budget、
   conflict 和 false-positive 等当前基础指标。
+- [x] 对显式 opt-in fixture，runtime/Bench 已记录 plan-bound child claim 的 denial、invalid-argv、
+  same-turn retry、Xunji non-denied terminal、prepared capability offered/hit 与首个可证明
+  non-denied terminal 时延；unknown、归因 unknown、阈值失败和 A/B fixture 集变化均 fail closed。
+  该 terminal 不等于原生权限批准、effect 执行成功或 evidence 形成。
 - [ ] 补齐 time-to-first-delegation、有效 lane 捕获率、Agent useful-yield、重复目标请求、
-  merge debt、信息增益、token budget 和 closure reopen 正确率，并统一统计口径。
+  merge debt、信息增益、provider token budget 和 closure reopen 正确率，并统一统计口径；
+  当前没有 provider usage receipt，不编造 token 节省。
 - [ ] 用 A/B fixture 比较 Root-direct、serial-Agent、parallel-Agent；只有质量/速度/覆盖收益
   超过调度与合并成本时才把 soft recommendation 升为 hard gate。
-- [ ] 当前 `selftest_all.py` 为 78/78、template check 通过，但 rule check 仍因 3 个可信入口
-  缺 safety-critical manifest 记录而 HOLD；补齐后重跑 focused/full/bench/rule/template/
-  runtime-boundary，才能恢复“全部全绿”完成门。
-- [x] safety-critical 变更完成作者感知的独立 fresh-context/异构复审并记录 disposition。
+- [x] 当前 `selftest_all.py` 为 80/80，focused、Bench、rule、template、runtime-boundary、
+  local hygiene 与 diff check 均通过；可信入口、compiled floor 与 safety-critical manifest
+  已恢复一致，完成门不再携带旧的 3-entry HOLD。
+- [x] safety-critical 变更完成作者感知的独立 fresh-context 复审并记录 disposition；
+  external assistance 被禁用，本轮不声称存在异构外部票。
 > 治理边界：`runs/test0_20260716` 的 E-006 maturity、Reason/marker、Agent merge、coverage
 > 和 independent review 属于该 run 的 canonical 修复，不复制进项目 TODO 充当实现进度。
 

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [],
+    "ask": [
+      "Bash(rm:*)",
+      "Bash(rmdir:*)",
+      "Bash(git push:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git rebase:*)",
+      "Bash(git clean:*)",
+      "Bash(git filter-branch:*)",
+      "Bash(git filter-repo:*)",
+      "Bash(git reflog expire:*)",
+      "Bash(git gc --prune:*)",
+      "Bash(git update-ref -d:*)",
+      "PowerShell(Remove-Item:*)"
+    ]
+  }
+}

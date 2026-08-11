@@ -154,6 +154,13 @@ barrier and next evidence action.
   control from prose counts.
 - Inspect large run artifacts through bounded `artifact_view.py range|search|strings`
   under `evidence/`; do not load the entire body merely because chunks exist.
+- Consume the context pack's `Prepared Registered Capabilities` as derived guidance:
+  when it gives an exact argv, use that shape before inspecting framework source;
+  when it says none, only the prepared projection is empty—existing built-ins,
+  public capability contracts, and assignment authority are unchanged. Do not
+  guess a command or inspect private framework source merely to discover syntax.
+  The projection grants no authority and every call still passes the normal
+  Hook/assignment/effect/budget/safety chain.
 - Agents do not spawn Agents. All canonical writes, conflict resolution, finding
   promotion, and closure remain Root-owned.
 - The global completion challenge is assignment-free and separate from a

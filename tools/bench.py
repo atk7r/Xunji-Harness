@@ -26,6 +26,11 @@ ROADMAP R-1(最高价值缺口): 一把尺子, 让框架改动可被 A/B —— 
                (高价值 front 覆盖、冲突解决、每 Agent 请求预算、首证时间、误报压制)。
                一旦 fixture 声明 expected_collaboration, 这些 checks 会进入 clean 门；
                缺少必要观测数据(如 state/events.jsonl)会显式 skipped=false-ok, 不静默通过。
+- tool-friction: expected_tool_friction 显式启用后，读取 hash-chain-valid 的 typed
+               AgentToolCallClaim/denial/Post 与 exact child transcript terminal，度量 denial、
+               invalid argv、non-denied terminal、prepared-capability marker hit。claim 的
+               success=false 只是预算预留，不是失败；identity 歧义/漂移/缺失一律 unknown。
+               unknown 必须为 0，且 fixture 必须声明至少一个 threshold 才能 clean。
 
 用法:
   python tools/bench.py score <run_dir> <truth.json>
@@ -37,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -49,6 +55,7 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # tools/  (evidence_parse)
 import evidence_parse   # 复用唯一权威证据解析器(独立模块, 不必拉整个收口门 check_run)
+import runtime_receipts  # typed child tool-call outcomes; read-only projection
 
 _E_BLOCK = re.compile(r"(?ms)^##\s+(E-\d+[a-z]*).*?(?=^##\s+E-|\Z)")
 
@@ -332,6 +339,304 @@ def _closure_check(run_dir: Path, truth: dict) -> dict | None:
     }
 
 
+_TOOL_FRICTION_THRESHOLDS = {
+    "min_attempted_calls": ("tool_calls_attempted", ">=", "count"),
+    "max_denied_calls": ("tool_calls_denied", "<=", "count"),
+    "max_denial_rate": ("tool_denial_rate", "<=", "rate"),
+    "max_invalid_argv_denials": (
+        "tool_invalid_argv_denials", "<=", "count"),
+    "max_invalid_argv_rate": ("tool_invalid_argv_rate", "<=", "rate"),
+    "max_post_failures": ("tool_post_failures", "<=", "count"),
+    "min_non_denied_terminals": (
+        "tool_non_denied_terminals", ">=", "count"),
+    "min_non_denied_terminal_rate": (
+        "tool_non_denied_terminal_rate", ">=", "rate"),
+    "min_prepared_capability_hits": (
+        "tool_prepared_capability_hits", ">=", "count"),
+    "min_prepared_capability_hit_rate": (
+        "tool_prepared_capability_hit_rate", ">=", "rate"),
+}
+_TOOL_FRICTION_PREPARED_THRESHOLDS = {
+    "min_prepared_capability_hits", "min_prepared_capability_hit_rate",
+}
+_TOOL_OUTCOME_FIELDS = {
+    "schema", "integrity", "attempted_calls", "outcomes",
+    "invalid_argv_denials", "non_denied_terminals",
+    "prepared_capability_hits", "prepared_capability_offered_calls",
+    "prepared_attribution_unknown", "denial_rate", "invalid_argv_rate",
+    "non_denied_terminal_rate", "prepared_capability_hit_rate",
+    "unknown_reason_counts",
+}
+_TOOL_OUTCOME_BUCKETS = {
+    "denied", "post_success", "post_failure",
+    "xunji_non_denied_terminal", "unknown",
+}
+
+
+def _tool_outcome_shape_errors(value: object) -> list[str]:
+    """Validate the complete aggregate contract without exposing private data."""
+    if not isinstance(value, dict):
+        return ["not-object"]
+    errors: list[str] = []
+    if set(value) != _TOOL_OUTCOME_FIELDS:
+        errors.append("top-level-fields")
+    if value.get("schema") != "xunji.agent-tool-call-outcomes.v1":
+        errors.append("schema")
+    if value.get("integrity") not in {"valid", "unknown"}:
+        errors.append("integrity")
+
+    def count(field: str, source: dict | None = None) -> int | None:
+        owner = source if source is not None else value
+        raw = owner.get(field)
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            errors.append("count:" + field)
+            return None
+        return raw
+
+    attempted = count("attempted_calls")
+    outcomes = value.get("outcomes")
+    if not isinstance(outcomes, dict) or set(outcomes) != _TOOL_OUTCOME_BUCKETS:
+        errors.append("outcome-fields")
+        outcomes = {}
+    bucket_counts = {
+        field: count(field, outcomes) for field in sorted(_TOOL_OUTCOME_BUCKETS)
+    }
+    invalid_argv = count("invalid_argv_denials")
+    non_denied = count("non_denied_terminals")
+    prepared_hits = count("prepared_capability_hits")
+    prepared_offered = count("prepared_capability_offered_calls")
+    prepared_unknown = count("prepared_attribution_unknown")
+
+    complete_buckets = all(item is not None for item in bucket_counts.values())
+    if attempted is not None and complete_buckets \
+            and sum(int(item) for item in bucket_counts.values()) != attempted:
+        errors.append("attempt-outcome-total")
+    denied = bucket_counts.get("denied")
+    if invalid_argv is not None and denied is not None and invalid_argv > denied:
+        errors.append("invalid-argv-subset")
+    expected_non_denied = None
+    if all(bucket_counts.get(field) is not None for field in (
+            "post_success", "post_failure", "xunji_non_denied_terminal")):
+        expected_non_denied = sum(int(bucket_counts[field]) for field in (
+            "post_success", "post_failure", "xunji_non_denied_terminal"))
+    if non_denied is not None and expected_non_denied is not None \
+            and non_denied != expected_non_denied:
+        errors.append("non-denied-total")
+    if prepared_hits is not None and prepared_offered is not None \
+            and prepared_hits > prepared_offered:
+        errors.append("prepared-hit-subset")
+    if attempted is not None and prepared_offered is not None \
+            and prepared_offered > attempted:
+        errors.append("prepared-offered-total")
+    if attempted is not None and prepared_unknown is not None \
+            and prepared_unknown > attempted:
+        errors.append("prepared-unknown-total")
+    if attempted is not None and prepared_offered is not None \
+            and prepared_unknown is not None \
+            and prepared_offered + prepared_unknown > attempted:
+        errors.append("prepared-attribution-total")
+
+    def expected_rate(numerator: int | None, denominator: int | None) -> float | None:
+        if numerator is None or denominator is None or denominator == 0:
+            return None
+        return round(numerator / denominator, 6)
+
+    def check_rate(field: str, expected: float | None) -> None:
+        raw = value.get(field)
+        if expected is None:
+            if raw is not None:
+                errors.append("rate:" + field)
+            return
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) \
+                or not math.isfinite(float(raw)) \
+                or not math.isclose(float(raw), expected, abs_tol=1e-9):
+            errors.append("rate:" + field)
+
+    check_rate("denial_rate", expected_rate(denied, attempted))
+    check_rate("invalid_argv_rate", expected_rate(invalid_argv, attempted))
+    check_rate("non_denied_terminal_rate", expected_rate(non_denied, attempted))
+    check_rate(
+        "prepared_capability_hit_rate",
+        expected_rate(prepared_hits, prepared_offered),
+    )
+
+    reasons = value.get("unknown_reason_counts")
+    if not isinstance(reasons, dict):
+        errors.append("unknown-reasons")
+    else:
+        reason_total = 0
+        for name, raw in reasons.items():
+            if not isinstance(name, str) \
+                    or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", name) \
+                    or isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+                errors.append("unknown-reasons")
+                break
+            reason_total += raw
+        unknown = bucket_counts.get("unknown")
+        if unknown is not None and reason_total != unknown:
+            errors.append("unknown-reason-total")
+    return sorted(set(errors))
+
+
+def _tool_friction_metrics(run_dir: Path, truth: dict) -> dict | None:
+    """Evaluate explicitly requested, receipt-backed Agent tool friction.
+
+    Old fixtures keep their scoring and exit behavior: runtime receipts are not
+    loaded unless ``expected_tool_friction`` is present in truth.  JSON output is
+    additive rather than byte-for-byte stable.  The public projection is
+    aggregate-only and carries no commands, paths, URLs, or result bytes.
+    """
+    if "expected_tool_friction" not in truth:
+        return None
+    spec = truth.get("expected_tool_friction")
+    spec_valid = isinstance(spec, dict)
+    spec = spec if isinstance(spec, dict) else {}
+    unknown_keys = sorted(set(spec) - set(_TOOL_FRICTION_THRESHOLDS))
+    declared = [key for key in _TOOL_FRICTION_THRESHOLDS if key in spec]
+    thresholds_valid = bool(declared) and spec_valid and not unknown_keys
+
+    producer_error = False
+    try:
+        raw_outcome = runtime_receipts.agent_tool_call_outcomes(run_dir)
+    except Exception:
+        # This is a scoring boundary, so an unexpected producer failure must
+        # remain a failed measurement instead of crashing an entire score-all
+        # batch. Expose only a stable reason code: exception text can contain
+        # private paths, commands, or imported target data.
+        producer_error = True
+        raw_outcome = {}
+    shape_errors = _tool_outcome_shape_errors(raw_outcome)
+    if producer_error:
+        shape_errors = sorted({*shape_errors, "producer-error"})
+    outcome = raw_outcome if isinstance(raw_outcome, dict) else {}
+    raw_outcomes = outcome.get("outcomes") \
+        if isinstance(outcome.get("outcomes"), dict) else {}
+
+    def nonnegative_int(value: object, default: int = 0) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) \
+            and value >= 0 else default
+
+    attempted = nonnegative_int(outcome.get("attempted_calls"))
+    denied = nonnegative_int(raw_outcomes.get("denied"))
+    post_failures = nonnegative_int(raw_outcomes.get("post_failure"))
+    unknown = nonnegative_int(raw_outcomes.get("unknown"), 1)
+    invalid_argv = nonnegative_int(outcome.get("invalid_argv_denials"))
+    non_denied = nonnegative_int(outcome.get("non_denied_terminals"))
+    prepared_hits = nonnegative_int(outcome.get("prepared_capability_hits"))
+    prepared_offered = nonnegative_int(
+        outcome.get("prepared_capability_offered_calls"))
+    prepared_unknown = nonnegative_int(
+        outcome.get("prepared_attribution_unknown"), attempted or 1)
+
+    def rate(name: str) -> float | None:
+        value = outcome.get(name)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                and 0.0 <= float(value) <= 1.0:
+            return float(value)
+        return None
+
+    values: dict[str, int | float | None] = {
+        "tool_calls_attempted": attempted,
+        "tool_calls_denied": denied,
+        "tool_denial_rate": rate("denial_rate"),
+        "tool_invalid_argv_denials": invalid_argv,
+        "tool_invalid_argv_rate": rate("invalid_argv_rate"),
+        "tool_post_failures": post_failures,
+        "tool_non_denied_terminals": non_denied,
+        "tool_non_denied_terminal_rate": rate("non_denied_terminal_rate"),
+        "tool_prepared_capability_hits": prepared_hits,
+        "tool_prepared_capability_offered_calls": prepared_offered,
+        "tool_prepared_capability_hit_rate": rate(
+            "prepared_capability_hit_rate"),
+        "tool_prepared_attribution_unknown": prepared_unknown,
+        "tool_outcome_unknown": unknown,
+    }
+    checks: list[dict] = [{
+        "id": "outcome-shape",
+        "metric": "shape",
+        "actual": ",".join(shape_errors) if shape_errors else "valid",
+        "expected": "valid",
+        "ok": not shape_errors,
+    }, {
+        "id": "outcome-integrity",
+        "metric": "integrity",
+        "actual": str(outcome.get("integrity") or "unknown"),
+        "expected": "valid",
+        "ok": outcome.get("schema") == "xunji.agent-tool-call-outcomes.v1"
+        and outcome.get("integrity") == "valid",
+    }, {
+        "id": "unknown-zero",
+        "metric": "tool_outcome_unknown",
+        "actual": unknown,
+        "threshold": 0,
+        "op": "==",
+        "ok": unknown == 0,
+    }]
+    if not thresholds_valid:
+        checks.append({
+            "id": "threshold-schema",
+            "metric": "expected_tool_friction",
+            "actual": (
+                "unknown keys: " + ",".join(unknown_keys)
+                if unknown_keys else "no valid threshold declared"),
+            "ok": False,
+        })
+
+    prepared_required = any(
+        key in _TOOL_FRICTION_PREPARED_THRESHOLDS for key in declared)
+    if prepared_required:
+        checks.append({
+            "id": "prepared-attribution-known",
+            "metric": "tool_prepared_attribution_unknown",
+            "actual": prepared_unknown,
+            "threshold": 0,
+            "op": "==",
+            "ok": prepared_unknown == 0,
+        })
+
+    required_metrics = {"tool_outcome_unknown"}
+    if prepared_required:
+        required_metrics.update({
+            "tool_prepared_attribution_unknown",
+            "tool_prepared_capability_offered_calls",
+        })
+    for name in declared:
+        metric, op, kind = _TOOL_FRICTION_THRESHOLDS[name]
+        required_metrics.add(metric)
+        raw_threshold = spec.get(name)
+        valid_threshold = (
+            isinstance(raw_threshold, int) and not isinstance(raw_threshold, bool)
+            and raw_threshold >= 0
+            if kind == "count"
+            else isinstance(raw_threshold, (int, float))
+            and not isinstance(raw_threshold, bool)
+            and 0.0 <= float(raw_threshold) <= 1.0
+        )
+        threshold = int(raw_threshold) if valid_threshold and kind == "count" \
+            else float(raw_threshold) if valid_threshold else None
+        actual = values.get(metric)
+        ok = bool(
+            valid_threshold and actual is not None
+            and (float(actual) >= float(threshold) if op == ">="
+                 else float(actual) <= float(threshold))
+        )
+        checks.append({
+            "id": name.replace("_", "-"),
+            "metric": metric,
+            "actual": actual,
+            "threshold": threshold,
+            "op": op,
+            "ok": ok,
+        })
+    return {
+        "enabled": True,
+        "thresholds_declared": thresholds_valid,
+        "required_metrics": sorted(required_metrics),
+        **values,
+        "checks": checks,
+    }
+
+
 def score(run_dir: Path, truth: dict) -> dict:
     blocks, cert, positive = _confirmed_blocks(run_dir)
     findings = []
@@ -361,6 +666,7 @@ def score(run_dir: Path, truth: dict) -> dict:
     budget_max = truth.get("budget", {}).get("max_requests")
     closure = _closure_check(run_dir, truth)
     collaboration = _collaboration_metrics(run_dir, truth)
+    tool_friction = _tool_friction_metrics(run_dir, truth)
     return {
         "fixture": truth.get("name", run_dir.name),
         "expected": n_exp, "detected": n_det,
@@ -379,6 +685,7 @@ def score(run_dir: Path, truth: dict) -> dict:
         "findings": findings, "fp_detail": fps,
         "process": proc,
         "collaboration": collaboration,
+        "tool_friction": tool_friction,
     }
 
 
@@ -440,6 +747,22 @@ def _print_card(s: dict) -> None:
             print("  collaboration checks failed: " + ", ".join(
                 str(c.get("id")) + (f" ({c.get('reason')})" if c.get("skipped") else "")
                 for c in failed))
+    friction = s.get("tool_friction")
+    if isinstance(friction, dict):
+        failed = [c for c in friction.get("checks", []) if not c.get("ok")]
+        print(
+            "  tool friction: "
+            f"attempted={friction.get('tool_calls_attempted', 0)} "
+            f"denied={friction.get('tool_calls_denied', 0)} "
+            f"invalid-argv={friction.get('tool_invalid_argv_denials', 0)} "
+            f"non-denied-terminal={friction.get('tool_non_denied_terminals', 0)} "
+            f"prepared-hit={friction.get('tool_prepared_capability_hits', 0)}/"
+            f"{friction.get('tool_prepared_capability_offered_calls', 0)} offered "
+            f"unknown={friction.get('tool_outcome_unknown', 0)}"
+        )
+        if failed:
+            print("  tool-friction checks failed: " + ", ".join(
+                str(c.get("id")) for c in failed))
 
 
 def _is_clean(s: dict) -> bool:
@@ -449,13 +772,20 @@ def _is_clean(s: dict) -> bool:
     closure_ok = closure is None or closure["correct"]
     collab = s.get("collaboration") or {}
     collab_ok = all(c.get("ok") for c in collab.get("checks", []))
+    friction = s.get("tool_friction")
+    friction_ok = friction is None or bool(
+        isinstance(friction, dict)
+        and friction.get("thresholds_declared") is True
+        and friction.get("tool_outcome_unknown") == 0
+        and all(c.get("ok") for c in friction.get("checks", []))
+    )
     detection_ok = (
         (s["expected"] > 0 and s["detected"] == s["expected"]
          and s["calibrated"] == s["expected"])
         or s["expected"] == 0
     )
     return (detection_ok and s["false_positives"] == 0 and not s.get("over_budget", False)
-            and proc_ok and closure_ok and collab_ok)
+            and proc_ok and closure_ok and collab_ok and friction_ok)
 
 
 def _load_truth(p: Path) -> dict:
@@ -473,6 +803,31 @@ def _aggregate(scores: list[dict]) -> dict:
     collaborations = [s.get("collaboration") or {} for s in scores]
     collab_checks = [c for co in collaborations for c in co.get("checks", [])]
     collab_ttfe = [v for co in collaborations for v in co.get("time_to_first_evidence_by_mode_sec", {}).values()]
+    friction_scores = [
+        (s, s.get("tool_friction")) for s in scores
+        if isinstance(s.get("tool_friction"), dict)
+    ]
+    frictions = [tf for _score, tf in friction_scores]
+    tool_fixture_ids = sorted(
+        str(score.get("fixture") or "") for score, _tf in friction_scores)
+    tool_fixture_ids_unique = bool(
+        all(tool_fixture_ids)
+        and len(tool_fixture_ids) == len(set(tool_fixture_ids))
+    ) if tool_fixture_ids else True
+    tool_attempted = sum(int(tf.get("tool_calls_attempted", 0)) for tf in frictions)
+    tool_denied = sum(int(tf.get("tool_calls_denied", 0)) for tf in frictions)
+    tool_invalid = sum(int(tf.get("tool_invalid_argv_denials", 0)) for tf in frictions)
+    tool_non_denied = sum(int(tf.get("tool_non_denied_terminals", 0)) for tf in frictions)
+    tool_prepared = sum(int(tf.get("tool_prepared_capability_hits", 0)) for tf in frictions)
+    tool_prepared_offered = sum(
+        int(tf.get("tool_prepared_capability_offered_calls", 0))
+        for tf in frictions)
+    tool_required = sorted({
+        str(metric)
+        for tf in frictions
+        for metric in tf.get("required_metrics", [])
+        if str(metric)
+    })
     return {
         "fixtures": len(scores),
         "clean": clean,
@@ -495,6 +850,38 @@ def _aggregate(scores: list[dict]) -> dict:
         "false_positive_suppression_events": sum(
             int(co.get("false_positive_suppression_events", 0)) for co in collaborations),
         "agent_first_evidence_avg_sec": round(sum(collab_ttfe) / len(collab_ttfe), 3) if collab_ttfe else None,
+        "tool_friction_fixtures": len(frictions),
+        "tool_friction_fixture_ids": tool_fixture_ids,
+        "tool_friction_fixture_ids_unique": tool_fixture_ids_unique,
+        "tool_friction_checks_failed": sum(
+            1 for tf in frictions for check in tf.get("checks", [])
+            if not check.get("ok")),
+        "tool_friction_required_metrics": tool_required,
+        "tool_calls_attempted": tool_attempted if frictions else None,
+        "tool_calls_denied": tool_denied if frictions else None,
+        "tool_denial_rate": (
+            round(tool_denied / tool_attempted, 6) if tool_attempted else None),
+        "tool_invalid_argv_denials": tool_invalid if frictions else None,
+        "tool_invalid_argv_rate": (
+            round(tool_invalid / tool_attempted, 6) if tool_attempted else None),
+        "tool_post_failures": sum(
+            int(tf.get("tool_post_failures", 0)) for tf in frictions)
+            if frictions else None,
+        "tool_non_denied_terminals": tool_non_denied if frictions else None,
+        "tool_non_denied_terminal_rate": (
+            round(tool_non_denied / tool_attempted, 6) if tool_attempted else None),
+        "tool_prepared_capability_hits": tool_prepared if frictions else None,
+        "tool_prepared_capability_offered_calls": (
+            tool_prepared_offered if frictions else None),
+        "tool_prepared_capability_hit_rate": (
+            round(tool_prepared / tool_prepared_offered, 6)
+            if tool_prepared_offered else None),
+        "tool_prepared_attribution_unknown": sum(
+            int(tf.get("tool_prepared_attribution_unknown", 0)) for tf in frictions)
+            if frictions else None,
+        "tool_outcome_unknown": sum(
+            int(tf.get("tool_outcome_unknown", 0)) for tf in frictions)
+            if frictions else None,
         "total_expected_findings": total_expected,
         "total_detected_findings": total_detected,
         "total_calibrated_findings": total_calibrated,
@@ -530,6 +917,18 @@ def _print_summary(summary: dict) -> None:
         print(f"  fp-suppression: {a['false_positive_suppression_events']} negative confirmed events")
         if a["agent_first_evidence_avg_sec"] is not None:
             print(f"  agent first-evidence avg: {a['agent_first_evidence_avg_sec']}s")
+    if a.get("tool_friction_fixtures"):
+        print(
+            "  tool friction: "
+            f"{a['tool_friction_fixtures']} fixture(s); "
+            f"attempted={a['tool_calls_attempted']} denied={a['tool_calls_denied']} "
+            f"invalid-argv={a['tool_invalid_argv_denials']} "
+            f"non-denied-terminal={a['tool_non_denied_terminals']} "
+            f"prepared-hit={a['tool_prepared_capability_hits']}/"
+            f"{a['tool_prepared_capability_offered_calls']} offered "
+            f"unknown={a['tool_outcome_unknown']} "
+            f"check-fail={a['tool_friction_checks_failed']}"
+        )
 
 
 def _write_json(path: Path | None, obj: dict) -> None:
@@ -556,21 +955,118 @@ def _compare(baseline: Path, change: Path) -> int:
         "closure_correct", "missed_high_value_fronts", "role_mismatched_fronts",
         "conflicts_unresolved", "collaboration_checks_failed", "agent_first_evidence_avg_sec",
         "false_positive_suppression_events",
+        "tool_calls_attempted", "tool_calls_denied", "tool_denial_rate",
+        "tool_invalid_argv_denials", "tool_invalid_argv_rate",
+        "tool_post_failures", "tool_non_denied_terminals",
+        "tool_non_denied_terminal_rate", "tool_prepared_capability_hits",
+        "tool_prepared_capability_offered_calls",
+        "tool_prepared_capability_hit_rate",
+        "tool_prepared_attribution_unknown", "tool_outcome_unknown",
+        "tool_friction_checks_failed",
     ]
     higher_is_better = {
         "detection_rate", "calibration_rate", "closure_correct",
         "false_positive_suppression_events",
+        "tool_non_denied_terminal_rate", "tool_prepared_capability_hit_rate",
     }
     lower_is_better = {
         "false_positives", "false_positive_rate_mean", "request_budget_total",
         "request_budget_over", "time_to_first_evidence_avg_sec", "missed_high_value_fronts",
         "role_mismatched_fronts", "conflicts_unresolved", "collaboration_checks_failed",
         "agent_first_evidence_avg_sec",
+        "tool_calls_denied", "tool_denial_rate", "tool_invalid_argv_denials",
+        "tool_invalid_argv_rate", "tool_post_failures",
+        "tool_prepared_attribution_unknown", "tool_outcome_unknown",
+        "tool_friction_checks_failed",
     }
     regressed = False
     print("== bench compare ==")
     print(f"  baseline: {baseline}")
     print(f"  change  : {change}")
+
+    def fixture_ids(source: dict) -> list[str] | None:
+        raw = source.get("tool_friction_fixture_ids")
+        if not isinstance(raw, list) \
+                or any(not isinstance(item, str) or not item for item in raw) \
+                or len(raw) != len(set(raw)):
+            return None
+        return sorted(raw)
+
+    def required_metrics(source: dict) -> list[str] | None:
+        raw = source.get("tool_friction_required_metrics")
+        if not isinstance(raw, list) \
+                or any(not isinstance(item, str) or not item for item in raw) \
+                or len(raw) != len(set(raw)):
+            return None
+        return sorted(raw)
+
+    friction_present = any(
+        (source.get("tool_friction_fixtures") is not None
+         and source.get("tool_friction_fixtures") != 0)
+        or bool(source.get("tool_friction_fixture_ids"))
+        or bool(source.get("tool_friction_required_metrics"))
+        or (source.get("tool_friction_checks_failed") is not None
+            and source.get("tool_friction_checks_failed") != 0)
+        for source in (b, c)
+    )
+    b_ids: list[str] = []
+    c_ids: list[str] = []
+    b_required: list[str] = []
+    c_required: list[str] = []
+    if friction_present:
+        populations_valid = True
+        for label, source in (("baseline", b), ("change", c)):
+            ids = fixture_ids(source)
+            count = source.get("tool_friction_fixtures")
+            unique = source.get("tool_friction_fixture_ids_unique")
+            if ids is None or isinstance(count, bool) \
+                    or not isinstance(count, int) or count < 0 \
+                    or count != len(ids) or unique is not True:
+                populations_valid = False
+                regressed = True
+                print(f"  tool_friction_fixture_ids: INVALID in {label}")
+            elif label == "baseline":
+                b_ids = ids
+            else:
+                c_ids = ids
+        if populations_valid and b_ids != c_ids:
+            regressed = True
+            print("  tool_friction_fixture_ids: POPULATION_MISMATCH")
+
+        baseline_required = required_metrics(b)
+        change_required = required_metrics(c)
+        if baseline_required is None or change_required is None:
+            regressed = True
+            print("  tool_friction_required_metrics: INVALID")
+        else:
+            b_required = baseline_required
+            c_required = change_required
+            if b_required != c_required:
+                regressed = True
+                print("  tool_friction_required_metrics: CONTRACT_MISMATCH")
+
+        def change_zero(field: str) -> None:
+            nonlocal regressed
+            value = c.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value != 0:
+                regressed = True
+                print(f"  {field}: CHANGE_MUST_BE_ZERO")
+
+        change_zero("tool_friction_checks_failed")
+        change_zero("tool_outcome_unknown")
+        if "tool_prepared_attribution_unknown" in c_required:
+            change_zero("tool_prepared_attribution_unknown")
+
+    required = set(b_required) | set(c_required)
+    for metric in sorted(required):
+        missing = [
+            label for label, source in (("baseline", b), ("change", c))
+            if metric not in source or source.get(metric) is None
+        ]
+        if missing:
+            regressed = True
+            print(
+                f"  {metric}: MISSING_REQUIRED in " + ",".join(missing))
     for k in keys:
         bv, cv = b.get(k), c.get(k)
         if bv is None and cv is None:
@@ -636,6 +1132,8 @@ def main() -> int:
                 _print_card(s)
             worst = max(worst, 0 if _is_clean(s) else 1)
         summary = _summary(scores)
+        if summary["summary"].get("tool_friction_fixture_ids_unique") is not True:
+            worst = 1
         _write_json(args.json_out, summary)
         if args.json:
             print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -652,6 +1150,7 @@ def _selftest() -> int:
     import contextlib
     import io
     import tempfile
+    from unittest import mock
     d = Path(tempfile.mkdtemp())
     run = d / "fix_20260101"
     run.mkdir()
@@ -696,6 +1195,126 @@ def _selftest() -> int:
         {"id": "sqli", "markers": ["sql injection"], "min_certainty": 0.8},
         {"id": "xss", "markers": ["reflected xss"], "min_certainty": 0.8}]})
     checks.append(("全检出+校准+零误报 -> clean(退出码0)", _is_clean(s2)))
+    with mock.patch.object(
+            runtime_receipts, "agent_tool_call_outcomes",
+            side_effect=AssertionError("legacy fixture loaded runtime receipts")):
+        legacy_score = score(run2, {
+            "name": "legacy-no-tool-friction",
+            "expected_findings": [
+                {"id": "sqli", "markers": ["sql injection"], "min_certainty": 0.8},
+                {"id": "xss", "markers": ["reflected xss"], "min_certainty": 0.8},
+            ],
+        })
+    checks.append(("旧 fixture 未声明 expected_tool_friction 时不加载 runtime receipts",
+                   legacy_score.get("tool_friction") is None and _is_clean(legacy_score)))
+
+    clean_tool_outcomes = {
+        "schema": "xunji.agent-tool-call-outcomes.v1",
+        "integrity": "valid",
+        "attempted_calls": 4,
+        "outcomes": {
+            "denied": 1,
+            "post_success": 2,
+            "post_failure": 0,
+            "xunji_non_denied_terminal": 1,
+            "unknown": 0,
+        },
+        "invalid_argv_denials": 0,
+        "non_denied_terminals": 3,
+        "prepared_capability_hits": 3,
+        "prepared_capability_offered_calls": 4,
+        "prepared_attribution_unknown": 0,
+        "denial_rate": 0.25,
+        "invalid_argv_rate": 0.0,
+        "non_denied_terminal_rate": 0.75,
+        "prepared_capability_hit_rate": 0.75,
+        "unknown_reason_counts": {},
+    }
+    tool_truth = {
+        "name": "tool-friction",
+        "expected_findings": [
+            {"id": "sqli", "markers": ["sql injection"], "min_certainty": 0.8},
+            {"id": "xss", "markers": ["reflected xss"], "min_certainty": 0.8},
+        ],
+        "expected_tool_friction": {
+            "min_attempted_calls": 4,
+            "max_denial_rate": 0.25,
+            "max_invalid_argv_denials": 0,
+            "max_post_failures": 0,
+            "min_non_denied_terminal_rate": 0.75,
+            "min_prepared_capability_hit_rate": 0.75,
+        },
+    }
+    with mock.patch.object(
+            runtime_receipts, "agent_tool_call_outcomes",
+            return_value=clean_tool_outcomes):
+        tool_score = score(run2, tool_truth)
+        no_threshold_score = score(run2, {
+            **tool_truth, "expected_tool_friction": {},
+        })
+        typo_threshold_score = score(run2, {
+            **tool_truth,
+            "expected_tool_friction": {"max_denail_rate": 0.25},
+        })
+    checks.append(("工具摩擦: 声明 thresholds、unknown=0 且 prepared marker 命中 -> clean",
+                   _is_clean(tool_score)
+                   and tool_score["tool_friction"]["tool_calls_attempted"] == 4
+                   and tool_score["tool_friction"]["tool_prepared_capability_hits"] == 3))
+    checks.append(("工具摩擦: 空 thresholds 与拼错字段都 fail closed",
+                   not _is_clean(no_threshold_score)
+                   and not _is_clean(typo_threshold_score)))
+    unknown_tool_outcomes = json.loads(json.dumps(clean_tool_outcomes))
+    unknown_tool_outcomes["outcomes"]["unknown"] = 1
+    unknown_tool_outcomes["outcomes"]["post_success"] = 1
+    unknown_tool_outcomes["non_denied_terminals"] = 2
+    unknown_tool_outcomes["non_denied_terminal_rate"] = 0.5
+    with mock.patch.object(
+            runtime_receipts, "agent_tool_call_outcomes",
+            return_value=unknown_tool_outcomes):
+        unknown_tool_score = score(run2, tool_truth)
+    checks.append(("工具摩擦: 即使其它阈值可调，任何 outcome unknown 都非 clean",
+                   not _is_clean(unknown_tool_score)
+                   and unknown_tool_score["tool_friction"]["tool_outcome_unknown"] == 1))
+    prepared_unknown_outcomes = json.loads(json.dumps(clean_tool_outcomes))
+    prepared_unknown_outcomes["prepared_attribution_unknown"] = 1
+    with mock.patch.object(
+            runtime_receipts, "agent_tool_call_outcomes",
+            return_value=prepared_unknown_outcomes):
+        prepared_unknown_score = score(run2, tool_truth)
+    checks.append(("工具摩擦: prepared threshold 要求完整 context descriptor 归因",
+                   not _is_clean(prepared_unknown_score)))
+    malformed_tool_outcomes = json.loads(json.dumps(clean_tool_outcomes))
+    malformed_tool_outcomes["non_denied_terminals"] = 4
+    with mock.patch.object(
+            runtime_receipts, "agent_tool_call_outcomes",
+            return_value=malformed_tool_outcomes):
+        malformed_tool_score = score(run2, tool_truth)
+    malformed_shape = next(
+        check for check in malformed_tool_score["tool_friction"]["checks"]
+        if check["id"] == "outcome-shape")
+    checks.append(("工具摩擦: producer count/rate invariant 畸形时 fail closed",
+                   not _is_clean(malformed_tool_score)
+                   and not malformed_shape["ok"]
+                   and "non-denied-total" in malformed_shape["actual"]))
+    producer_private_error = "private-path private-command imported-bytes"
+    with mock.patch.object(
+            runtime_receipts, "agent_tool_call_outcomes",
+            side_effect=RuntimeError(producer_private_error)):
+        producer_error_score = score(run2, tool_truth)
+    producer_error_shape = next(
+        check for check in producer_error_score["tool_friction"]["checks"]
+        if check["id"] == "outcome-shape")
+    producer_error_json = json.dumps(
+        producer_error_score, ensure_ascii=False, sort_keys=True)
+    checks.append(("工具摩擦: producer 异常脱敏、可观测并 fail closed",
+                   not _is_clean(producer_error_score)
+                   and "producer-error" in producer_error_shape["actual"]
+                   and producer_private_error not in producer_error_json))
+    duplicate_tool_fixture_summary = _summary([tool_score, tool_score])[
+        "summary"]
+    checks.append(("工具摩擦: score 批次拒绝重复 truth.name fixture ID",
+                   duplicate_tool_fixture_summary[
+                       "tool_friction_fixture_ids_unique"] is False))
     # 欠证: 期望 1.0 但只给 0.8
     s3 = score(run2, {"name": "undercert", "expected_findings": [
         {"id": "sqli", "markers": ["sql injection"], "min_certainty": 1.0},
@@ -940,6 +1559,109 @@ def _selftest() -> int:
         cmp_bad = _compare(base, change_bad)
     checks.append(("compare: unchanged metrics exit 0", cmp_ok == 0))
     checks.append(("compare: worse metrics exit 1", cmp_bad == 1))
+
+    friction_base = d / "friction-base.json"
+    friction_change_ok = d / "friction-change-ok.json"
+    friction_change_missing = d / "friction-change-missing.json"
+    friction_both_unknown = d / "friction-both-unknown.json"
+    friction_threshold_bad = d / "friction-threshold-bad.json"
+    friction_population_base = d / "friction-population-base.json"
+    friction_population_drop = d / "friction-population-drop.json"
+    friction_baseline_failed = d / "friction-baseline-failed.json"
+    friction_prepared_unknown = d / "friction-prepared-unknown.json"
+    friction_contract = {
+        "tool_friction_fixtures": 1,
+        "tool_friction_fixture_ids": ["tool-friction"],
+        "tool_friction_fixture_ids_unique": True,
+        "tool_friction_required_metrics": [
+            "tool_denial_rate", "tool_outcome_unknown"],
+        "tool_friction_checks_failed": 0,
+    }
+    friction_base.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_denial_rate": 0.25,
+        "tool_outcome_unknown": 0,
+    }}), encoding="utf-8")
+    friction_change_ok.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_denial_rate": 0.0,
+        "tool_outcome_unknown": 0,
+    }}), encoding="utf-8")
+    friction_change_missing.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_outcome_unknown": 0,
+    }}), encoding="utf-8")
+    friction_both_unknown.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_denial_rate": 0.25,
+        "tool_outcome_unknown": 1,
+        "tool_friction_checks_failed": 1,
+    }}), encoding="utf-8")
+    friction_threshold_bad.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_denial_rate": 0.0,
+        "tool_outcome_unknown": 0,
+        "tool_friction_checks_failed": 1,
+    }}), encoding="utf-8")
+    friction_population_base.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_friction_fixtures": 2,
+        "tool_friction_fixture_ids": ["tool-friction", "tool-friction-hard"],
+        "tool_denial_rate": 0.25,
+        "tool_outcome_unknown": 0,
+    }}), encoding="utf-8")
+    friction_population_drop.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_denial_rate": 0.0,
+        "tool_outcome_unknown": 0,
+    }}), encoding="utf-8")
+    friction_baseline_failed.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_denial_rate": 0.25,
+        "tool_outcome_unknown": 1,
+        "tool_friction_checks_failed": 1,
+    }}), encoding="utf-8")
+    friction_prepared_unknown.write_text(json.dumps({"summary": {
+        **friction_contract,
+        "tool_friction_required_metrics": [
+            "tool_outcome_unknown", "tool_prepared_attribution_unknown",
+            "tool_prepared_capability_hit_rate",
+            "tool_prepared_capability_offered_calls",
+        ],
+        "tool_denial_rate": 0.0,
+        "tool_outcome_unknown": 0,
+        "tool_prepared_attribution_unknown": 1,
+        "tool_prepared_capability_hit_rate": 0.5,
+        "tool_prepared_capability_offered_calls": 4,
+    }}), encoding="utf-8")
+    with contextlib.redirect_stdout(io.StringIO()):
+        friction_cmp_ok = _compare(friction_base, friction_change_ok)
+        friction_cmp_missing = _compare(
+            friction_base, friction_change_missing)
+        friction_cmp_both_unknown = _compare(
+            friction_both_unknown, friction_both_unknown)
+        friction_cmp_threshold_bad = _compare(
+            friction_base, friction_threshold_bad)
+        friction_cmp_population_drop = _compare(
+            friction_population_base, friction_population_drop)
+        friction_cmp_improved_from_failed = _compare(
+            friction_baseline_failed, friction_change_ok)
+        friction_cmp_prepared_unknown = _compare(
+            friction_prepared_unknown, friction_prepared_unknown)
+    checks.append(("compare: tool friction required metrics 完整且改善 -> exit 0",
+                   friction_cmp_ok == 0))
+    checks.append(("compare: tool friction required metric 缺失 -> fail closed",
+                   friction_cmp_missing == 1))
+    checks.append(("compare: 双方 outcome unknown 不因相等而通过",
+                   friction_cmp_both_unknown == 1))
+    checks.append(("compare: change threshold/check 失败时绝对拒绝",
+                   friction_cmp_threshold_bad == 1))
+    checks.append(("compare: 删除 tool-friction 难例不能改善汇总",
+                   friction_cmp_population_drop == 1))
+    checks.append(("compare: baseline 可失败，change 修复全部绝对门后可证明改善",
+                   friction_cmp_improved_from_failed == 0))
+    checks.append(("compare: prepared-required attribution unknown 必须绝对为零",
+                   friction_cmp_prepared_unknown == 1))
 
     # Keep the checked-in Ultra-native collaboration fixture from drifting.
     fixture_truth = ROOT / "bench" / "ultra-agent-collab" / "truth.json"
