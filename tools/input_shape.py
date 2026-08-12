@@ -5,10 +5,10 @@
 每个 IS-xxx 记录一个已探测的请求模板(URL pattern、Content-Type、关键参数、响应形状),
 供后续攻击复用。CLI 用法:
 
-  python tools/input_shape.py list runs/<dir>          # 列出所有 IS-xxx
-  python tools/input_shape.py match runs/<dir>          # 匹配给定 URL 最相似的已知输入形状
+  .venv/bin/python tools/input_shape.py list runs/<dir> # 列出所有 IS-xxx
+  .venv/bin/python tools/input_shape.py match runs/<dir> # 匹配 URL
            --method POST --path /api/user/profile
-  python tools/input_shape.py coverage runs/<dir>       # 计算各输入形状的 payload class 覆盖率
+  .venv/bin/python tools/input_shape.py coverage runs/<dir> # 计算覆盖率
 """
 from __future__ import annotations
 

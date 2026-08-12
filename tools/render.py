@@ -27,9 +27,9 @@ the login page. This is symmetric to the cookie EXPORT render.py already does:
 
 Run with the venv python (Playwright lives there); activate the venv first
 (.venv/bin/activate on Linux/macOS, .venv\Scripts\activate on Windows):
-  python tools/render.py <url> --run runs/<dir> [--wait networkidle]
-  python tools/render.py <url> --run runs/<dir> --cookie "PHPSESSID=abc; security=low"
-  python tools/render.py <url> --run runs/<dir> --screenshot --save page.html --wait-sec 3
+  .venv/bin/python tools/render.py <url> --run runs/<dir> [--wait networkidle]
+  .venv/bin/python tools/render.py <url> --run runs/<dir> --cookie "PHPSESSID=abc; security=low"
+  .venv/bin/python tools/render.py <url> --run runs/<dir> --screenshot --save page.html --wait-sec 3
 """
 
 from __future__ import annotations

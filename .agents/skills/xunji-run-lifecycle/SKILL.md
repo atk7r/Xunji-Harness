@@ -53,8 +53,8 @@ Read only the source needed for the lifecycle task:
 Prefer the one-shot scaffold:
 
 ```bash
-python tools/setup_run.py <slug> <recon.json>
-python tools/setup_run.py <slug> --target <http-or-https-url>
+.venv/bin/python tools/setup_run.py <slug> <recon.json>
+.venv/bin/python tools/setup_run.py <slug> --target <http-or-https-url>
 ```
 
 Key invariants:
@@ -78,13 +78,13 @@ Key invariants:
 To snapshot a run for the next session:
 
 ```bash
-python tools/session_handoff.py write runs/<dir>
+.venv/bin/python tools/session_handoff.py write runs/<dir>
 ```
 
 To produce a pickup prompt:
 
 ```bash
-python tools/session_handoff.py pickup runs/<dir>
+.venv/bin/python tools/session_handoff.py pickup runs/<dir>
 ```
 
 Resume from files, not prior chat. Start with `session_handoff.md` when present,
@@ -97,8 +97,8 @@ projection; verify important facts against Markdown.
 For an active run, recommend the cheap state pass before choosing work:
 
 ```bash
-python tools/graph.py runs/<dir>
-python tools/check_run.py runs/<dir>
+.venv/bin/python tools/graph.py runs/<dir>
+.venv/bin/python tools/check_run.py runs/<dir>
 ```
 
 `graph.py` writes derived state such as `state/workflow_checkpoint.json`.
@@ -115,15 +115,15 @@ hints must not rot.
 Before any "done", "exhausted", final report, or ghost completion claim, verify:
 
 ```bash
-python tools/check_run.py runs/<dir>
-python tools/check_run.py runs/<dir> --replay-verify   # explicit, live GET replay only
+.venv/bin/python tools/check_run.py runs/<dir>
+.venv/bin/python tools/check_run.py runs/<dir> --replay-verify   # explicit, live GET replay only
 ```
 
 Use `--auto-peer-review --review-driver codex` only when Codex authored or is
 maintaining the repo-side change and external review is allowed:
 
 ```bash
-python tools/check_run.py runs/<dir> --auto-peer-review --review-driver codex
+.venv/bin/python tools/check_run.py runs/<dir> --auto-peer-review --review-driver codex
 ```
 
 Closure hard points to preserve:
@@ -143,18 +143,18 @@ Closure hard points to preserve:
 When editing lifecycle docs or tools, run the narrow checks first:
 
 ```bash
-python tools/setup_run.py --selftest
-python tools/setup_transaction.py --selftest
-python tools/check_run.py --selftest
-python tools/session_handoff.py --selftest
-python tools/anti_drift.py --selftest
+.venv/bin/python tools/setup_run.py --selftest
+.venv/bin/python tools/setup_transaction.py --selftest
+.venv/bin/python tools/check_run.py --selftest
+.venv/bin/python tools/session_handoff.py --selftest
+.venv/bin/python tools/anti_drift.py --selftest
 ```
 
 Use broader checks when the change touches shared gates or review behavior:
 
 ```bash
-python tools/selftest_all.py --only peer_review
-python tools/selftest_all.py
+.venv/bin/python tools/selftest_all.py --only peer_review
+.venv/bin/python tools/selftest_all.py
 ```
 
 For safety-critical changes under `.claude/hooks/`, `tools/setup_transaction.py`,

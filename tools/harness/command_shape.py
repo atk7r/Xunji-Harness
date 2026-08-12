@@ -18,6 +18,11 @@ import stat
 import sys
 from urllib.parse import urlsplit
 
+try:
+    from . import python_runtime
+except ImportError:  # direct script/selftest import
+    import python_runtime  # type: ignore[no-redef]
+
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).with_name("fixtures") / "privacy-command-shape.json"
@@ -245,7 +250,43 @@ def parse_exact_python_command(
         # any helper/subprocess resolution differ from the environment this
         # exact-control boundary verified.
         return None
-    if len(tokens) < 2 or not trusted_python_token(tokens[0]):
+    if len(tokens) < 2 or not trusted_python_token(tokens[0], root=root):
+        return None
+    script = _resolve_script_token(
+        tokens[1], root=root, allowed_scripts=allowed_scripts,
+    )
+    if script is None:
+        return None
+    return PythonControlInvocation(script, tuple(tokens[2:]), tuple(environment))
+
+
+def parse_historical_python_command(
+    command: str,
+    *,
+    root: Path = ROOT,
+    allowed_scripts: set[Path] | frozenset[Path] | None = None,
+    allow_environment: bool = False,
+) -> PythonControlInvocation | None:
+    """Read one frozen legacy ``python3`` receipt without granting authority.
+
+    This parser exists only for append-only historical audit/settlement data.
+    Live Hooks, capability admission, prepared actions, retry hints, and command
+    execution must use :func:`parse_exact_python_command` instead.
+    """
+    normalized = str(command or "").strip()
+    if has_unquoted_shell_control(normalized):
+        return None
+    try:
+        tokens = shlex.split(normalized, comments=False, posix=True)
+    except ValueError:
+        return None
+    environment: list[str] = []
+    if allow_environment:
+        while tokens and _ENV_ASSIGNMENT_RE.fullmatch(tokens[0]):
+            environment.append(tokens.pop(0))
+    if environment and any(item.split("=", 1)[0] == "PATH" for item in environment):
+        return None
+    if len(tokens) < 2 or tokens[0] != "python3":
         return None
     script = _resolve_script_token(
         tokens[1], root=root, allowed_scripts=allowed_scripts,
@@ -270,35 +311,9 @@ def _executable_identity(value: str) -> tuple[Path, int, int] | None:
         return None
 
 
-def trusted_python_token(token: str) -> bool:
-    """Trust the documented bare Python 3 command or this hook interpreter.
-
-    Claude Code launches hooks and Bash tools with different inherited ``PATH``
-    values on macOS.  The exact bare spelling ``python3`` therefore belongs to
-    the trusted single-operator environment rather than to the hook process'
-    executable inode.  Command-local environment overrides remain rejected by
-    :func:`parse_exact_python_command`, and the script path/argv are still
-    validated exactly.  Absolute spellings stay narrower: only the current hook
-    interpreter spelling or canonical real path is accepted.
-    """
-    value = str(token or "")
-    path = Path(value)
-    if not _PYTHON_RE.fullmatch(path.name):
-        return False
-    current = _executable_identity(sys.executable)
-    if current is None:
-        return False
-    try:
-        if path.is_absolute():
-            spelling = Path(os.path.abspath(value))
-            permitted = {
-                Path(os.path.abspath(sys.executable)),
-                current[0],
-            }
-            return spelling in permitted and _executable_identity(value) == current
-        return value == "python3"
-    except (OSError, RuntimeError, ValueError):
-        return False
+def trusted_python_token(token: str, *, root: Path = ROOT) -> bool:
+    """Trust only the repository's canonical ``.venv`` interpreter."""
+    return python_runtime.token_is_canonical(str(token or ""), root=root)
 
 
 _OBSERVATIONAL_SUFFIX_RE = re.compile(
@@ -606,18 +621,20 @@ def selftest() -> int:
     from unittest import mock
 
     cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
+    project_python = python_runtime.display_token()
+    project_python_abs = str(python_runtime.canonical_path(ROOT))
     sha_a = "a" * 64
     sha_b = "b" * 64
     lifecycle_commands = (
         (
             (ROOT / "tools" / "completion_transaction.py").resolve(),
-            f"{shlex.quote(sys.executable)} "
+            f"{shlex.quote(project_python)} "
             f"{shlex.quote(str(ROOT / 'tools' / 'completion_transaction.py'))} "
             "adopt-policy runs/demo_20260101",
         ),
         (
             (ROOT / "tools" / "completion_transaction.py").resolve(),
-            f"{shlex.quote(sys.executable)} "
+            f"{shlex.quote(project_python)} "
             f"{shlex.quote(str(ROOT / 'tools' / 'completion_transaction.py'))} "
             "prepare runs/demo_20260101 --mode normal "
             f"--review-receipt independent-review={sha_a} "
@@ -626,14 +643,14 @@ def selftest() -> int:
         ),
         (
             (ROOT / "tools" / "barrier_state.py").resolve(),
-            f"{shlex.quote(sys.executable)} "
+            f"{shlex.quote(project_python)} "
             f"{shlex.quote(str(ROOT / 'tools' / 'barrier_state.py'))} "
             "observe runs/demo_20260101 "
             f"--failure-receipt-sha256 {sha_a}",
         ),
         (
             (ROOT / "tools" / "artifact_view.py").resolve(),
-            f"{shlex.quote(sys.executable)} "
+            f"{shlex.quote(project_python)} "
             f"{shlex.quote(str(ROOT / 'tools' / 'artifact_view.py'))} "
             "search runs/demo_20260101 evidence/large.bin 'session token' "
             "--scan-limit 8388608 --max-matches 20 --context-bytes 80",
@@ -641,7 +658,10 @@ def selftest() -> int:
     )
     checks: list[tuple[str, bool]] = []
     for case in cases:
-        command = str(case["command"]).replace("{ROOT}", str(ROOT))
+        command = str(case["command"])
+        if command.startswith("python3 "):
+            command = project_python + command[len("python3"):]
+        command = command.replace("{ROOT}", str(ROOT))
         if "shell_control" in case:
             checks.append((
                 f"{case['name']}: shell-control",
@@ -668,16 +688,16 @@ def selftest() -> int:
     checks.extend((
         ("trusted localhost direct-egress reminders normalize only for public setup",
          all(local_setup_metadata_invocation(command) is not None for command in (
-             "XUNJI_PROXY_REQUIRED=0 python3 tools/loop_bootstrap.py "
+             f"XUNJI_PROXY_REQUIRED=0 {project_python} tools/loop_bootstrap.py "
              "--source 'http://127.0.0.1:18765' --type auto",
-             "export XUNJI_PROXY_REQUIRED=0 && python3 tools/loop_bootstrap.py "
+             f"export XUNJI_PROXY_REQUIRED=0 && {project_python} tools/loop_bootstrap.py "
              "--source 'http://127.0.0.1:18765' --type auto",
          ))
          and all(local_setup_metadata_invocation(command) is None for command in (
-             "XUNJI_PROXY_REQUIRED=1 python3 tools/loop_bootstrap.py "
+             f"XUNJI_PROXY_REQUIRED=1 {project_python} tools/loop_bootstrap.py "
              "--source 'http://127.0.0.1:18765' --type auto",
-             "export XUNJI_PROXY_REQUIRED=0 && python3 tools/workers.py list runs/demo",
-             "export XUNJI_PROXY_REQUIRED=0; python3 tools/loop_bootstrap.py "
+             f"export XUNJI_PROXY_REQUIRED=0 && {project_python} tools/workers.py list runs/demo",
+             f"export XUNJI_PROXY_REQUIRED=0; {project_python} tools/loop_bootstrap.py "
              "--source 'http://127.0.0.1:18765' --type auto",
          ))),
         ("cancel-unlaunched exact Python argv parses as one control invocation",
@@ -688,7 +708,7 @@ def selftest() -> int:
                  "A-web-hunter-001", "--reason", "inputs changed",
              )
          ))(parse_exact_python_command(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "cancel-unlaunched runs/demo_20260101 A-web-hunter-001 "
              "--reason 'inputs changed'",
@@ -697,7 +717,7 @@ def selftest() -> int:
          ))),
         ("cancel-unlaunched shell chaining never parses as control",
          parse_exact_python_command(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "cancel-unlaunched runs/demo_20260101 A-web-hunter-001 "
              "--reason ok; echo forged",
@@ -712,7 +732,7 @@ def selftest() -> int:
                  "A-web-hunter-001",
              )
          ))(parse_exact_python_command(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "settle-stopped runs/demo_20260101 A-web-hunter-001",
              root=ROOT,
@@ -720,7 +740,7 @@ def selftest() -> int:
          ))),
         ("settle-stopped shell chaining never parses as control",
          parse_exact_python_command(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "settle-stopped runs/demo_20260101 A-web-hunter-001; echo forged",
              root=ROOT,
@@ -734,7 +754,7 @@ def selftest() -> int:
                  "A-web-hunter-001",
              )
          ))(parse_exact_python_command(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "settle-stream-stalled runs/demo_20260101 A-web-hunter-001",
              root=ROOT,
@@ -742,7 +762,7 @@ def selftest() -> int:
          ))),
         ("settle-stream-stalled shell chaining never parses as control",
          parse_exact_python_command(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "settle-stream-stalled runs/demo_20260101 "
              "A-web-hunter-001; echo forged",
@@ -761,10 +781,10 @@ def selftest() -> int:
          (lambda first, second: split_literal_and_chain(
              f"{first} && {second}"
          ) == (first, second))(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "list runs/demo_20260101",
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "status runs/demo_20260101",
          )),
@@ -772,10 +792,10 @@ def selftest() -> int:
          (lambda first, second: split_literal_and_chain(
              f"{first} && echo '---' && {second}"
          ) == (first, "echo '---'", second))(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "list runs/demo_20260101",
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "status runs/demo_20260101",
          )),
@@ -790,7 +810,7 @@ def selftest() -> int:
              command + " && echo $(id)",
              command + " &&\necho unsafe",
          )))(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "list runs/demo_20260101"
          )),
@@ -803,14 +823,16 @@ def selftest() -> int:
                  command + " && echo " + "x" * _MAX_DIAGNOSTIC_CHAIN_BYTES
              ) is None
          ))(
-             f"{shlex.quote(sys.executable)} "
+             f"{shlex.quote(project_python)} "
              f"{shlex.quote(str(ROOT / 'tools' / 'workers.py'))} "
              "list runs/demo_20260101"
          )),
-        ("current absolute Python identity is trusted",
-         trusted_python_token(sys.executable)),
-        ("current canonical Python identity is trusted",
-         trusted_python_token(str(Path(sys.executable).resolve(strict=True)))),
+        ("repository-relative canonical Python identity is trusted",
+         trusted_python_token(project_python)),
+        ("repository-absolute canonical Python spelling is trusted",
+         trusted_python_token(project_python_abs)),
+        ("bare python3 is not a project control interpreter",
+         not trusted_python_token("python3")),
     ))
     with tempfile.TemporaryDirectory() as tmp:
         fake_python = Path(tmp) / "python3"
@@ -818,8 +840,8 @@ def selftest() -> int:
         fake_python.chmod(0o755)
         with mock.patch.dict(os.environ, {"PATH": str(Path(tmp))}):
             checks.append((
-                "documented bare python3 is stable across hook and tool PATH",
-                trusted_python_token("python3"),
+                "PATH cannot promote bare python3 into project authority",
+                not trusted_python_token("python3"),
             ))
         unavailable_clean = (
             f"python3.99 {ROOT / 'tools' / 'loop_bootstrap.py'} "
@@ -855,14 +877,14 @@ def selftest() -> int:
         interpreter_alias = alias_dir / "python3"
         interpreter_alias.symlink_to(sys.executable)
         documented_setup = (
-            f"python3 {shlex.quote(str(ROOT / 'tools' / 'setup_run.py'))} "
+            f"{project_python} {shlex.quote(str(ROOT / 'tools' / 'setup_run.py'))} "
             "alpha --target https://example.test/ --date 20260714"
         )
         with mock.patch.dict(os.environ, {"PATH": str(alias_dir)}):
             checks.extend((
                 (
-                    "documented bare python3 remains trusted in a different PATH",
-                    trusted_python_token("python3"),
+                    "canonical project Python remains trusted in a different PATH",
+                    trusted_python_token(project_python),
                 ),
                 (
                     "documented setup argv reaches the exact Hook parser",
@@ -885,7 +907,7 @@ def selftest() -> int:
         checks.append((
             "attacker-controlled script alias cannot impersonate an allowed script",
             parse_exact_python_command(
-                f"{shlex.quote(sys.executable)} {shlex.quote(str(script_alias))} "
+                f"{shlex.quote(project_python)} {shlex.quote(str(script_alias))} "
                 "alpha --target https://example.test/",
                 root=ROOT,
                 allowed_scripts={(ROOT / "tools" / "setup_run.py").resolve()},
@@ -894,7 +916,7 @@ def selftest() -> int:
         checks.append((
             "inline PATH cannot alter an exact Python control environment",
             parse_exact_python_command(
-                f"PATH={tmp} {shlex.quote(sys.executable)} "
+                f"PATH={tmp} {shlex.quote(project_python)} "
                 f"{ROOT / 'tools' / 'setup_run.py'} "
                 "alpha --target https://example.test/",
                 root=ROOT,

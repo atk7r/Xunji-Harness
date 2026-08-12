@@ -141,8 +141,8 @@ When a run directory exists, record the same transition in
 `state/loop_journal.jsonl`:
 
 ```bash
-python3 tools/loop_journal.py runs/<dir> phase-start --phase "<Phase>" --note "<why>"
-python3 tools/loop_journal.py runs/<dir> phase-end --phase "<Phase>" --note "<result; next phase>"
+.venv/bin/python tools/loop_journal.py phase-start --phase "<Phase>" --note "<why>"
+.venv/bin/python tools/loop_journal.py phase-end --phase "<Phase>" --note "<result; next phase>"
 ```
 
 Mechanical Setup performed inside `setup_run.py` is the display exception: keep
@@ -277,7 +277,7 @@ Load: `frontier.md` · `hypotheses.md` · latest `decisions.md` · recent `evide
 Begin each cycle with a **Root-level state graph pass**: read the projected graph, all
 open/deferred fronts, newest evidence, assignments, and conflicts before choosing —
 catch newly-unlocked fronts, bad role coverage, duplication, and unresolved conflicts
-early. `python3 tools/graph.py runs/<dir>` plus `python3 tools/workers.py status runs/<dir>`
+early. `.venv/bin/python tools/graph.py runs/<dir>` plus `.venv/bin/python tools/workers.py status`
 makes "what just got unlocked / neglected / unassigned" a query, not a full re-read.
 Re-prioritize and assign only; never close a front. See `docs/WORKFLOW.md`
 "Root-level state graph pass" + `docs/WORKFLOW-reference.md` "State Graph".
@@ -360,7 +360,7 @@ Output:
 Before treating the report as final, run the run-state check and fix what it flags:
 
 ```text
-python3 tools/check_run.py runs/<target_slug>_<date>
+.venv/bin/python tools/check_run.py runs/<target_slug>_<date>
 ```
 
 Structural gate, not a quality judge: passing means the run files carry the required
@@ -370,21 +370,21 @@ fields, not that the findings are certified.
 
 Project-discipline and run-structure checks in `tools/`:
 
-- `python3 tools/check_run.py runs/<dir>` — the offline structural check used at
+- `.venv/bin/python tools/check_run.py runs/<dir>` — the offline structural check used at
   Reviewer and before Report. Live replay is never a routine closure step; only a
   current top-level operator authorization may route to the exact command and
   dispositions owned by `xunji-evidence-replay-gate`.
-- `python3 tools/check_rules.py` — repo ARCHITECTURE-drift guard (no legacy
+- `.venv/bin/python tools/check_rules.py` — repo ARCHITECTURE-drift guard (no legacy
   orchestrator/playbook dirs or refs; required doctrine files present). Does NOT police
   weapons: exp/poc/scanner code is method and free to live in the repo (`poc_library/`,
   `runs/<target>/`, `tools/poc_*`); irreversible harm is gated by effect at runtime by
   `.claude/hooks/safety_gate.py`, not by filename.
-- `python3 tools/check_hook.py` — the safety hook actually denies blocked commands and
+- `.venv/bin/python tools/check_hook.py` — the safety hook actually denies blocked commands and
   stays silent on allowed ones.
-- `python3 tools/selftest_all.py` — aggregate runner: every tool / hook / sentinel
+- `.venv/bin/python tools/selftest_all.py` — aggregate runner: every tool / hook / sentinel
   selftest in one shot, one green/red scorecard. Run before declaring a safety-critical
   change done (the floor before the independent review).
-- `python3 tools/bench.py score <run> <truth.json>` — R-1 self-eval scorer: grade a
+- `.venv/bin/python tools/bench.py score <run> <truth.json>` — R-1 self-eval scorer: grade a
   finished run against a fixture's ground truth (detection / calibration / false-pos /
   budget) and optional Ultra-native collaboration checks (agent coverage, conflict
   resolution, request budget by agent, time-to-first-evidence, false-positive
@@ -411,10 +411,10 @@ Project-discipline and run-structure checks in `tools/`:
   after the proxy is up), not an existing-run refresh mode. Start through
   `loop_bootstrap`; never hand-curate surface.md (selection bias → blind spots). Builds the
   workbench; makes no front choices.
-- `python3 tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
+- `.venv/bin/python tools/ingest_recon.py <recon.json>` — fold a recon/OSINT report into a
   `surface.md`-ready asset table, entry points, and a reachability matrix (recon-view vs
   your-egress-view). Setup helper; structures intel, makes no front choices.
-- `python3 tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck`
+- `.venv/bin/python tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck`
   — **OPT-IN** per-host classification by
   LIVE re-probe (stack fingerprint + LOGIN/DYN/FRAMEWORK/SPA flags). **Not the default
   coverage builder** — setup_run's Guanlan adapter already produces `coverage.json` with
@@ -422,24 +422,24 @@ Project-discipline and run-structure checks in `tools/`:
   **your-own-egress liveness/fingerprint recheck** (e.g. proxy now up). The registered
   live shape is exactly the command above; legacy `--hosts`/`--all` modes are not
   live capabilities and must not be inferred from helper CLI options.
-- `python3 tools/fetch_assets.py <page-url> --run runs/<dir>` — fetch ALL JS a SPA references
+- `.venv/bin/python tools/fetch_assets.py <page-url> --run runs/<dir>` — fetch ALL JS a SPA references
   into `runs/<dir>/evidence/assets_<host>/<invocation>/` (incl. webpack
   chunks) and assert completeness. **Run before claiming endpoint enumeration is complete**
   — grepping endpoints from a partial JS set is how a real engagement missed an
   account-takeover endpoint (only 4/13 chunks fetched). "fetched N/M" must be N==M before
   "endpoints fully enumerated".
-- `python3 tools/rerun_deferred.py --run runs/<dir>` — re-probe the assets that were
+- `.venv/bin/python tools/rerun_deferred.py --run runs/<dir>` — re-probe the assets that were
   unreachable (egress-deferred) per `coverage.json`, from any egress (after a cooldown, a
   switched egress, or run in-country by the operator). Reports which became reachable +
   re-classifies them — the standardized "come back to the deferred list" path instead of
   hunting through `frontier.md`.
-- `python3 tools/graph.py runs/<dir>` — derive the typed state graph from the run files
+- `.venv/bin/python tools/graph.py runs/<dir>` — derive the typed state graph from the run files
   (H/F/E nodes + `Unlocked-by`/`Supports`/`Refutes` edges) → `graph.json` + a view of
   actionable / unlocked-but-deferred / closed-but-unlocked / dangling Facts. **Run at the
   start of a Root graph pass** so "what just got unlocked / neglected" is a query, not a
   re-read. Advisory only — never selects the next front (that stays the Root). See
   `docs/WORKFLOW-reference.md` "State Graph".
-- `python3 tools/workers.py <subcommand> runs/<dir>` — work-plan-bound Agent Board
+- `.venv/bin/python tools/workers.py <subcommand>` — active-run, work-plan-bound Agent Board
   control and inspection. Load `xunji-agent-board`; its plan/delegate reference is
   the sole exact plan/assignment owner, and its launch/settlement reference owns the
   exact Claude binary launch contract (`subagent_type` plus byte-exact
@@ -447,35 +447,34 @@ Project-discipline and run-structure checks in `tools/`:
   returns contracts but does not spawn. Legacy `assign` and `--new` remain
   non-authorizing compatibility surfaces. The board never writes canonical findings
   or bypasses the Single Synthesizer.
-- `python3 tools/workers.py --help` — registered local-read command index for the
-  current planner, inspection, settlement, and typed-repair subcommands. It makes
-  `recover-hook-failed-stop` discoverable but is not a lifecycle or argument owner;
-  Root still reads the Agent Board reference named above before acting, and child
-  Agents do not spend calls on CLI discovery.
-- `python3 tools/runtime_receipts.py runs/<dir>` — validates the hook-owned hash
+- Do not call `workers.py --help` for live CLI discovery. The normal active-run reads are
+  `.venv/bin/python tools/workers.py status`, `suggest`, `lifecycle-check`, `merge-check`,
+  and `conflicts`; the normal scheduler action is `.venv/bin/python tools/workers.py
+  delegate`. Load the Agent Board reference for the bounded ID/enum repair forms.
+- `.venv/bin/python tools/runtime_receipts.py` — validates the active run's hook-owned hash
   chain for actual Agent/Cron/iteration-plan/foreground-review events. Plan
   receipts cover TaskCreate/TaskUpdate/TodoWrite and remain derived rather than
   canonical. `workers.py` lifecycle
   prose is not runtime proof. Async Agent PostToolUse proves launch, matching
   SubagentStop proves return, and the coordination epoch survives bare continue
   prompts. Assignment/front/asset tokens and tool receipts are transcript-backed.
-- `python3 tools/state_project.py runs/<dir>` — derives `state/projection.json` and
+- `.venv/bin/python tools/state_project.py runs/<dir>` — derives `state/projection.json` and
   `state/events.jsonl` from Markdown. This is a machine cache only; Markdown remains
   canonical and projection must not be hand-edited back into facts.
-- `python3 tools/loop_journal.py runs/<dir> status` — reads
+- `.venv/bin/python tools/loop_journal.py status` — reads
   `state/loop_journal.jsonl`, the derived interruption journal for bound execute
   cycles. Use `start|plan|action|write-result|interrupt|end` inside an execute turn,
   and `phase-start|phase-end --phase "<Phase>"` when entering/leaving Router phases.
   It is not evidence and never replaces `decisions.md`.
-- `python3 tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle
+- `.venv/bin/python tools/loop_state.py runs/<dir> --write` — derives the closed-loop cycle
   snapshot `state/loop_state.{json,md}` after graph / Agent Board / saturation /
   coverage-matrix inputs are refreshed. It records evidence deltas, certainty upgrades,
   coverage improvement, Coda convergence, unresolved conflicts, and fan-out/closure-review
   hints. Advisory only: it never selects a front, promotes evidence, or closes a run.
-- `python3 tools/progress_ledger.py runs/<dir> --write` — derives
+- `.venv/bin/python tools/progress_ledger.py runs/<dir> --write` — derives
   `state/progress_ledger.{json,md}` from loop state plus evidence artifacts. It
   records material progress and artifact-backed progress; it is not evidence.
-- `python3 tools/run_controller.py runs/<dir> --shadow` — writes
+- `.venv/bin/python tools/run_controller.py runs/<dir> --shadow` — writes
   `state/controller.shadow.json` and `state/controller_diff.md` with advisory
   stop blockers and the next required lifecycle action. It never chooses exploit
   steps, promotes evidence, or grants closure.

@@ -15,8 +15,8 @@ coverage.json 默认从 Guanlan recon 产物折成零重探 baseline, 满足 che
 
 它只【备好工作台】, 不选 front / 不做攻击判断 —— 派生不驱动, 绝非编排器。
 
-  python tools/setup_run.py <slug> [recon.json] [--date YYYYMMDD] [--classify]
-  python tools/setup_run.py --selftest
+  .venv/bin/python tools/setup_run.py <slug> [recon.json] [--date YYYYMMDD] [--classify]
+  .venv/bin/python tools/setup_run.py --selftest
 """
 from __future__ import annotations
 

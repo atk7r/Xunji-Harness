@@ -14,9 +14,9 @@ Handles both:
 Pure computation — no network calls, no external dependencies beyond stdlib.
 
 Usage:
-  python tools/decode_viewstate.py <base64_string>
-  echo <base64_string> | python tools/decode_viewstate.py
-  python tools/decode_viewstate.py --selftest
+  .venv/bin/python tools/decode_viewstate.py <base64_string>
+  echo <base64_string> | .venv/bin/python tools/decode_viewstate.py
+  .venv/bin/python tools/decode_viewstate.py --selftest
 """
 
 from __future__ import annotations

@@ -90,7 +90,7 @@ rules here.
 After that semantic intent is compiled, the single effect-facing bootstrap shape is:
 
 ```bash
-python3 tools/loop_bootstrap.py --source '<source>' --type auto
+.venv/bin/python tools/loop_bootstrap.py --source '<source>' --type auto
 ```
 
 Use the exact copy-safe source injected by `UserPromptSubmit`; do not reconstruct
@@ -159,7 +159,7 @@ for resume, handoff, drift recovery, or closure mechanics.
 Prefer the explicit handoff record over chat reconstruction:
 
 ```bash
-python3 tools/session_handoff.py pickup runs/<dir>
+.venv/bin/python tools/session_handoff.py pickup runs/<dir>
 ```
 
 If none exists, rebuild from canonical files in this order:
@@ -172,7 +172,7 @@ Before intentionally handing work to a later session, write the current canonica
 selection, blockers, debt, and next action:
 
 ```bash
-python3 tools/session_handoff.py write runs/<dir>
+.venv/bin/python tools/session_handoff.py write runs/<dir>
 ```
 
 Handoff does not revive authority, settle Agent debt, or close the run.
@@ -205,7 +205,7 @@ until its own prerequisite and authority are satisfied.
 The routine structural check is offline:
 
 ```bash
-python3 tools/check_run.py runs/<dir>
+.venv/bin/python tools/check_run.py
 ```
 
 Passing proves required structure, not factual correctness. Fix local blockers and
@@ -220,8 +220,8 @@ because closure is near.
 Reason-pass freshness is semantic:
 
 ```bash
-python3 tools/anti_drift.py --semantic-status runs/<dir>
-python3 tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N --chosen-front F-001 --reason "<whole-graph rationale>"
+.venv/bin/python tools/anti_drift.py --semantic-status runs/<dir>
+.venv/bin/python tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N --chosen-front F-001 --reason "<whole-graph rationale>"
 ```
 
 Reread/adjudicate before recording. Mtime, `touch`, and no-op edits prove nothing.
@@ -240,10 +240,10 @@ Closure is a sequence, not a report-presence heuristic:
    every optional slot needs either its valid receipt or an explicit limitation.
 4. Complete evidence/report parity, reachable coverage, severity artifacts, and
    per-lesson retrospective repair status, then move report `DRAFT -> READY`.
-5. Run `python3 tools/workers.py plan runs/<dir>`, commit its generated zero-lane
+5. Run `.venv/bin/python tools/workers.py plan`, commit its generated zero-lane
    S3 `COMPLETION_REVIEW` proposal with the printed exact
-   `python3 tools/workers.py commit-proposal runs/<dir>`, then run
-   `python3 tools/workers.py completion-review runs/<dir>` and call
+   `.venv/bin/python tools/workers.py commit-proposal`, then run
+   `.venv/bin/python tools/workers.py completion-review` and call
    the exact printed assignment-free Reviewer contract. The detailed contract is
    in `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer".
    Its pseudo receipt does not replace the independent peer review.
@@ -273,5 +273,5 @@ prose, report E-ids, and completion-review prose remain non-completion.
 ## Maintenance Checks
 
 ```bash
-python3 tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift
+.venv/bin/python tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift
 ```

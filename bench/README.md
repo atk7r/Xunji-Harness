@@ -175,5 +175,5 @@ A/B 时应在前后 truth 中显式复用同一个稳定 `name`，不要依赖�
 - `setup-normalizer-pilot/cases.json` —— Markdown/普通 JSON setup candidate 的离线
   A/B 与安全硬门。`--ai off` 是 deterministic baseline；reference-candidate 是只在已脱敏
   request ID 上选择的 oracle，用来证明 contract 有增加召回的能力，不冒充 live provider
-  质量。运行 `python3 tools/setup_normalizer_bench.py --json` 查看字段 precision/recall、
+  质量。运行 `.venv/bin/python tools/setup_normalizer_bench.py --json` 查看字段 precision/recall、
   hallucination、无来源字段、target 错选、source instruction 晋级与 model-egress leak。

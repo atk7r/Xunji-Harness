@@ -339,10 +339,9 @@ observe -> update state graph -> decompose fronts
   maintenance debt. Destination-free shell-shape denials remain denied but are
   non-maintenance.
   Lifecycle setup is stricter: the operator-facing `loop_bootstrap.py` shape owned by
-  `xunji-run-lifecycle` must be one exact argv-only command using the documented bare
-  `python3` or the current Hook interpreter; the internal setup adapter is not a second
-  Root route. The bare spelling intentionally trusts the single operator's inherited
-  local environment because Claude Code may give hooks and Bash different `PATH` values.
+  `xunji-run-lifecycle` must be one exact argv-only command using this repository's
+  `.venv/bin/python`; the internal setup adapter is not a second Root route. SessionStart
+  validates that exact interpreter identity before project work.
   Lifecycle commands reject
   `tool_input.env`, inline environment assignments, unquoted pathname/query glob,
   brace, tilde, zsh EQUALS, parameter/command expansion, redirects, chains, comments,
@@ -360,13 +359,28 @@ observe -> update state graph -> decompose fronts
   `--help` or ad-hoc shell discovery to reconstruct a live owner CLI. A known
   target script carrying only registry-allowed inline env but wrong
   argv, that is still `invalid-argv`, not framework maintenance. For probe use
-  `python3 tools/probe.py GET "<url>" --save <name> --run runs/<dir>`; do not
+  `.venv/bin/python tools/probe.py GET "<url>" --save <name> --run runs/<dir>`; do not
   invent `--method`, `--url`, or `--run-dir` aliases. Once a
   denied or failed maintenance action is never evidence or completion, but a
   benign operator mistake is not a sticky turn blocker: repair the typed path or
   argv and retry in the same maintenance turn. A new bare “继续” prompt revokes
   pending source authority and can return
   `XUNJI_E_RUN_TRANSITION_AUTHORITY_MISSING`.
+
+- **Normal project actions are short and active-run bound.** Claude native Tools remain
+  unchanged; Xunji uses native Bash only as the transport for these exact project actions:
+  `.venv/bin/python tools/check_project_env.py`,
+  `.venv/bin/python tools/workers.py status`,
+  `.venv/bin/python tools/runtime_receipts.py`,
+  `.venv/bin/python tools/loop_journal.py status`, and
+  `.venv/bin/python tools/check_run.py`. Do not read `.claude/xunji_active_run`, list or
+  scan `runs/`, call repository `--help`, inspect private source for syntax, or run
+  `.venv/bin/python --version` before them. Each owner resolves the one authoritative
+  active pointer and fails closed if it is absent or invalid. Mutating high-frequency
+  forms likewise accept only the business action/ID/enum documented by their owner, for
+  example `.venv/bin/python tools/workers.py delegate` and
+  `.venv/bin/python tools/loop_journal.py end --action complete`; callers do not supply
+  run paths, plan digests, capacity/budget scalars, hashes, notes, or derived prose.
   Missing Claude hook `session_id` is a correlation fault, not loss of the trusted
   operator's intent: use the exact transcript binding, or the single-operator local
   fallback only when both metadata fields are absent. Never consume another named
@@ -483,9 +497,9 @@ observe -> update state graph -> decompose fronts
   rejects the whole mutation. Read-only tools remain readable; Bash continues to
   use its exact capability/command-shape boundary.
 - **Reason-pass freshness is semantic, never temporal.** Inspect it with
-  `python3 tools/anti_drift.py --semantic-status runs/<dir>`. After rereading and
+  `.venv/bin/python tools/anti_drift.py --semantic-status runs/<dir>`. After rereading and
   adjudicating the whole canonical graph, record the stable snapshot with
-  `python3 tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N
+  `.venv/bin/python tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N
   --chosen-front F-001 --reason "<whole-graph rationale>"`. The v1 hash-chain
   binds frontier, evidence, coverage, decisions, and the derived graph. File age,
   mtime, `touch`, or a no-op Edit cannot make it fresh; operational liveness is a
@@ -508,7 +522,7 @@ observe -> update state graph -> decompose fronts
   resolves them. Coverage-matrix improvement means a previously `□` cell became
   tested through a recorded front/evidence update; relabeling, adding unsupported
   applicability, or firing a class only to fill a cell does not count. Use
-  `python3 tools/coverage_matrix.py runs/<dir> --write` as the derived coverage
+  `.venv/bin/python tools/coverage_matrix.py runs/<dir> --write` as the derived coverage
   view; do not treat it as an attack checklist.
 - Don't close a front because it's inconvenient / unfamiliar / initially blocked.
   Close or defer **only on one of**: evidence that confirms · rejects ·

@@ -21,6 +21,8 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
+from harness import python_runtime
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - single-workstation Unix is primary
@@ -44,7 +46,8 @@ class ContractSchemaUnavailable(RuntimeError):
         super().__init__(
             f"contract schema is unavailable: {name} "
             f"[{code}:{cause_class}]; run "
-            "`python3 tools/contract_schema.py --selftest`"
+            f"`{python_runtime.display_token()} "
+            "tools/contract_schema.py --selftest`"
         )
 
 
@@ -311,7 +314,10 @@ def prepare_schema_candidate(
         "base_sha256": current_hash,
         "repair_required": bool(repair_issues),
         "target_diagnostic": repair_issues[0] if repair_issues else "",
-        "next_argv": f"python3 tools/contract_schema.py publish {name}",
+        "next_argv": (
+            f"{python_runtime.display_token()} "
+            f"tools/contract_schema.py publish {name}"
+        ),
     }
 
 
@@ -383,7 +389,10 @@ def publish_schema_candidate(
         "name": name,
         "previous_sha256": current_hash,
         "published_sha256": new_hash,
-        "verification_argv": "python3 tools/contract_schema.py --selftest",
+        "verification_argv": (
+            f"{python_runtime.display_token()} "
+            "tools/contract_schema.py --selftest"
+        ),
     }
 
 
@@ -996,7 +1005,8 @@ def _selftest() -> int:
             missing_error
             and missing_error.code == "SCHEMA_NOT_FOUND"
             and missing_error.cause_class == "FileNotFoundError"
-            and "python3 tools/contract_schema.py --selftest" in str(missing_error)
+            and ".venv/bin/python tools/contract_schema.py --selftest"
+            in str(missing_error)
         )),
         ("invalid UTF-8 and JSON remain distinguishable", bool(
             invalid_utf8_error
@@ -1012,7 +1022,8 @@ def _selftest() -> int:
         ("schema prepare emits one exact ignored-candidate publication argv", bool(
             prepared.get("status") == "prepared"
             and prepared.get("next_argv")
-                == "python3 tools/contract_schema.py publish fixture.v1.schema.json"
+                == ".venv/bin/python tools/contract_schema.py "
+                   "publish fixture.v1.schema.json"
         )),
         ("malformed candidate cannot change the published schema",
          malformed_rejected and malformed_preserved),

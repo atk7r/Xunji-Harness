@@ -53,28 +53,28 @@ next move for every other lane.
 Run the Root graph pass before advising assignments:
 
 ```bash
-python tools/graph.py runs/<dir>
-python tools/workers.py status runs/<dir>
-python tools/workers.py conflicts runs/<dir>
-python tools/saturation.py runs/<dir>
+.venv/bin/python tools/graph.py runs/<dir>
+.venv/bin/python tools/workers.py status
+.venv/bin/python tools/workers.py conflicts
+.venv/bin/python tools/saturation.py runs/<dir>
 ```
 
 Plan or assign advisory lanes:
 
 ```bash
-python tools/workers.py suggest runs/<dir>
-python tools/workers.py plan runs/<dir>
-python tools/workers.py assign runs/<dir> --role web-hunter --front F-001 --asset app.example
-python tools/context_pack.py runs/<dir> --agent A-web-hunter-001
+.venv/bin/python tools/workers.py suggest
+.venv/bin/python tools/workers.py plan
+.venv/bin/python tools/workers.py delegate
+.venv/bin/python tools/context_pack.py runs/<dir> --agent A-web-hunter-001
 ```
 
 Before synthesis or closure, check discipline:
 
 ```bash
-python tools/workers.py agent-check runs/<dir>
-python tools/workers.py merge-check runs/<dir>
-python tools/workers.py conflicts runs/<dir>
-python tools/workers.py synthesize runs/<dir>
+.venv/bin/python tools/workers.py agent-check
+.venv/bin/python tools/workers.py merge-check
+.venv/bin/python tools/workers.py conflicts
+.venv/bin/python tools/workers.py synthesize
 ```
 
 ## Output Contract
@@ -100,10 +100,10 @@ canonical evidence gate is being applied.
 After changing Agent Board behavior, templates, or checks, run:
 
 ```bash
-python tools/workers.py --selftest
-python tools/context_pack.py --selftest
-python tools/saturation.py --selftest
-python tools/bench.py score-all bench --json-out /tmp/xunji-bench-agent-board.json
+.venv/bin/python tools/workers.py --selftest
+.venv/bin/python tools/context_pack.py --selftest
+.venv/bin/python tools/saturation.py --selftest
+.venv/bin/python tools/bench.py score-all bench --json-out /tmp/xunji-bench-agent-board.json
 ```
 
 For safety-critical guard/hook/sentinel changes discovered while auditing the

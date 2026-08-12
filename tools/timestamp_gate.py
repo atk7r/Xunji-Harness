@@ -7,13 +7,13 @@
 幻觉出过期/不存在 CVE, 确保搜索锚定当下。
 
 用法:
-  python tools/timestamp_gate.py                 # 人类可读: 多格式时间 + 搜索提示
-  python tools/timestamp_gate.py --json           # JSON 输出, 供程序/Agent 消费
-  python tools/timestamp_gate.py --iso            # 仅 ISO 8601
-  python tools/timestamp_gate.py --epoch          # 仅 Unix epoch
-  python tools/timestamp_gate.py --year           # 仅当前年份(如 2026)
-  python tools/timestamp_gate.py --search-hint    # 输出 WebSearch 应带的时间约束
-  python tools/timestamp_gate.py --selftest       # 回归测试
+  .venv/bin/python tools/timestamp_gate.py              # 人类可读
+  .venv/bin/python tools/timestamp_gate.py --json       # JSON 输出
+  .venv/bin/python tools/timestamp_gate.py --iso        # 仅 ISO 8601
+  .venv/bin/python tools/timestamp_gate.py --epoch      # 仅 Unix epoch
+  .venv/bin/python tools/timestamp_gate.py --year       # 仅当前年份
+  .venv/bin/python tools/timestamp_gate.py --search-hint
+  .venv/bin/python tools/timestamp_gate.py --selftest
 """
 
 from __future__ import annotations

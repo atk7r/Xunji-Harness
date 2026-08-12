@@ -3,9 +3,9 @@
 """deferred_queue.py —— deferred 资产重试：包装 rerun_deferred.py，读结构化结果写回。
 
 用法:
-  python tools/deferred_queue.py --run runs/<dir>              # 重试 + 写回
-  python tools/deferred_queue.py --run runs/<dir> --dry-run    # 仅列队列
-  python tools/deferred_queue.py --selftest                    # 自检
+  .venv/bin/python tools/deferred_queue.py --run runs/<dir>           # 重试 + 写回
+  .venv/bin/python tools/deferred_queue.py --run runs/<dir> --dry-run # 仅列队列
+  .venv/bin/python tools/deferred_queue.py --selftest                 # 自检
 """
 
 from __future__ import annotations

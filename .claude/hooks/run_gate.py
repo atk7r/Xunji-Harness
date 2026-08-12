@@ -550,8 +550,8 @@ def _check_agent_board(run_dir: Path, contract: dict | None = None) -> tuple[str
                     )
                 else:
                     next_step = (
-                        "运行 `python3 tools/workers.py completion-review "
-                        f"{run_dir}`，将输出的 tool_input 逐字节用于一次 "
+                        "运行 `.venv/bin/python tools/workers.py "
+                        "completion-review`，将输出的 tool_input 逐字节用于一次 "
                         "xunji-reviewer Agent 调用；不得手写 envelope"
                     )
             else:
@@ -1844,8 +1844,8 @@ def _selftest() -> int:
         "agent board gate: completion plan names the exact formatter command",
         mode3d == "block"
         and "cycle_end=missing" in msg3d
-        and "python3 tools/workers.py completion-review" in msg3d
-        and str(ab_run3d) in msg3d
+        and ".venv/bin/python tools/workers.py completion-review" in msg3d
+        and str(ab_run3d) not in msg3d
         and "不得手写 envelope" in msg3d,
     ))
 

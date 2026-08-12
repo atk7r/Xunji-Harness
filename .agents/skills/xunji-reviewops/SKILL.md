@@ -51,16 +51,16 @@ requested checkpoint or before assessing a final report or closure claim:
 1. Read the current run state: `frontier.md`, `hypotheses.md`, `evidence.md`,
    `false_positive.md`, `decisions.md`, `review.md`, `report.md`, and relevant
    artifacts.
-2. Run `python tools/check_run.py runs/<dir>` from the repo root. Treat hard
+2. Run `.venv/bin/python tools/check_run.py runs/<dir>` from the repo root. Treat hard
    gates as next work, not paperwork.
 3. If closure is being claimed and egress is accepted, prefer
-   `python tools/peer_review.py runs/<dir> --into-run`. If an independent review
+   `.venv/bin/python tools/peer_review.py runs/<dir> --into-run`. If an independent review
    already exists but evidence changed, rerun or record a fresh evidence-bound
    review because stale review hashes no longer certify the current run.
    Heterogeneous verdicts are challenges, not proof; accept them only when they
    cite current run artifacts or lead to a driver resolution that does.
 4. If replay evidence is load-bearing or closure is near, run
-   `python tools/check_run.py runs/<dir> --replay-verify` and re-adjudicate any
+   `.venv/bin/python tools/check_run.py runs/<dir> --replay-verify` and re-adjudicate any
    `DIVERGED` evidence before relying on it.
 5. Return concrete action candidates to Claude Root: reopen fronts, downgrade
    certainty, add controls/artifacts, update report scope, or write an
@@ -81,7 +81,7 @@ When Codex authors the maintenance diff:
 - Daily/live run work is still not Codex's runtime; do not use Codex or `.codex/`
   artifacts as proof that a live run was safe.
 - Codex does not count as an independent reviewer of its own code change.
-- Use `python tools/peer_review.py <scope> --driver codex` for Codex-authored code
+- Use `.venv/bin/python tools/peer_review.py <scope> --driver codex` for Codex-authored code
   review. With full availability, the reviewer votes are the external/third-party
   assistance module (registered providers are enabled through local `config.ini`;
   current selection: `arkcli`) plus
@@ -108,7 +108,7 @@ For each `PR-xxx` under `## Review Finding Ledger`:
 - Dismiss reviewer claims only with a concrete alternate explanation, not with
   "reviewer is wrong" or "driver disagrees".
 - Use the narrow resolver when available:
-  `python tools/peer_review.py runs/<dir> --resolve PR-001 --status accepted --resolution "Evidence: E-007 and evidence/probe.replay.json confirm missing control; reopened F-003."`
+  `.venv/bin/python tools/peer_review.py runs/<dir> --resolve PR-001 --status accepted --resolution "Evidence: E-007 and evidence/probe.replay.json confirm missing control; reopened F-003."`
 
 Allowed statuses are `accepted`, `dismissed`, `superseded`, and `escalated`.
 Every `DriverResolution` must cite the E-id, artifact, control, decision id, or
@@ -136,7 +136,7 @@ rules. For CRITICAL pause, require the extra critical review before pausing.
 
 Do not declare FINAL, 收工, complete, or "explored enough" unless both are true:
 
-- `python tools/check_run.py runs/<dir>` has no hard gates.
+- `.venv/bin/python tools/check_run.py runs/<dir>` has no hard gates.
 - `frontier.md` has zero open fronts, or every remaining front has an evidence-
   backed deferred/closed rationale that the review accepts.
 
@@ -157,7 +157,7 @@ Use this path only for behavior changes to:
 
 Before declaring such a change done:
 
-1. Run `python tools/selftest_all.py` or a justified focused subset plus the
+1. Run `.venv/bin/python tools/selftest_all.py` or a justified focused subset plus the
    directly affected selftests.
 2. Get an independent fresh-context review of the changed behavior, not a
    self-summary.

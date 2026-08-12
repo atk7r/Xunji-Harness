@@ -33,10 +33,10 @@ ROADMAP R-1(最高价值缺口): 一把尺子, 让框架改动可被 A/B —— 
                unknown 必须为 0，且 fixture 必须声明至少一个 threshold 才能 clean。
 
 用法:
-  python tools/bench.py score <run_dir> <truth.json>
-  python tools/bench.py score-all bench/        # 跑 bench/ 下每个 <fixture>/truth.json(各指 run)
-  python tools/bench.py compare baseline.json change.json
-  python tools/bench.py --selftest
+  .venv/bin/python tools/bench.py score <run_dir> <truth.json>
+  .venv/bin/python tools/bench.py score-all bench/
+  .venv/bin/python tools/bench.py compare baseline.json change.json
+  .venv/bin/python tools/bench.py --selftest
 """
 from __future__ import annotations
 

@@ -39,13 +39,13 @@
         "not a sticky `MAINTENANCE_BLOCKED` state",
         "`run_gate` yields before",
         "typed lane/runtime receipts still govern execution",
-        "python3 tools/workers.py completion-review runs/<dir>",
+        ".venv/bin/python tools/workers.py completion-review",
         "harmless leading\nhorizontal whitespace/BOM",
         "XUNJI_E_LIFECYCLE_PRIVATE_API",
         "project-level, content-addressed observation",
         "registered `--help` prints the same sequence",
         "committed receipt with pending derived projection",
-        "python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
+        ".venv/bin/python tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
         "`read.js-inventory`, effect",
         "prepared `local_read` candidate",
         "dedicated WebSocket\ncapability is currently **NO-GO**",
@@ -55,8 +55,8 @@
       "forbidden": [
         "that is the Reviewer's job",
         "then local knowledge/xday lookup",
-        "python3 tools/saturation.py runs/<dir>",
-        "python3 tools/js_inventory.py runs/<dir>"
+        ".venv/bin/python tools/saturation.py runs/<dir>",
+        ".venv/bin/python tools/js_inventory.py runs/<dir>"
       ]
     },
     {
@@ -85,14 +85,14 @@
         "does not sticky-freeze the personal operator's turn",
         "`run_gate` yields to that fixed output",
         "An Agent final response may include `## New Threat Hypotheses`",
-        "python3 tools/workers.py completion-review runs/<dir>",
+        ".venv/bin/python tools/workers.py completion-review",
         "xunji.hook-failed-agent-stop.v1",
         "xunji.hook-failed-agent-stop.v2",
         "2026-08-08T01:10:00Z",
         "xunji.subagent-stop-ingress.v1",
         "registered help -> prepare",
         "Recovery replay is idempotent",
-        "python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
+        ".venv/bin/python tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
         "`read.js-inventory` is an `active_run`-scoped `local_read`",
         "prepared `local_read` projection",
         "dedicated WebSocket capability is currently **NO-GO**",
@@ -101,10 +101,10 @@
       ],
       "forbidden": [
         "unavailable matrix is a",
-        "python3 tools/peer_review.py runs/<dir> --into-run",
+        ".venv/bin/python tools/peer_review.py runs/<dir> --into-run",
         "Codex-authored work uses `--driver codex`",
         "Agents may write `## New Threat Hypotheses`",
-        "python3 tools/js_inventory.py runs/<dir>"
+        ".venv/bin/python tools/js_inventory.py runs/<dir>"
       ]
     },
     {
@@ -117,7 +117,7 @@
         "durable `state=done` return checkpoint",
         "supplies a candidate disposition only",
         "typed cycle_end",
-        "python3 tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model",
+        ".venv/bin/python tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model",
         "references/plan-and-delegate.md",
         "references/launch-return-settlement.md",
         "Assignment-free global completion Reviewer",
@@ -133,23 +133,23 @@
         "pre-schema project ingress is only a non-canonical observation"
       ],
       "forbidden": [
-        "python3 tools/workers.py assign runs/<dir>",
+        ".venv/bin/python tools/workers.py assign runs/<dir>",
         "--lane '{\"id\"",
         "XUNJI_ASSIGNMENT=A-...",
-        "python3 tools/workers.py review-disposition runs/<dir>",
-        "python3 tools/workers.py finish runs/<dir>",
-        "python3 tools/context_pack.py --selftest",
+        ".venv/bin/python tools/workers.py review-disposition runs/<dir>",
+        ".venv/bin/python tools/workers.py finish runs/<dir>",
+        ".venv/bin/python tools/context_pack.py --selftest",
         "tmp-YYYYMMDD",
         "openmythos-inspired",
-        "python3 tools/js_inventory.py runs/<dir>"
+        ".venv/bin/python tools/js_inventory.py runs/<dir>"
       ]
     },
     {
       "path": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
       "required": [
-        "python3 tools/workers.py commit-proposal runs/<dir>",
-        "python3 tools/workers.py delegate runs/<dir>",
-        "python3 tools/workers.py cancel-unlaunched runs/<dir>",
+        ".venv/bin/python tools/workers.py commit-proposal",
+        ".venv/bin/python tools/workers.py delegate",
+        ".venv/bin/python tools/workers.py cancel-unlaunched A-<assignment>",
         "digest proves only that some input",
         "do not replan to manufacture `current=true`",
         "XUNJI_E_LIFECYCLE_EXACT_ARGV_REQUIRED",
@@ -157,13 +157,13 @@
         "NO_STRONG_CANDIDATE",
         "do not commit, invent lanes",
         "no unassigned lane has satisfied runtime dependencies",
-        "python3 tools/workers.py completion-review runs/<dir>",
+        ".venv/bin/python tools/workers.py completion-review",
         "the only legal\nzero-lane mode"
       ],
       "forbidden": [
-        "python3 tools/workers.py assign runs/<dir>",
+        ".venv/bin/python tools/workers.py assign runs/<dir>",
         "XUNJI_COMPLETION_VERDICT=PASS",
-        "python3 tools/saturation.py runs/<dir>",
+        ".venv/bin/python tools/saturation.py runs/<dir>",
         "--lane '{\"id\""
       ]
     },
@@ -178,11 +178,11 @@
         "XUNJI_RESULT_DIGEST=<64hex>",
         "xunji-hunter",
         "xunji-reviewer",
-        "python3 tools/workers.py status runs/<dir>",
-        "python3 tools/workers.py settle-stopped runs/<dir>",
-        "python3 tools/workers.py review-disposition runs/<dir>",
-        "python3 tools/workers.py finish runs/<dir>",
-        "python3 tools/loop_journal.py runs/<dir> end",
+        ".venv/bin/python tools/workers.py status",
+        ".venv/bin/python tools/workers.py settle-stopped A-<assignment>",
+        ".venv/bin/python tools/workers.py review-disposition A-<reviewer> --status",
+        ".venv/bin/python tools/workers.py finish A-<target> --status",
+        ".venv/bin/python tools/loop_journal.py end --action",
         "The global completion challenge is a separate assignment-free Reviewer envelope",
         "Assignment-free global completion Reviewer",
         "`status=reconciled` alone is not return proof",
@@ -190,8 +190,8 @@
         "`Reason: <exact barrier>; Front: F-xxx`",
         "XUNJI_E_AGENT_TOOL_CALL_LIMIT_EXCEEDED",
         "PreToolUse atomically\nappends one idempotent call claim",
-        "python3 tools/workers.py completion-review runs/<dir>",
-        "python3 tools/workers.py recover-hook-failed-stop runs/<dir>",
+        ".venv/bin/python tools/workers.py completion-review",
+        ".venv/bin/python tools/workers.py recover-hook-failed-stop A-<assignment>",
         "xunji.hook-failed-agent-stop.v1",
         "xunji.hook-failed-agent-stop.v2",
         "2026-08-08T01:10:00Z",
@@ -200,8 +200,8 @@
         "Exact recovery replay is idempotent"
       ],
       "forbidden": [
-        "python3 tools/work_plan.py commit runs/<dir>",
-        "python3 tools/workers.py delegate runs/<dir>",
+        ".venv/bin/python tools/work_plan.py commit runs/<dir>",
+        ".venv/bin/python tools/workers.py delegate runs/<dir>",
         "Use the plan status command owned by `plan-and-delegate.md` before typed cycle end.",
         "XUNJI_COMPLETION_VERDICT=PASS",
         "--status accept-candidate",
@@ -256,34 +256,34 @@
     {
       "path": ".claude/skills/xunji-run-lifecycle/SKILL.md",
       "required": [
-        "python3 tools/loop_bootstrap.py --source '<source>' --type auto",
+        ".venv/bin/python tools/loop_bootstrap.py --source '<source>' --type auto",
         "verified on\n  2.1.220",
         "`loop_requested=false`",
         "`UserPromptManualLoopAdvance`",
         "prepared_not_active",
         "persistent current-run selection",
-        "python3 tools/session_handoff.py write runs/<dir>",
-        "python3 tools/session_handoff.py pickup runs/<dir>",
-        "python3 tools/check_run.py runs/<dir>",
-        "python3 tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift",
+        ".venv/bin/python tools/session_handoff.py write runs/<dir>",
+        ".venv/bin/python tools/session_handoff.py pickup runs/<dir>",
+        ".venv/bin/python tools/check_run.py",
+        ".venv/bin/python tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift",
         "is a live `target` effect",
         "if false, perform no Cron action",
         "A denied or failed\naction is not a result",
         "the eligible atomic `ROOT_DIRECT` path",
         "`docs/WORKFLOW-reference.md` \"Assignment-free global completion Reviewer\"",
-        "python3 tools/workers.py completion-review runs/<dir>",
+        ".venv/bin/python tools/workers.py completion-review",
         "Harmless leading horizontal whitespace/BOM",
         "XUNJI_E_LIFECYCLE_PRIVATE_API",
         "exact status-emitted hook-failed Stop recovery",
         "project-level ingress observation is\nnot canonical run truth"
       ],
       "forbidden": [
-        "python3 tools/work_plan.py commit runs/<dir>",
-        "python3 tools/workers.py delegate runs/<dir>",
-        "python3 tools/check_run.py runs/<dir> --replay-verify",
-        "python3 tools/setup_transaction.py --selftest",
+        ".venv/bin/python tools/work_plan.py commit runs/<dir>",
+        ".venv/bin/python tools/workers.py delegate runs/<dir>",
+        ".venv/bin/python tools/check_run.py runs/<dir> --replay-verify",
+        ".venv/bin/python tools/setup_transaction.py --selftest",
         "assignment-free formatter output",
-        "python3 tools/peer_review.py runs/<dir> --into-run",
+        ".venv/bin/python tools/peer_review.py runs/<dir> --into-run",
         "xunji_statusline"
       ]
     },
@@ -294,12 +294,12 @@
         "tools/setup_transaction.py",
         "mandatory full aggregate",
         "fresh independent-review gate",
-        "python3 tools/contract_schema.py --help",
-        "python3 tools/contract_schema.py prepare <name.schema.json>",
+        ".venv/bin/python tools/contract_schema.py --help",
+        ".venv/bin/python tools/contract_schema.py prepare <name.schema.json>",
         "tmp/contract_schema_candidates/<name.schema.json>",
-        "python3 tools/contract_schema.py publish <name.schema.json>",
-        "python3 tools/contract_schema.py discard <name.schema.json>",
-        "python3 tools/contract_schema.py --selftest",
+        ".venv/bin/python tools/contract_schema.py publish <name.schema.json>",
+        ".venv/bin/python tools/contract_schema.py discard <name.schema.json>",
+        ".venv/bin/python tools/contract_schema.py --selftest",
         "SCHEMA_PUBLISH_CAS_MISMATCH"
       ],
       "forbidden": [
@@ -312,9 +312,9 @@
         "tools/harness/privacy.py",
         "tools/harness/command_shape.py",
         "tools/setup_transaction.py",
-        "python3 tools/selftest_all.py",
+        ".venv/bin/python tools/selftest_all.py",
         "fresh independent review",
-        "python3 tools/harness/subagent_stop_ingress.py --selftest",
+        ".venv/bin/python tools/harness/subagent_stop_ingress.py --selftest",
         "project-level receipt is not run truth"
       ],
       "forbidden": [
@@ -329,28 +329,28 @@
         "are offline helper CLIs, not",
         "a gate denial is not a lookup result",
         "separate, explicitly authorized repository",
-        "python3 tools/selftest_all.py --only check_knowledge,knowledge_match,xday_match"
+        ".venv/bin/python tools/selftest_all.py --only check_knowledge,knowledge_match,xday_match"
       ],
       "forbidden": [
         "python tools/knowledge_match.py --body",
         "python tools/xday_match.py --body",
         "python tools/knowledge_seed.py",
-        "python3 tools/knowledge_match.py --selftest",
-        "python3 tools/xday_match.py --selftest",
+        ".venv/bin/python tools/knowledge_match.py --selftest",
+        ".venv/bin/python tools/xday_match.py --selftest",
         "preload entries -> run every"
       ]
     },
     {
       "path": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
       "required": [
-        "python3 tools/probe.py GET",
-        "python3 tools/probe.py DIFF",
-        "python3 tools/replay.py runs/<dir>",
-        "python3 tools/check_run.py runs/<dir> --replay-verify",
+        ".venv/bin/python tools/probe.py GET",
+        ".venv/bin/python tools/probe.py DIFF",
+        ".venv/bin/python tools/replay.py runs/<dir>",
+        ".venv/bin/python tools/check_run.py runs/<dir> --replay-verify",
         "Use the replay-verification command above only when"
       ],
       "forbidden": [
-        "python tools/",
+        "```bash\npython tools/",
         "Before final report or `GHOST_COMPLETE`:\n\n```bash"
       ]
     },
@@ -360,16 +360,16 @@
         "single operator-facing adapter",
         "internal/source-specific adapter",
         "does not duplicate that argv",
-        "python3 tools/loop_bootstrap.py --source '<file>' --type file --ai external --ai-provider <provider> --ai-model <model> --prepare-normalizer",
-        "python3 tools/loop_bootstrap.py --source '<same-file>' --type file --ai external --ai-provider <same-provider> --ai-model <same-model> --candidate-json '<setup-normalizer-candidate.v1>'",
-        "python3 tools/setup_source.py --selftest"
+        ".venv/bin/python tools/loop_bootstrap.py --source '<file>' --type file --ai external --ai-provider <provider> --ai-model <model> --prepare-normalizer",
+        ".venv/bin/python tools/loop_bootstrap.py --source '<same-file>' --type file --ai external --ai-provider <same-provider> --ai-model <same-model> --candidate-json '<setup-normalizer-candidate.v1>'",
+        ".venv/bin/python tools/setup_source.py --selftest"
       ],
       "forbidden": [
-        "python3 tools/setup_source.py\n"
-        ,"python tools/"
-        ,"python3 tools/setup_run.py <slug> <recon.json> --classify"
-        ,"python3 tools/loop_bootstrap.py --source <run-or-URL-or-file> --type auto"
-        ,"python3 tools/loop_bootstrap.py --source <file> --type file --ai external"
+        ".venv/bin/python tools/setup_source.py\n"
+        ,"```bash\npython tools/"
+        ,".venv/bin/python tools/setup_run.py <slug> <recon.json> --classify"
+        ,".venv/bin/python tools/loop_bootstrap.py --source <run-or-URL-or-file> --type auto"
+        ,".venv/bin/python tools/loop_bootstrap.py --source <file> --type file --ai external"
       ]
     },
     {
@@ -378,8 +378,8 @@
         "only Claude-primary owner for public-research ordering",
         "In an active run, use WebSearch",
         "WebFetch is denied",
-        "python3 tools/timestamp_gate.py --search-hint --kind vuln",
-        "python3 tools/timestamp_gate.py --search-hint --kind generic",
+        ".venv/bin/python tools/timestamp_gate.py --search-hint --kind vuln",
+        ".venv/bin/python tools/timestamp_gate.py --search-hint --kind generic",
         "Invoke `xunji-knowledge-flywheel`",
         "Agents return the lead; Root/Single Synthesizer alone writes",
         "at most `Maturity: phenomenon` / `Certainty: 0.3`",
@@ -415,7 +415,7 @@
         "For a Codex-authored candidate, use author driver `codex`"
       ],
       "forbidden": [
-        "python3 tools/peer_review.py runs/<dir> --into-run",
+        ".venv/bin/python tools/peer_review.py runs/<dir> --into-run",
         "neither available leaves closure incomplete",
         "cannot become the independent closure receipt"
       ]
@@ -428,8 +428,8 @@
         "same-family review has weaker independence",
         "Claude Code CLI is an independent reviewer; use `--driver codex`",
         "non-Anthropic provider such as DeepSeek: record the actual",
-        "python3 tools/peer_review.py runs/<dir> --into-run",
-        "python3 tools/peer_review.py <scope-dir> --driver codex"
+        ".venv/bin/python tools/peer_review.py runs/<dir> --into-run",
+        ".venv/bin/python tools/peer_review.py <scope-dir> --driver codex"
       ],
       "forbidden": [
         "cannot become the independent closure receipt",
@@ -445,7 +445,7 @@
         "This name owns no review matrix or command protocol"
       ],
       "forbidden": [
-        "python3 tools/peer_review.py",
+        ".venv/bin/python tools/peer_review.py",
         "## Author Matrix",
         "kimi-k2.7-code"
       ]
@@ -484,7 +484,7 @@
       ],
       "forbidden": [
         "WebSearch/WebFetch",
-        "python tools/timestamp_gate.py --search-hint"
+        "\npython tools/timestamp_gate.py --search-hint"
       ]
     },
     {
@@ -506,7 +506,7 @@
         "typed repair: cancel-unlaunched, settle-stopped, recover-hook-failed-stop",
         "Exact failed-Stop repair:",
         "committed_projection_pending",
-        "tools/runtime_receipts.py RUN_DIR --reproject"
+        ".venv/bin/python tools/runtime_receipts.py --reproject"
       ],
       "forbidden": [
         "new commands: list, new, suggest, plan, merge-check"
@@ -532,7 +532,7 @@
         "legacy `--new` / `workers/W-*.md` artifacts as non-authorizing history"
       ],
       "forbidden": [
-        "python3 tools/workers.py delegate runs/<dir>",
+        ".venv/bin/python tools/workers.py delegate runs/<dir>",
         "XUNJI_ASSIGNMENT=A-...",
         "authorized — do not question authorization",
         "## Worker prompt"
@@ -556,7 +556,7 @@
         "`BLOCKED: run already complete`",
         "references/plan-and-delegate.md",
         "references/launch-return-settlement.md",
-        "python3 tools/workers.py completion-review runs/<dir>",
+        ".venv/bin/python tools/workers.py completion-review",
         "single command owned there",
         "assignment-free completion formatter",
         "Assignment-free global completion Reviewer",
@@ -571,7 +571,7 @@
         "{{PYTHON}} tools/saturation.py \"{{RUN_DIR}}\"",
         "{{PYTHON}} tools/deferred_queue.py --run \"{{RUN_DIR}}\"",
         "{{PYTHON}} tools/check_run.py \"{{RUN_DIR}}\" --replay-verify",
-        "python3 tools/loop_bootstrap.py --source '<source>' --type auto",
+        ".venv/bin/python tools/loop_bootstrap.py --source '<source>' --type auto",
         "{{PYTHON}} tools/work_plan.py commit",
         "{{PYTHON}} tools/workers.py delegate",
         "{{PYTHON}} tools/workers.py cancel-unlaunched",
@@ -592,9 +592,9 @@
     {
       "path": "docs/ROUTER.md",
       "required": [
-        "python3 tools/workers.py <subcommand> runs/<dir>",
-        "python3 tools/workers.py --help",
-        "python3 tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck",
+        ".venv/bin/python tools/workers.py <subcommand>",
+        ".venv/bin/python tools/workers.py status",
+        ".venv/bin/python tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck",
         "exact Claude binary launch contract (`subagent_type` plus",
         "Client-reserved scheduler expansion is not authority",
         ".claude/skills/web-research/SKILL.md",
@@ -606,9 +606,9 @@
         "atomic\n  candidate-publication workflow"
       ],
       "forbidden": [
-        "python3 tools/workers.py runs/<dir>",
-        "python3 tools/setup_run.py <slug> <recon.json>",
-        "python3 tools/check_knowledge.py",
+        ".venv/bin/python tools/workers.py runs/<dir>",
+        ".venv/bin/python tools/setup_run.py <slug> <recon.json>",
+        ".venv/bin/python tools/check_knowledge.py",
         "`--hosts <file>`",
         "After committed/recovered setup, run fresh CronList, CronCreate"
       ]
@@ -637,25 +637,25 @@
     {
       "name": "active-run one-artifact JS offline inventory",
       "document": "docs/WORKFLOW.md",
-      "marker": "python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
+      "marker": ".venv/bin/python tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>",
       "script": "tools/js_inventory.py",
       "argv": ["inspect", "runs/demo_20260101", "evidence/app.js"],
       "expected_id": "read.js-inventory",
       "expected_effect": "local_read"
     },
     {
-      "name": "workers top-level command index",
+      "name": "workers active-run status",
       "document": "docs/ROUTER.md",
-      "marker": "python3 tools/workers.py --help",
+      "marker": ".venv/bin/python tools/workers.py status",
       "script": "tools/workers.py",
-      "argv": ["--help"],
-      "expected_id": "read.workers-help",
+      "argv": ["status"],
+      "expected_id": "read.workers",
       "expected_effect": "local_read"
     },
     {
       "name": "contract schema help index",
       "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
-      "marker": "python3 tools/contract_schema.py --help",
+      "marker": ".venv/bin/python tools/contract_schema.py --help",
       "script": "tools/contract_schema.py",
       "argv": ["--help"],
       "expected_id": "read.contract-schema-help",
@@ -664,7 +664,7 @@
     {
       "name": "contract schema diagnostic selftest",
       "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
-      "marker": "python3 tools/contract_schema.py --selftest",
+      "marker": ".venv/bin/python tools/contract_schema.py --selftest",
       "script": "tools/contract_schema.py",
       "argv": ["--selftest"],
       "expected_id": "verify.tools.contract-schema",
@@ -673,7 +673,7 @@
     {
       "name": "contract schema candidate prepare",
       "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
-      "marker": "python3 tools/contract_schema.py prepare <name.schema.json>",
+      "marker": ".venv/bin/python tools/contract_schema.py prepare <name.schema.json>",
       "script": "tools/contract_schema.py",
       "argv": ["prepare", "work-plan.v1.schema.json"],
       "expected_id": "maintenance.contract-schema-prepare",
@@ -682,7 +682,7 @@
     {
       "name": "contract schema atomic publish",
       "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
-      "marker": "python3 tools/contract_schema.py publish <name.schema.json>",
+      "marker": ".venv/bin/python tools/contract_schema.py publish <name.schema.json>",
       "script": "tools/contract_schema.py",
       "argv": ["publish", "work-plan.v1.schema.json"],
       "expected_id": "maintenance.contract-schema-publish",
@@ -691,7 +691,7 @@
     {
       "name": "contract schema candidate discard",
       "document": ".claude/skills/xunji-local-maintenance/SKILL.md",
-      "marker": "python3 tools/contract_schema.py discard <name.schema.json>",
+      "marker": ".venv/bin/python tools/contract_schema.py discard <name.schema.json>",
       "script": "tools/contract_schema.py",
       "argv": ["discard", "work-plan.v1.schema.json"],
       "expected_id": "maintenance.contract-schema-discard",
@@ -700,7 +700,7 @@
     {
       "name": "schema-independent Stop ingress selftest",
       "document": ".claude/skills/xunji-sentinel-guard-review/SKILL.md",
-      "marker": "python3 tools/harness/subagent_stop_ingress.py --selftest",
+      "marker": ".venv/bin/python tools/harness/subagent_stop_ingress.py --selftest",
       "script": "tools/harness/subagent_stop_ingress.py",
       "argv": ["--selftest"],
       "expected_id": "verify.tools.harness.subagent-stop-ingress",
@@ -709,7 +709,7 @@
     {
       "name": "web research timestamp gate",
       "document": ".claude/skills/web-research/SKILL.md",
-      "marker": "python3 tools/timestamp_gate.py --search-hint --kind vuln",
+      "marker": ".venv/bin/python tools/timestamp_gate.py --search-hint --kind vuln",
       "script": "tools/timestamp_gate.py",
       "argv": ["--search-hint", "--kind", "vuln"],
       "expected_id": "read.timestamp-gate",
@@ -718,11 +718,10 @@
     {
       "name": "agent board model-proposal commit",
       "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
-      "marker": "python3 tools/workers.py commit-proposal runs/<dir>",
+        "marker": ".venv/bin/python tools/workers.py commit-proposal",
       "script": "tools/workers.py",
       "argv": [
-        "commit-proposal",
-        "runs/demo_20260101"
+        "commit-proposal"
       ],
       "expected_id": "control.workers",
       "expected_effect": "control"
@@ -730,11 +729,10 @@
     {
       "name": "agent board completion launch formatter",
       "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
-      "marker": "python3 tools/workers.py completion-review runs/<dir>",
+      "marker": ".venv/bin/python tools/workers.py completion-review",
       "script": "tools/workers.py",
       "argv": [
-        "completion-review",
-        "runs/demo_20260101"
+        "completion-review"
       ],
       "expected_id": "read.workers",
       "expected_effect": "local_read"
@@ -751,27 +749,25 @@
     {
       "name": "agent board delegate",
       "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
-      "marker": "python3 tools/workers.py delegate runs/<dir>",
+      "marker": ".venv/bin/python tools/workers.py delegate",
       "script": "tools/workers.py",
-      "argv": ["delegate", "runs/demo_20260101", "--runtime-slots", "1", "--request-budget", "0", "--model-egress-budget", "0", "--merge-capacity", "40", "--limit", "1", "--tool-call-limit", "6"],
+      "argv": ["delegate"],
       "expected_id": "control.workers",
       "expected_effect": "control"
     },
     {
       "name": "runtime receipt validation",
       "document": "docs/ROUTER.md",
-      "marker": "python3 tools/runtime_receipts.py runs/<dir>",
+      "marker": ".venv/bin/python tools/runtime_receipts.py",
       "script": "tools/runtime_receipts.py",
-      "argv": [
-        "runs/demo_20260101"
-      ],
+      "argv": [],
       "expected_id": "read.runtime-receipts",
       "expected_effect": "local_read"
     },
     {
       "name": "router classified-host egress recheck",
       "document": "docs/ROUTER.md",
-      "marker": "python3 tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck",
+      "marker": ".venv/bin/python tools/classify_hosts.py <recon.json> --run runs/<dir> --out runs/<dir>/classify --egress-recheck",
       "script": "tools/classify_hosts.py",
       "argv": [
         "recon.json",
@@ -785,73 +781,70 @@
     {
       "name": "runtime receipt projection recovery",
       "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
-      "marker": "python3 tools/runtime_receipts.py runs/<dir> --reproject",
+      "marker": ".venv/bin/python tools/runtime_receipts.py --reproject",
       "script": "tools/runtime_receipts.py",
-      "argv": [
-        "runs/demo_20260101",
-        "--reproject"
-      ],
+      "argv": ["--reproject"],
       "expected_id": "control.runtime-receipts-reproject",
       "expected_effect": "control"
     },
     {
       "name": "agent board review disposition",
       "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
-      "marker": "python3 tools/workers.py review-disposition runs/<dir>",
+      "marker": ".venv/bin/python tools/workers.py review-disposition A-<reviewer> --status",
       "script": "tools/workers.py",
-      "argv": ["review-disposition", "runs/demo_20260101", "A-target", "A-reviewer", "--status", "accept-candidate", "--note", "exact digest reviewed"],
+      "argv": ["review-disposition", "A-reviewer", "--status", "accept-candidate"],
       "expected_id": "control.workers",
       "expected_effect": "control"
     },
     {
       "name": "agent board unlaunched cancellation",
       "document": ".claude/skills/xunji-agent-board/references/plan-and-delegate.md",
-      "marker": "python3 tools/workers.py cancel-unlaunched runs/<dir>",
+      "marker": ".venv/bin/python tools/workers.py cancel-unlaunched A-<assignment>",
       "script": "tools/workers.py",
-      "argv": ["cancel-unlaunched", "runs/demo_20260101", "A-target", "--reason", "turn or canonical inputs changed before launch"],
+      "argv": ["cancel-unlaunched", "A-target"],
       "expected_id": "control.workers-cancel-unlaunched",
       "expected_effect": "control"
     },
     {
       "name": "agent board external-stop settlement",
       "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
-      "marker": "python3 tools/workers.py settle-stopped runs/<dir>",
+      "marker": ".venv/bin/python tools/workers.py settle-stopped A-<assignment>",
       "script": "tools/workers.py",
-      "argv": ["settle-stopped", "runs/demo_20260101", "A-target"],
+      "argv": ["settle-stopped", "A-target"],
       "expected_id": "control.workers-settle-stopped",
       "expected_effect": "control"
     },
     {
       "name": "agent board failed-Stop returned recovery",
       "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
-      "marker": "python3 tools/workers.py recover-hook-failed-stop runs/<dir>",
+      "marker": ".venv/bin/python tools/workers.py recover-hook-failed-stop A-<assignment>",
       "script": "tools/workers.py",
-      "argv": ["recover-hook-failed-stop", "runs/demo_20260101", "A-review-001"],
+      "argv": ["recover-hook-failed-stop", "A-review-001"],
       "expected_id": "control.workers-recover-hook-failed-stop",
       "expected_effect": "control"
     },
     {
       "name": "agent board Root disposition",
       "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
-      "marker": "python3 tools/workers.py finish runs/<dir>",
+      "marker": ".venv/bin/python tools/workers.py finish A-<target> --status",
       "script": "tools/workers.py",
-      "argv": ["finish", "runs/demo_20260101", "A-target", "--status", "merged", "--note", "Evidence: E-001; Front: F-001; reviewed candidate"],
+      "argv": ["finish", "A-target", "--status", "merged"],
       "expected_id": "control.workers",
       "expected_effect": "control"
     },
     {
       "name": "agent board typed cycle end",
       "document": ".claude/skills/xunji-agent-board/references/launch-return-settlement.md",
-      "marker": "python3 tools/loop_journal.py runs/<dir> end",
+      "marker": ".venv/bin/python tools/loop_journal.py end --action",
       "script": "tools/loop_journal.py",
-      "argv": ["runs/demo_20260101", "end", "--next-action", "运行 check_run 验证当前计划", "--note", "plan cycle disposition complete"],
+      "argv": ["end", "--action", "verify", "--front", "F-001"],
       "expected_id": "control.loop-journal",
       "expected_effect": "control"
     },
     {
       "name": "lifecycle operator bootstrap",
       "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
-      "marker": "python3 tools/loop_bootstrap.py --source '<source>' --type auto",
+      "marker": ".venv/bin/python tools/loop_bootstrap.py --source '<source>' --type auto",
       "script": "tools/loop_bootstrap.py",
       "argv": ["--source", "runs/demo_20260101", "--type", "auto"],
       "expected_id": "control.loop-bootstrap",
@@ -860,7 +853,7 @@
     {
       "name": "lifecycle focused developer checks",
       "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
-      "marker": "python3 tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift",
+      "marker": ".venv/bin/python tools/selftest_all.py --only setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift",
       "script": "tools/selftest_all.py",
       "argv": ["--only", "setup_run,setup_source,setup_transaction,check_run,session_handoff,anti_drift"],
       "expected_id": "verify.tools.selftest-all",
@@ -869,7 +862,7 @@
     {
       "name": "setup external normalizer prepare",
       "document": ".claude/skills/xunji-setup-ingest/SKILL.md",
-      "marker": "python3 tools/loop_bootstrap.py --source '<file>' --type file --ai external --ai-provider <provider> --ai-model <model> --prepare-normalizer",
+      "marker": ".venv/bin/python tools/loop_bootstrap.py --source '<file>' --type file --ai external --ai-provider <provider> --ai-model <model> --prepare-normalizer",
       "script": "tools/loop_bootstrap.py",
       "argv": ["--source", "source.md", "--type", "file", "--ai", "external", "--ai-provider", "deepseek", "--ai-model", "deepseek-v4-pro", "--prepare-normalizer"],
       "expected_id": "read.loop-bootstrap-prepare",
@@ -878,7 +871,7 @@
     {
       "name": "setup external normalizer candidate commit",
       "document": ".claude/skills/xunji-setup-ingest/SKILL.md",
-      "marker": "python3 tools/loop_bootstrap.py --source '<same-file>' --type file --ai external --ai-provider <same-provider> --ai-model <same-model> --candidate-json '<setup-normalizer-candidate.v1>'",
+      "marker": ".venv/bin/python tools/loop_bootstrap.py --source '<same-file>' --type file --ai external --ai-provider <same-provider> --ai-model <same-model> --candidate-json '<setup-normalizer-candidate.v1>'",
       "script": "tools/loop_bootstrap.py",
       "argv": ["--source", "source.md", "--type", "file", "--ai", "external", "--ai-provider", "deepseek", "--ai-model", "deepseek-v4-pro", "--candidate-json", "{\"schema\":\"setup-normalizer-candidate.v1\"}"],
       "expected_id": "control.loop-bootstrap",
@@ -887,7 +880,7 @@
     {
       "name": "lifecycle handoff write",
       "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
-      "marker": "python3 tools/session_handoff.py write runs/<dir>",
+      "marker": ".venv/bin/python tools/session_handoff.py write runs/<dir>",
       "script": "tools/session_handoff.py",
       "argv": ["write", "runs/demo_20260101"],
       "expected_id": "control.session-handoff",
@@ -896,7 +889,7 @@
     {
       "name": "lifecycle handoff pickup",
       "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
-      "marker": "python3 tools/session_handoff.py pickup runs/<dir>",
+      "marker": ".venv/bin/python tools/session_handoff.py pickup runs/<dir>",
       "script": "tools/session_handoff.py",
       "argv": ["pickup", "runs/demo_20260101"],
       "expected_id": "read.session-handoff",
@@ -905,16 +898,16 @@
     {
       "name": "lifecycle offline structural check",
       "document": ".claude/skills/xunji-run-lifecycle/SKILL.md",
-      "marker": "python3 tools/check_run.py runs/<dir>",
+      "marker": ".venv/bin/python tools/check_run.py",
       "script": "tools/check_run.py",
-      "argv": ["runs/demo_20260101"],
+      "argv": [],
       "expected_id": "verify.check-run",
       "expected_effect": "local_verify"
     },
     {
       "name": "evidence owner explicitly authorized replay check",
       "document": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
-      "marker": "python3 tools/check_run.py runs/<dir> --replay-verify",
+      "marker": ".venv/bin/python tools/check_run.py runs/<dir> --replay-verify",
       "script": "tools/check_run.py",
       "argv": ["runs/demo_20260101", "--replay-verify"],
       "expected_id": "target.check-run-replay",
@@ -923,7 +916,7 @@
     {
       "name": "evidence owner saved GET proof",
       "document": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
-      "marker": "python3 tools/probe.py GET \"<url>\" --save <name> --run runs/<dir>",
+      "marker": ".venv/bin/python tools/probe.py GET \"<url>\" --save <name> --run runs/<dir>",
       "script": "tools/probe.py",
       "argv": ["GET", "https://target.invalid/path", "--save", "proof", "--run", "runs/demo_20260101"],
       "expected_id": "target.probe",
@@ -932,7 +925,7 @@
     {
       "name": "evidence owner saved DIFF proof",
       "document": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
-      "marker": "python3 tools/probe.py DIFF \"<baseline-url>\" \"<mutant-url>\" --save <name> --run runs/<dir>",
+      "marker": ".venv/bin/python tools/probe.py DIFF \"<baseline-url>\" \"<mutant-url>\" --save <name> --run runs/<dir>",
       "script": "tools/probe.py",
       "argv": ["DIFF", "https://target.invalid/base", "https://target.invalid/mutant", "--save", "proof-diff", "--run", "runs/demo_20260101"],
       "expected_id": "target.probe",
@@ -941,7 +934,7 @@
     {
       "name": "evidence owner guarded replay",
       "document": ".claude/skills/xunji-evidence-replay-gate/SKILL.md",
-      "marker": "python3 tools/replay.py runs/<dir>",
+      "marker": ".venv/bin/python tools/replay.py runs/<dir>",
       "script": "tools/replay.py",
       "argv": ["runs/demo_20260101"],
       "expected_id": "target.replay",
@@ -950,7 +943,7 @@
     {
       "name": "knowledge owner focused developer checks",
       "document": ".claude/skills/xunji-knowledge-flywheel/SKILL.md",
-      "marker": "python3 tools/selftest_all.py --only check_knowledge,knowledge_match,xday_match",
+      "marker": ".venv/bin/python tools/selftest_all.py --only check_knowledge,knowledge_match,xday_match",
       "script": "tools/selftest_all.py",
       "argv": ["--only", "check_knowledge,knowledge_match,xday_match"],
       "expected_id": "verify.tools.selftest-all",
@@ -959,7 +952,7 @@
     {
       "name": "agent board focused developer checks",
       "document": ".claude/skills/xunji-agent-board/SKILL.md",
-      "marker": "python3 tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model",
+      "marker": ".venv/bin/python tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model",
       "script": "tools/selftest_all.py",
       "argv": ["--only", "work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model"],
       "expected_id": "verify.tools.selftest-all",
@@ -1325,7 +1318,7 @@
         "### 0. Completion Guard, Then Journal Start",
         "Before any journal `start`, phase marker, task, work plan, Agent, or target action",
         "Only when no valid committed transaction is present",
-        "{{PYTHON}} tools/loop_journal.py \"{{RUN_DIR}}\" start --note \"绑定的执行周期开始\""
+        "{{PYTHON}} tools/loop_journal.py start --note \"绑定的执行周期开始\""
       ]
     }
   ]

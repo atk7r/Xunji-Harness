@@ -9,8 +9,8 @@
 本工具从【任何出口】都能跑: 当前出口冷却后重试、换了出口、或操作者在境内跑——
 凡变可达的就重新分类、点出来。走 guard 熔断/限速; 不改原 coverage(写 *_rerun.json)。
 
-  python tools/rerun_deferred.py --run runs/<dir>            # 自动找 coverage.json
-  python tools/rerun_deferred.py --coverage runs/<dir>/classify/coverage.json
+  .venv/bin/python tools/rerun_deferred.py --run runs/<dir>  # 自动找 coverage.json
+  .venv/bin/python tools/rerun_deferred.py --coverage runs/<dir>/classify/coverage.json
 """
 from __future__ import annotations
 

@@ -38,13 +38,13 @@ incremental Edit/Write on the final path: a concurrent Hook could observe the
 temporary invalid bytes. The registered local-read index for this tool is:
 
 ```bash
-python3 tools/contract_schema.py --help
+.venv/bin/python tools/contract_schema.py --help
 ```
 
 For an existing or new `<name.schema.json>`, use this exact maintenance workflow:
 
 ```bash
-python3 tools/contract_schema.py prepare <name.schema.json>
+.venv/bin/python tools/contract_schema.py prepare <name.schema.json>
 ```
 
 This command remains the repair entrypoint when the published file already
@@ -57,7 +57,7 @@ Edit only the exact candidate printed by that command,
 tool. Then run the exact `next_argv` from the prepare result:
 
 ```bash
-python3 tools/contract_schema.py publish <name.schema.json>
+.venv/bin/python tools/contract_schema.py publish <name.schema.json>
 ```
 
 `publish` validates strict UTF-8/JSON, the Draft 2020-12 declaration and `$id`,
@@ -71,7 +71,7 @@ If the candidate is intentionally abandoned, remove only its ignored candidate
 and base pair with:
 
 ```bash
-python3 tools/contract_schema.py discard <name.schema.json>
+.venv/bin/python tools/contract_schema.py discard <name.schema.json>
 ```
 
 On `SCHEMA_CANDIDATE_STALE` or `SCHEMA_PUBLISH_CAS_MISMATCH`, preserve the
@@ -82,7 +82,7 @@ or use `python -c` as a publication bypass. Loader failures retain a stable caus
 `SCHEMA_READ_FAILED`, or `SCHEMA_INVALID`. Diagnose them with the exact selftest:
 
 ```bash
-python3 tools/contract_schema.py --selftest
+.venv/bin/python tools/contract_schema.py --selftest
 ```
 
 If an active-run Hook encounters that typed fault outside a maintenance turn,
@@ -97,23 +97,23 @@ For docs/templates/skills, run skill or template validators when applicable.
 For lifecycle or run-gate tooling, prefer one registered aggregate:
 
 ```bash
-python3 tools/selftest_all.py --only check_run,setup_run,session_handoff,anti_drift
+.venv/bin/python tools/selftest_all.py --only check_run,setup_run,session_handoff,anti_drift
 ```
 
 For repository architecture and hook behavior:
 
 ```bash
-python3 tools/contract_schema.py --selftest
-python3 tools/check_rules.py
-python3 tools/check_hook.py
+.venv/bin/python tools/contract_schema.py --selftest
+.venv/bin/python tools/check_rules.py
+.venv/bin/python tools/check_hook.py
 ```
 
 For a broad local scorecard:
 
 ```bash
-python3 tools/selftest_all.py
-python3 tools/selftest_all.py --only <suite1,suite2>
-python3 tools/selftest_all.py --list
+.venv/bin/python tools/selftest_all.py
+.venv/bin/python tools/selftest_all.py --only <suite1,suite2>
+.venv/bin/python tools/selftest_all.py --list
 ```
 
 ## Safety-Critical Changes

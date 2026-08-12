@@ -29,11 +29,11 @@ not drive real engagements.
 ## Commands
 
 ```bash
-python tools/bench.py --selftest
-python tools/bench.py score runs/<dir> bench/<fixture>/truth.json
-python tools/bench.py score-all bench/
-python tools/bench.py compare tmp/baseline.json tmp/change.json
-python tools/selftest_all.py --only bench
+.venv/bin/python tools/bench.py --selftest
+.venv/bin/python tools/bench.py score runs/<dir> bench/<fixture>/truth.json
+.venv/bin/python tools/bench.py score-all bench/
+.venv/bin/python tools/bench.py compare tmp/baseline.json tmp/change.json
+.venv/bin/python tools/selftest_all.py --only bench
 ```
 
 ## Review Checklist

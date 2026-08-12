@@ -16,10 +16,10 @@
 - 证明即止/外发脱敏仍归 safety-boundary + poc-package skill 管。
 
 用法:
-  python tools/xday_match.py --body resp.html    # 目标内容命中 → 调出对应本地 xday
-  python tools/xday_match.py --id soarcloud-ais-hr # 按 knowledge id 直调(从 kb:<id> 标签来)
-  python tools/xday_match.py --list              # 列本地 xday/weaponized 清单(不吐 payload)
-  python tools/xday_match.py --selftest
+  .venv/bin/python tools/xday_match.py --body resp.html
+  .venv/bin/python tools/xday_match.py --id soarcloud-ais-hr
+  .venv/bin/python tools/xday_match.py --list
+  .venv/bin/python tools/xday_match.py --selftest
 """
 from __future__ import annotations
 

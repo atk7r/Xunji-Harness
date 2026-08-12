@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import status_style  # noqa: E402
 import contract_schema  # noqa: E402
+from harness import active_run as _active_run  # noqa: E402
 
 SCHEMA = "xunji.loop_journal.v1"
 JOURNAL = "loop_journal.jsonl"
@@ -107,6 +108,13 @@ EVENT_CN = {
     "stage_exit": "阶段退出",
     "delegation_committed": "委派已提交",
 }
+CLI_EVENTS = (
+    "start", "plan", "action", "write-result", "interrupt", "resume", "end", "status",
+    "phase-start", "phase-end",
+)
+NEXT_ACTION_KINDS = frozenset({
+    "replan", "delegate", "verify", "review", "wait", "complete",
+})
 
 
 class JournalContractError(ValueError):
@@ -232,6 +240,180 @@ def validate_next_action_semantics(
         if not active and not cited and not _CONTROL_ANCHOR_RE.search(detail):
             return "CODA_CONTROL_OBJECT_REQUIRED"
     return ""
+
+
+def derive_next_action(
+    run_dir: str | Path,
+    *,
+    action: str,
+    front: str = "",
+) -> str:
+    """Compile a small typed choice into the legacy display/Coda projection.
+
+    The caller supplies only a bounded action enum and, when required, one
+    canonical front ID. Run, plan, digest, and the human-readable action text
+    remain owner-derived. The journal keeps its historical string field for
+    replay compatibility, but new model-facing calls never author that string.
+    """
+    kind = str(action or "").strip().lower()
+    selected_front = str(front or "").strip().upper()
+    if kind not in NEXT_ACTION_KINDS:
+        _contract_error("CYCLE_EVENT_ACTION_KIND_INVALID", kind)
+    if selected_front and not re.fullmatch(r"F-[0-9]+", selected_front):
+        _contract_error("CYCLE_EVENT_ACTION_FRONT_INVALID", selected_front)
+    try:
+        import run_model
+
+        state = run_model.summary(_resolve_run_dir(run_dir))
+        active = [str(item).upper() for item in state.get("open", [])]
+    except Exception as exc:
+        _contract_error("CYCLE_EVENT_NEXT_ACTION_CONTEXT_INVALID", exc.__class__.__name__)
+    if kind == "complete":
+        if selected_front or active:
+            _contract_error(
+                "CYCLE_EVENT_ACTION_STATE_INVALID",
+                "complete requires zero active fronts and no --front",
+            )
+        text = "运行 check_run.py 验证收口"
+    else:
+        if not selected_front:
+            _contract_error("CYCLE_EVENT_ACTION_FRONT_REQUIRED", kind)
+        if selected_front not in active:
+            _contract_error("CYCLE_EVENT_ACTION_FRONT_INACTIVE", selected_front)
+        text = {
+            "replan": f"运行 workers.py plan 重规划 {selected_front}",
+            "delegate": f"运行 workers.py delegate 分派 {selected_front}",
+            "verify": f"运行 check_run.py 验证 {selected_front}",
+            "review": f"运行 peer_review.py 复审 {selected_front}",
+            "wait": f"记录 decisions.md 中 {selected_front} 的 operator 恢复条件",
+        }[kind]
+    semantic_error = validate_next_action_semantics(text, active_fronts=active)
+    if semantic_error:
+        _contract_error("CYCLE_EVENT_ACTION_PROJECTION_INVALID", semantic_error)
+    return text
+
+
+def derive_typed_note(
+    run_dir: str | Path,
+    *,
+    action: str,
+    front: str = "",
+    state_validated: bool = False,
+) -> str:
+    """Derive the audit note for one model-facing typed cycle action.
+
+    Ordinary actions only freeze the enum/front projection. Completion also
+    freezes the scheduled-loop disposition from the current turn contract and
+    successful runtime receipts. The caller never supplies a job id or a
+    free-form completion assertion.
+    """
+    kind = str(action or "").strip().lower()
+    selected_front = str(front or "").strip().upper()
+    if kind not in NEXT_ACTION_KINDS:
+        _contract_error("CYCLE_EVENT_ACTION_KIND_INVALID", kind)
+    # This helper is also a public owner surface used by tests/recovery code.
+    # Revalidate the same state-bound enum/front contract even when it is not
+    # reached through ``main()``, so it can never freeze a bogus audit binding.
+    if not state_validated:
+        derive_next_action(run_dir, action=kind, front=selected_front)
+    base = f"typed-action={kind};front={selected_front or 'none'}"
+    if kind != "complete":
+        return base
+    if selected_front:
+        _contract_error(
+            "CYCLE_EVENT_ACTION_STATE_INVALID",
+            "complete does not accept --front",
+        )
+    run = _resolve_run_dir(run_dir)
+    try:
+        import runtime_receipts
+        import turn_contract
+
+        contract = turn_contract.load_contract(run)
+    except Exception as exc:
+        _contract_error("CYCLE_EVENT_CRON_CONTEXT_INVALID", exc.__class__.__name__)
+    if not contract:
+        _contract_error(
+            "CYCLE_EVENT_CRON_CONTEXT_INVALID", "missing current turn contract")
+    if contract.get("loop_requested") is not True:
+        return base + ";cron_cancelled=none"
+    session_id = str(contract.get("session_id") or "")
+    updated_at = contract.get("updated_at")
+    if not session_id or isinstance(updated_at, bool) \
+            or not isinstance(updated_at, (int, float)):
+        _contract_error(
+            "CYCLE_EVENT_CRON_CONTEXT_INVALID",
+            "recurring completion requires a bound session and update time",
+        )
+    since = float(updated_at)
+    try:
+        quiescent, detail = runtime_receipts.cron_quiescent(
+            run, session_id=session_id, since=since)
+        controls = runtime_receipts.valid_control_events(
+            run, session_id=session_id, since=since)
+    except Exception as exc:
+        _contract_error("CYCLE_EVENT_CRON_CONTEXT_INVALID", exc.__class__.__name__)
+    if not quiescent:
+        _contract_error("CYCLE_EVENT_CRON_NOT_QUIESCENT", str(detail or ""))
+    cron_lists = [
+        row for row in controls if row.get("tool_name") == "CronList"
+    ]
+    if not cron_lists:
+        _contract_error("CYCLE_EVENT_CRON_NOT_QUIESCENT", "missing CronList")
+    def receipt_seq(row: dict) -> int:
+        value = row.get("seq")
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            _contract_error(
+                "CYCLE_EVENT_CRON_RECEIPT_INVALID", "invalid control receipt seq")
+        return value
+
+    def receipt_job_id(value: object) -> str:
+        job = str(value or "")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{6,64}", job):
+            _contract_error(
+                "CYCLE_EVENT_CRON_RECEIPT_INVALID", "invalid control receipt job id")
+        return job
+
+    latest_list = max(cron_lists, key=receipt_seq)
+    latest_seq = receipt_seq(latest_list)
+    attributable: set[str] = set()
+    deleted: set[str] = set()
+    for row in sorted(controls, key=receipt_seq):
+        if receipt_seq(row) >= latest_seq:
+            continue
+        if row.get("tool_name") == "CronCreate" and row.get("run_mentioned"):
+            attributable.add(receipt_job_id(row.get("job_id")))
+        elif row.get("tool_name") == "CronList":
+            jobs = row.get("listed_run_job_ids", [])
+            if not isinstance(jobs, list):
+                _contract_error(
+                    "CYCLE_EVENT_CRON_RECEIPT_INVALID",
+                    "invalid CronList run job collection",
+                )
+            attributable.update(receipt_job_id(job) for job in jobs)
+        elif row.get("tool_name") == "CronDelete":
+            job = receipt_job_id(row.get("job_id"))
+            if job in attributable:
+                deleted.add(job)
+    deleted.discard("")
+    unresolved = attributable - deleted
+    if unresolved:
+        _contract_error(
+            "CYCLE_EVENT_CRON_DISPOSITION_INCOMPLETE",
+            "latest CronList is empty but attributable run job lacks CronDelete receipt",
+        )
+    cancelled = sorted(deleted)
+    if any(
+        re.fullmatch(r"[A-Za-z0-9_.:-]{6,64}", job) is None
+        for job in cancelled
+    ):
+        _contract_error("CYCLE_EVENT_CRON_DISPOSITION_INVALID", "invalid job id")
+    if len(cancelled) > 1:
+        _contract_error(
+            "CYCLE_EVENT_CRON_DISPOSITION_MULTIPLE",
+            "more than one current-run job was cancelled; settle scheduler duplication first",
+        )
+    return base + ";cron_cancelled=" + (cancelled[0] if cancelled else "none")
 
 
 def _hex_digest(value: object, *, field: str, allow_empty: bool = False) -> str:
@@ -1490,6 +1672,114 @@ def _selftest() -> int:
                    len(load_events(directory_failure)) == 1
                    and load_events(directory_failure)[0]["note"] == "retry"))
 
+    typed_action_run = scope("typed_action")
+    (typed_action_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n### F-001\n"
+        "- Status: open\n- Barrier class: none\n- Current depth: shallow\n",
+        encoding="utf-8",
+    )
+    typed_replan = derive_next_action(
+        typed_action_run, action="replan", front="F-001")
+    typed_wait = derive_next_action(
+        typed_action_run, action="wait", front="F-001")
+    wrong_front_rejected = False
+    free_text_kind_rejected = False
+    inactive_note_rejected = False
+    try:
+        derive_next_action(typed_action_run, action="replan", front="F-999")
+    except JournalContractError as exc:
+        wrong_front_rejected = exc.code == "CYCLE_EVENT_ACTION_FRONT_INACTIVE"
+    try:
+        derive_next_action(
+            typed_action_run, action="replan and delegate", front="F-001")
+    except JournalContractError as exc:
+        free_text_kind_rejected = exc.code == "CYCLE_EVENT_ACTION_KIND_INVALID"
+    try:
+        derive_typed_note(
+            typed_action_run, action="replan", front="F-999")
+    except JournalContractError as exc:
+        inactive_note_rejected = exc.code == "CYCLE_EVENT_ACTION_FRONT_INACTIVE"
+    checks.extend((
+        ("typed action derives one canonical next-action string",
+         typed_replan == "运行 workers.py plan 重规划 F-001"),
+        ("typed wait derives one concrete decision-record action",
+         typed_wait == "记录 decisions.md 中 F-001 的 operator 恢复条件"),
+        ("typed action rejects an inactive front", wrong_front_rejected),
+        ("typed action kind is a closed enum", free_text_kind_rejected),
+        ("typed audit note independently rejects an inactive front",
+         inactive_note_rejected),
+    ))
+    (typed_action_run / "frontier.md").write_text(
+        "# Frontier\n\n## Open Fronts\n\n",
+        encoding="utf-8",
+    )
+    no_loop_note = ""
+    recurring_note = ""
+    duplicate_cron_rejected = False
+    malformed_cron_rejected = False
+    unmatched_cron_rejected = False
+    fake_turn = SimpleNamespace(load_contract=lambda _run: {
+        "loop_requested": False, "session_id": "session", "updated_at": 1.0,
+    })
+    fake_runtime = SimpleNamespace(
+        cron_quiescent=lambda *_args, **_kwargs: (True, "ok"),
+        valid_control_events=lambda *_args, **_kwargs: [],
+    )
+    with patch.dict(sys.modules, {
+        "turn_contract": fake_turn, "runtime_receipts": fake_runtime,
+    }):
+        no_loop_note = derive_typed_note(typed_action_run, action="complete")
+    recurring_controls = [
+        {"seq": 1, "tool_name": "CronList", "listed_run_job_ids": ["job-01"]},
+        {"seq": 2, "tool_name": "CronDelete", "job_id": "job-01"},
+        {"seq": 3, "tool_name": "CronList", "listed_run_job_ids": []},
+    ]
+    fake_turn.load_contract = lambda _run: {
+        "loop_requested": True, "session_id": "session", "updated_at": 1.0,
+    }
+    fake_runtime.valid_control_events = lambda *_args, **_kwargs: recurring_controls
+    with patch.dict(sys.modules, {
+        "turn_contract": fake_turn, "runtime_receipts": fake_runtime,
+    }):
+        recurring_note = derive_typed_note(typed_action_run, action="complete")
+        recurring_controls[0]["listed_run_job_ids"] = ["job-01", "job-02"]
+        recurring_controls.insert(
+            2, {"seq": 2, "tool_name": "CronDelete", "job_id": "job-02"})
+        try:
+            derive_typed_note(typed_action_run, action="complete")
+        except JournalContractError as exc:
+            duplicate_cron_rejected = (
+                exc.code == "CYCLE_EVENT_CRON_DISPOSITION_MULTIPLE")
+        recurring_controls[:] = [
+            {"seq": "bad", "tool_name": "CronList", "listed_run_job_ids": []},
+        ]
+        try:
+            derive_typed_note(typed_action_run, action="complete")
+        except JournalContractError as exc:
+            malformed_cron_rejected = (
+                exc.code == "CYCLE_EVENT_CRON_RECEIPT_INVALID")
+        recurring_controls[:] = [
+            {"seq": 1, "tool_name": "CronList", "listed_run_job_ids": ["job-01"]},
+            {"seq": 2, "tool_name": "CronList", "listed_run_job_ids": []},
+        ]
+        try:
+            derive_typed_note(typed_action_run, action="complete")
+        except JournalContractError as exc:
+            unmatched_cron_rejected = (
+                exc.code == "CYCLE_EVENT_CRON_DISPOSITION_INCOMPLETE")
+    checks.extend((
+        ("typed non-recurring completion derives cron_cancelled=none",
+         no_loop_note.endswith(";cron_cancelled=none")),
+        ("typed recurring completion derives the receipt-bound CronDelete id",
+         recurring_note.endswith(";cron_cancelled=job-01")),
+        ("typed recurring completion rejects duplicate current-run jobs",
+         duplicate_cron_rejected),
+        ("typed recurring completion maps malformed receipt seq to a stable error",
+         malformed_cron_rejected),
+        ("typed recurring completion requires a CronDelete for an observed run job",
+         unmatched_cron_rejected),
+    ))
+
     def plan_data(digest: str, stage: str, *, prior_plan: str = "",
                   prior_exit: str = "") -> dict:
         value = {
@@ -2186,19 +2476,25 @@ def _selftest() -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="append/read Xunji loop interruption journal")
     ap.add_argument("run_dir", nargs="?")
-    ap.add_argument("event", nargs="?", choices=[
-        "start", "plan", "action", "write-result", "interrupt", "resume", "end", "status",
-        "phase-start", "phase-end",
-    ])
+    ap.add_argument("event", nargs="?", choices=CLI_EVENTS)
     ap.add_argument("--phase", default="", help="phase name for phase-start / phase-end")
     ap.add_argument("--note", default="")
     ap.add_argument(
         "--next-action", default="",
-        help="exact final Coda action for a plan-bound end",
+        help="legacy exact Coda text; new calls use --action/--front",
     )
+    ap.add_argument("--action", choices=sorted(NEXT_ACTION_KINDS),
+                    help="typed next action for a plan-bound end")
+    ap.add_argument("--front", default="", help="one exact active F-id for --action")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--selftest", action="store_true")
-    args = ap.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] in CLI_EVENTS:
+        try:
+            raw_argv.insert(0, str(_active_run.resolve()))
+        except _active_run.ActiveRunError as exc:
+            ap.error(str(exc))
+    args = ap.parse_args(raw_argv)
 
     if args.selftest:
         return _selftest()
@@ -2220,14 +2516,39 @@ def main(argv: list[str] | None = None) -> int:
             ap.error("--phase is required for phase-start / phase-end")
         if args.next_action and event != "cycle_end":
             ap.error("--next-action is accepted only for end")
+        if args.action and event != "cycle_end":
+            ap.error("--action is accepted only for end")
+        if args.action and args.next_action:
+            ap.error("--action and legacy --next-action are mutually exclusive")
+        if args.front and not args.action:
+            ap.error("--front requires --action")
+        if args.action and args.note:
+            ap.error("typed --action derives its note; do not pass --note")
+        next_action = args.next_action
+        note = args.note
+        if args.action:
+            try:
+                next_action = derive_next_action(
+                    args.run_dir, action=args.action, front=args.front)
+            except JournalContractError as exc:
+                print(f"[loop_journal] {exc}", file=sys.stderr)
+                return 1
+            try:
+                note = derive_typed_note(
+                    args.run_dir, action=args.action, front=args.front,
+                    state_validated=True,
+                )
+            except JournalContractError as exc:
+                print(f"[loop_journal] {exc}", file=sys.stderr)
+                return 1
         payload = {"phase": args.phase.strip()} if event in PHASE_EVENTS else {}
         try:
             rec = append_event(
                 args.run_dir,
                 event,
-                note=args.note,
+                note=note,
                 data=payload,
-                next_action=args.next_action,
+                next_action=next_action,
             )
         except (OSError, ValueError) as e:
             print(f"[loop_journal] {e}", file=sys.stderr)

@@ -9,8 +9,8 @@
 支持 osint_ai report_agent 的 schema(target/assets/entry_points/needs_human/
 verification_tasks/infrastructure/stats), 未知 schema 则降级为顶层键概览。
 
-  python tools/ingest_recon.py <recon.json>               # 打到 stdout
-  python tools/ingest_recon.py <recon.json> --out runs/<t>/surface_recon.md
+  .venv/bin/python tools/ingest_recon.py <recon.json>     # 打到 stdout
+  .venv/bin/python tools/ingest_recon.py <recon.json> --out runs/<t>/surface_recon.md
 """
 from __future__ import annotations
 

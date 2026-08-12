@@ -41,8 +41,8 @@ evidence grounded in saved target responses and safe replays, not prose.
 Prefer guard-routed probe artifacts:
 
 ```bash
-python3 tools/probe.py GET "<url>" --save <name> --run runs/<dir>
-python3 tools/probe.py DIFF "<baseline-url>" "<mutant-url>" --save <name> --run runs/<dir>
+.venv/bin/python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
+.venv/bin/python tools/probe.py DIFF "<baseline-url>" "<mutant-url>" --save <name> --run runs/<dir>
 ```
 
 This places the response and the `.replay.json` under `runs/<dir>/evidence/`.
@@ -58,8 +58,8 @@ files are tolerated by parsers but become layout-drift warnings.
 Use replay only as a verification aid; it does not auto-decide truth:
 
 ```bash
-python3 tools/replay.py runs/<dir>
-python3 tools/check_run.py runs/<dir> --replay-verify
+.venv/bin/python tools/replay.py runs/<dir>
+.venv/bin/python tools/check_run.py runs/<dir> --replay-verify
 ```
 
 Replay rules:

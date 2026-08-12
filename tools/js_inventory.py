@@ -3,7 +3,7 @@
 
 The live command is intentionally closed::
 
-    python3 tools/js_inventory.py inspect runs/<name> evidence/<artifact>
+    .venv/bin/python tools/js_inventory.py inspect runs/<name> evidence/<artifact>
 
 It performs no network I/O and writes no run state.  The source artifact is
 secure-opened through :mod:`artifact_view`; output is bounded JSON containing

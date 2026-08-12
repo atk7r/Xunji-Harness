@@ -79,7 +79,7 @@ or closes a front.
 Outside a live run, developers may validate the helper implementations directly:
 
 ```bash
-python3 tools/selftest_all.py --only check_knowledge,knowledge_match,xday_match
+.venv/bin/python tools/selftest_all.py --only check_knowledge,knowledge_match,xday_match
 ```
 
 If knowledge affects a report or closure claim, adjudicate it through

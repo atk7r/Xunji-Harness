@@ -61,6 +61,17 @@ inventory，负责攻击面理解、假设生成、主动验证、证据治理�
 
 ### 3.2 Tool 是能力，不是脚本别名
 
+Xunji 不修改、包装或缩减 Claude Code 原生 `Read` / `Edit` / `Bash` /
+`Agent` 等 Tool，也不以 MCP 作为项目 Tool 运行时。Claude Code 仍然以原生
+`Bash` 发起本地项目能力；Xunji 优化的是 `Bash` 内部的项目 action
+表面，而不是 host Tool 协议。正常 model-facing 调用使用短 typed action，
+例如 `.venv/bin/python tools/workers.py delegate` 或
+`.venv/bin/python tools/loop_journal.py end --action complete`；语义 owner 再从
+active pointer、当前 plan、assignment ledger、turn contract 与 runtime receipts
+派生 run path、plan digest、lane、budget、hash、展示文本和审计备注。
+显式长 argv 仅作 operator/历史兼容表面，不由当前 driver 文档、
+prepared projection 或 recovery hint 暴露给模型。
+
 每个能力遵循统一语义：
 
 ```text
@@ -119,6 +130,11 @@ receipt/candidate，而不是把完整子会话当作状态。Xunji 不以减少
 目标：能力保持细分，统一使用 typed capability/effect/validator/mandatory-service 契约；
 真正最小化的是每个 assignment 当前看到的派生能力投影和自动批准面。完整 registry 仍由
 Hook 在调用时精确匹配，不能把多个语义入口合并进一个宽 Bash 入口来换取表面上的 Tool 少。
+当前 Python 项目命令只使用 repository-owned `.venv/bin/python`；
+SessionStart preflight、Hook settings、model-facing 文档/技能/模板、prepared argv 和
+capability parser 共同强制该身份。系统 `python3 -m venv .venv` 只存在于
+尚无环境时的 bootstrap 边界；历史 receipt 中冻结的裸 `python3`
+只能由狭 read-only 历史 parser 重放，不会重获 live 执行权限。
 
 ### 3.7 并发取决于副作用
 
@@ -1049,10 +1065,10 @@ Xunji 管的是自动执行的效果和执行者，而不是禁止技术思考�
   边界，避免把字符串黑名单伪装成 shell effect 证明。
 - URL-bearing Bash 先分成三个通道：真实 target network、精确 local lifecycle metadata、
   model/reviewer egress。`command_shape.py` 只授权无 `tool_input.env`/inline env、compound、
-  redirect、substitution、未知选项的单一 argv；精确 bare `python3` 由可信单操作者的本机
-  environment owner，避免 Claude Code Hook 与 Bash 的继承 `PATH` 不同而产生假拒绝；绝对
-  Python 仍必须绑定当前 Hook executable identity，`python`、微版本拼写、相对/任意绝对
-  alias 都拒绝。未引用的 pathname/query glob、brace、tilde、zsh EQUALS、parameter/command
+  redirect、substitution、未知选项的单一 argv；live 项目命令的 Python identity
+  只能是当前 repository 精确 `.venv/bin/python`，SessionStart 预检与 command-shape
+  共同绑定其 executable/prefix。`python`、裸 `python3`、微版本拼写、其他虚拟环境和
+  任意绝对 alias 都拒绝。未引用的 pathname/query glob、brace、tilde、zsh EQUALS、parameter/command
   expansion、comment/newline/line-continuation 全部 fail closed，shell-quoted literal 只作为 argv
   data。可信解释器对已登记脚本发起的干净单命令若 argv 未匹配任何 capability，或末尾只
   带 `2>&1`/单段 `head`/`tail` 观察包装，返回兼容 diagnostic
@@ -1261,6 +1277,8 @@ Checkpoint；在此之前，Claude 主驾驶不得为该方向修改代码或扩
 | `tools/setup_transaction.py` | staging、setup receipt、active pointer、typed lock/CAS 与幂等恢复的唯一 owner | setup/loop/statusline adapters、turn claim、setup-transaction fixture、独立复审 |
 | `tools/harness/command_shape.py` | 单一精确 Python control argv 与 local lifecycle metadata 分类 | privacy、turn contract、data-driven fixture、独立复审 |
 | `tools/harness/capability_registry.py` | exact script/argv→effect 与 mandatory service policy；`root_direct_eligible` 默认关闭 | turn contract、command-shape、文档命令 fixture |
+| `tools/harness/python_runtime.py` + `tools/check_project_env.py` + `tools/bootstrap_env.sh` | canonical `.venv` interpreter identity、offline bootstrap、SessionStart/model-facing command-surface drift gate；不拥有业务 action 语义 | Claude settings、command-shape、capability registry、selftest matrix |
+| `tools/harness/active_run.py` | 严格解析唯一 active pointer，不扫描、不猜测 run | setup transaction/CAS、short project-action owners、containment fixtures |
 | `tools/context_pack.py` | 从 frozen lane/front 派生 0–3 个 exact registry-backed capability guidance、expected evidence/stop projection；不拥有 authority、availability 或 registry | instruction bundle、workers、turn route、barrier fingerprint、runtime attribution、intent/ambiguity/redirect fixtures |
 | `tools/harness/output_layout.py` | active-run artifact/classify bucket 与 standalone invocation scratch 的统一路径 owner；只做 placement/containment，不晋级 evidence | probe/render/fetch/classify、local hygiene、TTL/migration selftests、protected-path manifest |
 | `tools/harness/privacy.py` | target/model egress 隐私检查与不可逆脱敏 | safety gate、active tools、peer review、独立复审 |
@@ -1572,8 +1590,89 @@ TODO/review record；checkpoint 只保留当前一轮，旧值由 Git history �
     operator turn 可改走默认 direct，或再次明确 proxy 并由 Hook 原子消费 exact selected-route 确认；
     confirmation 不清除其他 failed proxy route，也不等于 route
     health success。Local control argv/note 中的 route 文本不得被扫描成 target effect。
+42. Claude Code 原生 Tool 集与调用协议保持不变，Xunji 不建 MCP 或通用
+    Tool wrapper。Live Python 项目命令只使用 canonical `.venv/bin/python`；
+    正常 model-facing control 路径只选择有界 action/ID/enum，语义 owner 从
+    active run、plan、ledger、contract 和 receipts 派生 run path、digest、budget、
+    hash 与显示/audit prose。无 active pointer、多义、过期或无可验 receipt 必须
+    fail closed，不得通过扫描 `runs/` 或让模型恢复手拼标量来降级。
 
 ## 12. Maintenance Checkpoint
+
+### 2026-08-12 — Canonical venv and short typed project-action surface
+
+- Date: 2026-08-12
+- Scope: keep Claude Code native `Read` / `Edit` / `Bash` / `Agent` contracts
+  unchanged and keep MCP out of the Xunji runtime; make repository Python commands
+  use one canonical `.venv/bin/python`; replace high-frequency model-authored long
+  control argv with active-run-bound action/ID/enum forms while preserving each
+  semantic owner (`workers.py`, `loop_journal.py`, `runtime_receipts.py`,
+  `check_run.py`) instead of adding a universal wrapper.
+- Architecture impact: yes — native Bash remains the host transport, but the normal
+  project-action surface is now `short typed input -> owner derivation -> registry/Hook
+  validation -> receipt`. Callers no longer author run paths, plan digests, scheduler
+  capacity/budget scalars, action hashes, completion summaries, Cron job notes, or
+  display prose for the covered high-frequency actions. Explicit long forms remain
+  non-rendered operator/historical compatibility; they are not current prepared or
+  driver guidance and do not broaden the live interpreter identity.
+- Owner/enforcement: `tools/harness/python_runtime.py` owns interpreter identity;
+  `tools/bootstrap_env.sh` owns offline first-install selection of Python 3.10+;
+  `tools/check_project_env.py` and SessionStart enforce environment plus model-visible
+  command drift; `tools/harness/active_run.py` resolves only the authoritative pointer
+  and never scans `runs/`. Existing action owners derive the omitted values.
+  `command_shape.py`, `capability_registry.py`, turn contract, Hook/guard/privacy,
+  runtime receipts, and driver-doc fixtures revalidate the resulting exact effect.
+- Migration: no original live run, pointer, journal, assignment, evidence, finding,
+  report, review, or target artifact was changed. Current docs/skills/templates and
+  Hook settings render `.venv/bin/python`; frozen historical bare-Python receipts have
+  a narrow read-only parser and are neither rendered nor retried. Bootstrap performs no
+  package discovery or network install. A stale Python-3.9 cold-start fixture exposed
+  and closed the need to select the first available supported system interpreter.
+- Verification: focused integration passed `17/17`; after converting two stale bare-
+  Python fixtures and the final settlement-length tightening, the exact full matrix
+  passed `83 passed, 0 failed` in 139.2 seconds.
+  `check_project_env`, rules/templates, command shape, capability registry, setup
+  transaction, Hook live-fire, Agent Board, loop journal, runtime receipts, turn
+  contract, completion/check gates, Python compilation, and `git diff --check` pass.
+- Claude Code real-driver validation: all runs used isolated repository copies and the
+  configured DeepSeek-backed Claude Code 2.1.220. An exploratory session
+  `7d1dcf97-f2a9-4925-a68a-3925e7cbbbd2` honestly exposed eight denied discovery/
+  wrapper shapes; guidance was then tightened to make the short surface explicit.
+  Session `46ee5dbf-9f14-4054-9f8a-e93156cc542d` used the short reads with zero denials
+  but also ran an intentionally honest `check_run` over an empty synthetic run, which
+  failed its evidence gate. Final clean session
+  `b7a76eb2-46f4-4bf9-a102-77025dc9e4ba` invoked exactly four active-run-bound commands:
+  `check_project_env.py`, `workers.py status`, `runtime_receipts.py`, and
+  `loop_journal.py status`; all exited 0 with no explicit run path. Runtime truth is
+  exactly four successful Bash PostToolUse receipts with capabilities
+  `verify.tools.check-project-env`, `read.workers`, `read.runtime-receipts`, and
+  `read.loop-journal`; there are zero denials and zero target/model-egress/Agent/Cron/
+  Web/MCP effects. The isolated pointer bytes and canonical run files were unchanged;
+  only expected Hook-owned turn/run-status/runtime audit state appeared. Final exact-
+  candidate session `c100dc63-f020-4787-b77c-193d8049d1e9` repeated those four reads
+  and one honest `check_run.py` over an incomplete synthetic run: the first four
+  succeeded, `check_run` failed its evidence gate, and the Stop truth gate prevented a
+  false completion claim. It had zero denials and zero target/model-egress/Agent/Cron/
+  Web/MCP effects; the isolated pointer stayed byte-identical and only Hook-owned
+  derived audit state changed. The original workspace active-pointer hash remained
+  unchanged; no claim is made that the shared `runs/` directory mtime stayed stable
+  while hermetic selftests and unrelated background processes were present.
+- Independent review: Codex author self-review does not count. Fresh no-tool Claude
+  reviews found and drove fixes for settings executable token parsing, loop receipt
+  sequence/job/delete/cardinality validation, frozen-result containment/digest/length,
+  and current review-receipt binding. The budget-field objection was dismissed against
+  the canonical schema: `request_budget` is lane authorization and `request_cost` is
+  scheduler wave consumption, with `request_cost <= request_budget` enforced. Final
+  session `46ba4225-ad2e-477a-b72b-1b9622d7fcc9` returned PASS with no P0-P2.
+  External assistance was disabled by local policy and contributes no vote. Full
+  disposition and driver receipts are recorded in
+  `review/records/2026-08-12-canonical-venv-short-actions-review.md`.
+- Residuals/exclusions: this does not change Claude native Tool schemas, build MCP, hide
+  the complete registry, remove all Python, or convert low-frequency target payloads and
+  genuinely semantic phase/reason text into fake enums. Setup/source, exact target URL,
+  evidence artifact, review limitation, and warning-disposition inputs remain explicit
+  where code cannot honestly derive operator intent. Long CLI compatibility is not an
+  authorization shortcut and may be removed only through a separate migration contract.
 
 ### 2026-08-12 — Rich capability registry with minimum runtime exposure
 

@@ -11,8 +11,8 @@ pass. Do not copy or repeat that pass here. After it is complete, draft ready la
 with the Agent Board planner:
 
 ```bash
-python3 tools/workers.py suggest runs/<dir>
-python3 tools/workers.py plan runs/<dir> --limit 2
+.venv/bin/python tools/workers.py suggest
+.venv/bin/python tools/workers.py plan
 ```
 
 `workers.py suggest` and `workers.py plan` already consume the saturation model
@@ -69,7 +69,7 @@ Before commit, use the built-in Edit/Write tool on that exact proposal file:
 Then commit the exact proposal through the single transaction owner:
 
 ```bash
-python3 tools/workers.py commit-proposal runs/<dir>
+.venv/bin/python tools/workers.py commit-proposal
 ```
 
 `commit-proposal` reads only the exact in-run regular proposal, rejects unknown
@@ -143,7 +143,7 @@ After the zero-lane proposal commits, do not run `delegate`. Run the exact
 read-only formatter command named by the commit receipt:
 
 ```bash
-python3 tools/workers.py completion-review runs/<dir>
+.venv/bin/python tools/workers.py completion-review
 ```
 
 It validates the current committed transaction, turn/input binding, S3 mode,
@@ -157,17 +157,20 @@ prompt prefixes/suffixes, whitespace, or hand-computed hashes.
 
 ## Delegate Ready Work
 
-Budget values must match the ready lanes and current shared capacity. Zero
-request/model-egress budgets are valid only when ready lanes need neither target
-requests nor model egress:
+The ordinary Claude-facing call contains only the business action:
 
 ```bash
-python3 tools/workers.py delegate runs/<dir> --runtime-slots <n> --request-budget <n> --model-egress-budget <n> --merge-capacity <n> --limit <n>
+.venv/bin/python tools/workers.py delegate
 ```
 
-The owner supplies the normal typed `tool_call_limit=24`; use the optional
-`--tool-call-limit <5-64>` override only when the lane has a concrete smaller or
-larger bound. It counts all child calls, including binding reads and denials.
+The owner resolves the authoritative active pointer, reads the committed ready
+lanes, and derives runtime slots, request/model-egress/merge capacity, wave width,
+and the normal typed `tool_call_limit=24`. Claude must not restate those scalar
+values. Explicit `RUN_DIR` and scalar overrides remain operator/test compatibility
+forms only; they are not model-facing guidance, and a partial implicit override is
+rejected.
+
+The tool-call limit counts all child calls, including binding reads and denials.
 Each committed lane's `request_budget` is also copied into the assignment and
 frozen by `SubagentStart`. It counts attempted target calls only; child PreToolUse
 claims them atomically, so concurrent calls cannot oversubscribe the lane and the
@@ -234,8 +237,11 @@ and unrelated Reviewer launches remain denied. A non-Reviewer assignment with
 zero launch facts may be retired through the typed command:
 
 ```bash
-python3 tools/workers.py cancel-unlaunched runs/<dir> A-<assignment> --reason "turn or canonical inputs changed before launch"
+.venv/bin/python tools/workers.py cancel-unlaunched A-<assignment>
 ```
+
+The owner derives the typed cancellation reason from the current stale
+turn/input proof. Do not append caller-authored reason prose.
 
 Cancellation is auditable settlement, not a result, review, refutation, merge,
 evidence item, or completed cycle. Commit a material replan before replacement

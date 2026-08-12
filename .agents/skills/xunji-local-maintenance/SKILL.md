@@ -31,7 +31,7 @@ the Root driver.
   `review/records/<date>-<topic>-context.md`, then run Codex read-only through
   `tools/harness/codex_proxy.py` (which maps `CODEX_PROXY` / `codex_proxy.conf`
   into Codex CLI proxy env), for example
-  `python tools/harness/codex_proxy.py codex exec -s read-only < review/records/<date>-<topic>-context.md`.
+  `.venv/bin/python tools/harness/codex_proxy.py codex exec -s read-only < review/records/<date>-<topic>-context.md`.
   Save the Codex findings to `review/records/<date>-<topic>-codex-review.md`
   and record driver disposition under `review/records/`. For Codex-authored
   changes, Codex self-review still does not count; use the Codex-authored
@@ -43,16 +43,16 @@ the Root driver.
 
 ```bash
 git status --short
-python tools/check_rules.py
-python tools/check_hook.py
-python tools/selftest_all.py --list
-python tools/selftest_all.py --only <suite1,suite2>
+.venv/bin/python tools/check_rules.py
+.venv/bin/python tools/check_hook.py
+.venv/bin/python tools/selftest_all.py --list
+.venv/bin/python tools/selftest_all.py --only <suite1,suite2>
 ```
 
 For Codex-authored maintenance review:
 
 ```bash
-python tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
+.venv/bin/python tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
 ```
 
 ## Report Back

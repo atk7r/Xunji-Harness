@@ -7,12 +7,12 @@
 都从零推理"。
 
 CLI 用法:
-  python tools/cross_run.py                          # 全量摘要
-  python tools/cross_run.py --barrier WAF-layer       # 按 barrier class 查询
-  python tools/cross_run.py --product nginx           # 按产品指纹查询
-  python tools/cross_run.py --mechanism SQLi          # 按机制类查询
-  python tools/cross_run.py --run puffts_20260702     # 单 run 摘要
-  python tools/cross_run.py --suggest barrier-class   # 列出所有已知 barrier class(供 context_pack 消费)
+  .venv/bin/python tools/cross_run.py                          # 全量摘要
+  .venv/bin/python tools/cross_run.py --barrier WAF-layer     # 按 barrier 查询
+  .venv/bin/python tools/cross_run.py --product nginx         # 按产品查询
+  .venv/bin/python tools/cross_run.py --mechanism SQLi        # 按机制查询
+  .venv/bin/python tools/cross_run.py --run puffts_20260702   # 单 run 摘要
+  .venv/bin/python tools/cross_run.py --suggest barrier-class
 """
 from __future__ import annotations
 

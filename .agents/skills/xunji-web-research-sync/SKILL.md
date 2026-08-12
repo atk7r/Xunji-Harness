@@ -35,11 +35,11 @@ project code and docs; Claude remains the live run driver.
 ## Commands
 
 ```bash
-python tools/timestamp_gate.py --selftest
-python tools/timestamp_gate.py --search-hint --kind vuln
-python tools/timestamp_gate.py --search-hint --kind generic
-python tools/knowledge_match.py --selftest
-python tools/xday_match.py --selftest
+.venv/bin/python tools/timestamp_gate.py --selftest
+.venv/bin/python tools/timestamp_gate.py --search-hint --kind vuln
+.venv/bin/python tools/timestamp_gate.py --search-hint --kind generic
+.venv/bin/python tools/knowledge_match.py --selftest
+.venv/bin/python tools/xday_match.py --selftest
 ```
 
 ## Review Checklist

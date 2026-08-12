@@ -6,7 +6,7 @@ verdict. Output is at most a 0.3-0.5 certainty lead; Hunter discipline still
 decides confirmed/rejected. The wrapper forces proof-only defaults and a rate cap;
 the PreToolUse hook is the second line that blocks dump/os-shell/intrusive flags.
 
-  python tools/scan.py --run runs/<dir> sqlmap "https://t/x?id=1"  # saves evidence
+  .venv/bin/python tools/scan.py --run runs/<dir> sqlmap "https://t/x?id=1"  # saves evidence
 
 This wrapper exposes no scanner-native tail argv.  All proof-only flags are
 fixed internally; direct scanner invocation remains outside the capability and

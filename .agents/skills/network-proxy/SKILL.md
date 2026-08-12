@@ -92,7 +92,7 @@ will not run Xunji active tools or model/API clients afterwards.
 For Xunji active tools, do this instead:
 
 ```bash
-XUNJI_PROXY_REQUIRED=1 XUNJI_PROXY=socks5h://127.0.0.1:7892 python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
+XUNJI_PROXY_REQUIRED=1 XUNJI_PROXY=socks5h://127.0.0.1:7892 .venv/bin/python tools/probe.py GET "<url>" --save <name> --run runs/<dir>
 ```
 
 ## WebFetch / WebSearch failures

@@ -16,9 +16,9 @@ Design:
   and exits.
 
 Usage:
-  python tools/oob_listener.py
-  python tools/oob_listener.py --listen 0.0.0.0:8080 --timeout 120
-  python tools/oob_listener.py --selftest
+  .venv/bin/python tools/oob_listener.py
+  .venv/bin/python tools/oob_listener.py --listen 0.0.0.0:8080 --timeout 120
+  .venv/bin/python tools/oob_listener.py --selftest
 """
 
 from __future__ import annotations

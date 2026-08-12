@@ -69,6 +69,7 @@ from evidence_parse import (  # 唯一权威证据解析器与 evidence-index ha
     parse_evidence,
     write_evidence_index,
 )
+from harness import active_run as _active_run
 
 try:
     from saturation import check as check_saturation
@@ -4536,7 +4537,12 @@ def main() -> int:
     if args.selftest:
         return _selftest()
     if args.run_dir is None:
-        parser.error("run_dir is required (or use --selftest)")
+        if args.replay_verify or args.auto_peer_review:
+            parser.error("target/model-egress modes require an explicit run_dir")
+        try:
+            args.run_dir = _active_run.resolve()
+        except _active_run.ActiveRunError as exc:
+            parser.error(str(exc))
 
     run_dir = args.run_dir
     if not run_dir.is_absolute():

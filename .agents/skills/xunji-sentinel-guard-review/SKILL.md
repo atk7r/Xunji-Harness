@@ -34,19 +34,19 @@ the project's independent review path.
 Run narrow suites for touched layers:
 
 ```bash
-python tools/check_hook.py
-python .claude/hooks/safety_gate.py --selftest
-python .claude/hooks/run_gate.py --selftest
-python .claude/hooks/output_gate.py --selftest
-python tools/harness/guard.py
-python sentinel/replay.py
-python sentinel/verify_layers.py
+.venv/bin/python tools/check_hook.py
+.venv/bin/python .claude/hooks/safety_gate.py --selftest
+.venv/bin/python .claude/hooks/run_gate.py --selftest
+.venv/bin/python .claude/hooks/output_gate.py --selftest
+.venv/bin/python tools/harness/guard.py
+.venv/bin/python sentinel/replay.py
+.venv/bin/python sentinel/verify_layers.py
 ```
 
 When feasible:
 
 ```bash
-python tools/selftest_all.py
+.venv/bin/python tools/selftest_all.py
 ```
 
 ## Independent Review
@@ -56,7 +56,7 @@ For behavior changes under `.claude/hooks/`, `tools/harness/guard.py`, or
 independent:
 
 ```bash
-python tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
+.venv/bin/python tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
 ```
 
 Review must check false positives, missed hard blocks, scope drift,

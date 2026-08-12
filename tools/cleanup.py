@@ -16,10 +16,10 @@ Safety (hard, non-negotiable):
 - DRY-RUN by default; pass --apply to actually delete.
 
 Usage:
-  python tools/cleanup.py runs/_scratch tmp/x        # dry-run: show what would go
-  python tools/cleanup.py runs/_scratch --apply      # actually delete
-  python tools/cleanup.py --scratch                  # preset: tmp/ __pycache__ .state/*.json (dry-run)
-  python tools/cleanup.py --scratch --apply
+  .venv/bin/python tools/cleanup.py runs/_scratch tmp/x   # dry-run
+  .venv/bin/python tools/cleanup.py runs/_scratch --apply # actually delete
+  .venv/bin/python tools/cleanup.py --scratch             # preset dry-run
+  .venv/bin/python tools/cleanup.py --scratch --apply
 """
 
 from __future__ import annotations

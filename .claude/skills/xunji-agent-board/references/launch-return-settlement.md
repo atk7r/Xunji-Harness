@@ -52,15 +52,15 @@ After a completion notification, cross the durable return barrier with the
 read-only owner command:
 
 ```bash
-python3 tools/workers.py status runs/<dir>
+.venv/bin/python tools/workers.py status
 ```
 
 Proceed only when that exact assignment is `state=done`. If it is still
 `running`, reconcile the derived projection once and repeat the status read:
 
 ```bash
-python3 tools/runtime_receipts.py runs/<dir> --reproject
-python3 tools/workers.py status runs/<dir>
+.venv/bin/python tools/runtime_receipts.py --reproject
+.venv/bin/python tools/workers.py status
 ```
 
 If `workers.py status` instead identifies one exact completed model result whose
@@ -69,7 +69,7 @@ If `workers.py status` instead identifies one exact completed model result whose
 invent one. Run only the exact typed owner command printed by status:
 
 ```bash
-python3 tools/workers.py recover-hook-failed-stop runs/<dir> A-<assignment>
+.venv/bin/python tools/workers.py recover-hook-failed-stop A-<assignment>
 ```
 
 Eligibility binds one successful plan-bound launch, one exact `SubagentStart`,
@@ -113,7 +113,7 @@ same child's final two records are the synthetic
 `[Request interrupted by user]`, run only:
 
 ```bash
-python3 tools/workers.py settle-stream-stalled runs/<dir> A-<assignment>
+.venv/bin/python tools/workers.py settle-stream-stalled A-<assignment>
 ```
 
 The `xunji.stream-stalled-agent.v1` receipt binds the assignment/session/tool/
@@ -137,7 +137,7 @@ reason and transcript-proof fixture; do not widen this contract by analogy.
 Exception: when the foreground Reviewer parent call itself ended with
 `[Request interrupted by user for tool use]` after a
 `SubagentStart:xunji-reviewer` hook cancellation, do not loop on `--reproject`
-or try `SendMessage`. Repeat the registered `workers.py delegate --limit 1`
+or try `SendMessage`. Repeat the registered `.venv/bin/python tools/workers.py delegate`
 owner command from `plan-and-delegate.md`. It automatically attempts the narrow
 interrupted-Start recovery before ordinary delegation. Recovery succeeds only
 when parent and exact child transcripts prove the frozen prompt, hook timeout,
@@ -157,7 +157,7 @@ one started child as user-stopped and permanently non-resumable. Run only the
 exact typed owner command named by `workers.py status`:
 
 ```bash
-python3 tools/workers.py settle-stopped runs/<dir> A-<assignment>
+.venv/bin/python tools/workers.py settle-stopped A-<assignment>
 ```
 
 This command requires one exact successful plan-bound Hunter launch, its exact
@@ -188,8 +188,8 @@ If `workers.py status` instead names
 non-Xunji lifecycle receipts, run the typed supersession owner first:
 
 ```bash
-python3 tools/runtime_receipts.py runs/<dir> --quarantine-unowned-lifecycle
-python3 tools/workers.py status runs/<dir>
+.venv/bin/python tools/runtime_receipts.py --quarantine-unowned-lifecycle
+.venv/bin/python tools/workers.py status
 ```
 
 This path never deletes or rewrites `runtime_events.jsonl`. It admits only a
@@ -272,9 +272,14 @@ Choose statuses from the returned evidence; the command grammar does not choose 
 disposition or grant merge authority:
 
 ```bash
-python3 tools/workers.py review-disposition runs/<dir> A-<target> A-<reviewer> --status <accept-candidate|needs-control|duplicate|refute|out-of-scope|retry|blocked> --note "<digest-bound review reason>"
-python3 tools/workers.py finish runs/<dir> A-<target> --status <merged|blocked|failed|abandoned> --note "<status-specific literal grammar below>"
+.venv/bin/python tools/workers.py review-disposition A-<reviewer> --status <accept-candidate|needs-control|duplicate|refute|out-of-scope|retry|blocked>
+.venv/bin/python tools/workers.py finish A-<target> --status <merged|blocked|failed|abandoned>
 ```
+
+These short forms preserve Root judgment in the status enum while the owner
+derives the active run, target/Reviewer binding, frozen-result digest note, front,
+and canonical anchors. The longer explicit-run/note forms remain historical and
+operator compatibility only; Claude does not reconstruct them.
 
 For an accepted target-effect result, `review-disposition` verifies that the
 frozen Hunter and Reviewer name the same run-local artifact set, every file
@@ -325,8 +330,12 @@ An adjudicated terminal state is immutable through ordinary `finish`. Correct an
 incorrect note explicitly while preserving history:
 
 ```bash
-python3 tools/workers.py finish runs/<dir> A-web-hunter-002 --status blocked --note "Reason: corrected barrier; Front: F-002" --amend
+.venv/bin/python tools/workers.py finish runs/<dir> A-web-hunter-002 --status blocked --note "Reason: corrected barrier; Front: F-002" --amend
 ```
+
+Amendment is the deliberate operator-compatible exception: changing an already
+audited terminal decision requires explicit run, exact replacement note, and
+`--amend`; the ordinary short form never rewrites history.
 
 Only anchors in canonical `evidence.md`, `frontier.md`, or `decisions.md` count;
 an artifact file alone is not an E-id.
@@ -337,11 +346,12 @@ After every lane has its required return/failure, Reviewer disposition, and Root
 disposition, derive typed `cycle_end` through the cycle/journal owner:
 
 ```bash
-python3 tools/loop_journal.py runs/<dir> end --next-action "运行 check_run 验证当前计划" --note "plan cycle disposition complete"
+.venv/bin/python tools/loop_journal.py end --action <replan|delegate|verify|review|wait|complete> --front F-<id>
 ```
 
-The example next action is not universal. Use the one concrete action justified by
-the current plan; the final Coda must project the receipt's `next_action` exactly.
+`complete` takes no `--front`; every other action binds one exact active front.
+The owner derives the stable note and display text. The final Coda must project
+the receipt's `next_action` exactly; do not append `--next-action` or `--note`.
 Missing, stale, duplicate, or out-of-order debt fails closed.
 
 Typed `cycle_end` settles this committed plan cycle only. It does not close its
@@ -354,11 +364,11 @@ Before synthesis/closure, inspect Agent, lifecycle, merge, and conflict debt in 
 following owner-defined order:
 
 ```bash
-python3 tools/workers.py agent-check runs/<dir>
-python3 tools/workers.py lifecycle-check runs/<dir> --closure
-python3 tools/workers.py merge-check runs/<dir>
-python3 tools/workers.py conflicts runs/<dir>
-python3 tools/workers.py synthesize runs/<dir>
+.venv/bin/python tools/workers.py agent-check
+.venv/bin/python tools/workers.py lifecycle-check --closure
+.venv/bin/python tools/workers.py merge-check
+.venv/bin/python tools/workers.py conflicts
+.venv/bin/python tools/workers.py synthesize
 ```
 
 Treat runtime projection diagnostics as unresolved until a later validated
@@ -369,7 +379,7 @@ generation covers the journal prefix; same-sequence hash conflicts remain debt.
 The global completion challenge is a separate assignment-free Reviewer envelope,
 not a plan-bound lane and not an independent peer-review replacement. It is
 authorized only by the current zero-lane S3 `COMPLETION_REVIEW` plan. Run
-`python3 tools/workers.py completion-review runs/<dir>` and use the printed Agent
+`.venv/bin/python tools/workers.py completion-review` and use the printed Agent
 `tool_input` byte-for-byte. Read the exact formatter-owned prompt and verdict contract in
 `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer" and the Agent boundary in
 `.claude/agents/xunji-reviewer.md`; do not reconstruct placeholder hashes or the

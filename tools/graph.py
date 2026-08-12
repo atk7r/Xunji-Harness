@@ -19,7 +19,7 @@
 【护栏】图只【派生 + 建议】, 永不自主驱动或收口 —— 一旦它"决定下一步"就退化成被删过的
 JSON 编排器(check_rules 盯着的那个)。选哪个前沿永远是 driver 判断; 图只是把当前状态摆出来。
 
-  python tools/graph.py runs/<dir>     # 写 <run>/graph.json + 打印派生视图
+  .venv/bin/python tools/graph.py runs/<dir> # 写 <run>/graph.json + 打印派生视图
 只读本地 run 文件; 不联网、不走 guard。check_run.py 复用本模块做图一致性软警告。
 """
 from __future__ import annotations

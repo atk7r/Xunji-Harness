@@ -59,19 +59,19 @@ control command and its project-level receipt is not run truth. Its only public
 maintenance invocation is the registered selftest:
 
 ```bash
-python3 tools/harness/subagent_stop_ingress.py --selftest
+.venv/bin/python tools/harness/subagent_stop_ingress.py --selftest
 ```
 
 Run the relevant registered aggregate for touched layers:
 
 ```bash
-python3 tools/selftest_all.py --only check_hook,safety_gate,run_gate,output_gate,sentinel_replay,verify_layers,guard_smoke
+.venv/bin/python tools/selftest_all.py --only check_hook,safety_gate,run_gate,output_gate,sentinel_replay,verify_layers,guard_smoke
 ```
 
 Then run the mandatory full aggregate:
 
 ```bash
-python3 tools/selftest_all.py
+.venv/bin/python tools/selftest_all.py
 ```
 
 Do not hand off or commit while the full aggregate is unrun or failing; record an

@@ -3,10 +3,10 @@
 """loop_bootstrap.py —— 准备 Xunji loop 运行状态。
 
 用法:
-  python3 tools/loop_bootstrap.py <slug> <recon.json>       # 新目标
-  python3 tools/loop_bootstrap.py --source <run|URL|file> --type auto|run|url|recon-json|file
-  python3 tools/loop_bootstrap.py --resume runs/<dir>       # 续接已有 run
-  python3 tools/loop_bootstrap.py --selftest                # 自检
+  .venv/bin/python tools/loop_bootstrap.py <slug> <recon.json>       # 新目标
+  .venv/bin/python tools/loop_bootstrap.py --source <run|URL|file> --type auto|run|url|recon-json|file
+  .venv/bin/python tools/loop_bootstrap.py --resume runs/<dir>       # 续接已有 run
+  .venv/bin/python tools/loop_bootstrap.py --selftest                # 自检
 
 输出: 状态准备结果和当前 Claude Code 可直接交给 UserPromptSubmit 的单周期启动指令。
 固定 loop 协议在 docs/templates/loop_prompt.md；不生成 per-run prompt。
@@ -24,8 +24,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
 LOOP_TEMPLATE = ROOT / "docs" / "templates" / "loop_prompt.md"
-PYTHON_CMD = sys.executable or "python3"
-DISPLAY_PYTHON_CMD = "python3"
 sys.path.insert(0, str(ROOT / "tools"))
 
 import loop_journal  # noqa: E402
@@ -35,7 +33,11 @@ import setup_source  # noqa: E402
 import setup_transaction  # noqa: E402
 import status_style  # noqa: E402
 import xunji_statusline  # noqa: E402
+from harness import python_runtime  # noqa: E402
 from anti_drift import SessionStateManager  # noqa: E402
+
+PYTHON_CMD = str(python_runtime.canonical_path(ROOT))
+DISPLAY_PYTHON_CMD = python_runtime.display_token()
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")

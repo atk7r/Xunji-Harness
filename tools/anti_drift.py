@@ -25,10 +25,10 @@ Two modes (config.ini [mode] mode=):
   dev    — development observability: drift records/reminds without that block; hard safety/evidence/Coda/closure-integrity gates still run
 
 Usage:
-    python tools/anti_drift.py            # print the anchor (UserPromptSubmit hook target)
-    python tools/anti_drift.py --selftest # offline regression
-    python tools/anti_drift.py --semantic-status runs/<dir>
-    python tools/anti_drift.py --record-reason-pass runs/<dir> \
+    .venv/bin/python tools/anti_drift.py            # print the anchor (UserPromptSubmit hook target)
+    .venv/bin/python tools/anti_drift.py --selftest # offline regression
+    .venv/bin/python tools/anti_drift.py --semantic-status runs/<dir>
+    .venv/bin/python tools/anti_drift.py --record-reason-pass runs/<dir> \
         --chosen-front F-001 --reason "whole-graph adjudication"
 """
 from __future__ import annotations
@@ -167,7 +167,7 @@ def _normal_completion_committed(run: Path) -> bool:
 BINDING_RULES_TIER1 = [   # TOP: 本轮必做 — placed at primacy position
     "回合优先级: receipt-backed TARGET_DENIED 只输出 output_gate exact envelope; MAINTENANCE 拒绝/失败不得声称成功, 修正 typed path/argv 后可同回合重试; 否则 safe 前沿还在就自主推进, 未完成时只用唯一「下一行动」收尾(普通 BLOCKED 无效)",
     "Reason pass: 每轮重读整个 frontier.md(所有 open+deferred)并结合 evidence/coverage/graph 裁定后写 v1 receipt; 内容未变可只读确认, 禁止 freshness touch/edit",
-    "联网检索走唯一 owner: 每次公共 WebSearch 前按 .claude/skills/web-research/SKILL.md 先执行已注册的 python3 tools/timestamp_gate.py --search-hint --kind vuln 并遵守输出; 非 CVE/CNVD 用 --kind generic; active run 不用 WebFetch",
+    "联网检索走唯一 owner: 每次公共 WebSearch 前按 .claude/skills/web-research/SKILL.md 先执行已注册的 .venv/bin/python tools/timestamp_gate.py --search-hint --kind vuln 并遵守输出; 非 CVE/CNVD 用 --kind generic; active run 不用 WebFetch",
     "CVE触发: live evidence 识别产品+版本/组件版本/CVE或advisory线索时, 同轮走 web-research 的 time gate → xunji-knowledge-flywheel → 公共 WebSearch → structured lead; Root 记录后再关闭或定级",
     "操作者约束持久化: 收到 directive/constraint 后先更新 hints.md(HINT-xxx, Kind=directive/constraint, Status=pending) 再继续; 每轮 Reason pass 无条件 Read hints.md —— constraint 是全 run 级原则非当前前沿上下文, 跨轮有效直到操作者显式解除",
     "Knowledge-first: 识别到产品签名后, WebSearch 前先路由 xunji-knowledge-flywheel 读取匹配接地条目; 不在 anti-drift 复制命令; 消费错误厂商 CVE 而正确 knowledge 未读 = 协议错误",

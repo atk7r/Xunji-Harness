@@ -9,8 +9,8 @@
 文件名)→ 核对已抓 vs 缺失 → 一键抓全(走 guard 熔断/限速/UTF-8)→ 完整性断言。
 之后对 --out 目录 grep 端点, 才有"已枚举完"的底气。
 
-  python tools/fetch_assets.py https://t/app/ --run runs/<dir>
-  python tools/fetch_assets.py --html runs/<dir>/evidence/page.html --base https://t \
+  .venv/bin/python tools/fetch_assets.py https://t/app/ --run runs/<dir>
+  .venv/bin/python tools/fetch_assets.py --html runs/<dir>/evidence/page.html --base https://t \
     --run runs/<dir> --out runs/<dir>/evidence/assets_t
 """
 from __future__ import annotations

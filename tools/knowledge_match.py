@@ -15,11 +15,11 @@
 - 它是【识别后查阅、按目标适配】的推理输入, 不是预载盲扫清单 —— 落在 cognition「攻击者非扫描器」Allowed 区。
 
 用法:
-  python tools/knowledge_match.py --body resp.html     # 拿保存的响应体匹配, 吐命中条目的接地内容
-  python tools/knowledge_match.py --body -             # 从 stdin 读 body
-  python tools/knowledge_match.py --id spring-boot-actuator   # 直接调某条目(从 kb:<id> 标签来)
-  python tools/knowledge_match.py --list               # 列全部接地条目(id/产品/成熟度/签名数)
-  python tools/knowledge_match.py --selftest
+  .venv/bin/python tools/knowledge_match.py --body resp.html
+  .venv/bin/python tools/knowledge_match.py --body -
+  .venv/bin/python tools/knowledge_match.py --id spring-boot-actuator
+  .venv/bin/python tools/knowledge_match.py --list
+  .venv/bin/python tools/knowledge_match.py --selftest
 """
 from __future__ import annotations
 
@@ -178,7 +178,7 @@ def main() -> int:
         if not hits:
             print(f"[{ts}] 无命中 — 目标内容未匹配任何【已入库】指纹。")
             print("         识别出新产品? 顺手写回飞轮(别等收口): "
-                  "python tools/knowledge_seed.py <id> --product <名> --from-body <本响应体>")
+                  ".venv/bin/python tools/knowledge_seed.py <id> --product <名> --from-body <本响应体>")
             print("         收口时在 report 申报 Fingerprints captured, 飞轮下次自动认。")
             return 0
         print(f"[{ts}] 命中 {len(hits)} 条 — 据目标指纹检索到以下接地条目(按目标定制利用, 勿盲跑):\n")

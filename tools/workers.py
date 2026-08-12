@@ -28,6 +28,8 @@ from pathlib import Path
 
 import agent_instruction_bundle as _instruction_bundle
 import contract_schema
+from harness import active_run as _active_run
+from harness import python_runtime as _python_runtime
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")       # type: ignore[attr-defined]
@@ -63,6 +65,7 @@ PROBE_CHUNK_MAX_COUNT = 128
 PROBE_CHUNK_MANIFEST_MAX_BYTES = 256 * 1024
 REVIEW_REPLAY_MAX_BYTES = 2 * 1024 * 1024
 REVIEW_ARTIFACT_MAX_BYTES = 64 * 1024 * 1024
+AGENT_RESULT_MAX_BYTES = 16 * 1024 * 1024
 
 SATURATION_SCRIPT = ROOT / "tools" / "saturation.py"
 
@@ -154,6 +157,22 @@ CANONICAL_AGENT_ROLES = frozenset(ROLE_ALIASES.values())
 DEFAULT_AGENT_TOOL_CALL_LIMIT = 24
 MIN_AGENT_TOOL_CALL_LIMIT = 5
 MAX_AGENT_TOOL_CALL_LIMIT = 64
+DEFAULT_DELEGATE_RUNTIME_SLOTS = 2
+DEFAULT_DELEGATE_REQUEST_BUDGET = 10
+DEFAULT_DELEGATE_MODEL_EGRESS_BUDGET = 1
+DEFAULT_DELEGATE_MERGE_CAPACITY = 100
+DEFAULT_DELEGATE_LIMIT = 2
+
+IMPLICIT_ACTIVE_RUN_COMMANDS = frozenset({
+    "list", "suggest", "plan", "commit-proposal", "delegate",
+    "completion-review", "status", "agent-check", "lifecycle-check",
+    "merge-check", "conflicts", "synthesize", "merge-constraints",
+    "merge-threats", "cancel-unlaunched", "settle-stopped",
+    "settle-stream-stalled", "recover-hook-failed-stop", "finish",
+    "review-disposition",
+})
+
+PYTHON_DISPLAY = _python_runtime.display_token()
 
 TARGET_ARTIFACT_OPSEC_RE = re.compile(
     r"\b(?:xunji|agent|worker|exploit|webshell|poc|vuln|rce|sqli|xss|idor|ssrf|lfi|"
@@ -203,6 +222,18 @@ def state_dir(run_dir: Path) -> Path:
 def resolve_run_dir(path: Path) -> Path:
     run_dir = path if path.is_absolute() else ROOT / path
     return run_dir.resolve()
+
+
+def resolve_cli_run_dir(path: Path | None) -> Path:
+    """Resolve an explicit run or the one authoritative active pointer.
+
+    The implicit form never scans ``runs/`` and never guesses by mtime.  It is
+    therefore suitable for the short model-facing command surface while the
+    explicit form remains available to operators and historical fixtures.
+    """
+    if path is not None:
+        return resolve_run_dir(path)
+    return _active_run.resolve(root=ROOT)
 
 
 def display_path(path: Path) -> str:
@@ -2833,13 +2864,40 @@ def _frozen_artifact_references(
     return references
 
 
-def _frozen_result_text(draft: dict, *, label: str) -> str:
+def _frozen_result_bytes(
+    run_dir: Path, draft: dict, *, label: str,
+) -> tuple[bytes, str]:
+    """Revalidate one runtime-frozen result before deriving owner text/notes."""
     result = draft.get("result") if isinstance(draft.get("result"), dict) else {}
     path = Path(str(result.get("path") or ""))
     try:
-        return path.read_text(encoding="utf-8", errors="strict")
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(run_dir.resolve(strict=True))
+        metadata = path.lstat()
+        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode) \
+                or metadata.st_size > AGENT_RESULT_MAX_BYTES:
+            raise ValueError("invalid frozen result file")
+        payload = path.read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
     except Exception as exc:
         raise ValueError(f"{label} frozen result is unavailable") from exc
+    expected = str(draft.get("result_digest") or result.get("sha256") or "")
+    recorded_length = result.get("length")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected) or digest != expected \
+            or result.get("sha256") not in {None, "", digest} \
+            or isinstance(recorded_length, bool) \
+            or not isinstance(recorded_length, int) \
+            or recorded_length != len(payload):
+        raise ValueError(f"{label} frozen result digest is invalid")
+    return payload, digest
+
+
+def _frozen_result_text(run_dir: Path, draft: dict, *, label: str) -> str:
+    payload, _digest = _frozen_result_bytes(run_dir, draft, label=label)
+    try:
+        return payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{label} frozen result is not UTF-8") from exc
 
 
 def _secure_directory_flags() -> int:
@@ -3599,8 +3657,9 @@ def _record_review_disposition_locked(run_dir: Path, *, target: str, reviewer: s
     artifact_validation = _validated_review_artifacts(
         run_dir,
         target_row=target_row,
-        target_text=_frozen_result_text(draft, label="target"),
-        reviewer_text=_frozen_result_text(reviewer_draft, label="Reviewer"),
+        target_text=_frozen_result_text(run_dir, draft, label="target"),
+        reviewer_text=_frozen_result_text(
+            run_dir, reviewer_draft, label="Reviewer"),
         disposition=disposition,
     )
     stamp = _now_iso()
@@ -4416,8 +4475,8 @@ def print_plan(run_dir: Path, limit: int) -> int:
                 "assignment-free plan mode and is restricted to S3."
             )
             print(
-                "NEXT_OWNER_ACTION: python3 tools/workers.py commit-proposal "
-                f"{display_path(run_dir)}"
+                f"NEXT_OWNER_ACTION: {PYTHON_DISPLAY} "
+                "tools/workers.py commit-proposal"
             )
             return 0
         print(
@@ -4562,7 +4621,7 @@ def print_commit_plan(
     if mode == "COMPLETION_REVIEW":
         print(
             "[workers commit-plan] COMPLETION_REVIEW_REQUIRES_PROPOSAL: run "
-            "`python3 tools/workers.py plan RUN_DIR`, inspect its current S3 "
+            f"`{PYTHON_DISPLAY} tools/workers.py plan`, inspect its current S3 "
             "zero-lane proposal, then use the printed commit-proposal owner.",
             file=sys.stderr,
         )
@@ -4576,7 +4635,7 @@ def print_commit_plan(
             print(
                 "[workers commit-plan] NO_STRONG_CANDIDATE: update canonical "
                 "frontier/coverage mapping and rerun the state pass. If S3 is "
-                "ready, run `python3 tools/workers.py plan RUN_DIR` to generate "
+                f"ready, run `{PYTHON_DISPLAY} tools/workers.py plan` to generate "
                 "the exact assignment-free completion proposal.",
                 file=sys.stderr,
             )
@@ -4635,7 +4694,7 @@ def _print_plan_commit_receipt(
                           if isinstance(item, dict) and item.get("front")}),
         "inherited_completed_lanes": inherited,
         "next_action": (
-            "python3 tools/workers.py completion-review " + display_path(run_dir)
+            f"{PYTHON_DISPLAY} tools/workers.py completion-review"
             if completion_mode else
             "delegate dependency-ready lanes from this committed plan"
         ),
@@ -4709,9 +4768,8 @@ def print_completion_review(run_dir: Path) -> int:
         print(
             "[workers completion-review] ERROR COMPLETION_REVIEW_NOT_READY: "
             "commit a current S3 COMPLETION_REVIEW plan first with "
-            f"`python3 tools/workers.py plan {display_path(run_dir)}` then "
-            "`python3 tools/workers.py commit-proposal "
-            f"{display_path(run_dir)}`.",
+            f"`{PYTHON_DISPLAY} tools/workers.py plan` then "
+            f"`{PYTHON_DISPLAY} tools/workers.py commit-proposal`.",
             file=sys.stderr,
         )
         return 1
@@ -4781,6 +4839,125 @@ def print_cancel_unlaunched(run_dir: Path, assignment: str, reason: str) -> int:
         "assignment debt is clear."
     )
     return 0
+
+
+def _assignment_row(run_dir: Path, assignment: str) -> dict:
+    rows = [
+        item for item in load_assignments(run_dir).get("assignments", [])
+        if isinstance(item, dict) and str(item.get("agent") or "") == assignment
+    ]
+    if len(rows) != 1:
+        raise ValueError("assignment must identify one exact ledger row")
+    return rows[0]
+
+
+def _reviewer_target(run_dir: Path, reviewer: str) -> str:
+    row = _assignment_row(run_dir, reviewer)
+    if str(row.get("role") or "") != "review":
+        raise ValueError("reviewer assignment must use role=review")
+    targets = [
+        str(item) for item in row.get("reviews_assignments", [])
+        if isinstance(item, str) and item
+    ]
+    if len(targets) != 1:
+        raise ValueError("Reviewer must bind one exact target assignment")
+    return targets[0]
+
+
+def _review_note(run_dir: Path, reviewer: str, disposition: str) -> str:
+    row = _assignment_row(run_dir, reviewer)
+    if _runtime_receipts is None:
+        raise ValueError("runtime_receipts unavailable; cannot freeze Reviewer result")
+    draft_path = _runtime_receipts.merge_draft_path(run_dir, reviewer)
+    try:
+        draft = json.loads(draft_path.read_text(encoding="utf-8", errors="strict"))
+        if draft.get("schema") != "xunji.merge-draft.v1" \
+                or draft.get("assignment") != reviewer \
+                or draft.get("plan_digest") != row.get("plan_digest") \
+                or draft.get("lane_id") != row.get("lane_id"):
+            raise ValueError("Reviewer merge draft binding mismatch")
+        _payload, current = _frozen_result_bytes(
+            run_dir, draft, label="Reviewer")
+        digest = str(draft.get("result_digest") or "")
+    except Exception as exc:
+        raise ValueError("Reviewer frozen result is unavailable") from exc
+    if not re.fullmatch(r"[0-9a-f]{64}", digest) or current != digest:
+        raise ValueError("Reviewer frozen result digest is invalid")
+    return (
+        f"Reviewer {reviewer} candidate disposition={disposition}; "
+        f"frozen_result_sha256={digest}"
+    )
+
+
+def print_review_decide(
+    run_dir: Path, reviewer: str, disposition: str,
+) -> int:
+    try:
+        target = _reviewer_target(run_dir, reviewer)
+        note = _review_note(run_dir, reviewer, disposition)
+    except Exception as exc:
+        print(f"[workers review] ERROR: {exc}", file=sys.stderr)
+        return 1
+    return print_review_disposition(
+        run_dir, target, reviewer, disposition, note)
+
+
+def _root_disposition_note(
+    run_dir: Path, assignment: str, status: str,
+) -> str:
+    row = _assignment_row(run_dir, assignment)
+    front = str(row.get("front") or "").upper()
+    if not re.fullmatch(r"F-[0-9]+[A-Za-z]*", front):
+        raise ValueError("assignment has no exact front binding")
+    if status == "merged":
+        receipt = _current_review_receipt(run_dir, row)
+        if str(receipt.get("disposition") or "") != "accept-candidate":
+            raise ValueError("merged requires accept-candidate review")
+        anchors: set[str] = {front}
+        try:
+            draft = json.loads(_runtime_receipts.merge_draft_path(
+                run_dir, assignment).read_text(encoding="utf-8", errors="strict"))
+            target_text = _frozen_result_text(
+                run_dir, draft, label="target")
+        except Exception as exc:
+            raise ValueError("target frozen result is unavailable") from exc
+        canonical = "\n".join(
+            path.read_text(encoding="utf-8", errors="strict")
+            for path in (
+                run_dir / "evidence.md", run_dir / "frontier.md",
+                run_dir / "decisions.md",
+            ) if path.is_file()
+        )
+        canonical_anchors = {
+            item.upper() for item in re.findall(r"\b[EDF]-\d+\b", canonical, re.I)
+        }
+        anchors.update(
+            item.upper() for item in re.findall(r"\b[ED]-\d+\b", target_text, re.I)
+            if item.upper() in canonical_anchors
+        )
+        evidence = sorted(item for item in anchors if item.startswith("E-"))
+        decisions = sorted(item for item in anchors if item.startswith("D-"))
+        fields = [f"Front: {front}"]
+        if evidence:
+            fields.append("Evidence: " + ",".join(evidence))
+        if decisions:
+            fields.append("Decision: " + ",".join(decisions))
+        fields.append("Result-SHA256: " + str(draft["result_digest"]))
+        return "; ".join(fields)
+    receipt = _current_review_receipt(run_dir, row)
+    disposition = str(receipt.get("disposition") or "")
+    if not disposition:
+        raise ValueError(f"{status} requires a current returned Reviewer disposition")
+    return f"Reason: reviewed disposition={disposition}; Front: {front}"
+
+
+def print_finish_decide(run_dir: Path, assignment: str, status: str) -> int:
+    try:
+        note = _root_disposition_note(run_dir, assignment, status)
+    except Exception as exc:
+        print(f"[agent-board finish] ERROR: {exc}", file=sys.stderr)
+        return 1
+    return print_finish(run_dir, assignment, status, note)
 
 
 def print_settle_stopped(run_dir: Path, assignment: str) -> int:
@@ -4867,8 +5044,8 @@ def print_recover_hook_failed_stop(run_dir: Path, assignment: str) -> int:
             "NEXT_OWNER_ACTION: the immutable failed-Stop recovery receipt is "
             "committed, but its assignment/merge projection is not complete. "
             "Run exact `" + str(result.get("next_argv") or "")
-            + "`, then re-run `python3 tools/workers.py status "
-            + display_path(run_dir) + "`. Do not create a second receipt, "
+            + f"`, then re-run `{PYTHON_DISPLAY} tools/workers.py status`. "
+            "Do not create a second receipt, "
             "fabricate SubagentStop, or record Reviewer disposition first."
         )
         return 1
@@ -5024,11 +5201,11 @@ def _replayable_existing_assignment(
 def delegate_ready_lanes(
     run_dir: Path,
     *,
-    runtime_slots: int = 2,
-    request_budget: int = 10,
-    model_egress_budget: int = 1,
-    merge_capacity: int = 100,
-    limit: int = 2,
+    runtime_slots: int | None = None,
+    request_budget: int | None = None,
+    model_egress_budget: int | None = None,
+    merge_capacity: int | None = None,
+    limit: int | None = None,
     tool_call_limit: int = DEFAULT_AGENT_TOOL_CALL_LIMIT,
     fault=None,
 ) -> dict:
@@ -5066,11 +5243,11 @@ def delegate_ready_lanes(
 def _delegate_ready_lanes_locked(
     run_dir: Path,
     *,
-    runtime_slots: int,
-    request_budget: int,
-    model_egress_budget: int,
-    merge_capacity: int,
-    limit: int,
+    runtime_slots: int | None,
+    request_budget: int | None,
+    model_egress_budget: int | None,
+    merge_capacity: int | None,
+    limit: int | None,
     tool_call_limit: int,
     fault=None,
 ) -> dict:
@@ -5133,6 +5310,50 @@ def _delegate_ready_lanes_locked(
                 "WORK_PLAN_STALE_SETTLEMENT_ONLY: no returned/failed execution "
                 "has an unassigned unique Reviewer")
         raise ValueError("no unassigned lane has satisfied runtime dependencies")
+
+    supplied_capacity = (
+        runtime_slots, request_budget, model_egress_budget, merge_capacity, limit,
+    )
+    if any(value is None for value in supplied_capacity):
+        if not all(value is None for value in supplied_capacity):
+            raise ValueError(
+                "DELEGATE_CAPACITY_PARTIAL: supply every legacy capacity field "
+                "or none; the ordinary no-argument form derives all fields"
+            )
+        # The committed plan is the authority for lane-local request/merge
+        # bounds.  The project policy below caps one ordinary wave; the model
+        # does not author or widen any scheduler scalar.
+        runtime_slots = DEFAULT_DELEGATE_RUNTIME_SLOTS
+        limit = 1 if mode == "SERIAL_AGENT" else DEFAULT_DELEGATE_LIMIT
+        request_budget = min(
+            DEFAULT_DELEGATE_REQUEST_BUDGET,
+            sum(
+                int(row["work_plan_lane"].get("request_budget") or 0)
+                for row in ready
+                if row["work_plan_lane"].get("effect") == "target"
+            ),
+        )
+        model_egress_budget = min(
+            DEFAULT_DELEGATE_MODEL_EGRESS_BUDGET,
+            sum(
+                int(row["work_plan_lane"].get("request_budget") or 0)
+                for row in ready
+                if row["work_plan_lane"].get("effect") == "model_egress"
+            ),
+        )
+        merge_capacity = min(
+            DEFAULT_DELEGATE_MERGE_CAPACITY,
+            sum(
+                int(row["work_plan_lane"].get("merge_cost") or 0)
+                for row in ready
+            ),
+        )
+
+    assert runtime_slots is not None
+    assert request_budget is not None
+    assert model_egress_budget is not None
+    assert merge_capacity is not None
+    assert limit is not None
 
     running = 0
     if _runtime_receipts is not None:
@@ -5291,10 +5512,38 @@ def _delegate_ready_lanes_locked(
 
 def print_delegate(
     run_dir: Path,
-    *, runtime_slots: int, request_budget: int,
-    model_egress_budget: int, merge_capacity: int, limit: int,
-    tool_call_limit: int,
+    *, runtime_slots: int | None, request_budget: int | None,
+    model_egress_budget: int | None, merge_capacity: int | None,
+    limit: int | None,
+    tool_call_limit: int | None,
 ) -> int:
+    capacity = (
+        runtime_slots, request_budget, model_egress_budget, merge_capacity, limit,
+    )
+    if any(value is not None for value in capacity) or tool_call_limit is not None:
+        # Compatibility path for explicit operator/fixture overrides.  New
+        # model-facing guidance emits no scalar flags.
+        runtime_slots = (
+            DEFAULT_DELEGATE_RUNTIME_SLOTS
+            if runtime_slots is None else runtime_slots
+        )
+        request_budget = (
+            DEFAULT_DELEGATE_REQUEST_BUDGET
+            if request_budget is None else request_budget
+        )
+        model_egress_budget = (
+            DEFAULT_DELEGATE_MODEL_EGRESS_BUDGET
+            if model_egress_budget is None else model_egress_budget
+        )
+        merge_capacity = (
+            DEFAULT_DELEGATE_MERGE_CAPACITY
+            if merge_capacity is None else merge_capacity
+        )
+        limit = DEFAULT_DELEGATE_LIMIT if limit is None else limit
+    tool_call_limit = (
+        DEFAULT_AGENT_TOOL_CALL_LIMIT
+        if tool_call_limit is None else tool_call_limit
+    )
     try:
         batch = delegate_ready_lanes(
             run_dir,
@@ -5369,13 +5618,13 @@ def _plan_continuation_notice(run_dir: Path) -> str:
             return (
                 "NEXT_OWNER_ACTION: runtime projection is blocked by proven "
                 f"non-Xunji lifecycle receipts at event seq {seqs}; run exact typed "
-                f"`python3 tools/runtime_receipts.py {display_path(run_dir)} "
+                f"`{PYTHON_DISPLAY} tools/runtime_receipts.py "
                 "--quarantine-unowned-lifecycle`, then repeat workers.py status. "
                 "This appends supersession receipts and preserves runtime_events.jsonl."
             )
         return (
             "NEXT_OWNER_ACTION: runtime projection has unresolved lifecycle debt; "
-            f"run exact `python3 tools/runtime_receipts.py {display_path(run_dir)} "
+            f"run exact `{PYTHON_DISPLAY} tools/runtime_receipts.py "
             "--reproject` and inspect the retained diagnostic. Do not cancel, "
             "replan, delete, or rewrite runtime receipts around an unresolved error."
         )
@@ -5408,9 +5657,8 @@ def _plan_continuation_notice(run_dir: Path) -> str:
                     f"receipt for {assignment} is committed, but its derived "
                     "assignment/merge projection is incomplete; run exact `"
                     + str(hook_failed_status.get("next_argv") or "")
-                    + "`, then rerun `python3 tools/workers.py status "
-                    + display_path(run_dir)
-                    + "`. Do not create another recovery receipt or record "
+                    + f"`, then rerun `{PYTHON_DISPLAY} tools/workers.py status`. "
+                    "Do not create another recovery receipt or record "
                     "Reviewer disposition before the projection is exact."
                 )
             if str(item.get("runtime_state") or "") != "running":
@@ -5431,8 +5679,8 @@ def _plan_continuation_notice(run_dir: Path) -> str:
                     "by host-authored XUNJI_E_RUNTIME_RECEIPT_HOOK_FAILED "
                     "SubagentStop feedback, while the runtime journal has no Stop; "
                     "run exact typed "
-                    f"`python3 tools/workers.py recover-hook-failed-stop "
-                    f"{display_path(run_dir)} {assignment}`. This preserves the "
+                    f"`{PYTHON_DISPLAY} tools/workers.py "
+                    f"recover-hook-failed-stop {assignment}`. This preserves the "
                     "missing physical Stop as a typed recovery receipt and "
                     "projects returned only; ordinary Reviewer and Root "
                     "settlement remain mandatory."
@@ -5443,8 +5691,8 @@ def _plan_continuation_notice(run_dir: Path) -> str:
                     f"the exact child terminal pair prove running assignment "
                     f"{assignment} was killed by the stream watchdog after "
                     "600s idle, with no SubagentStop or later activity; run "
-                    "exact typed `python3 tools/workers.py "
-                    f"settle-stream-stalled {display_path(run_dir)} "
+                    f"exact typed `{PYTHON_DISPLAY} tools/workers.py "
+                    "settle-stream-stalled "
                     f"{assignment}`. This projects failed only; Reviewer and "
                     "Root non-merged settlement remain mandatory, and the old "
                     "attempt must not be resumed."
@@ -5454,8 +5702,8 @@ def _plan_continuation_notice(run_dir: Path) -> str:
                     "NEXT_OWNER_ACTION: Claude Code has transcript-proven "
                     f"running assignment {assignment} user-stopped and "
                     "permanently non-resumable; run exact typed "
-                    f"`python3 tools/workers.py settle-stopped "
-                    f"{display_path(run_dir)} {assignment}`. This projects a "
+                    f"`{PYTHON_DISPLAY} tools/workers.py settle-stopped "
+                    f"{assignment}`. This projects a "
                     "failed result only; Reviewer and Root non-merged "
                     "settlement remain mandatory."
                 )
@@ -5491,8 +5739,8 @@ def _plan_continuation_notice(run_dir: Path) -> str:
             return (
                 "NEXT_OWNER_ACTION: committed plan is stale and its unique "
                 f"Reviewer {assignment} is assigned with no authentic launch; "
-                f"rerun `python3 tools/workers.py delegate {display_path(run_dir)} "
-                "--limit 1` to replay the exact durable launch contract, then "
+                f"rerun `{PYTHON_DISPLAY} tools/workers.py delegate` to replay "
+                "the exact durable launch contract, then "
                 "settle review and Root disposition. Do not cancel the Reviewer "
                 "or rebuild its prompt."
             )
@@ -5520,8 +5768,8 @@ def _plan_continuation_notice(run_dir: Path) -> str:
                 "NEXT_OWNER_ACTION: committed plan retains a started attempt "
                 "that Claude Code has transcript-proven user-stopped and "
                 "permanently non-resumable; run the exact typed "
-                f"`python3 tools/workers.py settle-stopped "
-                f"{display_path(run_dir)} {assignment}` command. This projects "
+                f"`{PYTHON_DISPLAY} tools/workers.py settle-stopped "
+                f"{assignment}` command. This projects "
                 "failed only; then create/replay its digest-bound Reviewer and "
                 "complete Root settlement."
             )
@@ -5530,17 +5778,17 @@ def _plan_continuation_notice(run_dir: Path) -> str:
             return (
                 "NEXT_OWNER_ACTION: committed plan retains a started attempt "
                 "whose exact host notification and child terminal pair prove "
-                "stream-watchdog death without SubagentStop; run `python3 "
-                f"tools/workers.py settle-stream-stalled "
-                f"{display_path(run_dir)} {assignment}`. This projects failed "
+                "stream-watchdog death without SubagentStop; run `"
+                f"{PYTHON_DISPLAY} tools/workers.py settle-stream-stalled "
+                f"{assignment}`. This projects failed "
                 "only; then create/replay its digest-bound Reviewer and "
                 "complete Root non-merged settlement before replanning."
             )
         if action == _agent_settlement.RECOVERY_WAIT_RUNNING:
             return (
                 "NEXT_OWNER_ACTION: committed plan retains an authentic running "
-                f"attempt; repeat `python3 tools/workers.py status "
-                f"{display_path(run_dir)}` after its Stop receipt. Do not cancel "
+                f"attempt; repeat `{PYTHON_DISPLAY} tools/workers.py status` "
+                "after its Stop receipt. Do not cancel "
                 "or replan around it."
             )
         if action == _agent_settlement.RECOVERY_HARD_INVALID:
@@ -6833,6 +7081,41 @@ def _selftest() -> int:
                                 "--asset", "a.example"])
         status_cli_exit = main(["status", str(run)])
         empty_status_cli_exit = print_status(empty_run)
+    implicit_status_output = io.StringIO()
+    implicit_delegate_stderr = io.StringIO()
+    with mock.patch.object(
+            _active_run, "resolve", return_value=empty_run.resolve()), \
+            contextlib.redirect_stdout(implicit_status_output):
+        implicit_status_cli_exit = main(["status"])
+    implicit_delegate_called = False
+    with mock.patch.object(
+            _active_run, "resolve", return_value=empty_run.resolve()), \
+            mock.patch.object(
+                sys, "stderr", implicit_delegate_stderr), \
+            mock.patch.object(
+                sys, "stdout", io.StringIO()), \
+            mock.patch.object(
+                sys.modules[__name__], "print_delegate",
+                side_effect=lambda *_args, **_kwargs: 0,
+            ) as implicit_delegate_mock:
+        implicit_delegate_cli_exit = main(["delegate"])
+        implicit_delegate_called = bool(
+            implicit_delegate_mock.call_count == 1
+            and all(
+                implicit_delegate_mock.call_args.kwargs[name] is None
+                for name in (
+                    "runtime_slots", "request_budget",
+                    "model_egress_budget", "merge_capacity", "limit",
+                    "tool_call_limit",
+                )
+            )
+        )
+    with mock.patch.object(
+            _active_run, "resolve", return_value=empty_run.resolve()), \
+            contextlib.redirect_stderr(implicit_delegate_stderr):
+        implicit_delegate_scalar_rejected = main([
+            "delegate", "--runtime-slots", "2",
+        ]) == 2
     agent_check_empty_exit = main(["agent-check", str(empty_run)])
     agent_clean = d / "agent_clean"
     agent_clean.mkdir()
@@ -8921,17 +9204,28 @@ def _selftest() -> int:
             planned_run, planned_hunter["agent"]
         ).read_text(encoding="utf-8")
     )
-    planned_review_receipt = record_review_disposition(
-        planned_run, target=planned_hunter["agent"],
-        reviewer=planned_reviewer["agent"], disposition="accept-candidate",
-        note="frozen source candidate is attributable",
-    )
+    short_review_output = io.StringIO()
+    with mock.patch.object(
+            _active_run, "resolve", return_value=planned_run.resolve()), \
+            contextlib.redirect_stdout(short_review_output):
+        short_review_exit = main([
+            "review-disposition", planned_reviewer["agent"],
+            "--status", "accept-candidate",
+        ])
+    planned_hunter_after_review = _assignment_row(
+        planned_run, planned_hunter["agent"])
+    planned_review_receipt = _current_review_receipt(
+        planned_run, planned_hunter_after_review)
     scaffold_mutation_does_not_change_frozen_result = bool(planned_review_receipt)
     planned_hunter_path.write_text(hunter_before_mutation, encoding="utf-8")
-    planned_merge = update_agent_lifecycle(
-        planned_run, planned_hunter["agent"], status="merged",
-        note="Evidence: E-900 Front: F-010", terminal=True,
-    )
+    short_finish_output = io.StringIO()
+    with mock.patch.object(
+            _active_run, "resolve", return_value=planned_run.resolve()), \
+            contextlib.redirect_stdout(short_finish_output):
+        short_finish_exit = main([
+            "finish", planned_hunter["agent"], "--status", "merged",
+        ])
+    planned_merge = _assignment_row(planned_run, planned_hunter["agent"])
     planned_continuation_notice = _plan_continuation_notice(planned_run)
     planned_disposition = _runtime_receipts.agent_disposition(planned_run)
     stale_plan_next_execution_blocked = False
@@ -9620,14 +9914,14 @@ def _selftest() -> int:
          and completion_proposal.get("macro_stage") == "S3"
          and completion_proposal.get("execution_mode") == "COMPLETION_REVIEW"
          and completion_proposal.get("lanes") == []
-         and "NEXT_OWNER_ACTION: python3 tools/workers.py commit-proposal"
+         and "NEXT_OWNER_ACTION: .venv/bin/python tools/workers.py commit-proposal"
             in completion_plan_output.getvalue()),
         ("completion proposal commits as an assignment-free plan",
          completion_commit_exit == 0
          and '"execution_mode": "COMPLETION_REVIEW"'
             in completion_commit_output.getvalue()
          and '"lane_count": 0' in completion_commit_output.getvalue()
-         and "python3 tools/workers.py completion-review"
+         and ".venv/bin/python tools/workers.py completion-review"
             in completion_commit_output.getvalue()),
         ("completion-review prints one copy-exact Agent tool contract",
          completion_contract_exit == 0
@@ -9954,7 +10248,9 @@ def _selftest() -> int:
         ("Reviewer return without review disposition cannot delegate next execution",
          reviewer_unreviewed_blocks_next),
         ("returned Reviewer writes an exact review disposition receipt",
-         planned_review_receipt.get("schema") == "xunji.review-disposition.v1"
+         short_review_exit == 0
+         and "disposition=accept-candidate" in short_review_output.getvalue()
+         and planned_review_receipt.get("schema") == "xunji.review-disposition.v1"
          and planned_review_receipt.get("reviewer_assignment") == planned_reviewer["agent"]),
         ("needs-control completes review of frozen bytes before Root settlement",
          planned_action_receipt.get("disposition") == "needs-control"
@@ -9968,7 +10264,11 @@ def _selftest() -> int:
          and _runtime_receipts.agent_asset_activity(
              planned_run, planned_hunter["agent"]).get("fixture.example") == 0),
         ("Root merge follows review and unlocks the next planner execution lane",
-         planned_merge.get("status") == "merged"
+         short_finish_exit == 0
+         and "terminal=merged" in short_finish_output.getvalue()
+         and planned_merge.get("status") == "merged"
+         and "Front: F-010" in str(planned_merge.get("last_note") or "")
+         and "Evidence: E-900" in str(planned_merge.get("last_note") or "")
          and planned_disposition.get("disposition_satisfied") is True
          and stale_plan_next_execution_blocked
          and steering_replan.get("inputs_digest")
@@ -9997,6 +10297,13 @@ def _selftest() -> int:
          synthesizer_assignment_rejected),
         ("status command exits 0", status_cli_exit == 0),
         ("empty status command exits 0", empty_status_cli_exit == 0),
+        ("status may bind only the authoritative active pointer",
+         implicit_status_cli_exit == 0
+         and "no assignments yet" in implicit_status_output.getvalue()),
+        ("ordinary delegate supplies no model-authored capacity scalar",
+         implicit_delegate_cli_exit == 0 and implicit_delegate_called),
+        ("implicit delegate rejects scalar broadening",
+         implicit_delegate_scalar_rejected),
         ("driver-facing legacy/status output routes to typed Agent Board",
          "workers.py assign" not in driver_output.getvalue()
          and "general-purpose" not in driver_output.getvalue()
@@ -10148,17 +10455,16 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("--replan-reason", default="")
             ap.add_argument("--limit", type=int, default=2)
         elif cmd in {"commit-proposal", "completion-review"}:
-            ap.add_argument("run_dir", type=Path)
+            ap.add_argument("run_dir", type=Path, nargs="?")
         elif cmd == "delegate":
-            ap.add_argument("run_dir", type=Path)
-            ap.add_argument("--runtime-slots", type=int, default=2)
-            ap.add_argument("--request-budget", type=int, default=10)
-            ap.add_argument("--model-egress-budget", type=int, default=1)
-            ap.add_argument("--merge-capacity", type=int, default=100)
-            ap.add_argument("--limit", type=int, default=2)
+            ap.add_argument("run_dir", type=Path, nargs="?")
+            ap.add_argument("--runtime-slots", type=int)
+            ap.add_argument("--request-budget", type=int)
+            ap.add_argument("--model-egress-budget", type=int)
+            ap.add_argument("--merge-capacity", type=int)
+            ap.add_argument("--limit", type=int)
             ap.add_argument(
-                "--tool-call-limit", type=int,
-                default=DEFAULT_AGENT_TOOL_CALL_LIMIT)
+                "--tool-call-limit", type=int)
         elif cmd == "assign":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("--role", required=True)
@@ -10169,14 +10475,18 @@ def main(argv: list[str] | None = None) -> int:
             ap.add_argument("--lane", default="",
                             help="exact L-* lane from the current xunji.work-plan.v1")
         elif cmd == "cancel-unlaunched":
-            ap.add_argument("run_dir", type=Path)
-            ap.add_argument("assignment")
-            ap.add_argument("--reason", required=True)
+            ap.add_argument(
+                "bindings", nargs="+",
+                help="A-assignment, or compatibility form RUN_DIR A-assignment",
+            )
+            ap.add_argument("--reason")
         elif cmd in {
                 "settle-stopped", "settle-stream-stalled",
                 "recover-hook-failed-stop"}:
-            ap.add_argument("run_dir", type=Path)
-            ap.add_argument("assignment")
+            ap.add_argument(
+                "bindings", nargs="+",
+                help="A-assignment, or compatibility form RUN_DIR A-assignment",
+            )
         elif cmd == "heartbeat":
             ap.add_argument("run_dir", type=Path)
             ap.add_argument("agent")
@@ -10184,28 +10494,71 @@ def main(argv: list[str] | None = None) -> int:
                             choices=sorted(NONTERMINAL_AGENT_STATUSES - {"?"}))
             ap.add_argument("--note", default="")
         elif cmd == "finish":
-            ap.add_argument("run_dir", type=Path)
-            ap.add_argument("agent")
-            ap.add_argument("--status", default="done", choices=sorted(TERMINAL_AGENT_STATUSES))
-            ap.add_argument("--note", default="")
+            ap.add_argument(
+                "bindings", nargs="+",
+                help="A-assignment, or compatibility form RUN_DIR A-assignment",
+            )
+            ap.add_argument("--status", choices=sorted(TERMINAL_AGENT_STATUSES))
+            ap.add_argument("--note")
             ap.add_argument("--amend", action="store_true",
                             help="replace an existing terminal disposition and preserve its history")
         elif cmd == "review-disposition":
-            ap.add_argument("run_dir", type=Path)
-            ap.add_argument("target")
-            ap.add_argument("reviewer")
+            ap.add_argument(
+                "bindings", nargs="+",
+                help=("A-reviewer, or compatibility form "
+                      "RUN_DIR A-target A-reviewer"),
+            )
             ap.add_argument("--status", required=True, choices=sorted(REVIEW_DISPOSITIONS))
-            ap.add_argument("--note", required=True)
+            ap.add_argument("--note")
         elif cmd == "lifecycle-check":
-            ap.add_argument("run_dir", type=Path)
+            ap.add_argument("run_dir", type=Path, nargs="?")
             ap.add_argument("--closure", action="store_true",
                             help="treat non-terminal/stale Agents as hard errors for closure")
         else:
-            ap.add_argument("run_dir", type=Path)
+            if cmd in IMPLICIT_ACTIVE_RUN_COMMANDS:
+                ap.add_argument("run_dir", type=Path, nargs="?")
+            else:
+                ap.add_argument("run_dir", type=Path)
         if cmd in {"suggest", "plan"}:
             ap.add_argument("--limit", type=int, default=(3 if cmd == "plan" else None))
         args = ap.parse_args(argv)
-        run_dir = resolve_run_dir(args.run_dir)
+        if cmd == "delegate" and args.run_dir is None and any(
+            value is not None for value in (
+                args.runtime_slots, args.request_budget,
+                args.model_egress_budget, args.merge_capacity, args.limit,
+                args.tool_call_limit,
+            )
+        ):
+            print(
+                "[workers] implicit active-run delegate accepts no scalar flags; "
+                "the project derives its capacity from the committed plan",
+                file=sys.stderr,
+            )
+            return 2
+        short_assignment_form = False
+        if cmd in {
+                "cancel-unlaunched", "settle-stopped", "settle-stream-stalled",
+                "recover-hook-failed-stop", "finish", "review-disposition"}:
+            bindings = list(args.bindings)
+            expected_explicit = 3 if cmd == "review-disposition" else 2
+            if len(bindings) == 1:
+                short_assignment_form = True
+                run_arg = None
+                if not re.fullmatch(r"A-[A-Za-z0-9._-]+", bindings[0]):
+                    ap.error("short form requires one exact A-assignment")
+            elif len(bindings) == expected_explicit:
+                run_arg = Path(bindings[0])
+            else:
+                ap.error(
+                    f"{cmd} requires one assignment, or its explicit-run compatibility form"
+                )
+        else:
+            run_arg = args.run_dir
+        try:
+            run_dir = resolve_cli_run_dir(run_arg)
+        except _active_run.ActiveRunError as exc:
+            print(f"[workers] {exc}", file=sys.stderr)
+            return 1
         if not run_dir.exists():
             print(f"[workers] run 目录不存在: {run_dir}", file=sys.stderr)
             return 1
@@ -10244,21 +10597,46 @@ def main(argv: list[str] | None = None) -> int:
                 tool_call_limit=args.tool_call_limit,
             )
         if cmd == "cancel-unlaunched":
+            assignment = bindings[0] if short_assignment_form else bindings[1]
+            reason = args.reason
+            if short_assignment_form:
+                if reason:
+                    ap.error("short cancel-unlaunched derives reason; do not pass --reason")
+                reason = "current turn or canonical inputs superseded this unlaunched assignment"
+            elif not reason:
+                ap.error("explicit-run cancel-unlaunched requires --reason")
             return print_cancel_unlaunched(
-                run_dir, args.assignment, args.reason)
+                run_dir, assignment, reason)
         if cmd == "settle-stopped":
-            return print_settle_stopped(run_dir, args.assignment)
+            return print_settle_stopped(
+                run_dir, bindings[0] if short_assignment_form else bindings[1])
         if cmd == "settle-stream-stalled":
-            return print_settle_stream_stalled(run_dir, args.assignment)
+            return print_settle_stream_stalled(
+                run_dir, bindings[0] if short_assignment_form else bindings[1])
         if cmd == "recover-hook-failed-stop":
-            return print_recover_hook_failed_stop(run_dir, args.assignment)
+            return print_recover_hook_failed_stop(
+                run_dir, bindings[0] if short_assignment_form else bindings[1])
         if cmd == "heartbeat":
             return print_heartbeat(run_dir, args.agent, args.status, args.note)
         if cmd == "finish":
-            return print_finish(run_dir, args.agent, args.status, args.note, args.amend)
+            assignment = bindings[0] if short_assignment_form else bindings[1]
+            if short_assignment_form:
+                if args.status not in {"merged", "blocked", "failed", "abandoned"}:
+                    ap.error("short finish requires --status merged|blocked|failed|abandoned")
+                if args.note or args.amend:
+                    ap.error("short finish derives note and does not amend history")
+                return print_finish_decide(run_dir, assignment, args.status)
+            return print_finish(
+                run_dir, assignment, args.status or "done", args.note or "", args.amend)
         if cmd == "review-disposition":
+            if short_assignment_form:
+                if args.note:
+                    ap.error("short review-disposition derives note; do not pass --note")
+                return print_review_decide(run_dir, bindings[0], args.status)
+            if not args.note:
+                ap.error("explicit-run review-disposition requires --note")
             return print_review_disposition(
-                run_dir, args.target, args.reviewer, args.status, args.note)
+                run_dir, bindings[1], bindings[2], args.status, args.note)
         if cmd == "lifecycle-check":
             return print_lifecycle_check(run_dir, closure=args.closure)
         if cmd == "status":
@@ -10292,12 +10670,12 @@ def main(argv: list[str] | None = None) -> int:
   stream repair: settle-stream-stalled
 
 Exact failed-Stop repair:
-  python3 tools/workers.py recover-hook-failed-stop RUN_DIR A-ASSIGNMENT
+  .venv/bin/python tools/workers.py recover-hook-failed-stop A-ASSIGNMENT
 If it reports committed_projection_pending, run its exact printed
-tools/runtime_receipts.py RUN_DIR --reproject argv before disposition.
+.venv/bin/python tools/runtime_receipts.py --reproject argv before disposition.
 
 Exact stream-watchdog repair:
-  python3 tools/workers.py settle-stream-stalled RUN_DIR A-ASSIGNMENT
+  .venv/bin/python tools/workers.py settle-stream-stalled A-ASSIGNMENT
 
 Legacy forms remain: workers.py RUN_DIR and workers.py RUN_DIR --new F-005.
 They are compatibility views/scaffolds, not plan or launch authority.""",

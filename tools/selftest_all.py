@@ -13,10 +13,10 @@ harness, still a backlog item). The registry is explicit on purpose — never gl
 run arbitrary files.
 
 Usage:
-    python tools/selftest_all.py            # run all, print scorecard, exit 0/1
-    python tools/selftest_all.py --verbose  # also dump each suite's output
-    python tools/selftest_all.py --only check_run,replay
-    python tools/selftest_all.py --list
+    .venv/bin/python tools/selftest_all.py            # run all, print scorecard, exit 0/1
+    .venv/bin/python tools/selftest_all.py --verbose  # also dump each suite's output
+    .venv/bin/python tools/selftest_all.py --only check_run,replay
+    .venv/bin/python tools/selftest_all.py --list
 """
 from __future__ import annotations
 
@@ -76,6 +76,12 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("local_hygiene",  ["tools/check_local_hygiene.py"],          "local/publication hygiene guard"),
     ("local_hygiene_selftest", ["tools/check_local_hygiene.py", "--selftest"],
      "hermetic local-permission and publication-hygiene regression"),
+    ("project_env", ["tools/check_project_env.py", "--selftest"],
+     "canonical .venv Python runtime"),
+    ("active_run", ["tools/harness/active_run.py", "--selftest"],
+     "strict authoritative active-run pointer resolver"),
+    ("closure_audit", [".agents/skills/xunji-closure-audit/scripts/closure_audit.py", "--selftest"],
+     "hermetic closure-audit wiring and skill-ownership regression"),
     ("clean_scratch",  ["tools/clean_scratch.py", "--selftest"], "bounded TTL scratch cleanup"),
     ("migrate_outputs", ["tools/migrate_output_artifacts.py", "--selftest"], "dry-run-first loose output migration"),
     ("runtime_boundary", ["tools/check_runtime_boundary.py"],         "Codex hooks absence guard"),

@@ -41,17 +41,17 @@ not become the live Root driver for target-facing runs.
 ## Commands
 
 ```bash
-python tools/probe.py --selftest
-python tools/replay.py --selftest
-python tools/check_run.py --selftest
-python tools/selftest_all.py --only probe,replay,check_run
+.venv/bin/python tools/probe.py --selftest
+.venv/bin/python tools/replay.py --selftest
+.venv/bin/python tools/check_run.py --selftest
+.venv/bin/python tools/selftest_all.py --only probe,replay,check_run
 ```
 
 For a run-level replay check:
 
 ```bash
-python tools/replay.py runs/<dir>
-python tools/check_run.py runs/<dir> --replay-verify
+.venv/bin/python tools/replay.py runs/<dir>
+.venv/bin/python tools/check_run.py runs/<dir> --replay-verify
 ```
 
 ## Review Checklist

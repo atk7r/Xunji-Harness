@@ -8,7 +8,8 @@
 > 其逐节处置见第 6 节；历史 review record 只提供来源与论证，不建立第二套 backlog 真值。
 > CCB/TypeScript 迁移不在当前路线；除非 operator 以后重新立项，不为它保留迁移任务。
 >
-> 本次盘点基线：当前工作树 `python3 tools/selftest_all.py` 为 **80 passed, 0 failed**；
+> 本次盘点基线：当前工作树 `.venv/bin/python tools/selftest_all.py` 为
+> **83 passed, 0 failed**；
 > `check_rules.py`、`check_templates.py`、`check_runtime_boundary.py` 与本机/封闭式 hygiene
 > 检查均通过，新增可信入口已与 safety-critical manifest 同步。
 > 历史隔离分支 `f1a186e` 的“全勾选”结果不在当前 HEAD 祖先链，未作为当前完成证据。
@@ -351,7 +352,7 @@ artifact/JS 分析与 opt-in 工具摩擦投影；live WebSocket 已明确 NO-GO
   当前没有 provider usage receipt，不编造 token 节省。
 - [ ] 用 A/B fixture 比较 Root-direct、serial-Agent、parallel-Agent；只有质量/速度/覆盖收益
   超过调度与合并成本时才把 soft recommendation 升为 hard gate。
-- [x] 当前 `selftest_all.py` 为 80/80，focused、Bench、rule、template、runtime-boundary、
+- [x] 当前 `selftest_all.py` 为 83/83，focused、Bench、rule、template、runtime-boundary、
   local hygiene 与 diff check 均通过；可信入口、compiled floor 与 safety-critical manifest
   已恢复一致，完成门不再携带旧的 3-entry HOLD。
 - [x] safety-critical 变更完成作者感知的独立 fresh-context 复审并记录 disposition；

@@ -52,6 +52,7 @@ import agent_settlement  # noqa: E402
 import agent_instruction_bundle  # noqa: E402
 from evidence_parse import current_evidence_index_hash  # noqa: E402
 from harness import capability_registry  # noqa: E402
+from harness import python_runtime  # noqa: E402
 from harness.command_shape import (  # noqa: E402
     PythonControlInvocation,
     PythonControlShapeIssue,
@@ -4214,11 +4215,15 @@ def _capability_policy_reason(
 
     run_ref = capability_registry.run_reference(spec, args)
     resolved_run_ref = _capability_path(run_ref) if run_ref else None
+    implicit_active_run = capability_registry.uses_implicit_active_run(
+        spec, args,
+    )
     if spec.scope in {"active_run", "review_scope"}:
         output_bound_only = spec.argv_validator == "ingest-write"
         if not output_bound_only and (
-                resolved_run_ref is None
-                or resolved_run_ref != run_dir.resolve(strict=False)):
+                not implicit_active_run
+                and (resolved_run_ref is None
+                     or resolved_run_ref != run_dir.resolve(strict=False))):
             return (
                 f"[{E_CAPABILITY_POLICY}] capability {spec.id} must bind the exact "
                 f"active run {run_dir.name}."
@@ -4345,7 +4350,7 @@ def _maintenance_pretool_reason(event: dict, contract: dict) -> str:
             first = schema_names[0]
             return (
                 "contract schema 禁止直接逐步 Edit/Write 发布。先运行精确 "
-                f"`python3 tools/contract_schema.py prepare {first}`，只编辑其"
+                f"`.venv/bin/python tools/contract_schema.py prepare {first}`，只编辑其"
                 f"输出的 `tmp/contract_schema_candidates/{first}`，再运行输出的"
                 "唯一 publish argv；发布器会验证、CAS 并以 fsync+os.replace "
                 "原子替换。"
@@ -4797,9 +4802,8 @@ def _lifecycle_invocation(
 
 def _python_control_hint(script: Path, args: list[str]) -> str:
     """Render a copy-safe trusted-interpreter argv hint without executing it."""
-    interpreter = Path(sys.executable).resolve()
     return " ".join(shlex.quote(str(token)) for token in (
-        interpreter, script.resolve(), *args,
+        python_runtime.display_token(), script.resolve(), *args,
     ))
 
 
@@ -5443,14 +5447,14 @@ def _stale_plan_recovery_hint(run_dir: Path, plan: dict) -> str:
         return (
             "旧 plan 含 authentic returned/failed execution，且其唯一 Reviewer "
             f"{assignment} 已 assigned 但未启动。运行 "
-            f"`python3 tools/workers.py delegate runs/{run_dir.name} --limit 1` "
+            "`.venv/bin/python tools/workers.py delegate` "
             "幂等重放 durable row 的 exact launch contract，再完成 review/Root "
             "settlement；不得取消 Reviewer、重建 prompt 或重启旧 Hunter。"
         )
     if action == agent_settlement.RECOVERY_CREATE_REVIEWER:
         return (
             "旧 plan 含真实 returned/failed execution；它只保留 settlement identity。"
-            f"运行 `python3 tools/workers.py delegate runs/{run_dir.name} --limit 1` "
+            "运行 `.venv/bin/python tools/workers.py delegate` "
             "创建唯一 digest-bound Reviewer 的 exact launch contract，完成 review/Root "
             "settlement 后再 replan；不得重启旧 Hunter。"
         )
@@ -5459,8 +5463,7 @@ def _stale_plan_recovery_hint(run_dir: Path, plan: dict) -> str:
         return (
             "旧 plan 含可证明未启动的非 Reviewer assignment；先执行 exact typed "
             "settlement "
-            f"`python3 tools/workers.py cancel-unlaunched runs/{run_dir.name} "
-            f"{assignment} --reason \"turn or canonical inputs changed before launch\"`，"
+            f"`.venv/bin/python tools/workers.py cancel-unlaunched {assignment}`，"
             "再为仍开放的 front 提交新 plan。"
         )
     if action == agent_settlement.RECOVERY_SETTLE_EXTERNALLY_STOPPED \
@@ -5468,8 +5471,8 @@ def _stale_plan_recovery_hint(run_dir: Path, plan: dict) -> str:
         return (
             "旧 plan 含真实 started attempt，且 Claude Code 父 transcript 已给出 "
             "exact user-stop/no-resume 结构化回执。运行 "
-            f"`python3 tools/workers.py settle-stopped runs/{run_dir.name} "
-            f"{assignment}` 投影 typed failed result，再走唯一 digest-bound "
+            f"`.venv/bin/python tools/workers.py settle-stopped {assignment}` "
+            "投影 typed failed result，再走唯一 digest-bound "
             "Reviewer 与 Root blocked/failed/abandoned settlement；这不是 return、"
             "evidence 或 merged。"
         )
@@ -5479,26 +5482,26 @@ def _stale_plan_recovery_hint(run_dir: Path, plan: dict) -> str:
             "旧 plan 含真实 started attempt，且 host task-notification 与 child "
             "transcript 已共同证明 stream watchdog idle-timeout 后进程终止、无 "
             "SubagentStop。运行 "
-            f"`python3 tools/workers.py settle-stream-stalled "
-            f"runs/{run_dir.name} {assignment}` 投影 typed failed result，再走唯一 "
+            f"`.venv/bin/python tools/workers.py settle-stream-stalled {assignment}` "
+            "投影 typed failed result，再走唯一 "
             "digest-bound Reviewer 与 Root blocked/failed/abandoned settlement；"
             "这不是 return、evidence 或 merged，也不得复活旧 attempt。"
         )
     if action == agent_settlement.RECOVERY_WAIT_RUNNING:
         return (
             "旧 plan 仍有真实 running attempt；不得取消或 replan。"
-            f"运行 `python3 tools/workers.py status runs/{run_dir.name}`，"
+            "运行 `.venv/bin/python tools/workers.py status`，"
             "等待同一因果 attempt 返回后走 Reviewer settlement。"
         )
     if action == agent_settlement.RECOVERY_MATERIAL_REPLAN:
         return (
-            f"旧 plan 已无 assignment settlement debt。运行 "
-            f"`python3 tools/workers.py plan runs/{run_dir.name} --limit 2`，"
+            "旧 plan 已无 assignment settlement debt。运行 "
+            "`.venv/bin/python tools/workers.py plan`，"
             "再通过 commit-proposal material replan；不得复活旧 execution authority。"
         )
     return (
         "旧 plan 的 Reviewer settlement identity 无法安全分类；运行 "
-        f"`python3 tools/workers.py status runs/{run_dir.name}` 读取 canonical "
+        "`.venv/bin/python tools/workers.py status` 读取 canonical "
         "debt，修复 owner 报告的具体 invariant。不得取消 Reviewer、删除 ledger/journal "
         "或绕过 assignment debt replan。"
     )
@@ -5627,7 +5630,7 @@ def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
                         run_dir, stale_plan)
                 except Exception:
                     next_action = (
-                        f"先运行 `python3 tools/workers.py status runs/{run_dir.name}` "
+                        "先运行 `.venv/bin/python tools/workers.py status` "
                         "读取 canonical debt；不要在 assignment debt 未结算时 replan。"
                     )
                 return (
@@ -5639,7 +5642,7 @@ def _work_plan_gate_reason(run_dir: Path, event: dict, contract: dict) -> str:
                 "输入 digest 一致的 xunji.work-plan.v1，并先选择 ROOT_DIRECT / "
                 f"SERIAL_AGENT / PARALLEL_AGENTS。当前状态：{detail}。"
                 "完整读取 `.claude/skills/xunji-agent-board/SKILL.md`，再从唯一公共入口 "
-                f"`python3 tools/workers.py plan runs/{run_dir.name} --limit 2` 继续；"
+                "`.venv/bin/python tools/workers.py plan` 继续；"
                 "不要读取 tools 源码或猜测 schema/argv。"
             )
     try:
@@ -7910,7 +7913,7 @@ def _selftest() -> int:
     continuation_contract = write_contract(
         continuation_run, continuation_event)
     continuation_invocation = _control_invocation(
-        f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+        f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
         f"--resume runs/{continuation_run.name}"
     )
     continuation_contract = _promote_model_lifecycle_candidate(
@@ -8478,7 +8481,7 @@ def _selftest() -> int:
     }
     target_event = {"tool_name": "Bash", "tool_input": {
         "command": (
-            "XUNJI_PROXY_REQUIRED=0 python3 tools/probe.py "
+            "XUNJI_PROXY_REQUIRED=0 .venv/bin/python tools/probe.py "
             "GET https://example.test"
         )}}
     scope_turn_target_blocked = "zero-probe local transition" in evaluate_pretool(
@@ -8491,80 +8494,80 @@ def _selftest() -> int:
         summary_failure_signature = _coordination_signature(run)
         summary_failure_reason = evaluate_pretool(run, target_event, contract)
     encoded_target = {"tool_name": "Bash", "tool_input": {
-        "command": "python3 -c 'import socket; socket.create_connection((\"example.test\",443))'"}}
-    renamed_target = {"tool_name": "Bash", "tool_input": {"command": "python3 /tmp/check.py"}}
+        "command": ".venv/bin/python -c 'import socket; socket.create_connection((\"example.test\",443))'"}}
+    renamed_target = {"tool_name": "Bash", "tool_input": {"command": ".venv/bin/python /tmp/check.py"}}
     workers_control = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'workers.py'} list {run}"}}
+        "command": f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run}"}}
     workers_asset_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'workers.py'} assign {run} "
+            f".venv/bin/python {ROOT / 'tools' / 'workers.py'} assign {run} "
             "--role web-hunter --front F-001 --asset example.test"
         )}}
     workers_quoted_note_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
             '--status blocked --note "Reason: shared barrier; Front: F-001"'
         )}}
     workers_protected_name_note_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'workers.py'} review-disposition {run} "
+            f".venv/bin/python {ROOT / 'tools' / 'workers.py'} review-disposition {run} "
             "A-web-001 A-review-001 --status accept-candidate "
             '--note "Reviewed assignments.json and runtime_events.jsonl bindings"'
         )}}
     workers_quoted_punctuation_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
             '--status blocked --note "Reason: auth; pipe | amp & gt > lt <; Front: F-001"'
         )}}
     workers_single_quoted_literal_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
             "--status blocked --note 'Reason: literal $(id) ${HOME} `id`; Front: F-001'"
         )}}
     workers_escaped_substitution_literal = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
             '--status blocked --note "Reason: literal \\$(id); Front: F-001"'
         )}}
     workers_ansi_c_literal_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+            f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
             "--status blocked --note $'Reason: literal $(id); Front: F-001'"
         )}}
     workers_trailing_comment_control = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'workers.py'} list {run} # ignored"}}
+        "command": f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run} # ignored"}}
     workers_shell_chain = (
-        f"python3 {ROOT / 'tools' / 'workers.py'} list {run}; echo unsafe")
+        f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run}; echo unsafe")
     adversarial_control_commands = [
-        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} | cat",
-        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} && echo unsafe",
-        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} > /tmp/forged",
-        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} 2>&1",
-        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+        f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run} | cat",
+        f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run} && echo unsafe",
+        f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run} > /tmp/forged",
+        f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run} 2>&1",
+        (f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
          '--status blocked --note "Reason: $(id); Front: F-001"'),
-        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+        (f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
          '--status blocked --note "Reason: ${HOME}; Front: F-001"'),
-        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+        (f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
          '--status blocked --note "Reason: `id`; Front: F-001"'),
-        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+        (f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
          '--status blocked --note "Reason: \\\\$(id); Front: F-001"'),
-        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+        (f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
          "--status blocked --note <(id)"),
-        (f"python3 {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
+        (f".venv/bin/python {ROOT / 'tools' / 'workers.py'} finish {run} A-web-001 "
          "--status blocked --note >(id)"),
-        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} # ignored $(id)",
-        f"python3 {ROOT / 'tools' / 'workers.py'} list '{run}",
-        f"python3 {ROOT / 'tools' / 'workers.py'} list {run} \\",
+        f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run} # ignored $(id)",
+        f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list '{run}",
+        f".venv/bin/python {ROOT / 'tools' / 'workers.py'} list {run} \\",
     ]
     setup_control = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'setup_run.py'} next {root / 'recon.json'}"}}
+        "command": f".venv/bin/python {ROOT / 'tools' / 'setup_run.py'} next {root / 'recon.json'}"}}
     setup_operator_contract = _contract_from_event({
         "prompt": f"/loop {root / 'recon.json'} 创建新 run，slug next",
         "session_id": "setup-session",
     }, run_name=run.name)
     setup_classify_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'setup_run.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'setup_run.py'} "
             f"next {root / 'recon.json'} --classify"
         )}}
     setup_classify_contract = _contract_from_event({
@@ -8619,7 +8622,8 @@ def _selftest() -> int:
     source_url = "https://new-source.example/path?key=opaque-secret"
     source_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f"{python_runtime.display_token()} "
+            f"{ROOT / 'tools' / 'loop_bootstrap.py'} "
             f"--source '{source_url}' --type auto"
         )}}
     source_operator_contract = _contract_from_event({
@@ -8663,7 +8667,8 @@ def _selftest() -> int:
     wrong_model_candidate = _promote_model_lifecycle_candidate(
         run,
         _lifecycle_invocation(
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f"{python_runtime.display_token()} "
+            f"{ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--source 'https://other.example/' --type auto"
         ),
         model_candidate_contract,
@@ -8687,13 +8692,13 @@ def _selftest() -> int:
     punctuated_source_url = "https://punct.example/path)"
     punctuated_source_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             f"--source '{punctuated_source_url}' --type auto"
         ),
     }}
     trimmed_punctuated_source_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--source 'https://punct.example/path' --type auto"
         ),
     }}
@@ -8737,7 +8742,7 @@ def _selftest() -> int:
     }, run_name=run.name)
     natural_local_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             f"--source {shlex.quote(natural_local_source)} --type auto"
         ),
     }}
@@ -8852,7 +8857,7 @@ def _selftest() -> int:
     }, run_name="pilot_20260715")
     natural_clean_source = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--source 'https://natural.example/path' --type auto"
         ),
     }}
@@ -8882,55 +8887,55 @@ def _selftest() -> int:
     }}
     wrong_query_source = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--source 'https://new-source.example/path?key=different-secret' --type auto"
         ),
     }}
     unselected_source = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--source 'https://unselected.example/other' --type auto"
         ),
     }}
     arbitrary_url = "https://arbitrary.example/third"
     setup_selected_target = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'setup_run.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'setup_run.py'} "
             f"{_deterministic_source_slug(source_url)} --target '{source_url}'"
         ),
     }}
     setup_unselected_target = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'setup_run.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'setup_run.py'} "
             f"{_deterministic_source_slug('https://unselected.example/other')} "
             "--target 'https://unselected.example/other'"
         ),
     }}
     setup_arbitrary_target = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'setup_run.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'setup_run.py'} "
             f"{_deterministic_source_slug(arbitrary_url)} --target '{arbitrary_url}'"
         ),
     }}
     unrelated_legacy_recon = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             f"unrelated {root / 'unrelated-recon.json'}"
         ),
     }}
     journal_control = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'loop_journal.py'} {run} start --note begin"}}
+        "command": f".venv/bin/python {ROOT / 'tools' / 'loop_journal.py'} {run} start --note begin"}}
     clear_active = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'xunji_statusline.py'} --clear-active"}}
+        "command": f".venv/bin/python {ROOT / 'tools' / 'xunji_statusline.py'} --clear-active"}}
     wrapped_clear_active = {"tool_name": "Bash", "tool_input": {
         "command": clear_active["tool_input"]["command"] + " 2>&1"}}
     set_active = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'xunji_statusline.py'} --set-active runs/other_20260101"}}
+        "command": f".venv/bin/python {ROOT / 'tools' / 'xunji_statusline.py'} --set-active runs/other_20260101"}}
     resume_control = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} --resume runs/other_20260101"}}
+        "command": f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} --resume runs/other_20260101"}}
     unrelated_resume_control = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--resume runs/unrelated_20260101"
         ),
     }}
@@ -8969,7 +8974,7 @@ def _selftest() -> int:
             "file_path": str(prepared_receipt_path)}}, contract) == ""
     prepared_recovery_event = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             f"--resume runs/{run.name}"
         )}}
     prepared_recovery_contract = _contract_from_event({
@@ -8986,7 +8991,7 @@ def _selftest() -> int:
 
     def registered_event(script: str, *args: str) -> dict:
         command = shlex.join((
-            str(Path(sys.executable).resolve()),
+            python_runtime.display_token(),
             str((ROOT / script).resolve()),
             *args,
         ))
@@ -8996,6 +9001,11 @@ def _selftest() -> int:
         "tools/probe.py", "GET", "https://example.test/")
     registry_workers = registered_event(
         "tools/workers.py", "list", str(run))
+    registry_implicit_delegate = registered_event(
+        "tools/workers.py", "delegate")
+    registry_implicit_cycle_end = registered_event(
+        "tools/loop_journal.py", "end", "--action", "replan",
+        "--front", "F-001")
     registry_owner_reads = [
         registered_event("tools/workers.py", "status", str(run)),
         registered_event("tools/workers.py", "lifecycle-check", str(run)),
@@ -9219,6 +9229,20 @@ def _selftest() -> int:
             outside_ingest, outside_probe_output,
         )
     )
+    implicit_active_capabilities = [
+        _registered_capability_invocation(
+            event["tool_input"]["command"])
+        for event in (registry_implicit_delegate, registry_implicit_cycle_end)
+    ]
+    implicit_active_run_binds_only_current_contract = all(
+        capability is not None
+        and capability_registry.run_reference(
+            capability[0], capability[2]) == ""
+        and capability_registry.uses_implicit_active_run(
+            capability[0], capability[2])
+        and _capability_policy_reason(run, capability) == ""
+        for capability in implicit_active_capabilities
+    )
     semantic_capability = _registered_capability_invocation(
         registry_anti_status["tool_input"]["command"])
     reason_capability = _registered_capability_invocation(
@@ -9329,7 +9353,7 @@ def _selftest() -> int:
         and _maintenance_action(manifest_python_read, contract=contract)
     )
     fake_workers_control = {"tool_name": "Bash", "tool_input": {
-        "command": "python3 /tmp/workers.py list runs/x"}}
+        "command": ".venv/bin/python /tmp/workers.py list runs/x"}}
     safe_sed_read = {"tool_name": "Bash", "tool_input": {
         "command": "sed -n '1,10p' frontier.md"}}
     readonly_helper_path_spoofs_rejected = all(not _readonly_shell(command) for command in (
@@ -9564,11 +9588,12 @@ def _selftest() -> int:
             run, {"tool_name": "Bash", "tool_input": {"command": command}}, contract))
         for command in adversarial_control_commands)
     python_alias_command = f"python {ROOT / 'tools' / 'loop_state.py'} {run}"
-    python3_alias_command = f"python3 {ROOT / 'tools' / 'loop_state.py'} {run}"
-    documented_python3_is_trusted_across_hook_path = (
-        _control_invocation(python3_alias_command) is not None
+    venv_python_command = f".venv/bin/python {ROOT / 'tools' / 'loop_state.py'} {run}"
+    canonical_venv_is_trusted_across_hook_path = (
+        _control_invocation(venv_python_command) is not None
         and _control_invocation(python_alias_command) is None
-        and trusted_python_token("python3")
+        and trusted_python_token(".venv/bin/python")
+        and not trusted_python_token("python3")
         and not trusted_python_token("python")
     )
     unavailable_micro_python_rejected = _control_invocation(
@@ -9581,9 +9606,9 @@ def _selftest() -> int:
         and _registered_capability_invocation(command)[0].id
         == "control.loop-bootstrap"
         for command in (
-            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f"XUNJI_PROXY_REQUIRED=0 .venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--source 'http://127.0.0.1:18765' --type auto",
-            f"export XUNJI_PROXY_REQUIRED=0 && python3 "
+            f"export XUNJI_PROXY_REQUIRED=0 && .venv/bin/python "
             f"{ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--source 'http://127.0.0.1:18765' --type auto",
         )
@@ -9667,7 +9692,7 @@ def _selftest() -> int:
     cloud_source_control = {
         "tool_name": "Bash",
         "tool_input": {"command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             "--source 'https://cloud.scshr.com/' --type auto"
         )},
     }
@@ -10725,7 +10750,7 @@ def _selftest() -> int:
     }
     denied_local_python = {
         "tool_name": "Bash", "tool_input": {"command": (
-            "python3 -c 'import glob; print(glob.glob(\"state/*\"))'")},
+            ".venv/bin/python -c 'import glob; print(glob.glob(\"state/*\"))'")},
     }
     denied_raw_target = {
         "tool_name": "Bash", "tool_input": {
@@ -10821,7 +10846,7 @@ def _selftest() -> int:
     coverage_sync_control = {
         "tool_name": "Bash",
         "tool_input": {"command": (
-            f"python3 {ROOT / 'tools' / 'coverage_matrix.py'} {run} --sync-coverage"
+            f".venv/bin/python {ROOT / 'tools' / 'coverage_matrix.py'} {run} --sync-coverage"
         )},
     }
     coverage_sync_control_allowed = evaluate_pretool(
@@ -11120,7 +11145,7 @@ def _selftest() -> int:
     work_plan_missing_after_task = E_WORK_PLAN_REQUIRED in post_plan_agent_reason
     work_plan_route_is_explicit = (
         ".claude/skills/xunji-agent-board/SKILL.md" in post_plan_agent_reason
-        and f"python3 tools/workers.py plan runs/{lifecycle_run.name} --limit 2"
+        and ".venv/bin/python tools/workers.py plan"
         in post_plan_agent_reason
         and "不要读取 tools 源码" in post_plan_agent_reason
     )
@@ -11781,7 +11806,8 @@ def _selftest() -> int:
         E_WORK_PLAN_STALE in stale_reviewer_wrong_prompt_reason
         and "已 assigned 但未启动" in stale_reviewer_wrong_prompt_reason
         and "workers.py delegate" in stale_reviewer_wrong_prompt_reason
-        and "--limit 1" in stale_reviewer_wrong_prompt_reason
+        and "--limit" not in stale_reviewer_wrong_prompt_reason
+        and f"runs/{stale_review_run.name}" not in stale_reviewer_wrong_prompt_reason
         and "cancel-unlaunched" not in stale_reviewer_wrong_prompt_reason
     )
     stale_reviewer_pretool_allowed = evaluate_pretool(
@@ -12069,7 +12095,8 @@ def _selftest() -> int:
     # shape that a transaction-only test with a manually seeded claim misses.
     same_source_url = "https://same-target.example.test/"
     same_source_command = (
-        f"python3 {shlex.quote(str(ROOT / 'tools' / 'loop_bootstrap.py'))} "
+        f"{python_runtime.display_token()} "
+        f"{shlex.quote(str(ROOT / 'tools' / 'loop_bootstrap.py'))} "
         f"--source {shlex.quote(same_source_url)} --type auto"
     )
     same_source_invocation = _control_invocation(same_source_command)
@@ -12149,7 +12176,7 @@ def _selftest() -> int:
     prepare_env["XUNJI_PENDING_TURN_DIR"] = str(prepare_pending_dir)
     prepare_env["XUNJI_TRANSITION_CLAIMS_DIR"] = str(prepare_claims_dir)
     normalizer_prepare_command = (
-        f"python3 {shlex.quote(str(ROOT / 'tools' / 'loop_bootstrap.py'))} "
+        f".venv/bin/python {shlex.quote(str(ROOT / 'tools' / 'loop_bootstrap.py'))} "
         f"--source {shlex.quote(str(normalizer_source))} --type file "
         "--ai external --ai-provider fixture-provider --ai-model fixture-model "
         "--prepare-normalizer"
@@ -12228,7 +12255,7 @@ def _selftest() -> int:
     no_active_shape_denied_without_claim = bool(
         shape_submit.returncode == 0
         and E_LIFECYCLE_EXACT_ARGV_REQUIRED in (no_active_wrapped.stdout or "")
-        and str(Path(sys.executable).resolve()) in (no_active_wrapped.stdout or "")
+        and python_runtime.display_token() in (no_active_wrapped.stdout or "")
         and not list(shape_claims_dir.glob("*.json"))
     )
     no_active_clean = no_run_hook({
@@ -12346,7 +12373,7 @@ def _selftest() -> int:
         "tool_name": "Bash",
         "tool_input": {
             "command": (
-                "python3 -c \"import setup_transaction; "
+                ".venv/bin/python -c \"import setup_transaction; "
                 "setup_transaction.create_and_activate('forged')\""
             ),
         },
@@ -12677,7 +12704,7 @@ def _selftest() -> int:
         and claims_before_prepare == claims_after_prepare == []
     )
     exact_setup_command = (
-        f"{shlex.quote(str(Path(sys.executable).resolve()))} "
+        f"{python_runtime.display_token()} "
         f"{shlex.quote(str((ROOT / 'tools' / 'setup_run.py').resolve()))} "
         f"bootstrap {shlex.quote(str(root / 'recon.json'))} "
         "--date 20260101"
@@ -12731,7 +12758,8 @@ def _selftest() -> int:
     bare_claims_dir = root / "bare-python-claims"
     bare_session = "bare-python-bootstrap"
     bare_command = (
-        f"python3 {shlex.quote(str((ROOT / 'tools' / 'setup_run.py').resolve()))} "
+        f"{python_runtime.display_token()} "
+        f"{shlex.quote(str((ROOT / 'tools' / 'setup_run.py').resolve()))} "
         f"bare-python {shlex.quote(str(root / 'recon.json'))} --date 20260101"
     )
     fake_python_dir = root / "fake-python-path"
@@ -12749,7 +12777,7 @@ def _selftest() -> int:
     }, hook_env=bare_env)
     bare_before = load_pending_contract(
         bare_session, pending_dir=bare_pending_dir)
-    unrecognized_bare_command = bare_command.replace("python3 ", "python3.99 ", 1)
+    unrecognized_bare_command = bare_command.replace(".venv/bin/python ", "python3.99 ", 1)
     bare_mismatch = no_run_hook({
         "hook_event_name": "PreToolUse", "session_id": bare_session,
         "tool_name": "Bash", "tool_input": {"command": unrecognized_bare_command},
@@ -12764,7 +12792,7 @@ def _selftest() -> int:
         and '"permissionDecision": "deny"' in (bare_mismatch.stdout or "")
         and not list(bare_claims_dir.glob("*.json"))
     )
-    alias_python_dir = root / "trusted-python-path"
+    alias_python_dir = root / "untrusted-python-path"
     alias_python_dir.mkdir()
     (alias_python_dir / "python3").symlink_to(Path(sys.executable).resolve())
     bare_alias_env = dict(bare_env)
@@ -12774,7 +12802,7 @@ def _selftest() -> int:
         "tool_name": "Bash", "tool_input": {"command": bare_command},
     }, hook_env=bare_alias_env)
     bare_alias_claims = sorted(bare_claims_dir.glob("*.json"))
-    documented_bare_python_claims_across_path_difference = bool(
+    canonical_venv_claims_across_path_difference = bool(
         bare_alias.returncode == 0
         and not (bare_alias.stdout or "").strip()
         and len(bare_alias_claims) == 1
@@ -12786,7 +12814,7 @@ def _selftest() -> int:
         input=json.dumps({
             "hook_event_name": "PreToolUse", "session_id": "s-bootstrap",
             "tool_name": "Bash", "tool_input": {
-                "command": "python3 tools/probe.py GET https://example.test"},
+                "command": ".venv/bin/python tools/probe.py GET https://example.test"},
         }),
         text=True, capture_output=True, env=env, timeout=10,
     )
@@ -12849,7 +12877,9 @@ def _selftest() -> int:
         input=json.dumps({
             "hook_event_name": "PreToolUse", "session_id": "s-no-contract",
             "tool_name": "Bash", "tool_input": {
-                "command": f"python3 {ROOT / 'tools' / 'xunji_statusline.py'} --set-active runs/ghost_20260101"},
+                "command": f"{python_runtime.display_token()} "
+                f"{ROOT / 'tools' / 'xunji_statusline.py'} "
+                "--set-active runs/ghost_20260101"},
         }),
         text=True, capture_output=True, env=env, timeout=10,
     )
@@ -13688,29 +13718,29 @@ def _selftest() -> int:
     raw_curl = {"tool_name": "Bash", "tool_input": {
         "command": "curl https://a.example/"}}
     raw_requests = {"tool_name": "Bash", "tool_input": {
-        "command": "python3 -c 'import requests; requests.get(\"https://a.example\")'"}}
+        "command": ".venv/bin/python -c 'import requests; requests.get(\"https://a.example\")'"}}
     target_webfetch = {"tool_name": "WebFetch", "tool_input": {"url": "https://a.example/"}}
     unknown_webfetch = {"tool_name": "WebFetch", "tool_input": {
         "url": "https://unknown.example/"}}
     guarded_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=1 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/"
         )}}
     unknown_guarded_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=1 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://unknown.example/"
         )}}
     dotted_save_guarded_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=1 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             f"GET https://a.example/app.js --save f003-cms-8090-app-js.js "
             f"--run {proxy_run}"
         )}}
     data_url_guarded_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=1 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             f"POST https://a.example/api "
             "--data 'next=https://payload-only.example/callback' "
             "--header 'Referer: https://header-only.example/source' "
@@ -13718,43 +13748,43 @@ def _selftest() -> int:
         )}}
     unknown_preflight_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=1 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "POST https://a.example/api "
             "--preflight-get https://preflight-unknown.example/form"
         )}}
     unknown_diff_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=1 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "DIFF https://a.example/ https://diff-unknown.example/"
         )}}
     direct_guarded_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=0 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/"
         )}}
     direct_env_probe = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/",
+        "command": f".venv/bin/python {ROOT / 'tools' / 'probe.py'} GET https://a.example/",
         "env": {"XUNJI_PROXY_REQUIRED": "0"},
     }}
     quoted_direct_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=o''ff python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=o''ff .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/"
         )}}
     direct_with_proxy_arg = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=0 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/ --proxy http://proxy.example:8080"
         )}}
     duplicate_env_selects_proxy = {"tool_name": "Bash", "tool_input": {
         "command": (
             "XUNJI_PROXY_REQUIRED=0 XUNJI_PROXY_REQUIRED=1 "
-            f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"
+            f".venv/bin/python {ROOT / 'tools' / 'probe.py'} GET https://a.example/"
         )}}
     duplicate_env_selects_direct = {"tool_name": "Bash", "tool_input": {
         "command": (
             "XUNJI_PROXY_REQUIRED=1 XUNJI_PROXY_REQUIRED=0 "
-            f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/"
+            f".venv/bin/python {ROOT / 'tools' / 'probe.py'} GET https://a.example/"
         )}}
     browser_target = {"tool_name": "mcp__browser__navigate", "tool_input": {
         "url": "https://a.example/"}}
@@ -13811,7 +13841,7 @@ def _selftest() -> int:
 
     def endpoint_probe(url: str) -> dict:
         return {"tool_name": "Bash", "tool_input": {"command": (
-            f"XUNJI_PROXY_REQUIRED=1 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=1 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             f"GET {url}"
         )}}
 
@@ -13859,13 +13889,13 @@ def _selftest() -> int:
          "operator_intent": {"route": "direct"}}) == ""
     local_settlement_with_route_text = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"python3 {ROOT / 'tools' / 'loop_journal.py'} {proxy_run} end "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_journal.py'} {proxy_run} end "
             "--next-action '等待操作者确认 XUNJI_PROXY_REQUIRED=0 后重试 F-001'"
         )}}
     local_route_text_is_not_target_route = "目标出口路由硬门" not in evaluate_pretool(
         proxy_run, local_settlement_with_route_text, proxy_contract)
     plain_guarded_probe = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://a.example/",
+        "command": f".venv/bin/python {ROOT / 'tools' / 'probe.py'} GET https://a.example/",
     }}
     proxy_route_needs_positive_selection = (
         "XUNJI_PROXY_REQUIRED=1" in evaluate_pretool(
@@ -13940,7 +13970,7 @@ def _selftest() -> int:
         corrupt_run, {"tool_name": "Bash", "tool_input": {
             "command": (
                 "XUNJI_PROXY_REQUIRED=1 "
-                f"python3 {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"
+                f".venv/bin/python {ROOT / 'tools' / 'probe.py'} GET https://unknown.example/"
             )}},
         proxy_contract)
     corrupt_coverage_fails_closed = (
@@ -14052,12 +14082,12 @@ def _selftest() -> int:
     actor_launch("launch-two", "A-two", "F-002", "b.example", "child-two")
     child_own_action = {"tool_name": "Bash", "agent_id": "child-one", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=0 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/"
         )}}
     child_outside_action = {"tool_name": "Bash", "agent_id": "child-one", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=0 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://b.example/"
         )}}
     child_nested_agent = {"tool_name": "Agent", "agent_id": "child-one", "tool_input": {
@@ -14069,7 +14099,7 @@ def _selftest() -> int:
         actor_run, child_nested_agent, actor_contract)
     actor_root_probe = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=0 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/"
         )}}
     root_allowed_while_agents_running = evaluate_pretool(
@@ -14084,7 +14114,7 @@ def _selftest() -> int:
         actor_run, actor_root_probe, actor_contract)
     child_two_action = {"tool_name": "Bash", "agent_id": "child-two", "tool_input": {
         "command": (
-            f"XUNJI_PROXY_REQUIRED=0 python3 {ROOT / 'tools' / 'probe.py'} "
+            f"XUNJI_PROXY_REQUIRED=0 .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://b.example/"
         )}}
     running_peer_not_blocked_by_returned_peer = evaluate_pretool(
@@ -14281,7 +14311,7 @@ def _selftest() -> int:
     operator_natural_localhost_control = {
         "tool_name": "Bash",
         "tool_input": {"command": (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f".venv/bin/python {ROOT / 'tools' / 'loop_bootstrap.py'} "
             f"--source '{localhost_source_url}' --type auto"
         )},
     }
@@ -14385,7 +14415,7 @@ def _selftest() -> int:
         "edits": [],
     }}
     maintenance_target = {"tool_name": "Bash", "tool_input": {
-        "command": f"python3 {ROOT / 'tools' / 'probe.py'} GET https://example.test/",
+        "command": f".venv/bin/python {ROOT / 'tools' / 'probe.py'} GET https://example.test/",
     }}
     maintenance_cron = {"tool_name": "CronCreate", "tool_input": {
         "prompt": f"/loop {run.name}",
@@ -14403,7 +14433,7 @@ def _selftest() -> int:
         "command": "sed -n '1,20p' tools/turn_contract.py",
     }}
     maintenance_compile = {"tool_name": "Bash", "tool_input": {
-        "command": "python3 -m py_compile tools/turn_contract.py",
+        "command": ".venv/bin/python -m py_compile tools/turn_contract.py",
     }}
     maintenance_schema_edit = {"tool_name": "Edit", "tool_input": {
         "file_path": str(ROOT / "contracts" / "work-plan.v1.schema.json"),
@@ -14417,12 +14447,12 @@ def _selftest() -> int:
     }}
     maintenance_schema_prepare = {"tool_name": "Bash", "tool_input": {
         "command": (
-            "python3 tools/contract_schema.py prepare "
+            ".venv/bin/python tools/contract_schema.py prepare "
             "work-plan.v1.schema.json"),
     }}
     maintenance_schema_publish = {"tool_name": "Bash", "tool_input": {
         "command": (
-            "python3 tools/contract_schema.py publish "
+            ".venv/bin/python tools/contract_schema.py publish "
             "work-plan.v1.schema.json"),
     }}
     maintenance_git_status = {"tool_name": "Bash", "tool_input": {
@@ -14444,14 +14474,14 @@ def _selftest() -> int:
     }}
     ordinary_encoded_write = {"tool_name": "Bash", "tool_input": {
         "command": (
-            "python3 -c \"import base64,pathlib;"
+            ".venv/bin/python -c \"import base64,pathlib;"
             "pathlib.Path(base64.b64decode('dG9vbHMvdHVybl9jb250cmFjdC5weQ==')"
             ".decode()).write_text('changed')\""
         ),
     }}
     ordinary_pythonpath_target = {"tool_name": "Bash", "tool_input": {
         "command": (
-            f"PYTHONPATH=/tmp python3 {ROOT / 'tools' / 'probe.py'} "
+            f"PYTHONPATH=/tmp .venv/bin/python {ROOT / 'tools' / 'probe.py'} "
             "GET https://a.example/"
         ),
     }}
@@ -14496,7 +14526,7 @@ def _selftest() -> int:
         {"tool_name": "Bash", "tool_input": {
             "command": "printf '%s' 'patch notes only'"}},
         {"tool_name": "Bash", "tool_input": {
-            "command": "python3 -c \"print('git apply')\""}},
+            "command": ".venv/bin/python -c \"print('git apply')\""}},
     ]
     ordinary_critical_edit_blocked = bool(evaluate_pretool(
         run, critical_edit, contract))
@@ -14873,7 +14903,7 @@ def _selftest() -> int:
     }
     iteration_plan_receipt_tools = {"TaskCreate", "TaskUpdate", "TodoWrite"}
     review_command = shlex.join((
-        str(Path(sys.executable).resolve()),
+        python_runtime.display_token(),
         str((ROOT / "tools" / "peer_review.py").resolve()),
         str(run), "--backend", "claude",
     ))
@@ -15132,12 +15162,12 @@ def _selftest() -> int:
         "skill": {"tool_name": "Skill", "tool_input": {
             "skill": "xunji-run-lifecycle"}},
         "status": {"tool_name": "Bash", "tool_input": {
-            "command": f"python3 {completion_tool} status {run}"}},
+            "command": f".venv/bin/python {completion_tool} status {run}"}},
         "commit": {"tool_name": "Bash", "tool_input": {
-            "command": f"python3 {completion_tool} commit {run}"}},
+            "command": f".venv/bin/python {completion_tool} commit {run}"}},
         "reopen": {"tool_name": "Bash", "tool_input": {
             "command": (
-                f"python3 {completion_tool} reopen {run} "
+                f".venv/bin/python {completion_tool} reopen {run} "
                 "--reason resume-open-front")}},
         "target": {"tool_name": "WebFetch", "tool_input": {
             "url": "https://example.test/"}},
@@ -15146,17 +15176,17 @@ def _selftest() -> int:
         "cron": {"tool_name": "CronCreate", "tool_input": {
             "prompt": f"/loop runs/{run.name}"}},
         "verify": {"tool_name": "Bash", "tool_input": {
-            "command": f"python3 {ROOT / 'tools' / 'check_run.py'} {run}"}},
+            "command": f".venv/bin/python {ROOT / 'tools' / 'check_run.py'} {run}"}},
         "replay_verify": {"tool_name": "Bash", "tool_input": {
             "command": (
-                f"python3 {ROOT / 'tools' / 'check_run.py'} {run} "
+                f".venv/bin/python {ROOT / 'tools' / 'check_run.py'} {run} "
                 "--replay-verify")}},
         "auto_verify": {"tool_name": "Bash", "tool_input": {
             "command": (
-                f"python3 {ROOT / 'tools' / 'check_run.py'} {run} "
+                f".venv/bin/python {ROOT / 'tools' / 'check_run.py'} {run} "
                 "--auto-peer-review --review-driver codex")}},
         "other_verify": {"tool_name": "Bash", "tool_input": {
-            "command": f"python3 {ROOT / 'tools' / 'peer_review.py'} --selftest"}},
+            "command": f".venv/bin/python {ROOT / 'tools' / 'peer_review.py'} --selftest"}},
     }
     prepared_gate = {
         "schema": "xunji.completion-terminal-gate.v1",
@@ -15419,7 +15449,7 @@ def _selftest() -> int:
          and schema_failure_code == 2
          and "ContractSchemaUnavailable.SCHEMA_JSON_INVALID.JSONDecodeError"
              in schema_failure_diagnostic
-         and "python3 tools/contract_schema.py prepare "
+         and ".venv/bin/python tools/contract_schema.py prepare "
              "work-plan.v1.schema.json" in schema_failure_diagnostic
          and "ignored candidate" in schema_failure_diagnostic),
         ("ordinary operator wording derives a distinct maintenance turn mode",
@@ -15734,8 +15764,8 @@ def _selftest() -> int:
          workers_shell_chain_rejected),
         ("adversarial shell syntax fails closed through evaluate_pretool",
          adversarial_controls_fail_closed),
-        ("documented bare python3 survives hook and Bash PATH differences",
-         documented_python3_is_trusted_across_hook_path),
+        ("canonical .venv Python survives Hook and Bash PATH differences",
+         canonical_venv_is_trusted_across_hook_path),
         ("unresolved micro-version Python token cannot impersonate control",
          unavailable_micro_python_rejected),
         ("new-run setup command is lifecycle control before old-run fanout",
@@ -15943,6 +15973,8 @@ def _selftest() -> int:
          typed_local_capability_shapes_are_exact),
         ("capability scope and output resources bind to the active run",
          capability_scope_and_output_bindings_fail_closed),
+        ("closed implicit commands bind the current active-run contract",
+         implicit_active_run_binds_only_current_contract),
         ("unknown argv for a registered script remains target-capable and non-control",
          invalid_registered_argv_fails_closed),
         ("clean invalid registered argv is a non-authorizing retryable shape denial",
@@ -16166,8 +16198,8 @@ def _selftest() -> int:
          pending_skill_allowed),
         ("pending bootstrap rejects an unrecognized bare Python without consuming authority",
          unrecognized_bare_python_fails_closed),
-        ("documented bare python3 claims across hook and Bash PATH differences",
-         documented_bare_python_claims_across_path_difference),
+        ("canonical .venv claims ignore Hook and Bash PATH differences",
+         canonical_venv_claims_across_path_difference),
         ("pending bootstrap blocks target execution before run binding",
          pending_target_action_blocked),
         ("pending bootstrap blocks arbitrary writes before run binding",
@@ -16269,7 +16301,7 @@ def _selftest() -> int:
                 "file_path": "/tmp/.claude/x/memory/MEMORY.md"}}, contract))),
         ("background review is blocked", bool(evaluate_pretool(
             run, {"tool_name": "Bash", "tool_input": {
-                "command": "python3 tools/peer_review.py runs/x > /tmp/review.log 2>&1 & echo started"}},
+                "command": ".venv/bin/python tools/peer_review.py runs/x > /tmp/review.log 2>&1 & echo started"}},
             contract))),
         ("foreground review uses typed --out instead of shell redirection",
          not bool(evaluate_pretool(run, safe_review_event, contract))),
@@ -16408,7 +16440,7 @@ def _schema_repair_guidance(
         return ""
     return (
         "；schema 修复不得在当前失败链中绕过 Hook。请发起独立框架维护回合并运行精确 "
-        f"`python3 tools/contract_schema.py prepare {fault.schema_name}`，"
+        f"`.venv/bin/python tools/contract_schema.py prepare {fault.schema_name}`，"
         "只编辑命令输出的 ignored candidate，再运行其 `next_argv`"
     )
 

@@ -9,9 +9,9 @@ ingest_recon.py 把 recon 折成资产表/可达性矩阵；本工具补它的�
 
 它只【分类】，不做选择/判断 —— front 选择仍是 driver 的事。
 
-  python tools/classify_hosts.py <recon.json> --run runs/<t> \
+  .venv/bin/python tools/classify_hosts.py <recon.json> --run runs/<t> \
     --out runs/<t>/classify --egress-recheck [--delay 1.5]
-  python tools/classify_hosts.py --hosts hosts.txt
+  .venv/bin/python tools/classify_hosts.py --hosts hosts.txt
 """
 from __future__ import annotations
 

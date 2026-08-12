@@ -31,26 +31,26 @@ engagements as fixtures.
 Score one run:
 
 ```bash
-python tools/bench.py score runs/<dir> bench/<fixture>/truth.json
+.venv/bin/python tools/bench.py score runs/<dir> bench/<fixture>/truth.json
 ```
 
 Score all fixtures:
 
 ```bash
-python tools/bench.py score-all bench/
-python tools/bench.py score-all bench --json-out tmp/baseline.json
+.venv/bin/python tools/bench.py score-all bench/
+.venv/bin/python tools/bench.py score-all bench --json-out tmp/baseline.json
 ```
 
 Compare before/after:
 
 ```bash
-python tools/bench.py compare tmp/baseline.json tmp/change.json
+.venv/bin/python tools/bench.py compare tmp/baseline.json tmp/change.json
 ```
 
 Regression test:
 
 ```bash
-python tools/bench.py --selftest
+.venv/bin/python tools/bench.py --selftest
 ```
 
 ## Interpretation

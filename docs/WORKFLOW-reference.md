@@ -83,7 +83,7 @@ path must remain under `<run>/state/`. `classify_hosts --egress-recheck` is sepa
 For offline JS/API route extraction, the sole registered command is:
 
 ```bash
-python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>
+.venv/bin/python tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>
 ```
 
 `read.js-inventory` is an `active_run`-scoped `local_read`; no optional path list,
@@ -122,7 +122,7 @@ verification, where mid-flight scratch in the root is normal — same cadence as
 just nudges you to tidy before the report is final. Repository hygiene also warns,
 without reading artifact content, about untracked root HTML/replay/capture files and
 top-level `evidence/` drift. For existing loose output,
-`python3 tools/migrate_output_artifacts.py --batch <id>` is a dry-run plan: a body
+`.venv/bin/python tools/migrate_output_artifacts.py --batch <id>` is a dry-run plan: a body
 and its replay sidecar move as one group only when canonical Markdown uniquely
 names a run; ambiguous/unreferenced files are planned for local
 `artifacts/orphans/<batch>/`. `--apply` is explicit, preflights a whole
@@ -130,7 +130,7 @@ body/sidecar group, stages verified copies, publishes every member before removi
 any original, refuses changed sources and overwrites, and records group state in a
 hash manifest. A failed source removal can leave a complete duplicate, never
 intentional data loss or a half-pair; migration does not promote evidence or
-rewrite a run receipt. `python3 tools/clean_scratch.py --dry-run --older-than <days>` is the
+rewrite a run receipt. `.venv/bin/python tools/clean_scratch.py --dry-run --older-than <days>` is the
 bounded TTL inventory for `tmp/`; `--apply` is explicit, and run/review/report/PoC/
 artifact-quarantine trees are never cleanup roots.
 
@@ -547,7 +547,7 @@ used to live only in your head is **`Unlocked-by:` / `Unlocks:`** — a confirme
 (E with `Certainty >= 0.8`) satisfying a front's precondition. That is the
 `chains.md` (chaining) edge, generalized to the whole frontier.
 
-`python3 tools/graph.py runs/<dir>` parses these into a **derived** graph
+`.venv/bin/python tools/graph.py runs/<dir>` parses these into a **derived** graph
 (`<run>/graph.json`) and prints what is otherwise easy to miss:
 
 - **actionable** — open fronts plus deferred fronts a confirmed Fact has unlocked.
@@ -599,12 +599,16 @@ only hard closure gates plus Root adjudication can authorize a stop.
 append-only interruption journal for explicit `/loop` cycles. The typed subset
 adds `stage_plan`, `replan`, `stage_exit`, `delegation_committed`, and plan-bound
 `cycle_end` to the legacy start/plan/action/write-result/interrupt/end surface.
-`tools/loop_journal.py <run> end --next-action "<exact final Coda action>"` is the
-public and sole producer CLI for plan-bound `cycle_end`. It validates the current
+`.venv/bin/python tools/loop_journal.py end --action <kind> [--front F-id]` is the
+normal model-facing producer CLI for plan-bound `cycle_end`. It validates the current
 work plan through its committed v2 transaction, immutable transaction
 archive, and lineage before deriving exhaustive assignment/result/review/Root
-dispositions from typed receipts. The caller supplies only `next_action`, never
-completion summaries or disposition arrays. The newest validated structured
+dispositions from typed receipts. The caller supplies only a closed action kind
+and, when that kind operates on a front, one active front ID. The owner resolves
+the active run and derives the display/Coda text, note, plan digest, completion
+summary, and disposition arrays. The explicit-run/free-text CLI remains a
+non-discovered compatibility surface for frozen history and operator recovery;
+it is not emitted by current driver guidance. The newest validated structured
 `next_action` for the exact current, ended v2 plan is authoritative for the final
 `下一行动:` projection. The producer and Stop consumer both apply the normal
 single-action, concrete-object, and active-front semantics; an older ended plan
@@ -826,8 +830,8 @@ S3 has one explicit zero-lane terminal plan. When no strong front candidate
 exists and S3 readiness has no blockers, `workers.py plan` generates a
 current-turn/input-bound `COMPLETION_REVIEW` proposal with `lanes=[]` and prints
 the exact `commit-proposal` next action. All other modes retain at least one lane.
-After commit, `workers.py completion-review runs/<dir>` is the sole public
-formatter for the exact Agent tool input; `delegate`, hand-written proposal
+After commit, `.venv/bin/python tools/workers.py completion-review` is the normal
+model-facing public formatter for the exact Agent tool input; `delegate`, hand-written proposal
 basis, shell-transported lane JSON, and `python -c` are not recovery paths.
 
 Repeated local infrastructure denial has a separate derived scheduling owner.
@@ -912,7 +916,7 @@ no Xunji Agent type, assignment, parent tool-use, same-session Start/launch, or
 assignment-ledger owner is not an Agent fact: new deliveries receive a
 content-addressed `xunji.foreign_agent_lifecycle.v1` observation outside
 `runtime_events.jsonl`. Legacy journal pollution is recovered only with
-`python3 tools/runtime_receipts.py runs/<dir> --quarantine-unowned-lifecycle`;
+`.venv/bin/python tools/runtime_receipts.py runs/<dir> --quarantine-unowned-lifecycle`;
 the immutable supersession binds the original seq/hash and validated journal
 head, preserves the journal bytes, then reprojects. Any ownership signal keeps
 the event fail closed.
@@ -1342,7 +1346,7 @@ heading does not name the current executor. A single-line field, prose mention, 
 `COMPLETION_REVIEW` plan (`lanes=[]`), then run:
 
 ```bash
-python3 tools/workers.py completion-review runs/<dir>
+.venv/bin/python tools/workers.py completion-review
 ```
 
 Invoke Agent using the resulting JSON object's exact `tool_input`; do not
@@ -1362,8 +1366,17 @@ FAIL/WARN/false check, or a bare PASS/WARN token is rejected. This completion ch
 `peer_review.py --into-run` ReviewReceipt/ledger gate cannot satisfy each other.
 In the same turn, only `loop_requested=true` runs `CronList`, deletes the observed
 current-run job if present, and lists again; `loop_requested=false` performs no
-Cron action. Then append a loop journal `end --next-action "<exact final Coda
-action>"` record (`cycle_end`) with `cron_cancelled=<job-id|none>` in the note.
+Cron action. Then append the loop journal with the typed project action:
+
+```bash
+.venv/bin/python tools/loop_journal.py end --action complete
+```
+
+The model supplies only the closed `complete` enum. The journal owner resolves the
+active run, derives the final Coda text, reads the current turn contract, and
+freezes `cron_cancelled=<job-id|none>` from successful Cron receipts. It rejects
+missing, stale, non-quiescent, or ambiguous recurring-loop evidence; callers do
+not author the job id, note, run path, plan digest, or final prose.
 Cron quiescence requires the latest successful CronList receipt to follow every
 observed CronCreate/CronDelete. That newest scheduler snapshot, not an indefinitely
 accumulated create-minus-delete map, decides current liveness: listed jobs or a
@@ -1377,8 +1390,8 @@ informational and is not accepted as completion basis. Dispose every emitted war
 Then use the sole completion owner:
 
 ```bash
-python3 tools/completion_transaction.py prepare runs/<dir> --mode ghost --review-receipt independent-review=<review-receipt-sha256> --review-limitation external-assistance="<provider unavailable or not used>" --cron-disposition quiescent
-python3 tools/completion_transaction.py commit runs/<dir>
+.venv/bin/python tools/completion_transaction.py prepare runs/<dir> --mode ghost --review-receipt independent-review=<review-receipt-sha256> --review-limitation external-assistance="<provider unavailable or not used>" --cron-disposition quiescent
+.venv/bin/python tools/completion_transaction.py commit runs/<dir>
 ```
 
 For normal mode use `--mode normal`; a non-recurring run uses
@@ -1410,7 +1423,7 @@ is denied; only the current S3 `workers plan` zero-lane proposal and its printed
 Prepared, committed, or legacy-unbound state is reopened only through:
 
 ```bash
-python3 tools/completion_transaction.py reopen runs/<dir> --reason "<material reason>"
+.venv/bin/python tools/completion_transaction.py reopen runs/<dir> --reason "<material reason>"
 ```
 
 A legacy marker is never backfilled: reopen it, create a fresh S3 completion plan,
@@ -1418,7 +1431,7 @@ then, if the legacy run lacks `state/review_policy.json`, adopt the fixed policy
 through:
 
 ```bash
-python3 tools/completion_transaction.py adopt-policy runs/<dir>
+.venv/bin/python tools/completion_transaction.py adopt-policy runs/<dir>
 ```
 
 The command is missing-only/idempotent and accepts no caller policy JSON. Repeat
@@ -1472,7 +1485,7 @@ exact capability/command-shape boundary rather than inheriting a guessed
 filesystem effect from raw JSON text.
 
 **Before declaring a behavior change to any of the above "done", first run the
-whole regression battery in one shot — `python3 tools/selftest_all.py` (every
+whole regression battery in one shot — `.venv/bin/python tools/selftest_all.py` (every
 tool / hook / sentinel selftest; green is the floor, not the goal) — then use the
 fresh-context reviewer selected by `xunji-reviewops` and
 `references/peer-review-panel.md`** (for a Codex-authored candidate, use author

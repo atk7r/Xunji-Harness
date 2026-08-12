@@ -3,9 +3,9 @@
 """session_handoff.py —— 会话交接：写 handoff 文件 / 打印续接 prompt。
 
 用法:
-  python tools/session_handoff.py write runs/<dir>              # 写 session_handoff.md
-  python tools/session_handoff.py pickup runs/<dir>              # 打印续接 prompt
-  python tools/session_handoff.py --selftest                     # 自检
+  .venv/bin/python tools/session_handoff.py write runs/<dir>    # 写 session_handoff.md
+  .venv/bin/python tools/session_handoff.py pickup runs/<dir>   # 打印续接 prompt
+  .venv/bin/python tools/session_handoff.py --selftest          # 自检
 """
 
 from __future__ import annotations

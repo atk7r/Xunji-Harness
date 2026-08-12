@@ -34,6 +34,8 @@ from evidence_parse import content_path_manifest, current_evidence_index_hash
 from harness import capability_registry as _capability_registry
 from harness import command_shape as _command_shape
 from harness import privacy
+from harness import active_run as _active_run
+from harness import python_runtime as _python_runtime
 from harness import subagent_stop_ingress as _stop_ingress
 
 try:
@@ -8370,11 +8372,8 @@ def _hook_failed_stop_projection_error(
 
 
 def _runtime_reproject_argv(run_dir: Path) -> str:
-    return (
-        "python3 tools/runtime_receipts.py "
-        + shlex.quote(str(run_dir.resolve()))
-        + " --reproject"
-    )
+    del run_dir
+    return _python_runtime.display_token() + " tools/runtime_receipts.py --reproject"
 
 
 def hook_failed_stop_recovery_status(
@@ -9074,7 +9073,11 @@ def _prepared_capability_action(
     canonical_env = " ".join(
         f"{key}={shlex.quote(value)}" for key, value in environment
     )
-    canonical_argv = shlex.join(("python3", spec.script, *invocation.args))
+    canonical_argv = shlex.join((
+        _command_shape.python_runtime.display_token(),
+        spec.script,
+        *invocation.args,
+    ))
     canonical_command = (
         f"{canonical_env} {canonical_argv}" if canonical_env else canonical_argv
     )
@@ -10090,6 +10093,17 @@ def _registered_bash_target_values(
         allow_environment=True,
     )
     if invocation is None:
+        # Append-only receipts created before the .venv migration remain
+        # auditable.  This branch is read-only settlement logic and can never
+        # authorize, render, retry, or execute the legacy command.
+        invocation = _command_shape.parse_historical_python_command(
+            command,
+            root=root,
+            allowed_scripts=_capability_registry.registered_scripts(
+                root=root, effects={"target"}),
+            allow_environment=True,
+        )
+    if invocation is None:
         if receipt_claims_target:
             raise RuntimeError(
                 "successful target receipt no longer parses as one exact "
@@ -10888,6 +10902,7 @@ def _selftest() -> int:
     import agent_settlement
     import run_model
     import workers
+    project_python = _command_shape.python_runtime.display_token()
 
     run = Path(tempfile.mkdtemp()) / "run"
     (run / "state").mkdir(parents=True)
@@ -15493,7 +15508,7 @@ def _selftest() -> int:
     budget_child_transcript = budget_child_dir / f"agent-{budget_agent}.jsonl"
     budget_child_ids = [f"budget-child-tool-{index}" for index in range(1, 10)]
     budget_prepared_command = shlex.join((
-        "python3", "tools/artifact_view.py", "range", str(budget_run.resolve()),
+        project_python, "tools/artifact_view.py", "range", str(budget_run.resolve()),
         "fixture.bin", "--offset", "0", "--length", "4096",
     ))
     budget_context = budget_run / "context" / "A-budget-001.md"
@@ -15845,7 +15860,7 @@ def _selftest() -> int:
     # launch hash frozen by Start/AgentToolCallClaim, not silently follow the
     # mutable assignment ledger to the replacement marker.
     budget_rebound_command = shlex.join((
-        "python3", "tools/artifact_view.py", "range", str(budget_run.resolve()),
+        project_python, "tools/artifact_view.py", "range", str(budget_run.resolve()),
         "fixture.bin", "--offset", "1", "--length", "4096",
     ))
     budget_rebound_marker = {
@@ -15969,7 +15984,7 @@ def _selftest() -> int:
             "action_sha256": str(index) * 64,
             "capability_id": capability_id,
             "effect": "local_read",
-        }, f"python3 tools/artifact_view.py fixture-{index}")
+        }, f"{project_python} tools/artifact_view.py fixture-{index}")
         for index, capability_id in enumerate((
             "read.artifact-view-search",
             "read.artifact-view-range",
@@ -15986,12 +16001,12 @@ def _selftest() -> int:
                 "action_sha256": "4" * 64,
                 "capability_id": "read.js-inventory",
                 "effect": "local_read",
-            }, "python3 tools/js_inventory.py fixture-4"),
+            }, f"{project_python} tools/js_inventory.py fixture-4"),
         ])) is None
     )
     prepared_root = Path(__file__).resolve().parents[1]
     mismatched_run_command = shlex.join((
-        "python3", "tools/artifact_view.py", "range",
+        project_python, "tools/artifact_view.py", "range",
         str(budget_run.parent.resolve()), "fixture.bin",
         "--offset", "0", "--length", "4096",
     ))
@@ -18248,7 +18263,10 @@ def main() -> int:
     if args.selftest:
         return _selftest()
     if not args.run_dir:
-        parser.error("run_dir is required")
+        try:
+            args.run_dir = str(_active_run.resolve())
+        except _active_run.ActiveRunError as exc:
+            parser.error(str(exc))
     if args.reproject and args.quarantine_unowned_lifecycle:
         parser.error("choose only one recovery action")
     if args.quarantine_unowned_lifecycle:

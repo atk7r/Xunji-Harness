@@ -131,7 +131,8 @@ def _spec(
 
 
 _SELFTEST_SCRIPTS = (
-    "tools/selftest_all.py", "tools/check_rules.py", "tools/check_hook.py",
+    "tools/selftest_all.py", "tools/check_project_env.py",
+    "tools/check_rules.py", "tools/check_hook.py",
     "tools/check_runtime_boundary.py", "tools/check_templates.py",
     "tools/harness/command_shape.py", "tools/harness/guard.py",
     "tools/harness/proxy.py",
@@ -168,6 +169,7 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         _verify_id(script),
         script, "local_verify",
         "selftest-all" if script == "tools/selftest_all.py"
+        else "project-env" if script == "tools/check_project_env.py"
         else "no-args" if script in {
             "tools/check_rules.py", "tools/check_hook.py",
             "tools/check_runtime_boundary.py", "tools/check_templates.py",
@@ -556,23 +558,44 @@ def _validate_loop_journal(args: tuple[str, ...], *, read: bool) -> bool:
         "start", "phase-start", "phase-end", "plan", "action",
         "write-result", "interrupt", "resume", "end", "status",
     }
-    ok, seen, pos = _options(
-        args,
-        values={"--phase": None, "--note": None, "--next-action": None},
-        flags={"--json"},
-        positionals=2,
-    )
-    if not ok or pos[1] not in events or (pos[1] == "status") is not read:
-        return False
-    phase_event = pos[1] in {"phase-start", "phase-end"}
-    if ("--phase" in seen) is not phase_event:
-        return False
-    if "--next-action" in seen and pos[1] != "end":
-        return False
-    if read and ("--note" in seen or "--phase" in seen
-                 or "--next-action" in seen):
-        return False
-    return True
+    for positional_count in (1, 2):
+        ok, seen, pos = _options(
+            args,
+            values={
+                "--phase": None, "--note": None, "--next-action": None,
+                "--action": {"replan", "delegate", "verify", "review", "wait", "complete"},
+                "--front": None,
+            },
+            flags={"--json"},
+            positionals=positional_count,
+        )
+        if not ok:
+            continue
+        event = pos[-1]
+        if event not in events or (event == "status") is not read:
+            continue
+        phase_event = event in {"phase-start", "phase-end"}
+        if ("--phase" in seen) is not phase_event:
+            continue
+        typed_action = (seen.get("--action") or [""])[0]
+        front = (seen.get("--front") or [""])[0]
+        if typed_action:
+            if event != "end" or "--next-action" in seen or "--note" in seen:
+                continue
+            if typed_action == "complete":
+                if front:
+                    continue
+            elif not re.fullmatch(r"F-[0-9]+", front):
+                continue
+        elif "--front" in seen:
+            continue
+        if "--next-action" in seen and (event != "end" or positional_count != 2):
+            continue
+        if read and any(item in seen for item in (
+                "--note", "--phase", "--next-action", "--action", "--front")):
+            continue
+        return True
+    return False
 
 
 def _validate_state_tool(
@@ -763,7 +786,7 @@ def _validate_anti_drift(args: tuple[str, ...], *, record: bool) -> bool:
 
 def _validate_check_run(args: tuple[str, ...], mode: str) -> bool:
     if mode == "offline":
-        return _one_run(args)
+        return not args or _one_run(args)
     if mode == "replay":
         ok, seen, _pos = _options(
             args, values={}, flags={"--replay-verify"}, positionals=1,
@@ -841,6 +864,14 @@ _WORKERS_HELP_COMMANDS = _WORKERS_COMMANDS | {
     "cancel-unlaunched", "settle-stopped", "settle-stream-stalled",
     "recover-hook-failed-stop",
 }
+_WORKERS_IMPLICIT_ACTIVE_COMMANDS = frozenset({
+    "list", "suggest", "plan", "commit-proposal", "delegate",
+    "completion-review", "status", "agent-check", "lifecycle-check",
+    "merge-check", "conflicts", "synthesize", "merge-constraints",
+    "merge-threats", "cancel-unlaunched", "settle-stopped",
+    "settle-stream-stalled", "recover-hook-failed-stop", "finish",
+    "review-disposition",
+})
 
 
 def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
@@ -902,57 +933,98 @@ def _validate_workers(args: tuple[str, ...], *, read: bool) -> bool:
             re.fullmatch(r"[12]", raw) is not None for raw in limits
         )
     if command in {"commit-proposal", "completion-review"}:
-        return len(args) == 2 and _one_run(args[1:])
+        return bool(
+            len(args) == 1
+            or (len(args) == 2 and _one_run(args[1:]))
+        )
     if command == "delegate":
-        ok, seen, _pos = _options(
+        for positional_count in (0, 1):
+            ok, seen, _pos = _options(
+                args[1:],
+                values={
+                    "--runtime-slots": None,
+                    "--request-budget": None,
+                    "--model-egress-budget": None,
+                    "--merge-capacity": None,
+                    "--limit": None,
+                    "--tool-call-limit": None,
+                },
+                flags=set(), positionals=positional_count,
+            )
+            if not ok:
+                continue
+            if positional_count == 0 and seen:
+                continue
+            bounds = {
+                "--runtime-slots": (1, 16),
+                "--request-budget": (0, 1000),
+                "--model-egress-budget": (0, 1000),
+                "--merge-capacity": (0, 10000),
+                "--limit": (1, 16),
+                "--tool-call-limit": (5, 64),
+            }
+            if all(
+                all(re.fullmatch(r"[0-9]+", raw) is not None
+                    and lower <= int(raw) <= upper
+                    for raw in seen.get(flag, []))
+                for flag, (lower, upper) in bounds.items()
+            ):
+                return True
+        return False
+    if command == "heartbeat":
+        values = {"--status": None, "--note": None}
+        ok, _seen, _pos = _options(
+            args[1:], values=values, flags=set(), positionals=2,
+        )
+        return ok
+    if command == "finish":
+        short_ok, short_seen, _short_pos = _options(
             args[1:],
             values={
-                "--runtime-slots": None,
-                "--request-budget": None,
-                "--model-egress-budget": None,
-                "--merge-capacity": None,
-                "--limit": None,
-                "--tool-call-limit": None,
+                "--status": {"merged", "blocked", "failed", "abandoned"},
             },
             flags=set(), positionals=1,
         )
-        if not ok:
-            return False
-        bounds = {
-            "--runtime-slots": (1, 16),
-            "--request-budget": (0, 1000),
-            "--model-egress-budget": (0, 1000),
-            "--merge-capacity": (0, 10000),
-            "--limit": (1, 16),
-            "--tool-call-limit": (5, 64),
-        }
-        return all(
-            all(re.fullmatch(r"[0-9]+", raw) is not None
-                and lower <= int(raw) <= upper for raw in seen.get(flag, []))
-            for flag, (lower, upper) in bounds.items()
-        )
-    if command in {"heartbeat", "finish"}:
-        values = {"--status": None, "--note": None}
-        flags = {"--amend"} if command == "finish" else set()
-        ok, _seen, _pos = _options(
-            args[1:], values=values, flags=flags, positionals=2,
-        )
-        return ok
-    if command == "review-disposition":
-        ok, seen, _pos = _options(
+        if short_ok and "--status" in short_seen \
+                and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[1]):
+            return True
+        explicit_ok, _seen, _pos = _options(
             args[1:], values={"--status": None, "--note": None},
+            flags={"--amend"}, positionals=2,
+        )
+        return explicit_ok
+    if command == "review-disposition":
+        dispositions = {
+            "accept-candidate", "needs-control", "duplicate", "refute",
+            "out-of-scope", "retry", "blocked",
+        }
+        short_ok, short_seen, _short_pos = _options(
+            args[1:], values={"--status": dispositions},
+            flags=set(), positionals=1,
+        )
+        if short_ok and "--status" in short_seen \
+                and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[1]):
+            return True
+        ok, seen, _pos = _options(
+            args[1:], values={"--status": dispositions, "--note": None},
             flags=set(), positionals=3,
         )
         return ok and {"--status", "--note"}.issubset(seen)
     flags = {"--closure"} if command == "lifecycle-check" else set()
     values = {"--limit": None} if command in {"suggest", "plan"} else {}
-    ok, _seen, _pos = _options(
-        args[1:], values=values, flags=flags, positionals=1,
+    positional_counts = (0, 1) \
+        if command in _WORKERS_IMPLICIT_ACTIVE_COMMANDS else (1,)
+    return any(
+        _options(
+            args[1:], values=values, flags=flags, positionals=count,
+        )[0]
+        for count in positional_counts
     )
-    return ok
 
 
 def _validate_workers_cancel_unlaunched(args: tuple[str, ...]) -> bool:
+    if len(args) == 2 and args[0] == "cancel-unlaunched":
+        return re.fullmatch(r"A-[A-Za-z0-9._-]+", args[1]) is not None
     if len(args) != 5 or args[0] != "cancel-unlaunched" \
             or not _one_run(args[1:2]) \
             or not re.fullmatch(r"A-[A-Za-z0-9._-]+", args[2]) \
@@ -965,28 +1037,28 @@ def _validate_workers_cancel_unlaunched(args: tuple[str, ...]) -> bool:
 
 def _validate_workers_settle_stopped(args: tuple[str, ...]) -> bool:
     return bool(
-        len(args) == 3
+        len(args) in {2, 3}
         and args[0] == "settle-stopped"
-        and _one_run(args[1:2])
-        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[2])
+        and (len(args) == 2 or _one_run(args[1:2]))
+        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[-1])
     )
 
 
 def _validate_workers_settle_stream_stalled(args: tuple[str, ...]) -> bool:
     return bool(
-        len(args) == 3
+        len(args) in {2, 3}
         and args[0] == "settle-stream-stalled"
-        and _one_run(args[1:2])
-        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[2])
+        and (len(args) == 2 or _one_run(args[1:2]))
+        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[-1])
     )
 
 
 def _validate_workers_recover_hook_failed_stop(args: tuple[str, ...]) -> bool:
     return bool(
-        len(args) == 3
+        len(args) in {2, 3}
         and args[0] == "recover-hook-failed-stop"
-        and _one_run(args[1:2])
-        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[2])
+        and (len(args) == 2 or _one_run(args[1:2]))
+        and re.fullmatch(r"A-[A-Za-z0-9._-]+", args[-1])
     )
 
 
@@ -1300,6 +1372,8 @@ def argv_matches(validator: str, args: Iterable[str]) -> bool:
             flags={"--verbose", "--list"},
         )
         return ok
+    if validator == "project-env":
+        return values in {(), ("--json",), ("--selftest",)}
     if validator == "timestamp-gate":
         return _validate_timestamp(values)
     if validator == "anti-drift-semantic-status":
@@ -1309,13 +1383,17 @@ def argv_matches(validator: str, args: Iterable[str]) -> bool:
     if validator == "one-run":
         return _one_run(values)
     if validator == "runtime-receipts-read":
-        return _one_run(values)
+        return not values or _one_run(values)
     if validator == "runtime-receipts-reproject":
-        return len(values) == 2 and _one_run(values[:1]) \
+        return values == ("--reproject",) or (
+            len(values) == 2 and _one_run(values[:1])
             and values[1] == "--reproject"
+        )
     if validator == "runtime-receipts-quarantine":
-        return len(values) == 2 and _one_run(values[:1]) \
+        return values == ("--quarantine-unowned-lifecycle",) or (
+            len(values) == 2 and _one_run(values[:1])
             and values[1] == "--quarantine-unowned-lifecycle"
+        )
     if validator == "coverage-read":
         return _validate_coverage(values, write=False)
     if validator == "coverage-write":
@@ -1476,11 +1554,30 @@ def _flag_values(args: Iterable[str], names: set[str]) -> dict[str, list[str]]:
 
 
 def run_reference(spec: CapabilitySpec, args: Iterable[str]) -> str:
-    """Project the run resource named by a validated capability argv."""
+    """Project an explicit run resource named by a validated capability argv.
+
+    The empty string can mean a separately validated implicit-active form.  A
+    caller enforcing scope must pair this with :func:`uses_implicit_active_run`
+    instead of interpreting an empty reference as an arbitrary run.
+    """
     values = tuple(str(value) for value in args)
     validator = spec.argv_validator
     if validator.startswith("check-run-"):
-        return values[0] if values else ""
+        if validator == "check-run-offline":
+            return values[0] if values else ""
+        value_options = {"--review-driver"}
+        flag_options = {"--replay-verify", "--auto-peer-review"}
+        index = 0
+        while index < len(values):
+            token = values[index]
+            if token in value_options:
+                index += 2
+                continue
+            if token in flag_options:
+                index += 1
+                continue
+            return token
+        return ""
     if validator.startswith("peer-review-") and validator not in {
             "peer-review-list"}:
         value_flags = {
@@ -1510,31 +1607,86 @@ def run_reference(spec: CapabilitySpec, args: Iterable[str]) -> str:
     }:
         return values[1] if len(values) > 1 else ""
     if validator.startswith("workers-"):
-        commands = {
-            "list", "new", "suggest", "plan", "commit-plan", "commit-proposal",
-            "delegate", "completion-review", "assign",
-            "cancel-unlaunched", "settle-stopped", "settle-stream-stalled",
-            "recover-hook-failed-stop",
-            "status",
-            "agent-check", "heartbeat", "finish", "review-disposition",
-            "lifecycle-check",
-            "merge-check", "conflicts", "synthesize", "merge-constraints",
-            "merge-threats",
+        if not values or values[0] not in _WORKERS_HELP_COMMANDS:
+            return values[0] if values else ""
+        command = values[0]
+        if command in {
+                "cancel-unlaunched", "settle-stopped",
+                "settle-stream-stalled", "recover-hook-failed-stop",
+                "finish", "review-disposition",
+        } and len(values) > 1 \
+                and re.fullmatch(r"A-[A-Za-z0-9._-]+", values[1]):
+            return ""
+        value_options = {
+            "--stage", "--objective", "--mode", "--reason", "--exit-gate",
+            "--replan-reason", "--limit", "--runtime-slots",
+            "--request-budget", "--model-egress-budget", "--merge-capacity",
+            "--tool-call-limit", "--role", "--front", "--scope", "--asset",
+            "--lane", "--status", "--note",
         }
-        return values[1] if values and values[0] in commands and len(values) > 1 \
+        flag_options = {"--closure", "--amend"}
+        index = 1
+        while index < len(values):
+            token = values[index]
+            if token in value_options:
+                index += 2
+                continue
+            if token in flag_options:
+                index += 1
+                continue
+            # Every registered workers shape places the run before any other
+            # positional business identifier.
+            return token
+        return "" if command in _WORKERS_IMPLICIT_ACTIVE_COMMANDS else ""
+    if validator in {"loop-journal-read", "loop-journal-control"}:
+        events = {
+            "start", "phase-start", "phase-end", "plan", "action",
+            "write-result", "interrupt", "resume", "end", "status",
+        }
+        return "" if values and values[0] in events \
             else (values[0] if values else "")
     if validator in {
         "one-run", "runtime-receipts-read", "runtime-receipts-reproject",
         "runtime-receipts-quarantine",
-        "coverage-read", "coverage-write", "loop-journal-read",
-        "loop-journal-control", "state-read", "loop-state-write",
+        "coverage-read", "coverage-write", "state-read", "loop-state-write",
         "progress-write", "controller-write", "scope-admission",
     }:
+        if validator.startswith("runtime-receipts-") \
+                and values and values[0].startswith("--"):
+            return ""
         return values[0] if values else ""
     if validator in {"session-pickup", "session-write"}:
         return values[1] if len(values) > 1 else ""
     flags = _flag_values(values, {"--run"})
     return (flags.get("--run") or [""])[0]
+
+
+def uses_implicit_active_run(
+    spec: CapabilitySpec, args: Iterable[str],
+) -> bool:
+    """Return whether one already-validated argv binds the active pointer.
+
+    This is deliberately a closed semantic list.  It does not infer an active
+    run merely because an argv omitted a path.
+    """
+    values = tuple(str(value) for value in args)
+    if spec.argv_validator.startswith("workers-"):
+        return bool(
+            values and values[0] in _WORKERS_IMPLICIT_ACTIVE_COMMANDS
+            and run_reference(spec, values) == ""
+        )
+    if spec.argv_validator in {
+            "check-run-offline", "runtime-receipts-read",
+            "runtime-receipts-reproject", "runtime-receipts-quarantine",
+    }:
+        return run_reference(spec, values) == ""
+    if spec.argv_validator in {"loop-journal-read", "loop-journal-control"}:
+        events = {
+            "start", "phase-start", "phase-end", "plan", "action",
+            "write-result", "interrupt", "resume", "end", "status",
+        }
+        return bool(values and values[0] in events)
+    return False
 
 
 def output_references(spec: CapabilitySpec, args: Iterable[str]) -> tuple[str, ...]:
@@ -2101,12 +2253,25 @@ def selftest() -> int:
                 "evidence/operator:pw@host#frag?token=secret.js",
             ]) is None
         )),
-        ("offline check_run is local verification", (match(
-            ROOT / "tools/check_run.py", ["runs/demo_20260101"]
-        ) or _spec("", "", "repo_mutation", "")).effect == "local_verify"),
-        ("replay check_run is a target effect", (match(
-            ROOT / "tools/check_run.py", ["runs/demo_20260101", "--replay-verify"]
-        ) or _spec("", "", "repo_mutation", "")).effect == "target"),
+        ("offline check_run is local verification", bool(
+            (match(ROOT / "tools/check_run.py", ["runs/demo_20260101"])
+             or _spec("", "", "repo_mutation", "")).effect == "local_verify"
+            and (lambda matched: bool(
+                matched and uses_implicit_active_run(matched, [])
+                and run_reference(matched, []) == ""
+            ))(match(ROOT / "tools/check_run.py", [])))),
+        ("replay check_run is a target effect", (lambda matched: bool(
+            matched and matched.effect == "target"
+            and run_reference(matched, [
+                "runs/demo_20260101", "--replay-verify",
+            ]) == "runs/demo_20260101"
+            and run_reference(matched, [
+                "--replay-verify", "runs/demo_20260101",
+            ]) == "runs/demo_20260101"
+        ))(match(
+            ROOT / "tools/check_run.py",
+            ["runs/demo_20260101", "--replay-verify"],
+        ))),
         ("auto review is model egress", (match(
             ROOT / "tools/check_run.py",
             ["runs/demo_20260101", "--auto-peer-review", "--review-driver", "codex"],
@@ -2257,12 +2422,21 @@ def selftest() -> int:
             ]) is None
         )),
         ("workers delegate has exact bounded scheduler argv", bool(
-            match(ROOT / "tools/workers.py", [
+            (lambda implicit: bool(
+                implicit
+                and implicit.id == "control.workers"
+                and run_reference(implicit, ["delegate"]) == ""
+                and uses_implicit_active_run(implicit, ["delegate"])
+            ))(match(ROOT / "tools/workers.py", ["delegate"]))
+            and match(ROOT / "tools/workers.py", [
                 "delegate", "runs/demo_20260101", "--runtime-slots", "2",
                 "--request-budget", "10", "--model-egress-budget", "1",
                 "--merge-capacity", "100", "--limit", "2",
                 "--tool-call-limit", "6",
             ])
+            and match(ROOT / "tools/workers.py", [
+                "delegate", "--runtime-slots", "2",
+            ]) is None
             and match(ROOT / "tools/workers.py", [
                 "delegate", "runs/demo_20260101", "--runtime-slots", "0",
             ]) is None
@@ -2273,6 +2447,16 @@ def selftest() -> int:
                 "delegate", "runs/demo_20260101", "--future", "1",
             ]) is None)),
         ("workers unlaunched cancellation is a distinct exact control capability", bool(
+            (lambda matched: bool(
+                matched and run_reference(matched, [
+                    "cancel-unlaunched", "A-web-hunter-001",
+                ]) == "" and uses_implicit_active_run(matched, [
+                    "cancel-unlaunched", "A-web-hunter-001",
+                ])
+            ))(match(ROOT / "tools/workers.py", [
+                "cancel-unlaunched", "A-web-hunter-001",
+            ]))
+            and
             (match(ROOT / "tools/workers.py", [
                 "cancel-unlaunched", "runs/demo_20260101", "A-web-hunter-001",
                 "--reason", "turn or canonical inputs changed before launch",
@@ -2291,6 +2475,11 @@ def selftest() -> int:
             ]) is None)),
         ("workers external-stop settlement is a distinct exact control capability", bool(
             (match(ROOT / "tools/workers.py", [
+                "settle-stopped", "A-web-hunter-001",
+            ]) or _spec("", "", "", "")).id
+            == "control.workers-settle-stopped"
+            and
+            (match(ROOT / "tools/workers.py", [
                 "settle-stopped", "runs/demo_20260101", "A-web-hunter-001",
             ]) or _spec("", "", "", "")).id
             == "control.workers-settle-stopped"
@@ -2305,6 +2494,11 @@ def selftest() -> int:
                 "--future",
             ]) is None)),
         ("workers stream-stall settlement is a distinct exact control capability", bool(
+            (match(ROOT / "tools/workers.py", [
+                "settle-stream-stalled", "A-web-hunter-001",
+            ]) or _spec("", "", "", "")).id
+            == "control.workers-settle-stream-stalled"
+            and
             (match(ROOT / "tools/workers.py", [
                 "settle-stream-stalled", "runs/demo_20260101",
                 "A-web-hunter-001",
@@ -2323,6 +2517,11 @@ def selftest() -> int:
             ]) is None)),
         ("workers hook-failed Stop recovery is a distinct exact control capability", bool(
             (match(ROOT / "tools/workers.py", [
+                "recover-hook-failed-stop", "A-review-001",
+            ]) or _spec("", "", "", "")).id
+            == "control.workers-recover-hook-failed-stop"
+            and
+            (match(ROOT / "tools/workers.py", [
                 "recover-hook-failed-stop", "runs/demo_20260101",
                 "A-review-001",
             ]) or _spec("", "", "", "")).id
@@ -2338,6 +2537,31 @@ def selftest() -> int:
                 "recover-hook-failed-stop", "runs/demo_20260101",
                 "A-review-001", "--future",
             ]) is None)),
+        ("workers review and Root dispositions have short typed active-run forms", bool(
+            (lambda matched: bool(
+                matched and matched.effect == "control"
+                and uses_implicit_active_run(matched, [
+                    "review-disposition", "A-review-001",
+                    "--status", "accept-candidate",
+                ])
+            ))(match(ROOT / "tools/workers.py", [
+                "review-disposition", "A-review-001",
+                "--status", "accept-candidate",
+            ]))
+            and (lambda matched: bool(
+                matched and matched.effect == "control"
+                and uses_implicit_active_run(matched, [
+                    "finish", "A-web-hunter-001", "--status", "merged",
+                ])
+            ))(match(ROOT / "tools/workers.py", [
+                "finish", "A-web-hunter-001", "--status", "merged",
+            ]))
+            and match(ROOT / "tools/workers.py", [
+                "finish", "A-web-hunter-001", "--status", "done",
+            ]) is None
+            and match(ROOT / "tools/workers.py", [
+                "review-disposition", "A-review-001", "--status", "unknown",
+            ]) is None)),
         ("workers status is read while assignment is control", (match(
             ROOT / "tools/workers.py", ["status", "runs/demo_20260101"]
         ) or _spec("", "", "repo_mutation", "")).effect == "local_read"),
@@ -2345,6 +2569,22 @@ def selftest() -> int:
             ROOT / "tools/work_plan.py", ["status", "runs/demo_20260101"]
         ) or _spec("", "", "repo_mutation", "")).effect == "local_read"),
         ("runtime receipt read/reproject/quarantine have exact distinct effects", bool(
+            (lambda matched: bool(
+                matched and matched.id == "read.runtime-receipts"
+                and uses_implicit_active_run(matched, [])
+            ))(match(ROOT / "tools/runtime_receipts.py", []))
+            and (lambda matched: bool(
+                matched and matched.id == "control.runtime-receipts-reproject"
+                and uses_implicit_active_run(matched, ["--reproject"])
+            ))(match(ROOT / "tools/runtime_receipts.py", ["--reproject"]))
+            and (lambda matched: bool(
+                matched and matched.id == "control.runtime-receipts-quarantine"
+                and uses_implicit_active_run(
+                    matched, ["--quarantine-unowned-lifecycle"])
+            ))(match(ROOT / "tools/runtime_receipts.py", [
+                "--quarantine-unowned-lifecycle",
+            ]))
+            and
             (match(ROOT / "tools/runtime_receipts.py", [
                 "runs/demo_20260101",
             ]) or _spec("", "", "", "")).id == "read.runtime-receipts"
@@ -2434,7 +2674,19 @@ def selftest() -> int:
             ]) or _spec("", "", "repo_mutation", "")).effect == "control"
         )),
         ("journal argv binds status/phase/end option ownership exactly", bool(
-            (match(ROOT / "tools/loop_journal.py", [
+            (lambda implicit: bool(
+                implicit
+                and implicit.id == "control.loop-journal"
+                and run_reference(implicit, [
+                    "end", "--action", "replan", "--front", "F-001",
+                ]) == ""
+                and uses_implicit_active_run(implicit, [
+                    "end", "--action", "replan", "--front", "F-001",
+                ])
+            ))(match(ROOT / "tools/loop_journal.py", [
+                "end", "--action", "replan", "--front", "F-001",
+            ]))
+            and (match(ROOT / "tools/loop_journal.py", [
                 "runs/demo_20260101", "status",
             ]) or _spec("", "", "repo_mutation", "")).effect == "local_read"
             and match(ROOT / "tools/loop_journal.py", [

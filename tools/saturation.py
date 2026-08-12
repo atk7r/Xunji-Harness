@@ -7,10 +7,10 @@ check_run.py 在收口检查中调用 check_saturation(); 该函数从 frontier.
 计算 sat = tried / (tried + untried)。高饱和度 + 多约束 = 建议降级 Type B。
 
 CLI 用法:
-  python tools/saturation.py runs/<dir>                  # 全量饱和度报告
-  python tools/saturation.py runs/<dir> --front F-001    # 单 front 详细报告
-  python tools/saturation.py runs/<dir> --suggest        # JSON 输出, 供 workers.py 消费
-  python tools/saturation.py runs/<dir> --merge          # 扫描 agents/*.md 的 New Constraints 块
+  .venv/bin/python tools/saturation.py runs/<dir>               # 全量饱和度报告
+  .venv/bin/python tools/saturation.py runs/<dir> --front F-001 # 单 front 详细报告
+  .venv/bin/python tools/saturation.py runs/<dir> --suggest     # JSON 输出
+  .venv/bin/python tools/saturation.py runs/<dir> --merge       # 扫描 Agent 结果
 """
 from __future__ import annotations
 

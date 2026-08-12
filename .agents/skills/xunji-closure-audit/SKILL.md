@@ -31,13 +31,13 @@ and may propose or implement maintenance fixes when the operator asks.
 Run the bundled deterministic scan from the repo root:
 
 ```bash
-python3 .agents/skills/xunji-closure-audit/scripts/closure_audit.py
-python3 .agents/skills/xunji-closure-audit/scripts/closure_audit.py --selftest
+.venv/bin/python .agents/skills/xunji-closure-audit/scripts/closure_audit.py
+.venv/bin/python .agents/skills/xunji-closure-audit/scripts/closure_audit.py --selftest
 ```
 
 Hard failures from this script mean real wiring gaps until disproven:
 
-- a documented `python tools/*.py` / `.claude/hooks/*.py` command references a
+- a documented project or Hook Python command references a
   missing file;
 - a Python entry point containing `--selftest` is not registered in
   `tools/selftest_all.py`;
@@ -57,14 +57,14 @@ Hard failures from this script mean real wiring gaps until disproven:
 Then run the relevant project gates:
 
 ```bash
-python3 tools/check_rules.py
-python3 tools/check_templates.py
-python3 tools/check_runtime_boundary.py
-python3 tools/selftest_all.py --list
+.venv/bin/python tools/check_rules.py
+.venv/bin/python tools/check_templates.py
+.venv/bin/python tools/check_runtime_boundary.py
+.venv/bin/python tools/selftest_all.py --list
 ```
 
 Use targeted selftests while iterating. Before claiming broad closure, prefer a
-full `python3 tools/selftest_all.py` unless the change is docs-only or the
+full `.venv/bin/python tools/selftest_all.py` unless the change is docs-only or the
 operator asked for a lightweight audit.
 
 ## Manual Audit Passes
@@ -115,8 +115,8 @@ For Codex-authored maintenance diffs that touch framework skills/tools/tests,
 follow the repository review matrix:
 
 ```bash
-python3 .claude/hooks/pre-commit --fingerprint
-python3 tools/peer_review.py <review-scope> --driver codex --out review/records/<date>-<topic>.md
+.venv/bin/python .claude/hooks/pre-commit --fingerprint
+.venv/bin/python tools/peer_review.py <review-scope> --driver codex --out review/records/<date>-<topic>.md
 ```
 
 Record `diff_fingerprint` and `reviewed_diff` in the disposition before commit.

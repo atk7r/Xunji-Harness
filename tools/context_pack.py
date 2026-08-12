@@ -42,6 +42,7 @@ try:
 except Exception:
     _xday_match = None
 from harness import capability_registry as _capability_registry
+from harness import python_runtime as _python_runtime
 
 
 ROLE_TEMPLATES = {
@@ -339,7 +340,7 @@ def _candidate_command(
     env = " ".join(
         f"{key}={shlex.quote(value)}" for key, value in candidate.env
     )
-    invocation = shlex.join(("python3", spec.script, *candidate.argv))
+    invocation = shlex.join((_python_runtime.display_token(), spec.script, *candidate.argv))
     return f"{env} {invocation}" if env else invocation
 
 
@@ -1999,7 +2000,7 @@ def _selftest() -> int:
         ("target GET lane receives one registry-validated exact public argv",
          "## Prepared Registered Capabilities" in prepared_probe
          and "### 1. target.probe" in prepared_probe
-         and "XUNJI_PROXY_REQUIRED=0 python3 tools/probe.py GET "
+         and "XUNJI_PROXY_REQUIRED=0 .venv/bin/python tools/probe.py GET "
          "http://127.0.0.1:18765" in prepared_probe
          and "GET - Target:" not in prepared_probe
          and "--run " in prepared_probe
@@ -2011,7 +2012,7 @@ def _selftest() -> int:
          ) is not None
          and _PREPARED_CAPABILITY_MARKER in prepared_probe),
         ("Chinese driver GET intent receives the same prepared probe argv",
-         "python3 tools/probe.py GET http://127.0.0.1:18765"
+         ".venv/bin/python tools/probe.py GET http://127.0.0.1:18765"
          in prepared_probe_zh),
         ("one explicit large artifact produces a stable maximum-three projection",
          prepared_artifacts.count(_PREPARED_CAPABILITY_MARKER) == 3

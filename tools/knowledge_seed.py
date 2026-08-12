@@ -15,9 +15,9 @@ knowledge_match --body 在一个明确指纹上 MISS, 就是飞轮盲点, 却没
 - 派生不驱动: 它只建文件, 不选目标、不发包、不入库 weaponized。
 
 用法:
-  python tools/knowledge_seed.py <id> --product "Name" [--vendor V] [--category cms]
+  .venv/bin/python tools/knowledge_seed.py <id> --product "Name" [--vendor V] [--category cms]
          [--aliases a,b] [--signatures s1,s2] [--from-body runs/<t>/evidence/x.html]
-  python tools/knowledge_seed.py --selftest
+  .venv/bin/python tools/knowledge_seed.py --selftest
 """
 from __future__ import annotations
 

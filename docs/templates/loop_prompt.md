@@ -61,8 +61,8 @@ interruption journal can recover the current phase. Do not emit markers for a
 phase you did not enter.
 
 ```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-start --phase "<Setup|Root Orchestrator|Hunter|Reviewer|Report>" --note "<为什么进入这个阶段>"
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" phase-end --phase "<Setup|Root Orchestrator|Hunter|Reviewer|Report>" --note "<阶段结果和下一阶段>"
+{{PYTHON}} tools/loop_journal.py phase-start --phase "<Setup|Root Orchestrator|Hunter|Reviewer|Report>" --note "<为什么进入这个阶段>"
+{{PYTHON}} tools/loop_journal.py phase-end --phase "<Setup|Root Orchestrator|Hunter|Reviewer|Report>" --note "<阶段结果和下一阶段>"
 ```
 
 Setup-only does not enter this protocol. A first-source literal route or its
@@ -95,7 +95,7 @@ cycle has begun. This journal is a derived interruption aid, not evidence:
 
 ```bash
 {{PYTHON}} tools/xunji_statusline.py --set-active "{{RUN_DIR}}"
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" start --note "绑定的执行周期开始"
+{{PYTHON}} tools/loop_journal.py start --note "绑定的执行周期开始"
 ```
 
 After run binding, use Claude Code TaskCreate/TaskUpdate for this execute cycle
@@ -198,8 +198,8 @@ names/content, and target writes. Use neutral unique
 use the guarded explicit auth exception; a privacy-redacted replay is not a
 successful verification.
 
-Use the one delegate argv owned by `references/plan-and-delegate.md`; budget values
-must match the ready lane's effects.
+Use the one short delegate action owned by `references/plan-and-delegate.md`;
+the owner derives budgets and capacity from the committed ready lanes.
 
 The selected Hunter Agent may use only registered guarded target capabilities
 allowed by its committed effect/assets. Load `xunji-evidence-replay-gate` for the
@@ -259,7 +259,7 @@ Agent lane.
 Before the chosen probe/agent/review action, append:
 
 ```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" action --note "即将执行 <工具/动作>"
+{{PYTHON}} tools/loop_journal.py action --note "即将执行 <工具/动作>"
 ```
 
 After the chosen proof/verification/Agent result is written to the run files,
@@ -297,7 +297,7 @@ assignment-free completion formatter and verdict contract from
 `docs/WORKFLOW-reference.md` "Assignment-free global completion Reviewer". It
 requires `workers.py plan` to generate, and `workers.py commit-proposal` to
 commit, the zero-lane S3 `COMPLETION_REVIEW` plan. Then run
-`python3 tools/workers.py completion-review runs/<dir>` and use its printed Agent
+`.venv/bin/python tools/workers.py completion-review` and use its printed Agent
 `tool_input` unchanged. It still requires real same-session
 Reviewer Start/Stop, creates no assignment/merge projection, and does not replace
 the independent ReviewReceipt. For recurring mode, cancel only this run's listed
@@ -337,7 +337,7 @@ After Markdown/state files are updated and refreshed, append:
 
 ```bash
 {{PYTHON}} tools/anti_drift.py --record-reason-pass "{{RUN_DIR}}" --cycle-id 1 --chosen-front F-001 --reason "whole-graph adjudication after final canonical writes"
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" write-result --note "运行文件已更新，建议态已刷新"
+{{PYTHON}} tools/loop_journal.py write-result --note "运行文件已更新，建议态已刷新"
 ```
 
 Replace `1` with the next strictly increasing Reason-pass cycle id and `F-001`
@@ -366,7 +366,7 @@ If the loop is interrupted before Markdown files are consistent, append an
 `interrupt` event with the last completed step before handing back or restarting:
 
 ```bash
-{{PYTHON}} tools/loop_journal.py "{{RUN_DIR}}" interrupt --note "在 <最后完成步骤> 后被中断"
+{{PYTHON}} tools/loop_journal.py interrupt --note "在 <最后完成步骤> 后被中断"
 ```
 
 Ask the operator only when blocked or after hard closure gates actually pass.

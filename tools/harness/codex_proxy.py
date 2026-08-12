@@ -23,9 +23,9 @@ Codex CLI 底层用 reqwest，遵循 HTTPS_PROXY / http_proxy 环境变量。
     run_codex(["codex", "exec", "-s", "read-only"], input=prompt, ...)
 
   CLI 包装:
-    python tools/harness/codex_proxy.py codex exec -s read-only
-    python tools/harness/codex_proxy.py --status     # 查配置
-    python tools/harness/codex_proxy.py --selftest    # 自检
+    .venv/bin/python tools/harness/codex_proxy.py codex exec -s read-only
+    .venv/bin/python tools/harness/codex_proxy.py --status
+    .venv/bin/python tools/harness/codex_proxy.py --selftest
 """
 from __future__ import annotations
 

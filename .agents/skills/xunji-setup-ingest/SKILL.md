@@ -47,13 +47,13 @@ fix project issues here; Claude remains the live Root driver during real runs.
 ## Commands
 
 ```bash
-python tools/setup_run.py --selftest
-python tools/setup_transaction.py --selftest
-python tools/ingest_recon.py <recon.json>
-python tools/classify_hosts.py --selftest
-python tools/scope.py --selftest
-python tools/check_run.py --selftest
-python tools/selftest_all.py --only setup_transaction,setup_run,classify_hosts,scope,check_run
+.venv/bin/python tools/setup_run.py --selftest
+.venv/bin/python tools/setup_transaction.py --selftest
+.venv/bin/python tools/ingest_recon.py <recon.json>
+.venv/bin/python tools/classify_hosts.py --selftest
+.venv/bin/python tools/scope.py --selftest
+.venv/bin/python tools/check_run.py --selftest
+.venv/bin/python tools/selftest_all.py --only setup_transaction,setup_run,classify_hosts,scope,check_run
 ```
 
 ## Review Checklist

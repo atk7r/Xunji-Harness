@@ -6,7 +6,7 @@
 每种技术返回: success, method, evidence, type_a_reason
 
 用法:
-  python tools/cdn_bypass.py <host> [--proxy PROXY]
+  .venv/bin/python tools/cdn_bypass.py <host> [--proxy PROXY]
 
 Author: Xunji P1 improvement (scshr.com retrospective)
 """

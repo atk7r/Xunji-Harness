@@ -38,8 +38,8 @@ Do not defer known-vulnerability lookup to report cleanup.
 ### 1. Time Gate
 
 ```bash
-python3 tools/timestamp_gate.py --search-hint --kind vuln
-python3 tools/timestamp_gate.py --search-hint --kind generic
+.venv/bin/python tools/timestamp_gate.py --search-hint --kind vuln
+.venv/bin/python tools/timestamp_gate.py --search-hint --kind generic
 ```
 
 Use `vuln` for CVE/CNVD/advisory work and `generic` for documentation,

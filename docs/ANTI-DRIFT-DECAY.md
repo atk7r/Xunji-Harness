@@ -601,7 +601,7 @@ flashcard_mode       str    ← 当前闪卡模式标识
 - [ ] `tools/anti_drift.py`: 改写 `build_anchor()` 输出格式，确保 <= 3KB（selftest 已有断言）
 - [ ] `tools/anti_drift.py --selftest`: 扩展，验证新格式包含三段标记
 - [ ] `CLAUDE.md` (可选): Autonomous Drive + Operating Loop 移到文件末尾
-- [ ] 运行 `python tools/selftest_all.py` 确认零回归
+- [ ] 运行 `.venv/bin/python tools/selftest_all.py` 确认零回归
 - [ ] 在下一个 run 中观测 20+ 轮仍然有效
 
 ### Phase 2 — 速查卡（修正版：外部计数）
@@ -617,7 +617,7 @@ flashcard_mode       str    ← 当前闪卡模式标识
 - [ ] `tools/anti_drift.py`: 注入后回写 `last_flashcard_at` 和 `flashcard_mode`（仅此两字段）
 - [ ] 闪卡文案写入 `BINDING_RULES` / 新增 `FLASHCARD_MODES` 常量
 - [ ] `tools/anti_drift.py --selftest`: 新增模式判定 / 状态读取测试
-- [ ] 运行 `python tools/selftest_all.py`
+- [ ] 运行 `.venv/bin/python tools/selftest_all.py`
 
 ### Phase 3 — 会话重启
 
@@ -626,7 +626,7 @@ flashcard_mode       str    ← 当前闪卡模式标识
 - [ ] `.claude/hooks/run_gate.py`: 新增 session-turn 阈值阻断逻辑
 - [ ] `.claude/hooks/run_gate.py`: `_selftest()` 新增 session-turn 阈值测试
 - [ ] `tools/anti_drift.py`: 检测 `session_handoff.md` 存在时在 anchor 中追加提示
-- [ ] 运行 `python tools/selftest_all.py`
+- [ ] 运行 `.venv/bin/python tools/selftest_all.py`
 - [ ] 一次实际超长 run（>= 40 轮）中验证完整交接流程
 
 ---

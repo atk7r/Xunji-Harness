@@ -57,7 +57,7 @@ the evidence gate and records the final disposition.
 Default Claude-driver run review and receipt append:
 
 ```bash
-python3 tools/peer_review.py runs/<dir> --into-run
+.venv/bin/python tools/peer_review.py runs/<dir> --into-run
 ```
 
 For an Agent-mode plan, invoke that exact foreground command only after the
@@ -71,26 +71,26 @@ rerun review instead of copying the old verdict.
 Inspect the frozen bundle before model egress:
 
 ```bash
-python3 tools/peer_review.py runs/<dir> --bundle-only
+.venv/bin/python tools/peer_review.py runs/<dir> --bundle-only
 ```
 
 Review a Codex-authored maintenance scope and write a record:
 
 ```bash
-python3 tools/peer_review.py <scope-dir> --driver codex \
+.venv/bin/python tools/peer_review.py <scope-dir> --driver codex \
   --out review/records/<date>-<topic>.md
 ```
 
 Force the current arkcli provider adapter only after it is enabled in `config.ini`:
 
 ```bash
-python3 tools/peer_review.py runs/<dir> --backend arkcli
+.venv/bin/python tools/peer_review.py runs/<dir> --backend arkcli
 ```
 
 Resolve a ledger item:
 
 ```bash
-python3 tools/peer_review.py runs/<dir> --resolve PR-001 \
+.venv/bin/python tools/peer_review.py runs/<dir> --resolve PR-001 \
   --status accepted --resolution "Evidence: E-007 and replay hash support the issue; reopened F-003."
 ```
 
@@ -99,7 +99,7 @@ Allowed statuses are `accepted`, `dismissed`, `superseded`, and `escalated`.
 Validate the implementation:
 
 ```bash
-python3 tools/peer_review.py --selftest
+.venv/bin/python tools/peer_review.py --selftest
 ```
 
 ## Backend And Egress Notes
@@ -129,8 +129,8 @@ python3 tools/peer_review.py --selftest
 After changing this contract or `tools/peer_review.py`, run:
 
 ```bash
-python3 tools/peer_review.py --selftest
-python3 tools/selftest_all.py --only peer_review
+.venv/bin/python tools/peer_review.py --selftest
+.venv/bin/python tools/selftest_all.py --only peer_review
 ```
 
 Then search Claude-primary docs for stale author matrices, fallback claims,

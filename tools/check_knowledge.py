@@ -16,7 +16,7 @@ gitignored weaponized tier. A payload heading/field in the PUBLIC tier is a
 publish-routing error (it would ship a weapon), so it hard-fails HERE. The check
 is structural; it does not certify that a cited CVE/CNVD is real.
 
-Pure stdlib. Run: python tools/check_knowledge.py
+Pure stdlib. Run: .venv/bin/python tools/check_knowledge.py
 """
 
 from __future__ import annotations

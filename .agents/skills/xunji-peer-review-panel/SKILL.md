@@ -51,7 +51,7 @@ For Claude Code-driven live runs or Claude-authored code/report/closure changes:
 For Codex-authored code maintenance, use:
 
 ```bash
-python3 tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
+.venv/bin/python tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
 ```
 
 In this mode:
@@ -92,37 +92,37 @@ fallbacks or explicit extra slots; they do not displace the Claude acceptance vo
 Generate the review bundle without model egress:
 
 ```bash
-python3 tools/peer_review.py runs/<dir> --bundle-only
+.venv/bin/python tools/peer_review.py runs/<dir> --bundle-only
 ```
 
 Review a Codex-authored maintenance diff:
 
 ```bash
-python3 tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
+.venv/bin/python tools/peer_review.py <scope> --driver codex --out review/records/<date>-<topic>.md
 ```
 
 Append an independent review into a Claude-run directory when acting as helper:
 
 ```bash
-python3 tools/peer_review.py runs/<dir> --into-run
+.venv/bin/python tools/peer_review.py runs/<dir> --into-run
 ```
 
 Inspect provider activation and adapter availability:
 
 ```bash
-python3 tools/peer_review.py --list-backends
+.venv/bin/python tools/peer_review.py --list-backends
 ```
 
 Force the current arkcli provider adapter after local activation:
 
 ```bash
-python3 tools/peer_review.py runs/<dir> --backend arkcli
+.venv/bin/python tools/peer_review.py runs/<dir> --backend arkcli
 ```
 
 Validate the panel implementation:
 
 ```bash
-python3 tools/peer_review.py --selftest
+.venv/bin/python tools/peer_review.py --selftest
 ```
 
 ## Review Handling Rules
@@ -142,8 +142,8 @@ python3 tools/peer_review.py --selftest
 After changing panel defaults, docs, or parser behavior, run:
 
 ```bash
-python3 tools/peer_review.py --selftest
-python3 tools/selftest_all.py --only peer_review
+.venv/bin/python tools/peer_review.py --selftest
+.venv/bin/python tools/selftest_all.py --only peer_review
 ```
 
 Then grep for stale claims:

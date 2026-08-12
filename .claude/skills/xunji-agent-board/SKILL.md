@@ -85,9 +85,9 @@ follow its owner-emitted next action before closing/deferring a front.
 For zero-open-front S3 closure, the owner flow is instead:
 
 ```text
-python3 tools/workers.py plan runs/<dir> -> generated COMPLETION_REVIEW proposal with lanes=[]
--> python3 tools/workers.py commit-proposal runs/<dir>
--> python3 tools/workers.py completion-review runs/<dir>
+.venv/bin/python tools/workers.py plan -> generated COMPLETION_REVIEW proposal with lanes=[]
+-> .venv/bin/python tools/workers.py commit-proposal
+-> .venv/bin/python tools/workers.py completion-review
 -> one exact xunji-reviewer Agent call from the printed tool_input
 -> typed cycle_end
 ```
@@ -186,5 +186,5 @@ completion proof.
 ## Maintenance Checks
 
 ```bash
-python3 tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model,check_templates
+.venv/bin/python tools/selftest_all.py --only work_plan,workers,runtime_receipts,turn_contract,context_pack,run_model,check_templates
 ```

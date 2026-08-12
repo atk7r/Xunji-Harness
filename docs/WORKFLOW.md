@@ -132,7 +132,7 @@ matching same-session Stop proves return; the generated prompt is byte-exact; an
 only a reviewed Root disposition plus typed cycle end can project the final Coda.
 When zero open fronts and zero S3 blockers remain, the same planner writes a
 fully filled `COMPLETION_REVIEW` proposal with `lanes=[]`. Commit it unchanged,
-run `python3 tools/workers.py completion-review runs/<dir>`, and use the printed
+run `.venv/bin/python tools/workers.py completion-review`, and use the printed
 Agent `tool_input` byte-for-byte. This is the only legal zero-lane plan and it
 has no `delegate` wave.
 
@@ -199,15 +199,15 @@ the operator. (Sentinel stays observe-only — this is self-awareness and audit,
 gate that stops you.) Run:
 
 ```bash
-python3 tools/graph.py runs/<dir>
-python3 tools/workers.py status runs/<dir>
-python3 tools/workers.py lifecycle-check runs/<dir>
-python3 tools/workers.py conflicts runs/<dir>
-python3 tools/coverage_matrix.py runs/<dir> --write --sync-coverage
-python3 tools/loop_journal.py runs/<dir> status
-python3 tools/loop_state.py runs/<dir> --write
-python3 tools/progress_ledger.py runs/<dir> --write
-python3 tools/run_controller.py runs/<dir> --shadow
+.venv/bin/python tools/graph.py runs/<dir>
+.venv/bin/python tools/workers.py status
+.venv/bin/python tools/workers.py lifecycle-check
+.venv/bin/python tools/workers.py conflicts
+.venv/bin/python tools/coverage_matrix.py runs/<dir> --write --sync-coverage
+.venv/bin/python tools/loop_journal.py status
+.venv/bin/python tools/loop_state.py runs/<dir> --write
+.venv/bin/python tools/progress_ledger.py runs/<dir> --write
+.venv/bin/python tools/run_controller.py runs/<dir> --shadow
 ```
 `workers.py status/suggest/plan` and `loop_state.py` expose the saturation-derived
 planning signals through registered capabilities; do not call `saturation.py`
@@ -239,7 +239,7 @@ evidence or close a front by themselves.
 journal for interruption recovery. In addition to legacy cycle/action markers,
 the typed subset records `stage_plan`, `replan`, `stage_exit`,
 `delegation_committed`, and plan-bound `cycle_end`. The CLI command
-`loop_journal.py runs/<dir> end --next-action "<exact final Coda action>"` is the
+`loop_journal.py end --action <typed-enum> [--front F-id]` is the
 sole producer of plan-bound `cycle_end`: it first validates the current work plan
 against the committed v2 work-plan transaction, immutable archive, and
 transaction lineage, then derives exhaustive lane/result/review/Root dispositions
@@ -266,9 +266,9 @@ not evidence and does not replace
 `decisions.md` or `session_handoff.md`.
 
 Reason-pass freshness is semantic, not time-based. Inspect the current projection
-with `python3 tools/anti_drift.py --semantic-status runs/<dir>`. After Root rereads
+with `.venv/bin/python tools/anti_drift.py --semantic-status runs/<dir>`. After Root rereads
 and adjudicates the whole canonical graph, append the v1 receipt with
-`python3 tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N
+`.venv/bin/python tools/anti_drift.py --record-reason-pass runs/<dir> --cycle-id N
 --chosen-front F-001 --reason "<whole-graph rationale>"`. It hash-binds frontier,
 evidence, coverage, decisions, and the derived graph. Old/new mtimes, `touch`, or
 a no-op edit cannot prove freshness. Operational liveness is separately derived
@@ -306,10 +306,9 @@ data. A trailing retry/explanation request does not cancel the primary operation
 in the natural-language fallback an actual lifecycle denial or permission question
 remains read-only. A literal top-level `/loop` is already an execute command, so
 only an actual denial cancels it.
-Lifecycle Bash is exactly one argv-only adapter invocation. The exact bare `python3`
-spelling is environment-owned so Hook and Bash `PATH` differences do not force the
-driver to discover an interpreter path; absolute interpreters remain bound to the
-current Hook identity. It rejects `tool_input.env`, inline env assignments, untrusted Python identity, unquoted
+Lifecycle Bash is exactly one argv-only adapter invocation through the repository's
+`.venv/bin/python`; SessionStart verifies that interpreter identity before project work.
+It rejects `tool_input.env`, inline env assignments, untrusted Python identity, unquoted
 pathname/query globs, brace/tilde/zsh-EQUALS/parameter/command expansion, redirects,
 chains, comments, newlines, and line continuations. Quote the source as one literal
 argv token. Output wrappers are diagnostic denials only and never mint a claim.
@@ -566,7 +565,7 @@ target authority alive and does not erase an authentic return. In a later
 may identify only the returned/failed lane's exact digest-bound Reviewer. Old
 Hunter/target/model-egress work remains denied. If that Reviewer already has one
 durable `assigned` row but no authentic launch attempt, the same
-`workers.py delegate --limit 1` owner call revalidates the
+`.venv/bin/python tools/workers.py delegate` owner call revalidates the
 row/bundle/runtime journal and returns its
 exact launch contract without a second assignment mutation. Reviewer debt is
 never routed to cancellation or bypassed by replan. Only an unlaunched
@@ -597,7 +596,7 @@ A distinct typed termination handles one exact non-Reviewer product signal:
 after a successful plan-bound Agent launch and `SubagentStart`, Claude Code may
 answer an exact `SendMessage` with `Agent <id> was stopped by the user and won't
 be resumed...` while no `SubagentStop` can ever arrive. In that case
-`python3 tools/workers.py settle-stopped runs/<dir> A-<assignment>` verifies the
+`.venv/bin/python tools/workers.py settle-stopped A-<assignment>` verifies the
 same agent/session/tool/lane/plan/prompt identity, exact structured parent result,
 frozen parent prefix and child transcript, no Stop, and no later child/runtime
 activity. It then publishes `xunji.externally-stopped-agent.v1` and projects a
@@ -610,7 +609,7 @@ network loss, transcript mutation, or any late lifecycle remain fail-closed debt
 
 A third disjoint termination handles one exact Claude Code stream-watchdog
 shape. `workers.py status` may print
-`python3 tools/workers.py settle-stream-stalled runs/<dir> A-<assignment>` only
+`.venv/bin/python tools/workers.py settle-stream-stalled A-<assignment>` only
 when the same plan-bound Hunter launch/Start has no Stop or later activity, the
 host system task notification reports the exact 600-second unrecovered stream
 stall, and the full child transcript ends with the exact synthetic idle-timeout
@@ -671,8 +670,8 @@ clear Chinese phase marker and, once a run directory exists, record it in the
 loop journal:
 
 ```bash
-python3 tools/loop_journal.py runs/<dir> phase-start --phase "Root Orchestrator" --note "why this phase starts"
-python3 tools/loop_journal.py runs/<dir> phase-end --phase "Root Orchestrator" --note "result and next phase"
+.venv/bin/python tools/loop_journal.py phase-start --phase "Root Orchestrator" --note "why this phase starts"
+.venv/bin/python tools/loop_journal.py phase-end --phase "Root Orchestrator" --note "result and next phase"
 ```
 
 `setup_run.py` 的机械 Setup 是显示例外：仍写入 Setup 的 `phase_start` / `phase_end`
@@ -880,7 +879,7 @@ routes, freeze exactly one active-run evidence artifact before delegation. The
 only registered inventory command is:
 
 ```bash
-python3 tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>
+.venv/bin/python tools/js_inventory.py inspect runs/<dir> evidence/<one-artifact>
 ```
 
 The capability registry binds that exact argv as `read.js-inventory`, effect
@@ -1111,7 +1110,7 @@ assets were only header / recon-classified, never examined. Before any such clai
   name the signal that made each relevant; a negative/deferred record states the barrier
   or why the class did not apply; no fixed payload list (payloads stay local/operator-chosen);
   the gate wants evidence of *reasoning/attack attempt*, not exhaustive exploitation.
-  Run `python3 tools/coverage_matrix.py runs/<dir> --write --sync-coverage` before closure or Coda
+  Run `.venv/bin/python tools/coverage_matrix.py runs/<dir> --write --sync-coverage` before closure or Coda
   trajectory-review checks to see the derived asset×vuln-family view. `□` means the
   category is signal-justified for that asset but no test record is visible; `·`
   means no current surface signal. Whole empty columns and sparse rows are review

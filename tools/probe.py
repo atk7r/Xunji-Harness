@@ -11,10 +11,10 @@ existence) -- bounded by the guard layer:
 - It never dumps: bodies are capped and only summarized (status/len/sha1/snippet).
 
 It is a sender, not an exploiter. Proof, not extraction. Examples:
-  python tools/probe.py GET  "https://t/api/x?id=1"
-  python tools/probe.py GET  "https://t/api/x?id=1'"          --tag sqli-probe
-  python tools/probe.py DIFF "https://t/x?id=1 and 1=1" "https://t/x?id=1 and 1=2"
-  python tools/probe.py POST "https://t/login" --data '{"u":"a"}' --auth-key t/login
+  .venv/bin/python tools/probe.py GET  "https://t/api/x?id=1"
+  .venv/bin/python tools/probe.py GET  "https://t/api/x?id=1'" --tag sqli-probe
+  .venv/bin/python tools/probe.py DIFF "https://t/x?id=1 and 1=1" "https://t/x?id=1 and 1=2"
+  .venv/bin/python tools/probe.py POST "https://t/login" --data '{"u":"a"}' --auth-key t/login
 """
 
 from __future__ import annotations

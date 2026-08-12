@@ -38,10 +38,11 @@ import status_style  # noqa: E402
 import workers  # noqa: E402
 import run_model  # noqa: E402
 import loop_journal  # noqa: E402
+from harness import python_runtime  # noqa: E402
 
 SCHEMA = "xunji.loop_state.v1"
 CONFIRMED = 0.8
-PYTHON_CMD = sys.executable or "python3"
+PYTHON_CMD = str(python_runtime.canonical_path(ROOT))
 OPEN_STATUS_TOKENS = {"open", "probing", "working", "blocked_type_a"}
 CLOSED_STATUS_TOKENS = {"closed", "closing", "final", "done", "complete", "completed", "blocked_type_b"}
 ACTION_TEXT_CN = {

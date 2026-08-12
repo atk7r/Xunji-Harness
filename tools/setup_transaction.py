@@ -4259,7 +4259,8 @@ def _selftest() -> int:
         hook_e2e_url = "https://hook-e2e.example.test/"
         hook_e2e_source, hook_e2e_bytes = setup_source.normalize_url(hook_e2e_url)
         hook_e2e_command = (
-            f"python3 {ROOT / 'tools' / 'loop_bootstrap.py'} "
+            f"{ROOT / '.venv' / 'bin' / 'python'} "
+            f"{ROOT / 'tools' / 'loop_bootstrap.py'} "
             f"--source {hook_e2e_url} --type auto"
         )
         hook_e2e_invocation = turn_contract._control_invocation(hook_e2e_command)

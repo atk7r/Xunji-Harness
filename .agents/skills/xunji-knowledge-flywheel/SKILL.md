@@ -40,15 +40,15 @@ Use this after a live observation recognizes a product, framework, version, or a
 coverage tag such as `kb:<id>`:
 
 ```bash
-python tools/knowledge_match.py --body runs/<dir>/evidence/<saved-body>
-python tools/xday_match.py --body runs/<dir>/evidence/<saved-body>
+.venv/bin/python tools/knowledge_match.py --body runs/<dir>/evidence/<saved-body>
+.venv/bin/python tools/xday_match.py --body runs/<dir>/evidence/<saved-body>
 ```
 
 Or direct lookup from a known tag:
 
 ```bash
-python tools/knowledge_match.py --id <knowledge-id>
-python tools/xday_match.py --id <knowledge-id>
+.venv/bin/python tools/knowledge_match.py --id <knowledge-id>
+.venv/bin/python tools/xday_match.py --id <knowledge-id>
 ```
 
 Convert the hit into a small number of target-specific hypotheses. Do not sweep
@@ -60,7 +60,7 @@ Seed a public grounding entry when a product is clearly fingerprinted but no
 knowledge entry matches:
 
 ```bash
-python tools/knowledge_seed.py <id> --product "<product>" --from-body runs/<dir>/evidence/<saved-body>
+.venv/bin/python tools/knowledge_seed.py <id> --product "<product>" --from-body runs/<dir>/evidence/<saved-body>
 ```
 
 Then curate the entry:
@@ -75,7 +75,7 @@ Then curate the entry:
 Validate before treating the entry as usable:
 
 ```bash
-python tools/check_knowledge.py
+.venv/bin/python tools/check_knowledge.py
 ```
 
 ## Autonomy Guard
@@ -100,9 +100,9 @@ and research the primary source before recording it as fact.
 After changing knowledge tooling or entries, run:
 
 ```bash
-python tools/check_knowledge.py
-python tools/knowledge_match.py --selftest
-python tools/xday_match.py --selftest
+.venv/bin/python tools/check_knowledge.py
+.venv/bin/python tools/knowledge_match.py --selftest
+.venv/bin/python tools/xday_match.py --selftest
 ```
 
 If the change affects report or closure claims, also use `xunji-reviewops`.

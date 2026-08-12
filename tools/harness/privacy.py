@@ -32,6 +32,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 try:
+    from . import python_runtime
     from .command_shape import (
         FIXTURE as COMMAND_SHAPE_FIXTURE,
         ROOT as PROJECT_ROOT,
@@ -40,6 +41,7 @@ try:
         parse_exact_python_command,
     )
 except ImportError:  # direct ``python tools/harness/privacy.py`` selftest
+    import python_runtime  # type: ignore[no-redef]
     from command_shape import (  # type: ignore[no-redef]
         FIXTURE as COMMAND_SHAPE_FIXTURE,
         ROOT as PROJECT_ROOT,
@@ -893,7 +895,10 @@ def selftest() -> int:
     for case in shape_cases:
         if "privacy" not in case:
             continue
-        command = str(case["command"]).replace("{ROOT}", str(PROJECT_ROOT))
+        command = str(case["command"])
+        if command.startswith("python3 "):
+            command = python_runtime.display_token() + command[len("python3"):]
+        command = command.replace("{ROOT}", str(PROJECT_ROOT))
         reason = outbound_command_privacy_reason(command)
         checks.append((
             f"privacy-command-shape fixture: {case['name']}",
@@ -1028,7 +1033,8 @@ def selftest() -> int:
          ) == ""),
         ("typed active-run control note keeps URL as local data",
          outbound_command_privacy_reason(
-             "python3 tools/loop_journal.py runs/sample end --next-action "
+             f"{python_runtime.display_token()} tools/loop_journal.py "
+             "runs/sample end --next-action "
              "'Probe https://target.test/' --note 'cycle complete'") == ""),
         ("raw payload project marker denied",
          bool(outbound_command_privacy_reason("curl https://target.test/ -d marker=xunji-proof"))),
